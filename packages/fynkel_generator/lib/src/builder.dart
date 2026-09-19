@@ -1,0 +1,356 @@
+/// The `build_runner` builder: resolves every library under `lib/`, reads
+/// the `@FynkelBehaviour` classes and their `@Expose` fields into
+/// [BehaviourClass]es and writes the two generated files.
+library;
+
+import 'dart:async';
+
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/nullability_suffix.dart';
+import 'package:analyzer/dart/element/type.dart';
+import 'package:build/build.dart';
+import 'package:glob/glob.dart';
+import 'package:source_gen/source_gen.dart';
+
+import 'emit.dart';
+import 'model.dart';
+
+const String dartOutput = 'lib/generated/behaviours.g.dart';
+const String jsonOutput = 'lib/generated/behaviours.g.json';
+
+const _behaviourAnnotation = TypeChecker.typeNamedLiterally('FynkelBehaviour', inPackage: 'fynkel');
+const _exposeAnnotation = TypeChecker.typeNamedLiterally('Expose', inPackage: 'fynkel');
+const _behaviourBase = TypeChecker.typeNamedLiterally('Behaviour', inPackage: 'fynkel');
+
+/// Aggregates the package's `@FynkelBehaviour` classes into
+/// `lib/generated/behaviours.g.dart` and `.g.json`. Runs once per package
+/// (input `$lib$`); generated files themselves are never inputs.
+class BehaviourBuilder implements Builder {
+  BehaviourBuilder(this.options);
+
+  final BuilderOptions options;
+
+  @override
+  Map<String, List<String>> get buildExtensions => const {
+        r'$lib$': ['generated/behaviours.g.dart', 'generated/behaviours.g.json'],
+      };
+
+  @override
+  Future<void> build(BuildStep buildStep) async {
+    final package = buildStep.inputId.package;
+    final classes = await collect(buildStep);
+    final dart = AssetId(package, dartOutput);
+    final json = AssetId(package, jsonOutput);
+    await buildStep.writeAsString(dart, emitDart(package, classes));
+    await buildStep.writeAsString(json, emitJson(package, classes));
+  }
+
+  /// Every behaviour class in the package, sorted by id; throws
+  /// [BehaviourGenerationError] on the first problem.
+  static Future<List<BehaviourClass>> collect(BuildStep buildStep) async {
+    final resolver = buildStep.resolver;
+    final out = <BehaviourClass>[];
+    final byId = <String, BehaviourClass>{};
+    final inputs = await buildStep.findAssets(Glob('lib/**.dart')).toList();
+    inputs.sort((a, b) => a.path.compareTo(b.path));
+    for (final id in inputs) {
+      if (id.path.startsWith('lib/generated/') || id.path.endsWith('.g.dart')) continue;
+      if (!await resolver.isLibrary(id)) continue;
+      final library = await resolver.libraryFor(id);
+      final reader = LibraryReader(library);
+      for (final annotated in reader.annotatedWith(_behaviourAnnotation)) {
+        final c = await _readClass(resolver, library, annotated);
+        final previous = byId[c.id];
+        if (previous != null) {
+          throw BehaviourGenerationError(
+            'behaviour id "${c.id}" is also used by ${previous.className} in ${previous.libraryUri}',
+            library: c.libraryUri,
+            member: c.className,
+          );
+        }
+        byId[c.id] = c;
+        out.add(c);
+      }
+    }
+    out.sort((a, b) => a.id.compareTo(b.id));
+    return out;
+  }
+}
+
+Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, AnnotatedElement annotated) async {
+  final element = annotated.element;
+  final libraryUri = library.uri.toString();
+  final name = element.name ?? '<unnamed>';
+  if (element is! ClassElement) {
+    throw BehaviourGenerationError('@FynkelBehaviour applies to classes only', library: libraryUri, member: name);
+  }
+  if (!_behaviourBase.isAssignableFrom(element)) {
+    throw BehaviourGenerationError('@FynkelBehaviour class must extend Behaviour', library: libraryUri, member: name);
+  }
+  if (element.isAbstract) {
+    throw BehaviourGenerationError('@FynkelBehaviour class must be concrete', library: libraryUri, member: name);
+  }
+  if (element.isPrivate) {
+    throw BehaviourGenerationError(
+      '@FynkelBehaviour class must be public (the generated file constructs it)',
+      library: libraryUri,
+      member: name,
+    );
+  }
+  final ctor = element.unnamedConstructor;
+  if (ctor == null || ctor.formalParameters.any((p) => p.isRequired)) {
+    throw BehaviourGenerationError(
+      '@FynkelBehaviour class needs an unnamed constructor without required parameters',
+      library: libraryUri,
+      member: name,
+    );
+  }
+  final id = annotated.annotation.peek('id')?.stringValue;
+  if (id == null || !RegExp(r'^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9]*)+$').hasMatch(id)) {
+    throw BehaviourGenerationError(
+      'id must be a namespaced type id such as "game.Spinner" (got ${id == null ? 'none' : '"$id"'})',
+      library: libraryUri,
+      member: name,
+    );
+  }
+  if (id.startsWith('fynkel.')) {
+    throw BehaviourGenerationError('the "fynkel." namespace is reserved for the engine', library: libraryUri, member: name);
+  }
+  final version = annotated.annotation.peek('version')?.intValue ?? 1;
+  if (version < 1) {
+    throw BehaviourGenerationError('version must be >= 1', library: libraryUri, member: name);
+  }
+
+  // Own fields first, then inherited ones up to (not including) Behaviour.
+  final fields = <ExposedField>[];
+  final seen = <String>{};
+  for (InterfaceElement? cls = element; cls != null && !_behaviourBase.isExactly(cls); cls = cls.supertype?.element) {
+    for (final f in cls.fields) {
+      final annotation = _exposeAnnotation.firstAnnotationOf(f);
+      if (annotation == null) continue;
+      final fieldName = f.name ?? '';
+      if (!seen.add(fieldName)) continue;
+      fields.add(await _readField(resolver, f, ConstantReader(annotation), libraryUri, '$name.$fieldName'));
+    }
+  }
+  fields.sort((a, b) => a.name.compareTo(b.name));
+  return BehaviourClass(
+    id: id,
+    version: version,
+    className: name,
+    libraryUri: libraryUri,
+    fields: fields,
+    doc: _doc(element.documentationComment),
+  );
+}
+
+Future<ExposedField> _readField(
+  Resolver resolver,
+  FieldElement f,
+  ConstantReader expose,
+  String libraryUri,
+  String member,
+) async {
+  final fieldName = f.name ?? '';
+  if (f.isStatic) {
+    throw BehaviourGenerationError('@Expose field must be an instance field', library: libraryUri, member: member);
+  }
+  if (f.isPrivate) {
+    throw BehaviourGenerationError('@Expose field must be public', library: libraryUri, member: member);
+  }
+  if (f.isFinal || f.isConst || f.setter == null) {
+    throw BehaviourGenerationError(
+      '@Expose field must be assignable (not final or const)',
+      library: libraryUri,
+      member: member,
+    );
+  }
+  final type = f.type;
+  final kind = _kindOf(type);
+  if (kind == null) {
+    throw BehaviourGenerationError(
+      '@Expose field type ${type.getDisplayString()} is not supported; use ${FieldKind.values.map((k) => k.dartType).join(', ')} (optionally nullable)',
+      library: libraryUri,
+      member: member,
+    );
+  }
+  final nullable = type.nullabilitySuffix == NullabilitySuffix.question;
+  Object? defaultValue;
+  var hasDefault = false;
+  final node = await resolver.astNodeFor(f.firstFragment);
+  if (node is VariableDeclaration) {
+    final init = node.initializer;
+    if (init != null) {
+      final v = _literal(init, kind);
+      if (v != null) {
+        defaultValue = v.value;
+        hasDefault = true;
+      }
+    }
+  }
+  if (hasDefault && defaultValue == null && !nullable) hasDefault = false;
+  return ExposedField(
+    name: fieldName,
+    kind: kind,
+    nullable: nullable,
+    defaultValue: defaultValue,
+    hasDefault: hasDefault,
+    label: expose.peek('label')?.stringValue,
+    tooltip: expose.peek('tooltip')?.stringValue,
+    min: _num(expose.peek('min')),
+    max: _num(expose.peek('max')),
+    step: _num(expose.peek('step')),
+    doc: _doc(f.documentationComment),
+  );
+}
+
+num? _num(ConstantReader? r) {
+  if (r == null || r.isNull) return null;
+  if (r.isInt) return r.intValue;
+  if (r.isDouble) return r.doubleValue;
+  return null;
+}
+
+FieldKind? _kindOf(DartType type) {
+  if (type is! InterfaceType) return null;
+  final element = type.element;
+  final name = element.name;
+  if (name == null) return null;
+  final lib = element.library.uri;
+  if (lib.isScheme('dart') && lib.path == 'core') {
+    return switch (name) {
+      'double' => FieldKind.number,
+      'int' => FieldKind.integer,
+      'bool' => FieldKind.boolean,
+      'String' => FieldKind.string,
+      _ => null,
+    };
+  }
+  if (lib.isScheme('package') && lib.pathSegments.first == 'fynkel') {
+    return switch (name) {
+      'Vec3' => FieldKind.vec3,
+      'Quat' => FieldKind.quat,
+      'AssetRef' => FieldKind.assetRef,
+      _ => null,
+    };
+  }
+  return null;
+}
+
+/// A literal the generator can read into JSON; `null` when the initializer
+/// is anything else (the class default still applies at runtime, the
+/// metadata just has no `default`).
+class _Literal {
+  const _Literal(this.value);
+  final Object? value;
+}
+
+_Literal? _literal(Expression e, FieldKind kind) {
+  if (e is NullLiteral) return const _Literal(null);
+  if (e is ParenthesizedExpression) return _literal(e.expression, kind);
+  switch (kind) {
+    case FieldKind.number:
+      final n = _number(e);
+      return n == null ? null : _Literal(n.toDouble());
+    case FieldKind.integer:
+      final n = _number(e);
+      return n is int ? _Literal(n) : null;
+    case FieldKind.boolean:
+      return e is BooleanLiteral ? _Literal(e.value) : null;
+    case FieldKind.string:
+      return e is SimpleStringLiteral ? _Literal(e.value) : null;
+    case FieldKind.vec3:
+      return _vector(e, 'Vec3', 3, const {
+        'zero': [0.0, 0.0, 0.0],
+        'one': [1.0, 1.0, 1.0],
+        'up': [0.0, 1.0, 0.0],
+        'right': [1.0, 0.0, 0.0],
+        'forward': [0.0, 0.0, -1.0],
+      });
+    case FieldKind.quat:
+      return _vector(e, 'Quat', 4, const {
+        'identity': [0.0, 0.0, 0.0, 1.0],
+      });
+    case FieldKind.assetRef:
+      return _assetRef(e);
+  }
+}
+
+num? _number(Expression e) {
+  if (e is IntegerLiteral) return e.value;
+  if (e is DoubleLiteral) return e.value;
+  if (e is PrefixExpression && e.operator.lexeme == '-') {
+    final n = _number(e.operand);
+    return n == null ? null : -n;
+  }
+  return null;
+}
+
+/// `Vec3(x, y, z)`, `Vec3.all(v)`, `Vec3.up`, … (and the `Quat` forms).
+_Literal? _vector(Expression e, String type, int arity, Map<String, List<double>> constants) {
+  if (e is PrefixedIdentifier && e.prefix.name == type) {
+    final c = constants[e.identifier.name];
+    return c == null ? null : _Literal(c);
+  }
+  if (e is InstanceCreationExpression && e.constructorName.type.name.lexeme == type) {
+    final ctor = e.constructorName.name?.name;
+    final args = <num>[];
+    for (final a in e.argumentList.arguments) {
+      if (a is! Expression) return null;
+      final n = _number(a);
+      if (n == null) return null;
+      args.add(n);
+    }
+    if (ctor == null && args.length == arity) return _Literal([for (final a in args) a.toDouble()]);
+    if (ctor == 'all' && args.length == 1 && type == 'Vec3') {
+      return _Literal(List<double>.filled(arity, args[0].toDouble()));
+    }
+  }
+  return null;
+}
+
+/// `AssetRef('uuid')`, `AssetRef('uuid', sub: 'mesh/0')`, `AssetRef.none`.
+_Literal? _assetRef(Expression e) {
+  if (e is PrefixedIdentifier && e.prefix.name == 'AssetRef' && e.identifier.name == 'none') {
+    return const _Literal({'asset': '00000000-0000-0000-0000-000000000000'});
+  }
+  if (e is InstanceCreationExpression &&
+      e.constructorName.type.name.lexeme == 'AssetRef' &&
+      e.constructorName.name == null) {
+    String? asset;
+    String? sub;
+    for (final a in e.argumentList.arguments) {
+      if (a is NamedArgument) {
+        if (a.name.lexeme != 'sub') return null;
+        final v = a.argumentExpression;
+        if (v is NullLiteral) continue;
+        if (v is! SimpleStringLiteral) return null;
+        sub = v.value;
+      } else if (a is SimpleStringLiteral && asset == null) {
+        asset = a.value;
+      } else {
+        return null;
+      }
+    }
+    if (asset == null) return null;
+    return _Literal({'asset': asset, 'sub': ?sub});
+  }
+  return null;
+}
+
+/// The first paragraph of a `///` comment, joined with spaces.
+String? _doc(String? comment) {
+  if (comment == null) return null;
+  final lines = <String>[];
+  for (final raw in comment.split('\n')) {
+    var line = raw.trim();
+    if (line.startsWith('///')) line = line.substring(3).trim();
+    if (line.isEmpty) {
+      if (lines.isNotEmpty) break;
+      continue;
+    }
+    lines.add(line);
+  }
+  return lines.isEmpty ? null : lines.join(' ');
+}

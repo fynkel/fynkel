@@ -73,6 +73,20 @@ fn project_and_scene_load_through_the_abi() {
     assert_eq!(r["scene"]["entities"], 4);
     assert_eq!(r["scene"]["rejectedComponents"], 0);
     assert_eq!(host.live(), 4);
+    // The Robot's `game.Spinner` is a Dart behaviour: known through the
+    // project's schemas/behaviours, so no warning, and handed to the SDK
+    // with its authored data and the spawned entity's handle.
+    assert_eq!(r["diagnostics"].as_array().unwrap().len(), 0, "{r:#}");
+    let behaviours = r["scene"]["behaviours"].as_array().unwrap();
+    assert_eq!(behaviours.len(), 1);
+    let b = &behaviours[0];
+    assert_eq!(b["type"], "game.Spinner");
+    assert_eq!(b["version"], 1);
+    assert_eq!(b["known"], true);
+    assert_eq!(b["data"]["speed"], 2.5);
+    assert_eq!(b["authoringId"], "c0000000-0000-4000-8000-0000000000e1");
+    assert_eq!(b["component"], "c0000000-0000-4000-8000-0000000000c2");
+    assert!(b["entity"].as_u64().unwrap() != 0);
 
     // The same scene again as a bare file: prefabs are found next to it.
     let path = fixture()
@@ -87,7 +101,15 @@ fn project_and_scene_load_through_the_abi() {
     );
     let r = host.report();
     assert_eq!(r["ok"], false);
-    assert_eq!(r["diagnostics"][0]["code"], "FYN-D0401", "unknown prefab");
+    let codes: Vec<&str> = r["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["code"].as_str().unwrap())
+        .collect();
+    assert!(codes.contains(&"FYN-D0401"), "unknown prefab: {codes:?}");
+    // Without a project nobody knows `game.Spinner`: warned, not fatal.
+    assert!(codes.contains(&"FYN-D0205"), "{codes:?}");
     assert_eq!(host.live(), 4, "a failed load leaves the world alone");
     // Loading again adds a second instance of the scene (ids are per load).
     let s = unsafe { fynkel_world_load_project(host.w, dir.as_ptr(), dir.len() as u32) };

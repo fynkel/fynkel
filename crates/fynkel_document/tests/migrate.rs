@@ -93,7 +93,7 @@ fn v0_scene_migrates_to_v1_exactly() {
         m.document.root.get("editorNotes").and_then(|n| n.as_str()),
         Some("written by the v0 tool; arrays instead of keyed objects")
     );
-    assert!(!describe(&scene).has_errors());
+    assert!(!describe(&scene, &SchemaSet::embedded()).has_errors());
 
     // Idempotent: the migrated document has nothing left to do.
     let again = migrate(&m.document, &Migrations::builtin(), &schemas);

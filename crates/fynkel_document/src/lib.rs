@@ -45,9 +45,11 @@ pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
 pub use migrate::{migrate, Migrated, Migration, Migrations};
 pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
 pub use project::{validate_project, Lock, Project, ProjectReport};
-pub use runtime::{describe, load_project, read_scene, DescribedScene, LoadedProject};
+pub use runtime::{
+    describe, load_project, read_scene, AuthoredBehaviour, DescribedScene, LoadedProject,
+};
 pub use scene::Scene;
-pub use schema::{ComponentInfo, SchemaSet};
+pub use schema::{BehaviourInfo, ComponentInfo, SchemaSet};
 
 /// Document kinds and their file-name conventions (§6, §7).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

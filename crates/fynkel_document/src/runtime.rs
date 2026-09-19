@@ -1,9 +1,13 @@
 //! Scene document → runtime description (blueprint §19.2c item 5): turns a
 //! validated [`Scene`] into the typed `fynkel_core::SceneDescription` that
-//! `World::load_scene` instantiates. Unknown component types are skipped
-//! with the same `FYN-D0205` warning the validator gives; values that do
-//! not decode are `FYN-D0206` errors (they cannot happen after a clean
-//! `Scene::validate`, but a caller may skip validation).
+//! `World::load_scene` instantiates, plus the authored behaviours
+//! ([`AuthoredBehaviour`]) the Dart SDK instantiates from the load report
+//! (M2-16). A non-native component whose type the schema set knows as a
+//! behaviour is one of those; any other unknown type is skipped with the
+//! same `FYN-D0205` warning the validator gives (its data is still handed
+//! over, so an SDK that registered the type can attach it anyway). Values
+//! that do not decode are `FYN-D0206` errors (they cannot happen after a
+//! clean `Scene::validate`, but a caller may skip validation).
 
 use std::path::{Path, PathBuf};
 
@@ -17,9 +21,31 @@ use crate::project::Project;
 use crate::scene::Scene;
 use crate::{Document, DocumentKind, SchemaSet};
 
+/// One scene component of a non-native type: what the SDK needs to
+/// `registry.instantiate(type_id, fields: data)` and attach it to the
+/// spawned entity.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuthoredBehaviour {
+    /// The entity's authoring id (spawned entity looked up through
+    /// `LoadedScene::handle_of`).
+    pub entity: Uuid,
+    /// The component's authoring id.
+    pub component: Uuid,
+    pub type_id: String,
+    pub version: u32,
+    /// The authored `data` object as JSON.
+    pub data: serde_json::Value,
+    /// JSON pointer of the component in its document.
+    pub pointer: String,
+    /// Whether the schema set knew the type (else `FYN-D0205` was reported).
+    pub known: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DescribedScene {
     pub description: SceneDescription,
+    /// Document order (entity, then component order).
+    pub behaviours: Vec<AuthoredBehaviour>,
     pub diagnostics: Vec<Diagnostic>,
 }
 
@@ -35,25 +61,41 @@ fn to_uuid(u: &uuid::Uuid) -> Uuid {
 
 /// Builds the description in document order (entities as listed; components
 /// as listed). Every diagnostic carries the document path and a pointer.
-pub fn describe(scene: &Scene) -> DescribedScene {
+/// `schemas` says which non-native types are behaviours.
+pub fn describe(scene: &Scene, schemas: &SchemaSet) -> DescribedScene {
     let mut diagnostics = Vec::new();
+    let mut behaviours = Vec::new();
     let doc = scene.document.path.as_deref();
     let mut entities = Vec::with_capacity(scene.entities.len());
     for e in &scene.entities {
         let mut components = Vec::with_capacity(e.components.len());
         for c in &e.components {
             match decode_component(&c.type_id, &c.data) {
-                None => diagnostics.push(diag(
-                    Code::SCENE_UNKNOWN_COMPONENT_TYPE,
-                    Severity::Warning,
-                    format!(
-                        "unknown component type \"{}\" is not instantiated (data kept)",
-                        c.type_id
-                    ),
-                    doc,
-                    &format!("{}/type", c.pointer),
-                    scene,
-                )),
+                None => {
+                    let known = schemas.behaviour(&c.type_id).is_some();
+                    if !known {
+                        diagnostics.push(diag(
+                            Code::SCENE_UNKNOWN_COMPONENT_TYPE,
+                            Severity::Warning,
+                            format!(
+                                "unknown component type \"{}\" is not instantiated (data kept)",
+                                c.type_id
+                            ),
+                            doc,
+                            &format!("{}/type", c.pointer),
+                            scene,
+                        ));
+                    }
+                    behaviours.push(AuthoredBehaviour {
+                        entity: to_uuid(&e.id),
+                        component: to_uuid(&c.id),
+                        type_id: c.type_id.clone(),
+                        version: c.version,
+                        data: c.data.to_serde(),
+                        pointer: c.pointer.clone(),
+                        known,
+                    });
+                }
                 Some(Err(err)) => diagnostics.push(diag(
                     Code::SCENE_COMPONENT_DATA,
                     Severity::Error,
@@ -79,6 +121,7 @@ pub fn describe(scene: &Scene) -> DescribedScene {
             name: scene.document.envelope.name.clone(),
             entities,
         },
+        behaviours,
         diagnostics,
     }
 }
@@ -113,40 +156,39 @@ fn diag(
 /// Reads, validates (embedded schemas), expands prefab instances (from
 /// `prefabs`, a directory scanned for `*.prefab.json`) and describes a
 /// scene document. `Err` carries every diagnostic when any is an error;
-/// `Ok` carries the description plus warnings.
-pub fn read_scene(
-    path: &Path,
-    prefabs: Option<&Path>,
-) -> Result<(SceneDescription, Vec<Diagnostic>), Vec<Diagnostic>> {
+/// `Ok` carries the description, the authored behaviours and the warnings.
+/// No project is involved, so every non-native type is an unknown one
+/// (`FYN-D0205`) whose data is still handed over.
+pub fn read_scene(path: &Path, prefabs: Option<&Path>) -> Result<DescribedScene, Vec<Diagnostic>> {
     let (library, scan) = match prefabs {
         Some(dir) => PrefabLibrary::scan(dir),
         None => (PrefabLibrary::empty(), Vec::new()),
     };
-    read_scene_with(path, &library, scan)
+    read_scene_with(path, &library, &SchemaSet::embedded(), scan)
 }
 
 fn read_scene_with(
     path: &Path,
     library: &PrefabLibrary,
+    schemas: &SchemaSet,
     mut diagnostics: Vec<Diagnostic>,
-) -> Result<(SceneDescription, Vec<Diagnostic>), Vec<Diagnostic>> {
-    let schemas = SchemaSet::embedded();
+) -> Result<DescribedScene, Vec<Diagnostic>> {
     let doc = Document::read(path, Some(DocumentKind::Scene)).map_err(|mut e| {
         e.extend(std::mem::take(&mut diagnostics));
         e
     })?;
     let mut scene = Scene::from_document(doc);
-    let mut validation = scene.validate(&schemas);
+    let mut validation = scene.validate(schemas);
     diagnostics.append(&mut validation);
     if scene.instances().next().is_some() {
-        let expanded = expand(&scene, library, &schemas);
+        let expanded = expand(&scene, library, schemas);
         scene = expanded.scene();
         diagnostics.extend(expanded.diagnostics);
     }
     if fynkel_contracts::has_errors(&diagnostics) {
         return Err(diagnostics);
     }
-    let described = describe(&scene);
+    let described = describe(&scene, schemas);
     // `describe` repeats the unknown-type warning; keep one per pointer.
     for d in described.diagnostics {
         if !diagnostics
@@ -159,7 +201,11 @@ fn read_scene_with(
     if fynkel_contracts::has_errors(&diagnostics) {
         return Err(diagnostics);
     }
-    Ok((described.description, diagnostics))
+    Ok(DescribedScene {
+        description: described.description,
+        behaviours: described.behaviours,
+        diagnostics,
+    })
 }
 
 /// A project's startup scene, ready for `World::load_scene`.
@@ -175,16 +221,29 @@ pub struct LoadedProject {
     /// The startup scene's document path.
     pub scene_path: PathBuf,
     pub scene: SceneDescription,
+    /// The startup scene's authored behaviours, for the SDK to attach.
+    pub behaviours: Vec<AuthoredBehaviour>,
     pub warnings: Vec<Diagnostic>,
+}
+
+/// Where a project keeps its generated behaviour schemas (`fynkel codegen`
+/// pipeline (b)): `<dir>/schemas/behaviours/<id>.schema.json`.
+pub const PROJECT_SCHEMAS_DIR: &str = "schemas";
+
+/// The embedded schemas plus the project's own (`<dir>/schemas`), with every
+/// behaviour the project registry declares made known.
+pub fn project_schemas(dir: &Path, project: &Project) -> Result<SchemaSet, Diagnostic> {
+    project.schemas(&SchemaSet::embedded(), dir)
 }
 
 /// Reads `<dir>/fynkel.project.json`, scans its asset root, resolves the
 /// startup scene and reads it with every prefab in the database available
 /// for expansion. `Err` when the project, the database or the scene has an
 /// error. The lock is not checked here (`fynkel project lock --check`).
+/// Behaviour types come from `<dir>/schemas/behaviours` and the registry.
 pub fn load_project(dir: &Path) -> Result<LoadedProject, Vec<Diagnostic>> {
-    let schemas = SchemaSet::embedded();
     let project = Project::read(dir)?;
+    let schemas = project_schemas(dir, &project).map_err(|d| vec![d])?;
     let mut diagnostics = project.read_diagnostics().to_vec();
     diagnostics.extend(project.validate(&schemas));
     if fynkel_contracts::has_errors(&diagnostics) {
@@ -220,14 +279,15 @@ pub fn load_project(dir: &Path) -> Result<LoadedProject, Vec<Diagnostic>> {
             Err(d) => diagnostics.extend(d),
         }
     }
-    let (scene, warnings) = read_scene_with(&startup, &library, diagnostics)?;
+    let described = read_scene_with(&startup, &library, &schemas, diagnostics)?;
     Ok(LoadedProject {
         project_name: project.name().to_string(),
         dir: dir.to_path_buf(),
         assets,
         cache: dir.join(".fynkel").join("cache"),
         scene_path: startup,
-        scene,
-        warnings,
+        scene: described.description,
+        behaviours: described.behaviours,
+        warnings: described.diagnostics,
     })
 }

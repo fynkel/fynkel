@@ -174,7 +174,7 @@ fn expansion_is_exact_and_deterministic() {
     assert_eq!(anchor_b.children[1], b.entity(base_local).unwrap());
 
     // And it loads.
-    let described = describe(&out);
+    let described = describe(&out, &schemas);
     assert!(!described.has_errors());
     assert_eq!(described.description.entities.len(), 3 + 3 + 1);
 }

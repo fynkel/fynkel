@@ -154,9 +154,9 @@ pub fn run_with(config: &HeadlessConfig) -> (HeadlessReport, World, Option<Loade
                 report.total_ms = start.elapsed().as_secs_f32() * 1e3;
                 return (report, world, None);
             }
-            Ok((description, warnings)) => {
-                sr.document_diagnostics = document::diagnostics_json(&warnings);
-                match world.load_scene(&description) {
+            Ok(described) => {
+                sr.document_diagnostics = document::diagnostics_json(&described.diagnostics);
+                match world.load_scene(&described.description) {
                     Ok(l) => {
                         sr.loaded = true;
                         sr.id = l.id.to_string();

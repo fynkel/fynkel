@@ -80,7 +80,8 @@ Every authoring diagnostic is the §14.2 record
 `info`), `message`, `document`, `pointer` (RFC 6901), `id`, `line`,
 `column`, `suggestion`, `related`. Absent fields are omitted in JSON. Code
 namespaces: `FYN-D` documents, `FYN-A` assets, `FYN-P` project, `FYN-G`
-codegen, `FYN-E` editing (authoring commands); append only.
+codegen, `FYN-E` editing (authoring commands), `FYN-B` behaviours (the Dart
+SDK attaching authored behaviours at load); append only.
 
 Human form: `error[FYN-D0012] assets/scenes/main.scene.json:3:3 /id: id is not a canonical UUID: upper-case hex (use lower-case …)`.
 
@@ -116,8 +117,8 @@ semantic rules on top of the schema pass:
 | `FYN-D0202` | `children` ↔ `parent` disagree (reported on both sides) |
 | `FYN-D0203` | the `parent` chain has a cycle |
 | `FYN-D0204` | two components of the same type on one entity |
-| `FYN-D0205` | unknown component type (warning; `data` is kept opaque) |
-| `FYN-D0206` | component `data` violates the type's schema (per field) |
+| `FYN-D0205` | unknown component type (warning; `data` is kept opaque) — not raised for a behaviour type the schema set knows (`schemas/behaviours/<id>.schema.json` in the project, or a registry entry of kind `behaviour`) |
+| `FYN-D0206` | component `data` violates the type's schema (per field; behaviour schemas too) |
 | `FYN-D0207` | type is not authorable (e.g. `fynkel.Name` — set `name` instead) |
 | `FYN-D0208` | the same child listed twice |
 | `FYN-D0209` | malformed entity/component entry skipped by the view |
@@ -134,12 +135,26 @@ components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
 `fynkel.DirectionalLight`, `fynkel.PointLight` (`fixtures/valid/training_room.scene.json`
 uses all of them).
 
+A component of any other type is a **behaviour**: a Dart class of the game
+(`@FynkelBehaviour(id: 'game.Spinner')`) whose `@Expose` fields are its
+`data`. `fynkel codegen --project` generates `schemas/behaviours/<id>.schema.json`
+for each (`docs/codegen.md` § Behaviour generator); a project's `schemas/`
+directory is loaded on top of the embedded schemas (`SchemaSet::embedded_with`,
+`Project::schemas`), and every `components` registry entry of kind
+`behaviour` declares its type known even without a schema. The runtime never
+instantiates these; the Dart SDK does, from the load report (below).
+`fixtures/project` has `game.Spinner` on the Robot with `speed: 2.5`, and the
+generated schema under `fixtures/project/schemas/behaviours/`.
+
 ## Scene → runtime
 
-`fynkel_document::describe(&Scene)` turns a validated scene into the typed
-`fynkel_core::SceneDescription` (entities in document order, each with its
-`ComponentValue`s); unknown component types are skipped with `FYN-D0205`,
-undecodable data is `FYN-D0206`. `World::load_scene(&description)` then
+`fynkel_document::describe(&Scene, &SchemaSet)` turns a validated scene into
+the typed `fynkel_core::SceneDescription` (entities in document order, each
+with its `ComponentValue`s) plus `behaviours: Vec<AuthoredBehaviour {
+entity, component, type_id, version, data, pointer, known }>` — every
+non-native component, for the SDK; a type the schema set does not know as a
+behaviour is still handed over but warned as `FYN-D0205`. Undecodable native
+data is `FYN-D0206`. `World::load_scene(&description)` then
 spawns roots in key order and children in listed order, applies every
 non-Transform component through `Command::SetComponent` (so a value the
 bridge would reject is rejected here too, command index `u32::MAX` in
@@ -155,13 +170,16 @@ The file-to-description paths every host shares live in
 `fynkel_document::runtime`:
 
 - `read_scene(path, prefabs)` — read, validate, expand prefab instances
-  (from a directory scanned for `*.prefab.json`), describe. `Err` carries
-  every diagnostic when any is an error.
-- `load_project(dir)` — `fynkel.project.json` → asset database scan →
+  (from a directory scanned for `*.prefab.json`), describe →
+  `DescribedScene { description, behaviours, diagnostics }`. `Err` carries
+  every diagnostic when any is an error. Embedded schemas only: no project,
+  so every behaviour type is an unknown one (warned, still handed over).
+- `load_project(dir)` — `fynkel.project.json` → the project's schemas
+  (`<dir>/schemas` + registry declarations) → asset database scan →
   `startupScene` resolved → the scene read with **every prefab in the
   database** available → `LoadedProject { project_name, dir, assets, cache
-  (<dir>/.fynkel/cache), scene_path, scene, warnings }`. The lock is not
-  checked here (`fynkel project lock --check` is).
+  (<dir>/.fynkel/cache), scene_path, scene, behaviours, warnings }`. The
+  lock is not checked here (`fynkel project lock --check` is).
 
 Both read source documents: the cooked scene chunk is the unexpanded
 canonical text and no loader reads it yet (M3).
@@ -171,10 +189,17 @@ path_utf8, len)` and `fynkel_world_load_project(world, dir_utf8, len)`
 return `FYNKEL_STATUS_OK`, `FYNKEL_STATUS_LOAD_FAILED` (the world is
 unchanged) or `FYNKEL_STATUS_INVALID_ARGUMENT`; `fynkel_world_load_report`
 is the JSON of the last call: `{ ok, scene: { id, name, path, entities,
-rejectedComponents } | null, project: { name, dir, assets, cache } | null,
-diagnostics: [...] }`. In Dart, `World.loadScene(path)` /
-`World.loadProject(dir)` return a `LoadReport` (warnings to
-`onLoadDiagnostics`) or throw `FynkelLoadError`.
+rejectedComponents, behaviours: [{ entity, authoringId, component, type,
+version, known, data, pointer }] } | null, project: { name, dir, assets,
+cache } | null, diagnostics: [...] }` — `entity` is the spawned handle. In
+Dart, `World.loadScene(path)` / `World.loadProject(dir)` return a
+`LoadReport` (warnings to `onLoadDiagnostics`) or throw `FynkelLoadError`;
+on success the SDK instantiates every listed behaviour through
+`world.registry` (`registerBehaviours(world.registry)` from the generated
+`behaviours.g.dart` first) and attaches it to `attach(entity)`. A type the
+registry lacks is `FYN-B0001`, data the type rejects is `FYN-B0002` — both
+warnings in the report (`behavioursAttached` counts the rest); the entity
+and its native components load either way.
 
 ### Cooked assets in the renderer
 
@@ -670,6 +695,7 @@ fynkel cooked inspect <file.fyna>... [--json]
 fynkel project describe [--project <dir>] [--json] [--schemas <dir>]
 fynkel project lock [--project <dir>] [--check] [--json] [--schemas <dir>]
 fynkel validate [--project <dir>] [--json] [--schemas <dir>]
+fynkel codegen [--check] [--root <repo>] [--project <dart package>]
 fynkel render [--project <dir>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--placeholders] [--json]
 fynkel schema list [--json]
 fynkel schema describe <type|kind> [--json]
@@ -739,7 +765,11 @@ the extract offscreen with the cooked cache (`--cache` defaults to
 default (`--json`: `{ ok, out, size, project, scene, cache, instances,
 meshes, placeholders, missing, batches, sceneCamera, sceneLight,
 assetErrors, diagnostics }`); exit 1 on a project/scene/asset error, 2 when
-no GPU adapter is available.
+no GPU adapter is available. `codegen` regenerates the native schemas and
+codecs (pipeline (a)); with `--project <dart package>` it also runs the
+behaviour generator in that package and splits its schemas into
+`schemas/behaviours/` (pipeline (b), `docs/codegen.md`); `--check` compares
+and exits 2 on drift without touching the tree.
 
 Exit codes, everywhere: 0 ok (warnings allowed), 1 diagnostics with errors
 (or drift for `format --check`), 2 usage, or a project that cannot be opened

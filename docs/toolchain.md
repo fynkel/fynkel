@@ -62,4 +62,16 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 | `crc32fast` | 1 | Per-chunk and header checksums in `fynkel_cooked`; the crate's only dependency, so a runtime can read cooked containers without the importers |
 
 Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`.
+
+Behaviour generator (`packages/fynkel_generator`, ADR-0012 pipeline (b), M2-16):
+
+| Package | Version | Why |
+| --- | --- | --- |
+| `build` / `build_runner` | 4.0.11 / 2.16.1 (dev in the game package) | the aggregate builder and the tool that runs it; `build_runner` 2.16 compiles builders AOT once per package (`.dart_tool/build`), later runs take ~1 s |
+| `source_gen` | 4.3.0 | `TypeChecker`/`ConstantReader`/`LibraryReader` over the analyzer's element model |
+| `analyzer` | 14.4.0 | element model and AST (field initializers → defaults); the version `source_gen` 4.3 targets |
+| `dart_style` | 3.1.13 | formats the generated Dart so output is byte-stable |
+| `glob` | 2.2.0 | `lib/**.dart` discovery |
+
+`fynkel codegen --project` finds the Dart SDK through `$FYNKEL_DART`, the `dart` next to `flutter` on `PATH`, or `dart` on `PATH`.
 Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.

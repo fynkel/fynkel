@@ -20,7 +20,7 @@ fn training_room_describes_and_loads() {
     let schemas =
         SchemaSet::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas")).unwrap();
     assert!(scene.validate(&schemas).is_empty());
-    let described = describe(&scene);
+    let described = describe(&scene, &schemas);
     assert!(
         described.diagnostics.is_empty(),
         "{:#?}",
@@ -99,14 +99,35 @@ fn component_values_round_trip_through_nodes() {
 #[test]
 fn unknown_and_undecodable_components_are_diagnosed() {
     let scene = fixture("scene/unknown_component.scene.json");
-    let described = describe(&scene);
+    let described = describe(&scene, &SchemaSet::embedded());
     assert_eq!(described.diagnostics.len(), 1);
     assert_eq!(described.diagnostics[0].code.as_str(), "FYN-D0205");
     assert!(!described.has_errors());
     assert!(described.description.entities[0].components.is_empty());
+    // The unknown component is still handed over as an authored behaviour
+    // (an SDK that registered the type attaches it), flagged as unknown.
+    assert_eq!(described.behaviours.len(), 1);
+    assert!(!described.behaviours[0].known);
+    assert_eq!(
+        described.behaviours[0].entity,
+        described.description.entities[0].id
+    );
+
+    // Declaring the type (a project registry entry) makes it a known
+    // behaviour: no warning, same hand-over.
+    let mut schemas = SchemaSet::embedded();
+    schemas.declare_behaviour(&described.behaviours[0].type_id, 1);
+    let described = describe(&scene, &schemas);
+    assert!(described.diagnostics.is_empty());
+    assert_eq!(described.behaviours.len(), 1);
+    assert!(described.behaviours[0].known);
+    assert!(scene
+        .validate(&schemas)
+        .iter()
+        .all(|d| d.code.as_str() != "FYN-D0205"));
 
     let scene = fixture("scene/bad_component_values.scene.json");
-    let described = describe(&scene);
+    let described = describe(&scene, &SchemaSet::embedded());
     let codes: Vec<&str> = described
         .diagnostics
         .iter()

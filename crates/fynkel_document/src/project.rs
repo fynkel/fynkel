@@ -86,6 +86,23 @@ pub struct Project {
 }
 
 impl Project {
+    /// `base` plus the project's own schemas (`<dir>/schemas`, where
+    /// `fynkel codegen --project` writes `behaviours/<id>.schema.json`),
+    /// with every registry entry of kind `behaviour` declared so its type
+    /// is known even without a schema.
+    #[allow(clippy::result_large_err)]
+    pub fn schemas(&self, base: &SchemaSet, dir: &Path) -> Result<SchemaSet, Diagnostic> {
+        let mut schemas = base.extended_with(&dir.join(crate::runtime::PROJECT_SCHEMAS_DIR))?;
+        for entry in self.components.iter().flatten() {
+            if entry.kind == "behaviour" {
+                schemas.declare_behaviour(&entry.type_id, entry.version);
+            }
+        }
+        Ok(schemas)
+    }
+}
+
+impl Project {
     pub fn from_document(document: Document) -> Project {
         let mut diags = Vec::new();
         if document.kind != DocumentKind::Project {
@@ -780,6 +797,16 @@ pub fn validate_project(
         }
     };
     report.diagnostics.extend(project.validate(schemas));
+    // From here on the project's behaviour types are known.
+    let schemas = match project.schemas(schemas, dir) {
+        Ok(s) => s,
+        Err(d) => {
+            report.diagnostics.push(d);
+            report.project = Some(project);
+            return report;
+        }
+    };
+    let schemas = &schemas;
 
     match Lock::read(dir, schemas) {
         Ok(lock) => {

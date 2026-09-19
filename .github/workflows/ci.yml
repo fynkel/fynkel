@@ -39,7 +39,7 @@ jobs:
         run: cargo run -p fynkel_cli -- codegen --check
 
   dart:
-    name: dart (package:fynkel tests)
+    name: dart (package:fynkel, fynkel_generator and example tests)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -63,3 +63,14 @@ jobs:
       - name: test
         working-directory: packages/fynkel
         run: dart test
+      # The behaviour generator (ADR-0012 pipeline (b)) and its example
+      # package, which is the M2-16 gate: authored scene data → compiled
+      # Dart behaviour.
+      - name: generator pub get + analyze + test
+        working-directory: packages/fynkel_generator
+        run: dart pub get && dart analyze --fatal-infos && dart test
+      - name: example pub get + analyze + test
+        working-directory: packages/fynkel_generator/example/spinner_game
+        run: dart pub get && dart analyze --fatal-infos && dart test
+      - name: codegen --check --project
+        run: cargo run -p fynkel_cli -- codegen --check --project packages/fynkel_generator/example/spinner_game

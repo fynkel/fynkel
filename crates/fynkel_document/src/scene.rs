@@ -13,6 +13,9 @@
 //! - the hierarchy is a forest (`D0203`);
 //! - one component per type per entity (`D0204`) — the runtime stores one;
 //! - unknown component types are kept and reported (`D0205`, warning);
+//!   behaviour types known to the schema set (`schemas/behaviours/*`, or a
+//!   project registry declaration) are not unknown: their data is checked
+//!   like a component's and the Dart SDK instantiates them;
 //! - component `data` must match the type's schema (`D0206`, via the
 //!   loaded component schemas);
 //! - engine-managed components may not be authored (`D0207`);
@@ -435,6 +438,16 @@ pub(crate) fn validate_entities<'a>(
             }
             types.insert(&c.type_id, c);
             match schemas.component(&c.type_id) {
+                    None if schemas.behaviour(&c.type_id).is_some() => {
+                        // A Dart behaviour: its data fits the generated (or
+                        // declared) schema; the SDK instantiates it.
+                        for mut d in schemas.validate_component(&c.type_id, &c.data) {
+                            d.code = Code::SCENE_COMPONENT_DATA;
+                            d.id = Some(c.id.to_string());
+                            let pointer = format!("{}/data{}", c.pointer, d.pointer.as_deref().unwrap_or(""));
+                            out.push(anchor(d, &pointer));
+                        }
+                    }
                     None => out.push(anchor(
                         Diagnostic::new(
                             Code::SCENE_UNKNOWN_COMPONENT_TYPE,

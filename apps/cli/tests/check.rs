@@ -20,6 +20,70 @@ fn generated_files_are_up_to_date() {
     );
 }
 
+/// Pipeline (b): the example package's committed generated files and
+/// `schemas/behaviours/` match its `@FynkelBehaviour` classes. Needs a Dart
+/// SDK (`FYNKEL_DART`, `flutter` or `dart` on PATH) and the pub cache;
+/// skipped with a note otherwise so the Rust suite stays runnable alone.
+#[test]
+fn behaviour_generator_output_is_up_to_date() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let example = root.join("packages/fynkel_generator/example/spinner_game");
+    let has_dart = std::env::var_os("FYNKEL_DART").is_some()
+        || std::env::var_os("PATH").is_some_and(|path| {
+            std::env::split_paths(&path)
+                .any(|d| d.join("flutter").is_file() || d.join("dart").is_file())
+        });
+    if !has_dart {
+        eprintln!("no Dart SDK on PATH; skipping behaviour_generator_output_is_up_to_date");
+        return;
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["codegen", "--check", "--root"])
+        .arg(&root)
+        .arg("--project")
+        .arg(&example)
+        .output()
+        .expect("run fynkel");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("up to date (2 behaviour types)"),
+        "{stdout}"
+    );
+    // A check never leaves the tree modified.
+    assert!(example.join("lib/generated/behaviours.g.dart").is_file());
+    assert!(example
+        .join("schemas/behaviours/game.Spinner.schema.json")
+        .is_file());
+}
+
+/// The fixture project validates its `game.Spinner` data against the very
+/// schema the generator produced for the example package.
+#[test]
+fn fixture_project_carries_the_generated_spinner_schema() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let generated = std::fs::read_to_string(
+        root.join("packages/fynkel_generator/example/spinner_game/schemas/behaviours/game.Spinner.schema.json"),
+    )
+    .unwrap();
+    let fixture = std::fs::read_to_string(root.join(
+        "crates/fynkel_document/fixtures/project/schemas/behaviours/game.Spinner.schema.json",
+    ))
+    .unwrap();
+    assert_eq!(
+        generated, fixture,
+        "copy the example's schema into the fixture project"
+    );
+    let v: serde_json::Value = serde_json::from_str(&generated).unwrap();
+    assert_eq!(v["x-fynkel"]["kind"], "behaviour");
+    assert_eq!(v["properties"]["speed"]["minimum"], 0);
+    assert_eq!(v["additionalProperties"], false);
+}
+
 #[test]
 fn schema_command_prints_fingerprint() {
     let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))

@@ -103,7 +103,7 @@ class FynkelBridgeError extends Error {
 
 /// One `fynkel_world_load_*` diagnostic (a document diagnostic: code
 /// `FYN-D####`/`FYN-P####`/`FYN-A####`, the file and JSON pointer when
-/// known).
+/// known) or an SDK one (`FYN-B####`: a behaviour the SDK could not attach).
 class LoadDiagnostic {
   const LoadDiagnostic({
     required this.code,
@@ -149,6 +149,53 @@ class LoadDiagnostic {
   }
 }
 
+/// One scene component of a non-native type in a load report: a Dart
+/// behaviour the SDK instantiates from the registry (`FYN-B0001` when the
+/// type is not registered, `FYN-B0002` when the data does not fit) and
+/// attaches to the spawned [entity].
+class AuthoredBehaviour {
+  const AuthoredBehaviour({
+    required this.entity,
+    required this.authoringId,
+    required this.component,
+    required this.type,
+    required this.version,
+    required this.known,
+    required this.data,
+    this.pointer,
+  });
+
+  factory AuthoredBehaviour.fromJson(Map<String, Object?> j) => AuthoredBehaviour(
+        entity: (j['entity'] as num).toInt(),
+        authoringId: j['authoringId'] as String? ?? '',
+        component: j['component'] as String? ?? '',
+        type: j['type'] as String? ?? '',
+        version: (j['version'] as num?)?.toInt() ?? 1,
+        known: j['known'] == true,
+        data: (j['data'] as Map?)?.cast<String, Object?>() ?? const {},
+        pointer: j['pointer'] as String?,
+      );
+
+  /// The spawned entity's handle (what [World.attach] takes).
+  final int entity;
+
+  /// The entity's and the component's authoring ids.
+  final String authoringId;
+  final String component;
+
+  /// The behaviour type id (`game.Spinner`) and authored version.
+  final String type;
+  final int version;
+
+  /// Whether the document layer knew the type (a project schema or registry
+  /// entry); false means it was reported as `FYN-D0205` there.
+  final bool known;
+
+  /// The authored `data` object: the fields to set.
+  final Map<String, Object?> data;
+  final String? pointer;
+}
+
 /// What [World.loadScene] / [World.loadProject] produced.
 class LoadReport {
   const LoadReport({
@@ -159,6 +206,8 @@ class LoadReport {
     this.scenePath,
     this.entityCount = 0,
     this.rejectedComponents = 0,
+    this.behaviours = const [],
+    this.behavioursAttached = 0,
     this.projectName,
     this.projectDir,
     this.assetsDir,
@@ -178,6 +227,10 @@ class LoadReport {
       scenePath: scene?['path'] as String?,
       entityCount: (scene?['entities'] as num?)?.toInt() ?? 0,
       rejectedComponents: (scene?['rejectedComponents'] as num?)?.toInt() ?? 0,
+      behaviours: [
+        for (final b in (scene?['behaviours'] as List?) ?? const [])
+          AuthoredBehaviour.fromJson((b as Map).cast<String, Object?>()),
+      ],
       projectName: project?['name'] as String?,
       projectDir: project?['dir'] as String?,
       assetsDir: project?['assets'] as String?,
@@ -192,6 +245,13 @@ class LoadReport {
   final String? scenePath;
   final int entityCount;
   final int rejectedComponents;
+
+  /// The scene's authored behaviours (every non-native component).
+  final List<AuthoredBehaviour> behaviours;
+
+  /// How many of [behaviours] were instantiated and attached; the rest are
+  /// `FYN-B` warnings in [diagnostics].
+  final int behavioursAttached;
   final String? projectName;
   final String? projectDir;
   final String? assetsDir;
@@ -200,6 +260,24 @@ class LoadReport {
 
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
+
+  /// This report after the SDK attached [attached] behaviours and found
+  /// [extra] problems doing so.
+  LoadReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => LoadReport(
+        ok: ok,
+        diagnostics: extra.isEmpty ? diagnostics : [...diagnostics, ...extra],
+        sceneId: sceneId,
+        sceneName: sceneName,
+        scenePath: scenePath,
+        entityCount: entityCount,
+        rejectedComponents: rejectedComponents,
+        behaviours: behaviours,
+        behavioursAttached: attached,
+        projectName: projectName,
+        projectDir: projectDir,
+        assetsDir: assetsDir,
+        cacheDir: cacheDir,
+      );
 }
 
 /// A scene or project failed to load; [report] says why.

@@ -6,7 +6,7 @@ use std::path::Path;
 
 use fynkel_contracts::{Diagnostic, Status};
 use fynkel_core::{LoadError, LoadedScene, SceneDescription};
-use fynkel_document::{diagnostic_json, load_project, read_scene};
+use fynkel_document::{diagnostic_json, load_project, read_scene, AuthoredBehaviour};
 use serde_json::{json, Value};
 
 use crate::{guarded, FynkelBufferView, FynkelWorld};
@@ -54,10 +54,12 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
 }
 
 /// Spawns `scene` and builds the report; `warnings` are the document
-/// diagnostics of a successful read.
+/// diagnostics of a successful read, `behaviours` the authored Dart
+/// behaviours the SDK attaches to the spawned entities.
 fn instantiate(
     w: &mut FynkelWorld,
     scene: &SceneDescription,
+    behaviours: &[AuthoredBehaviour],
     path: &Path,
     warnings: Vec<Diagnostic>,
     project: Value,
@@ -67,7 +69,7 @@ fn instantiate(
             status: Status::Ok,
             report: json!({
                 "ok": true,
-                "scene": scene_json(&loaded, path),
+                "scene": scene_json(&loaded, behaviours, path),
                 "project": project,
                 "diagnostics": warnings.iter().map(diagnostic_json).collect::<Vec<_>>(),
             }),
@@ -80,13 +82,34 @@ fn instantiate(
     }
 }
 
-fn scene_json(loaded: &LoadedScene, path: &Path) -> Value {
+fn scene_json(loaded: &LoadedScene, behaviours: &[AuthoredBehaviour], path: &Path) -> Value {
+    // `entity` is the spawned handle (what `World.attach` takes); an
+    // authored behaviour whose entity was not spawned cannot happen after
+    // a successful load, but is dropped rather than reported with a
+    // dangling handle.
+    let behaviours: Vec<Value> = behaviours
+        .iter()
+        .filter_map(|b| {
+            let entity = loaded.handle_of(b.entity)?;
+            Some(json!({
+                "entity": entity.to_bits(),
+                "authoringId": b.entity.to_string(),
+                "component": b.component.to_string(),
+                "type": b.type_id,
+                "version": b.version,
+                "known": b.known,
+                "data": b.data,
+                "pointer": b.pointer,
+            }))
+        })
+        .collect();
     json!({
         "id": loaded.id.to_string(),
         "name": loaded.name,
         "path": path.display().to_string(),
         "entities": loaded.entities().len(),
         "rejectedComponents": loaded.rejected_components,
+        "behaviours": behaviours,
     })
 }
 
@@ -112,7 +135,14 @@ pub unsafe extern "C" fn fynkel_world_load_scene(
     guarded(world, move |w| {
         let prefabs = path.parent().map(Path::to_path_buf);
         let out = match read_scene(&path, prefabs.as_deref()) {
-            Ok((scene, warnings)) => instantiate(w, &scene, &path, warnings, Value::Null),
+            Ok(d) => instantiate(
+                w,
+                &d.description,
+                &d.behaviours,
+                &path,
+                d.diagnostics,
+                Value::Null,
+            ),
             Err(diags) => failed(&diags, Value::Null),
         };
         finish(w, out)
@@ -140,7 +170,14 @@ pub unsafe extern "C" fn fynkel_world_load_project(
                     "assets": p.assets.display().to_string(),
                     "cache": p.cache.display().to_string(),
                 });
-                instantiate(w, &p.scene, &p.scene_path, p.warnings, project)
+                instantiate(
+                    w,
+                    &p.scene,
+                    &p.behaviours,
+                    &p.scene_path,
+                    p.warnings,
+                    project,
+                )
             }
             Err(diags) => failed(&diags, Value::Null),
         };

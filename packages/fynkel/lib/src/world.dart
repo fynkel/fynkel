@@ -358,9 +358,10 @@ class World {
 
   LoadReport _load((FynkelStatus, Map<String, Object?>) r, String op) {
     final (status, json) = r;
-    final report = LoadReport.fromJson(json);
+    var report = LoadReport.fromJson(json);
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
+        report = _attachAuthoredBehaviours(report);
         if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
         return report;
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
@@ -368,6 +369,45 @@ class World {
       default:
         throw FynkelBridgeError('$op: $status');
     }
+  }
+
+  /// Instantiates every authored behaviour of a loaded scene from
+  /// [registry] and attaches it to its spawned entity (M2-16: the scene
+  /// component `game.Spinner` with `speed: 2.5` becomes a `Spinner` with
+  /// that field set). A type the registry lacks is `FYN-B0001`, data the
+  /// type rejects is `FYN-B0002`; both are warnings — the entity and its
+  /// other components are loaded regardless.
+  LoadReport _attachAuthoredBehaviours(LoadReport report) {
+    if (report.behaviours.isEmpty) return report;
+    final extra = <LoadDiagnostic>[];
+    var attached = 0;
+    for (final b in report.behaviours) {
+      if (!registry.contains(b.type)) {
+        extra.add(LoadDiagnostic(
+          code: 'FYN-B0001',
+          severity: 'warning',
+          message: 'behaviour type ${b.type} is not registered; the component is loaded without a behaviour',
+          document: report.scenePath,
+          pointer: b.pointer,
+          suggestion: 'call registerBehaviours(world.registry) from the generated behaviours.g.dart',
+        ));
+        continue;
+      }
+      try {
+        attach(b.entity).addBehaviourFromData(b.type, fields: b.data, version: b.version);
+        attached++;
+      } on BehaviourDataError catch (e) {
+        extra.add(LoadDiagnostic(
+          code: 'FYN-B0002',
+          severity: 'warning',
+          message: '${b.type}${e.field == null ? '' : '.${e.field}'}: ${e.message}',
+          document: report.scenePath,
+          pointer: b.pointer == null ? null : '${b.pointer}/data${e.field == null ? '' : '/${e.field}'}',
+          suggestion: 'fix the component data or regenerate behaviours.g.dart (`fynkel codegen --project`)',
+        ));
+      }
+    }
+    return report.withBehaviours(attached: attached, extra: extra);
   }
 
   /// Called with the warnings of a successful load. Defaults to `print`.
