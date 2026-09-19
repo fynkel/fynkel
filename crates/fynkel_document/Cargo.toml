@@ -8,6 +8,9 @@ license.workspace = true
 
 [dependencies]
 fynkel_contracts.workspace = true
+fynkel_core.workspace = true
+fynkel_scene.workspace = true
+glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 jsonschema.workspace = true

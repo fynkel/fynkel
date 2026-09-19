@@ -1,7 +1,9 @@
 //! Commands are the only way gameplay mutates the world (§5.4).
 
-use fynkel_contracts::Entity;
+use fynkel_contracts::{ComponentId, Entity};
 use fynkel_scene::Transform;
+
+use crate::components::ComponentValue;
 
 /// Which frame phase a command batch belongs to (ADR-0008).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -49,19 +51,37 @@ pub enum Command {
         entity: Entity,
         name: String,
     },
+    /// Adds or replaces one built-in component. A `Transform` value behaves
+    /// exactly like `SetTransform`. Scene loading uses this same path.
+    SetComponent {
+        entity: Entity,
+        value: ComponentValue,
+    },
+    /// Removes a built-in component; `Transform`, hierarchy and `Name` are
+    /// not removable (`INVALID_PAYLOAD`).
+    RemoveComponent {
+        entity: Entity,
+        component: ComponentId,
+    },
 }
 
 impl Command {
     /// Presentation lane accepts plain-data writes only (§5.1 table).
     pub fn allowed_on_presentation(&self) -> bool {
-        matches!(self, Command::SetTransform { .. } | Command::SetName { .. })
+        matches!(
+            self,
+            Command::SetTransform { .. } | Command::SetName { .. } | Command::SetComponent { .. }
+        )
     }
 
     pub fn target(&self) -> Option<Entity> {
         match self {
             Command::Spawn { .. } => None,
             Command::Destroy(e) => Some(*e),
-            Command::SetTransform { entity, .. } | Command::SetName { entity, .. } => Some(*entity),
+            Command::SetTransform { entity, .. }
+            | Command::SetName { entity, .. }
+            | Command::SetComponent { entity, .. }
+            | Command::RemoveComponent { entity, .. } => Some(*entity),
             Command::SetParent { child, .. } => Some(*child),
         }
     }

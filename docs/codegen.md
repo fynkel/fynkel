@@ -12,8 +12,10 @@ Rust structs are the source of truth for every record that crosses the bridge.
         ┌──────────────────────────────┬───────────────┴───────────────┐
         ▼                              ▼                               ▼
  schemas/fynkel.schema.json    packages/fynkel/lib/generated/   crates/fynkel_wire/src/generated.rs
- schemas/components/*.json
- schemas/scene.schema.json     schema.g.dart (Dart codecs)      (Rust codecs, SCHEMA_FINGERPRINT)
+ schemas/components/*.json     schema.g.dart (Dart codecs)      (Rust codecs, SCHEMA_FINGERPRINT)
+ schemas/scene.schema.json                                      crates/fynkel_document/src/generated.rs
+                                                                (JSON ↔ typed component codecs,
+                                                                 embedded schemas, ComponentValue dispatch)
 ```
 
 * `fynkel_contracts::schema` defines the metadata (`RecordSchema`, `FieldType`), the wire layout rule (little-endian, natural alignment, records padded to 8, strings as `(offset, len)` into a string tail) and the fingerprint (FNV-1a over the canonical text of the registry).

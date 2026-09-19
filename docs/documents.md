@@ -134,6 +134,23 @@ components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
 `fynkel.DirectionalLight`, `fynkel.PointLight` (`fixtures/valid/training_room.scene.json`
 uses all of them).
 
+## Scene → runtime
+
+`fynkel_document::describe(&Scene)` turns a validated scene into the typed
+`fynkel_core::SceneDescription` (entities in document order, each with its
+`ComponentValue`s); unknown component types are skipped with `FYN-D0205`,
+undecodable data is `FYN-D0206`. `World::load_scene(&description)` then
+spawns roots in key order and children in listed order, applies every
+non-Transform component through `Command::SetComponent` (so a value the
+bridge would reject is rejected here too, command index `u32::MAX` in
+`World::diagnostics()`), propagates transforms and emits `SceneReady`. The
+returned `LoadedScene` maps authoring UUID ↔ runtime handle both ways;
+structural errors (`LoadError`) load nothing. The typed ↔ JSON codecs are
+generated (`crates/fynkel_document/src/generated.rs`, `DocumentCodec`), as
+are the schemas `SchemaSet::embedded()` compiles in, so a shipped runtime
+validates without a `schemas/` directory. `docs/hosts.md` covers
+`fynkel test --headless --scene` and `fynkel state dump`.
+
 ## CLI
 
 ```sh
@@ -142,6 +159,8 @@ fynkel document format <path>... [--check] [--json]
 fynkel document new <kind> <name> [--out <path>] [--json]
 fynkel scene inspect <path> [--json] [--schemas <dir>]
 fynkel scene validate <path>... [--json] [--schemas <dir>]
+fynkel test --headless --scene <path> [--steps N] [--json]
+fynkel state dump --scene <path> [--steps N] [--json]
 ```
 
 `scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,

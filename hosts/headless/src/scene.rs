@@ -31,6 +31,9 @@ pub struct DemoScene {
     /// Simulation seconds elapsed at the last fixed update.
     time: f32,
     fixed_dt: f32,
+    /// Passive driver for document scenes: spawns nothing, only watches.
+    passive: bool,
+    scene_ready: bool,
 }
 
 impl DemoScene {
@@ -55,7 +58,22 @@ impl DemoScene {
             satellites_requested: false,
             time: 0.0,
             fixed_dt: 0.0,
+            passive: false,
+            scene_ready: false,
         }
+    }
+
+    /// A driver that issues no commands (the world was filled by
+    /// `World::load_scene`) and only records `SceneReady`.
+    pub fn empty() -> Self {
+        Self {
+            passive: true,
+            ..Self::new(0, 0)
+        }
+    }
+
+    pub fn saw_scene_ready(&self) -> bool {
+        self.scene_ready
     }
 
     pub fn hub(&self) -> Option<Entity> {
@@ -75,6 +93,9 @@ impl DemoScene {
     /// hand-shakes resolve temp ids to handles.
     pub fn on_events(&mut self, events: &[Event]) {
         for ev in events {
+            if matches!(ev.payload, EventPayload::SceneReady) {
+                self.scene_ready = true;
+            }
             if let EventPayload::Spawned { temp_id, entity } = ev.payload {
                 if temp_id == HUB_TEMP_ID {
                     self.hub = Some(entity);
@@ -88,6 +109,9 @@ impl DemoScene {
     /// Gameplay for one fixed tick: stages the commands the next `step()`
     /// applies. `tick` is the tick about to be simulated.
     pub fn fixed_update(&mut self, world: &mut World, tick: Tick) {
+        if self.passive {
+            return;
+        }
         self.fixed_dt = world.config().fixed_dt;
         self.time = tick as f32 * self.fixed_dt;
         let mut commands = Vec::with_capacity(self.satellites.len() + 1);

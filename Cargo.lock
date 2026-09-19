@@ -676,6 +676,9 @@ name = "fynkel_document"
 version = "0.0.1"
 dependencies = [
  "fynkel_contracts",
+ "fynkel_core",
+ "fynkel_scene",
+ "glam",
  "jsonschema",
  "serde",
  "serde_json",
@@ -696,6 +699,7 @@ version = "0.0.1"
 dependencies = [
  "fynkel_contracts",
  "fynkel_core",
+ "fynkel_document",
  "fynkel_scene",
  "glam",
  "serde",

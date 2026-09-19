@@ -13,6 +13,7 @@ pub mod diagnostic;
 pub mod handle;
 pub mod ids;
 pub mod schema;
+pub mod uuid;
 
 pub use asset::{AssetId, AssetRef};
 pub use codes::{DiagnosticCode, Status};
@@ -23,6 +24,7 @@ pub use schema::{
     EnumSchema, FieldSchema, FieldType, HasEnumSchema, HasSchema, RecordSchema, SchemaField,
     SchemaKind,
 };
+pub use uuid::Uuid;
 
 /// Bumped when the C ABI (function signatures, buffer headers) changes.
 pub const ABI_VERSION: u16 = 1;

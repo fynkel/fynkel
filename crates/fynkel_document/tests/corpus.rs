@@ -119,7 +119,7 @@ fn newer_documents_are_read_only() {
 
 #[test]
 fn schema_violations_carry_pointer_and_position() {
-    let schemas = SchemaSet::embedded();
+    let schemas = SchemaSet::envelope_only();
     let text = "{\n  \"formatVersion\": 1,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"x\",\n  \"ref\": { \"asset\": \"nope\" }\n}\n";
     let doc = Document::parse(DocumentKind::Scene, Some("mem.scene.json"), text).unwrap();
     // No scene schema in the embedded set: warning, then envelope-only validation passes.

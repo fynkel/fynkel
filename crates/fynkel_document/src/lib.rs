@@ -16,14 +16,21 @@
 // the failure path of tooling, where its size is irrelevant.
 #![allow(clippy::result_large_err)]
 
+pub mod codec;
+#[rustfmt::skip]
+#[allow(clippy::all)]
+pub mod generated;
 pub mod json;
+pub mod runtime;
 pub mod scene;
 pub mod schema;
 
 use std::path::Path;
 
+pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
+pub use runtime::{describe, DescribedScene};
 pub use scene::Scene;
 pub use schema::{ComponentInfo, SchemaSet};
 

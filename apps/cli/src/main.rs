@@ -2,7 +2,9 @@
 //!
 //! M1 scope: `fynkel codegen` (ADR-0012, native schema generator),
 //! `fynkel schema`, and the seed of `fynkel test` (§13.3/§14.1): the Rust
-//! headless host. M2 adds `fynkel document` (validate/format/new). Exit codes: 0 ok, 1 error, 2 `--check` found drift.
+//! headless host. M2 adds `fynkel document` (validate/format/new), `fynkel
+//! scene`, `--scene` for the headless host and `fynkel state dump`. Exit
+//! codes: 0 ok, 1 error, 2 `--check` found drift.
 
 mod codegen;
 mod document;
@@ -13,7 +15,7 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host and report\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)"
+        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--scene <path>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate ...            scene documents"
     );
     ExitCode::from(1)
 }
@@ -47,6 +49,9 @@ fn main() -> ExitCode {
     };
     if cmd == "test" {
         return test_command(&args[1..]);
+    }
+    if cmd == "state" {
+        return state_command(&args[1..]);
     }
     if cmd == "document" || cmd == "scene" {
         let root = args
@@ -163,6 +168,7 @@ fn test_command(args: &[String]) -> ExitCode {
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(cfg.frame_dt)
             }
+            "--scene" => cfg.scene = value(&mut i).map(PathBuf::from),
             "--root" => {
                 i += 1;
             }
@@ -181,6 +187,23 @@ fn test_command(args: &[String]) -> ExitCode {
     if json {
         println!("{}", report.to_json());
     } else {
+        if let Some(scene) = &report.scene {
+            for d in &scene.document_diagnostics {
+                eprintln!("{}", diagnostic_line(d));
+            }
+            if scene.loaded {
+                println!(
+                    "loaded \"{}\" ({}) from {}: {} entities, {} components rejected",
+                    scene.name, scene.id, scene.path, scene.entities, scene.rejected_components
+                );
+            } else {
+                println!(
+                    "fynkel test --headless: {} did not load — FAILED",
+                    scene.path
+                );
+                return ExitCode::from(1);
+            }
+        }
         println!(
             "fynkel test --headless: {} ticks in {:.1} ms, {} entities, {} commands applied, {} rejected, {} diagnostics, checksum {} — {}",
             report.tick,
@@ -194,6 +217,101 @@ fn test_command(args: &[String]) -> ExitCode {
         );
     }
     if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
+}
+
+/// One-line human form of a §14.2 diagnostic record (as JSON).
+fn diagnostic_line(d: &serde_json::Value) -> String {
+    let s = |k: &str| d.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let mut out = format!("{}[{}]", s("severity"), s("code"));
+    if !s("document").is_empty() {
+        out.push(' ');
+        out.push_str(s("document"));
+        if let (Some(l), Some(c)) = (
+            d.get("line").and_then(|v| v.as_u64()),
+            d.get("column").and_then(|v| v.as_u64()),
+        ) {
+            out.push_str(&format!(":{l}:{c}"));
+        }
+    }
+    if !s("pointer").is_empty() {
+        out.push(' ');
+        out.push_str(s("pointer"));
+    }
+    out.push_str(": ");
+    out.push_str(s("message"));
+    out
+}
+
+/// `fynkel state dump --scene <path> [--steps N] [--json]`: loads the
+/// document into a fresh headless world, ticks it, and prints the state
+/// keyed by authoring id (never runtime handles).
+fn state_command(args: &[String]) -> ExitCode {
+    use fynkel_host_headless::{dump_json, dump_text, run_with, HeadlessConfig};
+    if args.first().map(String::as_str) != Some("dump") {
+        eprintln!("usage: fynkel state dump --scene <path> [--steps N] [--json]");
+        return ExitCode::from(2);
+    }
+    let mut cfg = HeadlessConfig {
+        steps: 0,
+        ..HeadlessConfig::default()
+    };
+    let mut json = false;
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--json" => json = true,
+            "--scene" => {
+                i += 1;
+                cfg.scene = args.get(i).map(PathBuf::from);
+            }
+            "--steps" => {
+                i += 1;
+                cfg.steps = args.get(i).and_then(|v| v.parse().ok()).unwrap_or(0);
+            }
+            "--root" => i += 1,
+            other => {
+                eprintln!("fynkel state dump: unknown argument {other}");
+                return ExitCode::from(2);
+            }
+        }
+        i += 1;
+    }
+    if cfg.scene.is_none() {
+        eprintln!("fynkel state dump: --scene <path> is required");
+        return ExitCode::from(2);
+    }
+    let (report, world, loaded) = run_with(&cfg);
+    let scene = report.scene.as_ref().expect("scene mode");
+    let Some(loaded) = loaded else {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({ "ok": false, "diagnostics": scene.document_diagnostics })
+            );
+        } else {
+            for d in &scene.document_diagnostics {
+                eprintln!("{}", diagnostic_line(d));
+            }
+            eprintln!("fynkel state dump: {} did not load", scene.path);
+        }
+        return ExitCode::from(1);
+    };
+    if json {
+        let mut out = dump_json(&world, &loaded);
+        out["ok"] = serde_json::Value::Bool(scene.rejected_components == 0);
+        out["diagnostics"] = serde_json::Value::Array(scene.document_diagnostics.clone());
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+    } else {
+        for d in &scene.document_diagnostics {
+            eprintln!("{}", diagnostic_line(d));
+        }
+        print!("{}", dump_text(&world, &loaded));
+    }
+    if scene.rejected_components == 0 {
         ExitCode::SUCCESS
     } else {
         ExitCode::from(1)

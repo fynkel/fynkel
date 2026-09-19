@@ -24,15 +24,21 @@ pub mod clock;
 pub mod command;
 pub mod components;
 pub mod event;
+pub mod load;
 pub mod schema;
 pub mod world;
 
 pub use clock::{FrameClock, FramePlan};
 pub use command::{Command, Lane};
-pub use components::{Camera, DirectionalLight, MeshRenderer, PointLight, Projection};
+pub use components::{
+    Camera, ComponentValue, DirectionalLight, MeshRenderer, PointLight, Projection,
+};
 pub use event::{Event, EventPayload};
-pub use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, WorldId};
+pub use fynkel_contracts::{
+    AssetId, AssetRef, ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, Uuid, WorldId,
+};
 pub use fynkel_scene::Transform;
+pub use load::{EntityDescription, LoadError, LoadedScene, SceneDescription};
 pub use world::{
     Diagnostic, Extract, ExtractRecord, Name, PhysicsOwned, Rejected, SnapshotRecord, StepReport,
     SubmitReport, World, WorldConfig,

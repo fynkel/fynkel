@@ -4,7 +4,8 @@
 //! the generated codecs; nothing reads them until the M3 renderer. Units:
 //! metres, radians, linear RGB.
 
-use fynkel_contracts::AssetRef;
+use fynkel_contracts::{AssetRef, ComponentId};
+use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
 use glam::Vec3;
 
@@ -139,6 +140,38 @@ mod tests {
     }
 
     #[test]
+    fn value_rules() {
+        assert!(ComponentValue::Camera(Camera::default()).validate().is_ok());
+        let mut c = Camera::default();
+        c.far = c.near;
+        assert!(ComponentValue::Camera(c).validate().is_err());
+        let mut c = Camera {
+            fov_y: 0.0,
+            ..Camera::default()
+        };
+        assert!(ComponentValue::Camera(c).validate().is_err());
+        c.projection = Projection::Orthographic;
+        assert!(
+            ComponentValue::Camera(c).validate().is_ok(),
+            "fov ignored for orthographic"
+        );
+        let l = PointLight {
+            range: 0.0,
+            ..PointLight::default()
+        };
+        assert!(ComponentValue::PointLight(l).validate().is_err());
+        let d = DirectionalLight {
+            color: Vec3::new(-1.0, 0.0, 0.0),
+            ..DirectionalLight::default()
+        };
+        assert!(ComponentValue::DirectionalLight(d).validate().is_err());
+        assert_eq!(
+            ComponentValue::PointLight(PointLight::default()).type_name(),
+            "fynkel.PointLight"
+        );
+    }
+
+    #[test]
     fn mesh_renderer_layout() {
         let s = &MeshRenderer::SCHEMA;
         assert!(matches!(s.fields[0].ty, FieldType::AssetRef));
@@ -146,5 +179,97 @@ mod tests {
         assert_eq!(s.offsets(), vec![0, 24, 48, 49, 50]);
         assert_eq!(s.wire_size(), 56);
         assert!(s.has_strings());
+    }
+}
+
+/// One typed built-in component value: what a scene document instantiates
+/// and what `Command::SetComponent` carries. `fynkel.Name` is not here —
+/// it mirrors the entity's `name` (`Command::SetName`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ComponentValue {
+    Transform(Transform),
+    MeshRenderer(MeshRenderer),
+    Camera(Camera),
+    DirectionalLight(DirectionalLight),
+    PointLight(PointLight),
+}
+
+impl ComponentValue {
+    pub fn id(&self) -> ComponentId {
+        match self {
+            ComponentValue::Transform(_) => ComponentId::TRANSFORM,
+            ComponentValue::MeshRenderer(_) => ComponentId::MESH_RENDERER,
+            ComponentValue::Camera(_) => ComponentId::CAMERA,
+            ComponentValue::DirectionalLight(_) => ComponentId::DIRECTIONAL_LIGHT,
+            ComponentValue::PointLight(_) => ComponentId::POINT_LIGHT,
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        self.id().name().unwrap()
+    }
+
+    /// Value rules the schema cannot express (ranges, finiteness). The
+    /// message is the `INVALID_PAYLOAD` diagnostic text.
+    pub fn validate(&self) -> Result<(), String> {
+        fn finite_color(c: Vec3) -> Result<(), String> {
+            if !c.is_finite() || c.min_element() < 0.0 {
+                return Err(format!("color must be finite and non-negative, got {c:?}"));
+            }
+            Ok(())
+        }
+        fn non_negative(what: &str, v: f32) -> Result<(), String> {
+            if !v.is_finite() || v < 0.0 {
+                return Err(format!("{what} must be finite and >= 0, got {v}"));
+            }
+            Ok(())
+        }
+        fn positive(what: &str, v: f32) -> Result<(), String> {
+            if !v.is_finite() || v <= 0.0 {
+                return Err(format!("{what} must be finite and > 0, got {v}"));
+            }
+            Ok(())
+        }
+        match self {
+            ComponentValue::Transform(t) => {
+                if !t.is_finite() {
+                    return Err("transform is not finite".into());
+                }
+            }
+            ComponentValue::MeshRenderer(_) => {}
+            ComponentValue::Camera(c) => {
+                positive("near", c.near)?;
+                if !c.far.is_finite() || c.far <= c.near {
+                    return Err(format!(
+                        "far must be finite and > near, got {} <= {}",
+                        c.far, c.near
+                    ));
+                }
+                match c.projection {
+                    Projection::Perspective => {
+                        if !c.fov_y.is_finite()
+                            || c.fov_y <= 0.0
+                            || c.fov_y >= core::f32::consts::PI
+                        {
+                            return Err(format!(
+                                "fov_y must be in (0, pi) radians, got {}",
+                                c.fov_y
+                            ));
+                        }
+                    }
+                    Projection::Orthographic => positive("ortho_height", c.ortho_height)?,
+                }
+            }
+            ComponentValue::DirectionalLight(l) => {
+                finite_color(l.color)?;
+                non_negative("intensity", l.intensity)?;
+            }
+            ComponentValue::PointLight(l) => {
+                finite_color(l.color)?;
+                non_negative("intensity", l.intensity)?;
+                positive("range", l.range)?;
+            }
+        }
+        Ok(())
     }
 }

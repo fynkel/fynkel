@@ -47,6 +47,21 @@ configs must give equal checksums (blueprint §5.6); the crate's tests assert
 this and that seeds differ. The Dart headless game host (Behaviours) plugs
 into the same command later.
 
+`--scene <path>` loads a `.scene.json` instead of the demo scene (validated
+against the embedded schemas, then `World::load_scene`; the world just ticks
+`--steps` times). The report gains `scene: { path, loaded, id, name,
+entities, rejected_components, document_diagnostics[] }`. Read-side:
+
+```sh
+cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json
+```
+
+prints the runtime state keyed by **authoring id** (never handles): each
+entity's `id`, `name`, `parent`, `children`, `local`/`world` transform and
+typed `components[]` in the document's own JSON shapes; exit 1 when the
+document does not load or a component value was rejected. This is the M2
+gate "project can be validated/imported headlessly".
+
 ## Flutter host
 
 `hosts/flutter_apple` uses **one** dylib, `libfynkel_platform_apple.dylib`,

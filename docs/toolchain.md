@@ -46,7 +46,7 @@ Later M0 additions (Flutter viewport; since M1-07 in `platform/apple`):
 | `objc2-io-surface` | 0.3.2 | |
 | `block2` | 0.6.2 | ObjC blocks for `MTLCommandBuffer.addCompletedHandler` |
 
-M2 additions (`fynkel_document`, authoring tools; none on the runtime path):
+M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `fynkel_document` depends on `fynkel_core` for the typed scene description, never the other way round, so the runtime stays free of JSON/schema crates; the headless host links both):
 
 | Crate | Version | Notes |
 | --- | --- | --- |

@@ -14,6 +14,7 @@ use glam::Mat4;
 
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
+use crate::components::{Camera, ComponentValue, DirectionalLight, MeshRenderer, PointLight};
 use crate::event::{Event, EventPayload, EventQueue};
 
 #[derive(Clone, Debug)]
@@ -416,11 +417,20 @@ impl World {
                 }
                 self.ecs.insert(entity, Name::new(name)).is_ok()
             }
+            Command::SetComponent {
+                entity,
+                value: ComponentValue::Transform(transform),
+            } => self.apply_presentation(index, Command::SetTransform { entity, transform }),
+            // Plain-data writes (§5.1: light colour, visibility, camera
+            // parameters) apply immediately; nothing interpolates them.
+            Command::SetComponent { entity, value } => {
+                self.set_component(index, lane, entity, value)
+            }
             _ => unreachable!("allowed_on_presentation"),
         }
     }
 
-    fn apply_simulation(&mut self, index: u32, cmd: Command, tick: Tick) -> bool {
+    pub(crate) fn apply_simulation(&mut self, index: u32, cmd: Command, tick: Tick) -> bool {
         let lane = Lane::Simulation;
         match cmd {
             Command::Spawn {
@@ -542,7 +552,90 @@ impl World {
                 }
                 self.ecs.insert(entity, Name::new(name)).is_ok()
             }
+            Command::SetComponent {
+                entity,
+                value: ComponentValue::Transform(transform),
+            } => self.apply_simulation(index, Command::SetTransform { entity, transform }, tick),
+            Command::SetComponent { entity, value } => {
+                self.set_component(index, lane, entity, value)
+            }
+            Command::RemoveComponent { entity, component } => {
+                if !self.check_entity(index, lane, entity, "remove_component") {
+                    return false;
+                }
+                let removed = match component {
+                    ComponentId::MESH_RENDERER => self.ecs.remove::<MeshRenderer>(entity).is_ok(),
+                    ComponentId::CAMERA => self.ecs.remove::<Camera>(entity).is_ok(),
+                    ComponentId::DIRECTIONAL_LIGHT => {
+                        self.ecs.remove::<DirectionalLight>(entity).is_ok()
+                    }
+                    ComponentId::POINT_LIGHT => self.ecs.remove::<PointLight>(entity).is_ok(),
+                    ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
+                        return self.reject(
+                            index,
+                            lane,
+                            DiagnosticCode::INVALID_PAYLOAD,
+                            entity,
+                            component,
+                            format!("{} cannot be removed", component.name().unwrap()),
+                        )
+                    }
+                    other => {
+                        return self.reject(
+                            index,
+                            lane,
+                            DiagnosticCode::UNKNOWN_COMPONENT,
+                            entity,
+                            other,
+                            format!("unknown component id {}", other.0),
+                        )
+                    }
+                };
+                if !removed {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::MISSING_COMPONENT,
+                        entity,
+                        component,
+                        format!("entity has no {}", component.name().unwrap()),
+                    );
+                }
+                true
+            }
         }
+    }
+
+    /// Shared by both lanes and by `load_scene`: validates the value and
+    /// inserts (or replaces) the component. Not for `Transform`.
+    fn set_component(
+        &mut self,
+        index: u32,
+        lane: Lane,
+        entity: Entity,
+        value: ComponentValue,
+    ) -> bool {
+        if !self.check_entity(index, lane, entity, "set_component") {
+            return false;
+        }
+        if let Err(msg) = value.validate() {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::INVALID_PAYLOAD,
+                entity,
+                value.id(),
+                msg,
+            );
+        }
+        let r = match value {
+            ComponentValue::Transform(_) => unreachable!("handled as SetTransform"),
+            ComponentValue::MeshRenderer(v) => self.ecs.insert(entity, v),
+            ComponentValue::Camera(v) => self.ecs.insert(entity, v),
+            ComponentValue::DirectionalLight(v) => self.ecs.insert(entity, v),
+            ComponentValue::PointLight(v) => self.ecs.insert(entity, v),
+        };
+        r.is_ok()
     }
 
     fn reject_scene(&mut self, index: u32, lane: Lane, entity: Entity, err: SceneError) -> bool {

@@ -38,9 +38,25 @@ pub struct ComponentInfo {
 }
 
 impl SchemaSet {
-    /// Envelope only: no `schemas/` directory involved.
+    /// The schemas compiled into this build: the envelope plus every
+    /// generated document and component schema (`generated::EMBEDDED_SCHEMAS`).
+    /// No `schemas/` directory involved, so shipped runtimes validate too.
     pub fn embedded() -> SchemaSet {
-        SchemaSet::build(Vec::new()).expect("embedded schema is valid")
+        let loaded = crate::generated::EMBEDDED_SCHEMAS
+            .iter()
+            .map(|(name, text)| {
+                (
+                    PathBuf::from(name),
+                    serde_json::from_str(text).expect("embedded schema is JSON"),
+                )
+            })
+            .collect();
+        SchemaSet::build(loaded).expect("embedded schemas are valid")
+    }
+
+    /// Envelope only (every kind reports `FYN-D0101`); for tests.
+    pub fn envelope_only() -> SchemaSet {
+        SchemaSet::build(Vec::new()).expect("embedded envelope schema is valid")
     }
 
     /// Loads every `*.schema.json` under `dir` (recursively).
