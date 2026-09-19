@@ -1,0 +1,87 @@
+{
+  "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+  "formatVersion": 1,
+  "id": "10000000-0000-4000-8000-000000000001",
+  "name": "Turret",
+  "entities": {
+    "10000000-0000-4000-8000-0000000000b1": {
+      "name": "Base",
+      "parent": null,
+      "children": [
+        "10000000-0000-4000-8000-0000000000b2"
+      ],
+      "components": {
+        "10000000-0000-4000-8000-0000000000c1": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "10000000-0000-4000-8000-0000000000c2": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "3c0a9f1e-5d2b-4c7a-9e8f-1a2b3c4d5e6f",
+              "sub": "mesh/1"
+            },
+            "material": {
+              "asset": "0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "10000000-0000-4000-8000-0000000000b2": {
+      "name": "Barrel",
+      "parent": "10000000-0000-4000-8000-0000000000b1",
+      "children": [],
+      "components": {
+        "10000000-0000-4000-8000-0000000000c3": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0.5,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    }
+  },
+  "roots": [
+    "10000000-0000-4000-8000-0000000000b1"
+  ]
+}

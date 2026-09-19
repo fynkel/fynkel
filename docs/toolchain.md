@@ -52,7 +52,7 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 | --- | --- | --- |
 | `serde_json` | 1.0.151 | now with `preserve_order` (schema key order is meaningful) |
 | `jsonschema` | 0.56.0 | draft 2020-12 validation; `default-features = false` (no HTTP/file retrieval — every `$ref` resolves from the loaded `schemas/` directory) |
-| `uuid` | 1.26.1 | `v4` for fresh document ids; parsing is canonical-text only |
+| `uuid` | 1.26.1 | `v4` for fresh document ids, `v5` for prefab-instance derived ids; parsing is canonical-text only |
 
 Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`.
 Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.

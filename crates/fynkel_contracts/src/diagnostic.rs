@@ -54,6 +54,23 @@ impl Code {
     pub const SHADER_BAD_DEFAULT: Code = Code("FYN-D0310");
     pub const SHADER_BAD_RANGE: Code = Code("FYN-D0311");
     pub const SHADER_MALFORMED_ENTRY: Code = Code("FYN-D0312");
+    // Documents (FYN-D): prefabs and instances (blueprint §6 Prefabs;
+    // `fynkel_document::prefab`).
+    /// `roots` and the parentless entities disagree.
+    pub const PREFAB_ROOTS_MISMATCH: Code = Code("FYN-D0400");
+    /// An instance names a prefab the library does not have.
+    pub const PREFAB_UNKNOWN: Code = Code("FYN-D0401");
+    /// A prefab contains a prefab instance (nested prefabs are post-M2).
+    pub const PREFAB_NESTED: Code = Code("FYN-D0402");
+    /// An override addresses an entity/component/field that does not exist.
+    pub const PREFAB_OVERRIDE_TARGET: Code = Code("FYN-D0403");
+    /// An override is not applicable (duplicate id or type, data not matching the schema).
+    pub const PREFAB_OVERRIDE_INVALID: Code = Code("FYN-D0404");
+    /// Two instances in one scene share an instance id.
+    pub const PREFAB_DUPLICATE_INSTANCE: Code = Code("FYN-D0405");
+    /// A derived id collides with an existing entity or component id.
+    pub const PREFAB_ID_COLLISION: Code = Code("FYN-D0406");
+    pub const PREFAB_MALFORMED_ENTRY: Code = Code("FYN-D0407");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 

@@ -49,8 +49,11 @@ into the same command later.
 
 `--scene <path>` loads a `.scene.json` instead of the demo scene (validated
 against the embedded schemas, then `World::load_scene`; the world just ticks
-`--steps` times). The report gains `scene: { path, loaded, id, name,
-entities, rejected_components, document_diagnostics[] }`. Read-side:
+`--steps` times). Scenes with prefab instances are expanded first from the
+`*.prefab.json` files under `--prefabs <dir>` (without it an instance is
+`FYN-D0401` and the scene does not load). The report gains `scene: { path,
+loaded, id, name, entities, rejected_components, document_diagnostics[] }`.
+Read-side:
 
 ```sh
 cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json

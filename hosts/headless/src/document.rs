@@ -8,19 +8,35 @@ use fynkel_contracts::Diagnostic;
 use fynkel_core::{ComponentValue, LoadedScene, Name, SceneDescription, World};
 use fynkel_document::generated::encode_component;
 use fynkel_document::{
-    describe, diagnostic_json, Document, DocumentCodec, DocumentKind, Scene, SchemaSet,
+    describe, diagnostic_json, expand, Document, DocumentCodec, DocumentKind, PrefabLibrary, Scene,
+    SchemaSet,
 };
 use fynkel_scene as scene;
 use fynkel_scene::Transform;
 use serde_json::{json, Value};
 
-/// Reads, validates (embedded schemas) and describes a scene document.
-/// `Err` carries every diagnostic when any is an error; `Ok` carries the
-/// description plus warnings.
-pub fn read_scene(path: &Path) -> Result<(SceneDescription, Vec<Diagnostic>), Vec<Diagnostic>> {
+/// Reads, validates (embedded schemas), expands prefab instances (from
+/// `prefabs`, a directory scanned for `*.prefab.json`) and describes a
+/// scene document. `Err` carries every diagnostic when any is an error;
+/// `Ok` carries the description plus warnings.
+pub fn read_scene(
+    path: &Path,
+    prefabs: Option<&Path>,
+) -> Result<(SceneDescription, Vec<Diagnostic>), Vec<Diagnostic>> {
     let doc = Document::read(path, Some(DocumentKind::Scene))?;
-    let scene = Scene::from_document(doc);
-    let mut diagnostics = scene.validate(&SchemaSet::embedded());
+    let schemas = SchemaSet::embedded();
+    let mut scene = Scene::from_document(doc);
+    let mut diagnostics = scene.validate(&schemas);
+    if scene.instances().next().is_some() {
+        let (library, scan) = match prefabs {
+            Some(dir) => PrefabLibrary::scan(dir),
+            None => (PrefabLibrary::empty(), Vec::new()),
+        };
+        diagnostics.extend(scan);
+        let expanded = expand(&scene, &library, &schemas);
+        scene = expanded.scene();
+        diagnostics.extend(expanded.diagnostics);
+    }
     if fynkel_contracts::has_errors(&diagnostics) {
         return Err(diagnostics);
     }

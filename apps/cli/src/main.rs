@@ -3,7 +3,7 @@
 //! M1 scope: `fynkel codegen` (ADR-0012, native schema generator),
 //! `fynkel schema`, and the seed of `fynkel test` (§13.3/§14.1): the Rust
 //! headless host. M2 adds `fynkel document` (validate/format/new), `fynkel
-//! scene`, `fynkel material`, `fynkel shader`, `--scene` for the headless
+//! scene`, `fynkel prefab`, `fynkel material`, `fynkel shader`, `--scene` for the headless
 //! host and `fynkel state dump`. Exit
 //! codes: 0 ok, 1 error, 2 `--check` found drift.
 
@@ -17,7 +17,7 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--scene <path>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate ...            scene documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests"
+        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--scene <path>] [--prefabs <dir>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate ...            scene documents (--prefabs <dir>, --expand)\n  fynkel prefab inspect|validate ...           prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests"
     );
     ExitCode::from(1)
 }
@@ -55,7 +55,10 @@ fn main() -> ExitCode {
     if cmd == "state" {
         return state_command(&args[1..]);
     }
-    if matches!(cmd.as_str(), "document" | "scene" | "material" | "shader") {
+    if matches!(
+        cmd.as_str(),
+        "document" | "scene" | "prefab" | "material" | "shader"
+    ) {
         let root = args
             .iter()
             .position(|a| a == "--root")
@@ -64,7 +67,7 @@ fn main() -> ExitCode {
         let root = repo_root(root);
         return match cmd.as_str() {
             "document" => document::run(&root, &args[1..]),
-            "scene" => scene::run(&root, &args[1..]),
+            "scene" | "prefab" => scene::run(&root, cmd, &args[1..]),
             other => material::run(&root, other, &args[1..]),
         };
     }
@@ -171,6 +174,7 @@ fn test_command(args: &[String]) -> ExitCode {
                     .unwrap_or(cfg.frame_dt)
             }
             "--scene" => cfg.scene = value(&mut i).map(PathBuf::from),
+            "--prefabs" => cfg.prefabs = value(&mut i).map(PathBuf::from),
             "--root" => {
                 i += 1;
             }
@@ -248,13 +252,13 @@ fn diagnostic_line(d: &serde_json::Value) -> String {
     out
 }
 
-/// `fynkel state dump --scene <path> [--steps N] [--json]`: loads the
+/// `fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]`: loads the
 /// document into a fresh headless world, ticks it, and prints the state
 /// keyed by authoring id (never runtime handles).
 fn state_command(args: &[String]) -> ExitCode {
     use fynkel_host_headless::{dump_json, dump_text, run_with, HeadlessConfig};
     if args.first().map(String::as_str) != Some("dump") {
-        eprintln!("usage: fynkel state dump --scene <path> [--steps N] [--json]");
+        eprintln!("usage: fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]");
         return ExitCode::from(2);
     }
     let mut cfg = HeadlessConfig {
@@ -269,6 +273,10 @@ fn state_command(args: &[String]) -> ExitCode {
             "--scene" => {
                 i += 1;
                 cfg.scene = args.get(i).map(PathBuf::from);
+            }
+            "--prefabs" => {
+                i += 1;
+                cfg.prefabs = args.get(i).map(PathBuf::from);
             }
             "--steps" => {
                 i += 1;

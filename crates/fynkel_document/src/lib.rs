@@ -22,6 +22,7 @@ pub mod codec;
 pub mod generated;
 pub mod json;
 pub mod material;
+pub mod prefab;
 pub mod runtime;
 pub mod scene;
 pub mod schema;
@@ -32,6 +33,7 @@ pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
 pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
+pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
 pub use runtime::{describe, DescribedScene};
 pub use scene::Scene;
 pub use schema::{ComponentInfo, SchemaSet};
@@ -150,6 +152,10 @@ impl Document {
         ];
         match kind {
             DocumentKind::Scene => members.push(("entities".into(), Node::object(Vec::new()))),
+            DocumentKind::Prefab => {
+                members.push(("entities".into(), Node::object(Vec::new())));
+                members.push(("roots".into(), Node::synthetic(Value::Array(Vec::new()))));
+            }
             DocumentKind::Material => {
                 members.push(("shader".into(), Node::string(material::PBR_SHADER_ID)));
                 members.push(("parameters".into(), Node::object(Vec::new())));

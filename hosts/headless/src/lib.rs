@@ -32,6 +32,9 @@ pub struct HeadlessConfig {
     /// A `.scene.json` to load instead of the procedural demo scene; the
     /// world then runs `steps` ticks with no gameplay driver.
     pub scene: Option<PathBuf>,
+    /// Directory scanned for `*.prefab.json` when the scene has prefab
+    /// instances (none: instances fail with `FYN-D0401`).
+    pub prefabs: Option<PathBuf>,
 }
 
 impl Default for HeadlessConfig {
@@ -45,6 +48,7 @@ impl Default for HeadlessConfig {
             fixed_dt: world.fixed_dt,
             max_steps_per_frame: world.max_steps_per_frame,
             scene: None,
+            prefabs: None,
         }
     }
 }
@@ -143,7 +147,7 @@ pub fn run_with(config: &HeadlessConfig) -> (HeadlessReport, World, Option<Loade
             path: path.display().to_string(),
             ..SceneReport::default()
         };
-        match read_scene(path) {
+        match read_scene(path, config.prefabs.as_deref()) {
             Err(diags) => {
                 sr.document_diagnostics = document::diagnostics_json(&diags);
                 report.scene = Some(sr);

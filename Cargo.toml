@@ -37,7 +37,7 @@ proc-macro2 = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 jsonschema = { version = "0.56", default-features = false }
-uuid = { version = "1.26", features = ["v4"] }
+uuid = { version = "1.26", features = ["v4", "v5"] }
 fynkel_contracts = { path = "crates/fynkel_contracts" }
 fynkel_schema_derive = { path = "crates/fynkel_schema_derive" }
 fynkel_ecs = { path = "crates/fynkel_ecs" }

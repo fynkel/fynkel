@@ -1,0 +1,129 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 1,
+  "id": "20000000-0000-4000-8000-000000000001",
+  "name": "Two turrets",
+  "entities": {
+    "20000000-0000-4000-8000-0000000000a1": {
+      "name": "Turret A",
+      "parent": null,
+      "children": [],
+      "components": {
+        "20000000-0000-4000-8000-0000000000d1": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -2,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      },
+      "prefab": {
+        "asset": {
+          "asset": "10000000-0000-4000-8000-000000000001"
+        },
+        "instance": "20000000-0000-4000-8000-0000000000e1",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "10000000-0000-4000-8000-0000000000b1",
+            "component": "10000000-0000-4000-8000-0000000000c2",
+            "field": "cast_shadows",
+            "value": false
+          },
+          {
+            "op": "addComponent",
+            "entity": "10000000-0000-4000-8000-0000000000b2",
+            "component": "10000000-0000-4000-8000-0000000000c4",
+            "type": "fynkel.PointLight",
+            "version": 1,
+            "data": {
+              "color": [
+                1,
+                0.5,
+                0.2
+              ],
+              "intensity": 3.0,
+              "range": 4.0
+            }
+          },
+          {
+            "op": "addObject",
+            "entity": "10000000-0000-4000-8000-0000000000b3",
+            "name": "Muzzle",
+            "parent": "10000000-0000-4000-8000-0000000000b2",
+            "components": {
+              "10000000-0000-4000-8000-0000000000c5": {
+                "type": "fynkel.Transform",
+                "version": 1,
+                "data": {
+                  "position": [
+                    0,
+                    0,
+                    1
+                  ],
+                  "rotation": [
+                    0,
+                    0,
+                    0,
+                    1
+                  ],
+                  "scale": [
+                    1,
+                    1,
+                    1
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "20000000-0000-4000-8000-0000000000a2": {
+      "name": "Turret B",
+      "parent": null,
+      "children": [
+        "20000000-0000-4000-8000-0000000000a3"
+      ],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "10000000-0000-4000-8000-000000000001"
+        },
+        "instance": "20000000-0000-4000-8000-0000000000e2",
+        "overrides": [
+          {
+            "op": "removeObject",
+            "entity": "10000000-0000-4000-8000-0000000000b2"
+          },
+          {
+            "op": "removeComponent",
+            "entity": "10000000-0000-4000-8000-0000000000b1",
+            "component": "10000000-0000-4000-8000-0000000000c2"
+          }
+        ]
+      }
+    },
+    "20000000-0000-4000-8000-0000000000a3": {
+      "name": "Label",
+      "parent": "20000000-0000-4000-8000-0000000000a2",
+      "children": [],
+      "components": {}
+    }
+  }
+}

@@ -174,3 +174,136 @@ fn material_and_shader_commands_validate_and_inspect() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["diagnostics"][2]["code"], "FYN-D0311");
 }
+
+#[test]
+fn prefab_commands_validate_inspect_and_expand() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = root.join("crates/fynkel_document/fixtures");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let turret = fixtures.join("valid/turret.prefab.json");
+    let out = run(&["prefab", "validate", "--json", turret.to_str().unwrap()]);
+    assert!(out.status.success());
+    let out = run(&["prefab", "inspect", "--json", turret.to_str().unwrap()]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["kind"], "prefab");
+    assert_eq!(v["roots"][0], "10000000-0000-4000-8000-0000000000b1");
+    assert_eq!(v["entities"][0]["children"].as_array().unwrap().len(), 1);
+
+    let mismatch = fixtures.join("prefab/roots_mismatch.prefab.json");
+    let out = run(&["prefab", "validate", "--json", mismatch.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0400");
+
+    // A scene with instances: prefabs come from --prefabs (default: the
+    // scene's directory, which here holds no prefab → D0401).
+    let scene = fixtures.join("prefab/instances_ok.scene.json");
+    let out = run(&["scene", "validate", "--json", scene.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0401");
+    let out = run(&[
+        "scene",
+        "validate",
+        "--json",
+        scene.to_str().unwrap(),
+        "--prefabs",
+        fixtures.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    let out = run(&[
+        "scene",
+        "inspect",
+        "--json",
+        scene.to_str().unwrap(),
+        "--prefabs",
+        fixtures.to_str().unwrap(),
+    ]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["expanded"], false);
+    assert_eq!(v["entityCount"], 3);
+    assert_eq!(v["instanceCount"], 2);
+    assert_eq!(
+        v["roots"][0]["prefab"]["asset"],
+        "10000000-0000-4000-8000-000000000001"
+    );
+    assert_eq!(v["roots"][0]["prefab"]["overrides"], 3);
+
+    let out = run(&[
+        "scene",
+        "inspect",
+        "--json",
+        "--expand",
+        scene.to_str().unwrap(),
+        "--prefabs",
+        fixtures.to_str().unwrap(),
+    ]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["expanded"], true);
+    assert_eq!(v["entityCount"], 7);
+    assert_eq!(v["instanceCount"], 0);
+    assert_eq!(v["roots"][0]["children"][0]["name"], "Base");
+    assert_eq!(
+        v["roots"][0]["children"][0]["id"],
+        "650fd857-152f-582a-9c45-012b2be17ad8"
+    );
+
+    let bad = fixtures.join("prefab/bad_overrides.scene.json");
+    let out = run(&[
+        "scene",
+        "validate",
+        "--json",
+        bad.to_str().unwrap(),
+        "--prefabs",
+        fixtures.join("valid").to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"].as_array().unwrap().len(), 5);
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0403");
+
+    // The headless host expands before loading: derived ids reach the runtime.
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["state", "dump", "--json", "--scene"])
+        .arg(&scene)
+        .arg("--prefabs")
+        .arg(&fixtures)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["entityCount"], 7);
+    let base = v["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "650fd857-152f-582a-9c45-012b2be17ad8")
+        .expect("derived Base entity");
+    assert_eq!(base["parent"], "20000000-0000-4000-8000-0000000000a1");
+    assert_eq!(base["world"]["position"][0], -2.0);
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["state", "dump", "--json", "--scene"])
+        .arg(&scene)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0401");
+}

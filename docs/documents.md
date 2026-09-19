@@ -151,6 +151,48 @@ are the schemas `SchemaSet::embedded()` compiles in, so a shipped runtime
 validates without a `schemas/` directory. `docs/hosts.md` covers
 `fynkel test --headless --scene` and `fynkel state dump`.
 
+## Prefab documents
+
+`.prefab.json` (`schemas/prefab.schema.json`, generated from the same
+document model as the scene schema) is a scene body plus `roots[]`: the
+parentless entities, in order — validation checks both directions
+(`FYN-D0400`). A scene entity becomes an **instance anchor** by carrying
+`prefab: { asset, instance, overrides[] }`: `asset` is the prefab document's
+`id` as an `AssetRef`, `instance` a UUID v4 that is stable for the anchor's
+lifetime, `overrides` an ordered op list addressed by **prefab-local** ids:
+
+| op | fields | note |
+| --- | --- | --- |
+| `setField` | `entity`, `component`, `field`, `value` | `null` stores null |
+| `unsetField` | `entity`, `component`, `field` | removes the key (the schema default applies) |
+| `addComponent` | `entity`, `component`, `type`, `version`, `data` | new instance id, checked for uniqueness |
+| `removeComponent` | `entity`, `component` | |
+| `addObject` | `entity`, `parent`, `name`, `components` | `parent` is a prefab-local entity or absent (root) |
+| `removeObject` | `entity` | removes the subtree |
+
+Array indices, display names and deep merges are not override targets.
+Prefab entities may not carry `prefab` themselves (`D0402`, no nesting in
+M2); two anchors sharing an `instance` id is `D0405`.
+
+`fynkel_document::expand(&scene, &library, &schemas) -> Expanded` replaces
+every anchor's instance by the prefab's entities: each prefab-local entity
+and component id becomes `derive_id(instance, local)` — UUID v5 with the
+instance as namespace, so expansion is deterministic and two instances of the
+same prefab never collide (`D0406` if a derived id meets an authored one) —
+and every reference inside the prefab (`parent`, `children`, component data
+strings equal to a local id) is remapped; `AssetRef`s stay shared. Instance
+roots are appended to the anchor's `children` after its authored children,
+the new entities follow the anchor in document order, and the `prefab` key is
+gone from the result, which is a plain scene (`Expanded::scene()`).
+Overrides apply in order; a target that does not exist (or no longer exists)
+is `D0403`, an op whose result would not validate against the component
+schema (or a duplicate unique component) is `D0404`, a malformed op is
+`D0407`. An unknown prefab is `D0401`; the whole instance is skipped and the
+anchor kept. `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
+under a directory (a later path with the same id wins, with a warning).
+The headless host expands before `describe`, so derived ids reach the
+runtime and `fynkel state dump` prints them.
+
 ## Material and shader documents
 
 `.shader.json` is a shader's **interface manifest** (`schemas/shader.schema.json`,
@@ -192,19 +234,25 @@ outside its range `D0310`, `min > max` `D0311`, malformed entry `D0312`.
 fynkel document validate <path>... [--json] [--schemas <dir>] [--kind <kind>]
 fynkel document format <path>... [--check] [--json]
 fynkel document new <kind> <name> [--out <path>] [--json]
-fynkel scene inspect <path> [--json] [--schemas <dir>]
-fynkel scene validate <path>... [--json] [--schemas <dir>]
+fynkel scene inspect <path> [--json] [--schemas <dir>] [--prefabs <dir>] [--expand]
+fynkel scene validate <path>... [--json] [--schemas <dir>] [--prefabs <dir>]
+fynkel prefab inspect <path> [--json] [--schemas <dir>]
+fynkel prefab validate <path>... [--json] [--schemas <dir>]
 fynkel material inspect <path> [--json] [--schemas <dir>] [--shader <manifest>]...
 fynkel material validate <path>... [--json] [--schemas <dir>] [--shader <manifest>]...
 fynkel shader inspect <path> | --builtin <shaderId> [--json]
 fynkel shader validate <path>... [--json] [--schemas <dir>]
-fynkel test --headless --scene <path> [--steps N] [--json]
-fynkel state dump --scene <path> [--steps N] [--json]
+fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
+fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
 ```
 
 `scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,
-entityCount, componentCount, componentTypes, roots[] }` with `--json`) followed
-by the diagnostics. `material inspect` prints the resolved material (every
+entityCount, instanceCount, componentCount, componentTypes, roots[],
+expanded }` with `--json`) followed by the diagnostics; anchors show their
+prefab, instance id and override count, `--expand` shows the expanded scene
+instead. Scenes with instances resolve prefabs from `--prefabs <dir>`
+(default: the scene's own directory) and report override problems in
+`validate`. `prefab inspect` prints roots and the tree. `material inspect` prints the resolved material (every
 manifest parameter with its value, `(default)` where the material did not set
 it; every slot with its binding or fallback); `--shader` adds custom manifests
 to the built-in library (a manifest with errors is reported and left out).
