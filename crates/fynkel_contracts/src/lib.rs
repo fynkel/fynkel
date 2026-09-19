@@ -8,11 +8,13 @@
 #![forbid(unsafe_code)]
 
 pub mod codes;
+pub mod diagnostic;
 pub mod handle;
 pub mod ids;
 pub mod schema;
 
 pub use codes::{DiagnosticCode, Status};
+pub use diagnostic::{has_errors, Code, Diagnostic, Severity};
 pub use handle::{Entity, WorldId};
 pub use ids::{ComponentId, EventKind};
 pub use schema::{FieldSchema, FieldType, HasSchema, RecordSchema, SchemaKind};

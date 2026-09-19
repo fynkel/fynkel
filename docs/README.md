@@ -11,6 +11,7 @@
 | [`m1-gate-report.md`](m1-gate-report.md) | M1 go/no-go: gate results, Dart allocation per frame, leak tests, bandwidth. |
 | [`toolchain.md`](toolchain.md) | Frozen toolchain matrix (M0). |
 | [`codegen.md`](codegen.md) | Schema codegen pipeline: Rust structs → JSON Schema, Dart and Rust codecs, fixtures (M1). |
+| [`documents.md`](documents.md) | Authoring documents (M2): envelope, strict JSON rules, canonical form, diagnostics, `fynkel document`. |
 | [`hosts.md`](hosts.md) | The hosts sharing the core (headless, standalone, Flutter) and how each drives `step()` (M1). |
 | [`../platform/apple/README.md`](../platform/apple/README.md) | Apple (macOS + iOS) platform integration contract (§8.4): IOSurface ring, synchronization, resize, lifecycle. |
 

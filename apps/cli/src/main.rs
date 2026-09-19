@@ -2,16 +2,17 @@
 //!
 //! M1 scope: `fynkel codegen` (ADR-0012, native schema generator),
 //! `fynkel schema`, and the seed of `fynkel test` (§13.3/§14.1): the Rust
-//! headless host. Exit codes: 0 ok, 1 error, 2 `--check` found drift.
+//! headless host. M2 adds `fynkel document` (validate/format/new). Exit codes: 0 ok, 1 error, 2 `--check` found drift.
 
 mod codegen;
+mod document;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host and report"
+        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host and report\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)"
     );
     ExitCode::from(1)
 }
@@ -45,6 +46,14 @@ fn main() -> ExitCode {
     };
     if cmd == "test" {
         return test_command(&args[1..]);
+    }
+    if cmd == "document" {
+        let root = args
+            .iter()
+            .position(|a| a == "--root")
+            .and_then(|i| args.get(i + 1))
+            .map(PathBuf::from);
+        return document::run(&repo_root(root), &args[1..]);
     }
     let mut check = false;
     let mut root = None;

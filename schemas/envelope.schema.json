@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/envelope.schema.json",
+  "title": "Fynkel document envelope",
+  "description": "Fields every Fynkel authoring document carries (blueprint §6, ADR-0006). Kind schemas extend this with allOf and add their body.",
+  "type": "object",
+  "properties": {
+    "$schema": { "type": "string" },
+    "formatVersion": { "type": "integer", "minimum": 1 },
+    "id": { "$ref": "#/$defs/uuid" },
+    "name": { "type": "string", "maxLength": 256 }
+  },
+  "required": ["formatVersion", "id", "name"],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "description": "Canonical lower-case UUID; the persistent identity of documents, entities, components and assets.",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "typeId": {
+      "type": "string",
+      "description": "Namespaced type id such as fynkel.Transform or game.PlayerController.",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+    },
+    "assetRef": {
+      "type": "object",
+      "description": "Reference to an asset by identity, never by path.",
+      "properties": {
+        "asset": { "$ref": "#/$defs/uuid" },
+        "sub": { "type": "string", "minLength": 1 }
+      },
+      "required": ["asset"],
+      "additionalProperties": false
+    }
+  }
+}
