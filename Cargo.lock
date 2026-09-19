@@ -587,6 +587,7 @@ dependencies = [
 name = "fynkel_m0"
 version = "0.0.1"
 dependencies = [
+ "block2 0.6.2",
  "env_logger",
  "fynkel_m0_scene",
  "glam",

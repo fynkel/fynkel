@@ -18,7 +18,7 @@ Benchmark profile: `mac-m3max-2026` (see `docs/toolchain.md`). Compare against
 
 ## Result — steady state (per 1 s window, 120 Hz display)
 
-| Metric | async mode | blocking mode |
+| Metric | async mode (mode 0, superseded by M0-07) | blocking mode |
 | --- | --- | --- |
 | Dart tick interval p50 / p95 / p99 (ms) | 8.33 / 8.34 / 8.34 | 8.33 / 8.34 / 8.34 |
 | `render()` FFI call p50 / p95 / p99 (ms) | 0.06 / 0.13 / 0.17 | 0.80 / 0.90 / 0.98 |
@@ -44,13 +44,10 @@ presented interval **8.33 / 8.67 ms** p50/p95.
 - **Real GPU time for the frame is ~0.75 ms** (blocking mode measures it
   directly by waiting).
 - **Async-mode finding (latency):** `wgpu::Queue::on_submitted_work_done`
-  callbacks only fire when the device is next polled/submitted, so in async
-  mode the "frame ready" signal reaches Flutter at the *next* frame's `render()`
-  — ~8.3 ms later, i.e. **+1 frame of latency** even though throughput is
-  unaffected. Blocking mode has no such lag but burns ~0.8 ms of the Dart
-  main-isolate frame waiting. Fix for M0-07: register an
-  `MTLCommandBuffer.addCompletedHandler` via `wgpu-hal`/objc2 (fires on Metal's
-  completion thread immediately), or poll from a helper thread.
+  callbacks only fire when the device is next polled/submitted, so in this
+  mode the "frame ready" signal reaches Flutter ~8.3 ms later. Resolved in
+  M0-07 (`latency-and-sync.md`): a Metal completion handler signals at
+  ~1.15 ms, and a bounded consumer-side wait gives presentation lag 0.
 - Startup: first window shows one stale present and a 16.7 ms p99 tick (the
   ring warming up). Not a concern.
 

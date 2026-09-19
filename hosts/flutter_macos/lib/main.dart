@@ -47,9 +47,50 @@ class HostPage extends StatefulWidget {
 
 class _HostPageState extends State<HostPage> {
   final _viewportKey = GlobalKey<_ViewportPageState>();
-  bool _showViewport = true;
+  bool _showViewport = !const bool.fromEnvironment('FYNKEL_M0_NO_VIEWPORT');
   double _inset = 0;
   int _generation = 0;
+
+  // Flutter's own frame timings (UI build + raster), to measure what the
+  // Texture layer costs Impeller: compare with the viewport destroyed.
+  final List<double> _buildMs = [];
+  final List<double> _rasterMs = [];
+  Timer? _timingsTimer;
+  String _timingsText = '';
+
+  @override
+  void initState() {
+    super.initState();
+    SchedulerBinding.instance.addTimingsCallback(_onTimings);
+    _timingsTimer = Timer.periodic(const Duration(seconds: 1), (_) => _reportTimings());
+  }
+
+  @override
+  void dispose() {
+    SchedulerBinding.instance.removeTimingsCallback(_onTimings);
+    _timingsTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onTimings(List<FrameTiming> timings) {
+    for (final t in timings) {
+      _buildMs.add(t.buildDuration.inMicroseconds / 1000);
+      _rasterMs.add(t.rasterDuration.inMicroseconds / 1000);
+    }
+  }
+
+  void _reportTimings() {
+    final b = List<double>.from(_buildMs)..sort();
+    final r = List<double>.from(_rasterMs)..sort();
+    _buildMs.clear();
+    _rasterMs.clear();
+    if (!mounted) return;
+    setState(() {
+      _timingsText =
+          'flutter frames n=${r.length} viewport=${_showViewport ? "on" : "off"}  ui build ms p50=${_ViewportPageState._p(b, .5)} p95=${_ViewportPageState._p(b, .95)}  raster ms p50=${_ViewportPageState._p(r, .5)} p95=${_ViewportPageState._p(r, .95)} p99=${_ViewportPageState._p(r, .99)}';
+    });
+    debugPrint('[m0] $_timingsText');
+  }
 
   Future<void> _toggleViewport() async {
     if (_showViewport) {
@@ -83,6 +124,10 @@ class _HostPageState extends State<HostPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               spacing: 8,
               children: [
+                // Keeps Flutter animating at display rate even without the viewport,
+                // so raster timings are comparable.
+                const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                Text(_timingsText, style: const TextStyle(fontFamily: 'Menlo', fontSize: 11)),
                 FilledButton.tonal(
                   onPressed: _toggleViewport,
                   child: Text(_showViewport ? 'destroy viewport' : 'recreate viewport'),
@@ -126,7 +171,9 @@ class _ViewportPageState extends State<ViewportPage>
   bool _resizing = false;
   bool _creating = false;
   bool _tornDown = false;
-  final bool _blocking = const bool.fromEnvironment("FYNKEL_M0_BLOCKING");
+  static const _syncMode = int.fromEnvironment('FYNKEL_M0_SYNC', defaultValue: 2);
+  static const _syncModeNames = ['async-poll', 'blocking', 'metal-completion'];
+  static const _acquireWaitUs = int.fromEnvironment('FYNKEL_M0_ACQUIRE_WAIT_US', defaultValue: 3000);
 
   // Frame timing on the Dart side.
   Duration? _lastTick;
@@ -194,9 +241,10 @@ class _ViewportPageState extends State<ViewportPage>
     _height = height;
     try {
       final native = _native ??= M0Native(M0Native.defaultLibraryPath());
-      final ctx = native.create(width: width, height: height, bufferCount: _bufferCount, blocking: _blocking);
+      final ctx = native.create(width: width, height: height, bufferCount: _bufferCount, syncMode: _syncMode);
       if (ctx == nullptr) throw StateError('fynkel_m0_create returned null (see native log)');
       _ctx = ctx;
+      native.setAcquireWaitUs(ctx, _acquireWaitUs);
       final id = await _channel.invokeMethod<int>('registerTexture', {
         'ctx': ctx.address,
         'acquireFn': native.acquireFnAddress,
@@ -305,12 +353,13 @@ class _ViewportPageState extends State<ViewportPage>
     if (!mounted) return;
     setState(() {
       _statsText = [
-        'viewport ${_width}x$_height  ring=$_bufferCount  mode=${_blocking ? "blocking" : "async"}  ticker.muted=${_ticker?.muted}',
+        'viewport ${_width}x$_height  ring=$_bufferCount  mode=${_syncModeNames[_syncMode]} acquireWait=${_acquireWaitUs}us  ticker.muted=${_ticker?.muted}',
         'dart tick interval ms  p50=${_p(intervals, .5)} p95=${_p(intervals, .95)} p99=${_p(intervals, .99)}  (n=${intervals.length}, skipped while resizing=$skipped)',
         'ffi render() call ms   p50=${_p(calls, .5)} p95=${_p(calls, .95)} p99=${_p(calls, .99)}',
         'rust cpu encode+submit p50=${s.cpuP50Ms.toStringAsFixed(3)} p95=${s.cpuP95Ms.toStringAsFixed(3)} p99=${s.cpuP99Ms.toStringAsFixed(3)}',
         'submit→gpu complete    p50=${s.gpuP50Ms.toStringAsFixed(2)} p95=${s.gpuP95Ms.toStringAsFixed(2)} p99=${s.gpuP99Ms.toStringAsFixed(2)}',
         'rendered=${s.framesRendered} dropped(ring full)=${s.framesDropped}/$dropped presented=${s.framesPresented} stalePresent=${s.presentsWithoutNewFrame}',
+        'present lag (frames behind newest submit) p50=${s.presentLagP50} p95=${s.presentLagP95} max=${s.presentLagMax}  raster acquire wait ms p50=${s.acquireWaitP50Ms.toStringAsFixed(2)} p95=${s.acquireWaitP95Ms.toStringAsFixed(2)} max=${s.acquireWaitMaxMs.toStringAsFixed(2)}',
         'resizes=${s.resizes} rust resize ms p50=${s.resizeP50Ms.toStringAsFixed(2)} max=${s.resizeMaxMs.toStringAsFixed(2)}',
         if (swift != null)
           'swift copyPixelBuffer=${swift["copyCalls"]} newFrame=${swift["copyWithNewFrame"]} noFrame=${swift["copyNoFrame"]} readySignals=${swift["frameReadySignals"]} rebinds=${swift["rebinds"]}',
@@ -319,7 +368,7 @@ class _ViewportPageState extends State<ViewportPage>
       ].join('\n');
     });
     // Also print for scripted captures (benchmarks/m0).
-    debugPrint('[m0] ${_statsText.split('\n').take(8).join(' | ')}');
+    debugPrint('[m0] ${_statsText.split('\n').take(9).join(' | ')}');
   }
 
   static String _p(List<double> sorted, double q) {

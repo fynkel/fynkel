@@ -38,8 +38,9 @@ Later M0 additions (Flutter host, `crates/fynkel_m0`):
 | `wgpu-hal` | 30.0.1 | feature `metal`; `texture_from_raw` for IOSurface-backed textures |
 | `objc2` | 0.6.3 | |
 | `objc2-foundation` | 0.3.2 | |
-| `objc2-metal` | 0.3.2 | feature `objc2-io-surface` (`newTextureWithDescriptor_iosurface_plane`) |
+| `objc2-metal` | 0.3.2 | features `objc2-io-surface` (`newTextureWithDescriptor_iosurface_plane`), `block2` |
 | `objc2-core-foundation` | 0.3.2 | |
 | `objc2-io-surface` | 0.3.2 | |
+| `block2` | 0.6.2 | ObjC blocks for `MTLCommandBuffer.addCompletedHandler` |
 
 Dart side: package `ffi` (pub) for the hand-written M0 bindings only.

@@ -34,6 +34,18 @@ final class M0Stats extends Struct {
   external int resizeP50Us;
   @Uint32()
   external int resizeMaxUs;
+  @Uint32()
+  external int presentLagP50;
+  @Uint32()
+  external int presentLagP95;
+  @Uint32()
+  external int presentLagMax;
+  @Uint32()
+  external int acquireWaitP50Us;
+  @Uint32()
+  external int acquireWaitP95Us;
+  @Uint32()
+  external int acquireWaitMaxUs;
 }
 
 typedef _CreateC = Pointer<Void> Function(Uint32, Uint32, Uint32, Int32);
@@ -49,6 +61,8 @@ typedef _TakeStatsDart = void Function(Pointer<Void>, Pointer<M0Stats>);
 typedef _ResizeC = Int32 Function(Pointer<Void>, Uint32, Uint32);
 typedef _ResizeDart = int Function(Pointer<Void>, int, int);
 typedef _SetCallbackC = Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>);
+typedef _SetAcquireWaitC = Void Function(Pointer<Void>, Uint32);
+typedef _SetAcquireWaitDart = void Function(Pointer<Void>, int);
 typedef _SetCallbackDart = void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>);
 
 class M0Native {
@@ -60,6 +74,7 @@ class M0Native {
     _takeStats = _lib.lookupFunction<_TakeStatsC, _TakeStatsDart>('fynkel_m0_take_stats');
     _resize = _lib.lookupFunction<_ResizeC, _ResizeDart>('fynkel_m0_resize');
     _setCallback = _lib.lookupFunction<_SetCallbackC, _SetCallbackDart>('fynkel_m0_set_frame_ready_callback');
+    _setAcquireWait = _lib.lookupFunction<_SetAcquireWaitC, _SetAcquireWaitDart>('fynkel_m0_set_acquire_wait_us');
     acquireFnAddress = _lib.lookup<Void>('fynkel_m0_acquire_presented').address;
     setCallbackFnAddress = _lib.lookup<Void>('fynkel_m0_set_frame_ready_callback').address;
   }
@@ -73,14 +88,17 @@ class M0Native {
   late final _TakeStatsDart _takeStats;
   late final _ResizeDart _resize;
   late final _SetCallbackDart _setCallback;
+  late final _SetAcquireWaitDart _setAcquireWait;
 
   /// Raw symbol addresses handed to Swift so it can call Rust directly from
   /// Flutter's raster thread without dlopen-ing the library a second time.
   late final int acquireFnAddress;
   late final int setCallbackFnAddress;
 
-  Pointer<Void> create({required int width, required int height, int bufferCount = 4, bool blocking = false}) =>
-      _create(width, height, bufferCount, blocking ? 1 : 0);
+  /// [syncMode]: 0 = wgpu on_submitted_work_done (polled), 1 = blocking,
+  /// 2 = Metal completion handler (see fynkel_m0 `SyncMode`).
+  Pointer<Void> create({required int width, required int height, int bufferCount = 4, int syncMode = 2}) =>
+      _create(width, height, bufferCount, syncMode);
 
   void destroy(Pointer<Void> ctx) => _destroy(ctx);
 
@@ -90,6 +108,10 @@ class M0Native {
   /// Clears the Rust -> host frame-ready callback (synchronously; waits for an
   /// in-progress callback). Call before the callback's target goes away.
   void clearFrameReadyCallback(Pointer<Void> ctx) => _setCallback(ctx, nullptr, nullptr);
+
+  /// Bounded wait the presenter (raster thread) may spend on the newest
+  /// in-flight frame so it composites this tick's frame (0 disables).
+  void setAcquireWaitUs(Pointer<Void> ctx, int us) => _setAcquireWait(ctx, us);
 
   List<int> iosurfaceAddresses(Pointer<Void> ctx, int count) =>
       List.generate(count, (i) => _iosurface(ctx, i).address);
@@ -116,6 +138,12 @@ class M0Native {
         resizes: s.resizes,
         resizeP50Ms: s.resizeP50Us / 1000,
         resizeMaxMs: s.resizeMaxUs / 1000,
+        presentLagP50: s.presentLagP50,
+        presentLagP95: s.presentLagP95,
+        presentLagMax: s.presentLagMax,
+        acquireWaitP50Ms: s.acquireWaitP50Us / 1000,
+        acquireWaitP95Ms: s.acquireWaitP95Us / 1000,
+        acquireWaitMaxMs: s.acquireWaitMaxUs / 1000,
       );
     } finally {
       calloc.free(out);
@@ -146,7 +174,15 @@ class M0StatsSnapshot {
     required this.resizes,
     required this.resizeP50Ms,
     required this.resizeMaxMs,
+    required this.presentLagP50,
+    required this.presentLagP95,
+    required this.presentLagMax,
+    required this.acquireWaitP50Ms,
+    required this.acquireWaitP95Ms,
+    required this.acquireWaitMaxMs,
   });
+  final double acquireWaitP50Ms, acquireWaitP95Ms, acquireWaitMaxMs;
   final int framesRendered, framesDropped, framesPresented, presentsWithoutNewFrame, resizes;
+  final int presentLagP50, presentLagP95, presentLagMax;
   final double cpuP50Ms, cpuP95Ms, cpuP99Ms, gpuP50Ms, gpuP95Ms, gpuP99Ms, resizeP50Ms, resizeMaxMs;
 }

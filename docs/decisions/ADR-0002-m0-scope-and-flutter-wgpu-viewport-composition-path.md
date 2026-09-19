@@ -1,6 +1,6 @@
 # ADR-0002: M0 scope and Flutter/wgpu viewport composition path
 
-**Status:** Accepted (numbers pending M0 measurement)  
+**Status:** Accepted (Path A numbers measured 2026-09-19; fallback column pending Path C prototype)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
@@ -36,9 +36,29 @@ Removed from M0: any second graphics backend, the Wasm/WebGPU spike, `fynkel_ecs
 
 M0 is answerable in weeks, not months. Windows risk is deferred to post-1.0 with a periodic `cargo check` as the only guard. Skia is not verified. Measured numbers to be appended:
 
-| Metric | Standalone | Path A | Fallback |
+| Metric (mac-m3max-2026, 120 Hz, 1600×1200 physical viewport) | Standalone | Path A | Fallback (Path C) |
 | --- | --- | --- | --- |
-| frame p95 @1080p | _tbd_ | _tbd_ | _tbd_ |
-| added composition overhead p95 | — | _tbd_ | _tbd_ |
-| copies per frame | 0 | _tbd_ | _tbd_ |
-| presentation latency (frames) | _tbd_ | _tbd_ | _tbd_ |
+| presented interval p95 | 8.67 ms | 8.34 ms (vsync-locked, 0 drops) | _tbd_ |
+| engine CPU encode+submit p95 | 0.137 ms | 0.14 ms | _tbd_ |
+| added composition overhead p95 (Flutter raster thread) | — | **~0.1 ms** CPU (raster 0.21 → 0.33 ms) + optional 0.64 ms bounded wait for lag 0 | _tbd_ |
+| Flutter frame total p95 (UI build + raster) | — | 0.25 + 0.94 ms | _tbd_ |
+| copies per frame | 0 | **0** | _tbd_ |
+| presentation latency (frames behind the tick's frame) | 0 | **0** with consumer-side wait; 1 without | _tbd_ |
+| resize cost | — | ~1 ms, no drops | _tbd_ |
+
+Sources: `benchmarks/m0/standalone-baseline.md`, `benchmarks/m0/flutter-path-a.md`,
+`benchmarks/m0/lifecycle-harness.md`, `benchmarks/m0/latency-and-sync.md`.
+
+**Measured synchronization design (supersedes the sketch above).** The ring
+is 4 IOSurface-backed `MTLTexture`s created via `newTextureWithDescriptor:iosurface:plane:`
+on wgpu's own `MTLDevice` and imported with `wgpu-hal` `texture_from_raw`
+(no `CVMetalTextureCache` needed on the Rust side; Swift wraps the same
+IOSurfaces as `CVPixelBuffer`s for `FlutterTexture`). Completion ownership:
+after `queue.submit`, an empty `MTLCommandBuffer` is committed on the same
+`MTLCommandQueue` with `addCompletedHandler`; Metal fires it ~1 ms after
+submit. `wgpu::Queue::on_submitted_work_done` is **not** usable for this: it
+is only delivered on the next poll/submit, i.e. one frame late. The presenter
+(`copyPixelBuffer`, raster thread) may wait a bounded ~3 ms for the newest
+in-flight frame; this yields presentation lag 0 at a measured 0.64 ms wait
+and zero cost on the Dart isolate. No hard kill was hit: no readback, no
+unexplained latency, resize/DPI/lifecycle reliable, overlays composite.

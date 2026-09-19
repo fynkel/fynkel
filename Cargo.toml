@@ -26,7 +26,9 @@ version = "0.6.3"
 version = "0.3.2"
 [workspace.dependencies.objc2-metal]
 version = "0.3.2"
-features = ["objc2-io-surface"]
+features = ["objc2-io-surface", "block2"]
+[workspace.dependencies.block2]
+version = "0.6.2"
 [workspace.dependencies.objc2-core-foundation]
 version = "0.3.2"
 [workspace.dependencies.objc2-io-surface]

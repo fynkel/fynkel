@@ -21,3 +21,4 @@ objc2-foundation.workspace = true
 objc2-metal.workspace = true
 objc2-core-foundation.workspace = true
 objc2-io-surface.workspace = true
+block2.workspace = true

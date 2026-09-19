@@ -19,7 +19,7 @@
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use objc2::rc::Retained;
@@ -30,8 +30,8 @@ use objc2_io_surface::{
     IOSurfaceRef,
 };
 use objc2_metal::{
-    MTLDevice, MTLPixelFormat, MTLResource, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
-    MTLTextureType, MTLTextureUsage,
+    MTLCommandBuffer, MTLCommandQueue, MTLDevice, MTLPixelFormat, MTLResource, MTLStorageMode,
+    MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
 };
 
 use fynkel_m0_scene::CubeRenderer;
@@ -47,6 +47,10 @@ pub enum SyncMode {
     Async = 0,
     /// Block on the queue after submit; the buffer is ready when `render` returns.
     Blocking = 1,
+    /// Commit an empty `MTLCommandBuffer` behind the frame on the same
+    /// `MTLCommandQueue` and mark ready from its `addCompletedHandler`, which
+    /// Metal fires immediately on its completion thread (no polling).
+    MetalCompletion = 2,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -71,6 +75,12 @@ struct Slot {
     view: wgpu::TextureView,
 }
 
+struct RingShared {
+    ring: Mutex<Ring>,
+    /// Signalled when a slot becomes Ready.
+    ready: Condvar,
+}
+
 struct Ring {
     slots: Vec<Slot>,
     next_seq: u64,
@@ -89,6 +99,11 @@ pub struct Stats {
     pub cpu_us: Vec<u32>,
     pub gpu_complete_us: Vec<u32>,
     pub resize_us: Vec<u32>,
+    /// Per present: how many frames newer than the presented one had already
+    /// been submitted (0 = the presenter got the frame rendered this tick).
+    pub present_lag: Vec<u32>,
+    /// Per present: time spent waiting for an in-flight frame in `acquire_presented`.
+    pub acquire_wait_us: Vec<u32>,
 }
 
 pub struct Context {
@@ -98,12 +113,17 @@ pub struct Context {
     width: u32,
     height: u32,
     sync_mode: SyncMode,
-    ring: Arc<Mutex<Ring>>,
+    ring: Arc<RingShared>,
+    /// How long `acquire_presented` may wait for an in-flight frame to
+    /// complete (0 = never wait). Waiting happens on the presenter's thread.
+    acquire_wait: Mutex<Duration>,
     stats: Arc<Mutex<Stats>>,
     frame_ready_cb: Arc<FrameReadyCallback>,
     /// Kept alive for the lifetime of the textures; indexed like `ring.slots`.
     surfaces: Vec<CFRetained<IOSurfaceRef>>,
     _mtl_device: Retained<ProtocolObject<dyn MTLDevice>>,
+    /// The MTLCommandQueue wgpu submits on; used by `SyncMode::MetalCompletion`.
+    mtl_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
 }
 
 type FrameReadyFn = unsafe extern "C" fn(*mut c_void);
@@ -160,6 +180,13 @@ impl Context {
             hal.raw_device().clone()
         };
 
+        let mtl_queue: Retained<ProtocolObject<dyn MTLCommandQueue>> = unsafe {
+            let hal = queue
+                .as_hal::<wgpu_hal::api::Metal>()
+                .ok_or("queue is not Metal")?;
+            Retained::from(hal.as_raw())
+        };
+
         let renderer = CubeRenderer::new(&device, TEXTURE_FORMAT, width, height);
         let (slots, surfaces) = build_ring(&device, &mtl_device, width, height, buffer_count)?;
 
@@ -170,11 +197,15 @@ impl Context {
             width,
             height,
             sync_mode,
-            ring: Arc::new(Mutex::new(Ring {
-                slots,
-                next_seq: 1,
-                generation: 0,
-            })),
+            ring: Arc::new(RingShared {
+                ring: Mutex::new(Ring {
+                    slots,
+                    next_seq: 1,
+                    generation: 0,
+                }),
+                ready: Condvar::new(),
+            }),
+            acquire_wait: Mutex::new(Duration::ZERO),
             stats: Arc::new(Mutex::new(Stats::default())),
             frame_ready_cb: Arc::new(FrameReadyCallback {
                 func: Mutex::new(None),
@@ -182,6 +213,7 @@ impl Context {
             }),
             surfaces,
             _mtl_device: mtl_device,
+            mtl_queue,
         })
     }
 
@@ -201,7 +233,7 @@ impl Context {
         let count = self.surfaces.len() as u32;
         let (slots, surfaces) = build_ring(&self.device, &self._mtl_device, width, height, count)?;
         {
-            let mut ring = self.ring.lock().unwrap();
+            let mut ring = self.ring.ring.lock().unwrap();
             ring.slots = slots;
             ring.generation += 1;
         }
@@ -231,7 +263,7 @@ impl Context {
     pub fn render(&self, time_secs: f32) -> i32 {
         let t0 = Instant::now();
         let (index, seq, generation) = {
-            let mut ring = self.ring.lock().unwrap();
+            let mut ring = self.ring.ring.lock().unwrap();
             let Some(i) = ring.slots.iter().position(|s| s.state == BufferState::Free) else {
                 self.stats.lock().unwrap().frames_dropped_no_free_buffer += 1;
                 return -1;
@@ -251,18 +283,18 @@ impl Context {
                 label: Some("m0 frame"),
             });
         {
-            let ring = self.ring.lock().unwrap();
+            let ring = self.ring.ring.lock().unwrap();
             self.renderer.draw(&mut encoder, &ring.slots[index].view);
         }
         self.queue.submit(Some(encoder.finish()));
 
-        let ring = self.ring.clone();
+        let shared = self.ring.clone();
         let stats = self.stats.clone();
         let cb = self.frame_ready_cb.clone();
         let submitted = Instant::now();
         let mark_ready = move || {
             {
-                let mut ring = ring.lock().unwrap();
+                let mut ring = shared.ring.lock().unwrap();
                 // A resize may have replaced the ring; only promote our own frame.
                 if ring.generation == generation {
                     let slot = &mut ring.slots[index];
@@ -270,6 +302,7 @@ impl Context {
                         slot.state = BufferState::Ready;
                     }
                 }
+                shared.ready.notify_all();
             }
             stats
                 .lock()
@@ -285,6 +318,41 @@ impl Context {
                 let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
                 mark_ready();
             }
+            SyncMode::MetalCompletion => {
+                // Command buffers on one MTLCommandQueue complete in commit
+                // order, so this empty buffer completes after the frame.
+                let fence = self
+                    .mtl_queue
+                    .commandBuffer()
+                    .expect("MTLCommandQueue.commandBuffer");
+                let commit_t = media_time();
+                let block = block2::RcBlock::new(
+                    move |cb: std::ptr::NonNull<ProtocolObject<dyn MTLCommandBuffer>>| {
+                        mark_ready();
+                        if seq % 600 == 0 {
+                            // SAFETY: Metal hands us a live command buffer.
+                            let cb = unsafe { cb.as_ref() };
+                            let (ks, gs, ge, now) = (
+                                cb.kernelStartTime(),
+                                cb.GPUStartTime(),
+                                cb.GPUEndTime(),
+                                media_time(),
+                            );
+                            log::info!(
+                                "seq {seq} fence timeline (ms from commit): kernelStart={:.2} gpuStart={:.2} gpuEnd={:.2} handler={:.2} instant={:.2}",
+                                (ks - commit_t) * 1e3,
+                                (gs - commit_t) * 1e3,
+                                (ge - commit_t) * 1e3,
+                                (now - commit_t) * 1e3,
+                                submitted.elapsed().as_secs_f64() * 1e3
+                            );
+                        }
+                    },
+                );
+                // SAFETY: the block is retained by Metal until it has run.
+                unsafe { fence.addCompletedHandler(block2::RcBlock::as_ptr(&block)) };
+                fence.commit();
+            }
         }
 
         let mut st = self.stats.lock().unwrap();
@@ -297,8 +365,32 @@ impl Context {
     /// Returns the newest GPU-complete buffer and rotates Presented/Retiring.
     /// If nothing new is ready, returns the currently presented buffer again
     /// (or -1 if nothing has ever been presented).
+    pub fn set_acquire_wait(&self, wait: Duration) {
+        *self.acquire_wait.lock().unwrap() = wait;
+    }
+
     pub fn acquire_presented(&self) -> i32 {
-        let mut ring = self.ring.lock().unwrap();
+        let mut ring = self.ring.ring.lock().unwrap();
+        let mut waited = Duration::ZERO;
+        let max_wait = *self.acquire_wait.lock().unwrap();
+        if max_wait > Duration::ZERO {
+            // If the newest submitted frame is still on the GPU, give it a
+            // bounded chance to finish so this present shows it (lag 0).
+            let t0 = Instant::now();
+            loop {
+                let newest_seq = ring.next_seq - 1;
+                let newest_in_flight = ring
+                    .slots
+                    .iter()
+                    .any(|s| s.state == BufferState::Rendering && s.seq == newest_seq);
+                let remaining = max_wait.saturating_sub(t0.elapsed());
+                if !newest_in_flight || remaining.is_zero() {
+                    break;
+                }
+                ring = self.ring.ready.wait_timeout(ring, remaining).unwrap().0;
+            }
+            waited = t0.elapsed();
+        }
         let newest_ready = ring
             .slots
             .iter()
@@ -321,6 +413,9 @@ impl Context {
                 }
                 ring.slots[new].state = BufferState::Presented;
                 stats.frames_presented += 1;
+                let lag = (ring.next_seq - 1).saturating_sub(ring.slots[new].seq);
+                stats.present_lag.push(lag as u32);
+                stats.acquire_wait_us.push(waited.as_micros() as u32);
                 new as i32
             }
             None => {
@@ -340,6 +435,25 @@ impl Context {
 
     pub fn take_stats(&self) -> Stats {
         std::mem::take(&mut *self.stats.lock().unwrap())
+    }
+}
+
+/// Seconds on the `mach_absolute_time` clock, the same clock as
+/// `MTLCommandBuffer.GPUStartTime` / `CACurrentMediaTime`.
+fn media_time() -> f64 {
+    #[repr(C)]
+    struct Timebase {
+        numer: u32,
+        denom: u32,
+    }
+    extern "C" {
+        fn mach_absolute_time() -> u64;
+        fn mach_timebase_info(info: *mut Timebase) -> i32;
+    }
+    let mut tb = Timebase { numer: 0, denom: 0 };
+    unsafe {
+        mach_timebase_info(&mut tb);
+        mach_absolute_time() as f64 * tb.numer as f64 / tb.denom as f64 / 1e9
     }
 }
 
@@ -491,10 +605,10 @@ pub extern "C" fn fynkel_m0_create(
 ) -> *mut Context {
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .try_init();
-    let mode = if sync_mode == 1 {
-        SyncMode::Blocking
-    } else {
-        SyncMode::Async
+    let mode = match sync_mode {
+        1 => SyncMode::Blocking,
+        2 => SyncMode::MetalCompletion,
+        _ => SyncMode::Async,
     };
     match Context::new(width.max(1), height.max(1), buffer_count.clamp(2, 8), mode) {
         Ok(ctx) => Box::into_raw(Box::new(ctx)),
@@ -545,6 +659,17 @@ pub unsafe extern "C" fn fynkel_m0_render(ctx: *const Context, time_secs: f32) -
     ctx.as_ref().map(|c| c.render(time_secs)).unwrap_or(-1)
 }
 
+/// Sets the bounded wait `fynkel_m0_acquire_presented` may spend on the
+/// newest in-flight frame (microseconds; 0 disables).
+/// # Safety
+/// `ctx` must be a live context.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_m0_set_acquire_wait_us(ctx: *const Context, us: u32) {
+    if let Some(c) = ctx.as_ref() {
+        c.set_acquire_wait(Duration::from_micros(us as u64));
+    }
+}
+
 /// # Safety
 /// `ctx` must be a live context. Safe to call from any thread.
 #[no_mangle]
@@ -580,6 +705,12 @@ pub struct M0Stats {
     pub resizes: u64,
     pub resize_p50_us: u32,
     pub resize_max_us: u32,
+    pub present_lag_p50: u32,
+    pub present_lag_p95: u32,
+    pub present_lag_max: u32,
+    pub acquire_wait_p50_us: u32,
+    pub acquire_wait_p95_us: u32,
+    pub acquire_wait_max_us: u32,
 }
 
 fn pct(v: &mut [u32], q: f64) -> u32 {
@@ -613,6 +744,12 @@ pub unsafe extern "C" fn fynkel_m0_take_stats(ctx: *const Context, out: *mut M0S
         resizes: s.resizes,
         resize_p50_us: pct(&mut s.resize_us, 0.50),
         resize_max_us: pct(&mut s.resize_us, 1.0),
+        present_lag_p50: pct(&mut s.present_lag, 0.50),
+        present_lag_p95: pct(&mut s.present_lag, 0.95),
+        present_lag_max: pct(&mut s.present_lag, 1.0),
+        acquire_wait_p50_us: pct(&mut s.acquire_wait_us, 0.50),
+        acquire_wait_p95_us: pct(&mut s.acquire_wait_us, 0.95),
+        acquire_wait_max_us: pct(&mut s.acquire_wait_us, 1.0),
     };
 }
 
@@ -651,7 +788,11 @@ mod tests {
 
     #[test]
     fn renders_into_iosurface_ring_and_rotates_states() {
-        for mode in [SyncMode::Blocking, SyncMode::Async] {
+        for mode in [
+            SyncMode::Blocking,
+            SyncMode::Async,
+            SyncMode::MetalCompletion,
+        ] {
             let ctx = Context::new(256, 256, 4, mode).expect("context");
             assert!(!ctx.iosurface_ptr(0).is_null());
             assert!(ctx.iosurface_ptr(4).is_null());
@@ -659,7 +800,7 @@ mod tests {
 
             let i = ctx.render(0.0);
             assert_eq!(i, 0);
-            if mode == SyncMode::Async {
+            if mode != SyncMode::Blocking {
                 // Wait for the GPU completion callback.
                 let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
                 std::thread::sleep(Duration::from_millis(20));
@@ -693,7 +834,7 @@ mod tests {
                 -1,
                 "ring full: frame dropped, not overwritten"
             );
-            if mode == SyncMode::Async {
+            if mode != SyncMode::Blocking {
                 let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -739,5 +880,65 @@ mod tests {
         let st = ctx.take_stats();
         assert_eq!(st.resizes, 1);
         assert_eq!(st.frames_rendered, 3);
+    }
+}
+
+#[cfg(test)]
+mod acquire_wait {
+    use super::*;
+
+    #[test]
+    fn presenter_wait_yields_lag_zero() {
+        let ctx = Context::new(1600, 1200, 4, SyncMode::MetalCompletion).expect("context");
+        ctx.set_acquire_wait(Duration::from_millis(50)); // generous: first frame warms up
+        for i in 0..30 {
+            assert!(ctx.render(i as f32 * 0.01) >= 0);
+            // Present immediately: the frame is still on the GPU; the wait
+            // should absorb it.
+            assert!(ctx.acquire_presented() >= 0);
+            std::thread::sleep(Duration::from_micros(8333));
+        }
+        let mut st = ctx.take_stats();
+        assert_eq!(
+            pct(&mut st.present_lag, 1.0),
+            0,
+            "every present shows the newest frame"
+        );
+        let w95 = pct(&mut st.acquire_wait_us, 0.95);
+        assert!(
+            w95 > 100 && w95 < 4000,
+            "waited a bounded ~GPU time: {w95} us"
+        );
+    }
+}
+
+#[cfg(test)]
+mod timing {
+    use super::*;
+
+    #[test]
+    fn completion_latency_in_isolation() {
+        for mode in [
+            SyncMode::MetalCompletion,
+            SyncMode::Async,
+            SyncMode::Blocking,
+        ] {
+            let ctx = Context::new(1600, 1200, 4, mode).expect("context");
+            for i in 0..60 {
+                let idx = ctx.render(i as f32 * 0.01);
+                assert!(idx >= 0);
+                std::thread::sleep(Duration::from_micros(8333));
+                ctx.acquire_presented();
+            }
+            let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
+            std::thread::sleep(Duration::from_millis(20));
+            let mut st = ctx.take_stats();
+            eprintln!(
+                "{mode:?}: submit->complete p50={} p95={} us (n={})",
+                pct(&mut st.gpu_complete_us, 0.5),
+                pct(&mut st.gpu_complete_us, 0.95),
+                st.gpu_complete_us.len()
+            );
+        }
     }
 }
