@@ -43,6 +43,7 @@
     "kind": "component",
     "id": 1,
     "rust": "fynkel_scene::Transform",
-    "wireSize": 40
+    "wireSize": 40,
+    "authored": true
   }
 }

@@ -27,6 +27,17 @@ impl Code {
     // Documents (FYN-D): JSON Schema.
     pub const SCHEMA_VIOLATION: Code = Code("FYN-D0100");
     pub const SCHEMA_UNAVAILABLE: Code = Code("FYN-D0101");
+    // Documents (FYN-D): scene semantics (blueprint §6; `fynkel_document::scene`).
+    pub const SCENE_DANGLING_PARENT: Code = Code("FYN-D0200");
+    pub const SCENE_UNKNOWN_CHILD: Code = Code("FYN-D0201");
+    pub const SCENE_CHILD_PARENT_MISMATCH: Code = Code("FYN-D0202");
+    pub const SCENE_HIERARCHY_CYCLE: Code = Code("FYN-D0203");
+    pub const SCENE_DUPLICATE_COMPONENT: Code = Code("FYN-D0204");
+    pub const SCENE_UNKNOWN_COMPONENT_TYPE: Code = Code("FYN-D0205");
+    pub const SCENE_COMPONENT_DATA: Code = Code("FYN-D0206");
+    pub const SCENE_COMPONENT_NOT_AUTHORED: Code = Code("FYN-D0207");
+    pub const SCENE_DUPLICATE_CHILD: Code = Code("FYN-D0208");
+    pub const SCENE_MALFORMED_ENTRY: Code = Code("FYN-D0209");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 

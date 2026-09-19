@@ -1,0 +1,36 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 1,
+  "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968330",
+  "name": "BadData",
+  "entities": {
+    "aaaaaaaa-0000-4000-8000-000000000001": {
+      "name": "Root",
+      "parent": null,
+      "children": [],
+      "components": {
+        "11111111-0000-4000-8000-000000000001": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    }
+  }
+}

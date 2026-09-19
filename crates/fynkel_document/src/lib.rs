@@ -17,13 +17,15 @@
 #![allow(clippy::result_large_err)]
 
 pub mod json;
+pub mod scene;
 pub mod schema;
 
 use std::path::Path;
 
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
-pub use schema::SchemaSet;
+pub use scene::Scene;
+pub use schema::{ComponentInfo, SchemaSet};
 
 /// Document kinds and their file-name conventions (§6, §7).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

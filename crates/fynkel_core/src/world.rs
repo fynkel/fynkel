@@ -37,7 +37,7 @@ impl Default for WorldConfig {
 
 /// Human-readable entity name (`fynkel.Name`).
 #[derive(Clone, Debug, PartialEq, Eq, Schema)]
-#[schema(kind = "component", id = 3, name = "fynkel.Name")]
+#[schema(kind = "component", id = 3, name = "fynkel.Name", authored = false)]
 pub struct Name {
     pub value: String,
 }

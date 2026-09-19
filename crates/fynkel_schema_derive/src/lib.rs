@@ -14,7 +14,8 @@
 //! Field types are mapped by their last path segment: `f32 u32 i32 u64 bool
 //! Vec3 Quat Entity String`, `Option<Entity>`; any other type is treated as a
 //! nested record and must implement `HasSchema`. Doc comments become the
-//! schema docs (and end up in JSON Schema / Dart docs).
+//! schema docs (and end up in JSON Schema / Dart docs). `authored = false`
+//! marks an engine-managed component that scene documents may not contain.
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -36,12 +37,14 @@ struct Attrs {
     kind: String,
     id: u32,
     name: String,
+    authored: bool,
 }
 
 fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
     let mut kind = None;
     let mut id = 0u32;
     let mut name = None;
+    let mut authored = true;
     for attr in &input.attrs {
         if !attr.path().is_ident("schema") {
             continue;
@@ -67,8 +70,14 @@ fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
                     name = Some(s.value());
                     return Ok(());
                 }
+            } else if meta.path.is_ident("authored") {
+                if let Lit::Bool(b) = lit {
+                    authored = b.value();
+                    return Ok(());
+                }
             }
-            Err(meta.error("expected kind = \"...\", id = N, name = \"...\""))
+            Err(meta
+                .error("expected kind = \"...\", id = N, name = \"...\", authored = true|false"))
         })?;
     }
     let kind = kind.unwrap_or_else(|| "record".to_string());
@@ -85,7 +94,12 @@ fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
         ));
     }
     let name = name.unwrap_or_else(|| format!("fynkel.{}", input.ident));
-    Ok(Attrs { kind, id, name })
+    Ok(Attrs {
+        kind,
+        id,
+        name,
+        authored,
+    })
 }
 
 fn doc_of(attrs: &[syn::Attribute]) -> String {
@@ -181,6 +195,7 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     };
     let id = attrs.id;
     let name = attrs.name;
+    let authored = attrs.authored;
     let doc = doc_of(&input.attrs);
     Ok(quote! {
         impl ::fynkel_contracts::schema::HasSchema for #ident {
@@ -192,6 +207,7 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     rust_path: concat!(module_path!(), "::", #ident_str),
                     doc: #doc,
                     fields: &[ #(#field_tokens),* ],
+                    authored: #authored,
                 };
         }
     })

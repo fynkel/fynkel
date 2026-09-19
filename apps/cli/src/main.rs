@@ -6,6 +6,7 @@
 
 mod codegen;
 mod document;
+mod scene;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -47,13 +48,18 @@ fn main() -> ExitCode {
     if cmd == "test" {
         return test_command(&args[1..]);
     }
-    if cmd == "document" {
+    if cmd == "document" || cmd == "scene" {
         let root = args
             .iter()
             .position(|a| a == "--root")
             .and_then(|i| args.get(i + 1))
             .map(PathBuf::from);
-        return document::run(&repo_root(root), &args[1..]);
+        let root = repo_root(root);
+        return if cmd == "document" {
+            document::run(&root, &args[1..])
+        } else {
+            scene::run(&root, &args[1..])
+        };
     }
     let mut check = false;
     let mut root = None;

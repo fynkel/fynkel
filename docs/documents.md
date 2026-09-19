@@ -84,13 +84,61 @@ codegen; append only.
 
 Human form: `error[FYN-D0012] assets/scenes/main.scene.json:3:3 /id: id is not a canonical UUID: upper-case hex (use lower-case …)`.
 
+## Scene documents
+
+`.scene.json` bodies are validated by `schemas/scene.schema.json`, which
+`fynkel codegen` generates from the envelope plus every registered component
+schema (`docs/codegen.md`); the component `data` of each authored type is
+bound with an `if type == … then data $ref` clause, so a bad Transform is
+reported at its exact field. Body:
+
+```json
+"entities": {
+  "<entity uuid>": {
+    "name": "Player",
+    "parent": null | "<entity uuid>",
+    "children": ["<entity uuid>", ...],
+    "components": {
+      "<component uuid>": { "type": "fynkel.Transform", "version": 1, "data": { ... } }
+    }
+  }
+}
+```
+
+`fynkel_document::Scene::from_document` builds a lenient view (malformed
+entries are skipped and reported, never fatal) and `Scene::validate` adds the
+semantic rules on top of the schema pass:
+
+| code | rule |
+|---|---|
+| `FYN-D0200` | `parent` names an entity that does not exist |
+| `FYN-D0201` | a `children` entry names an entity that does not exist |
+| `FYN-D0202` | `children` ↔ `parent` disagree (reported on both sides) |
+| `FYN-D0203` | the `parent` chain has a cycle |
+| `FYN-D0204` | two components of the same type on one entity |
+| `FYN-D0205` | unknown component type (warning; `data` is kept opaque) |
+| `FYN-D0206` | component `data` violates the type's schema (per field) |
+| `FYN-D0207` | type is not authorable (e.g. `fynkel.Name` — set `name` instead) |
+| `FYN-D0208` | the same child listed twice |
+| `FYN-D0209` | malformed entity/component entry skipped by the view |
+
+Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
+marks runtime-only records. `fixtures/scene/` holds one document per rule
+with its expected diagnostics.
+
 ## CLI
 
 ```sh
 fynkel document validate <path>... [--json] [--schemas <dir>] [--kind <kind>]
 fynkel document format <path>... [--check] [--json]
 fynkel document new <kind> <name> [--out <path>] [--json]
+fynkel scene inspect <path> [--json] [--schemas <dir>]
+fynkel scene validate <path>... [--json] [--schemas <dir>]
 ```
+
+`scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,
+entityCount, componentCount, componentTypes, roots[] }` with `--json`) followed
+by the diagnostics.
 
 Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
 `--json` prints `{ "ok": bool, "diagnostics": [ ...records... ] }`

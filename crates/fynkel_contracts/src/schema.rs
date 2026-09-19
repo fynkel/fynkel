@@ -115,6 +115,10 @@ pub struct RecordSchema {
     pub rust_path: &'static str,
     pub doc: &'static str,
     pub fields: &'static [FieldSchema],
+    /// Components only: may appear in authored documents (scenes, prefabs).
+    /// Engine-managed components (`fynkel.Name` mirrors the entity's `name`
+    /// field) are `false`. Not part of the wire fingerprint.
+    pub authored: bool,
 }
 
 impl RecordSchema {
@@ -211,6 +215,7 @@ mod tests {
         name: "t.Inner",
         rust_path: "t::Inner",
         doc: "",
+        authored: true,
         fields: &[
             FieldSchema {
                 name: "a",
@@ -230,6 +235,7 @@ mod tests {
         name: "t.Outer",
         rust_path: "t::Outer",
         doc: "",
+        authored: true,
         fields: &[
             FieldSchema {
                 name: "id",

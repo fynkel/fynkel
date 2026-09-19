@@ -8,7 +8,9 @@
     "$schema": { "type": "string" },
     "formatVersion": { "type": "integer", "minimum": 1 },
     "id": { "$ref": "#/$defs/uuid" },
-    "name": { "type": "string", "maxLength": 256 }
+    "name": { "type": "string", "maxLength": 256 },
+    "description": { "type": "string" },
+    "editorNotes": { "type": "string", "description": "Free-form notes; the JSON has no comments (blueprint §6)." }
   },
   "required": ["formatVersion", "id", "name"],
   "$defs": {

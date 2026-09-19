@@ -22,6 +22,19 @@ pub struct SchemaSet {
     envelope: Validator,
     /// Kinds that fell back to the envelope schema.
     missing: Vec<DocumentKind>,
+    /// Built-in component schemas by type id (`schemas/components/*`), the
+    /// committed codegen metadata ADR-0016 says tools read.
+    components: HashMap<String, ComponentInfo>,
+}
+
+/// What a tool needs to know about a component type without linking the
+/// runtime: its `data` schema and the `x-fynkel` metadata.
+pub struct ComponentInfo {
+    pub type_id: String,
+    pub numeric_id: u32,
+    pub authored: bool,
+    pub wire_size: u32,
+    validator: Validator,
 }
 
 impl SchemaSet {
@@ -110,6 +123,30 @@ impl SchemaSet {
         };
 
         let envelope = compile(&by_id[0].1, &envelope_id)?;
+        let mut components = HashMap::new();
+        for (id, value) in &by_id {
+            let meta = value.get("x-fynkel");
+            if meta.and_then(|m| m.get("kind")).and_then(|k| k.as_str()) != Some("component") {
+                continue;
+            }
+            let Some(type_id) = value.get("title").and_then(|t| t.as_str()) else {
+                continue;
+            };
+            let meta = meta.unwrap();
+            components.insert(
+                type_id.to_string(),
+                ComponentInfo {
+                    type_id: type_id.to_string(),
+                    numeric_id: meta.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    authored: meta
+                        .get("authored")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true),
+                    wire_size: meta.get("wireSize").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    validator: compile(value, id)?,
+                },
+            );
+        }
         let mut validators = HashMap::new();
         let mut missing = Vec::new();
         for kind in DocumentKind::ALL {
@@ -125,7 +162,35 @@ impl SchemaSet {
             validators,
             envelope,
             missing,
+            components,
         })
+    }
+
+    /// Known component type (from the loaded component schemas).
+    pub fn component(&self, type_id: &str) -> Option<&ComponentInfo> {
+        self.components.get(type_id)
+    }
+
+    /// Component types, sorted.
+    pub fn component_types(&self) -> Vec<&ComponentInfo> {
+        let mut v: Vec<&ComponentInfo> = self.components.values().collect();
+        v.sort_by(|a, b| a.type_id.cmp(&b.type_id));
+        v
+    }
+
+    /// Validates a component's `data` against its schema. Pointers are
+    /// relative to `data`; the caller re-anchors them. Empty for unknown
+    /// types (the semantic pass reports those).
+    pub fn validate_component(&self, type_id: &str, data: &Node) -> Vec<Diagnostic> {
+        let Some(info) = self.components.get(type_id) else {
+            return Vec::new();
+        };
+        let instance = data.to_serde();
+        let mut out = Vec::new();
+        for err in info.validator.iter_errors(&instance) {
+            out.extend(to_diagnostics(&err, data));
+        }
+        out
     }
 
     /// Kinds without their own schema (validated against the envelope only).

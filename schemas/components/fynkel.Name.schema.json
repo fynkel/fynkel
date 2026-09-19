@@ -18,6 +18,7 @@
     "kind": "component",
     "id": 3,
     "rust": "fynkel_core::world::Name",
-    "wireSize": 8
+    "wireSize": 8,
+    "authored": false
   }
 }

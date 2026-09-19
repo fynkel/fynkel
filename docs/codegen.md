@@ -11,11 +11,12 @@ Rust structs are the source of truth for every record that crosses the bridge.
         ┌──────────────────────────────┬───────────────┴───────────────┐
         ▼                              ▼                               ▼
  schemas/fynkel.schema.json    packages/fynkel/lib/generated/   crates/fynkel_wire/src/generated.rs
- schemas/components/*.json     schema.g.dart (Dart codecs)      (Rust codecs, SCHEMA_FINGERPRINT)
+ schemas/components/*.json
+ schemas/scene.schema.json     schema.g.dart (Dart codecs)      (Rust codecs, SCHEMA_FINGERPRINT)
 ```
 
 * `fynkel_contracts::schema` defines the metadata (`RecordSchema`, `FieldType`), the wire layout rule (little-endian, natural alignment, records padded to 8, strings as `(offset, len)` into a string tail) and the fingerprint (FNV-1a over the canonical text of the registry).
-* `fynkel_schema_derive` provides `#[derive(Schema)]` with `#[schema(kind = "component" | "command" | "event" | "record", id = N, name = "fynkel.X")]`. Supported field types: `f32 u32 i32 u64 bool Vec3 Quat Entity Option<Entity> String` and nested schema structs. Doc comments flow into JSON Schema and Dart docs.
+* `fynkel_schema_derive` provides `#[derive(Schema)]` with `#[schema(kind = "component" | "command" | "event" | "record", id = N, name = "fynkel.X")]`. Supported field types: `f32 u32 i32 u64 bool Vec3 Quat Entity Option<Entity> String` and nested schema structs. Doc comments flow into JSON Schema and Dart docs. `authored = false` marks runtime-only records (`fynkel.Name`): they get no `data` binding in `scene.schema.json` and scene validation rejects them (`FYN-D0207`).
 * Generated files are **committed**. `cargo test -p fynkel_cli` runs `fynkel codegen --check` and fails on drift; regenerate with `cargo run -p fynkel_cli -- codegen`.
 * Protocol fixtures: `tests/fixtures/wire/<fingerprint>/<Record>.bin` are written by the Rust codecs (`FYNKEL_UPDATE_FIXTURES=1 cargo test -p fynkel_wire`) and decoded + re-encoded byte-for-byte by the Dart codecs (`dart test` in `packages/fynkel`). A schema change produces a new fingerprint directory; delete the old one in the same commit.
 
