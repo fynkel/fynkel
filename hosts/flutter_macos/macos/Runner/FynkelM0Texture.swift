@@ -12,10 +12,16 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
   typealias FrameReadyFn = @convention(c) (UnsafeMutableRawPointer?) -> Void
   typealias SetCallbackFn = @convention(c) (UnsafeMutableRawPointer?, FrameReadyFn?, UnsafeMutableRawPointer?) -> Void
 
-  private let ctx: UnsafeMutableRawPointer
+  let ctx: UnsafeMutableRawPointer
   private let acquire: AcquireFn
-  private let pixelBuffers: [CVPixelBuffer]
+  /// Guards `pixelBuffers`/`lastIndex`: written on the platform thread
+  /// (rebind after a resize), read on the raster thread.
+  private let lock = NSLock()
+  private var pixelBuffers: [CVPixelBuffer]
   private var lastIndex: Int32 = -1
+  /// Set on unregister; after this the raster thread never calls into Rust
+  /// again, so the host may free `ctx`.
+  private var detached = false
 
   var textureId: Int64 = -1
   weak var registry: FlutterTextureRegistry?
@@ -24,10 +30,38 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
   var copyCalls = 0
   var copyWithNewFrame = 0
   var frameReadySignals = 0
+  var copyNoFrame = 0
+  var rebinds = 0
 
-  init?(ctx: UnsafeMutableRawPointer, acquire: AcquireFn, iosurfaces: [UnsafeMutableRawPointer], width: Int, height: Int) {
+  init?(ctx: UnsafeMutableRawPointer, acquire: AcquireFn, iosurfaces: [UnsafeMutableRawPointer]) {
     self.ctx = ctx
     self.acquire = acquire
+    guard let buffers = FynkelM0Texture.wrap(iosurfaces) else { return nil }
+    self.pixelBuffers = buffers
+    super.init()
+  }
+
+  /// Swap in a new IOSurface ring (after `fynkel_m0_resize`). The old
+  /// CVPixelBuffers are released here; Flutter may still hold a retained one
+  /// for an in-flight raster, which keeps that IOSurface alive on its own.
+  func rebind(iosurfaces: [UnsafeMutableRawPointer]) -> Bool {
+    guard let buffers = FynkelM0Texture.wrap(iosurfaces) else { return false }
+    lock.lock()
+    pixelBuffers = buffers
+    lastIndex = -1
+    rebinds += 1
+    lock.unlock()
+    return true
+  }
+
+  func detach() {
+    lock.lock()
+    detached = true
+    pixelBuffers = []
+    lock.unlock()
+  }
+
+  private static func wrap(_ iosurfaces: [UnsafeMutableRawPointer]) -> [CVPixelBuffer]? {
     var buffers: [CVPixelBuffer] = []
     for ptr in iosurfaces {
       let surface = Unmanaged<IOSurface>.fromOpaque(ptr).takeUnretainedValue()
@@ -42,8 +76,7 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
       }
       buffers.append(pbUnmanaged.takeRetainedValue())
     }
-    self.pixelBuffers = buffers
-    super.init()
+    return buffers
   }
 
   /// Called from Rust (possibly from a Metal completion thread) when a frame's GPU work finished.
@@ -56,9 +89,14 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
   // MARK: FlutterTexture (called on Flutter's raster thread)
 
   func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
+    lock.lock(); defer { lock.unlock() }
     copyCalls += 1
+    if detached { return nil }
     let index = acquire(ctx)
-    if index < 0 { return nil }
+    if index < 0 || Int(index) >= pixelBuffers.count {
+      copyNoFrame += 1
+      return nil
+    }
     if index != lastIndex { copyWithNewFrame += 1 }
     lastIndex = index
     return Unmanaged.passRetained(pixelBuffers[Int(index)])
@@ -72,6 +110,7 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
 final class FynkelM0Channel {
   private let registrar: FlutterPluginRegistrar
   private var texture: FynkelM0Texture?
+  private var setCallback: FynkelM0Texture.SetCallbackFn?
 
   init(registrar: FlutterPluginRegistrar) {
     self.registrar = registrar
@@ -88,9 +127,7 @@ final class FynkelM0Channel {
             let ctxAddr = args["ctx"] as? Int,
             let acquireAddr = args["acquireFn"] as? Int,
             let setCbAddr = args["setCallbackFn"] as? Int,
-            let surfaces = args["iosurfaces"] as? [Int],
-            let width = args["width"] as? Int,
-            let height = args["height"] as? Int
+            let surfaces = args["iosurfaces"] as? [Int]
       else {
         result(FlutterError(code: "args", message: "bad arguments", details: nil))
         return
@@ -99,7 +136,7 @@ final class FynkelM0Channel {
       let acquire = unsafeBitCast(UnsafeRawPointer(bitPattern: acquireAddr)!, to: FynkelM0Texture.AcquireFn.self)
       let setCallback = unsafeBitCast(UnsafeRawPointer(bitPattern: setCbAddr)!, to: FynkelM0Texture.SetCallbackFn.self)
       let ptrs = surfaces.map { UnsafeMutableRawPointer(bitPattern: $0)! }
-      guard let tex = FynkelM0Texture(ctx: ctx, acquire: acquire, iosurfaces: ptrs, width: width, height: height) else {
+      guard let tex = FynkelM0Texture(ctx: ctx, acquire: acquire, iosurfaces: ptrs) else {
         result(FlutterError(code: "texture", message: "could not wrap IOSurfaces", details: nil))
         return
       }
@@ -115,7 +152,25 @@ final class FynkelM0Channel {
         Unmanaged<FynkelM0Texture>.fromOpaque(ud).takeUnretainedValue().onFrameReady()
       }
       setCallback(ctx, cb, userdata)
+      self.setCallback = setCallback
       result(tex.textureId)
+
+    case "rebindTexture":
+      guard let tex = texture,
+            let args = call.arguments as? [String: Any],
+            let surfaces = args["iosurfaces"] as? [Int]
+      else {
+        result(FlutterError(code: "args", message: "no texture or bad arguments", details: nil))
+        return
+      }
+      let ptrs = surfaces.map { UnsafeMutableRawPointer(bitPattern: $0)! }
+      guard tex.rebind(iosurfaces: ptrs) else {
+        result(FlutterError(code: "texture", message: "could not wrap IOSurfaces", details: nil))
+        return
+      }
+      // Tell Flutter the next raster should ask us for a (new-size) frame.
+      registrar.textures.textureFrameAvailable(tex.textureId)
+      result(nil)
 
     case "stats":
       guard let tex = texture else { result(nil); return }
@@ -123,13 +178,22 @@ final class FynkelM0Channel {
         "copyCalls": tex.copyCalls,
         "copyWithNewFrame": tex.copyWithNewFrame,
         "frameReadySignals": tex.frameReadySignals,
+        "copyNoFrame": tex.copyNoFrame,
+        "rebinds": tex.rebinds,
       ])
       tex.copyCalls = 0; tex.copyWithNewFrame = 0; tex.frameReadySignals = 0
+      tex.copyNoFrame = 0; tex.rebinds = 0
 
     case "unregisterTexture":
       if let tex = texture {
+        // Order matters: stop Rust from signalling into `tex` before the
+        // Flutter registry (and we) drop it. `set_frame_ready_callback` waits
+        // for any in-progress callback, so no use-after-free window remains.
+        setCallback?(tex.ctx, nil, nil)
+        tex.detach()
         registrar.textures.unregisterTexture(tex.textureId)
         texture = nil
+        setCallback = nil
       }
       result(nil)
 

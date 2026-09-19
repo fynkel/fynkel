@@ -28,6 +28,12 @@ final class M0Stats extends Struct {
   external int gpuCompleteP95Us;
   @Uint32()
   external int gpuCompleteP99Us;
+  @Uint64()
+  external int resizes;
+  @Uint32()
+  external int resizeP50Us;
+  @Uint32()
+  external int resizeMaxUs;
 }
 
 typedef _CreateC = Pointer<Void> Function(Uint32, Uint32, Uint32, Int32);
@@ -40,6 +46,10 @@ typedef _RenderC = Int32 Function(Pointer<Void>, Float);
 typedef _RenderDart = int Function(Pointer<Void>, double);
 typedef _TakeStatsC = Void Function(Pointer<Void>, Pointer<M0Stats>);
 typedef _TakeStatsDart = void Function(Pointer<Void>, Pointer<M0Stats>);
+typedef _ResizeC = Int32 Function(Pointer<Void>, Uint32, Uint32);
+typedef _ResizeDart = int Function(Pointer<Void>, int, int);
+typedef _SetCallbackC = Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>);
+typedef _SetCallbackDart = void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>);
 
 class M0Native {
   M0Native(this.libraryPath) : _lib = DynamicLibrary.open(libraryPath) {
@@ -48,6 +58,8 @@ class M0Native {
     _iosurface = _lib.lookupFunction<_IoSurfaceC, _IoSurfaceDart>('fynkel_m0_iosurface');
     _render = _lib.lookupFunction<_RenderC, _RenderDart>('fynkel_m0_render');
     _takeStats = _lib.lookupFunction<_TakeStatsC, _TakeStatsDart>('fynkel_m0_take_stats');
+    _resize = _lib.lookupFunction<_ResizeC, _ResizeDart>('fynkel_m0_resize');
+    _setCallback = _lib.lookupFunction<_SetCallbackC, _SetCallbackDart>('fynkel_m0_set_frame_ready_callback');
     acquireFnAddress = _lib.lookup<Void>('fynkel_m0_acquire_presented').address;
     setCallbackFnAddress = _lib.lookup<Void>('fynkel_m0_set_frame_ready_callback').address;
   }
@@ -59,6 +71,8 @@ class M0Native {
   late final _IoSurfaceDart _iosurface;
   late final _RenderDart _render;
   late final _TakeStatsDart _takeStats;
+  late final _ResizeDart _resize;
+  late final _SetCallbackDart _setCallback;
 
   /// Raw symbol addresses handed to Swift so it can call Rust directly from
   /// Flutter's raster thread without dlopen-ing the library a second time.
@@ -69,6 +83,13 @@ class M0Native {
       _create(width, height, bufferCount, blocking ? 1 : 0);
 
   void destroy(Pointer<Void> ctx) => _destroy(ctx);
+
+  /// Rebuilds the IOSurface ring; the host must re-wrap the surfaces afterwards.
+  bool resize(Pointer<Void> ctx, int width, int height) => _resize(ctx, width, height) == 0;
+
+  /// Clears the Rust -> host frame-ready callback (synchronously; waits for an
+  /// in-progress callback). Call before the callback's target goes away.
+  void clearFrameReadyCallback(Pointer<Void> ctx) => _setCallback(ctx, nullptr, nullptr);
 
   List<int> iosurfaceAddresses(Pointer<Void> ctx, int count) =>
       List.generate(count, (i) => _iosurface(ctx, i).address);
@@ -92,6 +113,9 @@ class M0Native {
         gpuP50Ms: s.gpuCompleteP50Us / 1000,
         gpuP95Ms: s.gpuCompleteP95Us / 1000,
         gpuP99Ms: s.gpuCompleteP99Us / 1000,
+        resizes: s.resizes,
+        resizeP50Ms: s.resizeP50Us / 1000,
+        resizeMaxMs: s.resizeMaxUs / 1000,
       );
     } finally {
       calloc.free(out);
@@ -119,7 +143,10 @@ class M0StatsSnapshot {
     required this.gpuP50Ms,
     required this.gpuP95Ms,
     required this.gpuP99Ms,
+    required this.resizes,
+    required this.resizeP50Ms,
+    required this.resizeMaxMs,
   });
-  final int framesRendered, framesDropped, framesPresented, presentsWithoutNewFrame;
-  final double cpuP50Ms, cpuP95Ms, cpuP99Ms, gpuP50Ms, gpuP95Ms, gpuP99Ms;
+  final int framesRendered, framesDropped, framesPresented, presentsWithoutNewFrame, resizes;
+  final double cpuP50Ms, cpuP95Ms, cpuP99Ms, gpuP50Ms, gpuP95Ms, gpuP99Ms, resizeP50Ms, resizeMaxMs;
 }

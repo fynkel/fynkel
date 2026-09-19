@@ -74,6 +74,9 @@ struct Slot {
 struct Ring {
     slots: Vec<Slot>,
     next_seq: u64,
+    /// Bumped on every resize; completion callbacks from an older generation
+    /// must not touch the new slots.
+    generation: u64,
 }
 
 #[derive(Default)]
@@ -82,8 +85,10 @@ pub struct Stats {
     pub frames_dropped_no_free_buffer: u64,
     pub frames_presented: u64,
     pub presents_without_new_frame: u64,
+    pub resizes: u64,
     pub cpu_us: Vec<u32>,
     pub gpu_complete_us: Vec<u32>,
+    pub resize_us: Vec<u32>,
 }
 
 pub struct Context {
@@ -156,21 +161,7 @@ impl Context {
         };
 
         let renderer = CubeRenderer::new(&device, TEXTURE_FORMAT, width, height);
-
-        let mut slots = Vec::with_capacity(buffer_count as usize);
-        let mut surfaces = Vec::with_capacity(buffer_count as usize);
-        for i in 0..buffer_count {
-            let surface = create_iosurface(width, height)?;
-            let texture = import_iosurface(&device, &mtl_device, &surface, width, height, i)?;
-            let view = texture.create_view(&Default::default());
-            slots.push(Slot {
-                state: BufferState::Free,
-                seq: 0,
-                _texture: texture,
-                view,
-            });
-            surfaces.push(surface);
-        }
+        let (slots, surfaces) = build_ring(&device, &mtl_device, width, height, buffer_count)?;
 
         Ok(Self {
             device,
@@ -179,7 +170,11 @@ impl Context {
             width,
             height,
             sync_mode,
-            ring: Arc::new(Mutex::new(Ring { slots, next_seq: 1 })),
+            ring: Arc::new(Mutex::new(Ring {
+                slots,
+                next_seq: 1,
+                generation: 0,
+            })),
             stats: Arc::new(Mutex::new(Stats::default())),
             frame_ready_cb: Arc::new(FrameReadyCallback {
                 func: Mutex::new(None),
@@ -188,6 +183,40 @@ impl Context {
             surfaces,
             _mtl_device: mtl_device,
         })
+    }
+
+    /// Rebuild the ring at a new size. Must be called from the same thread as
+    /// `render` (the host loop). Blocks until in-flight GPU work is done, so
+    /// no old buffer is being written when it is released. Old IOSurfaces
+    /// stay alive as long as the presenter still holds them (CF refcount);
+    /// the host must re-wrap the new surfaces (`iosurface_ptr`) before it
+    /// renders again. After this call nothing is Presented, so
+    /// `acquire_presented` returns -1 until a new frame is ready.
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        if width == self.width && height == self.height {
+            return Ok(());
+        }
+        let t0 = Instant::now();
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        let count = self.surfaces.len() as u32;
+        let (slots, surfaces) = build_ring(&self.device, &self._mtl_device, width, height, count)?;
+        {
+            let mut ring = self.ring.lock().unwrap();
+            ring.slots = slots;
+            ring.generation += 1;
+        }
+        self.surfaces = surfaces;
+        self.renderer.resize(&self.device, width, height);
+        self.width = width;
+        self.height = height;
+        let mut st = self.stats.lock().unwrap();
+        st.resizes += 1;
+        st.resize_us.push(t0.elapsed().as_micros() as u32);
+        Ok(())
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
     }
 
     pub fn iosurface_ptr(&self, index: u32) -> *const c_void {
@@ -201,7 +230,7 @@ impl Context {
     /// if every buffer is in use (the frame is dropped).
     pub fn render(&self, time_secs: f32) -> i32 {
         let t0 = Instant::now();
-        let (index, seq) = {
+        let (index, seq, generation) = {
             let mut ring = self.ring.lock().unwrap();
             let Some(i) = ring.slots.iter().position(|s| s.state == BufferState::Free) else {
                 self.stats.lock().unwrap().frames_dropped_no_free_buffer += 1;
@@ -211,7 +240,7 @@ impl Context {
             ring.next_seq += 1;
             ring.slots[i].state = BufferState::Rendering;
             ring.slots[i].seq = seq;
-            (i, seq)
+            (i, seq, ring.generation)
         };
 
         self.renderer
@@ -234,10 +263,12 @@ impl Context {
         let mark_ready = move || {
             {
                 let mut ring = ring.lock().unwrap();
-                let slot = &mut ring.slots[index];
-                // A resize may have recycled the slot; only promote our own frame.
-                if slot.state == BufferState::Rendering && slot.seq == seq {
-                    slot.state = BufferState::Ready;
+                // A resize may have replaced the ring; only promote our own frame.
+                if ring.generation == generation {
+                    let slot = &mut ring.slots[index];
+                    if slot.state == BufferState::Rendering && slot.seq == seq {
+                        slot.state = BufferState::Ready;
+                    }
                 }
             }
             stats
@@ -329,6 +360,32 @@ fn pollster_block<F: std::future::Future>(f: F) -> F::Output {
         }
         std::thread::sleep(Duration::from_micros(50));
     }
+}
+
+type RingParts = (Vec<Slot>, Vec<CFRetained<IOSurfaceRef>>);
+
+fn build_ring(
+    device: &wgpu::Device,
+    mtl_device: &ProtocolObject<dyn MTLDevice>,
+    width: u32,
+    height: u32,
+    buffer_count: u32,
+) -> Result<RingParts, String> {
+    let mut slots = Vec::with_capacity(buffer_count as usize);
+    let mut surfaces = Vec::with_capacity(buffer_count as usize);
+    for i in 0..buffer_count {
+        let surface = create_iosurface(width, height)?;
+        let texture = import_iosurface(device, mtl_device, &surface, width, height, i)?;
+        let view = texture.create_view(&Default::default());
+        slots.push(Slot {
+            state: BufferState::Free,
+            seq: 0,
+            _texture: texture,
+            view,
+        });
+        surfaces.push(surface);
+    }
+    Ok((slots, surfaces))
 }
 
 fn create_iosurface(width: u32, height: u32) -> Result<CFRetained<IOSurfaceRef>, String> {
@@ -457,6 +514,21 @@ pub unsafe extern "C" fn fynkel_m0_destroy(ctx: *mut Context) {
     }
 }
 
+/// Returns 0 on success, -1 on failure (the old ring is kept on failure).
+/// # Safety
+/// `ctx` must be a live context; call from the render thread only.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_m0_resize(ctx: *mut Context, width: u32, height: u32) -> i32 {
+    let Some(c) = ctx.as_mut() else { return -1 };
+    match c.resize(width.max(1), height.max(1)) {
+        Ok(()) => 0,
+        Err(e) => {
+            log::error!("fynkel_m0_resize failed: {e}");
+            -1
+        }
+    }
+}
+
 /// # Safety
 /// `ctx` must be a live context.
 #[no_mangle]
@@ -505,6 +577,9 @@ pub struct M0Stats {
     pub gpu_complete_p50_us: u32,
     pub gpu_complete_p95_us: u32,
     pub gpu_complete_p99_us: u32,
+    pub resizes: u64,
+    pub resize_p50_us: u32,
+    pub resize_max_us: u32,
 }
 
 fn pct(v: &mut [u32], q: f64) -> u32 {
@@ -535,6 +610,9 @@ pub unsafe extern "C" fn fynkel_m0_take_stats(ctx: *const Context, out: *mut M0S
         gpu_complete_p50_us: pct(&mut s.gpu_complete_us, 0.50),
         gpu_complete_p95_us: pct(&mut s.gpu_complete_us, 0.95),
         gpu_complete_p99_us: pct(&mut s.gpu_complete_us, 0.99),
+        resizes: s.resizes,
+        resize_p50_us: pct(&mut s.resize_us, 0.50),
+        resize_max_us: pct(&mut s.resize_us, 1.0),
     };
 }
 
@@ -628,5 +706,38 @@ mod tests {
             assert_eq!(st.frames_presented, 2);
             assert!(st.cpu_us.len() == 5);
         }
+    }
+
+    #[test]
+    fn resize_rebuilds_ring_and_ignores_stale_completions() {
+        let mut ctx = Context::new(128, 128, 3, SyncMode::Async).expect("context");
+        let old_surface = ctx.iosurface_ptr(0);
+        assert_eq!(ctx.render(0.0), 0);
+        assert_eq!(ctx.render(0.1), 1);
+        // Resize while frames 0 and 1 may still be in flight.
+        ctx.resize(256, 192).expect("resize");
+        assert_eq!(ctx.size(), (256, 192));
+        assert_ne!(ctx.iosurface_ptr(0), old_surface, "new surfaces");
+        // Stale completions must not have promoted anything.
+        let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(
+            ctx.acquire_presented(),
+            -1,
+            "nothing presented after resize"
+        );
+        // Rendering into the new ring works and produces the right-sized frame.
+        assert_eq!(ctx.render(0.2), 0);
+        let _ = ctx.device.poll(wgpu::PollType::wait_indefinitely());
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(ctx.acquire_presented(), 0);
+        assert_eq!(ctx.read_pixel(0, 2, 2).unwrap(), clear_bgra());
+        assert_ne!(ctx.read_pixel(0, 128, 96).unwrap(), clear_bgra());
+        assert!(ctx.read_pixel(0, 255, 191).is_some());
+        // Same size is a no-op.
+        ctx.resize(256, 192).expect("noop resize");
+        let st = ctx.take_stats();
+        assert_eq!(st.resizes, 1);
+        assert_eq!(st.frames_rendered, 3);
     }
 }
