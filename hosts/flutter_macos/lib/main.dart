@@ -187,6 +187,15 @@ class _ViewportPageState extends State<ViewportPage>
   final List<String> _events = [];
   final _clock = Stopwatch()..start();
 
+  // Input harness (M0 backlog #9): what the engine would receive.
+  final _viewportFocus = FocusNode(debugLabel: 'viewport');
+  final _hudTextFocus = FocusNode(debugLabel: 'hud-text');
+  final Set<String> _keysDown = {};
+  String _pointer = '-';
+  int _pointerEventsThisWindow = 0;
+  int _viewportClicks = 0;
+  int _keyEventsToViewport = 0;
+
   void _log(String msg) {
     final line = '${(_clock.elapsedMilliseconds / 1000).toStringAsFixed(2)}s $msg';
     debugPrint('[m0] $line');
@@ -199,7 +208,40 @@ class _ViewportPageState extends State<ViewportPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _statsTimer = Timer.periodic(const Duration(seconds: 1), (_) => _reportStats());
+    _viewportFocus.addListener(() => _log('viewport focus=${_viewportFocus.hasFocus}'));
+    _hudTextFocus.addListener(() => _log('hud text focus=${_hudTextFocus.hasFocus}'));
     _log('init generation=${widget.generation}');
+  }
+
+  // ---- input -----------------------------------------------------------------
+
+  KeyEventResult _onViewportKey(FocusNode node, KeyEvent e) {
+    final k = e.logicalKey.keyLabel.isEmpty ? e.logicalKey.debugName ?? '?' : e.logicalKey.keyLabel;
+    if (e is KeyDownEvent) {
+      _keysDown.add(k);
+      _keyEventsToViewport++;
+      _log('key down $k (viewport)');
+    } else if (e is KeyUpEvent) {
+      _keysDown.remove(k);
+    }
+    // The engine consumes game keys; everything else bubbles (menus, ⌘Q).
+    return e.logicalKey.keyLabel.length == 1 ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
+  void _onPointer(PointerEvent e) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    // Local logical → viewport physical pixels: the engine's coordinate space.
+    final px = (e.localPosition.dx * dpr).round();
+    final py = (e.localPosition.dy * dpr).round();
+    _pointer = '$px,$py (${e.runtimeType})';
+    _pointerEventsThisWindow++;
+    if (e is PointerDownEvent) {
+      _viewportClicks++;
+      // Deferred: a focused TextField's tap-outside handler unfocuses *in the
+      // same dispatch* and would win over a synchronous requestFocus here.
+      Future.microtask(_viewportFocus.requestFocus);
+      _log('pointer down on viewport at $px,$py → focus viewport');
+    }
   }
 
   // ---- lifecycle -----------------------------------------------------------
@@ -255,6 +297,8 @@ class _ViewportPageState extends State<ViewportPage>
       setState(() => _textureId = id);
       _ticker = createTicker(_onTick)..start();
       _log('created ${width}x$height texture=$id');
+      // A game host wants the world to own keyboard focus until a HUD widget takes it.
+      _viewportFocus.requestFocus();
     } catch (e) {
       setState(() => _error = '$e');
     } finally {
@@ -299,6 +343,8 @@ class _ViewportPageState extends State<ViewportPage>
     _ticker?.dispose();
     _ticker = null;
     _statsTimer?.cancel();
+    _viewportFocus.dispose();
+    _hudTextFocus.dispose();
     if (_ctx != nullptr) {
       final ctx = _ctx;
       _ctx = nullptr;
@@ -363,12 +409,14 @@ class _ViewportPageState extends State<ViewportPage>
         'resizes=${s.resizes} rust resize ms p50=${s.resizeP50Ms.toStringAsFixed(2)} max=${s.resizeMaxMs.toStringAsFixed(2)}',
         if (swift != null)
           'swift copyPixelBuffer=${swift["copyCalls"]} newFrame=${swift["copyWithNewFrame"]} noFrame=${swift["copyNoFrame"]} readySignals=${swift["frameReadySignals"]} rebinds=${swift["rebinds"]}',
+        'input: pointer=$_pointer events/s=$_pointerEventsThisWindow clicks=$_viewportClicks  keysDown=${_keysDown.toList()} keyEvents=$_keyEventsToViewport  focus=${FocusManager.instance.primaryFocus?.debugLabel ?? "?"}',
         '--- events',
         ..._events,
       ].join('\n');
     });
+    _pointerEventsThisWindow = 0;
     // Also print for scripted captures (benchmarks/m0).
-    debugPrint('[m0] ${_statsText.split('\n').take(9).join(' | ')}');
+    debugPrint('[m0] ${_statsText.split('\n').take(10).join(' | ')}');
   }
 
   static String _p(List<double> sorted, double q) {
@@ -389,7 +437,20 @@ class _ViewportPageState extends State<ViewportPage>
           fit: StackFit.expand,
           children: [
             if (_textureId != null)
-              Texture(textureId: _textureId!, filterQuality: FilterQuality.none)
+              // The viewport is an ordinary Flutter layer: pointer events and
+              // keyboard focus are handled by normal Flutter widgets around it.
+              Focus(
+                focusNode: _viewportFocus,
+                onKeyEvent: _onViewportKey,
+                child: Listener(
+                  onPointerDown: _onPointer,
+                  onPointerMove: _onPointer,
+                  onPointerHover: _onPointer,
+                  onPointerUp: _onPointer,
+                  behavior: HitTestBehavior.opaque,
+                  child: Texture(textureId: _textureId!, filterQuality: FilterQuality.none),
+                ),
+              )
             else
               Center(child: Text(_error ?? 'creating viewport…', textAlign: TextAlign.center)),
             // Flutter overlay: this is the "HUD over the 3D world" the gate requires.
@@ -416,9 +477,20 @@ class _ViewportPageState extends State<ViewportPage>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  SizedBox(
+                    width: 180,
+                    child: TextField(
+                      focusNode: _hudTextFocus,
+                      decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: 'HUD text field'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
                   Text('clicks: $_clicks   ', style: const TextStyle(fontFamily: 'Menlo')),
                   FilledButton.icon(
-                    onPressed: () => setState(() => _clicks++),
+                    onPressed: () {
+                      setState(() => _clicks++);
+                      _log('HUD button click #$_clicks');
+                    },
                     icon: const Icon(Icons.touch_app),
                     label: const Text('Flutter button over 3D'),
                   ),
