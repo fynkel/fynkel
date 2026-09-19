@@ -186,3 +186,107 @@ class M0StatsSnapshot {
   final int presentLagP50, presentLagP95, presentLagMax;
   final double cpuP50Ms, cpuP95Ms, cpuP99Ms, gpuP50Ms, gpuP95Ms, gpuP99Ms, resizeP50Ms, resizeMaxMs;
 }
+
+// ---- Path C: engine-owned CAMetalLayer surface (fynkel_m0::surface) --------
+
+final class M0SurfaceStats extends Struct {
+  @Uint64()
+  external int frames;
+  @Uint64()
+  external int skipped;
+  @Uint64()
+  external int resizes;
+  @Uint32()
+  external int intervalP50Us;
+  @Uint32()
+  external int intervalP95Us;
+  @Uint32()
+  external int intervalP99Us;
+  @Uint32()
+  external int acquireP50Us;
+  @Uint32()
+  external int acquireP95Us;
+  @Uint32()
+  external int acquireP99Us;
+  @Uint32()
+  external int cpuP50Us;
+  @Uint32()
+  external int cpuP95Us;
+  @Uint32()
+  external int cpuP99Us;
+  @Uint32()
+  external int resizeP50Us;
+  @Uint32()
+  external int resizeMaxUs;
+}
+
+typedef _SurfaceCreateC = Pointer<Void> Function(Pointer<Void>, Uint32, Uint32);
+typedef _SurfaceCreateDart = Pointer<Void> Function(Pointer<Void>, int, int);
+typedef _SurfaceResizeC = Void Function(Pointer<Void>, Uint32, Uint32);
+typedef _SurfaceResizeDart = void Function(Pointer<Void>, int, int);
+typedef _SurfacePauseC = Void Function(Pointer<Void>, Int32);
+typedef _SurfacePauseDart = void Function(Pointer<Void>, int);
+typedef _SurfaceStatsC = Void Function(Pointer<Void>, Pointer<M0SurfaceStats>);
+typedef _SurfaceStatsDart = void Function(Pointer<Void>, Pointer<M0SurfaceStats>);
+
+class M0SurfaceNative {
+  M0SurfaceNative(String libraryPath) : _lib = DynamicLibrary.open(libraryPath) {
+    _create = _lib.lookupFunction<_SurfaceCreateC, _SurfaceCreateDart>('fynkel_m0_surface_create');
+    _destroy = _lib.lookupFunction<_DestroyC, _DestroyDart>('fynkel_m0_surface_destroy');
+    _resize = _lib.lookupFunction<_SurfaceResizeC, _SurfaceResizeDart>('fynkel_m0_surface_resize');
+    _setPaused = _lib.lookupFunction<_SurfacePauseC, _SurfacePauseDart>('fynkel_m0_surface_set_paused');
+    _takeStats = _lib.lookupFunction<_SurfaceStatsC, _SurfaceStatsDart>('fynkel_m0_surface_take_stats');
+  }
+
+  final DynamicLibrary _lib;
+  late final _SurfaceCreateDart _create;
+  late final _DestroyDart _destroy;
+  late final _SurfaceResizeDart _resize;
+  late final _SurfacePauseDart _setPaused;
+  late final _SurfaceStatsDart _takeStats;
+
+  /// [layerAddress] is a CAMetalLayer the host keeps alive; starts the engine's
+  /// render thread immediately.
+  Pointer<Void> create({required int layerAddress, required int width, required int height}) =>
+      _create(Pointer.fromAddress(layerAddress), width, height);
+  void destroy(Pointer<Void> ctx) => _destroy(ctx);
+  void resize(Pointer<Void> ctx, int width, int height) => _resize(ctx, width, height);
+  void setPaused(Pointer<Void> ctx, bool paused) => _setPaused(ctx, paused ? 1 : 0);
+
+  M0SurfaceStatsSnapshot takeStats(Pointer<Void> ctx) {
+    final out = calloc<M0SurfaceStats>();
+    try {
+      _takeStats(ctx, out);
+      final s = out.ref;
+      return M0SurfaceStatsSnapshot(
+        frames: s.frames,
+        skipped: s.skipped,
+        resizes: s.resizes,
+        intervalMs: [s.intervalP50Us / 1000, s.intervalP95Us / 1000, s.intervalP99Us / 1000],
+        acquireMs: [s.acquireP50Us / 1000, s.acquireP95Us / 1000, s.acquireP99Us / 1000],
+        cpuMs: [s.cpuP50Us / 1000, s.cpuP95Us / 1000, s.cpuP99Us / 1000],
+        resizeP50Ms: s.resizeP50Us / 1000,
+        resizeMaxMs: s.resizeMaxUs / 1000,
+      );
+    } finally {
+      calloc.free(out);
+    }
+  }
+}
+
+class M0SurfaceStatsSnapshot {
+  const M0SurfaceStatsSnapshot({
+    required this.frames,
+    required this.skipped,
+    required this.resizes,
+    required this.intervalMs,
+    required this.acquireMs,
+    required this.cpuMs,
+    required this.resizeP50Ms,
+    required this.resizeMaxMs,
+  });
+  final int frames, skipped, resizes;
+  /// p50, p95, p99.
+  final List<double> intervalMs, acquireMs, cpuMs;
+  final double resizeP50Ms, resizeMaxMs;
+}

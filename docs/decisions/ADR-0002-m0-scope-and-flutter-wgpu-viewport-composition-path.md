@@ -1,6 +1,6 @@
 # ADR-0002: M0 scope and Flutter/wgpu viewport composition path
 
-**Status:** Accepted (Path A numbers measured 2026-09-19; fallback column pending Path C prototype)  
+**Status:** Accepted (Path A and Path C measured 2026-09-19; Path A selected, Path C kept as fallback)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
@@ -36,18 +36,21 @@ Removed from M0: any second graphics backend, the Wasm/WebGPU spike, `fynkel_ecs
 
 M0 is answerable in weeks, not months. Windows risk is deferred to post-1.0 with a periodic `cargo check` as the only guard. Skia is not verified. Measured numbers to be appended:
 
-| Metric (mac-m3max-2026, 120 Hz, 1600×1200 physical viewport) | Standalone | Path A | Fallback (Path C) |
+| Metric (mac-m3max-2026, 120 Hz, ~2400×1480 physical viewport) | Standalone | Path A | Fallback (Path C) |
 | --- | --- | --- | --- |
-| presented interval p95 | 8.67 ms | 8.34 ms (vsync-locked, 0 drops) | _tbd_ |
-| engine CPU encode+submit p95 | 0.137 ms | 0.14 ms | _tbd_ |
-| added composition overhead p95 (Flutter raster thread) | — | **~0.1 ms** CPU (raster 0.21 → 0.33 ms) + optional 0.64 ms bounded wait for lag 0 | _tbd_ |
-| Flutter frame total p95 (UI build + raster) | — | 0.25 + 0.94 ms | _tbd_ |
-| copies per frame | 0 | **0** | _tbd_ |
-| presentation latency (frames behind the tick's frame) | 0 | **0** with consumer-side wait; 1 without | _tbd_ |
-| resize cost | — | ~1 ms, no drops | _tbd_ |
+| presented interval p95 | 8.67 ms | 8.34 ms (vsync-locked, 0 drops) | 8.67 ms (own swapchain, vsync-locked, 0 skips) |
+| engine CPU encode+submit p95 | 0.14 ms | 0.14 ms | 0.22 ms (engine thread competes with Flutter's raster thread) |
+| added composition overhead p95 (Flutter raster thread) | — | **~0.1 ms** CPU (raster 0.21 → 0.33 ms) + optional 0.64 ms bounded wait for lag 0 | **~0.06 ms** CPU (raster 0.23 → 0.29 ms); window-server blend of a second layer not measurable in-process |
+| Flutter frame total p95 (UI build + raster) | — | 0.34 + 0.95 ms | 0.19 + 0.29 ms |
+| copies per frame | 0 | **0** | **0** |
+| presentation latency (frames behind the tick's frame) | 0 | **0** with consumer-side wait; 1 without | 0 for the world (standalone-equivalent); HUD and world are **not frame-synchronized** (≤ 1 frame apart) |
+| resize cost | — | ~1 ms, no drops | 0.1–1.1 ms surface reconfigure; engine rect follows Flutter layout one frame late |
+
+Both paths are readback-free and inside the composition budget. **Path A is selected**: the world is an ordinary Flutter layer (same-frame composition with the HUD, clipping/effects/scrolling, several viewports for the editor) at ≈0.7 ms more raster-thread time per frame, most of it the optional bounded wait that buys lag 0. Path C stays the production fallback: it is cheaper on Flutter's threads and decouples the engine loop from Flutter entirely, but the world is an opaque rectangle outside Flutter's layer tree, HUD and world can land one frame apart, and the host must keep AppKit's responder chain intact (see `benchmarks/m0/path-c.md`).
 
 Sources: `benchmarks/m0/standalone-baseline.md`, `benchmarks/m0/flutter-path-a.md`,
-`benchmarks/m0/lifecycle-harness.md`, `benchmarks/m0/latency-and-sync.md`.
+`benchmarks/m0/lifecycle-harness.md`, `benchmarks/m0/latency-and-sync.md`, `benchmarks/m0/path-c.md`,
+`benchmarks/m0/results/2026-09-19-f958917.md` (captured by `benchmarks/m0/capture.py`).
 
 **Measured synchronization design (supersedes the sketch above).** The ring
 is 4 IOSurface-backed `MTLTexture`s created via `newTextureWithDescriptor:iosurface:plane:`

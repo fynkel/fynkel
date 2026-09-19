@@ -10,6 +10,7 @@
 
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -18,6 +19,17 @@ import 'package:flutter/services.dart';
 import 'm0_ffi.dart';
 
 const _bufferCount = 4;
+
+/// Host mode: `a` (default) = Path A Texture viewport, `c` = Path C
+/// (engine-owned CAMetalLayer under a transparent Flutter view; the Swift
+/// side reads the same variable), `none` = no viewport (control).
+/// `FYNKEL_M0_MODE` env var at runtime, else the dart-define.
+final String hostMode = () {
+  final env = Platform.environment['FYNKEL_M0_MODE'];
+  if (env != null && env.isNotEmpty) return env;
+  if (const bool.fromEnvironment('FYNKEL_M0_NO_VIEWPORT')) return 'none';
+  return const String.fromEnvironment('FYNKEL_M0_MODE', defaultValue: 'a');
+}();
 
 void main() {
   runApp(const M0App());
@@ -29,8 +41,11 @@ class M0App extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Fynkel — Flutter host (M0 Path A)',
-      theme: ThemeData.dark(useMaterial3: true),
+      title: 'Fynkel — Flutter host (M0 Path ${hostMode.toUpperCase()})',
+      theme: ThemeData.dark(useMaterial3: true).copyWith(
+        // Path C: Flutter is a transparent layer over the engine's surface.
+        scaffoldBackgroundColor: hostMode == 'c' ? Colors.transparent : null,
+      ),
       home: const HostPage(),
     );
   }
@@ -47,7 +62,8 @@ class HostPage extends StatefulWidget {
 
 class _HostPageState extends State<HostPage> {
   final _viewportKey = GlobalKey<_ViewportPageState>();
-  bool _showViewport = !const bool.fromEnvironment('FYNKEL_M0_NO_VIEWPORT');
+  final _pathCKey = GlobalKey<_PathCPageState>();
+  bool _showViewport = hostMode != 'none';
   double _inset = 0;
   int _generation = 0;
 
@@ -87,7 +103,7 @@ class _HostPageState extends State<HostPage> {
     if (!mounted) return;
     setState(() {
       _timingsText =
-          'flutter frames n=${r.length} viewport=${_showViewport ? "on" : "off"}  ui build ms p50=${_ViewportPageState._p(b, .5)} p95=${_ViewportPageState._p(b, .95)}  raster ms p50=${_ViewportPageState._p(r, .5)} p95=${_ViewportPageState._p(r, .95)} p99=${_ViewportPageState._p(r, .99)}';
+          'flutter frames n=${r.length} viewport=${_showViewport ? hostMode : "off"}  ui build ms p50=${_ViewportPageState._p(b, .5)} p95=${_ViewportPageState._p(b, .95)}  raster ms p50=${_ViewportPageState._p(r, .5)} p95=${_ViewportPageState._p(r, .95)} p99=${_ViewportPageState._p(r, .99)}';
     });
     debugPrint('[m0] $_timingsText');
   }
@@ -96,6 +112,7 @@ class _HostPageState extends State<HostPage> {
     if (_showViewport) {
       // Ordered teardown *before* the widget goes away; see ViewportPage.teardown.
       await _viewportKey.currentState?.teardown();
+      await _pathCKey.currentState?.teardown();
       setState(() => _showViewport = false);
     } else {
       setState(() {
@@ -113,9 +130,11 @@ class _HostPageState extends State<HostPage> {
           Expanded(
             child: Padding(
               padding: EdgeInsets.all(_inset),
-              child: _showViewport
-                  ? ViewportPage(key: _viewportKey, generation: _generation)
-                  : const Center(child: Text('viewport destroyed')),
+              child: !_showViewport
+                  ? const Center(child: Text('viewport destroyed'))
+                  : hostMode == 'c'
+                      ? PathCPage(key: _pathCKey, generation: _generation)
+                      : ViewportPage(key: _viewportKey, generation: _generation),
             ),
           ),
           Padding(
@@ -506,6 +525,282 @@ class _ViewportPageState extends State<ViewportPage>
           ],
         );
       },
+    );
+  }
+}
+
+/// Path C page (backlog #7): no Texture widget. The engine's CAMetalLayer is
+/// under the whole window; this page is the transparent HUD on top and the
+/// owner of the Rust surface context. Its size drives the engine's drawable
+/// size only indirectly (the Swift host reports the engine view's frame).
+class PathCPage extends StatefulWidget {
+  const PathCPage({super.key, required this.generation});
+  final int generation;
+
+  @override
+  State<PathCPage> createState() => _PathCPageState();
+}
+
+class _PathCPageState extends State<PathCPage> with WidgetsBindingObserver {
+  static const _channel = MethodChannel('fynkel/m0/pathc');
+
+  M0SurfaceNative? _native;
+  Pointer<Void> _ctx = nullptr;
+  String? _error;
+  int _width = 0, _height = 0;
+  double _scale = 0;
+  bool _tornDown = false;
+  bool _paused = false;
+
+  Timer? _statsTimer;
+  String _statsText = 'starting…';
+  int _clicks = 0;
+  final List<String> _events = [];
+  final _clock = Stopwatch()..start();
+
+  final _viewportFocus = FocusNode(debugLabel: 'viewport');
+  final _hudTextFocus = FocusNode(debugLabel: 'hud-text');
+  final Set<String> _keysDown = {};
+  String _pointer = '-';
+  int _pointerEventsThisWindow = 0;
+  int _viewportClicks = 0;
+  int _keyEventsToViewport = 0;
+
+  void _log(String msg) {
+    final line = '${(_clock.elapsedMilliseconds / 1000).toStringAsFixed(2)}s $msg';
+    debugPrint('[m0] $line');
+    _events.add(line);
+    if (_events.length > 6) _events.removeAt(0);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _channel.setMethodCallHandler(_onHostCall);
+    _statsTimer = Timer.periodic(const Duration(seconds: 1), (_) => _reportStats());
+    _viewportFocus.addListener(() => _log('viewport focus=${_viewportFocus.hasFocus}'));
+    _hudTextFocus.addListener(() => _log('hud text focus=${_hudTextFocus.hasFocus}'));
+    _log('init path C generation=${widget.generation}');
+    _create();
+  }
+
+  Future<void> _create() async {
+    try {
+      _native ??= M0SurfaceNative(M0Native.defaultLibraryPath());
+      final info = await _channel.invokeMapMethod<String, dynamic>('attach');
+      if (info == null || _tornDown) return;
+      _width = info['width'] as int;
+      _height = info['height'] as int;
+      _scale = (info['scale'] as num).toDouble();
+      final ctx = _native!.create(layerAddress: info['layer'] as int, width: _width, height: _height);
+      if (ctx == nullptr) throw StateError('fynkel_m0_surface_create failed');
+      _ctx = ctx;
+      _log('surface ${_width}x$_height @${_scale}x, engine render thread started');
+      setState(() {});
+      _viewportFocus.requestFocus();
+    } catch (e) {
+      setState(() => _error = '$e');
+    }
+  }
+
+  Future<dynamic> _onHostCall(MethodCall call) async {
+    switch (call.method) {
+      case 'resized':
+        _applySize((call.arguments as Map).cast<String, dynamic>(), 'host view resized');
+      case 'visibility':
+        _setPaused(!(call.arguments as bool), 'window ${call.arguments == true ? "deminiaturized" : "miniaturized"}');
+    }
+  }
+
+  void _applySize(Map<String, dynamic> a, String why) {
+    final w = a['width'] as int, h = a['height'] as int;
+    final s = (a['scale'] as num).toDouble();
+    if (_ctx != nullptr && (w != _width || h != _height || s != _scale)) {
+      _width = w;
+      _height = h;
+      _scale = s;
+      _native!.resize(_ctx, w, h);
+      _log('$why → ${w}x$h @${s}x');
+    }
+  }
+
+  /// Re-reads the engine view's size from the host; catches a frame change
+  /// that raced the attach.
+  Future<void> _syncSize(String why) async {
+    if (_ctx == nullptr) return;
+    final a = await _channel.invokeMapMethod<String, dynamic>('size');
+    if (a != null && !_tornDown) _applySize(a, why);
+  }
+
+  void _setPaused(bool paused, String why) {
+    if (_ctx == nullptr || paused == _paused) return;
+    _paused = paused;
+    _native!.setPaused(_ctx, paused);
+    _log('${paused ? "paused" : "resumed"} engine loop: $why');
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _log('lifecycle $state');
+    _setPaused(state == AppLifecycleState.hidden || state == AppLifecycleState.paused, '$state');
+  }
+
+  @override
+  void didChangeMetrics() => _syncSize('metrics changed');
+
+  KeyEventResult _onViewportKey(FocusNode node, KeyEvent e) {
+    final k = e.logicalKey.keyLabel.isEmpty ? e.logicalKey.debugName ?? '?' : e.logicalKey.keyLabel;
+    if (e is KeyDownEvent) {
+      _keysDown.add(k);
+      _keyEventsToViewport++;
+      _log('key down $k (viewport)');
+    } else if (e is KeyUpEvent) {
+      _keysDown.remove(k);
+    }
+    return e.logicalKey.keyLabel.length == 1 ? KeyEventResult.handled : KeyEventResult.ignored;
+  }
+
+  void _onPointer(PointerEvent e) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final px = (e.localPosition.dx * dpr).round();
+    final py = (e.localPosition.dy * dpr).round();
+    _pointer = '$px,$py (${e.runtimeType})';
+    _pointerEventsThisWindow++;
+    if (e is PointerDownEvent) {
+      _viewportClicks++;
+      Future.microtask(_viewportFocus.requestFocus);
+      _log('pointer down on viewport at $px,$py → focus viewport');
+    }
+  }
+
+  void _reportStats() {
+    if (_ctx == nullptr) return;
+    _syncSize('size poll');
+    final s = _native!.takeStats(_ctx);
+    if (!mounted) return;
+    String t(List<double> v, [int d = 2]) =>
+        'p50=${v[0].toStringAsFixed(d)} p95=${v[1].toStringAsFixed(d)} p99=${v[2].toStringAsFixed(d)}';
+    setState(() {
+      _statsText = [
+        'path C surface ${_width}x$_height @${_scale}x  paused=$_paused  (engine thread, Fifo)',
+        'engine present interval ms ${t(s.intervalMs)}  (n=${s.frames}, skipped=${s.skipped})',
+        'engine acquire wait ms     ${t(s.acquireMs)}',
+        'engine cpu encode+submit   ${t(s.cpuMs, 3)}',
+        'resizes=${s.resizes} rust resize ms p50=${s.resizeP50Ms.toStringAsFixed(2)} max=${s.resizeMaxMs.toStringAsFixed(2)}',
+        'input: pointer=$_pointer events/s=$_pointerEventsThisWindow clicks=$_viewportClicks  keysDown=${_keysDown.toList()} keyEvents=$_keyEventsToViewport  focus=${FocusManager.instance.primaryFocus?.debugLabel ?? "?"}',
+        '--- events',
+        ..._events,
+      ].join('\n');
+    });
+    _pointerEventsThisWindow = 0;
+    debugPrint('[m0] ${_statsText.split('\n').take(6).join(' | ')}');
+  }
+
+  /// Ordered teardown: stop stats → Swift stops reporting → join the engine
+  /// thread and release the surface (the layer itself stays with the host).
+  Future<void> teardown() async {
+    if (_tornDown) return;
+    _tornDown = true;
+    _statsTimer?.cancel();
+    _viewportFocus.dispose();
+    _hudTextFocus.dispose();
+    if (_ctx != nullptr) {
+      final ctx = _ctx;
+      _ctx = nullptr;
+      await _channel.invokeMethod('detach');
+      _native!.destroy(ctx);
+      _log('destroyed');
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _channel.setMethodCallHandler(null);
+    teardown();
+    super.dispose();
+  }
+
+  Rect? _reportedRect;
+
+  /// Tells the host where this widget is so the engine view follows Flutter
+  /// layout (shrink/grow, host bar) instead of filling the window.
+  void _reportRect() {
+    if (_ctx == nullptr || !mounted) return;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    if (rect == _reportedRect) return;
+    _reportedRect = rect;
+    _channel.invokeMethod('setFrame', {'x': rect.left, 'y': rect.top, 'w': rect.width, 'h': rect.height});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reportRect());
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (_ctx != nullptr)
+          // Transparent hit target: Flutter's view is on top of the engine
+          // layer, so *all* input arrives here first and is forwarded.
+          Focus(
+            focusNode: _viewportFocus,
+            onKeyEvent: _onViewportKey,
+            child: Listener(
+              onPointerDown: _onPointer,
+              onPointerMove: _onPointer,
+              onPointerHover: _onPointer,
+              onPointerUp: _onPointer,
+              behavior: HitTestBehavior.opaque,
+              child: const SizedBox.expand(),
+            ),
+          )
+        else
+          Center(child: Text(_error ?? 'attaching engine surface…', textAlign: TextAlign.center)),
+        Positioned(
+          left: 16,
+          top: 16,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(_statsText, style: const TextStyle(fontFamily: 'Menlo', fontSize: 12, height: 1.4)),
+            ),
+          ),
+        ),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 180,
+                child: TextField(
+                  focusNode: _hudTextFocus,
+                  decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: 'HUD text field'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text('clicks: $_clicks   ', style: const TextStyle(fontFamily: 'Menlo')),
+              FilledButton.icon(
+                onPressed: () {
+                  setState(() => _clicks++);
+                  _log('HUD button click #$_clicks');
+                },
+                icon: const Icon(Icons.touch_app),
+                label: const Text('Flutter button over 3D'),
+              ),
+            ],
+          ),
+        ),
+        const Positioned(left: 0, right: 0, bottom: 16, child: Center(child: CircularProgressIndicator())),
+      ],
     );
   }
 }

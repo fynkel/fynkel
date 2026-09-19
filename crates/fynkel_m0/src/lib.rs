@@ -17,6 +17,8 @@
 //!   (possibly still sampled by an in-flight Flutter frame), are never
 //!   rendered into.
 
+pub mod surface;
+
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -457,7 +459,7 @@ fn media_time() -> f64 {
     }
 }
 
-fn pollster_block<F: std::future::Future>(f: F) -> F::Output {
+pub(crate) fn pollster_block<F: std::future::Future>(f: F) -> F::Output {
     // Tiny inline executor; avoids pulling pollster into the cdylib.
     use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
     fn noop(_: *const ()) {}
@@ -713,7 +715,7 @@ pub struct M0Stats {
     pub acquire_wait_max_us: u32,
 }
 
-fn pct(v: &mut [u32], q: f64) -> u32 {
+pub(crate) fn pct(v: &mut [u32], q: f64) -> u32 {
     if v.is_empty() {
         return 0;
     }

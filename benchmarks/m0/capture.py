@@ -59,15 +59,7 @@ def environment():
 def build():
     print("building…", flush=True)
     sh(["cargo", "build", "--release", "--workspace"])
-    sh([str(FLUTTER), "build", "macos", "--release", f"--dart-define=FYNKEL_M0_DYLIB={M0_DYLIB}"], cwd=FLUTTER_DIR)
-    sh([str(FLUTTER), "build", "macos", "--release", f"--dart-define=FYNKEL_M0_DYLIB={M0_DYLIB}",
-        "--dart-define=FYNKEL_M0_NO_VIEWPORT=true"], cwd=FLUTTER_DIR)
-    # keep the no-viewport build under a different name
-    src = FLUTTER_APP.parents[2]
-    dst = src.with_name("fynkel_host_flutter_noviewport.app")
-    sh(["rm", "-rf", str(dst)])
-    sh(["cp", "-R", str(src), str(dst)])
-    # rebuild the default (with viewport) as the canonical app
+    # One build serves all host modes; FYNKEL_M0_MODE (a | c | none) is read at runtime.
     sh([str(FLUTTER), "build", "macos", "--release", f"--dart-define=FYNKEL_M0_DYLIB={M0_DYLIB}"], cwd=FLUTTER_DIR)
 
 
@@ -131,7 +123,20 @@ def capture_standalone(warmup, sample):
 def parse_flutter(out):
     windows, frames = [], []
     for line in out.splitlines():
-        if "viewport " in line and "dart tick" in line:
+        if "path C surface" in line:
+            d = {}
+            m = re.search(r"surface (\d+)x(\d+)", line); d["viewport"] = [int(m.group(1)), int(m.group(2))]
+            m = re.search(r"present interval ms p50=" + NUM + " p95=" + NUM + " p99=" + NUM + r"\s+\(n=(\d+), skipped=(\d+)\)", line)
+            if not m or int(m.group(4)) < 30:
+                continue
+            d["interval_ms"] = {"p50": float(m.group(1)), "p95": float(m.group(2)), "p99": float(m.group(3))}
+            d["frames"] = int(m.group(4)); d["skipped"] = int(m.group(5))
+            for key, label in [("acquire_ms", "acquire wait ms"), ("cpu_ms", r"cpu encode\+submit")]:
+                m = re.search(label + r"\s+p50=" + NUM + " p95=" + NUM + " p99=" + NUM, line)
+                if m:
+                    d[key] = {"p50": float(m.group(1)), "p95": float(m.group(2)), "p99": float(m.group(3))}
+            windows.append(d)
+        elif "viewport " in line and "dart tick" in line:
             d = {}
             m = re.search(r"viewport (\d+)x(\d+)", line); d["viewport"] = [int(m.group(1)), int(m.group(2))]
             m = re.search(r"dart tick interval ms\s+p50=" + NUM + " p95=" + NUM + " p99=" + NUM + r"\s+\(n=(\d+)", line)
@@ -152,7 +157,7 @@ def parse_flutter(out):
                 d["raster_acquire_wait_ms"] = {"p50": float(m.group(4)), "p95": float(m.group(5)), "p99": float(m.group(6))}
             windows.append(d)
         elif "flutter frames n=" in line:
-            m = re.search(r"n=(\d+) viewport=(on|off)\s+ui build ms p50=" + NUM + " p95=" + NUM + r"\s+raster ms p50=" + NUM + " p95=" + NUM + " p99=" + NUM, line)
+            m = re.search(r"n=(\d+) viewport=(\w+)\s+ui build ms p50=" + NUM + " p95=" + NUM + r"\s+raster ms p50=" + NUM + " p95=" + NUM + " p99=" + NUM, line)
             if m and int(m.group(1)) >= 30:
                 frames.append({"n": int(m.group(1)), "viewport": m.group(2),
                                "ui_build_ms": {"p50": float(m.group(3)), "p95": float(m.group(4)), "p99": float(m.group(4))},
@@ -160,10 +165,10 @@ def parse_flutter(out):
     return windows, frames
 
 
-def capture_flutter(app, label, warmup, sample):
-    print(f"flutter host ({label})…", flush=True)
-    p = subprocess.Popen([str(app)], cwd=FLUTTER_DIR, env={**os.environ, "RUST_LOG": "info"}, text=True,
-                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+def capture_flutter(app, mode, warmup, sample):
+    print(f"flutter host (mode {mode})…", flush=True)
+    p = subprocess.Popen([str(app)], cwd=FLUTTER_DIR, env={**os.environ, "RUST_LOG": "info", "FYNKEL_M0_MODE": mode},
+                         text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     time.sleep(2.5)
     place_window(app.name)
     time.sleep(0.5)
@@ -176,7 +181,14 @@ def capture_flutter(app, label, warmup, sample):
     windows, frames = parse_flutter(out)
     w, f = windows[warmup:], frames[warmup:]
     res = {"windows_total": len(windows), "flutter_frame_windows_total": len(frames)}
-    if w:
+    if w and "frames" in w[0]:  # path C: engine-thread stats
+        res.update({
+            "viewport_physical": w[-1]["viewport"],
+            "frames_per_s": statistics.median(x["frames"] for x in w),
+            "skipped_total": sum(x["skipped"] for x in w),
+            "interval_ms": agg(w, "interval_ms"), "acquire_ms": agg(w, "acquire_ms"), "rust_cpu_ms": agg(w, "cpu_ms"),
+        })
+    elif w:
         res.update({
             "viewport_physical": w[-1]["viewport"],
             "ticks_per_s": statistics.median(x["ticks"] for x in w),
@@ -209,22 +221,22 @@ def fmt(a, unit="ms"):
 
 
 def markdown(r):
-    s, fv, fn, b = r["standalone"], r["flutter_path_a"], r["flutter_no_viewport"], r["bridge"]
+    s, fv, fc, fn, b = r["standalone"], r["flutter_path_a"], r["flutter_path_c"], r["flutter_no_viewport"], r["bridge"]
     lines = [
         f"# M0 capture {r['environment']['captured_at']} — commit {r['environment']['commit']}{' (dirty)' if r['environment']['dirty'] else ''}",
         "", f"Profile `{r['profile']['profile']}`; warm-up {r['warmup_seconds']} s, sample {r['sample_seconds']} s; "
         "values are p50 / p95 / p99 (median of per-second p50/p95, max of per-second p99).", "",
-        "| Metric | Standalone | Flutter Path A | Flutter, no viewport |", "| --- | --- | --- | --- |",
-        f"| frames or ticks per second | {s.get('frames_per_s')} | {fv.get('ticks_per_s')} | {fn.get('flutter_frames_per_s')} |",
-        f"| presented interval / Dart tick interval | {fmt(s.get('interval_ms'))} | {fmt(fv.get('tick_interval_ms'))} | — |",
-        f"| engine CPU encode+submit | {fmt(s.get('cpu_encode_submit_ms'))} | {fmt(fv.get('rust_cpu_ms'))} | — |",
-        f"| submit → GPU complete | — | {fmt(fv.get('gpu_complete_ms'))} | — |",
-        f"| present lag (frames) | 0 | {fmt(fv.get('present_lag_frames'), '')} | — |",
-        f"| raster-thread acquire wait | — | {fmt(fv.get('raster_acquire_wait_ms'))} | — |",
-        f"| Flutter UI build | — | {fmt(fv.get('ui_build_ms'))} | {fmt(fn.get('ui_build_ms'))} |",
-        f"| Flutter raster | — | {fmt(fv.get('raster_ms'))} | {fmt(fn.get('raster_ms'))} |",
-        f"| dropped / stale presents (sample) | {'—'} | {fv.get('dropped_total')} / {fv.get('stale_presents_total')} | — |",
-        f"| viewport (physical px) | 2560×1440 | {'×'.join(map(str, fv.get('viewport_physical', ['?'])))} | — |",
+        "| Metric | Standalone | Flutter Path A | Flutter Path C | Flutter, no viewport |", "| --- | --- | --- | --- | --- |",
+        f"| frames or ticks per second | {s.get('frames_per_s')} | {fv.get('ticks_per_s')} | {fc.get('frames_per_s')} | {fn.get('flutter_frames_per_s')} |",
+        f"| presented interval / Dart tick interval | {fmt(s.get('interval_ms'))} | {fmt(fv.get('tick_interval_ms'))} | {fmt(fc.get('interval_ms'))} | — |",
+        f"| engine CPU encode+submit | {fmt(s.get('cpu_encode_submit_ms'))} | {fmt(fv.get('rust_cpu_ms'))} | {fmt(fc.get('rust_cpu_ms'))} | — |",
+        f"| submit → GPU complete | — | {fmt(fv.get('gpu_complete_ms'))} | — | — |",
+        f"| present lag (frames) | 0 | {fmt(fv.get('present_lag_frames'), '')} | 0 (own swapchain) | — |",
+        f"| raster-thread acquire wait | — | {fmt(fv.get('raster_acquire_wait_ms'))} | — | — |",
+        f"| Flutter UI build | — | {fmt(fv.get('ui_build_ms'))} | {fmt(fc.get('ui_build_ms'))} | {fmt(fn.get('ui_build_ms'))} |",
+        f"| Flutter raster | — | {fmt(fv.get('raster_ms'))} | {fmt(fc.get('raster_ms'))} | {fmt(fn.get('raster_ms'))} |",
+        f"| dropped / stale presents (sample) | {'—'} | {fv.get('dropped_total')} / {fv.get('stale_presents_total')} | {fc.get('skipped_total')} skipped / — | — |",
+        f"| viewport (physical px) | 2560×1440 | {'×'.join(map(str, fv.get('viewport_physical', ['?'])))} | {'×'.join(map(str, fc.get('viewport_physical', ['?'])))} | — |",
         "", f"Bridge @ {b.get('entities')} entities: encode+submit {b.get('encode_submit_us')} µs, step {b.get('step_us')} µs, "
         f"read {b.get('read_us')} µs per tick; {b.get('in_kib')} KiB in / {b.get('out_kib')} KiB out ({b.get('runtime')}).",
     ]
@@ -242,12 +254,12 @@ def main():
     sample = a.sample or profile["sample_seconds"]
     if not a.skip_build:
         build()
-    noviewport = FLUTTER_APP.parents[3] / "fynkel_host_flutter_noviewport.app/Contents/MacOS/fynkel_host_flutter"
     result = {
         "profile": profile, "environment": environment(), "warmup_seconds": warmup, "sample_seconds": sample,
         "standalone": capture_standalone(warmup, sample),
-        "flutter_path_a": capture_flutter(FLUTTER_APP, "path A", warmup, sample),
-        "flutter_no_viewport": capture_flutter(noviewport, "no viewport", warmup, sample),
+        "flutter_path_a": capture_flutter(FLUTTER_APP, "a", warmup, sample),
+        "flutter_path_c": capture_flutter(FLUTTER_APP, "c", warmup, sample),
+        "flutter_no_viewport": capture_flutter(FLUTTER_APP, "none", warmup, sample),
         "bridge": capture_bridge(),
     }
     stem = f"{dt.date.today().isoformat()}-{result['environment']['commit']}"
