@@ -32,6 +32,16 @@ final String hostMode = () {
   return const String.fromEnvironment('FYNKEL_HOST_MODE', defaultValue: 'viewport');
 }();
 
+/// A project directory to load instead of the Dart demo scene: its startup
+/// scene goes into the world and its cooked cache (`fynkel cook`) feeds the
+/// renderer. `FYNKEL_PROJECT` env var at runtime, else the dart-define.
+final String? projectDir = () {
+  final env = Platform.environment['FYNKEL_PROJECT'];
+  if (env != null && env.isNotEmpty) return env;
+  const define = String.fromEnvironment('FYNKEL_PROJECT');
+  return define.isEmpty ? null : define;
+}();
+
 void main() {
   runApp(const HostApp());
 }
@@ -177,6 +187,7 @@ class _ViewportPageState extends State<ViewportPage>
   // Engine: one dylib serves the engine ABI (package:fynkel) and the viewport ABI.
   World? _world;
   DemoScene? _scene;
+  LoadReport? _project;
   ViewportNative? _viewportNative;
   Pointer<Void> _viewport = nullptr;
   int? _textureId;
@@ -309,13 +320,28 @@ class _ViewportPageState extends State<ViewportPage>
       final world = _world ??= World.create();
       // Release-mode hosts log diagnostics; debug throws (FynkelError).
       world.onDiagnostics = (d) => _log('diagnostics: ${d.join("; ")}');
-      _scene ??= DemoScene(satellites: _satellites);
+      world.onLoadDiagnostics = (d) => _log('load: ${d.join("; ")}');
+      final dir = projectDir;
+      if (dir == null) {
+        _scene ??= DemoScene(satellites: _satellites);
+      } else if (_project == null) {
+        // The scene file, not Dart, decides what exists (blueprint §7).
+        final r = _project = world.loadProject(dir);
+        _log('loaded ${r.projectName}: scene "${r.sceneName}" ${r.entityCount} entities from ${r.scenePath}');
+      }
       final native = _viewportNative ??= ViewportNative();
       final vp = native.create(width: width, height: height, bufferCount: _bufferCount, syncMode: _syncMode);
       if (vp == nullptr) throw StateError('fynkel_apple_viewport_create returned null (see native log)');
       _viewport = vp;
       native.setAcquireWaitUs(vp, _acquireWaitUs);
       native.setCamera(vp, eye: [0, 2.5, 7.5], target: [0, 0, 0]);
+      final cache = _project?.cacheDir;
+      if (cache != null) {
+        native.setPlaceholders(vp, false);
+        if (!native.setAssetCache(vp, cache)) {
+          _log('no cooked cache at $cache — run `fynkel cook --assets ${_project!.assetsDir} --cache $cache`');
+        }
+      }
       final id = await _channel.invokeMethod<int>('registerTexture', {
         'ctx': vp.address,
         'acquireFn': native.acquireFnAddress,
@@ -414,7 +440,8 @@ class _ViewportPageState extends State<ViewportPage>
     _lastTick = elapsed;
 
     final sim = Stopwatch()..start();
-    final plan = world.frame(dt, fixedUpdate: (tick) => _scene!.fixedUpdate(world, tick));
+    final scene = _scene;
+    final plan = world.frame(dt, fixedUpdate: scene == null ? null : (tick) => scene.fixedUpdate(world, tick));
     sim.stop();
     _simMs.add(sim.elapsedMicroseconds / 1000);
     _ticksThisWindow += plan.steps;
@@ -458,7 +485,9 @@ class _ViewportPageState extends State<ViewportPage>
     setState(() {
       _statsText = [
         'viewport ${_width}x$_height  ring=$_bufferCount  mode=${_syncModeNames[_syncMode]} acquireWait=${_acquireWaitUs}us  ticker.muted=${_ticker?.muted}',
-        'world tick=${b.tick} entities=${b.liveEntities} instances=${s.instances}  fixed ticks/s=$ticks missedDeadlines=$missed  bridge calls=${b.ffiCalls} bytes in/out=${b.bytesIn}/${b.bytesOut}',
+        if (_project != null)
+          'project "${_project!.projectName}" scene "${_project!.sceneName}" (${_project!.entityCount} entities, ${_project!.rejectedComponents} rejected)  cache=${_project!.cacheDir}',
+        'world tick=${b.tick} entities=${b.liveEntities} instances=${s.instances} meshes=${s.meshes} placeholders=${s.placeholders} missing=${s.missing} assetErrors=${s.assetErrors} sceneCamera=${s.sceneCamera}  fixed ticks/s=$ticks missedDeadlines=$missed  bridge calls=${b.ffiCalls} bytes in/out=${b.bytesIn}/${b.bytesOut}',
         'dart tick interval ms  p50=${_p(intervals, .5)} p95=${_p(intervals, .95)} p99=${_p(intervals, .99)}  (n=${intervals.length}, skipped while resizing=$skipped)',
         'dart simulate ms       p50=${_p(sim, .5)} p95=${_p(sim, .95)} p99=${_p(sim, .99)}  (gameplay + submit + step + snapshot)',
         'ffi render() call ms   p50=${_p(calls, .5)} p95=${_p(calls, .95)} p99=${_p(calls, .99)}  (extract + encode + submit)',

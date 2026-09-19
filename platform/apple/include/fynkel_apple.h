@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 1
+#define FYNKEL_APPLE_ABI_VERSION 2
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -47,6 +47,12 @@ typedef struct FynkelAppleViewportStats {
   uint32_t acquire_wait_p50_us, acquire_wait_p95_us, acquire_wait_max_us;
   uint32_t instances_last_frame;
   uint32_t frame_ready_signals;
+  /* Last frame: cooked meshes drawn, placeholder cubes, meshes missing
+   * from the cache; assets that failed to load since the cache was set;
+   * whether the scene's own Camera drove the view. */
+  uint32_t meshes_last_frame, placeholders_last_frame, missing_last_frame;
+  uint32_t asset_errors;
+  uint32_t scene_camera;
 } FynkelAppleViewportStats;
 
 typedef void (*FynkelAppleFrameReadyFn)(void *userdata);
@@ -66,6 +72,12 @@ void fynkel_apple_viewport_set_acquire_wait_us(const FynkelAppleViewport *vp, ui
 void fynkel_apple_viewport_set_frame_ready_callback(const FynkelAppleViewport *vp,
                                                     FynkelAppleFrameReadyFn func, void *userdata);
 void fynkel_apple_viewport_take_stats(const FynkelAppleViewport *vp, FynkelAppleViewportStats *out);
+/* Cooked assets (`fynkel cook` cache directory, UTF-8, not NUL-terminated;
+ * NULL/empty clears). 0 on success, -1 when it is not a readable cache. */
+int32_t fynkel_apple_viewport_set_asset_cache(FynkelAppleViewport *vp,
+                                              const uint8_t *dir_utf8, uint32_t dir_len);
+/* Entities without a MeshRenderer draw as placeholder cubes (default on). */
+void fynkel_apple_viewport_set_placeholders(FynkelAppleViewport *vp, int32_t enabled);
 
 /* Presenter (raster) thread: the only call it makes. */
 int32_t fynkel_apple_viewport_acquire_presented(const FynkelAppleViewport *vp);

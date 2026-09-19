@@ -4,11 +4,12 @@
 // is host glue: when `fynkel_flutter` exists it owns this file (generated
 // with ffigen like the engine bindings).
 
+import 'dart:convert';
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-const viewportAbiVersion = 1;
+const viewportAbiVersion = 2;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -57,6 +58,16 @@ final class ViewportStats extends Struct {
   external int instancesLastFrame;
   @Uint32()
   external int frameReadySignals;
+  @Uint32()
+  external int meshesLastFrame;
+  @Uint32()
+  external int placeholdersLastFrame;
+  @Uint32()
+  external int missingLastFrame;
+  @Uint32()
+  external int assetErrors;
+  @Uint32()
+  external int sceneCamera;
 }
 
 final class ViewportCamera extends Struct {
@@ -104,6 +115,10 @@ external void _setCallback(Pointer<Void> vp, Pointer<Void> fn, Pointer<Void> use
 external int _acquirePresented(Pointer<Void> vp);
 @Native<Void Function(Pointer<Void>, Pointer<ViewportStats>)>(symbol: 'fynkel_apple_viewport_take_stats', assetId: _asset)
 external void _takeStats(Pointer<Void> vp, Pointer<ViewportStats> out);
+@Native<Int32 Function(Pointer<Void>, Pointer<Uint8>, Uint32)>(symbol: 'fynkel_apple_viewport_set_asset_cache', assetId: _asset)
+external int _setAssetCache(Pointer<Void> vp, Pointer<Uint8> dir, int len);
+@Native<Void Function(Pointer<Void>, Int32)>(symbol: 'fynkel_apple_viewport_set_placeholders', assetId: _asset)
+external void _setPlaceholders(Pointer<Void> vp, int enabled);
 
 class ViewportNative {
   ViewportNative() {
@@ -156,6 +171,23 @@ class ViewportNative {
     }
   }
 
+  /// Points the renderer at a `fynkel cook` cache directory (null clears).
+  /// False when the directory is not a readable cache.
+  bool setAssetCache(Pointer<Void> vp, String? dir) {
+    if (dir == null || dir.isEmpty) return _setAssetCache(vp, nullptr, 0) == 0;
+    final bytes = utf8.encode(dir);
+    final p = calloc<Uint8>(bytes.length + 1);
+    try {
+      p.asTypedList(bytes.length).setAll(0, bytes);
+      return _setAssetCache(vp, p, bytes.length) == 0;
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// Whether entities without a MeshRenderer draw as placeholder cubes.
+  void setPlaceholders(Pointer<Void> vp, bool enabled) => _setPlaceholders(vp, enabled ? 1 : 0);
+
   /// Bounded wait the presenter (raster thread) may spend on the newest
   /// in-flight frame so it composites this tick's frame (0 disables).
   void setAcquireWaitUs(Pointer<Void> vp, int us) => _setAcquireWait(vp, us);
@@ -190,6 +222,11 @@ class ViewportNative {
         acquireWaitP95Ms: s.acquireWaitP95Us / 1000,
         acquireWaitMaxMs: s.acquireWaitMaxUs / 1000,
         instances: s.instancesLastFrame,
+        meshes: s.meshesLastFrame,
+        placeholders: s.placeholdersLastFrame,
+        missing: s.missingLastFrame,
+        assetErrors: s.assetErrors,
+        sceneCamera: s.sceneCamera != 0,
       );
     } finally {
       calloc.free(out);
@@ -219,7 +256,14 @@ class ViewportStatsSnapshot {
     required this.acquireWaitP95Ms,
     required this.acquireWaitMaxMs,
     required this.instances,
+    this.meshes = 0,
+    this.placeholders = 0,
+    this.missing = 0,
+    this.assetErrors = 0,
+    this.sceneCamera = false,
   });
+  final int meshes, placeholders, missing, assetErrors;
+  final bool sceneCamera;
   final double acquireWaitP50Ms, acquireWaitP95Ms, acquireWaitMaxMs;
   final int framesRendered, framesDropped, framesPresented, presentsWithoutNewFrame, resizes, instances;
   final int presentLagP50, presentLagP95, presentLagMax;

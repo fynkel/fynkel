@@ -19,6 +19,8 @@ pub enum Status {
     OutOfResources = 6,
     /// Version / schema fingerprint mismatch.
     Incompatible = 7,
+    /// A scene or project could not be loaded; the load report says why.
+    LoadFailed = 8,
 }
 
 impl Status {
@@ -32,6 +34,7 @@ impl Status {
             5 => Status::Panic,
             6 => Status::OutOfResources,
             7 => Status::Incompatible,
+            8 => Status::LoadFailed,
             _ => return None,
         })
     }

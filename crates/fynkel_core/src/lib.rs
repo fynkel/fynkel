@@ -40,6 +40,7 @@ pub use fynkel_contracts::{
 pub use fynkel_scene::Transform;
 pub use load::{EntityDescription, LoadError, LoadedScene, SceneDescription};
 pub use world::{
-    Diagnostic, Extract, ExtractRecord, Name, PhysicsOwned, Rejected, SnapshotRecord, StepReport,
-    SubmitReport, World, WorldConfig,
+    Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight, ExtractMesh, ExtractPointLight,
+    ExtractRecord, Name, PhysicsOwned, Rejected, SnapshotRecord, StepReport, SubmitReport, World,
+    WorldConfig,
 };

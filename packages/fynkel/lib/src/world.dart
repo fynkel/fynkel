@@ -264,6 +264,37 @@ class World {
 
   List<int> allEntities() => _native.query(QueryKind.allEntities).u64s();
 
+  // ---------------------------------------------------------------- documents
+
+  /// Loads a `.scene.json` (prefabs resolved from the files next to it and
+  /// below) into the world. Entities exist immediately; components go
+  /// through the command path (rejections reach [onDiagnostics] on the
+  /// next step). Throws [FynkelLoadError] when the document has errors.
+  LoadReport loadScene(String path) => _load(_native.loadScene(path), 'loadScene');
+
+  /// Loads the startup scene of the project at [dir] (`fynkel.project.json`),
+  /// with every prefab in its asset database available. The report's
+  /// [LoadReport.cacheDir] is where `fynkel cook` put the cooked assets a
+  /// renderer needs. Throws [FynkelLoadError] on errors.
+  LoadReport loadProject(String dir) => _load(_native.loadProject(dir), 'loadProject');
+
+  LoadReport _load((FynkelStatus, Map<String, Object?>) r, String op) {
+    final (status, json) = r;
+    final report = LoadReport.fromJson(json);
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
+        return report;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        throw FynkelLoadError(report, context: op);
+      default:
+        throw FynkelBridgeError('$op: $status');
+    }
+  }
+
+  /// Called with the warnings of a successful load. Defaults to `print`.
+  void Function(List<LoadDiagnostic>) onLoadDiagnostics = (d) => print(d.join('\n'));
+
   BridgeStats stats() => _native.stats();
 
   void dispose() {

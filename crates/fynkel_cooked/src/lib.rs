@@ -38,6 +38,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod payload;
+
 use std::fmt;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;

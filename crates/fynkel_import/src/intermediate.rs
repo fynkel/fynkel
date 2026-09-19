@@ -20,68 +20,10 @@ use serde::{Deserialize, Serialize};
 pub const MAGIC: &[u8; 4] = b"FYNI";
 pub const INTERMEDIATE_VERSION: u32 = 1;
 
-/// The one vertex layout every mesh is normalized to (72 bytes).
-/// Missing attributes take defaults: flat normals, zero tangents (tangent
-/// generation is M3's), `[0, 0]` uvs, white colour.
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[repr(C)]
-pub struct Vertex {
-    pub position: [f32; 3],
-    pub normal: [f32; 3],
-    pub tangent: [f32; 4],
-    pub uv0: [f32; 2],
-    pub uv1: [f32; 2],
-    pub color: [f32; 4],
-}
-
-impl Default for Vertex {
-    fn default() -> Self {
-        Vertex {
-            position: [0.0; 3],
-            normal: [0.0, 0.0, 1.0],
-            tangent: [0.0; 4],
-            uv0: [0.0; 2],
-            uv1: [0.0; 2],
-            color: [1.0; 4],
-        }
-    }
-}
-
-impl Vertex {
-    pub const STRIDE: usize = 72;
-
-    pub fn write(&self, out: &mut Vec<u8>) {
-        for f in self
-            .position
-            .iter()
-            .chain(&self.normal)
-            .chain(&self.tangent)
-            .chain(&self.uv0)
-            .chain(&self.uv1)
-            .chain(&self.color)
-        {
-            out.extend_from_slice(&f.to_le_bytes());
-        }
-    }
-
-    pub fn read(bytes: &[u8]) -> Option<Vertex> {
-        if bytes.len() < Self::STRIDE {
-            return None;
-        }
-        let mut floats = [0f32; 18];
-        for (i, f) in floats.iter_mut().enumerate() {
-            *f = f32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().unwrap());
-        }
-        Some(Vertex {
-            position: [floats[0], floats[1], floats[2]],
-            normal: [floats[3], floats[4], floats[5]],
-            tangent: [floats[6], floats[7], floats[8], floats[9]],
-            uv0: [floats[10], floats[11]],
-            uv1: [floats[12], floats[13]],
-            color: [floats[14], floats[15], floats[16], floats[17]],
-        })
-    }
-}
+/// The one vertex layout every mesh is normalized to (72 bytes); the
+/// cooked `MESH` payload uses the same one, so it is defined next to the
+/// container (`fynkel_cooked::payload::Vertex`).
+pub use fynkel_cooked::payload::Vertex;
 
 /// One drawable: a triangle list with one material.
 #[derive(Clone, Debug, PartialEq)]

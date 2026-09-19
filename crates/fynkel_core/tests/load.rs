@@ -257,3 +257,57 @@ fn set_and_remove_component_commands() {
     assert!(!w.ecs().has::<PointLight>(e4));
     assert_eq!(w.ecs().copy::<Transform>(e4).unwrap().position.x, 3.0);
 }
+
+#[test]
+fn extract_resolves_renderable_components_against_records() {
+    let mut world = World::new(WorldConfig::default());
+    let mut s = scene();
+    // A visible and an invisible mesh, and a second, higher-priority camera.
+    s.entities[1]
+        .components
+        .push(ComponentValue::MeshRenderer(MeshRenderer {
+            mesh: AssetRef {
+                asset: id(50),
+                sub: "mesh/0".into(),
+            },
+            material: AssetRef {
+                asset: id(51),
+                sub: String::new(),
+            },
+            ..MeshRenderer::default()
+        }));
+    s.entities[2]
+        .components
+        .push(ComponentValue::MeshRenderer(MeshRenderer {
+            visible: false,
+            ..MeshRenderer::default()
+        }));
+    s.entities[3]
+        .components
+        .push(ComponentValue::Camera(Camera {
+            priority: 5,
+            ..Camera::default()
+        }));
+    let loaded = world.load_scene(&s).unwrap();
+    let ex = world.extract();
+    assert_eq!(ex.records.len(), 4);
+    let record_of = |n: u8| {
+        let e = loaded.handle_of(id(n)).unwrap();
+        ex.records.iter().position(|r| r.entity == e).unwrap() as u32
+    };
+    assert_eq!(ex.meshes.len(), 1, "invisible renderers are not extracted");
+    assert_eq!(ex.meshes[0].record, record_of(1));
+    assert_eq!(ex.meshes[0].mesh.sub, "mesh/0");
+    assert_eq!(ex.meshes[0].material.asset, id(51));
+    let cam = ex.camera.unwrap();
+    assert_eq!(cam.record, record_of(4), "the highest priority camera wins");
+    assert_eq!(cam.camera.priority, 5);
+    assert_eq!(ex.directional_lights.len(), 1);
+    assert_eq!(ex.directional_lights[0].record, record_of(4));
+    // Identity rotation: the light shines along -Z.
+    assert!((ex.directional_lights[0].direction - Vec3::NEG_Z).length() < 1e-6);
+    assert_eq!(ex.point_lights.len(), 1);
+    assert_eq!(ex.point_lights[0].record, record_of(3));
+    // e3 is a child of e1 at x=10 with an identity local transform.
+    assert!((ex.point_lights[0].position - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-6);
+}

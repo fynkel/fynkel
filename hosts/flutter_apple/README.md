@@ -30,3 +30,18 @@ Flutter targets (universal macOS builds need
 `@Native` externals on that asset.
 
 `FYNKEL_HOST_MODE=none` runs the app without a viewport (raster control).
+
+`FYNKEL_PROJECT=<dir>` (env var or `--dart-define`) loads that project's
+startup scene (`World.loadProject`) instead of the Dart demo scene and
+points the viewport at its cooked cache (`<dir>/.fynkel/cache`, placeholder
+cubes off): the scene file, its cooked meshes and materials and its own
+`Camera` are what is on screen. Cook first:
+
+```sh
+fynkel cook --assets <dir>/assets --cache <dir>/.fynkel/cache
+FYNKEL_PROJECT=<dir> build/macos/Build/Products/Release/fynkel_host_flutter.app/Contents/MacOS/fynkel_host_flutter
+```
+
+The HUD's `meshes=… placeholders=… missing=… assetErrors=…` line says what
+the renderer found; `fynkel render --project <dir> --out out.png` produces
+the same picture headlessly.

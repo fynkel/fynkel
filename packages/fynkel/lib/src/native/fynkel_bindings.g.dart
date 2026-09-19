@@ -211,6 +211,67 @@ external double fynkel_world_alpha(ffi.Pointer<FynkelWorld> world);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FynkelWorld>)>()
 external int fynkel_world_is_poisoned(ffi.Pointer<FynkelWorld> world);
 
+/// Documents (blueprint §7). Loads a `.scene.json` (`path`, UTF-8, not
+/// NUL-terminated; prefab instances expand from `*.prefab.json` files next
+/// to it and below) or a project directory's startup scene (every prefab in
+/// the project's asset database is available) into the world: entities are
+/// spawned immediately with their authoring ids kept for the report; other
+/// components go through the command path and any rejection is in
+/// fynkel_world_diagnostics. FYNKEL_STATUS_LOAD_FAILED when the document,
+/// the project or the hierarchy has errors (the world is unchanged);
+/// FYNKEL_STATUS_INVALID_ARGUMENT for NULL or non-UTF-8 input.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_load_scene')
+external int _fynkel_world_load_scene(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> path_utf8,
+  int path_len,
+);
+
+FynkelStatus fynkel_world_load_scene(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> path_utf8,
+  int path_len,
+) => FynkelStatus.fromValue(
+  _fynkel_world_load_scene(world, path_utf8, path_len),
+);
+
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_load_project')
+external int _fynkel_world_load_project(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> dir_utf8,
+  int dir_len,
+);
+
+FynkelStatus fynkel_world_load_project(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> dir_utf8,
+  int dir_len,
+) => FynkelStatus.fromValue(
+  _fynkel_world_load_project(world, dir_utf8, dir_len),
+);
+
+/// UTF-8 JSON describing the last load call on this world (empty before
+/// any): {"ok": bool, "scene": {"id", "name", "path", "entities"} | null,
+/// "project": {"name", "dir", "assets", "cache"} | null, "diagnostics":
+/// [{"code", "severity", "message", "document"?, "pointer"?, ...}]}.
+/// Valid until the next load call.
+@ffi.Native<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>()
+external FynkelBufferView fynkel_world_load_report(
+  ffi.Pointer<FynkelWorld> world,
+);
+
 final class FynkelRuntime extends ffi.Opaque {}
 
 final class FynkelWorld extends ffi.Opaque {}
@@ -234,7 +295,11 @@ enum FynkelStatus {
   FYNKEL_STATUS_OUT_OF_RESOURCES(6),
 
   /// ABI version or schema fingerprint mismatch.
-  FYNKEL_STATUS_INCOMPATIBLE(7);
+  FYNKEL_STATUS_INCOMPATIBLE(7),
+
+  /// A scene or project document could not be loaded; see
+  /// fynkel_world_load_report.
+  FYNKEL_STATUS_LOAD_FAILED(8);
 
   final int value;
   const FynkelStatus(this.value);
@@ -248,6 +313,7 @@ enum FynkelStatus {
     5 => FYNKEL_STATUS_PANIC,
     6 => FYNKEL_STATUS_OUT_OF_RESOURCES,
     7 => FYNKEL_STATUS_INCOMPATIBLE,
+    8 => FYNKEL_STATUS_LOAD_FAILED,
     _ => throw ArgumentError('Unknown value for FynkelStatus: $value'),
   };
 }

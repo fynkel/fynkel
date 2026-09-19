@@ -2,6 +2,8 @@
 // write / read-your-writes / destroy, stale handles, diagnostics as
 // FynkelError, presentation lane, hierarchy, frame plan.
 
+import 'dart:io';
+
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/generated/schema.g.dart' show DestroyCommand, DiagnosticRecord;
 import 'package:test/test.dart';
@@ -160,5 +162,28 @@ void main() {
     expect(s.bytesOut, greaterThan(0));
     expect(s.ffiCalls, greaterThan(0));
   });
-}
 
+  test('loadProject / loadScene: the fixture project reaches the world', () {
+    final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
+    final w = world();
+    addTearDown(w.dispose);
+    final r = w.loadProject(fixture);
+    expect(r.ok, isTrue);
+    expect(r.projectName, 'Fixture Game');
+    expect(r.sceneName, 'Main');
+    expect(r.entityCount, 4);
+    expect(r.rejectedComponents, 0);
+    expect(r.cacheDir, endsWith('.fynkel/cache'));
+    expect(w.allEntities(), hasLength(4));
+    w.frame(1 / 60);
+
+    // A bare scene file whose prefab is not next to it: an error report.
+    expect(
+      () => w.loadScene('$fixture/assets/scenes/main.scene.json'),
+      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-D0401'))),
+    );
+    expect(w.allEntities(), hasLength(4), reason: 'a failed load leaves the world alone');
+    expect(() => w.loadProject('/nonexistent'), throwsA(isA<FynkelLoadError>()));
+    expect(w.isPoisoned, isFalse);
+  });
+}

@@ -38,8 +38,10 @@ use crate::Limits;
 pub const DEFAULT_PROFILE: &str = "dev";
 
 /// Texture chunk formats (`TEXR` payload, `format` field).
-pub const TEXTURE_FORMAT_RGBA8_SRGB: u32 = 1;
-pub const TEXTURE_FORMAT_RGBA8_LINEAR: u32 = 2;
+pub use fynkel_cooked::payload::{
+    decode_clip, decode_mesh, decode_texture, ClipPayload as ClipChunk, MeshPayload as MeshChunk,
+    TexturePayload as TextureChunk, TEXTURE_FORMAT_RGBA8_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
+};
 
 #[derive(Clone, Debug)]
 pub struct CookOptions {
@@ -951,166 +953,34 @@ fn texture_chunk(t: &TextureData, sub: Option<String>) -> ChunkPlan {
     }
 }
 
-/// `MESH`: u32 vertex count, u32 index count, [f32; 3] min, [f32; 3] max,
-/// vertices (72 bytes each), u32 indices. All little-endian.
+/// `MESH` (see `fynkel_cooked::payload`).
 pub fn encode_mesh(mesh: &MeshData) -> Vec<u8> {
-    let mut out = Vec::with_capacity(
-        32 + mesh.vertices.len() * crate::Vertex::STRIDE + mesh.indices.len() * 4,
-    );
-    out.extend_from_slice(&(mesh.vertices.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(mesh.indices.len() as u32).to_le_bytes());
-    for v in mesh.bounds_min.iter().chain(mesh.bounds_max.iter()) {
-        out.extend_from_slice(&v.to_le_bytes());
-    }
-    for v in &mesh.vertices {
-        v.write(&mut out);
-    }
-    for i in &mesh.indices {
-        out.extend_from_slice(&i.to_le_bytes());
-    }
-    out
+    fynkel_cooked::payload::encode_mesh(
+        &mesh.vertices,
+        &mesh.indices,
+        mesh.bounds_min,
+        mesh.bounds_max,
+    )
 }
 
-/// `TEXR`: u32 width, u32 height, u32 format, u32 mip levels (1), then
-/// `width * height * 4` texels, top row first.
+/// `TEXR` (see `fynkel_cooked::payload`).
 pub fn encode_texture(t: &TextureData) -> Vec<u8> {
-    let mut out = Vec::with_capacity(16 + t.rgba8.len());
-    out.extend_from_slice(&t.width.to_le_bytes());
-    out.extend_from_slice(&t.height.to_le_bytes());
-    out.extend_from_slice(
-        &match t.color_space {
+    fynkel_cooked::payload::encode_texture(
+        t.width,
+        t.height,
+        match t.color_space {
             ColorSpace::Srgb => TEXTURE_FORMAT_RGBA8_SRGB,
             ColorSpace::Linear => TEXTURE_FORMAT_RGBA8_LINEAR,
-        }
-        .to_le_bytes(),
-    );
-    out.extend_from_slice(&1u32.to_le_bytes());
-    out.extend_from_slice(&t.rgba8);
-    out
+        },
+        &t.rgba8,
+    )
 }
 
-/// `CLIP`: u32 sample rate, u32 channels, u64 frames, then interleaved
-/// `f32` samples.
+/// `CLIP` (see `fynkel_cooked::payload`).
 pub fn encode_clip(clip: &AudioData) -> Vec<u8> {
-    let mut out = Vec::with_capacity(16 + clip.samples.len() * 4);
-    out.extend_from_slice(&clip.sample_rate.to_le_bytes());
-    out.extend_from_slice(&(clip.channels as u32).to_le_bytes());
-    out.extend_from_slice(&clip.frames().to_le_bytes());
-    for s in &clip.samples {
-        out.extend_from_slice(&s.to_le_bytes());
-    }
-    out
+    fynkel_cooked::payload::encode_clip(clip.sample_rate, clip.channels as u32, &clip.samples)
 }
 
-/// A decoded `MESH` payload.
-#[derive(Clone, Debug, PartialEq)]
-pub struct MeshChunk {
-    pub bounds_min: [f32; 3],
-    pub bounds_max: [f32; 3],
-    pub vertices: Vec<crate::Vertex>,
-    pub indices: Vec<u32>,
-}
-
-pub fn decode_mesh(bytes: &[u8]) -> Option<MeshChunk> {
-    if bytes.len() < 32 {
-        return None;
-    }
-    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().ok()?).into();
-    let vertex_count: Option<u32> = u32_at(0);
-    let index_count: Option<u32> = u32_at(4);
-    let (vertex_count, index_count) = (vertex_count? as usize, index_count? as usize);
-    let f32_at = |at: usize| f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-    let bounds_min = [f32_at(8), f32_at(12), f32_at(16)];
-    let bounds_max = [f32_at(20), f32_at(24), f32_at(28)];
-    let vertices_len = vertex_count.checked_mul(crate::Vertex::STRIDE)?;
-    let indices_len = index_count.checked_mul(4)?;
-    if bytes.len() != 32 + vertices_len + indices_len {
-        return None;
-    }
-    let mut vertices = Vec::with_capacity(vertex_count);
-    for i in 0..vertex_count {
-        let at = 32 + i * crate::Vertex::STRIDE;
-        vertices.push(crate::Vertex::read(&bytes[at..at + crate::Vertex::STRIDE])?);
-    }
-    let mut indices = Vec::with_capacity(index_count);
-    for i in 0..index_count {
-        let at = 32 + vertices_len + i * 4;
-        indices.push(u32::from_le_bytes(bytes[at..at + 4].try_into().ok()?));
-    }
-    Some(MeshChunk {
-        bounds_min,
-        bounds_max,
-        vertices,
-        indices,
-    })
-}
-
-/// A decoded `TEXR` payload.
-#[derive(Clone, Debug, PartialEq)]
-pub struct TextureChunk {
-    pub width: u32,
-    pub height: u32,
-    pub format: u32,
-    pub mip_levels: u32,
-    pub rgba8: Vec<u8>,
-}
-
-pub fn decode_texture(bytes: &[u8]) -> Option<TextureChunk> {
-    if bytes.len() < 16 {
-        return None;
-    }
-    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-    let (width, height, format, mip_levels) = (u32_at(0), u32_at(4), u32_at(8), u32_at(12));
-    let texels = (width as usize)
-        .checked_mul(height as usize)?
-        .checked_mul(4)?;
-    if mip_levels != 1 || bytes.len() != 16 + texels {
-        return None;
-    }
-    Some(TextureChunk {
-        width,
-        height,
-        format,
-        mip_levels,
-        rgba8: bytes[16..].to_vec(),
-    })
-}
-
-/// A decoded `CLIP` payload.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ClipChunk {
-    pub sample_rate: u32,
-    pub channels: u32,
-    pub frames: u64,
-    pub samples: Vec<f32>,
-}
-
-pub fn decode_clip(bytes: &[u8]) -> Option<ClipChunk> {
-    if bytes.len() < 16 {
-        return None;
-    }
-    let sample_rate = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
-    let channels = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
-    let frames = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
-    let count = (frames as usize)
-        .checked_mul(channels as usize)?
-        .checked_mul(4)?;
-    if bytes.len() != 16 + count {
-        return None;
-    }
-    let samples = bytes[16..]
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
-    Some(ClipChunk {
-        sample_rate,
-        channels,
-        frames,
-        samples,
-    })
-}
-
-/// `index.json`: the last cook's asset id → key map, for loaders.
 fn write_index(cache: &Cache, report: &CookReport) -> Result<(), Diagnostic> {
     let index = json!({
         "fynkel": "cache-index",

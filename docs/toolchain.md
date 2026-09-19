@@ -30,7 +30,7 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 | bytemuck | 1.25.2 | POD casts |
 | hecs | 0.11.1 | ECS storage behind `fynkel_ecs` (ADR-0003) |
 | syn / quote / proc-macro2 | 2.0.119 / 1.0.47 / 1.0.107 | `fynkel_schema_derive` proc macro only (ADR-0012) |
-| serde / serde_json | 1.0.229 / 1.0.151 | `fynkel` CLI JSON Schema output; not on the runtime path |
+| serde / serde_json | 1.0.229 / 1.0.151 | `fynkel` CLI JSON Schema output; since the scene-on-screen spike `serde_json` is also on the runtime path: `fynkel_render` reads the cache index, META and cooked material JSON, `fynkel_native` writes the load report |
 | pollster | 1.0.1 | block on wgpu async setup |
 | log / env_logger | 0.4.34 / 0.11.11 | logging |
 

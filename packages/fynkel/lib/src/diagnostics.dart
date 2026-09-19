@@ -100,3 +100,117 @@ class FynkelBridgeError extends Error {
   @override
   String toString() => 'FynkelBridgeError: $message';
 }
+
+/// One `fynkel_world_load_*` diagnostic (a document diagnostic: code
+/// `FYN-D####`/`FYN-P####`/`FYN-A####`, the file and JSON pointer when
+/// known).
+class LoadDiagnostic {
+  const LoadDiagnostic({
+    required this.code,
+    required this.severity,
+    required this.message,
+    this.document,
+    this.pointer,
+    this.line,
+    this.column,
+    this.suggestion,
+  });
+
+  factory LoadDiagnostic.fromJson(Map<String, Object?> j) => LoadDiagnostic(
+        code: j['code'] as String? ?? '',
+        severity: j['severity'] as String? ?? 'error',
+        message: j['message'] as String? ?? '',
+        document: j['document'] as String?,
+        pointer: j['pointer'] as String?,
+        line: (j['line'] as num?)?.toInt(),
+        column: (j['column'] as num?)?.toInt(),
+        suggestion: j['suggestion'] as String?,
+      );
+
+  final String code;
+  final String severity;
+  final String message;
+  final String? document;
+  final String? pointer;
+  final int? line;
+  final int? column;
+  final String? suggestion;
+
+  bool get isError => severity == 'error';
+
+  @override
+  String toString() {
+    final where = [
+      if (document != null) document,
+      if (line != null) '$line${column != null ? ':$column' : ''}',
+      if (pointer != null && pointer!.isNotEmpty) pointer,
+    ].join(':');
+    return '$severity $code${where.isEmpty ? '' : ' $where'}: $message${suggestion != null ? ' ($suggestion)' : ''}';
+  }
+}
+
+/// What [World.loadScene] / [World.loadProject] produced.
+class LoadReport {
+  const LoadReport({
+    required this.ok,
+    required this.diagnostics,
+    this.sceneId,
+    this.sceneName,
+    this.scenePath,
+    this.entityCount = 0,
+    this.rejectedComponents = 0,
+    this.projectName,
+    this.projectDir,
+    this.assetsDir,
+    this.cacheDir,
+  });
+
+  factory LoadReport.fromJson(Map<String, Object?> j) {
+    final scene = j['scene'] as Map<String, Object?>?;
+    final project = j['project'] as Map<String, Object?>?;
+    return LoadReport(
+      ok: j['ok'] == true,
+      diagnostics: [
+        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
+      ],
+      sceneId: scene?['id'] as String?,
+      sceneName: scene?['name'] as String?,
+      scenePath: scene?['path'] as String?,
+      entityCount: (scene?['entities'] as num?)?.toInt() ?? 0,
+      rejectedComponents: (scene?['rejectedComponents'] as num?)?.toInt() ?? 0,
+      projectName: project?['name'] as String?,
+      projectDir: project?['dir'] as String?,
+      assetsDir: project?['assets'] as String?,
+      cacheDir: project?['cache'] as String?,
+    );
+  }
+
+  final bool ok;
+  final List<LoadDiagnostic> diagnostics;
+  final String? sceneId;
+  final String? sceneName;
+  final String? scenePath;
+  final int entityCount;
+  final int rejectedComponents;
+  final String? projectName;
+  final String? projectDir;
+  final String? assetsDir;
+  /// Where `fynkel cook` writes for this project (`<dir>/.fynkel/cache`).
+  final String? cacheDir;
+
+  Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
+  Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
+}
+
+/// A scene or project failed to load; [report] says why.
+class FynkelLoadError extends Error {
+  FynkelLoadError(this.report, {this.context = ''});
+  final LoadReport report;
+  final String context;
+
+  @override
+  String toString() {
+    final lines = report.diagnostics.map((d) => '  $d').join('\n');
+    return 'FynkelLoadError${context.isEmpty ? '' : ' ($context)'}:\n$lines';
+  }
+}

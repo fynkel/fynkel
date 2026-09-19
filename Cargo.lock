@@ -741,8 +741,11 @@ dependencies = [
  "fynkel_document",
  "fynkel_host_headless",
  "fynkel_import",
+ "fynkel_render",
+ "image",
  "serde",
  "serde_json",
+ "wgpu",
 ]
 
 [[package]]
@@ -842,10 +845,12 @@ version = "0.0.1"
 dependencies = [
  "fynkel_contracts",
  "fynkel_core",
+ "fynkel_document",
  "fynkel_scene",
  "fynkel_wire",
  "glam",
  "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -876,10 +881,14 @@ version = "0.0.1"
 dependencies = [
  "bytemuck",
  "fynkel_contracts",
+ "fynkel_cooked",
  "fynkel_core",
+ "fynkel_document",
+ "fynkel_import",
  "fynkel_scene",
  "glam",
  "pollster",
+ "serde_json",
  "wgpu",
 ]
 

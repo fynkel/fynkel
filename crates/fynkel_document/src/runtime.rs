@@ -5,11 +5,17 @@
 //! not decode are `FYN-D0206` errors (they cannot happen after a clean
 //! `Scene::validate`, but a caller may skip validation).
 
+use std::path::{Path, PathBuf};
+
 use fynkel_contracts::{Code, Diagnostic, Severity, Uuid};
 use fynkel_core::{EntityDescription, SceneDescription};
 
+use crate::asset::{AssetDatabase, AssetKind};
 use crate::generated::decode_component;
+use crate::prefab::{expand, Prefab, PrefabLibrary};
+use crate::project::Project;
 use crate::scene::Scene;
+use crate::{Document, DocumentKind, SchemaSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DescribedScene {
@@ -102,4 +108,126 @@ fn diag(
         }
     }
     d
+}
+
+/// Reads, validates (embedded schemas), expands prefab instances (from
+/// `prefabs`, a directory scanned for `*.prefab.json`) and describes a
+/// scene document. `Err` carries every diagnostic when any is an error;
+/// `Ok` carries the description plus warnings.
+pub fn read_scene(
+    path: &Path,
+    prefabs: Option<&Path>,
+) -> Result<(SceneDescription, Vec<Diagnostic>), Vec<Diagnostic>> {
+    let (library, scan) = match prefabs {
+        Some(dir) => PrefabLibrary::scan(dir),
+        None => (PrefabLibrary::empty(), Vec::new()),
+    };
+    read_scene_with(path, &library, scan)
+}
+
+fn read_scene_with(
+    path: &Path,
+    library: &PrefabLibrary,
+    mut diagnostics: Vec<Diagnostic>,
+) -> Result<(SceneDescription, Vec<Diagnostic>), Vec<Diagnostic>> {
+    let schemas = SchemaSet::embedded();
+    let doc = Document::read(path, Some(DocumentKind::Scene)).map_err(|mut e| {
+        e.extend(std::mem::take(&mut diagnostics));
+        e
+    })?;
+    let mut scene = Scene::from_document(doc);
+    let mut validation = scene.validate(&schemas);
+    diagnostics.append(&mut validation);
+    if scene.instances().next().is_some() {
+        let expanded = expand(&scene, library, &schemas);
+        scene = expanded.scene();
+        diagnostics.extend(expanded.diagnostics);
+    }
+    if fynkel_contracts::has_errors(&diagnostics) {
+        return Err(diagnostics);
+    }
+    let described = describe(&scene);
+    // `describe` repeats the unknown-type warning; keep one per pointer.
+    for d in described.diagnostics {
+        if !diagnostics
+            .iter()
+            .any(|x| x.code == d.code && x.pointer == d.pointer)
+        {
+            diagnostics.push(d);
+        }
+    }
+    if fynkel_contracts::has_errors(&diagnostics) {
+        return Err(diagnostics);
+    }
+    Ok((described.description, diagnostics))
+}
+
+/// A project's startup scene, ready for `World::load_scene`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoadedProject {
+    pub project_name: String,
+    /// The project directory as given.
+    pub dir: PathBuf,
+    /// The asset root (`project.assets` under `dir`).
+    pub assets: PathBuf,
+    /// Where `fynkel cook` writes by default: `<dir>/.fynkel/cache`.
+    pub cache: PathBuf,
+    /// The startup scene's document path.
+    pub scene_path: PathBuf,
+    pub scene: SceneDescription,
+    pub warnings: Vec<Diagnostic>,
+}
+
+/// Reads `<dir>/fynkel.project.json`, scans its asset root, resolves the
+/// startup scene and reads it with every prefab in the database available
+/// for expansion. `Err` when the project, the database or the scene has an
+/// error. The lock is not checked here (`fynkel project lock --check`).
+pub fn load_project(dir: &Path) -> Result<LoadedProject, Vec<Diagnostic>> {
+    let schemas = SchemaSet::embedded();
+    let project = Project::read(dir)?;
+    let mut diagnostics = project.read_diagnostics().to_vec();
+    diagnostics.extend(project.validate(&schemas));
+    if fynkel_contracts::has_errors(&diagnostics) {
+        return Err(diagnostics);
+    }
+    let assets = project.assets_dir(dir);
+    let (db, scan) = AssetDatabase::scan(&assets, &schemas);
+    diagnostics.extend(scan);
+    diagnostics.extend(project.validate_against(&db, &schemas));
+    if fynkel_contracts::has_errors(&diagnostics) {
+        return Err(diagnostics);
+    }
+    // `validate_against` has already reported an unset or unresolvable
+    // startup scene as an error.
+    let startup = project
+        .startup_scene
+        .as_ref()
+        .and_then(|r| db.resolve(r).ok())
+        .map(|r| r.entry.file(&assets))
+        .ok_or_else(|| {
+            vec![
+                Diagnostic::error(Code::PROJECT_STARTUP_SCENE, "startupScene is unset")
+                    .with_document(dir.join(crate::project::PROJECT_FILE).display().to_string()),
+            ]
+        })?;
+    let mut library = PrefabLibrary::empty();
+    for e in db.entries() {
+        if e.kind != AssetKind::Document(DocumentKind::Prefab) {
+            continue;
+        }
+        match Document::read(&e.file(&assets), Some(DocumentKind::Prefab)) {
+            Ok(doc) => library.add(Prefab::from_document(doc)),
+            Err(d) => diagnostics.extend(d),
+        }
+    }
+    let (scene, warnings) = read_scene_with(&startup, &library, diagnostics)?;
+    Ok(LoadedProject {
+        project_name: project.name().to_string(),
+        dir: dir.to_path_buf(),
+        assets,
+        cache: dir.join(".fynkel").join("cache"),
+        scene_path: startup,
+        scene,
+        warnings,
+    })
 }

@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use fynkel_core::Extract;
 use fynkel_native::FynkelWorld;
-use fynkel_render::{Camera, ExtractRenderer};
+use fynkel_render::{Camera, CookedAssets, ExtractRenderer, FrameStats};
 use glam::Vec3;
 
 pub use ring::{IoSurfaceRing, RingStats, SyncMode, TEXTURE_FORMAT};
@@ -78,6 +78,28 @@ impl Viewport {
     pub fn instance_count(&self) -> u32 {
         self.renderer.instance_count()
     }
+
+    pub fn frame_stats(&self) -> FrameStats {
+        self.renderer.stats()
+    }
+
+    /// Points the renderer at a cooked cache (`fynkel cook`), or at nothing.
+    pub fn set_asset_cache(&mut self, dir: Option<&std::path::Path>) -> Result<(), String> {
+        let assets = match dir {
+            Some(d) => Some(CookedAssets::open(d)?),
+            None => None,
+        };
+        self.renderer.set_assets(assets);
+        Ok(())
+    }
+
+    pub fn set_placeholders(&mut self, enabled: bool) {
+        self.renderer.placeholders = enabled;
+    }
+
+    pub fn asset_errors(&self) -> &[String] {
+        self.renderer.asset_errors()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +155,11 @@ pub struct FynkelAppleViewportStats {
     pub acquire_wait_max_us: u32,
     pub instances_last_frame: u32,
     pub frame_ready_signals: u32,
+    pub meshes_last_frame: u32,
+    pub placeholders_last_frame: u32,
+    pub missing_last_frame: u32,
+    pub asset_errors: u32,
+    pub scene_camera: u32,
 }
 
 /// Returned by `fynkel_apple_viewport_render` when the world pointer is
@@ -140,7 +167,7 @@ pub struct FynkelAppleViewportStats {
 pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 
 /// Viewport ABI version; bumped with `include/fynkel_apple.h`.
-pub const APPLE_ABI_VERSION: u32 = 1;
+pub const APPLE_ABI_VERSION: u32 = 2;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -262,6 +289,52 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_camera(
     }
 }
 
+/// Points the viewport's renderer at a cooked asset cache directory (the
+/// `index.json` written by `fynkel cook`); `dir` NULL or empty clears it.
+/// Returns 0, or -1 when the directory is not a readable cache (the
+/// previous source is dropped either way).
+///
+/// # Safety
+/// `vp` must be a live viewport; `dir_utf8` points at `dir_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_asset_cache(
+    vp: *mut Viewport,
+    dir_utf8: *const u8,
+    dir_len: u32,
+) -> i32 {
+    let Some(v) = vp.as_mut() else {
+        return -1;
+    };
+    let dir = if dir_utf8.is_null() || dir_len == 0 {
+        None
+    } else {
+        let bytes = std::slice::from_raw_parts(dir_utf8, dir_len as usize);
+        match std::str::from_utf8(bytes) {
+            Ok(s) => Some(std::path::PathBuf::from(s)),
+            Err(_) => return -1,
+        }
+    };
+    match v.set_asset_cache(dir.as_deref()) {
+        Ok(()) => 0,
+        Err(e) => {
+            log::error!("fynkel_apple_viewport_set_asset_cache: {e}");
+            -1
+        }
+    }
+}
+
+/// Whether entities without a `MeshRenderer` draw as placeholder cubes
+/// (on by default — the M1 look).
+///
+/// # Safety
+/// `vp` must be a live viewport.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_placeholders(vp: *mut Viewport, enabled: i32) {
+    if let Some(v) = vp.as_mut() {
+        v.set_placeholders(enabled != 0);
+    }
+}
+
 /// Sets the bounded wait `fynkel_apple_viewport_acquire_presented` may spend
 /// on the newest in-flight frame (microseconds; 0 disables).
 /// # Safety
@@ -334,5 +407,10 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
         acquire_wait_max_us: pct(&mut s.acquire_wait_us, 1.0),
         instances_last_frame: v.instance_count(),
         frame_ready_signals: v.ring.frame_ready_signals(),
+        meshes_last_frame: v.frame_stats().meshes,
+        placeholders_last_frame: v.frame_stats().placeholders,
+        missing_last_frame: v.frame_stats().missing,
+        asset_errors: v.asset_errors().len() as u32,
+        scene_camera: v.frame_stats().scene_camera as u32,
     };
 }

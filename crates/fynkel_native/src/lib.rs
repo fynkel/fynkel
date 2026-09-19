@@ -9,6 +9,7 @@
 
 pub mod bridge;
 pub mod buffer;
+pub mod load;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -28,6 +29,8 @@ pub struct FynkelWorld {
     after_physics_buf: Vec<u8>,
     diagnostics_buf: Vec<u8>,
     query_buf: Vec<u8>,
+    /// JSON of the last `fynkel_world_load_*` call; empty before any.
+    load_report: Vec<u8>,
     stats: Counters,
 }
 
@@ -154,6 +157,7 @@ impl FynkelWorld {
             after_physics_buf: buffer::empty(BufferKind::Events),
             diagnostics_buf: buffer::empty(BufferKind::Diagnostics),
             query_buf: buffer::empty(BufferKind::Query),
+            load_report: Vec::new(),
             stats: Counters::default(),
         }
     }

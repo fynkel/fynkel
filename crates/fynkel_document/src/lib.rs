@@ -40,7 +40,7 @@ pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
 pub use migrate::{migrate, Migrated, Migration, Migrations};
 pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
 pub use project::{validate_project, Lock, Project, ProjectReport};
-pub use runtime::{describe, DescribedScene};
+pub use runtime::{describe, load_project, read_scene, DescribedScene, LoadedProject};
 pub use scene::Scene;
 pub use schema::{ComponentInfo, SchemaSet};
 

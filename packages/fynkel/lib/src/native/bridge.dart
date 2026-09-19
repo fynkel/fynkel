@@ -2,6 +2,7 @@
 // operation family (blueprint §5.3); buffers in and out, no per-property
 // calls. The gameplay API in lib/src/world.dart builds on this.
 
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:typed_data';
 
@@ -284,6 +285,33 @@ class NativeWorld {
     final b = _wrap(_view.ref, _queryView);
     assert(b.requestId == _requestId);
     return b;
+  }
+
+  /// `fynkel_world_load_scene` / `fynkel_world_load_project`: the status
+  /// and the JSON report (decoded) of that call.
+  (FynkelStatus, Map<String, Object?>) loadScene(String path) => _load(path, fynkel_world_load_scene);
+
+  (FynkelStatus, Map<String, Object?>) loadProject(String dir) => _load(dir, fynkel_world_load_project);
+
+  (FynkelStatus, Map<String, Object?>) _load(
+    String text,
+    FynkelStatus Function(Pointer<FynkelWorld>, Pointer<Uint8>, int) call,
+  ) {
+    final bytes = utf8.encode(text);
+    final p = calloc<Uint8>(bytes.length + 1);
+    try {
+      p.asTypedList(bytes.length).setAll(0, bytes);
+      ffiCalls += 2;
+      final s = call(_w, p, bytes.length);
+      final v = fynkel_world_load_report(_w);
+      if (v.length == 0) return (s, const {});
+      dartCopies++;
+      dartBytesCopied += v.length;
+      final report = jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as Map<String, Object?>;
+      return (s, report);
+    } finally {
+      calloc.free(p);
+    }
   }
 
   BridgeStats stats() {

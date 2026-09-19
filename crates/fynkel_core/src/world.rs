@@ -4,13 +4,13 @@
 use std::collections::{BTreeSet, HashMap};
 
 use fynkel_contracts::{
-    ComponentId, DiagnosticCode, Entity, Status, Tick, WorldId, DEFAULT_FIXED_DT,
+    AssetRef, ComponentId, DiagnosticCode, Entity, Status, Tick, WorldId, DEFAULT_FIXED_DT,
     DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
 };
 use fynkel_ecs::{EcsError, World as Ecs};
 use fynkel_scene::{self as scene, Parent, SceneError, Transform, WorldTransform};
 use fynkel_schema_derive::Schema;
-use glam::Mat4;
+use glam::{Mat4, Vec3};
 
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
@@ -114,11 +114,52 @@ pub struct ExtractRecord {
     pub overridden: bool,
 }
 
+/// A visible `MeshRenderer`: `record` indexes [`Extract::records`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtractMesh {
+    pub record: u32,
+    pub mesh: AssetRef,
+    pub material: AssetRef,
+    pub cast_shadows: bool,
+    pub receive_shadows: bool,
+}
+
+/// The camera the frame is rendered from: the enabled `Camera` with the
+/// highest priority (ties: the earliest record).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExtractCamera {
+    pub record: u32,
+    pub world: Mat4,
+    pub camera: Camera,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExtractDirectionalLight {
+    pub record: u32,
+    /// World-space direction the light shines along (the entity's -Z).
+    pub direction: Vec3,
+    pub light: DirectionalLight,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExtractPointLight {
+    pub record: u32,
+    pub position: Vec3,
+    pub light: PointLight,
+}
+
+/// What a frame draws (blueprint §8.5): every spatial entity's world
+/// matrix, plus the renderable components resolved against those records.
+/// The renderer reads this and nothing else from the world.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Extract {
     pub tick: Tick,
     pub alpha: f32,
     pub records: Vec<ExtractRecord>,
+    pub meshes: Vec<ExtractMesh>,
+    pub camera: Option<ExtractCamera>,
+    pub directional_lights: Vec<ExtractDirectionalLight>,
+    pub point_lights: Vec<ExtractPointLight>,
 }
 
 pub struct World {
@@ -891,24 +932,65 @@ impl World {
     pub fn extract(&self) -> Extract {
         let alpha = self.clock.alpha();
         let mut memo: HashMap<Entity, (Mat4, bool)> = HashMap::new();
-        let mut records = Vec::with_capacity(self.ecs.len() as usize);
+        let mut out = Extract {
+            tick: self.clock.tick(),
+            alpha,
+            records: Vec::with_capacity(self.ecs.len() as usize),
+            ..Extract::default()
+        };
         let entities: Vec<Entity> = self.ecs.entities().collect();
         for e in entities {
             if !self.ecs.has::<WorldTransform>(e) {
                 continue;
             }
             let (world, overridden) = self.resolve_extract(e, alpha, &mut memo);
-            records.push(ExtractRecord {
+            let record = out.records.len() as u32;
+            out.records.push(ExtractRecord {
                 entity: e,
                 world,
                 overridden,
             });
+            if let Ok(m) = self.ecs.get::<MeshRenderer>(e) {
+                if m.visible {
+                    out.meshes.push(ExtractMesh {
+                        record,
+                        mesh: m.mesh.clone(),
+                        material: m.material.clone(),
+                        cast_shadows: m.cast_shadows,
+                        receive_shadows: m.receive_shadows,
+                    });
+                }
+            }
+            if let Ok(c) = self.ecs.copy::<Camera>(e) {
+                let better = match &out.camera {
+                    Some(cur) => c.priority > cur.camera.priority,
+                    None => true,
+                };
+                if better {
+                    out.camera = Some(ExtractCamera {
+                        record,
+                        world,
+                        camera: c,
+                    });
+                }
+            }
+            if let Ok(l) = self.ecs.copy::<DirectionalLight>(e) {
+                let direction = world.transform_vector3(-Vec3::Z).normalize_or(-Vec3::Z);
+                out.directional_lights.push(ExtractDirectionalLight {
+                    record,
+                    direction,
+                    light: l,
+                });
+            }
+            if let Ok(l) = self.ecs.copy::<PointLight>(e) {
+                out.point_lights.push(ExtractPointLight {
+                    record,
+                    position: world.transform_point3(Vec3::ZERO),
+                    light: l,
+                });
+            }
         }
-        Extract {
-            tick: self.clock.tick(),
-            alpha,
-            records,
-        }
+        out
     }
 
     fn resolve_extract(

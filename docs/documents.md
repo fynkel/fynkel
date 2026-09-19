@@ -151,6 +151,50 @@ are the schemas `SchemaSet::embedded()` compiles in, so a shipped runtime
 validates without a `schemas/` directory. `docs/hosts.md` covers
 `fynkel test --headless --scene` and `fynkel state dump`.
 
+The file-to-description paths every host shares live in
+`fynkel_document::runtime`:
+
+- `read_scene(path, prefabs)` — read, validate, expand prefab instances
+  (from a directory scanned for `*.prefab.json`), describe. `Err` carries
+  every diagnostic when any is an error.
+- `load_project(dir)` — `fynkel.project.json` → asset database scan →
+  `startupScene` resolved → the scene read with **every prefab in the
+  database** available → `LoadedProject { project_name, dir, assets, cache
+  (<dir>/.fynkel/cache), scene_path, scene, warnings }`. The lock is not
+  checked here (`fynkel project lock --check` is).
+
+Both read source documents: the cooked scene chunk is the unexpanded
+canonical text and no loader reads it yet (M3).
+
+Over the C ABI (`fynkel_native::load`): `fynkel_world_load_scene(world,
+path_utf8, len)` and `fynkel_world_load_project(world, dir_utf8, len)`
+return `FYNKEL_STATUS_OK`, `FYNKEL_STATUS_LOAD_FAILED` (the world is
+unchanged) or `FYNKEL_STATUS_INVALID_ARGUMENT`; `fynkel_world_load_report`
+is the JSON of the last call: `{ ok, scene: { id, name, path, entities,
+rejectedComponents } | null, project: { name, dir, assets, cache } | null,
+diagnostics: [...] }`. In Dart, `World.loadScene(path)` /
+`World.loadProject(dir)` return a `LoadReport` (warnings to
+`onLoadDiagnostics`) or throw `FynkelLoadError`.
+
+### Cooked assets in the renderer
+
+`fynkel_render::CookedAssets::open(cache_dir)` reads the cache's
+`index.json` and serves `mesh(&AssetRef)`, `texture(&AssetRef)` and
+`material(&AssetRef)` from the containers on demand (`ChunkFile`, bounded
+reads, the chunk whose `kind` and `sub` match the reference). The renderer
+draws every extracted `MeshRenderer` with its mesh and the `baseColor`
+factor × texture of its `fynkel.pbr@1` material (`MaterialDesc`: base
+colour, metallic, roughness, emissive, base colour texture — read straight
+from the cooked material JSON), from the scene's `Camera` (highest
+`priority`) with its first `DirectionalLight`; a mesh missing from the cache
+draws as a magenta cube, a missing texture as white, and entities without
+a `MeshRenderer` as tinted placeholder cubes when
+`ExtractRenderer::placeholders` is on (the default; the Flutter host turns
+it off with a project). The cooked vertex layout is the GPU layout
+(`fynkel_cooked::payload::Vertex`, 72 bytes). Hosts point a viewport at a
+cache with `fynkel_apple_viewport_set_asset_cache`; `fynkel render` does the
+whole path headlessly.
+
 ## Prefab documents
 
 `.prefab.json` (`schemas/prefab.schema.json`, generated from the same
@@ -462,8 +506,11 @@ Chunk kinds and payloads:
 | `CLIP` | `u32` sample rate, `u32` channels, `u64` frames, interleaved `f32` samples |
 | `BLOB` | The source file's bytes |
 
-`fynkel_import::cook::{decode_mesh, decode_texture, decode_clip}` read the
-typed payloads back (length-checked; `None` on a malformed payload).
+`fynkel_cooked::payload::{decode_mesh, decode_texture, decode_clip}` (and
+the `encode_*` counterparts, `Vertex`, `MeshPayload`, `TexturePayload`,
+`ClipPayload`) read the typed payloads back (length-checked, indices
+bounds-checked; `None` on a malformed payload); `fynkel_import::cook`
+re-exports them.
 
 ## Project and lock
 
@@ -536,6 +583,7 @@ fynkel cooked inspect <file.fyna>... [--json]
 fynkel project describe [--project <dir>] [--json] [--schemas <dir>]
 fynkel project lock [--project <dir>] [--check] [--json] [--schemas <dir>]
 fynkel validate [--project <dir>] [--json] [--schemas <dir>]
+fynkel render [--project <dir>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--placeholders] [--json]
 fynkel schema list [--json]
 fynkel schema describe <type|kind> [--json]
 fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
@@ -596,6 +644,13 @@ id, name, rust, doc, wireSize, authored, schema, fields: [{ name, type,
 offset, size, doc }] }] }`); `schema describe <fynkel.Transform>` prints one
 record with field offsets, `schema describe <scene>` a document kind's
 schema id and envelope. `--project` defaults to the current directory.
+`render` loads the project's startup scene, steps the world once and draws
+the extract offscreen with the cooked cache (`--cache` defaults to
+`<project>/.fynkel/cache`; run `fynkel cook` first) to a PNG, 1280×720 by
+default (`--json`: `{ ok, out, size, project, scene, cache, instances,
+meshes, placeholders, missing, batches, sceneCamera, sceneLight,
+assetErrors, diagnostics }`); exit 1 on a project/scene/asset error, 2 when
+no GPU adapter is available.
 
 Exit codes, everywhere: 0 ok (warnings allowed), 1 diagnostics with errors
 (or drift for `format --check`), 2 usage, or a project that cannot be opened
