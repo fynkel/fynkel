@@ -1,12 +1,13 @@
-// The Dart gameplay API seed (design/dart-sdk.md §21.2, ADR-0008): World,
-// GameObject, TransformRef with a staged-write overlay. Behaviours and the
-// scene/asset layers come with M2; this is what the bridge contract needs
-// to be exercised end to end from Dart.
+// The Dart gameplay API (design/dart-sdk.md §21.2, ADR-0008): World,
+// GameObject, TransformRef with a staged-write overlay, and (behaviour.dart)
+// the Behaviour lifecycle the world drives at the §5.1 points of a host
+// frame. The scene/asset layers arrive through `loadScene`/`loadProject`.
 
 import 'dart:typed_data';
 
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
+import 'context.dart';
 import 'diagnostics.dart';
 import 'events.dart';
 import 'native/bridge.dart';
@@ -15,6 +16,8 @@ import 'wire/buffers.dart';
 
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
+part 'behaviour.dart';
+
 /// Immutable local transform value (position, rotation, scale).
 typedef Transform = gen.Transform;
 
@@ -22,7 +25,11 @@ const Transform identityTransform = Transform(position: Vec3.zero, rotation: Qua
 
 /// Runtime entity/component container over one native world.
 class World {
-  World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt});
+  World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt, BehaviourRegistry? registry})
+      : registry = registry ?? BehaviourRegistry() {
+    context = GameContext(time: _WorldTime(this));
+    _behaviours = _BehaviourSystem(this);
+  }
 
   /// Creates a world on a fresh [NativeLibrary] (or the given one).
   factory World.create({
@@ -31,15 +38,33 @@ class World {
     double fixedDt = 0,
     int maxStepsPerFrame = 0,
     double maxFrameDt = 0,
+    BehaviourRegistry? registry,
   }) {
     final lib = library ?? NativeLibrary.open();
     final native = lib.createWorld(
         worldId: worldId, fixedDt: fixedDt, maxStepsPerFrame: maxStepsPerFrame, maxFrameDt: maxFrameDt);
-    return World._(lib, native, ownsLibrary: library == null, fixedDt: fixedDt > 0 ? fixedDt : 1 / 60);
+    return World._(lib, native, ownsLibrary: library == null, fixedDt: fixedDt > 0 ? fixedDt : 1 / 60, registry: registry);
   }
 
   /// Seconds per fixed tick (the engine default when not given).
   final double fixedDt;
+
+  /// Behaviour types this world can instantiate from authored data
+  /// ([GameObject.addBehaviourFromData]).
+  final BehaviourRegistry registry;
+
+  /// The services behaviours see; current during every callback. Replace it
+  /// (a [TestGameContext], say) before the first frame.
+  late GameContext context;
+
+  late final _BehaviourSystem _behaviours;
+
+  /// Every attached behaviour, in callback order.
+  List<Behaviour> get behaviours => List.unmodifiable(_behaviours._all);
+
+  /// Host frames begun and the last frame's dt (for [TimeService]).
+  int _frameCount = 0;
+  double _frameDt = 0;
 
   final NativeLibrary _lib;
   final NativeWorld _native;
@@ -104,6 +129,8 @@ class World {
   FramePlan beginFrame(double dtSeconds) {
     _presentation.clear();
     _presentationTargets.clear();
+    _frameCount++;
+    _frameDt = dtSeconds;
     final plan = _native.beginFrame(dtSeconds);
     if (plan.missedDeadline) _collectDiagnostics('begin_frame');
     return plan;
@@ -153,9 +180,14 @@ class World {
             go._entity = entity;
             _byEntity[entity] = go;
             _toSubscribe.add(entity);
+            if (go._behaviours.isNotEmpty) _behaviours.objectChanged();
           }
         case EntityDestroyed(:final entity):
-          _byEntity.remove(entity)?._alive = false;
+          final go = _byEntity.remove(entity);
+          if (go != null) {
+            go._alive = false;
+            if (go._behaviours.isNotEmpty) _behaviours.objectChanged();
+          }
         default:
           break;
       }
@@ -171,20 +203,64 @@ class World {
   /// extraction). [step] does not flush this lane.
   void flushPresentation() => _flush(CommandLane.presentation, _presentation, _presentationTargets, 'presentation');
 
-  /// Convenience host loop for tests and headless runs: begin frame, drain
-  /// events, run [fixedUpdate] and step per planned tick, flush
-  /// presentation writes.
+  /// The host loop (§5.1) for tests, headless runs and hosts that need no
+  /// custom phases: begin the frame; per planned tick run every behaviour's
+  /// `fixedUpdate` (and [fixedUpdate]) with the non-physics events drained
+  /// since the last tick, `step`, drain the tick's events and run
+  /// `afterPhysics` with its contacts for behaviours that opted in; then
+  /// `update`/`lateUpdate` (and [update]) and the presentation flush.
+  /// [fixedUpdate] runs before the behaviours, [update] after them. Every
+  /// non-physics event reaches exactly one `fixedUpdate`.
   FramePlan frame(double dtSeconds, {void Function(int tick)? fixedUpdate, void Function()? update}) {
     final plan = beginFrame(dtSeconds);
+    _carry(drainEvents());
     for (var i = 0; i < plan.steps; i++) {
-      drainEvents();
       fixedUpdate?.call(tick);
+      _behaviours.fixedUpdate(tick, _takeCarried());
+      final stepped = tick;
       step();
+      final events = drainEvents();
+      _behaviours.afterPhysics(stepped, _contacts(events));
+      _carry(events);
     }
-    drainEvents();
+    _behaviours.update(dtSeconds);
     update?.call();
     flushPresentation();
     return plan;
+  }
+
+  /// Non-physics events waiting for the next `fixedUpdate`.
+  List<EngineEvent> _carried = [];
+
+  void _carry(List<EngineEvent> events) {
+    for (final e in events) {
+      if (e is! Contact) _carried.add(e);
+    }
+  }
+
+  List<EngineEvent> _takeCarried() {
+    if (_carried.isEmpty) return const [];
+    final out = _carried;
+    _carried = [];
+    return out;
+  }
+
+  static List<Contact> _contacts(List<EngineEvent> events) {
+    if (events.isEmpty) return const [];
+    return [for (final e in events) if (e is Contact) e];
+  }
+
+  /// A handle for an entity that already exists (loaded from a scene, or
+  /// found by a query); the same handle comes back for the same entity.
+  /// Its transform is subscribed from the next tick.
+  GameObject attach(int entity, {String name = ''}) {
+    final existing = _byEntity[entity];
+    if (existing != null) return existing;
+    final go = GameObject._(this, 0, identityTransform, name.isEmpty ? (nameOfEntity(entity) ?? '') : name);
+    go._entity = entity;
+    _byEntity[entity] = go;
+    _toSubscribe.add(entity);
+    return go;
   }
 
   void _flush(CommandLane lane, CommandBatch batch, _Targets targets, String context) {
@@ -256,8 +332,10 @@ class World {
     return p.isEmpty || p[0] == 0 ? null : p[0];
   }
 
-  String? nameOf(GameObject go) {
-    final b = _native.query(QueryKind.name, entity: go._requireResolved('name'));
+  String? nameOf(GameObject go) => nameOfEntity(go._requireResolved('name'));
+
+  String? nameOfEntity(int entity) {
+    final b = _native.query(QueryKind.name, entity: entity);
     if (b.recordCount == 0) return null;
     return gen.Name.decode(b.records, 0, b.tail).value;
   }
@@ -347,6 +425,33 @@ class GameObject {
   }
 
   late final TransformRef transform;
+
+  final List<Behaviour> _behaviours = [];
+
+  /// The behaviours attached to this object, in attach order.
+  List<Behaviour> get behaviours => List.unmodifiable(_behaviours);
+
+  /// Attaches [behaviour]; its `onCreate`/`onEnable` run at the next safe
+  /// boundary (once the object is spawned). Returns it for chaining.
+  T addBehaviour<T extends Behaviour>(T behaviour) {
+    world._behaviours.attach(this, behaviour);
+    return behaviour;
+  }
+
+  /// Builds a behaviour of the registered type [typeId] from authored
+  /// [fields] (see [BehaviourRegistry.instantiate]) and attaches it.
+  Behaviour addBehaviourFromData(String typeId, {Map<String, Object?> fields = const {}, int? version}) =>
+      addBehaviour(world.registry.instantiate(typeId, fields: fields, version: version));
+
+  /// The first attached behaviour of type [T].
+  T? behaviour<T extends Behaviour>() {
+    for (final b in _behaviours) {
+      if (b is T) return b;
+    }
+    return null;
+  }
+
+  Iterable<T> behavioursOf<T extends Behaviour>() => _behaviours.whereType<T>();
 
   bool get isPending => _entity == null;
   bool get isAlive => _alive;
@@ -493,4 +598,23 @@ class TransformRef {
 
   Vec3 get scale => value.scale;
   set scale(Vec3 s) => value = Transform(position: value.position, rotation: value.rotation, scale: s);
+}
+
+/// The world's clock as a [TimeService].
+class _WorldTime implements TimeService {
+  _WorldTime(this.world);
+  final World world;
+
+  @override
+  double get delta => world._frameDt;
+  @override
+  double get fixedDelta => world.fixedDt;
+  @override
+  int get tick => world.tick;
+  @override
+  double get elapsed => world.tick * world.fixedDt;
+  @override
+  int get frame => world._frameCount;
+  @override
+  double get alpha => world.alpha;
 }
