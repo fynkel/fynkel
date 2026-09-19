@@ -1,0 +1,65 @@
+# The same gate `docs/status.md` describes, run on every push and pull
+# request so "green" is a machine's word, not a person's. Keep the step list
+# in sync with the "Verification" section of docs/status.md.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  FLUTTER_VERSION: 3.47.2
+
+jobs:
+  rust:
+    name: rust (fmt, clippy, test, codegen --check)
+    # Apple crates (platform/apple, hosts/flutter_apple) need a macOS toolchain.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins the channel and the Apple targets; rustup
+      # installs them on first use.
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace
+      - name: codegen --check
+        run: cargo run -p fynkel_cli -- codegen --check
+
+  dart:
+    name: dart (package:fynkel tests)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      # Flutter's Dart is the toolchain of record (docs/toolchain.md).
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: pub get
+        working-directory: packages/fynkel
+        run: dart pub get
+      - name: analyze
+        working-directory: packages/fynkel
+        run: dart analyze --fatal-infos
+      # The native-assets hook builds the runtime (cargo, release) for the
+      # host architecture before the tests run.
+      - name: test
+        working-directory: packages/fynkel
+        run: dart test

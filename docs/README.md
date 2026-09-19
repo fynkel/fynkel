@@ -2,6 +2,7 @@
 
 | Document | Role |
 | --- | --- |
+| [`status.md`](status.md) | **Start here.** What exists, what is proven end to end, what is not, known compromises, how "green" is verified. Rewritten at every gate. |
 | [`blueprint.md`](blueprint.md) | The development blueprint (v0.4). Architecture, contracts, milestones M0–M7, backlog. |
 | [`decisions/`](decisions/) | Architecture Decision Records. **Binding**; they override the blueprint where they conflict. |
 | [`design/dart-sdk.md`](design/dart-sdk.md) | Dart SDK and standard component spec. Living draft, revisited at M1. |
