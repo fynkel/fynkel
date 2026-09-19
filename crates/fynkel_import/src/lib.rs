@@ -13,16 +13,23 @@
 //!
 //! Importers never run scripts, never follow a URI unless the sidecar's
 //! settings say so, and stop at explicit [`Limits`].
+//!
+//! [`cook`] takes a whole asset database through the importers into the
+//! content-addressed [`Cache`] as `fynkel_cooked` containers (item 12).
 
 #![forbid(unsafe_code)]
 // As in `fynkel_document`: a `Diagnostic` is the error type on purpose.
 #![allow(clippy::result_large_err)]
 
 pub mod audio;
+pub mod cache;
+pub mod cook;
 pub mod gltf;
 pub mod image;
 pub mod intermediate;
 
+pub use cache::{Cache, CacheKey, KeyInputs, Manifest, CACHE_VERSION};
+pub use cook::{cook, CookOptions, CookReport, CookedAsset, Status};
 pub use intermediate::{
     AudioData, ColorSpace, ImageData, Intermediate, MaterialData, MeshData, TextureData, Vertex,
     INTERMEDIATE_VERSION,
@@ -108,7 +115,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             )
             .with_document(path.display().to_string())
             .with_suggestion(
-                "importers: fynkel.gltf (.gltf/.glb), fynkel.image (.png/.jpg), fynkel.audio (.wav/.ogg); fynkel.file has none (the cache, M2-12, carries such files as they are)",
+                "importers: fynkel.gltf (.gltf/.glb), fynkel.image (.png/.jpg), fynkel.audio (.wav/.ogg); fynkel.file has none (`fynkel cook` carries such files as they are)",
             )],
         },
     }

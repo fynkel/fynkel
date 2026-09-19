@@ -1,0 +1,10 @@
+[package]
+name = "fynkel_cooked"
+description = "The cooked asset container (ADR-0006, blueprint §6): one versioned file per asset with a chunk table, per-chunk checksums and dependency ids. Writer for the cooker, bounded reader for the runtime. Depends on crc32fast only."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+crc32fast.workspace = true

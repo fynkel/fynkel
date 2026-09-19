@@ -1,0 +1,565 @@
+//! The cache and the cooker (blueprint §19.2c item 12): a clean corpus
+//! cooks to one container per asset; cooking again hits every key;
+//! editing a texture (its pixels or its sidecar settings) recooks exactly
+//! the material that uses it and the scene that uses that material;
+//! changing the profile misses everything; the containers read back
+//! through `fynkel_cooked` with bounded decoding; cycles and unresolved
+//! references fail only the assets involved.
+
+use std::path::{Path, PathBuf};
+
+use fynkel_contracts::Code;
+use fynkel_cooked::{ChunkFile, Container};
+use fynkel_document::asset::AssetDatabase;
+use fynkel_document::SchemaSet;
+use fynkel_import::cook::{decode_clip, decode_mesh, decode_texture, TEXTURE_FORMAT_RGBA8_SRGB};
+use fynkel_import::{cook, Cache, CookOptions, CookReport, Status};
+use uuid::Uuid;
+
+const ROBOT: &str = "c0000000-0000-4000-8000-000000000001";
+const SWATCH: &str = "c0000000-0000-4000-8000-000000000002";
+const TONE: &str = "c0000000-0000-4000-8000-000000000003";
+const NOTES: &str = "c0000000-0000-4000-8000-000000000004";
+const RUSTED: &str = "c0000000-0000-4000-8000-000000000020";
+const MAIN: &str = "c0000000-0000-4000-8000-000000000030";
+
+fn id(s: &str) -> Uuid {
+    Uuid::parse_str(s).unwrap()
+}
+
+fn fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures")
+}
+
+fn schemas() -> SchemaSet {
+    SchemaSet::embedded()
+}
+
+/// A fresh copy of the corpus and an empty cache, both under a temporary
+/// directory that is removed on drop.
+struct Project {
+    dir: PathBuf,
+}
+
+impl Project {
+    fn new(name: &str) -> Project {
+        let dir = std::env::temp_dir().join(format!("fynkel-cook-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        copy_dir(&fixtures().join("project/assets"), &dir.join("assets"));
+        Project { dir }
+    }
+
+    fn assets(&self) -> PathBuf {
+        self.dir.join("assets")
+    }
+
+    fn cache(&self) -> Cache {
+        Cache::at(&self.dir.join("cache"))
+    }
+
+    fn cook_with(&self, opts: &CookOptions) -> CookReport {
+        let (db, diags) = AssetDatabase::scan(&self.assets(), &schemas());
+        assert!(
+            !fynkel_contracts::has_errors(&diags),
+            "the corpus must scan clean: {diags:?}"
+        );
+        cook(&db, &schemas(), &self.cache(), opts)
+    }
+
+    fn cook(&self) -> CookReport {
+        self.cook_with(&CookOptions::default())
+    }
+
+    fn write(&self, rel: &str, text: &str) {
+        std::fs::write(self.assets().join(rel), text).unwrap();
+    }
+}
+
+impl Drop for Project {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+fn status(r: &CookReport, asset: &str) -> Status {
+    r.get(id(asset))
+        .unwrap_or_else(|| panic!("{asset} not in the report"))
+        .status
+}
+
+fn statuses(r: &CookReport) -> Vec<(&str, Status)> {
+    [ROBOT, SWATCH, TONE, NOTES, RUSTED, MAIN]
+        .iter()
+        .map(|a| (*a, status(r, a)))
+        .collect()
+}
+
+fn all(r: &CookReport, s: Status) -> bool {
+    r.assets.iter().all(|a| a.status == s)
+}
+
+#[test]
+fn a_clean_corpus_cooks_then_hits() {
+    let p = Project::new("clean");
+    let first = p.cook();
+    assert!(!first.has_errors(), "{:?}", first.diagnostics);
+    assert_eq!(first.assets.len(), 6);
+    assert!(all(&first, Status::Cooked), "{:?}", statuses(&first));
+    for a in &first.assets {
+        let key = a.key.expect("cooked assets have a key");
+        assert!(p.cache().has(&key));
+        assert_eq!(
+            a.file.as_deref(),
+            Some(p.cache().object_path(&key).as_path())
+        );
+        assert!(a.bytes > 0);
+        assert_eq!(a.chunks[0].kind, "META");
+    }
+    assert!(p.cache().index_path().is_file());
+    let index: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(p.cache().index_path()).unwrap()).unwrap();
+    assert_eq!(index["profile"], "dev");
+    assert_eq!(index["assets"].as_array().unwrap().len(), 6);
+
+    let second = p.cook();
+    assert!(!second.has_errors());
+    assert!(all(&second, Status::Cached), "{:?}", statuses(&second));
+    for (a, b) in first.assets.iter().zip(&second.assets) {
+        assert_eq!(a.key, b.key);
+        assert_eq!(a.chunks, b.chunks);
+        assert_eq!(a.bytes, b.bytes);
+    }
+
+    // Dependencies: the material uses the texture, the scene uses the
+    // model and the material; sources depend on nothing.
+    let by = |a: &str| first.get(id(a)).unwrap().dependencies.clone();
+    assert_eq!(by(RUSTED), vec![id(SWATCH)]);
+    assert_eq!(by(MAIN), vec![id(ROBOT), id(RUSTED)]);
+    assert!(by(ROBOT).is_empty() && by(SWATCH).is_empty() && by(TONE).is_empty());
+
+    // `--force` cooks again to the same keys and bytes.
+    let forced = p.cook_with(&CookOptions {
+        force: true,
+        ..CookOptions::default()
+    });
+    assert!(all(&forced, Status::Cooked));
+    for (a, b) in first.assets.iter().zip(&forced.assets) {
+        assert_eq!(a.key, b.key);
+        assert_eq!(a.chunks, b.chunks);
+    }
+}
+
+#[test]
+fn editing_a_texture_invalidates_exactly_its_dependents() {
+    let p = Project::new("edit-png");
+    let first = p.cook();
+    assert!(all(&first, Status::Cooked));
+
+    // Swap the pixels: same dimensions, different bytes.
+    let png = fixtures().join("textures/swatch_rgb.png");
+    std::fs::copy(&png, p.assets().join("textures/swatch.png")).unwrap();
+    let second = p.cook();
+    assert!(!second.has_errors(), "{:?}", second.diagnostics);
+    assert_eq!(
+        statuses(&second),
+        [
+            (ROBOT, Status::Cached),
+            (SWATCH, Status::Cooked),
+            (TONE, Status::Cached),
+            (NOTES, Status::Cached),
+            (RUSTED, Status::Cooked),
+            (MAIN, Status::Cooked),
+        ]
+    );
+    let key = |r: &CookReport, a: &str| r.get(id(a)).unwrap().key.unwrap();
+    assert_ne!(key(&first, SWATCH), key(&second, SWATCH));
+    assert_ne!(key(&first, RUSTED), key(&second, RUSTED));
+    assert_ne!(key(&first, MAIN), key(&second, MAIN));
+    assert_eq!(key(&first, ROBOT), key(&second, ROBOT));
+    // The old objects are still there (content-addressed, never edited).
+    assert!(p.cache().has(&key(&first, SWATCH)));
+    assert!(p.cache().has(&key(&second, SWATCH)));
+
+    // The material's manifest names the new texture key.
+    let manifest = p.cache().read_manifest(&key(&second, RUSTED)).unwrap();
+    assert_eq!(manifest.dependencies.len(), 1);
+    assert_eq!(manifest.dependencies[0].id, SWATCH);
+    assert_eq!(manifest.dependencies[0].key, key(&second, SWATCH).hex());
+
+    // Then the same again: everything hits.
+    let third = p.cook();
+    assert!(all(&third, Status::Cached));
+
+    // Putting the original pixels back finds the first objects again.
+    std::fs::copy(
+        fixtures().join("textures/swatch.png"),
+        p.assets().join("textures/swatch.png"),
+    )
+    .unwrap();
+    let fourth = p.cook();
+    assert!(all(&fourth, Status::Cached), "{:?}", statuses(&fourth));
+    assert_eq!(key(&fourth, MAIN), key(&first, MAIN));
+}
+
+#[test]
+fn editing_import_settings_invalidates_the_same_set() {
+    let p = Project::new("edit-settings");
+    let first = p.cook();
+    assert!(all(&first, Status::Cooked));
+    p.write(
+        "textures/swatch.png.meta.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{SWATCH}","name":"swatch.png","importer":"fynkel.image","importerVersion":1,"settings":{{"colorSpace":"linear"}},"subAssets":{{}}}}"#
+        ),
+    );
+    let second = p.cook();
+    assert!(!second.has_errors(), "{:?}", second.diagnostics);
+    assert_eq!(
+        statuses(&second),
+        [
+            (ROBOT, Status::Cached),
+            (SWATCH, Status::Cooked),
+            (TONE, Status::Cached),
+            (NOTES, Status::Cached),
+            (RUSTED, Status::Cooked),
+            (MAIN, Status::Cooked),
+        ]
+    );
+    // The texture chunk now says linear.
+    let swatch = second.get(id(SWATCH)).unwrap();
+    let bytes = std::fs::read(swatch.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    let texture = decode_texture(c.read(1, 1 << 20).unwrap()).unwrap();
+    assert_eq!(
+        texture.format,
+        fynkel_import::cook::TEXTURE_FORMAT_RGBA8_LINEAR
+    );
+}
+
+#[test]
+fn editing_a_document_invalidates_it_and_its_dependents_only() {
+    let p = Project::new("edit-doc");
+    let first = p.cook();
+    assert!(all(&first, Status::Cooked));
+    let path = p.assets().join("materials/rusted.material.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("\"roughness\": 0.65", "\"roughness\": 0.9");
+    std::fs::write(&path, text).unwrap();
+    let second = p.cook();
+    assert_eq!(
+        statuses(&second),
+        [
+            (ROBOT, Status::Cached),
+            (SWATCH, Status::Cached),
+            (TONE, Status::Cached),
+            (NOTES, Status::Cached),
+            (RUSTED, Status::Cooked),
+            (MAIN, Status::Cooked),
+        ]
+    );
+}
+
+#[test]
+fn the_profile_is_part_of_the_key() {
+    let p = Project::new("profile");
+    let dev = p.cook();
+    assert!(all(&dev, Status::Cooked));
+    let ios = p.cook_with(&CookOptions {
+        profile: "ios".to_string(),
+        ..CookOptions::default()
+    });
+    assert!(all(&ios, Status::Cooked), "{:?}", statuses(&ios));
+    for (a, b) in dev.assets.iter().zip(&ios.assets) {
+        assert_ne!(a.key, b.key);
+        // Same inputs otherwise: the payload chunks are identical.
+        assert_eq!(a.chunks[1..], b.chunks[1..]);
+    }
+    assert!(all(&p.cook(), Status::Cached));
+}
+
+#[test]
+fn containers_read_back_with_bounded_decoding() {
+    let p = Project::new("readback");
+    let r = p.cook();
+    assert!(!r.has_errors());
+
+    // The model: meshes, materials, a decoded image, the prefab.
+    let robot = r.get(id(ROBOT)).unwrap();
+    let mut f = ChunkFile::open_path(robot.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(&f.meta(1 << 20).unwrap()).unwrap();
+    assert_eq!(meta["id"], ROBOT);
+    assert_eq!(meta["kind"], "fynkel.gltf");
+    assert_eq!(meta["importer"], "fynkel.gltf");
+    assert_eq!(meta["profile"], "dev");
+    assert_eq!(meta["key"], robot.key.unwrap().hex());
+    assert_eq!(
+        meta["subAssets"]["mesh/0"],
+        "cbac6df1-3f63-5f74-89cb-152ae43389d9"
+    );
+    let chunks = meta["chunks"].as_array().unwrap();
+    assert_eq!(chunks.len(), f.chunks().len());
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(
+        kinds,
+        ["META", "MESH", "MESH", "MESH", "JSON", "JSON", "TEXR", "JSON"]
+    );
+    let names: Vec<&str> = chunks
+        .iter()
+        .map(|c| c["sub"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "",
+            "mesh/0",
+            "mesh/1/0",
+            "mesh/1/1",
+            "material/0",
+            "material/1",
+            "image/0",
+            "prefab"
+        ]
+    );
+    assert_eq!(chunks[1]["id"], "cbac6df1-3f63-5f74-89cb-152ae43389d9");
+    let mesh = decode_mesh(&f.read(1, 1 << 24).unwrap()).unwrap();
+    assert_eq!(
+        mesh.vertices.len(),
+        chunks[1]["vertices"].as_u64().unwrap() as usize
+    );
+    assert_eq!(
+        mesh.indices.len(),
+        chunks[1]["indices"].as_u64().unwrap() as usize
+    );
+    assert!(mesh
+        .indices
+        .iter()
+        .all(|i| (*i as usize) < mesh.vertices.len()));
+    assert!(mesh
+        .bounds_min
+        .iter()
+        .zip(&mesh.bounds_max)
+        .all(|(a, b)| a <= b));
+    let material: serde_json::Value = serde_json::from_slice(&f.read(4, 1 << 20).unwrap()).unwrap();
+    assert_eq!(material["shader"], "fynkel.pbr@1");
+    let image = decode_texture(&f.read(6, 1 << 24).unwrap()).unwrap();
+    assert_eq!(
+        (image.width, image.height),
+        (
+            chunks[6]["width"].as_u64().unwrap() as u32,
+            chunks[6]["height"].as_u64().unwrap() as u32
+        )
+    );
+    assert_eq!(image.format, TEXTURE_FORMAT_RGBA8_SRGB);
+    let prefab: serde_json::Value = serde_json::from_slice(&f.read(7, 1 << 20).unwrap()).unwrap();
+    assert!(prefab["entities"].is_object());
+
+    // Bounded: a mesh larger than the budget is refused before it is read.
+    let err = f.read(1, 16).unwrap_err();
+    assert!(
+        matches!(err, fynkel_cooked::Error::ChunkTooLarge { index: 1, .. }),
+        "{err}"
+    );
+    assert!(matches!(
+        f.read(99, 1 << 20).unwrap_err(),
+        fynkel_cooked::Error::ChunkOutOfRange(99)
+    ));
+
+    // The texture asset itself.
+    let swatch = r.get(id(SWATCH)).unwrap();
+    let bytes = std::fs::read(swatch.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    assert_eq!(c.chunks().len(), 2);
+    let t = decode_texture(c.read(1, 1 << 20).unwrap()).unwrap();
+    assert_eq!(
+        (t.width, t.height, t.format),
+        (4, 3, TEXTURE_FORMAT_RGBA8_SRGB)
+    );
+    assert_eq!(t.rgba8.len(), 48);
+    assert!(
+        t.rgba8[0] < t.rgba8[12],
+        "red rises along x, as in the source"
+    );
+
+    // The clip.
+    let tone = r.get(id(TONE)).unwrap();
+    let bytes = std::fs::read(tone.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    let clip = decode_clip(c.read(1, 1 << 24).unwrap()).unwrap();
+    assert_eq!((clip.sample_rate, clip.channels), (8000, 2));
+    assert_eq!(clip.samples.len() as u64, clip.frames * 2);
+
+    // The plain file: its bytes, untouched.
+    let notes = r.get(id(NOTES)).unwrap();
+    let bytes = std::fs::read(notes.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    assert_eq!(c.chunks()[1].kind_str(), "BLOB");
+    assert_eq!(
+        c.read(1, 1 << 20).unwrap(),
+        b"Design notes for the cook fixture.\n"
+    );
+
+    // Documents: canonical JSON, and the META lists the dependency ids.
+    let main = r.get(id(MAIN)).unwrap();
+    let bytes = std::fs::read(main.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
+    assert_eq!(meta["kind"], "document/scene");
+    assert_eq!(meta["dependencies"], serde_json::json!([ROBOT, RUSTED]));
+    let scene: serde_json::Value = serde_json::from_slice(c.read(1, 1 << 20).unwrap()).unwrap();
+    assert_eq!(scene["id"], MAIN);
+
+    // A flipped byte in a payload is caught by its checksum.
+    let mut bad = bytes.clone();
+    let at = c.chunks()[1].offset as usize + 4;
+    bad[at] ^= 0xff;
+    let c = Container::parse(&bad).unwrap();
+    assert!(matches!(
+        c.read(1, 1 << 20),
+        Err(fynkel_cooked::Error::Checksum { index: 1 })
+    ));
+}
+
+#[test]
+fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
+    let p = Project::new("failures");
+    // Scene B references scene A, scene A references scene B (a scene's
+    // entities may carry any assetRef-shaped data; the cooker does not
+    // care which component).
+    let a = "c0000000-0000-4000-8000-0000000000a0";
+    let b = "c0000000-0000-4000-8000-0000000000b0";
+    let scene = |own: &str, other: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":1,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+        )
+    };
+    p.write("scenes/a.scene.json", &scene(a, b));
+    p.write("scenes/b.scene.json", &scene(b, a));
+    // Scene C references an asset that does not exist.
+    let c = "c0000000-0000-4000-8000-0000000000c0";
+    p.write(
+        "scenes/c.scene.json",
+        &scene(c, "c0000000-0000-4000-8000-0000000000ff"),
+    );
+    // Scene D depends on the cycle (on A).
+    let d = "c0000000-0000-4000-8000-0000000000d0";
+    p.write("scenes/d.scene.json", &scene(d, a));
+
+    let r = p.cook();
+    assert!(r.has_errors());
+    assert_eq!(status(&r, a), Status::Failed);
+    assert_eq!(status(&r, b), Status::Failed);
+    assert_eq!(status(&r, c), Status::Failed);
+    assert_eq!(status(&r, d), Status::Failed);
+    assert!(
+        statuses(&r).iter().all(|(_, s)| *s == Status::Cooked),
+        "{:?}",
+        statuses(&r)
+    );
+    let codes: Vec<Code> = r.diagnostics.iter().map(|d| d.code).collect();
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|c| **c == Code::IMPORT_INVALID_DATA)
+            .count(),
+        2,
+        "{:?}",
+        r.diagnostics
+    );
+    assert_eq!(
+        codes
+            .iter()
+            .filter(|c| **c == Code::ASSET_UNRESOLVED)
+            .count(),
+        1
+    );
+    let blocked = r
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == Code::IMPORT_SKIPPED && d.message.contains("not cooked because"))
+        .count();
+    assert_eq!(blocked, 1, "{:?}", r.diagnostics);
+    assert!(r.get(id(d)).unwrap().key.is_none());
+
+    // Fixing the cycle cooks the four scenes; nothing else moves.
+    p.write("scenes/b.scene.json", &scene(b, RUSTED));
+    p.write("scenes/c.scene.json", &scene(c, SWATCH));
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert!(statuses(&r).iter().all(|(_, s)| *s == Status::Cached));
+    for s in [a, b, c, d] {
+        assert_eq!(status(&r, s), Status::Cooked);
+    }
+}
+
+#[test]
+fn a_sidecar_behind_its_import_warns_and_a_broken_source_fails() {
+    let p = Project::new("stale");
+    p.write(
+        "models/robot.glb.meta.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{ROBOT}","name":"robot.glb","importer":"fynkel.gltf","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
+        ),
+    );
+    // The scene's `mesh/0` reference no longer resolves against the sidecar.
+    let r = p.cook();
+    assert_eq!(status(&r, ROBOT), Status::Cooked);
+    assert_eq!(status(&r, MAIN), Status::Failed);
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.code == Code::IMPORT_SKIPPED && d.message.contains("subAssets are behind")));
+    // The cooked model still carries every sub-asset id (derived).
+    let bytes = std::fs::read(r.get(id(ROBOT)).unwrap().file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
+    assert_eq!(
+        meta["subAssets"]["mesh/0"],
+        "cbac6df1-3f63-5f74-89cb-152ae43389d9"
+    );
+
+    // A truncated source fails its own asset; the rest cook.
+    std::fs::copy(
+        fixtures().join("audio/truncated.wav"),
+        p.assets().join("audio/tone.wav"),
+    )
+    .unwrap();
+    let r = p.cook();
+    assert_eq!(status(&r, TONE), Status::Failed);
+    assert!(r.get(id(TONE)).unwrap().key.is_some());
+    assert!(!p.cache().has(&r.get(id(TONE)).unwrap().key.unwrap()));
+    assert_eq!(status(&r, SWATCH), Status::Cached);
+}
+
+#[test]
+fn prune_removes_objects_not_kept() {
+    let p = Project::new("prune");
+    let first = p.cook();
+    std::fs::copy(
+        fixtures().join("textures/swatch_rgb.png"),
+        p.assets().join("textures/swatch.png"),
+    )
+    .unwrap();
+    let second = p.cook();
+    let keep: Vec<_> = second.assets.iter().filter_map(|a| a.key).collect();
+    assert_eq!(p.cache().prune(&keep).unwrap(), 3);
+    for a in &first.assets {
+        let stale = second.get(a.id).unwrap().key != a.key;
+        assert_eq!(p.cache().has(&a.key.unwrap()), !stale);
+    }
+    assert!(all(&p.cook(), Status::Cached));
+}

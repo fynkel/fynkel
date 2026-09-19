@@ -376,6 +376,95 @@ the committed `fixtures/robot.expected.fyni`,
 every id derivation (`FYNKEL_UPDATE_FIXTURES=1 cargo test -p fynkel_import`
 regenerates them when a change is intended).
 
+## Cache and cooked assets
+
+`fynkel cook` (`fynkel_import::cook`) turns the whole asset database into
+one **cooked container per asset** in a **content-addressed cache**
+(blueprint §6, §19.2c item 12). Nothing in the cache is needed to rebuild
+it — the committed sources, sidecars and documents are the truth (ADR-0006)
+— so `.fynkel/cache/` is ignored by version control and `rm -rf` is a
+valid repair.
+
+**Keys.** `fynkel_import::cache::KeyInputs::key()` is BLAKE3 over
+length-prefixed fields: the cache format version, the intermediate and
+container versions, the asset id, the kind (`fynkel.gltf`, `fynkel.image`,
+…, or `document/<kind>`), its version (importer version or
+`formatVersion`), the BLAKE3 of the source bytes, extra input files (a
+`.gltf`'s non-`data:` `buffers[].uri` / `images[].uri`, hashed, sorted; a
+missing file hashes as "missing"), the sidecar's `settings` as canonical
+JSON, every dependency as `(id, key)` sorted by id, and the target profile.
+Same inputs → same key → the object is already there ("cached"); anything
+else is a new key ("cooked"). Objects are never edited in place; an old
+key's object stays until pruned.
+
+**Dependencies** are what a document references: every `assetRef` in it
+(nil ids skipped), resolved against the database to the *asset* that owns
+the target (a sub-asset reference depends on the whole source). Sources
+depend on nothing but their own files. Because a dependency's key is part
+of the dependent's key, editing a texture recooks the material that uses
+it and the scene that uses that material — and nothing else
+(`tests/cook.rs` pins that down). Assets are cooked in dependency order
+(Tarjan's SCCs); a cycle fails its members (`FYN-A0104`), an unresolved
+reference fails the document (`FYN-A0003`), and a dependent of a failed
+asset is skipped (`FYN-A0105`, "not cooked because … failed"). The rest of
+the database still cooks.
+
+**Layout.** `<cache>/objects/<key>.fyna` next to `<key>.manifest.json`
+(both written to a temporary name and renamed, the object first), and
+`<cache>/index.json` after every cook: `{ fynkel: "cache-index",
+cacheVersion, profile, assets: [{ id, path, kind, status, key, file,
+dependencies }] }` — how a loader finds "the current cooked file for this
+asset" without recomputing keys. The manifest records the key's inputs
+(`sourceHash`, `extraInputs`, `settings`, `dependencies: [{ id, key }]`)
+and the chunk table (`kind`, `name`, `length`, `crc32`), no timestamps.
+`Cache::prune(keep)` deletes every object not in `keep`; `fynkel cook
+--prune` keeps the current profile's keys only.
+
+**What is cooked.** A document: validated (schema + references; errors
+fail it) and stored as its canonical text in one `JSON` chunk. A source
+with an importer: run through `fynkel_import::import`, then meshes →
+`MESH`, materials → `JSON` (`documentKind: material`), embedded glTF images
+→ decoded `TEXR` (colour space from the material slots that use them:
+`baseColor`/`emissive` → sRGB, data slots → linear, unused → sRGB, both →
+sRGB with an `FYN-A0105` warning), the asset's own texture → `TEXR`, clips
+→ `CLIP`, the prefab → `JSON`. A `fynkel.file` source: its bytes in one
+`BLOB` chunk. A sidecar whose `subAssets` fall behind the import cooks with
+a warning (the container carries the derived ids) — `fynkel import`
+updates the sidecar; the cooker never writes outside the cache.
+
+### The cooked container (`fynkel_cooked`, `.fyna`, version 1)
+
+A dependency-free crate (only `crc32fast`) so a shipped runtime can read
+containers without the importers. Little-endian throughout.
+
+- **Header** (48 bytes): `FYNC`, `u32` version (1), `u32` header length,
+  `u32` chunk count, `u64` table offset, `u64` file length, `u32` flags,
+  `u32` CRC-32 of the first 36 header bytes, `u64` reserved.
+- **Payloads**, each 8-byte aligned, then the **table**: per chunk
+  `kind[4]`, `u32` flags, `u64` offset, `u64` length, `u32` CRC-32 of the
+  payload, `u32` reserved. At most 65 536 chunks; chunk 0 is always `META`.
+- **Reading is bounded**: `Container::parse` (bytes in memory) and
+  `ChunkFile::open` (seekable stream; only the header, the table and the
+  requested chunks are read) validate the header, the table and every
+  offset/length against the file length before any payload is touched;
+  `read(index, max_len)` refuses a chunk larger than the caller's budget
+  (`ChunkTooLarge`) and verifies its CRC (`Checksum`); `verify()` checks
+  every payload.
+
+Chunk kinds and payloads:
+
+| Kind | Payload |
+| --- | --- |
+| `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `mipLevels`; `sampleRate`, `channels`, `frames`, `codec`; `entities`; `extension` |
+| `JSON` | A document's canonical text (scene, prefab, material, …) |
+| `MESH` | `u32` vertex count, `u32` index count, `[f32; 3]` bounds min, `[f32; 3]` bounds max, vertices (72 bytes each, the intermediate's layout), `u32` indices |
+| `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear), `u32` mip levels (1), then `width × height × 4` texels, top row first |
+| `CLIP` | `u32` sample rate, `u32` channels, `u64` frames, interleaved `f32` samples |
+| `BLOB` | The source file's bytes |
+
+`fynkel_import::cook::{decode_mesh, decode_texture, decode_clip}` read the
+typed payloads back (length-checked; `None` on a malformed payload).
+
 ## CLI
 
 ```sh
@@ -396,6 +485,8 @@ fynkel asset init <file>... [--json]
 fynkel migrate <path|dir>... [--dry-run] [--json] [--schemas <dir>]
 fynkel migrate --list [--json]
 fynkel import <file>... [--out <dir>] [--dry-run] [--json] [--schemas <dir>]
+fynkel cook [--assets <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json] [--schemas <dir>]
+fynkel cooked inspect <file.fyna>... [--json]
 fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
 fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
 ```
@@ -427,7 +518,18 @@ sidecar's importer and writes `<out>/<asset id>.fyni` (`--out` defaults to
 sidecar gets one, a sidecar missing sub-asset ids is updated (existing ids
 kept); `--dry-run` prints the summary and writes nothing (`--json`: `{ ok,
 dryRun, files: [{ file, ok, id, importer, sidecar, sidecarCreated,
-sidecarWritten, summary, intermediate, bytes }], diagnostics }`).
+sidecarWritten, summary, intermediate, bytes }], diagnostics }`). `cook`
+scans `assets/` (or `--assets <dir>`) and cooks every asset into the cache
+(`--cache`, default `.fynkel/cache`) for `--profile` (default `dev`);
+each asset prints as `cooked|cached|failed  path (kind) key bytes`;
+`--force` cooks even when the key is present, `--prune` deletes every
+object the run did not produce (other profiles' objects included)
+(`--json`: `{ ok, profile, cooked, cached, failed, cache, pruned, assets:
+[{ id, path, kind, status, key, file, dependencies, chunks, bytes }],
+diagnostics }`). `cooked inspect` prints a container's header, its chunk
+table with checksums verified, and the META summary (`--json`: `{ ok,
+files: [{ file, ok, version, bytes, verified, error, chunks[], meta }],
+diagnostics }`); a damaged container is an error.
 
 Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
 `--json` prints `{ "ok": bool, "diagnostics": [ ...records... ] }`

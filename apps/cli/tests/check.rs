@@ -661,3 +661,81 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn cook_fills_the_cache_and_cooked_inspect_reads_it() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let assets = root.join("crates/fynkel_import/fixtures/project/assets");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let cache = std::env::temp_dir().join(format!("fynkel-cli-cook-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let cook = |extra: &[&str]| {
+        let mut args = vec![
+            "cook",
+            "--json",
+            "--assets",
+            assets.to_str().unwrap(),
+            "--cache",
+            cache.to_str().unwrap(),
+        ];
+        args.extend_from_slice(extra);
+        let out = run(&args);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        v
+    };
+    let first = cook(&[]);
+    assert_eq!(first["profile"], "dev");
+    assert_eq!(first["cooked"], 6);
+    assert_eq!(first["cached"], 0);
+    assert_eq!(first["failed"], 0);
+    assert!(cache.join("index.json").is_file());
+    let second = cook(&[]);
+    assert_eq!(second["cached"], 6);
+    let ios = cook(&["--profile", "ios"]);
+    assert_eq!(ios["cooked"], 6);
+
+    // Inspect the scene's container.
+    let scene = first["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["path"] == "scenes/main.scene.json")
+        .unwrap();
+    let file = scene["file"].as_str().unwrap();
+    let out = run(&["cooked", "inspect", file]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("checksums ok"), "{text}");
+    assert!(text.contains("[1] JSON"), "{text}");
+    let out = run(&["cooked", "inspect", "--json", file]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["files"][0]["verified"], true);
+    assert_eq!(v["files"][0]["meta"]["kind"], "document/scene");
+    assert_eq!(v["files"][0]["chunks"].as_array().unwrap().len(), 2);
+
+    // A damaged container is reported, exit 1.
+    let mut bytes = std::fs::read(file).unwrap();
+    bytes[60] ^= 0xff; // inside the META payload
+    let damaged = cache.join("damaged.fyna");
+    std::fs::write(&damaged, &bytes).unwrap();
+    let out = run(&["cooked", "inspect", damaged.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+
+    // Pruning after an ios cook drops the dev objects.
+    let pruned = cook(&["--profile", "ios", "--prune"]);
+    assert_eq!(pruned["pruned"], 6);
+    assert_eq!(cook(&[])["cooked"], 6);
+    let _ = std::fs::remove_dir_all(&cache);
+}

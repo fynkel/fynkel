@@ -1,0 +1,31 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 1,
+  "id": "c0000000-0000-4000-8000-000000000030",
+  "name": "Main",
+  "entities": {
+    "c0000000-0000-4000-8000-0000000000e1": {
+      "name": "Robot",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000000c1": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "c0000000-0000-4000-8000-000000000001",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "c0000000-0000-4000-8000-000000000020"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    }
+  }
+}

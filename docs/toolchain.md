@@ -58,6 +58,8 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 | `base64` | 0.23.1 | `data:` URIs in `.gltf` files |
 | `image` | 0.25.10 | PNG/JPEG decoding in `fynkel_import`; `default-features = false`, features `png`, `jpeg` only (no other formats compiled in) |
 | `symphonia` | 0.6.1 | WAV (PCM) and Ogg Vorbis decoding in `fynkel_import`; `default-features = false`, features `wav`, `pcm`, `ogg`, `vorbis` — no SIMD features, so decoding is bit-identical across machines. Chosen over `hound` + `lewton` (the blueprint's candidates): one maintained pure-Rust decoder covers both formats and bounds its own allocations |
+| `blake3` | 1 | Cache keys in `fynkel_import::cache` (content addressing, §6); pure Rust, no SIMD-dependent output — the same inputs hash the same on every machine |
+| `crc32fast` | 1 | Per-chunk and header checksums in `fynkel_cooked`; the crate's only dependency, so a runtime can read cooked containers without the importers |
 
 Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`.
 Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.

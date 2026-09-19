@@ -11,6 +11,7 @@ members = [
     "crates/fynkel_native",
     "crates/fynkel_document",
     "crates/fynkel_import",
+    "crates/fynkel_cooked",
     "platform/apple",
     "hosts/headless",
     "hosts/standalone",
@@ -44,7 +45,10 @@ gltf = { version = "1.4", default-features = false, features = ["utils", "names"
 base64 = "0.23"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm", "ogg", "vorbis"] }
+blake3 = "1"
+crc32fast = "1"
 fynkel_contracts = { path = "crates/fynkel_contracts" }
+fynkel_cooked = { path = "crates/fynkel_cooked" }
 fynkel_schema_derive = { path = "crates/fynkel_schema_derive" }
 fynkel_ecs = { path = "crates/fynkel_ecs" }
 fynkel_scene = { path = "crates/fynkel_scene" }

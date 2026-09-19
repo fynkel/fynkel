@@ -9,6 +9,8 @@ license.workspace = true
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_document.workspace = true
+fynkel_cooked.workspace = true
+blake3.workspace = true
 glam.workspace = true
 gltf.workspace = true
 base64.workspace = true
