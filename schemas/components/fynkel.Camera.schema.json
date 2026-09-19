@@ -37,6 +37,20 @@
       "minimum": -2147483648,
       "maximum": 2147483647,
       "description": "Higher renders on top when several cameras are enabled."
+    },
+    "exposure_mode": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "manual"
+      ],
+      "x-fynkel": {
+        "enum": "fynkel.ExposureMode"
+      }
+    },
+    "exposure": {
+      "type": "number",
+      "description": "EV100 when `exposure_mode` is `manual` (12 ≈ a 10 000 lux sun; +1 halves the brightness)."
     }
   },
   "required": [
@@ -45,14 +59,16 @@
     "ortho_height",
     "near",
     "far",
-    "priority"
+    "priority",
+    "exposure_mode",
+    "exposure"
   ],
   "additionalProperties": false,
   "x-fynkel": {
     "kind": "component",
     "id": 5,
     "rust": "fynkel_core::components::Camera",
-    "wireSize": 24,
+    "wireSize": 32,
     "authored": true
   }
 }

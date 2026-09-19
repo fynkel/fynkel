@@ -27,11 +27,15 @@ propagation, staged commands and alpha interpolation.
 
 ## `fynkel_render`
 
-`ExtractRenderer` (crate `fynkel_render`) draws an `Extract` as instanced
-lit unit cubes with one perspective camera and one directional light. It
-is host-agnostic: it takes a `wgpu::Device`, a target format and a
-`TextureView`. `render_offscreen` is the readback helper for tests. This is
-the seed of the Renderer V1 (blueprint §8.5), not its shape.
+`ExtractRenderer` (crate `fynkel_render`, `docs/renderer.md`) draws an
+`Extract`: the scene's cooked meshes with their PBR materials (or, for the
+demo scene, instanced placeholder cubes) from its camera and lights,
+through an HDR pass and a post pass into the host's target. It is
+host-agnostic: it takes a `wgpu::Device`, a target format and a
+`TextureView`; the host's format decides whether the post pass sRGB
+encodes itself. `render_offscreen` is the readback helper for tests. A
+scene that authors no lighting (the demo scene) is lit by the renderer's
+fallback sun.
 
 ## Headless host and `fynkel test`
 

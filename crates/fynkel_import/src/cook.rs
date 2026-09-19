@@ -1008,6 +1008,10 @@ fn plan_intermediate(
     shown: &str,
 ) {
     for mesh in &im.meshes {
+        // Tangents the source did not carry are generated here, once, so
+        // the renderer never has to (M3-04; closes the M2 compromise).
+        let mut vertices = mesh.vertices.clone();
+        let tangents = crate::tangents::ensure(&mut vertices, &mesh.indices);
         chunks.push(ChunkPlan {
             kind: KIND_MESH,
             name: mesh.name.clone(),
@@ -1016,8 +1020,14 @@ fn plan_intermediate(
                 "vertices": mesh.vertices.len(),
                 "indices": mesh.indices.len(),
                 "material": mesh.material,
+                "tangents": tangents.name(),
             }),
-            payload: encode_mesh(mesh),
+            payload: fynkel_cooked::payload::encode_mesh(
+                &vertices,
+                &mesh.indices,
+                mesh.bounds_min,
+                mesh.bounds_max,
+            ),
         });
     }
     for material in &im.materials {

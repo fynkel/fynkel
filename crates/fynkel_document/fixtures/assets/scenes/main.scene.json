@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "a0000000-0000-4000-8000-000000000030",
   "name": "Main",
   "entities": {

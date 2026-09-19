@@ -28,7 +28,7 @@ fn training_room_describes_and_loads() {
     );
     let d = &described.description;
     assert_eq!(d.name, "TrainingRoom");
-    assert_eq!(d.entities.len(), 4);
+    assert_eq!(d.entities.len(), 5);
     let player = &d.entities[0];
     assert_eq!(player.name, "Player");
     assert_eq!(player.components.len(), 2);
@@ -47,7 +47,7 @@ fn training_room_describes_and_loads() {
 
     let mut world = World::new(WorldConfig::default());
     let loaded = world.load_scene(d).unwrap();
-    assert_eq!(loaded.len(), 4);
+    assert_eq!(loaded.len(), 5);
     assert_eq!(loaded.rejected_components, 0, "{:?}", world.diagnostics());
     let cam = loaded.handle_of(camera.id).unwrap();
     let m = fynkel_scene::world_matrix(world.ecs(), cam).unwrap();
@@ -80,8 +80,8 @@ fn component_values_round_trip_through_nodes() {
             seen += 1;
         }
     }
-    assert_eq!(seen, 8);
-    assert_eq!(AUTHORED_COMPONENTS.len(), 5);
+    assert_eq!(seen, 11);
+    assert_eq!(AUTHORED_COMPONENTS.len(), 7);
     assert!(!AUTHORED_COMPONENTS.contains(&"fynkel.Name"));
     // Encoded numbers are the shortest f32 text, so files stay readable.
     let node = Camera::default().to_node();

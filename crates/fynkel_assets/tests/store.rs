@@ -16,6 +16,8 @@ const CRATE_PREFAB: &str = "c0000000-0000-4000-8000-000000000040";
 const ROBOT: &str = "c0000000-0000-4000-8000-000000000001";
 const SWATCH: &str = "c0000000-0000-4000-8000-000000000002";
 const RUSTED: &str = "c0000000-0000-4000-8000-000000000020";
+const RUSTED_NORMAL: &str = "c0000000-0000-4000-8000-000000000003";
+const RUSTED_MR: &str = "c0000000-0000-4000-8000-000000000004";
 
 fn id(s: &str) -> Uuid {
     s.parse().unwrap()
@@ -53,7 +55,11 @@ fn the_index_opens_and_refuses_other_builds() {
     let cooked = Cooked::new("index");
     let index = CacheIndex::open(&cooked.0).unwrap_or_else(|d| panic!("{d}"));
     assert_eq!(index.profile(), "dev");
-    assert_eq!(index.len(), 5);
+    assert_eq!(
+        index.len(),
+        7,
+        "scene, robot, material, three textures, prefab"
+    );
     let p = index.project().unwrap();
     assert_eq!(p.name, "Fixture Game");
     assert_eq!(p.startup_scene, Some(id(MAIN)));
@@ -75,6 +81,8 @@ fn the_index_opens_and_refuses_other_builds() {
         id(ROBOT),
         id(RUSTED),
         id(SWATCH),
+        id(RUSTED_NORMAL),
+        id(RUSTED_MR),
     ];
     expect.sort();
     assert_eq!(closure, expect);
@@ -141,9 +149,9 @@ fn scenes_describe_from_the_expanded_chunk() {
         vec![],
         "game.Spinner is known to the cook"
     );
-    // Camera, Robot, Crate A and the crate the prefab expands to.
-    assert_eq!(scene.description.entities.len(), 4);
-    assert_eq!(scene.closure.len(), 5);
+    // Camera, Robot, Sun, Crate A and the crate the prefab expands to.
+    assert_eq!(scene.description.entities.len(), 5);
+    assert_eq!(scene.closure.len(), 7);
     assert_eq!(scene.behaviours.len(), 1);
     assert_eq!(scene.behaviours[0].type_id, "game.Spinner");
     assert!(scene.behaviours[0].known);
@@ -185,10 +193,10 @@ fn payloads_load_by_reference_and_residency_evicts() {
     let a = assets.retain(&closure);
     let b = assets.retain(&closure);
     assert!(assets.is_resident(id(ROBOT)));
-    assert_eq!(assets.stats().retained, 5);
+    assert_eq!(assets.stats().retained, 7);
     let before = assets.evictions();
     a.release();
-    assert_eq!(assets.stats().retained, 5);
+    assert_eq!(assets.stats().retained, 7);
     assert_eq!(assets.stats().meshes, 1);
     assert_eq!(assets.evictions(), before);
     drop(b);

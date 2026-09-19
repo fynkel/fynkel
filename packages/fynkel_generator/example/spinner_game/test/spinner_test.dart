@@ -118,7 +118,7 @@ void main() {
     final r = w.loadProject(fixture, cacheDir: cache);
     expect(r.ok, isTrue);
     expect(r.behavioursAttached, 0);
-    expect(r.entityCount, 4);
+    expect(r.entityCount, 5);
     expect(warnings.map((d) => d.code), ['FYN-B0001']);
     expect(warnings.single.pointer, endsWith('/components/c0000000-0000-4000-8000-0000000000c2'));
     expect(w.behaviours, isEmpty);

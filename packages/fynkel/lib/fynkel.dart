@@ -4,7 +4,18 @@
 library;
 
 export 'generated/schema.g.dart'
-    show AlphaMode, Camera, DirectionalLight, MeshRenderer, PbrMaterial, PointLight, Projection, SnapshotTransformRecord;
+    show
+        AlphaMode,
+        Camera,
+        DirectionalLight,
+        Environment,
+        ExposureMode,
+        MeshRenderer,
+        PbrMaterial,
+        PointLight,
+        Projection,
+        SnapshotTransformRecord,
+        SpotLight;
 export 'src/asset_ref.dart';
 export 'src/context.dart';
 export 'math.dart';

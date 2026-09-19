@@ -13,7 +13,9 @@ use fynkel_contracts::{Entity, HasSchema};
 use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
 
-use crate::components::{Camera, DirectionalLight, MeshRenderer, PointLight};
+use crate::components::{
+    Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
+};
 use crate::material::PbrMaterial;
 use crate::world::Name;
 
@@ -194,6 +196,8 @@ pub const ALL: &[&RecordSchema] = &[
     &DirectionalLight::SCHEMA,
     &PointLight::SCHEMA,
     &PbrMaterial::SCHEMA,
+    &SpotLight::SCHEMA,
+    &Environment::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

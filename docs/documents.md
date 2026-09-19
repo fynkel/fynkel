@@ -137,8 +137,15 @@ number arrays, enums are the lowerCamel variant name (`"projection":
 "perspective"`), asset references are `{ "asset": "<uuid>", "sub": "mesh/0" }`
 with `sub` omitted for the asset itself — never a path. Built-in authored
 components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
-`fynkel.DirectionalLight`, `fynkel.PointLight` (`fixtures/valid/training_room.scene.json`
-uses all of them).
+`fynkel.DirectionalLight`, `fynkel.PointLight`, `fynkel.SpotLight`,
+`fynkel.Environment` (`fixtures/valid/training_room.scene.json` uses all of
+them). Scenes and prefabs are **formatVersion 2** since M3-04: `fynkel.Camera`
+gained `exposure_mode` (`auto` | `manual`) and `exposure` (EV100; the
+camera-exposure migration below fills the defaults in), `SpotLight`
+(candela, range, inner/outer cone angles in radians) and `Environment`
+(constant ambient in lux, optional equirectangular `sky` texture reference
+with `sky_intensity` in nits and `sky_rotation`; the first one in the scene
+counts) were added; `docs/renderer.md` says how the renderer uses each.
 
 A component of any other type is a **behaviour**: a Dart class of the game
 (`@FynkelBehaviour(id: 'game.Spinner')`) whose `@Expose` fields are its
@@ -250,22 +257,25 @@ fynkel_cli` inside a source checkout).
 
 `fynkel_render` draws from the same `Assets` store (`set_assets`; a store
 it already holds is a no-op, so re-pointing per frame is free): every
-extracted `MeshRenderer` with its mesh and the `base_color` factor ×
-texture of its `fynkel.pbr@1` material (the `PbrMaterial` record decoded
-from the cooked `MATL` chunk — every field and all five texture
-references; M3-04 wires the rest into the shading), from the scene's
-`Camera` (highest `priority`) with its first `DirectionalLight`; a mesh
-missing from the cache draws as a magenta cube, a missing texture as
-white, and entities without a `MeshRenderer` as tinted placeholder cubes
-when `ExtractRenderer::placeholders` is on (the default; the Flutter host
-turns it off with a project). At the start of each `prepare` the renderer
-drops the GPU copies of assets the store evicted since its last frame (a
-scene unload) and reloads what the extract still references. The cooked
-vertex layout is the GPU layout (`fynkel_cooked::payload::Vertex`, 72
-bytes). A viewport drawing a world that loaded from a cache uses the
-world's store; `fynkel_apple_viewport_set_asset_cache` remains for
-viewports drawing a world that did not (the demo scene). `fynkel render`
-does the whole path headlessly, from the cache alone.
+extracted `MeshRenderer` with its mesh and its `fynkel.pbr@1` material
+(the `PbrMaterial` record decoded from the cooked `MATL` chunk — every
+factor and all five maps shade, `docs/renderer.md`), from the scene's
+`Camera` (highest `priority`, perspective or orthographic, its exposure)
+with its first `DirectionalLight` as the sun, the eight nearest point and
+spot lights and its `Environment`; a mesh missing from the cache draws as
+a magenta cube, a missing map as its neutral fallback, and entities
+without a `MeshRenderer` as tinted placeholder cubes when
+`ExtractRenderer::placeholders` is on (the default; the Flutter host turns
+it off with a project). At the start of each `prepare` the renderer drops
+the GPU copies of assets the store evicted since its last frame (a scene
+unload) — a material's bind group goes with any of its maps — and reloads
+what the extract still references. The cooked vertex layout is the GPU
+layout (`fynkel_cooked::payload::Vertex`, 72 bytes; the tangent the cook
+generated when the source had none is what normal mapping uses). A
+viewport drawing a world that loaded from a cache uses the world's store;
+`fynkel_apple_viewport_set_asset_cache` remains for viewports drawing a
+world that did not (the demo scene). `fynkel render` does the whole path
+headlessly, from the cache alone.
 
 ## Prefab documents
 
@@ -469,7 +479,7 @@ set; `pbr` and `doubleSided` alongside).
 ## Migrations
 
 Each kind has a current `formatVersion` (`DocumentKind::supported_format_version`:
-material 2, every other kind 1). `fynkel_document::migrate` brings older documents
+material, scene and prefab 2, every other kind 1). `fynkel_document::migrate` brings older documents
 up: a `Migration` is `(kind, from, name, apply: fn(&mut Node))` and always
 steps `from → from + 1`; `Migrations::builtin()` is the ordered registry
 (`Migrations::path(kind, from, to)` is the chain). `migrate(&doc, &registry,
@@ -499,9 +509,18 @@ Built-in steps (`fynkel migrate --list`):
   (they live on `fynkel.MeshRenderer`). A parameter or slot the PBR model
   does not have makes the step fail (`D0018`) rather than drop data.
 - **scene 0 → 1** `scene/0-1/entities-keyed-by-id` (synthetic;
-  `fixtures/migrate/v0_training.scene.json` → `.migrated.json`): v0 kept
-  `entities` and `components` as arrays of objects carrying their `id`; v1
-  keys them by that id in the same order.
+  `fixtures/migrate/v0_training.scene.json` → `.migrated.json`, which now
+  continues to v2): v0 kept `entities` and `components` as arrays of
+  objects carrying their `id`; v1 keys them by that id in the same order.
+- **scene 1 → 2** `scene/1-2/camera-exposure` and **prefab 1 → 2**
+  `prefab/1-2/camera-exposure` (M3-04;
+  `fixtures/migrate/v1_lookout.scene.json` → `.migrated.json`): every
+  `fynkel.Camera` gets the fields the record gained — `exposure_mode:
+  "auto"` and `exposure: 12.0` — when it has neither; other components
+  are untouched. The step is the pattern for any component that gains a
+  required field: the schema-derived component schemas require every
+  field, so a document written before the field exists is outdated
+  (`D0016`) until migrated.
 
 New steps follow the same shape when a format changes: add the
 `Migration`, bump the kind's version, keep the fixture pair. Until a
@@ -550,7 +569,7 @@ It is development-only, never runs in a shipped game, and serializes to
 bytes deterministically — the same source, settings and sidecar give the
 same bytes on every machine, so it can be hashed, cached and diffed.
 
-### glTF/GLB (`fynkel.gltf`, version 2)
+### glTF/GLB (`fynkel.gltf`, version 3)
 
 The importer reads glTF 2.0 `.gltf`/`.glb` through
 the `gltf` crate (no `import` feature: buffers and images are resolved by
@@ -558,11 +577,11 @@ Fynkel, never by the crate) and produces, per file:
 
 | Sub-asset id | What | Notes |
 | --- | --- | --- |
-| `mesh/<n>` (one primitive) or `mesh/<n>/<p>` | one mesh per **triangle** primitive | fixed 72-byte vertex: position, normal, tangent(4), uv0, uv1, colour(4); `u32` indices; bounds. Missing normals → unwelded with flat face normals (per spec); missing tangents → zero (M3 computes them); missing colour → white. Points/lines/strips/fans are skipped with `FYN-A0105`. |
-| `material/<m>` | a `fynkel.pbr@1` material document (formatVersion 2) | `base_color`, `metallic`, `roughness`, `emissive`, `emissive_strength` (`KHR_materials_emissive_strength`), `normal_scale`, `occlusion_strength`, `alpha_mode`/`alpha_cutoff`, `double_sided`; the five `<slot>_texture` references bound to `{ asset: <this asset>, sub: "image/<i>" }` (or `image/<i>/linear`, below). A slot that samples `TEXCOORD_1` or a non-default sampler (nearest filtering, clamp/mirror wrap) is imported without that setting and warned about once (`FYN-A0105`): the PBR model has one UV set and one sampler. Validates like a hand-written one. |
+| `mesh/<n>` (one primitive) or `mesh/<n>/<p>` | one mesh per **triangle** primitive | fixed 72-byte vertex: position, normal, tangent(4), uv0, uv1, colour(4); `u32` indices; bounds. Missing normals → unwelded with flat face normals (per spec); missing tangents → zero in the intermediate (the cook generates them, below); missing colour → white. Points/lines/strips/fans are skipped with `FYN-A0105`. |
+| `material/<m>` | a `fynkel.pbr@1` material document (the current formatVersion) | `base_color`, `metallic`, `roughness`, `emissive`, `emissive_strength` (`KHR_materials_emissive_strength`), `normal_scale`, `occlusion_strength`, `alpha_mode`/`alpha_cutoff`, `double_sided`; the five `<slot>_texture` references bound to `{ asset: <this asset>, sub: "image/<i>" }` (or `image/<i>/linear`, below). A slot that samples `TEXCOORD_1` or a non-default sampler (nearest filtering, clamp/mirror wrap) is imported without that setting and warned about once (`FYN-A0105`): the PBR model has one UV set and one sampler. Validates like a hand-written one. |
 | `image/<i>` | the encoded bytes (PNG/JPEG) with their MIME type and **colour space** | sRGB when a colour slot (`base_color`, `emissive`) uses it, linear when only data slots (`normal`, `metallic_roughness`, `occlusion`) do, sRGB when unused |
 | `image/<i>/linear` | a linear copy of a **dual-use** image | when one image feeds both a colour and a data slot it is imported twice; the data slots point at the linear copy, so every texture reaches the cache in the colour space its slot needs |
-| `prefab` | the default scene's node hierarchy as a prefab document | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive. Entity and component ids are UUID v5 of the asset id and `node/<i>`, `node/<i>/transform`, `node/<i>/renderer`, `node/<i>/primitive/<p>[/transform|/renderer]`. |
+| `prefab` | the default scene's node hierarchy as a prefab document (the current formatVersion; importer version 3 = prefab formatVersion 2) | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive. Entity and component ids are UUID v5 of the asset id and `node/<i>`, `node/<i>/transform`, `node/<i>/renderer`, `node/<i>/primitive/<p>[/transform|/renderer]`. |
 
 Skins, morph targets, animations and cameras are skipped with `A0105`
 warnings (static meshes are M2's scope; animation import is a later
@@ -690,7 +709,12 @@ semantics; errors fail it) and stored as its canonical text in one `JSON`
 chunk — a scene **expanded** (prefabs applied, ids derived; see "Cooked
 scenes and the runtime store" above), a prefab as its template. A source
 with an importer: run through `fynkel_import::import`, then meshes →
-`MESH`, materials → `JSON` (`documentKind: material`) **plus** a `MATL`
+`MESH` (a mesh whose vertices all carry a zero tangent gets one generated
+per vertex from positions and `uv0` — Lengyel accumulation, Gram-Schmidt
+against the normal, handedness in `w`, `fynkel_import::tangents`; the
+chunk info says `"tangents": "authored" | "generated" | "none"`, the last
+when there are no UVs either and the renderer falls back to the vertex
+normal; cache version 3), materials → `JSON` (`documentKind: material`) **plus** a `MATL`
 chunk of the same name/sub (the decoded `PbrMaterial`, what the renderer
 reads; a material document cooks the same pair), embedded glTF images →
 decoded `TEXR` in the colour space the importer assigned them (dual-use
@@ -952,8 +976,9 @@ the cache through `fynkel_assets`, steps the world once and draws the
 extract offscreen from the same store to a PNG, 1280×720 by default
 (`--json`: `{ ok, out, size, project, scene: { id, name, key, entities,
 rejectedComponents }, cache, instances,
-meshes, placeholders, missing, batches, sceneCamera, sceneLight,
-assetErrors, diagnostics }`); exit 1 on a project/scene/asset error, 2 when
+meshes, placeholders, missing, batches, sceneCamera, sceneLight, lights,
+lightsDropped, sky, ev100, assetErrors, diagnostics }`; `docs/renderer.md`
+names the counts); exit 1 on a project/scene/asset error, 2 when
 no GPU adapter is available. `codegen` regenerates the native schemas and
 codecs (pipeline (a)); with `--project <dart package>` it also runs the
 behaviour generator in that package and splits its schemas into

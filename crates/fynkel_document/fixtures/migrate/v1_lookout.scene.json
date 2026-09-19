@@ -1,0 +1,73 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 1,
+  "id": "b0000000-0000-4000-8000-000000000005",
+  "name": "Lookout",
+  "entities": {
+    "b0000000-0000-4000-8000-0000000000e1": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c1": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [0, 2, 6],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000c2": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 1.0,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": 0
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e2": {
+      "name": "Night camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c3": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "orthographic",
+            "fov_y": 1.0,
+            "ortho_height": 4.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": -1,
+            "exposure_mode": "manual",
+            "exposure": 6.0
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e3": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c4": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [1, 1, 1],
+            "intensity": 10000.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    }
+  }
+}

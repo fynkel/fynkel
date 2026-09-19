@@ -94,8 +94,9 @@ Component types:
 
 - `fynkel.Transform` — position `[x,y,z]`, rotation quaternion `[x,y,z,w]`, scale. Every drawn entity has one.
 - `fynkel.MeshRenderer` — `mesh: { asset, sub: "mesh/<n>" }`, `material: { asset }`, `cast_shadows`, `receive_shadows`, `visible`.
-- `fynkel.Camera` — `projection`, `fov_y` (radians), `ortho_height`, `near`, `far`, `priority`.
-- `fynkel.DirectionalLight`, `fynkel.PointLight` — `color` (linear RGB), `intensity`, ...
+- `fynkel.Camera` — `projection`, `fov_y` (radians), `ortho_height`, `near`, `far`, `priority`, `exposure_mode` (`auto` meters the sun; `manual` uses `exposure`, EV100).
+- `fynkel.DirectionalLight` (`intensity` in lux), `fynkel.PointLight` / `fynkel.SpotLight` (`intensity` in candela, `range` in metres; spot `inner_angle` / `outer_angle` in radians) — `color` is linear RGB.
+- `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply.
 - `game.*` — this project's behaviours (Dart classes in `lib/game/`); `data` holds the `@Expose` fields, validated by `schemas/behaviours/<id>.schema.json`.
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for

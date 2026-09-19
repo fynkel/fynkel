@@ -2,7 +2,7 @@
   "roots": [],
   "name": "Later",
   "id": "5d4c3b2a-1f0e-4d9c-8b7a-695847362510",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
   "entities": {}
 }

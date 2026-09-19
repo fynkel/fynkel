@@ -124,7 +124,14 @@ void main() {
   check(
     'Camera',
     const Camera(
-        projection: Projection.orthographic, fovY: 1.25, orthoHeight: 10.0, near: 0.1, far: 1000.0, priority: -1),
+        projection: Projection.orthographic,
+        fovY: 1.25,
+        orthoHeight: 10.0,
+        near: 0.1,
+        far: 1000.0,
+        priority: -1,
+        exposureMode: ExposureMode.manual,
+        exposure: 13.5),
     Camera.wireSize,
     Camera.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -133,6 +140,23 @@ void main() {
       DirectionalLight.wireSize, DirectionalLight.decode, (v, d, o, s) => v.encode(d, o, s));
   check('PointLight', const PointLight(color: Vec3(0.2, 0.4, 1.0), intensity: 800.0, range: 12.5), PointLight.wireSize,
       PointLight.decode, (v, d, o, s) => v.encode(d, o, s));
+  check(
+      'SpotLight',
+      const SpotLight(color: Vec3(1.0, 0.9, 0.8), intensity: 1500.0, range: 15.0, innerAngle: 0.4, outerAngle: 0.6),
+      SpotLight.wireSize,
+      SpotLight.decode,
+      (v, d, o, s) => v.encode(d, o, s));
+  check(
+      'Environment',
+      const Environment(
+          ambientColor: Vec3(0.8, 0.9, 1.0),
+          ambientIntensity: 1500.0,
+          sky: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'image/1'),
+          skyIntensity: 5000.0,
+          skyRotation: 0.25),
+      Environment.wireSize,
+      Environment.decode,
+      (v, d, o, s) => v.encode(d, o, s));
   test('unknown enum index and malformed asset ids fail loudly', () {
     final d = ByteData(Camera.wireSize);
     d.setUint32(0, 2, Endian.little);

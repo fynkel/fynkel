@@ -14,7 +14,9 @@ use glam::{Mat4, Vec3};
 
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
-use crate::components::{Camera, ComponentValue, DirectionalLight, MeshRenderer, PointLight};
+use crate::components::{
+    Camera, ComponentValue, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
+};
 use crate::event::{Event, EventPayload, EventQueue};
 
 #[derive(Clone, Debug)]
@@ -148,6 +150,22 @@ pub struct ExtractPointLight {
     pub light: PointLight,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExtractSpotLight {
+    pub record: u32,
+    pub position: Vec3,
+    /// World-space direction the light shines along (the entity's -Z).
+    pub direction: Vec3,
+    pub light: SpotLight,
+}
+
+/// The scene's `Environment`: the first record that has one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtractEnvironment {
+    pub record: u32,
+    pub environment: Environment,
+}
+
 /// What a frame draws (blueprint §8.5): every spatial entity's world
 /// matrix, plus the renderable components resolved against those records.
 /// The renderer reads this and nothing else from the world.
@@ -160,6 +178,8 @@ pub struct Extract {
     pub camera: Option<ExtractCamera>,
     pub directional_lights: Vec<ExtractDirectionalLight>,
     pub point_lights: Vec<ExtractPointLight>,
+    pub spot_lights: Vec<ExtractSpotLight>,
+    pub environment: Option<ExtractEnvironment>,
 }
 
 pub struct World {
@@ -611,6 +631,8 @@ impl World {
                         self.ecs.remove::<DirectionalLight>(entity).is_ok()
                     }
                     ComponentId::POINT_LIGHT => self.ecs.remove::<PointLight>(entity).is_ok(),
+                    ComponentId::SPOT_LIGHT => self.ecs.remove::<SpotLight>(entity).is_ok(),
+                    ComponentId::ENVIRONMENT => self.ecs.remove::<Environment>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -675,6 +697,8 @@ impl World {
             ComponentValue::Camera(v) => self.ecs.insert(entity, v),
             ComponentValue::DirectionalLight(v) => self.ecs.insert(entity, v),
             ComponentValue::PointLight(v) => self.ecs.insert(entity, v),
+            ComponentValue::SpotLight(v) => self.ecs.insert(entity, v),
+            ComponentValue::Environment(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -988,6 +1012,22 @@ impl World {
                     position: world.transform_point3(Vec3::ZERO),
                     light: l,
                 });
+            }
+            if let Ok(l) = self.ecs.copy::<SpotLight>(e) {
+                out.spot_lights.push(ExtractSpotLight {
+                    record,
+                    position: world.transform_point3(Vec3::ZERO),
+                    direction: world.transform_vector3(-Vec3::Z).normalize_or(-Vec3::Z),
+                    light: l,
+                });
+            }
+            if out.environment.is_none() {
+                if let Ok(env) = self.ecs.get::<Environment>(e) {
+                    out.environment = Some(ExtractEnvironment {
+                        record,
+                        environment: env.clone(),
+                    });
+                }
             }
         }
         out

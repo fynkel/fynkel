@@ -131,7 +131,7 @@ fn test_headless_reports_json() {
 /// asset references.
 const SECOND_SCENE: &str = r#"{
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "Second",
   "entities": {
@@ -155,7 +155,7 @@ const SECOND_SCENE: &str = r#"{
         },
         "818dc3dc-a9ee-4355-908f-58e20a60ce31": {
           "type": "fynkel.Camera", "version": 1,
-          "data": { "projection": "perspective", "fov_y": 1.0, "ortho_height": 10, "near": 0.1, "far": 1000, "priority": 0 }
+          "data": { "projection": "perspective", "fov_y": 1.0, "ortho_height": 10, "near": 0.1, "far": 1000, "priority": 0, "exposure_mode": "auto", "exposure": 12.0 }
         }
       }
     }
@@ -217,10 +217,10 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     assert_eq!(v["scene"]["name"], "Main");
     assert_eq!(v["scene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["scene"]["cache"], cache.to_str().unwrap());
-    assert_eq!(v["scene"]["entities"], 4);
-    assert_eq!(v["scene"]["retained"], 5);
+    assert_eq!(v["scene"]["entities"], 5);
+    assert_eq!(v["scene"]["retained"], 7);
     assert_eq!(v["scene"]["document_diagnostics"], serde_json::json!([]));
-    assert_eq!(v["live_entities"], 4);
+    assert_eq!(v["live_entities"], 5);
     assert!(cache.join("index.json").is_file());
 
     // A scene by path resolves the enclosing project; by id it reads the
@@ -282,8 +282,8 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     ]);
     assert!(out.status.success());
     let v = json(&out);
-    assert_eq!(v["entityCount"], 4);
-    let crate_entity = &v["entities"][3];
+    assert_eq!(v["entityCount"], 5);
+    let crate_entity = &v["entities"][4];
     assert_eq!(
         crate_entity["parent"],
         "c0000000-0000-4000-8000-0000000000e2"
@@ -653,10 +653,13 @@ fn migrate_dry_runs_then_writes_with_backup() {
     let out = run(&["migrate", "--list", "--json"]);
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["current"]["scene"], 1);
+    assert_eq!(v["current"]["scene"], 2);
+    assert_eq!(v["current"]["prefab"], 2);
     assert_eq!(v["current"]["material"], 2);
     assert_eq!(v["steps"][0]["name"], "material/1-2/pbr-fields");
-    assert_eq!(v["steps"][1]["name"], "scene/0-1/entities-keyed-by-id");
+    assert_eq!(v["steps"][1]["name"], "prefab/1-2/camera-exposure");
+    assert_eq!(v["steps"][2]["name"], "scene/0-1/entities-keyed-by-id");
+    assert_eq!(v["steps"][3]["name"], "scene/1-2/camera-exposure");
 
     let dir = std::env::temp_dir().join(format!("fynkel-cli-migrate-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -697,15 +700,16 @@ fn migrate_dry_runs_then_writes_with_backup() {
         .unwrap()
         .contains("+  \"base_color_texture\": {"));
     assert_eq!(docs[2]["from"], 0);
-    assert_eq!(docs[2]["to"], 1);
+    assert_eq!(docs[2]["to"], 2);
     assert_eq!(
         docs[2]["applied"][0]["name"],
         "scene/0-1/entities-keyed-by-id"
     );
+    assert_eq!(docs[2]["applied"][1]["name"], "scene/1-2/camera-exposure");
     assert!(docs[2]["diff"]
         .as_str()
         .unwrap()
-        .contains("+  \"formatVersion\": 1,"));
+        .contains("+  \"formatVersion\": 2,"));
     assert_eq!(docs[2]["written"], false);
     assert_eq!(std::fs::read(&scene).unwrap(), original);
     assert!(!dir.join("scenes/room.scene.json.bak").exists());
@@ -1032,8 +1036,8 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     assert_eq!(v["ok"], true);
     assert_eq!(v["project"]["name"], "Fixture Game");
     assert_eq!(v["documents"], 3);
-    assert_eq!(v["sources"], 2);
-    assert_eq!(v["references"], 6);
+    assert_eq!(v["sources"], 4);
+    assert_eq!(v["references"], 8);
     assert_eq!(v["lock"]["cache"]["container"], 1);
     let out = run(&["validate", "--project", fixture.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
@@ -1128,7 +1132,7 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
-    assert_eq!(v["assetCount"], 5);
+    assert_eq!(v["assetCount"], 7);
     assert_eq!(v["quality"]["default"], "medium");
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     let out = run(&[

@@ -38,7 +38,12 @@ fn builtin_steps_chain_to_the_current_version() {
     let ids: Vec<String> = m.steps().iter().map(Migration::id).collect();
     assert_eq!(
         ids,
-        ["material/1-2/pbr-fields", "scene/0-1/entities-keyed-by-id"]
+        [
+            "material/1-2/pbr-fields",
+            "prefab/1-2/camera-exposure",
+            "scene/0-1/entities-keyed-by-id",
+            "scene/1-2/camera-exposure"
+        ]
     );
 }
 
@@ -57,10 +62,13 @@ fn v0_scene_migrates_to_v1_exactly() {
     let m = migrate(&doc, &Migrations::builtin(), &schemas);
     assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
     assert!(m.changed());
-    assert_eq!((m.from, m.to), (0, 1));
-    assert_eq!(m.applied.len(), 1);
+    // Two steps chain: 0 → 1 (keyed entities), 1 → 2 (camera exposure —
+    // nothing to do here, the scene has no camera).
+    assert_eq!((m.from, m.to), (0, 2));
+    assert_eq!(m.applied.len(), 2);
     assert_eq!(m.applied[0].name, "scene/0-1/entities-keyed-by-id");
-    assert_eq!(m.document.envelope.format_version, 1);
+    assert_eq!(m.applied[1].name, "scene/1-2/camera-exposure");
+    assert_eq!(m.document.envelope.format_version, 2);
     assert!(!m.document.is_outdated());
 
     let text = m.document.write().unwrap();
@@ -76,7 +84,7 @@ fn v0_scene_migrates_to_v1_exactly() {
     assert!(m.diff.contains("(formatVersion 0)\n+++ "));
     assert!(m
         .diff
-        .contains("-  \"formatVersion\": 0,\n+  \"formatVersion\": 1,"));
+        .contains("-  \"formatVersion\": 0,\n+  \"formatVersion\": 2,"));
     assert!(m.diff.contains("-  \"entities\": [\n-    {\n-      \"id\": \"b0000000-0000-4000-8000-0000000000e1\",\n+  \"entities\": {\n+    \"b0000000-0000-4000-8000-0000000000e1\": {"));
 
     // Order kept, ids became keys, everything else untouched; the result
@@ -177,6 +185,41 @@ fn v1_material_migrates_to_v2_exactly() {
 }
 
 #[test]
+fn v1_scene_with_a_camera_migrates_to_v2_exactly() {
+    let schemas = schemas();
+    let path = fixtures().join("v1_lookout.scene.json");
+    let doc = Document::read(&path, None).unwrap();
+    assert!(doc.is_outdated());
+    let m = migrate(&doc, &Migrations::builtin(), &schemas);
+    assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
+    assert_eq!((m.from, m.to), (1, 2));
+    assert_eq!(m.applied.len(), 1);
+    assert_eq!(m.applied[0].name, "scene/1-2/camera-exposure");
+
+    let text = m.document.write().unwrap();
+    let expected_path = fixtures().join("v1_lookout.scene.migrated.json");
+    let expected = std::fs::read_to_string(&expected_path).unwrap_or_default();
+    if text != expected {
+        std::fs::write(expected_path.with_extension("actual.json"), &text).unwrap();
+    }
+    assert_eq!(text, expected, "see the .actual.json next to the fixture");
+    // Every camera gained the two defaults after `priority`; the light and
+    // the camera that already had a manual exposure are untouched.
+    assert!(
+        m.diff.contains("-            \"priority\": 0\n+            \"priority\": 0,\n+            \"exposure_mode\": \"auto\",\n+            \"exposure\": 12.0\n"),
+        "{}",
+        m.diff
+    );
+    assert_eq!(m.diff.matches("+            \"exposure_mode\"").count(), 1);
+    let scene = Scene::from_document(m.document.clone());
+    assert!(scene.validate(&schemas).is_empty());
+    assert!(!describe(&scene, &SchemaSet::embedded()).has_errors());
+
+    let again = migrate(&m.document, &Migrations::builtin(), &schemas);
+    assert!(!again.changed());
+}
+
+#[test]
 fn failures_leave_the_document_untouched() {
     let schemas = schemas();
     let reg = Migrations::builtin();
@@ -202,6 +245,12 @@ fn failures_leave_the_document_untouched() {
 
     // A step whose output the schema rejects is reported and discarded.
     let mut reg = Migrations::empty();
+    reg.add(
+        Migrations::builtin()
+            .step(DocumentKind::Scene, 1)
+            .unwrap()
+            .clone(),
+    );
     reg.add(Migration {
         kind: DocumentKind::Scene,
         from: 0,

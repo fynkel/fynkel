@@ -404,15 +404,15 @@ mod tests {
         let (report, world, loaded) = run_with(&cfg);
         let scene = report.scene.as_ref().unwrap();
         assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
-        // Camera, Robot, the "Crate A" instance and its expanded crate.
-        assert_eq!((scene.entities, scene.rejected_components), (4, 0));
+        // Camera, Robot, Sun, the "Crate A" instance and its expanded crate.
+        assert_eq!((scene.entities, scene.rejected_components), (5, 0));
         assert_eq!(scene.name, "Main");
         assert_eq!(scene.path, "scenes/main.scene.json");
         assert_eq!(scene.key.len(), 64);
-        assert_eq!(scene.retained, 5);
+        assert_eq!(scene.retained, 7);
         assert!(report.scene_ready);
         assert_eq!(report.tick, 5);
-        assert_eq!(report.live_entities, 4);
+        assert_eq!(report.live_entities, 5);
         assert_eq!(
             (
                 report.commands_applied,
@@ -426,22 +426,22 @@ mod tests {
 
         let loaded = loaded.unwrap();
         let dump = dump_json(&world, &loaded);
-        assert_eq!(dump["entityCount"], 4);
+        assert_eq!(dump["entityCount"], 5);
         assert_eq!(dump["tick"], 5);
         let text = dump.to_string();
         assert!(!text.contains("handle:"), "authoring ids only: {text}");
         // The prefab's crate carries the id the cook derived for it, under
         // the instance entity.
         assert_eq!(
-            dump["entities"][3]["parent"],
+            dump["entities"][4]["parent"],
             "c0000000-0000-4000-8000-0000000000e2"
         );
         assert_ne!(
-            dump["entities"][3]["id"], "c0000000-0000-4000-8000-0000000000b1",
+            dump["entities"][4]["id"], "c0000000-0000-4000-8000-0000000000b1",
             "the prefab's entity got a derived id, not its template id"
         );
         assert_eq!(
-            dump["entities"][3]["components"][1]["data"]["cast_shadows"], false,
+            dump["entities"][4]["components"][1]["data"]["cast_shadows"], false,
             "the instance override was applied by the cook"
         );
         assert_eq!(

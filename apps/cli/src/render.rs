@@ -180,13 +180,17 @@ pub fn run(args: &[String]) -> ExitCode {
                 "batches": stats.batches,
                 "sceneCamera": stats.scene_camera,
                 "sceneLight": stats.scene_light,
+                "lights": stats.lights,
+                "lightsDropped": stats.lights_dropped,
+                "sky": stats.sky,
+                "ev100": renderer.ev100(),
                 "assetErrors": errors,
                 "diagnostics": diagnostics_json(&cooked.diagnostics),
             })
         );
     } else {
         println!(
-            "{}: {}x{} — {} \"{}\": {} entities, {} instances ({} meshes, {} placeholders, {} missing), camera {}, light {}",
+            "{}: {}x{} — {} \"{}\": {} entities, {} instances ({} meshes, {} placeholders, {} missing), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}",
             opts.out.display(),
             opts.width,
             opts.height,
@@ -199,6 +203,14 @@ pub fn run(args: &[String]) -> ExitCode {
             stats.missing,
             if stats.scene_camera { "scene" } else { "default" },
             if stats.scene_light { "scene" } else { "default" },
+            stats.lights,
+            if stats.lights_dropped > 0 {
+                format!(" ({} dropped)", stats.lights_dropped)
+            } else {
+                String::new()
+            },
+            renderer.ev100(),
+            if stats.sky { ", sky" } else { "" },
         );
         for e in &errors {
             eprintln!("asset error: {e}");

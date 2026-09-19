@@ -23,16 +23,16 @@ fn schemas() -> SchemaSet {
 }
 
 const IMPORTERS: &[(&str, u32)] = &[
-    ("fynkel.gltf", 2),
+    ("fynkel.gltf", 3),
     ("fynkel.image", 1),
     ("fynkel.audio", 1),
     ("fynkel.file", 1),
 ];
 
 /// What `fynkel_import::expected_lock()` produces; mirrored here because
-/// this crate cannot depend on the importers (cache version 2, container 1).
+/// this crate cannot depend on the importers (cache version 3, container 1).
 fn expected_lock() -> Lock {
-    Lock::expected(IMPORTERS, 2, 1)
+    Lock::expected(IMPORTERS, 3, 1)
 }
 
 /// A temporary copy of the fixture project, removed on drop.
@@ -145,7 +145,7 @@ fn the_fixture_project_reads_and_validates_clean() {
         .unwrap();
     assert_eq!((medium.shadow_resolution, medium.msaa), (1024, 4));
     assert!(medium.shadows, "shadows default to on");
-    assert_eq!(project.components.as_ref().unwrap().len(), 6);
+    assert_eq!(project.components.as_ref().unwrap().len(), 8);
     assert!(project.allows_component("fynkel.Transform"));
     assert!(project.allows_component("game.Spinner"));
     assert!(!project.allows_component("fynkel.Name"));
@@ -170,7 +170,7 @@ fn the_fixture_project_reads_and_validates_clean() {
     );
     assert_eq!(
         (report.documents, report.sources, report.references),
-        (3, 2, 6)
+        (3, 4, 8)
     );
     assert!(report.lock.is_some());
     let json = report.json();
@@ -190,10 +190,10 @@ fn describe_json_lists_everything() {
     assert_eq!(v["name"], "Fixture Game");
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["assets"], "assets");
-    assert_eq!(v["assetCount"], 5);
+    assert_eq!(v["assetCount"], 7);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 3);
     assert_eq!(v["quality"]["default"], "medium");
-    assert_eq!(v["components"].as_array().unwrap().len(), 6);
+    assert_eq!(v["components"].as_array().unwrap().len(), 8);
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     assert_eq!(v["lock"]["schemaFingerprint"], lock.schema_fingerprint);
 }

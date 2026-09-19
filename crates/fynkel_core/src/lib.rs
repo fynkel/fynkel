@@ -32,7 +32,8 @@ pub mod world;
 pub use clock::{FrameClock, FramePlan};
 pub use command::{Command, Lane};
 pub use components::{
-    Camera, ComponentValue, DirectionalLight, MeshRenderer, PointLight, Projection,
+    Camera, ComponentValue, DirectionalLight, Environment, ExposureMode, MeshRenderer, PointLight,
+    Projection, SpotLight,
 };
 pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{
@@ -41,7 +42,7 @@ pub use fynkel_contracts::{
 pub use fynkel_scene::Transform;
 pub use load::{EntityDescription, LoadError, LoadedScene, SceneDescription};
 pub use world::{
-    Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight, ExtractMesh, ExtractPointLight,
-    ExtractRecord, Name, PhysicsOwned, Rejected, SnapshotRecord, StepReport, SubmitReport, World,
-    WorldConfig,
+    Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight, ExtractEnvironment, ExtractMesh,
+    ExtractPointLight, ExtractRecord, ExtractSpotLight, Name, PhysicsOwned, Rejected,
+    SnapshotRecord, StepReport, SubmitReport, World, WorldConfig,
 };

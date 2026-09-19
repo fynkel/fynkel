@@ -85,8 +85,8 @@ fn load_startup(assets: &Assets) -> (World, fynkel_core::Extract, fynkel_assets:
     assert_eq!(cooked.name, "Main");
     let mut world = World::new(WorldConfig::default());
     let loaded = world.load_scene(&cooked.description).unwrap();
-    // Camera, Robot, the "Crate A" instance and the crate it expands to.
-    assert_eq!(loaded.len(), 4);
+    // Camera, Robot, Sun, the "Crate A" instance and the crate it expands to.
+    assert_eq!(loaded.len(), 5);
     let residency = assets.retain(&cooked.closure);
     world.begin_frame(1.0 / 60.0);
     world.step();
@@ -131,10 +131,10 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
         ),
         (2, 2, 0, 0)
     );
-    assert!(stats.scene_camera && !stats.scene_light);
-    assert_eq!(stats.batches, 1, "same mesh + same texture = one draw");
+    assert!(stats.scene_camera && stats.scene_light, "the Sun lights it");
+    assert_eq!(stats.batches, 1, "same mesh + same material = one draw");
 
-    // Rusted base colour [0.8, 0.5, 0.3] × the swatch (red ramps 0→180
+    // Rusted base colour [1, 0.7, 0.5] × the swatch (red ramps 0→180
     // along u over a constant blue 200): the left of each face is blue,
     // the right is red — so the texture, not just the factor, is on screen.
     let drawn: Vec<[u8; 4]> = px.iter().copied().filter(|p| !is_background(*p)).collect();
@@ -166,9 +166,10 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
     let before = assets.stats();
     assert_eq!(
         (before.meshes, before.textures, before.materials),
-        (1, 1, 1)
+        (1, 3, 1),
+        "swatch, normal and metallic-roughness maps"
     );
-    assert_eq!(before.retained, 5);
+    assert_eq!(before.retained, 7);
     drop(residency);
     let after = assets.stats();
     assert_eq!((after.meshes, after.textures, after.materials), (0, 0, 0));
@@ -222,7 +223,7 @@ fn placeholders_off_hides_entities_without_meshes() {
     // become cubes too.
     render_offscreen(&device, &queue, &mut renderer, &extract);
     let s = renderer.stats();
-    assert_eq!((s.instances, s.placeholders, s.missing), (4, 2, 2));
+    assert_eq!((s.instances, s.placeholders, s.missing), (5, 3, 2));
     renderer.placeholders = false;
     render_offscreen(&device, &queue, &mut renderer, &extract);
     let s = renderer.stats();

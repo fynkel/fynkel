@@ -909,6 +909,7 @@ dependencies = [
  "fynkel_scene",
  "glam",
  "pollster",
+ "serde_json",
  "wgpu",
 ]
 

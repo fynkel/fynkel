@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968330",
   "name": "TrainingRoom",
   "entities": {
@@ -87,7 +87,9 @@
             "ortho_height": 10,
             "near": 0.1,
             "far": 1000,
-            "priority": 0
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0
           }
         }
       }
@@ -172,6 +174,65 @@
             ],
             "intensity": 800,
             "range": 12.5
+          }
+        },
+        "818dc3dc-a9ee-4355-908f-58e20a60ce52": {
+          "type": "fynkel.SpotLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1,
+              0.9,
+              0.8
+            ],
+            "intensity": 1500,
+            "range": 15,
+            "inner_angle": 0.4,
+            "outer_angle": 0.6
+          }
+        }
+      }
+    },
+    "c1d2e3f4-0000-4000-8000-000000000050": {
+      "name": "Environment",
+      "parent": null,
+      "children": [],
+      "components": {
+        "818dc3dc-a9ee-4355-908f-58e20a60ce54": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "818dc3dc-a9ee-4355-908f-58e20a60ce53": {
+          "type": "fynkel.Environment",
+          "version": 1,
+          "data": {
+            "ambient_color": [
+              0.8,
+              0.9,
+              1
+            ],
+            "ambient_intensity": 1500,
+            "sky": null,
+            "sky_intensity": 5000,
+            "sky_rotation": 0
           }
         }
       }

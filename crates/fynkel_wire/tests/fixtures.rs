@@ -10,7 +10,10 @@
 use std::path::PathBuf;
 
 use fynkel_contracts::{AssetId, AssetRef, Entity, WorldId};
-use fynkel_core::components::{Camera, DirectionalLight, MeshRenderer, PointLight, Projection};
+use fynkel_core::components::{
+    Camera, DirectionalLight, Environment, ExposureMode, MeshRenderer, PointLight, Projection,
+    SpotLight,
+};
 use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
 use fynkel_core::Name;
@@ -169,6 +172,8 @@ fn fixtures_match_generated_codecs() {
             near: 0.1,
             far: 1000.0,
             priority: -1,
+            exposure_mode: ExposureMode::Manual,
+            exposure: 13.5,
         },
     );
     check(
@@ -205,6 +210,26 @@ fn fixtures_match_generated_codecs() {
             metallic_roughness_texture: Some(AssetRef::with_sub(mesh_id, "image/0/linear")),
             occlusion_texture: None,
             emissive_texture: Some(AssetRef::new(material_id)),
+        },
+    );
+    check(
+        "SpotLight",
+        &SpotLight {
+            color: Vec3::new(1.0, 0.9, 0.8),
+            intensity: 1_500.0,
+            range: 15.0,
+            inner_angle: 0.4,
+            outer_angle: 0.6,
+        },
+    );
+    check(
+        "Environment",
+        &Environment {
+            ambient_color: Vec3::new(0.8, 0.9, 1.0),
+            ambient_intensity: 1_500.0,
+            sky: Some(AssetRef::with_sub(mesh_id, "image/1")),
+            sky_intensity: 5_000.0,
+            sky_rotation: 0.25,
         },
     );
     check("CommandHeader", &CommandHeader { kind: 1, size: 64 });

@@ -343,7 +343,7 @@ void main() {
     addTearDown(w.dispose);
     w.loadProject(fixture, cacheDir: cache);
     final entities = w.allEntities();
-    expect(entities, hasLength(4));
+    expect(entities, hasLength(5));
     final go = w.attach(entities.first);
     expect(w.attach(entities.first), same(go));
     expect(go.isPending, isFalse);

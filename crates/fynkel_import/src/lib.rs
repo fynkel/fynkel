@@ -27,6 +27,7 @@ pub mod cook;
 pub mod gltf;
 pub mod image;
 pub mod intermediate;
+pub mod tangents;
 
 pub use cache::{Cache, CacheKey, KeyInputs, Manifest, CACHE_VERSION};
 pub use cook::{

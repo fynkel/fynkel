@@ -137,11 +137,12 @@ Writes have two forms with identical semantics (M2, carry-over C1): the value fo
 - `DirectionalLight`
 - `PointLight`
 - `SpotLight`
+- `Environment` (one per scene: constant ambient, optional equirectangular sky — M3-04; `docs/renderer.md`)
 - Optional `ReflectionProbe` only if implemented and documented before 1.0
 
 `MeshRenderer` references mesh and material assets and exposes visibility, shadow participation, layer/mask, and bounds-related properties. Do not expose raw wgpu resources.
 
-`Camera` should define projection, clear mode, viewport, clipping planes, render layer mask, HDR/AA settings where appropriate, and priority/order. Avoid embedding Flutter view ownership directly into the camera component.
+`Camera` should define projection, clear mode, viewport, clipping planes, render layer mask, HDR/AA settings where appropriate, and priority/order. Since M3-04 it carries exposure: `exposureMode` (`auto` meters the scene's sun/ambient, `manual` uses `exposure` in EV100). Avoid embedding Flutter view ownership directly into the camera component.
 
 #### Physics
 

@@ -69,6 +69,15 @@ impl Migrations {
             description: "fynkel.pbr@1 materials carry the PbrMaterial fields (base_color, metallic, …, <slot>_texture) instead of parameters/textures maps; alphaMode/alphaCutoff become alpha_mode/alpha_cutoff, cull becomes double_sided, castShadows/receiveShadows moved to fynkel.MeshRenderer",
             apply: material_1_to_2,
         });
+        for kind in [DocumentKind::Scene, DocumentKind::Prefab] {
+            m.add(Migration {
+                kind,
+                from: 1,
+                name: "camera-exposure",
+                description: "fynkel.Camera gained exposure_mode (auto | manual) and exposure (EV100); every camera gets the defaults auto / 12",
+                apply: camera_exposure_1_to_2,
+            });
+        }
         m
     }
 
@@ -466,5 +475,52 @@ fn material_1_to_2(root: &mut Node) -> Result<(), String> {
         }
     }
     *root = Node::object(out);
+    Ok(())
+}
+
+/// Scene/prefab 1 → 2 (M3-04, renderer V1 exposure): every
+/// `fynkel.Camera` component's `data` gains `exposure_mode: "auto"` and
+/// `exposure: 12` (the defaults — nothing about how the scene looked
+/// changes) unless the member is already there. Entities and components
+/// are objects keyed by id (v1); anything else in the document is kept.
+fn camera_exposure_1_to_2(root: &mut Node) -> Result<(), String> {
+    // A missing `entities` is the schema's complaint, not this step's.
+    let Some(entities) = root.get_mut("entities") else {
+        return Ok(());
+    };
+    let entities = entities
+        .as_object_mut()
+        .ok_or("/entities: expected an object")?;
+    for entity in entities.iter_mut() {
+        let Some(components) = entity.value.get_mut("components") else {
+            continue;
+        };
+        let Some(components) = components.as_object_mut() else {
+            continue;
+        };
+        for c in components.iter_mut() {
+            if c.value.get("type").and_then(Node::as_str) != Some("fynkel.Camera") {
+                continue;
+            }
+            let data = c.value.get_mut("data").ok_or_else(|| {
+                format!(
+                    "/entities/{}/components/{}: fynkel.Camera has no data",
+                    entity.key, c.key
+                )
+            })?;
+            if data.as_object().is_none() {
+                return Err(format!(
+                    "/entities/{}/components/{}/data: expected an object",
+                    entity.key, c.key
+                ));
+            }
+            if data.get("exposure_mode").is_none() {
+                data.set("exposure_mode", Node::string("auto"));
+            }
+            if data.get("exposure").is_none() {
+                data.set("exposure", Node::float(12.0));
+            }
+        }
+    }
     Ok(())
 }

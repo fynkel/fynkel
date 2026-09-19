@@ -359,6 +359,15 @@ fn containers_read_back_with_bounded_decoding() {
         .indices
         .iter()
         .all(|i| (*i as usize) < mesh.vertices.len()));
+    // The robot authors no tangents: the cook generated an orthonormal
+    // frame per vertex (M3-04) and says so in the chunk info.
+    assert_eq!(chunks[1]["tangents"], "generated");
+    assert!(mesh.vertices.iter().all(|v| {
+        let t = glam::Vec3::from([v.tangent[0], v.tangent[1], v.tangent[2]]);
+        (t.length() - 1.0).abs() < 1e-4
+            && t.dot(glam::Vec3::from(v.normal)).abs() < 1e-3
+            && v.tangent[3].abs() == 1.0
+    }));
     assert!(mesh
         .bounds_min
         .iter()
@@ -480,7 +489,7 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     let b = "c0000000-0000-4000-8000-0000000000b0";
     let scene = |own: &str, other: &str| {
         format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":1,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":2,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
         )
     };
     p.write("scenes/a.scene.json", &scene(a, b));
@@ -617,7 +626,11 @@ fn cook_project_expands_scenes_and_records_the_project() {
 
     let r = cook_project(&dir, None, &CookOptions::default()).unwrap_or_else(|d| panic!("{d:#?}"));
     assert!(!r.has_errors(), "{}", r.text());
-    assert_eq!(r.assets.len(), 5, "scene, prefab, robot, material, swatch");
+    assert_eq!(
+        r.assets.len(),
+        7,
+        "scene, prefab, robot, material, swatch, normal, metallic-roughness"
+    );
     let cache = project_cache_dir(&dir);
     assert_eq!(cache, dir.join(".fynkel/cache"));
     let index: serde_json::Value =
@@ -650,7 +663,7 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert_eq!(info["kind"], "JSON");
     assert_eq!(info["documentKind"], "scene");
     assert_eq!(info["expanded"], true);
-    assert_eq!(info["entities"], 4);
+    assert_eq!(info["entities"], 5);
     assert_eq!(info["instances"], 1);
     assert_eq!(
         info["behaviourTypes"],
@@ -658,7 +671,7 @@ fn cook_project_expands_scenes_and_records_the_project() {
     );
     let scene: serde_json::Value = serde_json::from_slice(c.read(1, 1 << 20).unwrap()).unwrap();
     let entities = scene["entities"].as_object().unwrap();
-    assert_eq!(entities.len(), 4);
+    assert_eq!(entities.len(), 5);
     let host = &entities["c0000000-0000-4000-8000-0000000000e2"];
     assert!(host.get("prefab").is_none(), "expanded: {host}");
     let child = host["children"][0].as_str().unwrap();

@@ -17,6 +17,8 @@ impl ComponentId {
     pub const CAMERA: ComponentId = ComponentId(5);
     pub const DIRECTIONAL_LIGHT: ComponentId = ComponentId(6);
     pub const POINT_LIGHT: ComponentId = ComponentId(7);
+    pub const SPOT_LIGHT: ComponentId = ComponentId(8);
+    pub const ENVIRONMENT: ComponentId = ComponentId(9);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -27,6 +29,8 @@ impl ComponentId {
             5 => Some("fynkel.Camera"),
             6 => Some("fynkel.DirectionalLight"),
             7 => Some("fynkel.PointLight"),
+            8 => Some("fynkel.SpotLight"),
+            9 => Some("fynkel.Environment"),
             _ => None,
         }
     }

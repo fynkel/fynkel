@@ -278,7 +278,9 @@ fn spawn_order(scene: &SceneDescription) -> Result<Vec<usize>, LoadError> {
 impl ComponentValue {
     /// Every built-in component on `entity`, in registry order.
     pub fn all_of(world: &World, entity: Entity) -> Vec<ComponentValue> {
-        use crate::components::{Camera, DirectionalLight, MeshRenderer, PointLight};
+        use crate::components::{
+            Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
+        };
         let ecs = world.ecs();
         let mut out = Vec::new();
         if let Ok(t) = ecs.copy::<Transform>(entity) {
@@ -295,6 +297,12 @@ impl ComponentValue {
         }
         if let Ok(v) = ecs.copy::<PointLight>(entity) {
             out.push(ComponentValue::PointLight(v));
+        }
+        if let Ok(v) = ecs.copy::<SpotLight>(entity) {
+            out.push(ComponentValue::SpotLight(v));
+        }
+        if let Ok(v) = ecs.get::<Environment>(entity) {
+            out.push(ComponentValue::Environment(v.clone()));
         }
         out
     }

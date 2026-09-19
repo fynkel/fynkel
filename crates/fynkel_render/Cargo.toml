@@ -1,6 +1,6 @@
 [package]
 name = "fynkel_render"
-description = "wgpu renderer over fynkel_core's render extract (blueprint §8.5 seed): cooked meshes and materials from the fynkel_assets residency store (base colour in V1), placeholder cubes, the scene camera and one directional light."
+description = "wgpu renderer over fynkel_core's render extract (blueprint §8.5, renderer V1 a): physically based shading of cooked meshes and materials from the fynkel_assets residency store into an HDR target with camera exposure and ACES; sun, ambient and sky, point and spot lights; docs/renderer.md."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -20,3 +20,4 @@ fynkel_assets.workspace = true
 fynkel_import.workspace = true
 fynkel_scene.workspace = true
 pollster.workspace = true
+serde_json.workspace = true

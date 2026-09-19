@@ -32,7 +32,7 @@ use crate::intermediate::{ColorSpace, ImageData, Intermediate, MaterialData, Mes
 use crate::{derive_sub_id, read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
-pub const IMPORTER_VERSION: u32 = 2;
+pub const IMPORTER_VERSION: u32 = 3;
 
 /// Extensions the importer understands when a file *requires* them.
 const SUPPORTED_REQUIRED: &[&str] = &["KHR_materials_emissive_strength"];
@@ -1022,7 +1022,10 @@ fn prefab_document(
 
     let mut prefab = Map::new();
     prefab.insert("$schema".into(), json!(DocumentKind::Prefab.schema_id()));
-    prefab.insert("formatVersion".into(), json!(1));
+    prefab.insert(
+        "formatVersion".into(),
+        json!(DocumentKind::Prefab.supported_format_version()),
+    );
     prefab.insert("id".into(), json!(Uuid::nil().to_string()));
     prefab.insert("name".into(), json!(scene_name));
     prefab.insert(

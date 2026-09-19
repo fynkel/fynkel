@@ -145,6 +145,38 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "fynkel.SpotLight"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.SpotLight.schema.json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "fynkel.Environment"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.Environment.schema.json"
+              }
+            }
+          }
         }
       ]
     },
