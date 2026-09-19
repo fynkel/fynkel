@@ -26,7 +26,6 @@ pub const PREFAB_SCHEMA: &str = "schemas/prefab.schema.json";
 /// truth) that `fynkel_document` still embeds; the envelope is embedded by
 /// `SchemaSet` itself.
 pub const HAND_WRITTEN_SCHEMAS: &[&str] = &[
-    "material.schema.json",
     "shader.schema.json",
     "meta.schema.json",
     "project.schema.json",
@@ -81,6 +80,13 @@ pub fn generate() -> Vec<(String, String)> {
         out.push((
             format!("schemas/components/{}.schema.json", s.name),
             pretty(&json_schema(s)),
+        ));
+    }
+    for s in document_records() {
+        let kind = s.document.unwrap();
+        out.push((
+            format!("schemas/{kind}.schema.json"),
+            pretty(&document_schema(s)),
         ));
     }
     out
@@ -146,12 +152,18 @@ fn json_type(ty: &FieldType) -> Value {
         FieldType::Vec3 => {
             json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3})
         }
+        FieldType::Vec4 => {
+            json!({"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4})
+        }
         FieldType::Quat => {
             json!({"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4, "description": "[x, y, z, w]"})
         }
         FieldType::Str => json!({"type": "string"}),
         FieldType::Nested(s) => json!({"$ref": format!("{}.schema.json", s.name)}),
         FieldType::AssetRef => json!({"$ref": format!("{ENVELOPE_ID}#/$defs/assetRef")}),
+        FieldType::OptionalAssetRef => {
+            json!({"oneOf": [{"$ref": format!("{ENVELOPE_ID}#/$defs/assetRef")}, {"type": "null"}]})
+        }
         FieldType::Enum(e) => {
             json!({"type": "string", "enum": e.variants, "x-fynkel": {"enum": e.name}})
         }
@@ -167,7 +179,10 @@ fn json_schema(s: &RecordSchema) -> Value {
             t["description"] = Value::String(f.doc.to_string());
         }
         props.insert(f.name.to_string(), t);
-        if !matches!(f.ty, FieldType::OptionalEntity) {
+        if !matches!(
+            f.ty,
+            FieldType::OptionalEntity | FieldType::OptionalAssetRef
+        ) {
             required.push(f.name);
         }
     }
@@ -182,6 +197,122 @@ fn json_schema(s: &RecordSchema) -> Value {
         "required": required,
         "additionalProperties": false,
         "x-fynkel": {"kind": s.kind.name(), "id": s.id, "rust": s.rust_path, "wireSize": s.wire_size(), "authored": s.authored},
+    })
+}
+
+/// The `properties` of a document record: every field optional, with the
+/// Rust `Default` as the schema `default` (read through the generated
+/// document codec, so the two cannot drift).
+fn document_properties(s: &RecordSchema) -> serde_json::Map<String, Value> {
+    let kind = s.document.expect("a document record");
+    let defaults = fynkel_document::generated::document_defaults()
+        .into_iter()
+        .find(|(k, _)| *k == kind)
+        .map(|(_, node)| node.to_serde())
+        .unwrap_or_else(|| {
+            panic!("no document defaults for {kind} (regenerate after adding the record)")
+        });
+    let mut props = serde_json::Map::new();
+    for f in s.fields {
+        let mut t = json_type(&f.ty);
+        if !f.doc.is_empty() {
+            t["description"] = Value::String(f.doc.to_string());
+        }
+        match &defaults[f.name] {
+            Value::Null => {}
+            v => t["default"] = v.clone(),
+        }
+        props.insert(f.name.to_string(), t);
+    }
+    props
+}
+
+/// `schemas/<kind>.schema.json` for a document record.
+fn document_schema(s: &RecordSchema) -> Value {
+    match s.document {
+        Some("material") => material_schema(s),
+        other => panic!("no document schema template for {other:?}"),
+    }
+}
+
+/// `material.schema.json` (blueprint §6 Materials, §19.2d item 2): the
+/// envelope, `shader`, the `fynkel.PbrMaterial` fields (what a
+/// `fynkel.pbr@1` material sets) and a custom shader's manifest-typed
+/// `parameters`/`textures`. Which group a document may use follows from
+/// its shader and is a semantic rule (`fynkel material validate`, FYN-D0307)
+/// rather than a conditional here: a failed `if`/`then` branch would turn
+/// every field of the branch into "unexpected property".
+fn material_schema(s: &RecordSchema) -> Value {
+    let shader_schema = "https://fynkel.dev/schemas/shader.schema.json";
+    let mut properties = serde_json::Map::new();
+    properties.insert(
+        "shader".into(),
+        json!({
+            "$ref": format!("{shader_schema}#/$defs/shaderId"),
+            "description": "The shader this material sets values for: `fynkel.pbr@1` (built in, the fields below) or a custom manifest's id (`parameters` and `textures`).",
+        }),
+    );
+    properties.extend(document_properties(s));
+    properties.insert(
+        "parameters".into(),
+        json!({
+            "type": "object",
+            "description": "Custom shaders only: parameter values; anything not set takes the manifest default.",
+            "propertyNames": {"$ref": format!("{shader_schema}#/$defs/identifier")},
+            "additionalProperties": {
+                "oneOf": [
+                    {"type": "number"},
+                    {"type": "boolean"},
+                    {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 4},
+                ],
+            },
+        }),
+    );
+    properties.insert(
+        "textures".into(),
+        json!({
+            "type": "object",
+            "description": "Custom shaders only: texture slot → binding.",
+            "propertyNames": {"$ref": format!("{shader_schema}#/$defs/identifier")},
+            "additionalProperties": {"$ref": "#/$defs/textureBinding"},
+        }),
+    );
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://fynkel.dev/schemas/material.schema.json",
+        "$comment": "GENERATED by `fynkel codegen` from `fynkel_core::material::PbrMaterial` (ADR-0012). Do not edit.",
+        "title": "Fynkel material document",
+        "description": "A shader id plus the values a material sets (blueprint §6 Materials and shaders). For the built-in `fynkel.pbr@1` the fields are those of the Rust `fynkel.PbrMaterial` record (factors, five texture slots, alpha mode, double-sidedness); every one is optional and defaults as stated. A custom shader instead takes typed `parameters` and `textures` checked against its manifest. Which group applies, ranges and slot existence are semantic rules (`fynkel material validate`). Shadow flags live on `fynkel.MeshRenderer`.",
+        "type": "object",
+        "allOf": [{"$ref": ENVELOPE_ID}],
+        "properties": properties,
+        "required": ["shader"],
+        "patternProperties": {"^x-": true},
+        "unevaluatedProperties": false,
+        "x-fynkel": {"kind": "record", "name": s.name, "rust": s.rust_path, "wireSize": s.wire_size(), "document": "material"},
+        "$defs": {
+            "textureBinding": {
+                "type": "object",
+                "properties": {
+                    "texture": {"$ref": format!("{ENVELOPE_ID}#/$defs/assetRef")},
+                    "colorSpace": {"enum": ["srgb", "linear"], "description": "Overrides the slot's colour space."},
+                    "uvSet": {"type": "integer", "minimum": 0, "maximum": 1, "default": 0},
+                    "sampler": {"$ref": "#/$defs/sampler"},
+                },
+                "required": ["texture"],
+                "additionalProperties": false,
+            },
+            "sampler": {
+                "type": "object",
+                "properties": {
+                    "filter": {"enum": ["linear", "nearest"], "default": "linear"},
+                    "mipmaps": {"type": "boolean", "default": true},
+                    "wrap": {"enum": ["repeat", "clamp", "mirror"], "default": "repeat"},
+                    "anisotropy": {"type": "integer", "minimum": 1, "maximum": 16, "default": 1},
+                },
+                "additionalProperties": false,
+            },
+        },
     })
 }
 
@@ -372,10 +503,12 @@ fn dart_type(ty: &FieldType) -> String {
         FieldType::OptionalEntity => "int?".into(),
         FieldType::Bool => "bool".into(),
         FieldType::Vec3 => "Vec3".into(),
+        FieldType::Vec4 => "Vec4".into(),
         FieldType::Quat => "Quat".into(),
         FieldType::Str => "String".into(),
         FieldType::Nested(s) => rust_ident(s).into(),
         FieldType::AssetRef => "AssetRef".into(),
+        FieldType::OptionalAssetRef => "AssetRef?".into(),
         FieldType::Enum(e) => enum_ident(e).into(),
     }
 }
@@ -465,7 +598,10 @@ fn dart(fp: u64) -> String {
         } else {
             let _ = writeln!(o, "  const {name}({{");
             for f in s.fields {
-                let req = if matches!(f.ty, FieldType::OptionalEntity) {
+                let req = if matches!(
+                    f.ty,
+                    FieldType::OptionalEntity | FieldType::OptionalAssetRef
+                ) {
                     ""
                 } else {
                     "required "
@@ -520,10 +656,14 @@ fn dart(fp: u64) -> String {
                 }
                 FieldType::Bool => format!("d.setUint8(offset + {off}, {v} ? 1 : 0);"),
                 FieldType::Vec3 => format!("writeVec3(d, offset + {off}, {v});"),
+                FieldType::Vec4 => format!("writeVec4(d, offset + {off}, {v});"),
                 FieldType::Quat => format!("writeQuat(d, offset + {off}, {v});"),
                 FieldType::Str => format!("writeWireString(d, offset + {off}, {v}, strings);"),
                 FieldType::Nested(_) => format!("{v}.encode(d, offset + {off}, strings);"),
                 FieldType::AssetRef => format!("writeAssetRef(d, offset + {off}, {v}, strings);"),
+                FieldType::OptionalAssetRef => {
+                    format!("writeOptionalAssetRef(d, offset + {off}, {v}, strings);")
+                }
                 FieldType::Enum(_) => {
                     format!("d.setUint32(offset + {off}, {v}.index, Endian.little);")
                 }
@@ -559,12 +699,16 @@ fn dart(fp: u64) -> String {
                     }
                     FieldType::Bool => format!("d.getUint8(offset + {off}) != 0"),
                     FieldType::Vec3 => format!("readVec3(d, offset + {off})"),
+                    FieldType::Vec4 => format!("readVec4(d, offset + {off})"),
                     FieldType::Quat => format!("readQuat(d, offset + {off})"),
                     FieldType::Str => format!("readWireString(d, offset + {off}, tail)"),
                     FieldType::Nested(n) => {
                         format!("{}.decode(d, offset + {off}, tail)", rust_ident(n))
                     }
                     FieldType::AssetRef => format!("readAssetRef(d, offset + {off}, tail)"),
+                    FieldType::OptionalAssetRef => {
+                        format!("readOptionalAssetRef(d, offset + {off}, tail)")
+                    }
                     FieldType::Enum(e) => format!(
                         "enumValue({}.values, d.getUint32(offset + {off}, Endian.little), '{}')",
                         enum_ident(e),
@@ -660,6 +804,7 @@ fn rust(fp: u64) -> String {
                 FieldType::OptionalEntity => format!("put_opt_entity(out, {off}, {v});"),
                 FieldType::Bool => format!("put_bool(out, {off}, {v});"),
                 FieldType::Vec3 => format!("put_vec3(out, {off}, {v});"),
+                FieldType::Vec4 => format!("put_vec4(out, {off}, {v});"),
                 FieldType::Quat => format!("put_quat(out, {off}, {v});"),
                 FieldType::Str => format!("put_str(out, {off}, &{v}, strings);"),
                 FieldType::Nested(n) => format!(
@@ -668,6 +813,9 @@ fn rust(fp: u64) -> String {
                     off + n.wire_size()
                 ),
                 FieldType::AssetRef => format!("put_asset_ref(out, {off}, &{v}, strings);"),
+                FieldType::OptionalAssetRef => {
+                    format!("put_opt_asset_ref(out, {off}, {v}.as_ref(), strings);")
+                }
                 FieldType::Enum(_) => format!("put_enum(out, {off}, &{v});"),
             };
             let _ = writeln!(o, "        {line}");
@@ -693,6 +841,7 @@ fn rust(fp: u64) -> String {
                     FieldType::OptionalEntity => format!("get_opt_entity(b, {off})"),
                     FieldType::Bool => format!("get_bool(b, {off})"),
                     FieldType::Vec3 => format!("get_vec3(b, {off})"),
+                    FieldType::Vec4 => format!("get_vec4(b, {off})"),
                     FieldType::Quat => format!("get_quat(b, {off})"),
                     FieldType::Str => format!("get_str(b, {off}, tail)?"),
                     FieldType::Nested(n) => format!(
@@ -701,6 +850,7 @@ fn rust(fp: u64) -> String {
                         off + n.wire_size()
                     ),
                     FieldType::AssetRef => format!("get_asset_ref(b, {off}, tail)?"),
+                    FieldType::OptionalAssetRef => format!("get_opt_asset_ref(b, {off}, tail)?"),
                     FieldType::Enum(_) => format!("get_enum(b, {off})?"),
                 };
                 let _ = writeln!(o, "            {}: {expr},", f.name);
@@ -715,8 +865,8 @@ fn rust(fp: u64) -> String {
 
 // ------------------------------------------------------------ document codecs
 
-/// Authored records: every authored component plus the records they nest,
-/// registry order, once each.
+/// Authored records: every authored component and document record plus
+/// the records they nest, registry order, once each.
 fn authored_records() -> Vec<&'static RecordSchema> {
     fn visit(s: &'static RecordSchema, out: &mut Vec<&'static RecordSchema>) {
         if out.iter().any(|x| x.name == s.name) {
@@ -732,11 +882,19 @@ fn authored_records() -> Vec<&'static RecordSchema> {
     let mut out = Vec::new();
     for s in ALL
         .iter()
-        .filter(|s| s.kind == SchemaKind::Component && s.authored)
+        .filter(|s| (s.kind == SchemaKind::Component && s.authored) || s.document.is_some())
     {
         visit(s, &mut out);
     }
     out
+}
+
+/// Records that are a document kind's top level (`document = "..."`).
+fn document_records() -> Vec<&'static RecordSchema> {
+    ALL.iter()
+        .copied()
+        .filter(|s| s.document.is_some())
+        .collect()
 }
 
 /// `crates/fynkel_document/src/generated.rs`: typed component values ↔ JSON
@@ -791,28 +949,41 @@ fn document_codecs(fp: u64) -> String {
         );
         let _ = writeln!(o, "        let m = object(node)?;");
         let _ = writeln!(o, "        let _ = m;");
+        // A document record's fields are all optional: an absent one takes
+        // the Rust `Default` (the generated schema states the same values).
+        let is_document = s.document.is_some();
+        if is_document {
+            let _ = writeln!(o, "        let d = Self::default();");
+        }
         if s.fields.is_empty() {
             let _ = writeln!(o, "        Ok(Self)");
         } else {
             let _ = writeln!(o, "        Ok(Self {{");
             for f in s.fields {
                 let name = f.name;
-                let expr = match f.ty {
-                    FieldType::F32 => format!("f32_field(m, \"{name}\")?"),
-                    FieldType::U32 => format!("u32_field(m, \"{name}\")?"),
-                    FieldType::I32 => format!("i32_field(m, \"{name}\")?"),
-                    FieldType::U64 => format!("u64_field(m, \"{name}\")?"),
-                    FieldType::Bool => format!("bool_field(m, \"{name}\")?"),
-                    FieldType::Vec3 => format!("vec3_field(m, \"{name}\")?"),
-                    FieldType::Quat => format!("quat_field(m, \"{name}\")?"),
-                    FieldType::Str => format!("str_field(m, \"{name}\")?"),
-                    FieldType::AssetRef => format!("asset_ref_field(m, \"{name}\")?"),
-                    FieldType::Enum(_) => format!("enum_field(m, \"{name}\")?"),
-                    FieldType::Nested(_) => format!("nested_field(m, \"{name}\")?"),
+                let reader = match f.ty {
+                    FieldType::F32 => "f32_field",
+                    FieldType::U32 => "u32_field",
+                    FieldType::I32 => "i32_field",
+                    FieldType::U64 => "u64_field",
+                    FieldType::Bool => "bool_field",
+                    FieldType::Vec3 => "vec3_field",
+                    FieldType::Vec4 => "vec4_field",
+                    FieldType::Quat => "quat_field",
+                    FieldType::Str => "str_field",
+                    FieldType::AssetRef => "asset_ref_field",
+                    FieldType::OptionalAssetRef => "opt_asset_ref_field",
+                    FieldType::Enum(_) => "enum_field",
+                    FieldType::Nested(_) => "nested_field",
                     FieldType::Entity | FieldType::OptionalEntity => panic!(
-                        "{}.{}: authored components cannot hold entity handles",
+                        "{}.{}: authored records cannot hold entity handles",
                         s.name, name
                     ),
+                };
+                let expr = if is_document {
+                    format!("or_default(m, \"{name}\", {reader}, d.{name})?")
+                } else {
+                    format!("{reader}(m, \"{name}\")?")
                 };
                 let _ = writeln!(o, "            {name}: {expr},");
             }
@@ -831,9 +1002,12 @@ fn document_codecs(fp: u64) -> String {
                 }
                 FieldType::Bool => format!("bool_node({v})"),
                 FieldType::Vec3 => format!("vec3_node({v})"),
+                FieldType::Vec4 => format!("vec4_node({v})"),
                 FieldType::Quat => format!("quat_node({v})"),
                 FieldType::Str => format!("str_node(&{v})"),
                 FieldType::AssetRef => format!("asset_ref_node(&{v})"),
+                // Unbound optional references are left out of the document.
+                FieldType::OptionalAssetRef => format!("opt_asset_ref_node({v}.as_ref())"),
                 FieldType::Enum(_) => format!("enum_node(&{v})"),
                 FieldType::Nested(_) => format!("{v}.to_node()"),
                 FieldType::Entity | FieldType::OptionalEntity => unreachable!(),
@@ -844,6 +1018,31 @@ fn document_codecs(fp: u64) -> String {
         let _ = writeln!(o, "    }}");
         let _ = writeln!(o, "}}");
     }
+    // Defaults of the document records, for the generated document schemas.
+    let _ = writeln!(o);
+    let _ = writeln!(
+        o,
+        "/// `(document kind, Default as a node)` of every document record; the"
+    );
+    let _ = writeln!(
+        o,
+        "/// `default` values in `schemas/<kind>.schema.json` come from here."
+    );
+    let _ = writeln!(
+        o,
+        "pub fn document_defaults() -> Vec<(&'static str, Node)> {{"
+    );
+    let _ = writeln!(o, "    vec![");
+    for s in document_records() {
+        let _ = writeln!(
+            o,
+            "        (\"{}\", <::{} as Default>::default().to_node()),",
+            s.document.unwrap(),
+            s.rust_path
+        );
+    }
+    let _ = writeln!(o, "    ]");
+    let _ = writeln!(o, "}}");
     // Schemas compiled into fynkel_document (SchemaSet::embedded).
     let _ = writeln!(o);
     let _ = writeln!(
@@ -859,6 +1058,13 @@ fn document_codecs(fp: u64) -> String {
         o,
         "    (\"prefab.schema.json\", include_str!(\"../../../{PREFAB_SCHEMA}\")),"
     );
+    for s in document_records() {
+        let kind = s.document.unwrap();
+        let _ = writeln!(
+            o,
+            "    (\"{kind}.schema.json\", include_str!(\"../../../schemas/{kind}.schema.json\")),"
+        );
+    }
     for hand_written in HAND_WRITTEN_SCHEMAS {
         let _ = writeln!(
             o,

@@ -14,6 +14,7 @@ use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
 
 use crate::components::{Camera, DirectionalLight, MeshRenderer, PointLight};
+use crate::material::PbrMaterial;
 use crate::world::Name;
 
 /// Stable command ids (wire `kind` of a command record).
@@ -192,6 +193,7 @@ pub const ALL: &[&RecordSchema] = &[
     &Camera::SCHEMA,
     &DirectionalLight::SCHEMA,
     &PointLight::SCHEMA,
+    &PbrMaterial::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

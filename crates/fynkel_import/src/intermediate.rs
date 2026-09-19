@@ -18,7 +18,7 @@ use fynkel_contracts::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 pub const MAGIC: &[u8; 4] = b"FYNI";
-pub const INTERMEDIATE_VERSION: u32 = 1;
+pub const INTERMEDIATE_VERSION: u32 = 2;
 
 /// The one vertex layout every mesh is normalized to (72 bytes); the
 /// cooked `MESH` payload uses the same one, so it is defined next to the
@@ -57,11 +57,14 @@ pub struct MaterialData {
 /// An image as it came (PNG/JPEG bytes); decoding is the texture importer's.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImageData {
-    /// Sub-asset id (`image/<i>`).
+    /// Sub-asset id (`image/<i>`, or `image/<i>/linear` for the data copy
+    /// of an image that is also used as a colour).
     pub sub_id: String,
     pub name: String,
     pub mime_type: String,
     pub bytes: Vec<u8>,
+    /// Decided by the importer from the material slots that bind it.
+    pub color_space: ColorSpace,
 }
 
 /// How the texels of a texture are to be read (§9; the material schema's
@@ -262,6 +265,8 @@ struct ImageHeader {
     #[serde(rename = "mimeType")]
     mime_type: String,
     bytes: [u64; 2],
+    #[serde(rename = "colorSpace")]
+    color_space: ColorSpace,
 }
 
 impl Intermediate {
@@ -309,6 +314,7 @@ impl Intermediate {
                 name: im.name.clone(),
                 mime_type: im.mime_type.clone(),
                 bytes: push(&im.bytes),
+                color_space: im.color_space,
             })
             .collect();
         let textures = self
@@ -445,6 +451,7 @@ impl Intermediate {
                 name: im.name,
                 mime_type: im.mime_type,
                 bytes: data,
+                color_space: im.color_space,
             });
         }
         let mut textures = Vec::with_capacity(header.textures.len());

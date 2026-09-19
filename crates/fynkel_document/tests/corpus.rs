@@ -170,5 +170,5 @@ fn new_documents_are_valid_and_canonical() {
     let text = doc.write().unwrap();
     let again = Document::parse(DocumentKind::Material, None, &text).unwrap();
     assert_eq!(again.envelope, doc.envelope);
-    assert!(text.starts_with("{\n  \"$schema\": \"https://fynkel.dev/schemas/material.schema.json\",\n  \"formatVersion\": 1,\n  \"id\": \""));
+    assert!(text.starts_with("{\n  \"$schema\": \"https://fynkel.dev/schemas/material.schema.json\",\n  \"formatVersion\": 2,\n  \"id\": \""));
 }

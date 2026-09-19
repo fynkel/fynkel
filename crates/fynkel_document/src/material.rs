@@ -1,15 +1,19 @@
 //! Material and shader documents (blueprint §6 Materials and shaders,
-//! §19.2c item 6): typed views over `.material.json` and `.shader.json`
-//! and the rules that tie a material to its shader's interface manifest.
+//! §19.2c item 6, §19.2d item 2): typed views over `.material.json` and
+//! `.shader.json` and the rules that tie a material to its shader.
 //!
-//! A [`ShaderManifest`] says what a shader exposes: passes, typed
-//! parameters with defaults and ranges, texture slots with colour spaces.
-//! Built-in shaders ship their manifest inside the engine
-//! ([`ShaderLibrary::builtin`], `fynkel.pbr@1`); custom ones are read from
-//! documents and added to the library. A [`Material`] names a shader and
-//! sets values; [`Material::validate`] checks them against the manifest
-//! and [`Material::resolve`] fills in every default so a consumer (the
-//! renderer, `inspect`) sees the full parameter set.
+//! A material for the built-in `fynkel.pbr@1` *is* a
+//! [`PbrMaterial`](fynkel_core::material::PbrMaterial): the document's
+//! fields are the record's (every one optional, `Default` when absent —
+//! `schemas/material.schema.json` is generated from it), and
+//! [`Material::pbr`] is the typed value the cook and the renderer consume.
+//! A [`ShaderManifest`] says what a custom shader exposes: passes, typed
+//! parameters with defaults and ranges, texture slots with colour spaces;
+//! such a material sets `parameters` and `textures` that
+//! [`Material::validate`] checks against the manifest and
+//! [`Material::resolve`] completes with the manifest defaults. The
+//! built-in shader has a manifest too ([`ShaderLibrary::builtin`]) so
+//! `inspect` shows both kinds the same way.
 //!
 //! Like [`crate::scene`], the tree stays the source of truth; the views are
 //! lenient so a broken document still describes itself, every problem
@@ -17,22 +21,28 @@
 //!
 //! Semantic rules, materials (`FYN-D030x`):
 //! - the shader must be known (`D0300`);
-//! - every parameter must exist in the manifest (`D0301`), have the
-//!   manifest's type — number / bool / vector of the right length, whole
-//!   numbers for `int` (`D0302`) — and lie within its range (`D0303`);
-//! - every texture slot must exist (`D0304`); required slots must be
-//!   bound (`D0305`);
-//! - `alphaMode` must name a pass the shader has (`D0306`);
-//! - a binding that overrides the slot's colour space is flagged (`D0308`,
-//!   warning: an sRGB normal map is almost always a mistake).
+//! - PBR: every factor within its range (`D0303`); the formatVersion 1
+//!   `parameters`/`textures` maps are refused with a hint to `fynkel
+//!   migrate` (`D0307`);
+//! - custom: every parameter must exist in the manifest (`D0301`), have
+//!   the manifest's type — number / bool / vector of the right length,
+//!   whole numbers for `int` (`D0302`) — and lie within its range
+//!   (`D0303`); every texture slot must exist (`D0304`); required slots
+//!   must be bound (`D0305`); a binding that overrides the slot's colour
+//!   space is flagged (`D0308`, warning: an sRGB normal map is almost
+//!   always a mistake);
+//! - `alpha_mode` must name a pass the shader has (`D0306`).
 //!
 //! Semantic rules, manifests (`FYN-D031x`): defaults must match their
 //! parameter type and range (`D0310`), `min` must not exceed `max`
 //! (`D0311`).
 
+use fynkel_contracts::schema::HasEnumSchema;
 use fynkel_contracts::{Code, Diagnostic};
+pub use fynkel_core::material::{AlphaMode, PbrMaterial};
 use uuid::Uuid;
 
+use crate::codec::DocumentCodec;
 use crate::json::{Node, Value};
 use crate::scene::escape;
 use crate::schema::SchemaSet;
@@ -215,66 +225,50 @@ impl Pass {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum AlphaMode {
-    #[default]
-    Opaque,
-    Mask,
-    Blend,
+/// The document name of an alpha mode (`opaque` | `mask` | `blend`).
+pub fn alpha_mode_name(m: AlphaMode) -> &'static str {
+    AlphaMode::ENUM.variants[m.to_index() as usize]
 }
 
-impl AlphaMode {
-    pub const fn name(self) -> &'static str {
-        match self {
-            AlphaMode::Opaque => "opaque",
-            AlphaMode::Mask => "mask",
-            AlphaMode::Blend => "blend",
-        }
-    }
+pub fn parse_alpha_mode(s: &str) -> Option<AlphaMode> {
+    AlphaMode::ENUM
+        .variants
+        .iter()
+        .position(|v| *v == s)
+        .and_then(|i| AlphaMode::from_index(i as u32))
+}
 
-    pub fn parse(s: &str) -> Option<AlphaMode> {
-        match s {
-            "opaque" => Some(AlphaMode::Opaque),
-            "mask" => Some(AlphaMode::Mask),
-            "blend" => Some(AlphaMode::Blend),
-            _ => None,
-        }
-    }
-
-    /// The pass a material with this mode renders in.
-    pub const fn pass(self) -> Pass {
-        match self {
-            AlphaMode::Opaque => Pass::Opaque,
-            AlphaMode::Mask => Pass::Mask,
-            AlphaMode::Blend => Pass::Blend,
-        }
+/// The pass a material with this alpha mode renders in.
+pub const fn pass_of(m: AlphaMode) -> Pass {
+    match m {
+        AlphaMode::Opaque => Pass::Opaque,
+        AlphaMode::Mask => Pass::Mask,
+        AlphaMode::Blend => Pass::Blend,
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum CullMode {
-    #[default]
-    Back,
-    Front,
-    None,
-}
+/// Document field names that belong to the PBR model only (not shared with
+/// custom-shader materials).
+pub const PBR_ONLY_FIELDS: [&str; 12] = [
+    "base_color",
+    "metallic",
+    "roughness",
+    "emissive",
+    "emissive_strength",
+    "normal_scale",
+    "occlusion_strength",
+    "base_color_texture",
+    "normal_texture",
+    "metallic_roughness_texture",
+    "occlusion_texture",
+    "emissive_texture",
+];
 
-impl CullMode {
-    pub const fn name(self) -> &'static str {
-        match self {
-            CullMode::Back => "back",
-            CullMode::Front => "front",
-            CullMode::None => "none",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<CullMode> {
-        match s {
-            "back" => Some(CullMode::Back),
-            "front" => Some(CullMode::Front),
-            "none" => Some(CullMode::None),
-            _ => None,
-        }
+/// Removes the PBR-only fields from a material body (a fresh document
+/// re-pointed at a custom shader).
+pub fn strip_pbr_fields(root: &mut Node) {
+    if let Some(members) = root.as_object_mut() {
+        members.retain(|m| !PBR_ONLY_FIELDS.contains(&m.key.as_str()));
     }
 }
 
@@ -711,15 +705,16 @@ pub struct AuthoredParameter {
 pub struct Material {
     pub document: Document,
     pub shader: String,
-    /// Document order.
+    /// The typed model when `shader` is `fynkel.pbr@1` (defaults filled;
+    /// a field that does not decode keeps its default and is reported).
+    pub pbr: Option<PbrMaterial>,
+    /// Custom shaders: document order (empty for PBR).
     pub parameters: Vec<AuthoredParameter>,
-    /// Document order.
+    /// Custom shaders: document order (empty for PBR).
     pub textures: Vec<TextureBinding>,
     pub alpha_mode: AlphaMode,
     pub alpha_cutoff: f64,
-    pub cull: CullMode,
-    pub cast_shadows: bool,
-    pub receive_shadows: bool,
+    pub double_sided: bool,
     read_diagnostics: Vec<Diagnostic>,
 }
 
@@ -757,117 +752,163 @@ impl Material {
                 String::new()
             }
         };
+        let is_pbr = shader == PBR_SHADER_ID;
+        let mut pbr = None;
         let mut parameters = Vec::new();
-        match root.get("parameters").map(|n| &n.value) {
-            Some(Value::Object(members)) => {
-                for m in members {
-                    parameters.push(AuthoredParameter {
-                        name: m.key.clone(),
-                        node: m.value.clone(),
-                        pointer: format!("/parameters/{}", escape(&m.key)),
-                    });
+        let mut textures = Vec::new();
+        if is_pbr {
+            for legacy in ["parameters", "textures"] {
+                if root.get(legacy).is_some() {
+                    diags.push(
+                        malformed(
+                            &format!(
+                                "{PBR_SHADER_ID} materials carry the PbrMaterial fields (base_color, metallic, …, <slot>_texture); `{legacy}` is the formatVersion 1 form"
+                            ),
+                            &format!("/{legacy}"),
+                        )
+                        .with_suggestion("run `fynkel migrate <path>` to convert the document"),
+                    );
                 }
             }
-            Some(_) => diags.push(malformed("parameters must be an object", "/parameters")),
-            None => {}
-        }
-        let mut textures = Vec::new();
-        match root.get("textures").map(|n| &n.value) {
-            Some(Value::Object(members)) => {
-                for m in members {
-                    let pointer = format!("/textures/{}", escape(&m.key));
-                    let Some(fields) = m.value.as_object() else {
-                        diags.push(malformed("texture binding must be an object", &pointer));
-                        continue;
-                    };
-                    let texture = match crate::codec::asset_ref_field(fields, "texture") {
-                        Ok(r) => r,
-                        Err(e) => {
-                            diags.push(malformed(
-                                &format!("texture: {}", e.message),
-                                &format!("{pointer}{}", e.pointer),
-                            ));
-                            continue;
-                        }
-                    };
-                    let get = |k: &str| fields.iter().find(|f| f.key == k).map(|f| &f.value);
-                    let color_space = match get("colorSpace") {
-                        Some(n) => match n.as_str().and_then(ColorSpace::parse) {
-                            Some(c) => Some(c),
-                            None => {
-                                diags.push(malformed(
-                                    "colorSpace must be srgb | linear",
-                                    &format!("{pointer}/colorSpace"),
-                                ));
-                                None
-                            }
-                        },
-                        None => None,
-                    };
-                    let mut sampler = Sampler::default();
-                    if let Some(s) = get("sampler").and_then(Node::as_object) {
-                        let sget = |k: &str| s.iter().find(|f| f.key == k).map(|f| &f.value);
-                        if let Some(v) = sget("filter").and_then(Node::as_str) {
-                            sampler.filter = v.to_string();
-                        }
-                        if let Some(v) = sget("mipmaps").and_then(Node::as_bool) {
-                            sampler.mipmaps = v;
-                        }
-                        if let Some(v) = sget("wrap").and_then(Node::as_str) {
-                            sampler.wrap = v.to_string();
-                        }
-                        if let Some(v) = sget("anisotropy").and_then(Node::as_i64) {
-                            sampler.anisotropy = v.clamp(1, 16) as u32;
+            // Field by field so one bad value does not hide the rest: the
+            // codec reports the first failure, so retry without that field.
+            let mut body = root.clone();
+            strip_legacy(&mut body);
+            let value = loop {
+                match PbrMaterial::from_node(&body) {
+                    Ok(v) => break v,
+                    Err(e) => {
+                        let field = e
+                            .pointer
+                            .trim_start_matches('/')
+                            .split('/')
+                            .next()
+                            .unwrap_or("")
+                            .to_string();
+                        diags.push(malformed(&format!("{field}: {}", e.message), &e.pointer));
+                        if field.is_empty() || !remove_member(&mut body, &field) {
+                            break PbrMaterial::default();
                         }
                     }
-                    textures.push(TextureBinding {
-                        slot: m.key.clone(),
-                        texture,
-                        color_space,
-                        uv_set: get("uvSet").and_then(Node::as_i64).unwrap_or(0).max(0) as u32,
-                        sampler,
-                        pointer,
-                    });
+                }
+            };
+            pbr = Some(value);
+        } else {
+            for field in PBR_ONLY_FIELDS {
+                if root.get(field).is_some() {
+                    diags.push(
+                        malformed(
+                            &format!(
+                                "`{field}` belongs to {PBR_SHADER_ID}; a custom shader's values go in `parameters` and `textures`"
+                            ),
+                            &format!("/{field}"),
+                        )
+                        .with_suggestion(format!("move the value into `parameters` (or `textures`) as {:?} names it", shader)),
+                    );
                 }
             }
-            Some(_) => diags.push(malformed("textures must be an object", "/textures")),
-            None => {}
+            match root.get("parameters").map(|n| &n.value) {
+                Some(Value::Object(members)) => {
+                    for m in members {
+                        parameters.push(AuthoredParameter {
+                            name: m.key.clone(),
+                            node: m.value.clone(),
+                            pointer: format!("/parameters/{}", escape(&m.key)),
+                        });
+                    }
+                }
+                Some(_) => diags.push(malformed("parameters must be an object", "/parameters")),
+                None => {}
+            }
+            match root.get("textures").map(|n| &n.value) {
+                Some(Value::Object(members)) => {
+                    for m in members {
+                        let pointer = format!("/textures/{}", escape(&m.key));
+                        let Some(fields) = m.value.as_object() else {
+                            diags.push(malformed("texture binding must be an object", &pointer));
+                            continue;
+                        };
+                        let texture = match crate::codec::asset_ref_field(fields, "texture") {
+                            Ok(r) => r,
+                            Err(e) => {
+                                diags.push(malformed(
+                                    &format!("texture: {}", e.message),
+                                    &format!("{pointer}{}", e.pointer),
+                                ));
+                                continue;
+                            }
+                        };
+                        let get = |k: &str| fields.iter().find(|f| f.key == k).map(|f| &f.value);
+                        let color_space = match get("colorSpace") {
+                            Some(n) => match n.as_str().and_then(ColorSpace::parse) {
+                                Some(c) => Some(c),
+                                None => {
+                                    diags.push(malformed(
+                                        "colorSpace must be srgb | linear",
+                                        &format!("{pointer}/colorSpace"),
+                                    ));
+                                    None
+                                }
+                            },
+                            None => None,
+                        };
+                        let mut sampler = Sampler::default();
+                        if let Some(s) = get("sampler").and_then(Node::as_object) {
+                            let sget = |k: &str| s.iter().find(|f| f.key == k).map(|f| &f.value);
+                            if let Some(v) = sget("filter").and_then(Node::as_str) {
+                                sampler.filter = v.to_string();
+                            }
+                            if let Some(v) = sget("mipmaps").and_then(Node::as_bool) {
+                                sampler.mipmaps = v;
+                            }
+                            if let Some(v) = sget("wrap").and_then(Node::as_str) {
+                                sampler.wrap = v.to_string();
+                            }
+                            if let Some(v) = sget("anisotropy").and_then(Node::as_i64) {
+                                sampler.anisotropy = v.clamp(1, 16) as u32;
+                            }
+                        }
+                        textures.push(TextureBinding {
+                            slot: m.key.clone(),
+                            texture,
+                            color_space,
+                            uv_set: get("uvSet").and_then(Node::as_i64).unwrap_or(0).max(0) as u32,
+                            sampler,
+                            pointer,
+                        });
+                    }
+                }
+                Some(_) => diags.push(malformed("textures must be an object", "/textures")),
+                None => {}
+            }
         }
-        let alpha_mode = match root.get("alphaMode") {
-            Some(n) => match n.as_str().and_then(AlphaMode::parse) {
-                Some(m) => m,
-                None => {
-                    diags.push(malformed(
-                        "alphaMode must be opaque | mask | blend",
-                        "/alphaMode",
-                    ));
-                    AlphaMode::default()
-                }
-            },
-            None => AlphaMode::default(),
+        let (alpha_mode, alpha_cutoff, double_sided) = match &pbr {
+            Some(p) => (p.alpha_mode, p.alpha_cutoff as f64, p.double_sided),
+            None => {
+                let alpha_mode = match root.get("alpha_mode") {
+                    Some(n) => match n.as_str().and_then(parse_alpha_mode) {
+                        Some(m) => m,
+                        None => {
+                            diags.push(malformed(
+                                "alpha_mode must be opaque | mask | blend",
+                                "/alpha_mode",
+                            ));
+                            AlphaMode::default()
+                        }
+                    },
+                    None => AlphaMode::default(),
+                };
+                let alpha_cutoff = root
+                    .get("alpha_cutoff")
+                    .and_then(Node::as_f64)
+                    .unwrap_or(0.5);
+                let double_sided = root
+                    .get("double_sided")
+                    .and_then(Node::as_bool)
+                    .unwrap_or(false);
+                (alpha_mode, alpha_cutoff, double_sided)
+            }
         };
-        let cull = match root.get("cull") {
-            Some(n) => match n.as_str().and_then(CullMode::parse) {
-                Some(m) => m,
-                None => {
-                    diags.push(malformed("cull must be back | front | none", "/cull"));
-                    CullMode::default()
-                }
-            },
-            None => CullMode::default(),
-        };
-        let alpha_cutoff = root
-            .get("alphaCutoff")
-            .and_then(Node::as_f64)
-            .unwrap_or(0.5);
-        let cast_shadows = root
-            .get("castShadows")
-            .and_then(Node::as_bool)
-            .unwrap_or(true);
-        let receive_shadows = root
-            .get("receiveShadows")
-            .and_then(Node::as_bool)
-            .unwrap_or(true);
 
         for d in &mut diags {
             if d.document.is_none() {
@@ -877,13 +918,12 @@ impl Material {
         Material {
             document,
             shader,
+            pbr,
             parameters,
             textures,
             alpha_mode,
             alpha_cutoff,
-            cull,
-            cast_shadows,
-            receive_shadows,
+            double_sided,
             read_diagnostics: diags,
         }
     }
@@ -946,6 +986,20 @@ impl Material {
             }
             return finish(out, &self.document);
         };
+
+        if let Some(pbr) = &self.pbr {
+            for (field, why) in pbr.violations() {
+                let pointer = if root.get(field).is_some() {
+                    format!("/{field}")
+                } else {
+                    String::new()
+                };
+                out.push(anchor(
+                    Diagnostic::error(Code::MATERIAL_PARAMETER_RANGE, why),
+                    &pointer,
+                ));
+            }
+        }
 
         for p in &self.parameters {
             let Some(spec) = manifest.parameter(&p.name) else {
@@ -1051,14 +1105,14 @@ impl Material {
             }
         }
 
-        if !manifest.has_pass(self.alpha_mode.pass()) {
+        if !manifest.has_pass(pass_of(self.alpha_mode)) {
             out.push(anchor(
                 Diagnostic::error(
                     Code::MATERIAL_UNSUPPORTED_ALPHA_MODE,
                     format!(
                         "{} has no {} pass",
                         manifest.shader_id,
-                        self.alpha_mode.name()
+                        alpha_mode_name(self.alpha_mode)
                     ),
                 )
                 .with_suggestion(format!(
@@ -1070,8 +1124,8 @@ impl Material {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )),
-                if root.get("alphaMode").is_some() {
-                    "/alphaMode"
+                if root.get("alpha_mode").is_some() {
+                    "/alpha_mode"
                 } else {
                     ""
                 },
@@ -1081,17 +1135,22 @@ impl Material {
     }
 
     /// Every parameter and slot of the manifest with the material's value
-    /// or the manifest default: what a renderer consumes. Values that do
-    /// not fit the manifest fall back to the default (validation reports
-    /// them). `None` when the shader is unknown.
+    /// or the manifest default: what `inspect` shows (the renderer reads
+    /// [`Material::pbr`] through the cache instead). Values that do not
+    /// fit the manifest fall back to the default (validation reports
+    /// them). A PBR material's fields are presented as the built-in
+    /// manifest's parameters and slots. `None` when the shader is unknown.
     pub fn resolve(&self, shaders: &ShaderLibrary) -> Option<ResolvedMaterial> {
         let manifest = shaders.get(&self.shader)?;
+        let (parameters_in, textures_in) = match &self.pbr {
+            Some(pbr) => pbr_as_manifest_values(pbr, &self.document.root),
+            None => (self.parameters.clone(), self.textures.clone()),
+        };
         let parameters = manifest
             .parameters
             .iter()
             .map(|spec| {
-                let authored = self
-                    .parameters
+                let authored = parameters_in
                     .iter()
                     .find(|p| p.name == spec.name)
                     .and_then(|p| ParameterValue::from_node(&p.node, spec.ty).ok())
@@ -1110,7 +1169,7 @@ impl Material {
             .textures
             .iter()
             .map(|slot| {
-                let binding = self.binding(&slot.name).cloned();
+                let binding = textures_in.iter().find(|t| t.slot == slot.name).cloned();
                 ResolvedTexture {
                     slot: slot.name.clone(),
                     color_space: binding
@@ -1126,15 +1185,82 @@ impl Material {
             id: self.id(),
             name: self.document.envelope.name.clone(),
             shader_id: manifest.shader_id.clone(),
-            pass: self.alpha_mode.pass(),
+            pass: pass_of(self.alpha_mode),
+            pbr: self.pbr.clone(),
             parameters,
             textures,
             alpha_mode: self.alpha_mode,
             alpha_cutoff: self.alpha_cutoff,
-            cull: self.cull,
-            cast_shadows: self.cast_shadows,
-            receive_shadows: self.receive_shadows,
+            double_sided: self.double_sided,
         })
+    }
+}
+
+/// A PBR material's fields as the built-in manifest's parameters and slots
+/// (for [`Material::resolve`]); `authored` follows whether the document
+/// sets the field.
+fn pbr_as_manifest_values(
+    pbr: &PbrMaterial,
+    root: &Node,
+) -> (Vec<AuthoredParameter>, Vec<TextureBinding>) {
+    let node = pbr.to_node();
+    let param = |name: &str, field: &str| -> Option<AuthoredParameter> {
+        root.get(field)?;
+        Some(AuthoredParameter {
+            name: name.to_string(),
+            node: node.get(field)?.clone(),
+            pointer: format!("/{field}"),
+        })
+    };
+    let parameters = [
+        ("baseColor", "base_color"),
+        ("metallic", "metallic"),
+        ("roughness", "roughness"),
+        ("emissive", "emissive"),
+        ("emissiveStrength", "emissive_strength"),
+        ("normalScale", "normal_scale"),
+        ("occlusionStrength", "occlusion_strength"),
+    ]
+    .into_iter()
+    .filter_map(|(name, field)| param(name, field))
+    .collect();
+    let textures = [
+        ("baseColor", "base_color_texture"),
+        ("normal", "normal_texture"),
+        ("metallicRoughness", "metallic_roughness_texture"),
+        ("occlusion", "occlusion_texture"),
+        ("emissive", "emissive_texture"),
+    ]
+    .into_iter()
+    .zip(pbr.textures())
+    .filter_map(|((slot, field), (_, _, texture))| {
+        Some(TextureBinding {
+            slot: slot.to_string(),
+            texture: texture?.clone(),
+            color_space: None,
+            uv_set: 0,
+            sampler: Sampler::default(),
+            pointer: format!("/{field}"),
+        })
+    })
+    .collect();
+    (parameters, textures)
+}
+
+fn strip_legacy(root: &mut Node) {
+    if let Some(members) = root.as_object_mut() {
+        members.retain(|m| m.key != "parameters" && m.key != "textures");
+    }
+}
+
+fn remove_member(root: &mut Node, key: &str) -> bool {
+    match root.as_object_mut() {
+        Some(members) => {
+            let before = members.len();
+            members.retain(|m| m.key != key);
+            members.len() != before
+        }
+        None => false,
     }
 }
 
@@ -1164,13 +1290,13 @@ pub struct ResolvedMaterial {
     pub name: String,
     pub shader_id: String,
     pub pass: Pass,
+    /// The typed model for `fynkel.pbr@1`.
+    pub pbr: Option<PbrMaterial>,
     pub parameters: Vec<ResolvedParameter>,
     pub textures: Vec<ResolvedTexture>,
     pub alpha_mode: AlphaMode,
     pub alpha_cutoff: f64,
-    pub cull: CullMode,
-    pub cast_shadows: bool,
-    pub receive_shadows: bool,
+    pub double_sided: bool,
 }
 
 impl ResolvedMaterial {
@@ -1190,11 +1316,9 @@ impl ResolvedMaterial {
             "name": self.name,
             "shader": self.shader_id,
             "pass": self.pass.name(),
-            "alphaMode": self.alpha_mode.name(),
+            "alphaMode": alpha_mode_name(self.alpha_mode),
             "alphaCutoff": self.alpha_cutoff,
-            "cull": self.cull.name(),
-            "castShadows": self.cast_shadows,
-            "receiveShadows": self.receive_shadows,
+            "doubleSided": self.double_sided,
             "parameters": self.parameters.iter().map(|p| serde_json::json!({
                 "name": p.name, "type": p.ty.name(), "value": p.value.to_json(), "authored": p.authored,
             })).collect::<Vec<_>>(),
@@ -1215,20 +1339,18 @@ impl ResolvedMaterial {
     /// Human `inspect` output.
     pub fn to_text(&self) -> String {
         let mut s = format!(
-            "{} ({})\n  shader {}  pass {}  alpha {}{}  cull {}  shadows cast={} receive={}\n",
+            "{} ({})\n  shader {}  pass {}  alpha {}{}  double-sided {}\n",
             self.name,
             self.id,
             self.shader_id,
             self.pass.name(),
-            self.alpha_mode.name(),
+            alpha_mode_name(self.alpha_mode),
             if self.alpha_mode == AlphaMode::Mask {
                 format!(" cutoff {}", self.alpha_cutoff)
             } else {
                 String::new()
             },
-            self.cull.name(),
-            self.cast_shadows,
-            self.receive_shadows
+            self.double_sided
         );
         s.push_str("  parameters\n");
         for p in &self.parameters {
@@ -1324,11 +1446,19 @@ fn sort_by_position(diags: &mut [Diagnostic]) {
     diags.sort_by(|a, b| (a.line, a.column, &a.pointer).cmp(&(b.line, b.column, &b.pointer)));
 }
 
+/// Positions the diagnostic at `pointer`, or at the nearest ancestor that
+/// exists (a missing field is reported at its parent's position).
 fn anchor(root: &Node, d: Diagnostic, pointer: &str) -> Diagnostic {
     let d = d.with_pointer(pointer);
-    match root.pointer_span(pointer) {
-        Some(s) => d.at(s.start.line, s.start.column),
-        None => d,
+    let mut at = pointer.to_string();
+    loop {
+        if let Some(s) = root.pointer_span(&at) {
+            return d.at(s.start.line, s.start.column);
+        }
+        match at.rfind('/') {
+            Some(i) => at.truncate(i),
+            None => return d,
+        }
     }
 }
 

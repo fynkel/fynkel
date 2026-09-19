@@ -143,6 +143,27 @@ void main() {
     expect(const AssetRef('70D7BA8B-F7FB-4EBA-920D-EC9E6B968330').isValid, isFalse);
     expect(AssetRef.none.isNone, isTrue);
   });
+  check(
+    'PbrMaterial',
+    const PbrMaterial(
+      baseColor: Vec4(0.8, 0.5, 0.3, 1.0),
+      metallic: 1.0,
+      roughness: 0.65,
+      emissive: Vec3(0.1, 0.1, 0.0),
+      emissiveStrength: 3.0,
+      normalScale: 0.5,
+      occlusionStrength: 0.8,
+      alphaMode: AlphaMode.mask,
+      alphaCutoff: 0.4,
+      doubleSided: true,
+      baseColorTexture: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'image/0'),
+      metallicRoughnessTexture: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'image/0/linear'),
+      emissiveTexture: AssetRef('0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff'),
+    ),
+    PbrMaterial.wireSize,
+    PbrMaterial.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   check('CommandHeader', const CommandHeader(kind: 1, size: 64), CommandHeader.wireSize, CommandHeader.decode,
       (v, d, o, s) => v.encode(d, o, s));
   check('EventHeader', const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0), EventHeader.wireSize,

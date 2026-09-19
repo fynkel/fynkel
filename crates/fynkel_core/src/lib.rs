@@ -25,6 +25,7 @@ pub mod command;
 pub mod components;
 pub mod event;
 pub mod load;
+pub mod material;
 pub mod schema;
 pub mod world;
 

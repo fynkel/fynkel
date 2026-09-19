@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{Code, Diagnostic};
 
-use crate::json::{Member, Node};
+use crate::json::{Member, Node, Value};
 use crate::{Document, DocumentKind, SchemaSet};
 
 /// One step: `kind` documents at `from` become `from + 1`.
@@ -61,6 +61,13 @@ impl Migrations {
             name: "entities-keyed-by-id",
             description: "entities and components were arrays carrying their id; they become objects keyed by it (order kept)",
             apply: scene_0_to_1,
+        });
+        m.add(Migration {
+            kind: DocumentKind::Material,
+            from: 1,
+            name: "pbr-fields",
+            description: "fynkel.pbr@1 materials carry the PbrMaterial fields (base_color, metallic, …, <slot>_texture) instead of parameters/textures maps; alphaMode/alphaCutoff become alpha_mode/alpha_cutoff, cull becomes double_sided, castShadows/receiveShadows moved to fynkel.MeshRenderer",
+            apply: material_1_to_2,
         });
         m
     }
@@ -379,4 +386,85 @@ fn take_id(node: Node, at: &str) -> Result<(String, Node), String> {
     let id = id.ok_or_else(|| format!("{at}: id is missing"))?;
     crate::parse_uuid(&id).map_err(|e| format!("{at}/id: {e}"))?;
     Ok((id, Node::object(rest)))
+}
+
+/// Material 1 → 2 (M3-02, `fynkel_core::material::PbrMaterial` as the
+/// source of truth): for `fynkel.pbr@1` the `parameters` map becomes the
+/// factor fields and each `textures` binding its `<slot>_texture`
+/// reference (sampler, uvSet and colorSpace overrides are dropped: the
+/// cache carries the colour space, samplers come from the texture's
+/// import settings). For every material `alphaMode`/`alphaCutoff` become
+/// `alpha_mode`/`alpha_cutoff`, `cull: none` becomes `double_sided: true`
+/// (`front` has no equivalent and is dropped), and the shadow flags go
+/// (they live on `fynkel.MeshRenderer`). Member order is kept; the maps
+/// expand in place.
+fn material_1_to_2(root: &mut Node) -> Result<(), String> {
+    const PARAMETERS: [(&str, &str); 7] = [
+        ("baseColor", "base_color"),
+        ("metallic", "metallic"),
+        ("roughness", "roughness"),
+        ("emissive", "emissive"),
+        ("emissiveStrength", "emissive_strength"),
+        ("normalScale", "normal_scale"),
+        ("occlusionStrength", "occlusion_strength"),
+    ];
+    const TEXTURES: [(&str, &str); 5] = [
+        ("baseColor", "base_color_texture"),
+        ("normal", "normal_texture"),
+        ("metallicRoughness", "metallic_roughness_texture"),
+        ("occlusion", "occlusion_texture"),
+        ("emissive", "emissive_texture"),
+    ];
+    let pbr = root.get("shader").and_then(Node::as_str) == Some(crate::material::PBR_SHADER_ID);
+    let members: Vec<Member> = root.as_object().ok_or("expected an object")?.to_vec();
+    let mut out: Vec<(String, Node)> = Vec::with_capacity(members.len() + 8);
+    for m in members {
+        match m.key.as_str() {
+            "alphaMode" => out.push(("alpha_mode".into(), m.value)),
+            "alphaCutoff" => out.push(("alpha_cutoff".into(), m.value)),
+            "cull" => {
+                let none = m.value.as_str() == Some("none");
+                out.push(("double_sided".into(), Node::synthetic(Value::Bool(none))));
+            }
+            "castShadows" | "receiveShadows" => {}
+            "parameters" if pbr => {
+                let params = m
+                    .value
+                    .as_object()
+                    .ok_or("/parameters: expected an object")?;
+                for p in params {
+                    let (_, field) = PARAMETERS
+                        .iter()
+                        .find(|(old, _)| *old == p.key)
+                        .ok_or_else(|| {
+                            format!("/parameters/{}: fynkel.pbr@1 has no such parameter", p.key)
+                        })?;
+                    out.push(((*field).to_string(), p.value.clone()));
+                }
+            }
+            "textures" if pbr => {
+                let slots = m.value.as_object().ok_or("/textures: expected an object")?;
+                for t in slots {
+                    let (_, field) =
+                        TEXTURES
+                            .iter()
+                            .find(|(old, _)| *old == t.key)
+                            .ok_or_else(|| {
+                                format!(
+                                    "/textures/{}: fynkel.pbr@1 has no such texture slot",
+                                    t.key
+                                )
+                            })?;
+                    let texture = t
+                        .value
+                        .get("texture")
+                        .ok_or_else(|| format!("/textures/{}: texture is missing", t.key))?;
+                    out.push(((*field).to_string(), texture.clone()));
+                }
+            }
+            _ => out.push((m.key, m.value)),
+        }
+    }
+    *root = Node::object(out);
+    Ok(())
 }

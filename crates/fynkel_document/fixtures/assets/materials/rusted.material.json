@@ -1,23 +1,14 @@
 {
   "$schema": "https://fynkel.dev/schemas/material.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "a0000000-0000-4000-8000-000000000020",
   "name": "Rusted",
   "shader": "fynkel.pbr@1",
-  "parameters": {
-    "roughness": 0.8
+  "roughness": 0.8,
+  "base_color_texture": {
+    "asset": "a0000000-0000-4000-8000-000000000002"
   },
-  "textures": {
-    "baseColor": {
-      "texture": {
-        "asset": "a0000000-0000-4000-8000-000000000002"
-      }
-    },
-    "normal": {
-      "texture": {
-        "asset": "a0000000-0000-4000-8000-000000000002"
-      },
-      "colorSpace": "linear"
-    }
+  "normal_texture": {
+    "asset": "a0000000-0000-4000-8000-000000000002"
   }
 }

@@ -220,12 +220,19 @@ fn material_and_shader_commands_validate_and_inspect() {
     assert_eq!(v["parameters"].as_array().unwrap().len(), 7);
     assert_eq!(v["textures"][3]["slot"], "occlusion");
     assert!(v["textures"][3]["texture"].is_null());
+    assert_eq!(v["parameters"][2]["name"], "roughness");
+    assert_eq!(v["parameters"][2]["value"], 0.65);
+    assert_eq!(v["parameters"][2]["authored"], true);
+    assert_eq!(v["doubleSided"], true);
+    assert!(v.get("cull").is_none());
 
     let bad = fixtures.join("material/bad_parameters.material.json");
     let out = run(&["material", "validate", "--json", bad.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0301");
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0100");
+    assert_eq!(v["diagnostics"][0]["pointer"], "/base_colour");
+    assert_eq!(v["diagnostics"][3]["code"], "FYN-D0303");
 
     // A custom manifest via --shader; without it the material's shader is unknown.
     let toon = fixtures.join("material/toon_missing_ramp.material.json");
@@ -488,7 +495,9 @@ fn migrate_dry_runs_then_writes_with_backup() {
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["current"]["scene"], 1);
-    assert_eq!(v["steps"][0]["name"], "scene/0-1/entities-keyed-by-id");
+    assert_eq!(v["current"]["material"], 2);
+    assert_eq!(v["steps"][0]["name"], "material/1-2/pbr-fields");
+    assert_eq!(v["steps"][1]["name"], "scene/0-1/entities-keyed-by-id");
 
     let dir = std::env::temp_dir().join(format!("fynkel-cli-migrate-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -498,6 +507,11 @@ fn migrate_dry_runs_then_writes_with_backup() {
     std::fs::copy(
         root.join("crates/fynkel_document/fixtures/valid/rusted_metal.material.json"),
         dir.join("current.material.json"),
+    )
+    .unwrap();
+    std::fs::copy(
+        fixtures.join("v1_rusted_metal.material.json"),
+        dir.join("legacy.material.json"),
     )
     .unwrap();
     let original = std::fs::read(&scene).unwrap();
@@ -512,20 +526,28 @@ fn migrate_dry_runs_then_writes_with_backup() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["dryRun"], true);
     let docs = v["documents"].as_array().unwrap();
-    assert_eq!(docs.len(), 2);
+    assert_eq!(docs.len(), 3);
     assert_eq!(docs[0]["kind"], "material");
     assert_eq!(docs[0]["applied"].as_array().unwrap().len(), 0);
-    assert_eq!(docs[1]["from"], 0);
-    assert_eq!(docs[1]["to"], 1);
-    assert_eq!(
-        docs[1]["applied"][0]["name"],
-        "scene/0-1/entities-keyed-by-id"
-    );
+    assert_eq!(docs[1]["kind"], "material");
+    assert_eq!(docs[1]["from"], 1);
+    assert_eq!(docs[1]["to"], 2);
+    assert_eq!(docs[1]["applied"][0]["name"], "material/1-2/pbr-fields");
     assert!(docs[1]["diff"]
         .as_str()
         .unwrap()
+        .contains("+  \"base_color_texture\": {"));
+    assert_eq!(docs[2]["from"], 0);
+    assert_eq!(docs[2]["to"], 1);
+    assert_eq!(
+        docs[2]["applied"][0]["name"],
+        "scene/0-1/entities-keyed-by-id"
+    );
+    assert!(docs[2]["diff"]
+        .as_str()
+        .unwrap()
         .contains("+  \"formatVersion\": 1,"));
-    assert_eq!(docs[1]["written"], false);
+    assert_eq!(docs[2]["written"], false);
     assert_eq!(std::fs::read(&scene).unwrap(), original);
     assert!(!dir.join("scenes/room.scene.json.bak").exists());
 
@@ -544,7 +566,12 @@ fn migrate_dry_runs_then_writes_with_backup() {
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["documents"][1]["written"], true);
-    let backup = PathBuf::from(v["documents"][1]["backup"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("legacy.material.json")).unwrap(),
+        std::fs::read_to_string(fixtures.join("v1_rusted_metal.material.migrated.json")).unwrap()
+    );
+    assert_eq!(v["documents"][2]["written"], true);
+    let backup = PathBuf::from(v["documents"][2]["backup"].as_str().unwrap());
     assert_eq!(backup, dir.join("scenes/room.scene.json.bak"));
     assert_eq!(std::fs::read(&backup).unwrap(), original);
     assert_eq!(
@@ -649,8 +676,11 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
     assert_eq!(sidecar["id"], id);
     assert_eq!(sidecar["importer"], "fynkel.gltf");
     let subs = sidecar["subAssets"].as_object().unwrap();
-    assert_eq!(subs.len(), 7);
+    assert_eq!(subs.len(), 8);
     assert!(subs.contains_key("mesh/0") && subs.contains_key("prefab"));
+    // The robot's metallic-roughness image is also its base colour: it is
+    // imported twice, once per colour space.
+    assert!(subs.contains_key("image/0") && subs.contains_key("image/0/linear"));
 
     // Re-importing is a no-op for the sidecar and reproduces the bytes.
     let out = run(&[

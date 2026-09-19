@@ -2,12 +2,14 @@
 //! (`src/generated.rs`, emitted by `fynkel codegen` from the Rust component
 //! schemas — ADR-0012): typed component values ↔ strict JSON nodes. Field
 //! conventions match `docs/codegen.md`: numbers, `[x, y, z]` vectors,
-//! `[x, y, z, w]` quaternions, `{ "asset", "sub"? }` references and
-//! lowerCamel enum names.
+//! `[x, y, z, w]` quaternions and 4-vectors, `{ "asset", "sub"? }`
+//! references (an optional one absent or `null` when unbound) and
+//! lowerCamel enum names. Document records (`document = "..."`) read every
+//! field through [`or_default`].
 
 use fynkel_contracts::schema::{EnumSchema, HasEnumSchema};
 use fynkel_contracts::{AssetRef, Uuid};
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, Vec4};
 
 use crate::json::{Member, Node, Value};
 
@@ -46,6 +48,27 @@ pub trait DocumentCodec: Sized {
 pub fn object(node: &Node) -> Result<&[Member], FieldError> {
     node.as_object()
         .ok_or_else(|| FieldError::new("", "expected an object"))
+}
+
+fn has(members: &[Member], name: &str) -> bool {
+    members
+        .iter()
+        .any(|m| m.key == name && !matches!(m.value.value, Value::Null))
+}
+
+/// `reader(m, name)` when the field is present and not `null`, else
+/// `default`: how a document record's optional fields read.
+pub fn or_default<T>(
+    m: &[Member],
+    name: &str,
+    reader: impl FnOnce(&[Member], &str) -> Result<T, FieldError>,
+    default: T,
+) -> Result<T, FieldError> {
+    if has(m, name) {
+        reader(m, name)
+    } else {
+        Ok(default)
+    }
 }
 
 fn field<'a>(members: &'a [Member], name: &str) -> Result<&'a Node, FieldError> {
@@ -134,6 +157,12 @@ pub fn vec3_field(m: &[Member], name: &str) -> Result<Vec3, FieldError> {
         .map_err(|e| e.under(name))
 }
 
+pub fn vec4_field(m: &[Member], name: &str) -> Result<Vec4, FieldError> {
+    numbers::<4>(field(m, name)?)
+        .map(Vec4::from_array)
+        .map_err(|e| e.under(name))
+}
+
 pub fn quat_field(m: &[Member], name: &str) -> Result<Quat, FieldError> {
     numbers::<4>(field(m, name)?)
         .map(Quat::from_array)
@@ -159,6 +188,15 @@ pub fn asset_ref_field(m: &[Member], name: &str) -> Result<AssetRef, FieldError>
         Ok(AssetRef { asset, sub })
     })()
     .map_err(|e: FieldError| e.under(name))
+}
+
+/// Absent or `null` is `None`.
+pub fn opt_asset_ref_field(m: &[Member], name: &str) -> Result<Option<AssetRef>, FieldError> {
+    if has(m, name) {
+        asset_ref_field(m, name).map(Some)
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn enum_from_node<T: HasEnumSchema>(node: &Node) -> Result<T, FieldError> {
@@ -231,6 +269,15 @@ pub fn vec3_node(v: Vec3) -> Node {
     array_node(vec![f32_node(v.x), f32_node(v.y), f32_node(v.z)])
 }
 
+pub fn vec4_node(v: Vec4) -> Node {
+    array_node(vec![
+        f32_node(v.x),
+        f32_node(v.y),
+        f32_node(v.z),
+        f32_node(v.w),
+    ])
+}
+
 pub fn quat_node(q: Quat) -> Node {
     array_node(vec![
         f32_node(q.x),
@@ -248,14 +295,24 @@ pub fn asset_ref_node(r: &AssetRef) -> Node {
     Node::object(members)
 }
 
+/// `None` is a `null` node, which [`object_node`] leaves out.
+pub fn opt_asset_ref_node(r: Option<&AssetRef>) -> Node {
+    match r {
+        Some(r) => asset_ref_node(r),
+        None => Node::synthetic(Value::Null),
+    }
+}
+
 pub fn enum_node<T: HasEnumSchema>(v: &T) -> Node {
     Node::string(T::ENUM.variants[v.to_index() as usize])
 }
 
+/// An object; `null` members (unset optional fields) are left out.
 pub fn object_node(fields: Vec<(&'static str, Node)>) -> Node {
     Node::object(
         fields
             .into_iter()
+            .filter(|(_, v)| !matches!(v.value, Value::Null))
             .map(|(k, v)| (k.to_string(), v))
             .collect(),
     )

@@ -42,6 +42,8 @@ pub enum FieldType {
     Vec3,
     /// Four `f32`, `[x, y, z, w]`.
     Quat,
+    /// Four `f32`, `[x, y, z, w]` — a colour with alpha or any 4-vector.
+    Vec4,
     /// `Entity` handle, `u64`.
     Entity,
     /// `Option<Entity>`, `u64` with `0` = none.
@@ -53,6 +55,9 @@ pub enum FieldType {
     /// [`crate::AssetRef`]: 16 id bytes then `sub` as a `str`
     /// (`(offset, len)`, empty = none). JSON: `{ "asset": uuid, "sub"? }`.
     AssetRef,
+    /// `Option<AssetRef>`: the same 24 bytes, a nil id = none. JSON: the
+    /// member is absent (or `null`) for none.
+    OptionalAssetRef,
     /// Unit-variant enum, `u32` variant index on the wire; JSON: the
     /// variant's lowerCamel name as a string.
     Enum(&'static EnumSchema),
@@ -68,11 +73,13 @@ impl FieldType {
             FieldType::Bool => "bool",
             FieldType::Vec3 => "vec3",
             FieldType::Quat => "quat",
+            FieldType::Vec4 => "vec4",
             FieldType::Entity => "entity",
             FieldType::OptionalEntity => "entity?",
             FieldType::Str => "str",
             FieldType::Nested(s) => s.name,
             FieldType::AssetRef => "assetRef",
+            FieldType::OptionalAssetRef => "assetRef?",
             FieldType::Enum(e) => e.name,
         }
     }
@@ -92,10 +99,10 @@ impl FieldType {
             FieldType::U64 | FieldType::Entity | FieldType::OptionalEntity => 8,
             FieldType::Bool => 1,
             FieldType::Vec3 => 12,
-            FieldType::Quat => 16,
+            FieldType::Quat | FieldType::Vec4 => 16,
             FieldType::Str => 8,
             FieldType::Nested(s) => s.wire_size(),
-            FieldType::AssetRef => 24,
+            FieldType::AssetRef | FieldType::OptionalAssetRef => 24,
             FieldType::Enum(_) => 4,
         }
     }
@@ -106,12 +113,13 @@ impl FieldType {
             | FieldType::U32
             | FieldType::I32
             | FieldType::Vec3
-            | FieldType::Quat => 4,
+            | FieldType::Quat
+            | FieldType::Vec4 => 4,
             FieldType::U64 | FieldType::Entity | FieldType::OptionalEntity => 8,
             FieldType::Bool => 1,
             FieldType::Str => 4,
             FieldType::Nested(_) => 8,
-            FieldType::AssetRef => 8,
+            FieldType::AssetRef | FieldType::OptionalAssetRef => 8,
             FieldType::Enum(_) => 4,
         }
     }
@@ -151,6 +159,12 @@ pub struct RecordSchema {
     /// Engine-managed components (`fynkel.Name` mirrors the entity's `name`
     /// field) are `false`. Not part of the wire fingerprint.
     pub authored: bool,
+    /// Records only: the top level of a document of this kind (its
+    /// `.<kind>.json` body next to the envelope). Every field is then
+    /// optional in the document and takes the Rust `Default` when absent;
+    /// `fynkel codegen` writes `schemas/<kind>.schema.json` from it. Not
+    /// part of the wire fingerprint.
+    pub document: Option<&'static str>,
 }
 
 impl RecordSchema {
@@ -186,7 +200,7 @@ impl RecordSchema {
 
     pub fn has_strings(&self) -> bool {
         self.fields.iter().any(|f| match f.ty {
-            FieldType::Str | FieldType::AssetRef => true,
+            FieldType::Str | FieldType::AssetRef | FieldType::OptionalAssetRef => true,
             FieldType::Nested(s) => s.has_strings(),
             _ => false,
         })
@@ -263,6 +277,7 @@ mod tests {
         rust_path: "t::Inner",
         doc: "",
         authored: true,
+        document: None,
         fields: &[
             FieldSchema {
                 name: "a",
@@ -283,6 +298,7 @@ mod tests {
         rust_path: "t::Outer",
         doc: "",
         authored: true,
+        document: None,
         fields: &[
             FieldSchema {
                 name: "id",

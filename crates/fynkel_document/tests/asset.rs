@@ -131,8 +131,8 @@ fn references_resolve_by_id_and_sub_id() {
         (
             "materials/broken.material.json",
             vec![
-                ("FYN-A0004", "/textures/baseColor/texture", 10),
-                ("FYN-A0004", "/textures/normal/texture", 15),
+                ("FYN-A0004", "/base_color_texture", 7),
+                ("FYN-A0004", "/normal_texture", 10),
             ],
         ),
         (

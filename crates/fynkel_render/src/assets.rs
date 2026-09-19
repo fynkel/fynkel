@@ -4,43 +4,22 @@
 //! a material by `AssetRef`; everything is loaded on demand and bounded.
 //!
 //! Nothing here knows about the importers or the document layer: a
-//! material is read from its cooked JSON chunk with the handful of
-//! `fynkel.pbr@1` fields the V1 shading uses.
+//! material is the cooked `PbrMaterial` (`MATL` chunk, decoded by
+//! `fynkel_wire::material`), of which the V1 shading uses the base
+//! colour, metallic and roughness.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{AssetRef, Uuid};
 use fynkel_cooked::payload::{decode_mesh, decode_texture, MeshPayload, TexturePayload};
-use fynkel_cooked::{ChunkFile, KIND_JSON, KIND_MESH, KIND_TEXTURE};
+use fynkel_cooked::{ChunkFile, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE};
+pub use fynkel_core::material::PbrMaterial;
+use fynkel_wire::material::decode_material;
 
 /// Largest payload the renderer will read (per chunk).
 pub const MAX_CHUNK_BYTES: u64 = 256 << 20;
 const MAX_META_BYTES: u64 = 16 << 20;
-
-/// What the V1 shading reads from a `fynkel.pbr@1` material.
-#[derive(Clone, Debug, PartialEq)]
-pub struct MaterialDesc {
-    /// Linear RGBA factor; multiplies the base colour texture.
-    pub base_color: [f32; 4],
-    pub metallic: f32,
-    pub roughness: f32,
-    pub emissive: [f32; 3],
-    /// The `baseColor` slot's texture, when bound.
-    pub base_color_texture: Option<AssetRef>,
-}
-
-impl Default for MaterialDesc {
-    fn default() -> Self {
-        MaterialDesc {
-            base_color: [1.0; 4],
-            metallic: 0.0,
-            roughness: 0.5,
-            emissive: [0.0; 3],
-            base_color_texture: None,
-        }
-    }
-}
 
 /// A cooked cache opened for reading.
 #[derive(Debug)]
@@ -107,11 +86,13 @@ impl CookedAssets {
         decode_texture(&bytes).ok_or_else(|| format!("{r}: malformed TEXR payload"))
     }
 
-    pub fn material(&self, r: &AssetRef) -> Result<MaterialDesc, String> {
-        let bytes = self.chunk(r, KIND_JSON)?;
-        let doc: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|e| format!("{r}: material is not JSON: {e}"))?;
-        Ok(material_from_json(&doc))
+    /// The cooked `PbrMaterial`. A custom-shader material has no `MATL`
+    /// chunk and reports as such; a chunk another record layout wrote (a
+    /// stale cache) is "malformed" and `fynkel cook` fixes it.
+    pub fn material(&self, r: &AssetRef) -> Result<PbrMaterial, String> {
+        let bytes = self.chunk(r, KIND_MATERIAL)?;
+        decode_material(&bytes)
+            .ok_or_else(|| format!("{r}: malformed MATL payload (re-run `fynkel cook`)"))
     }
 
     /// The payload of the chunk of `kind` whose `sub` is the reference's.
@@ -140,64 +121,9 @@ impl CookedAssets {
     }
 }
 
-/// The V1 fields of a `fynkel.pbr@1` material document; anything missing
-/// takes the manifest default.
-pub fn material_from_json(doc: &serde_json::Value) -> MaterialDesc {
-    let mut m = MaterialDesc::default();
-    let p = &doc["parameters"];
-    if let Some(c) = floats(&p["baseColor"]) {
-        if c.len() == 4 {
-            m.base_color = [c[0], c[1], c[2], c[3]];
-        }
-    }
-    if let Some(v) = p["metallic"].as_f64() {
-        m.metallic = v as f32;
-    }
-    if let Some(v) = p["roughness"].as_f64() {
-        m.roughness = v as f32;
-    }
-    if let Some(c) = floats(&p["emissive"]) {
-        if c.len() == 3 {
-            m.emissive = [c[0], c[1], c[2]];
-        }
-    }
-    let t = &doc["textures"]["baseColor"]["texture"];
-    if let Some(asset) = t["asset"].as_str().and_then(|s| s.parse::<Uuid>().ok()) {
-        m.base_color_texture = Some(AssetRef {
-            asset,
-            sub: t["sub"].as_str().unwrap_or("").to_string(),
-        });
-    }
-    m
-}
-
-fn floats(v: &serde_json::Value) -> Option<Vec<f32>> {
-    v.as_array()?
-        .iter()
-        .map(|x| x.as_f64().map(|f| f as f32))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn material_fields_and_defaults() {
-        let m = material_from_json(&serde_json::json!({
-            "parameters": { "baseColor": [0.8, 0.5, 0.3, 1.0], "metallic": 1.0 },
-            "textures": { "baseColor": { "texture": { "asset": "c0000000-0000-4000-8000-000000000002" } } }
-        }));
-        assert_eq!(m.base_color, [0.8, 0.5, 0.3, 1.0]);
-        assert_eq!((m.metallic, m.roughness), (1.0, 0.5));
-        let t = m.base_color_texture.unwrap();
-        assert_eq!(t.asset.0[0], 0xc0);
-        assert_eq!(t.sub, "");
-        assert_eq!(
-            material_from_json(&serde_json::json!({})),
-            MaterialDesc::default()
-        );
-    }
 
     #[test]
     fn missing_index_says_to_cook() {

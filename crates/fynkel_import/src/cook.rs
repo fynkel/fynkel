@@ -21,7 +21,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{has_errors, Code, Diagnostic};
-use fynkel_cooked::{Writer, KIND_BLOB, KIND_CLIP, KIND_JSON, KIND_MESH, KIND_TEXTURE};
+use fynkel_cooked::{
+    Writer, KIND_BLOB, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE,
+};
 use fynkel_document::asset::{asset_refs, AssetDatabase, AssetEntry, AssetKind, Meta};
 use fynkel_document::{json, Document, DocumentKind, SchemaSet};
 use serde_json::{json, Value};
@@ -631,6 +633,9 @@ fn cook_one(
                 info: json!({ "documentKind": doc.kind.name() }),
                 payload: text.into_bytes(),
             });
+            if let Some(c) = material_chunk(doc, &entry.name, None) {
+                chunks.push(c);
+            }
         }
         Input::Source { meta, bytes } => {
             importer = Some(meta.importer.clone());
@@ -825,37 +830,30 @@ fn plan_intermediate(
         });
     }
     for material in &im.materials {
+        let text = serde_json::to_string(&material.document).expect("material serializes");
         chunks.push(ChunkPlan {
             kind: KIND_JSON,
             name: material.name.clone(),
             sub: Some(material.sub_id.clone()),
             info: json!({ "documentKind": "material" }),
-            payload: serde_json::to_string(&material.document)
-                .expect("material serializes")
-                .into_bytes(),
+            payload: text.clone().into_bytes(),
         });
-    }
-    let usage = image_usage(im);
-    for image in &im.images {
-        let color_space = match usage.get(&image.sub_id) {
-            Some((true, false)) | None => ColorSpace::Srgb,
-            Some((false, true)) => ColorSpace::Linear,
-            Some((true, true)) => {
-                diagnostics.push(
-                    Diagnostic::warning(
-                        Code::IMPORT_SKIPPED,
-                        format!(
-                            "{}: used both as a colour and as a data texture; cooked as sRGB",
-                            image.sub_id
-                        ),
-                    )
-                    .with_document(shown.to_string()),
-                );
-                ColorSpace::Srgb
+        match Document::parse(DocumentKind::Material, Some(&material.sub_id), &text) {
+            Ok(doc) => {
+                if let Some(c) = material_chunk(&doc, &material.name, Some(material.sub_id.clone()))
+                {
+                    chunks.push(c);
+                }
             }
-            Some((false, false)) => ColorSpace::Srgb,
-        };
-        match crate::image::decode(&image.bytes, &image.name, color_space, limits) {
+            Err(ds) => {
+                for d in ds {
+                    diagnostics.push(d.with_document(shown.to_string()));
+                }
+            }
+        }
+    }
+    for image in &im.images {
+        match crate::image::decode(&image.bytes, &image.name, image.color_space, limits) {
             Ok(texture) => chunks.push(texture_chunk(&texture, Some(image.sub_id.clone()))),
             Err(d) => diagnostics.push(
                 Diagnostic::warning(
@@ -908,33 +906,23 @@ fn plan_intermediate(
     }
 }
 
-/// image sub id → (used as colour, used as data), from the material
-/// documents' texture slots. `baseColor` and `emissive` are colour; the
-/// rest carry data.
-fn image_usage(im: &Intermediate) -> HashMap<String, (bool, bool)> {
-    let mut usage: HashMap<String, (bool, bool)> = HashMap::new();
-    for material in &im.materials {
-        let Some(slots) = material.document.get("textures").and_then(Value::as_object) else {
-            continue;
-        };
-        for (slot, binding) in slots {
-            let Some(sub) = binding
-                .get("texture")
-                .and_then(|t| t.get("sub"))
-                .and_then(Value::as_str)
-            else {
-                continue;
-            };
-            let colour = matches!(slot.as_str(), "baseColor" | "emissive");
-            let e = usage.entry(sub.to_string()).or_insert((false, false));
-            if colour {
-                e.0 = true;
-            } else {
-                e.1 = true;
-            }
-        }
-    }
-    usage
+/// The `MATL` chunk of a `fynkel.pbr@1` material document: the typed
+/// `PbrMaterial` (`fynkel_wire::material`), what the renderer reads. A
+/// custom-shader material has only its `JSON` chunk.
+fn material_chunk(doc: &Document, name: &str, sub: Option<String>) -> Option<ChunkPlan> {
+    let material = fynkel_document::Material::from_document(doc.clone());
+    let pbr = material.pbr.as_ref()?;
+    Some(ChunkPlan {
+        kind: KIND_MATERIAL,
+        name: name.to_string(),
+        sub,
+        info: json!({
+            "shader": material.shader,
+            "alphaMode": fynkel_document::material::alpha_mode_name(pbr.alpha_mode),
+            "textures": pbr.textures().iter().filter(|(_, _, t)| t.is_some()).map(|(slot, _, _)| *slot).collect::<Vec<_>>(),
+        }),
+        payload: fynkel_wire::material::encode_material(pbr),
+    })
 }
 
 fn texture_chunk(t: &TextureData, sub: Option<String>) -> ChunkPlan {

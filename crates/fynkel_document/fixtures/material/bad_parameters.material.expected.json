@@ -1,7 +1,7 @@
 [
-  { "code": "FYN-D0301", "pointer": "/parameters/baseColour", "line": 8, "column": 5 },
-  { "code": "FYN-D0302", "pointer": "/parameters/metallic", "line": 14, "column": 5 },
-  { "code": "FYN-D0303", "pointer": "/parameters/roughness", "line": 18, "column": 5 },
-  { "code": "FYN-D0303", "pointer": "/parameters/emissive", "line": 19, "column": 5 },
-  { "code": "FYN-D0302", "pointer": "/parameters/emissiveStrength", "line": 24, "column": 5 }
+  { "code": "FYN-D0100", "pointer": "/base_colour", "line": 7, "column": 3 },
+  { "code": "FYN-D0100", "pointer": "/metallic", "line": 13, "column": 3 },
+  { "code": "FYN-D0100", "pointer": "/emissive_strength", "line": 23, "column": 3 },
+  { "code": "FYN-D0303", "pointer": "/roughness", "line": 17, "column": 3 },
+  { "code": "FYN-D0303", "pointer": "/emissive", "line": 18, "column": 3 }
 ]

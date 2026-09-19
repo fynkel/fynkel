@@ -64,6 +64,20 @@ Vec3 readVec3(ByteData d, int o) => Vec3(
       d.getFloat32(o + 8, Endian.little),
     );
 
+void writeVec4(ByteData d, int o, Vec4 v) {
+  d.setFloat32(o, v.x, Endian.little);
+  d.setFloat32(o + 4, v.y, Endian.little);
+  d.setFloat32(o + 8, v.z, Endian.little);
+  d.setFloat32(o + 12, v.w, Endian.little);
+}
+
+Vec4 readVec4(ByteData d, int o) => Vec4(
+      d.getFloat32(o, Endian.little),
+      d.getFloat32(o + 4, Endian.little),
+      d.getFloat32(o + 8, Endian.little),
+      d.getFloat32(o + 12, Endian.little),
+    );
+
 void writeQuat(ByteData d, int o, Quat q) {
   d.setFloat32(o, q.x, Endian.little);
   d.setFloat32(o + 4, q.y, Endian.little);
@@ -98,6 +112,24 @@ AssetRef readAssetRef(ByteData d, int o, Uint8List tail) {
     id[i] = d.getUint8(o + i);
   }
   return AssetRef.fromBytes(id, readWireString(d, o + 16, tail));
+}
+
+/// `AssetRef?` on the wire: a nil id (all zero bytes) with an empty `sub`
+/// means none.
+void writeOptionalAssetRef(ByteData d, int o, AssetRef? v, WireStrings strings) {
+  if (v == null) {
+    for (var i = 0; i < 16; i++) {
+      d.setUint8(o + i, 0);
+    }
+    writeWireString(d, o + 16, '', strings);
+    return;
+  }
+  writeAssetRef(d, o, v, strings);
+}
+
+AssetRef? readOptionalAssetRef(ByteData d, int o, Uint8List tail) {
+  final r = readAssetRef(d, o, tail);
+  return r.isNone ? null : r;
 }
 
 /// Enum fields carry the declaration index; an index this SDK does not know

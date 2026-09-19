@@ -28,11 +28,11 @@ use gltf::mesh::Mode;
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::intermediate::{ImageData, Intermediate, MaterialData, MeshData, Vertex};
+use crate::intermediate::{ColorSpace, ImageData, Intermediate, MaterialData, MeshData, Vertex};
 use crate::{derive_sub_id, read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
-pub const IMPORTER_VERSION: u32 = 1;
+pub const IMPORTER_VERSION: u32 = 2;
 
 /// Extensions the importer understands when a file *requires* them.
 const SUPPORTED_REQUIRED: &[&str] = &["KHR_materials_emissive_strength"];
@@ -353,6 +353,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
                 .unwrap_or_else(|| format!("image{}", image.index())),
             mime_type: mime,
             bytes,
+            color_space: ColorSpace::Srgb,
         });
     }
 
@@ -372,6 +373,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             document,
         });
     }
+    split_dual_use_images(&mut materials, &mut images);
 
     // Meshes → one MeshData per triangle primitive.
     let mut meshes = Vec::new();
@@ -682,6 +684,13 @@ fn nums(v: &[f32]) -> Value {
     Value::Array(v.iter().map(|x| num(*x)).collect())
 }
 
+/// `fynkel.PbrMaterial`'s document form (formatVersion 2): factors as
+/// authored, one `<slot>_texture` reference per bound slot (`image/<i>`;
+/// the data slots of an image that is also a colour are re-pointed at its
+/// linear variant by [`split_dual_use_images`]). What the model has no
+/// field for is reported once and dropped: a second UV set, and samplers
+/// other than linear/repeat (samplers come from the texture's import
+/// settings).
 fn material_document(
     ctx: &mut Ctx,
     material: &gltf::Material,
@@ -690,100 +699,12 @@ fn material_document(
     meta: &Meta,
 ) -> Value {
     let pbr = material.pbr_metallic_roughness();
-    let mut parameters = Map::new();
-    parameters.insert("baseColor".into(), nums(&pbr.base_color_factor()));
-    parameters.insert("metallic".into(), num(pbr.metallic_factor()));
-    parameters.insert("roughness".into(), num(pbr.roughness_factor()));
-    parameters.insert("emissive".into(), nums(&material.emissive_factor()));
-    if let Some(strength) = material.emissive_strength() {
-        parameters.insert("emissiveStrength".into(), num(strength));
-    }
-    if let Some(n) = material.normal_texture() {
-        parameters.insert("normalScale".into(), num(n.scale()));
-    }
-    if let Some(o) = material.occlusion_texture() {
-        parameters.insert("occlusionStrength".into(), num(o.strength()));
-    }
-
-    let mut textures = Map::new();
-    let mut bind = |ctx: &mut Ctx, slot: &str, texture: &gltf::Texture, tex_coord: u32| {
-        let image = texture.source();
-        let mut binding = Map::new();
-        binding.insert(
-            "texture".into(),
-            json!({ "asset": meta.id().to_string(), "sub": format!("image/{}", image.index()) }),
-        );
-        match tex_coord {
-            0 => {}
-            1 => {
-                binding.insert("uvSet".into(), json!(1));
-            }
-            other => ctx.warn(
-                Code::IMPORT_SKIPPED,
-                format!("{sub_id} ({name}): {slot} uses TEXCOORD_{other}; only sets 0 and 1 exist, using 0"),
-            ),
-        }
-        let sampler = texture.sampler();
-        if sampler.index().is_some() {
-            let mut s = Map::new();
-            s.insert(
-                "filter".into(),
-                json!(match sampler.mag_filter() {
-                    Some(gltf::texture::MagFilter::Nearest) => "nearest",
-                    _ => "linear",
-                }),
-            );
-            s.insert(
-                "mipmaps".into(),
-                json!(!matches!(
-                    sampler.min_filter(),
-                    Some(gltf::texture::MinFilter::Nearest)
-                        | Some(gltf::texture::MinFilter::Linear)
-                )),
-            );
-            let wrap = |w: gltf::texture::WrappingMode| match w {
-                gltf::texture::WrappingMode::ClampToEdge => "clamp",
-                gltf::texture::WrappingMode::MirroredRepeat => "mirror",
-                gltf::texture::WrappingMode::Repeat => "repeat",
-            };
-            if sampler.wrap_s() != sampler.wrap_t()
-                && !ctx.warned_textures.contains(&texture.index())
-            {
-                ctx.warned_textures.push(texture.index());
-                ctx.warn(
-                    Code::IMPORT_SKIPPED,
-                    format!(
-                        "texture {} wraps S={} T={}; Fynkel samplers wrap both axes the same way, using S",
-                        texture.index(),
-                        wrap(sampler.wrap_s()),
-                        wrap(sampler.wrap_t())
-                    ),
-                );
-            }
-            s.insert("wrap".into(), json!(wrap(sampler.wrap_s())));
-            binding.insert("sampler".into(), Value::Object(s));
-        }
-        textures.insert(slot.to_string(), Value::Object(binding));
-    };
-    if let Some(t) = pbr.base_color_texture() {
-        bind(ctx, "baseColor", &t.texture(), t.tex_coord());
-    }
-    if let Some(t) = pbr.metallic_roughness_texture() {
-        bind(ctx, "metallicRoughness", &t.texture(), t.tex_coord());
-    }
-    if let Some(t) = material.normal_texture() {
-        bind(ctx, "normal", &t.texture(), t.tex_coord());
-    }
-    if let Some(t) = material.occlusion_texture() {
-        bind(ctx, "occlusion", &t.texture(), t.tex_coord());
-    }
-    if let Some(t) = material.emissive_texture() {
-        bind(ctx, "emissive", &t.texture(), t.tex_coord());
-    }
-
     let mut doc = Map::new();
     doc.insert("$schema".into(), json!(DocumentKind::Material.schema_id()));
-    doc.insert("formatVersion".into(), json!(1));
+    doc.insert(
+        "formatVersion".into(),
+        json!(DocumentKind::Material.supported_format_version()),
+    );
     doc.insert("id".into(), json!(Uuid::nil().to_string())); // patched by the caller
     doc.insert("name".into(), json!(name));
     doc.insert(
@@ -791,9 +712,18 @@ fn material_document(
         json!(format!("Imported from {} ({sub_id}).", ctx.shown_file())),
     );
     doc.insert("shader".into(), json!("fynkel.pbr@1"));
-    doc.insert("parameters".into(), Value::Object(parameters));
-    if !textures.is_empty() {
-        doc.insert("textures".into(), Value::Object(textures));
+    doc.insert("base_color".into(), nums(&pbr.base_color_factor()));
+    doc.insert("metallic".into(), num(pbr.metallic_factor()));
+    doc.insert("roughness".into(), num(pbr.roughness_factor()));
+    doc.insert("emissive".into(), nums(&material.emissive_factor()));
+    if let Some(strength) = material.emissive_strength() {
+        doc.insert("emissive_strength".into(), num(strength));
+    }
+    if let Some(n) = material.normal_texture() {
+        doc.insert("normal_scale".into(), num(n.scale()));
+    }
+    if let Some(o) = material.occlusion_texture() {
+        doc.insert("occlusion_strength".into(), num(o.strength()));
     }
     let alpha = match material.alpha_mode() {
         gltf::material::AlphaMode::Opaque => "opaque",
@@ -801,18 +731,138 @@ fn material_document(
         gltf::material::AlphaMode::Blend => "blend",
     };
     if alpha != "opaque" {
-        doc.insert("alphaMode".into(), json!(alpha));
+        doc.insert("alpha_mode".into(), json!(alpha));
     }
     if alpha == "mask" {
         doc.insert(
-            "alphaCutoff".into(),
+            "alpha_cutoff".into(),
             num(material.alpha_cutoff().unwrap_or(0.5)),
         );
     }
     if material.double_sided() {
-        doc.insert("cull".into(), json!("none"));
+        doc.insert("double_sided".into(), json!(true));
+    }
+
+    let mut bind = |ctx: &mut Ctx, field: &str, texture: &gltf::Texture, tex_coord: u32| {
+        let image = texture.source();
+        doc.insert(
+            field.into(),
+            json!({ "asset": meta.id().to_string(), "sub": format!("image/{}", image.index()) }),
+        );
+        if tex_coord != 0 {
+            ctx.warn(
+                Code::IMPORT_SKIPPED,
+                format!(
+                    "{sub_id} ({name}): {field} uses TEXCOORD_{tex_coord}; the PBR material samples set 0"
+                ),
+            );
+        }
+        let sampler = texture.sampler();
+        if sampler.index().is_some() && !ctx.warned_textures.contains(&texture.index()) {
+            let nearest = matches!(
+                sampler.mag_filter(),
+                Some(gltf::texture::MagFilter::Nearest)
+            );
+            let wrap = |w: gltf::texture::WrappingMode| match w {
+                gltf::texture::WrappingMode::ClampToEdge => "clamp",
+                gltf::texture::WrappingMode::MirroredRepeat => "mirror",
+                gltf::texture::WrappingMode::Repeat => "repeat",
+            };
+            let wraps = (wrap(sampler.wrap_s()), wrap(sampler.wrap_t()));
+            if nearest || wraps != ("repeat", "repeat") {
+                ctx.warned_textures.push(texture.index());
+                ctx.warn(
+                    Code::IMPORT_SKIPPED,
+                    format!(
+                        "texture {}: sampler {} wrap S={} T={} is not kept; materials sample linear/repeat (sampler settings belong to the texture's sidecar)",
+                        texture.index(),
+                        if nearest { "nearest" } else { "linear" },
+                        wraps.0,
+                        wraps.1
+                    ),
+                );
+            }
+        }
+    };
+    if let Some(t) = pbr.base_color_texture() {
+        bind(ctx, "base_color_texture", &t.texture(), t.tex_coord());
+    }
+    if let Some(t) = material.normal_texture() {
+        bind(ctx, "normal_texture", &t.texture(), t.tex_coord());
+    }
+    if let Some(t) = pbr.metallic_roughness_texture() {
+        bind(
+            ctx,
+            "metallic_roughness_texture",
+            &t.texture(),
+            t.tex_coord(),
+        );
+    }
+    if let Some(t) = material.occlusion_texture() {
+        bind(ctx, "occlusion_texture", &t.texture(), t.tex_coord());
+    }
+    if let Some(t) = material.emissive_texture() {
+        bind(ctx, "emissive_texture", &t.texture(), t.tex_coord());
     }
     Value::Object(doc)
+}
+
+/// Colour slots of the PBR model (sRGB); the others carry linear data.
+const COLOR_SLOTS: [&str; 2] = ["base_color_texture", "emissive_texture"];
+const DATA_SLOTS: [&str; 3] = [
+    "normal_texture",
+    "metallic_roughness_texture",
+    "occlusion_texture",
+];
+
+/// Gives every image its colour space from the slots that bind it. An
+/// image bound both as a colour and as data is cooked twice: `image/<i>`
+/// stays sRGB and a linear copy `image/<i>/linear` is added, with the
+/// materials' data slots re-pointed at it. Unbound images are sRGB.
+fn split_dual_use_images(materials: &mut [MaterialData], images: &mut Vec<ImageData>) {
+    let sub_of = |m: &MaterialData, slot: &str| -> Option<String> {
+        m.document
+            .get(slot)?
+            .get("sub")?
+            .as_str()
+            .map(str::to_string)
+    };
+    let mut extra = Vec::new();
+    for image in images.iter_mut() {
+        let colour = materials.iter().any(|m| {
+            COLOR_SLOTS
+                .iter()
+                .any(|s| sub_of(m, s).as_deref() == Some(&image.sub_id))
+        });
+        let data = materials.iter().any(|m| {
+            DATA_SLOTS
+                .iter()
+                .any(|s| sub_of(m, s).as_deref() == Some(&image.sub_id))
+        });
+        image.color_space = if data && !colour {
+            ColorSpace::Linear
+        } else {
+            ColorSpace::Srgb
+        };
+        if colour && data {
+            let linear_sub = format!("{}/linear", image.sub_id);
+            for m in materials.iter_mut() {
+                for slot in DATA_SLOTS {
+                    if sub_of(m, slot).as_deref() == Some(&image.sub_id) {
+                        m.document[slot]["sub"] = json!(linear_sub);
+                    }
+                }
+            }
+            extra.push(ImageData {
+                sub_id: linear_sub,
+                name: format!("{} (linear)", image.name),
+                mime_type: image.mime_type.clone(),
+                bytes: image.bytes.clone(),
+                color_space: ColorSpace::Linear,
+            });
+        }
+    }
+    images.extend(extra);
 }
 
 impl Ctx<'_> {

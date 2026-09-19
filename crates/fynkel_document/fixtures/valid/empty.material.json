@@ -1,8 +1,7 @@
 {
   "$schema": "https://fynkel.dev/schemas/material.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "0b1c2d3e-4f50-4a6b-8c7d-8e9f0a1b2c3d",
   "name": "Untextured",
-  "shader": "fynkel.pbr@1",
-  "parameters": {}
+  "shader": "fynkel.pbr@1"
 }

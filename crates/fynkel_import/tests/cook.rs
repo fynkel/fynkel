@@ -10,10 +10,15 @@ use std::path::{Path, PathBuf};
 
 use fynkel_contracts::Code;
 use fynkel_cooked::{ChunkFile, Container};
+use fynkel_core::material::AlphaMode;
 use fynkel_document::asset::AssetDatabase;
 use fynkel_document::SchemaSet;
-use fynkel_import::cook::{decode_clip, decode_mesh, decode_texture, TEXTURE_FORMAT_RGBA8_SRGB};
+use fynkel_import::cook::{
+    decode_clip, decode_mesh, decode_texture, TEXTURE_FORMAT_RGBA8_LINEAR,
+    TEXTURE_FORMAT_RGBA8_SRGB,
+};
 use fynkel_import::{cook, Cache, CookOptions, CookReport, Status};
+use fynkel_wire::material::decode_material;
 use uuid::Uuid;
 
 const ROBOT: &str = "c0000000-0000-4000-8000-000000000001";
@@ -314,9 +319,11 @@ fn containers_read_back_with_bounded_decoding() {
     let chunks = meta["chunks"].as_array().unwrap();
     assert_eq!(chunks.len(), f.chunks().len());
     let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    // Every material has its document and its typed MATL chunk; the one
+    // image is cooked twice (colour and data use).
     assert_eq!(
         kinds,
-        ["META", "MESH", "MESH", "MESH", "JSON", "JSON", "TEXR", "JSON"]
+        ["META", "MESH", "MESH", "MESH", "JSON", "MATL", "JSON", "MATL", "TEXR", "TEXR", "JSON"]
     );
     let names: Vec<&str> = chunks
         .iter()
@@ -330,8 +337,11 @@ fn containers_read_back_with_bounded_decoding() {
             "mesh/1/0",
             "mesh/1/1",
             "material/0",
+            "material/0",
+            "material/1",
             "material/1",
             "image/0",
+            "image/0/linear",
             "prefab"
         ]
     );
@@ -356,16 +366,42 @@ fn containers_read_back_with_bounded_decoding() {
         .all(|(a, b)| a <= b));
     let material: serde_json::Value = serde_json::from_slice(&f.read(4, 1 << 20).unwrap()).unwrap();
     assert_eq!(material["shader"], "fynkel.pbr@1");
-    let image = decode_texture(&f.read(6, 1 << 24).unwrap()).unwrap();
+    let painted = decode_material(&f.read(5, 1 << 20).unwrap()).unwrap();
+    assert_eq!(painted.base_color.to_array(), [0.8, 0.2, 0.2, 1.0]);
+    assert_eq!(painted.emissive_strength, 3.0);
+    assert_eq!(
+        painted.normal_texture.as_ref().unwrap().sub,
+        "image/0/linear"
+    );
+    assert_eq!(
+        chunks[5]["textures"],
+        serde_json::json!([
+            "base_color_texture",
+            "normal_texture",
+            "metallic_roughness_texture",
+            "occlusion_texture",
+            "emissive_texture"
+        ])
+    );
+    let glass = decode_material(&f.read(7, 1 << 20).unwrap()).unwrap();
+    assert_eq!(glass.alpha_mode, AlphaMode::Blend);
+    assert!(glass.double_sided);
+    assert_eq!(chunks[7]["alphaMode"], "blend");
+    let image = decode_texture(&f.read(8, 1 << 24).unwrap()).unwrap();
     assert_eq!(
         (image.width, image.height),
         (
-            chunks[6]["width"].as_u64().unwrap() as u32,
-            chunks[6]["height"].as_u64().unwrap() as u32
+            chunks[8]["width"].as_u64().unwrap() as u32,
+            chunks[8]["height"].as_u64().unwrap() as u32
         )
     );
     assert_eq!(image.format, TEXTURE_FORMAT_RGBA8_SRGB);
-    let prefab: serde_json::Value = serde_json::from_slice(&f.read(7, 1 << 20).unwrap()).unwrap();
+    assert_eq!(chunks[8]["colorSpace"], "srgb");
+    let linear = decode_texture(&f.read(9, 1 << 24).unwrap()).unwrap();
+    assert_eq!(linear.format, TEXTURE_FORMAT_RGBA8_LINEAR);
+    assert_eq!(linear.rgba8, image.rgba8);
+    assert_eq!(chunks[9]["colorSpace"], "linear");
+    let prefab: serde_json::Value = serde_json::from_slice(&f.read(10, 1 << 20).unwrap()).unwrap();
     assert!(prefab["entities"].is_object());
 
     // Bounded: a mesh larger than the budget is refused before it is read.

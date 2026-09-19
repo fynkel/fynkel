@@ -1,11 +1,11 @@
 {
   "$schema": "https://fynkel.dev/schemas/material.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "d07d9cbe-8bad-4fc0-9ce3-7d8f9a0b1c23",
   "name": "Toon without ramp",
   "shader": "studio.toon@2",
   "parameters": {
     "bands": 2.5
   },
-  "alphaMode": "blend"
+  "alpha_mode": "blend"
 }

@@ -1420,6 +1420,9 @@ impl Cx<'_> {
                 }
                 if let Some(s) = shader {
                     doc.root.set("shader", Node::string(s.clone()));
+                    if s != crate::material::PBR_SHADER_ID {
+                        crate::material::strip_pbr_fields(&mut doc.root);
+                    }
                 }
                 let material = Material::from_document(doc.clone());
                 let diags = material.validate_semantics(&ShaderLibrary::builtin());

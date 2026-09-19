@@ -10,6 +10,7 @@ license.workspace = true
 fynkel_contracts.workspace = true
 fynkel_document.workspace = true
 fynkel_cooked.workspace = true
+fynkel_wire.workspace = true
 blake3.workspace = true
 glam.workspace = true
 gltf.workspace = true
@@ -19,3 +20,6 @@ symphonia.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+fynkel_core.workspace = true

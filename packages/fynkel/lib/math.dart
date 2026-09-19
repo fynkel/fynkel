@@ -1,8 +1,9 @@
 /// Fynkel-owned immutable math value types (ADR-0013). Right-handed, Y-up,
 /// metres, radians; quaternions are `[x, y, z, w]`, matching `glam`.
 ///
-/// M1 provides `Vec3` and `Quat` (what the wire records need); `Vec2`,
-/// `Vec4`, `Mat4` and `Transform3` follow with the gameplay API.
+/// M1 provides `Vec3` and `Quat` (what the wire records need), M3 `Vec4`
+/// (material colours); `Vec2`, `Mat4` and `Transform3` follow with the
+/// gameplay API.
 library;
 
 import 'dart:math' as math;
@@ -43,6 +44,36 @@ class Vec3 {
   int get hashCode => Object.hash(x, y, z);
   @override
   String toString() => 'Vec3($x, $y, $z)';
+}
+
+/// Four components; also an RGBA colour (linear, `x y z w` = `r g b a`).
+class Vec4 {
+  const Vec4(this.x, this.y, this.z, this.w);
+  const Vec4.all(double v) : this(v, v, v, v);
+
+  static const Vec4 zero = Vec4(0, 0, 0, 0);
+  static const Vec4 one = Vec4(1, 1, 1, 1);
+
+  final double x, y, z, w;
+
+  Vec4 operator +(Vec4 o) => Vec4(x + o.x, y + o.y, z + o.z, w + o.w);
+  Vec4 operator -(Vec4 o) => Vec4(x - o.x, y - o.y, z - o.z, w - o.w);
+  Vec4 operator -() => Vec4(-x, -y, -z, -w);
+  Vec4 operator *(double s) => Vec4(x * s, y * s, z * s, w * s);
+  Vec4 operator /(double s) => Vec4(x / s, y / s, z / s, w / s);
+
+  double dot(Vec4 o) => x * o.x + y * o.y + z * o.z + w * o.w;
+  Vec3 get xyz => Vec3(x, y, z);
+  Vec4 lerp(Vec4 o, double t) => this + (o - this) * t;
+  bool get isFinite => x.isFinite && y.isFinite && z.isFinite && w.isFinite;
+
+  @override
+  bool operator ==(Object other) =>
+      other is Vec4 && other.x == x && other.y == y && other.z == z && other.w == w;
+  @override
+  int get hashCode => Object.hash(x, y, z, w);
+  @override
+  String toString() => 'Vec4($x, $y, $z, $w)';
 }
 
 class Quat {

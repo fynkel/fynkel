@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use fynkel_contracts::{has_errors, Code};
 use fynkel_document::asset::{sidecar_path, Meta};
 use fynkel_document::{Document, DocumentKind, Material, Prefab, SchemaSet, ShaderLibrary};
-use fynkel_import::{derive_sub_id, import, Imported, Intermediate, Limits, Vertex};
+use fynkel_import::{derive_sub_id, import, ColorSpace, Imported, Intermediate, Limits, Vertex};
 use uuid::Uuid;
 
 fn fixture(name: &str) -> PathBuf {
@@ -84,13 +84,19 @@ fn robot_imports_meshes_materials_images_and_a_prefab() {
     assert_eq!(quad.triangle_count(), 2);
     assert!(quad.vertices.iter().any(|v| v.color != [1.0; 4]));
 
-    // Materials and images.
+    // Materials and images: the one image is bound as a colour (base
+    // colour, emissive) and as data (normal, metallic-roughness,
+    // occlusion), so it is imported twice with its two colour spaces.
     let names: Vec<&str> = i.materials.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(names, ["Painted", "Glass"]);
-    assert_eq!(i.images.len(), 1);
+    assert_eq!(i.images.len(), 2);
     assert_eq!(i.images[0].sub_id, "image/0");
     assert_eq!(i.images[0].mime_type, "image/png");
     assert!(i.images[0].bytes.starts_with(b"\x89PNG"));
+    assert_eq!(i.images[0].color_space, ColorSpace::Srgb);
+    assert_eq!(i.images[1].sub_id, "image/0/linear");
+    assert_eq!(i.images[1].color_space, ColorSpace::Linear);
+    assert_eq!(i.images[1].bytes, i.images[0].bytes);
 
     // Sub-asset ids: the sidecar's win, the rest are derived from the asset id.
     let asset = Uuid::parse_str(ROBOT_ID).unwrap();
@@ -102,6 +108,7 @@ fn robot_imports_meshes_materials_images_and_a_prefab() {
         "material/0",
         "material/1",
         "image/0",
+        "image/0/linear",
         "prefab",
     ]
     .iter()
@@ -118,8 +125,17 @@ fn robot_imports_meshes_materials_images_and_a_prefab() {
     assert_eq!(i.sub_assets, expected);
     assert!(r.sidecar_changed(&meta));
 
-    // Warnings only: the fixture's sampler wraps S and T differently.
-    assert_eq!(codes(&r), [Code::IMPORT_SKIPPED]);
+    // Warnings only: the fixture's sampler (nearest, clamp/repeat) is not
+    // kept by the PBR model, and one slot samples TEXCOORD_1.
+    assert_eq!(codes(&r), [Code::IMPORT_SKIPPED, Code::IMPORT_SKIPPED]);
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.message.contains("TEXCOORD_1")));
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.message.contains("sampler nearest")));
 }
 
 #[test]
@@ -135,46 +151,65 @@ fn robot_material_documents_validate_against_the_pbr_manifest() {
         painted["id"],
         derive_sub_id(Uuid::parse_str(ROBOT_ID).unwrap(), "material/0").to_string()
     );
+    assert_eq!(painted["formatVersion"], 2);
     assert_eq!(
-        painted["parameters"]["baseColor"],
+        painted["base_color"],
         serde_json::json!([0.8, 0.2, 0.2, 1.0])
     );
-    assert_eq!(painted["parameters"]["metallic"], 0.1);
-    assert_eq!(painted["parameters"]["roughness"], 0.7);
-    assert_eq!(painted["parameters"]["emissiveStrength"], 3.0);
-    assert_eq!(painted["parameters"]["normalScale"], 0.5);
-    assert_eq!(painted["parameters"]["occlusionStrength"], 0.8);
-    assert_eq!(
-        painted["textures"]["baseColor"]["texture"]["asset"],
-        ROBOT_ID
-    );
-    assert_eq!(
-        painted["textures"]["baseColor"]["texture"]["sub"],
-        "image/0"
-    );
-    assert_eq!(
-        painted["textures"]["baseColor"]["sampler"]["filter"],
-        "nearest"
-    );
-    assert_eq!(painted["textures"]["baseColor"]["sampler"]["mipmaps"], true);
-    assert_eq!(painted["textures"]["baseColor"]["sampler"]["wrap"], "clamp");
-    assert_eq!(painted["textures"]["metallicRoughness"]["uvSet"], 1);
-    assert!(painted["textures"]["baseColor"].get("uvSet").is_none());
-    assert!(painted.get("alphaMode").is_none());
+    assert_eq!(painted["metallic"], 0.1);
+    assert_eq!(painted["roughness"], 0.7);
+    assert_eq!(painted["emissive_strength"], 3.0);
+    assert_eq!(painted["normal_scale"], 0.5);
+    assert_eq!(painted["occlusion_strength"], 0.8);
+    assert_eq!(painted["base_color_texture"]["asset"], ROBOT_ID);
+    assert_eq!(painted["base_color_texture"]["sub"], "image/0");
+    assert_eq!(painted["emissive_texture"]["sub"], "image/0");
+    // The data slots read the linear copy of the same image.
+    for slot in [
+        "normal_texture",
+        "metallic_roughness_texture",
+        "occlusion_texture",
+    ] {
+        assert_eq!(painted[slot]["asset"], ROBOT_ID, "{slot}");
+        assert_eq!(painted[slot]["sub"], "image/0/linear", "{slot}");
+    }
+    assert!(painted.get("alpha_mode").is_none());
+    assert!(painted.get("parameters").is_none() && painted.get("textures").is_none());
 
     let glass = &i.materials[1].document;
     assert_eq!(glass["id"], GLASS_ID);
-    assert_eq!(glass["alphaMode"], "blend");
-    assert_eq!(glass["cull"], "none");
-    assert!(glass.get("textures").is_none());
+    assert_eq!(glass["alpha_mode"], "blend");
+    assert_eq!(glass["double_sided"], true);
+    assert!(glass.get("base_color_texture").is_none());
 
     for m in &i.materials {
         let text = serde_json::to_string_pretty(&m.document).unwrap();
         let doc = Document::parse(DocumentKind::Material, Some(&m.sub_id), &text)
             .unwrap_or_else(|d| panic!("{d:#?}"));
-        let diags = Material::from_document(doc).validate(&schemas, &shaders);
+        let material = Material::from_document(doc);
+        let diags = material.validate(&schemas, &shaders);
         assert!(!has_errors(&diags), "{}: {diags:#?}", m.sub_id);
+        assert!(material.pbr.is_some());
     }
+    let painted = Material::from_document(
+        Document::parse(
+            DocumentKind::Material,
+            None,
+            &serde_json::to_string(&i.materials[0].document).unwrap(),
+        )
+        .unwrap(),
+    )
+    .pbr
+    .unwrap();
+    assert_eq!(painted.emissive_strength, 3.0);
+    assert_eq!(
+        painted
+            .textures()
+            .iter()
+            .filter(|(_, _, t)| t.is_some())
+            .count(),
+        5
+    );
 }
 
 #[test]

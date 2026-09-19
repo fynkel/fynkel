@@ -3,7 +3,8 @@
 /// and the ABI v1 bridge underneath.
 library;
 
-export 'generated/schema.g.dart' show Camera, DirectionalLight, MeshRenderer, PointLight, Projection, SnapshotTransformRecord;
+export 'generated/schema.g.dart'
+    show AlphaMode, Camera, DirectionalLight, MeshRenderer, PbrMaterial, PointLight, Projection, SnapshotTransformRecord;
 export 'src/asset_ref.dart';
 export 'src/context.dart';
 export 'math.dart';

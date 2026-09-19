@@ -56,6 +56,9 @@ pub const KIND_JSON: [u8; 4] = *b"JSON";
 pub const KIND_MESH: [u8; 4] = *b"MESH";
 pub const KIND_TEXTURE: [u8; 4] = *b"TEXR";
 pub const KIND_CLIP: [u8; 4] = *b"CLIP";
+/// A cooked `fynkel.PbrMaterial` (`fynkel_wire::material`), next to the
+/// material document's `JSON` chunk.
+pub const KIND_MATERIAL: [u8; 4] = *b"MATL";
 pub const KIND_BLOB: [u8; 4] = *b"BLOB";
 
 #[derive(Debug)]

@@ -1,4 +1,4 @@
-# Engine status — 2026-09-19 (M2 gate: GO; M3 in progress, item 1 done)
+# Engine status — 2026-09-19 (M2 gate: GO; M3 in progress, items 1–2 done)
 
 The one-page, plain-words answer to "what do we have, is it solid, what is
 missing". Rewritten at every milestone gate and updated whenever a row below
@@ -13,13 +13,13 @@ changes. Numbers come from the gate reports (`m0-architecture-report.md`,
 | `fynkel_contracts` | Shared types: ids, schema metadata, `AssetRef`/`Uuid`, the §14.2 diagnostic record and code namespaces, wire header | **Solid** | unit tests; every other crate builds on it |
 | `fynkel_ecs` + `fynkel_scene` | `hecs` behind a thin facade (ADR-0003); transforms, hierarchy, propagation | **Solid** | unit tests; deterministic checksum in the headless host; `hecs` provably hidden |
 | `fynkel_core` | The world: command batches in, snapshot/events/diagnostics out, fixed §5.1 step order, `load_scene` from a typed description | **Solid** | 3 000-tick deterministic checksum (step p50 2 µs at 25 entities), 25 tests, headless host |
-| `fynkel_wire` + `fynkel_schema_derive` + `fynkel codegen` (a) | Components written once in Rust → JSON Schema, Dart codecs, Rust codecs, fingerprint `0xa3c3bd56d1793195` | **Solid** — the strongest piece | `codegen --check` in CI; wire fixtures shared by Rust and Dart |
+| `fynkel_wire` + `fynkel_schema_derive` + `fynkel codegen` (a) | Components and document records written once in Rust → JSON Schema (components, `material.schema.json`), Dart codecs, Rust codecs, fingerprint `0x45bf9f2f1cc8d124` | **Solid** — the strongest piece | `codegen --check` in CI; wire fixtures shared by Rust and Dart |
 | `fynkel_native` + `package:fynkel` | C ABI v1, `ffigen` bindings, the Dart SDK: `World`, `GameObject`, allocation-free `TransformWriter`, `loadScene`/`loadProject` → `LoadReport`, `Behaviour` with the §3.2 lifecycle driven by `World.frame` at the §5.1 points, `GameContext` services with installable test contexts, `BehaviourRegistry`; native-assets build hook | **Solid** | 1 000 entities/tick: 191 µs encode+submit, 169 µs step, 47 µs read; 5.1 KB/frame Dart allocation on the 25-entity scene (0.7–1.2 KB of it SDK), 2 GCs in 3 000 frames; leak tests at the ABI and viewport |
 | `package:fynkel_generator` + `fynkel codegen` (b) | `build_runner` aggregate builder: `@FynkelBehaviour`/`@Expose` classes → `behaviours.g.dart` (factories, field get/set, `registerBehaviours`), `behaviours.g.json` (Inspector metadata) and `schemas/behaviours/<id>.schema.json`; `fynkel codegen --project [--check]` runs it and splits the schemas | **Solid** | authored `game.Spinner { speed: 2.5 }` → validated → instantiated → rotates (M2 gate); emit tests; `--check` in CI for the example and the starter project; 1 s warm |
-| `fynkel_document` | Strict JSON with spans, envelope, JSON Schema 2020-12, canonical writer that preserves unknown data; scene, prefab, material, shader, `.meta.json`, project and lock documents; prefab expansion (UUID v5 ids, overrides, nested refused); asset database (scan, resolve, reference check); migrations with diff + `.bak`; scene → runtime (`describe`, `read_scene`, `load_project`, both project-aware); whole-project validation; authoring commands and transactions (`Editor`: revision = blake3, 13 §11.1 commands + `unsetField` as reversible edits, conflicts, rollback to the byte, byte-exact undo/redo) | **Solid** | 55 integration tests over fixture corpora with 30 exact code/pointer/line/column expectations; every command undone to the original text; validate/load ≈20–25 µs per entity, linear to 10 000 entities |
-| `fynkel_import` | glTF/GLB, PNG/JPEG, WAV/Ogg Vorbis → deterministic `FYNI` intermediates: meshes in the one 72-byte vertex layout, `fynkel.pbr@1` materials, RGBA8 textures with a declared colour space, f32 PCM clips, node hierarchy as a prefab; sub-asset ids from the sidecar or derived; external files denied by default; limits | **Solid for static meshes, 8-bit textures and PCM/Vorbis clips** — no skins, morphs, animations, Draco, HDR, FLAC/MP3 | 37 tests; 3 committed expected intermediates; a 2 MiB / 79 k-triangle GLB imports in 16 ms |
-| `fynkel_import::cache` + `::cook` + `fynkel_cooked` | Content-addressed cache (blake3 over source, settings, importer/format versions, dependency keys, profile; `objects/<key>.fyna`, `index.json`, `--prune`) and the cooker; `FYNC` v1 container with CRC-checked header and chunk table, bounded reads, dependency-free reader (`MESH`/`TEXR`/`CLIP`/`JSON`/`BLOB`) | **Solid for what is imported** — no mipmaps, compression or per-profile transforms; `CLIP` has no consumer; no GC beyond `--prune` | editing a texture re-cooks exactly its dependents (4 of 6 on the fixture); cook miss 20 ms / hit 12 ms / partial 13 ms; flipped byte caught on read-back |
-| `fynkel_render` | wgpu renderer over the extract: `MeshRenderer` entities drawn with their cooked mesh and the `baseColor` factor × texture of their `fynkel.pbr@1` material (from the cook cache through `CookedAssets`), the scene's `Camera` and first `DirectionalLight`, optional placeholder cubes, magenta for a missing mesh | **Seed → V1 slice** — one pass, Lambert + Blinn-Phong, no shadows, point lights, normal/metal-rough maps, IBL, exposure control or transparency | pixel-readback tests incl. the fixture project rendered from its own camera; `fynkel render` writes a PNG; runs in every host |
+| `fynkel_document` | Strict JSON with spans, envelope, JSON Schema 2020-12, canonical writer that preserves unknown data; scene, prefab, material (formatVersion 2: the `PbrMaterial` fields flat on the document, custom shaders through their manifest), shader, `.meta.json`, project and lock documents; prefab expansion (UUID v5 ids, overrides, nested refused); asset database (scan, resolve, reference check); migrations with diff + `.bak` (`material/1-2/pbr-fields` is the first real step); scene → runtime (`describe`, `read_scene`, `load_project`, both project-aware); whole-project validation; authoring commands and transactions (`Editor`: revision = blake3, 13 §11.1 commands + `unsetField` as reversible edits, conflicts, rollback to the byte, byte-exact undo/redo) | **Solid** | 55 integration tests over fixture corpora with 30 exact code/pointer/line/column expectations; every command undone to the original text; validate/load ≈20–25 µs per entity, linear to 10 000 entities |
+| `fynkel_import` | glTF/GLB, PNG/JPEG, WAV/Ogg Vorbis → deterministic `FYNI` intermediates: meshes in the one 72-byte vertex layout, `fynkel.pbr@1` materials in the model's document form with all five texture slots, RGBA8 textures with a declared colour space (a glTF image used as both colour and data is imported twice), f32 PCM clips, node hierarchy as a prefab; sub-asset ids from the sidecar or derived; external files denied by default; limits | **Solid for static meshes, 8-bit textures and PCM/Vorbis clips** — no skins, morphs, animations, Draco, HDR, FLAC/MP3 | 37 tests; 3 committed expected intermediates; a 2 MiB / 79 k-triangle GLB imports in 16 ms |
+| `fynkel_import::cache` + `::cook` + `fynkel_cooked` | Content-addressed cache (blake3 over source, settings, importer/format versions, dependency keys, profile; `objects/<key>.fyna`, `index.json`, `--prune`) and the cooker; `FYNC` v1 container with CRC-checked header and chunk table, bounded reads, dependency-free reader (`MESH`/`TEXR`/`CLIP`/`JSON`/`MATL`/`BLOB`; `MATL` is the `PbrMaterial` wire record the renderer consumes) | **Solid for what is imported** — no mipmaps, compression or per-profile transforms; `CLIP` has no consumer; no GC beyond `--prune` | editing a texture re-cooks exactly its dependents (4 of 6 on the fixture); cook miss 20 ms / hit 12 ms / partial 13 ms; flipped byte caught on read-back |
+| `fynkel_render` | wgpu renderer over the extract: `MeshRenderer` entities drawn with their cooked mesh and the `base_color` factor × texture of their `fynkel.pbr@1` material (the `PbrMaterial` record from the cook cache's `MATL` chunk through `CookedAssets`; the other fields and maps are decoded but not yet shaded), the scene's `Camera` and first `DirectionalLight`, optional placeholder cubes, magenta for a missing mesh | **Seed → V1 slice** — one pass, Lambert + Blinn-Phong, no shadows, point lights, normal/metal-rough maps, IBL, exposure control or transparency | pixel-readback tests incl. the fixture project rendered from its own camera; `fynkel render` writes a PNG; runs in every host |
 | `platform/apple` + `package:fynkel_flutter` + `hosts/flutter_apple` | IOSurface ring → Flutter `Texture` (Path A), 0 copies, GPU-completion hand-off; macOS + iOS. `package:fynkel_flutter` is the Flutter plugin a game depends on: Swift `FynkelFlutterPlugin` (texture registration, multi-viewport by `textureId`, ordered teardown), `FynkelViewportController` (create/resize/rebind, asset cache, placeholders, camera, stats), `FynkelViewport` widget (layout × DPR, focus, pointer in physical px) and `FynkelGameView` (Ticker loop: `World.frame` then render, lifecycle mute, per-second `FynkelFrameStats`, overlay). `hosts/flutter_apple` is the measurement harness as a thin app on it; `FYNKEL_PROJECT=<dir>` shows a project's startup scene from its cooked cache | **Solid** | 120 Hz, lag 0, raster p95 0.96 ms after the port (M0 capture `2026-09-19-b35f603`); iOS simulator 60 Hz, 0 drops; package tests create → render → resize → detach against the real Rust viewport under `flutter test`; 60-lifetime leak test |
 | `hosts/headless` + `hosts/standalone` | Rust hosts: deterministic runs, `--project`/`--scene`, state dump by authoring id; winit window | **Solid** | CLI tests |
 | `apps/cli` | `fynkel codegen [--project]`, `schema`, `test --headless`, `state dump`, `document`, `scene`, `prefab`, `material`, `shader`, `asset`, `migrate`, `import`, `cook`, `cooked inspect`, `project describe\|lock`, `validate`, `render`, `scene\|prefab apply --patch`, `create`, `run` — every command with `--json`, exit codes 0/1/2 fixed (ADR-0017); works outside the checkout on the embedded schemas; document commands and loads know the enclosing project's behaviour types | **Solid** | 16 CLI tests incl. a fresh `fynkel create` project through validate, headless, state dump and `codegen --check`; every command under 30 ms on the fixture project except `codegen --project` (1 s warm) |
@@ -97,15 +97,17 @@ Not bugs — things done the simple way with a note to revisit.
 - Dart tests run through Flutter's `dart` only (`hooks`/`code_assets` are
   still experimental on stable Dart). Pinned; fallback documented in the M1
   gate report.
-- The glTF importer writes zero tangents when the file has none and keeps
-  only `wrapS` of a sampler; tangent generation and per-axis wrap are
-  renderer decisions.
+- The glTF importer writes zero tangents when the file has none and drops
+  non-default samplers and `TEXCOORD_1` bindings with a warning (the PBR
+  model has one sampler and one UV set); tangent generation is a renderer
+  decision.
 - The cache has no garbage collection beyond `fynkel cook --prune`; stale
   objects accumulate until then, and `rm -rf .fynkel/cache` is always safe.
   Cooked textures are RGBA8 with one mip level for every profile (D8).
-- The renderer's `MaterialDesc` is a handful of `fynkel.pbr@1` fields read
-  straight from the cooked material JSON, not the document layer's
-  `Material`/`ShaderManifest` (validation-only). Fine for the slice.
+- The renderer reads the whole `PbrMaterial` from the cooked `MATL` chunk
+  but shades only `base_color` × its texture; the normal, metallic-
+  roughness, occlusion and emissive maps are cooked and decoded, not yet
+  sampled (Renderer V1). Custom-shader materials have no cooked record.
 - `fynkel_world_load_scene` looks for prefabs in the scene file's directory
   and below and, since M2-18, for behaviour schemas in the enclosing
   project; `fynkel_world_load_project` has the whole asset database. A scene
@@ -153,6 +155,12 @@ tests total) and the host/package analyze steps; the starter was built and
 run on macOS and the host on the iOS simulator by hand. `platform/apple`'s
 `presenter_wait_yields_lag_zero` is load-sensitive — it fails while another
 build or a simulator app is using the GPU and passes on a quiet machine.
+M3-02 (2026-09-19): fmt/clippy clean, `cargo test --workspace` green,
+both `codegen --check` pipelines up to date (fingerprint
+`0x45bf9f2f1cc8d124`), 66 Dart tests (50 `fynkel`, 5 `fynkel_generator`,
+4 `spinner_game`, 7 `fynkel_flutter`), starter create → validate →
+headless → cook → render → codegen → analyze → test clean; the robot's
+cooked `MATL` chunk binds all five texture slots.
 
 ## 6. Verdict and next steps
 
@@ -170,8 +178,12 @@ in its own app, play it, or hear it. That is M3, in this order:
 1. ~~**`package:fynkel_flutter`** (D1)~~ — done (M3-01): the viewport widget
    and Swift plugin as a package; the template uses it; a created project
    shows its spinning cube.
-2. **Renderer V1** against the picture the spike produces: materials beyond
-   base colour, lights, shadows, exposure; the Rust `Material` type (D6).
-3. **Cooked-scene loading** (D2), **input** (C2, D3), **audio** (D4), and the
+2. ~~**Rust material model** (D6)~~ — done (M3-02): `fynkel_core::material::PbrMaterial`
+   is the one definition behind the generated material schema, the codecs,
+   the importer's output, the cooked `MATL` chunk and what the renderer
+   reads; materials are formatVersion 2 via the first real migration.
+3. **Renderer V1** against the picture the spike produces: materials beyond
+   base colour, lights, shadows, exposure.
+4. **Cooked-scene loading** (D2), **input** (C2, D3), **audio** (D4), and the
    Tier 1 reference game that exercises them — measured with both captures
    at every step.

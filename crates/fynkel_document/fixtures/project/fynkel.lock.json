@@ -8,9 +8,9 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0xa3c3bd56d1793195",
+  "schemaFingerprint": "0x45bf9f2f1cc8d124",
   "documents": {
-    "material": 1,
+    "material": 2,
     "meta": 1,
     "prefab": 1,
     "project": 1,
@@ -20,11 +20,11 @@
   "importers": {
     "fynkel.audio": 1,
     "fynkel.file": 1,
-    "fynkel.gltf": 1,
+    "fynkel.gltf": 2,
     "fynkel.image": 1
   },
   "cache": {
-    "version": 1,
+    "version": 2,
     "container": 1
   }
 }

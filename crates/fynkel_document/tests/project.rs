@@ -23,16 +23,16 @@ fn schemas() -> SchemaSet {
 }
 
 const IMPORTERS: &[(&str, u32)] = &[
-    ("fynkel.gltf", 1),
+    ("fynkel.gltf", 2),
     ("fynkel.image", 1),
     ("fynkel.audio", 1),
     ("fynkel.file", 1),
 ];
 
 /// What `fynkel_import::expected_lock()` produces; mirrored here because
-/// this crate cannot depend on the importers.
+/// this crate cannot depend on the importers (cache version 2, container 1).
 fn expected_lock() -> Lock {
-    Lock::expected(IMPORTERS, 1, 1)
+    Lock::expected(IMPORTERS, 2, 1)
 }
 
 /// A temporary copy of the fixture project, removed on drop.

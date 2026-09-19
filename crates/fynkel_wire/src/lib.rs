@@ -8,12 +8,13 @@
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub mod generated;
+pub mod material;
 
 pub use generated::SCHEMA_FINGERPRINT;
 
 use fynkel_contracts::schema::HasEnumSchema;
 use fynkel_contracts::{AssetId, AssetRef, Entity};
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, Vec4};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WireError {
@@ -120,6 +121,13 @@ pub fn put_quat(b: &mut [u8], off: usize, v: Quat) {
     put_f32(b, off + 12, v.w);
 }
 #[inline]
+pub fn put_vec4(b: &mut [u8], off: usize, v: Vec4) {
+    put_f32(b, off, v.x);
+    put_f32(b, off + 4, v.y);
+    put_f32(b, off + 8, v.z);
+    put_f32(b, off + 12, v.w);
+}
+#[inline]
 pub fn put_entity(b: &mut [u8], off: usize, v: Entity) {
     put_u64(b, off, v.to_bits());
 }
@@ -137,6 +145,19 @@ pub fn put_str(b: &mut [u8], off: usize, v: &str, strings: &mut StringTable) {
 pub fn put_asset_ref(b: &mut [u8], off: usize, v: &AssetRef, strings: &mut StringTable) {
     b[off..off + 16].copy_from_slice(v.asset.as_bytes());
     put_str(b, off + 16, &v.sub, strings);
+}
+/// None = a nil id and an empty sub.
+#[inline]
+pub fn put_opt_asset_ref(
+    b: &mut [u8],
+    off: usize,
+    v: Option<&AssetRef>,
+    strings: &mut StringTable,
+) {
+    match v {
+        Some(r) => put_asset_ref(b, off, r, strings),
+        None => put_asset_ref(b, off, &AssetRef::default(), strings),
+    }
 }
 #[inline]
 pub fn put_enum<T: HasEnumSchema>(b: &mut [u8], off: usize, v: &T) {
@@ -181,6 +202,15 @@ pub fn get_quat(b: &[u8], off: usize) -> Quat {
     )
 }
 #[inline]
+pub fn get_vec4(b: &[u8], off: usize) -> Vec4 {
+    Vec4::new(
+        get_f32(b, off),
+        get_f32(b, off + 4),
+        get_f32(b, off + 8),
+        get_f32(b, off + 12),
+    )
+}
+#[inline]
 pub fn get_entity(b: &[u8], off: usize) -> Entity {
     Entity::from_bits(get_u64(b, off))
 }
@@ -197,6 +227,12 @@ pub fn get_asset_ref(b: &[u8], off: usize, tail: &[u8]) -> Result<AssetRef, Wire
         asset: AssetId::from_bytes(b[off..off + 16].try_into().unwrap()),
         sub: get_str(b, off + 16, tail)?,
     })
+}
+/// A nil id reads as `None` (whatever the sub says).
+#[inline]
+pub fn get_opt_asset_ref(b: &[u8], off: usize, tail: &[u8]) -> Result<Option<AssetRef>, WireError> {
+    let r = get_asset_ref(b, off, tail)?;
+    Ok(if r.asset.is_nil() { None } else { Some(r) })
 }
 #[inline]
 pub fn get_enum<T: HasEnumSchema>(b: &[u8], off: usize) -> Result<T, WireError> {

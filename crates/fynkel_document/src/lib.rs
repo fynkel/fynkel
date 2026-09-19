@@ -121,8 +121,13 @@ impl DocumentKind {
     }
 
     /// Newest `formatVersion` this build reads and writes for the kind.
+    /// Material 2 (M3-02): the `fynkel.PbrMaterial` fields replaced the
+    /// `parameters`/`textures` maps for `fynkel.pbr@1`.
     pub const fn supported_format_version(self) -> u32 {
-        1
+        match self {
+            DocumentKind::Material => 2,
+            _ => 1,
+        }
     }
 }
 
@@ -171,7 +176,6 @@ impl Document {
             }
             DocumentKind::Material => {
                 members.push(("shader".into(), Node::string(material::PBR_SHADER_ID)));
-                members.push(("parameters".into(), Node::object(Vec::new())));
             }
             DocumentKind::Meta => {
                 members.push(("importer".into(), Node::string(asset::FILE_IMPORTER)));

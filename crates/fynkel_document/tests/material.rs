@@ -142,7 +142,11 @@ fn resolve_fills_defaults_and_keeps_authored_values() {
     assert_eq!(r.shader_id, PBR_SHADER_ID);
     assert_eq!(r.alpha_mode, AlphaMode::Mask);
     assert_eq!(r.pass, Pass::Mask);
-    assert_eq!(r.alpha_cutoff, 0.4);
+    assert!((r.alpha_cutoff - 0.4).abs() < 1e-6);
+    let pbr = r.pbr.as_ref().unwrap();
+    assert_eq!((pbr.metallic, pbr.roughness), (1.0, 0.65));
+    assert!(pbr.double_sided);
+    assert!(pbr.occlusion_texture.is_none());
     assert_eq!(r.parameters.len(), 7);
     let metallic = r.parameter("metallic").unwrap();
     assert!(metallic.authored);
@@ -153,7 +157,10 @@ fn resolve_fills_defaults_and_keeps_authored_values() {
     assert_eq!(r.textures.len(), 5);
     let base = r.texture("baseColor").unwrap();
     assert_eq!(base.color_space, ColorSpace::Srgb);
-    assert_eq!(base.binding.as_ref().unwrap().sampler.anisotropy, 8);
+    assert_eq!(
+        base.binding.as_ref().unwrap().texture.asset.to_string(),
+        "3f8a2b1c-5d6e-4f70-8a9b-0c1d2e3f4a5b"
+    );
     let mr = r.texture("metallicRoughness").unwrap();
     assert_eq!(mr.binding.as_ref().unwrap().texture.sub, "packed");
     let occlusion = r.texture("occlusion").unwrap();

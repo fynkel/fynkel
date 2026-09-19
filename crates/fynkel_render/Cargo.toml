@@ -1,6 +1,6 @@
 [package]
 name = "fynkel_render"
-description = "wgpu renderer over fynkel_core's render extract (blueprint §8.5 seed): cooked meshes with fynkel.pbr base colour, placeholder cubes, the scene camera and one directional light."
+description = "wgpu renderer over fynkel_core's render extract (blueprint §8.5 seed): cooked meshes with the cooked PbrMaterial (base colour in V1), placeholder cubes, the scene camera and one directional light."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,6 +10,7 @@ license.workspace = true
 fynkel_contracts.workspace = true
 fynkel_cooked.workspace = true
 fynkel_core.workspace = true
+fynkel_wire.workspace = true
 wgpu.workspace = true
 glam.workspace = true
 bytemuck.workspace = true

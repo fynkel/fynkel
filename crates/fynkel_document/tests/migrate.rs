@@ -5,9 +5,10 @@
 
 use std::path::{Path, PathBuf};
 
+use fynkel_document::material::{AlphaMode, ShaderLibrary};
 use fynkel_document::migrate::backup_path;
 use fynkel_document::{
-    describe, migrate, Document, DocumentKind, Migration, Migrations, Scene, SchemaSet,
+    describe, migrate, Document, DocumentKind, Material, Migration, Migrations, Scene, SchemaSet,
 };
 
 fn fixtures() -> PathBuf {
@@ -34,7 +35,11 @@ fn builtin_steps_chain_to_the_current_version() {
             step.id()
         );
     }
-    assert_eq!(m.steps()[0].id(), "scene/0-1/entities-keyed-by-id");
+    let ids: Vec<String> = m.steps().iter().map(Migration::id).collect();
+    assert_eq!(
+        ids,
+        ["material/1-2/pbr-fields", "scene/0-1/entities-keyed-by-id"]
+    );
 }
 
 #[test]
@@ -100,6 +105,75 @@ fn v0_scene_migrates_to_v1_exactly() {
     assert!(!again.changed());
     assert!(again.diagnostics.is_empty());
     assert!(again.diff.is_empty());
+}
+
+#[test]
+fn v1_material_migrates_to_v2_exactly() {
+    let schemas = schemas();
+    let path = fixtures().join("v1_rusted_metal.material.json");
+    let doc = Document::read(&path, None).unwrap();
+    assert!(doc.is_outdated());
+    assert_eq!(doc.validate(&schemas)[0].code.as_str(), "FYN-D0016");
+
+    let m = migrate(&doc, &Migrations::builtin(), &schemas);
+    assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
+    assert_eq!((m.from, m.to), (1, 2));
+    assert_eq!(m.applied[0].name, "material/1-2/pbr-fields");
+
+    let text = m.document.write().unwrap();
+    let expected_path = fixtures().join("v1_rusted_metal.material.migrated.json");
+    let expected = std::fs::read_to_string(&expected_path).unwrap_or_default();
+    if text != expected {
+        std::fs::write(expected_path.with_extension("actual.json"), &text).unwrap();
+    }
+    assert_eq!(text, expected, "see the .actual.json next to the fixture");
+
+    // The maps became the record's fields (sampler and colour-space
+    // overrides dropped), cull: none became double_sided, the shadow
+    // flags went; the result is the typed model.
+    let material = Material::from_document(m.document.clone());
+    assert!(material
+        .validate(&schemas, &ShaderLibrary::builtin())
+        .is_empty());
+    let pbr = material.pbr.unwrap();
+    assert_eq!(pbr.base_color.to_array(), [0.8, 0.5, 0.3, 1.0]);
+    assert_eq!((pbr.metallic, pbr.roughness), (1.0, 0.65));
+    assert_eq!(pbr.alpha_mode, AlphaMode::Mask);
+    assert_eq!(pbr.alpha_cutoff, 0.4);
+    assert!(pbr.double_sided);
+    assert_eq!(pbr.metallic_roughness_texture.unwrap().sub, "packed");
+    assert!(pbr.normal_texture.is_some() && pbr.occlusion_texture.is_none());
+    for key in [
+        "parameters",
+        "textures",
+        "cull",
+        "castShadows",
+        "receiveShadows",
+        "alphaMode",
+    ] {
+        assert!(m.document.root.get(key).is_none(), "{key} survived");
+    }
+
+    let again = migrate(&m.document, &Migrations::builtin(), &schemas);
+    assert!(!again.changed());
+
+    // A pbr material naming a parameter the model has no field for cannot
+    // be converted; the document is left as it was.
+    let text = r#"{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 1,
+  "id": "b0000000-0000-4000-8000-000000000004",
+  "name": "Odd",
+  "shader": "fynkel.pbr@1",
+  "parameters": { "sheen": 0.5 }
+}"#;
+    let doc = Document::parse(DocumentKind::Material, Some("odd.material.json"), text).unwrap();
+    let m = migrate(&doc, &Migrations::builtin(), &schemas);
+    assert!(!m.changed());
+    assert_eq!(m.diagnostics.len(), 1);
+    assert_eq!(m.diagnostics[0].code.as_str(), "FYN-D0018");
+    assert!(m.diagnostics[0].message.contains("/parameters/sheen"));
+    assert_eq!(m.document.envelope.format_version, 1);
 }
 
 #[test]

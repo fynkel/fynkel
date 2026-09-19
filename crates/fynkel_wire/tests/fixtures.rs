@@ -11,11 +11,12 @@ use std::path::PathBuf;
 
 use fynkel_contracts::{AssetId, AssetRef, Entity, WorldId};
 use fynkel_core::components::{Camera, DirectionalLight, MeshRenderer, PointLight, Projection};
+use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
 use fynkel_core::Name;
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, Vec4};
 
 fn dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -184,6 +185,26 @@ fn fixtures_match_generated_codecs() {
             color: Vec3::new(0.2, 0.4, 1.0),
             intensity: 800.0,
             range: 12.5,
+        },
+    );
+    check(
+        "PbrMaterial",
+        &PbrMaterial {
+            base_color: Vec4::new(0.8, 0.5, 0.3, 1.0),
+            metallic: 1.0,
+            roughness: 0.65,
+            emissive: Vec3::new(0.1, 0.1, 0.0),
+            emissive_strength: 3.0,
+            normal_scale: 0.5,
+            occlusion_strength: 0.8,
+            alpha_mode: AlphaMode::Mask,
+            alpha_cutoff: 0.4,
+            double_sided: true,
+            base_color_texture: Some(AssetRef::with_sub(mesh_id, "image/0")),
+            normal_texture: None,
+            metallic_roughness_texture: Some(AssetRef::with_sub(mesh_id, "image/0/linear")),
+            occlusion_texture: None,
+            emissive_texture: Some(AssetRef::new(material_id)),
         },
     );
     check("CommandHeader", &CommandHeader { kind: 1, size: 64 });

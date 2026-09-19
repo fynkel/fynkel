@@ -32,7 +32,7 @@ use fynkel_core::{Extract, Projection};
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
-pub use assets::{CookedAssets, MaterialDesc};
+pub use assets::{CookedAssets, PbrMaterial};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -179,7 +179,7 @@ pub struct ExtractRenderer {
     assets: Option<CookedAssets>,
     meshes: HashMap<AssetRef, Option<GpuMesh>>,
     textures: HashMap<AssetRef, Option<GpuTexture>>,
-    materials: HashMap<AssetRef, Option<MaterialDesc>>,
+    materials: HashMap<AssetRef, Option<PbrMaterial>>,
     asset_errors: Vec<String>,
     stats: FrameStats,
     /// Fallback camera when the extract has none.
@@ -501,7 +501,7 @@ impl ExtractRenderer {
                             },
                             Instance {
                                 model: r.world.to_cols_array_2d(),
-                                tint: material.base_color,
+                                tint: material.base_color.to_array(),
                                 params: [material.metallic, material.roughness, 0.0, 0.0],
                             },
                         )
@@ -697,11 +697,11 @@ impl ExtractRenderer {
         ok
     }
 
-    /// The material's V1 fields, the manifest defaults when it cannot be
-    /// read (a nil reference is not an error: "no material").
-    fn material(&mut self, r: &AssetRef) -> MaterialDesc {
+    /// The cooked material, the model's defaults when it cannot be read (a
+    /// nil reference is not an error: "no material").
+    fn material(&mut self, r: &AssetRef) -> PbrMaterial {
         if r.is_nil() {
-            return MaterialDesc::default();
+            return PbrMaterial::default();
         }
         if let Some(m) = self.materials.get(r) {
             return m.clone().unwrap_or_default();

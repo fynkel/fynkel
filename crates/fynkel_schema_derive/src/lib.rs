@@ -12,12 +12,14 @@
 //! ```
 //!
 //! Field types are mapped by their last path segment: `f32 u32 i32 u64 bool
-//! Vec3 Quat Entity String AssetRef`, `Option<Entity>`; any other type must
+//! Vec3 Quat Vec4 Entity String AssetRef`, `Option<Entity>`,
+//! `Option<AssetRef>`; any other type must
 //! implement `SchemaField`, which this derive also emits — so nested records
 //! and enums are just other `#[derive(Schema)]` types. Doc comments become
 //! the schema docs (and end up in JSON Schema / Dart docs). `authored =
 //! false` marks an engine-managed component that scene documents may not
-//! contain.
+//! contain. `document = "material"` on a record makes it the top level of
+//! that document kind: every field optional, `Default` when absent.
 //!
 //! On a unit-variant enum the derive emits `HasEnumSchema`: the wire carries
 //! the declaration index, documents the lowerCamel variant name.
@@ -49,6 +51,7 @@ struct Attrs {
     id: u32,
     name: String,
     authored: bool,
+    document: Option<String>,
 }
 
 fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
@@ -56,6 +59,7 @@ fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
     let mut id = 0u32;
     let mut name = None;
     let mut authored = true;
+    let mut document = None;
     for attr in &input.attrs {
         if !attr.path().is_ident("schema") {
             continue;
@@ -86,9 +90,15 @@ fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
                     authored = b.value();
                     return Ok(());
                 }
+            } else if meta.path.is_ident("document") {
+                if let Lit::Str(s) = lit {
+                    document = Some(s.value());
+                    return Ok(());
+                }
             }
-            Err(meta
-                .error("expected kind = \"...\", id = N, name = \"...\", authored = true|false"))
+            Err(meta.error(
+                "expected kind = \"...\", id = N, name = \"...\", authored = true|false, document = \"...\"",
+            ))
         })?;
     }
     let kind = kind.unwrap_or_else(|| "record".to_string());
@@ -104,12 +114,19 @@ fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
             "components, commands and events need a non-zero `id`",
         ));
     }
+    if document.is_some() && kind != "record" {
+        return Err(syn::Error::new_spanned(
+            input,
+            "`document = ...` is for plain records (a document's top level)",
+        ));
+    }
     let name = name.unwrap_or_else(|| format!("fynkel.{}", input.ident));
     Ok(Attrs {
         kind,
         id,
         name,
         authored,
+        document,
     })
 }
 
@@ -145,6 +162,7 @@ fn field_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
         "bool" => quote!(#c::Bool),
         "Vec3" => quote!(#c::Vec3),
         "Quat" => quote!(#c::Quat),
+        "Vec4" => quote!(#c::Vec4),
         "Entity" => quote!(#c::Entity),
         "String" => quote!(#c::Str),
         "AssetRef" => quote!(#c::AssetRef),
@@ -158,10 +176,15 @@ fn field_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
                 {
                     quote!(#c::OptionalEntity)
                 }
+                Some(GenericArgument::Type(Type::Path(inner)))
+                    if inner.path.segments.last().unwrap().ident == "AssetRef" =>
+                {
+                    quote!(#c::OptionalAssetRef)
+                }
                 _ => {
                     return Err(syn::Error::new_spanned(
                         ty,
-                        "only Option<Entity> is supported",
+                        "only Option<Entity> and Option<AssetRef> are supported",
                     ))
                 }
             }
@@ -289,6 +312,10 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     let id = attrs.id;
     let name = attrs.name;
     let authored = attrs.authored;
+    let document = match &attrs.document {
+        Some(d) => quote!(Some(#d)),
+        None => quote!(None),
+    };
     let doc = doc_of(&input.attrs);
     Ok(quote! {
         impl ::fynkel_contracts::schema::HasSchema for #ident {
@@ -301,6 +328,7 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     doc: #doc,
                     fields: &[ #(#field_tokens),* ],
                     authored: #authored,
+                    document: #document,
                 };
         }
         impl ::fynkel_contracts::schema::SchemaField for #ident {
