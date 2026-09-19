@@ -13,7 +13,7 @@ All package names, commands, APIs, file schemas, platform targets, and performan
 
 - The engine is a **library**; a **host** owns the main loop (§2, §5.2, ADR-0007/0008). Flutter is one host among several and the engine never depends on it.
 - Dart gameplay runs on the main isolate and drives `step()` synchronously; isolate/native-thread migration is a documented later option (ADR-0008).
-- Fixed step uses an accumulator with render interpolation; events are pull-only (ADR-0008).
+- Fixed step uses an accumulator with render interpolation; events are pull-only; two command classes (simulation vs presentation); input edges consumed by one tick; `afterPhysics` receives its tick's physics events (ADR-0008).
 - M0 is macOS/Metal + Impeller only. Windows backend proof and the Wasm spike are removed from M0 (ADR-0002).
 - 1.0 platform intent is **macOS + iOS** (ADR-0009). Windows is post-1.0.
 - The reference game is split into **Tier 1 (M3)** and **Tier 2 (M5)** (§1.2, ADR-0010).
@@ -340,9 +340,9 @@ Pin a tested Rust/Flutter/Dart/dependency matrix. Record:
 
 Dependency upgrades are deliberate engineering changes, not automatic maintenance.
 
-### 2.4 Licensing and repository strategy — M0 decision
+### 2.4 Licensing and repository strategy — decide before the M3 public push
 
-Licensing is an architectural/repository decision and must be resolved before public package publication.
+Licensing is an architectural/repository decision and must be resolved before the repository goes public or any package is published. The repository stays private through M0–M2; ADR-0005 is accepted as an M3 gate item. Nothing in M0 blocks on it.
 
 **Recommended default for discussion in ADR-0005:**
 
@@ -352,7 +352,7 @@ Licensing is an architectural/repository decision and must be resolved before pu
 - third-party sample assets: explicit per-asset licenses;
 - contributor policy: choose DCO or CLA before accepting external contributions.
 
-M0 must also decide:
+Before the M3 public push, also decide:
 
 - public monorepo vs split repositories;
 - crate/package publishing policy;
@@ -670,12 +670,13 @@ One **host frame** does the following (ADR-0008):
 
 ```text
 Host frame begins (Flutter frame callback / winit redraw / test loop)
-  -> capture input since last frame
+  -> capture input since last frame: held state + pending edges (pressed/released)
   -> accumulator += frame dt (clamped to a max, e.g. 250 ms)
   -> while accumulator >= fixedDt and steps < maxStepsPerFrame:
        FIXED TICK n:
-         expose coherent snapshot S[n] + drained events to Dart
-         Dart fixedUpdate produces command batch C[n]
+         expose coherent snapshot S[n] + drained non-physics events to Dart
+         input view for tick n: held state; pending edges are consumed by THIS tick only
+         Dart fixedUpdate produces SIMULATION command batch C[n]
          step(C[n]):                          # one synchronous FFI call
            validate/apply C[n] at tick boundary
            native pre-tick systems
@@ -683,21 +684,34 @@ Host frame begins (Flutter frame callback / winit redraw / test loop)
            post-physics synchronization
            animation/transform work for the tick
            deferred structural changes
-           publish S[n+1]; queue events
-         Dart afterPhysics (opt-in) reads S[n+1]
+           publish S[n+1]; physics events of tick n attached to S[n+1]
+         Dart afterPhysics(context) (opt-in): reads S[n+1], receives tick n's
+           collision/trigger events; its writes are simulation commands for tick n+1
        accumulator -= fixedDt
   -> alpha = accumulator / fixedDt
-  -> Dart update(dt), lateUpdate(dt)          # presentation rate; writes are staged for the next tick
-  -> render extraction with interpolation between S[n] and S[n+1] using alpha
+  -> Dart update(dt), lateUpdate(dt)          # presentation rate
+       simulation commands  -> staged for the next fixed tick
+       presentation commands -> applied before this frame's extraction
+  -> render extraction: interpolate S[n]..S[n+1] by alpha, then apply presentation overrides
   -> renderer draws/presents (possibly on its own Rust thread)
 ```
+
+**Two command classes** (ADR-0008):
+
+| Class | Examples | Applied |
+| --- | --- | --- |
+| Simulation | `SetRigidBodyVelocity`, `SpawnPrefab`, `DestroyEntity`, `SetAnimatorParameter`, transform of physics/simulation objects | at the next fixed tick boundary |
+| Presentation | camera transform, transform of non-physics objects set in `lateUpdate`, material parameters, visibility, light colour | before the current frame's render extraction |
+
+A presentation transform command does two things: it overrides the extract for the current frame (that object is not interpolated this frame) **and** it is staged as the authoritative value for the next tick, so the object does not snap back. Physics-owned transforms reject presentation commands with a diagnostic; use simulation commands (forces, velocities, teleport) for them.
 
 Rules:
 
 - The fixed step defaults to 60 Hz and is configurable per project.
 - **Accumulator + render interpolation** is the 1.0 model: at 120 Hz presentation, ticks run every other frame and transforms are interpolated; below 60 Hz, up to `maxStepsPerFrame` ticks catch up, then time is dropped and a `MissedDeadline` diagnostic is recorded.
-- `update`/`lateUpdate` run once per host frame. Authoritative writes issued there are staged and applied at the next tick boundary; they never mutate native storage mid-step.
-- **Events are pull-only.** Collision, trigger, animation, asset-loaded, and scene-ready events are queued in Rust and drained by Dart at the start of the next tick (or, when no tick runs that frame, at the start of the frame). Asynchronous work on Rust threads (asset decoding) completes into the same queue; a completion may therefore surface up to one frame late. No `NativePort`/callback delivery exists in 1.0.
+- `update`/`lateUpdate` run once per host frame. Simulation writes issued there are staged for the next tick; presentation writes affect the current frame. Neither mutates native storage mid-step.
+- **Input edges are consumed by exactly one fixed tick.** `pressed`/`released` transitions captured during a frame go into a pending buffer; the first fixed tick of the frame consumes them and later catch-up ticks in the same frame see only held state. If a frame runs zero ticks (e.g. 120 Hz presentation), pending edges are carried to the next tick, never dropped. `update`/`lateUpdate` see the frame's raw edges for presentation-only reactions (UI sounds, camera nudges).
+- **Events are pull-only**, in two lanes. *Physics events* (collision enter/stay/exit, trigger enter/exit) generated by tick n are delivered inside `afterPhysics(context)` of tick n and again available in the next tick's drain for behaviours that do not opt into `afterPhysics`. *All other events* (animation, asset-loaded, scene-ready, lifecycle) are queued in Rust and drained at the start of the next tick, or at frame start when no tick runs. Asynchronous work on Rust threads completes into the same queue and may surface up to one frame late. No `NativePort`/callback delivery exists in 1.0.
 
 ### 5.2 Host and threading model
 
@@ -707,7 +721,8 @@ Rules:
 | --- | --- | --- |
 | Flutter game app | Flutter frame callback on the main isolate | yes (main isolate) |
 | Standalone Rust host | winit event loop; M0 baseline and benchmarks | no |
-| Headless host | test loop, `fynkel test --headless` | Dart or Rust |
+| Rust headless host | Rust test loop; native systems and runtime contract tests only | no |
+| Dart headless game host | Dart test loop; complete game simulation including Behaviours; what `fynkel test --headless` launches for a project | yes (test isolate) |
 | Fynkel Editor | Flutter frame callback; edit-preview world | yes |
 
 **Dart gameplay runs on the main Flutter isolate and calls `step()` synchronously** (ADR-0008). This is a deliberate simplicity choice for a solo-developer M1, not a permanent constraint. A dedicated gameplay isolate and/or a Rust simulation thread with a command/snapshot handshake remain possible because the protocol is already message-shaped. Migration trigger: measured Dart gameplay time on the reference game or stress benchmark that causes HUD frame drops the frame budget cannot absorb. Record the migration in a new ADR when it happens.
@@ -1167,6 +1182,8 @@ Support:
 
 Flutter UI consumes its own interactions first. Fynkel receives the remaining mapped game actions according to explicit focus rules.
 
+Action state has two parts: **held** values (buttons down, axes) that every fixed tick sees, and **edges** (`pressed`/`released`) that exactly one fixed tick consumes (§5.1). A jump pressed once during a frame that runs three catch-up ticks triggers one jump.
+
 The public `Input` convenience API may be static-looking, but it resolves through the active `GameContext` service, making it replaceable in tests and preventing process-global gameplay state.
 
 ## 10. UI model
@@ -1391,7 +1408,7 @@ fynkel create my_game
 cd my_game
 
 fynkel doctor
-fynkel codegen        # wraps build_runner; generated files are committed
+fynkel codegen        # runs both generators (native schema + behaviour/build_runner); output is committed
 fynkel run
 fynkel test
 
@@ -1472,7 +1489,7 @@ fynkel scene apply --patch patch.json --dry-run --json
 fynkel asset import assets/models/player.glb --json
 fynkel validate --json
 
-fynkel test --headless --steps 600 --seed 42 --json   # full simulation, no renderer, no GPU needed
+fynkel test --headless --steps 600 --seed 42 --json   # Dart headless game host: full simulation incl. Behaviours, no renderer/GPU
 fynkel run --test-profile reference
 fynkel capture --scene Playground --output preview.png  # renders offscreen; requires a GPU
 fynkel state dump --json                                 # world state after a headless run
@@ -1704,7 +1721,7 @@ Browser product work is not on the 1.0 critical path.
 - Repository/monorepo structure, toolchain/version lock, ADR files.
 - Standalone Rust/wgpu/winit host rendering a lit cube on macOS/Metal; this is the overhead baseline.
 - Flutter (Impeller) macOS app presenting the same cube through **Path A**: IOSurface-backed `CVPixelBuffer` → `CVMetalTextureCache` → `wgpu-hal` texture import.
-- **One** fallback path (C or D) far enough to compare risk.
+- **Path C** (engine-owned surface with Flutter composed as a native layer on top) far enough to compare risk. Path C is the only production fallback. Path D (separate window) is prototyped only as the Editor Play mechanism and **cannot satisfy the game-host gate**, because it does not prove Flutter HUD over the Fynkel 3D world.
 - Resize/DPI/minimize/background/dispose stress harness.
 - Flutter overlay + pointer/keyboard focus test over the viewport.
 - Frame-time instrumentation on both hosts; M0 benchmark manifest and capture script.
@@ -1713,14 +1730,15 @@ Browser product work is not on the 1.0 critical path.
 
 **Gate**
 
-- A readback-free Path A (or approved fallback) composites correctly under Flutter overlays with controllable input.
+- A readback-free **Path A or Path C** composites Flutter UI over the 3D world correctly, with controllable input. Path D does not count.
+- The Metal synchronization contract is demonstrated, not assumed (ADR-0002): wgpu and the imported texture share the same `MTLDevice`; IOSurface-backed `CVPixelBuffer` ring of 2–3 buffers; GPU completion/fence ownership so Flutter never samples a buffer wgpu is still rendering into; Flutter raster-thread lifetime respected; resize reallocates the ring without tearing or use-after-free.
 - Measured composition overhead is recorded; ≤1.5 ms p95 is the target, modest overshoot is accepted and written down.
 - Resize/DPI/lifecycle behaviour is reliable under repeat testing.
 - The C ABI round-trip works from Dart with `ffigen`-generated bindings.
 
 **Kill/fallback rule**
 
-- If Path A fails a hard criterion (readback, >1 frame latency, unreliable lifecycle, overlay/input failure), move to the fallback path.
+- If Path A fails a hard criterion (readback, >1 frame latency, unreliable lifecycle, overlay/input failure, device mismatch that cannot be contained), move to Path C.
 - If every practical composition path fails, stop and redesign the host architecture before M1.
 
 **Explicitly not in M0**
@@ -1783,7 +1801,7 @@ Browser product work is not on the 1.0 critical path.
 - glTF/GLB importer;
 - texture/audio import baseline;
 - content-addressed/incremental cache keys;
-- `fynkel codegen` (`build_runner`) producing the committed Dart behaviour registry and Inspector metadata (ADR-0012);
+- `fynkel codegen`: one user-facing command wrapping **two independent generators** (ADR-0012) — (a) the native schema generator: Rust component definitions → JSON Schema + Dart native component API + wire codecs; (b) the behaviour generator: Dart `@FynkelBehaviour` classes → `build_runner` → factories, field serializers, Inspector metadata. Separate incremental caches and test fixtures;
 - `fynkel_document` authoring command crate and CLI validation (ADR-0016);
 - `fynkel create` including the `AGENTS.md` template (ADR-0017).
 
@@ -2134,9 +2152,9 @@ Track at least these issues (ADR-0002 scope):
 2. Freeze §1.2 reference-game spec with the Tier 1/Tier 2 split.
 3. Build the standalone macOS/Metal wgpu/winit host with a lit cube.
 4. Record the standalone frame/presentation baseline.
-5. Build the Flutter (Impeller) macOS app with Path A: IOSurface `CVPixelBuffer` → `CVMetalTextureCache` → `wgpu-hal` import.
+5. Build the Flutter (Impeller) macOS app with Path A: IOSurface `CVPixelBuffer` → `CVMetalTextureCache` → `wgpu-hal` import, on the same `MTLDevice` as wgpu, with a 2–3 buffer ring and GPU completion ownership.
 6. Measure copies, latency, and composition overhead against the baseline.
-7. Prototype one fallback path (engine-owned surface/view or separate window) far enough to compare.
+7. Prototype Path C (engine-owned surface, Flutter as native overlay layer) far enough to compare. Path D is prototyped only as the Editor Play window.
 8. Add the resize/DPI/minimize/background/dispose stress harness.
 9. Add the Flutter overlay + pointer/keyboard focus test.
 10. Define the C ABI v0 header and generate Dart bindings with `ffigen`.

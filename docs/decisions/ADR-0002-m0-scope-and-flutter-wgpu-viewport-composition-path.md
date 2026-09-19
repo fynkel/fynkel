@@ -10,7 +10,17 @@ The single highest architectural risk is compositing Rust/wgpu output under Flut
 
 ## Decision
 
-M0 validates **macOS + Metal + Flutter Impeller only**. It builds a standalone winit/wgpu baseline, a Flutter Path A prototype (IOSurface-backed `CVPixelBuffer` → `CVMetalTextureCache` → `wgpu-hal` texture import), one fallback path (C or D), lifecycle/overlay/input harnesses, a C ABI round-trip with `ffigen`, and a benchmark manifest.
+M0 validates **macOS + Metal + Flutter Impeller only**. It builds a standalone winit/wgpu baseline, a Flutter Path A prototype (IOSurface-backed `CVPixelBuffer` → `CVMetalTextureCache` → `wgpu-hal` texture import), a Path C prototype, lifecycle/overlay/input harnesses, a C ABI round-trip with `ffigen`, and a benchmark manifest.
+
+**Metal synchronization contract (must be demonstrated, not assumed).** `wgpu` only accepts a wrapped `wgpu-hal` texture that originates from the same device it created, with a correct descriptor. Therefore M0 must prototype and test:
+
+- the imported texture and the wgpu device share the **same `MTLDevice`** (asserted at startup; failure is a hard kill for Path A);
+- an IOSurface-backed `CVPixelBuffer` **ring of 2–3 buffers**;
+- **GPU completion/fence ownership**: a buffer is handed to Flutter only after the wgpu command buffer rendering into it has completed; Flutter never samples a buffer wgpu is still writing;
+- Flutter raster-thread lifetime: texture callbacks may run on Flutter's raster thread; no wgpu device access from there beyond handing over a finished buffer;
+- resize/DPI change reallocates the ring without tearing, stale frames, or use-after-free.
+
+**Path C is the only production fallback.** Path D (separate player window) is prototyped only as the Editor Play mechanism; it cannot satisfy the game-host gate because it does not demonstrate Flutter HUD composited over the Fynkel 3D world.
 
 The 1.5 ms p95 composition budget is provisional. A readback-free Path A that lands modestly over it (e.g. ~2.5 ms) is accepted and the measured number recorded here. Hard kills are: full-frame readback, more than one frame of unexplained latency, unreliable resize/DPI/lifecycle, overlay/input failures, or resource-ownership conflicts.
 
@@ -19,6 +29,7 @@ Removed from M0: any second graphics backend, the Wasm/WebGPU spike, `fynkel_ecs
 ## Alternatives considered
 
 - Full Windows/D3D12 viewport in M0: rejected; doubles interop work before the first question is answered.
+- Accepting Path D as the game-host gate: rejected; it would leave the core Fynkel promise (Flutter UI over the 3D world) unproven.
 - Wasm spike: rejected; `wgpu` already targets WebGPU and browser is post-1.0.
 
 ## Consequences
