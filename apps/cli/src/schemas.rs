@@ -58,25 +58,6 @@ fn find_workspace(start: &Path) -> Option<PathBuf> {
     }
 }
 
-/// The project a document belongs to: the nearest ancestor directory of
-/// `path` holding `fynkel.project.json`.
-pub fn project_dir_of(path: &Path) -> Option<PathBuf> {
-    let abs = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        std::env::current_dir().ok()?.join(path)
-    };
-    let mut dir = abs.parent()?.to_path_buf();
-    loop {
-        if dir.join(fynkel_document::project::PROJECT_FILE).is_file() {
-            return Some(dir);
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
-}
-
 /// [`load`], then the project's own behaviour schemas and registry when
 /// `path` lies inside a project (so a scene's `game.*` components validate
 /// against their generated schemas instead of warning `FYN-D0205`). A
@@ -89,7 +70,7 @@ pub fn load_for(
     path: &Path,
 ) -> Result<SchemaSet, Diagnostic> {
     let base = load(root, explicit)?;
-    let Some(dir) = project_dir_of(path) else {
+    let Some(dir) = fynkel_document::Project::dir_of(path) else {
         return Ok(base);
     };
     match fynkel_document::Project::read(&dir) {

@@ -108,8 +108,9 @@ fn project_and_scene_load_through_the_abi() {
         .map(|d| d["code"].as_str().unwrap())
         .collect();
     assert!(codes.contains(&"FYN-D0401"), "unknown prefab: {codes:?}");
-    // Without a project nobody knows `game.Spinner`: warned, not fatal.
-    assert!(codes.contains(&"FYN-D0205"), "{codes:?}");
+    // The file lies inside the fixture project, so `game.Spinner` is known
+    // from the project's schemas even on a bare-file load (M2-18).
+    assert!(!codes.contains(&"FYN-D0205"), "{codes:?}");
     assert_eq!(host.live(), 4, "a failed load leaves the world alone");
     // Loading again adds a second instance of the scene (ids are per load).
     let s = unsafe { fynkel_world_load_project(host.w, dir.as_ptr(), dir.len() as u32) };

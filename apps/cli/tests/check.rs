@@ -174,6 +174,24 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["ok"], false);
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0200");
+
+    // A scene inside a project validates its behaviour components against
+    // the project's schemas: the fixture Robot's game.Spinner is known, not
+    // a D0205 warning (M2-18).
+    let in_project =
+        root.join("crates/fynkel_document/fixtures/project/assets/scenes/main.scene.json");
+    let prefabs = root.join("crates/fynkel_document/fixtures/project/assets/prefabs");
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["test", "--headless", "--steps", "1", "--json", "--scene"])
+        .arg(&in_project)
+        .arg("--prefabs")
+        .arg(&prefabs)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["scene"]["entities"], 4);
+    assert_eq!(v["scene"]["document_diagnostics"], serde_json::json!([]));
 }
 
 #[test]

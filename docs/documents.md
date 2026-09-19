@@ -719,7 +719,9 @@ the build (identical to `schemas/` by `fynkel codegen --check`); `--schemas
 <dir>` overrides either. Scene and prefab commands run on a document inside
 a project (`fynkel.project.json` in an ancestor directory) with that
 project's behaviour schemas and registry, so `game.*` components validate
-instead of warning `FYN-D0205`. `fynkel test --headless` and `fynkel state
+instead of warning `FYN-D0205`; `read_scene` (behind `--scene`,
+`fynkel_world_load_scene` and `World.loadScene`) does the same for a scene
+file inside a project. `fynkel test --headless` and `fynkel state
 dump` take `--project <dir>` (the startup scene through `load_project`,
 prefabs and behaviour schemas included) and default to the current
 directory when it holds a project file.

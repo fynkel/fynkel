@@ -153,18 +153,24 @@ fn diag(
     d
 }
 
-/// Reads, validates (embedded schemas), expands prefab instances (from
-/// `prefabs`, a directory scanned for `*.prefab.json`) and describes a
-/// scene document. `Err` carries every diagnostic when any is an error;
-/// `Ok` carries the description, the authored behaviours and the warnings.
-/// No project is involved, so every non-native type is an unknown one
-/// (`FYN-D0205`) whose data is still handed over.
+/// Reads, validates, expands prefab instances (from `prefabs`, a directory
+/// scanned for `*.prefab.json`) and describes a scene document. `Err`
+/// carries every diagnostic when any is an error; `Ok` carries the
+/// description, the authored behaviours and the warnings. A scene inside a
+/// project validates against that project's behaviour schemas and registry
+/// (like `load_project`); elsewhere, or when the project file does not
+/// read, against the embedded set alone, so every non-native type is an
+/// unknown one (`FYN-D0205`) whose data is still handed over.
 pub fn read_scene(path: &Path, prefabs: Option<&Path>) -> Result<DescribedScene, Vec<Diagnostic>> {
     let (library, scan) = match prefabs {
         Some(dir) => PrefabLibrary::scan(dir),
         None => (PrefabLibrary::empty(), Vec::new()),
     };
-    read_scene_with(path, &library, &SchemaSet::embedded(), scan)
+    let schemas = Project::dir_of(path)
+        .and_then(|dir| Project::read(&dir).ok().map(|p| (dir, p)))
+        .and_then(|(dir, p)| project_schemas(&dir, &p).ok())
+        .unwrap_or_else(SchemaSet::embedded);
+    read_scene_with(path, &library, &schemas, scan)
 }
 
 fn read_scene_with(
@@ -189,12 +195,14 @@ fn read_scene_with(
         return Err(diagnostics);
     }
     let described = describe(&scene, schemas);
-    // `describe` repeats the unknown-type warning; keep one per pointer.
+    // `describe` repeats the unknown-type warning; keep one per pointer
+    // (a set, not a scan: a scene may carry thousands of them).
+    let mut seen: std::collections::HashSet<(Code, Option<String>)> = diagnostics
+        .iter()
+        .map(|d| (d.code, d.pointer.clone()))
+        .collect();
     for d in described.diagnostics {
-        if !diagnostics
-            .iter()
-            .any(|x| x.code == d.code && x.pointer == d.pointer)
-        {
+        if seen.insert((d.code, d.pointer.clone())) {
             diagnostics.push(d);
         }
     }

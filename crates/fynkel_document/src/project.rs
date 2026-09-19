@@ -279,6 +279,25 @@ impl Project {
         }
     }
 
+    /// The project a file belongs to: the nearest ancestor directory of
+    /// `path` holding `fynkel.project.json`, or `None` outside any project.
+    pub fn dir_of(path: &Path) -> Option<PathBuf> {
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir().ok()?.join(path)
+        };
+        let mut dir = abs.parent()?.to_path_buf();
+        loop {
+            if dir.join(PROJECT_FILE).is_file() {
+                return Some(dir);
+            }
+            if !dir.pop() {
+                return None;
+            }
+        }
+    }
+
     /// Reads `<dir>/fynkel.project.json`.
     pub fn read(dir: &Path) -> Result<Project, Vec<Diagnostic>> {
         let path = dir.join(PROJECT_FILE);

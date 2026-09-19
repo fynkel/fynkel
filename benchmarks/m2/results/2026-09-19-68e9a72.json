@@ -1,0 +1,175 @@
+{
+  "profile": {
+    "profile": "mac-m3max-2026",
+    "frozen": "2026-09-19",
+    "machine": {
+      "model": "MacBook Pro 16-inch, Apple M3 Max",
+      "cpu": "Apple M3 Max, 14 cores",
+      "gpu": "Apple M3 Max, 30 cores, Metal 4",
+      "ram_gib": 36,
+      "display": "built-in 3456x2234 Retina, 120 Hz ProMotion, scale 2.0"
+    },
+    "os": "macOS 26.5.1",
+    "graphics_backend": "Metal (wgpu 30.0.1)",
+    "toolchain": {
+      "rust": "1.93.0 aarch64-apple-darwin",
+      "flutter": "3.47.2 (Impeller)",
+      "dart": "3.13.2",
+      "xcode": "26.5 (17F42)"
+    },
+    "resolution": {
+      "standalone_window_logical": [
+        1280,
+        720
+      ],
+      "flutter_window_logical": [
+        1200,
+        820
+      ],
+      "flutter_viewport_physical_note": "window minus host bar, times dpr 2.0; recorded per run"
+    },
+    "quality": "M0 cube scene, no MSAA, Depth32Float, Bgra8Unorm, Fifo/vsync",
+    "scene_version": "fynkel_m0_scene 0.0.1 (one lit cube)",
+    "warm_up_seconds": 2,
+    "sample_seconds": 10,
+    "capture_command": "python3 benchmarks/m0/capture.py",
+    "power": "capture on mains power, no other GPU-heavy apps; display at native scaling"
+  },
+  "environment": {
+    "captured_at": "2026-09-19T22:02:32+02:00",
+    "commit": "68e9a72",
+    "dirty": true,
+    "os": "26.5.1",
+    "cpu": "Apple M3 Max",
+    "ram_gib": 36,
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "dart": "Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on \"macos_arm64\""
+  },
+  "runs": 10,
+  "validate": {
+    "baseline_schema_list": {
+      "min_ms": 8.01,
+      "p50_ms": 8.37,
+      "runs": 10
+    },
+    "fixture_project": {
+      "min_ms": 11.65,
+      "p50_ms": 12.53,
+      "runs": 10,
+      "documents": 3,
+      "sources": 3
+    },
+    "starter_project": {
+      "min_ms": 11.59,
+      "p50_ms": 12.22,
+      "runs": 10,
+      "documents": 2,
+      "sources": 2
+    },
+    "scene_1000": {
+      "min_ms": 26.22,
+      "p50_ms": 26.87,
+      "runs": 10,
+      "entities": 1000
+    },
+    "scene_10000": {
+      "min_ms": 237.46,
+      "p50_ms": 241.6,
+      "runs": 10,
+      "entities": 10000
+    }
+  },
+  "scene_load": {
+    "fixture_project": {
+      "min_ms": 10.84,
+      "p50_ms": 11.7,
+      "runs": 10,
+      "entities": 4
+    },
+    "starter_project": {
+      "min_ms": 10.7,
+      "p50_ms": 11.35,
+      "runs": 10,
+      "entities": 3
+    },
+    "scene_1000": {
+      "min_ms": 26.83,
+      "p50_ms": 27.18,
+      "runs": 10,
+      "entities": 1000
+    },
+    "scene_10000": {
+      "min_ms": 253.53,
+      "p50_ms": 255.04,
+      "runs": 10,
+      "entities": 10000
+    }
+  },
+  "import": {
+    "robot_glb": {
+      "min_ms": 9.2,
+      "p50_ms": 9.85,
+      "runs": 10,
+      "bytes": 4108
+    },
+    "grid_glb": {
+      "min_ms": 14.77,
+      "p50_ms": 15.52,
+      "runs": 10,
+      "bytes": 2231440,
+      "vertices": 40000,
+      "triangles": 79202,
+      "path": "fixture/assets/models/grid.glb"
+    }
+  },
+  "cook": {
+    "miss_empty_cache": {
+      "min_ms": 19.67,
+      "p50_ms": 20.28,
+      "runs": 10,
+      "cooked": 6,
+      "cached": 0,
+      "assets": 6
+    },
+    "hit_unchanged": {
+      "min_ms": 11.62,
+      "p50_ms": 12.1,
+      "runs": 10,
+      "cooked": 0,
+      "cached": 6,
+      "assets": 6
+    },
+    "partial_texture_edit": {
+      "min_ms": 12.91,
+      "p50_ms": 13.19,
+      "runs": 10,
+      "cooked": 4,
+      "cached": 2,
+      "assets": 6
+    }
+  },
+  "codegen": {
+    "cold_no_dart_tool": {
+      "min_ms": 22353.34,
+      "p50_ms": 22353.34,
+      "runs": 1
+    },
+    "warm": {
+      "min_ms": 973.56,
+      "p50_ms": 1007.77,
+      "runs": 3
+    },
+    "check_warm": {
+      "min_ms": 997.82,
+      "p50_ms": 1008.96,
+      "runs": 3
+    }
+  },
+  "create": {
+    "no_flutter": {
+      "min_ms": 9.18,
+      "p50_ms": 9.35,
+      "runs": 3
+    }
+  }
+}
