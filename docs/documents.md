@@ -22,7 +22,7 @@ Every document is one JSON object:
 | Field | Rule |
 | --- | --- |
 | `$schema` | optional string; should name `<kind>.schema.json` (warning `FYN-D0014` otherwise). Either the canonical URL or a relative path is accepted. |
-| `formatVersion` | integer ≥ 1. Newer than the tool supports → `FYN-D0013`, the document is **read-only**: it can be read and validated, never rewritten. |
+| `formatVersion` | integer ≥ 0. Newer than the tool supports → `FYN-D0013`, the document is **read-only**: it is refused, never rewritten. Older than the current version → `FYN-D0016`, the document is **outdated**: it can be read and migrated (`fynkel migrate`), not validated or loaded. |
 | `id` | canonical UUID text: lower-case, hyphenated, 36 characters, not nil. It is the document's persistent identity; names and paths are labels. |
 | `name` | string ≤ 256 characters. |
 
@@ -228,6 +228,31 @@ outside its range `D0310`, `min > max` `D0311`, malformed entry `D0312`.
 `Material::resolve(&library)` fills every default into a `ResolvedMaterial`
 (what `inspect` prints and the renderer will consume).
 
+## Migrations
+
+Each kind has a current `formatVersion` (`DocumentKind::supported_format_version`,
+1 for all of them today). `fynkel_document::migrate` brings older documents
+up: a `Migration` is `(kind, from, name, apply: fn(&mut Node))` and always
+steps `from → from + 1`; `Migrations::builtin()` is the ordered registry
+(`Migrations::path(kind, from, to)` is the chain). `migrate(&doc, &registry,
+&schemas) -> Migrated` applies the chain, sets `formatVersion` after each
+step, validates the result against the current schema and returns the
+document plus `applied[]` (`scene/0-1/entities-keyed-by-id`, ...) and a
+unified diff of the canonical text (`similar`). Anything that goes wrong
+leaves the document as it was: no step for a version `FYN-D0017`, a step
+that cannot handle the document or a result the schema rejects `D0018`, a
+newer document `D0013`. `Migrated::write_with_backup(path)` copies the
+original to `<file>.bak` first and refuses when nothing changed or errors
+were reported; the diff and the `.bak` are the two ways to see what a
+migration did.
+
+The one built-in step is the synthetic **scene 0 → 1**
+(`fixtures/migrate/v0_training.scene.json` → `.migrated.json`): v0 kept
+`entities` and `components` as arrays of objects carrying their `id`; v1
+keys them by that id in the same order. Real steps follow the same shape
+when a format changes: add the `Migration`, bump the kind's version, keep
+the fixture pair.
+
 ## Asset sidecars and the asset database
 
 A **source asset** (a `.glb`, `.png`, `.wav`, ... under `assets/`) has no
@@ -278,6 +303,8 @@ fynkel shader validate <path>... [--json] [--schemas <dir>]
 fynkel asset list [--assets <dir>] [--json] [--schemas <dir>]
 fynkel asset resolve <uuid>[#<sub>]... [--assets <dir>] [--json] [--schemas <dir>]
 fynkel asset init <file>... [--json]
+fynkel migrate <path|dir>... [--dry-run] [--json] [--schemas <dir>]
+fynkel migrate --list [--json]
 fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
 fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
 ```
@@ -298,7 +325,12 @@ with its id, kind and sub-assets (`--json`: `{ ok, root, assets[],
 diagnostics }`); `asset resolve` prints the file (and sub-asset) behind each
 id (`--json` adds `resolved[]`); `asset init` writes sidecars and prints
 `id  importer  sidecar` per file (an existing sidecar is kept, with a
-warning).
+warning). `migrate` takes files or directories (every document under them,
+sidecars included); `--dry-run` prints each document's diff and writes
+nothing, otherwise changed files are rewritten with the original kept as
+`<file>.bak` (`--json`: `{ ok, dryRun, documents: [{ path, kind, from, to,
+applied[], diff, written, backup? }], diagnostics }`); `--list` shows the
+current versions and known steps.
 
 Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
 `--json` prints `{ "ok": bool, "diagnostics": [ ...records... ] }`

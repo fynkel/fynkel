@@ -24,6 +24,12 @@ impl Code {
     pub const UNSUPPORTED_FORMAT_VERSION: Code = Code("FYN-D0013");
     pub const SCHEMA_REFERENCE_MISMATCH: Code = Code("FYN-D0014");
     pub const UNKNOWN_DOCUMENT_KIND: Code = Code("FYN-D0015");
+    /// `formatVersion` older than the current one: migrate before use.
+    pub const OUTDATED_FORMAT_VERSION: Code = Code("FYN-D0016");
+    /// No chain of migrations leads from the document's version to the current one.
+    pub const NO_MIGRATION_PATH: Code = Code("FYN-D0017");
+    /// A migration step could not be applied to this document.
+    pub const MIGRATION_FAILED: Code = Code("FYN-D0018");
     // Documents (FYN-D): JSON Schema.
     pub const SCHEMA_VIOLATION: Code = Code("FYN-D0100");
     pub const SCHEMA_UNAVAILABLE: Code = Code("FYN-D0101");

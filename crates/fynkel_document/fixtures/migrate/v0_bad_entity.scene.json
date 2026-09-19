@@ -1,0 +1,14 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 0,
+  "id": "b0000000-0000-4000-8000-000000000002",
+  "name": "Broken v0",
+  "entities": [
+    {
+      "name": "No id",
+      "parent": null,
+      "children": [],
+      "components": []
+    }
+  ]
+}

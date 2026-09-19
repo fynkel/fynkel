@@ -1,0 +1,87 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 0,
+  "id": "b0000000-0000-4000-8000-000000000001",
+  "name": "Training room (v0)",
+  "editorNotes": "written by the v0 tool; arrays instead of keyed objects",
+  "entities": [
+    {
+      "id": "b0000000-0000-4000-8000-0000000000e1",
+      "name": "Root",
+      "parent": null,
+      "children": [
+        "b0000000-0000-4000-8000-0000000000e2"
+      ],
+      "components": [
+        {
+          "id": "b0000000-0000-4000-8000-0000000000c1",
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "b0000000-0000-4000-8000-0000000000e2",
+      "name": "Light",
+      "parent": "b0000000-0000-4000-8000-0000000000e1",
+      "children": [],
+      "components": [
+        {
+          "id": "b0000000-0000-4000-8000-0000000000c2",
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              3,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        {
+          "id": "b0000000-0000-4000-8000-0000000000c3",
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1,
+              0.9,
+              0.8
+            ],
+            "intensity": 20,
+            "range": 10
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -6,7 +6,7 @@
   "type": "object",
   "properties": {
     "$schema": { "type": "string" },
-    "formatVersion": { "type": "integer", "minimum": 1 },
+    "formatVersion": { "type": "integer", "minimum": 0, "description": "Layout version of the body; below the current version the document is outdated (fynkel migrate), above it read-only." },
     "id": { "$ref": "#/$defs/uuid" },
     "name": { "type": "string", "maxLength": 256 },
     "description": { "type": "string" },

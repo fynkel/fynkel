@@ -389,3 +389,106 @@ fn asset_commands_list_resolve_and_init() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("textures/new.png"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn migrate_dry_runs_then_writes_with_backup() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = root.join("crates/fynkel_document/fixtures/migrate");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let out = run(&["migrate", "--list", "--json"]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["current"]["scene"], 1);
+    assert_eq!(v["steps"][0]["name"], "scene/0-1/entities-keyed-by-id");
+
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-migrate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("scenes")).unwrap();
+    let scene = dir.join("scenes/room.scene.json");
+    std::fs::copy(fixtures.join("v0_training.scene.json"), &scene).unwrap();
+    std::fs::copy(
+        root.join("crates/fynkel_document/fixtures/valid/rusted_metal.material.json"),
+        dir.join("current.material.json"),
+    )
+    .unwrap();
+    let original = std::fs::read(&scene).unwrap();
+
+    // Dry run over the directory: the diff is reported, nothing written.
+    let out = run(&["migrate", "--dry-run", "--json", dir.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["dryRun"], true);
+    let docs = v["documents"].as_array().unwrap();
+    assert_eq!(docs.len(), 2);
+    assert_eq!(docs[0]["kind"], "material");
+    assert_eq!(docs[0]["applied"].as_array().unwrap().len(), 0);
+    assert_eq!(docs[1]["from"], 0);
+    assert_eq!(docs[1]["to"], 1);
+    assert_eq!(
+        docs[1]["applied"][0]["name"],
+        "scene/0-1/entities-keyed-by-id"
+    );
+    assert!(docs[1]["diff"]
+        .as_str()
+        .unwrap()
+        .contains("+  \"formatVersion\": 1,"));
+    assert_eq!(docs[1]["written"], false);
+    assert_eq!(std::fs::read(&scene).unwrap(), original);
+    assert!(!dir.join("scenes/room.scene.json.bak").exists());
+
+    // Until then the scene is refused everywhere with FYN-D0016.
+    let out = run(&["scene", "validate", "--json", scene.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0016");
+
+    // The real run writes and keeps the original next to it.
+    let out = run(&["migrate", "--json", dir.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["documents"][1]["written"], true);
+    let backup = PathBuf::from(v["documents"][1]["backup"].as_str().unwrap());
+    assert_eq!(backup, dir.join("scenes/room.scene.json.bak"));
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    assert_eq!(
+        std::fs::read_to_string(&scene).unwrap(),
+        std::fs::read_to_string(fixtures.join("v0_training.scene.migrated.json")).unwrap()
+    );
+    let out = run(&["scene", "validate", scene.to_str().unwrap()]);
+    assert!(out.status.success());
+    let out = run(&[
+        "state",
+        "dump",
+        "--json",
+        "--scene",
+        scene.to_str().unwrap(),
+    ]);
+    assert!(out.status.success());
+
+    // Errors: a document from a newer tool is reported and untouched.
+    let newer = dir.join("future.scene.json");
+    std::fs::copy(fixtures.join("newer.scene.json"), &newer).unwrap();
+    let before = std::fs::read(&newer).unwrap();
+    let out = run(&["migrate", "--json", newer.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0013");
+    assert_eq!(std::fs::read(&newer).unwrap(), before);
+    assert!(!dir.join("future.scene.json.bak").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

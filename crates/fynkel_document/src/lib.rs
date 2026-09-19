@@ -23,6 +23,7 @@ pub mod codec;
 pub mod generated;
 pub mod json;
 pub mod material;
+pub mod migrate;
 pub mod prefab;
 pub mod runtime;
 pub mod scene;
@@ -35,6 +36,7 @@ pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
 pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
+pub use migrate::{migrate, Migrated, Migration, Migrations};
 pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
 pub use runtime::{describe, DescribedScene};
 pub use scene::Scene;
@@ -235,6 +237,31 @@ impl Document {
     /// per kind are layered on by the kind modules (M2-03 onwards).
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = Vec::new();
+        if self.is_outdated() {
+            // The body follows an older layout; the current schema would
+            // only produce noise. `fynkel migrate` brings it up to date.
+            let d = Diagnostic::error(
+                Code::OUTDATED_FORMAT_VERSION,
+                format!(
+                    "formatVersion {} is older than the current {}; the document must be migrated before it can be validated or loaded",
+                    self.envelope.format_version,
+                    self.kind.supported_format_version()
+                ),
+            )
+            .with_pointer("/formatVersion")
+            .with_suggestion(format!(
+                "run `fynkel migrate {}` (add --dry-run to preview the change)",
+                self.path.as_deref().unwrap_or("<path>")
+            ));
+            let d = match self.root.pointer_span("/formatVersion") {
+                Some(s) => d.at(s.start.line, s.start.column),
+                None => d,
+            };
+            return vec![match &self.path {
+                Some(p) => d.with_document(p.clone()),
+                None => d,
+            }];
+        }
         let (_, envelope_diags) = parse_envelope(self.kind, &self.root);
         let envelope_pointers: Vec<String> = envelope_diags
             .iter()
@@ -263,6 +290,11 @@ impl Document {
     /// validated, never rewritten (§6).
     pub fn is_read_only(&self) -> bool {
         self.envelope.format_version > self.kind.supported_format_version()
+    }
+
+    /// True when the file follows an older layout (`fynkel migrate`).
+    pub fn is_outdated(&self) -> bool {
+        self.envelope.format_version < self.kind.supported_format_version()
     }
 
     /// Canonical text (§6). Envelope keys first, in order; everything else
@@ -355,7 +387,7 @@ pub fn parse_envelope(kind: DocumentKind, root: &Node) -> (Option<Envelope>, Vec
             None
         }
         Some(n) => match n.as_i64() {
-            Some(v) if v >= 1 && v <= u32::MAX as i64 => {
+            Some(v) if v >= 0 && v <= u32::MAX as i64 => {
                 let v = v as u32;
                 if v > kind.supported_format_version() {
                     diags.push(at(
@@ -376,7 +408,7 @@ pub fn parse_envelope(kind: DocumentKind, root: &Node) -> (Option<Envelope>, Vec
                 diags.push(at(
                     Diagnostic::error(
                         Code::ENVELOPE_WRONG_TYPE,
-                        "formatVersion must be a positive integer",
+                        "formatVersion must be a non-negative integer",
                     ),
                     "/formatVersion",
                 ));
