@@ -16,6 +16,7 @@
 // the failure path of tooling, where its size is irrelevant.
 #![allow(clippy::result_large_err)]
 
+pub mod asset;
 pub mod codec;
 #[rustfmt::skip]
 #[allow(clippy::all)]
@@ -29,6 +30,7 @@ pub mod schema;
 
 use std::path::Path;
 
+pub use asset::{AssetDatabase, AssetEntry, AssetKind, Meta, Resolved};
 pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
@@ -159,6 +161,12 @@ impl Document {
             DocumentKind::Material => {
                 members.push(("shader".into(), Node::string(material::PBR_SHADER_ID)));
                 members.push(("parameters".into(), Node::object(Vec::new())));
+            }
+            DocumentKind::Meta => {
+                members.push(("importer".into(), Node::string(asset::FILE_IMPORTER)));
+                members.push(("importerVersion".into(), Node::integer(1)));
+                members.push(("settings".into(), Node::object(Vec::new())));
+                members.push(("subAssets".into(), Node::object(Vec::new())));
             }
             _ => {}
         }

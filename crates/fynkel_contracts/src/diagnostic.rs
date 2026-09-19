@@ -74,6 +74,20 @@ impl Code {
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 
+    // Assets (`FYN-A####`, blueprint §19.2c item 8): the asset database.
+    /// A source file under `assets/` has no `.meta.json` sidecar.
+    pub const ASSET_MISSING_SIDECAR: Code = Code("FYN-A0001");
+    /// A `.meta.json` whose source file is gone (moved without it, or deleted).
+    pub const ASSET_ORPHANED_SIDECAR: Code = Code("FYN-A0002");
+    /// Two assets (documents, sidecars or sub-assets) claim the same id.
+    pub const ASSET_DUPLICATE_ID: Code = Code("FYN-A0003");
+    /// An `assetRef` names an id the database does not have.
+    pub const ASSET_UNRESOLVED: Code = Code("FYN-A0004");
+    /// An `assetRef` names a sub-asset its asset does not declare.
+    pub const ASSET_UNKNOWN_SUB: Code = Code("FYN-A0005");
+    /// A sidecar entry the schema accepts but the database cannot use.
+    pub const ASSET_MALFORMED_ENTRY: Code = Code("FYN-A0006");
+
     pub const fn as_str(self) -> &'static str {
         self.0
     }

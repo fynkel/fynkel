@@ -1,0 +1,16 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 1,
+  "id": "a0000000-0000-4000-8000-000000000001",
+  "name": "robot.glb",
+  "importer": "fynkel.gltf",
+  "importerVersion": 1,
+  "settings": {
+    "scale": 1
+  },
+  "subAssets": {
+    "mesh/Body": "a0000000-0000-4000-8000-000000000011",
+    "mesh/Head": "a0000000-0000-4000-8000-000000000012",
+    "material/0": "a0000000-0000-4000-8000-000000000013"
+  }
+}

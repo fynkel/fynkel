@@ -1,4 +1,4 @@
-# Engine status — 2026-09-19 (after M2-07)
+# Engine status — 2026-09-19 (after M2-08)
 
 The one-page, plain-words answer to "what do we have, is it solid, what is
 missing". Updated at every milestone gate and whenever a row below changes.
@@ -17,8 +17,8 @@ Numbers come from the gate reports (`m0-architecture-report.md`,
 | `fynkel_render` | wgpu renderer: every extracted transform drawn as a lit instanced cube, one camera, one directional light | **Seed** — real, but a fixed demo look | pixel-readback tests; runs in every host |
 | `platform/apple` + `hosts/flutter_apple` | IOSurface ring → Flutter `Texture` (Path A), 0 copies, GPU-completion hand-off; macOS + iOS | **Solid** | 120 Hz, lag 0, raster p95 0.95 ms; iPhone 16 Pro Max: GPU 1.84 ms, no drops |
 | `hosts/headless` + `hosts/standalone` | Rust hosts: deterministic runs, `--scene`, state dump; winit window | **Solid** | CLI tests |
-| `fynkel_document` | Strict JSON with spans, envelope, JSON Schema 2020-12, §14.2 diagnostics; scene, prefab, material, shader documents; prefab expansion; scene → runtime | **Solid** | fixture corpora with exact code/line/column expectations (valid, unknown, invalid, scene, prefab, material) |
-| `apps/cli` | `fynkel codegen`, `schema`, `test --headless`, `state dump`, `document`, `scene`, `prefab`, `material`, `shader` — all with `--json` | **Solid** | CLI tests |
+| `fynkel_document` | Strict JSON with spans, envelope, JSON Schema 2020-12, §14.2 diagnostics; scene, prefab, material, shader documents and `.meta.json` sidecars; prefab expansion; asset database (scan, resolve, reference check); scene → runtime | **Solid** | fixture corpora with exact code/line/column expectations (valid, unknown, invalid, scene, prefab, material, assets incl. the move test) |
+| `apps/cli` | `fynkel codegen`, `schema`, `test --headless`, `state dump`, `document`, `scene`, `prefab`, `material`, `shader`, `asset` — all with `--json` | **Solid** | CLI tests |
 
 Size: ≈23 k lines (Rust 17.4 k, Dart 5.1 k, Swift/ObjC 0.9 k) over 31 commits.
 
@@ -39,7 +39,7 @@ Size: ≈23 k lines (Rust 17.4 k, Dart 5.1 k, Swift/ObjC 0.9 k) over 31 commits.
 | --- | --- | --- |
 | **No file reaches the screen.** The Flutter host renders its own Dart demo scene; it cannot open a `.scene.json`. Only the headless host loads documents. | The "author a scene, see it" loop — the whole point — is not one line yet. | M2-17 template project + **M3 first item** |
 | **The renderer ignores materials, lights and cameras from documents.** `Camera`, `MeshRenderer`, `DirectionalLight`, `PointLight`, materials and the `fynkel.pbr@1` manifest are stored and validated, nothing consumes them. | The material system is an interface with no implementation behind it. | M3 (renderer V1) |
-| **No meshes, textures or audio.** No importer, no asset database, no cache. | Nothing but cubes can be shown. | M2-08, M2-10..12 |
+| **No meshes, textures or audio.** Assets have identity (sidecars, database) but no importer and no cache: nothing reads the bytes yet. | Nothing but cubes can be shown. | M2-10..12 |
 | **No input contract** (§5.1 held-state + edge). | Games cannot be played yet. | M3 (C2) |
 | **No migrations, no project file, no authoring commands, no behaviour SDK.** Prefabs exist (M2-07) but only expand headlessly; the editor cannot apply/revert overrides yet. | The editor (M4) has nothing to stand on. | M2-09, 13, 14, 15, 16 (apply/revert: M4) |
 | **Everything runs on the Flutter UI thread** (step, extract, render). | Fine at current sizes; ADR-0007 allows a render thread later, so extraction must stay cheap. | M5 |
@@ -91,7 +91,7 @@ screen, the authoring side is a well-tested promise.
 
 Order of work:
 
-1. **Finish M2 lean** (items 8–18: asset db, migrations, importers,
+1. **Finish M2 lean** (items 9–18: migrations, importers,
    cache, project, commands, behaviours, template). Each is a dependency of
    the editor; none should grow beyond its blueprint line.
 2. **M2 gate (item 18)** — the built-in stop-and-look moment; this page gets

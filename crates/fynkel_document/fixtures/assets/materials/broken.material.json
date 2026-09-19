@@ -1,0 +1,20 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 1,
+  "id": "a0000000-0000-4000-8000-000000000021",
+  "name": "Broken",
+  "shader": "fynkel.pbr@1",
+  "parameters": {},
+  "textures": {
+    "baseColor": {
+      "texture": {
+        "asset": "a0000000-0000-4000-8000-0000000000ee"
+      }
+    },
+    "normal": {
+      "texture": {
+        "asset": "a0000000-0000-4000-8000-000000000003"
+      }
+    }
+  }
+}

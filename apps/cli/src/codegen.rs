@@ -25,7 +25,11 @@ pub const PREFAB_SCHEMA: &str = "schemas/prefab.schema.json";
 /// Document schemas maintained by hand under `schemas/` (no Rust source of
 /// truth) that `fynkel_document` still embeds; the envelope is embedded by
 /// `SchemaSet` itself.
-pub const HAND_WRITTEN_SCHEMAS: &[&str] = &["material.schema.json", "shader.schema.json"];
+pub const HAND_WRITTEN_SCHEMAS: &[&str] = &[
+    "material.schema.json",
+    "shader.schema.json",
+    "meta.schema.json",
+];
 pub const ENVELOPE_ID: &str = "https://fynkel.dev/schemas/envelope.schema.json";
 
 pub fn run(root: &Path, check: bool) -> Result<Outcome, String> {

@@ -228,6 +228,39 @@ outside its range `D0310`, `min > max` `D0311`, malformed entry `D0312`.
 `Material::resolve(&library)` fills every default into a `ResolvedMaterial`
 (what `inspect` prints and the renderer will consume).
 
+## Asset sidecars and the asset database
+
+A **source asset** (a `.glb`, `.png`, `.wav`, ... under `assets/`) has no
+envelope of its own, so its identity lives in a sidecar next to it:
+`<file>.meta.json` (`schemas/meta.schema.json`, hand-written; ADR-0006).
+Besides the envelope (`name` defaults to the file name) it holds
+`importer` (namespaced id chosen from the extension: `fynkel.gltf`,
+`fynkel.image`, `fynkel.audio`, `fynkel.file` for anything else),
+`importerVersion`, importer-defined `settings`, and `subAssets` — sub-asset
+id (`mesh/Body`, `material/0`; the `sub` of an `assetRef`) → that
+sub-asset's own stable uuid, written on first import and kept across
+re-imports. Documents (`.scene.json`, `.prefab.json`, `.material.json`,
+`.shader.json`) are their own identity and have no sidecar.
+`fynkel asset init <file>` writes a fresh sidecar (new v4 id); moving an
+asset means moving the file **and** its sidecar — the id, and every
+`assetRef` to it, survive because references never hold a path. A copy
+needs a new sidecar: two files sharing an id is an error.
+
+`fynkel_document::AssetDatabase::scan(dir, schemas)` is the asset database:
+a walk of the tree (hidden files skipped, path order), nothing persisted,
+so it can never disagree with the committed files. Each entry is
+`{ id, path, name, kind: document(kind) | source{importer, version},
+subAssets }`; `get(id)`, `by_path`, and `resolve(&AssetRef)` (the asset by
+id, then `sub` against its declared sub-assets; a sub-asset's own uuid
+resolves to the same place). `check_references(&Document)` finds every
+`assetRef`-shaped object in a document (nil ids mean "unset" and are
+skipped) and reports the ones that do not resolve, anchored at the
+reference — the project-wide check in `fynkel validate` (M2-13) builds on
+it. Codes: source file without a sidecar `FYN-A0001`, sidecar without a
+source `A0002`, duplicate id (across documents, sidecars and sub-assets;
+the first path wins) `A0003`, unknown asset `A0004`, unknown sub-asset
+`A0005`, malformed sidecar entry `A0006`.
+
 ## CLI
 
 ```sh
@@ -242,6 +275,9 @@ fynkel material inspect <path> [--json] [--schemas <dir>] [--shader <manifest>].
 fynkel material validate <path>... [--json] [--schemas <dir>] [--shader <manifest>]...
 fynkel shader inspect <path> | --builtin <shaderId> [--json]
 fynkel shader validate <path>... [--json] [--schemas <dir>]
+fynkel asset list [--assets <dir>] [--json] [--schemas <dir>]
+fynkel asset resolve <uuid>[#<sub>]... [--assets <dir>] [--json] [--schemas <dir>]
+fynkel asset init <file>... [--json]
 fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
 fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
 ```
@@ -257,6 +293,12 @@ manifest parameter with its value, `(default)` where the material did not set
 it; every slot with its binding or fallback); `--shader` adds custom manifests
 to the built-in library (a manifest with errors is reported and left out).
 `shader inspect --builtin fynkel.pbr@1` shows the built-in interface.
+`asset list` scans `assets/` (or `--assets <dir>`) and prints every asset
+with its id, kind and sub-assets (`--json`: `{ ok, root, assets[],
+diagnostics }`); `asset resolve` prints the file (and sub-asset) behind each
+id (`--json` adds `resolved[]`); `asset init` writes sidecars and prints
+`id  importer  sidecar` per file (an existing sidecar is kept, with a
+warning).
 
 Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
 `--json` prints `{ "ok": bool, "diagnostics": [ ...records... ] }`

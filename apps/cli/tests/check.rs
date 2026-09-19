@@ -307,3 +307,85 @@ fn prefab_commands_validate_inspect_and_expand() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0401");
 }
+
+#[test]
+fn asset_commands_list_resolve_and_init() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = root.join("crates/fynkel_document/fixtures/assets");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let assets = fixtures.to_str().unwrap();
+
+    let out = run(&["asset", "list", "--json", "--assets", assets]);
+    assert_eq!(out.status.code(), Some(1), "the corpus has errors");
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["assets"].as_array().unwrap().len(), 6);
+    assert_eq!(v["assets"][2]["path"], "models/robot.glb");
+    assert_eq!(v["assets"][2]["importer"], "fynkel.gltf");
+    assert_eq!(
+        v["assets"][2]["subAssets"]["mesh/Body"],
+        "a0000000-0000-4000-8000-000000000011"
+    );
+    assert_eq!(v["assets"][1]["document"], "material");
+    let codes: Vec<&str> = v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["FYN-A0003", "FYN-A0001", "FYN-A0002", "FYN-A0003"]);
+
+    let out = run(&[
+        "asset",
+        "resolve",
+        "--json",
+        "--assets",
+        assets,
+        "a0000000-0000-4000-8000-000000000001#mesh/Head",
+        "a0000000-0000-4000-8000-000000000001#mesh/Nope",
+    ]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["resolved"].as_array().unwrap().len(), 1);
+    assert_eq!(v["resolved"][0]["path"], "models/robot.glb");
+    assert_eq!(v["resolved"][0]["sub"]["id"], "mesh/Head");
+    assert!(v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "FYN-A0005"));
+
+    // init: a fresh tree with one source file → sidecar → clean list.
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-asset-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("textures")).unwrap();
+    let png = dir.join("textures/new.png");
+    std::fs::write(&png, b"png").unwrap();
+    let out = run(&["asset", "init", "--json", png.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["written"][0]["importer"], "fynkel.image");
+    let id = v["written"][0]["id"].as_str().unwrap().to_string();
+    assert!(dir.join("textures/new.png.meta.json").is_file());
+    // Running it again keeps the sidecar (warning, exit 0).
+    let out = run(&["asset", "init", "--json", png.to_str().unwrap()]);
+    assert!(out.status.success());
+    let out = run(&["asset", "list", "--json", "--assets", dir.to_str().unwrap()]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["assets"][0]["id"], id);
+    let out = run(&["asset", "resolve", "--assets", dir.to_str().unwrap(), &id]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("textures/new.png"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
