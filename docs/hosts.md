@@ -87,13 +87,22 @@ has no AppKit/UIKit dependency and the hook cross-compiles it for
   (`FynkelDiagnostic.isInformational`): reported through `onDiagnostics`,
   never thrown.
 
-Measured on the iPhone 16 Pro Max simulator (debug, 1320×2508): 60 Hz
-frames, 60 fixed ticks/s, 25 entities, Dart simulate ≈ 0.09 ms, `render()`
-≈ 0.6 ms, no dropped frames, no missed deadlines. Device numbers go in
-`benchmarks/m1` once the phone run is captured (`flutter run -d <iphone>
---release`; the phone must be unlocked and trust the development
-certificate). Full iOS qualification (touch overlay, lifecycle, thermal,
-packaging) is M6.
+Measured (profile mode, 1320×2508, 24 satellites):
+
+| | iPhone 16 Pro Max (A18 Pro, iOS 26.6.1) | iPhone 16 Pro Max simulator (debug) |
+| --- | --- | --- |
+| Flutter frames | 120 Hz (ProMotion), tick interval p50 8.33 ms | 60 Hz |
+| fixed ticks/s, missed deadlines | 60, 0 | 60, 0 |
+| Dart simulate (gameplay+submit+step+snapshot) | p50 0.06 ms, p99 0.12 ms | p50 0.09 ms |
+| `render()` call (extract+encode+submit) | p50 0.41 ms, p99 0.56 ms | p50 0.62 ms |
+| submit → GPU complete | p50 1.84 ms, p99 2.51 ms | p50 1.31 ms |
+| raster acquire wait | p50 0.90 ms, max 1.89 ms | p50 0.00 ms |
+| present lag / dropped frames / stale presents | 0 / 0 / 0 | 0 / 0 / 0 |
+| Flutter raster | p50 1.73 ms, p99 2.66 ms | p50 0.99 ms |
+
+The cube renders on the device through the same interop; M1-09 gate item
+met. Full iOS qualification (touch overlay, lifecycle, thermal, packaging)
+is M6.
 
 Path C (engine-owned `CAMetalLayer`) was an M0 prototype; it is not carried
 into `platform/apple`. Its numbers remain in `benchmarks/m0/results`, its
