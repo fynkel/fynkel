@@ -2181,6 +2181,15 @@ Derived from the M1 "Build" list above; one commit per item, in this order:
 9. iOS smoke test: the cube on a device through the same interop.
 10. M1 gate report: allocation-per-frame measurement, teardown leak test, bandwidth numbers appended to the benchmark capture.
 
+**M1 carry-over (2026-09-19, from `docs/m1-gate-report.md` §5).** The M1 gate passed; these items are what the gate did not require but §5.1 and the M1 build list imply. Each is owned by the milestone named, not deferred indefinitely:
+
+- **C1 (M2, before any scene with movers is authored):** allocation-free hot-path writers on the command batch — `setPosition(entity, x, y, z)`, `setRotation`, a reusable `TransformWriter` — so per-frame transform updates never materialise `Transform`/`Vec3`/`Quat` objects. Keeps ADR-0013 (immutable values remain the read/API type). Measured driver: ≈150 B per transform write, 3.6 KB/frame at 24 movers, ≈300 KB/frame at 2 000.
+- **C2 (M3):** input capture per §5.1 — held state plus pressed/released edges consumed by exactly one fixed tick — in the hosts and the `step()` input view.
+- **C3 (M3, host profiling):** live Dart allocation and GC counters in the Flutter host's bridge diagnostics (today only the offline `tool/alloc_bench.dart` probe), and an AOT (Flutter release) allocation capture in `benchmarks/m0/capture.py`.
+- **C4 (M5, with physics):** native system registration for the pre-tick / physics / post-physics / animation phases; `World::step()` fixes the order today with no producers.
+- **C5 (M3):** subscription budget diagnostic (bytes per snapshot against a host-set ceiling) so "bounded" is enforced, not only measured.
+- **C6 (first release):** publish `fynkel.lock.json` prebuilt artifacts with sha256s; until then the hook's prebuilt path is covered by unit tests only.
+
 ### 19.3 First vertical slice after M0
 
 The first post-M0 slice should be:

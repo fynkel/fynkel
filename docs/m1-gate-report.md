@@ -112,23 +112,42 @@ the same interop without moving the composition cost.
   `tool/alloc_bench.dart`, `tests/leak.rs`, `tests/lifetime.rs`, all folded
   into `benchmarks/m0/capture.py`.
 
-## 5. Known gaps carried into M2
+## 5. Known gaps carried forward
 
-- Allocation numbers are JIT-only (§2); AOT capture is deferred to M3 host
-  profiling.
-- The allocation profile's per-class breakdown is indicative (JIT-inlined
-  allocations are not counted; VM-service traffic pollutes it). The
-  heap-delta figure is the one the gate uses.
-- Benchmarks run on one macOS profile; the iOS numbers are a single
-  profile-mode session, not a scripted capture.
-- A second display / DPI change is still not exercised live (unchanged from
-  M0).
-- The `fynkel.lock.json` prebuilt artifacts have no published sha256 yet; the
-  hook's prebuilt path is exercised only by unit tests until the first
-  release is cut.
+Tracked as "M1 carry-over" C1–C6 in the blueprint (§19.2b), each with an
+owning milestone.
+
+- **Allocation-free write path (C1, M2).** The gate accepted the documented
+  5.1 KB/frame, but 3.6 KB of it is the cost of ADR-0013's immutable values
+  on every transform write. It scales with movers (≈300 KB/frame at 2 000),
+  which at 120 Hz means a young-generation scavenge every few frames. Add
+  scalar/typed-data writers on the batch before authoring scenes with many
+  movers; the value types stay the read/API surface.
+- **Input capture (C2, M3).** §5.1's held-state + one-tick edge contract is
+  not implemented in any host yet; M1's build list did not name it.
+- **Live allocation/GC counters and AOT numbers (C3, M3).** The build list
+  says "bridge diagnostics: … Dart allocations per frame, GC pauses"; M1
+  delivers calls/bytes/copies live and allocation/GC only as the offline JIT
+  probe. AOT capture is not scripted.
+- **Phase hooks (C4, M5).** `World::step()` fixes the §5.1 order, but the
+  pre-tick / physics / post-physics / animation slots have no registration
+  mechanism until physics needs one.
+- **Subscription budget (C5, M3).** "Bounded" is met as explicit and
+  measured (`BridgeStats.subscriptions`, bytes per view); there is no
+  ceiling or diagnostic.
+- **Prebuilt artifacts (C6, first release).** `fynkel.lock.json` has no
+  published sha256s; the hook's prebuilt path is exercised by unit tests only.
+- Benchmarks run on one macOS profile; iOS numbers are one profile-mode
+  session. A second display / DPI change is still not exercised live.
+- The native-assets hook depends on `hooks`/`code_assets`, still
+  experimental on stable-channel Dart (works through Flutter's Dart, which
+  is the toolchain of record). Fallback if the API moves: a plugin-style FFI
+  package with `DynamicLibrary`, pinned versions in the meantime.
+- Everything (step, extract, `render()`) runs on the Flutter UI thread;
+  ADR-0007 allows a Rust render thread later, so extraction must stay cheap.
 
 ## 6. Decision
 
 **GO.** M2 (project documents, assets, prefabs, materials, behaviours) starts
-on the M1 runtime as is. The M2 backlog inherits the gaps above as explicit
-items rather than blocking on them.
+on the M1 runtime as is. Carry-over C1 lands inside M2 before scenes with movers are
+authored; C2–C6 are owned by the milestones named above.
