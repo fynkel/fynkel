@@ -1,10 +1,10 @@
 // dart:ffi bindings for the macOS viewport ABI (platform/macos/include/
 // fynkel_macos.h). The engine ABI comes from package:fynkel; both live in
-// the same dylib. This is host glue: when `fynkel_flutter` exists it owns
-// this file (generated with ffigen like the engine bindings).
+// the same dylib, provided by package:fynkel's build hook (ADR-0015). This
+// is host glue: when `fynkel_flutter` exists it owns this file (generated
+// with ffigen like the engine bindings).
 
 import 'dart:ffi';
-import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 
@@ -74,68 +74,50 @@ final class ViewportCamera extends Struct {
   external double far;
 }
 
-typedef _AbiVersionC = Uint32 Function();
-typedef _AbiVersionDart = int Function();
-typedef _CreateC = Pointer<Void> Function(Uint32, Uint32, Uint32, Int32);
-typedef _CreateDart = Pointer<Void> Function(int, int, int, int);
-typedef _DestroyC = Void Function(Pointer<Void>);
-typedef _DestroyDart = void Function(Pointer<Void>);
-typedef _ResizeC = Int32 Function(Pointer<Void>, Uint32, Uint32);
-typedef _ResizeDart = int Function(Pointer<Void>, int, int);
-typedef _BufferCountC = Uint32 Function(Pointer<Void>);
-typedef _BufferCountDart = int Function(Pointer<Void>);
-typedef _IoSurfaceC = Pointer<Void> Function(Pointer<Void>, Uint32);
-typedef _IoSurfaceDart = Pointer<Void> Function(Pointer<Void>, int);
-typedef _RenderC = Int32 Function(Pointer<Void>, Pointer<Void>);
-typedef _RenderDart = int Function(Pointer<Void>, Pointer<Void>);
-typedef _SetCameraC = Void Function(Pointer<Void>, Pointer<ViewportCamera>);
-typedef _SetCameraDart = void Function(Pointer<Void>, Pointer<ViewportCamera>);
-typedef _SetAcquireWaitC = Void Function(Pointer<Void>, Uint32);
-typedef _SetAcquireWaitDart = void Function(Pointer<Void>, int);
-typedef _SetCallbackC = Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>);
-typedef _SetCallbackDart = void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>);
-typedef _TakeStatsC = Void Function(Pointer<Void>, Pointer<ViewportStats>);
-typedef _TakeStatsDart = void Function(Pointer<Void>, Pointer<ViewportStats>);
+// The viewport symbols are `@Native` externals on the same code asset as
+// the engine bindings: package:fynkel's build hook ships one dylib that
+// exports both ABIs (platform/macos), so nothing is dlopen-ed here.
+const _asset = 'package:fynkel/fynkel_native';
+
+@Native<Uint32 Function()>(symbol: 'fynkel_macos_abi_version', assetId: _asset)
+external int _abiVersion();
+@Native<Pointer<Void> Function(Uint32, Uint32, Uint32, Int32)>(symbol: 'fynkel_macos_viewport_create', assetId: _asset)
+external Pointer<Void> _create(int width, int height, int bufferCount, int syncMode);
+@Native<Void Function(Pointer<Void>)>(symbol: 'fynkel_macos_viewport_destroy', assetId: _asset)
+external void _destroy(Pointer<Void> vp);
+@Native<Int32 Function(Pointer<Void>, Uint32, Uint32)>(symbol: 'fynkel_macos_viewport_resize', assetId: _asset)
+external int _resize(Pointer<Void> vp, int width, int height);
+@Native<Uint32 Function(Pointer<Void>)>(symbol: 'fynkel_macos_viewport_buffer_count', assetId: _asset)
+external int _bufferCount(Pointer<Void> vp);
+@Native<Pointer<Void> Function(Pointer<Void>, Uint32)>(symbol: 'fynkel_macos_viewport_iosurface', assetId: _asset)
+external Pointer<Void> _iosurface(Pointer<Void> vp, int index);
+@Native<Int32 Function(Pointer<Void>, Pointer<Void>)>(symbol: 'fynkel_macos_viewport_render', assetId: _asset)
+external int _render(Pointer<Void> vp, Pointer<Void> world);
+@Native<Void Function(Pointer<Void>, Pointer<ViewportCamera>)>(symbol: 'fynkel_macos_viewport_set_camera', assetId: _asset)
+external void _setCamera(Pointer<Void> vp, Pointer<ViewportCamera> camera);
+@Native<Void Function(Pointer<Void>, Uint32)>(symbol: 'fynkel_macos_viewport_set_acquire_wait_us', assetId: _asset)
+external void _setAcquireWait(Pointer<Void> vp, int us);
+@Native<Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>(
+    symbol: 'fynkel_macos_viewport_set_frame_ready_callback', assetId: _asset)
+external void _setCallback(Pointer<Void> vp, Pointer<Void> fn, Pointer<Void> userData);
+@Native<Int32 Function(Pointer<Void>)>(symbol: 'fynkel_macos_viewport_acquire_presented', assetId: _asset)
+external int _acquirePresented(Pointer<Void> vp);
+@Native<Void Function(Pointer<Void>, Pointer<ViewportStats>)>(symbol: 'fynkel_macos_viewport_take_stats', assetId: _asset)
+external void _takeStats(Pointer<Void> vp, Pointer<ViewportStats> out);
 
 class ViewportNative {
-  ViewportNative(this.libraryPath) : _lib = DynamicLibrary.open(libraryPath) {
-    final v = _lib.lookupFunction<_AbiVersionC, _AbiVersionDart>('fynkel_macos_abi_version')();
+  ViewportNative() {
+    final v = _abiVersion();
     if (v != viewportAbiVersion) {
       throw StateError('viewport ABI $v, host expects $viewportAbiVersion');
     }
-    _create = _lib.lookupFunction<_CreateC, _CreateDart>('fynkel_macos_viewport_create');
-    _destroy = _lib.lookupFunction<_DestroyC, _DestroyDart>('fynkel_macos_viewport_destroy');
-    _resize = _lib.lookupFunction<_ResizeC, _ResizeDart>('fynkel_macos_viewport_resize');
-    _bufferCount = _lib.lookupFunction<_BufferCountC, _BufferCountDart>('fynkel_macos_viewport_buffer_count');
-    _iosurface = _lib.lookupFunction<_IoSurfaceC, _IoSurfaceDart>('fynkel_macos_viewport_iosurface');
-    _render = _lib.lookupFunction<_RenderC, _RenderDart>('fynkel_macos_viewport_render');
-    _setCamera = _lib.lookupFunction<_SetCameraC, _SetCameraDart>('fynkel_macos_viewport_set_camera');
-    _setAcquireWait =
-        _lib.lookupFunction<_SetAcquireWaitC, _SetAcquireWaitDart>('fynkel_macos_viewport_set_acquire_wait_us');
-    _setCallback =
-        _lib.lookupFunction<_SetCallbackC, _SetCallbackDart>('fynkel_macos_viewport_set_frame_ready_callback');
-    _takeStats = _lib.lookupFunction<_TakeStatsC, _TakeStatsDart>('fynkel_macos_viewport_take_stats');
-    acquireFnAddress = _lib.lookup<Void>('fynkel_macos_viewport_acquire_presented').address;
-    setCallbackFnAddress = _lib.lookup<Void>('fynkel_macos_viewport_set_frame_ready_callback').address;
   }
-
-  final String libraryPath;
-  final DynamicLibrary _lib;
-  late final _CreateDart _create;
-  late final _DestroyDart _destroy;
-  late final _ResizeDart _resize;
-  late final _BufferCountDart _bufferCount;
-  late final _IoSurfaceDart _iosurface;
-  late final _RenderDart _render;
-  late final _SetCameraDart _setCamera;
-  late final _SetAcquireWaitDart _setAcquireWait;
-  late final _SetCallbackDart _setCallback;
-  late final _TakeStatsDart _takeStats;
 
   /// Raw symbol addresses handed to Swift so it can call Rust directly from
   /// Flutter's raster thread without dlopen-ing the library a second time.
-  late final int acquireFnAddress;
-  late final int setCallbackFnAddress;
+  final int acquireFnAddress = Native.addressOf<NativeFunction<Int32 Function(Pointer<Void>)>>(_acquirePresented).address;
+  final int setCallbackFnAddress =
+      Native.addressOf<NativeFunction<Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>>(_setCallback).address;
 
   /// [syncMode]: 0 = wgpu on_submitted_work_done, 1 = blocking, 2 = Metal
   /// completion handler (production).
@@ -212,15 +194,6 @@ class ViewportNative {
     } finally {
       calloc.free(out);
     }
-  }
-
-  /// The one dylib exporting the engine and viewport ABIs.
-  static String defaultLibraryPath() {
-    const fromDefine = String.fromEnvironment('FYNKEL_NATIVE_LIB');
-    if (fromDefine.isNotEmpty) return fromDefine;
-    final env = Platform.environment['FYNKEL_NATIVE_LIB'];
-    if (env != null && env.isNotEmpty) return env;
-    throw StateError('Set --dart-define=FYNKEL_NATIVE_LIB=/abs/path/to/libfynkel_platform_macos.dylib');
   }
 }
 

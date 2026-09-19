@@ -1,0 +1,14 @@
+{
+  "$comment": "Native runtime pin for package:fynkel (ADR-0015, blueprint §13.5). A game project overrides this with its own fynkel.lock.json via `hooks.user_defines.fynkel.lock_file`. No release store publishes artifacts yet: every entry is unpublished (no sha256), so the hook builds from source (dev checkout or Rust toolchain) until release CI fills these in.",
+  "runtime_version": "0.0.1",
+  "abi_version": 1,
+  "schema_fingerprint": "0x38f0488290df0bf6",
+  "release_base_url": "https://github.com/mooumari/fynkelengine/releases/download/runtime-v{version}/",
+  "artifacts": {
+    "macos-arm64": { "file": "libfynkel_platform_macos-macos-arm64.dylib", "sha256": null },
+    "macos-x64": { "file": "libfynkel_platform_macos-macos-x64.dylib", "sha256": null },
+    "ios-arm64": { "file": "libfynkel_native-ios-arm64.dylib", "sha256": null },
+    "ios-simulator-arm64": { "file": "libfynkel_native-ios-simulator-arm64.dylib", "sha256": null },
+    "ios-simulator-x64": { "file": "libfynkel_native-ios-simulator-x64.dylib", "sha256": null }
+  }
+}

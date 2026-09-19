@@ -15,7 +15,7 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| Rust | 1.93.0 stable, `aarch64-apple-darwin` | pinned in `rust-toolchain.toml` |
+| Rust | 1.93.0 stable, `aarch64-apple-darwin` + `x86_64-apple-darwin` std | pinned in `rust-toolchain.toml`; the second target because Flutter builds universal macOS apps and the native-assets hook (ADR-0015) builds per architecture (`rustup target add x86_64-apple-darwin`) |
 | Flutter | 3.47.2 stable (engine a804b26164) | Impeller default on macOS |
 | Dart | 3.13.2 | |
 | Xcode | 26.5 (17F42) | |

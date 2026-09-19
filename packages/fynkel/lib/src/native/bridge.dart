@@ -3,7 +3,6 @@
 // calls. The gameplay API in lib/src/world.dart builds on this.
 
 import 'dart:ffi';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
@@ -80,46 +79,32 @@ class BridgeStats {
 }
 
 class NativeLibrary {
-  NativeLibrary._(this._b, this._runtime);
+  NativeLibrary._(this._runtime);
 
-  final FynkelNativeBindings _b;
   final Pointer<FynkelRuntime> _runtime;
 
-  /// Opens the library and verifies ABI version and schema fingerprint.
-  static NativeLibrary open([String? libraryPath]) {
-    final b = FynkelNativeBindings(DynamicLibrary.open(libraryPath ?? defaultLibraryPath()));
-    final v = b.fynkel_abi_version();
+  /// Verifies ABI version and schema fingerprint and creates the runtime.
+  ///
+  /// The native code is the `package:fynkel/fynkel_native` code asset that
+  /// `hook/build.dart` provides (ADR-0015); the bindings are `@Native` and
+  /// the Dart/Flutter toolchain resolves them, so there is no library path.
+  static NativeLibrary open() {
+    final v = fynkel_abi_version();
     if (v != gen.abiVersion) {
       throw StateError('fynkel_native speaks ABI $v, this SDK speaks ${gen.abiVersion}');
     }
-    final fp = b.fynkel_schema_fingerprint();
+    final fp = fynkel_schema_fingerprint();
     if (fp != gen.schemaFingerprint) {
       throw StateError('schema fingerprint mismatch: library ${_hex(fp)} vs SDK ${_hex(gen.schemaFingerprint)}; '
           'rerun `fynkel codegen` and rebuild');
     }
-    final rt = b.fynkel_runtime_create();
+    final rt = fynkel_runtime_create();
     if (rt == nullptr) throw StateError('fynkel_runtime_create failed');
-    return NativeLibrary._(b, rt);
+    return NativeLibrary._(rt);
   }
 
   static String _hex(int v) =>
       '0x${(v >>> 32).toRadixString(16).padLeft(8, '0')}${v.toUnsigned(32).toRadixString(16).padLeft(8, '0')}';
-
-  /// `FYNKEL_NATIVE_LIB` env var, else the workspace's release build.
-  /// The native-assets hook (ADR-0015) replaces this lookup.
-  static String defaultLibraryPath() {
-    final env = Platform.environment['FYNKEL_NATIVE_LIB'];
-    if (env != null && env.isNotEmpty) return env;
-    var dir = Directory.current;
-    while (true) {
-      final candidate = '${dir.path}/target/release/libfynkel_native.dylib';
-      if (File(candidate).existsSync()) return candidate;
-      final parent = dir.parent;
-      if (parent.path == dir.path) break;
-      dir = parent;
-    }
-    throw StateError('libfynkel_native.dylib not found; run `cargo build --release -p fynkel_native` or set FYNKEL_NATIVE_LIB');
-  }
 
   NativeWorld createWorld({
     int worldId = 0,
@@ -133,19 +118,19 @@ class NativeLibrary {
       desc.ref.fixed_dt_seconds = fixedDt;
       desc.ref.max_steps_per_frame = maxStepsPerFrame;
       desc.ref.max_frame_dt_seconds = maxFrameDt;
-      final w = _b.fynkel_world_create(_runtime, desc);
+      final w = fynkel_world_create(_runtime, desc);
       if (w == nullptr) throw StateError('fynkel_world_create failed');
-      return NativeWorld._(_b, w);
+      return NativeWorld._(w);
     } finally {
       calloc.free(desc);
     }
   }
 
-  void dispose() => _b.fynkel_runtime_destroy(_runtime);
+  void dispose() => fynkel_runtime_destroy(_runtime);
 }
 
 class NativeWorld {
-  NativeWorld._(this._b, this._w)
+  NativeWorld._(this._w)
       : _plan = calloc<FynkelFramePlan>(),
         _submit = calloc<FynkelSubmitResult>(),
         _step = calloc<FynkelStepResult>(),
@@ -153,7 +138,6 @@ class NativeWorld {
         _view = calloc<FynkelBufferView>(),
         _stats = calloc<FynkelWorldStats>();
 
-  final FynkelNativeBindings _b;
   Pointer<FynkelWorld> _w;
   final Pointer<FynkelFramePlan> _plan;
   final Pointer<FynkelSubmitResult> _submit;
@@ -177,22 +161,22 @@ class NativeWorld {
 
   bool get isPoisoned {
     ffiCalls++;
-    return _b.fynkel_world_is_poisoned(_w) != 0;
+    return fynkel_world_is_poisoned(_w) != 0;
   }
 
   int get tick {
     ffiCalls++;
-    return _b.fynkel_world_tick(_w);
+    return fynkel_world_tick(_w);
   }
 
   double get alpha {
     ffiCalls++;
-    return _b.fynkel_world_alpha(_w);
+    return fynkel_world_alpha(_w);
   }
 
   FramePlan beginFrame(double dtSeconds) {
     ffiCalls++;
-    final s = _b.fynkel_world_begin_frame(_w, dtSeconds, _plan);
+    final s = fynkel_world_begin_frame(_w, dtSeconds, _plan);
     _check(s, 'begin_frame');
     final p = _plan.ref;
     return FramePlan(p.steps, p.dropped_seconds, p.clamped != 0, p.alpha);
@@ -208,13 +192,13 @@ class NativeWorld {
     dartCopies++;
     dartBytesCopied += bytes.length;
     ffiCalls++;
-    final s = _b.fynkel_world_submit_commands(_w, lane.index, _scratch, bytes.length, _submit);
+    final s = fynkel_world_submit_commands(_w, lane.index, _scratch, bytes.length, _submit);
     return SubmitResult(s, _submit.ref.accepted, _submit.ref.rejected);
   }
 
   StepResult step() {
     ffiCalls++;
-    final s = _b.fynkel_world_step(_w, _step);
+    final s = fynkel_world_step(_w, _step);
     final r = _step.ref;
     return StepResult(s, r.tick, r.commands_applied, r.commands_rejected, r.snapshot_records, r.event_records,
         r.diagnostic_records, r.live_entities);
@@ -226,7 +210,7 @@ class NativeWorld {
     try {
       p.asTypedList(entities.length).setAll(0, entities);
       ffiCalls++;
-      return _b.fynkel_world_subscribe(_w, gen.Transform.componentId, p, entities.length, enable ? 1 : 0);
+      return fynkel_world_subscribe(_w, gen.Transform.componentId, p, entities.length, enable ? 1 : 0);
     } finally {
       calloc.free(p);
     }
@@ -238,23 +222,23 @@ class NativeWorld {
   /// Subscribed transforms after the last step (read in place, no copy).
   WireBuffer get snapshot {
     ffiCalls++;
-    return _wrap(_b.fynkel_world_snapshot(_w));
+    return _wrap(fynkel_world_snapshot(_w));
   }
 
   WireBuffer get diagnostics {
     ffiCalls++;
-    return _wrap(_b.fynkel_world_diagnostics(_w));
+    return _wrap(fynkel_world_diagnostics(_w));
   }
 
   /// Pull-only: moves pending events into the returned view.
   WireBuffer drainEvents() {
     ffiCalls++;
-    return _wrap(_b.fynkel_world_drain_events(_w));
+    return _wrap(fynkel_world_drain_events(_w));
   }
 
   WireBuffer get afterPhysicsEvents {
     ffiCalls++;
-    return _wrap(_b.fynkel_world_after_physics_events(_w));
+    return _wrap(fynkel_world_after_physics_events(_w));
   }
 
   int _requestId = 0;
@@ -265,7 +249,7 @@ class NativeWorld {
     _query.ref.request_id = ++_requestId;
     _query.ref.entity = entity;
     ffiCalls++;
-    final s = _b.fynkel_world_query(_w, _query, _view);
+    final s = fynkel_world_query(_w, _query, _view);
     _check(s, 'query');
     final b = _wrap(_view.ref);
     assert(b.requestId == _requestId);
@@ -274,7 +258,7 @@ class NativeWorld {
 
   BridgeStats stats() {
     ffiCalls++;
-    _check(_b.fynkel_world_stats(_w, _stats), 'stats');
+    _check(fynkel_world_stats(_w, _stats), 'stats');
     final s = _stats.ref;
     return BridgeStats(
       tick: s.tick,
@@ -300,7 +284,7 @@ class NativeWorld {
 
   void dispose() {
     if (_w == nullptr) return;
-    _b.fynkel_world_destroy(_w);
+    fynkel_world_destroy(_w);
     _w = nullptr;
     calloc.free(_plan);
     calloc.free(_submit);

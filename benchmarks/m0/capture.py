@@ -33,7 +33,6 @@ FLUTTER_DIR = ROOT / "hosts/flutter_macos"
 FLUTTER_BIN = Path.home() / "Documents/flutter/flutter/bin"
 DART = FLUTTER_BIN / "dart"
 FLUTTER = FLUTTER_BIN / "flutter"
-NATIVE_DYLIB = ROOT / "target/release/libfynkel_platform_macos.dylib"
 FLUTTER_APP = FLUTTER_DIR / "build/macos/Build/Products/Release/fynkel_host_flutter.app/Contents/MacOS/fynkel_host_flutter"
 
 
@@ -60,7 +59,8 @@ def build():
     print("building…", flush=True)
     sh(["cargo", "build", "--release", "--workspace"])
     # One build serves all host modes; FYNKEL_HOST_MODE (viewport | none) is read at runtime.
-    sh([str(FLUTTER), "build", "macos", "--release", f"--dart-define=FYNKEL_NATIVE_LIB={NATIVE_DYLIB}"], cwd=FLUTTER_DIR)
+    # package:fynkel's build hook (ADR-0015) builds and bundles the native runtime.
+    sh([str(FLUTTER), "build", "macos", "--release"], cwd=FLUTTER_DIR)
 
 
 def run_for(cmd, seconds, cwd=ROOT, env=None):
@@ -167,7 +167,7 @@ def parse_flutter(out):
 
 def capture_flutter(app, mode, warmup, sample):
     print(f"flutter host (mode {mode})…", flush=True)
-    p = subprocess.Popen([str(app)], cwd=FLUTTER_DIR, env={**os.environ, "RUST_LOG": "info", "FYNKEL_HOST_MODE": mode, "FYNKEL_NATIVE_LIB": str(NATIVE_DYLIB)},
+    p = subprocess.Popen([str(app)], cwd=FLUTTER_DIR, env={**os.environ, "RUST_LOG": "info", "FYNKEL_HOST_MODE": mode},
                          text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     time.sleep(2.5)
     place_window(app.name)

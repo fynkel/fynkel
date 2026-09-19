@@ -49,9 +49,16 @@ into the same command later.
 
 ## Flutter host
 
-`hosts/flutter_macos` loads **one** dylib, `libfynkel_platform_macos.dylib`,
+`hosts/flutter_macos` uses **one** dylib, `libfynkel_platform_macos.dylib`,
 which exports both the engine ABI (`fynkel_*`, used by `package:fynkel`) and
 the viewport ABI (`fynkel_macos_*`, `platform/macos/include/fynkel_macos.h`).
+It arrives as the code asset `package:fynkel/fynkel_native` from
+`packages/fynkel/hook/build.dart` (ADR-0015): explicit `native_lib`
+user-define → source checkout `cargo build` → checksummed prebuilt named by
+`fynkel.lock.json` → `cargo build` fallback when Rust is installed → an
+error that names the fix. All bindings are `@Native` on that asset; nothing
+calls `DynamicLibrary.open`. The Flutter toolchain bundles it as a
+universal framework, so the hook builds once per architecture.
 Each Flutter frame: `World.frame(dt, fixedUpdate: …)` (gameplay + `step()`
 per planned tick, presentation flush), then
 `fynkel_macos_viewport_render(viewport, world)` which extracts the world in

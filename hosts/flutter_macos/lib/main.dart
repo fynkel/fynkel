@@ -303,12 +303,11 @@ class _ViewportPageState extends State<ViewportPage>
     _width = width;
     _height = height;
     try {
-      final libPath = ViewportNative.defaultLibraryPath();
-      final world = _world ??= World.create(library: NativeLibrary.open(libPath));
+      final world = _world ??= World.create();
       // Release-mode hosts log diagnostics; debug throws (FynkelError).
       world.onDiagnostics = (d) => _log('diagnostics: ${d.join("; ")}');
       _scene ??= DemoScene(satellites: _satellites);
-      final native = _viewportNative ??= ViewportNative(libPath);
+      final native = _viewportNative ??= ViewportNative();
       final vp = native.create(width: width, height: height, bufferCount: _bufferCount, syncMode: _syncMode);
       if (vp == nullptr) throw StateError('fynkel_macos_viewport_create returned null (see native log)');
       _viewport = vp;
