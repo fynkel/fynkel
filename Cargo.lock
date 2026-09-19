@@ -774,6 +774,7 @@ dependencies = [
 name = "fynkel_document"
 version = "0.0.1"
 dependencies = [
+ "blake3",
  "fynkel_contracts",
  "fynkel_core",
  "fynkel_scene",

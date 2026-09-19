@@ -921,6 +921,193 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let _ = std::fs::remove_dir_all(&empty);
 }
 
+#[test]
+fn scene_apply_dry_runs_conflicts_and_writes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = root.join("crates/fynkel_document/fixtures");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-apply-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let scene = dir.join("edit.scene.json");
+    std::fs::copy(fixtures.join("scene/hierarchy_ok.scene.json"), &scene).unwrap();
+    let original = std::fs::read_to_string(&scene).unwrap();
+    let scene_s = scene.to_str().unwrap();
+
+    // The revision comes from `inspect --json`.
+    let out = run(&["scene", "inspect", "--json", scene_s]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let revision = v["revision"].as_str().unwrap().to_string();
+    assert_eq!(revision.len(), 64);
+
+    // Usage errors and unreadable patches exit 2.
+    assert_eq!(run(&["scene", "apply", scene_s]).status.code(), Some(2));
+    let patch = dir.join("ops.json");
+    std::fs::write(&patch, "not json").unwrap();
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-E0004");
+    std::fs::write(&patch, r#"[{"command": "warp"}]"#).unwrap();
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+
+    // A dry run prints the diff and the mutations, writes nothing.
+    let ops = serde_json::json!({
+        "baseRevision": revision,
+        "commands": [
+            {"command": "renameObject", "id": "aaaaaaaa-0000-4000-8000-000000000001", "name": "Renamed"},
+            {"command": "setField", "entity": "aaaaaaaa-0000-4000-8000-000000000001",
+             "component": "11111111-0000-4000-8000-000000000001", "field": "/position/2", "value": 4}
+        ]
+    });
+    std::fs::write(&patch, ops.to_string()).unwrap();
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--dry-run",
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["dryRun"], true);
+    assert_eq!(v["written"], false);
+    assert_eq!(v["baseRevision"], revision);
+    assert_ne!(v["revision"], revision);
+    assert_eq!(v["mutations"].as_array().unwrap().len(), 2);
+    assert_eq!(v["mutations"][0]["command"], "renameObject");
+    assert_eq!(v["mutations"][0]["undo"][0]["value"], "Root");
+    assert_eq!(
+        v["mutations"][1]["affectedIds"].as_array().unwrap().len(),
+        2
+    );
+    let diff = v["diff"].as_str().unwrap();
+    assert!(diff.contains("+      \"name\": \"Renamed\""), "{diff}");
+    assert_eq!(std::fs::read_to_string(&scene).unwrap(), original);
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--dry-run",
+    ]);
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("-      \"name\": \"Root\""));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("dry run"));
+
+    // For real: the file changes and the old revision is now stale.
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["written"], true);
+    let new_revision = v["revision"].as_str().unwrap().to_string();
+    let written = std::fs::read_to_string(&scene).unwrap();
+    assert!(written.contains("\"Renamed\""));
+    let out = run(&["scene", "inspect", "--json", scene_s]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["revision"], new_revision);
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-E0001");
+    assert!(v["mutations"].as_array().unwrap().is_empty());
+    assert_eq!(std::fs::read_to_string(&scene).unwrap(), written);
+
+    // A transaction that would leave the document invalid is refused whole.
+    std::fs::write(
+        &patch,
+        r#"[{"command": "setField", "entity": "aaaaaaaa-0000-4000-8000-000000000001",
+             "component": "11111111-0000-4000-8000-000000000001", "field": "position", "value": "x"}]"#,
+    )
+    .unwrap();
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-E0005");
+    assert_eq!(v["diagnostics"][0]["related"][0]["code"], "FYN-D0100");
+    assert_eq!(std::fs::read_to_string(&scene).unwrap(), written);
+
+    // Prefab documents go through the same path.
+    let prefab = dir.join("turret.prefab.json");
+    std::fs::copy(fixtures.join("valid/turret.prefab.json"), &prefab).unwrap();
+    std::fs::write(
+        &patch,
+        r#"[{"command": "createObject", "name": "Antenna", "parent": null,
+             "components": [{"type": "fynkel.Transform", "data": {"position": [0, 1, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}}]}]"#,
+    )
+    .unwrap();
+    let out = run(&[
+        "prefab",
+        "apply",
+        prefab.to_str().unwrap(),
+        "--patch",
+        patch.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let out = run(&["prefab", "inspect", "--json", prefab.to_str().unwrap()]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["roots"].as_array().unwrap().len(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap() {

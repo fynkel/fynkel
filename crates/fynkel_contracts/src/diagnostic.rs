@@ -1,8 +1,9 @@
 //! Authoring diagnostics (blueprint §14.2). One record shape for documents,
 //! assets, projects and codegen so the `--json` CLI, the editor and agents
-//! read the same thing. Codes are stable strings in four namespaces:
+//! read the same thing. Codes are stable strings in five namespaces:
 //! `FYN-D####` documents, `FYN-A####` assets, `FYN-P####` project,
-//! `FYN-G####` codegen. Append only; never renumber.
+//! `FYN-E####` editing (authoring commands), `FYN-G####` codegen. Append
+//! only; never renumber.
 
 /// A stable diagnostic code such as `FYN-D0002`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -131,6 +132,32 @@ impl Code {
     pub const LOCK_MISMATCH: Code = Code("FYN-P0011");
     /// The lock file is not valid (JSON, schema).
     pub const LOCK_MALFORMED: Code = Code("FYN-P0012");
+
+    // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
+    /// The transaction's base revision is not the document's current one.
+    pub const EDIT_CONFLICT: Code = Code("FYN-E0001");
+    /// A command names an entity the document does not have.
+    pub const EDIT_UNKNOWN_ENTITY: Code = Code("FYN-E0002");
+    /// A command names a component the entity does not have.
+    pub const EDIT_UNKNOWN_COMPONENT: Code = Code("FYN-E0003");
+    /// A command is malformed (missing or mistyped argument).
+    pub const EDIT_INVALID_COMMAND: Code = Code("FYN-E0004");
+    /// The transaction would leave the document invalid; nothing was applied
+    /// (the validation errors are `related`).
+    pub const EDIT_REJECTED: Code = Code("FYN-E0005");
+    /// A reparent would make an entity its own ancestor.
+    pub const EDIT_CYCLE: Code = Code("FYN-E0006");
+    /// The document cannot be edited (read-only, outdated, or not a kind
+    /// with entities).
+    pub const EDIT_NOT_EDITABLE: Code = Code("FYN-E0007");
+    /// The entity is not a prefab instance, or the override does not exist.
+    pub const EDIT_NOT_AN_INSTANCE: Code = Code("FYN-E0008");
+    /// Nothing to undo / redo.
+    pub const EDIT_NO_HISTORY: Code = Code("FYN-E0009");
+    /// An id the command would create already exists in the document.
+    pub const EDIT_DUPLICATE_ID: Code = Code("FYN-E0010");
+    /// A save or file creation failed.
+    pub const EDIT_IO: Code = Code("FYN-E0011");
 
     pub const fn as_str(self) -> &'static str {
         self.0

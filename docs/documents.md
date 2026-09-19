@@ -80,7 +80,7 @@ Every authoring diagnostic is the §14.2 record
 `info`), `message`, `document`, `pointer` (RFC 6901), `id`, `line`,
 `column`, `suggestion`, `related`. Absent fields are omitted in JSON. Code
 namespaces: `FYN-D` documents, `FYN-A` assets, `FYN-P` project, `FYN-G`
-codegen; append only.
+codegen, `FYN-E` editing (authoring commands); append only.
 
 Human form: `error[FYN-D0012] assets/scenes/main.scene.json:3:3 /id: id is not a canonical UUID: upper-case hex (use lower-case …)`.
 
@@ -236,6 +236,91 @@ anchor kept. `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
 under a directory (a later path with the same id wins, with a warning).
 The headless host expands before `describe`, so derived ids reach the
 runtime and `fynkel state dump` prints them.
+
+## Authoring commands and transactions
+
+`fynkel_document::authoring` (§11.1, ADR-0016) is the one implementation of
+document mutation the editor, the CLI and agents share; the C ABI for it
+waits for M4. An `Editor` holds one scene or prefab document (`Editor::open`
+refuses other kinds, read-only newer documents and outdated ones with
+`FYN-E0007`; a document that already has errors opens, and those baseline
+errors are tolerated). Its `Revision` is the blake3 hash of the canonical
+text (`Document::write`), so two tools that read the same bytes agree on it
+without shared state — `fynkel scene inspect --json` and `fynkel prefab
+inspect --json` print it as `revision`.
+
+`Editor::apply(Request { id?, baseRevision?, commands }, &schemas)` runs one
+**transaction** atomically:
+
+1. When `baseRevision` is given and differs from the editor's revision the
+   whole request is a conflict (`FYN-E0001`): nothing is read, nothing is
+   applied, the caller re-reads and rebases. Two writers never overwrite each
+   other silently.
+2. Each command compiles to primitive, reversible **edits** on the JSON tree
+   (`replace` at a pointer, `insertMember`/`removeMember` at an index of an
+   object, `insertItem`/`removeItem` of an array). Applying an edit yields
+   its exact inverse; the command's `undo` is those inverses in reverse. A
+   command that cannot run (unknown entity `E0002`, unknown component
+   `E0003`, malformed `E0004`, cycle `E0006`, not an instance `E0008`,
+   duplicate id `E0010`) stops the transaction and everything already applied
+   is rolled back.
+3. The document is validated (`Scene::validate` / `Prefab::validate`). Any
+   error the transaction *introduces* (not in the baseline) rejects it whole
+   with `FYN-E0005`, the errors in `related`, and the document back to the
+   byte. Warnings (an unregistered component type, say) are reported and
+   never fatal.
+4. Side effects run last, once the document is known good: `saveDocument`
+   writes the document (to `path` or where it was read from) and
+   `createMaterial` writes a new material document (never overwriting;
+   validated against the built-in shader library first). A failed side
+   effect (`FYN-E0011`) rolls the transaction back too.
+
+The result (`Applied`, `--json` shape) is `{ ok, transactionId, baseRevision,
+revision, mutations[], diagnostics[] }`; each mutation is the §11.1 record
+`{ commandId, command, transactionId, baseRevision, affectedIds[], ok,
+diagnostics[], undo[] }`. `affectedIds` lists the entities, components,
+instances and documents the command touched or created. The editor keeps the
+committed transactions as its history: `undo()` replays the inverses of the
+last transaction and `redo()` its forward edits, both byte-exact (key order,
+positions and number lexemes come back as they were); `FYN-E0009` when there
+is nothing to undo or redo. `is_dirty()` compares the revision with the one
+last opened or saved; a saved file stays saved when its transaction is
+undone. A transform-gizmo drag is one transaction, so one undo step.
+
+The commands (`Command`, JSON form `{ "command": "<name>", ... }`, ids are
+new UUIDs when omitted, `field` is a key of the component's `data` or a JSON
+pointer into it such as `/position/1`):
+
+| command | fields | effect |
+| --- | --- | --- |
+| `createObject` | `id?`, `name`, `parent?`, `index?`, `components[]` | new entity `{ name, parent, children: [], components }`, appended to (or inserted at `index` of) the parent's `children`, or the prefab's `roots` |
+| `deleteObject` | `id` | removes the entity and its subtree, detaches it from its parent / `roots` |
+| `renameObject` | `id`, `name` | |
+| `reparentObject` | `id`, `parent?`, `index?` | moves the entity (`FYN-E0006` if `parent` is the entity or below it); `null` makes it a root |
+| `addComponent` | `entity`, `component: { id?, type, version?, data? }` | `version` 1 and empty `data` by default; `FYN-E0010` if the id exists |
+| `removeComponent` | `entity`, `component` | |
+| `setField` | `entity`, `component`, `field`, `value` | replaces the value, or adds the member / appends to an array end |
+| `unsetField` | `entity`, `component`, `field` | removes the member (distinct from setting `null`) |
+| `assignAsset` | `entity`, `component`, `field`, `asset: { asset, sub? }` | `setField` with an `assetRef` |
+| `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]` | `createObject` plus `prefab: { asset, instance, overrides: [] }`; scene documents only |
+| `setPrefabOverride` | `entity`, `override` (a prefab-model op object) | replaces the override with the same target (field for `setField`/`unsetField`, component for `addComponent`/`removeComponent`, object for `addObject`/`removeObject`), else appends |
+| `revertPrefabOverride` | `entity`, `index?` | removes one override, or all of them |
+| `createMaterial` | `id?`, `name`, `shader?`, `path` | writes a new `.material.json` (default shader `fynkel.pbr@1`); no undo |
+| `saveDocument` | `path?` | writes the document; no undo |
+
+`ImportAsset` and `ValidateProject` from §11.1 are `fynkel import` and
+`fynkel validate` — they do not mutate a document, so they are not commands
+here.
+
+A **patch file** for `fynkel scene apply` / `fynkel prefab apply` is either
+an array of commands or `{ "transactionId"?, "baseRevision"?, "commands":
+[...] }`, each command optionally carrying a `commandId`. `apply` reads the
+document, runs the one transaction and writes the file back; `--dry-run`
+prints the unified diff of the canonical text instead (with `--json`, as
+`diff`, next to `dryRun` and `written`). Exit 0 when the transaction committed
+(and, unless `--dry-run`, the file was written), 1 when it was refused
+(conflict, invalid command, rejected by validation), 2 when the document,
+the patch or the arguments cannot be read.
 
 ## Material and shader documents
 
@@ -566,8 +651,10 @@ fynkel document format <path>... [--check] [--json]
 fynkel document new <kind> <name> [--out <path>] [--json]
 fynkel scene inspect <path> [--json] [--schemas <dir>] [--prefabs <dir>] [--expand]
 fynkel scene validate <path>... [--json] [--schemas <dir>] [--prefabs <dir>]
+fynkel scene apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>]
 fynkel prefab inspect <path> [--json] [--schemas <dir>]
 fynkel prefab validate <path>... [--json] [--schemas <dir>]
+fynkel prefab apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>]
 fynkel material inspect <path> [--json] [--schemas <dir>] [--shader <manifest>]...
 fynkel material validate <path>... [--json] [--schemas <dir>] [--shader <manifest>]...
 fynkel shader inspect <path> | --builtin <shaderId> [--json]
@@ -591,12 +678,14 @@ fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
 ```
 
 `scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,
-entityCount, instanceCount, componentCount, componentTypes, roots[],
-expanded }` with `--json`) followed by the diagnostics; anchors show their
+revision, entityCount, instanceCount, componentCount, componentTypes,
+roots[], expanded }` with `--json`) followed by the diagnostics; anchors show their
 prefab, instance id and override count, `--expand` shows the expanded scene
 instead. Scenes with instances resolve prefabs from `--prefabs <dir>`
 (default: the scene's own directory) and report override problems in
-`validate`. `prefab inspect` prints roots and the tree. `material inspect` prints the resolved material (every
+`validate`. `prefab inspect` prints roots and the tree. `scene apply` and
+`prefab apply` run one authoring transaction from a patch file (see
+[Authoring commands and transactions](#authoring-commands-and-transactions)). `material inspect` prints the resolved material (every
 manifest parameter with its value, `(default)` where the material did not set
 it; every slot with its binding or fallback); `--shader` adds custom manifests
 to the built-in library (a manifest with errors is reported and left out).

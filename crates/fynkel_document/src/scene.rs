@@ -695,7 +695,7 @@ fn read_prefab_instance(
     })
 }
 
-fn read_override(
+pub(crate) fn read_override(
     node: &Node,
     pointer: &str,
     diags: &mut Vec<Diagnostic>,
@@ -841,6 +841,7 @@ pub fn inspect_json(scene: &Scene) -> serde_json::Value {
         "id": scene.document.envelope.id.to_string(),
         "name": scene.document.envelope.name,
         "formatVersion": scene.document.envelope.format_version,
+        "revision": crate::authoring::Revision::of(&scene.document).map(|r| r.to_string()).ok(),
         "entityCount": scene.entities.len(),
         "instanceCount": scene.instances().count(),
         "componentCount": scene.entities.iter().map(|e| e.components.len()).sum::<usize>(),

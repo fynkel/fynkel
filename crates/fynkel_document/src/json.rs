@@ -200,6 +200,28 @@ impl Node {
         Some(cur)
     }
 
+    /// Mutable RFC 6901 lookup.
+    pub fn pointer_mut(&mut self, pointer: &str) -> Option<&mut Node> {
+        if pointer.is_empty() {
+            return Some(self);
+        }
+        let mut cur = self;
+        for raw in pointer.strip_prefix('/')?.split('/') {
+            let token = raw.replace("~1", "/").replace("~0", "~");
+            cur = match &mut cur.value {
+                Value::Object(members) => &mut members.iter_mut().find(|m| m.key == token)?.value,
+                Value::Array(items) => {
+                    if token != "0" && token.starts_with('0') {
+                        return None;
+                    }
+                    items.get_mut(token.parse::<usize>().ok()?)?
+                }
+                _ => return None,
+            };
+        }
+        Some(cur)
+    }
+
     /// Like [`Node::pointer`] but returns the key's span for object members
     /// (better anchor for "unexpected property" diagnostics).
     pub fn pointer_span(&self, pointer: &str) -> Option<Span> {

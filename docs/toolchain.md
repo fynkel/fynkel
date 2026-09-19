@@ -53,12 +53,12 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 | `serde_json` | 1.0.151 | now with `preserve_order` (schema key order is meaningful) |
 | `jsonschema` | 0.56.0 | draft 2020-12 validation; `default-features = false` (no HTTP/file retrieval — every `$ref` resolves from the loaded `schemas/` directory) |
 | `uuid` | 1.26.1 | `v4` for fresh document ids, `v5` for prefab-instance derived ids; parsing is canonical-text only |
-| `similar` | 2.7.0 | unified diffs for `fynkel migrate --dry-run` |
+| `similar` | 2.7.0 | unified diffs for `fynkel migrate --dry-run` and `fynkel scene apply --dry-run` |
 | `gltf` | 1.4.1 | glTF 2.0 / GLB parsing in `fynkel_import`; `default-features = false` with `utils` (accessor readers), `names`, `KHR_materials_emissive_strength` — no `import` feature, so the crate never touches the file system or decodes images; Fynkel resolves every buffer and image itself (external files denied by default) |
 | `base64` | 0.23.1 | `data:` URIs in `.gltf` files |
 | `image` | 0.25.10 | PNG/JPEG decoding in `fynkel_import`; `default-features = false`, features `png`, `jpeg` only (no other formats compiled in) |
 | `symphonia` | 0.6.1 | WAV (PCM) and Ogg Vorbis decoding in `fynkel_import`; `default-features = false`, features `wav`, `pcm`, `ogg`, `vorbis` — no SIMD features, so decoding is bit-identical across machines. Chosen over `hound` + `lewton` (the blueprint's candidates): one maintained pure-Rust decoder covers both formats and bounds its own allocations |
-| `blake3` | 1 | Cache keys in `fynkel_import::cache` (content addressing, §6); pure Rust, no SIMD-dependent output — the same inputs hash the same on every machine |
+| `blake3` | 1 | Cache keys in `fynkel_import::cache` (content addressing, §6) and document revisions in `fynkel_document::authoring`; pure Rust, no SIMD-dependent output — the same inputs hash the same on every machine |
 | `crc32fast` | 1 | Per-chunk and header checksums in `fynkel_cooked`; the crate's only dependency, so a runtime can read cooked containers without the importers |
 
 Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`.

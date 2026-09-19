@@ -16,3 +16,4 @@ serde_json.workspace = true
 jsonschema.workspace = true
 uuid.workspace = true
 similar.workspace = true
+blake3.workspace = true

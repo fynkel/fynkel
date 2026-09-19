@@ -17,6 +17,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod asset;
+pub mod authoring;
 pub mod codec;
 #[rustfmt::skip]
 #[allow(clippy::all)]
@@ -33,6 +34,10 @@ pub mod schema;
 use std::path::Path;
 
 pub use asset::{AssetDatabase, AssetEntry, AssetKind, Meta, Resolved};
+pub use authoring::{
+    Applied, Command, ComponentSpec, Edit, Editor, Mutation, Request, Requested, Revision,
+    Transaction,
+};
 pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};

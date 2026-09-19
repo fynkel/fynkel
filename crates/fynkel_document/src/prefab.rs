@@ -858,6 +858,7 @@ pub fn inspect_json(prefab: &Prefab) -> serde_json::Value {
         "id": prefab.id().to_string(),
         "name": prefab.document.envelope.name,
         "formatVersion": prefab.document.envelope.format_version,
+        "revision": crate::authoring::Revision::of(&prefab.document).map(|r| r.to_string()).ok(),
         "entityCount": prefab.entities.len(),
         "roots": prefab.roots.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
         "entities": prefab.entities.iter().map(|e| serde_json::json!({
