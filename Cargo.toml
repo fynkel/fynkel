@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/fynkel_contracts",
     "crates/fynkel_ecs",
+    "crates/fynkel_scene",
     "crates/fynkel_m0_scene",
     "crates/fynkel_m0",
     "crates/fynkel_native",
@@ -26,6 +27,7 @@ env_logger = "0.11.11"
 hecs = "0.11.1"
 fynkel_contracts = { path = "crates/fynkel_contracts" }
 fynkel_ecs = { path = "crates/fynkel_ecs" }
+fynkel_scene = { path = "crates/fynkel_scene" }
 
 [profile.release]
 debug = 1   # keep symbols for profiling M0 baselines
