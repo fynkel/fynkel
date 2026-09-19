@@ -1,4 +1,4 @@
-//! A lit spinning cube. Deliberately boring: one pipeline, one vertex buffer,
+//! The M0 test scene: a lit spinning cube. Deliberately boring: one pipeline, one vertex buffer,
 //! one uniform buffer, depth test. Enough to measure presentation overhead.
 
 use glam::{Mat4, Vec3};

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["hosts/standalone"]
+members = ["hosts/standalone", "crates/fynkel_m0_scene", "crates/fynkel_m0"]
 
 [workspace.package]
 version = "0.0.1"
@@ -19,3 +19,15 @@ env_logger = "0.11.11"
 
 [profile.release]
 debug = 1   # keep symbols for profiling M0 baselines
+
+[workspace.dependencies.objc2]
+version = "0.6.3"
+[workspace.dependencies.objc2-foundation]
+version = "0.3.2"
+[workspace.dependencies.objc2-metal]
+version = "0.3.2"
+features = ["objc2-io-surface"]
+[workspace.dependencies.objc2-core-foundation]
+version = "0.3.2"
+[workspace.dependencies.objc2-io-surface]
+version = "0.3.2"

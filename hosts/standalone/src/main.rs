@@ -4,7 +4,6 @@
 //! This is the "engine alone" ruler that the Flutter-hosted viewport is
 //! measured against (blueprint §8.1, ADR-0002).
 
-mod cube;
 mod stats;
 
 use std::sync::Arc;
@@ -15,7 +14,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
-use cube::CubeRenderer;
+use fynkel_m0_scene::CubeRenderer;
 use stats::{FrameStats, FrameTiming};
 
 struct Gpu {

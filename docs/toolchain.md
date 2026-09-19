@@ -31,4 +31,15 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 | pollster | 1.0.1 | block on wgpu async setup |
 | log / env_logger | 0.4.34 / 0.11.11 | logging |
 
-Later M0 additions (when the Flutter host lands): `wgpu-hal`, `metal`, `core-foundation`, `core-video`/IOSurface bindings, `objc2`. Record versions here when added.
+Later M0 additions (Flutter host, `crates/fynkel_m0`):
+
+| Crate | Version | Notes |
+| --- | --- | --- |
+| `wgpu-hal` | 30.0.1 | feature `metal`; `texture_from_raw` for IOSurface-backed textures |
+| `objc2` | 0.6.3 | |
+| `objc2-foundation` | 0.3.2 | |
+| `objc2-metal` | 0.3.2 | feature `objc2-io-surface` (`newTextureWithDescriptor_iosurface_plane`) |
+| `objc2-core-foundation` | 0.3.2 | |
+| `objc2-io-surface` | 0.3.2 | |
+
+Dart side: package `ffi` (pub) for the hand-written M0 bindings only.

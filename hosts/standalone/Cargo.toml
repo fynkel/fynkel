@@ -14,3 +14,4 @@ bytemuck.workspace = true
 pollster.workspace = true
 log.workspace = true
 env_logger.workspace = true
+fynkel_m0_scene = { path = "../../crates/fynkel_m0_scene" }

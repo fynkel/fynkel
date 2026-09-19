@@ -1,0 +1,23 @@
+[package]
+name = "fynkel_m0"
+description = "M0 Flutter viewport experiment: renders the M0 scene into an IOSurface ring via wgpu-hal Metal interop. Throwaway C ABI, not the real fynkel_native."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wgpu.workspace = true
+wgpu-hal = { version = "30.0.1", features = ["metal"] }
+glam.workspace = true
+log.workspace = true
+env_logger.workspace = true
+fynkel_m0_scene = { path = "../fynkel_m0_scene" }
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-metal.workspace = true
+objc2-core-foundation.workspace = true
+objc2-io-surface.workspace = true
