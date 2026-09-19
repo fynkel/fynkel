@@ -1,5 +1,5 @@
 name: fynkel_host_flutter
-description: "A new Flutter project."
+description: "Fynkel Flutter macOS host: Dart gameplay on package:fynkel, step() from the frame callback, Path A viewport from platform/macos."
 publish_to: 'none'
 version: 0.1.0+1
 
@@ -8,6 +8,8 @@ environment:
 
 dependencies:
   ffi: ^2.2.0
+  fynkel:
+    path: ../../packages/fynkel
   flutter:
     sdk: flutter
 

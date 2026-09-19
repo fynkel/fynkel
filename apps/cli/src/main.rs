@@ -1,7 +1,8 @@
 //! `fynkel` — the Fynkel command-line tool.
 //!
-//! M1 scope: `fynkel codegen` (ADR-0012, native schema generator) and
-//! `fynkel schema`. Exit codes: 0 ok, 1 error, 2 `--check` found drift.
+//! M1 scope: `fynkel codegen` (ADR-0012, native schema generator),
+//! `fynkel schema`, and the seed of `fynkel test` (§13.3/§14.1): the Rust
+//! headless host. Exit codes: 0 ok, 1 error, 2 `--check` found drift.
 
 mod codegen;
 
@@ -10,7 +11,7 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint"
+        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host and report"
     );
     ExitCode::from(1)
 }
@@ -42,6 +43,9 @@ fn main() -> ExitCode {
     let Some(cmd) = args.first() else {
         return usage();
     };
+    if cmd == "test" {
+        return test_command(&args[1..]);
+    }
     let mut check = false;
     let mut root = None;
     let mut i = 1;
@@ -104,5 +108,79 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         _ => usage(),
+    }
+}
+
+/// `fynkel test --headless`: runs the Rust headless host (blueprint §5.2).
+/// The Dart headless game host (Behaviours) plugs in here later; without
+/// `--headless` this is all M1 has, so it runs the same thing and says so.
+fn test_command(args: &[String]) -> ExitCode {
+    use fynkel_host_headless::{run, HeadlessConfig};
+    let mut cfg = HeadlessConfig::default();
+    let mut json = false;
+    let mut headless = false;
+    let mut i = 0;
+    while i < args.len() {
+        let value = |i: &mut usize| -> Option<&String> {
+            *i += 1;
+            args.get(*i)
+        };
+        match args[i].as_str() {
+            "--headless" => headless = true,
+            "--json" => json = true,
+            "--steps" => {
+                cfg.steps = value(&mut i)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(cfg.steps)
+            }
+            "--seed" => {
+                cfg.seed = value(&mut i)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(cfg.seed)
+            }
+            "--satellites" => {
+                cfg.satellites = value(&mut i)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(cfg.satellites)
+            }
+            "--frame-dt" => {
+                cfg.frame_dt = value(&mut i)
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(cfg.frame_dt)
+            }
+            "--root" => {
+                i += 1;
+            }
+            other => {
+                eprintln!("fynkel test: unknown argument {other}");
+                return usage();
+            }
+        }
+        i += 1;
+    }
+    if !headless && !json {
+        eprintln!("fynkel test: M1 runs the Rust headless host (pass --headless to be explicit)");
+    }
+    let report = run(&cfg);
+    let ok = report.scene_ready && report.commands_rejected == 0 && report.diagnostics == 0;
+    if json {
+        println!("{}", report.to_json());
+    } else {
+        println!(
+            "fynkel test --headless: {} ticks in {:.1} ms, {} entities, {} commands applied, {} rejected, {} diagnostics, checksum {} — {}",
+            report.tick,
+            report.total_ms,
+            report.live_entities,
+            report.commands_applied,
+            report.commands_rejected,
+            report.diagnostics,
+            report.checksum,
+            if ok { "ok" } else { "FAILED" }
+        );
+    }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
     }
 }

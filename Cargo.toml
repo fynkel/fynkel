@@ -7,9 +7,10 @@ members = [
     "crates/fynkel_scene",
     "crates/fynkel_core",
     "crates/fynkel_wire",
-    "crates/fynkel_m0_scene",
-    "crates/fynkel_m0",
+    "crates/fynkel_render",
     "crates/fynkel_native",
+    "platform/macos",
+    "hosts/headless",
     "hosts/standalone",
     "apps/cli",
 ]
@@ -40,6 +41,9 @@ fynkel_ecs = { path = "crates/fynkel_ecs" }
 fynkel_scene = { path = "crates/fynkel_scene" }
 fynkel_core = { path = "crates/fynkel_core" }
 fynkel_wire = { path = "crates/fynkel_wire" }
+fynkel_render = { path = "crates/fynkel_render" }
+fynkel_native = { path = "crates/fynkel_native" }
+fynkel_host_headless = { path = "hosts/headless" }
 
 [profile.release]
 debug = 1   # keep symbols for profiling M0 baselines

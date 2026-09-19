@@ -1,6 +1,6 @@
 [package]
 name = "fynkel_cli"
-description = "The `fynkel` command-line tool (blueprint §13, §14). M1: `fynkel codegen` — the native schema generator (ADR-0012)."
+description = "The `fynkel` command-line tool (blueprint §13, §14). M1: `fynkel codegen` (ADR-0012) and `fynkel test --headless` (Rust headless host)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,5 +13,6 @@ path = "src/main.rs"
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true
+fynkel_host_headless.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -21,7 +21,7 @@ const Transform identityTransform = Transform(position: Vec3.zero, rotation: Qua
 
 /// Runtime entity/component container over one native world.
 class World {
-  World._(this._lib, this._native, {required this.ownsLibrary});
+  World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt});
 
   /// Creates a world on a fresh [NativeLibrary] (or the given one).
   factory World.create({
@@ -34,8 +34,11 @@ class World {
     final lib = library ?? NativeLibrary.open();
     final native = lib.createWorld(
         worldId: worldId, fixedDt: fixedDt, maxStepsPerFrame: maxStepsPerFrame, maxFrameDt: maxFrameDt);
-    return World._(lib, native, ownsLibrary: library == null);
+    return World._(lib, native, ownsLibrary: library == null, fixedDt: fixedDt > 0 ? fixedDt : 1 / 60);
   }
+
+  /// Seconds per fixed tick (the engine default when not given).
+  final double fixedDt;
 
   final NativeLibrary _lib;
   final NativeWorld _native;

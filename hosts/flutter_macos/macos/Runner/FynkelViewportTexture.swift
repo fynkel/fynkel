@@ -3,11 +3,11 @@ import FlutterMacOS
 import CoreVideo
 import IOSurface
 
-/// M0 Path A experiment: a `FlutterTexture` backed by a ring of IOSurfaces that
-/// Rust/wgpu renders into. Every `copyPixelBuffer` asks Rust which buffer is
-/// the newest GPU-complete one and returns the matching CVPixelBuffer.
-/// No pixels are copied on the CPU.
-final class FynkelM0Texture: NSObject, FlutterTexture {
+/// Path A viewport (ADR-0002, platform/macos): a `FlutterTexture` backed by a
+/// ring of IOSurfaces that Rust/wgpu renders into. Every `copyPixelBuffer`
+/// asks Rust which slot is the newest GPU-complete one and returns the
+/// matching CVPixelBuffer. No pixels are copied on the CPU.
+final class FynkelViewportTexture: NSObject, FlutterTexture {
   typealias AcquireFn = @convention(c) (UnsafeMutableRawPointer?) -> Int32
   typealias FrameReadyFn = @convention(c) (UnsafeMutableRawPointer?) -> Void
   typealias SetCallbackFn = @convention(c) (UnsafeMutableRawPointer?, FrameReadyFn?, UnsafeMutableRawPointer?) -> Void
@@ -26,7 +26,7 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
   var textureId: Int64 = -1
   weak var registry: FlutterTextureRegistry?
 
-  /// Counters for the M0 report.
+  /// Counters for the stats overlay / benchmark capture.
   var copyCalls = 0
   var copyWithNewFrame = 0
   var frameReadySignals = 0
@@ -36,16 +36,16 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
   init?(ctx: UnsafeMutableRawPointer, acquire: AcquireFn, iosurfaces: [UnsafeMutableRawPointer]) {
     self.ctx = ctx
     self.acquire = acquire
-    guard let buffers = FynkelM0Texture.wrap(iosurfaces) else { return nil }
+    guard let buffers = FynkelViewportTexture.wrap(iosurfaces) else { return nil }
     self.pixelBuffers = buffers
     super.init()
   }
 
-  /// Swap in a new IOSurface ring (after `fynkel_m0_resize`). The old
+  /// Swap in a new IOSurface ring (after `fynkel_macos_viewport_resize`). The old
   /// CVPixelBuffers are released here; Flutter may still hold a retained one
   /// for an in-flight raster, which keeps that IOSurface alive on its own.
   func rebind(iosurfaces: [UnsafeMutableRawPointer]) -> Bool {
-    guard let buffers = FynkelM0Texture.wrap(iosurfaces) else { return false }
+    guard let buffers = FynkelViewportTexture.wrap(iosurfaces) else { return false }
     lock.lock()
     pixelBuffers = buffers
     lastIndex = -1
@@ -71,7 +71,7 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
       ]
       let status = CVPixelBufferCreateWithIOSurface(nil, surface, attrs as CFDictionary, &pbUnmanaged)
       guard status == kCVReturnSuccess, let pbUnmanaged else {
-        NSLog("FynkelM0Texture: CVPixelBufferCreateWithIOSurface failed: \(status)")
+        NSLog("FynkelViewportTexture: CVPixelBufferCreateWithIOSurface failed: \(status)")
         return nil
       }
       buffers.append(pbUnmanaged.takeRetainedValue())
@@ -107,14 +107,14 @@ final class FynkelM0Texture: NSObject, FlutterTexture {
 
 /// Method channel glue. Dart owns the Rust context (created via dart:ffi) and
 /// hands us raw pointers; we only do what must be done in the Flutter embedder.
-final class FynkelM0Channel {
+final class FynkelViewportChannel {
   private let registrar: FlutterPluginRegistrar
-  private var texture: FynkelM0Texture?
-  private var setCallback: FynkelM0Texture.SetCallbackFn?
+  private var texture: FynkelViewportTexture?
+  private var setCallback: FynkelViewportTexture.SetCallbackFn?
 
   init(registrar: FlutterPluginRegistrar) {
     self.registrar = registrar
-    let channel = FlutterMethodChannel(name: "fynkel/m0", binaryMessenger: registrar.messenger)
+    let channel = FlutterMethodChannel(name: "fynkel/viewport", binaryMessenger: registrar.messenger)
     channel.setMethodCallHandler { [weak self] call, result in
       self?.handle(call, result: result)
     }
@@ -133,10 +133,10 @@ final class FynkelM0Channel {
         return
       }
       let ctx = UnsafeMutableRawPointer(bitPattern: ctxAddr)!
-      let acquire = unsafeBitCast(UnsafeRawPointer(bitPattern: acquireAddr)!, to: FynkelM0Texture.AcquireFn.self)
-      let setCallback = unsafeBitCast(UnsafeRawPointer(bitPattern: setCbAddr)!, to: FynkelM0Texture.SetCallbackFn.self)
+      let acquire = unsafeBitCast(UnsafeRawPointer(bitPattern: acquireAddr)!, to: FynkelViewportTexture.AcquireFn.self)
+      let setCallback = unsafeBitCast(UnsafeRawPointer(bitPattern: setCbAddr)!, to: FynkelViewportTexture.SetCallbackFn.self)
       let ptrs = surfaces.map { UnsafeMutableRawPointer(bitPattern: $0)! }
-      guard let tex = FynkelM0Texture(ctx: ctx, acquire: acquire, iosurfaces: ptrs) else {
+      guard let tex = FynkelViewportTexture(ctx: ctx, acquire: acquire, iosurfaces: ptrs) else {
         result(FlutterError(code: "texture", message: "could not wrap IOSurfaces", details: nil))
         return
       }
@@ -147,9 +147,9 @@ final class FynkelM0Channel {
       // Rust -> Swift frame-ready signal. userdata = unretained pointer to `tex`,
       // which we keep alive in `self.texture` until unregister.
       let userdata = Unmanaged.passUnretained(tex).toOpaque()
-      let cb: FynkelM0Texture.FrameReadyFn = { ud in
+      let cb: FynkelViewportTexture.FrameReadyFn = { ud in
         guard let ud else { return }
-        Unmanaged<FynkelM0Texture>.fromOpaque(ud).takeUnretainedValue().onFrameReady()
+        Unmanaged<FynkelViewportTexture>.fromOpaque(ud).takeUnretainedValue().onFrameReady()
       }
       setCallback(ctx, cb, userdata)
       self.setCallback = setCallback

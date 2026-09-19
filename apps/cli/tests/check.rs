@@ -34,3 +34,31 @@ fn schema_command_prints_fingerprint() {
     )));
     assert!(text.contains("fynkel.Transform"));
 }
+
+#[test]
+fn test_headless_reports_json() {
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args([
+            "test",
+            "--headless",
+            "--steps",
+            "30",
+            "--seed",
+            "3",
+            "--satellites",
+            "4",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json report");
+    assert_eq!(v["tick"], 30);
+    assert_eq!(v["live_entities"], 5);
+    assert_eq!(v["scene_ready"], true);
+    assert!(v["checksum"].as_str().unwrap().len() == 16);
+}

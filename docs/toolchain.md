@@ -34,7 +34,7 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 | pollster | 1.0.1 | block on wgpu async setup |
 | log / env_logger | 0.4.34 / 0.11.11 | logging |
 
-Later M0 additions (Flutter host, `crates/fynkel_m0`):
+Later M0 additions (Flutter viewport; since M1-07 in `platform/macos`):
 
 | Crate | Version | Notes |
 | --- | --- | --- |

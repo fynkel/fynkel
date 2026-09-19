@@ -575,6 +575,7 @@ version = "0.0.1"
 dependencies = [
  "fynkel_contracts",
  "fynkel_core",
+ "fynkel_host_headless",
  "serde",
  "serde_json",
 ]
@@ -603,44 +604,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_host_headless"
+version = "0.0.1"
+dependencies = [
+ "fynkel_contracts",
+ "fynkel_core",
+ "fynkel_scene",
+ "glam",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fynkel_host_standalone"
 version = "0.0.1"
 dependencies = [
- "bytemuck",
  "env_logger",
- "fynkel_m0_scene",
+ "fynkel_core",
+ "fynkel_host_headless",
+ "fynkel_render",
  "glam",
  "log",
  "pollster",
  "wgpu",
  "winit",
-]
-
-[[package]]
-name = "fynkel_m0"
-version = "0.0.1"
-dependencies = [
- "block2 0.6.2",
- "env_logger",
- "fynkel_m0_scene",
- "glam",
- "log",
- "objc2 0.6.4",
- "objc2-core-foundation",
- "objc2-foundation 0.3.2",
- "objc2-io-surface",
- "objc2-metal 0.3.2",
- "wgpu",
- "wgpu-hal",
-]
-
-[[package]]
-name = "fynkel_m0_scene"
-version = "0.0.1"
-dependencies = [
- "bytemuck",
- "glam",
- "wgpu",
 ]
 
 [[package]]
@@ -653,6 +640,41 @@ dependencies = [
  "fynkel_wire",
  "glam",
  "log",
+]
+
+[[package]]
+name = "fynkel_platform_macos"
+version = "0.0.1"
+dependencies = [
+ "block2 0.6.2",
+ "env_logger",
+ "fynkel_contracts",
+ "fynkel_core",
+ "fynkel_native",
+ "fynkel_render",
+ "fynkel_scene",
+ "glam",
+ "log",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "objc2-io-surface",
+ "objc2-metal 0.3.2",
+ "wgpu",
+ "wgpu-hal",
+]
+
+[[package]]
+name = "fynkel_render"
+version = "0.0.1"
+dependencies = [
+ "bytemuck",
+ "fynkel_contracts",
+ "fynkel_core",
+ "fynkel_scene",
+ "glam",
+ "pollster",
+ "wgpu",
 ]
 
 [[package]]

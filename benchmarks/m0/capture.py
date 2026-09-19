@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """M0 benchmark capture (blueprint §15.1, backlog #12).
 
-Builds the standalone host, the fynkel_m0/fynkel_native dylibs and the
-Flutter macOS host, runs each workload for warm-up + sample seconds, parses
-their per-second stats lines and writes:
+Builds the standalone host, the fynkel_platform_macos dylib (which exports
+fynkel_native too) and the Flutter macOS host, runs each workload for
+warm-up + sample seconds, parses their per-second stats lines and writes:
 
   benchmarks/m0/results/<date>-<commit>.json   raw + aggregated numbers
   benchmarks/m0/results/<date>-<commit>.md     summary table
@@ -33,7 +33,7 @@ FLUTTER_DIR = ROOT / "hosts/flutter_macos"
 FLUTTER_BIN = Path.home() / "Documents/flutter/flutter/bin"
 DART = FLUTTER_BIN / "dart"
 FLUTTER = FLUTTER_BIN / "flutter"
-M0_DYLIB = ROOT / "target/release/libfynkel_m0.dylib"
+NATIVE_DYLIB = ROOT / "target/release/libfynkel_platform_macos.dylib"
 FLUTTER_APP = FLUTTER_DIR / "build/macos/Build/Products/Release/fynkel_host_flutter.app/Contents/MacOS/fynkel_host_flutter"
 
 
@@ -59,8 +59,8 @@ def environment():
 def build():
     print("building…", flush=True)
     sh(["cargo", "build", "--release", "--workspace"])
-    # One build serves all host modes; FYNKEL_M0_MODE (a | c | none) is read at runtime.
-    sh([str(FLUTTER), "build", "macos", "--release", f"--dart-define=FYNKEL_M0_DYLIB={M0_DYLIB}"], cwd=FLUTTER_DIR)
+    # One build serves all host modes; FYNKEL_HOST_MODE (viewport | none) is read at runtime.
+    sh([str(FLUTTER), "build", "macos", "--release", f"--dart-define=FYNKEL_NATIVE_LIB={NATIVE_DYLIB}"], cwd=FLUTTER_DIR)
 
 
 def run_for(cmd, seconds, cwd=ROOT, env=None):
@@ -167,7 +167,7 @@ def parse_flutter(out):
 
 def capture_flutter(app, mode, warmup, sample):
     print(f"flutter host (mode {mode})…", flush=True)
-    p = subprocess.Popen([str(app)], cwd=FLUTTER_DIR, env={**os.environ, "RUST_LOG": "info", "FYNKEL_M0_MODE": mode},
+    p = subprocess.Popen([str(app)], cwd=FLUTTER_DIR, env={**os.environ, "RUST_LOG": "info", "FYNKEL_HOST_MODE": mode, "FYNKEL_NATIVE_LIB": str(NATIVE_DYLIB)},
                          text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     time.sleep(2.5)
     place_window(app.name)
@@ -257,8 +257,9 @@ def main():
     result = {
         "profile": profile, "environment": environment(), "warmup_seconds": warmup, "sample_seconds": sample,
         "standalone": capture_standalone(warmup, sample),
-        "flutter_path_a": capture_flutter(FLUTTER_APP, "a", warmup, sample),
-        "flutter_path_c": capture_flutter(FLUTTER_APP, "c", warmup, sample),
+        "flutter_path_a": capture_flutter(FLUTTER_APP, "viewport", warmup, sample),
+        # Path C prototype retired with M1-07 (see benchmarks/m0/results for its M0 numbers).
+        "flutter_path_c": {},
         "flutter_no_viewport": capture_flutter(FLUTTER_APP, "none", warmup, sample),
         "bridge": capture_bridge(),
     }

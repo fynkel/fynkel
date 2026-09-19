@@ -1,8 +1,10 @@
-//! Standalone winit/wgpu host — the M0 baseline.
+//! Standalone winit/wgpu host — the "engine alone" ruler (blueprint §8.1,
+//! ADR-0002, ADR-0007).
 //!
-//! Draws a lit, spinning cube on Metal and prints frame-time statistics.
-//! This is the "engine alone" ruler that the Flutter-hosted viewport is
-//! measured against (blueprint §8.1, ADR-0002).
+//! The host owns the loop: each redraw it feeds the frame dt to
+//! `fynkel_core`, runs the demo scene's gameplay for every planned fixed
+//! tick, steps the world, and renders the world's extract interpolated by
+//! alpha. Prints frame-time statistics for the benchmark capture.
 
 mod stats;
 
@@ -14,7 +16,9 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
-use fynkel_m0_scene::CubeRenderer;
+use fynkel_core::{World, WorldConfig};
+use fynkel_host_headless::DemoScene;
+use fynkel_render::ExtractRenderer;
 use stats::{FrameStats, FrameTiming};
 
 struct Gpu {
@@ -23,7 +27,7 @@ struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    renderer: CubeRenderer,
+    renderer: ExtractRenderer,
 }
 
 impl Gpu {
@@ -64,7 +68,7 @@ impl Gpu {
         config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
 
-        let renderer = CubeRenderer::new(&device, config.format, config.width, config.height);
+        let renderer = ExtractRenderer::new(&device, config.format, config.width, config.height);
 
         Self {
             window,
@@ -88,7 +92,7 @@ impl Gpu {
 
     /// Returns `None` when the surface needs reconfiguring; otherwise the
     /// (acquire wait, cpu encode+submit) durations for this frame.
-    fn render(&mut self, elapsed_secs: f32) -> Option<FrameTiming> {
+    fn render(&mut self, extract: &fynkel_core::Extract) -> Option<FrameTiming> {
         use wgpu::CurrentSurfaceTexture as C;
         let t_acquire = Instant::now();
         let frame = match self.surface.get_current_texture() {
@@ -105,12 +109,7 @@ impl Gpu {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        self.renderer.update(
-            &self.queue,
-            elapsed_secs,
-            self.config.width,
-            self.config.height,
-        );
+        self.renderer.prepare(&self.device, &self.queue, extract);
 
         let mut encoder = self
             .device
@@ -129,13 +128,48 @@ impl Gpu {
     }
 }
 
-#[derive(Default)]
 struct App {
     gpu: Option<Gpu>,
     start: Option<Instant>,
+    last_frame: Option<Instant>,
     stats: FrameStats,
+    world: World,
+    scene: DemoScene,
     /// Auto-exit after this many seconds (`--seconds N`), for scripted captures.
     run_for: Option<f32>,
+}
+
+impl App {
+    fn new(satellites: u32, seed: u64) -> Self {
+        Self {
+            gpu: None,
+            start: None,
+            last_frame: None,
+            stats: FrameStats::default(),
+            world: World::new(WorldConfig::default()),
+            scene: DemoScene::new(satellites, seed),
+            run_for: None,
+        }
+    }
+
+    /// One host frame of simulation (ADR-0008 order): begin_frame → per
+    /// planned tick {pull events, gameplay, step} → extract.
+    fn simulate(&mut self, dt: f32) -> fynkel_core::Extract {
+        let plan = self.world.begin_frame(dt);
+        if plan.dropped_seconds > 0.0 {
+            log::warn!("missed deadline: dropped {:.3}s", plan.dropped_seconds);
+        }
+        for _ in 0..plan.steps {
+            let events = self.world.drain_events();
+            self.scene.on_events(&events);
+            let tick = self.world.tick();
+            self.scene.fixed_update(&mut self.world, tick);
+            self.world.step();
+        }
+        let events = self.world.drain_events();
+        self.scene.on_events(&events);
+        self.world.extract()
+    }
 }
 
 impl ApplicationHandler for App {
@@ -144,7 +178,7 @@ impl ApplicationHandler for App {
             return;
         }
         let attrs = Window::default_attributes()
-            .with_title("Fynkel — standalone host (M0 baseline)")
+            .with_title("Fynkel — standalone host")
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         self.gpu = Some(Gpu::new(window));
@@ -152,13 +186,17 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        let Some(gpu) = self.gpu.as_mut() else { return };
+        if self.gpu.is_none() {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => {
                 self.stats.report_final();
                 event_loop.exit();
             }
-            WindowEvent::Resized(size) => gpu.resize(size.width, size.height),
+            WindowEvent::Resized(size) => {
+                self.gpu.as_mut().unwrap().resize(size.width, size.height)
+            }
             WindowEvent::RedrawRequested => {
                 let elapsed = self.start.map(|s| s.elapsed().as_secs_f32()).unwrap_or(0.0);
                 if self.run_for.is_some_and(|limit| elapsed >= limit) {
@@ -166,7 +204,15 @@ impl ApplicationHandler for App {
                     event_loop.exit();
                     return;
                 }
-                match gpu.render(elapsed) {
+                let now = Instant::now();
+                let dt = self
+                    .last_frame
+                    .map(|t| now.duration_since(t).as_secs_f32())
+                    .unwrap_or(0.0);
+                self.last_frame = Some(now);
+                let extract = self.simulate(dt);
+                let gpu = self.gpu.as_mut().unwrap();
+                match gpu.render(&extract) {
                     Some(t) => self.stats.record(t),
                     None => {
                         let size = gpu.window.inner_size();
@@ -184,12 +230,24 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let event_loop = EventLoop::new().expect("event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::default();
+    let mut satellites = 24;
+    let mut seed = 42;
+    let mut run_for = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
-        if a == "--seconds" {
-            app.run_for = args.next().and_then(|v| v.parse().ok());
+        match a.as_str() {
+            "--seconds" => run_for = args.next().and_then(|v| v.parse().ok()),
+            "--satellites" => {
+                satellites = args
+                    .next()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(satellites)
+            }
+            "--seed" => seed = args.next().and_then(|v| v.parse().ok()).unwrap_or(seed),
+            _ => {}
         }
     }
+    let mut app = App::new(satellites, seed);
+    app.run_for = run_for;
     event_loop.run_app(&mut app).expect("run");
 }

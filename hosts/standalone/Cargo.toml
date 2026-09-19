@@ -1,17 +1,18 @@
 [package]
 name = "fynkel_host_standalone"
-description = "Standalone winit/wgpu host. M0 baseline for measuring host/composition overhead."
+description = "Standalone winit/wgpu host: owns the loop, steps fynkel_core, renders its extract. The M0 baseline ruler for host/composition overhead."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+fynkel_core.workspace = true
+fynkel_render.workspace = true
+fynkel_host_headless.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 glam.workspace = true
-bytemuck.workspace = true
 pollster.workspace = true
 log.workspace = true
 env_logger.workspace = true
-fynkel_m0_scene = { path = "../../crates/fynkel_m0_scene" }
