@@ -8,6 +8,7 @@ import 'dart:typed_data';
 
 import 'package:fynkel/generated/schema.g.dart';
 import 'package:fynkel/math.dart';
+import 'package:fynkel/src/asset_ref.dart';
 import 'package:fynkel/src/wire/support.dart';
 import 'package:test/test.dart';
 
@@ -107,6 +108,41 @@ void main() {
     DiagnosticRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
+  check(
+    'MeshRenderer',
+    const MeshRenderer(
+      mesh: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'mesh/0'),
+      material: AssetRef('0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff'),
+      castShadows: true,
+      receiveShadows: false,
+      visible: true,
+    ),
+    MeshRenderer.wireSize,
+    MeshRenderer.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Camera',
+    const Camera(
+        projection: Projection.orthographic, fovY: 1.25, orthoHeight: 10.0, near: 0.1, far: 1000.0, priority: -1),
+    Camera.wireSize,
+    Camera.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check('DirectionalLight', const DirectionalLight(color: Vec3(1.0, 0.95, 0.9), intensity: 10000.0, castShadows: true),
+      DirectionalLight.wireSize, DirectionalLight.decode, (v, d, o, s) => v.encode(d, o, s));
+  check('PointLight', const PointLight(color: Vec3(0.2, 0.4, 1.0), intensity: 800.0, range: 12.5), PointLight.wireSize,
+      PointLight.decode, (v, d, o, s) => v.encode(d, o, s));
+  test('unknown enum index and malformed asset ids fail loudly', () {
+    final d = ByteData(Camera.wireSize);
+    d.setUint32(0, 2, Endian.little);
+    expect(() => Camera.decode(d, 0, Uint8List(0)), throwsFormatException);
+    final bad = const MeshRenderer(
+        mesh: AssetRef('not-a-uuid'), material: AssetRef.none, castShadows: true, receiveShadows: true, visible: true);
+    expect(() => bad.encode(ByteData(MeshRenderer.wireSize), 0, WireStrings()), throwsFormatException);
+    expect(const AssetRef('70D7BA8B-F7FB-4EBA-920D-EC9E6B968330').isValid, isFalse);
+    expect(AssetRef.none.isNone, isTrue);
+  });
   check('CommandHeader', const CommandHeader(kind: 1, size: 64), CommandHeader.wireSize, CommandHeader.decode,
       (v, d, o, s) => v.encode(d, o, s));
   check('EventHeader', const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0), EventHeader.wireSize,

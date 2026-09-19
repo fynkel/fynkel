@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../../math.dart';
+import '../asset_ref.dart';
 
 /// Collects strings while encoding; the bytes form the buffer's string tail.
 /// Every generated record: fixed-size body written at [encode]'s offset,
@@ -79,3 +80,31 @@ Quat readQuat(ByteData d, int o) => Quat(
 
 /// `0` on the wire means "no entity".
 int? optionalEntity(int bits) => bits == 0 ? null : bits;
+
+/// `AssetRef` on the wire: 16 id bytes, then `sub` as a wire string (empty =
+/// none). Throws [FormatException] when the id text is not canonical.
+void writeAssetRef(ByteData d, int o, AssetRef v, WireStrings strings) {
+  final id = v.bytes;
+  if (id == null) throw FormatException('AssetRef.asset is not a canonical UUID: "${v.asset}"');
+  for (var i = 0; i < 16; i++) {
+    d.setUint8(o + i, id[i]);
+  }
+  writeWireString(d, o + 16, v.sub ?? '', strings);
+}
+
+AssetRef readAssetRef(ByteData d, int o, Uint8List tail) {
+  final id = Uint8List(16);
+  for (var i = 0; i < 16; i++) {
+    id[i] = d.getUint8(o + i);
+  }
+  return AssetRef.fromBytes(id, readWireString(d, o + 16, tail));
+}
+
+/// Enum fields carry the declaration index; an index this SDK does not know
+/// (a newer native library) is a [FormatException], never a silent default.
+T enumValue<T extends Enum>(List<T> values, int index, String name) {
+  if (index < 0 || index >= values.length) {
+    throw FormatException('$name: unknown variant index $index (this SDK knows ${values.length})');
+  }
+  return values[index];
+}

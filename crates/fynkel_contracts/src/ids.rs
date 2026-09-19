@@ -15,6 +15,8 @@ impl ComponentId {
     pub const NAME: ComponentId = ComponentId(3);
     pub const MESH_RENDERER: ComponentId = ComponentId(4);
     pub const CAMERA: ComponentId = ComponentId(5);
+    pub const DIRECTIONAL_LIGHT: ComponentId = ComponentId(6);
+    pub const POINT_LIGHT: ComponentId = ComponentId(7);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -23,6 +25,8 @@ impl ComponentId {
             3 => Some("fynkel.Name"),
             4 => Some("fynkel.MeshRenderer"),
             5 => Some("fynkel.Camera"),
+            6 => Some("fynkel.DirectionalLight"),
+            7 => Some("fynkel.PointLight"),
             _ => None,
         }
     }

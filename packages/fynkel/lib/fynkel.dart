@@ -2,7 +2,8 @@
 /// typed events, diagnostics, and the ABI v1 bridge underneath.
 library;
 
-export 'generated/schema.g.dart' show SnapshotTransformRecord;
+export 'generated/schema.g.dart' show Camera, DirectionalLight, MeshRenderer, PointLight, Projection, SnapshotTransformRecord;
+export 'src/asset_ref.dart';
 export 'math.dart';
 export 'src/diagnostics.dart';
 export 'src/events.dart';

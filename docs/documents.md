@@ -126,6 +126,14 @@ Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule
 with its expected diagnostics.
 
+Component `data` follows the field types of `docs/codegen.md`: vectors are
+number arrays, enums are the lowerCamel variant name (`"projection":
+"perspective"`), asset references are `{ "asset": "<uuid>", "sub": "mesh/0" }`
+with `sub` omitted for the asset itself — never a path. Built-in authored
+components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
+`fynkel.DirectionalLight`, `fynkel.PointLight` (`fixtures/valid/training_room.scene.json`
+uses all of them).
+
 ## CLI
 
 ```sh

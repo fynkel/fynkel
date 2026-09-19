@@ -7,17 +7,22 @@
 
 #![forbid(unsafe_code)]
 
+pub mod asset;
 pub mod codes;
 pub mod diagnostic;
 pub mod handle;
 pub mod ids;
 pub mod schema;
 
+pub use asset::{AssetId, AssetRef};
 pub use codes::{DiagnosticCode, Status};
 pub use diagnostic::{has_errors, Code, Diagnostic, Severity};
 pub use handle::{Entity, WorldId};
 pub use ids::{ComponentId, EventKind};
-pub use schema::{FieldSchema, FieldType, HasSchema, RecordSchema, SchemaKind};
+pub use schema::{
+    EnumSchema, FieldSchema, FieldType, HasEnumSchema, HasSchema, RecordSchema, SchemaField,
+    SchemaKind,
+};
 
 /// Bumped when the C ABI (function signatures, buffer headers) changes.
 pub const ABI_VERSION: u16 = 1;

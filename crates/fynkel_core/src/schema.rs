@@ -13,6 +13,7 @@ use fynkel_contracts::{Entity, HasSchema};
 use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
 
+use crate::components::{Camera, DirectionalLight, MeshRenderer, PointLight};
 use crate::world::Name;
 
 /// Stable command ids (wire `kind` of a command record).
@@ -187,6 +188,10 @@ pub const ALL: &[&RecordSchema] = &[
     &DiagnosticRecord::SCHEMA,
     &CommandHeader::SCHEMA,
     &EventHeader::SCHEMA,
+    &MeshRenderer::SCHEMA,
+    &Camera::SCHEMA,
+    &DirectionalLight::SCHEMA,
+    &PointLight::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -223,6 +228,19 @@ mod tests {
         assert!(s.has_strings());
         assert_eq!(SceneReadyEvent::SCHEMA.wire_size(), 0);
         assert_eq!(SnapshotTransformRecord::SCHEMA.wire_size(), 88);
+    }
+
+    #[test]
+    fn component_ids_match_the_contracts_table() {
+        for s in ALL.iter().filter(|s| s.kind == SchemaKind::Component) {
+            assert_eq!(
+                fynkel_contracts::ComponentId(s.id).name(),
+                Some(s.name),
+                "{} id {} disagrees with fynkel_contracts::ids",
+                s.name,
+                s.id
+            );
+        }
     }
 
     #[test]

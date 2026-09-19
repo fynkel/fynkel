@@ -9,7 +9,8 @@
 
 use std::path::PathBuf;
 
-use fynkel_contracts::{Entity, WorldId};
+use fynkel_contracts::{AssetId, AssetRef, Entity, WorldId};
+use fynkel_core::components::{Camera, DirectionalLight, MeshRenderer, PointLight, Projection};
 use fynkel_core::schema::*;
 use fynkel_core::Name;
 use fynkel_scene::Transform;
@@ -146,6 +147,45 @@ fn fixtures_match_generated_codecs() {
             message: "stale or unknown entity".into(),
         },
     );
+    let mesh_id: AssetId = "70d7ba8b-f7fb-4eba-920d-ec9e6b968330".parse().unwrap();
+    let material_id: AssetId = "0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff".parse().unwrap();
+    check(
+        "MeshRenderer",
+        &MeshRenderer {
+            mesh: AssetRef::with_sub(mesh_id, "mesh/0"),
+            material: AssetRef::new(material_id),
+            cast_shadows: true,
+            receive_shadows: false,
+            visible: true,
+        },
+    );
+    check(
+        "Camera",
+        &Camera {
+            projection: Projection::Orthographic,
+            fov_y: 1.25,
+            ortho_height: 10.0,
+            near: 0.1,
+            far: 1000.0,
+            priority: -1,
+        },
+    );
+    check(
+        "DirectionalLight",
+        &DirectionalLight {
+            color: Vec3::new(1.0, 0.95, 0.9),
+            intensity: 10_000.0,
+            cast_shadows: true,
+        },
+    );
+    check(
+        "PointLight",
+        &PointLight {
+            color: Vec3::new(0.2, 0.4, 1.0),
+            intensity: 800.0,
+            range: 12.5,
+        },
+    );
     check("CommandHeader", &CommandHeader { kind: 1, size: 64 });
     check(
         "EventHeader",
@@ -177,4 +217,15 @@ fn truncated_and_bad_strings_fail_safely() {
     );
     fynkel_wire::put_u32(&mut b, 0, u32::MAX);
     assert!(Name::decode(&b, b"tail").is_err());
+
+    // An enum index from a newer peer is an error, not a silent default.
+    let mut b = [0u8; Camera::SIZE];
+    fynkel_wire::put_u32(&mut b, 0, 2);
+    assert_eq!(
+        Camera::decode(&b, &[]),
+        Err(WireError::BadEnum {
+            name: "fynkel.Projection",
+            index: 2
+        })
+    );
 }

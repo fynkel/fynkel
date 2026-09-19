@@ -50,6 +50,12 @@ pub enum FieldType {
     Str,
     /// Another schema inlined at its own alignment.
     Nested(&'static RecordSchema),
+    /// [`crate::AssetRef`]: 16 id bytes then `sub` as a `str`
+    /// (`(offset, len)`, empty = none). JSON: `{ "asset": uuid, "sub"? }`.
+    AssetRef,
+    /// Unit-variant enum, `u32` variant index on the wire; JSON: the
+    /// variant's lowerCamel name as a string.
+    Enum(&'static EnumSchema),
 }
 
 impl FieldType {
@@ -66,6 +72,17 @@ impl FieldType {
             FieldType::OptionalEntity => "entity?",
             FieldType::Str => "str",
             FieldType::Nested(s) => s.name,
+            FieldType::AssetRef => "assetRef",
+            FieldType::Enum(e) => e.name,
+        }
+    }
+
+    /// Text the fingerprint hashes: the name, plus the variant list for
+    /// enums (adding or reordering a variant changes what an index means).
+    pub fn canonical(&self) -> String {
+        match self {
+            FieldType::Enum(e) => format!("{}{{{}}}", e.name, e.variants.join("|")),
+            other => other.name().to_string(),
         }
     }
 
@@ -78,6 +95,8 @@ impl FieldType {
             FieldType::Quat => 16,
             FieldType::Str => 8,
             FieldType::Nested(s) => s.wire_size(),
+            FieldType::AssetRef => 24,
+            FieldType::Enum(_) => 4,
         }
     }
 
@@ -92,8 +111,21 @@ impl FieldType {
             FieldType::Bool => 1,
             FieldType::Str => 4,
             FieldType::Nested(_) => 8,
+            FieldType::AssetRef => 8,
+            FieldType::Enum(_) => 4,
         }
     }
+}
+
+/// A unit-variant enum used as a field type. `variants` are the JSON /
+/// Dart names in declaration order; the wire carries the index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EnumSchema {
+    /// Stable name, e.g. `fynkel.Projection`.
+    pub name: &'static str,
+    pub rust_path: &'static str,
+    pub doc: &'static str,
+    pub variants: &'static [&'static str],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,7 +186,7 @@ impl RecordSchema {
 
     pub fn has_strings(&self) -> bool {
         self.fields.iter().any(|f| match f.ty {
-            FieldType::Str => true,
+            FieldType::Str | FieldType::AssetRef => true,
             FieldType::Nested(s) => s.has_strings(),
             _ => false,
         })
@@ -169,7 +201,7 @@ impl RecordSchema {
             if i > 0 {
                 s.push(',');
             }
-            let _ = write!(s, "{}:{}", f.name, f.ty.name());
+            let _ = write!(s, "{}:{}", f.name, f.ty.canonical());
         }
         s.push(']');
         s
@@ -180,9 +212,24 @@ pub const fn align_up(v: usize, align: usize) -> usize {
     v.div_ceil(align) * align
 }
 
-/// Implemented by `#[derive(Schema)]`.
+/// Implemented by `#[derive(Schema)]` on structs.
 pub trait HasSchema {
     const SCHEMA: RecordSchema;
+}
+
+/// Implemented by `#[derive(Schema)]` on unit-variant enums.
+pub trait HasEnumSchema: Sized {
+    const ENUM: EnumSchema;
+    /// Declaration index, what the wire carries.
+    fn to_index(&self) -> u32;
+    /// `None` for an index outside the variant list.
+    fn from_index(index: u32) -> Option<Self>;
+}
+
+/// How a type appears as a record field; the derive uses it for any type
+/// it does not recognise by name (nested records and enums).
+pub trait SchemaField {
+    const TYPE: FieldType;
 }
 
 /// FNV-1a 64 over the canonical text of every schema, in registry order,

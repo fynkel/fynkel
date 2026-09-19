@@ -7,7 +7,9 @@
     "f4d6d600-7931-44f5-a258-45b5a6850300": {
       "name": "Player",
       "parent": null,
-      "children": [],
+      "children": [
+        "a1b2c3d4-0000-4000-8000-000000000010"
+      ],
       "components": {
         "818dc3dc-a9ee-4355-908f-58e20a60ce20": {
           "type": "fynkel.Transform",
@@ -29,6 +31,147 @@
               1,
               1
             ]
+          }
+        },
+        "818dc3dc-a9ee-4355-908f-58e20a60ce21": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "3c0a9f1e-5d2b-4c7a-9e8f-1a2b3c4d5e6f",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "a1b2c3d4-0000-4000-8000-000000000010": {
+      "name": "Camera",
+      "parent": "f4d6d600-7931-44f5-a258-45b5a6850300",
+      "children": [],
+      "components": {
+        "818dc3dc-a9ee-4355-908f-58e20a60ce30": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              1.5,
+              4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "818dc3dc-a9ee-4355-908f-58e20a60ce31": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 1.0471975511965976,
+            "ortho_height": 10,
+            "near": 0.1,
+            "far": 1000,
+            "priority": 0
+          }
+        }
+      }
+    },
+    "a1b2c3d4-0000-4000-8000-000000000020": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "818dc3dc-a9ee-4355-908f-58e20a60ce40": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              10,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "818dc3dc-a9ee-4355-908f-58e20a60ce41": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1,
+              0.95,
+              0.9
+            ],
+            "intensity": 10000,
+            "cast_shadows": true
+          }
+        }
+      }
+    },
+    "a1b2c3d4-0000-4000-8000-000000000030": {
+      "name": "Lamp",
+      "parent": null,
+      "children": [],
+      "components": {
+        "818dc3dc-a9ee-4355-908f-58e20a60ce50": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              2,
+              2,
+              -1
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "818dc3dc-a9ee-4355-908f-58e20a60ce51": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              0.2,
+              0.4,
+              1
+            ],
+            "intensity": 800,
+            "range": 12.5
           }
         }
       }

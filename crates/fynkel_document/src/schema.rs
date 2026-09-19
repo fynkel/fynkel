@@ -190,6 +190,7 @@ impl SchemaSet {
         for err in info.validator.iter_errors(&instance) {
             out.extend(to_diagnostics(&err, data));
         }
+        sort_by_position(&mut out);
         out
     }
 
@@ -223,8 +224,15 @@ impl SchemaSet {
         for err in validator.iter_errors(&instance) {
             out.extend(to_diagnostics(&err, root));
         }
+        sort_by_position(&mut out);
         out
     }
+}
+
+/// Document order (line, column, pointer) rather than the validator's
+/// keyword traversal order, so output is stable and reads top to bottom.
+fn sort_by_position(diags: &mut [Diagnostic]) {
+    diags.sort_by(|a, b| (a.line, a.column, &a.pointer).cmp(&(b.line, b.column, &b.pointer)));
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {

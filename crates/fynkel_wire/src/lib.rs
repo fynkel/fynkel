@@ -11,7 +11,8 @@ pub mod generated;
 
 pub use generated::SCHEMA_FINGERPRINT;
 
-use fynkel_contracts::Entity;
+use fynkel_contracts::schema::HasEnumSchema;
+use fynkel_contracts::{AssetId, AssetRef, Entity};
 use glam::{Quat, Vec3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +21,8 @@ pub enum WireError {
     Truncated { needed: usize, got: usize },
     /// String reference outside the tail or not UTF-8.
     BadString { offset: u32, len: u32 },
+    /// Enum index outside the variant list (a newer peer).
+    BadEnum { name: &'static str, index: u32 },
 }
 
 /// Collects strings during encoding; the tail is appended after the records.
@@ -130,6 +133,15 @@ pub fn put_str(b: &mut [u8], off: usize, v: &str, strings: &mut StringTable) {
     put_u32(b, off, o);
     put_u32(b, off + 4, l);
 }
+#[inline]
+pub fn put_asset_ref(b: &mut [u8], off: usize, v: &AssetRef, strings: &mut StringTable) {
+    b[off..off + 16].copy_from_slice(v.asset.as_bytes());
+    put_str(b, off + 16, &v.sub, strings);
+}
+#[inline]
+pub fn put_enum<T: HasEnumSchema>(b: &mut [u8], off: usize, v: &T) {
+    put_u32(b, off, v.to_index());
+}
 
 #[inline]
 pub fn get_u16(b: &[u8], off: usize) -> u16 {
@@ -178,6 +190,21 @@ pub fn get_opt_entity(b: &[u8], off: usize) -> Option<Entity> {
         0 => None,
         bits => Some(Entity::from_bits(bits)),
     }
+}
+#[inline]
+pub fn get_asset_ref(b: &[u8], off: usize, tail: &[u8]) -> Result<AssetRef, WireError> {
+    Ok(AssetRef {
+        asset: AssetId::from_bytes(b[off..off + 16].try_into().unwrap()),
+        sub: get_str(b, off + 16, tail)?,
+    })
+}
+#[inline]
+pub fn get_enum<T: HasEnumSchema>(b: &[u8], off: usize) -> Result<T, WireError> {
+    let index = get_u32(b, off);
+    T::from_index(index).ok_or(WireError::BadEnum {
+        name: T::ENUM.name,
+        index,
+    })
 }
 #[inline]
 pub fn get_str(b: &[u8], off: usize, tail: &[u8]) -> Result<String, WireError> {

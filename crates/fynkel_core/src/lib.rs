@@ -22,12 +22,14 @@
 
 pub mod clock;
 pub mod command;
+pub mod components;
 pub mod event;
 pub mod schema;
 pub mod world;
 
 pub use clock::{FrameClock, FramePlan};
 pub use command::{Command, Lane};
+pub use components::{Camera, DirectionalLight, MeshRenderer, PointLight, Projection};
 pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, WorldId};
 pub use fynkel_scene::Transform;

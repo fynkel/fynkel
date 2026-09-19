@@ -5,7 +5,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use fynkel_contracts::schema::{FieldType, RecordSchema, SchemaKind};
+use fynkel_contracts::schema::{EnumSchema, FieldType, RecordSchema, SchemaKind};
 use fynkel_contracts::ABI_VERSION;
 use fynkel_core::schema::{schema_fingerprint, ALL};
 use serde_json::{json, Value};
@@ -90,13 +90,19 @@ fn json_index(fp: u64) -> String {
                 "rust": s.rust_path,
                 "doc": s.doc,
                 "size": s.wire_size(),
-                "fields": s.fields.iter().zip(offsets).map(|(f, off)| json!({
-                    "name": f.name,
-                    "type": f.ty.name(),
-                    "offset": off,
-                    "size": f.ty.wire_size(),
-                    "doc": f.doc,
-                })).collect::<Vec<_>>(),
+                "fields": s.fields.iter().zip(offsets).map(|(f, off)| {
+                    let mut v = json!({
+                        "name": f.name,
+                        "type": f.ty.name(),
+                        "offset": off,
+                        "size": f.ty.wire_size(),
+                        "doc": f.doc,
+                    });
+                    if let FieldType::Enum(e) = f.ty {
+                        v["variants"] = json!(e.variants);
+                    }
+                    v
+                }).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -125,6 +131,10 @@ fn json_type(ty: &FieldType) -> Value {
         }
         FieldType::Str => json!({"type": "string"}),
         FieldType::Nested(s) => json!({"$ref": format!("{}.schema.json", s.name)}),
+        FieldType::AssetRef => json!({"$ref": format!("{ENVELOPE_ID}#/$defs/assetRef")}),
+        FieldType::Enum(e) => {
+            json!({"type": "string", "enum": e.variants, "x-fynkel": {"enum": e.name}})
+        }
     }
 }
 
@@ -262,7 +272,28 @@ fn dart_type(ty: &FieldType) -> String {
         FieldType::Quat => "Quat".into(),
         FieldType::Str => "String".into(),
         FieldType::Nested(s) => rust_ident(s).into(),
+        FieldType::AssetRef => "AssetRef".into(),
+        FieldType::Enum(e) => enum_ident(e).into(),
     }
+}
+
+fn enum_ident(e: &EnumSchema) -> &str {
+    e.rust_path.rsplit("::").next().unwrap()
+}
+
+/// Every enum used by a field in `ALL`, first-use order, once each.
+fn enums() -> Vec<&'static EnumSchema> {
+    let mut out: Vec<&'static EnumSchema> = Vec::new();
+    for s in ALL {
+        for f in s.fields {
+            if let FieldType::Enum(e) = f.ty {
+                if !out.iter().any(|x| x.name == e.name) {
+                    out.push(e);
+                }
+            }
+        }
+    }
+    out
 }
 
 fn dart(fp: u64) -> String {
@@ -281,6 +312,7 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o, "import 'dart:typed_data';");
     let _ = writeln!(o);
     let _ = writeln!(o, "import '../math.dart';");
+    let _ = writeln!(o, "import '../src/asset_ref.dart';");
     let _ = writeln!(o, "import '../src/wire/support.dart';");
     let _ = writeln!(o);
     let _ = writeln!(
@@ -290,6 +322,23 @@ fn dart(fp: u64) -> String {
     let _ = writeln!(o, "/// native library's `fynkel_schema_fingerprint()`.");
     let _ = writeln!(o, "const int schemaFingerprint = {fp:#x};");
     let _ = writeln!(o, "const int abiVersion = {ABI_VERSION};");
+    for e in enums() {
+        let _ = writeln!(o);
+        if !e.doc.is_empty() {
+            let _ = writeln!(o, "/// {}", e.doc);
+            let _ = writeln!(o, "///");
+        }
+        let _ = writeln!(
+            o,
+            "/// `{}`: the wire carries the index, documents the name.",
+            e.name
+        );
+        let _ = writeln!(o, "enum {} {{", enum_ident(e));
+        for v in e.variants {
+            let _ = writeln!(o, "  {v},");
+        }
+        let _ = writeln!(o, "}}");
+    }
     for s in ALL {
         let name = rust_ident(s);
         let offsets = s.offsets();
@@ -371,6 +420,10 @@ fn dart(fp: u64) -> String {
                 FieldType::Quat => format!("writeQuat(d, offset + {off}, {v});"),
                 FieldType::Str => format!("writeWireString(d, offset + {off}, {v}, strings);"),
                 FieldType::Nested(_) => format!("{v}.encode(d, offset + {off}, strings);"),
+                FieldType::AssetRef => format!("writeAssetRef(d, offset + {off}, {v}, strings);"),
+                FieldType::Enum(_) => {
+                    format!("d.setUint32(offset + {off}, {v}.index, Endian.little);")
+                }
             };
             let _ = writeln!(o, "    {line}");
         }
@@ -408,6 +461,12 @@ fn dart(fp: u64) -> String {
                     FieldType::Nested(n) => {
                         format!("{}.decode(d, offset + {off}, tail)", rust_ident(n))
                     }
+                    FieldType::AssetRef => format!("readAssetRef(d, offset + {off}, tail)"),
+                    FieldType::Enum(e) => format!(
+                        "enumValue({}.values, d.getUint32(offset + {off}, Endian.little), '{}')",
+                        enum_ident(e),
+                        e.name
+                    ),
                 };
                 let _ = writeln!(o, "      {v}: {expr},");
             }
@@ -505,6 +564,8 @@ fn rust(fp: u64) -> String {
                     n.rust_path,
                     off + n.wire_size()
                 ),
+                FieldType::AssetRef => format!("put_asset_ref(out, {off}, &{v}, strings);"),
+                FieldType::Enum(_) => format!("put_enum(out, {off}, &{v});"),
             };
             let _ = writeln!(o, "        {line}");
         }
@@ -536,6 +597,8 @@ fn rust(fp: u64) -> String {
                         n.rust_path,
                         off + n.wire_size()
                     ),
+                    FieldType::AssetRef => format!("get_asset_ref(b, {off}, tail)?"),
+                    FieldType::Enum(_) => format!("get_enum(b, {off})?"),
                 };
                 let _ = writeln!(o, "            {}: {expr},", f.name);
             }

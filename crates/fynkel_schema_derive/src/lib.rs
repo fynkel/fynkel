@@ -12,10 +12,21 @@
 //! ```
 //!
 //! Field types are mapped by their last path segment: `f32 u32 i32 u64 bool
-//! Vec3 Quat Entity String`, `Option<Entity>`; any other type is treated as a
-//! nested record and must implement `HasSchema`. Doc comments become the
-//! schema docs (and end up in JSON Schema / Dart docs). `authored = false`
-//! marks an engine-managed component that scene documents may not contain.
+//! Vec3 Quat Entity String AssetRef`, `Option<Entity>`; any other type must
+//! implement `SchemaField`, which this derive also emits — so nested records
+//! and enums are just other `#[derive(Schema)]` types. Doc comments become
+//! the schema docs (and end up in JSON Schema / Dart docs). `authored =
+//! false` marks an engine-managed component that scene documents may not
+//! contain.
+//!
+//! On a unit-variant enum the derive emits `HasEnumSchema`: the wire carries
+//! the declaration index, documents the lowerCamel variant name.
+//!
+//! ```ignore
+//! #[derive(Schema)]
+//! #[schema(name = "fynkel.Projection")]
+//! pub enum Projection { Perspective, Orthographic }
+//! ```
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -136,6 +147,7 @@ fn field_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
         "Quat" => quote!(#c::Quat),
         "Entity" => quote!(#c::Entity),
         "String" => quote!(#c::Str),
+        "AssetRef" => quote!(#c::AssetRef),
         "Option" => {
             let PathArguments::AngleBracketed(args) = &seg.arguments else {
                 return Err(syn::Error::new_spanned(ty, "Option needs a type argument"));
@@ -154,16 +166,97 @@ fn field_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
                 }
             }
         }
-        _ => quote!(#c::Nested(&<#ty as ::fynkel_contracts::schema::HasSchema>::SCHEMA)),
+        _ => quote!(<#ty as ::fynkel_contracts::schema::SchemaField>::TYPE),
+    })
+}
+
+fn lower_camel(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(first) => first.to_lowercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+fn expand_enum(input: &DeriveInput, data: &syn::DataEnum) -> syn::Result<proc_macro2::TokenStream> {
+    let attrs = parse_attrs(input)?;
+    if attrs.kind != "record" || attrs.id != 0 {
+        return Err(syn::Error::new_spanned(
+            input,
+            "enums take only `name = \"...\"` (they are field types, not records)",
+        ));
+    }
+    let mut names = Vec::new();
+    let mut idents = Vec::new();
+    for v in &data.variants {
+        if !matches!(v.fields, Fields::Unit) {
+            return Err(syn::Error::new_spanned(
+                v,
+                "Schema enums need unit variants only",
+            ));
+        }
+        if v.discriminant.is_some() {
+            return Err(syn::Error::new_spanned(
+                v,
+                "Schema enums use declaration order; drop the explicit discriminant",
+            ));
+        }
+        names.push(lower_camel(&v.ident.to_string()));
+        idents.push(&v.ident);
+    }
+    if idents.is_empty() {
+        return Err(syn::Error::new_spanned(
+            input,
+            "Schema enums need a variant",
+        ));
+    }
+    let ident = &input.ident;
+    let ident_str = ident.to_string();
+    let name = attrs.name;
+    let doc = doc_of(&input.attrs);
+    let index = 0u32..;
+    let from_arms = idents
+        .iter()
+        .zip(index.clone())
+        .map(|(v, i)| quote!(#i => Some(Self::#v),));
+    let to_arms = idents
+        .iter()
+        .zip(index)
+        .map(|(v, i)| quote!(Self::#v => #i,));
+    Ok(quote! {
+        impl ::fynkel_contracts::schema::HasEnumSchema for #ident {
+            const ENUM: ::fynkel_contracts::schema::EnumSchema =
+                ::fynkel_contracts::schema::EnumSchema {
+                    name: #name,
+                    rust_path: concat!(module_path!(), "::", #ident_str),
+                    doc: #doc,
+                    variants: &[ #(#names),* ],
+                };
+            fn to_index(&self) -> u32 {
+                match self { #(#to_arms)* }
+            }
+            fn from_index(index: u32) -> Option<Self> {
+                match index { #(#from_arms)* _ => None }
+            }
+        }
+        impl ::fynkel_contracts::schema::SchemaField for #ident {
+            const TYPE: ::fynkel_contracts::schema::FieldType =
+                ::fynkel_contracts::schema::FieldType::Enum(
+                    &<#ident as ::fynkel_contracts::schema::HasEnumSchema>::ENUM,
+                );
+        }
     })
 }
 
 fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    if let Data::Enum(data) = &input.data {
+        return expand_enum(&input, data);
+    }
     let attrs = parse_attrs(&input)?;
     let Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(
             &input,
-            "Schema derives on structs only",
+            "Schema derives on structs and unit-variant enums only",
         ));
     };
     let fields: Vec<_> = match &data.fields {
@@ -209,6 +302,12 @@ fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     fields: &[ #(#field_tokens),* ],
                     authored: #authored,
                 };
+        }
+        impl ::fynkel_contracts::schema::SchemaField for #ident {
+            const TYPE: ::fynkel_contracts::schema::FieldType =
+                ::fynkel_contracts::schema::FieldType::Nested(
+                    &<#ident as ::fynkel_contracts::schema::HasSchema>::SCHEMA,
+                );
         }
     })
 }
