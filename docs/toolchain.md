@@ -15,7 +15,7 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 
 | Tool | Version | Notes |
 | --- | --- | --- |
-| Rust | 1.93.0 stable, `aarch64-apple-darwin` + `x86_64-apple-darwin` std | pinned in `rust-toolchain.toml`; the second target because Flutter builds universal macOS apps and the native-assets hook (ADR-0015) builds per architecture (`rustup target add x86_64-apple-darwin`) |
+| Rust | 1.93.0 stable; std for `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios` | pinned in `rust-toolchain.toml` (targets included, rustup installs them); Flutter builds universal macOS apps and two simulator slices, and the native-assets hook (ADR-0015) builds per architecture |
 | Flutter | 3.47.2 stable (engine a804b26164) | Impeller default on macOS |
 | Dart | 3.13.2 | |
 | Xcode | 26.5 (17F42) | |
@@ -34,7 +34,7 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 | pollster | 1.0.1 | block on wgpu async setup |
 | log / env_logger | 0.4.34 / 0.11.11 | logging |
 
-Later M0 additions (Flutter viewport; since M1-07 in `platform/macos`):
+Later M0 additions (Flutter viewport; since M1-07 in `platform/apple`):
 
 | Crate | Version | Notes |
 | --- | --- | --- |

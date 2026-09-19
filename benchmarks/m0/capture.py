@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """M0 benchmark capture (blueprint §15.1, backlog #12).
 
-Builds the standalone host, the fynkel_platform_macos dylib (which exports
+Builds the standalone host, the fynkel_platform_apple dylib (which exports
 fynkel_native too) and the Flutter macOS host, runs each workload for
 warm-up + sample seconds, parses their per-second stats lines and writes:
 
@@ -29,7 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / "benchmarks/profiles/mac-m3max-2026.json"
-FLUTTER_DIR = ROOT / "hosts/flutter_macos"
+FLUTTER_DIR = ROOT / "hosts/flutter_apple"
 FLUTTER_BIN = Path.home() / "Documents/flutter/flutter/bin"
 DART = FLUTTER_BIN / "dart"
 FLUTTER = FLUTTER_BIN / "flutter"

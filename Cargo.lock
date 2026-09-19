@@ -643,7 +643,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fynkel_platform_macos"
+name = "fynkel_platform_apple"
 version = "0.0.1"
 dependencies = [
  "block2 0.6.2",

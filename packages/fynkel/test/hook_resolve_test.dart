@@ -18,8 +18,9 @@ void main() {
   });
 
   test('crate and file names per OS', () {
-    expect(crateFor(OS.macOS), 'fynkel_platform_macos');
-    expect(crateFor(OS.iOS), 'fynkel_native');
+    expect(crateFor(OS.macOS), 'fynkel_platform_apple');
+    expect(crateFor(OS.iOS), 'fynkel_platform_apple');
+    expect(crateFor(OS.linux), 'fynkel_native');
     expect(cargoLibraryFileName('fynkel_native', OS.macOS), 'libfynkel_native.dylib');
     expect(cargoLibraryFileName('fynkel_native', OS.windows), 'fynkel_native.dll');
     expect(cargoLibraryFileName('fynkel_native', OS.linux), 'libfynkel_native.so');

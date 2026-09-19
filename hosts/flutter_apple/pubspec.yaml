@@ -1,0 +1,22 @@
+name: fynkel_host_flutter
+description: "Fynkel Flutter macOS host: Dart gameplay on package:fynkel, step() from the frame callback, Path A viewport from platform/apple."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  ffi: ^2.2.0
+  fynkel:
+    path: ../../packages/fynkel
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

@@ -65,6 +65,11 @@ class FynkelDiagnostic {
 
   bool get isCommandRejection => commandIndex != 0xffffffff;
 
+  /// Runtime conditions that are reported, never thrown: a missed deadline
+  /// is the clock dropping time after a stall (ADR-0008), not a program
+  /// error, and a host must keep ticking through it.
+  bool get isInformational => code == DiagnosticCode.missedDeadline;
+
   @override
   String toString() =>
       'FynkelDiagnostic(#${isCommandRejection ? commandIndex : '-'} ${code.name} entity=0x${entity.toRadixString(16)} lane=$lane "$message")';

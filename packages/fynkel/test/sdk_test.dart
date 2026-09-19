@@ -129,7 +129,13 @@ void main() {
   test('frame plan: catch-up cap and MissedDeadline surface as diagnostics', () {
     final w = World.create(library: lib, maxStepsPerFrame: 2)..throwOnDiagnostics = true;
     addTearDown(w.dispose);
-    expect(() => w.beginFrame(0.25), throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.missedDeadline)));
+    // Informational: reported, never thrown, even with throwOnDiagnostics.
+    final reported = <FynkelDiagnostic>[];
+    w.onDiagnostics = reported.addAll;
+    final plan = w.beginFrame(0.25);
+    expect(plan.missedDeadline, isTrue);
+    expect(reported.single.code, DiagnosticCode.missedDeadline);
+    expect(reported.single.isInformational, isTrue);
     final events = w.drainEvents();
     expect(events.single, isA<MissedDeadline>());
     expect(w.step().tick, 1);

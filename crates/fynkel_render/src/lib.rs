@@ -412,9 +412,18 @@ pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     .ok()?;
     block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("fynkel headless device"),
+        required_limits: device_limits(&adapter),
         ..Default::default()
     }))
     .ok()
+}
+
+/// Limits to request for [`ExtractRenderer`]: WebGPU defaults, lowered to
+/// what the adapter offers (the iOS simulator's Metal device sits below
+/// them, e.g. 15 inter-stage variables). The renderer needs nothing beyond
+/// the downlevel set, so every Apple adapter satisfies the result.
+pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+    wgpu::Limits::default().or_worse_values_from(&adapter.limits())
 }
 
 /// Tiny inline executor so the renderer does not depend on an async runtime.

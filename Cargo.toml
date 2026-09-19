@@ -9,7 +9,7 @@ members = [
     "crates/fynkel_wire",
     "crates/fynkel_render",
     "crates/fynkel_native",
-    "platform/macos",
+    "platform/apple",
     "hosts/headless",
     "hosts/standalone",
     "apps/cli",

@@ -2176,7 +2176,7 @@ Derived from the M1 "Build" list above; one commit per item, in this order:
 4. `fynkel_core`: world lifecycle, `FrameClock` (accumulator, `maxStepsPerFrame`, alpha, `MissedDeadline`), `step()` with the §5.1 phases, two command lanes with the presentation override + staged authoritative value, pull-only two-lane event queue, subscribed snapshots, diagnostics buffer.
 5. Component schema as source of truth (ADR-0012): `#[derive(Component)]` emitting schema metadata; `fynkel codegen` native pipeline → JSON Schema (`schemas/`), Dart codecs (`packages/fynkel/lib/generated/`), Rust wire codecs; schema fingerprint derived, not hand-maintained.
 6. `fynkel_native` v1 over `fynkel_core`: full operation families (§5.3) incl. query, request ids, stats; Dart SDK `World`/`GameObject`/`Transform` API with staged-write overlay; `FynkelError` in debug; bridge diagnostics (calls, bytes, copies, Dart allocations, GC pauses).
-7. Hosts sharing the core: `hosts/headless` (test loop, `fynkel test` seed), `hosts/standalone` rendering the core's extract (interpolated by alpha), Flutter host driving `step()` from the frame callback through the Path A viewport moved into `platform/macos`.
+7. Hosts sharing the core: `hosts/headless` (test loop, `fynkel test` seed), `hosts/standalone` rendering the core's extract (interpolated by alpha), Flutter host driving `step()` from the frame callback through the Path A viewport moved into `platform/apple`.
 8. Native-assets `hook/build.dart` for `package:fynkel` (ADR-0015).
 9. iOS smoke test: the cube on a device through the same interop.
 10. M1 gate report: allocation-per-frame measurement, teardown leak test, bandwidth numbers appended to the benchmark capture.

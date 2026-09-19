@@ -56,6 +56,7 @@ impl Gpu {
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("fynkel standalone device"),
+            required_limits: fynkel_render::device_limits(&adapter),
             ..Default::default()
         }))
         .expect("request device");

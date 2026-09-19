@@ -156,7 +156,7 @@ class NativeWorld {
   bool get isDisposed => _w == nullptr;
 
   /// Raw `FynkelWorld*` for platform viewports that render this world's
-  /// extract (e.g. `fynkel_macos_viewport_render`). Valid until [dispose].
+  /// extract (e.g. `fynkel_apple_viewport_render`). Valid until [dispose].
   int get handleAddress => _w.address;
 
   bool get isPoisoned {

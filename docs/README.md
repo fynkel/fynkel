@@ -11,7 +11,7 @@
 | [`toolchain.md`](toolchain.md) | Frozen toolchain matrix (M0). |
 | [`codegen.md`](codegen.md) | Schema codegen pipeline: Rust structs → JSON Schema, Dart and Rust codecs, fixtures (M1). |
 | [`hosts.md`](hosts.md) | The hosts sharing the core (headless, standalone, Flutter) and how each drives `step()` (M1). |
-| [`../platform/macos/README.md`](../platform/macos/README.md) | macOS platform integration contract (§8.4): IOSurface ring, synchronization, resize, lifecycle. |
+| [`../platform/apple/README.md`](../platform/apple/README.md) | Apple (macOS + iOS) platform integration contract (§8.4): IOSurface ring, synchronization, resize, lifecycle. |
 
 ## Decision index
 

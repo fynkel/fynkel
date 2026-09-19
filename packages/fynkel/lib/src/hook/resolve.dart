@@ -9,10 +9,10 @@ import 'package:code_assets/code_assets.dart';
 /// The code asset every `@Native` binding in this package resolves through.
 const assetName = 'fynkel_native';
 
-/// Which native crate serves a target. macOS ships the platform dylib (it
-/// exports the `fynkel_*` ABI plus the IOSurface viewport); everything else
-/// gets the bare ABI crate.
-String crateFor(OS os) => os == OS.macOS ? 'fynkel_platform_macos' : 'fynkel_native';
+/// Which native crate serves a target. Apple targets ship the platform dylib
+/// (it exports the `fynkel_*` ABI plus the IOSurface viewport); everything
+/// else gets the bare ABI crate.
+String crateFor(OS os) => os == OS.macOS || os == OS.iOS ? 'fynkel_platform_apple' : 'fynkel_native';
 
 /// `<os>[-simulator]-<arch>` key used by `fynkel.lock.json` and the release
 /// store file names.

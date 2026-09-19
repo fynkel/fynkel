@@ -68,7 +68,9 @@ class World {
   /// (debug mode throws [FynkelError] instead). Defaults to `print`.
   void Function(List<FynkelDiagnostic>) onDiagnostics = (d) => print(d.join('\n'));
 
-  /// Throw [FynkelError] on diagnostics. Defaults to [isDebugMode].
+  /// Throw [FynkelError] on error diagnostics (rejections, protocol errors).
+  /// Informational ones ([FynkelDiagnostic.isInformational], e.g. a missed
+  /// deadline) always go to [onDiagnostics]. Defaults to [isDebugMode].
   bool throwOnDiagnostics = isDebugMode;
 
   int get tick => _native.tick;
@@ -209,7 +211,9 @@ class World {
       if (d.entity != 0) _byEntity[d.entity]?._overlay = null;
     }
     if (context == 'step') _simulationTargets.clear();
-    if (throwOnDiagnostics) throw FynkelError(list, context: context);
+    if (throwOnDiagnostics && list.any((d) => !d.isInformational)) {
+      throw FynkelError(list, context: context);
+    }
     onDiagnostics(list);
   }
 

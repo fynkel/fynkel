@@ -12,7 +12,7 @@ The hook resolves the library in this order:
 
 1. `hooks.user_defines.fynkel.native_lib` — use this library as-is.
 2. Fynkel source checkout (`packages/fynkel` inside the Cargo workspace) —
-   `cargo build --release -p fynkel_platform_macos` (macOS) or
+   `cargo build --release -p fynkel_platform_apple` (macOS) or
    `-p fynkel_native` (other targets), cross-compiling with `--target` when
    the requested architecture is not the host's.
 3. Prebuilt artifact for the target named in `fynkel.lock.json`, downloaded
@@ -33,7 +33,7 @@ hooks:
     fynkel:
       lock_file: fynkel.lock.json   # project runtime pin; default: the package's
       build_from_source: true       # skip the download
-      native_lib: path/to/libfynkel_platform_macos.dylib
+      native_lib: path/to/libfynkel_platform_apple.dylib
 ```
 
 Hooks run with a stripped environment (only `PATH`, `HOME` and a few tool
