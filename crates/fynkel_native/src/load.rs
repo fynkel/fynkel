@@ -1,12 +1,14 @@
-//! `fynkel_world_load_scene` / `fynkel_world_load_project` /
-//! `fynkel_world_load_report`: documents into the world through
-//! `fynkel_document::runtime`, with a JSON report the host can show.
+//! `fynkel_world_load_project` / `fynkel_world_load_scene` /
+//! `fynkel_world_load_report`: cooked scenes into the world through
+//! `fynkel_assets` (M3-03: a host reads the cache only — no source
+//! document is ever opened here), with a JSON report the host can show.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use fynkel_contracts::{Diagnostic, Status};
-use fynkel_core::{LoadError, LoadedScene, SceneDescription};
-use fynkel_document::{diagnostic_json, load_project, read_scene, AuthoredBehaviour};
+use fynkel_assets::{Assets, CookedScene};
+use fynkel_contracts::{Diagnostic, Status, Uuid};
+use fynkel_core::{LoadError, LoadedScene};
+use fynkel_document::diagnostic_json;
 use serde_json::{json, Value};
 
 use crate::{guarded, FynkelBufferView, FynkelWorld};
@@ -26,13 +28,13 @@ fn utf8<'a>(ptr: *const u8, len: u32) -> Option<&'a str> {
     std::str::from_utf8(bytes).ok()
 }
 
-fn failed(diagnostics: &[Diagnostic], project: Value) -> Outcome {
+fn failed(diagnostics: &[Diagnostic], cache: Value) -> Outcome {
     Outcome {
         status: Status::LoadFailed,
         report: json!({
             "ok": false,
             "scene": Value::Null,
-            "project": project,
+            "cache": cache,
             "diagnostics": diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
         }),
     }
@@ -53,41 +55,77 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
     Diagnostic::error(code, e.to_string())
 }
 
-/// Spawns `scene` and builds the report; `warnings` are the document
-/// diagnostics of a successful read, `behaviours` the authored Dart
-/// behaviours the SDK attaches to the spawned entities.
-fn instantiate(
-    w: &mut FynkelWorld,
-    scene: &SceneDescription,
-    behaviours: &[AuthoredBehaviour],
-    path: &Path,
-    warnings: Vec<Diagnostic>,
-    project: Value,
-) -> Outcome {
-    match w.core_mut().load_scene(scene) {
-        Ok(loaded) => Outcome {
-            status: Status::Ok,
-            report: json!({
-                "ok": true,
-                "scene": scene_json(&loaded, behaviours, path),
-                "project": project,
-                "diagnostics": warnings.iter().map(diagnostic_json).collect::<Vec<_>>(),
-            }),
-        },
+fn cache_json(assets: &Assets) -> Value {
+    let project = assets.project();
+    json!({
+        "dir": assets.root().display().to_string(),
+        "profile": assets.profile(),
+        "project": project.as_ref().map(|p| p.name.clone()),
+        "startupScene": project.and_then(|p| p.startup_scene).map(|u| u.to_string()),
+    })
+}
+
+/// The store for `cache_dir`: the world's own when it is the same
+/// directory (residency accumulates across loads), else a fresh one.
+// A `Diagnostic` is the error type on purpose (failure path only).
+#[allow(clippy::result_large_err)]
+fn open(w: &mut FynkelWorld, cache_dir: &Path) -> Result<Assets, Diagnostic> {
+    if let Some(a) = &w.assets {
+        if same_dir(&a.root(), cache_dir) {
+            return Ok(a.clone());
+        }
+    }
+    Assets::open(cache_dir)
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+/// Spawns the cooked scene, retains its closure and builds the report.
+fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outcome {
+    let cache = cache_json(&assets);
+    match w.core_mut().load_scene(&scene.description) {
+        Ok(loaded) => {
+            let residency = assets.retain(&scene.closure);
+            let stats = assets.stats();
+            w.residency.push(residency);
+            w.assets = Some(assets);
+            Outcome {
+                status: Status::Ok,
+                report: json!({
+                    "ok": true,
+                    "scene": scene_json(&loaded, &scene),
+                    "cache": cache,
+                    "residency": {
+                        "retained": stats.retained,
+                        "meshes": stats.meshes,
+                        "textures": stats.textures,
+                        "materials": stats.materials,
+                        "bytes": stats.bytes,
+                    },
+                    "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
+                }),
+            }
+        }
         Err(e) => {
-            let mut diags = warnings;
+            let mut diags = scene.diagnostics;
             diags.push(load_error_diagnostic(&e));
-            failed(&diags, project)
+            failed(&diags, cache)
         }
     }
 }
 
-fn scene_json(loaded: &LoadedScene, behaviours: &[AuthoredBehaviour], path: &Path) -> Value {
+fn scene_json(loaded: &LoadedScene, scene: &CookedScene) -> Value {
     // `entity` is the spawned handle (what `World.attach` takes); an
     // authored behaviour whose entity was not spawned cannot happen after
     // a successful load, but is dropped rather than reported with a
     // dangling handle.
-    let behaviours: Vec<Value> = behaviours
+    let behaviours: Vec<Value> = scene
+        .behaviours
         .iter()
         .filter_map(|b| {
             let entity = loaded.handle_of(b.entity)?;
@@ -106,9 +144,11 @@ fn scene_json(loaded: &LoadedScene, behaviours: &[AuthoredBehaviour], path: &Pat
     json!({
         "id": loaded.id.to_string(),
         "name": loaded.name,
-        "path": path.display().to_string(),
+        "path": scene.path,
+        "key": scene.key,
         "entities": loaded.entities().len(),
         "rejectedComponents": loaded.rejected_components,
+        "assets": scene.closure.len(),
         "behaviours": behaviours,
     })
 }
@@ -120,67 +160,68 @@ fn finish(w: &mut FynkelWorld, out: Outcome) -> Status {
     out.status
 }
 
+fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>) -> Outcome {
+    let assets = match open(w, cache_dir) {
+        Ok(a) => a,
+        Err(d) => return failed(&[d], Value::Null),
+    };
+    let cache = cache_json(&assets);
+    let id = match scene.map(Ok).unwrap_or_else(|| assets.startup_scene()) {
+        Ok(id) => id,
+        Err(d) => return failed(&[d], cache),
+    };
+    match assets.scene(id) {
+        Ok(scene) => instantiate(w, assets, scene),
+        Err(diags) => failed(&diags, cache),
+    }
+}
+
+/// Loads the startup scene of the cooked project at `cache_utf8` (the
+/// `.fynkel/cache` directory `fynkel cook` wrote from the project root).
+///
 /// # Safety
-/// `world` live or NULL; `path_utf8` points at `path_len` readable bytes.
+/// `world` live or NULL; `cache_utf8` points at `cache_len` readable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn fynkel_world_load_scene(
+pub unsafe extern "C" fn fynkel_world_load_project(
     world: *mut FynkelWorld,
-    path_utf8: *const u8,
-    path_len: u32,
+    cache_utf8: *const u8,
+    cache_len: u32,
 ) -> Status {
-    let Some(path) = utf8(path_utf8, path_len) else {
+    let Some(dir) = utf8(cache_utf8, cache_len) else {
         return Status::InvalidArgument;
     };
-    let path = Path::new(path).to_path_buf();
+    let dir = PathBuf::from(dir);
     guarded(world, move |w| {
-        let prefabs = path.parent().map(Path::to_path_buf);
-        let out = match read_scene(&path, prefabs.as_deref()) {
-            Ok(d) => instantiate(
-                w,
-                &d.description,
-                &d.behaviours,
-                &path,
-                d.diagnostics,
-                Value::Null,
-            ),
-            Err(diags) => failed(&diags, Value::Null),
-        };
+        let out = load(w, &dir, None);
         finish(w, out)
     })
 }
 
+/// Loads the cooked scene `scene_id_utf8` (an asset id) from the cache at
+/// `cache_utf8`.
+///
 /// # Safety
-/// `world` live or NULL; `dir_utf8` points at `dir_len` readable bytes.
+/// `world` live or NULL; the two strings point at their lengths' bytes.
 #[no_mangle]
-pub unsafe extern "C" fn fynkel_world_load_project(
+pub unsafe extern "C" fn fynkel_world_load_scene(
     world: *mut FynkelWorld,
-    dir_utf8: *const u8,
-    dir_len: u32,
+    cache_utf8: *const u8,
+    cache_len: u32,
+    scene_id_utf8: *const u8,
+    scene_id_len: u32,
 ) -> Status {
-    let Some(dir) = utf8(dir_utf8, dir_len) else {
+    let (Some(dir), Some(id)) = (
+        utf8(cache_utf8, cache_len),
+        utf8(scene_id_utf8, scene_id_len),
+    ) else {
         return Status::InvalidArgument;
     };
-    let dir = Path::new(dir).to_path_buf();
+    let Ok(id) = id.parse::<Uuid>() else {
+        return Status::InvalidArgument;
+    };
+    let dir = PathBuf::from(dir);
     guarded(world, move |w| {
-        let out = match load_project(&dir) {
-            Ok(p) => {
-                let project = json!({
-                    "name": p.project_name,
-                    "dir": p.dir.display().to_string(),
-                    "assets": p.assets.display().to_string(),
-                    "cache": p.cache.display().to_string(),
-                });
-                instantiate(
-                    w,
-                    &p.scene,
-                    &p.behaviours,
-                    &p.scene_path,
-                    p.warnings,
-                    project,
-                )
-            }
-            Err(diags) => failed(&diags, Value::Null),
-        };
+        let out = load(w, &dir, Some(id));
         finish(w, out)
     })
 }

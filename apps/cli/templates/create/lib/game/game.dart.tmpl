@@ -1,8 +1,10 @@
 // {{title}}: the game behind the app and the tests.
 //
 // One `World` on the native runtime, the project's startup scene loaded
-// into it, and every `@FynkelBehaviour` class of this package registered so
-// the scene's behaviour components become live Dart objects. The host
+// into it from the cooked cache (`.fynkel/cache`, written by `fynkel cook`;
+// `fynkel run` and `fynkel test` cook first, a test calls `cookProject`),
+// and every `@FynkelBehaviour` class of this package registered so the
+// scene's behaviour components become live Dart objects. The host
 // (lib/main.dart, or a test) owns the loop and calls [frame] once per frame
 // (ADR-0007/0008).
 
@@ -22,14 +24,16 @@ class Game {
   final LoadReport report;
 
   /// Loads the project at [projectDir] (the directory holding
-  /// `fynkel.project.json`). Throws when the project does not load; warnings
-  /// stay in [report].diagnostics.
-  static Game load(String projectDir, {NativeLibrary? library}) {
+  /// `fynkel.project.json`) from its cooked cache ([cacheDir], default
+  /// `<projectDir>/.fynkel/cache`). Throws when the cache is missing or
+  /// stale (`FYN-R0001`/`R0002`: run `fynkel cook`) or the scene does not
+  /// load; warnings stay in [report].diagnostics.
+  static Game load(String projectDir, {String? cacheDir, NativeLibrary? library}) {
     final world = World.create(library: library);
     registerBehaviours(world.registry);
     final warnings = <LoadDiagnostic>[];
     world.onLoadDiagnostics = warnings.addAll;
-    final report = world.loadProject(projectDir);
+    final report = world.loadProject(projectDir, cacheDir: cacheDir);
     if (!report.ok) {
       world.dispose();
       throw StateError('$projectDir did not load:\n${report.diagnostics.join('\n')}');

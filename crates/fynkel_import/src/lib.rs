@@ -29,7 +29,10 @@ pub mod image;
 pub mod intermediate;
 
 pub use cache::{Cache, CacheKey, KeyInputs, Manifest, CACHE_VERSION};
-pub use cook::{cook, CookOptions, CookReport, CookedAsset, Status};
+pub use cook::{
+    cook, cook_project, project_cache_dir, CookOptions, CookProject, CookReport, CookedAsset,
+    Status,
+};
 pub use intermediate::{
     AudioData, ColorSpace, ImageData, Intermediate, MaterialData, MeshData, TextureData, Vertex,
     INTERMEDIATE_VERSION,

@@ -11,12 +11,12 @@ pub mod scene;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use fynkel_contracts::Diagnostic;
-use fynkel_core::{Extract, LoadedScene, SceneDescription, World, WorldConfig};
-use fynkel_document::load_project;
+use fynkel_assets::Assets;
+use fynkel_contracts::{Diagnostic, Uuid};
+use fynkel_core::{Extract, LoadedScene, World, WorldConfig};
 use serde::{Deserialize, Serialize};
 
-pub use document::{dump_json, dump_text, read_scene};
+pub use document::{dump_json, dump_text};
 pub use scene::DemoScene;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,16 +31,14 @@ pub struct HeadlessConfig {
     pub frame_dt: f32,
     pub fixed_dt: f32,
     pub max_steps_per_frame: u32,
-    /// A `.scene.json` to load instead of the procedural demo scene; the
-    /// world then runs `steps` ticks with no gameplay driver.
-    pub scene: Option<PathBuf>,
-    /// Directory scanned for `*.prefab.json` when the scene has prefab
-    /// instances (none: instances fail with `FYN-D0401`).
-    pub prefabs: Option<PathBuf>,
-    /// A project directory (`fynkel.project.json`) whose startup scene is
-    /// loaded with the project's prefabs and behaviour schemas
-    /// (`fynkel_document::load_project`); takes precedence over `scene`.
-    pub project: Option<PathBuf>,
+    /// A cooked cache (`fynkel cook`) whose scene is loaded instead of the
+    /// procedural demo scene; the world then runs `steps` ticks with no
+    /// gameplay driver. The host reads the cache only (M3-03): source
+    /// documents are never opened here.
+    pub cache: Option<PathBuf>,
+    /// The scene to load from `cache` (its asset id, text form); `None`
+    /// loads the project's startup scene from the index.
+    pub scene: Option<String>,
 }
 
 impl Default for HeadlessConfig {
@@ -53,24 +51,30 @@ impl Default for HeadlessConfig {
             frame_dt: world.fixed_dt,
             fixed_dt: world.fixed_dt,
             max_steps_per_frame: world.max_steps_per_frame,
+            cache: None,
             scene: None,
-            prefabs: None,
-            project: None,
         }
     }
 }
 
-/// What loading a document scene produced (`HeadlessReport::scene`).
+/// What loading a cooked scene produced (`HeadlessReport::scene`).
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct SceneReport {
+    /// The cache directory the scene came from.
+    pub cache: String,
+    /// The scene's authoring path as the cache index records it.
     pub path: String,
     pub loaded: bool,
     pub id: String,
     pub name: String,
+    /// The cooked object's cache key (hex).
+    pub key: String,
     pub entities: u32,
     /// Component values the world rejected (see `diagnostics`).
     pub rejected_components: u32,
-    /// §14.2 document diagnostics (validation and description).
+    /// Assets retained for the scene (its dependency closure).
+    pub retained: u32,
+    /// §14.2 document diagnostics and `FYN-R` runtime diagnostics.
     pub document_diagnostics: Vec<serde_json::Value>,
 }
 
@@ -101,7 +105,7 @@ pub struct HeadlessReport {
     pub step_time: Timing,
     pub total_ms: f32,
     pub scene_ready: bool,
-    /// Present when `HeadlessConfig::scene` was set.
+    /// Present when `HeadlessConfig::cache` was set.
     pub scene: Option<SceneReport>,
 }
 
@@ -111,48 +115,48 @@ impl HeadlessReport {
     }
 }
 
-/// Where a document scene comes from: a scene file (plus an optional prefab
-/// directory) or a project's startup scene.
-enum SceneSource {
-    Scene(PathBuf),
-    Project(PathBuf),
+/// Opens the cache and reads the requested (or startup) scene.
+fn read_cooked(
+    cache: &std::path::Path,
+    scene: Option<&str>,
+) -> Result<(Assets, fynkel_assets::CookedScene), Vec<Diagnostic>> {
+    let assets = Assets::open(cache).map_err(|d| vec![d])?;
+    let id = match scene {
+        Some(text) => text.parse::<Uuid>().map_err(|_| {
+            vec![Diagnostic::error(
+                fynkel_contracts::Code::RUNTIME_ASSET_MISSING,
+                format!("`{text}` is not an asset id (UUID)"),
+            )]
+        })?,
+        None => assets.startup_scene().map_err(|d| vec![d])?,
+    };
+    let cooked = assets.scene(id)?;
+    Ok((assets, cooked))
 }
 
-impl SceneSource {
-    fn path(&self) -> &std::path::Path {
-        match self {
-            SceneSource::Scene(p) | SceneSource::Project(p) => p,
-        }
-    }
-
-    /// The description to load, the warnings and the scene document's
-    /// path; `Err` carries every diagnostic when any is an error.
-    fn read(
-        &self,
-        prefabs: Option<&std::path::Path>,
-    ) -> Result<(SceneDescription, Vec<Diagnostic>, PathBuf), Vec<Diagnostic>> {
-        match self {
-            SceneSource::Scene(path) => {
-                let d = read_scene(path, prefabs)?;
-                Ok((d.description, d.diagnostics, path.clone()))
-            }
-            SceneSource::Project(dir) => {
-                let p = load_project(dir)?;
-                Ok((p.scene, p.warnings, p.scene_path))
-            }
-        }
-    }
-}
-
-/// Runs the demo scene (or `config.scene` / `config.project`) for
+/// Runs the demo scene (or the cooked scene from `config.cache`) for
 /// `config.steps` fixed ticks.
 pub fn run(config: &HeadlessConfig) -> HeadlessReport {
     run_with(config).0
 }
 
-/// [`run`] that also hands back the world and the loaded document scene
-/// (for `fynkel state dump`).
+/// [`run`] that also hands back the world and the loaded cooked scene
+/// (for `fynkel state dump`). The world's assets stay resident for as
+/// long as the returned residency lives.
 pub fn run_with(config: &HeadlessConfig) -> (HeadlessReport, World, Option<LoadedScene>) {
+    let (report, world, loaded, _residency) = run_retaining(config);
+    (report, world, loaded)
+}
+
+/// [`run_with`] plus the store and the scene's residency.
+pub fn run_retaining(
+    config: &HeadlessConfig,
+) -> (
+    HeadlessReport,
+    World,
+    Option<LoadedScene>,
+    Option<(Assets, fynkel_assets::Residency)>,
+) {
     let start = Instant::now();
     let mut world = World::new(WorldConfig {
         fixed_dt: config.fixed_dt,
@@ -180,40 +184,40 @@ pub fn run_with(config: &HeadlessConfig) -> (HeadlessReport, World, Option<Loade
     };
     let mut step_us: Vec<u32> = Vec::with_capacity(config.steps as usize);
 
-    // A document scene replaces the demo driver: loaded before tick 0,
-    // then the world just ticks.
+    // A cooked scene replaces the demo driver: loaded before tick 0, then
+    // the world just ticks.
     let mut loaded: Option<LoadedScene> = None;
-    let source = match (&config.project, &config.scene) {
-        (Some(dir), _) => Some(SceneSource::Project(dir.clone())),
-        (None, Some(path)) => Some(SceneSource::Scene(path.clone())),
-        (None, None) => None,
-    };
-    if let Some(source) = source {
+    let mut retained: Option<(Assets, fynkel_assets::Residency)> = None;
+    if let Some(cache) = &config.cache {
         let mut sr = SceneReport {
-            path: source.path().display().to_string(),
+            cache: cache.display().to_string(),
             ..SceneReport::default()
         };
-        let (description, diagnostics, path) = match source.read(config.prefabs.as_deref()) {
+        let (assets, cooked) = match read_cooked(cache, config.scene.as_deref()) {
             Err(diags) => {
                 sr.document_diagnostics = document::diagnostics_json(&diags);
                 report.scene = Some(sr);
                 report.total_ms = start.elapsed().as_secs_f32() * 1e3;
-                return (report, world, None);
+                return (report, world, None, None);
             }
             Ok(ok) => ok,
         };
-        sr.path = path.display().to_string();
-        sr.document_diagnostics = document::diagnostics_json(&diagnostics);
-        match world.load_scene(&description) {
+        sr.path = cooked.path.clone();
+        sr.id = cooked.id.to_string();
+        sr.name = cooked.name.clone();
+        sr.key = cooked.key.clone();
+        sr.document_diagnostics = document::diagnostics_json(&cooked.diagnostics);
+        match world.load_scene(&cooked.description) {
             Ok(l) => {
+                let residency = assets.retain(&cooked.closure);
                 sr.loaded = true;
-                sr.id = l.id.to_string();
-                sr.name = l.name.clone();
                 sr.entities = l.len() as u32;
                 sr.rejected_components = l.rejected_components;
+                sr.retained = residency.ids().len() as u32;
                 report.commands_rejected += l.rejected_components as u64;
                 report.diagnostics += world.diagnostics().len() as u64;
                 loaded = Some(l);
+                retained = Some((assets, residency));
             }
             Err(e) => {
                 sr.document_diagnostics.push(serde_json::json!({
@@ -224,7 +228,7 @@ pub fn run_with(config: &HeadlessConfig) -> (HeadlessReport, World, Option<Loade
                 }));
                 report.scene = Some(sr);
                 report.total_ms = start.elapsed().as_secs_f32() * 1e3;
-                return (report, world, None);
+                return (report, world, None, None);
             }
         }
         report.scene = Some(sr);
@@ -277,7 +281,7 @@ pub fn run_with(config: &HeadlessConfig) -> (HeadlessReport, World, Option<Loade
     };
     report.step_time = timing(&mut step_us);
     report.total_ms = start.elapsed().as_secs_f32() * 1e3;
-    (report, world, loaded)
+    (report, world, loaded, retained)
 }
 
 /// FNV-1a 64 over the extract's world matrices (f32 bit patterns) in
@@ -362,24 +366,50 @@ mod tests {
         );
     }
 
-    fn fixture(rel: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../crates/fynkel_document/fixtures")
-            .join(rel)
+    /// The fixture project cooked into a cache of its own (removed on drop).
+    struct Cooked(PathBuf);
+
+    impl Cooked {
+        fn new(name: &str) -> Cooked {
+            let project = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../crates/fynkel_document/fixtures/project");
+            let dir =
+                std::env::temp_dir().join(format!("fynkel-headless-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let report = fynkel_import::cook_project(
+                &project,
+                Some(&dir),
+                &fynkel_import::CookOptions::default(),
+            )
+            .unwrap_or_else(|d| panic!("{d:#?}"));
+            assert!(!report.has_errors(), "{}", report.text());
+            Cooked(dir)
+        }
+    }
+
+    impl Drop for Cooked {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
-    fn document_scene_loads_ticks_and_dumps_by_authoring_id() {
+    fn cooked_scene_loads_ticks_and_dumps_by_authoring_id() {
+        let cooked = Cooked::new("dump");
         let cfg = HeadlessConfig {
             steps: 5,
-            scene: Some(fixture("valid/training_room.scene.json")),
+            cache: Some(cooked.0.clone()),
             ..HeadlessConfig::default()
         };
         let (report, world, loaded) = run_with(&cfg);
         let scene = report.scene.as_ref().unwrap();
         assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
+        // Camera, Robot, the "Crate A" instance and its expanded crate.
         assert_eq!((scene.entities, scene.rejected_components), (4, 0));
-        assert_eq!(scene.name, "TrainingRoom");
+        assert_eq!(scene.name, "Main");
+        assert_eq!(scene.path, "scenes/main.scene.json");
+        assert_eq!(scene.key.len(), 64);
+        assert_eq!(scene.retained, 5);
         assert!(report.scene_ready);
         assert_eq!(report.tick, 5);
         assert_eq!(report.live_entities, 4);
@@ -391,7 +421,7 @@ mod tests {
             ),
             (0, 0, 0)
         );
-        // Same document, same world: deterministic.
+        // Same cache, same world: deterministic.
         assert_eq!(run(&cfg).checksum, report.checksum);
 
         let loaded = loaded.unwrap();
@@ -400,29 +430,41 @@ mod tests {
         assert_eq!(dump["tick"], 5);
         let text = dump.to_string();
         assert!(!text.contains("handle:"), "authoring ids only: {text}");
+        // The prefab's crate carries the id the cook derived for it, under
+        // the instance entity.
         assert_eq!(
-            dump["entities"][1]["parent"],
-            "f4d6d600-7931-44f5-a258-45b5a6850300"
+            dump["entities"][3]["parent"],
+            "c0000000-0000-4000-8000-0000000000e2"
         );
-        assert_eq!(dump["entities"][1]["world"]["position"][1], 2.5);
+        assert_ne!(
+            dump["entities"][3]["id"], "c0000000-0000-4000-8000-0000000000b1",
+            "the prefab's entity got a derived id, not its template id"
+        );
+        assert_eq!(
+            dump["entities"][3]["components"][1]["data"]["cast_shadows"], false,
+            "the instance override was applied by the cook"
+        );
         assert_eq!(
             dump["entities"][1]["components"][1]["type"],
-            "fynkel.Camera"
-        );
-        assert_eq!(
-            dump["entities"][1]["components"][1]["data"]["projection"],
-            "perspective"
+            "fynkel.MeshRenderer"
         );
         assert!(
-            dump_text(&world, &loaded).contains("  Camera (a1b2c3d4-0000-4000-8000-000000000010)")
+            dump_text(&world, &loaded).contains("Camera (c0000000-0000-4000-8000-0000000000e0)")
         );
+
+        // Any scene by id, not only the startup one.
+        let by_id = HeadlessConfig {
+            scene: Some("c0000000-0000-4000-8000-000000000030".into()),
+            ..cfg.clone()
+        };
+        assert_eq!(run(&by_id).checksum, report.checksum);
     }
 
     #[test]
-    fn invalid_document_scene_reports_and_loads_nothing() {
+    fn missing_or_wrong_cache_reports_and_loads_nothing() {
         let cfg = HeadlessConfig {
             steps: 5,
-            scene: Some(fixture("scene/cycle.scene.json")),
+            cache: Some(PathBuf::from("/nonexistent/fynkel/cache")),
             ..HeadlessConfig::default()
         };
         let (report, world, loaded) = run_with(&cfg);
@@ -432,18 +474,27 @@ mod tests {
         assert!(!report.scene_ready);
         assert_eq!(report.steps, 0);
         assert_eq!(world.live_entities(), 0);
-        assert!(scene
-            .document_diagnostics
-            .iter()
-            .any(|d| d["code"] == "FYN-D0203"));
-        let missing = HeadlessConfig {
-            scene: Some(fixture("nope.scene.json")),
+        assert_eq!(scene.document_diagnostics[0]["code"], "FYN-R0001");
+
+        let cooked = Cooked::new("wrong");
+        let not_a_scene = HeadlessConfig {
+            cache: Some(cooked.0.clone()),
+            scene: Some("c0000000-0000-4000-8000-000000000040".into()),
             ..HeadlessConfig::default()
         };
-        let r = run(&missing);
+        let r = run(&not_a_scene);
         assert_eq!(
             r.scene.unwrap().document_diagnostics[0]["code"],
-            "FYN-D0900"
+            "FYN-R0006",
+            "a prefab has no scene chunk"
+        );
+        let not_an_id = HeadlessConfig {
+            scene: Some("robot".into()),
+            ..not_a_scene
+        };
+        assert_eq!(
+            run(&not_an_id).scene.unwrap().document_diagnostics[0]["code"],
+            "FYN-R0003"
         );
     }
 

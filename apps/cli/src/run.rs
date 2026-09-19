@@ -2,9 +2,10 @@
 //! `flutter run` in the project with `FYNKEL_PROJECT` defined, so the app's
 //! `Game.load(projectDirectory())` finds `fynkel.project.json` whatever the
 //! process's working directory is. The project is validated first (a
-//! project with errors does not run), then cooked into `.fynkel/cache` so
-//! the app's viewport has every mesh and texture (`--no-cook` skips that;
-//! a warm cache costs milliseconds).
+//! project with errors does not run), then cooked into `.fynkel/cache`:
+//! the app loads its scenes, meshes and textures from that cache and
+//! nothing else (`--no-cook` skips the cook; a warm cache costs
+//! milliseconds).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -63,28 +64,15 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     };
     let abs = std::fs::canonicalize(&project).unwrap_or(project.clone());
-    if cook {
-        // Same defaults as `fynkel cook` run from the project root.
-        let loaded = match fynkel_document::load_project(&abs) {
-            Ok(l) => l,
-            Err(diags) => {
-                for d in &diags {
-                    eprintln!("{d}");
-                }
-                return ExitCode::from(1);
-            }
-        };
-        let cook_args = [
-            "--assets".to_string(),
-            loaded.assets.display().to_string(),
-            "--cache".to_string(),
-            loaded.cache.display().to_string(),
-        ];
-        let status = crate::cook::run(root, &cook_args);
-        if status != ExitCode::SUCCESS {
-            eprintln!("fynkel run: cooking failed; fix the assets first (`fynkel cook`) or pass --no-cook");
-            return status;
-        }
+    // The app reads the cache only (`World.loadProject` opens
+    // `<project>/.fynkel/cache`): cook it, same as `fynkel cook` would.
+    let target = crate::cook::Target {
+        project: Some(abs.clone()),
+        no_cook: !cook,
+        ..crate::cook::Target::default()
+    };
+    if let Err(code) = crate::cook::prepare("fynkel run", &target) {
+        return code;
     }
     let status = Command::new(flutter)
         .arg("run")

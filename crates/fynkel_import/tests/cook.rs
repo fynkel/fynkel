@@ -599,3 +599,131 @@ fn prune_removes_objects_not_kept() {
     }
     assert!(all(&p.cook(), Status::Cached));
 }
+
+/// M3-03: `cook_project` cooks a project directory — the expanded scene
+/// (prefabs applied, ids derived, behaviour types recorded) is the scene's
+/// JSON chunk, the index records the project, and an invalid scene is a
+/// failed cook, never an object the runtime would refuse later.
+#[test]
+fn cook_project_expands_scenes_and_records_the_project() {
+    use fynkel_import::{cook_project, project_cache_dir};
+    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../fynkel_document/fixtures/project")
+        .canonicalize()
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!("fynkel-cook-project-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&src, &dir);
+
+    let r = cook_project(&dir, None, &CookOptions::default()).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert!(!r.has_errors(), "{}", r.text());
+    assert_eq!(r.assets.len(), 5, "scene, prefab, robot, material, swatch");
+    let cache = project_cache_dir(&dir);
+    assert_eq!(cache, dir.join(".fynkel/cache"));
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(cache.join("index.json")).unwrap()).unwrap();
+    assert_eq!(index["fynkel"], "cache-index");
+    assert_eq!(index["project"]["name"], "Fixture Game");
+    assert_eq!(index["project"]["startupScene"], MAIN);
+    assert_eq!(
+        index["schemaFingerprint"],
+        fynkel_import::cook::schema_fingerprint_hex()
+    );
+    assert_eq!(index["containerVersion"], fynkel_cooked::VERSION);
+    let main_entry = index["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["id"] == MAIN)
+        .unwrap();
+    assert_eq!(main_entry["name"], "Main");
+    assert_eq!(main_entry["status"], "cooked");
+
+    // The scene chunk is the expanded scene: the crate prefab's entity is
+    // under the instance with a derived id, the override applied, and no
+    // `prefab` block remains. META says so, and names the behaviour types.
+    let main = r.get(id(MAIN)).unwrap();
+    let bytes = std::fs::read(main.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
+    let info = &meta["chunks"][1];
+    assert_eq!(info["kind"], "JSON");
+    assert_eq!(info["documentKind"], "scene");
+    assert_eq!(info["expanded"], true);
+    assert_eq!(info["entities"], 4);
+    assert_eq!(info["instances"], 1);
+    assert_eq!(
+        info["behaviourTypes"],
+        serde_json::json!([{ "type": "game.Spinner", "version": 1 }])
+    );
+    let scene: serde_json::Value = serde_json::from_slice(c.read(1, 1 << 20).unwrap()).unwrap();
+    let entities = scene["entities"].as_object().unwrap();
+    assert_eq!(entities.len(), 4);
+    let host = &entities["c0000000-0000-4000-8000-0000000000e2"];
+    assert!(host.get("prefab").is_none(), "expanded: {host}");
+    let child = host["children"][0].as_str().unwrap();
+    assert_ne!(child, "c0000000-0000-4000-8000-0000000000b1");
+    let crate_entity = &entities[child];
+    assert_eq!(
+        crate_entity["parent"],
+        "c0000000-0000-4000-8000-0000000000e2"
+    );
+    let mesh_renderer = crate_entity["components"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|c| c["type"] == "fynkel.MeshRenderer")
+        .unwrap();
+    assert_eq!(mesh_renderer["data"]["cast_shadows"], false);
+    // The prefab's own chunk keeps its template form.
+    let prefab = r.get(id("c0000000-0000-4000-8000-000000000040")).unwrap();
+    let bytes = std::fs::read(prefab.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
+    assert_eq!(meta["chunks"][1]["documentKind"], "prefab");
+    assert_eq!(meta["chunks"][1]["entities"], 1);
+
+    // Cooking again hits everything; the same scene key.
+    let again = cook_project(&dir, None, &CookOptions::default()).unwrap();
+    assert!(all(&again, Status::Cached));
+    assert_eq!(again.get(id(MAIN)).unwrap().key, main.key);
+
+    // An invalid scene (dangling parent) fails its own cook with the
+    // document diagnostic; the rest of the project is untouched.
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fynkel_document/fixtures/scene/dangling_parent.scene.json"),
+        dir.join("assets/scenes/bad.scene.json"),
+    )
+    .unwrap();
+    let r = cook_project(&dir, None, &CookOptions::default()).unwrap();
+    assert!(r.has_errors());
+    let bad = r
+        .assets
+        .iter()
+        .find(|a| a.path == "scenes/bad.scene.json")
+        .unwrap();
+    assert_eq!(bad.status, Status::Failed);
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.code == Code::SCENE_DANGLING_PARENT));
+    assert_eq!(status(&r, MAIN), Status::Cached);
+    let index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(cache.join("index.json")).unwrap()).unwrap();
+    let bad_entry = index["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["path"] == "scenes/bad.scene.json")
+        .unwrap();
+    assert_eq!(bad_entry["status"], "failed");
+    assert!(bad_entry["file"].is_null());
+
+    // A project with errors cooks nothing.
+    std::fs::remove_file(dir.join("assets/scenes/bad.scene.json")).unwrap();
+    std::fs::remove_file(dir.join("fynkel.project.json")).unwrap();
+    let err = cook_project(&dir, None, &CookOptions::default()).unwrap_err();
+    assert_eq!(err[0].code, Code::PROJECT_MISSING);
+    let _ = std::fs::remove_dir_all(&dir);
+}

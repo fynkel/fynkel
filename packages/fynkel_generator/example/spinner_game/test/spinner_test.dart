@@ -7,16 +7,24 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 import 'package:spinner_game/generated/behaviours.g.dart';
 import 'package:spinner_game/spinner.dart';
 import 'package:test/test.dart';
 
 void main() {
   late NativeLibrary lib;
-  setUpAll(() => lib = NativeLibrary.open());
-  tearDownAll(() => lib.dispose());
-
+  late String cache;
   final fixture = Directory('../../../../crates/fynkel_document/fixtures/project').absolute.path;
+  setUpAll(() {
+    lib = NativeLibrary.open();
+    // The world loads from the cooked cache only: cook the fixture first.
+    cache = cookProject(fixture, cacheDir: Directory.systemTemp.createTempSync('spinner-cache-').path);
+  });
+  tearDownAll(() {
+    lib.dispose();
+    Directory(cache).deleteSync(recursive: true);
+  });
 
   test('generated registration covers every @FynkelBehaviour class', () {
     expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Spinner']);
@@ -73,7 +81,7 @@ void main() {
     final warnings = <LoadDiagnostic>[];
     w.onLoadDiagnostics = warnings.addAll;
 
-    final r = w.loadProject(fixture);
+    final r = w.loadProject(fixture, cacheDir: cache);
     expect(r.ok, isTrue);
     expect(r.behaviours, hasLength(1));
     expect(r.behaviours.single.type, 'game.Spinner');
@@ -107,7 +115,7 @@ void main() {
     addTearDown(w.dispose);
     final warnings = <LoadDiagnostic>[];
     w.onLoadDiagnostics = warnings.addAll;
-    final r = w.loadProject(fixture);
+    final r = w.loadProject(fixture, cacheDir: cache);
     expect(r.ok, isTrue);
     expect(r.behavioursAttached, 0);
     expect(r.entityCount, 4);
@@ -135,7 +143,7 @@ void main() {
     addTearDown(strict.dispose);
     final strictWarnings = <LoadDiagnostic>[];
     strict.onLoadDiagnostics = strictWarnings.addAll;
-    final sr = strict.loadProject(fixture);
+    final sr = strict.loadProject(fixture, cacheDir: cache);
     expect(sr.ok, isTrue);
     expect(sr.behavioursAttached, 0);
     expect(strictWarnings.map((d) => d.code), ['FYN-B0002']);

@@ -25,7 +25,8 @@ use fynkel_cooked::{
     Writer, KIND_BLOB, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE,
 };
 use fynkel_document::asset::{asset_refs, AssetDatabase, AssetEntry, AssetKind, Meta};
-use fynkel_document::{json, Document, DocumentKind, SchemaSet};
+use fynkel_document::prefab::{expand, Prefab, PrefabLibrary};
+use fynkel_document::{describe, json, Document, DocumentKind, Scene, SchemaSet};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -54,6 +55,18 @@ pub struct CookOptions {
     pub limits: Limits,
     /// Cook even when the object is already in the cache.
     pub force: bool,
+    /// The project the database belongs to, recorded in the cache index so
+    /// a host can find the startup scene without the project file (M3-03:
+    /// hosts read the cache only). `None` cooks a bare asset root.
+    pub project: Option<CookProject>,
+}
+
+/// What the cache index says about its project.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CookProject {
+    pub name: String,
+    /// The startup scene's asset id (`fynkel_world_load_project` loads it).
+    pub startup_scene: Option<Uuid>,
 }
 
 impl Default for CookOptions {
@@ -62,6 +75,7 @@ impl Default for CookOptions {
             profile: DEFAULT_PROFILE.to_string(),
             limits: Limits::default(),
             force: false,
+            project: None,
         }
     }
 }
@@ -249,6 +263,17 @@ pub fn cook(
         }
     }
 
+    // Every prefab document that read, for expanding scenes (a scene's
+    // key covers its prefabs through the reference dependencies).
+    let mut library = PrefabLibrary::empty();
+    for p in &prepared {
+        if let Input::Document(doc) = &p.input {
+            if doc.kind == DocumentKind::Prefab && !p.failed {
+                library.add(Prefab::from_document(doc.clone()));
+            }
+        }
+    }
+
     // 3. Cook in that order; keys need the dependencies' keys.
     let mut keys: HashMap<Uuid, CacheKey> = HashMap::new();
     let mut results: Vec<Option<CookedAsset>> = (0..entries.len()).map(|_| None).collect();
@@ -332,7 +357,17 @@ pub fn cook(
                 ),
             }
         }
-        match cook_one(db, entry, p, &inputs, &key, opts, &mut diagnostics) {
+        match cook_one(
+            db,
+            schemas,
+            &library,
+            entry,
+            p,
+            &inputs,
+            &key,
+            opts,
+            &mut diagnostics,
+        ) {
             Some((bytes, manifest)) => match cache.write(&key, &bytes, &manifest) {
                 Ok(()) => {
                     result.status = Status::Cooked;
@@ -359,10 +394,67 @@ pub fn cook(
         diagnostics,
     };
     let mut report = report;
-    if let Err(d) = write_index(cache, &report) {
+    if let Err(d) = write_index(cache, &report, opts.project.as_ref(), db) {
         report.diagnostics.push(d);
     }
     report
+}
+
+/// Where a project's cache lives: `<dir>/.fynkel/cache`.
+pub fn project_cache_dir(project_dir: &Path) -> PathBuf {
+    project_dir.join(".fynkel").join("cache")
+}
+
+/// `fynkel cook` for a project directory: reads `fynkel.project.json`,
+/// validates it, scans its asset root with the project's behaviour
+/// schemas, records the project (name, startup scene) in the index and
+/// cooks into `cache` (default [`project_cache_dir`]). `Err` when the
+/// project file, the database or the project's references have errors
+/// (nothing is cooked then); a cook with failed assets is an `Ok` report
+/// whose `has_errors()` says so.
+pub fn cook_project(
+    project_dir: &Path,
+    cache: Option<&Path>,
+    opts: &CookOptions,
+) -> Result<CookReport, Vec<Diagnostic>> {
+    use fynkel_document::Project;
+    let project = Project::read(project_dir)?;
+    let schemas = project
+        .schemas(&SchemaSet::embedded(), project_dir)
+        .map_err(|d| vec![d])?;
+    let mut diagnostics = project.read_diagnostics().to_vec();
+    diagnostics.extend(project.validate(&schemas));
+    if has_errors(&diagnostics) {
+        return Err(diagnostics);
+    }
+    let assets = project.assets_dir(project_dir);
+    let (db, scan) = AssetDatabase::scan(&assets, &schemas);
+    diagnostics.extend(scan);
+    diagnostics.extend(project.validate_against(&db, &schemas));
+    if has_errors(&diagnostics) {
+        return Err(diagnostics);
+    }
+    let startup_scene = project
+        .startup_scene
+        .as_ref()
+        .and_then(|r| db.resolve(r).ok())
+        .map(|r| r.entry.id);
+    let opts = CookOptions {
+        project: Some(CookProject {
+            name: project.name().to_string(),
+            startup_scene,
+        }),
+        ..opts.clone()
+    };
+    let cache_dir = cache
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| project_cache_dir(project_dir));
+    let mut report = cook(&db, &schemas, &Cache::at(&cache_dir), &opts);
+    // Scan warnings (a sidecar behind its import, say) belong to the cook.
+    let mut all = diagnostics;
+    all.append(&mut report.diagnostics);
+    report.diagnostics = all;
+    Ok(report)
 }
 
 struct Tarjan<'a> {
@@ -493,7 +585,10 @@ fn prepare(
                 version,
                 source,
                 extra_inputs: Vec::new(),
-                settings: "{}".to_string(),
+                // A document's cooked form depends on the component schemas
+                // (a scene is described and expanded against them), so the
+                // fingerprint is an input: a schema change recooks it.
+                settings: document_settings(),
                 dependencies: dependencies.into_iter().collect(),
                 input,
                 failed,
@@ -555,6 +650,16 @@ fn prepare(
     }
 }
 
+/// The `settings` key input of every document: the schema fingerprint.
+fn document_settings() -> String {
+    format!("{{\"schemaFingerprint\":\"{}\"}}", schema_fingerprint_hex())
+}
+
+/// This build's schema fingerprint as the lock and the cache index print it.
+pub fn schema_fingerprint_hex() -> String {
+    format!("{:#018x}", fynkel_core::schema::schema_fingerprint())
+}
+
 fn is_gltf_json(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
@@ -601,8 +706,11 @@ fn gltf_extra_inputs(path: &Path, bytes: &[u8]) -> Vec<(String, CacheKey)> {
 }
 
 /// Cooks one asset to container bytes and its manifest.
+#[allow(clippy::too_many_arguments)]
 fn cook_one(
     db: &AssetDatabase,
+    schemas: &SchemaSet,
+    library: &PrefabLibrary,
     entry: &AssetEntry,
     p: &Prepared,
     inputs: &KeyInputs,
@@ -618,6 +726,15 @@ fn cook_one(
     let mut sub_assets: BTreeMap<String, Uuid> = BTreeMap::new();
 
     match &p.input {
+        Input::Document(doc) if doc.kind == DocumentKind::Scene => {
+            chunks.push(scene_chunk(
+                doc,
+                schemas,
+                library,
+                &entry.name,
+                diagnostics,
+            )?);
+        }
         Input::Document(doc) => {
             let text = match doc.write() {
                 Ok(t) => t,
@@ -626,11 +743,15 @@ fn cook_one(
                     return None;
                 }
             };
+            let mut info = json!({ "documentKind": doc.kind.name() });
+            if doc.kind == DocumentKind::Prefab {
+                info["entities"] = Prefab::from_document(doc.clone()).entities.len().into();
+            }
             chunks.push(ChunkPlan {
                 kind: KIND_JSON,
                 name: entry.name.clone(),
                 sub: None,
-                info: json!({ "documentKind": doc.kind.name() }),
+                info,
                 payload: text.into_bytes(),
             });
             if let Some(c) = material_chunk(doc, &entry.name, None) {
@@ -794,6 +915,76 @@ fn cook_one(
         bytes: bytes.len() as u64,
     };
     Some((bytes, manifest))
+}
+
+/// A scene's `JSON` chunk is the **expanded** scene (M3-03): every prefab
+/// instance replaced by its entities with the ids the document layer
+/// derives, so a host spawns it without prefabs or the expander. The META
+/// records the entity count and the behaviour types the scene authors
+/// (`known` ones only, i.e. the project registry's), which the runtime
+/// declares when it describes the chunk. Expansion or description errors
+/// fail the scene.
+fn scene_chunk(
+    doc: &Document,
+    schemas: &SchemaSet,
+    library: &PrefabLibrary,
+    name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ChunkPlan> {
+    let shown = doc.path.clone().unwrap_or_default();
+    let mut scene = Scene::from_document(doc.clone());
+    // What the runtime would refuse (`FYN-R0008`) is refused here: an
+    // invalid scene is a failed cook, never a cooked object.
+    let checked = scene.validate(schemas);
+    let bad = has_errors(&checked);
+    diagnostics.extend(checked);
+    if bad {
+        return None;
+    }
+    let instances = scene.instances().count();
+    if instances > 0 {
+        let expanded = expand(&scene, library, schemas);
+        let bad = expanded.has_errors();
+        diagnostics.extend(expanded.diagnostics.iter().cloned());
+        if bad {
+            return None;
+        }
+        scene = expanded.scene();
+    }
+    let described = describe(&scene, schemas);
+    let bad = described.has_errors();
+    diagnostics.extend(described.diagnostics.iter().cloned());
+    if bad {
+        return None;
+    }
+    let mut behaviour_types: Vec<(String, u32)> = described
+        .behaviours
+        .iter()
+        .filter(|b| b.known)
+        .map(|b| (b.type_id.clone(), b.version))
+        .collect();
+    behaviour_types.sort();
+    behaviour_types.dedup();
+    let text = match scene.document.write() {
+        Ok(t) => t,
+        Err(d) => {
+            diagnostics.push(d.with_document(shown));
+            return None;
+        }
+    };
+    Some(ChunkPlan {
+        kind: KIND_JSON,
+        name: name.to_string(),
+        sub: None,
+        info: json!({
+            "documentKind": "scene",
+            "entities": described.description.entities.len(),
+            "instances": instances,
+            "expanded": true,
+            "behaviourTypes": behaviour_types.iter().map(|(t, v)| json!({ "type": t, "version": v })).collect::<Vec<_>>(),
+        }),
+        payload: text.into_bytes(),
+    })
 }
 
 struct ChunkPlan {
@@ -969,14 +1160,26 @@ pub fn encode_clip(clip: &AudioData) -> Vec<u8> {
     fynkel_cooked::payload::encode_clip(clip.sample_rate, clip.channels as u32, &clip.samples)
 }
 
-fn write_index(cache: &Cache, report: &CookReport) -> Result<(), Diagnostic> {
+fn write_index(
+    cache: &Cache,
+    report: &CookReport,
+    project: Option<&CookProject>,
+    db: &AssetDatabase,
+) -> Result<(), Diagnostic> {
     let index = json!({
         "fynkel": "cache-index",
         "cacheVersion": CACHE_VERSION,
+        "containerVersion": fynkel_cooked::VERSION,
+        "schemaFingerprint": schema_fingerprint_hex(),
         "profile": report.profile,
+        "project": project.map(|p| json!({
+            "name": p.name,
+            "startupScene": p.startup_scene.map(|u| u.to_string()),
+        })),
         "assets": report.assets.iter().map(|a| json!({
             "id": a.id.to_string(),
             "path": a.path,
+            "name": db.get(a.id).map(|e| e.name.as_str()).unwrap_or(""),
             "kind": a.kind,
             "status": a.status.name(),
             "key": a.key.map(|k| k.hex()),

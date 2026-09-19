@@ -28,7 +28,7 @@ assets/models/          glTF/GLB sources + <file>.meta.json sidecars (asset id, 
 assets/textures/        PNG/JPEG sources + sidecars
 assets/audio/           WAV/Ogg sources + sidecars
 test/                   `flutter test`: headless simulation, no window or GPU
-.fynkel/cache/          cooked assets (`fynkel cook`); ignored by git
+.fynkel/cache/          cooked assets (`fynkel cook`); ignored by git — the only thing the running game reads
 ```
 
 ## The loop: validate → codegen → build → test
@@ -39,14 +39,16 @@ After every change, in this order, all must exit 0:
 fynkel validate --json                 # documents, sidecars, references, lock; exit 1 on errors
 fynkel codegen --project . --check     # generated behaviour registration + schemas are current (exit 2 = stale: run without --check)
 flutter analyze                        # Dart static analysis
-flutter test                           # the game loads headlessly and behaviours run
-fynkel test --headless --json          # the startup scene on the Rust headless host, N deterministic ticks
+flutter test                           # the game loads headlessly and behaviours run (cooks first via package:fynkel/testing.dart)
+fynkel test --headless --json          # cooks, then the startup scene on the Rust headless host, N deterministic ticks
 ```
 
+The runtime reads `.fynkel/cache` only — never a source document or model.
 `fynkel run` validates, cooks and runs the app (`flutter run` with
-`FYNKEL_PROJECT` pointing here; the viewport draws from `.fynkel/cache`, so a
-plain `flutter run` needs `fynkel cook` first). `fynkel cook` then `fynkel render --out out.png` draws the
-startup scene without a window (needs a GPU; not for headless CI).
+`FYNKEL_PROJECT` pointing here); a plain `flutter run` needs `fynkel cook`
+first, and a missing or stale cache is a load error (`FYN-R0001`/`R0002`)
+naming the fix. `fynkel render --out out.png` cooks and draws the startup
+scene without a window (needs a GPU; not for headless CI).
 
 ## Commands (all support `--json`; exit 0 ok, 1 errors, 2 usage/unopenable)
 
@@ -63,11 +65,11 @@ fynkel document new <kind> <name> [--out <path>]         a fresh, valid, empty d
 fynkel document format <path>... [--check]               canonical formatting
 fynkel asset list | resolve <uuid>[#sub] | init <file>   the asset database (ids come from sidecars and documents)
 fynkel import <file>...                                  (re)import sources; fills sidecar sub-asset ids
-fynkel cook [--force] [--prune]                          cook every asset into .fynkel/cache
+fynkel cook [--force] [--prune]                          cook the project's assets into .fynkel/cache (scenes expanded, prefabs applied)
 fynkel codegen --project . [--check]                     behaviour registration + schemas from @FynkelBehaviour classes
-fynkel test --headless [--steps N] [--seed S]            Rust headless host over the startup scene
-fynkel state dump --project . [--steps N]                world state after N ticks, keyed by authoring id
-fynkel render [--out <png>] [--size WxH]                 offscreen render of the startup scene (after cook)
+fynkel test --headless [--scene <path|id>] [--steps N]   cook, then the Rust headless host over the startup scene (or --scene)
+fynkel state dump [--scene <path|id>] [--steps N]        cook, then the world state after N ticks, keyed by authoring id
+fynkel render [--scene <path|id>] [--out <png>] [--size WxH]  cook, then an offscreen render of the scene
 fynkel run [--no-cook] [-- <flutter run args>]           validate, cook, then `flutter run` with FYNKEL_PROJECT set
 fynkel migrate <path|dir> [--dry-run]                    bring documents to the current formatVersion
 ```
@@ -160,4 +162,4 @@ class PlayerController extends Behaviour {
 - Don't put paths in asset references, or invent ids that are not in `fynkel asset list`.
 - Don't rename component `type` ids or behaviour ids once scenes use them (add a new type and migrate).
 - Don't call engine APIs from outside a behaviour callback or the host loop (`Time.*` and `Diagnostics.*` need a current GameContext).
-- Don't rely on `.fynkel/cache`: it is derived, ignored by git, and `fynkel cook` rebuilds it.
+- Don't commit or hand-edit `.fynkel/cache`: it is derived, ignored by git, and `fynkel cook` rebuilds it. Don't read source documents at runtime either — the game loads from the cache by asset id.

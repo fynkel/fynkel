@@ -32,7 +32,7 @@ package:fynkel/
 
 Keep Flutter-specific helpers in a separate package such as `package:fynkel_flutter/` so gameplay logic and headless tests do not depend on widget APIs.
 
-*Implemented (M3-01):* `package:fynkel_flutter` (`packages/fynkel_flutter`) is that package — the Path A viewport plugin (`FynkelFlutterPlugin` for macOS + iOS), `FynkelViewportController`, the `FynkelViewport` widget and `FynkelGameView`, which owns the Ticker and calls `World.frame` at the §5.1 points before rendering. A game's `lib/main.dart` is `FynkelGameView(world: game.world, controller: FynkelViewportController(assetCache: report.cacheDir), overlay: <HUD>)`; `package:fynkel` itself imports nothing from Flutter (`docs/hosts.md`, "Flutter host").
+*Implemented (M3-01):* `package:fynkel_flutter` (`packages/fynkel_flutter`) is that package — the Path A viewport plugin (`FynkelFlutterPlugin` for macOS + iOS), `FynkelViewportController`, the `FynkelViewport` widget and `FynkelGameView`, which owns the Ticker and calls `World.frame` at the §5.1 points before rendering. A game's `lib/main.dart` is `FynkelGameView(world: game.world, controller: FynkelViewportController(placeholders: false), overlay: <HUD>)` (the viewport draws from the store the world's `loadProject` opened; `assetCache` is only for a world that loaded nothing); `package:fynkel` itself imports nothing from Flutter (`docs/hosts.md`, "Flutter host").
 
 ### 21.2 Core runtime objects
 
@@ -67,6 +67,8 @@ player.destroy();
 ```
 
 The exact syntax can change before 1.0, but the semantic contract should be stable: reads come from a coherent snapshot or local staged state; writes become commands applied at a documented boundary.
+
+**Implemented (M3-03, `packages/fynkel/lib/src/world.dart`, `diagnostics.dart`, `testing.dart`).** Scenes come from the cooked cache only: `World.loadProject(dir, {cacheDir})` opens `cacheDir` (default `World.cacheDirOf(dir)` = `<dir>/.fynkel/cache`) and loads the project's startup scene; `World.loadScene(cacheDir, sceneId)` loads one cooked scene by its asset id (a non-UUID is a `FynkelBridgeError`). Neither reads a source document, nothing in `package:fynkel` cooks — `fynkel cook`, `fynkel run` or `fynkel test` do — and a missing, stale or incomplete cache is a `FynkelLoadError` whose `FYN-R` diagnostics name the asset id and suggest `fynkel cook`. The `LoadReport` carries `sceneId`/`sceneName`/`scenePath`/`sceneKey` (the cache key of the object that was loaded), `entities`, `rejectedComponents`, `assetCount`, `cacheDir`/`cacheProfile`/`projectName`/`startupScene`, `projectDir` (when loaded through `loadProject`), the attached `behaviours` and `ResidencyStats { retained, meshes, textures, materials, bytes }` of the world's store after the load. A `package:fynkel/testing.dart` gives tests the cook step: `cookProject(dir, {cacheDir, force})` runs the `fynkel` CLI (`FYNKEL_CLI`, then PATH, then `cargo run -p fynkel_cli` in the checkout the package was resolved from) and `runFynkel(args)`; the SDK tests and the `fynkel create` starter's `test/game_test.dart` cook into a temporary cache in `setUpAll`.
 
 ### 21.3 Behaviour model
 

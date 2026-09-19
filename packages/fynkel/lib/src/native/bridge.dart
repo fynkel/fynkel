@@ -287,31 +287,38 @@ class NativeWorld {
     return b;
   }
 
-  /// `fynkel_world_load_scene` / `fynkel_world_load_project`: the status
-  /// and the JSON report (decoded) of that call.
-  (FynkelStatus, Map<String, Object?>) loadScene(String path) => _load(path, fynkel_world_load_scene);
+  /// `fynkel_world_load_project`: the startup scene of the cooked cache at
+  /// [cacheDir]; the status and the JSON report (decoded) of that call.
+  (FynkelStatus, Map<String, Object?>) loadProject(String cacheDir) =>
+      _withUtf8(cacheDir, (c, cl) => _load(() => fynkel_world_load_project(_w, c, cl)));
 
-  (FynkelStatus, Map<String, Object?>) loadProject(String dir) => _load(dir, fynkel_world_load_project);
+  /// `fynkel_world_load_scene`: the cooked scene [sceneId] (UUID text) from
+  /// the cache at [cacheDir].
+  (FynkelStatus, Map<String, Object?>) loadScene(String cacheDir, String sceneId) => _withUtf8(
+        cacheDir,
+        (c, cl) => _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_load_scene(_w, c, cl, s, sl))),
+      );
 
-  (FynkelStatus, Map<String, Object?>) _load(
-    String text,
-    FynkelStatus Function(Pointer<FynkelWorld>, Pointer<Uint8>, int) call,
-  ) {
+  T _withUtf8<T>(String text, T Function(Pointer<Uint8>, int) body) {
     final bytes = utf8.encode(text);
     final p = calloc<Uint8>(bytes.length + 1);
     try {
       p.asTypedList(bytes.length).setAll(0, bytes);
-      ffiCalls += 2;
-      final s = call(_w, p, bytes.length);
-      final v = fynkel_world_load_report(_w);
-      if (v.length == 0) return (s, const {});
-      dartCopies++;
-      dartBytesCopied += v.length;
-      final report = jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as Map<String, Object?>;
-      return (s, report);
+      return body(p, bytes.length);
     } finally {
       calloc.free(p);
     }
+  }
+
+  (FynkelStatus, Map<String, Object?>) _load(FynkelStatus Function() call) {
+    ffiCalls += 2;
+    final s = call();
+    final v = fynkel_world_load_report(_w);
+    if (v.length == 0) return (s, const {});
+    dartCopies++;
+    dartBytesCopied += v.length;
+    final report = jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as Map<String, Object?>;
+    return (s, report);
   }
 
   BridgeStats stats() {

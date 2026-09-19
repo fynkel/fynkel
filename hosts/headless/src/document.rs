@@ -1,6 +1,6 @@
-//! Document scenes in the headless host (blueprint §19.2c item 5): load a
-//! `.scene.json` into the world and dump the runtime state with authoring
-//! ids. `fynkel test --headless --scene <path>` and `fynkel state dump`.
+//! Cooked scenes in the headless host (blueprint §19.2c item 5, §19.2d
+//! item 3): dump the runtime state with authoring ids.
+//! `fynkel test --headless` and `fynkel state dump`.
 
 use fynkel_contracts::Diagnostic;
 use fynkel_core::{ComponentValue, LoadedScene, Name, World};
@@ -9,8 +9,6 @@ use fynkel_document::{diagnostic_json, DocumentCodec};
 use fynkel_scene as scene;
 use fynkel_scene::Transform;
 use serde_json::{json, Value};
-
-pub use fynkel_document::read_scene;
 
 pub fn diagnostics_json(diags: &[Diagnostic]) -> Vec<Value> {
     diags.iter().map(diagnostic_json).collect()

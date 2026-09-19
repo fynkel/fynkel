@@ -7,8 +7,10 @@
 //!
 //! What it draws (V1 slice):
 //! * every `MeshRenderer` in the extract, with its cooked mesh and the
-//!   `baseColor` factor + texture of its `fynkel.pbr@1` material, read from
-//!   the cooked cache through [`CookedAssets`] on first use;
+//!   `base_color` factor + texture of its `fynkel.pbr@1` material, read from
+//!   the cooked cache through the [`Assets`] residency store on first use
+//!   (the store a world loaded its scene from, so what the scene retains is
+//!   what the renderer draws; GPU copies go when the store evicts);
 //! * the extract's camera (`Camera` component, highest priority) and its
 //!   first directional light, or the host-set [`Camera`] and light when the
 //!   scene has none;
@@ -22,8 +24,6 @@
 //! reused; a frame with no growth and no new assets allocates nothing on
 //! the CPU side beyond the batch table.
 
-pub mod assets;
-
 use std::collections::HashMap;
 
 use fynkel_contracts::AssetRef;
@@ -32,7 +32,7 @@ use fynkel_core::{Extract, Projection};
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
-pub use assets::{CookedAssets, PbrMaterial};
+pub use fynkel_assets::{Assets, PbrMaterial};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -176,7 +176,9 @@ pub struct ExtractRenderer {
     depth_view: wgpu::TextureView,
     width: u32,
     height: u32,
-    assets: Option<CookedAssets>,
+    assets: Option<Assets>,
+    /// `Assets::evictions` when the GPU caches were last reconciled.
+    evictions_seen: u64,
     meshes: HashMap<AssetRef, Option<GpuMesh>>,
     textures: HashMap<AssetRef, Option<GpuTexture>>,
     materials: HashMap<AssetRef, Option<PbrMaterial>>,
@@ -344,6 +346,7 @@ impl ExtractRenderer {
             width: width.max(1),
             height: height.max(1),
             assets: None,
+            evictions_seen: 0,
             meshes: HashMap::new(),
             textures: HashMap::new(),
             materials: HashMap::new(),
@@ -375,14 +378,37 @@ impl ExtractRenderer {
     }
 
     /// Where meshes, textures and materials come from. Replacing the
-    /// source drops every loaded asset (they are reloaded on demand).
-    pub fn set_assets(&mut self, assets: Option<CookedAssets>) {
+    /// store drops every loaded asset (they are reloaded on demand);
+    /// setting a clone of the current store is a no-op.
+    pub fn set_assets(&mut self, assets: Option<Assets>) {
+        if let (Some(a), Some(b)) = (&self.assets, &assets) {
+            if a.same_store(b) {
+                return;
+            }
+        }
+        self.evictions_seen = assets.as_ref().map(Assets::evictions).unwrap_or(0);
         self.assets = assets;
         self.clear_assets();
     }
 
-    pub fn assets(&self) -> Option<&CookedAssets> {
+    pub fn assets(&self) -> Option<&Assets> {
         self.assets.as_ref()
+    }
+
+    /// Drops the GPU copies of assets the store evicted since the last
+    /// frame (a scene unload released them); nothing to do otherwise.
+    fn reconcile_evictions(&mut self) {
+        let Some(assets) = &self.assets else { return };
+        let now = assets.evictions();
+        if now == self.evictions_seen {
+            return;
+        }
+        self.evictions_seen = now;
+        let a = assets.clone();
+        self.meshes.retain(|r, _| a.is_resident(r.asset));
+        self.textures.retain(|r, _| a.is_resident(r.asset));
+        self.materials.retain(|r, _| a.is_resident(r.asset));
+        self.asset_errors.clear();
     }
 
     /// Forgets every loaded asset and error; the next `prepare` reloads
@@ -408,6 +434,7 @@ impl ExtractRenderer {
         queue: &wgpu::Queue,
         extract: &Extract,
     ) -> u32 {
+        self.reconcile_evictions();
         if self.white.is_none() {
             self.white = Some(upload_rgba8(
                 device,
@@ -649,7 +676,7 @@ impl ExtractRenderer {
                 &payload.indices,
             )),
             Some(Err(e)) => {
-                self.asset_errors.push(format!("mesh {e}"));
+                self.asset_errors.push(format!("mesh {r}: {}", e.message));
                 None
             }
             None => {
@@ -687,7 +714,8 @@ impl ExtractRenderer {
                 ))
             }
             Some(Err(e)) => {
-                self.asset_errors.push(format!("texture {e}"));
+                self.asset_errors
+                    .push(format!("texture {r}: {}", e.message));
                 None
             }
             None => None,
@@ -709,7 +737,8 @@ impl ExtractRenderer {
         let loaded = match self.assets.as_ref().map(|a| a.material(r)) {
             Some(Ok(m)) => Some(m),
             Some(Err(e)) => {
-                self.asset_errors.push(format!("material {e}"));
+                self.asset_errors
+                    .push(format!("material {r}: {}", e.message));
                 None
             }
             None => None,

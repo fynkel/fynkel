@@ -225,17 +225,19 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
     // Release-mode hosts log diagnostics; debug throws (FynkelError).
     _world.onDiagnostics = (d) => _log('diagnostics: ${d.join("; ")}');
     _world.onLoadDiagnostics = (d) => _log('load: ${d.join("; ")}');
-    String? cache;
     try {
       final dir = projectDir;
       if (dir == null) {
         _scene = DemoScene(satellites: _satellites);
       } else {
-        // The scene file, not Dart, decides what exists (blueprint §7).
+        // The cooked scene, not Dart, decides what exists (blueprint §7):
+        // the world reads `<dir>/.fynkel/cache` (`fynkel run` cooks first)
+        // and the viewport draws from the same asset store.
         final r = _project = _world.loadProject(dir);
-        _log('loaded ${r.projectName}: scene "${r.sceneName}" ${r.entityCount} entities from ${r.scenePath}');
-        cache = r.cacheDir;
+        _log('loaded ${r.projectName}: scene "${r.sceneName}" ${r.entityCount} entities, ${r.assetCount} assets from ${r.cacheDir} (${r.scenePath})');
       }
+    } on FynkelLoadError catch (e) {
+      _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {
       _error = '$e';
     }
@@ -243,8 +245,7 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
       bufferCount: _bufferCount,
       syncMode: ViewportSyncMode.values[_syncMode],
       acquireWaitUs: _acquireWaitUs,
-      placeholders: cache == null,
-      assetCache: cache,
+      placeholders: _project == null,
       camera: const ViewportCameraSpec(eye: Vec3(0, 2.5, 7.5), target: Vec3(0, 0, 0)),
     );
     _controller.addListener(_onViewportChanged);
@@ -256,9 +257,6 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
       case ViewportState.attached when !_announcedCreate:
         _announcedCreate = true;
         _log('created ${c.physicalWidth}x${c.physicalHeight} texture=${c.textureId} world tick=${_world.tick}');
-        if (_project != null && !c.assetCacheOk) {
-          _log('no cooked cache at ${_project!.cacheDir} — run `fynkel cook --assets ${_project!.assetsDir} --cache ${_project!.cacheDir}`');
-        }
         // A game host wants the world to own keyboard focus until a HUD widget takes it.
         _viewportFocus.requestFocus();
       case ViewportState.attached when c.resizes != _lastResizes:

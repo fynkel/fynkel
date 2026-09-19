@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/generated/schema.g.dart' show DestroyCommand, DiagnosticRecord;
+import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -163,26 +164,56 @@ void main() {
     expect(s.ffiCalls, greaterThan(0));
   });
 
-  test('loadProject / loadScene: the fixture project reaches the world', () {
+  test('loadProject / loadScene: the fixture project reaches the world from its cache', () {
     final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
+    final cache = Directory.systemTemp.createTempSync('fynkel-sdk-cache-').path;
+    addTearDown(() => Directory(cache).deleteSync(recursive: true));
+    expect(cookProject(fixture, cacheDir: cache), cache);
+    expect(File('$cache/index.json').existsSync(), isTrue);
     final w = world();
     addTearDown(w.dispose);
-    final r = w.loadProject(fixture);
+    final r = w.loadProject(fixture, cacheDir: cache);
     expect(r.ok, isTrue);
     expect(r.projectName, 'Fixture Game');
+    expect(r.projectDir, fixture);
+    expect(r.cacheDir, cache);
+    expect(r.cacheProfile, 'dev');
     expect(r.sceneName, 'Main');
-    expect(r.entityCount, 4);
+    expect(r.sceneId, 'c0000000-0000-4000-8000-000000000030');
+    expect(r.startupScene, r.sceneId);
+    expect(r.scenePath, 'scenes/main.scene.json');
+    expect(r.sceneKey, hasLength(64));
+    expect(r.entityCount, 4, reason: 'the crate prefab was expanded by the cook');
     expect(r.rejectedComponents, 0);
-    expect(r.cacheDir, endsWith('.fynkel/cache'));
+    expect(r.assetCount, 5);
+    expect(r.residency.retained, 5);
+    expect(r.residency.meshes, 0, reason: 'payloads load on first draw');
     expect(w.allEntities(), hasLength(4));
     w.frame(1 / 60);
 
-    // A bare scene file whose prefab is not next to it: an error report.
+    // Any scene by id from the same cache; a second copy of the same one.
+    final again = w.loadScene(cache, r.sceneId!);
+    expect(again.sceneName, 'Main');
+    expect(again.projectDir, isNull);
+    expect(w.allEntities(), hasLength(8));
+
+    // A prefab is not a scene; an id the cache lacks; not a UUID at all.
     expect(
-      () => w.loadScene('$fixture/assets/scenes/main.scene.json'),
-      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-D0401'))),
+      () => w.loadScene(cache, 'c0000000-0000-4000-8000-000000000040'),
+      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0006'))),
     );
-    expect(w.allEntities(), hasLength(4), reason: 'a failed load leaves the world alone');
+    expect(
+      () => w.loadScene(cache, 'c0000000-0000-4000-8000-0000000000ff'),
+      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0003'))),
+    );
+    expect(() => w.loadScene(cache, 'robot'), throwsA(isA<FynkelBridgeError>()));
+    expect(w.allEntities(), hasLength(8), reason: 'a failed load leaves the world alone');
+
+    // No cache: the runtime never falls back to the source tree.
+    expect(
+      () => w.loadProject(fixture, cacheDir: '$cache/nope'),
+      throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0001'))),
+    );
     expect(() => w.loadProject('/nonexistent'), throwsA(isA<FynkelLoadError>()));
     expect(w.isPoisoned, isFalse);
   });

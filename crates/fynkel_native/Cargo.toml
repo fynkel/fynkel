@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true
+fynkel_assets.workspace = true
 fynkel_document.workspace = true
 fynkel_scene.workspace = true
 fynkel_wire.workspace = true
@@ -19,3 +20,4 @@ serde_json.workspace = true
 
 [dev-dependencies]
 glam.workspace = true
+fynkel_import.workspace = true

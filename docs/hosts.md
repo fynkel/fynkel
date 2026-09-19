@@ -47,23 +47,27 @@ configs must give equal checksums (blueprint §5.6); the crate's tests assert
 this and that seeds differ. The Dart headless game host (Behaviours) plugs
 into the same command later.
 
-`--scene <path>` loads a `.scene.json` instead of the demo scene (validated
-against the embedded schemas, then `World::load_scene`; the world just ticks
-`--steps` times). Scenes with prefab instances are expanded first from the
-`*.prefab.json` files under `--prefabs <dir>` (without it an instance is
-`FYN-D0401` and the scene does not load). The report gains `scene: { path,
-loaded, id, name, entities, rejected_components, document_diagnostics[] }`.
-Read-side:
+Inside a project (or with `--project <dir>`, `--scene <path|id>`,
+`--cache <dir>`) `fynkel test --headless` cooks the project and loads a
+cooked scene instead of the demo scene — the host reads the cache only
+(M3-03: `HeadlessConfig { cache, scene }`, `fynkel_assets::Assets`; no
+source document is opened, prefabs were expanded by the cook), retains the
+scene's closure, then just ticks `--steps` times. The report gains `scene:
+{ cache, path, loaded, id, name, key, entities, rejected_components,
+retained, document_diagnostics[] }` (`FYN-R` codes when the cache is
+missing, stale or lacks the scene). Read-side:
 
 ```sh
 cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json
 ```
 
-prints the runtime state keyed by **authoring id** (never handles): each
-entity's `id`, `name`, `parent`, `children`, `local`/`world` transform and
-typed `components[]` in the document's own JSON shapes; exit 1 when the
-document does not load or a component value was rejected. This is the M2
-gate "project can be validated/imported headlessly".
+prints the runtime state keyed by **authoring id** (never handles; the
+entities a prefab instance expands to carry the ids the cook derived):
+each entity's `id`, `name`, `parent`, `children`, `local`/`world`
+transform and typed `components[]` in the document's own JSON shapes; exit
+1 when the scene does not load or a component value was rejected, 2 for a
+scene outside any project (nothing could cook it). This is the M2 gate
+"project can be validated/imported headlessly", now from the cache.
 
 ## Flutter host
 
@@ -100,8 +104,10 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
 - `FynkelViewportController` — one native viewport: `requestSize(w, h)` in
   physical pixels creates the ring and registers the texture, later calls
   are coalesced resizes (native resize → Swift rebind; `render()` returns
-  null in between so the simulation never waits); `assetCache`,
-  `placeholders`, `camera`; `takeStats()` (Rust) and `platformStats()`
+  null in between so the simulation never waits); `assetCache` (only for a
+  world that loaded no cooked scene — a viewport rendering a world that
+  `loadProject`/`loadScene` filled adopts that world's `fynkel_assets` store
+  at the first `render`, M3-03), `placeholders`, `camera`; `takeStats()` (Rust) and `platformStats()`
   (Swift); `detach()` is the ordered teardown (clear callback → unregister →
   destroy) and the controller is reusable afterwards.
 - `FynkelViewport` — the widget: `LayoutBuilder` × device pixel ratio →

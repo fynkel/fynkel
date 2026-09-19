@@ -2,24 +2,25 @@
 //! validated [`Scene`] into the typed `fynkel_core::SceneDescription` that
 //! `World::load_scene` instantiates, plus the authored behaviours
 //! ([`AuthoredBehaviour`]) the Dart SDK instantiates from the load report
-//! (M2-16). A non-native component whose type the schema set knows as a
+//! (M2-16). The cooker describes a scene to check it and to record its
+//! behaviour types; the runtime (`fynkel_assets`) describes the expanded
+//! chunk it reads from the cache. Nothing here opens a file: reading and
+//! expanding source scenes for the runtime ended with M3-03 (D2). A non-native component whose type the schema set knows as a
 //! behaviour is one of those; any other unknown type is skipped with the
 //! same `FYN-D0205` warning the validator gives (its data is still handed
 //! over, so an SDK that registered the type can attach it anyway). Values
 //! that do not decode are `FYN-D0206` errors (they cannot happen after a
 //! clean `Scene::validate`, but a caller may skip validation).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fynkel_contracts::{Code, Diagnostic, Severity, Uuid};
 use fynkel_core::{EntityDescription, SceneDescription};
 
-use crate::asset::{AssetDatabase, AssetKind};
 use crate::generated::decode_component;
-use crate::prefab::{expand, Prefab, PrefabLibrary};
 use crate::project::Project;
 use crate::scene::Scene;
-use crate::{Document, DocumentKind, SchemaSet};
+use crate::SchemaSet;
 
 /// One scene component of a non-native type: what the SDK needs to
 /// `registry.instantiate(type_id, fields: data)` and attach it to the
@@ -153,87 +154,6 @@ fn diag(
     d
 }
 
-/// Reads, validates, expands prefab instances (from `prefabs`, a directory
-/// scanned for `*.prefab.json`) and describes a scene document. `Err`
-/// carries every diagnostic when any is an error; `Ok` carries the
-/// description, the authored behaviours and the warnings. A scene inside a
-/// project validates against that project's behaviour schemas and registry
-/// (like `load_project`); elsewhere, or when the project file does not
-/// read, against the embedded set alone, so every non-native type is an
-/// unknown one (`FYN-D0205`) whose data is still handed over.
-pub fn read_scene(path: &Path, prefabs: Option<&Path>) -> Result<DescribedScene, Vec<Diagnostic>> {
-    let (library, scan) = match prefabs {
-        Some(dir) => PrefabLibrary::scan(dir),
-        None => (PrefabLibrary::empty(), Vec::new()),
-    };
-    let schemas = Project::dir_of(path)
-        .and_then(|dir| Project::read(&dir).ok().map(|p| (dir, p)))
-        .and_then(|(dir, p)| project_schemas(&dir, &p).ok())
-        .unwrap_or_else(SchemaSet::embedded);
-    read_scene_with(path, &library, &schemas, scan)
-}
-
-fn read_scene_with(
-    path: &Path,
-    library: &PrefabLibrary,
-    schemas: &SchemaSet,
-    mut diagnostics: Vec<Diagnostic>,
-) -> Result<DescribedScene, Vec<Diagnostic>> {
-    let doc = Document::read(path, Some(DocumentKind::Scene)).map_err(|mut e| {
-        e.extend(std::mem::take(&mut diagnostics));
-        e
-    })?;
-    let mut scene = Scene::from_document(doc);
-    let mut validation = scene.validate(schemas);
-    diagnostics.append(&mut validation);
-    if scene.instances().next().is_some() {
-        let expanded = expand(&scene, library, schemas);
-        scene = expanded.scene();
-        diagnostics.extend(expanded.diagnostics);
-    }
-    if fynkel_contracts::has_errors(&diagnostics) {
-        return Err(diagnostics);
-    }
-    let described = describe(&scene, schemas);
-    // `describe` repeats the unknown-type warning; keep one per pointer
-    // (a set, not a scan: a scene may carry thousands of them).
-    let mut seen: std::collections::HashSet<(Code, Option<String>)> = diagnostics
-        .iter()
-        .map(|d| (d.code, d.pointer.clone()))
-        .collect();
-    for d in described.diagnostics {
-        if seen.insert((d.code, d.pointer.clone())) {
-            diagnostics.push(d);
-        }
-    }
-    if fynkel_contracts::has_errors(&diagnostics) {
-        return Err(diagnostics);
-    }
-    Ok(DescribedScene {
-        description: described.description,
-        behaviours: described.behaviours,
-        diagnostics,
-    })
-}
-
-/// A project's startup scene, ready for `World::load_scene`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct LoadedProject {
-    pub project_name: String,
-    /// The project directory as given.
-    pub dir: PathBuf,
-    /// The asset root (`project.assets` under `dir`).
-    pub assets: PathBuf,
-    /// Where `fynkel cook` writes by default: `<dir>/.fynkel/cache`.
-    pub cache: PathBuf,
-    /// The startup scene's document path.
-    pub scene_path: PathBuf,
-    pub scene: SceneDescription,
-    /// The startup scene's authored behaviours, for the SDK to attach.
-    pub behaviours: Vec<AuthoredBehaviour>,
-    pub warnings: Vec<Diagnostic>,
-}
-
 /// Where a project keeps its generated behaviour schemas (`fynkel codegen`
 /// pipeline (b)): `<dir>/schemas/behaviours/<id>.schema.json`.
 pub const PROJECT_SCHEMAS_DIR: &str = "schemas";
@@ -242,60 +162,4 @@ pub const PROJECT_SCHEMAS_DIR: &str = "schemas";
 /// behaviour the project registry declares made known.
 pub fn project_schemas(dir: &Path, project: &Project) -> Result<SchemaSet, Diagnostic> {
     project.schemas(&SchemaSet::embedded(), dir)
-}
-
-/// Reads `<dir>/fynkel.project.json`, scans its asset root, resolves the
-/// startup scene and reads it with every prefab in the database available
-/// for expansion. `Err` when the project, the database or the scene has an
-/// error. The lock is not checked here (`fynkel project lock --check`).
-/// Behaviour types come from `<dir>/schemas/behaviours` and the registry.
-pub fn load_project(dir: &Path) -> Result<LoadedProject, Vec<Diagnostic>> {
-    let project = Project::read(dir)?;
-    let schemas = project_schemas(dir, &project).map_err(|d| vec![d])?;
-    let mut diagnostics = project.read_diagnostics().to_vec();
-    diagnostics.extend(project.validate(&schemas));
-    if fynkel_contracts::has_errors(&diagnostics) {
-        return Err(diagnostics);
-    }
-    let assets = project.assets_dir(dir);
-    let (db, scan) = AssetDatabase::scan(&assets, &schemas);
-    diagnostics.extend(scan);
-    diagnostics.extend(project.validate_against(&db, &schemas));
-    if fynkel_contracts::has_errors(&diagnostics) {
-        return Err(diagnostics);
-    }
-    // `validate_against` has already reported an unset or unresolvable
-    // startup scene as an error.
-    let startup = project
-        .startup_scene
-        .as_ref()
-        .and_then(|r| db.resolve(r).ok())
-        .map(|r| r.entry.file(&assets))
-        .ok_or_else(|| {
-            vec![
-                Diagnostic::error(Code::PROJECT_STARTUP_SCENE, "startupScene is unset")
-                    .with_document(dir.join(crate::project::PROJECT_FILE).display().to_string()),
-            ]
-        })?;
-    let mut library = PrefabLibrary::empty();
-    for e in db.entries() {
-        if e.kind != AssetKind::Document(DocumentKind::Prefab) {
-            continue;
-        }
-        match Document::read(&e.file(&assets), Some(DocumentKind::Prefab)) {
-            Ok(doc) => library.add(Prefab::from_document(doc)),
-            Err(d) => diagnostics.extend(d),
-        }
-    }
-    let described = read_scene_with(&startup, &library, &schemas, diagnostics)?;
-    Ok(LoadedProject {
-        project_name: project.name().to_string(),
-        dir: dir.to_path_buf(),
-        assets,
-        cache: dir.join(".fynkel").join("cache"),
-        scene_path: startup,
-        scene: described.description,
-        behaviours: described.behaviours,
-        warnings: described.diagnostics,
-    })
 }

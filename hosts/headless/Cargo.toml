@@ -15,6 +15,10 @@ fynkel_contracts.workspace = true
 fynkel_core.workspace = true
 fynkel_scene.workspace = true
 fynkel_document.workspace = true
+fynkel_assets.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+fynkel_import.workspace = true

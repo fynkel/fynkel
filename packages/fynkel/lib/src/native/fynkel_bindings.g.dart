@@ -211,36 +211,20 @@ external double fynkel_world_alpha(ffi.Pointer<FynkelWorld> world);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FynkelWorld>)>()
 external int fynkel_world_is_poisoned(ffi.Pointer<FynkelWorld> world);
 
-/// Documents (blueprint §7). Loads a `.scene.json` (`path`, UTF-8, not
-/// NUL-terminated; prefab instances expand from `*.prefab.json` files next
-/// to it and below) or a project directory's startup scene (every prefab in
-/// the project's asset database is available) into the world: entities are
-/// spawned immediately with their authoring ids kept for the report; other
-/// components go through the command path and any rejection is in
-/// fynkel_world_diagnostics. FYNKEL_STATUS_LOAD_FAILED when the document,
-/// the project or the hierarchy has errors (the world is unchanged);
-/// FYNKEL_STATUS_INVALID_ARGUMENT for NULL or non-UTF-8 input.
-@ffi.Native<
-  ffi.UnsignedInt Function(
-    ffi.Pointer<FynkelWorld>,
-    ffi.Pointer<ffi.Uint8>,
-    ffi.Uint32,
-  )
->(symbol: 'fynkel_world_load_scene')
-external int _fynkel_world_load_scene(
-  ffi.Pointer<FynkelWorld> world,
-  ffi.Pointer<ffi.Uint8> path_utf8,
-  int path_len,
-);
-
-FynkelStatus fynkel_world_load_scene(
-  ffi.Pointer<FynkelWorld> world,
-  ffi.Pointer<ffi.Uint8> path_utf8,
-  int path_len,
-) => FynkelStatus.fromValue(
-  _fynkel_world_load_scene(world, path_utf8, path_len),
-);
-
+/// Cooked scenes (blueprint §6, §7; M3-03). A host reads the cache
+/// `fynkel cook` wrote and never a source document. `cache_utf8` (UTF-8, not
+/// NUL-terminated) is the cache directory (`<project>/.fynkel/cache`).
+/// `fynkel_world_load_project` loads the startup scene the cache's index
+/// names; `fynkel_world_load_scene` loads the cooked scene with asset id
+/// `scene_id_utf8` (36-char UUID text). Entities are spawned immediately
+/// with their authoring ids kept for the report; other components go
+/// through the command path and any rejection is in
+/// fynkel_world_diagnostics. The scene's closure of assets stays resident
+/// in the world's store (a viewport rendering this world draws from it)
+/// until the world is destroyed. FYNKEL_STATUS_LOAD_FAILED when the cache is
+/// missing or stale, the scene is not in it or the hierarchy has errors
+/// (FYN-R#### diagnostics; the world is unchanged);
+/// FYNKEL_STATUS_INVALID_ARGUMENT for NULL, non-UTF-8 or non-UUID input.
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
@@ -250,23 +234,58 @@ FynkelStatus fynkel_world_load_scene(
 >(symbol: 'fynkel_world_load_project')
 external int _fynkel_world_load_project(
   ffi.Pointer<FynkelWorld> world,
-  ffi.Pointer<ffi.Uint8> dir_utf8,
-  int dir_len,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
 );
 
 FynkelStatus fynkel_world_load_project(
   ffi.Pointer<FynkelWorld> world,
-  ffi.Pointer<ffi.Uint8> dir_utf8,
-  int dir_len,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
 ) => FynkelStatus.fromValue(
-  _fynkel_world_load_project(world, dir_utf8, dir_len),
+  _fynkel_world_load_project(world, cache_utf8, cache_len),
+);
+
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_load_scene')
+external int _fynkel_world_load_scene(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+);
+
+FynkelStatus fynkel_world_load_scene(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+) => FynkelStatus.fromValue(
+  _fynkel_world_load_scene(
+    world,
+    cache_utf8,
+    cache_len,
+    scene_id_utf8,
+    scene_id_len,
+  ),
 );
 
 /// UTF-8 JSON describing the last load call on this world (empty before
-/// any): {"ok": bool, "scene": {"id", "name", "path", "entities"} | null,
-/// "project": {"name", "dir", "assets", "cache"} | null, "diagnostics":
-/// [{"code", "severity", "message", "document"?, "pointer"?, ...}]}.
-/// Valid until the next load call.
+/// any): {"ok": bool, "scene": {"id", "name", "path", "key", "entities",
+/// "rejectedComponents", "assets", "behaviours": [...]} | null,
+/// "cache": {"dir", "profile", "project", "startupScene"} | null,
+/// "residency": {"retained", "meshes", "textures", "materials", "bytes"}?,
+/// "diagnostics": [{"code", "severity", "message", "document"?, "pointer"?,
+/// ...}]}. Valid until the next load call.
 @ffi.Native<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>()
 external FynkelBufferView fynkel_world_load_report(
   ffi.Pointer<FynkelWorld> world,

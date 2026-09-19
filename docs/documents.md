@@ -81,7 +81,12 @@ Every authoring diagnostic is the §14.2 record
 `column`, `suggestion`, `related`. Absent fields are omitted in JSON. Code
 namespaces: `FYN-D` documents, `FYN-A` assets, `FYN-P` project, `FYN-G`
 codegen, `FYN-E` editing (authoring commands), `FYN-B` behaviours (the Dart
-SDK attaching authored behaviours at load); append only.
+SDK attaching authored behaviours at load), `FYN-R` runtime loading (the
+cooked cache: `R0001` unreadable, `R0002` stale — cooked for another schema
+fingerprint, `R0003` asset not in the cache, `R0004` its cook failed,
+`R0005` object unreadable, `R0006` chunk missing, `R0007` payload
+malformed, `R0008` cooked scene invalid for this build, `R0009` no startup
+scene); append only.
 
 Human form: `error[FYN-D0012] assets/scenes/main.scene.json:3:3 /id: id is not a canonical UUID: upper-case hex (use lower-case …)`.
 
@@ -164,61 +169,103 @@ structural errors (`LoadError`) load nothing. The typed ↔ JSON codecs are
 generated (`crates/fynkel_document/src/generated.rs`, `DocumentCodec`), as
 are the schemas `SchemaSet::embedded()` compiles in, so a shipped runtime
 validates without a `schemas/` directory. `docs/hosts.md` covers
-`fynkel test --headless --scene` and `fynkel state dump`.
+`fynkel test --headless` and `fynkel state dump`.
 
-The file-to-description paths every host shares live in
-`fynkel_document::runtime`:
+`describe` is what the cooker runs on a scene (after validating and
+expanding it) to check it and to record its behaviour types, and what the
+runtime runs on the expanded chunk it reads back. **A host never opens a
+scene file** (M3-03, D2): source documents are the authoring format, the
+cooked cache is what runs.
 
-- `read_scene(path, prefabs)` — read, validate, expand prefab instances
-  (from a directory scanned for `*.prefab.json`), describe →
-  `DescribedScene { description, behaviours, diagnostics }`. `Err` carries
-  every diagnostic when any is an error. Embedded schemas only: no project,
-  so every behaviour type is an unknown one (warned, still handed over).
-- `load_project(dir)` — `fynkel.project.json` → the project's schemas
-  (`<dir>/schemas` + registry declarations) → asset database scan →
-  `startupScene` resolved → the scene read with **every prefab in the
-  database** available → `LoadedProject { project_name, dir, assets, cache
-  (<dir>/.fynkel/cache), scene_path, scene, behaviours, warnings }`. The
-  lock is not checked here (`fynkel project lock --check` is).
+### Cooked scenes and the runtime store (`fynkel_assets`)
 
-Both read source documents: the cooked scene chunk is the unexpanded
-canonical text and no loader reads it yet (M3).
+`fynkel cook` writes each scene's `JSON` chunk **expanded** — prefab
+instances applied, their entity and component ids derived, overrides in
+place, no `prefab` blocks left — with META
+`{ documentKind: "scene", entities, instances, expanded: true,
+behaviourTypes: [{ type, version }] }` (the behaviour types the project's
+schemas and registry knew, so the runtime declares them known without the
+project), and each prefab's chunk as its template (`entities` in META).
+An invalid scene is a failed cook, never an object.
 
-Over the C ABI (`fynkel_native::load`): `fynkel_world_load_scene(world,
-path_utf8, len)` and `fynkel_world_load_project(world, dir_utf8, len)`
-return `FYNKEL_STATUS_OK`, `FYNKEL_STATUS_LOAD_FAILED` (the world is
-unchanged) or `FYNKEL_STATUS_INVALID_ARGUMENT`; `fynkel_world_load_report`
-is the JSON of the last call: `{ ok, scene: { id, name, path, entities,
-rejectedComponents, behaviours: [{ entity, authoringId, component, type,
-version, known, data, pointer }] } | null, project: { name, dir, assets,
-cache } | null, diagnostics: [...] }` — `entity` is the spawned handle. In
-Dart, `World.loadScene(path)` / `World.loadProject(dir)` return a
-`LoadReport` (warnings to `onLoadDiagnostics`) or throw `FynkelLoadError`;
-on success the SDK instantiates every listed behaviour through
-`world.registry` (`registerBehaviours(world.registry)` from the generated
+`crates/fynkel_assets` is the runtime's only door to content:
+
+- `CacheIndex::open(cache_dir)` reads `index.json` and refuses a cache
+  cooked for another schema fingerprint (`FYN-R0002`; a missing or
+  malformed index is `FYN-R0001`, "run `fynkel cook`"). It knows the
+  profile, the project (`name`, `startupScene`) and, per asset, the
+  authoring path (for messages), kind, status, key, object file and
+  dependencies; `closure(id)` is an asset and everything it depends on.
+- `Assets` is the shared, thread-safe **residency store** a world and its
+  renderer both hold (clone = same store). `mesh(&AssetRef)`,
+  `texture(&AssetRef)` and `material(&AssetRef)` load on first use from
+  the object whose chunk `kind` and `sub` match (bounded reads) and stay
+  resident while something retains their asset; `retain(ids)` hands out a
+  `Residency` token — a loaded scene holds one for its closure — whose
+  release (or drop) evicts every payload of an asset no other token
+  retains and bumps an eviction counter the renderer compares to drop its
+  GPU copies. Every miss is a `FYN-R` diagnostic naming the asset id:
+  not in the cache (`R0003`), cook failed (`R0004`), object unreadable
+  (`R0005`), no such chunk or sub-asset (`R0006`), payload malformed
+  (`R0007`) — never a fallback to a source file.
+- `Assets::scene(id)` reads the expanded chunk, declares the recorded
+  behaviour types, validates and describes it →
+  `CookedScene { id, name, key, path, description, behaviours,
+  diagnostics, closure }`; a chunk this build cannot describe is
+  `FYN-R0008` (recook); a prefab or other non-scene asset is `R0006`.
+  `startup_scene()` is the index's, or `FYN-R0009` for a cache cooked
+  without a project (`fynkel cook --assets`).
+
+Over the C ABI (`fynkel_native::load`): `fynkel_world_load_project(world,
+cache_utf8, len)` loads the startup scene the cache's index names and
+`fynkel_world_load_scene(world, cache_utf8, len, scene_id_utf8, len)` any
+cooked scene by id; both return `FYNKEL_STATUS_OK`,
+`FYNKEL_STATUS_LOAD_FAILED` (the world is unchanged) or
+`FYNKEL_STATUS_INVALID_ARGUMENT` (NULL, non-UTF-8, non-UUID). The world
+keeps one `Assets` store per cache directory and retains each loaded
+scene's closure until it is destroyed; a viewport rendering the world
+adopts that store (`fynkel_apple_viewport_render`), so residency and GPU
+copies agree without the host pointing the viewport at anything.
+`fynkel_world_load_report` is the JSON of the last call: `{ ok, scene: {
+id, name, path, key, entities, rejectedComponents, assets, behaviours: [{
+entity, authoringId, component, type, version, known, data, pointer }] } |
+null, cache: { dir, profile, project, startupScene } | null, residency: {
+retained, meshes, textures, materials, bytes }, diagnostics: [...] }` —
+`entity` is the spawned handle, `assets` the closure size. In Dart,
+`World.loadProject(dir, {cacheDir})` (default `<dir>/.fynkel/cache`) and
+`World.loadScene(cacheDir, sceneId)` return a `LoadReport` (`sceneKey`,
+`cacheDir`, `cacheProfile`, `startupScene`, `assetCount`, `residency`;
+warnings to `onLoadDiagnostics`) or throw `FynkelLoadError`; on success
+the SDK instantiates every listed behaviour through `world.registry`
+(`registerBehaviours(world.registry)` from the generated
 `behaviours.g.dart` first) and attaches it to `attach(entity)`. A type the
 registry lacks is `FYN-B0001`, data the type rejects is `FYN-B0002` — both
 warnings in the report (`behavioursAttached` counts the rest); the entity
-and its native components load either way.
+and its native components load either way. Tests cook first:
+`package:fynkel/testing.dart`'s `cookProject(dir, {cacheDir})` runs the
+`fynkel` CLI (`FYNKEL_CLI`, `fynkel` on `PATH`, or `cargo run -p
+fynkel_cli` inside a source checkout).
 
 ### Cooked assets in the renderer
 
-`fynkel_render::CookedAssets::open(cache_dir)` reads the cache's
-`index.json` and serves `mesh(&AssetRef)`, `texture(&AssetRef)` and
-`material(&AssetRef)` from the containers on demand (`ChunkFile`, bounded
-reads, the chunk whose `kind` and `sub` match the reference). The renderer
-draws every extracted `MeshRenderer` with its mesh and the `base_color`
-factor × texture of its `fynkel.pbr@1` material (the `PbrMaterial` record
-decoded from the cooked `MATL` chunk — every field and all five texture
-references; M3-03 wires the rest into the shading), from the scene's `Camera` (highest
-`priority`) with its first `DirectionalLight`; a mesh missing from the cache
-draws as a magenta cube, a missing texture as white, and entities without
-a `MeshRenderer` as tinted placeholder cubes when
-`ExtractRenderer::placeholders` is on (the default; the Flutter host turns
-it off with a project). The cooked vertex layout is the GPU layout
-(`fynkel_cooked::payload::Vertex`, 72 bytes). Hosts point a viewport at a
-cache with `fynkel_apple_viewport_set_asset_cache`; `fynkel render` does the
-whole path headlessly.
+`fynkel_render` draws from the same `Assets` store (`set_assets`; a store
+it already holds is a no-op, so re-pointing per frame is free): every
+extracted `MeshRenderer` with its mesh and the `base_color` factor ×
+texture of its `fynkel.pbr@1` material (the `PbrMaterial` record decoded
+from the cooked `MATL` chunk — every field and all five texture
+references; M3-04 wires the rest into the shading), from the scene's
+`Camera` (highest `priority`) with its first `DirectionalLight`; a mesh
+missing from the cache draws as a magenta cube, a missing texture as
+white, and entities without a `MeshRenderer` as tinted placeholder cubes
+when `ExtractRenderer::placeholders` is on (the default; the Flutter host
+turns it off with a project). At the start of each `prepare` the renderer
+drops the GPU copies of assets the store evicted since its last frame (a
+scene unload) and reloads what the extract still references. The cooked
+vertex layout is the GPU layout (`fynkel_cooked::payload::Vertex`, 72
+bytes). A viewport drawing a world that loaded from a cache uses the
+world's store; `fynkel_apple_viewport_set_asset_cache` remains for
+viewports drawing a world that did not (the demo scene). `fynkel render`
+does the whole path headlessly, from the cache alone.
 
 ## Prefab documents
 
@@ -586,12 +633,18 @@ regenerates them when a change is intended).
 
 ## Cache and cooked assets
 
-`fynkel cook` (`fynkel_import::cook`) turns the whole asset database into
-one **cooked container per asset** in a **content-addressed cache**
-(blueprint §6, §19.2c item 12). Nothing in the cache is needed to rebuild
-it — the committed sources, sidecars and documents are the truth (ADR-0006)
-— so `.fynkel/cache/` is ignored by version control and `rm -rf` is a
-valid repair.
+`fynkel cook` (`fynkel_import::cook_project`) turns the whole asset
+database of a project into one **cooked container per asset** in a
+**content-addressed cache** (blueprint §6, §19.2c item 12) and records the
+project (name, startup scene) in the index; `--assets <dir>` cooks a bare
+asset root. Nothing in the cache is needed to rebuild it — the committed
+sources, sidecars and documents are the truth (ADR-0006) — so
+`.fynkel/cache/` is ignored by version control and `rm -rf` is a valid
+repair. The cache is, on the other hand, **all the runtime reads**
+(M3-03): `fynkel run`, `fynkel test --headless`, `fynkel state dump` and
+`fynkel render` cook first (`--no-cook` skips it), hosts never cook, and a
+missing or stale object is a `FYN-R` load error naming the asset, never a
+fallback to source.
 
 **Keys.** `fynkel_import::cache::KeyInputs::key()` is BLAKE3 over
 length-prefixed fields: the cache format version, the intermediate and
@@ -620,16 +673,22 @@ the database still cooks.
 **Layout.** `<cache>/objects/<key>.fyna` next to `<key>.manifest.json`
 (both written to a temporary name and renamed, the object first), and
 `<cache>/index.json` after every cook: `{ fynkel: "cache-index",
-cacheVersion, profile, assets: [{ id, path, kind, status, key, file,
-dependencies }] }` — how a loader finds "the current cooked file for this
-asset" without recomputing keys. The manifest records the key's inputs
+cacheVersion, containerVersion, schemaFingerprint, profile, project: {
+name, startupScene } | null, assets: [{ id, path, name, kind, status, key,
+file, dependencies }] }` — how the runtime finds "the current cooked file
+for this asset" without recomputing keys, and whether this build may read
+the cache at all (`schemaFingerprint` is the build's `fynkel schema`
+fingerprint; it is also part of every document's key through the key's
+`settings`, so a schema change recooks every document). The manifest records the key's inputs
 (`sourceHash`, `extraInputs`, `settings`, `dependencies: [{ id, key }]`)
 and the chunk table (`kind`, `name`, `length`, `crc32`), no timestamps.
 `Cache::prune(keep)` deletes every object not in `keep`; `fynkel cook
 --prune` keeps the current profile's keys only.
 
-**What is cooked.** A document: validated (schema + references; errors
-fail it) and stored as its canonical text in one `JSON` chunk. A source
+**What is cooked.** A document: validated (schema + references + scene
+semantics; errors fail it) and stored as its canonical text in one `JSON`
+chunk — a scene **expanded** (prefabs applied, ids derived; see "Cooked
+scenes and the runtime store" above), a prefab as its template. A source
 with an importer: run through `fynkel_import::import`, then meshes →
 `MESH`, materials → `JSON` (`documentKind: material`) **plus** a `MATL`
 chunk of the same name/sub (the decoded `PbrMaterial`, what the renderer
@@ -764,12 +823,14 @@ entitlements get `com.apple.security.app-sandbox = false` (a dev build
 reads the project directory; the Fynkel Flutter host runs the same way).
 The output passes `fynkel validate`, `fynkel test --headless`, `fynkel
 codegen --project . --check`, `flutter analyze` and `flutter test` (CI runs
-all five on a fresh project) and renders with `fynkel cook && fynkel render`.
+all five on a fresh project; the test cooks the project first through
+`package:fynkel/testing.dart`, `FYNKEL_CLI` naming the CLI) and renders
+with `fynkel render`.
 
 `fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]`
-validates the project, cooks it (`fynkel cook` with the project's asset root
-and `.fynkel/cache`; a warm cache costs milliseconds, `--no-cook` skips it)
-so the viewport has every mesh and texture, then runs `flutter run
+validates the project, cooks it into `.fynkel/cache` (a warm cache costs
+milliseconds, `--no-cook` skips it) — the app loads its scene, meshes and
+textures from that cache and nothing else — then runs `flutter run
 --dart-define=FYNKEL_PROJECT=<abs dir>` in it, which is how `lib/main.dart`
 finds the project from a bundle.
 
@@ -778,12 +839,15 @@ the build (identical to `schemas/` by `fynkel codegen --check`); `--schemas
 <dir>` overrides either. Scene and prefab commands run on a document inside
 a project (`fynkel.project.json` in an ancestor directory) with that
 project's behaviour schemas and registry, so `game.*` components validate
-instead of warning `FYN-D0205`; `read_scene` (behind `--scene`,
-`fynkel_world_load_scene` and `World.loadScene`) does the same for a scene
-file inside a project. `fynkel test --headless` and `fynkel state
-dump` take `--project <dir>` (the startup scene through `load_project`,
-prefabs and behaviour schemas included) and default to the current
-directory when it holds a project file.
+instead of warning `FYN-D0205`. The runtime tools — `fynkel test
+--headless`, `fynkel state dump`, `fynkel render`, `fynkel run` — read a
+cooked cache only, so they cook the project first (`cook::prepare`):
+`--project <dir>` (default: the current directory when it holds a project
+file), `--scene <path|id>` (a `.scene.json` inside a project resolves that
+project and the scene's id; a loose scene outside any project is refused
+with exit 2, since nothing could cook it), `--cache <dir>` (default
+`<project>/.fynkel/cache`; alone, with no project around, it is read as it
+is) and `--no-cook`.
 
 ## CLI
 
@@ -807,17 +871,18 @@ fynkel asset init <file>... [--json]
 fynkel migrate <path|dir>... [--dry-run] [--json] [--schemas <dir>]
 fynkel migrate --list [--json]
 fynkel import <file>... [--out <dir>] [--dry-run] [--json] [--schemas <dir>]
-fynkel cook [--assets <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json] [--schemas <dir>]
+fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json]
+fynkel cook --assets <dir> [--cache <dir>] [--schemas <dir>] ...
 fynkel cooked inspect <file.fyna>... [--json]
 fynkel project describe [--project <dir>] [--json] [--schemas <dir>]
 fynkel project lock [--project <dir>] [--check] [--json] [--schemas <dir>]
 fynkel validate [--project <dir>] [--json] [--schemas <dir>]
 fynkel codegen [--check] [--root <repo>] [--project <dart package>]
-fynkel render [--project <dir>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--placeholders] [--json]
+fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--no-cook] [--placeholders] [--json]
 fynkel schema list [--json]
 fynkel schema describe <type|kind> [--json]
-fynkel test --headless [--project <dir> | --scene <path> [--prefabs <dir>]] [--steps N] [--seed S] [--json]
-fynkel state dump [--project <dir> | --scene <path> [--prefabs <dir>]] [--steps N] [--json]
+fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--seed S] [--json]
+fynkel state dump [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--json]
 fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter] [--force] [--json]
 fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]
 ```
@@ -852,8 +917,12 @@ sidecar gets one, a sidecar missing sub-asset ids is updated (existing ids
 kept); `--dry-run` prints the summary and writes nothing (`--json`: `{ ok,
 dryRun, files: [{ file, ok, id, importer, sidecar, sidecarCreated,
 sidecarWritten, summary, intermediate, bytes }], diagnostics }`). `cook`
-scans `assets/` (or `--assets <dir>`) and cooks every asset into the cache
-(`--cache`, default `.fynkel/cache`) for `--profile` (default `dev`);
+reads the project (`--project`, default the current directory), scans its
+asset root with its behaviour schemas and cooks every asset into the cache
+(`--cache`, default `<project>/.fynkel/cache`) for `--profile` (default
+`dev`), recording the project's name and startup scene in the index;
+`--assets <dir>` cooks a bare asset root instead (no project record, so
+the runtime can load its scenes by id only);
 each asset prints as `cooked|cached|failed  path (kind) key bytes`;
 `--force` cooks even when the key is present, `--prune` deletes every
 object the run did not produce (other profiles' objects included)
@@ -878,10 +947,11 @@ id, name, rust, doc, wireSize, authored, schema, fields: [{ name, type,
 offset, size, doc }] }] }`); `schema describe <fynkel.Transform>` prints one
 record with field offsets, `schema describe <scene>` a document kind's
 schema id and envelope. `--project` defaults to the current directory.
-`render` loads the project's startup scene, steps the world once and draws
-the extract offscreen with the cooked cache (`--cache` defaults to
-`<project>/.fynkel/cache`; run `fynkel cook` first) to a PNG, 1280×720 by
-default (`--json`: `{ ok, out, size, project, scene, cache, instances,
+`render` cooks the project, loads its startup scene (or `--scene`) from
+the cache through `fynkel_assets`, steps the world once and draws the
+extract offscreen from the same store to a PNG, 1280×720 by default
+(`--json`: `{ ok, out, size, project, scene: { id, name, key, entities,
+rejectedComponents }, cache, instances,
 meshes, placeholders, missing, batches, sceneCamera, sceneLight,
 assetErrors, diagnostics }`); exit 1 on a project/scene/asset error, 2 when
 no GPU adapter is available. `codegen` regenerates the native schemas and

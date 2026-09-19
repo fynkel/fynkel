@@ -204,19 +204,24 @@ class LoadReport {
     this.sceneId,
     this.sceneName,
     this.scenePath,
+    this.sceneKey,
     this.entityCount = 0,
     this.rejectedComponents = 0,
+    this.assetCount = 0,
     this.behaviours = const [],
     this.behavioursAttached = 0,
     this.projectName,
     this.projectDir,
-    this.assetsDir,
     this.cacheDir,
+    this.cacheProfile,
+    this.startupScene,
+    this.residency = const ResidencyStats(),
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
     final scene = j['scene'] as Map<String, Object?>?;
-    final project = j['project'] as Map<String, Object?>?;
+    final cache = j['cache'] as Map<String, Object?>?;
+    final residency = j['residency'] as Map<String, Object?>?;
     return LoadReport(
       ok: j['ok'] == true,
       diagnostics: [
@@ -225,16 +230,19 @@ class LoadReport {
       sceneId: scene?['id'] as String?,
       sceneName: scene?['name'] as String?,
       scenePath: scene?['path'] as String?,
+      sceneKey: scene?['key'] as String?,
       entityCount: (scene?['entities'] as num?)?.toInt() ?? 0,
       rejectedComponents: (scene?['rejectedComponents'] as num?)?.toInt() ?? 0,
+      assetCount: (scene?['assets'] as num?)?.toInt() ?? 0,
       behaviours: [
         for (final b in (scene?['behaviours'] as List?) ?? const [])
           AuthoredBehaviour.fromJson((b as Map).cast<String, Object?>()),
       ],
-      projectName: project?['name'] as String?,
-      projectDir: project?['dir'] as String?,
-      assetsDir: project?['assets'] as String?,
-      cacheDir: project?['cache'] as String?,
+      projectName: cache?['project'] as String?,
+      cacheDir: cache?['dir'] as String?,
+      cacheProfile: cache?['profile'] as String?,
+      startupScene: cache?['startupScene'] as String?,
+      residency: residency == null ? const ResidencyStats() : ResidencyStats.fromJson(residency),
     );
   }
 
@@ -242,9 +250,18 @@ class LoadReport {
   final List<LoadDiagnostic> diagnostics;
   final String? sceneId;
   final String? sceneName;
+
+  /// The scene's authoring path as the cache index records it (relative to
+  /// the asset root; for messages — the runtime never opens it).
   final String? scenePath;
+
+  /// The cooked scene object's cache key (hex).
+  final String? sceneKey;
   final int entityCount;
   final int rejectedComponents;
+
+  /// Assets retained for the scene: the scene and its dependency closure.
+  final int assetCount;
 
   /// The scene's authored behaviours (every non-native component).
   final List<AuthoredBehaviour> behaviours;
@@ -252,32 +269,86 @@ class LoadReport {
   /// How many of [behaviours] were instantiated and attached; the rest are
   /// `FYN-B` warnings in [diagnostics].
   final int behavioursAttached;
+
+  /// The project name the cache was cooked for (its index).
   final String? projectName;
+
+  /// The project directory passed to `World.loadProject` (null for
+  /// `loadScene`).
   final String? projectDir;
-  final String? assetsDir;
-  /// Where `fynkel cook` writes for this project (`<dir>/.fynkel/cache`).
+
+  /// The cooked cache the scene came from.
   final String? cacheDir;
+
+  /// The cook profile of that cache (`dev`, `ios`, …).
+  final String? cacheProfile;
+
+  /// The startup scene id the cache's index names.
+  final String? startupScene;
+
+  /// The world's asset store after the load.
+  final ResidencyStats residency;
 
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
-  /// This report after the SDK attached [attached] behaviours and found
-  /// [extra] problems doing so.
-  LoadReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => LoadReport(
+  LoadReport _copy({int? behavioursAttached, List<LoadDiagnostic>? diagnostics, String? projectDir}) => LoadReport(
         ok: ok,
-        diagnostics: extra.isEmpty ? diagnostics : [...diagnostics, ...extra],
+        diagnostics: diagnostics ?? this.diagnostics,
         sceneId: sceneId,
         sceneName: sceneName,
         scenePath: scenePath,
+        sceneKey: sceneKey,
         entityCount: entityCount,
         rejectedComponents: rejectedComponents,
+        assetCount: assetCount,
         behaviours: behaviours,
-        behavioursAttached: attached,
+        behavioursAttached: behavioursAttached ?? this.behavioursAttached,
         projectName: projectName,
-        projectDir: projectDir,
-        assetsDir: assetsDir,
+        projectDir: projectDir ?? this.projectDir,
         cacheDir: cacheDir,
+        cacheProfile: cacheProfile,
+        startupScene: startupScene,
+        residency: residency,
       );
+
+  /// This report after the SDK attached [attached] behaviours and found
+  /// [extra] problems doing so.
+  LoadReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => _copy(
+        behavioursAttached: attached,
+        diagnostics: extra.isEmpty ? diagnostics : [...diagnostics, ...extra],
+      );
+
+  /// This report with the project directory it was loaded for.
+  LoadReport withProjectDir(String dir) => _copy(projectDir: dir);
+}
+
+/// What the world's asset store holds (`LoadReport.residency`).
+class ResidencyStats {
+  const ResidencyStats({this.retained = 0, this.meshes = 0, this.textures = 0, this.materials = 0, this.bytes = 0});
+
+  factory ResidencyStats.fromJson(Map<String, Object?> j) => ResidencyStats(
+        retained: (j['retained'] as num?)?.toInt() ?? 0,
+        meshes: (j['meshes'] as num?)?.toInt() ?? 0,
+        textures: (j['textures'] as num?)?.toInt() ?? 0,
+        materials: (j['materials'] as num?)?.toInt() ?? 0,
+        bytes: (j['bytes'] as num?)?.toInt() ?? 0,
+      );
+
+  /// Assets some loaded scene retains.
+  final int retained;
+
+  /// Payloads resident right now (loaded on first use, so 0 right after
+  /// a load and before a frame is drawn).
+  final int meshes;
+  final int textures;
+  final int materials;
+
+  /// CPU bytes of the resident mesh and texture payloads.
+  final int bytes;
+
+  @override
+  String toString() => 'residency(retained $retained, $meshes meshes, $textures textures, $materials materials, $bytes bytes)';
 }
 
 /// A scene or project failed to load; [report] says why.

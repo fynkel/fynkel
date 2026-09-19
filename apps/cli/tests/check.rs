@@ -127,71 +127,262 @@ fn test_headless_reports_json() {
     assert!(v["checksum"].as_str().unwrap().len() == 16);
 }
 
+/// A second scene for the temp project: a Player with a child Camera, no
+/// asset references.
+const SECOND_SCENE: &str = r#"{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 1,
+  "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
+  "name": "Second",
+  "entities": {
+    "f4d6d600-7931-44f5-a258-45b5a6850300": {
+      "name": "Player", "parent": null,
+      "children": ["a1b2c3d4-0000-4000-8000-000000000010"],
+      "components": {
+        "818dc3dc-a9ee-4355-908f-58e20a60ce20": {
+          "type": "fynkel.Transform", "version": 1,
+          "data": { "position": [0, 1.0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] }
+        }
+      }
+    },
+    "a1b2c3d4-0000-4000-8000-000000000010": {
+      "name": "Camera", "parent": "f4d6d600-7931-44f5-a258-45b5a6850300",
+      "children": [],
+      "components": {
+        "818dc3dc-a9ee-4355-908f-58e20a60ce30": {
+          "type": "fynkel.Transform", "version": 1,
+          "data": { "position": [0, 1.5, 4], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] }
+        },
+        "818dc3dc-a9ee-4355-908f-58e20a60ce31": {
+          "type": "fynkel.Camera", "version": 1,
+          "data": { "projection": "perspective", "fov_y": 1.0, "ortho_height": 10, "near": 0.1, "far": 1000, "priority": 0 }
+        }
+      }
+    }
+  }
+}
+"#;
+
+/// The runtime tools read the cooked cache only (M3-03): `fynkel test
+/// --headless` and `fynkel state dump` cook the enclosing project first,
+/// load by id from the cache, and refuse a scene outside any project.
 #[test]
 fn scene_documents_load_headlessly_and_dump_by_id() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let scene = root.join("crates/fynkel_document/fixtures/valid/training_room.scene.json");
-    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
-        .args(["test", "--headless", "--steps", "3", "--json", "--scene"])
-        .arg(&scene)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["scene"]["loaded"], true);
-    assert_eq!(v["scene"]["entities"], 4);
-    assert_eq!(v["live_entities"], 4);
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-headless-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&root.join("crates/fynkel_document/fixtures/project"), &dir);
+    let second = dir.join("assets/scenes/second.scene.json");
+    std::fs::write(&second, SECOND_SCENE).unwrap();
+    let cache = dir.join("cooked");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let json = |out: &std::process::Output| -> serde_json::Value {
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{e}: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            )
+        })
+    };
 
-    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
-        .args(["state", "dump", "--json", "--scene"])
-        .arg(&scene)
-        .output()
-        .unwrap();
+    // The project's startup scene, cooked on the way: the fixture Robot's
+    // game.Spinner is known through the project's schemas, prefabs are
+    // expanded by the cook (4 entities), and the report names the cache.
+    let out = run(&[
+        "test",
+        "--headless",
+        "--steps",
+        "3",
+        "--json",
+        "--project",
+        dir.to_str().unwrap(),
+        "--cache",
+        cache.to_str().unwrap(),
+    ]);
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let v = json(&out);
+    assert_eq!(v["scene"]["loaded"], true);
+    assert_eq!(v["scene"]["name"], "Main");
+    assert_eq!(v["scene"]["path"], "scenes/main.scene.json");
+    assert_eq!(v["scene"]["cache"], cache.to_str().unwrap());
+    assert_eq!(v["scene"]["entities"], 4);
+    assert_eq!(v["scene"]["retained"], 5);
+    assert_eq!(v["scene"]["document_diagnostics"], serde_json::json!([]));
+    assert_eq!(v["live_entities"], 4);
+    assert!(cache.join("index.json").is_file());
+
+    // A scene by path resolves the enclosing project; by id it reads the
+    // cache directly (`--no-cook`: nothing changed).
+    let out = run(&[
+        "test",
+        "--headless",
+        "--steps",
+        "3",
+        "--json",
+        "--scene",
+        second.to_str().unwrap(),
+        "--cache",
+        cache.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["scene"]["name"], "Second");
+    assert_eq!(v["scene"]["entities"], 2);
+    let out = run(&[
+        "state",
+        "dump",
+        "--json",
+        "--no-cook",
+        "--cache",
+        cache.to_str().unwrap(),
+        "--scene",
+        "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
     assert_eq!(v["ok"], true);
+    assert_eq!(v["scene"]["name"], "Second");
     assert_eq!(
         v["entities"][0]["id"],
         "f4d6d600-7931-44f5-a258-45b5a6850300"
     );
+    assert_eq!(v["entities"][1]["world"]["position"][1], 2.5);
     assert!(!out.stdout.windows(7).any(|w| w == b"handle:"));
 
-    let bad = root.join("crates/fynkel_document/fixtures/scene/dangling_parent.scene.json");
-    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
-        .args(["state", "dump", "--json", "--scene"])
-        .arg(&bad)
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["ok"], false);
-    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0200");
-
-    // A scene inside a project validates its behaviour components against
-    // the project's schemas: the fixture Robot's game.Spinner is known, not
-    // a D0205 warning (M2-18).
-    let in_project =
-        root.join("crates/fynkel_document/fixtures/project/assets/scenes/main.scene.json");
-    let prefabs = root.join("crates/fynkel_document/fixtures/project/assets/prefabs");
-    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
-        .args(["test", "--headless", "--steps", "1", "--json", "--scene"])
-        .arg(&in_project)
-        .arg("--prefabs")
-        .arg(&prefabs)
-        .output()
-        .unwrap();
+    // The cook's expansion reaches the runtime: the crate under the
+    // instance entity carries a derived id and the override.
+    let out = run(&[
+        "state",
+        "dump",
+        "--json",
+        "--project",
+        dir.to_str().unwrap(),
+        "--cache",
+        cache.to_str().unwrap(),
+    ]);
     assert!(out.status.success());
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["scene"]["entities"], 4);
-    assert_eq!(v["scene"]["document_diagnostics"], serde_json::json!([]));
+    let v = json(&out);
+    assert_eq!(v["entityCount"], 4);
+    let crate_entity = &v["entities"][3];
+    assert_eq!(
+        crate_entity["parent"],
+        "c0000000-0000-4000-8000-0000000000e2"
+    );
+    assert_ne!(crate_entity["id"], "c0000000-0000-4000-8000-0000000000b1");
+    assert_eq!(crate_entity["components"][1]["data"]["cast_shadows"], false);
+
+    // A scene that does not validate fails the cook: exit 1, the document
+    // diagnostic on stderr, nothing loaded.
+    let bad = dir.join("assets/scenes/bad.scene.json");
+    std::fs::copy(
+        root.join("crates/fynkel_document/fixtures/scene/dangling_parent.scene.json"),
+        &bad,
+    )
+    .unwrap();
+    let out = run(&[
+        "state",
+        "dump",
+        "--json",
+        "--scene",
+        bad.to_str().unwrap(),
+        "--cache",
+        cache.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("FYN-D0200"), "{err}");
+    assert!(err.contains("cooking failed"), "{err}");
+    std::fs::remove_file(&bad).unwrap();
+
+    // An asset id the cache does not hold, and a prefab (no scene chunk).
+    let out = run(&[
+        "test",
+        "--headless",
+        "--json",
+        "--no-cook",
+        "--cache",
+        cache.to_str().unwrap(),
+        "--scene",
+        "c0000000-0000-4000-8000-0000000000ff",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        json(&out)["scene"]["document_diagnostics"][0]["code"],
+        "FYN-R0003"
+    );
+    let out = run(&[
+        "test",
+        "--headless",
+        "--json",
+        "--no-cook",
+        "--cache",
+        cache.to_str().unwrap(),
+        "--scene",
+        "c0000000-0000-4000-8000-000000000040",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(
+        json(&out)["scene"]["document_diagnostics"][0]["code"],
+        "FYN-R0006"
+    );
+
+    // Loose scenes have no cache to come from: refused, exit 2.
+    let loose = root.join("crates/fynkel_document/fixtures/valid/training_room.scene.json");
+    let out = run(&[
+        "test",
+        "--headless",
+        "--json",
+        "--scene",
+        loose.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("outside any project"));
+    let out = run(&["state", "dump", "--scene", loose.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(2));
+    // `--prefabs` is gone.
+    let out = run(&[
+        "state",
+        "dump",
+        "--scene",
+        second.to_str().unwrap(),
+        "--prefabs",
+        "x",
+    ]);
+    assert_eq!(out.status.code(), Some(2));
+
+    // A missing cache says to cook (no project around to cook here).
+    let none = dir.join("nope");
+    let out = run(&[
+        "test",
+        "--headless",
+        "--json",
+        "--cache",
+        none.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = json(&out);
+    assert_eq!(v["scene"]["document_diagnostics"][0]["code"], "FYN-R0001");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -363,38 +554,6 @@ fn prefab_commands_validate_inspect_and_expand() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["diagnostics"].as_array().unwrap().len(), 5);
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0403");
-
-    // The headless host expands before loading: derived ids reach the runtime.
-    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
-        .args(["state", "dump", "--json", "--scene"])
-        .arg(&scene)
-        .arg("--prefabs")
-        .arg(&fixtures)
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["entityCount"], 7);
-    let base = v["entities"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|e| e["id"] == "650fd857-152f-582a-9c45-012b2be17ad8")
-        .expect("derived Base entity");
-    assert_eq!(base["parent"], "20000000-0000-4000-8000-0000000000a1");
-    assert_eq!(base["world"]["position"][0], -2.0);
-    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
-        .args(["state", "dump", "--json", "--scene"])
-        .arg(&scene)
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0401");
 }
 
 #[test]
@@ -579,14 +738,6 @@ fn migrate_dry_runs_then_writes_with_backup() {
         std::fs::read_to_string(fixtures.join("v0_training.scene.migrated.json")).unwrap()
     );
     let out = run(&["scene", "validate", scene.to_str().unwrap()]);
-    assert!(out.status.success());
-    let out = run(&[
-        "state",
-        "dump",
-        "--json",
-        "--scene",
-        scene.to_str().unwrap(),
-    ]);
     assert!(out.status.success());
 
     // Errors: a document from a newer tool is reported and untouched.

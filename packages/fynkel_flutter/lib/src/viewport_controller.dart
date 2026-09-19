@@ -123,8 +123,11 @@ class FynkelViewportController extends ChangeNotifier {
     }
   }
 
-  /// The `fynkel cook` cache the renderer reads meshes, textures and
-  /// materials from (`LoadReport.cacheDir`); null renders placeholders only.
+  /// A `fynkel cook` cache for the renderer to read meshes, textures and
+  /// materials from when the world it draws did not load a scene from one.
+  /// A world that did (`World.loadProject`/`loadScene`) brings its own
+  /// asset store along, and the viewport draws from that — same residency,
+  /// nothing to set here. Null renders placeholders only.
   String? get assetCache => _assetCache;
   set assetCache(String? dir) {
     _assetCache = dir;

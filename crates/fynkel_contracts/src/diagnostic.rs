@@ -159,6 +159,35 @@ impl Code {
     /// A save or file creation failed.
     pub const EDIT_IO: Code = Code("FYN-E0011");
 
+    // Runtime loading and residency (`FYN-R`, blueprint §19.2d item 3): a
+    // host reads the cooked cache only, and every miss is an error that
+    // names the asset, never a fallback to source documents.
+    /// The cache directory has no readable `index.json` (not cooked yet, or
+    /// not a cache at all).
+    pub const RUNTIME_CACHE_UNREADABLE: Code = Code("FYN-R0001");
+    /// The cache was cooked by a different build (schema fingerprint or
+    /// cache version): re-run `fynkel cook`.
+    pub const RUNTIME_CACHE_STALE: Code = Code("FYN-R0002");
+    /// The asset id is not in the cache index.
+    pub const RUNTIME_ASSET_MISSING: Code = Code("FYN-R0003");
+    /// The index lists the asset but its cook failed (no object).
+    pub const RUNTIME_ASSET_FAILED: Code = Code("FYN-R0004");
+    /// The cooked object cannot be read (file missing, container damaged).
+    pub const RUNTIME_OBJECT_UNREADABLE: Code = Code("FYN-R0005");
+    /// The cooked object has no chunk of the requested kind for the
+    /// sub-asset (a mesh reference into a texture, an unknown `sub`, a
+    /// custom-shader material asked for as `MATL`).
+    pub const RUNTIME_CHUNK_MISSING: Code = Code("FYN-R0006");
+    /// The chunk's payload does not decode (a cache written by another
+    /// version): re-run `fynkel cook --force`.
+    pub const RUNTIME_PAYLOAD_MALFORMED: Code = Code("FYN-R0007");
+    /// The cooked scene does not describe (component data this build
+    /// rejects, hierarchy errors): re-run `fynkel cook`.
+    pub const RUNTIME_SCENE_INVALID: Code = Code("FYN-R0008");
+    /// The cache names no startup scene (`fynkel cook` ran without a
+    /// project file).
+    pub const RUNTIME_NO_STARTUP_SCENE: Code = Code("FYN-R0009");
+
     pub const fn as_str(self) -> &'static str {
         self.0
     }

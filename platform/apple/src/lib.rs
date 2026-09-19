@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use fynkel_core::Extract;
 use fynkel_native::FynkelWorld;
-use fynkel_render::{Camera, CookedAssets, ExtractRenderer, FrameStats};
+use fynkel_render::{Assets, Camera, ExtractRenderer, FrameStats};
 use glam::Vec3;
 
 pub use ring::{IoSurfaceRing, RingStats, SyncMode, TEXTURE_FORMAT};
@@ -84,9 +84,12 @@ impl Viewport {
     }
 
     /// Points the renderer at a cooked cache (`fynkel cook`), or at nothing.
+    /// A world that loaded its scene from a cache brings its own store
+    /// along (see [`fynkel_apple_viewport_render`]); this is for viewports
+    /// that draw without one.
     pub fn set_asset_cache(&mut self, dir: Option<&std::path::Path>) -> Result<(), String> {
         let assets = match dir {
-            Some(d) => Some(CookedAssets::open(d)?),
+            Some(d) => Some(Assets::open(d).map_err(|e| e.message)?),
             None => None,
         };
         self.renderer.set_assets(assets);
@@ -270,6 +273,12 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render(
     if w.core().is_poisoned() {
         return FYNKEL_APPLE_RENDER_NO_WORLD;
     }
+    // The world's scene came from a cooked cache: draw from the same
+    // store, so residency (what the scene retained) and the renderer's
+    // GPU copies agree. Re-pointing at the store it already has is free.
+    if let Some(assets) = w.assets() {
+        v.renderer.set_assets(Some(assets.clone()));
+    }
     let extract = w.core().extract();
     v.render(&extract)
 }
@@ -292,7 +301,9 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_camera(
 /// Points the viewport's renderer at a cooked asset cache directory (the
 /// `index.json` written by `fynkel cook`); `dir` NULL or empty clears it.
 /// Returns 0, or -1 when the directory is not a readable cache (the
-/// previous source is dropped either way).
+/// previous source is dropped either way). Rendering a world that loaded
+/// from a cache adopts that world's store instead, so hosts on the SDK's
+/// `loadProject`/`loadScene` never need this.
 ///
 /// # Safety
 /// `vp` must be a live viewport; `dir_utf8` points at `dir_len` bytes.

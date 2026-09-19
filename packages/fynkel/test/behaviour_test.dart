@@ -8,6 +8,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 /// Records every callback with the tick it ran at.
@@ -335,9 +336,12 @@ void main() {
 
   test('attach(): behaviours on entities loaded from a project', () {
     final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
+    final cache = Directory.systemTemp.createTempSync('fynkel-behaviour-cache-').path;
+    addTearDown(() => Directory(cache).deleteSync(recursive: true));
+    cookProject(fixture, cacheDir: cache);
     final w = world();
     addTearDown(w.dispose);
-    w.loadProject(fixture);
+    w.loadProject(fixture, cacheDir: cache);
     final entities = w.allEntities();
     expect(entities, hasLength(4));
     final go = w.attach(entities.first);

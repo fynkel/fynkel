@@ -12,6 +12,7 @@ members = [
     "crates/fynkel_document",
     "crates/fynkel_import",
     "crates/fynkel_cooked",
+    "crates/fynkel_assets",
     "platform/apple",
     "hosts/headless",
     "hosts/standalone",
@@ -58,6 +59,7 @@ fynkel_render = { path = "crates/fynkel_render" }
 fynkel_native = { path = "crates/fynkel_native" }
 fynkel_document = { path = "crates/fynkel_document" }
 fynkel_import = { path = "crates/fynkel_import" }
+fynkel_assets = { path = "crates/fynkel_assets" }
 fynkel_host_headless = { path = "hosts/headless" }
 
 [profile.release]

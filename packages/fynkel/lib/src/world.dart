@@ -1,7 +1,7 @@
 // The Dart gameplay API (design/dart-sdk.md §21.2, ADR-0008): World,
 // GameObject, TransformRef with a staged-write overlay, and (behaviour.dart)
 // the Behaviour lifecycle the world drives at the §5.1 points of a host
-// frame. The scene/asset layers arrive through `loadScene`/`loadProject`.
+// frame. Scenes come from the cooked cache through `loadProject`/`loadScene`.
 
 import 'dart:typed_data';
 
@@ -344,17 +344,27 @@ class World {
 
   // ---------------------------------------------------------------- documents
 
-  /// Loads a `.scene.json` (prefabs resolved from the files next to it and
-  /// below) into the world. Entities exist immediately; components go
-  /// through the command path (rejections reach [onDiagnostics] on the
-  /// next step). Throws [FynkelLoadError] when the document has errors.
-  LoadReport loadScene(String path) => _load(_native.loadScene(path), 'loadScene');
+  /// Where `fynkel cook` writes a project's cache: `<dir>/.fynkel/cache`.
+  static String cacheDirOf(String projectDir) => '$projectDir/.fynkel/cache';
 
-  /// Loads the startup scene of the project at [dir] (`fynkel.project.json`),
-  /// with every prefab in its asset database available. The report's
-  /// [LoadReport.cacheDir] is where `fynkel cook` put the cooked assets a
-  /// renderer needs. Throws [FynkelLoadError] on errors.
-  LoadReport loadProject(String dir) => _load(_native.loadProject(dir), 'loadProject');
+  /// Loads the startup scene of the project at [dir] from its cooked cache
+  /// ([cacheDir], default [cacheDirOf]). The runtime reads the cache only:
+  /// `fynkel cook` (or `fynkel run`, `fynkel test`, which cook first) must
+  /// have run for this build, or the load fails with `FYN-R0001`/`R0002`.
+  /// Entities exist immediately; components go through the command path
+  /// (rejections reach [onDiagnostics] on the next step). The scene's
+  /// assets stay resident in the world's store — a viewport rendering this
+  /// world draws from it — until the world is disposed. Throws
+  /// [FynkelLoadError] when the cache or the scene has errors.
+  LoadReport loadProject(String dir, {String? cacheDir}) {
+    final cache = cacheDir ?? cacheDirOf(dir);
+    return _load(_native.loadProject(cache), 'loadProject').withProjectDir(dir);
+  }
+
+  /// Loads the cooked scene with asset id [sceneId] (UUID text) from the
+  /// cache at [cacheDir]; see [loadProject]. Throws [FynkelLoadError] when
+  /// the scene is not in the cache (`FYN-R0003`) or does not load.
+  LoadReport loadScene(String cacheDir, String sceneId) => _load(_native.loadScene(cacheDir, sceneId), 'loadScene');
 
   LoadReport _load((FynkelStatus, Map<String, Object?>) r, String op) {
     final (status, json) = r;

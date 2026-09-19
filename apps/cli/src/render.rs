@@ -1,41 +1,40 @@
 //! `fynkel render`: a project's startup scene through the real runtime and
-//! renderer to a PNG, headless. The proof that a scene file reaches pixels
-//! without a window: `load_project` → `World::load_scene` → one step →
-//! extract → `ExtractRenderer` over the cooked cache → readback. Exit 0
-//! when the image was written, 1 when the project, the scene or an asset
-//! failed, 2 on usage or when no GPU adapter is available.
+//! renderer to a PNG, headless. The proof that a scene reaches pixels
+//! without a window — and from the cache alone: `cook::prepare` (cook the
+//! project) → `Assets::scene` → `World::load_scene` → one step → extract →
+//! `ExtractRenderer` over the same asset store → readback. Exit 0 when the
+//! image was written, 1 when the project, the scene or an asset failed, 2
+//! on usage or when no GPU adapter is available.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use fynkel_core::{World, WorldConfig};
-use fynkel_document::{diagnostics_json, load_project};
-use fynkel_render::{headless_device, render_offscreen, CookedAssets, ExtractRenderer};
+use fynkel_document::diagnostics_json;
+use fynkel_render::{headless_device, render_offscreen, Assets, ExtractRenderer};
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel render [--project <dir>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--placeholders] [--json]\n                                               render the project's startup scene headlessly to a PNG (run `fynkel cook` first)"
+        "usage:\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--no-cook] [--placeholders] [--json]\n                                               cook the project, then render its startup scene (or --scene) headlessly from the cache to a PNG"
     );
     ExitCode::from(2)
 }
 
 struct Opts {
-    project: PathBuf,
+    target: crate::cook::Target,
     out: PathBuf,
     width: u32,
     height: u32,
-    cache: Option<PathBuf>,
     placeholders: bool,
     json: bool,
 }
 
 fn parse(args: &[String]) -> Option<Opts> {
     let mut o = Opts {
-        project: PathBuf::from("."),
+        target: crate::cook::Target::default(),
         out: PathBuf::from("render.png"),
         width: 1280,
         height: 720,
-        cache: None,
         placeholders: false,
         json: false,
     };
@@ -44,9 +43,14 @@ fn parse(args: &[String]) -> Option<Opts> {
         match args[i].as_str() {
             "--json" => o.json = true,
             "--placeholders" => o.placeholders = true,
+            "--no-cook" => o.target.no_cook = true,
             "--project" => {
                 i += 1;
-                o.project = PathBuf::from(args.get(i)?);
+                o.target.project = Some(PathBuf::from(args.get(i)?));
+            }
+            "--scene" => {
+                i += 1;
+                o.target.scene = Some(args.get(i)?.clone());
             }
             "--out" => {
                 i += 1;
@@ -54,7 +58,7 @@ fn parse(args: &[String]) -> Option<Opts> {
             }
             "--cache" => {
                 i += 1;
-                o.cache = Some(PathBuf::from(args.get(i)?));
+                o.target.cache = Some(PathBuf::from(args.get(i)?));
             }
             "--size" => {
                 i += 1;
@@ -74,42 +78,56 @@ pub fn run(args: &[String]) -> ExitCode {
     let Some(opts) = parse(args) else {
         return usage();
     };
-    let loaded = match load_project(&opts.project) {
-        Ok(l) => l,
-        Err(diags) => {
-            if opts.json {
-                println!(
-                    "{}",
-                    serde_json::json!({ "ok": false, "diagnostics": diagnostics_json(&diags) })
-                );
-            } else {
-                for d in &diags {
-                    eprintln!("{d}");
-                }
-            }
-            return ExitCode::from(1);
-        }
+    let prepared = match crate::cook::prepare("fynkel render", &opts.target) {
+        Ok(p) => p,
+        Err(code) => return code,
     };
-    for d in &loaded.warnings {
+    let fail = |diags: Vec<fynkel_document::Diagnostic>| {
+        if opts.json {
+            println!(
+                "{}",
+                serde_json::json!({ "ok": false, "diagnostics": diagnostics_json(&diags) })
+            );
+        } else {
+            for d in &diags {
+                eprintln!("{d}");
+            }
+        }
+        ExitCode::from(1)
+    };
+    let cache = prepared.cache.clone();
+    let assets = match Assets::open(&cache) {
+        Ok(a) => a,
+        Err(d) => return fail(vec![d]),
+    };
+    let scene_id = match prepared.scene {
+        Some(id) => id,
+        None => match assets.startup_scene() {
+            Ok(id) => id,
+            Err(d) => return fail(vec![d]),
+        },
+    };
+    let cooked = match assets.scene(scene_id) {
+        Ok(s) => s,
+        Err(diags) => return fail(diags),
+    };
+    for d in &cooked.diagnostics {
         eprintln!("{d}");
     }
-    let cache = opts.cache.clone().unwrap_or_else(|| loaded.cache.clone());
-    let assets = match CookedAssets::open(&cache) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("fynkel render: {e}");
-            return ExitCode::from(1);
-        }
-    };
+    let project_name = assets
+        .project()
+        .map(|p| p.name)
+        .unwrap_or_else(|| "(no project)".to_string());
 
     let mut world = World::new(WorldConfig::default());
-    let scene = match world.load_scene(&loaded.scene) {
+    let scene = match world.load_scene(&cooked.description) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("fynkel render: {e}");
             return ExitCode::from(1);
         }
     };
+    let _residency = assets.retain(&cooked.closure);
     world.begin_frame(1.0 / 60.0);
     world.step();
     let extract = world.extract();
@@ -152,8 +170,8 @@ pub fn run(args: &[String]) -> ExitCode {
                 "ok": errors.is_empty(),
                 "out": opts.out.display().to_string(),
                 "size": [opts.width, opts.height],
-                "project": loaded.project_name,
-                "scene": { "id": scene.id.to_string(), "name": scene.name, "entities": scene.entities().len(), "rejectedComponents": scene.rejected_components },
+                "project": project_name,
+                "scene": { "id": scene.id.to_string(), "name": scene.name, "key": cooked.key, "entities": scene.entities().len(), "rejectedComponents": scene.rejected_components },
                 "cache": cache.display().to_string(),
                 "instances": stats.instances,
                 "meshes": stats.meshes,
@@ -163,7 +181,7 @@ pub fn run(args: &[String]) -> ExitCode {
                 "sceneCamera": stats.scene_camera,
                 "sceneLight": stats.scene_light,
                 "assetErrors": errors,
-                "diagnostics": diagnostics_json(&loaded.warnings),
+                "diagnostics": diagnostics_json(&cooked.diagnostics),
             })
         );
     } else {
@@ -172,7 +190,7 @@ pub fn run(args: &[String]) -> ExitCode {
             opts.out.display(),
             opts.width,
             opts.height,
-            loaded.project_name,
+            project_name,
             scene.name,
             scene.entities().len(),
             stats.instances,

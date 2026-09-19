@@ -96,6 +96,10 @@ jobs:
           "$GITHUB_WORKSPACE/target/debug/fynkel" validate --root "$GITHUB_WORKSPACE"
           "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless --root "$GITHUB_WORKSPACE"
           "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project . --root "$GITHUB_WORKSPACE"
+      # The starter's test cooks the project first (package:fynkel/testing.dart);
+      # FYNKEL_CLI points it at the built CLI instead of a `cargo run`.
       - name: starter flutter analyze + test
         working-directory: ${{ runner.temp }}/starter_game
+        env:
+          FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
         run: flutter pub get && flutter analyze && flutter test

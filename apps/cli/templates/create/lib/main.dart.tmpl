@@ -9,6 +9,7 @@
 // project's cooked cache (`fynkel cook`, which `fynkel run` does for you).
 
 import 'package:flutter/material.dart';
+import 'package:fynkel/fynkel.dart' show FynkelLoadError;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
@@ -52,10 +53,13 @@ class _GamePageState extends State<GamePage> {
       return;
     }
     try {
-      final game = _game = Game.load(dir);
-      // The renderer reads the cooked cache; scene entities without a mesh
-      // stay invisible (placeholders off) as they will in the shipped game.
-      _viewport = FynkelViewportController(assetCache: game.report.cacheDir, placeholders: false);
+      _game = Game.load(dir);
+      // The viewport draws from the world's asset store (the cooked cache
+      // the scene came from); scene entities without a mesh stay invisible
+      // (placeholders off) as they will in the shipped game.
+      _viewport = FynkelViewportController(placeholders: false);
+    } on FynkelLoadError catch (e) {
+      _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {
       _error = '$e';
     }
@@ -119,8 +123,7 @@ class Hud extends StatelessWidget {
       'behaviours ${game.world.behaviours.length} attached',
       for (final sp in game.world.behaviours.whereType<Spinner>())
         'spinner    ${sp.angle.toStringAsFixed(2)} rad at ${sp.speed} rad/s',
-      if (!viewport.assetCacheOk)
-        'no cooked cache at ${game.report.cacheDir} — run `fynkel cook` (or `fynkel run`)',
+      'assets     ${game.report.assetCount} retained from ${game.report.cacheDir}',
       if (s != null) ...[
         'viewport   ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
             'frame ${s.tickInterval.p50.toStringAsFixed(2)} ms  render ${s.renderCall.p50.toStringAsFixed(2)} ms',

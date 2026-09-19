@@ -1,18 +1,17 @@
-//! A scene file reaches pixels: the fixture project is cooked into a cache,
-//! its startup scene is read through `fynkel_document`, loaded into a core
-//! world and rendered offscreen from the scene's own camera — the cooked
-//! robot mesh with the rusted material (base colour × swatch texture) and
-//! the crate prefab instance. A mesh the cache lacks draws magenta.
+//! A scene file reaches pixels — from the cache alone (M3-03 gate): the
+//! fixture project is cooked into a cache, its startup scene is read
+//! through `fynkel_assets`, loaded into a core world and rendered
+//! offscreen from the scene's own camera — the cooked robot mesh with the
+//! rusted material (base colour × swatch texture) and the crate prefab
+//! instance (expanded by the cook). With the source tree deleted the same
+//! cache renders the identical image. A mesh the cache lacks draws
+//! magenta.
 
 use std::path::{Path, PathBuf};
 
 use fynkel_core::{World, WorldConfig};
-use fynkel_document::asset::AssetDatabase;
-use fynkel_document::{load_project, SchemaSet};
-use fynkel_import::{cook, Cache, CookOptions};
-use fynkel_render::{
-    clear_rgba8, headless_device, render_offscreen, CookedAssets, ExtractRenderer,
-};
+use fynkel_import::{cook_project, CookOptions};
+use fynkel_render::{clear_rgba8, headless_device, render_offscreen, Assets, ExtractRenderer};
 
 fn fixture_project() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -48,13 +47,27 @@ impl TempProject {
 
     /// `fynkel cook` for this project: `<dir>/.fynkel/cache`.
     fn cook(&self) -> PathBuf {
-        let schemas = SchemaSet::embedded();
-        let (db, diags) = AssetDatabase::scan(&self.dir.join("assets"), &schemas);
-        assert!(!fynkel_contracts::has_errors(&diags), "{diags:?}");
-        let cache = self.dir.join(".fynkel/cache");
-        let report = cook(&db, &schemas, &Cache::at(&cache), &CookOptions::default());
+        let report = cook_project(&self.dir, None, &CookOptions::default())
+            .unwrap_or_else(|d| panic!("{d:#?}"));
         assert!(!report.has_errors(), "{}", report.text());
-        cache
+        self.dir.join(".fynkel/cache")
+    }
+
+    /// Deletes everything but the cache: what a shipped game has.
+    fn remove_sources(&self) {
+        for entry in std::fs::read_dir(&self.dir).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() == ".fynkel" {
+                continue;
+            }
+            if entry.file_type().unwrap().is_dir() {
+                std::fs::remove_dir_all(entry.path()).unwrap();
+            } else {
+                std::fs::remove_file(entry.path()).unwrap();
+            }
+        }
+        assert!(!self.dir.join("fynkel.project.json").exists());
+        assert!(!self.dir.join("assets").exists());
     }
 }
 
@@ -62,6 +75,23 @@ impl Drop for TempProject {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// The startup scene, loaded and stepped once, with its closure retained.
+fn load_startup(assets: &Assets) -> (World, fynkel_core::Extract, fynkel_assets::Residency) {
+    let id = assets.startup_scene().unwrap();
+    let cooked = assets.scene(id).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(cooked.diagnostics, vec![]);
+    assert_eq!(cooked.name, "Main");
+    let mut world = World::new(WorldConfig::default());
+    let loaded = world.load_scene(&cooked.description).unwrap();
+    // Camera, Robot, the "Crate A" instance and the crate it expands to.
+    assert_eq!(loaded.len(), 4);
+    let residency = assets.retain(&cooked.closure);
+    world.begin_frame(1.0 / 60.0);
+    world.step();
+    let extract = world.extract();
+    (world, extract, residency)
 }
 
 fn is_background(p: [u8; 4]) -> bool {
@@ -76,18 +106,9 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
     };
     let project = TempProject::new("fixture");
     let cache = project.cook();
-
-    let loaded = load_project(&project.dir).unwrap_or_else(|d| panic!("{d:?}"));
-    assert_eq!(loaded.project_name, "Fixture Game");
-    assert_eq!(loaded.cache, cache);
-    // Camera, Robot, the "Crate A" instance and the crate it expands to.
-    assert_eq!(loaded.scene.entities.len(), 4);
-
-    let mut world = World::new(WorldConfig::default());
-    world.load_scene(&loaded.scene).unwrap();
-    world.begin_frame(1.0 / 60.0);
-    world.step();
-    let extract = world.extract();
+    let assets = Assets::open(&cache).unwrap_or_else(|d| panic!("{d}"));
+    assert_eq!(assets.project().unwrap().name, "Fixture Game");
+    let (_world, extract, residency) = load_startup(&assets);
     assert!(
         extract.camera.is_some(),
         "the scene's Camera drives the view"
@@ -97,7 +118,7 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
     let (w, h) = (256, 256);
     let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, w, h);
     renderer.placeholders = false;
-    renderer.set_assets(Some(CookedAssets::open(&cache).unwrap()));
+    renderer.set_assets(Some(assets.clone()));
     let px = render_offscreen(&device, &queue, &mut renderer, &extract);
     assert_eq!(renderer.asset_errors(), &[] as &[String]);
     let stats = renderer.stats();
@@ -139,6 +160,35 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
     // The camera at (0, 2, 6) looks down -Z; the top-left corner is sky.
     assert!(is_background(px[(2 * w + 2) as usize]));
 
+    // The store holds what the frame needed; releasing the scene's
+    // residency evicts it, and the renderer drops its GPU copies on the
+    // next frame (then reloads what the extract still references).
+    let before = assets.stats();
+    assert_eq!(
+        (before.meshes, before.textures, before.materials),
+        (1, 1, 1)
+    );
+    assert_eq!(before.retained, 5);
+    drop(residency);
+    let after = assets.stats();
+    assert_eq!((after.meshes, after.textures, after.materials), (0, 0, 0));
+    assert_eq!(after.retained, 0);
+    assert_eq!(after.evictions, before.evictions + 1, "one eviction event");
+    let px2 = render_offscreen(&device, &queue, &mut renderer, &extract);
+    assert_eq!(px2, px, "reloaded from the cache: the same image");
+
+    // Gate: the source tree is gone; the cache alone renders the same
+    // image through a fresh store.
+    project.remove_sources();
+    let alone = Assets::open(&cache).unwrap_or_else(|d| panic!("{d}"));
+    let (_world, extract2, _residency) = load_startup(&alone);
+    let mut fresh = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, w, h);
+    fresh.placeholders = false;
+    fresh.set_assets(Some(alone));
+    let px3 = render_offscreen(&device, &queue, &mut fresh, &extract2);
+    assert_eq!(fresh.asset_errors(), &[] as &[String]);
+    assert_eq!(px3, px, "no source file was needed");
+
     // Without the cache nothing is on the GPU: both meshes draw as missing
     // (magenta) and the errors say why.
     renderer.set_assets(None);
@@ -164,12 +214,8 @@ fn placeholders_off_hides_entities_without_meshes() {
         return;
     };
     let project = TempProject::new("placeholders");
-    let loaded = load_project(&project.dir).unwrap_or_else(|d| panic!("{d:?}"));
-    let mut world = World::new(WorldConfig::default());
-    world.load_scene(&loaded.scene).unwrap();
-    world.begin_frame(1.0 / 60.0);
-    world.step();
-    let extract = world.extract();
+    let assets = Assets::open(&project.cook()).unwrap_or_else(|d| panic!("{d}"));
+    let (_world, extract, _residency) = load_startup(&assets);
 
     let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
     // No assets, placeholders on: the camera and the instance host entity

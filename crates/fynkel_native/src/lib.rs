@@ -31,6 +31,12 @@ pub struct FynkelWorld {
     query_buf: Vec<u8>,
     /// JSON of the last `fynkel_world_load_*` call; empty before any.
     load_report: Vec<u8>,
+    /// The cache the last load opened (a renderer drawing this world adopts
+    /// it, so both see one residency store).
+    assets: Option<fynkel_assets::Assets>,
+    /// One token per loaded scene: its closure stays resident until the
+    /// world is destroyed (scene unload is M3 item 12).
+    residency: Vec<fynkel_assets::Residency>,
     stats: Counters,
 }
 
@@ -158,6 +164,8 @@ impl FynkelWorld {
             diagnostics_buf: buffer::empty(BufferKind::Diagnostics),
             query_buf: buffer::empty(BufferKind::Query),
             load_report: Vec::new(),
+            assets: None,
+            residency: Vec::new(),
             stats: Counters::default(),
         }
     }
@@ -167,6 +175,11 @@ impl FynkelWorld {
     }
     pub fn core_mut(&mut self) -> &mut World {
         &mut self.inner
+    }
+
+    /// The residency store of the last successful load, if any.
+    pub fn assets(&self) -> Option<&fynkel_assets::Assets> {
+        self.assets.as_ref()
     }
 
     fn rebuild_diagnostics(&mut self) {

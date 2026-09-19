@@ -73,7 +73,9 @@ void fynkel_apple_viewport_set_frame_ready_callback(const FynkelAppleViewport *v
                                                     FynkelAppleFrameReadyFn func, void *userdata);
 void fynkel_apple_viewport_take_stats(const FynkelAppleViewport *vp, FynkelAppleViewportStats *out);
 /* Cooked assets (`fynkel cook` cache directory, UTF-8, not NUL-terminated;
- * NULL/empty clears). 0 on success, -1 when it is not a readable cache. */
+ * NULL/empty clears). 0 on success, -1 when it is not a readable cache.
+ * Rendering a world that loaded a scene from a cache adopts that world's
+ * asset store, so hosts on loadProject/loadScene never call this. */
 int32_t fynkel_apple_viewport_set_asset_cache(FynkelAppleViewport *vp,
                                               const uint8_t *dir_utf8, uint32_t dir_len);
 /* Entities without a MeshRenderer draw as placeholder cubes (default on). */
