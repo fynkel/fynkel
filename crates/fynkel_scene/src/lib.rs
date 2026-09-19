@@ -18,11 +18,16 @@
 use fynkel_contracts::Entity;
 use fynkel_ecs::internal::hecs;
 use fynkel_ecs::{EcsError, EntityBuilder, World};
+use fynkel_schema_derive::Schema;
 use glam::{Mat4, Quat, Vec3};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Local transform relative to the parent (or the world for roots).
+#[derive(Clone, Copy, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 1, name = "fynkel.Transform")]
 pub struct Transform {
+    /// Metres.
     pub position: Vec3,
+    /// Unit quaternion `[x, y, z, w]`.
     pub rotation: Quat,
     pub scale: Vec3,
 }

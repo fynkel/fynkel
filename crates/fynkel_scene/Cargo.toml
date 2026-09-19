@@ -8,5 +8,6 @@ license.workspace = true
 
 [dependencies]
 fynkel_contracts.workspace = true
+fynkel_schema_derive.workspace = true
 fynkel_ecs.workspace = true
 glam.workspace = true

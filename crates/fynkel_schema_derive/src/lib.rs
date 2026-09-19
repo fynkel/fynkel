@@ -1,0 +1,198 @@
+//! `#[derive(Schema)]` for Fynkel components and wire records.
+//!
+//! ```ignore
+//! #[derive(Schema)]
+//! #[schema(kind = "component", id = 1, name = "fynkel.Transform")]
+//! pub struct Transform {
+//!     /// Metres.
+//!     pub position: Vec3,
+//!     pub rotation: Quat,
+//!     pub scale: Vec3,
+//! }
+//! ```
+//!
+//! Field types are mapped by their last path segment: `f32 u32 i32 u64 bool
+//! Vec3 Quat Entity String`, `Option<Entity>`; any other type is treated as a
+//! nested record and must implement `HasSchema`. Doc comments become the
+//! schema docs (and end up in JSON Schema / Dart docs).
+
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{
+    parse_macro_input, Data, DeriveInput, Expr, ExprLit, Fields, GenericArgument, Lit, Meta,
+    PathArguments, Type,
+};
+
+#[proc_macro_derive(Schema, attributes(schema))]
+pub fn derive_schema(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match expand(input) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+struct Attrs {
+    kind: String,
+    id: u32,
+    name: String,
+}
+
+fn parse_attrs(input: &DeriveInput) -> syn::Result<Attrs> {
+    let mut kind = None;
+    let mut id = 0u32;
+    let mut name = None;
+    for attr in &input.attrs {
+        if !attr.path().is_ident("schema") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            let value: Expr = meta.value()?.parse()?;
+            let lit = match value {
+                Expr::Lit(ExprLit { lit, .. }) => lit,
+                _ => return Err(meta.error("expected literal")),
+            };
+            if meta.path.is_ident("kind") {
+                if let Lit::Str(s) = lit {
+                    kind = Some(s.value());
+                    return Ok(());
+                }
+            } else if meta.path.is_ident("id") {
+                if let Lit::Int(i) = lit {
+                    id = i.base10_parse()?;
+                    return Ok(());
+                }
+            } else if meta.path.is_ident("name") {
+                if let Lit::Str(s) = lit {
+                    name = Some(s.value());
+                    return Ok(());
+                }
+            }
+            Err(meta.error("expected kind = \"...\", id = N, name = \"...\""))
+        })?;
+    }
+    let kind = kind.unwrap_or_else(|| "record".to_string());
+    if !["component", "command", "event", "record"].contains(&kind.as_str()) {
+        return Err(syn::Error::new_spanned(
+            input,
+            "schema kind must be component | command | event | record",
+        ));
+    }
+    if kind != "record" && id == 0 {
+        return Err(syn::Error::new_spanned(
+            input,
+            "components, commands and events need a non-zero `id`",
+        ));
+    }
+    let name = name.unwrap_or_else(|| format!("fynkel.{}", input.ident));
+    Ok(Attrs { kind, id, name })
+}
+
+fn doc_of(attrs: &[syn::Attribute]) -> String {
+    let mut lines = Vec::new();
+    for a in attrs {
+        if let Meta::NameValue(nv) = &a.meta {
+            if nv.path.is_ident("doc") {
+                if let Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) = &nv.value
+                {
+                    lines.push(s.value().trim().to_string());
+                }
+            }
+        }
+    }
+    lines.join(" ")
+}
+
+fn field_type(ty: &Type) -> syn::Result<proc_macro2::TokenStream> {
+    let Type::Path(p) = ty else {
+        return Err(syn::Error::new_spanned(ty, "unsupported field type"));
+    };
+    let seg = p.path.segments.last().unwrap();
+    let ident = seg.ident.to_string();
+    let c = quote!(::fynkel_contracts::schema::FieldType);
+    Ok(match ident.as_str() {
+        "f32" => quote!(#c::F32),
+        "u32" => quote!(#c::U32),
+        "i32" => quote!(#c::I32),
+        "u64" => quote!(#c::U64),
+        "bool" => quote!(#c::Bool),
+        "Vec3" => quote!(#c::Vec3),
+        "Quat" => quote!(#c::Quat),
+        "Entity" => quote!(#c::Entity),
+        "String" => quote!(#c::Str),
+        "Option" => {
+            let PathArguments::AngleBracketed(args) = &seg.arguments else {
+                return Err(syn::Error::new_spanned(ty, "Option needs a type argument"));
+            };
+            match args.args.first() {
+                Some(GenericArgument::Type(Type::Path(inner)))
+                    if inner.path.segments.last().unwrap().ident == "Entity" =>
+                {
+                    quote!(#c::OptionalEntity)
+                }
+                _ => {
+                    return Err(syn::Error::new_spanned(
+                        ty,
+                        "only Option<Entity> is supported",
+                    ))
+                }
+            }
+        }
+        _ => quote!(#c::Nested(&<#ty as ::fynkel_contracts::schema::HasSchema>::SCHEMA)),
+    })
+}
+
+fn expand(input: DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let attrs = parse_attrs(&input)?;
+    let Data::Struct(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            &input,
+            "Schema derives on structs only",
+        ));
+    };
+    let fields: Vec<_> = match &data.fields {
+        Fields::Named(named) => named.named.iter().collect(),
+        Fields::Unit => Vec::new(),
+        Fields::Unnamed(_) => {
+            return Err(syn::Error::new_spanned(
+                &input,
+                "Schema needs named fields (or a unit struct)",
+            ))
+        }
+    };
+    let mut field_tokens = Vec::new();
+    for f in fields {
+        let name = f.ident.as_ref().unwrap().to_string();
+        let ty = field_type(&f.ty)?;
+        let doc = doc_of(&f.attrs);
+        field_tokens.push(quote! {
+            ::fynkel_contracts::schema::FieldSchema { name: #name, ty: #ty, doc: #doc }
+        });
+    }
+    let ident = &input.ident;
+    let ident_str = ident.to_string();
+    let kind = match attrs.kind.as_str() {
+        "component" => quote!(::fynkel_contracts::schema::SchemaKind::Component),
+        "command" => quote!(::fynkel_contracts::schema::SchemaKind::Command),
+        "event" => quote!(::fynkel_contracts::schema::SchemaKind::Event),
+        _ => quote!(::fynkel_contracts::schema::SchemaKind::Record),
+    };
+    let id = attrs.id;
+    let name = attrs.name;
+    let doc = doc_of(&input.attrs);
+    Ok(quote! {
+        impl ::fynkel_contracts::schema::HasSchema for #ident {
+            const SCHEMA: ::fynkel_contracts::schema::RecordSchema =
+                ::fynkel_contracts::schema::RecordSchema {
+                    kind: #kind,
+                    id: #id,
+                    name: #name,
+                    rust_path: concat!(module_path!(), "::", #ident_str),
+                    doc: #doc,
+                    fields: &[ #(#field_tokens),* ],
+                };
+        }
+    })
+}

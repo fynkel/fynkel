@@ -23,6 +23,7 @@
 pub mod clock;
 pub mod command;
 pub mod event;
+pub mod schema;
 pub mod world;
 
 pub use clock::{FrameClock, FramePlan};

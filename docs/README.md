@@ -9,6 +9,7 @@
 | [`ideas.md`](ideas.md) | Post-1.0 ideas (plugins, roadmap). Non-binding. |
 | [`m0-architecture-report.md`](m0-architecture-report.md) | M0 go/no-go: gate results, measured numbers, Path A selected, Path C fallback. |
 | [`toolchain.md`](toolchain.md) | Frozen toolchain matrix (M0). |
+| [`codegen.md`](codegen.md) | Schema codegen pipeline: Rust structs → JSON Schema, Dart and Rust codecs, fixtures (M1). |
 
 ## Decision index
 

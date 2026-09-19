@@ -1,0 +1,17 @@
+[package]
+name = "fynkel_cli"
+description = "The `fynkel` command-line tool (blueprint §13, §14). M1: `fynkel codegen` — the native schema generator (ADR-0012)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fynkel"
+path = "src/main.rs"
+
+[dependencies]
+fynkel_contracts.workspace = true
+fynkel_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

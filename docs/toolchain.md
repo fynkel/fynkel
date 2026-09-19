@@ -29,6 +29,8 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 | glam | 0.33.7 | math, `bytemuck` feature for GPU upload |
 | bytemuck | 1.25.2 | POD casts |
 | hecs | 0.11.1 | ECS storage behind `fynkel_ecs` (ADR-0003) |
+| syn / quote / proc-macro2 | 2.0.119 / 1.0.47 / 1.0.107 | `fynkel_schema_derive` proc macro only (ADR-0012) |
+| serde / serde_json | 1.0.229 / 1.0.151 | `fynkel` CLI JSON Schema output; not on the runtime path |
 | pollster | 1.0.1 | block on wgpu async setup |
 | log / env_logger | 0.4.34 / 0.11.11 | logging |
 

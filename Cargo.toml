@@ -2,13 +2,16 @@
 resolver = "2"
 members = [
     "crates/fynkel_contracts",
+    "crates/fynkel_schema_derive",
     "crates/fynkel_ecs",
     "crates/fynkel_scene",
     "crates/fynkel_core",
+    "crates/fynkel_wire",
     "crates/fynkel_m0_scene",
     "crates/fynkel_m0",
     "crates/fynkel_native",
     "hosts/standalone",
+    "apps/cli",
 ]
 
 [workspace.package]
@@ -26,10 +29,17 @@ pollster = "1.0.1"
 log = "0.4.34"
 env_logger = "0.11.11"
 hecs = "0.11.1"
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 fynkel_contracts = { path = "crates/fynkel_contracts" }
+fynkel_schema_derive = { path = "crates/fynkel_schema_derive" }
 fynkel_ecs = { path = "crates/fynkel_ecs" }
 fynkel_scene = { path = "crates/fynkel_scene" }
 fynkel_core = { path = "crates/fynkel_core" }
+fynkel_wire = { path = "crates/fynkel_wire" }
 
 [profile.release]
 debug = 1   # keep symbols for profiling M0 baselines

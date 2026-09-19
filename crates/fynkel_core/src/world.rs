@@ -9,6 +9,7 @@ use fynkel_contracts::{
 };
 use fynkel_ecs::{EcsError, World as Ecs};
 use fynkel_scene::{self as scene, Parent, SceneError, Transform, WorldTransform};
+use fynkel_schema_derive::Schema;
 use glam::Mat4;
 
 use crate::clock::{FrameClock, FramePlan};
@@ -35,8 +36,19 @@ impl Default for WorldConfig {
 }
 
 /// Human-readable entity name (`fynkel.Name`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Name(pub String);
+#[derive(Clone, Debug, PartialEq, Eq, Schema)]
+#[schema(kind = "component", id = 3, name = "fynkel.Name")]
+pub struct Name {
+    pub value: String,
+}
+
+impl Name {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+        }
+    }
+}
 
 /// Marker: the transform is written by physics; presentation-lane transform
 /// commands are rejected with `PHYSICS_OWNED` (ADR-0008).
@@ -358,7 +370,7 @@ impl World {
                 if !self.check_entity(index, lane, entity, "set_name") {
                     return false;
                 }
-                self.ecs.insert(entity, Name(name)).is_ok()
+                self.ecs.insert(entity, Name::new(name)).is_ok()
             }
             _ => unreachable!("allowed_on_presentation"),
         }
@@ -403,7 +415,7 @@ impl World {
                     Err(err) => return self.reject_scene(index, lane, Entity::NULL, err),
                 };
                 if let Some(n) = name {
-                    let _ = self.ecs.insert(e, Name(n));
+                    let _ = self.ecs.insert(e, Name::new(n));
                 }
                 self.events.push(Event {
                     tick,
@@ -484,7 +496,7 @@ impl World {
                 if !self.check_entity(index, lane, entity, "set_name") {
                     return false;
                 }
-                self.ecs.insert(entity, Name(name)).is_ok()
+                self.ecs.insert(entity, Name::new(name)).is_ok()
             }
         }
     }

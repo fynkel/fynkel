@@ -85,7 +85,7 @@ fn spawn_maps_temp_ids_and_destroy_removes_subtree() {
         EventPayload::Spawned { temp_id: 7, entity } => *entity,
         p => panic!("{p:?}"),
     };
-    assert_eq!(w.ecs().get::<Name>(child).unwrap().0, "child");
+    assert_eq!(w.ecs().get::<Name>(child).unwrap().value, "child");
     assert_eq!(w.live_entities(), 3);
     w.subscribe(&[root, child], true);
 
