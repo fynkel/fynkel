@@ -739,3 +739,197 @@ fn cook_fills_the_cache_and_cooked_inspect_reads_it() {
     assert_eq!(cook(&[])["cooked"], 6);
     let _ = std::fs::remove_dir_all(&cache);
 }
+
+#[test]
+fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture = root.join("crates/fynkel_document/fixtures/project");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let json = |out: &std::process::Output| -> serde_json::Value {
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{e}: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            )
+        })
+    };
+
+    // 0: the fixture project is clean.
+    let out = run(&["validate", "--project", fixture.to_str().unwrap(), "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let v = json(&out);
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["project"]["name"], "Fixture Game");
+    assert_eq!(v["documents"], 3);
+    assert_eq!(v["sources"], 2);
+    assert_eq!(v["references"], 6);
+    assert_eq!(v["lock"]["cache"]["container"], 1);
+    let out = run(&["validate", "--project", fixture.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("0 error(s), 0 warning(s)"));
+
+    // 2: no project file at all, or bad usage.
+    let empty = std::env::temp_dir().join(format!("fynkel-cli-validate-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&empty);
+    std::fs::create_dir_all(&empty).unwrap();
+    let out = run(&["validate", "--project", empty.to_str().unwrap(), "--json"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(json(&out)["diagnostics"][0]["code"], "FYN-P0001");
+    let out = run(&["validate", "--bogus"]);
+    assert_eq!(out.status.code(), Some(2));
+    let out = run(&["project"]);
+    assert_eq!(out.status.code(), Some(2));
+
+    // 1: a copy with a stale lock and a dangling startup scene.
+    let broken = empty.join("broken");
+    copy_dir(&fixture, &broken);
+    let lock_path = broken.join("fynkel.lock.json");
+    let lock = std::fs::read_to_string(&lock_path).unwrap();
+    std::fs::write(
+        &lock_path,
+        lock.replace("\"abiVersion\": 1", "\"abiVersion\": 99"),
+    )
+    .unwrap();
+    let project_path = broken.join("fynkel.project.json");
+    let project = std::fs::read_to_string(&project_path).unwrap();
+    std::fs::write(
+        &project_path,
+        project.replace(
+            "c0000000-0000-4000-8000-000000000030",
+            "c0000000-0000-4000-8000-0000000000ff",
+        ),
+    )
+    .unwrap();
+    let out = run(&["validate", "--project", broken.to_str().unwrap(), "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = json(&out);
+    assert_eq!(v["ok"], false);
+    let codes: Vec<&str> = v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(codes, ["FYN-P0011", "FYN-P0002"], "{v}");
+
+    // project lock --check sees the stale lock (1); project lock rewrites it (0).
+    let out = run(&[
+        "project",
+        "lock",
+        "--check",
+        "--project",
+        broken.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("/runtime/abiVersion"));
+    let out = run(&[
+        "project",
+        "lock",
+        "--project",
+        broken.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    assert_eq!(json(&out)["written"], true);
+    assert_eq!(
+        std::fs::read_to_string(&lock_path).unwrap(),
+        lock,
+        "the rewritten lock is byte-identical to the fixture's"
+    );
+    let out = run(&[
+        "project",
+        "lock",
+        "--check",
+        "--project",
+        broken.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+
+    // project describe --json.
+    let out = run(&[
+        "project",
+        "describe",
+        "--project",
+        fixture.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(0));
+    let v = json(&out);
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
+    assert_eq!(v["assetCount"], 5);
+    assert_eq!(v["quality"]["default"], "medium");
+    assert_eq!(v["targets"].as_array().unwrap().len(), 3);
+    let out = run(&[
+        "project",
+        "describe",
+        "--project",
+        fixture.to_str().unwrap(),
+    ]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("project Fixture Game"));
+
+    // schema list / describe.
+    let out = run(&["schema", "list", "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let v = json(&out);
+    assert_eq!(
+        v["fingerprint"],
+        format!("{:#018x}", fynkel_core::schema::schema_fingerprint())
+    );
+    assert!(v["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["kind"] == "project"));
+    assert!(v["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["name"] == "fynkel.Transform" && r["wireSize"] == 40));
+    let out = run(&["schema", "describe", "fynkel.Transform", "--json"]);
+    assert_eq!(out.status.code(), Some(0));
+    let v = json(&out);
+    assert_eq!(v["kind"], "component");
+    assert_eq!(v["id"], 1);
+    assert_eq!(v["fields"][1]["name"], "rotation");
+    assert_eq!(v["fields"][1]["offset"], 12);
+    assert_eq!(
+        v["schema"],
+        "https://fynkel.dev/schemas/components/fynkel.Transform.schema.json"
+    );
+    let out = run(&["schema", "describe", "scene", "--json"]);
+    assert_eq!(
+        json(&out)["schema"],
+        "https://fynkel.dev/schemas/scene.schema.json"
+    );
+    let out = run(&["schema", "describe", "fynkel.Nope", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let out = run(&["schema", "describe"]);
+    assert_eq!(out.status.code(), Some(2));
+    // The bare command still prints the registry.
+    let out = run(&["schema"]);
+    assert!(String::from_utf8_lossy(&out.stdout).contains("fynkel.Transform"));
+
+    let _ = std::fs::remove_dir_all(&empty);
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}

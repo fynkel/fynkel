@@ -1,0 +1,56 @@
+{
+  "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+  "formatVersion": 1,
+  "id": "c0000000-0000-4000-8000-000000000040",
+  "name": "Crate",
+  "entities": {
+    "c0000000-0000-4000-8000-0000000000b1": {
+      "name": "Crate",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000000c2": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0.5,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000000c3": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "c0000000-0000-4000-8000-000000000001",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "c0000000-0000-4000-8000-000000000020"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    }
+  },
+  "roots": [
+    "c0000000-0000-4000-8000-0000000000b1"
+  ]
+}

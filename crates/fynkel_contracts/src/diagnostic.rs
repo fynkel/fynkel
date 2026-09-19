@@ -108,6 +108,30 @@ impl Code {
     /// Something was left out of the intermediate (warning; the rest imported).
     pub const IMPORT_SKIPPED: Code = Code("FYN-A0105");
 
+    // Project (`FYN-P`, blueprint §19.2c item 13).
+    /// No `fynkel.project.json` where one was expected.
+    pub const PROJECT_MISSING: Code = Code("FYN-P0001");
+    /// `startupScene` does not resolve to a scene document.
+    pub const PROJECT_STARTUP_SCENE: Code = Code("FYN-P0002");
+    /// A registry entry names a native component type no schema knows.
+    pub const PROJECT_UNKNOWN_COMPONENT: Code = Code("FYN-P0003");
+    /// A document uses a component type the registry does not list (warning).
+    pub const PROJECT_UNREGISTERED_COMPONENT: Code = Code("FYN-P0004");
+    /// `quality.default` is not one of `quality.profiles`.
+    pub const PROJECT_QUALITY_DEFAULT: Code = Code("FYN-P0005");
+    /// No build target is enabled (warning).
+    pub const PROJECT_NO_TARGET: Code = Code("FYN-P0006");
+    /// The asset root does not exist or is not a directory.
+    pub const PROJECT_ASSET_ROOT: Code = Code("FYN-P0007");
+    /// An entry of the project file that could not be read as its shape says.
+    pub const PROJECT_MALFORMED_ENTRY: Code = Code("FYN-P0008");
+    /// No `fynkel.lock.json` next to the project file.
+    pub const LOCK_MISSING: Code = Code("FYN-P0010");
+    /// The lock records versions this build does not match.
+    pub const LOCK_MISMATCH: Code = Code("FYN-P0011");
+    /// The lock file is not valid (JSON, schema).
+    pub const LOCK_MALFORMED: Code = Code("FYN-P0012");
+
     pub const fn as_str(self) -> &'static str {
         self.0
     }

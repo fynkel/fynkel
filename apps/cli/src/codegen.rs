@@ -29,6 +29,8 @@ pub const HAND_WRITTEN_SCHEMAS: &[&str] = &[
     "material.schema.json",
     "shader.schema.json",
     "meta.schema.json",
+    "project.schema.json",
+    "lock.schema.json",
 ];
 pub const ENVELOPE_ID: &str = "https://fynkel.dev/schemas/envelope.schema.json";
 

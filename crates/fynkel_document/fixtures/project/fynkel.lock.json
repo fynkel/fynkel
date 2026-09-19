@@ -1,0 +1,30 @@
+{
+  "$schema": "https://fynkel.dev/schemas/lock.schema.json",
+  "formatVersion": 1,
+  "runtime": {
+    "version": "0.0.1",
+    "abiVersion": 1
+  },
+  "tools": {
+    "version": "0.0.1"
+  },
+  "schemaFingerprint": "0xa3c3bd56d1793195",
+  "documents": {
+    "material": 1,
+    "meta": 1,
+    "prefab": 1,
+    "project": 1,
+    "scene": 1,
+    "shader": 1
+  },
+  "importers": {
+    "fynkel.audio": 1,
+    "fynkel.file": 1,
+    "fynkel.gltf": 1,
+    "fynkel.image": 1
+  },
+  "cache": {
+    "version": 1,
+    "container": 1
+  }
+}

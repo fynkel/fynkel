@@ -465,6 +465,52 @@ Chunk kinds and payloads:
 `fynkel_import::cook::{decode_mesh, decode_texture, decode_clip}` read the
 typed payloads back (length-checked; `None` on a malformed payload).
 
+## Project and lock
+
+`fynkel.project.json` (`fynkel_document::project`, `project.schema.json`,
+hand-written like the material and shader schemas) is the one file that
+makes a directory a project. It is a document (envelope, strict JSON,
+`formatVersion` 1, `DocumentKind::Project`) and holds:
+
+| Member | Meaning |
+| --- | --- |
+| `startupScene` | `{ asset }` — required; must resolve to a scene document in the asset database |
+| `assets` | The asset root, relative to the project directory (default `assets`; no `..`, no absolute path) |
+| `inputActions` | A stub for §5.1: `name → { type: button \| axis1d \| axis2d, description?, bindings: ["keyboard:…", "mouse:…", "gamepad:…", "touch:…"] }`; nothing consumes it yet |
+| `quality` | `{ default, profiles: { name → { shadows, shadowResolution, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults |
+| `components` | The component registry: `typeId → { kind: native \| behaviour, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
+| `targets` | `macos \| ios \| android \| windows \| linux \| web → { enabled (default true), profile (default dev) }`; all disabled is a warning |
+| `x-*` | Tool extensions, kept verbatim |
+
+`fynkel.lock.json` (`lock.schema.json`, not a document: no envelope, no id)
+records what this build is: `runtime { version, abiVersion }`, `tools {
+version }`, `schemaFingerprint`, `documents { kind → formatVersion }`,
+`importers { id → version }` and `cache { version, container }`. `Lock::
+expected(importers, cacheVersion, containerVersion)` is the lock this build
+writes (`fynkel_import::expected_lock()` fills the importer and cache
+versions in, since `fynkel_document` cannot see them); `Lock::check` reports
+every differing field as `FYN-P0011` at its pointer. A mismatch is always an
+error — nothing migrates silently; `fynkel project lock` rewrites the lock
+once the upgrade is meant. The lock is canonical JSON (sorted maps), so it
+diffs cleanly in version control.
+
+`validate_project(dir, schemas, expectedLock)` is the whole-project check
+behind `fynkel validate`: the project file (schema, then semantics), the lock
+against the build, the asset root, the asset database scan (every sidecar),
+the startup scene and the native registry entries, then every document under
+the asset root — references checked against the database, scenes validated
+and expanded against every prefab in the project, prefabs, materials against
+the built-in shaders plus every manifest in the project, shader manifests —
+and the registry check. The report counts documents, sources and references;
+a missing project file is `FYN-P0001` and the one case the CLI exits 2 on.
+
+Codes: `FYN-P0001` no project file, `P0002` startup scene unset/unresolved/
+not a scene, `P0003` unknown native component in the registry, `P0004`
+(warning) unregistered component used, `P0005` quality default not a
+profile, `P0006` (warning) no enabled target, `P0007` asset root escapes the
+project or is missing, `P0008` malformed entry, `P0010` no lock, `P0011`
+lock mismatch, `P0012` malformed lock.
+
 ## CLI
 
 ```sh
@@ -487,6 +533,11 @@ fynkel migrate --list [--json]
 fynkel import <file>... [--out <dir>] [--dry-run] [--json] [--schemas <dir>]
 fynkel cook [--assets <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json] [--schemas <dir>]
 fynkel cooked inspect <file.fyna>... [--json]
+fynkel project describe [--project <dir>] [--json] [--schemas <dir>]
+fynkel project lock [--project <dir>] [--check] [--json] [--schemas <dir>]
+fynkel validate [--project <dir>] [--json] [--schemas <dir>]
+fynkel schema list [--json]
+fynkel schema describe <type|kind> [--json]
 fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
 fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
 ```
@@ -529,11 +580,28 @@ object the run did not produce (other profiles' objects included)
 diagnostics }`). `cooked inspect` prints a container's header, its chunk
 table with checksums verified, and the META summary (`--json`: `{ ok,
 files: [{ file, ok, version, bytes, verified, error, chunks[], meta }],
-diagnostics }`); a damaged container is an error.
+diagnostics }`); a damaged container is an error. `project describe` prints
+the project file resolved against its asset database and lock (`--json`:
+`{ ok, id, name, path, formatVersion, assets, assetCount, startupScene: {
+asset, path, name }, inputActions[], quality, components[], targets[],
+lock, diagnostics }`); `project lock` writes `fynkel.lock.json` for this
+build (unchanged files are left alone; `--check` only compares and exits 1
+on a mismatch; `--json`: `{ ok, lock, path, written, check, diagnostics
+}`). `validate` runs the whole-project check (`--json`: `{ ok, project: {
+id, name, path }, lock, documents, sources, references, errors, warnings,
+diagnostics }`). `schema list` prints every document kind and every
+component/command/event record with its wire size and the fingerprint
+(`--json`: `{ ok, fingerprint, abiVersion, documents[], records: [{ kind,
+id, name, rust, doc, wireSize, authored, schema, fields: [{ name, type,
+offset, size, doc }] }] }`); `schema describe <fynkel.Transform>` prints one
+record with field offsets, `schema describe <scene>` a document kind's
+schema id and envelope. `--project` defaults to the current directory.
 
-Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
-`--json` prints `{ "ok": bool, "diagnostics": [ ...records... ] }`
-(`format` adds `"drift": [paths]`).
+Exit codes, everywhere: 0 ok (warnings allowed), 1 diagnostics with errors
+(or drift for `format --check`), 2 usage, or a project that cannot be opened
+at all (no `fynkel.project.json`, unreadable schemas). `--json` prints
+`{ "ok": bool, "diagnostics": [ ...records... ] }` (`format` adds
+`"drift": [paths]`).
 
 ## Fixtures
 
@@ -542,4 +610,8 @@ fixed point), `unknown/` (unknown keys and lexemes byte-for-byte, hoisting
 expectations in `*.expected.json`), `invalid/` (exact code/pointer/line/
 column expectations in `*.expected.json`), `scene/` and `material/` (semantic
 expectations per kind; `material/` also holds custom manifests the material
-fixtures reference). Every kind added later extends this corpus.
+fixtures reference), `project/` (a complete project: `fynkel.project.json`,
+the lock this build writes — `FYNKEL_UPDATE_FIXTURES=1 cargo test -p
+fynkel_document --test project` refreshes it — and an asset tree with a
+scene, a prefab instance, a glTF mesh, a texture and a material). Every kind
+added later extends this corpus.

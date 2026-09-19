@@ -15,6 +15,7 @@ mod document;
 mod import;
 mod material;
 mod migrate;
+mod project;
 mod scene;
 
 use std::path::PathBuf;
@@ -22,7 +23,7 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--scene <path>] [--prefabs <dir>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate ...            scene documents (--prefabs <dir>, --expand)\n  fynkel prefab inspect|validate ...           prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>]        import glTF/GLB sources to their normalized intermediate (sidecars updated)\n  fynkel cook [--assets <dir>] [--cache <dir>] [--profile <name>] [--force]\n                                               cook every asset into the content-addressed cache (.fynkel/cache)\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table"
+        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [list|describe <type>] [--json] the schema registry: document kinds, component types, fingerprint\n  fynkel test --headless [--scene <path>] [--prefabs <dir>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate ...            scene documents (--prefabs <dir>, --expand)\n  fynkel prefab inspect|validate ...           prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>]        import glTF/GLB sources to their normalized intermediate (sidecars updated)\n  fynkel cook [--assets <dir>] [--cache <dir>] [--profile <name>] [--force]\n                                               cook every asset into the content-addressed cache (.fynkel/cache)\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table\n  fynkel project describe|lock [--project <dir>] [--json]\n                                               the project file (fynkel.project.json) and its lock (fynkel.lock.json)\n  fynkel validate [--project <dir>] [--json]   validate the whole project: exit 0 ok, 1 errors, 2 usage/IO"
     );
     ExitCode::from(1)
 }
@@ -60,6 +61,9 @@ fn main() -> ExitCode {
     if cmd == "state" {
         return state_command(&args[1..]);
     }
+    if cmd == "schema" && args.len() > 1 && !args[1].starts_with("--") {
+        return project::run_schema(&args[1..]);
+    }
     if matches!(
         cmd.as_str(),
         "document"
@@ -72,6 +76,8 @@ fn main() -> ExitCode {
             | "import"
             | "cook"
             | "cooked"
+            | "project"
+            | "validate"
     ) {
         let root = args
             .iter()
@@ -85,6 +91,8 @@ fn main() -> ExitCode {
             "import" => import::run(&root, &args[1..]),
             "cook" => cook::run(&root, &args[1..]),
             "cooked" => cook::run_cooked(&args[1..]),
+            "project" => project::run_project(&root, &args[1..]),
+            "validate" => project::run_validate(&root, &args[1..]),
             "document" => document::run(&root, &args[1..]),
             "scene" | "prefab" => scene::run(&root, cmd, &args[1..]),
             other => material::run(&root, other, &args[1..]),

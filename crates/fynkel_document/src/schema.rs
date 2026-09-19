@@ -25,6 +25,8 @@ pub struct SchemaSet {
     /// Built-in component schemas by type id (`schemas/components/*`), the
     /// committed codegen metadata ADR-0016 says tools read.
     components: HashMap<String, ComponentInfo>,
+    /// Every other loaded schema by `$id` (`lock.schema.json`, …).
+    others: HashMap<String, Validator>,
 }
 
 /// What a tool needs to know about a component type without linking the
@@ -174,11 +176,24 @@ impl SchemaSet {
                 None => missing.push(kind),
             }
         }
+        let mut others = HashMap::new();
+        for (id, value) in by_id.iter().skip(1) {
+            let is_document = DocumentKind::ALL.iter().any(|k| k.schema_id() == *id);
+            let is_component = value
+                .get("x-fynkel")
+                .and_then(|m| m.get("kind"))
+                .and_then(|k| k.as_str())
+                == Some("component");
+            if !is_document && !is_component {
+                others.insert(id.clone(), compile(value, id)?);
+            }
+        }
         Ok(SchemaSet {
             validators,
             envelope,
             missing,
             components,
+            others,
         })
     }
 
@@ -208,6 +223,20 @@ impl SchemaSet {
         }
         sort_by_position(&mut out);
         out
+    }
+
+    /// Validates a tree against a loaded schema that is not a document
+    /// kind's (`https://fynkel.dev/schemas/lock.schema.json`, …); `None`
+    /// when no such schema is loaded.
+    pub fn validate_schema(&self, schema_id: &str, root: &Node) -> Option<Vec<Diagnostic>> {
+        let validator = self.others.get(schema_id)?;
+        let instance = root.to_serde();
+        let mut out = Vec::new();
+        for err in validator.iter_errors(&instance) {
+            out.extend(to_diagnostics(&err, root));
+        }
+        sort_by_position(&mut out);
+        Some(out)
     }
 
     /// Kinds without their own schema (validated against the envelope only).

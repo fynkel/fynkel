@@ -40,6 +40,31 @@ use std::path::Path;
 use fynkel_contracts::Diagnostic;
 use fynkel_document::asset::Meta;
 
+/// Every importer with its version — the asset compiler fingerprint
+/// `fynkel.lock.json` records (`fynkel.file` has no importer; the cooker
+/// copies such files, so its "version" is the cooker's).
+pub const IMPORTERS: &[(&str, u32)] = &[
+    (
+        fynkel_document::asset::GLTF_IMPORTER,
+        gltf::IMPORTER_VERSION,
+    ),
+    (
+        fynkel_document::asset::IMAGE_IMPORTER,
+        image::IMPORTER_VERSION,
+    ),
+    (
+        fynkel_document::asset::AUDIO_IMPORTER,
+        audio::IMPORTER_VERSION,
+    ),
+    (fynkel_document::asset::FILE_IMPORTER, 1),
+];
+
+/// The lock this build writes (`fynkel project lock`) and checks
+/// (`fynkel validate`).
+pub fn expected_lock() -> fynkel_document::Lock {
+    fynkel_document::Lock::expected(IMPORTERS, cache::CACHE_VERSION, fynkel_cooked::VERSION)
+}
+
 /// Resource budgets every importer honours (`FYN-A0101` when exceeded).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Limits {
