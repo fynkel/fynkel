@@ -1,199 +1,789 @@
 # Fynkel Engine — Development Blueprint
 
-**Status:** Proposed architecture and implementation plan, version 0.2  
-**Prepared:** 18 September 2026  
-**Brand updated:** 19 September 2026  
-**Audience:** Runtime, rendering, Flutter/Dart, editor, tooling, and quality engineers  
-**Objective:** Build **Fynkel Engine**, a Dart-first 3D game engine with a Unity-like authoring workflow, a Rust runtime, and optional Flutter desktop/browser editors.
+**Status:** Proposed architecture and implementation plan, version 0.3  
+**Prepared:** 19 September 2026  
+**Audience:** Fynkel maintainers, contributors, runtime/rendering engineers, Dart/Flutter engineers, tooling engineers, and AI-assisted development workflows  
+**Objective:** Build **Fynkel Engine**, a native-first, Dart-first 3D game engine with a Rust runtime, `wgpu` rendering, `hecs` behind a Fynkel-owned ECS boundary, Flutter UI/editor tooling, transparent project files, and a Unity-like workflow without making the editor mandatory.
 
-All package names, commands, APIs, file schemas, and performance budgets below are proposed contracts, not descriptions of an already implemented product. Milestones are acceptance gates, not calendar estimates. Platform support is earned through testing, not inferred from dependency support.
+All package names, commands, APIs, file schemas, platform targets, and performance budgets below are proposed engineering contracts until validated by milestone gates. Milestones are acceptance gates, not calendar estimates. Platform support is earned through testing, not inferred from Flutter, Rust, or dependency support.
 
 ### Naming and brand conventions
 
-The official product name is **Fynkel Engine**. Use **Fynkel** as the short product name in normal developer-facing copy. Use `fynkel` for the CLI command and primary Dart package, `fynkel_*` for engine-owned Rust/Dart modules where a qualified package name is useful, and `fynkel.*` for built-in serialized type IDs. A shipped-game attribution may use **Made with Fynkel**. Generic words such as “engine”, “runtime”, “editor”, and “renderer” remain lowercase when they describe a technical concept rather than the product name.
+The official product name is **Fynkel Engine**. Use **Fynkel** as the short product name in developer-facing copy. Use `fynkel` for the CLI and primary Dart package, `fynkel_*` for engine-owned Rust/Dart modules, and `fynkel.*` for built-in serialized type IDs. Shipped games may use **Made with Fynkel**.
+
+Generic words such as “engine”, “runtime”, “renderer”, and “editor” remain lowercase when describing technical concepts.
+
+### Scope principle for 1.0
+
+Fynkel 1.0 is **native-first**. The product must become a good native engine before it becomes a browser development environment.
+
+Browser/Wasm/WebGPU compatibility is kept alive through a small M0 feasibility spike and portable contracts, but the browser editor, browser-only project workflow, cloud compilation, browser filesystem layer, and web collaboration are **post-1.0** work.
+
+The project follows this rule:
+
+> Build the smallest architecture that does not prevent Fynkel from becoming the engine we eventually want.
 
 ## 1. Product definition and scope
 
-Build **Fynkel Engine** with three equally valid workflows: code-first, editor-first, and hybrid. A game is a normal Flutter project with the **Fynkel SDK** added. The editor reads and writes the same version-controlled project files that developers, command-line tools, and AI agents use.
+Build **Fynkel Engine** around three equally valid workflows:
 
-The public workflow should be familiar to Unity users: GameObjects, components, behaviours, a Transform hierarchy, scenes, prefabs, materials, an Inspector, and Play/Stop. Internally, GameObjects are handles into an entity-component system (ECS); they are not heavyweight object trees containing the simulation.
+1. **Code-first:** create worlds, entities, components, scenes, and gameplay through Dart.
+2. **Editor-first:** author scenes, prefabs, materials, component fields, and assets visually.
+3. **Hybrid:** author stable world structure in the editor and combine it with procedural/gameplay code.
 
-The first release should support small and medium 3D games and interactive applications. The reference game is a compact third-person collect-and-interact game with a menu, player movement, collisions, collectibles, animation, sound, a Flutter HUD, and a win/restart loop. Use that game to make scope decisions.
+A Fynkel game is a normal Flutter/Dart project using the Fynkel SDK. The Fynkel Editor reads and writes the same version-controlled project data used by the CLI, build system, tests, and AI agents.
 
-**Non-negotiable principles**
+The public workflow should be familiar to Unity developers: GameObjects, components, behaviours, Transform hierarchy, scenes, prefabs, materials, Inspector, Scene view, Game view, and Play/Stop. Internally, GameObjects are lightweight handles into an ECS-backed world; they are not heavyweight object trees.
 
-1. A complete game must build and run without the editor. The Rust core must also support no-renderer tests; a game using Dart behaviours still requires a Dart execution host.
-2. Rust owns native simulation and engine resources. Dart owns gameplay behaviours and Flutter application UI. Explicit contracts govern shared state.
-3. Project data is readable, versioned, validated, and editable without GUI automation.
-4. Runtime, authoring tools, and editor applications are separate deliverables. Editor code must not enter production game builds.
-5. Performance, native rendering integration, web compatibility, and resource lifetime are tested from the first milestone.
+### 1.1 Non-negotiable product principles
 
-**Initial release scope:** hierarchy and components; Dart behaviours; glTF import; PBR rendering; bounded lighting/shadow quality; physics and scene queries; basic skeletal animation; audio; input; scenes and simple prefabs; Flutter HUD; native world-space panels/text; desktop editor; CLI; native release exports; connected browser-editor mode.
+1. A complete game must build and run without the editor.
+2. The Rust runtime owns performance-sensitive native state and resources.
+3. Dart owns gameplay behaviours and high-level game logic.
+4. Flutter owns screen-space application/game UI and the desktop editor UI.
+5. Project files are readable, versioned, validated, source-control friendly, and editable without GUI automation.
+6. Editor code, import tools, and development servers must not enter release game builds.
+7. Dart ↔ Rust communication is batched and measured; per-property native chatter is prohibited in hot paths.
+8. Public APIs and serialized formats do not expose `hecs`, Rapier, wgpu, Rust pointers, or other dependency-specific implementation details.
+9. Fynkel 1.0 does not depend on the browser editor or browser-only tooling.
+10. Performance and platform integration are validated before feature breadth.
 
-**Deferred scope:** console support, networked multiplayer/rollback, terrain systems, advanced global illumination, ray tracing, shader graphs, visual scripting, complex prefab inheritance, marketplace, hosted collaboration, large-scale streaming worlds, and arbitrary Flutter widgets rendered into 3D textures.
+### 1.2 Fynkel 1.0 reference game
+
+The reference game is the **scope oracle** for 1.0. Every major feature proposal should answer: “Does the reference game or an external pilot project require this?”
+
+The reference game is a small third-person 3D collect-and-interact game with this frozen baseline:
+
+**Project structure**
+
+- `MainMenu` UI state.
+- `Playground` gameplay scene.
+- `Results`/win state.
+- Saveable settings for audio, graphics quality, and input bindings.
+
+**Player**
+
+- One skinned/animated player character.
+- Idle, walk, run, and jump animation states.
+- Third-person camera.
+- Character collision and ground detection.
+- Walk, sprint, jump, interact, pause, and camera input actions.
+
+**World**
+
+- Approximately 100 static mesh renderers.
+- At least 20 dynamic rigid bodies.
+- 10 collectibles.
+- 2 moving or physics-based hazards.
+- 1 directional light with shadows.
+- A small bounded number of point/spot lights.
+- PBR materials and imported glTF/GLB assets.
+- At least one true world-space UI/sign element.
+- At least one projected Flutter world label or marker if the projected-label system is included in 1.0.
+
+**Gameplay**
+
+- Collect all 10 items.
+- Trigger zones.
+- Collision/trigger events.
+- Win condition.
+- Restart.
+- Scene/state transition.
+- One simple runtime-spawned object/prefab.
+- One example of additive or controlled scene loading only if that feature is part of the 1.0 API.
+
+**Flutter UI**
+
+- Main menu.
+- HUD collectible counter.
+- Pause menu.
+- Settings panel.
+- Results/restart UI.
+
+**Audio**
+
+- Background music.
+- Footsteps or movement audio.
+- Pickup sound.
+- At least one spatial world sound.
+
+**Tooling**
+
+- The entire game can be built code-first before Editor V0 exists.
+- The same project can later be recreated/edited through Fynkel Editor without changing runtime semantics.
+- Headless tests can simulate core gameplay state without requiring a rendered window where practical.
+
+Do not expand this reference game into a showcase project. Its purpose is to exercise the architecture, not to prove every possible engine feature.
+
+### 1.3 Initial 1.0 capability scope
+
+Fynkel 1.0 should target:
+
+- GameObject/component/Behaviour model.
+- Transform hierarchy.
+- Dart gameplay behaviours.
+- `hecs`-backed ECS behind `fynkel_ecs`.
+- glTF/GLB import.
+- PBR rendering.
+- Bounded lighting and shadow quality.
+- Physics and scene queries.
+- Basic skeletal animation.
+- Audio.
+- Named input actions.
+- Scenes.
+- Simple prefabs with explicit overrides.
+- Materials and custom WGSL shader contracts.
+- Flutter HUD/application UI.
+- Basic native world-space UI.
+- Desktop Fynkel Editor.
+- CLI, validation, code generation, headless testing, and AI-oriented structured tooling.
+- Native builds on platforms that pass qualification gates.
+
+The **minimum 1.0 platform commitment** should be made only after M0/M6 measurements. M0 uses **macOS/Metal as the primary integration target** and requires a second graphics/backend path before architecture sign-off. Windows/D3D12 is the preferred second validation path when hardware/CI is available. Linux/Vulkan and mobile targets remain planned native targets but are advertised only after they pass the same lifecycle, rendering, performance, and packaging gates.
+
+### 1.4 Explicitly deferred from 1.0
+
+Postpone:
+
+- Browser editor.
+- Browser-only authoring.
+- Production browser game runtime.
+- Cloud compilation/build service.
+- Hosted collaboration.
+- Networked multiplayer/rollback.
+- Terrain.
+- Large-world streaming.
+- Navigation/navmesh.
+- Advanced particle/VFX graph.
+- Shader graph.
+- Visual scripting.
+- Ray tracing.
+- Advanced global illumination.
+- Complex prefab inheritance/variants.
+- Stable native plugin ABI.
+- Marketplace.
+- Console support.
+- AR/VR.
+- Arbitrary Flutter widgets rendered into 3D textures.
+
+A deferred feature may have an architectural interface or experiment, but it must not become a hidden requirement for shipping 1.0.
 
 ## 2. System architecture
 
 ```text
-Normal Flutter game project
+Normal Flutter/Dart game project
   Dart behaviours + Flutter UI + Fynkel SDK
                     |
-      FynkelBridge: commands / snapshots / events
-             /                         \
-      Native C ABI              Browser JS/Wasm bridge
-             |                         |
-             +------- Rust runtime ----+
-                      ECS / transforms
-                      physics / animation / audio
-                      asset runtime / renderer
-                                |
-                               wgpu
+     FynkelBridge: commands / snapshots / events
+                    |
+              Versioned C ABI
+                    |
+              Rust runtime
+       fynkel_ecs -> hecs internally
+       transforms / physics / animation / audio
+       assets / scene runtime / renderer
+                    |
+                   wgpu
+       Metal / D3D12 / Vulkan / GLES as qualified
 
 Development only
-  Fynkel Editor / Fynkel CLI / AI tools
+  Fynkel Editor (Flutter desktop)
+  Fynkel CLI
+  code generation / importers / asset compiler
+  AI/automation tools
                     |
-        Versioned authoring command service
+        Shared authoring command service
                     |
-      Project documents / importers / asset compiler
-                    |
-       Compiled assets + generated Dart registry
+        JSON project/source documents
 ```
 
-`wgpu` supplies graphics abstraction, not a complete game renderer or a ready-made Flutter integration. Its documented native and browser backends support the overall direction, but every target needs its own verified integration path. [S1]
+The runtime must remain usable without Flutter widgets except where a Flutter host is explicitly needed. The Dart gameplay package should therefore remain separable from `fynkel_flutter`.
 
-### Repository layout
+### 2.1 Browser compatibility policy
+
+Do **not** maintain a second production runtime/bridge/editor before 1.0.
+
+M0 contains one deliberately small compatibility spike:
+
+```text
+Rust rendering core subset
+        |
+     Wasm build
+        |
+   wgpu / WebGPU
+        |
+ simple test scene
+```
+
+The spike answers only whether the core abstractions are unnecessarily native-only. It is allowed to be throwaway code. It does not create a browser product commitment.
+
+Public project formats, component schemas, asset IDs, material contracts, and high-level renderer abstractions should avoid assumptions that make future Wasm support impossible. Browser filesystem, JS bridge, browser editor, web audio, security, and cloud-build work remain post-1.0.
+
+### 2.2 Repository layout
 
 ```text
 fynkel/
   crates/
-    fynkel_contracts/       # IDs, wire records, versions, schema metadata
-    fynkel_core/            # world lifecycle, time, services
-    fynkel_ecs/             # entity allocation, storage, queries
-    fynkel_scene/           # hierarchy, runtime scene instantiation
+    fynkel_contracts/       # IDs, protocol records, versions, schema metadata
+    fynkel_core/            # world lifecycle, time, service orchestration
+    fynkel_ecs/             # Fynkel-owned ECS facade over hecs
+    fynkel_scene/           # hierarchy and runtime scene instantiation
     fynkel_render/          # wgpu renderer and render extraction
     fynkel_assets/          # runtime handles, loading, residency
     fynkel_physics/         # Rapier adapter
     fynkel_animation/
     fynkel_audio/
     fynkel_world_ui/
-    fynkel_document/        # source documents, validation, edit transactions
-    fynkel_import/          # development-only import and cooking
+    fynkel_document/        # source docs, validation, edit transactions
+    fynkel_import/          # development-only import/cooking
     fynkel_native/          # C ABI and native host boundary
-    fynkel_web/             # Wasm exports and browser adaptation
+
   packages/
     fynkel/                 # Flutter-independent Dart gameplay API
-    fynkel_flutter/         # viewport, Flutter UI/input integration
-    fynkel_codegen/         # Dart behaviour registration and metadata
-    fynkel_tools/           # project-local tool launcher
+    fynkel_flutter/         # Flutter viewport/UI/input integration
+    fynkel_codegen/         # behaviour registration and metadata
+    fynkel_tools/           # project-local tool launcher/helpers
+
   apps/
-    editor/                 # Fynkel Editor: Flutter desktop and web UI
-    cli/                    # Fynkel CLI: native project/build/authoring tools
-  platform/                 # platform-specific texture and lifecycle plugins
-  schemas/                  # engine-owned schema source and fixtures
+    editor/                 # Fynkel Editor desktop app
+    cli/                    # Fynkel CLI
+
+  platform/                 # native texture/surface/lifecycle integrations
+  experiments/
+    web_spike/              # M0 compatibility experiment only
+  schemas/
   examples/reference_game/
-  tests/{contracts,fixtures,integration,performance}/
-  docs/{architecture,decisions,guides}/
+  tests/
+    contracts/
+    fixtures/
+    integration/
+    performance/
+  docs/
+    architecture/
+    decisions/
+    guides/
 ```
 
-These are logical boundaries. Begin with fewer crates if appropriate; do not create empty crates solely to match the diagram. Keep dependencies one-directional: runtime must not depend on editor/import tools; contracts must not depend on Flutter, wgpu, or a particular ECS implementation.
+These are logical boundaries, not a command to create empty crates. Begin with fewer crates where that reduces friction.
 
-### Dependency policy
+Dependency direction must remain clear:
 
-Use Rust, `wgpu`, WGSL shaders, `glam`, `serde`/`serde_json`, Rapier, and a thin C ABI. Evaluate Kira behind an audio interface, including real-device and browser backend tests before commitment. glTF/GLB is the first 3D interchange format. Rapier, glam, Kira, and glTF cover existing functionality that should not be rebuilt merely to avoid dependencies. [S2–S5]
+```text
+contracts
+   ↑
+core / ecs / scene / assets
+   ↑
+renderer / physics / animation / audio
+   ↑
+native host
 
-Do not use `bevy_ecs` in the production design. Implement a deliberately small engine-owned ECS, but measure the tradeoff. `bevy_ecs` is independently usable; avoiding it is not proof of a faster or smaller engine. Use `hecs` as an optional development-only comparison because it explicitly targets a minimalist ECS library. [S6–S7]
+editor/import/build tooling  ---> may depend on contracts/document/import
+runtime                      -X-> must not depend on editor UI
+```
 
-Pin a tested Rust/Flutter/Dart/dependency matrix. Record compiled size, compile time, enabled features, platform support, licenses, and upgrade burden. Review updates; do not blindly track every latest release. Do not expose dependency-specific handles or types in public scene files or the Dart SDK.
+### 2.3 Dependency policy
+
+Initial technology choices:
+
+| Area                     | Choice                                        |
+| ------------------------ | --------------------------------------------- |
+| Native language          | Rust                                          |
+| Renderer                 | `wgpu`                                        |
+| Shader language          | WGSL                                          |
+| ECS storage/query engine | `hecs`, private behind `fynkel_ecs`           |
+| Math                     | `glam`                                        |
+| Physics                  | Rapier                                        |
+| Serialization            | `serde` / `serde_json`                        |
+| Source documents         | strict JSON                                   |
+| Model interchange        | glTF / GLB                                    |
+| Gameplay                 | Dart                                          |
+| Screen UI/editor         | Flutter                                       |
+| Native bridge            | versioned C ABI                               |
+| Audio                    | evaluate Kira behind a Fynkel-owned interface |
+
+`hecs` is the default 1.0 ECS implementation because it is a small ECS library rather than a full engine framework. Fynkel still owns scheduling, public handles, component metadata, commands, snapshots, authoring identity, and the Dart-facing API.
+
+Do not expose `hecs::Entity`, Rapier handles, `wgpu` resources, or `glam` memory layouts in public APIs or serialized documents.
+
+Pin a tested Rust/Flutter/Dart/dependency matrix. Record:
+
+- exact versions;
+- enabled features;
+- binary-size impact;
+- compile-time impact;
+- licenses;
+- native platform support;
+- upgrade notes.
+
+Dependency upgrades are deliberate engineering changes, not automatic maintenance.
+
+### 2.4 Licensing and repository strategy — M0 decision
+
+Licensing is an architectural/repository decision and must be resolved before public package publication.
+
+**Recommended default for discussion in ADR-0005:**
+
+- engine/runtime/SDK/tooling code: `MIT OR Apache-2.0`;
+- examples/templates: same unless asset licenses require otherwise;
+- Fynkel name/logo: separate trademark/brand policy;
+- third-party sample assets: explicit per-asset licenses;
+- contributor policy: choose DCO or CLA before accepting external contributions.
+
+M0 must also decide:
+
+- public monorepo vs split repositories;
+- crate/package publishing policy;
+- whether prebuilt native binaries are distributed via releases/package artifacts;
+- security disclosure process;
+- release signing/checksum policy;
+- branch/review rules.
+
+Do not let package layout accidentally determine licensing or governance after users already depend on it.
+
+### 2.5 Architecture Decision Records
+
+Every irreversible or expensive-to-change decision gets an ADR in `docs/decisions/`.
+
+Initial ADR set:
+
+```text
+ADR-0001  Fynkel 1.0 scope and native-first policy
+ADR-0002  Flutter/wgpu viewport composition path
+ADR-0003  hecs behind fynkel_ecs
+ADR-0004  Dart/Rust command-snapshot protocol
+ADR-0005  license, repository, contribution, trademark policy
+ADR-0006  project/source document format
+ADR-0007  runtime/editor process separation
+```
+
+ADRs are short decision records, not replacements for this blueprint.
 
 ## 3. Public object and scripting model
 
-Expose `GameObject`, `Component`, `Behaviour`, `Transform`, `Scene`, `Prefab`, and `AssetRef<T>`.
+Expose a Unity-familiar but Fynkel-owned API built around `GameObject`, `Component`, `Behaviour`, `Transform`, `Scene`, `Prefab`, `AssetRef<T>`, and engine services.
 
-A GameObject is an ergonomic facade over an entity. Native components such as Transform, MeshRenderer, Collider, and Animator live in Rust. Dart behaviours hold ordinary gameplay state and call SDK operations. Do not turn every native component into a separate mutable Dart-owned copy.
+A `GameObject` is an ergonomic Dart handle to a runtime entity. Native components such as `Transform`, `MeshRenderer`, `Collider`, `Camera`, and `Animator` live authoritatively in Rust. Dart behaviours hold gameplay state and issue batched commands through the SDK.
 
-Distinguish three kinds of identity:
+Do not mirror every native component as an independently owned mutable Dart object.
 
-- **Authoring IDs:** persistent UUID strings for assets, entities, and component instances. Names and paths are labels, not identities.
-- **Runtime handles:** world identity plus entity index and generation. A reused slot must never validate an old handle.
-- **Type IDs:** stable namespaced component/behaviour identifiers, with versioned field metadata. Do not serialize Rust runtime type IDs or unqualified Dart class names.
+### 3.1 Identity model
 
-Use two 32-bit words or another explicitly safe encoding for runtime handles at the browser bridge. Never assume a packed 64-bit handle can be round-tripped through an ordinary JavaScript number without a deliberate representation.
+Keep three identities separate:
 
-### Behaviour lifecycle
+- **Authoring IDs:** persistent UUID strings for assets, entities, component instances, prefab-local objects, and documents.
+- **Runtime handles:** Fynkel-owned world/entity handles with generation validation.
+- **Type IDs:** stable namespaced identifiers such as `fynkel.Transform` and `game.PlayerController`.
 
-Define `onCreate`, `onEnable`, `start`, `fixedUpdate`, `update`, `lateUpdate`, `onDisable`, and `onDestroy`, plus collision/trigger callbacks. A newly instantiated scene must resolve all object and asset references before start callbacks. `start` runs once before the first update while active. Disabling pauses update callbacks; destruction is deferred to a safe boundary. Publish exact event ordering and cover it with tests.
+Names and file paths are labels/locations, not identities.
 
-Permit multiple behaviours per object. Native component metadata declares whether a type is unique. Avoid universal per-object ticking: static objects need no behaviour allocation or update call; behaviours opt into the callbacks they need.
+Never serialize:
 
-### Generated registration, not runtime class discovery
+- raw pointers;
+- `hecs::Entity`;
+- Rapier handles;
+- dependency-specific runtime IDs;
+- temporary runtime handles.
 
-Flutter does not support `dart:mirrors`; generate behaviour factories, field serializers, inspector metadata, and registries at build time. [S8]
+### 3.2 Canonical Behaviour lifecycle
 
-For example, a proposed `@FynkelBehaviour(id: 'game.PlayerController')` annotation and `@Expose()` field generate a factory and schema. Rust-owned component definitions generate the equivalent schema and Dart bindings from their owning source. Merge both into one versioned project registry, rejecting duplicate type IDs and schema mismatches.
+This is the **single authoritative lifecycle definition** for the whole blueprint. Later sections must reference it rather than redefine it.
 
-The editor reads this metadata without executing gameplay. Play compiles and launches the project's own Dart program. A prebuilt editor must not assume it can dynamically load an arbitrary Dart class merely because its filename appears in a scene.
+```text
+onCreate
+  object and serialized fields exist;
+  scene/object/asset references have been resolved
 
-### Code-first and generated worlds
+onEnable
+  behaviour becomes active
 
-Support creating objects, attaching components, loading scenes, and instantiating prefabs entirely through Dart. Support typed bulk operations as well as convenient per-object methods.
+start
+  runs once before the first active gameplay update
 
-Procedurally created runtime objects are inspectable but are not automatically editable source code. An explicit bake/export operation can save an authoring snapshot. The editor must never pretend moving a runtime object rewrites the Dart generator that produced it.
+fixedUpdate
+  fixed-timestep gameplay/simulation intent
+
+afterPhysics
+  optional post-physics hook for behaviours that explicitly opt in
+
+update
+  presentation-rate gameplay logic
+
+lateUpdate
+  ordering-sensitive presentation/camera logic
+
+onDisable
+  behaviour becomes inactive
+
+onDestroy
+  final lifecycle notification at a safe destruction boundary
+```
+
+Typed collision, trigger, animation, and input events should use event/subscription mechanisms rather than adding a lifecycle method for every engine event.
+
+Rules:
+
+- `start` runs once.
+- disabled behaviours do not receive gameplay update callbacks;
+- destruction is deferred to a safe command boundary;
+- callback ordering is deterministic within documented scheduling rules;
+- behaviour ordering dependencies must be explicit, not inferred from object names or scene order.
+
+### 3.3 Generated registration, not runtime reflection
+
+Generate behaviour factories, field serializers, inspector metadata, stable IDs, migrations, and schemas at build/codegen time.
+
+Proposed API:
+
+```dart
+@FynkelBehaviour(id: 'game.PlayerController')
+class PlayerController extends Behaviour {
+  @Expose(min: 0, step: 0.1)
+  double moveSpeed = 6.0;
+
+  @override
+  void fixedUpdate(FixedUpdateContext context) {
+    final move = Input.action2D('move');
+    gameObject.get<RigidBody>().setPlanarVelocity(
+      move.x * moveSpeed,
+      move.y * moveSpeed,
+    );
+  }
+}
+```
+
+`Input.action2D(...)` is allowed as an ergonomic static facade, but it must resolve through the **current `GameContext`/world service container**, not mutable process-global gameplay state. Tests must be able to install a deterministic test context. Internally, services remain explicit and replaceable.
+
+The editor reads generated metadata without executing arbitrary gameplay code.
+
+### 3.4 Code-first and generated worlds
+
+Everything important in the editor must have a code/tool equivalent.
+
+Dart must support:
+
+- creating/destroying GameObjects;
+- adding/removing allowed components;
+- loading/unloading scenes;
+- instantiating prefabs;
+- setting material/component fields;
+- querying objects/components;
+- physics queries;
+- asset loading;
+- runtime spawning.
+
+Procedurally created objects may be inspected while running. They are not automatically turned back into source code. An explicit bake/export action may create authoring data where supported.
+
+The editor must never imply that moving a procedurally generated runtime object rewrites the Dart code that generated it.
 
 ## 4. ECS, hierarchy, and memory ownership
 
-Start with generational entity allocation, typed dense component arrays plus sparse entity lookup, read/write queries, resources, change tracking, deferred structural commands, and an explicitly ordered scheduler.
+### 4.1 Use `hecs` first
 
-Do not initially implement a general parallel scheduler or a full archetype/chunk engine. Begin with clear single-writer ownership. Benchmark sparse-set joins and realistic mutation patterns before changing storage. Keep storage private so a future change does not alter project files or public handles.
+Fynkel 1.0 uses `hecs` internally.
 
-Required correctness tests include stale handles, entity reuse, component destruction, query aliasing, mutation during iteration, world shutdown, asset references, and large spawn/despawn batches. Minimize and isolate unsafe code. Any unsafe storage code requires documented invariants and targeted validation.
+Architecture:
 
-Keep hierarchy and ECS conceptually distinct. Parent/child relationships determine transform propagation and authoring structure, not memory ownership of arbitrary components. Cache world transforms and update dirty subtrees. Reject cycles. Define whether reparenting preserves world or local transform; make both explicit operations.
+```text
+Dart / editor / scene files
+          |
+     Fynkel APIs
+          |
+     fynkel_ecs
+  handles / scheduler
+  commands / metadata
+  snapshots / change journals
+          |
+         hecs
+```
 
-Adopt one coordinate convention: right-handed, Y up, metres, seconds, radians in APIs, quaternion storage `[x,y,z,w]`, and documented matrix layout. The Inspector can display Euler degrees. Normalize asset imports into that convention and test camera, collider, skinning, and picking agreement. Restrict unsupported non-uniform scale on dynamic physics bodies instead of silently producing incorrect results.
+`hecs` is an implementation detail, not a public contract.
 
-Rust owns ECS storage, native resources, and authoritative native component state. Dart may read immutable snapshots and keep local behaviour state. No SDK object may retain an unscoped pointer into relocatable ECS storage.
+Fynkel owns:
+
+- external/runtime entity handles;
+- world identity;
+- component type metadata;
+- scene/object identity mapping;
+- command buffering;
+- scheduler phases;
+- snapshot extraction;
+- editor/AI metadata;
+- diagnostics;
+- serialization contracts.
+
+`hecs` owns the internal ECS world/query/storage mechanics.
+
+### 4.2 Public/runtime handle indirection
+
+Do not expose or serialize `hecs::Entity`.
+
+A Fynkel entity handle should contain or address:
+
+- world identity;
+- Fynkel-managed runtime slot/index;
+- generation.
+
+`fynkel_ecs` maps that validated Fynkel handle to the current internal `hecs::Entity`.
+
+Internal native systems may use `hecs::Entity` directly while operating inside the world. External/Dart/editor/network/document boundaries use only Fynkel handles/UUIDs.
+
+This preserves the ability to replace `hecs` without changing:
+
+- Dart games;
+- scene files;
+- prefabs;
+- editor documents;
+- plugin metadata;
+- bridge protocols.
+
+### 4.3 Custom ECS replacement gate
+
+Do **not** write a custom ECS because it seems cleaner, smaller, or more “engine-native.”
+
+A custom ECS may replace `hecs` only when one of these is demonstrated:
+
+1. a required feature cannot be implemented reasonably while retaining `hecs`; or
+2. repeated profiling on a frozen Fynkel workload shows a material frame-time bottleneck attributable to the ECS implementation.
+
+For performance justification, require both:
+
+- a meaningful relative improvement on the ECS-bound workload (target: at least ~20%); and
+- a meaningful absolute frame-time win in a real Fynkel benchmark (target: at least ~0.5 ms p95 on the reference machine), unless the issue is memory/latency/correctness rather than CPU time.
+
+These numbers are engineering gates, not promises. Update them only through an ADR backed by measurements.
+
+A prototype replacement must preserve the existing `fynkel_ecs` API before migration is considered.
+
+### 4.4 Scheduler ownership
+
+Fynkel—not `hecs`—owns the logical scheduler.
+
+Initial phases:
+
+```text
+Input capture
+  -> Dart fixedUpdate command generation
+  -> native pre-physics systems
+  -> physics
+  -> afterPhysics callbacks/subscriptions
+  -> animation / transform work
+  -> deferred structural changes
+  -> update
+  -> lateUpdate
+  -> render extraction
+```
+
+Do not build a general dependency graph/parallel scheduler before profiling proves it is needed.
+
+Begin with obvious ordered phases and explicit ownership. Add parallel work behind stable system boundaries later.
+
+### 4.5 Hierarchy is not the ECS
+
+Parent/child hierarchy determines authoring structure and transform propagation. It does not imply component memory ownership.
+
+Implement:
+
+- local position/rotation/scale;
+- cached world transform;
+- dirty-subtree propagation;
+- cycle rejection;
+- explicit `setParentKeepLocal` / `setParentKeepWorld`;
+- deterministic child ordering for authoring;
+- robust destruction/reparenting semantics.
+
+Adopt one coordinate convention:
+
+> right-handed, Y-up, metres, seconds, radians in APIs, quaternion storage `[x, y, z, w]`.
+
+The Inspector may display Euler degrees.
+
+### 4.6 Memory ownership and correctness
+
+Rust owns:
+
+- ECS storage;
+- native resources;
+- renderer resources;
+- physics state;
+- authoritative native component state.
+
+Dart may own:
+
+- Behaviour instance state;
+- immutable/local snapshots;
+- staged command state;
+- Flutter UI state.
+
+No Dart object may retain an unscoped pointer into relocatable Rust storage.
+
+Required tests include:
+
+- stale handles;
+- entity slot reuse;
+- world destruction;
+- component add/remove churn;
+- destruction during update;
+- query access safety;
+- scene load/unload;
+- prefab instantiation;
+- large spawn/despawn batches;
+- handle-to-hecs mapping integrity.
+
+Unsafe Rust must be isolated and documented with explicit invariants.
 
 ## 5. Simulation, bridge, and scheduling contract
 
-### Logical tick order
+The bridge is one of Fynkel's highest-risk performance boundaries. Design it as a protocol, not a collection of convenience FFI calls.
+
+### 5.1 Fixed simulation contract
+
+Initial logical fixed-tick order:
 
 ```text
-Capture tick input and completed events
-  -> read snapshot S[n]
-  -> Dart fixedUpdate builds command batch C[n]
+Capture tick input + completed events
+  -> expose coherent snapshot S[n] to Dart
+  -> Dart fixedUpdate produces command batch C[n]
   -> validate/apply C[n] at tick boundary
   -> native pre-physics systems
   -> fixed physics step
-  -> transform synchronization and required animation work
+  -> post-physics synchronization
+  -> optional afterPhysics callbacks/events
+  -> animation/transform work required for the tick
   -> deferred structural changes
-  -> publish S[n+1], events, and render extraction
+  -> publish S[n+1] + events
+  -> build immutable render extraction
 ```
 
-Start with a configurable 60 Hz simulation. Rendering uses the latest completed state and interpolation where needed. `update`/`lateUpdate` are presentation-rate callbacks; authoritative simulation writes from them are queued for a documented next tick, not applied to arbitrary in-progress physics.
+Start with a configurable 60 Hz fixed step.
 
-For V0, a host-driven batched native step is acceptable if measured inside its CPU budget. Keep it outside widget `build()` and prohibit synchronous I/O. A native simulation worker is an optimization with the same tick contract, not an excuse for undefined command timing.
+`update` and `lateUpdate` run at presentation rate. Authoritative writes issued there are staged for a documented safe boundary; they do not mutate physics/native storage in the middle of an in-progress simulation step.
 
-On native targets, render/asset workers may operate on immutable extracts and owned jobs. Do not call Dart from arbitrary Rust worker threads. Native completions must use an approved host messaging mechanism. Begin with browser single-thread correctness; additional workers are optional acceleration, not a prerequisite. Flutter web's Dart isolate support differs from native Flutter, so the web path cannot simply reuse an isolate-based native design. [S9]
+Rendering uses completed state and interpolation where appropriate.
 
-If Dart misses a deadline, keep rendering the last coherent state; never silently advance a tick that requires missing gameplay commands. Bound catch-up steps and outstanding work. During a debugger pause, pause the simulation. Report dropped wall-clock time rather than allowing an unbounded backlog. A fixed timestep alone is not a promise of cross-platform deterministic physics; Rapier's determinism requires additional configuration and application-wide conditions. [S10]
+### 5.2 Host/threading model
 
-### Bridge contract
+For the first implementation, a host-driven batched native step is acceptable if it meets the performance gate.
 
-Use a stable, versioned C ABI for native and matching semantic operations through JS/Wasm for web. Define create/destroy world, submit commands, advance simulation, subscribe/read snapshots, drain events, request queries, and retrieve diagnostics. Flutter texture/lifecycle registration belongs in the platform integration layer.
+Rules:
 
-Per-frame traffic uses reusable typed/binary buffers, not JSON and not a message per property. Define byte order, scalar widths, alignment, buffer lifetime, count/length validation, request IDs, protocol version, schema fingerprint, tick number, and error records. Do not pass Rust struct layouts, `glam` layouts, or WGSL uniform layouts across boundaries by assumption.
+- never step the engine from a Flutter widget `build()` call;
+- no synchronous disk/network I/O on frame-critical paths;
+- Rust worker threads must not call arbitrary Dart gameplay callbacks;
+- renderer/asset workers operate on owned jobs or immutable extracts;
+- moving simulation to a native worker later must preserve the same command/tick semantics.
 
-Read subscriptions should cover only needed components, fields, and objects; do not mirror the entire world into Dart every frame. Writes enter a staging buffer. Define read-your-writes behaviour: getters may consult that staging overlay, then the last acknowledged snapshot. They must not conceal an expensive native query on every property access.
+Do not create one thread per subsystem.
 
-Structural batches return mappings from temporary creation IDs to runtime handles. Batch application has documented transaction or partial-failure semantics; authoring transactions are all-or-nothing. Physics queries that must affect the current tick use an explicitly budgeted query phase, not an accidental one-frame-late answer.
+If Dart misses a simulation deadline:
 
-Never unwind Rust panics across the ABI. Use status/error records and a tested panic boundary. Avoid callback reentrancy while storage is borrowed. Destroy worlds and GPU resources explicitly; finalizers are leak protection, not the primary lifetime mechanism.
+- render the last coherent state;
+- bound catch-up work;
+- do not silently simulate ticks whose gameplay command phase was skipped;
+- expose diagnostics for missed deadlines.
+
+When a debugger pauses gameplay, pause or explicitly control the simulation clock instead of building an unbounded backlog.
+
+### 5.3 Native bridge protocol
+
+Use a stable, versioned C ABI for the native host boundary.
+
+Required operation families:
+
+```text
+runtime create/destroy
+world create/destroy
+submit command batch
+advance/step
+subscribe snapshot fields
+read snapshot
+drain events
+perform explicit query
+read diagnostics/stats
+resource/asset requests
+```
+
+Per-frame traffic uses reusable binary/typed buffers.
+
+Do **not** use:
+
+- JSON per frame;
+- one FFI call per property;
+- Rust struct memory layouts as an ABI;
+- pointers to ECS storage;
+- callback reentrancy while storage is borrowed.
+
+Define:
+
+- byte order;
+- scalar widths;
+- alignment;
+- buffer ownership;
+- count/length validation;
+- protocol version;
+- schema fingerprint;
+- tick number;
+- request IDs;
+- error/status records.
+
+### 5.4 Commands, snapshots, and read-your-writes
+
+Dart gameplay writes go into a command/staging buffer.
+
+Examples:
+
+```text
+SetTransform
+SetRigidBodyVelocity
+SpawnPrefab
+DestroyEntity
+PlayAudio
+SetAnimatorParameter
+```
+
+Reads normally come from a coherent snapshot. To keep ergonomic APIs useful, getters may consult a local staged-write overlay before the last acknowledged snapshot.
+
+A property getter must never hide an expensive native round trip.
+
+Snapshots are subscription-based. Dart should receive only the objects/components/fields it asked to observe or that the engine API requires for active behaviours.
+
+Structural command batches return mappings from temporary spawn IDs to validated Fynkel runtime handles.
+
+### 5.5 Error and lifetime rules
+
+Never unwind Rust panics across the ABI.
+
+Use:
+
+- status codes;
+- structured error records;
+- debug assertions inside Rust;
+- a tested panic boundary at the ABI edge.
+
+Destroy worlds, render resources, native handles, and subscriptions explicitly. Dart finalizers may provide leak protection but are not the primary lifetime mechanism.
+
+### 5.6 Determinism statement
+
+A fixed timestep is useful for stability and testing, but Fynkel 1.0 must **not** promise cross-platform deterministic simulation or rollback multiplayer.
+
+If a future feature requires cross-platform deterministic Rapier physics, use Rapier's documented determinism requirements and validate the entire game-side input/math/state pipeline—not only the physics library.
+
+### 5.7 Bridge acceptance targets
+
+Before M1 closes:
+
+- the bridge supports batched create/update/destroy traffic;
+- stale handles fail safely;
+- command buffers are bounded and validated;
+- snapshot bandwidth is measurable;
+- no hot reference-game path uses per-property FFI calls;
+- protocol fixtures are versioned;
+- a no-renderer test host can exercise the world/bridge contract.
 
 ## 6. Source formats: strict JSON and schemas
 
 Use **strict JSON** for the initial authoritative scene, prefab, material, and engine project files. This deliberately refines the earlier JSON5 suggestion: one strict machine contract is the simpler starting point for schemas, agents, formatters, and round-trip tests. Comments can live in explicit `description` or `editorNotes` fields. An optional JSON5 import layer can be added later; do not maintain two authoritative formats.
 
-Suggested extensions are `.scene.json`, `.prefab.json`, `.material.json`, and `.shader.json`. Validate structural data with JSON Schema, pinning the supported dialect. Add semantic validation for references, component uniqueness, prefab cycles, unsupported physics configurations, and shader compatibility. JSON Schema supplies a standard vocabulary, but it does not define those engine-specific semantics. [S11]
+Suggested extensions are `.scene.json`, `.prefab.json`, `.material.json`, and `.shader.json`. Validate structural data with JSON Schema, pinning the supported dialect. Add semantic validation for references, component uniqueness, prefab cycles, unsupported physics configurations, and shader compatibility. JSON Schema supplies a standard vocabulary, but it does not define those engine-specific semantics. [S8]
 
 All documents carry format version and persistent ID. Use UUID-keyed maps for entities and component instances; store child ordering separately. This avoids making identity depend on array position. Store runtime handles nowhere in authoring files.
 
@@ -286,7 +876,7 @@ Source file + import settings + importer version
   -> release asset bundle
 ```
 
-Begin with GLB/glTF, PNG/JPEG, selected HDR/environment inputs, and a deliberately small audio format set. glTF is an asset interchange format, not the engine's scene/prefab behavioural format. [S5]
+Begin with GLB/glTF, PNG/JPEG, selected HDR/environment inputs, and a deliberately small audio format set. glTF is an asset interchange format, not the engine's scene/prefab behavioural format. [S7]
 
 Cache by source content, dependencies, settings, compiler version, and target profile. Include dependency hashes so changing a referenced texture invalidates the right material/model output. Distinguish stable identity from cache hash.
 
@@ -304,37 +894,222 @@ Migrations are explicit, versioned, testable transformations with dry-run diffs 
 
 ## 8. Renderer and Flutter integration
 
-### Integration prototype first
+The Flutter/wgpu presentation path is the **first architectural risk Fynkel must retire**. M0 is a real go/no-go architecture gate, not a demo milestone.
 
-Implement two test hosts: a minimal standalone Rust renderer host and a Flutter-hosted viewport. Compare equivalent scenes to isolate embedding overhead.
+### 8.1 M0 primary platform and comparison host
 
-Flutter's Texture widget uses platform-managed texture registries; it does not promise direct import of every arbitrary wgpu texture. A separate platform plugin may be needed even when ordinary native functions are exposed through FFI. [S12–S13]
+Use:
 
-For each target, document the graphics API, GPU adapter/device relationship, surface/texture ownership, synchronization primitive, colour space, alpha convention, and copies. Test resize, DPI changes, clipping, overlapping Flutter UI, minimize/restore, app backgrounding, device loss, and resource disposal.
+- **Primary integration target:** macOS + Metal.
+- **Preferred second validation path:** Windows + D3D12.
+- **Additional later native paths:** Vulkan/GLES where platform qualification requires them.
 
-Prefer supported GPU-resident sharing or a measured GPU copy. A production path that reads a full frame back to CPU and uploads it again every frame fails the intended performance design unless a deliberately limited fallback is approved. Do not promise zero-copy before measuring it. Do not fork Flutter in the first milestone.
+Build the same minimal scene in:
 
-### Renderer V1
+1. a standalone Rust/wgpu host; and
+2. a Flutter-hosted Fynkel viewport.
 
-Build forward rendering with perspective/orthographic cameras, static meshes, indexed drawing, textures/samplers, depth testing, frustum culling, instancing, PBR, one initial shadowed directional light, bounded additional lights, environment lighting, HDR intermediate colour, tone mapping, selected anti-aliasing, alpha masking/blending, and debug primitives.
+The standalone host is the baseline for measuring host/composition overhead.
 
-Use explicit pass inputs and outputs from the beginning: shadow, opaque, transparent/world UI, post-processing, presentation. A small render graph should manage dependencies and resource lifetime; do not initially build a general-purpose optimizing graph or force a depth prepass on every target.
+### 8.2 Viewport paths to evaluate
 
-Extract immutable render data from simulation. Reuse allocations, batch compatible objects, cache pipelines/material bindings, and place bounds on pipeline variants. Baseline rendering must not require advanced GPU features on every target. Use capability profiles and explicit quality fallbacks.
+Evaluate these in M0 instead of betting on one API:
 
-### Later rendering work
+**Path A — Flutter backend texture / `Texture` integration**
 
-Add skeletal skinning and practical animation with the reference game, then measured LOD, clustered lighting, occlusion, indirect drawing, and additional post-processing. Make each advanced feature earn its cost through benchmark improvement or a concrete game requirement. Do not implement TAA, SSAO, SSR, and GPU-driven rendering as an undifferentiated checklist.
+- Render with Rust/wgpu.
+- Present through a platform-specific Flutter texture registry integration.
+- Measure copies and synchronization.
+
+**Path B — Platform-native embedded surface/view**
+
+- Let Fynkel own a native GPU surface/view embedded in the Flutter host.
+- Flutter provides surrounding/overlay UI where platform composition permits it.
+
+**Path C — Engine-owned game surface/window with Flutter UI separated**
+
+- Fynkel owns the main game rendering surface.
+- Flutter is composed as a separate native/UI layer or separate window where appropriate.
+- This is an acceptable fallback if embedded texture composition is too expensive or unreliable.
+
+**Path D — Separate game/player window**
+
+- Especially acceptable for early Editor Play mode.
+- The editor remains Flutter; the player is a separate native-hosted Flutter/Fynkel game process/window.
+
+Do not fork Flutter in M0.
+
+### 8.3 M0 viewport kill/fallback criteria
+
+The preferred Flutter-hosted path fails the production gate if any of these are true on frozen reference hardware:
+
+- It requires a full-frame GPU → CPU → GPU readback/upload every frame.
+- Added host/composition overhead is consistently above the provisional M0 budget of **1.5 ms p95 at 1080p/60** compared with the standalone host, unless an ADR explicitly revises the budget based on measured hardware/quality tradeoffs.
+- It introduces more than one frame of unexplained presentation latency.
+- Resize/DPI/minimize/restore/background/dispose behaviour is unreliable under repeat testing.
+- Flutter overlays cannot compose correctly with the 3D viewport.
+- Pointer/keyboard/focus routing is not controllable.
+- The path prevents required GPU features or causes device/resource ownership conflicts that cannot be contained.
+
+If Path A fails, evaluate Path B/C rather than spending months forcing `Texture` to work.
+
+If **all practical native composition paths fail**, stop feature development and redesign the host architecture before M1. Do not bury a failed M0 behind renderer progress.
+
+### 8.4 Platform integration contract
+
+For every qualified target, document:
+
+- graphics backend;
+- adapter/device ownership;
+- Flutter renderer relationship;
+- native surface/texture ownership;
+- synchronization mechanism;
+- required copies;
+- colour space;
+- alpha/premultiplication rules;
+- DPI scaling;
+- resize path;
+- device loss handling;
+- lifecycle/background behaviour;
+- resource disposal.
+
+Flutter's `Texture` API uses platform-managed backend textures; it is not proof that an arbitrary wgpu texture can be imported without platform-specific work.
+
+### 8.5 Renderer V1
+
+Build a deliberately bounded forward renderer with:
+
+- perspective and orthographic cameras;
+- static/indexed meshes;
+- textures/samplers;
+- depth testing;
+- frustum culling;
+- instancing;
+- PBR materials;
+- environment lighting;
+- one shadowed directional light;
+- bounded point/spot lights;
+- HDR intermediate rendering;
+- tone mapping;
+- selected anti-aliasing;
+- alpha masking/blending;
+- debug primitives;
+- world-space UI pass.
+
+Use explicit pass inputs/outputs:
+
+```text
+shadow
+  -> opaque
+  -> transparent/world UI
+  -> post
+  -> presentation
+```
+
+A small render graph may manage dependencies and transient resources. Do not start with a universal optimizing render graph.
+
+Extract immutable render data from the simulation. Reuse allocations, cache pipelines/material bindings, batch compatible objects, and cap shader/pipeline variant explosion.
+
+### 8.6 Renderer work after V1
+
+Add features only when required by the reference game, pilot projects, or benchmark evidence.
+
+Likely order:
+
+- skeletal GPU skinning;
+- LOD;
+- better shadow quality;
+- improved culling;
+- selected post-processing;
+- clustered/forward+ lighting if real light counts justify it;
+- occlusion;
+- indirect/GPU-driven drawing.
+
+Do not implement TAA, SSAO, SSR, ray tracing, or GPU-driven rendering merely to match another engine's feature list.
 
 ## 9. Physics, animation, audio, and input
 
-**Physics:** Integrate Rapier through engine-owned components and handles. Support static/dynamic/kinematic bodies, primitive colliders, collision layers, sensors, raycasts/shape casts, collision events, and a character controller. Add common joints and selected continuous collision detection as needed. Physics owns dynamic-body transforms; gameplay drives them using forces, impulses, kinematic targets, or explicit teleport operations. Avoid competing writes from parenting, animation, and physics.
+### Physics
 
-**Animation:** Import skeletons, clips, and skins. Implement sampling, looping, transitions, basic blending, events, and skinning. Define root-motion ownership and the relationship to physics before implementing it. Add a simple state-machine authoring model before a large animation-graph editor. Defer retargeting, advanced IK, and cinematic tooling.
+Integrate Rapier behind Fynkel-owned components and handles.
 
-**Audio:** Provide engine-level sources/listeners, 2D playback, basic spatial attenuation/panning, buses, volume, looping, and streamed music. Limit voices. Keep blocking work out of audio callbacks. Test interruption, device change, mute/suspend, browser activation, and resource disposal. Native and browser audio may use different backends behind the same API.
+1.0 baseline:
 
-**Input:** Define named actions with keyboard/mouse/touch/gamepad bindings rather than hard-coded key checks. Support focus, pointer capture, relative mouse movement, remapping, pause, and input recording for tests. Flutter consumes UI interactions first; only appropriate unconsumed actions reach gameplay. Test pointer-lock and focus behaviour on web explicitly.
+- static/dynamic/kinematic rigid bodies;
+- box/sphere/capsule colliders;
+- bounded MeshCollider support with explicit limitations;
+- collision layers/masks;
+- sensors/triggers;
+- raycasts;
+- shape casts;
+- overlap queries;
+- collision/trigger events;
+- character controller;
+- selected joints only when the reference game/pilots need them;
+- continuous collision settings where justified.
+
+Physics owns dynamic-body transforms. Gameplay modifies physics bodies using forces, impulses, velocities, kinematic targets, or an explicit teleport operation.
+
+Do not allow transform hierarchy, animation, Dart scripts, and physics to silently fight over the same authoritative transform.
+
+### Animation
+
+Import skeletons, clips, and skins from supported glTF/GLB data.
+
+1.0 baseline:
+
+- clip sampling;
+- looping;
+- playback speed;
+- simple transitions/state machine;
+- basic blending;
+- animation events;
+- skinning;
+- explicit root-motion policy.
+
+Defer:
+
+- advanced retargeting;
+- complex IK;
+- cinematic timeline;
+- large node-based animation graph tooling.
+
+### Audio
+
+Expose Fynkel concepts rather than backend types.
+
+1.0 baseline:
+
+- AudioSource / AudioListener;
+- 2D playback;
+- basic 3D spatial attenuation/panning;
+- buses;
+- volume/pitch/loop;
+- streamed music;
+- voice limits/priority;
+- pause/suspend;
+- device/lifecycle handling.
+
+Keep blocking allocation/decoding/I/O out of audio callbacks.
+
+### Input
+
+Use named input actions instead of hard-coded key checks.
+
+Support:
+
+- keyboard;
+- mouse;
+- pointer capture/relative movement;
+- touch where a qualified target needs it;
+- gamepad;
+- rebinding;
+- action recording/replay for tests;
+- focus/pause behaviour.
+
+Flutter UI consumes its own interactions first. Fynkel receives the remaining mapped game actions according to explicit focus rules.
+
+The public `Input` convenience API may be static-looking, but it resolves through the active `GameContext` service, making it replaceable in tests and preventing process-global gameplay state.
 
 ## 10. UI model
 
@@ -348,300 +1123,1037 @@ Expose world UI through the same component schemas, authoring commands, and Dart
 
 ## 11. Editor and authoring service
 
-Build the runtime first until the reference game is playable through code, then build Editor V0. Design documents and edit commands before the editor. Thereafter, engine features and their basic authoring tools should ship together.
+Build Fynkel's runtime until the complete reference game is playable **without an editor**. Then implement Editor V0. Do not wait until the runtime is “finished”; after Editor V0, runtime features and their basic authoring support evolve together.
 
-The editor is a client of a shared authoring service. Commands include create/delete object, add/remove component, set field, reparent, assign asset, instantiate prefab, apply/revert override, save document, and request preview/build.
+The editor is a client of the same authoring/document services used by the CLI and AI tooling.
 
-Each edit has a transaction ID, base document revision, validation, affected IDs, and undo information. Group a gizmo drag into one undo step. Reject stale writes or show a merge conflict instead of silently overwriting edits from another editor or agent. Apply validated document transactions atomically.
+### 11.1 Shared authoring commands
 
-Editor V0 includes a Scene viewport, hierarchy, schema-generated Inspector, asset browser, selection, transform gizmos, save/load, undo/redo, Play/Stop, logs, and a basic performance panel. It does not need a custom code editor; open Dart files in the developer's existing IDE.
+Canonical commands include:
 
-Maintain separate authoring state, edit-preview runtime, and play runtime. Edit mode never runs arbitrary game behaviours by default. Play builds/launches the actual project with its pinned runtime in a separate process initially. A separate game window is acceptable; embedding a crash-isolated player viewport is later work. Stop discards runtime mutations unless the user explicitly applies a supported change back to source.
+```text
+CreateObject
+DeleteObject
+RenameObject
+ReparentObject
+AddComponent
+RemoveComponent
+SetField
+AssignAsset
+InstantiatePrefab
+SetPrefabOverride
+RevertPrefabOverride
+CreateMaterial
+SaveDocument
+ImportAsset
+ValidateProject
+```
 
-The Scene viewport uses an editor camera and edit-preview world. The Game view uses the project's cameras and Flutter UI. A minimal split avoids pretending the editor itself is the deployed game.
+Every document mutation has:
 
-### Reload policy
+- command ID;
+- transaction ID;
+- base document revision;
+- affected persistent IDs;
+- validation result;
+- undo/redo data;
+- structured diagnostics.
 
-Material/asset reload: validate, replace safely, preserve the last valid version on failure. Dart reload: integrate supported development tooling and an explicit engine refresh/restart policy. Rust/native changes: rebuild and restart. Structural script/schema changes may require regeneration and restart. Flutter hot reload is a debug capability; it does not automatically rebuild native code or reconstruct the engine's scene lifecycle. [S14]
+A transform-gizmo drag becomes one transaction/undo unit.
 
-## 12. Browser editor strategy
+Stale revision writes must be rejected or surfaced as a conflict rather than silently overwriting newer editor/CLI/AI changes.
 
-Treat three separate capabilities as separate milestones: editor UI in a browser, the 3D runtime in a browser, and compilation of newly edited Dart game code. One does not imply the others.
+### 11.2 Editor V0
 
-### Mode A — Connected browser editor: first supported mode
+Required:
 
-A local `fynkel serve` process serves the Flutter web editor and a restricted authoring/build API. The browser can present a WebGPU edit-preview world using the Wasm runtime. Project files and compiler tools remain in the local companion.
+- desktop Flutter application;
+- Scene viewport;
+- hierarchy;
+- generated Inspector;
+- asset browser;
+- selection;
+- move/rotate/scale gizmos;
+- save/load;
+- undo/redo;
+- Play/Stop;
+- console;
+- basic profiler/performance view;
+- open script in external IDE.
 
-Play launches a native player separately or a locally compiled web player. A WebSocket carries commands/events; it does not by itself transport native GPU frames. Native viewport streaming would be a separate feature with its own encoding, latency, and security work.
+Not required for V0:
 
-Bind the companion to loopback by default. Use per-session authentication, origin checks, request size limits, project-root path validation including symlinks, and explicit project trust for build or script execution. Do not expose an unauthenticated shell or filesystem service. Serve UI and API together where practical to simplify browser-origin constraints.
+- custom code editor;
+- browser editor;
+- full docking framework;
+- visual scripting;
+- shader graph;
+- collaborative editing.
 
-### Mode B — Browser-only authoring: later, narrower initially
+### 11.3 Authoring vs play state
 
-Use Flutter web, Rust/Wasm, and WebGPU with JS interop. Dart's web interop path differs from native FFI. Flutter web supports Wasm builds, but its compilation/rendering path and the Rust WebGPU runtime must both be tested on named browser versions. [S15–S16]
+Maintain distinct concepts:
 
-Use an abstract ProjectStore: browser storage and import/export for browser-only mode; ordinary filesystem operations through the companion in connected mode. The origin-private filesystem can store browser-local project data, but quotas and persistence/export behaviour require explicit handling. Native `dart:io` is not the browser storage implementation. [S9, S17]
+```text
+Authoring documents
+Edit-preview world
+Actual play runtime
+```
 
-Start with scene editing and precompiled game templates. Editing arbitrary Dart code requires a separately designed compiler path: the local companion initially; a sandboxed hosted build service only when deliberately implemented. A precompiled Flutter editor must not promise to execute arbitrary new Dart source by inspection.
+Edit mode does not run arbitrary gameplay behaviours by default.
 
-Require WebGPU for the first supported browser-runtime profile. Feature-detect availability, limits, and device loss; provide a clear unsupported message or a non-3D editing mode. WebGPU has secure-context requirements and varying availability, so maintain a tested compatibility matrix rather than marketing universal parity. [S18]
+Initially, Play launches the project's real game process separately. A separate player/game window is acceptable and is safer than forcing the editor process to host arbitrary game code.
 
-Do not depend on threads/shared memory for baseline correctness. Multi-threaded web acceleration can require additional deployment headers and browser capabilities. Flutter's Wasm documentation describes these hosting requirements. [S16]
+Stop discards runtime mutations unless a supported explicit “apply to source” operation is invoked.
+
+Runtime-spawned objects can be inspected. Baking them back into authoring data is explicit.
+
+### 11.4 Reload policy
+
+**Assets/materials:** validate replacement first; keep the previous valid resource if import/compile fails.
+
+**Dart code:** use supported Flutter/Dart development workflows plus Fynkel codegen/registry refresh. Structural behaviour/schema changes may require restart.
+
+**Rust/native code:** rebuild and restart.
+
+Flutter hot reload must not be treated as if it automatically reconstructs Fynkel native world state.
+
+### 11.5 Editor crash/data-safety rules
+
+- writes use atomic replacement where practical;
+- autosave/recovery is separate from committed source documents;
+- editor crashes must not corrupt the last explicit save;
+- Play-mode crashes must not corrupt authoring documents;
+- unknown plugin/component data must be preserved where possible instead of silently deleted.
+
+## 12. Web compatibility spike and post-1.0 browser policy
+
+Fynkel 1.0 does **not** include a browser editor or production browser runtime.
+
+The purpose of web work before 1.0 is only to avoid accidental architectural lock-in.
+
+### 12.1 M0 WebGPU/Wasm spike
+
+Build a strictly bounded experiment that:
+
+- compiles a minimal subset of the Rust rendering core to Wasm;
+- creates a wgpu/WebGPU device;
+- renders a simple test scene/cube;
+- consumes the same basic material/mesh conventions where practical;
+- validates that renderer abstractions do not require native pointers or platform-only assumptions.
+
+The spike does **not** need:
+
+- Dart gameplay bridge;
+- Flutter web editor;
+- project filesystem;
+- asset importer parity;
+- audio;
+- physics;
+- production input;
+- cloud build;
+- browser security model;
+- deployment productization.
+
+Record unsupported assumptions and then stop browser work.
+
+### 12.2 Portability constraints kept before 1.0
+
+Keep these contracts future-friendly:
+
+- strict JSON source formats;
+- stable asset IDs;
+- renderer feature/capability abstraction;
+- no public native pointers;
+- no serialized dependency handles;
+- shader/material interfaces expressed in portable data;
+- bridge semantics defined above the native C ABI.
+
+Do not add significant complexity to the native engine solely for speculative browser parity.
+
+### 12.3 Post-1.0 browser work
+
+After Fynkel 1.0 is stable, browser work may proceed as separate product milestones:
+
+1. production Wasm/WebGPU runtime;
+2. web-compatible Dart/Rust bridge;
+3. browser Scene/editor UI;
+4. local companion for filesystem/build access;
+5. browser-only storage/import/export;
+6. optional hosted build/compiler services;
+7. collaboration/cloud features.
+
+Each is a separate commitment. A browser UI does not imply browser compilation, and a WebSocket does not magically provide native GPU viewport streaming.
 
 ## 13. Fynkel distribution and developer workflow
 
-Ship three independently installable but version-matched Fynkel deliverables: the **Fynkel Runtime SDK**, **Fynkel development tools/CLI**, and the optional **Fynkel Editor** application. The browser editor is another client of the tools/runtime, not a fourth engine.
+Fynkel should feel like a normal Flutter/Dart development dependency plus optional tooling—not a proprietary project container.
 
-The proposed workflow is:
+### 13.1 Deliverables
+
+Ship three version-matched deliverables:
+
+1. **Fynkel Runtime SDK**
+   - Dart API.
+   - Flutter integration package.
+   - Native runtime binaries/libraries for qualified targets.
+   - Everything required to run a game.
+
+2. **Fynkel development tools / CLI**
+   - project creation;
+   - validation;
+   - code generation;
+   - import/cooking;
+   - build orchestration;
+   - headless tests;
+   - diagnostics;
+   - AI/automation interface.
+
+3. **Fynkel Editor**
+   - separate desktop Flutter application;
+   - optional;
+   - development-only.
+
+Installing the runtime package must not place the full editor/import pipeline inside the final game binary.
+
+### 13.2 Project model
+
+A Fynkel game remains a normal Flutter project:
+
+```text
+my_game/
+  pubspec.yaml
+  pubspec.lock
+  fynkel.project.json
+  fynkel.lock.json
+
+  lib/
+    main.dart
+    game/
+    generated/
+
+  assets/
+    scenes/
+    prefabs/
+    materials/
+    models/
+    textures/
+    audio/
+
+  tests/
+  .fynkel/
+    cache/
+  build/
+```
+
+The project remains usable in VS Code, IntelliJ/Android Studio, command-line Flutter tooling, and ordinary Git workflows.
+
+### 13.3 Proposed developer workflow
 
 ```sh
 fynkel create my_game
+cd my_game
+
 fynkel doctor
 fynkel run
+fynkel test
+
 fynkel editor .
-fynkel serve .
-fynkel validate --json
-fynkel test --headless --json
-fynkel build windows
+fynkel validate
+fynkel build macos
 ```
 
-Support adding the Fynkel SDK to an existing Flutter app without regenerating the app. Installing the runtime dependency must not install or bundle the editor. A project-local tool launcher may locate or install matching development binaries, with explicit version and integrity checks.
+The exact commands may change, but the experience should remain compact and predictable.
 
-Prefer prebuilt Rust runtimes for supported targets so ordinary game developers do not need a Rust compiler. Keep a source-build path for contributors and unsupported configurations. Normal Flutter/platform SDK requirements still apply. Flutter's native build hooks can build or bundle native assets, including downloaded precompiled binaries, but the viewport's Flutter Plugin API integration is a separate packaging concern. [S13]
+### 13.4 Runtime package strategy
 
-Use a compatibility handshake between the Fynkel Editor, tools, Dart API, native library, and schemas. A source version mismatch should produce actionable diagnostics; a binary/protocol mismatch must never proceed silently. Keep the first release train aligned before attempting broad cross-version editor compatibility.
+Prefer prebuilt, signed/checksummed native runtime artifacts for supported target/toolchain combinations so ordinary game developers do not need a Rust toolchain merely to use Fynkel.
 
-The build pipeline resolves locked dependencies, generates script registration, validates documents, cooks assets, compiles target code, packages the game, and runs smoke tests. Document whether raw `flutter run/build` automatically invokes preparation or requires an explicit `fynkel prepare`; never let stale caches silently succeed. Initial templates may require preparation, but the tool must detect stale outputs and explain recovery.
+Maintain a source-build path for:
 
-Release builds exclude editor UI, importers, developer daemons, debug command endpoints, unnecessary source assets, and unused optional systems. Keep debug symbols separately for diagnostics.
+- Fynkel contributors;
+- unsupported/custom configurations;
+- development of the native runtime.
+
+The package/build integration must fail with actionable diagnostics when a matching runtime artifact is unavailable.
+
+### 13.5 Version matching
+
+`fynkel.lock.json` should record or resolve:
+
+- runtime version;
+- Dart SDK package version;
+- editor/tools compatibility range;
+- schema/document version;
+- asset compiler version;
+- codegen version.
+
+The Editor may be newer than a project only when compatibility is explicit. Never silently migrate and rewrite a project on open.
+
+### 13.6 Release build contents
+
+Production games should include only what the game needs:
+
+```text
+Flutter/Dart application runtime
+Fynkel native runtime
+compiled/cooked game assets
+generated behaviour registry
+platform packaging
+```
+
+Exclude:
+
+- Fynkel Editor;
+- import tools;
+- schema authoring UI;
+- development servers;
+- AI command endpoints;
+- debug-only inspectors/profilers unless explicitly enabled.
 
 ## 14. AI and automation interface
 
-Provide the same validated capabilities to humans, scripts, and agents. Do not make GUI clicking the authoritative automation API.
+AI-native does **not** mean “put a chatbot inside the editor.” It means the project and engine are controllable through stable, machine-readable contracts.
 
-Required proposed commands:
+Humans, IDEs, CI, the editor, and AI agents should use the same underlying project model and authoring commands.
+
+### 14.1 Structured CLI
+
+Proposed commands:
 
 ```sh
+fynkel project describe --json
+fynkel schema list --json
 fynkel schema describe fynkel.Transform --json
+
 fynkel scene inspect assets/scenes/main.scene.json --json
-fynkel scene apply --patch changes.json --dry-run --json
-fynkel scene apply --patch changes.json --expected-revision 42 --json
+fynkel scene validate assets/scenes/main.scene.json --json
+fynkel scene apply --patch patch.json --dry-run --json
+
+fynkel asset import assets/models/player.glb --json
 fynkel validate --json
+
 fynkel test --headless --steps 600 --seed 42 --json
-fynkel capture --scene main --output preview.png
-fynkel build web --json
+fynkel run --test-profile reference
+fynkel capture --scene Playground --output preview.png
+
+fynkel build macos --json
 ```
 
-Machine output needs a version, stable diagnostic codes, severity, document path, JSON pointer/field path, entity/component ID, message, and suggested repair where known. Keep machine output separate from human logs. Define exit codes and cancellation/timeouts.
+All automation-facing commands must have stable exit codes and structured diagnostics.
 
-An automated workflow should be able to create a level, validate it, run scripted inputs, assert gameplay state, capture an image, and produce a release build. Screenshot tests require a graphics-capable host; no-renderer tests do not verify visuals.
+### 14.2 Diagnostic contract
 
-Respect revision conflicts, dry runs, permission boundaries, and explicit trust. AI-authored code is untrusted code like any other external code. Optional agent-protocol adapters should delegate to the same command service rather than introducing a separate capability surface.
+Diagnostics should contain:
+
+- stable code;
+- severity;
+- human-readable message;
+- document path;
+- JSON/document field path where relevant;
+- persistent object/component/asset ID;
+- source line/column where available;
+- suggested corrective action;
+- related diagnostics.
+
+An AI agent should not need to scrape colourful terminal prose to determine whether a scene is valid.
+
+### 14.3 AI workflow target
+
+A capable agent should be able to:
+
+```text
+inspect project
+ -> inspect schemas
+ -> create/modify scene/prefab/material data
+ -> write Dart behaviour
+ -> run code generation
+ -> validate
+ -> build/run reference test
+ -> simulate recorded input
+ -> inspect structured failures/runtime state
+ -> capture image
+ -> patch
+ -> repeat
+```
+
+The editor is optional in this loop.
+
+### 14.4 Safe authoring
+
+Opening project data must not execute game code.
+
+AI-authored scripts/plugins are untrusted executable code. Build/run operations require the same trust boundary as human-authored external code.
+
+Provide:
+
+- dry-run patches;
+- project-root path restrictions;
+- revision checks;
+- explicit build/run commands;
+- source-control-friendly file changes;
+- deterministic test inputs where practical.
+
+AI tooling must not bypass validation or mutate hidden editor-only state.
 
 ## 15. Performance and quality requirements
 
-These are proposed engineering targets, not measured performance claims. M0 must freeze named hardware, OS, driver, browser, resolution, scene contents, and repeatable measurement commands before the team treats a number as a release gate.
+Performance is a product feature and must be measured from M0.
 
-For the desktop reference game, propose a 1080p, 60 Hz profile. CPU critical-path work and GPU work including composition should each remain below roughly 12 ms at the 95th percentile, leaving headroom within the 16.67 ms frame interval. CPU and GPU work may overlap; do not add their times as though the pipeline were wholly serial. Track missed presentation deadlines and the 99th percentile separately.
+### 15.1 Benchmark manifest
 
-Set scene-specific sub-budgets after profiling. Initial bridge target: bounded batched traffic and less than 0.5 ms p95 encoding/copy/dispatch overhead on the agreed desktop benchmark, excluding native simulation. This is a target to validate, not a promise that all APIs, platforms, or scene sizes meet it.
+Freeze named benchmark profiles containing:
 
-Maintain separate tests for dense transform updates, mixed ECS queries and churn, instanced rendering, many material changes, animated characters, physics stress, heavy Flutter UI, large project editing, cold startup, and asset streaming. Do not combine unrelated maximum counts into one advertised capacity figure.
+- machine model/CPU/GPU/RAM;
+- OS version;
+- graphics backend;
+- driver/runtime version;
+- Flutter/Dart/Rust versions;
+- Fynkel commit/version;
+- resolution;
+- quality settings;
+- scene version;
+- warm-up duration;
+- sample duration;
+- capture command.
 
-Measure bridge bytes/calls/copies, script time and allocations, native allocations, ECS/query cost, physics and animation time, render preparation, GPU pass times where available, Flutter composition, VRAM/native/Dart memory, load times, package size, and input-to-visible latency. Device memory must include Flutter as well as the 3D engine.
+Do not compare numbers collected from materially different profiles as if they were the same benchmark.
 
-Add trace spans and counters in M0. Record standalone versus embedded performance. Avoid per-frame CPU readback, unbounded queues, allocation churn, blocking I/O, unnecessary full-world synchronization, and uncontrolled pipeline compilation. Instrument each; do not rely on code review alone.
+### 15.2 Frame-time targets
 
-Mobile targets require sustained on-device thermal/power and lifecycle testing, not a short simulator FPS result. Browser profiles require their own budgets and feature limits. Pause unnecessary work in hidden/inactive views according to the documented game policy.
+For the desktop reference profile at 1080p/60:
 
-### Continuous integration and release quality
+- frame interval: 16.67 ms;
+- initial engineering target: keep the normal CPU critical path and GPU workload each with useful headroom;
+- use approximately **12 ms p95** as an early total-work target where measurement semantics make that meaningful;
+- track p99, stutter, missed presentation deadlines, and input latency;
+- do not rely on average FPS.
 
-Every change runs formatting/linting, unit tests, schema/ABI fixtures, and an appropriate build matrix. Nightly or dedicated hardware jobs run rendering, performance, and lifecycle tests.
+CPU and GPU may overlap; do not simply add their timings and call the result frame time.
 
-Use property/fuzz tests for ECS operations, document parsing, binary buffers, prefab expansion, and malformed assets. Test unsafe storage paths with applicable Rust tooling. Test repeated create/destroy, scene load/unload, resize/suspend/resume, and Play/Stop for leaks and crashes.
+The M0 viewport composition overhead has its own stricter provisional gate in §8.
 
-Maintain visual golden tests with documented tolerances and fixed inputs; do not require byte-identical images across unrelated GPU drivers. Test CLI/editor equivalence, code-first builds, missing assets/plugins, migrations, and release packages. Generated registries and binding fixtures must be reproducible.
+### 15.3 Separate benchmark workloads
 
-Investigate repeatable regressions rather than trusting a single noisy run. Release gating includes error recovery and diagnostic quality, not only FPS.
+Maintain independent benchmarks for:
+
+- `hecs` component iteration;
+- spawn/despawn churn;
+- transform hierarchy updates;
+- Dart/Rust bridge command throughput;
+- snapshot bandwidth;
+- instanced rendering;
+- many materials/pipeline changes;
+- skeletal animation;
+- physics body counts;
+- asset loading;
+- Flutter-heavy HUD/editor UI;
+- Editor hierarchy/Inspector scaling.
+
+Do not combine maximum entity, triangle, light, and rigid-body counts into one misleading “supports X objects” claim.
+
+### 15.4 Instrumentation
+
+Capture at minimum:
+
+- Dart behaviour time;
+- native simulation time;
+- physics;
+- animation;
+- transform propagation;
+- render extraction;
+- render preparation;
+- GPU pass timings where supported;
+- draw/dispatch counts;
+- visible/culled objects;
+- bridge calls/bytes/copies;
+- Dart allocations where measurable;
+- native memory;
+- asset residency;
+- estimated GPU memory;
+- Flutter frame/UI timing;
+- loading/startup time.
+
+### 15.5 Continuous quality
+
+CI should include:
+
+- Rust unit/integration tests;
+- Dart tests;
+- codegen fixtures;
+- JSON/schema fixtures;
+- bridge protocol golden tests;
+- scene/prefab round trips;
+- headless reference-game tests;
+- renderer smoke tests on available GPU runners;
+- formatting/linting;
+- dependency/license checks;
+- package/build smoke tests.
+
+Run performance benchmarks on controlled machines, not arbitrary shared CI workers where results are too noisy.
+
+### 15.6 Robustness testing
+
+Fuzz or property-test:
+
+- malformed JSON documents;
+- invalid IDs/references;
+- command buffers;
+- bridge lengths/counts;
+- imported asset metadata;
+- prefab overrides.
+
+Lifecycle stress tests repeatedly:
+
+- create/destroy worlds;
+- load/unload scenes;
+- resize viewports;
+- enter/exit Play mode;
+- minimize/restore;
+- background/foreground;
+- create/destroy GPU resources.
+
+### 15.7 Supported-platform rule
+
+A platform is not “supported” because Flutter or wgpu lists it.
+
+Fynkel support requires:
+
+- build/install;
+- rendering;
+- input;
+- lifecycle;
+- file/assets;
+- audio;
+- release packaging;
+- reference-game test;
+- performance/quality budget;
+- documented limitations.
+
+Mobile qualification additionally requires sustained-device/thermal testing.
 
 ## 16. Milestones and acceptance gates
 
-### M0 — Feasibility, platform paths, and contracts
+Milestones are **gates**, not time estimates. Do not progress because a date arrived; progress when the contract is proven.
 
-**Owners:** Architecture lead; rendering/platform; Dart SDK/tooling.
+For a small team, keep work-in-progress narrow. The critical path is:
 
-**Build:** Standalone wgpu test host; Flutter native viewport prototype; browser WebGPU/Wasm viewport prototype; overlay/input/resize tests; initial bridge encode/decode; lifecycle and performance instrumentation; architecture decision records.
+```text
+M0 architecture proof
+  -> M1 runtime foundation
+  -> M2 documents/assets/scripts
+  -> M3 complete code-first game
+  -> M4 Editor V0
+  -> M5 game-development completeness
+  -> M6 native qualification/optimization
+  -> M7 beta / 1.0
+```
 
-**Freeze:** Coordinates, ID model, ownership, tick semantics, bridge outline, initial source format, release target order, hardware benchmarks, and scope of browser mode.
+Browser product work is not on the 1.0 critical path.
 
-**Gate:** Equivalent scenes render in standalone and Flutter hosts on a primary desktop target; validate a second graphics backend before claiming portability. Browser prototype proves canvas composition and input. Record a mobile surface/lifecycle risk spike. All unavoidable copies and synchronization are documented. No unexplained resource leak through repeated creation/resizing.
+### M0 — Architecture proof, repository bootstrap, and go/no-go
 
-**Do not:** Begin a full editor, custom ECS scheduler, or advanced renderer before the surface integration has an acceptable path.
+**Purpose:** retire the highest architectural risks before building broad engine functionality.
 
-### M1 — Runtime world, ECS, and bridge
+**Build**
 
-**Depends on:** M0. **Owners:** Runtime/ECS; SDK.
+- Public repository/monorepo structure.
+- Toolchain/version locks.
+- ADR-0001 through ADR-0007 drafts/decisions.
+- License/contribution/trademark decision.
+- Frozen reference-game specification.
+- Standalone Rust/wgpu baseline renderer.
+- Flutter-hosted viewport Path A prototype.
+- At least one fallback viewport Path B/C prototype far enough to compare risk.
+- Input/overlay/resize/lifecycle tests.
+- Basic instrumentation.
+- Tiny versioned C ABI round-trip.
+- Minimal Rust/Wasm/WebGPU compatibility spike.
+- Secondary native backend proof before closing the milestone.
 
-**Build:** Generational entities; basic storage/queries; transform hierarchy; command buffers; immutable snapshots; time/input contract; typed handles; world lifecycle; no-renderer test host.
+**Primary validation**
 
-**Gate:** Dart creates, updates, queries, and destroys objects; stale handles fail safely; native and web bridge fixtures agree; hierarchy tests pass; bounded queues and repeatable ECS benchmarks exist. Rendering can continue from completed state without accessing mutating storage.
+- macOS/Metal.
 
-**Do not:** Expose ECS internals or raw pointers; implement generalized parallel scheduling before correctness and measurement.
+**Preferred second validation**
 
-### M2 — Documents, assets, schemas, and behaviour registration
+- Windows/D3D12 when available; otherwise a documented second backend/platform chosen by ADR.
 
-**Depends on:** M1. **Owners:** Tools/document; SDK; asset pipeline.
+**Gate**
 
-**Build:** Scene/material/basic prefab schemas; UUID asset metadata; authoring command service; strict validation; JSON formatting; glTF import; incremental cache; generated Dart registry; headless load/save/cook; migration fixtures.
+- A practical native Flutter/Fynkel presentation architecture passes §8 criteria.
+- No production viewport path depends on full-frame CPU readback/re-upload.
+- Added host/composition overhead is understood and within the approved budget.
+- Overlay/input/resize/lifecycle behaviour is reliable.
+- At least two native graphics/backend paths prove the renderer abstraction is not accidentally single-backend.
+- The browser spike records portability blockers but does not expand scope.
+- Repository governance/license/package strategy is decided.
+- Reference benchmark manifest exists.
 
-**Gate:** A scene created through code/document commands round-trips without losing IDs or supported data. Prefabs instantiate with correct reference remapping. Missing asset/type errors identify exact locations. A generated behaviour loads in a compiled game. Editor-independent build preparation works from a clean checkout.
+**Kill/fallback rule**
 
-**Do not:** Maintain separate editor-only formats, serialize raw Rust structs, or execute project scripts on open.
+- If Flutter `Texture` fails, move to another approved native composition path.
+- If every practical composition path fails, stop and redesign before M1.
+
+**Do not**
+
+- build the full editor;
+- build a custom ECS;
+- build advanced rendering;
+- productize browser support;
+- start five independent engine subsystems before the host boundary is proven.
+
+### M1 — Runtime foundation, `hecs` wrapper, and bridge
+
+**Depends on:** M0.
+
+**Build**
+
+- `fynkel_core`;
+- `fynkel_ecs` facade over `hecs`;
+- Fynkel runtime handles + mapping to internal `hecs::Entity`;
+- component registration metadata;
+- Transform/hierarchy;
+- world lifecycle;
+- explicit scheduler phases;
+- command buffers;
+- subscribed snapshots;
+- events;
+- no-renderer host tests;
+- bridge diagnostics.
+
+**Gate**
+
+- Dart can create, inspect, update, and destroy objects through Fynkel APIs.
+- Stale handles fail.
+- Entity reuse does not alias stale Dart handles.
+- Batched updates are used in hot paths.
+- Snapshot subscriptions are bounded/measurable.
+- world teardown is leak-safe.
+- transform hierarchy passes cycle/reparent tests.
+- `hecs` is not visible in public APIs/files.
+
+**Do not**
+
+- write a custom ECS;
+- build a generic parallel scheduler;
+- expose mutable native memory to Dart.
+
+### M2 — Project documents, assets, prefabs, materials, and behaviours
+
+**Depends on:** M1.
+
+**Build**
+
+- strict JSON schemas;
+- scene documents;
+- material documents;
+- simple prefab format/override semantics;
+- stable asset IDs/metadata;
+- document migration framework;
+- glTF/GLB importer;
+- texture/audio import baseline;
+- content-addressed/incremental cache keys;
+- generated Dart behaviour registry;
+- Inspector metadata;
+- CLI validation;
+- authoring commands independent of editor UI.
+
+**Gate**
+
+- documents round-trip without losing unknown/valid data;
+- scene IDs remain stable through edits;
+- asset moves preserve identity;
+- prefab references remap correctly;
+- invalid fields produce exact diagnostics;
+- a compiled Dart behaviour can be instantiated from authored data;
+- project can be validated/imported headlessly.
+
+**Do not**
+
+- hide project state in an editor database;
+- implement nested prefab inheritance;
+- build a shader graph;
+- make editor UI the only way to modify data.
 
 ### M3 — Complete code-first reference game
 
-**Depends on:** M2. **Owners:** Runtime/rendering/physics/SDK; reference-game owner.
+**Depends on:** M2.
 
-**Build:** Renderer V1 subset; camera and lighting; physics character movement; interaction/collectibles; basic audio; Flutter menu/HUD; scene transition; win/restart flow; packaged desktop game.
+**Build the exact §1.2 reference game without relying on Fynkel Editor.**
 
-**Gate:** A new developer builds and plays the whole game without opening the Fynkel Editor. Native resources are released correctly; baseline performance and input latency are recorded. The game has actual gameplay and a completion/restart loop, not only a rendering demo.
+Required runtime capability now includes:
 
-**Do not:** Wait for all engine subsystems or graphics effects to finish before proving a game can ship.
+- renderer V1;
+- player/camera;
+- physics;
+- animation;
+- audio;
+- input actions;
+- scenes/state transitions;
+- prefab spawning;
+- Flutter menus/HUD;
+- world-space UI baseline;
+- saveable settings;
+- headless gameplay tests where applicable.
 
-### M4 — Editor V0
+**Gate**
 
-**Depends on:** M2 and playable M3 integration. **Owners:** Editor/document; runtime support.
+- a clean checkout can build/run the reference game through documented commands;
+- the game is playable end-to-end;
+- no editor is required;
+- critical frame paths are instrumented;
+- there are no hidden manual native setup steps beyond documented platform prerequisites;
+- reference-game performance is recorded against the benchmark manifest.
 
-**Build:** Scene viewport, hierarchy, generated Inspector, selection/gizmos, asset browser, save/load, undo/redo, Play/Stop, console, basic profiler. Use real schemas and authoring commands.
+**Do not**
 
-**Gate:** A developer recreates the reference level visually, attaches a Dart behaviour, saves it, and runs the same project through the CLI. Undo/redo preserves valid state. A play-process crash does not corrupt the authoring document. Play mutations are discarded by default.
+- add speculative systems to make the demo impressive;
+- start browser-editor product work;
+- postpone usability problems to the editor.
 
-**Do not:** Put gameplay in editor widgets or depend on the editor to generate hidden essential state.
+### M4 — Fynkel Editor V0
 
-### M5 — Practical game and authoring completeness
+**Depends on:** M2 plus stable/playable M3 integration.
 
-**Depends on:** M4. **Owners:** Runtime systems; editor counterparts.
+**Build**
 
-**Build:** Skeletal animation and transitions; improved audio; common physics options; world-space UI subset; projected labels; practical prefab overrides; scene lifecycle; persistence example; tools for each supported feature.
+- Flutter desktop editor;
+- Scene viewport;
+- hierarchy;
+- schema-generated Inspector;
+- asset browser;
+- selection;
+- transform gizmos;
+- save/load;
+- undo/redo;
+- Play/Stop;
+- console;
+- basic profiler;
+- external IDE navigation.
 
-**Gate:** The reference game uses animated characters, reusable prefab instances, sound, a depth-tested interactive panel, and scene transitions. Each feature has a code example, CLI/serialization contract, and basic editor support.
+**Gate**
 
-**Do not:** Add systems that the reference game or early adopters do not exercise.
+- a developer can recreate/edit the reference level visually;
+- all mutations go through shared authoring commands;
+- the CLI sees the same data immediately;
+- Play launches the actual project runtime;
+- Play crashes do not corrupt source documents;
+- ordinary errors are diagnosable without editing raw UUIDs/cache files.
 
-### M6 — Connected browser editor
+**Do not**
 
-**Depends on:** M2 and M4; shell/interop work can begin earlier. **Owners:** Web/platform; editor/tools.
+- build a custom code editor;
+- require full docking/multi-window framework;
+- build browser parity;
+- implement gameplay rules inside editor widgets.
 
-**Build:** Flutter web editor, authenticated local companion, browser edit-preview renderer, project file access through the companion, compile/run commands, and a documented browser support profile.
+### M5 — Practical game-development completeness
 
-**Gate:** The same project can be edited in desktop and browser clients without format conversion. Conflicting revisions are detected. The browser editor can launch a native player or a locally compiled web player. Security tests reject unauthorized origins and project-root escape attempts.
+**Depends on:** M4.
 
-**Do not:** Describe the local-companion mode as browser-only or confuse WebSocket control with viewport streaming.
+**Build/finish**
 
-### M7 — Supported platform builds and optimization
+- animation usability;
+- audio usability;
+- prefab override UX;
+- scene lifecycle;
+- project settings;
+- persistence/save example;
+- world-space UI tooling;
+- input rebinding;
+- component/asset inspectors;
+- runtime inspection;
+- documentation/tutorials for the reference game;
+- first external pilot project support.
 
-**Depends on:** M3–M5; target-specific work begins at M0. **Owners:** Platform/rendering; tooling; quality.
+**Gate**
 
-**Build:** Versioned runtime binaries; verified package integration; supported desktop exports; Android/iOS integration and device tests as release scope permits; quality profiles; practical memory/performance improvements; signed/checksummed artifact pipeline.
+- reference game can be authored comfortably in editor-first or hybrid mode;
+- at least one external pilot project reaches a playable state;
+- common workflows do not require undocumented internal APIs;
+- migrations and error handling survive normal project evolution.
 
-**Gate:** Clean-machine install/build/run works on every advertised target. No editor binaries ship in the game. Lifecycle, rendering, asset, input, audio, and sustained-performance tests pass. Unsupported targets fail clearly, not partially.
+**Do not**
 
-**Do not:** Advertise every Flutter/wgpu platform merely because a dependency lists it.
+- introduce large systems unused by reference/pilot projects;
+- stabilize a native plugin ABI just because 1.0 is approaching.
 
-### M8 — Browser-only authoring and web-player qualification
+### M6 — Native platform qualification and optimization
 
-**Depends on:** M5–M7 as applicable. **Owners:** Web/runtime; tools.
+**Depends on:** M3–M5. Target-specific work begins earlier where necessary.
 
-**Build:** Browser project storage/import/export; precompiled template preview; complete browser runtime validation; asset limits; capability diagnostics. Add a hosted compiler only under a separate approved security/product scope.
+**Build**
 
-**Gate:** Browser-only mode can edit, save/export, and preview its supported projects without a local install. Newly edited Dart source is explicitly routed to a compiler service/companion when required. No feature silently assumes native files, FFI, or threads.
+- versioned prebuilt native artifacts;
+- clean-machine installation paths;
+- packaging/export workflows;
+- release-mode asset cooking;
+- lifecycle hardening;
+- quality profiles;
+- profiler improvements;
+- measured culling/batching/memory optimizations;
+- crash reporting hooks/interfaces where appropriate.
 
-**Do not:** Block a useful native/connected-editor release on full cloud IDE functionality.
+**Gate**
+For every platform advertised for 1.0:
 
-### M9 — Beta and 1.0 readiness
+- clean install/build/run succeeds;
+- reference game passes lifecycle tests;
+- release package excludes editor/dev-only code;
+- input/audio/rendering work;
+- performance budgets and known limits are documented;
+- binaries/artifacts are reproducible or traceable and checksummed/signed per release policy.
 
-**Depends on:** M5–M7, plus whichever M8 features are advertised. **Owners:** All leads; quality/release owner.
+**Minimum release target set**
+Must be decided by evidence. Do not add Linux/mobile to the marketing matrix until their gates pass.
 
-**Build:** Migration policy, API cleanup, release documentation, tutorials, troubleshooting, templates, benchmark reports, issue triage, and independent pilot projects.
+**Do not**
 
-**Gate:** Independent developers build games without undocumented support from the engine authors. At least two additional small pilot projects exercise workflows beyond the reference game. No known release-blocking data-loss or crash defects remain. Code-first, hybrid, editor-first, and advertised web workflows have automated coverage. Platform support and known limitations are published accurately.
+- call unqualified dependency support “Fynkel support”;
+- optimize synthetic microbenchmarks while real reference/pilot bottlenecks remain.
 
-**Do not:** Declare 1.0 based only on a polished demo or a long feature list.
+### M7 — Beta and Fynkel 1.0
+
+**Depends on:** M6.
+
+**Build/finalize**
+
+- API cleanup;
+- document migrations;
+- SDK deprecations/changelog;
+- tutorials;
+- project templates;
+- troubleshooting;
+- architecture docs;
+- stable package publishing;
+- release/update process;
+- security/reporting docs;
+- external pilot feedback fixes.
+
+**Gate**
+
+- reference game ships through the supported workflow;
+- at least two external small projects/pilots can build meaningful playable content without undocumented assistance;
+- release-blocking crash/data-loss bugs are resolved;
+- public SDK/project formats have migration policy;
+- supported platform matrix is explicit;
+- benchmark report is published internally/publicly as appropriate;
+- editor is optional;
+- browser editor/runtime is still not required.
+
+**1.0 means**
+A small team can build and ship a native 3D game with Fynkel using Dart/Flutter and the optional editor.
+
+It does **not** mean feature parity with Unity, Godot, or Unreal.
 
 ## 17. Workstream ownership and delivery rules
 
-Assign accountable owners to runtime/ECS, rendering/platform integration, Dart SDK/code generation, documents/assets/editor, and testing/releases. These are responsibilities, not mandatory separate hires. One architecture owner resolves cross-boundary contracts and prevents duplicate sources of truth.
+The plan must work for a small team or even one primary developer using AI tooling. “Owner” means accountable responsibility, not a requirement for a separate full-time person.
 
-The critical path is M0 integration -> M1 world/bridge -> M2 data/scripts -> M3 playable game -> M4 editor. Browser experiments begin in M0; browser editor work can proceed once document and bridge contracts are stable. Do not have every engineer implement a different large subsystem before the integration path is proven.
+### 17.1 Responsibility areas
 
-Each milestone produces a runnable build, tests, documentation, measured performance notes, known limitations, and a short demo script. Estimate calendar dates only after M0, actual team capacity, and target hardware are known. Keep acceptance criteria stable when schedules change; reduce scope rather than quietly removing correctness gates.
+Maintain clear ownership for:
 
-### Definition of done for a feature
+- architecture/contracts;
+- runtime/ECS/bridge;
+- renderer/platform integration;
+- Dart SDK/codegen;
+- documents/assets/import pipeline;
+- editor/tooling;
+- testing/release quality.
 
-A feature is complete only when its runtime API, source schema/migration, generated bindings or registry, code example, relevant authoring support, diagnostics, tests, resource lifetime, performance impact, and target compatibility are documented. Mark genuinely code-only or platform-specific features explicitly.
+One person may own several areas. A code-generation or AI assistant is not the accountable owner of an architectural contract.
 
-### Highest risks and controls
+### 17.2 Small-team execution rule
 
-| Risk                                                                  | Control / decision gate                                                                                     |
-| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Flutter/wgpu interoperability is expensive or unsupported on a target | M0 platform spike, copy/synchronization accounting, standalone comparison; do not claim support prematurely |
-| Custom ECS becomes a project within the project                       | Minimal storage/scheduler, benchmark against a small library, bounded scope, review before storage redesign |
-| Native and Dart state diverge                                         | Tick-numbered commands, ownership table, immutable snapshots, read-your-writes contract, conformance tests  |
-| Editor cannot inspect or run user behaviours                          | Generated metadata and factories; actual project compilation and a separate player host                     |
-| Project files become fragile or unmergeable                           | Stable IDs, strict schemas, canonical formatting, explicit prefab overrides, revisions and transactions     |
-| Browser editor implies an unplanned cloud compiler                    | Connected mode first; separate editing, rendering, and compilation milestones                               |
-| Performance work arrives too late                                     | M0 instrumentation, reference game, fixed benchmarks, regression gates                                      |
-| Project loading becomes arbitrary code execution                      | Data-only inspection, explicit trust, restricted companion, bounded parsers/importers                       |
-| Version mismatch corrupts data or crashes                             | Lockfiles, protocol/schema handshake, tested migration, refuse incompatible writes                          |
+Keep the critical path narrow.
+
+Preferred sequence:
+
+```text
+prove architecture
+ -> finish runtime slice
+ -> finish data/tool slice
+ -> finish complete game
+ -> add editor
+ -> harden
+```
+
+Parallelize only work that has a stable interface and does not create large integration debt.
+
+Examples of safe parallel work:
+
+- schema fixtures while ECS bridge stabilizes;
+- reference-game art/content preparation;
+- documentation/tests;
+- isolated importer implementation.
+
+Examples of dangerous parallel work:
+
+- full editor before document commands stabilize;
+- custom ECS while bridge/world is unfinished;
+- browser product while native viewport is unresolved;
+- advanced renderer while core asset/material contracts are changing.
+
+### 17.3 Definition of done for an engine feature
+
+A feature is not done when one demo works.
+
+It needs, where relevant:
+
+- public API;
+- source/document schema;
+- runtime implementation;
+- editor representation if required by 1.0;
+- validation/diagnostics;
+- serialization/migration;
+- asset/resource lifetime rules;
+- tests;
+- performance instrumentation;
+- docs/example;
+- headless/automation accessibility.
+
+### 17.4 Highest risks and controls
+
+| Risk                                     | Control                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| Flutter/wgpu presentation path fails     | M0 first; evaluate multiple native composition paths; explicit kill/fallback criteria |
+| Bridge becomes chatty                    | command buffers, snapshots, instrumentation, no hidden native getter calls            |
+| ECS becomes an engine project            | use `hecs`; custom replacement only after benchmark/feature gate                      |
+| Dart/native state diverges               | authoritative ownership table, ticked commands, staged reads, snapshots               |
+| Editor creates a second project model    | shared authoring commands and strict source documents                                 |
+| Asset pipeline becomes opaque            | committed metadata, stable IDs, reconstructible cache                                 |
+| Scope explodes                           | reference game as scope oracle; browser removed from 1.0                              |
+| Performance work starts too late         | instrumentation in M0/M1, benchmark manifests                                         |
+| Native dependencies leak into public API | wrapper modules and contract tests                                                    |
+| Small team fragments effort              | WIP limits and milestone critical path                                                |
+| AI-generated changes bypass safety       | same schemas/validation/revision/trust rules as editor/CLI                            |
+| Licensing is postponed                   | ADR in M0 before public publishing                                                    |
 
 ## 18. What not to do
 
-Do not build a Unity clone feature-for-feature. Reuse a familiar workflow while keeping a smaller, coherent engine.
+Do **not**:
 
-Do not wait until a supposedly finished runtime exists before considering editor operations. Document formats, schema metadata, undoable transactions, and script registration are early architecture, not late polish.
+- attempt Unity/Godot feature parity for 1.0;
+- build a custom ECS before `hecs` is proven insufficient;
+- expose `hecs`, Rapier, wgpu, Rust pointers, or native memory layouts in public contracts;
+- make one FFI call per property/object in hot paths;
+- copy the entire ECS into Dart every frame;
+- store editor-only truth outside version-controlled project documents;
+- identify entities/components by array index or display name in saved data;
+- implement prefab overrides as an unspecified recursive merge;
+- make the editor mandatory for build/run;
+- delay the first complete game until the editor exists;
+- delay the editor until every runtime subsystem is “finished”;
+- build the browser editor before 1.0;
+- build a cloud compiler as a side effect of browser experimentation;
+- let the M0 web spike become a supported product by accident;
+- assume Flutter `Texture` means zero-copy wgpu integration;
+- accept full-frame CPU readback as the normal viewport solution;
+- fork Flutter in the first architecture milestone;
+- build a custom Dart coroutine language instead of using Dart async primitives;
+- build a full IDE/code editor;
+- build visual scripting or shader graphs before real projects justify them;
+- add a plugin ABI before internal boundaries are stable;
+- assume fewer dependencies automatically means better performance;
+- rewrite proven physics/audio/text/import functionality without evidence;
+- advertise platform support because a dependency compiles there;
+- optimize average FPS while ignoring p95/p99 stutter and latency;
+- silently migrate projects without dry-run/backup/version rules;
+- allow AI/editor commands to bypass validation or source-control-friendly data;
+- let browser, console, XR, multiplayer, terrain, or marketplace work block the native engine.
 
-Do not equate fewer dependencies with better performance. Avoid Bevy in this implementation as requested, but do not replace proven physics, image, audio, or text libraries without evidence.
-
-Do not assume FFI, shared textures, hot reload, browser file access, native concurrency, and arbitrary Dart compilation automatically work together.
-
-Do not make every entity a Flutter widget, every component a Dart object, every property access a bridge call, or every tick a JSON message.
-
-Do not write a custom physics engine, custom compiler, general text renderer, visual scripting system, shader graph, marketplace, or multiplayer backend in the first release.
-
-Do not make unmeasured claims of Godot/Unity performance parity. Compare defined workloads, image quality, hardware, frame pacing, memory, and shipped-game behaviour.
-
-Do not sacrifice source-data safety for fast previews. Lost scenes, broken IDs, and incompatible upgrades can invalidate otherwise strong rendering work.
+The main discipline is: **finish coherent vertical slices before expanding breadth.**
 
 ## 19. First implementation backlog
 
-Start with nine concrete deliverables: repository/toolchain locks; architecture decision records; standalone renderer host; Flutter viewport adapter; browser canvas prototype; versioned binary command round-trip; resize/dispose/suspend test harness; instrumentation and benchmark manifests; and the smallest code-created world exercising a camera and mesh.
+Turn this blueprint into the repository immediately. Do not leave the plan as a standalone strategy document.
 
-Once M0 passes, implement generational entities and transforms, then document/schema/registry infrastructure, then the playable reference game. Start the editor immediately after that code-first path works. Continue with engine features and authoring support together.
+### 19.1 Repository bootstrap
 
-**Delivery objective:** a developer can create a normal Flutter project, author a game in Dart or the optional editor, validate it through automation, and produce a stable, measured release build without learning the engine's internal Rust implementation.
+Create:
+
+- `README.md`;
+- root licenses/placeholders according to ADR-0005;
+- `docs/architecture/`;
+- `docs/decisions/`;
+- `docs/guides/`;
+- `crates/`;
+- `packages/`;
+- `apps/`;
+- `examples/reference_game/`;
+- `tests/`;
+- issue tracker labels/milestones for M0–M7.
+
+Create ADR files for the initial decision set in §2.5.
+
+### 19.2 M0 issue backlog
+
+Track at least these issues:
+
+1. Freeze toolchain matrix.
+2. Decide repository/license/contribution/trademark policy.
+3. Freeze §1.2 reference-game spec.
+4. Build standalone macOS/Metal wgpu baseline.
+5. Record standalone frame/presentation baseline.
+6. Prototype Flutter `Texture`/platform-texture path.
+7. Measure copies, latency, and composition overhead.
+8. Prototype at least one fallback engine-owned surface/view path.
+9. Add resize/DPI/minimize/background/dispose stress harness.
+10. Add Flutter overlay + input/focus test.
+11. Define native C ABI v0 framing.
+12. Send one batched command buffer Dart → Rust and return one snapshot/event Rust → Dart.
+13. Create `fynkel_ecs` wrapper with a tiny `hecs` world.
+14. Validate stale-handle mapping design.
+15. Validate a second native graphics/backend path.
+16. Run the minimal Wasm/WebGPU compatibility spike.
+17. Write M0 benchmark manifest and capture script.
+18. Produce M0 architecture report and ADR decisions.
+
+### 19.3 First vertical slice after M0
+
+The first post-M0 slice should be:
+
+```text
+Flutter app
+  -> native Fynkel viewport
+  -> Rust world
+  -> hecs-backed entity
+  -> Transform
+  -> Camera
+  -> MeshRenderer
+  -> one imported mesh/material
+  -> batched Dart command changes transform
+  -> snapshot exposes required state
+  -> scene renders correctly
+```
+
+Do not begin with physics, animation, or an editor panel before this slice is stable.
 
 ## 20. Verified technical references
 
-References were checked on 18 September 2026. Re-check platform and toolchain details when freezing M0 and before release. The architectural prescriptions and budgets in this plan are design decisions, not claims that dependencies implement the entire proposed system.
+Key implementation assumptions were re-checked on **19 September 2026**. Re-check exact versions and platform details when M0 freezes the toolchain and before each supported release.
 
 - **S1 — wgpu documentation:** `https://docs.rs/wgpu/latest/wgpu/`
-- **S2 — Rapier getting started:** `https://rapier.rs/docs/user_guides/rust/getting_started/`
-- **S3 — glam documentation:** `https://docs.rs/glam/latest/glam/`
-- **S4 — Kira documentation:** `https://docs.rs/kira/latest/kira/`
-- **S5 — Khronos glTF:** `https://www.khronos.org/gltf/`
-- **S6 — Bevy ECS standalone documentation:** `https://docs.rs/bevy_ecs/latest/bevy_ecs/`
-- **S7 — hecs documentation:** `https://docs.rs/hecs/latest/hecs/`
-- **S8 — Flutter FAQ, reflection/code generation:** `https://docs.flutter.dev/resources/faq`
-- **S9 — Flutter web FAQ, I/O and concurrency:** `https://docs.flutter.dev/platform-integration/web/faq`
-- **S10 — Rapier determinism:** `https://rapier.rs/docs/user_guides/rust/determinism/`
-- **S11 — JSON Schema draft 2020-12:** `https://json-schema.org/draft/2020-12`
-- **S12 — Flutter Texture widget:** `https://api.flutter.dev/flutter/widgets/Texture-class.html`
-- **S13 — Flutter native FFI and build hooks:** `https://docs.flutter.dev/platform-integration/bind-native-code`
-- **S14 — Flutter hot reload:** `https://docs.flutter.dev/tools/hot-reload`
-- **S15 — Dart JavaScript interoperability:** `https://dart.dev/interop/js-interop`
-- **S16 — Flutter WebAssembly support:** `https://docs.flutter.dev/platform-integration/web/wasm`
-- **S17 — MDN origin-private filesystem:** `https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system`
-- **S18 — MDN WebGPU:** `https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API`
+- **S2 — hecs documentation:** `https://docs.rs/hecs/latest/hecs/`
+- **S3 — Rapier getting started:** `https://rapier.rs/docs/user_guides/rust/getting_started/`
+- **S4 — Rapier determinism:** `https://rapier.rs/docs/user_guides/rust/determinism/`
+- **S5 — glam documentation:** `https://docs.rs/glam/latest/glam/`
+- **S6 — Kira documentation:** `https://docs.rs/kira/latest/kira/`
+- **S7 — Khronos glTF:** `https://www.khronos.org/gltf/`
+- **S8 — JSON Schema draft 2020-12:** `https://json-schema.org/draft/2020-12`
+- **S9 — Flutter `Texture` widget:** `https://api.flutter.dev/flutter/widgets/Texture-class.html`
+- **S10 — Flutter native code / FFI and build hooks:** `https://docs.flutter.dev/platform-integration/bind-native-code`
+- **S11 — Flutter hot reload:** `https://docs.flutter.dev/tools/hot-reload`
+- **S12 — Flutter FAQ / reflection limitations:** `https://docs.flutter.dev/resources/faq`
+- **S13 — Dart JS interoperability (future browser work):** `https://dart.dev/interop/js-interop`
+- **S14 — Flutter Wasm support (future browser work):** `https://docs.flutter.dev/platform-integration/web/wasm`
+- **S15 — MDN WebGPU (future browser work):** `https://developer.mozilla.org/en-US/docs/Web/API/WebGPU_API`
+
+At the time of this revision, the current docs describe `hecs` as a high-performance minimalist ECS **library, not a framework**, which is the reason it fits Fynkel's “own the engine API, reuse storage/query mechanics” approach. Current wgpu documentation continues to describe native backends including Metal, D3D12, and Vulkan plus WebGPU/Wasm support, but Fynkel platform support remains contingent on its own tests.
+
+The architectural prescriptions, budgets, and platform priorities in this blueprint are Fynkel design decisions—not capabilities automatically guaranteed by those dependencies.
 
 ## 21. Fynkel Dart SDK and standard component specification
 
@@ -711,23 +2223,11 @@ The exact syntax can change before 1.0, but the semantic contract should be stab
 
 ### 21.3 Behaviour model
 
-Dart behaviours provide the main game-scripting experience. Define a small lifecycle rather than dozens of callbacks:
+The authoritative lifecycle is defined once in **§3.2**. The SDK implements that exact contract and this section does not define a second lifecycle.
 
-```text
-onCreate      object and fields exist; scene references are resolved
-onEnable      behaviour becomes active
-start         runs once before the first gameplay update
-fixedUpdate   fixed-rate simulation logic
-update        variable-rate gameplay logic
-lateUpdate    ordering-sensitive presentation logic
-afterPhysics  optional post-physics callback if needed
-onDisable     behaviour becomes inactive
-onDestroy     final cleanup notification
-```
+Collision, trigger, animation, asset, and input notifications should use typed events/subscriptions where possible instead of expanding the lifecycle into dozens of callbacks.
 
-Collision, trigger, animation, and input events should be typed events or subscriptions rather than adding a callback method for every possible engine event.
-
-Example API target:
+Example target:
 
 ```dart
 @FynkelBehaviour(id: 'game.PlayerController')
@@ -742,12 +2242,23 @@ class PlayerController extends Behaviour {
   void fixedUpdate(FixedUpdateContext context) {
     final move = Input.action2D('move');
     final body = gameObject.get<RigidBody>();
-    body.setPlanarVelocity(move.x * moveSpeed, move.y * moveSpeed);
+
+    body.setPlanarVelocity(
+      move.x * moveSpeed,
+      move.y * moveSpeed,
+    );
+  }
+
+  @override
+  void afterPhysics(AfterPhysicsContext context) {
+    // Optional: react to the completed fixed physics step.
   }
 }
 ```
 
-Generated metadata should provide behaviour factories, field serialization, Inspector metadata, stable type IDs, migration hooks, and schema descriptions. Do not use runtime reflection as a requirement.
+`Input.action2D(...)` is intentionally convenient. The static-looking facade resolves to the `InputService` belonging to the active `GameContext`; it is not mutable process-global state. Unit/headless tests can provide a deterministic test context and input service.
+
+Generated metadata provides behaviour factories, field serialization, Inspector metadata, stable type IDs, migration hooks, and schema descriptions. Runtime reflection is not required.
 
 ### 21.4 Standard component catalogue for 1.0
 
@@ -813,20 +2324,57 @@ Do not force Flutter widgets into the native world UI model. Projected Flutter l
 
 Dart `Behaviour` instances are registered against GameObjects but should not require one native component per behaviour field. A compact native marker/registry relationship is acceptable for scheduling and authoring identity.
 
-### 21.5 Standard engine services
+### 21.5 Standard engine services and `GameContext`
 
-Provide focused services rather than global static APIs that cannot be tested. Static convenience facades may delegate to the current `GameContext`, but the underlying service boundaries should be explicit.
+Services are explicit underneath the public convenience API.
 
-Minimum services:
+Each running world/game host has a `GameContext` containing service interfaces such as:
 
-- `Scenes`: load, unload, additive load, active scene, lookup by ID
-- `Assets`: typed load, preload, release, dependency status, async progress
-- `Input`: actions, axes, pointer, touch, gamepad, rebinding
+- `ScenesService`
+- `AssetsService`
+- `InputService`
+- `PhysicsService`
+- `AudioService`
+- `TimeService`
+- `DiagnosticsService`
+- `ApplicationService`
+
+Public convenience facades are allowed:
+
+```dart
+final move = Input.action2D('move');
+final dt = Time.delta;
+await Scenes.load('asset://scenes/level2.scene.json');
+```
+
+But those calls resolve through the active context rather than hidden singleton state.
+
+This gives Fynkel both:
+
+- concise game code; and
+- testability/replacement of underlying services.
+
+Tests should be able to run:
+
+```dart
+final context = TestGameContext(
+  input: RecordedInput(...),
+  time: FixedTestTime(...),
+);
+```
+
+Avoid APIs whose behaviour depends on an unreplaceable process-global singleton.
+
+Minimum service capabilities:
+
+- `Scenes`: load, unload, active scene, additive operations where supported
+- `Assets`: typed load, preload, release, dependency/progress status
+- `Input`: actions, axes, pointer, touch/gamepad, rebinding
 - `Physics`: raycast, shapecast, overlap, layer masks
-- `Audio`: one-shot playback, global buses, listener control
-- `Time`: frame delta, fixed delta, scale, frame/tick count
+- `Audio`: one-shot playback, buses, listener/global control
+- `Time`: frame delta, fixed delta, time scale, frame/tick count
 - `Diagnostics`: logs, markers, counters, assertions
-- `Application`: platform, lifecycle, quit/restart requests where supported
+- `Application`: platform/lifecycle and quit/restart requests where supported
 
 ### 21.6 Async, tasks, and coroutines
 
@@ -1077,11 +2625,22 @@ After the single-scene workflow is stable, support additive/open multiple scenes
 
 For large projects, prioritize virtualization, indexed search, incremental asset scanning, cancellation, and background import work. Do not block the UI thread on full-project parsing/imports.
 
-### 22.17 Browser editor UX
+### 22.17 Future browser-editor parity constraints
 
-The browser editor should preserve the same conceptual workspace and authoring commands. Browser-specific differences such as file permissions, companion connectivity, capability limits, and build availability must be visible rather than hidden.
+Browser editing is **post-1.0** and is not part of the Editor V0 or Fynkel 1.0 acceptance gate.
 
-If connected to a local companion, show connection identity, project root, trust state, and whether a command runs in-browser or locally. Never present local execution as if it were isolated cloud execution.
+However, desktop editor architecture should avoid unnecessary lock-in:
+
+- authoring commands remain UI-independent;
+- documents remain strict JSON;
+- Inspector generation remains schema-driven;
+- panels should not own project truth;
+- project operations remain available through service interfaces;
+- editor command IDs should be stable enough for future alternate clients.
+
+Do not add browser-specific storage, companion-server, security, or JS/Wasm complexity to the desktop editor before 1.0.
+
+When browser work begins after 1.0, it should preserve the same conceptual workspace where practical while clearly exposing browser-specific limitations.
 
 ### 22.18 Accessibility and internationalization
 
@@ -1089,184 +2648,278 @@ Use Flutter semantics/accessibility APIs for standard controls. Keyboard navigat
 
 ### 22.19 Editor acceptance gate
 
-The editor is 1.0-ready when a developer unfamiliar with engine internals can create or open the reference project, construct a level, attach/configure behaviours, author materials, run the game, diagnose common errors, inspect performance, and recover from ordinary mistakes without manually editing internal IDs or cache files. Every editor mutation must map to a shared authoring command or a clearly documented editor-local preference.
+The **desktop** editor is 1.0-ready when a developer unfamiliar with Fynkel internals can:
+
+- create/open the reference project;
+- construct and edit the reference level;
+- attach/configure behaviours;
+- author materials;
+- manage assets;
+- run/stop the real game;
+- diagnose common errors;
+- inspect basic performance;
+- undo ordinary mistakes;
+- recover from crashes/autosave state;
+- continue working through normal Dart/Flutter IDE tooling.
+
+They must not need to manually edit internal UUIDs, cache files, `hecs` data, Rust handles, or generated registries.
+
+Every source-changing editor mutation maps to a shared authoring command or a clearly documented editor-local preference.
+
+Browser-editor parity is not part of this gate.
 
 ## 23. Fynkel extensibility and plugin architecture
 
-Extensibility is required for a healthy ecosystem, but it should be introduced only after the engine's contracts are stable enough to extend. The plugin system must not expose arbitrary internal pointers or freeze the ECS/renderer implementation permanently.
+Fynkel must be extensible without forcing users to fork the engine, but a broad/stable plugin platform is **not a prerequisite for 1.0**.
 
-Treat extensibility as multiple capability layers rather than one universal plugin mechanism.
+The 1.0 priority is to establish clean internal boundaries and first-party extension points that can later become stable public plugin contracts.
 
-### 23.1 Extension categories
+### 23.1 Extension layers
 
-Define these categories separately:
+Treat these as separate mechanisms:
 
-| Extension type        | Typical use                                                 | Execution environment       |
-| --------------------- | ----------------------------------------------------------- | --------------------------- |
-| Dart package          | Gameplay libraries, reusable behaviours, high-level systems | Game Dart runtime           |
-| Editor extension      | Panels, inspectors, asset tools, commands                   | Editor Dart/Flutter runtime |
-| Importer extension    | New source asset formats and preprocessing                  | Development tool process    |
-| Native engine plugin  | Performance-sensitive native systems                        | Rust/native runtime         |
-| Build extension       | Packaging/codegen/validation steps                          | Development/build process   |
-| Shader/render feature | Custom material/shader functionality                        | Renderer-defined contract   |
+| Layer                                                  | Typical use                            | 1.0 status                 |
+| ------------------------------------------------------ | -------------------------------------- | -------------------------- |
+| Dart package                                           | reusable gameplay libraries/behaviours | Supported                  |
+| Generated custom Behaviour metadata                    | user gameplay types                    | Supported                  |
+| Custom data/components through documented registration | project/game extensions                | Supported where safe       |
+| Editor command/Inspector extensions                    | project tooling                        | Limited/experimental       |
+| Importer extensions                                    | new asset formats/processors           | First-party/internal first |
+| Build extensions                                       | project-specific build/codegen steps   | Limited                    |
+| Native Rust plugin                                     | high-performance engine extension      | Post-1.0 stable API        |
+| Renderer plugin/pass API                               | custom render pipeline integration     | Post-1.0 stable API        |
 
-A plugin may provide more than one extension category through one manifest, but each capability needs explicit permissions and lifecycle rules.
+This prevents “plugin system” from becoming one enormous ABI commitment.
 
-### 23.2 Plugin/package manifest
+### 23.2 1.0 extensibility contract
 
-Use a committed manifest with stable plugin ID, semantic version, engine compatibility range, dependencies, capabilities, and entry points.
+For 1.0, guarantee primarily:
 
-Conceptual example:
+- normal Dart/pub packages can provide reusable gameplay code;
+- custom `Behaviour` classes register through Fynkel code generation;
+- serialized custom behaviour fields are schema-described;
+- projects can define reusable higher-level systems without modifying Fynkel source;
+- editor Inspector generation can render normal exposed fields automatically;
+- command-line validation understands registered project types;
+- unknown extension data is preserved safely when possible.
+
+Do not make a game developer write a native Rust plugin for ordinary gameplay.
+
+### 23.3 Plugin manifest direction
+
+A future plugin/package manifest should include:
 
 ```json
 {
-  "id": "com.example.terrain",
+  "id": "com.example.fynkel.terrain",
   "version": "1.2.0",
-  "fynkel": ">=1.1.0 <2.0.0",
-  "capabilities": [
-    "dartPackage",
-    "editorExtension",
-    "nativeRuntime",
-    "assetImporter"
-  ],
-  "dependencies": {
-    "com.fynkel.navigation": "^1.0.0"
+  "fynkel": ">=1.3.0 <2.0.0",
+  "capabilities": ["editor", "importer"],
+  "entrypoints": {
+    "dart": "package:example_terrain/plugin.dart"
   }
 }
 ```
 
-Do not infer compatibility from filenames or dynamically inspect untrusted libraries without a manifest/handshake.
+The final schema may differ.
 
-### 23.3 Dart gameplay extensions
+A manifest must declare:
 
-The simplest extension mechanism is an ordinary Dart package that depends on the Fynkel SDK. It may provide Behaviours, data models, helper systems, editor metadata, and assets.
+- stable plugin ID;
+- version;
+- compatible Fynkel range;
+- capabilities;
+- required dependencies;
+- platform support;
+- execution/trust requirements;
+- optional editor/runtime/build entrypoints.
 
-Generated registration should allow packages to contribute stable behaviour/component schemas without modifying a central engine source file manually.
+### 23.4 Dart gameplay extensions
 
-For most third-party gameplay libraries, this should be the preferred model.
+Dart packages are the preferred early ecosystem layer.
 
-### 23.4 Custom component types
+They can provide:
 
-Support two classes of third-party component:
+- behaviours;
+- controllers;
+- game systems;
+- helper libraries;
+- state machines;
+- camera systems;
+- gameplay AI;
+- reusable UI;
+- test helpers.
 
-**Dart-authored data/behaviour components:** suitable for gameplay state and authoring metadata where native high-throughput iteration is unnecessary.
+They operate through public Fynkel APIs and must not depend on private native layouts.
 
-**Native registered components:** supplied by approved native plugins for systems that need Rust-side storage and scheduling.
+### 23.5 Custom component/type registration
 
-Every custom component needs a stable type ID, versioned schema, serializer/migration path, Inspector metadata, and unknown-component preservation semantics.
+Fynkel should distinguish:
 
-Do not allow plugins to reuse engine-reserved type IDs.
+1. built-in native components;
+2. Dart Behaviour state;
+3. future custom native/data components.
 
-### 23.5 Editor extensions
+Before exposing general custom native component storage, define:
 
-Editor extensions should use a documented Flutter/Dart API that permits:
+- stable type IDs;
+- serialization schema;
+- default values;
+- migration hooks;
+- editor metadata;
+- lifecycle;
+- threading/access rules.
 
-- New panels/windows.
-- Custom inspectors/property editors.
-- Asset previewers.
-- Project/scene commands.
-- Menu/command-palette actions.
-- Gizmos/overlays through defined extension APIs.
-- Validation rules.
-- Import/build status UI.
+Do not expose `hecs` component insertion directly as the public extension API.
 
-Extensions must use the authoring service for project mutations. Directly editing project files behind the editor's back should be discouraged because it bypasses revisions, validation, undo, and collaboration/conflict checks.
+### 23.6 Editor extensions
 
-Keep editor extension UI isolated from engine-private widgets. Public extension APIs need compatibility guarantees separate from internal editor implementation.
+After Editor V0 is stable, experimental editor extension points may include:
 
-### 23.6 Importer extensions
+- custom Inspector widgets;
+- panels;
+- menu/command palette commands;
+- asset previews;
+- project validation;
+- tooling actions.
 
-Importers run during development/build, not inside the shipped game unless explicitly required. An importer declares accepted file types, importer/version ID, settings schema, output artifact types, dependency discovery, and deterministic cache-key inputs.
+Editor extensions use the shared authoring command service rather than mutating source files behind the editor's back.
 
-Importer execution must have cancellation, bounded error reporting, and a documented trust model. A third-party importer is executable code and must not be treated as safe merely because it processes an asset.
+The stable editor plugin SDK can arrive after 1.0 once real extension patterns are known.
 
-### 23.7 Native Rust plugins
+### 23.7 Importer extensions
 
-Native plugins are the highest-risk extension mechanism and should not be required for common game development.
+Importer plugins may eventually provide:
 
-A stable C ABI boundary is preferable to exposing Rust ABI details across independently built plugin binaries. Rust ABI is not a long-term binary compatibility contract.
+- recognized file extensions/MIME signatures;
+- import settings schema;
+- dependency discovery;
+- deterministic import/cook operation;
+- preview metadata;
+- diagnostics;
+- target-specific cooking.
 
-The native plugin ABI should expose opaque handles, versioned function tables, explicit ownership, allocator rules, thread constraints, logging, registration functions, and capability negotiation.
+First build Fynkel's own glTF/texture/audio import pipeline. Public importer APIs should be extracted from working internal contracts, not invented beforehand.
 
-If stable dynamic native plugins prove too costly initially, support **source-linked Rust extensions** first: the plugin contributes a Rust crate compiled as part of the game's native engine build. This avoids premature ABI promises while still enabling advanced extensions.
+### 23.8 Native Rust plugins — post-1.0 stable API
 
-Do not permit arbitrary native plugins in browser-only builds unless they have a separate Wasm-compatible implementation.
+A stable native plugin ABI is deliberately post-1.0.
 
-### 23.8 Scheduler/system extensions
+Reasons:
 
-Native extension systems should register into named phases such as:
+- runtime internals will still change rapidly before 1.0;
+- freezing ECS/renderer/threading details too early would damage optimization freedom;
+- unsafe third-party native code introduces crash/security/support complexity.
+
+When implemented, expose:
+
+- opaque Fynkel handles;
+- versioned function tables;
+- explicit alloc/free ownership;
+- thread constraints;
+- logging/diagnostics hooks;
+- capability negotiation;
+- registration functions.
+
+Never expose direct ownership of the wgpu device, `hecs::World`, Rapier world, or raw internal pointers as the first native plugin ABI.
+
+### 23.9 Scheduler/system extensions
+
+A future system extension API should register logical requirements such as:
 
 ```text
-PreFixed
-FixedSimulation
-PostPhysics
-PostFixed
-VariableUpdate
-LateUpdate
-RenderExtract
+phase: PrePhysics
+reads: Transform, Velocity
+writes: CustomComponent
+ordering: after game.SomeSystem
 ```
 
-Dependencies/ordering constraints must be explicit and cycle-checked. Do not let plugins inject undocumented work at arbitrary points inside renderer internals.
+Fynkel decides the actual execution/thread scheduling.
 
-Dart extension systems should use a similar high-level scheduling contract without exposing native thread ownership.
+Do not let plugins assume a specific worker thread or `hecs` archetype/storage layout.
 
-### 23.9 Rendering extensions
+### 23.10 Rendering extensions
 
-Keep renderer extensibility narrower than gameplay extensibility. Initially support:
+Rendering extensibility should start high-level:
 
-- Custom shaders through the documented shader/material interface.
-- Custom material definitions.
-- Optional render features inserted at a small number of named extension points once the render graph API is stable.
+- custom material/shader packages;
+- custom post effects through approved interfaces;
+- render-feature registration;
+- debug rendering.
 
-Do not expose raw internal render-graph nodes or wgpu device ownership as the first plugin API. Renderer internals are likely to evolve significantly after 1.0.
+Delay arbitrary render-graph/device access until the renderer is stable enough to support it without freezing internals.
 
-Advanced native render extensions can become a post-1.0 experimental API before receiving compatibility guarantees.
+### 23.11 Build extensions
 
-### 23.10 Build extensions
+Future build extensions may contribute:
 
-Build extensions may add validation, generated source, cooked assets, platform configuration, and packaging steps. They need declared inputs/outputs so builds remain incremental and reproducible.
+- validation;
+- code generation;
+- asset cooking;
+- packaging steps.
 
-A build extension must not silently modify unrelated project files. Build steps should operate in staging/generated areas unless explicitly performing a migration accepted by the user.
+They must:
 
-### 23.11 Plugin dependency resolution and lockfiles
+- declare inputs/outputs;
+- support structured diagnostics;
+- avoid writing arbitrary undocumented project state;
+- be reproducible enough for CI.
 
-Project dependency resolution must produce a lockfile containing exact plugin/package versions and relevant native artifact hashes. A project reopened later should resolve to the same tested versions unless the developer intentionally upgrades.
+### 23.12 Dependency resolution and lockfiles
 
-Detect incompatible engine/plugin version ranges before opening in write mode or building.
+When a plugin ecosystem exists:
 
-Avoid a custom dependency solver where Dart's package system already solves Dart-package dependencies. The engine manifest should coordinate non-Dart capabilities and engine compatibility around the existing package ecosystem rather than replacing it unnecessarily.
+- record exact resolved plugin versions;
+- detect incompatible Fynkel ranges;
+- expose transitive dependencies;
+- support reproducible restoration;
+- surface conflicts before build/run.
 
-### 23.12 Security and trust
+Do not allow an editor to silently upgrade project extensions.
 
-Differentiate data-only packages from executable extensions. Native plugins, editor extensions, importers, and build extensions can execute code with developer-machine privileges.
+### 23.13 Security and trust
 
-The editor should show when a project introduces new executable extensions and require trust before executing them. Browser/local-companion mode must apply the same trust model.
+Code plugins are executable code.
 
-Do not load unknown native binaries merely to inspect project metadata.
+The editor/tooling should surface when a project introduces:
 
-### 23.13 Plugin testing
+- a native plugin;
+- an editor extension;
+- an importer/build extension;
+- a script/package requiring execution.
 
-Provide an extension test harness with:
+Trust decisions must be explicit.
 
-- API/ABI compatibility checks.
-- Schema validation tests.
-- Example project fixtures.
-- Editor extension smoke tests.
-- Headless runtime tests.
-- Importer determinism/cache tests.
-- Cross-version compatibility tests for supported ranges.
+Signed packages may be introduced later, but signatures do not replace sandboxing/review/permission design.
 
-The engine CI should maintain a small set of representative first-party/sample plugins as compatibility canaries.
+### 23.14 Plugin testing
 
-### 23.14 Plugin distribution and registry
+A future stable plugin SDK requires conformance tests for:
 
-Do not make a marketplace or proprietary registry a prerequisite for plugins. The first distribution path should use normal source/package hosting plus manifests and lockfiles.
+- load/unload;
+- version rejection;
+- state cleanup;
+- project migration;
+- error containment;
+- editor reload;
+- build/package integration;
+- unsupported platform behaviour.
 
-A curated registry or marketplace can be added later for discovery, signing, compatibility metadata, reviews, paid assets, or hosted binaries. The engine must remain capable of consuming packages outside that registry.
+Native plugin failures must not corrupt source documents.
 
-### 23.15 Extensibility acceptance gate
+### 23.15 Plugin distribution
 
-The plugin architecture is ready for stable support when an external team can implement at least one Dart gameplay package, one editor extension, and one custom importer using only documented public APIs; projects preserve unknown extension data safely; version mismatches fail clearly; and no extension requires private repository imports. Native dynamic ABI support should remain experimental until multi-version compatibility has been proven.
+Early ecosystem distribution should use the normal Dart/Rust/package ecosystems where practical.
+
+A dedicated Fynkel registry/marketplace is post-1.0 and must not be needed to build a normal Fynkel project.
+
+### 23.16 Extensibility acceptance rule
+
+For **Fynkel 1.0**, extensibility is sufficient when external developers can build reusable gameplay packages and registered behaviours without forking the engine.
+
+A **stable public plugin SDK** is ready only later, after at least several real external extension use cases validate the contracts.
+
+Do not block 1.0 on a marketplace-grade plugin platform.
 
 ## 24. Fynkel post-1.0 roadmap
 
@@ -1276,29 +2929,40 @@ Post-1.0 work should be driven by shipped games, profiler data, platform demand,
 
 After 1.0:
 
-1. Maintain backward compatibility and migration quality before major feature expansion.
-2. Improve the workflows already used by real projects before adding speculative systems.
-3. Keep advanced systems modular so a small mobile game does not pay for features it does not use.
-4. Benchmark each major renderer/runtime change against frozen reference workloads.
-5. Prefer interoperable formats and established libraries over proprietary reinvention.
-6. Keep AI/CLI/editor parity for new authoring capabilities.
+1. Protect shipped projects and migration quality before adding breadth.
+2. Improve workflows proven by real projects before speculative systems.
+3. Keep advanced systems modular so small games do not pay for unused features.
+4. Benchmark every major renderer/runtime change against frozen workloads.
+5. Prefer established libraries/formats unless a measured limitation justifies replacement.
+6. Keep CLI/editor/automation parity for new authoring features.
+7. Revisit `hecs` only through the replacement gate in §4.3.
+8. Begin browser product work only after the native engine is demonstrably stable enough that it will not starve core development.
+9. Make stable plugin APIs from proven internal extension contracts rather than guesses.
 
 ### 24.2 Phase A — 1.x stability, profiling, and workflow depth
 
-The first releases after 1.0 should concentrate on reliability:
+The first releases after 1.0 should concentrate on what shipped projects reveal:
 
-- Crash and data-loss fixes.
-- Faster startup and incremental import.
-- Better error messages and migration tooling.
-- Editor performance on larger projects.
-- Profiler timeline/capture comparison.
-- Memory/resource leak tooling.
-- Improved documentation and templates.
-- SDK ergonomics based on real game feedback.
-- More complete headless testing and automation.
-- Stable plugin APIs where evidence supports them.
+- crash/data-loss fixes;
+- faster startup;
+- incremental import improvements;
+- clearer diagnostics;
+- project migration quality;
+- editor scaling;
+- profiler capture/timeline improvements;
+- resource/memory leak tooling;
+- SDK ergonomics;
+- templates/tutorials;
+- headless test depth;
+- supported-platform hardening;
+- additional native platforms that pass qualification;
+- stable plugin APIs only where repeated external use cases exist.
 
-Avoid immediately turning 1.1 into a second 1.0-sized feature wave.
+Also benchmark `hecs` with real shipped workloads.
+
+Do not start a custom ECS project unless §4.3's gate is satisfied.
+
+Avoid turning Fynkel 1.1 into another pre-1.0 scope explosion.
 
 ### 24.3 Rendering roadmap
 
@@ -1403,16 +3067,41 @@ Rollback/prediction requires deterministic simulation policies far beyond simply
 
 ### 24.9 Browser and cloud development
 
-After connected browser editing is stable, possible expansion includes:
+Browser support begins as a **post-1.0 product track**. The M0 web spike exists only to keep the architecture compatible enough to revisit this work.
 
-- Browser-only scene/material/prefab authoring.
-- Hosted project storage integrations.
-- Remote build workers.
-- Shareable read-only scene previews.
-- Web collaboration sessions.
-- Hosted CI/testing.
+Recommended sequence:
 
-A cloud compiler/build service is a separate product/security/operations commitment. Do not make it a hidden architectural dependency of the open/local engine workflow.
+**Phase 1 — Production web runtime**
+
+- qualify Rust/Wasm/wgpu WebGPU rendering;
+- define the Dart/web bridge;
+- define browser input/audio/lifecycle;
+- establish asset/package size budgets;
+- test named browser/version combinations.
+
+**Phase 2 — Connected browser editor**
+
+- Flutter web editor client;
+- shared authoring commands/schemas;
+- authenticated local companion for project filesystem and native build/run;
+- clear trust, origin, path, and execution boundaries.
+
+**Phase 3 — Browser-only authoring**
+
+- browser project storage/import/export;
+- scene/material/prefab editing without a local companion;
+- browser-safe preview runtime.
+
+**Phase 4 — Optional hosted services**
+
+- remote builds;
+- hosted project storage;
+- shareable previews;
+- collaboration.
+
+A cloud compiler/build service is a separate security, operations, pricing, and reliability commitment. Never make it a hidden requirement for local/open development.
+
+Browser work must not force the native 1.x runtime to accept significant complexity without a measured benefit.
 
 ### 24.10 Collaboration and source-control tooling
 
@@ -1518,6 +3207,22 @@ Before a 2.0, provide migration tools, compatibility documentation, benchmark ev
 
 ### 24.19 Long-term success criteria
 
-The engine should be considered successful if independent teams can ship complete games while choosing code-first, editor-first, or hybrid workflows; the runtime remains competitive on defined workloads; project data remains transparent and durable; extensions do not require forks; browser/automation workflows share the same project model; and new engine capabilities remain accessible equally to humans, IDEs, CI systems, and AI agents.
+Fynkel is successful if independent developers/teams can ship complete games while choosing code-first, editor-first, or hybrid workflows; project data remains transparent and durable; the native runtime performs competitively on clearly defined workloads; developers can extend common gameplay without engine forks; and the SDK/editor/CLI/AI tooling all operate on the same underlying contracts.
 
-The roadmap should be reviewed after every substantial release using telemetry that users explicitly opt into where applicable, public issue trends, profiler evidence from real projects, and direct developer feedback. Feature count alone is not the objective; reliable iteration speed and shipped games are.
+Later browser, cloud, plugin, console, networking, terrain, XR, and visual tooling are successful only if they extend that foundation rather than becoming separate incompatible products.
+
+Feature count is not the primary metric.
+
+The stronger long-term metrics are:
+
+- games shipped;
+- time from project creation to playable result;
+- iteration/build times;
+- crash/data-loss rate;
+- upgrade/migration success;
+- measured performance;
+- documentation success;
+- external package/plugin reuse;
+- ability of both humans and automation to diagnose and modify projects safely.
+
+Review the roadmap after substantial releases using real project evidence, issue trends, profiling data, and direct developer feedback.
