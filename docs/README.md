@@ -7,13 +7,15 @@
 | [`design/dart-sdk.md`](design/dart-sdk.md) | Dart SDK and standard component spec. Living draft, revisited at M1. |
 | [`design/editor-ux.md`](design/editor-ux.md) | Editor UX spec. Living draft, revisited at M4. |
 | [`ideas.md`](ideas.md) | Post-1.0 ideas (plugins, roadmap). Non-binding. |
+| [`m0-architecture-report.md`](m0-architecture-report.md) | M0 go/no-go: gate results, measured numbers, Path A selected, Path C fallback. |
+| [`toolchain.md`](toolchain.md) | Frozen toolchain matrix (M0). |
 
 ## Decision index
 
 | ADR | Title | Status |
 | --- | --- | --- |
 | 0001 | 1.0 scope and native-first policy | Accepted |
-| 0002 | M0 scope and Flutter/wgpu viewport composition path | Accepted, numbers pending M0 |
+| 0002 | M0 scope and Flutter/wgpu viewport composition path | Accepted, measured; Path A selected |
 | 0003 | `hecs` behind `fynkel_ecs` | Accepted |
 | 0004 | Dart/Rust command-snapshot protocol and wire format | Accepted |
 | 0005 | License, repository, contribution, trademark | **Open** — before M3 public push |
