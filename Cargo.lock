@@ -574,6 +574,16 @@ name = "fynkel_contracts"
 version = "0.0.1"
 
 [[package]]
+name = "fynkel_core"
+version = "0.0.1"
+dependencies = [
+ "fynkel_contracts",
+ "fynkel_ecs",
+ "fynkel_scene",
+ "glam",
+]
+
+[[package]]
 name = "fynkel_ecs"
 version = "0.0.1"
 dependencies = [

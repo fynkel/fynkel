@@ -1,0 +1,13 @@
+[package]
+name = "fynkel_core"
+description = "Fynkel runtime core: world lifecycle, FrameClock, step() with the §5.1 phases, two command lanes, pull-only events, subscribed snapshots, diagnostics. No ABI, no renderer, no host loop (ADR-0007)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fynkel_contracts.workspace = true
+fynkel_ecs.workspace = true
+fynkel_scene.workspace = true
+glam.workspace = true

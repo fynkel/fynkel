@@ -703,7 +703,9 @@ Host frame begins (Flutter frame callback / winit redraw / test loop)
 | Simulation | `SetRigidBodyVelocity`, `SpawnPrefab`, `DestroyEntity`, `SetAnimatorParameter`, transform of physics/simulation objects | at the next fixed tick boundary |
 | Presentation | camera transform, transform of non-physics objects set in `lateUpdate`, material parameters, visibility, light colour | before the current frame's render extraction |
 
-A presentation transform command does two things: it overrides the extract for the current frame (that object is not interpolated this frame) **and** it is staged as the authoritative value for the next tick, so the object does not snap back. Physics-owned transforms reject presentation commands with a diagnostic; use simulation commands (forces, velocities, teleport) for them.
+A presentation transform command does two things: it overrides the extract for the current frame (that object is not interpolated this frame) **and** it is staged as the authoritative value for the next tick, so the object does not snap back. When that staged value is applied, the object (and its subtree) is treated as teleported: its S[n] interpolation source is set to the new value, so a one-off presentation write is not visibly interpolated back through the old state. Physics-owned transforms reject presentation commands with a diagnostic (`physics_owned`); structural or simulation-only commands on the presentation lane are rejected with `wrong_lane`; use simulation commands (forces, velocities, teleport) for them.
+
+Extraction renders **one tick behind**: right after a tick, alpha ≈ 0 and the extract shows S[n]; it moves towards S[n+1] over the following fixed interval. This is the standard accumulator model and the price of smooth 120 Hz presentation from a 60 Hz simulation; presentation overrides are the escape hatch for objects that must reflect this frame's input (camera).
 
 Rules:
 

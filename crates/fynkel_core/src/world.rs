@@ -1,0 +1,791 @@
+//! The runtime world: lifecycle, command lanes, `step()`, snapshots,
+//! events, diagnostics, render extraction.
+
+use std::collections::{BTreeSet, HashMap};
+
+use fynkel_contracts::{
+    ComponentId, DiagnosticCode, Entity, Status, Tick, WorldId, DEFAULT_FIXED_DT,
+    DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
+};
+use fynkel_ecs::{EcsError, World as Ecs};
+use fynkel_scene::{self as scene, Parent, SceneError, Transform, WorldTransform};
+use glam::Mat4;
+
+use crate::clock::{FrameClock, FramePlan};
+use crate::command::{Command, Lane};
+use crate::event::{Event, EventPayload, EventQueue};
+
+#[derive(Clone, Debug)]
+pub struct WorldConfig {
+    pub id: WorldId,
+    pub fixed_dt: f32,
+    pub max_steps_per_frame: u32,
+    pub max_frame_dt: f32,
+}
+
+impl Default for WorldConfig {
+    fn default() -> Self {
+        Self {
+            id: WorldId(1),
+            fixed_dt: DEFAULT_FIXED_DT as f32,
+            max_steps_per_frame: DEFAULT_MAX_STEPS_PER_FRAME,
+            max_frame_dt: MAX_FRAME_DT as f32,
+        }
+    }
+}
+
+/// Human-readable entity name (`fynkel.Name`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Name(pub String);
+
+/// Marker: the transform is written by physics; presentation-lane transform
+/// commands are rejected with `PHYSICS_OWNED` (ADR-0008).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PhysicsOwned;
+
+/// World transform at the start of the last tick (S[n]) for interpolation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PrevWorld(Transform);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Diagnostic {
+    /// Index in the batch the command came from; `u32::MAX` for diagnostics
+    /// not tied to a command (missed deadline).
+    pub command_index: u32,
+    pub lane: Lane,
+    pub code: DiagnosticCode,
+    pub entity: Entity,
+    pub component: ComponentId,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SubmitReport {
+    pub status: Status,
+    /// Simulation lane: staged. Presentation lane: applied.
+    pub accepted: u32,
+    pub rejected: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StepReport {
+    pub status: Status,
+    pub tick: Tick,
+    pub applied: u32,
+    pub rejected: u32,
+    pub snapshot_records: u32,
+    pub event_records: u32,
+    pub diagnostic_records: u32,
+    pub live_entities: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SnapshotRecord {
+    pub entity: Entity,
+    pub local: Transform,
+    pub world: Transform,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ExtractRecord {
+    pub entity: Entity,
+    pub world: Mat4,
+    /// True when a presentation override replaced interpolation this frame.
+    pub overridden: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Extract {
+    pub tick: Tick,
+    pub alpha: f32,
+    pub records: Vec<ExtractRecord>,
+}
+
+pub struct World {
+    config: WorldConfig,
+    clock: FrameClock,
+    ecs: Ecs,
+    /// Simulation commands for the next tick with their batch index and
+    /// whether they were staged by the presentation lane.
+    staged: Vec<(u32, Command, bool)>,
+    /// Entities whose next tick must not interpolate from S[n] (their
+    /// authoritative value came from a presentation override already shown).
+    teleported: Vec<Entity>,
+    /// Presentation-lane transform overrides for the current frame.
+    overrides: HashMap<Entity, Transform>,
+    events: EventQueue,
+    subscriptions: BTreeSet<Entity>,
+    snapshot: Vec<SnapshotRecord>,
+    diagnostics: Vec<Diagnostic>,
+    last_events: u32,
+    applied_this_tick: u32,
+    poisoned: bool,
+}
+
+impl World {
+    pub fn new(config: WorldConfig) -> Self {
+        let clock = FrameClock::new(
+            config.fixed_dt,
+            config.max_steps_per_frame,
+            config.max_frame_dt,
+        );
+        Self {
+            ecs: Ecs::new(config.id),
+            config,
+            clock,
+            staged: Vec::new(),
+            teleported: Vec::new(),
+            overrides: HashMap::new(),
+            events: EventQueue::default(),
+            subscriptions: BTreeSet::new(),
+            snapshot: Vec::new(),
+            diagnostics: Vec::new(),
+            last_events: 0,
+            applied_this_tick: 0,
+            poisoned: false,
+        }
+    }
+
+    pub fn config(&self) -> &WorldConfig {
+        &self.config
+    }
+    pub fn id(&self) -> WorldId {
+        self.config.id
+    }
+    pub fn clock(&self) -> &FrameClock {
+        &self.clock
+    }
+    pub fn tick(&self) -> Tick {
+        self.clock.tick()
+    }
+    pub fn alpha(&self) -> f32 {
+        self.clock.alpha()
+    }
+    pub fn live_entities(&self) -> u32 {
+        self.ecs.len()
+    }
+    /// Direct storage access for native systems and hosts; gameplay goes
+    /// through commands.
+    pub fn ecs(&self) -> &Ecs {
+        &self.ecs
+    }
+    pub fn ecs_mut(&mut self) -> &mut Ecs {
+        &mut self.ecs
+    }
+
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned
+    }
+    /// Marks the world unusable after a caught panic (ADR-0014).
+    pub fn poison(&mut self) {
+        self.poisoned = true;
+    }
+
+    // ----------------------------------------------------------------- frame
+
+    /// Starts a host frame: clears last frame's presentation overrides,
+    /// accumulates `dt`, records `MissedDeadline` when time is dropped.
+    pub fn begin_frame(&mut self, dt: f32) -> FramePlan {
+        self.overrides.clear();
+        let plan = self.clock.begin_frame(dt);
+        if plan.dropped_seconds > 0.0 {
+            self.diagnostics.push(Diagnostic {
+                command_index: u32::MAX,
+                lane: Lane::Simulation,
+                code: DiagnosticCode::MISSED_DEADLINE,
+                entity: Entity::NULL,
+                component: ComponentId::NONE,
+                message: format!(
+                    "dropped {:.4}s after {} catch-up ticks",
+                    plan.dropped_seconds, plan.steps
+                ),
+            });
+            self.events.push(Event {
+                tick: self.clock.tick(),
+                payload: EventPayload::MissedDeadline {
+                    dropped_seconds: plan.dropped_seconds,
+                },
+            });
+        }
+        plan
+    }
+
+    // -------------------------------------------------------------- commands
+
+    /// Submits a batch. Simulation commands are staged for the next tick and
+    /// only validated then; presentation commands are validated and applied
+    /// now. Rejections are in [`World::diagnostics`].
+    pub fn submit(&mut self, lane: Lane, commands: Vec<Command>) -> SubmitReport {
+        if self.poisoned {
+            return SubmitReport {
+                status: Status::Poisoned,
+                accepted: 0,
+                rejected: commands.len() as u32,
+            };
+        }
+        let mut accepted = 0;
+        let mut rejected = 0;
+        match lane {
+            Lane::Simulation => {
+                accepted = commands.len() as u32;
+                self.staged.extend(
+                    commands
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, c)| (i as u32, c, false)),
+                );
+            }
+            Lane::Presentation => {
+                for (i, cmd) in commands.into_iter().enumerate() {
+                    if self.apply_presentation(i as u32, cmd) {
+                        accepted += 1;
+                    } else {
+                        rejected += 1;
+                    }
+                }
+            }
+        }
+        SubmitReport {
+            status: if rejected == 0 {
+                Status::Ok
+            } else {
+                Status::CommandsRejected
+            },
+            accepted,
+            rejected,
+        }
+    }
+
+    fn reject(
+        &mut self,
+        index: u32,
+        lane: Lane,
+        code: DiagnosticCode,
+        entity: Entity,
+        component: ComponentId,
+        message: impl Into<String>,
+    ) -> bool {
+        self.diagnostics.push(Diagnostic {
+            command_index: index,
+            lane,
+            code,
+            entity,
+            component,
+            message: message.into(),
+        });
+        false
+    }
+
+    fn check_entity(&mut self, index: u32, lane: Lane, e: Entity, what: &str) -> bool {
+        if e.world() != self.config.id {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::WRONG_WORLD,
+                e,
+                ComponentId::NONE,
+                format!("{what}: entity belongs to world {}", e.world().0),
+            );
+        }
+        if !self.ecs.contains(e) {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::STALE_ENTITY,
+                e,
+                ComponentId::NONE,
+                format!("{what}: stale or unknown entity"),
+            );
+        }
+        true
+    }
+
+    fn apply_presentation(&mut self, index: u32, cmd: Command) -> bool {
+        let lane = Lane::Presentation;
+        if !cmd.allowed_on_presentation() {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::WRONG_LANE,
+                cmd.target().unwrap_or(Entity::NULL),
+                ComponentId::NONE,
+                "structural/simulation command on the presentation lane",
+            );
+        }
+        match cmd {
+            Command::SetTransform { entity, transform } => {
+                if !self.check_entity(index, lane, entity, "set_transform") {
+                    return false;
+                }
+                if !transform.is_finite() {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::INVALID_PAYLOAD,
+                        entity,
+                        ComponentId::TRANSFORM,
+                        "transform is not finite",
+                    );
+                }
+                if self.ecs.has::<PhysicsOwned>(entity) {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::PHYSICS_OWNED,
+                        entity,
+                        ComponentId::TRANSFORM,
+                        "transform is physics-owned; use simulation commands",
+                    );
+                }
+                if !self.ecs.has::<Transform>(entity) {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::MISSING_COMPONENT,
+                        entity,
+                        ComponentId::TRANSFORM,
+                        "entity has no Transform",
+                    );
+                }
+                // Override this frame's extract and become authoritative at
+                // the next tick (ADR-0008).
+                self.overrides.insert(entity, transform);
+                self.staged
+                    .push((index, Command::SetTransform { entity, transform }, true));
+                true
+            }
+            Command::SetName { entity, name } => {
+                if !self.check_entity(index, lane, entity, "set_name") {
+                    return false;
+                }
+                self.ecs.insert(entity, Name(name)).is_ok()
+            }
+            _ => unreachable!("allowed_on_presentation"),
+        }
+    }
+
+    fn apply_simulation(&mut self, index: u32, cmd: Command, tick: Tick) -> bool {
+        let lane = Lane::Simulation;
+        match cmd {
+            Command::Spawn {
+                temp_id,
+                transform,
+                parent,
+                name,
+            } => {
+                if temp_id == 0 {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::INVALID_TEMP_ID,
+                        Entity::NULL,
+                        ComponentId::NONE,
+                        "spawn temp id must be non-zero",
+                    );
+                }
+                if !transform.is_finite() {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::INVALID_PAYLOAD,
+                        Entity::NULL,
+                        ComponentId::TRANSFORM,
+                        "transform is not finite",
+                    );
+                }
+                if let Some(p) = parent {
+                    if !self.check_entity(index, lane, p, "spawn parent") {
+                        return false;
+                    }
+                }
+                let e = match scene::spawn(&mut self.ecs, transform, parent) {
+                    Ok(e) => e,
+                    Err(err) => return self.reject_scene(index, lane, Entity::NULL, err),
+                };
+                if let Some(n) = name {
+                    let _ = self.ecs.insert(e, Name(n));
+                }
+                self.events.push(Event {
+                    tick,
+                    payload: EventPayload::Spawned { temp_id, entity: e },
+                });
+                true
+            }
+            Command::Destroy(entity) => {
+                if !self.check_entity(index, lane, entity, "destroy") {
+                    return false;
+                }
+                let gone = match scene::despawn_subtree(&mut self.ecs, entity) {
+                    Ok(v) => v,
+                    Err(err) => return self.reject_scene(index, lane, entity, err),
+                };
+                for e in gone {
+                    self.subscriptions.remove(&e);
+                    self.overrides.remove(&e);
+                    self.events.push(Event {
+                        tick,
+                        payload: EventPayload::Destroyed { entity: e },
+                    });
+                }
+                true
+            }
+            Command::SetTransform { entity, transform } => {
+                if !self.check_entity(index, lane, entity, "set_transform") {
+                    return false;
+                }
+                if !transform.is_finite() {
+                    return self.reject(
+                        index,
+                        lane,
+                        DiagnosticCode::INVALID_PAYLOAD,
+                        entity,
+                        ComponentId::TRANSFORM,
+                        "transform is not finite",
+                    );
+                }
+                match scene::set_local(&self.ecs, entity, transform) {
+                    Ok(()) => true,
+                    Err(err) => self.reject_scene(index, lane, entity, err),
+                }
+            }
+            Command::SetParent {
+                child,
+                parent,
+                keep_world,
+            } => {
+                if !self.check_entity(index, lane, child, "set_parent child") {
+                    return false;
+                }
+                if let Some(p) = parent {
+                    if !self.check_entity(index, lane, p, "set_parent parent") {
+                        return false;
+                    }
+                }
+                let r = if keep_world {
+                    // Cached world matrices must reflect earlier commands in
+                    // this batch.
+                    scene::propagate(&mut self.ecs);
+                    scene::set_parent_keep_world(&mut self.ecs, child, parent)
+                } else {
+                    scene::set_parent_keep_local(&mut self.ecs, child, parent)
+                };
+                match r {
+                    Ok(()) => {
+                        self.events.push(Event {
+                            tick,
+                            payload: EventPayload::ParentChanged { child, parent },
+                        });
+                        true
+                    }
+                    Err(err) => self.reject_scene(index, lane, child, err),
+                }
+            }
+            Command::SetName { entity, name } => {
+                if !self.check_entity(index, lane, entity, "set_name") {
+                    return false;
+                }
+                self.ecs.insert(entity, Name(name)).is_ok()
+            }
+        }
+    }
+
+    fn reject_scene(&mut self, index: u32, lane: Lane, entity: Entity, err: SceneError) -> bool {
+        let (code, entity, component, msg) = match err {
+            SceneError::Cycle { child, parent } => (
+                DiagnosticCode::HIERARCHY_CYCLE,
+                child,
+                ComponentId::HIERARCHY,
+                format!("parent {parent:?} is {child:?} or a descendant of it"),
+            ),
+            SceneError::NotFinite(e) => (
+                DiagnosticCode::INVALID_PAYLOAD,
+                if e.is_null() { entity } else { e },
+                ComponentId::TRANSFORM,
+                "transform is not finite".to_string(),
+            ),
+            SceneError::Ecs(EcsError::StaleEntity(e)) => (
+                DiagnosticCode::STALE_ENTITY,
+                e,
+                ComponentId::NONE,
+                "stale or unknown entity".to_string(),
+            ),
+            SceneError::Ecs(EcsError::MissingComponent(e)) => (
+                DiagnosticCode::MISSING_COMPONENT,
+                e,
+                ComponentId::TRANSFORM,
+                "entity has no Transform".to_string(),
+            ),
+        };
+        self.reject(index, lane, code, entity, component, msg)
+    }
+
+    // ------------------------------------------------------------------ step
+
+    /// One fixed tick (§5.1). Applies staged simulation commands, runs the
+    /// native phases, propagates transforms, publishes S[n+1], the tick's
+    /// events and the snapshot.
+    pub fn step(&mut self) -> StepReport {
+        if self.poisoned {
+            return StepReport {
+                status: Status::Poisoned,
+                tick: self.clock.tick(),
+                applied: 0,
+                rejected: 0,
+                snapshot_records: 0,
+                event_records: 0,
+                diagnostic_records: 0,
+                live_entities: self.ecs.len(),
+            };
+        }
+        self.diagnostics.clear();
+        self.events.begin_tick();
+        let next_tick = self.clock.tick() + 1;
+
+        // S[n] becomes the interpolation source.
+        self.record_prev_world();
+
+        // Validate/apply C[n] at the tick boundary.
+        let staged = std::mem::take(&mut self.staged);
+        let mut applied = 0;
+        let mut rejected = 0;
+        for (index, cmd, from_presentation) in staged {
+            let target = cmd.target();
+            if self.apply_simulation(index, cmd, next_tick) {
+                if from_presentation {
+                    self.teleported.extend(target);
+                }
+                applied += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+
+        // Native pre-tick systems, physics, post-physics sync, animation:
+        // no producers in M1; the phase order is fixed here.
+
+        // Deferred structural changes.
+        for e in self.ecs.flush_deferred() {
+            self.subscriptions.remove(&e);
+            self.overrides.remove(&e);
+        }
+
+        // Transform/hierarchy work for the tick; new entities start with
+        // PrevWorld == current so they do not interpolate from the origin.
+        scene::propagate(&mut self.ecs);
+        self.seed_prev_world();
+        self.apply_teleports();
+
+        let tick = self.clock.consume_step();
+        debug_assert_eq!(tick, next_tick);
+        self.applied_this_tick = applied;
+
+        self.publish_snapshot();
+        self.events.publish_tick();
+        self.last_events = self.events.pending() as u32;
+
+        let diagnostic_records = self.diagnostics.len() as u32;
+        StepReport {
+            status: if rejected == 0 {
+                Status::Ok
+            } else {
+                Status::CommandsRejected
+            },
+            tick,
+            applied,
+            rejected,
+            snapshot_records: self.snapshot.len() as u32,
+            event_records: self.last_events,
+            diagnostic_records,
+            live_entities: self.ecs.len(),
+        }
+    }
+
+    fn record_prev_world(&mut self) {
+        let h = self.ecs.hecs_mut();
+        for (wt, prev) in h.query_mut::<(&WorldTransform, &mut PrevWorld)>() {
+            prev.0 = Transform::from_matrix(wt.matrix);
+        }
+    }
+
+    /// A value already shown through a presentation override must not be
+    /// interpolated towards from S[n] once it becomes authoritative, or the
+    /// object would visibly snap back for one tick.
+    fn apply_teleports(&mut self) {
+        let roots = std::mem::take(&mut self.teleported);
+        for root in roots {
+            for e in scene::subtree(&self.ecs, root) {
+                let Ok(wt) = self.ecs.copy::<WorldTransform>(e) else {
+                    continue;
+                };
+                if let Ok(mut prev) = self.ecs.get_mut::<PrevWorld>(e) {
+                    prev.0 = Transform::from_matrix(wt.matrix);
+                }
+            }
+        }
+    }
+
+    fn seed_prev_world(&mut self) {
+        let mut fresh = Vec::new();
+        {
+            let h = self.ecs.hecs();
+            for (e, wt) in h
+                .query::<fynkel_ecs::internal::hecs::Without<
+                    (fynkel_ecs::internal::hecs::Entity, &WorldTransform),
+                    &PrevWorld,
+                >>()
+                .iter()
+            {
+                fresh.push((e, Transform::from_matrix(wt.matrix)));
+            }
+        }
+        let h = self.ecs.hecs_mut();
+        for (e, t) in fresh {
+            let _ = h.insert_one(e, PrevWorld(t));
+        }
+    }
+
+    fn publish_snapshot(&mut self) {
+        self.snapshot.clear();
+        for &e in &self.subscriptions {
+            let (Ok(local), Ok(wt)) = (
+                self.ecs.copy::<Transform>(e),
+                self.ecs.get::<WorldTransform>(e),
+            ) else {
+                continue;
+            };
+            self.snapshot.push(SnapshotRecord {
+                entity: e,
+                local,
+                world: Transform::from_matrix(wt.matrix),
+            });
+        }
+    }
+
+    // --------------------------------------------------------------- reads
+
+    /// Subscribes (or unsubscribes) entities for the transform snapshot.
+    /// Unknown/stale handles are ignored; destroyed entities drop out.
+    pub fn subscribe(&mut self, entities: &[Entity], enable: bool) {
+        for &e in entities {
+            if enable {
+                if self.ecs.contains(e) {
+                    self.subscriptions.insert(e);
+                }
+            } else {
+                self.subscriptions.remove(&e);
+            }
+        }
+    }
+
+    pub fn subscriptions(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.subscriptions.iter().copied()
+    }
+
+    /// Coherent S[n+1] of subscribed entities, in handle order.
+    pub fn snapshot(&self) -> &[SnapshotRecord] {
+        &self.snapshot
+    }
+
+    /// Diagnostics since the last `step()` began (rejections from that step
+    /// and from presentation submits after it).
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    /// Pull-only drain: general events plus the last tick's physics events.
+    pub fn drain_events(&mut self) -> Vec<Event> {
+        self.events.drain()
+    }
+
+    /// Physics events of the tick just stepped (for `afterPhysics`).
+    pub fn after_physics_events(&self) -> &[Event] {
+        self.events.after_physics()
+    }
+
+    /// Queues a general-lane event from a native system or host (e.g.
+    /// `SceneReady` after a load completes).
+    pub fn push_event(&mut self, payload: EventPayload) {
+        self.events.push(Event {
+            tick: self.clock.tick(),
+            payload,
+        });
+    }
+
+    // -------------------------------------------------------------- extract
+
+    /// Render extraction: every spatial entity's world matrix interpolated
+    /// S[n]..S[n+1] by alpha, with presentation overrides applied (an
+    /// overridden entity and its descendants skip interpolation).
+    pub fn extract(&self) -> Extract {
+        let alpha = self.clock.alpha();
+        let mut memo: HashMap<Entity, (Mat4, bool)> = HashMap::new();
+        let mut records = Vec::with_capacity(self.ecs.len() as usize);
+        let entities: Vec<Entity> = self.ecs.entities().collect();
+        for e in entities {
+            if !self.ecs.has::<WorldTransform>(e) {
+                continue;
+            }
+            let (world, overridden) = self.resolve_extract(e, alpha, &mut memo);
+            records.push(ExtractRecord {
+                entity: e,
+                world,
+                overridden,
+            });
+        }
+        Extract {
+            tick: self.clock.tick(),
+            alpha,
+            records,
+        }
+    }
+
+    fn resolve_extract(
+        &self,
+        e: Entity,
+        alpha: f32,
+        memo: &mut HashMap<Entity, (Mat4, bool)>,
+    ) -> (Mat4, bool) {
+        if let Some(r) = memo.get(&e) {
+            return *r;
+        }
+        let parent = self.ecs.get::<Parent>(e).ok().map(|p| p.0);
+        let parent_res = parent.map(|p| self.resolve_extract(p, alpha, memo));
+        let parent_overridden = parent_res.is_some_and(|r| r.1);
+        let result = if let Some(t) = self.overrides.get(&e) {
+            let pw = parent_res.map(|r| r.0).unwrap_or(Mat4::IDENTITY);
+            (pw * t.matrix(), true)
+        } else if parent_overridden {
+            let local = self.ecs.copy::<Transform>(e).unwrap_or_default();
+            (parent_res.unwrap().0 * local.matrix(), true)
+        } else {
+            let cur = self
+                .ecs
+                .get::<WorldTransform>(e)
+                .map(|w| Transform::from_matrix(w.matrix))
+                .unwrap_or_default();
+            let prev = self.ecs.copy::<PrevWorld>(e).map(|p| p.0).unwrap_or(cur);
+            (lerp(prev, cur, alpha).matrix(), false)
+        };
+        memo.insert(e, result);
+        result
+    }
+
+    /// Total events published by the last step (test/stat hook).
+    pub fn last_event_count(&self) -> u32 {
+        self.last_events
+    }
+}
+
+fn lerp(a: Transform, b: Transform, t: f32) -> Transform {
+    if t <= 0.0 {
+        return a;
+    }
+    if t >= 1.0 {
+        return b;
+    }
+    Transform {
+        position: a.position.lerp(b.position, t),
+        rotation: a.rotation.slerp(b.rotation, t),
+        scale: a.scale.lerp(b.scale, t),
+    }
+}

@@ -56,6 +56,9 @@ impl DiagnosticCode {
     /// Time dropped after `max_steps_per_frame` catch-up ticks.
     pub const MISSED_DEADLINE: DiagnosticCode = DiagnosticCode(10);
     pub const DUPLICATE_COMPONENT: DiagnosticCode = DiagnosticCode(11);
+    /// A structural or simulation-only command was submitted on the
+    /// presentation lane.
+    pub const WRONG_LANE: DiagnosticCode = DiagnosticCode(12);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -70,6 +73,7 @@ impl DiagnosticCode {
             9 => "physics_owned",
             10 => "missed_deadline",
             11 => "duplicate_component",
+            12 => "wrong_lane",
             _ => "unknown",
         }
     }
