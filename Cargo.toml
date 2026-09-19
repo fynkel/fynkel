@@ -1,7 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["hosts/standalone", "crates/fynkel_m0_scene", "crates/fynkel_m0",
-    "crates/fynkel_native"]
+members = [
+    "crates/fynkel_contracts",
+    "crates/fynkel_ecs",
+    "crates/fynkel_m0_scene",
+    "crates/fynkel_m0",
+    "crates/fynkel_native",
+    "hosts/standalone",
+]
 
 [workspace.package]
 version = "0.0.1"
@@ -17,6 +23,9 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 pollster = "1.0.1"
 log = "0.4.34"
 env_logger = "0.11.11"
+hecs = "0.11.1"
+fynkel_contracts = { path = "crates/fynkel_contracts" }
+fynkel_ecs = { path = "crates/fynkel_ecs" }
 
 [profile.release]
 debug = 1   # keep symbols for profiling M0 baselines

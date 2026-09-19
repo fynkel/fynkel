@@ -1,0 +1,11 @@
+[package]
+name = "fynkel_ecs"
+description = "Fynkel-owned ECS facade over hecs: generational runtime handles, component access, deferred structural changes. hecs is an implementation detail (ADR-0003)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fynkel_contracts.workspace = true
+hecs.workspace = true

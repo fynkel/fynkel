@@ -28,6 +28,7 @@ Frozen for M0 on the reference machine. Upgrades are deliberate changes (bluepri
 | winit | 0.30.13 | standalone host window/event loop (0.31 is beta; not adopted) |
 | glam | 0.33.7 | math, `bytemuck` feature for GPU upload |
 | bytemuck | 1.25.2 | POD casts |
+| hecs | 0.11.1 | ECS storage behind `fynkel_ecs` (ADR-0003) |
 | pollster | 1.0.1 | block on wgpu async setup |
 | log / env_logger | 0.4.34 / 0.11.11 | logging |
 
