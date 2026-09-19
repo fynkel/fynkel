@@ -160,7 +160,20 @@ pub struct IoSurfaceRing {
 
 impl IoSurfaceRing {
     /// Creates a Metal device and a ring of `buffer_count` surfaces.
+    ///
+    /// Runs in its own autorelease pool, like [`Self::resize`] and the
+    /// completion path of [`Self::render_with`]: Metal and IOSurface
+    /// autorelease on the calling thread, which need not have a pool.
     pub fn new(
+        width: u32,
+        height: u32,
+        buffer_count: u32,
+        sync_mode: SyncMode,
+    ) -> Result<Self, String> {
+        objc2::rc::autoreleasepool(|_| Self::new_in_pool(width, height, buffer_count, sync_mode))
+    }
+
+    fn new_in_pool(
         width: u32,
         height: u32,
         buffer_count: u32,
@@ -266,6 +279,10 @@ impl IoSurfaceRing {
         if width == self.width && height == self.height {
             return Ok(());
         }
+        objc2::rc::autoreleasepool(|_| self.resize_in_pool(width, height))
+    }
+
+    fn resize_in_pool(&mut self, width: u32, height: u32) -> Result<(), String> {
         let t0 = Instant::now();
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
         let count = self.surfaces.len() as u32;
@@ -348,9 +365,12 @@ impl IoSurfaceRing {
                 let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
                 mark_ready();
             }
-            SyncMode::MetalCompletion => {
+            SyncMode::MetalCompletion => objc2::rc::autoreleasepool(|_| {
                 // Command buffers on one MTLCommandQueue complete in commit
-                // order, so this empty buffer completes after the frame.
+                // order, so this empty buffer completes after the frame. The
+                // pool drains what Metal autoreleases here (the caller's
+                // thread may have none: Rust hosts, tests), else every frame
+                // retains a command buffer (M1 leak test).
                 let fence = self
                     .mtl_queue
                     .commandBuffer()
@@ -363,7 +383,7 @@ impl IoSurfaceRing {
                 // SAFETY: the block is retained by Metal until it has run.
                 unsafe { fence.addCompletedHandler(block2::RcBlock::as_ptr(&block)) };
                 fence.commit();
-            }
+            }),
         }
 
         let mut st = self.stats.lock().unwrap();

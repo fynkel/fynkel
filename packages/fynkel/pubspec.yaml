@@ -15,5 +15,6 @@ dependencies:
 
 dev_dependencies:
   ffigen: ^20.0.0
+  vm_service: ^15.0.0 # tool/alloc_bench.dart
   test: ^1.25.0
   lints: ^6.0.0

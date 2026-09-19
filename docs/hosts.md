@@ -107,3 +107,19 @@ is M6.
 Path C (engine-owned `CAMetalLayer`) was an M0 prototype; it is not carried
 into `platform/apple`. Its numbers remain in `benchmarks/m0/results`, its
 code at the M0 commits (ADR-0002 keeps it as the documented fallback).
+
+## Per-frame cost instrumentation (M1-10)
+
+Three probes feed the M1 gate (`docs/m1-gate-report.md`) and are run by
+`python3 benchmarks/m0/capture.py` alongside the host benchmarks:
+
+- `dart run tool/alloc_bench.dart [--frames N] [--satellites K] [--json]` in
+  `packages/fynkel`: the Flutter demo scene without a renderer, driven from
+  Dart; reports heap bytes per frame (heap-usage deltas after forced GC, chunks
+  with a GC event excluded), GC count and pause time from the VM service.
+  JIT numbers; the class breakdown is indicative only.
+- `cargo test --release -p fynkel_native --test leak`: counting global
+  allocator over repeated runtime + world lifetimes; bytes in use after
+  teardown must equal the baseline.
+- `cargo test --release -p fynkel_platform_apple --test lifetime`: repeated
+  viewport create/render/resize/destroy; process RSS growth bounded.

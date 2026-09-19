@@ -21,6 +21,15 @@ class WireBuffer {
     if (bytes.length < bufferHeaderSize) {
       throw FormatException('buffer shorter than its header (${bytes.length} bytes)');
     }
+    reparse();
+  }
+
+  /// Re-reads the header (and re-slices records/tail when the layout moved)
+  /// after the native side rewrote the same memory. The bridge keeps one
+  /// [WireBuffer] per output family and reparses it while the view's
+  /// address and length are unchanged, so a steady-state frame allocates
+  /// no views (M1 gate).
+  void reparse() {
     final d = ByteData.sublistView(bytes);
     if (d.getUint32(0, Endian.little) != bufferMagic) throw const FormatException('bad buffer magic');
     final version = d.getUint16(4, Endian.little);
@@ -31,13 +40,16 @@ class WireBuffer {
     if (byteLength != bytes.length) {
       throw FormatException('buffer declares $byteLength bytes, view has ${bytes.length}');
     }
-    recordsEnd = d.getUint32(16, Endian.little);
-    if (recordsEnd < bufferHeaderSize || recordsEnd > bytes.length) {
-      throw FormatException('bad records_end $recordsEnd');
+    final end = d.getUint32(16, Endian.little);
+    if (end < bufferHeaderSize || end > bytes.length) {
+      throw FormatException('bad records_end $end');
     }
     requestId = d.getUint32(20, Endian.little);
-    records = ByteData.sublistView(bytes, bufferHeaderSize, recordsEnd);
-    tail = Uint8List.sublistView(bytes, recordsEnd);
+    if (end != recordsEnd) {
+      recordsEnd = end;
+      records = ByteData.sublistView(bytes, bufferHeaderSize, end);
+      tail = Uint8List.sublistView(bytes, end);
+    }
   }
 
   static final WireBuffer empty = WireBuffer(_emptyBytes());
@@ -53,12 +65,12 @@ class WireBuffer {
   }
 
   final Uint8List bytes;
-  late final int kind;
-  late final int recordCount;
-  late final int recordsEnd;
-  late final int requestId;
-  late final ByteData records;
-  late final Uint8List tail;
+  int kind = 0;
+  int recordCount = 0;
+  int recordsEnd = -1;
+  int requestId = 0;
+  late ByteData records;
+  late Uint8List tail;
 
   int get byteLength => bytes.length;
 
@@ -77,9 +89,16 @@ class WireBuffer {
 /// buffer grows to the largest batch and is reused; strings are appended
 /// to a tail after the records.
 class CommandBatch {
-  CommandBatch([int initialCapacity = 4096]) : _bytes = ByteData(initialCapacity);
+  CommandBatch([int initialCapacity = 4096])
+      : _bytes = ByteData(initialCapacity),
+        _view = Uint8List(0) {
+    _view = _bytes.buffer.asUint8List();
+  }
 
   ByteData _bytes;
+
+  /// Whole backing store as bytes (rebuilt only when it grows).
+  Uint8List _view;
   int _len = bufferHeaderSize;
   int _count = 0;
   final WireStrings _strings = WireStrings();
@@ -90,7 +109,7 @@ class CommandBatch {
   void clear() {
     _len = bufferHeaderSize;
     _count = 0;
-    _strings.takeBytes();
+    _strings.clear();
   }
 
   void _reserve(int extra) {
@@ -100,35 +119,62 @@ class CommandBatch {
       cap *= 2;
     }
     final grown = ByteData(cap);
-    grown.buffer.asUint8List().setRange(0, _len, _bytes.buffer.asUint8List());
+    grown.buffer.asUint8List().setRange(0, _len, _view);
     _bytes = grown;
+    _view = grown.buffer.asUint8List();
   }
 
-  /// Appends one command: header + [bodySize] bytes written by [encode].
-  void command(int kind, int bodySize, void Function(ByteData d, int o, WireStrings s) encode) {
+  /// Appends one command: header + [bodySize] bytes written by [record].
+  /// Allocation-free (M1 gate): header fields are written in place and the
+  /// record encodes through its interface, not a tear-off.
+  void command(int kind, int bodySize, WireRecord record) {
+    final o = _begin(kind, bodySize);
+    record.encode(_bytes, o, _strings);
+  }
+
+  int _begin(int kind, int bodySize) {
     _reserve(CommandHeader.wireSize + bodySize);
-    CommandHeader(kind: kind, size: bodySize).encode(_bytes, _len, _strings);
+    _bytes.setUint32(_len, kind, Endian.little);
+    _bytes.setUint32(_len + 4, bodySize, Endian.little);
     _len += CommandHeader.wireSize;
     _bytes.buffer.asUint8List(_len, bodySize).fillRange(0, bodySize, 0);
-    encode(_bytes, _len, _strings);
+    final o = _len;
     _len += bodySize;
     _count++;
+    return o;
   }
 
-  void spawn(SpawnCommand c) => command(SpawnCommand.commandKind, SpawnCommand.wireSize, c.encode);
-  void destroy(DestroyCommand c) => command(DestroyCommand.commandKind, DestroyCommand.wireSize, c.encode);
-  void setTransform(SetTransformCommand c) =>
-      command(SetTransformCommand.commandKind, SetTransformCommand.wireSize, c.encode);
-  void setParent(SetParentCommand c) => command(SetParentCommand.commandKind, SetParentCommand.wireSize, c.encode);
-  void setName(SetNameCommand c) => command(SetNameCommand.commandKind, SetNameCommand.wireSize, c.encode);
+  void spawn(SpawnCommand c) => command(SpawnCommand.commandKind, SpawnCommand.wireSize, c);
+  void destroy(DestroyCommand c) => command(DestroyCommand.commandKind, DestroyCommand.wireSize, c);
+  void setTransform(SetTransformCommand c) => command(SetTransformCommand.commandKind, SetTransformCommand.wireSize, c);
+
+  /// The hot path (one per moving object per tick) without the command
+  /// record: entity, then the transform, as `SetTransformCommand.encode`
+  /// lays them out.
+  void setTransformOf(int entity, Transform t) {
+    final o = _begin(SetTransformCommand.commandKind, SetTransformCommand.wireSize);
+    _bytes.setUint64(o, entity, Endian.little);
+    t.encode(_bytes, o + 8, _strings);
+  }
+
+  void setParent(SetParentCommand c) => command(SetParentCommand.commandKind, SetParentCommand.wireSize, c);
+  void setName(SetNameCommand c) => command(SetNameCommand.commandKind, SetNameCommand.wireSize, c);
 
   /// Finalizes header and tail; returns a view (valid until [clear]).
-  Uint8List encoded() {
-    final tail = _strings.takeBytes();
-    _reserve(tail.length);
+  Uint8List encoded() => Uint8List.sublistView(_view, 0, finalize());
+
+  /// Finalizes header and tail in place and returns the encoded length; the
+  /// bytes are the first [finalize] bytes of [backingStore]. This is the
+  /// allocation-free form [encoded] wraps.
+  int finalize() {
     final recordsEnd = _len;
-    _bytes.buffer.asUint8List(_len, tail.length).setAll(0, tail);
-    final total = _len + tail.length;
+    var total = _len;
+    if (_strings.length != 0) {
+      final tail = _strings.takeBytes();
+      _reserve(tail.length);
+      _view.setRange(_len, _len + tail.length, tail);
+      total += tail.length;
+    }
     _bytes.setUint32(0, bufferMagic, Endian.little);
     _bytes.setUint16(4, abiVersion, Endian.little);
     _bytes.setUint16(6, bufferKindValue(BufferKind.commands), Endian.little);
@@ -136,6 +182,8 @@ class CommandBatch {
     _bytes.setUint32(12, total, Endian.little);
     _bytes.setUint32(16, recordsEnd, Endian.little);
     _bytes.setUint32(20, 0, Endian.little);
-    return _bytes.buffer.asUint8List(0, total);
+    return total;
   }
+
+  Uint8List get backingStore => _view;
 }

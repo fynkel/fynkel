@@ -224,7 +224,7 @@ fn dart(fp: u64) -> String {
             s.id,
             s.wire_size()
         );
-        let _ = writeln!(o, "class {name} {{");
+        let _ = writeln!(o, "class {name} implements WireRecord {{");
         // constructor
         if s.fields.is_empty() {
             let _ = writeln!(o, "  const {name}();");
@@ -270,7 +270,7 @@ fn dart(fp: u64) -> String {
         );
         let _ = writeln!(
             o,
-            "  void encode(ByteData d, int offset, WireStrings strings) {{"
+            "  @override\n  void encode(ByteData d, int offset, WireStrings strings) {{"
         );
         for (f, off) in s.fields.iter().zip(&offsets) {
             let v = camel(f.name);

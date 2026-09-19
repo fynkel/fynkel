@@ -8,6 +8,7 @@
 | [`design/editor-ux.md`](design/editor-ux.md) | Editor UX spec. Living draft, revisited at M4. |
 | [`ideas.md`](ideas.md) | Post-1.0 ideas (plugins, roadmap). Non-binding. |
 | [`m0-architecture-report.md`](m0-architecture-report.md) | M0 go/no-go: gate results, measured numbers, Path A selected, Path C fallback. |
+| [`m1-gate-report.md`](m1-gate-report.md) | M1 go/no-go: gate results, Dart allocation per frame, leak tests, bandwidth. |
 | [`toolchain.md`](toolchain.md) | Frozen toolchain matrix (M0). |
 | [`codegen.md`](codegen.md) | Schema codegen pipeline: Rust structs → JSON Schema, Dart and Rust codecs, fixtures (M1). |
 | [`hosts.md`](hosts.md) | The hosts sharing the core (headless, standalone, Flutter) and how each drives `step()` (M1). |

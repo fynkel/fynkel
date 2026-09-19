@@ -129,6 +129,11 @@ class NativeLibrary {
   void dispose() => fynkel_runtime_destroy(_runtime);
 }
 
+class _ViewCache {
+  WireBuffer? buffer;
+  int address = 0, length = 0;
+}
+
 class NativeWorld {
   NativeWorld._(this._w)
       : _plan = calloc<FynkelFramePlan>(),
@@ -149,6 +154,7 @@ class NativeWorld {
   // Reused native scratch for command bytes (grown on demand) so a submit is
   // one memcpy + one FFI call, no allocation in steady state.
   Pointer<Uint8> _scratch = nullptr;
+  Uint8List _scratchView = Uint8List(0);
   int _scratchLen = 0;
 
   int ffiCalls = 0, dartCopies = 0, dartBytesCopied = 0;
@@ -182,17 +188,22 @@ class NativeWorld {
     return FramePlan(p.steps, p.dropped_seconds, p.clamped != 0, p.alpha);
   }
 
-  SubmitResult submit(CommandLane lane, Uint8List bytes) {
-    if (bytes.length > _scratchLen) {
+  SubmitResult submit(CommandLane lane, Uint8List bytes) => submitBytes(lane, bytes, bytes.length);
+
+  /// Submits the first [length] bytes of [bytes]: one memcpy into reused
+  /// native scratch, one FFI call, no Dart allocation besides the result.
+  SubmitResult submitBytes(CommandLane lane, Uint8List bytes, int length) {
+    if (length > _scratchLen) {
       if (_scratch != nullptr) calloc.free(_scratch);
-      _scratchLen = bytes.length * 2;
+      _scratchLen = length * 2;
       _scratch = calloc<Uint8>(_scratchLen);
+      _scratchView = _scratch.asTypedList(_scratchLen);
     }
-    _scratch.asTypedList(_scratchLen).setRange(0, bytes.length, bytes);
+    _scratchView.setRange(0, length, bytes);
     dartCopies++;
-    dartBytesCopied += bytes.length;
+    dartBytesCopied += length;
     ffiCalls++;
-    final s = fynkel_world_submit_commands(_w, lane.index, _scratch, bytes.length, _submit);
+    final s = fynkel_world_submit_commands(_w, lane.index, _scratch, length, _submit);
     return SubmitResult(s, _submit.ref.accepted, _submit.ref.rejected);
   }
 
@@ -216,29 +227,48 @@ class NativeWorld {
     }
   }
 
-  WireBuffer _wrap(FynkelBufferView v) =>
-      v.length == 0 ? WireBuffer.empty : WireBuffer(v.data.asTypedList(v.length));
+  // One cached view per output family: the native side reuses its buffers,
+  // so in steady state the address and length repeat and the WireBuffer is
+  // reparsed instead of re-created (no allocation).
+  final _snapshotView = _ViewCache();
+  final _diagnosticsView = _ViewCache();
+  final _eventsView = _ViewCache();
+  final _afterPhysicsView = _ViewCache();
+  final _queryView = _ViewCache();
+
+  WireBuffer _wrap(FynkelBufferView v, _ViewCache cache) {
+    if (v.length == 0) return WireBuffer.empty;
+    final address = v.data.address;
+    final cached = cache.buffer;
+    if (cached != null && cache.address == address && cache.length == v.length) {
+      cached.reparse();
+      return cached;
+    }
+    cache.address = address;
+    cache.length = v.length;
+    return cache.buffer = WireBuffer(v.data.asTypedList(v.length));
+  }
 
   /// Subscribed transforms after the last step (read in place, no copy).
   WireBuffer get snapshot {
     ffiCalls++;
-    return _wrap(fynkel_world_snapshot(_w));
+    return _wrap(fynkel_world_snapshot(_w), _snapshotView);
   }
 
   WireBuffer get diagnostics {
     ffiCalls++;
-    return _wrap(fynkel_world_diagnostics(_w));
+    return _wrap(fynkel_world_diagnostics(_w), _diagnosticsView);
   }
 
   /// Pull-only: moves pending events into the returned view.
   WireBuffer drainEvents() {
     ffiCalls++;
-    return _wrap(fynkel_world_drain_events(_w));
+    return _wrap(fynkel_world_drain_events(_w), _eventsView);
   }
 
   WireBuffer get afterPhysicsEvents {
     ffiCalls++;
-    return _wrap(fynkel_world_after_physics_events(_w));
+    return _wrap(fynkel_world_after_physics_events(_w), _afterPhysicsView);
   }
 
   int _requestId = 0;
@@ -251,7 +281,7 @@ class NativeWorld {
     ffiCalls++;
     final s = fynkel_world_query(_w, _query, _view);
     _check(s, 'query');
-    final b = _wrap(_view.ref);
+    final b = _wrap(_view.ref, _queryView);
     assert(b.requestId == _requestId);
     return b;
   }

@@ -7,6 +7,13 @@ import 'dart:typed_data';
 import '../../math.dart';
 
 /// Collects strings while encoding; the bytes form the buffer's string tail.
+/// Every generated record: fixed-size body written at [encode]'s offset,
+/// strings in the tail. Lets [CommandBatch] encode without a per-command
+/// closure (tear-off) allocation.
+abstract interface class WireRecord {
+  void encode(ByteData d, int offset, WireStrings strings);
+}
+
 class WireStrings {
   final BytesBuilder _b = BytesBuilder(copy: false);
 
@@ -23,6 +30,8 @@ class WireStrings {
   }
 
   Uint8List takeBytes() => _b.takeBytes();
+
+  void clear() => _b.clear();
 }
 
 final List<int> _pair = List.filled(2, 0);

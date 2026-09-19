@@ -51,8 +51,8 @@ class World {
   final CommandBatch _presentation = CommandBatch();
 
   /// Command index → GameObject for overlay clearing on rejection.
-  final List<GameObject?> _simulationTargets = [];
-  final List<GameObject?> _presentationTargets = [];
+  final _Targets _simulationTargets = _Targets();
+  final _Targets _presentationTargets = _Targets();
 
   final Map<int, GameObject> _byEntity = {};
   final Map<int, GameObject> _pendingByTempId = {};
@@ -115,10 +115,21 @@ class World {
     final r = _native.step();
     _checkFatal(r.status, 'step');
     _snapshot = _native.snapshot;
-    _snapshotIndex.clear();
+    // entity → record index. Overwrite in place (no growth in steady state,
+    // M1 gate); rebuild only when the subscribed set changed size, which is
+    // the only way a stale key can remain.
     final d = _snapshot.records;
-    for (var i = 0; i < _snapshot.recordCount; i++) {
+    final n = _snapshot.recordCount;
+    if (_snapshotIndex.length != n) _snapshotIndex.clear();
+    for (var i = 0; i < n; i++) {
       _snapshotIndex[d.getUint64(i * gen.SnapshotTransformRecord.wireSize, Endian.little)] = i;
+    }
+    if (_snapshotIndex.length != n) {
+      // Same count, different members: rebuild once.
+      _snapshotIndex.clear();
+      for (var i = 0; i < n; i++) {
+        _snapshotIndex[d.getUint64(i * gen.SnapshotTransformRecord.wireSize, Endian.little)] = i;
+      }
     }
     // Overlays are consumed by the tick they were staged for.
     for (final go in _byEntity.values) {
@@ -130,7 +141,9 @@ class World {
 
   /// Pull-only event drain; resolves spawn/destroy bookkeeping on the way.
   List<EngineEvent> drainEvents() {
-    final events = decodeEvents(_native.drainEvents()).toList();
+    final buffer = _native.drainEvents();
+    if (buffer.recordCount == 0) return const [];
+    final events = decodeEvents(buffer).toList();
     for (final e in events) {
       switch (e) {
         case EntitySpawned(:final tempId, :final entity):
@@ -173,9 +186,9 @@ class World {
     return plan;
   }
 
-  void _flush(CommandLane lane, CommandBatch batch, List<GameObject?> targets, String context) {
+  void _flush(CommandLane lane, CommandBatch batch, _Targets targets, String context) {
     if (batch.isEmpty) return;
-    final r = _native.submit(lane, batch.encoded());
+    final r = _native.submitBytes(lane, batch.backingStore, batch.finalize());
     batch.clear();
     _checkFatal(r.status, context);
     if (lane == CommandLane.presentation) {
@@ -308,7 +321,7 @@ class GameObject {
   void setLocalTransform(Transform t) {
     final e = _requireResolved('setLocalTransform');
     _overlay = t;
-    world._simulation.setTransform(gen.SetTransformCommand(entity: e, transform: t));
+    world._simulation.setTransformOf(e, t);
     world._simulationTargets.add(this);
   }
 
@@ -317,12 +330,36 @@ class GameObject {
   void setPresentationTransform(Transform t) {
     final e = _requireResolved('setPresentationTransform');
     _overlay = t;
-    world._presentation.setTransform(gen.SetTransformCommand(entity: e, transform: t));
+    world._presentation.setTransformOf(e, t);
     world._presentationTargets.add(this);
   }
 
   @override
   String toString() => 'GameObject($name, ${_entity == null ? 'pending #$_tempId' : '0x${_entity!.toRadixString(16)}'})';
+}
+
+/// The objects a command batch targets, by command index (for rejection
+/// diagnostics). A growable `List` releases its backing store on `clear()`
+/// and regrows every tick; this keeps its capacity (zero steady-state
+/// allocation, M1 gate).
+class _Targets {
+  List<GameObject?> _items = List.filled(64, null);
+  int _count = 0;
+
+  int get length => _count;
+  GameObject? operator [](int i) => _items[i];
+
+  void add(GameObject? go) {
+    if (_count == _items.length) {
+      _items = List.filled(_items.length * 2, null)..setRange(0, _count, _items);
+    }
+    _items[_count++] = go;
+  }
+
+  void clear() {
+    _items.fillRange(0, _count, null);
+    _count = 0;
+  }
 }
 
 /// Property-style access with read-your-writes semantics.

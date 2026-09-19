@@ -16,7 +16,7 @@ const int abiVersion = 1;
 /// Local transform relative to the parent (or the world for roots).
 ///
 /// `fynkel.Transform` (component, id 1, 40 bytes).
-class Transform {
+class Transform implements WireRecord {
   const Transform({
     required this.position,
     required this.rotation,
@@ -34,6 +34,7 @@ class Transform {
   static const int componentId = 1;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     writeVec3(d, offset + 0, position);
     writeQuat(d, offset + 12, rotation);
@@ -63,7 +64,7 @@ class Transform {
 /// Human-readable entity name (`fynkel.Name`).
 ///
 /// `fynkel.Name` (component, id 3, 8 bytes).
-class Name {
+class Name implements WireRecord {
   const Name({
     required this.value,
   });
@@ -75,6 +76,7 @@ class Name {
   static const int componentId = 3;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     writeWireString(d, offset + 0, value, strings);
   }
@@ -100,7 +102,7 @@ class Name {
 /// Spawns an entity; `temp_id` is echoed by `Spawned` with the real handle.
 ///
 /// `fynkel.cmd.Spawn` (command, id 1, 64 bytes).
-class SpawnCommand {
+class SpawnCommand implements WireRecord {
   const SpawnCommand({
     required this.tempId,
     required this.transform,
@@ -120,6 +122,7 @@ class SpawnCommand {
   static const int commandKind = 1;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, tempId, Endian.little);
     transform.encode(d, offset + 8, strings);
@@ -151,7 +154,7 @@ class SpawnCommand {
 /// Destroys the entity and its subtree.
 ///
 /// `fynkel.cmd.Destroy` (command, id 2, 8 bytes).
-class DestroyCommand {
+class DestroyCommand implements WireRecord {
   const DestroyCommand({
     required this.entity,
   });
@@ -163,6 +166,7 @@ class DestroyCommand {
   static const int commandKind = 2;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, entity, Endian.little);
   }
@@ -186,7 +190,7 @@ class DestroyCommand {
 }
 
 /// `fynkel.cmd.SetTransform` (command, id 3, 48 bytes).
-class SetTransformCommand {
+class SetTransformCommand implements WireRecord {
   const SetTransformCommand({
     required this.entity,
     required this.transform,
@@ -200,6 +204,7 @@ class SetTransformCommand {
   static const int commandKind = 3;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, entity, Endian.little);
     transform.encode(d, offset + 8, strings);
@@ -225,7 +230,7 @@ class SetTransformCommand {
 }
 
 /// `fynkel.cmd.SetParent` (command, id 4, 24 bytes).
-class SetParentCommand {
+class SetParentCommand implements WireRecord {
   const SetParentCommand({
     required this.child,
     this.parent,
@@ -242,6 +247,7 @@ class SetParentCommand {
   static const int commandKind = 4;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, child, Endian.little);
     d.setUint64(offset + 8, parent ?? 0, Endian.little);
@@ -269,7 +275,7 @@ class SetParentCommand {
 }
 
 /// `fynkel.cmd.SetName` (command, id 5, 16 bytes).
-class SetNameCommand {
+class SetNameCommand implements WireRecord {
   const SetNameCommand({
     required this.entity,
     required this.name,
@@ -283,6 +289,7 @@ class SetNameCommand {
   static const int commandKind = 5;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, entity, Endian.little);
     writeWireString(d, offset + 8, name, strings);
@@ -308,7 +315,7 @@ class SetNameCommand {
 }
 
 /// `fynkel.ev.Spawned` (event, id 1, 16 bytes).
-class SpawnedEvent {
+class SpawnedEvent implements WireRecord {
   const SpawnedEvent({
     required this.tempId,
     required this.entity,
@@ -322,6 +329,7 @@ class SpawnedEvent {
   static const int eventKind = 1;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, tempId, Endian.little);
     d.setUint64(offset + 8, entity, Endian.little);
@@ -347,7 +355,7 @@ class SpawnedEvent {
 }
 
 /// `fynkel.ev.Destroyed` (event, id 2, 8 bytes).
-class DestroyedEvent {
+class DestroyedEvent implements WireRecord {
   const DestroyedEvent({
     required this.entity,
   });
@@ -359,6 +367,7 @@ class DestroyedEvent {
   static const int eventKind = 2;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, entity, Endian.little);
   }
@@ -382,7 +391,7 @@ class DestroyedEvent {
 }
 
 /// `fynkel.ev.ParentChanged` (event, id 3, 16 bytes).
-class ParentChangedEvent {
+class ParentChangedEvent implements WireRecord {
   const ParentChangedEvent({
     required this.child,
     this.parent,
@@ -396,6 +405,7 @@ class ParentChangedEvent {
   static const int eventKind = 3;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, child, Endian.little);
     d.setUint64(offset + 8, parent ?? 0, Endian.little);
@@ -423,7 +433,7 @@ class ParentChangedEvent {
 /// Time dropped after `max_steps_per_frame` catch-up ticks (ADR-0008).
 ///
 /// `fynkel.ev.MissedDeadline` (event, id 4, 8 bytes).
-class MissedDeadlineEvent {
+class MissedDeadlineEvent implements WireRecord {
   const MissedDeadlineEvent({
     required this.droppedSeconds,
   });
@@ -435,6 +445,7 @@ class MissedDeadlineEvent {
   static const int eventKind = 4;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setFloat32(offset + 0, droppedSeconds, Endian.little);
   }
@@ -458,7 +469,7 @@ class MissedDeadlineEvent {
 }
 
 /// `fynkel.ev.SceneReady` (event, id 5, 0 bytes).
-class SceneReadyEvent {
+class SceneReadyEvent implements WireRecord {
   const SceneReadyEvent();
 
 
@@ -467,6 +478,7 @@ class SceneReadyEvent {
   static const int eventKind = 5;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
   }
 
@@ -489,7 +501,7 @@ class SceneReadyEvent {
 /// Physics-lane events share one body (collision/trigger enter/stay/exit).
 ///
 /// `fynkel.ev.Contact` (event, id 256, 16 bytes).
-class ContactEvent {
+class ContactEvent implements WireRecord {
   const ContactEvent({
     required this.a,
     required this.b,
@@ -503,6 +515,7 @@ class ContactEvent {
   static const int eventKind = 256;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, a, Endian.little);
     d.setUint64(offset + 8, b, Endian.little);
@@ -530,7 +543,7 @@ class ContactEvent {
 /// Snapshot record for a subscribed transform.
 ///
 /// `fynkel.rec.SnapshotTransform` (record, id 0, 88 bytes).
-class SnapshotTransformRecord {
+class SnapshotTransformRecord implements WireRecord {
   const SnapshotTransformRecord({
     required this.entity,
     required this.local,
@@ -545,6 +558,7 @@ class SnapshotTransformRecord {
   static const int wireSize = 88;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint64(offset + 0, entity, Endian.little);
     local.encode(d, offset + 8, strings);
@@ -574,7 +588,7 @@ class SnapshotTransformRecord {
 /// One rejected command or runtime diagnostic (ADR-0014).
 ///
 /// `fynkel.rec.Diagnostic` (record, id 0, 32 bytes).
-class DiagnosticRecord {
+class DiagnosticRecord implements WireRecord {
   const DiagnosticRecord({
     required this.commandIndex,
     required this.code,
@@ -599,6 +613,7 @@ class DiagnosticRecord {
   static const int wireSize = 32;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint32(offset + 0, commandIndex, Endian.little);
     d.setUint32(offset + 4, code, Endian.little);
@@ -634,7 +649,7 @@ class DiagnosticRecord {
 /// Command envelope in a command buffer: `kind` selects the body schema (a `CommandKind`), `size` lets readers skip bodies they do not know.
 ///
 /// `fynkel.rec.CommandHeader` (record, id 0, 8 bytes).
-class CommandHeader {
+class CommandHeader implements WireRecord {
   const CommandHeader({
     required this.kind,
     required this.size,
@@ -648,6 +663,7 @@ class CommandHeader {
   static const int wireSize = 8;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint32(offset + 0, kind, Endian.little);
     d.setUint32(offset + 4, size, Endian.little);
@@ -675,7 +691,7 @@ class CommandHeader {
 /// Event envelope in an event buffer: `kind` selects the body schema (an `EventKind`; every physics kind uses `ContactEvent`).
 ///
 /// `fynkel.rec.EventHeader` (record, id 0, 16 bytes).
-class EventHeader {
+class EventHeader implements WireRecord {
   const EventHeader({
     required this.kind,
     required this.size,
@@ -694,6 +710,7 @@ class EventHeader {
   static const int wireSize = 16;
 
   /// Writes [wireSize] bytes at [offset]; strings go to [strings].
+  @override
   void encode(ByteData d, int offset, WireStrings strings) {
     d.setUint32(offset + 0, kind, Endian.little);
     d.setUint32(offset + 4, size, Endian.little);

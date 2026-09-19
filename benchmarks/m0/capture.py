@@ -214,6 +214,36 @@ def capture_bridge():
             "read_us": int(m.group(4)), "in_kib": float(m.group(5)), "out_kib": float(m.group(6)), "runtime": "dart test (JIT)"}
 
 
+def capture_alloc():
+    """Dart allocations + GC per frame on the M1 scene (packages/fynkel/tool/alloc_bench.dart)."""
+    print("dart allocations…", flush=True)
+    out = sh([str(DART), "run", "tool/alloc_bench.dart", "--frames", "3000", "--json"], cwd=ROOT / "packages/fynkel", check=False)
+    line = next((l for l in out.splitlines() if l.startswith("{")), None)
+    if line is None:
+        return {"error": out[-500:]}
+    return {**json.loads(line), "runtime": "dart run (JIT)"}
+
+
+def capture_headless():
+    """`fynkel test --headless --json`: the Rust host loop, determinism checksum, step timing."""
+    print("headless host…", flush=True)
+    out = sh(["cargo", "run", "-q", "--release", "-p", "fynkel_cli", "--", "test", "--headless", "--steps", "3000", "--json"], check=False)
+    start = out.find("{")
+    try:
+        return json.loads(out[start:]) if start >= 0 else {"error": out[-500:]}
+    except json.JSONDecodeError:
+        return {"error": out[-500:]}
+
+
+def capture_leaks():
+    """The M1 teardown leak tests, with their measured numbers."""
+    print("leak tests…", flush=True)
+    r = subprocess.run(["cargo", "test", "--release", "-p", "fynkel_native", "-p", "fynkel_platform_apple", "--test", "leak", "--test", "lifetime", "--", "--nocapture"],
+                       cwd=ROOT, text=True, capture_output=True)
+    lines = [l.strip() for l in (r.stdout + r.stderr).splitlines() if l.strip().startswith("[leak]")]
+    return {"passed": r.returncode == 0, "lines": lines}
+
+
 def fmt(a, unit="ms"):
     if not a:
         return "—"
@@ -223,7 +253,7 @@ def fmt(a, unit="ms"):
 def markdown(r):
     s, fv, fc, fn, b = r["standalone"], r["flutter_path_a"], r["flutter_path_c"], r["flutter_no_viewport"], r["bridge"]
     lines = [
-        f"# M0 capture {r['environment']['captured_at']} — commit {r['environment']['commit']}{' (dirty)' if r['environment']['dirty'] else ''}",
+        f"# M0/M1 capture {r['environment']['captured_at']} — commit {r['environment']['commit']}{' (dirty)' if r['environment']['dirty'] else ''}",
         "", f"Profile `{r['profile']['profile']}`; warm-up {r['warmup_seconds']} s, sample {r['sample_seconds']} s; "
         "values are p50 / p95 / p99 (median of per-second p50/p95, max of per-second p99).", "",
         "| Metric | Standalone | Flutter Path A | Flutter Path C | Flutter, no viewport |", "| --- | --- | --- | --- | --- |",
@@ -240,6 +270,17 @@ def markdown(r):
         "", f"Bridge @ {b.get('entities')} entities: encode+submit {b.get('encode_submit_us')} µs, step {b.get('step_us')} µs, "
         f"read {b.get('read_us')} µs per tick; {b.get('in_kib')} KiB in / {b.get('out_kib')} KiB out ({b.get('runtime')}).",
     ]
+    al, hl, lk = r.get("alloc", {}), r.get("headless", {}), r.get("leaks", {})
+    if "heap_bytes_per_frame" in al:
+        gcs = ", ".join(f"{k}×{v}" for k, v in al.get("gc_reasons", {}).items()) or "none"
+        lines += ["", f"Dart allocation on the M1 scene ({al['entities']} entities, {al['frames']} frames, {al['runtime']}): "
+                  f"{al['heap_bytes_per_frame']:.0f} B/frame; GC in window: {al['gc_count']} ({gcs}), {al['gc_total_ms']:.2f} ms total."]
+    if "step_time" in hl:
+        st = hl["step_time"]
+        lines += ["", f"Headless host: {hl['steps']} steps, {hl['live_entities']} entities, step p50/p95/max {st['p50_us']}/{st['p95_us']}/{st['max_us']} µs, "
+                  f"checksum {hl['checksum']}, missed deadlines {hl['missed_deadlines']}."]
+    if lk:
+        lines += ["", f"Leak tests {'passed' if lk.get('passed') else 'FAILED'}:"] + [f"- {l}" for l in lk.get("lines", [])]
     return "\n".join(lines) + "\n"
 
 
@@ -262,6 +303,10 @@ def main():
         "flutter_path_c": {},
         "flutter_no_viewport": capture_flutter(FLUTTER_APP, "none", warmup, sample),
         "bridge": capture_bridge(),
+        # M1 additions (blueprint §19.2b item 10).
+        "alloc": capture_alloc(),
+        "headless": capture_headless(),
+        "leaks": capture_leaks(),
     }
     stem = f"{dt.date.today().isoformat()}-{result['environment']['commit']}"
     out_dir = ROOT / "benchmarks/m0/results"
