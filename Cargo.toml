@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["hosts/standalone"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.93"
+license = "UNLICENSED"   # see docs/decisions/ADR-0005 (open until the M3 public push)
+
+[workspace.dependencies]
+wgpu = "30.0.1"
+winit = "0.30.13"
+glam = { version = "0.33.7", features = ["bytemuck"] }
+bytemuck = { version = "1.25.2", features = ["derive"] }
+pollster = "1.0.1"
+log = "0.4.34"
+env_logger = "0.11.11"
+
+[profile.release]
+debug = 1   # keep symbols for profiling M0 baselines

@@ -1,0 +1,4 @@
+/target
+**/.fynkel/cache/
+**/build/
+.DS_Store
