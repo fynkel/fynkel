@@ -90,6 +90,7 @@ fn a_fresh_project_validates_and_runs_headlessly() {
     let pubspec = std::fs::read_to_string(dir.join("pubspec.yaml")).unwrap();
     assert!(pubspec.contains("name: my_game"));
     assert!(pubspec.contains("packages/fynkel\n") || pubspec.contains("packages/fynkel\r\n"));
+    assert!(pubspec.contains("packages/fynkel_flutter"));
     assert!(pubspec.contains("packages/fynkel_generator"));
 
     // The M2-17 gate: validate and the headless host, from inside the

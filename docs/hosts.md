@@ -18,7 +18,7 @@ render                     (host-specific target)
 | --- | --- | --- | --- | --- |
 | Rust headless | `hosts/headless` (`fynkel_host_headless`, lib + bin) | test loop, one fixed step per frame by default | Rust `DemoScene` (commands) | none; reports JSON |
 | Standalone | `hosts/standalone` (`fynkel_host_standalone`) | winit `RedrawRequested`, vsync (`Fifo`) | Rust `DemoScene` | winit swapchain via `fynkel_render` |
-| Flutter macOS + iOS | `hosts/flutter_apple` (`macos/`, `ios/`) | Flutter `Ticker` on the main isolate | Dart `DemoScene` on `package:fynkel` | `platform/apple` IOSurface ring → Flutter `Texture` |
+| Flutter macOS + iOS | `hosts/flutter_apple` (`macos/`, `ios/`), a thin app on `package:fynkel_flutter` | `FynkelGameView`'s Flutter `Ticker` on the main isolate | Dart `DemoScene` on `package:fynkel` | `platform/apple` IOSurface ring → Flutter `Texture` (`FynkelViewport`) |
 
 All three render (or checksum) the same scene: a tumbling hub cube with
 `satellites` child cubes on their own rings, driven by one `SetTransform`
@@ -83,15 +83,56 @@ per planned tick, presentation flush), then
 Rust and renders into a free ring slot. Swift's `FynkelViewportTexture`
 hands the newest GPU-complete slot to Flutter's `Texture`.
 
+Since M3-01 all of that lives in **`package:fynkel_flutter`**
+(`packages/fynkel_flutter`), the Flutter plugin every game depends on:
+
+- `darwin/fynkel_flutter/` — one Swift package for macOS and iOS
+  (`sharedDarwinSource`, SwiftPM with a podspec for CocoaPods projects):
+  `FynkelViewportTexture` (the `FlutterTexture` over the ring) and
+  `FynkelFlutterPlugin`, registered by the generated plugin registrant, on
+  the method channel `fynkel_flutter/viewport`: `registerTexture` (ctx,
+  acquire/set-callback function addresses, IOSurface addresses → `textureId`,
+  installs the Rust→Swift frame-ready callback), `rebindTexture`, `stats`,
+  `unregisterTexture` — every call after registration names its
+  `textureId`, so an editor can show several viewports.
+- `lib/src/viewport_native.dart` — the viewport ABI v2 as `@Native` externals
+  on the same code asset as `package:fynkel`.
+- `FynkelViewportController` — one native viewport: `requestSize(w, h)` in
+  physical pixels creates the ring and registers the texture, later calls
+  are coalesced resizes (native resize → Swift rebind; `render()` returns
+  null in between so the simulation never waits); `assetCache`,
+  `placeholders`, `camera`; `takeStats()` (Rust) and `platformStats()`
+  (Swift); `detach()` is the ordered teardown (clear callback → unregister →
+  destroy) and the controller is reusable afterwards.
+- `FynkelViewport` — the widget: `LayoutBuilder` × device pixel ratio →
+  `requestSize`, the `Texture`, `Focus` + `Listener` (pointer positions in
+  viewport physical pixels), a placeholder until attached and the error when
+  creation failed.
+- `FynkelGameView` — the loop: a `Ticker` runs `World.frame(dt, fixedUpdate:)`
+  then `controller.render(world)`; dt is clamped (`maxFrameDt`), the clock is
+  re-primed when the app resumes and when the viewport attaches (a start-up
+  stall is not simulated time), the ticker is muted while hidden/paused
+  (`pauseWhenHidden`), `onStats` delivers a `FynkelFrameStats` per window
+  (tick interval / simulate / render-call percentiles, fixed ticks, missed
+  deadlines, dropped frames, world + viewport + platform counters), and
+  `overlay` is the HUD composited over the texture.
+
+`flutter test` runs the package's tests against the real Rust viewport (the
+hook builds the dylib; Metal creates the ring headlessly) with the texture
+channel mocked, so create → render → resize → detach is covered without a
+window. `hosts/flutter_apple/lib/main.dart` keeps only the harness: destroy
+/ recreate, inset resize, lifecycle log, focus/pointer probes, the HUD, and
+the `[host]` lines `benchmarks/m0/capture.py` parses (unchanged format).
+
 Measured on mac-m3max-2026 at 1600×1104 physical, 24 satellites: 120 Hz
 frames, 60 fixed ticks/s, Dart simulate ≈ 0.02 ms, `render()` call ≈ 0.1 ms,
 present lag 0, no dropped frames.
 
 ## iOS smoke test (M1-09)
 
-The same host, Dart code, Swift texture glue (`FynkelViewportTexture.swift`
-is byte-identical in `macos/Runner` and `ios/Runner`, `#if os(iOS)` for the
-imports and registrar accessors) and Rust crate run on iOS: `platform/apple`
+The same host, Dart code, Swift texture glue (`FynkelViewportTexture.swift`,
+one file for both platforms in `package:fynkel_flutter` since M3-01, `#if
+os(iOS)` for the imports and registrar accessors) and Rust crate run on iOS: `platform/apple`
 has no AppKit/UIKit dependency and the hook cross-compiles it for
 `aarch64-apple-ios`, `aarch64-apple-ios-sim` and `x86_64-apple-ios`
 (Flutter builds two simulator slices). Two things surfaced:

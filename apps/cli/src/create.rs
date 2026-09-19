@@ -253,8 +253,9 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         }
     }
     let fynkel_pkg = root.join("packages/fynkel");
+    let flutter_pkg = root.join("packages/fynkel_flutter");
     let generator_pkg = root.join("packages/fynkel_generator");
-    for p in [&fynkel_pkg, &generator_pkg] {
+    for p in [&fynkel_pkg, &flutter_pkg, &generator_pkg] {
         if !p.join("pubspec.yaml").is_file() {
             return Err(format!(
                 "{} is not a Fynkel checkout ({} missing); pass --root <repo>",
@@ -281,6 +282,10 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         ("package".into(), package.clone()),
         ("title".into(), title.clone()),
         ("fynkel".into(), dependency_path(dir, &fynkel_pkg, root)),
+        (
+            "fynkel_flutter".into(),
+            dependency_path(dir, &flutter_pkg, root),
+        ),
         (
             "generator".into(),
             dependency_path(dir, &generator_pkg, root),

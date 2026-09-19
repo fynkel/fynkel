@@ -8,7 +8,7 @@ Fynkel CLI. Created by `fynkel create`.
 fynkel validate                  # the whole project: documents, references, lock
 fynkel test --headless           # the startup scene on the Rust headless host
 flutter test                     # test/game_test.dart: the scene loads, the cube spins
-fynkel run                       # flutter run with FYNKEL_PROJECT set to this directory
+fynkel run                       # validate, cook, then flutter run with FYNKEL_PROJECT set to this directory
 fynkel cook && fynkel render --out render.png   # the scene as a picture, no window
 ```
 
@@ -20,6 +20,8 @@ regenerated `lib/generated/` and `schemas/behaviours/`.
 `AGENTS.md` describes the layout, every command and the validate → codegen →
 build → test loop for tools and AI agents (and is a good tour for people).
 
-The 3D viewport widget (`package:fynkel_flutter`) arrives with Fynkel M3;
-until then `flutter run` shows the running simulation as text and
-`fynkel render` draws the scene.
+`lib/main.dart` shows the scene in a `FynkelGameView` (`package:fynkel_flutter`:
+the 3D viewport and the frame loop) with a Flutter HUD over it; the
+renderer reads the cooked cache, so `fynkel run` cooks before it runs (plain
+`flutter run` needs a `fynkel cook` first). `fynkel render` draws the same
+scene to a PNG without a window.

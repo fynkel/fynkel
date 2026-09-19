@@ -1,16 +1,15 @@
 // {{title}} — entry point (created by `fynkel create`; edit freely).
 //
-// The host owns the loop (ADR-0007): a Ticker runs once per Flutter frame
-// and hands the frame time to `Game.frame`, which runs every behaviour's
-// fixedUpdate for the planned ticks, steps the native world and runs
-// update/lateUpdate. The scene is fynkel.project.json's startupScene.
-//
-// The 3D viewport widget (package:fynkel_flutter) arrives with M3; until
-// then this app shows the running simulation as text and `fynkel render`
-// draws the scene to a PNG.
+// `FynkelGameView` (package:fynkel_flutter) owns the loop (ADR-0007): once
+// per Flutter frame it hands the frame time to the world, which runs every
+// behaviour's fixedUpdate for the planned ticks, steps the native runtime and
+// runs update/lateUpdate; then it renders the world into the viewport
+// texture. Flutter widgets drawn over it are the HUD. The scene is
+// fynkel.project.json's startupScene; meshes and textures come from the
+// project's cooked cache (`fynkel cook`, which `fynkel run` does for you).
 
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
 import 'game/spinner.dart';
@@ -37,12 +36,11 @@ class GamePage extends StatefulWidget {
   State<GamePage> createState() => _GamePageState();
 }
 
-class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
+class _GamePageState extends State<GamePage> {
   Game? _game;
   String? _error;
-  late final Ticker _ticker;
-  Duration _last = Duration.zero;
-  bool _primed = false;
+  FynkelViewportController? _viewport;
+  FynkelFrameStats? _stats;
 
   @override
   void initState() {
@@ -51,35 +49,21 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
     if (dir == null) {
       _error = 'No project directory: run `fynkel run` from the project, '
           'or pass --dart-define=FYNKEL_PROJECT=<dir> to flutter run.';
-    } else {
-      try {
-        _game = Game.load(dir);
-      } catch (e) {
-        _error = '$e';
-      }
-    }
-    _ticker = createTicker(_onTick)..start();
-  }
-
-  void _onTick(Duration elapsed) {
-    final game = _game;
-    if (game == null) return;
-    if (!_primed) {
-      // The first tick only sets the clock: the window's start-up gap is
-      // not simulated time.
-      _primed = true;
-      _last = elapsed;
       return;
     }
-    final dt = (elapsed - _last).inMicroseconds / 1e6;
-    _last = elapsed;
-    game.frame(dt.clamp(0, 0.25));
-    setState(() {});
+    try {
+      final game = _game = Game.load(dir);
+      // The renderer reads the cooked cache; scene entities without a mesh
+      // stay invisible (placeholders off) as they will in the shipped game.
+      _viewport = FynkelViewportController(assetCache: game.report.cacheDir, placeholders: false);
+    } catch (e) {
+      _error = '$e';
+    }
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
+    _viewport?.dispose();
     _game?.dispose();
     super.dispose();
   }
@@ -87,27 +71,67 @@ class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final game = _game;
-    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(fontFamily: 'monospace');
-    final lines = <String>[
-      '{{title}}',
-      ?_error,
-      if (game != null) ...[
-        'scene      ${game.report.sceneName} (${game.report.entityCount} entities)',
-        'tick       ${game.world.tick}',
-        'behaviours ${game.world.behaviours.length} attached',
-        for (final s in game.world.behaviours.whereType<Spinner>())
-          'spinner    ${s.angle.toStringAsFixed(2)} rad at ${s.speed} rad/s',
-        for (final d in game.report.diagnostics) '$d',
-      ],
-    ];
+    if (game == null) {
+      return Scaffold(body: Center(child: Text(_error ?? '', textAlign: TextAlign.center)));
+    }
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [for (final l in lines) Text(l, style: style)],
+      body: FynkelGameView(
+        world: game.world,
+        controller: _viewport,
+        onStats: (s) => setState(() => _stats = s),
+        overlay: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Hud(game: game, stats: _stats, viewport: _viewport!),
+              ),
+            ),
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// The HUD: ordinary Flutter widgets composited over the 3D viewport.
+class Hud extends StatelessWidget {
+  const Hud({super.key, required this.game, required this.stats, required this.viewport});
+
+  final Game game;
+  final FynkelFrameStats? stats;
+  final FynkelViewportController viewport;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(fontFamily: 'monospace');
+    final s = stats;
+    final lines = <String>[
+      '{{title}}',
+      'scene      ${game.report.sceneName} (${game.report.entityCount} entities)',
+      'tick       ${game.world.tick}',
+      'behaviours ${game.world.behaviours.length} attached',
+      for (final sp in game.world.behaviours.whereType<Spinner>())
+        'spinner    ${sp.angle.toStringAsFixed(2)} rad at ${sp.speed} rad/s',
+      if (!viewport.assetCacheOk)
+        'no cooked cache at ${game.report.cacheDir} — run `fynkel cook` (or `fynkel run`)',
+      if (s != null) ...[
+        'viewport   ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
+            'frame ${s.tickInterval.p50.toStringAsFixed(2)} ms  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
+        if (s.viewport case final v?) 'meshes     ${v.meshes} drawn, ${v.missing} missing, ${v.assetErrors} errors',
+      ],
+      for (final d in game.report.diagnostics) '$d',
+    ];
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [for (final l in lines) Text(l, style: style)],
     );
   }
 }

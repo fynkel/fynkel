@@ -1,26 +1,22 @@
-// Fynkel Flutter macOS host (blueprint §5.2, ADR-0007/0008, ADR-0002 Path A).
-//
-// The host owns the loop: a Ticker runs once per Flutter frame on the main
-// isolate and (1) hands the frame dt to the world, (2) runs Dart gameplay
-// and `step()` for every planned fixed tick, (3) asks the platform viewport
-// to render the world's extract (interpolated by alpha) into the IOSurface
-// ring. Swift hands the newest GPU-complete slot to Flutter's Texture
-// widget; Flutter widgets are composited on top in the same frame.
-//
-// Harness kept from M0: resize (window / DPI), lifecycle (hidden, paused,
-// resumed), dispose/recreate, HUD overlay with pointer/keyboard focus.
+// Fynkel Flutter macOS/iOS host (blueprint §5.2, ADR-0007/0008, ADR-0002
+// Path A) — the measurement harness, now a thin app on
+// `package:fynkel_flutter`: `FynkelGameView` owns the Ticker-driven loop
+// (simulate, then render the extract into the IOSurface ring) and the
+// viewport texture; this file keeps the M0 harness around it: resize
+// (window / DPI / inset), lifecycle, dispose/recreate, HUD overlay with
+// pointer/keyboard focus, and the `[host]` stat lines `benchmarks/m0`
+// parses.
 
 import 'dart:async';
-import 'dart:ffi';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'demo_scene.dart';
-import 'viewport_ffi.dart';
 
 const _bufferCount = 4;
 
@@ -103,14 +99,14 @@ class _HostPageState extends State<HostPage> {
   }
 
   void _reportTimings() {
-    final b = List<double>.from(_buildMs)..sort();
-    final r = List<double>.from(_rasterMs)..sort();
+    final b = MsPercentiles.of(_buildMs);
+    final r = MsPercentiles.of(_rasterMs);
     _buildMs.clear();
     _rasterMs.clear();
     if (!mounted) return;
     setState(() {
       _timingsText =
-          'flutter frames n=${r.length} viewport=${_showViewport ? hostMode : "off"}  ui build ms p50=${_ViewportPageState._p(b, .5)} p95=${_ViewportPageState._p(b, .95)}  raster ms p50=${_ViewportPageState._p(r, .5)} p95=${_ViewportPageState._p(r, .95)} p99=${_ViewportPageState._p(r, .99)}';
+          'flutter frames n=${r.count} viewport=${_showViewport ? hostMode : "off"}  ui build ms p50=${b.p50.toStringAsFixed(2)} p95=${b.p95.toStringAsFixed(2)}  raster ms ${r.format()}';
     });
     debugPrint('[host] $_timingsText');
   }
@@ -180,42 +176,23 @@ class ViewportPage extends StatefulWidget {
   State<ViewportPage> createState() => _ViewportPageState();
 }
 
-class _ViewportPageState extends State<ViewportPage>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  static const _channel = MethodChannel('fynkel/viewport');
-
-  // Engine: one dylib serves the engine ABI (package:fynkel) and the viewport ABI.
-  World? _world;
-  DemoScene? _scene;
-  LoadReport? _project;
-  ViewportNative? _viewportNative;
-  Pointer<Void> _viewport = nullptr;
-  int? _textureId;
-  Ticker? _ticker;
-  String? _error;
-
-  // Viewport size in physical pixels; the ring is (re)created at this size.
-  int _width = 0;
-  int _height = 0;
-  (int, int)? _pendingSize;
-  bool _resizing = false;
-  bool _creating = false;
-  bool _tornDown = false;
+class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver {
   static const _syncMode = int.fromEnvironment('FYNKEL_SYNC', defaultValue: 2);
   static const _syncModeNames = ['async-poll', 'blocking', 'metal-completion'];
   static const _acquireWaitUs = int.fromEnvironment('FYNKEL_ACQUIRE_WAIT_US', defaultValue: 3000);
   static const _satellites = int.fromEnvironment('FYNKEL_SATELLITES', defaultValue: 24);
 
-  // Frame timing on the Dart side.
-  Duration? _lastTick;
-  final List<double> _intervalsMs = [];
-  final List<double> _simMs = [];
-  final List<double> _renderCallMs = [];
-  int _ticksThisWindow = 0;
-  int _missedDeadlines = 0;
-  int _droppedThisWindow = 0;
-  int _skippedWhileResizing = 0;
-  Timer? _statsTimer;
+  // Engine: one dylib serves the engine ABI (package:fynkel) and the viewport ABI.
+  late final World _world;
+  DemoScene? _scene;
+  LoadReport? _project;
+  final _gameKey = GlobalKey<FynkelGameViewState>();
+  late final FynkelViewportController _controller;
+  String? _error;
+  bool _tornDown = false;
+  bool _announcedCreate = false;
+  int _lastResizes = 0;
+
   String _statsText = 'starting…';
   int _clicks = 0;
   final List<String> _events = [];
@@ -241,10 +218,57 @@ class _ViewportPageState extends State<ViewportPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _statsTimer = Timer.periodic(const Duration(seconds: 1), (_) => _reportStats());
     _viewportFocus.addListener(() => _log('viewport focus=${_viewportFocus.hasFocus}'));
     _hudTextFocus.addListener(() => _log('hud text focus=${_hudTextFocus.hasFocus}'));
     _log('init generation=${widget.generation}');
+    _world = World.create();
+    // Release-mode hosts log diagnostics; debug throws (FynkelError).
+    _world.onDiagnostics = (d) => _log('diagnostics: ${d.join("; ")}');
+    _world.onLoadDiagnostics = (d) => _log('load: ${d.join("; ")}');
+    String? cache;
+    try {
+      final dir = projectDir;
+      if (dir == null) {
+        _scene = DemoScene(satellites: _satellites);
+      } else {
+        // The scene file, not Dart, decides what exists (blueprint §7).
+        final r = _project = _world.loadProject(dir);
+        _log('loaded ${r.projectName}: scene "${r.sceneName}" ${r.entityCount} entities from ${r.scenePath}');
+        cache = r.cacheDir;
+      }
+    } catch (e) {
+      _error = '$e';
+    }
+    _controller = FynkelViewportController(
+      bufferCount: _bufferCount,
+      syncMode: ViewportSyncMode.values[_syncMode],
+      acquireWaitUs: _acquireWaitUs,
+      placeholders: cache == null,
+      assetCache: cache,
+      camera: const ViewportCameraSpec(eye: Vec3(0, 2.5, 7.5), target: Vec3(0, 0, 0)),
+    );
+    _controller.addListener(_onViewportChanged);
+  }
+
+  void _onViewportChanged() {
+    final c = _controller;
+    switch (c.state) {
+      case ViewportState.attached when !_announcedCreate:
+        _announcedCreate = true;
+        _log('created ${c.physicalWidth}x${c.physicalHeight} texture=${c.textureId} world tick=${_world.tick}');
+        if (_project != null && !c.assetCacheOk) {
+          _log('no cooked cache at ${_project!.cacheDir} — run `fynkel cook --assets ${_project!.assetsDir} --cache ${_project!.cacheDir}`');
+        }
+        // A game host wants the world to own keyboard focus until a HUD widget takes it.
+        _viewportFocus.requestFocus();
+      case ViewportState.attached when c.resizes != _lastResizes:
+        _lastResizes = c.resizes;
+        _log('resized ${c.physicalWidth}x${c.physicalHeight}');
+      case ViewportState.failed:
+        setState(() => _error = '${c.error}');
+      default:
+        break;
+    }
   }
 
   // ---- input -----------------------------------------------------------------
@@ -262,11 +286,10 @@ class _ViewportPageState extends State<ViewportPage>
     return e.logicalKey.keyLabel.length == 1 ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
-  void _onPointer(PointerEvent e) {
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    // Local logical → viewport physical pixels: the engine's coordinate space.
-    final px = (e.localPosition.dx * dpr).round();
-    final py = (e.localPosition.dy * dpr).round();
+  void _onPointer(PointerEvent e, Offset physical) {
+    // Viewport physical pixels: the engine's coordinate space.
+    final px = physical.dx.round();
+    final py = physical.dy.round();
     _pointer = '$px,$py (${e.runtimeType})';
     _pointerEventsThisWindow++;
     if (e is PointerDownEvent) {
@@ -283,221 +306,77 @@ class _ViewportPageState extends State<ViewportPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // `hidden` = window minimised/occluded on macOS; `inactive` = lost focus
-    // (keep rendering). Muting the ticker pauses the host loop — and with it
-    // the simulation clock (§5.2: no unbounded backlog while paused).
+    // (keep rendering). FynkelGameView mutes its ticker for hidden/paused,
+    // which pauses the simulation clock (§5.2: no backlog while paused).
     final mute = state == AppLifecycleState.hidden || state == AppLifecycleState.paused;
-    _ticker?.muted = mute;
-    if (!mute) _lastTick = null; // do not feed the pause as one giant dt
     _log('lifecycle $state ticker.muted=$mute');
   }
 
   @override
   void didChangeMetrics() {
-    // Fires on window resize and display/DPI change; the LayoutBuilder below
-    // sees the new constraints on the next frame.
+    // Fires on window resize and display/DPI change; the viewport's
+    // LayoutBuilder sees the new constraints on the next frame.
     final v = View.of(context);
     _log('metrics dpr=${v.devicePixelRatio} physical=${v.physicalSize.width.round()}x${v.physicalSize.height.round()}');
   }
 
-  // ---- create / resize / teardown ----------------------------------------
-
-  void _requestSize(int width, int height) {
-    if (_tornDown || _error != null || width == 0 || height == 0) return;
-    if (_textureId == null) {
-      if (!_creating) _create(width, height);
-      return;
-    }
-    if (width == _width && height == _height) return;
-    _pendingSize = (width, height);
-    if (!_resizing) _drainResizes();
-  }
-
-  Future<void> _create(int width, int height) async {
-    _creating = true;
-    _width = width;
-    _height = height;
-    try {
-      final world = _world ??= World.create();
-      // Release-mode hosts log diagnostics; debug throws (FynkelError).
-      world.onDiagnostics = (d) => _log('diagnostics: ${d.join("; ")}');
-      world.onLoadDiagnostics = (d) => _log('load: ${d.join("; ")}');
-      final dir = projectDir;
-      if (dir == null) {
-        _scene ??= DemoScene(satellites: _satellites);
-      } else if (_project == null) {
-        // The scene file, not Dart, decides what exists (blueprint §7).
-        final r = _project = world.loadProject(dir);
-        _log('loaded ${r.projectName}: scene "${r.sceneName}" ${r.entityCount} entities from ${r.scenePath}');
-      }
-      final native = _viewportNative ??= ViewportNative();
-      final vp = native.create(width: width, height: height, bufferCount: _bufferCount, syncMode: _syncMode);
-      if (vp == nullptr) throw StateError('fynkel_apple_viewport_create returned null (see native log)');
-      _viewport = vp;
-      native.setAcquireWaitUs(vp, _acquireWaitUs);
-      native.setCamera(vp, eye: [0, 2.5, 7.5], target: [0, 0, 0]);
-      final cache = _project?.cacheDir;
-      if (cache != null) {
-        native.setPlaceholders(vp, false);
-        if (!native.setAssetCache(vp, cache)) {
-          _log('no cooked cache at $cache — run `fynkel cook --assets ${_project!.assetsDir} --cache $cache`');
-        }
-      }
-      final id = await _channel.invokeMethod<int>('registerTexture', {
-        'ctx': vp.address,
-        'acquireFn': native.acquireFnAddress,
-        'setCallbackFn': native.setCallbackFnAddress,
-        'iosurfaces': native.iosurfaceAddresses(vp),
-      });
-      if (!mounted || _tornDown) return;
-      setState(() => _textureId = id);
-      _ticker = createTicker(_onTick)..start();
-      _log('created ${width}x$height texture=$id world tick=${world.tick}');
-      // A game host wants the world to own keyboard focus until a HUD widget takes it.
-      _viewportFocus.requestFocus();
-    } catch (e) {
-      setState(() => _error = '$e');
-    } finally {
-      _creating = false;
-    }
-  }
-
-  /// Applies the latest requested size, coalescing bursts from live resize.
-  /// Sequence per resize: stop rendering → Rust rebuilds the ring (GPU idle)
-  /// → Swift re-wraps the new IOSurfaces → resume rendering.
-  Future<void> _drainResizes() async {
-    _resizing = true;
-    try {
-      while (_pendingSize != null && !_tornDown) {
-        final (w, h) = _pendingSize!;
-        _pendingSize = null;
-        if (w == _width && h == _height) continue;
-        final sw = Stopwatch()..start();
-        if (!_viewportNative!.resize(_viewport, w, h)) {
-          _log('resize FAILED ${w}x$h');
-          continue;
-        }
-        await _channel.invokeMethod('rebindTexture', {
-          'iosurfaces': _viewportNative!.iosurfaceAddresses(_viewport),
-        });
-        _width = w;
-        _height = h;
-        _log('resized ${w}x$h in ${sw.elapsedMicroseconds / 1000} ms');
-      }
-    } finally {
-      _resizing = false;
-    }
-  }
-
-  /// Ordered teardown. Safe to call more than once. Order matters:
-  /// 1. stop the host loop; 2. clear the Rust→Swift callback (synchronous);
-  /// 3. Swift detaches + unregisters the texture (raster thread will not call
-  /// into Rust afterwards); 4. free the viewport; 5. dispose the world.
+  /// Ordered teardown (the package's `detach`: clear the Rust→Swift callback,
+  /// unregister the texture, free the viewport), then dispose the world.
+  /// Safe to call more than once.
   Future<void> teardown() async {
     if (_tornDown) return;
     _tornDown = true;
-    _ticker?.dispose();
-    _ticker = null;
-    _statsTimer?.cancel();
-    _viewportFocus.dispose();
-    _hudTextFocus.dispose();
-    if (_viewport != nullptr) {
-      final vp = _viewport;
-      _viewport = nullptr;
-      _viewportNative!.clearFrameReadyCallback(vp);
-      await _channel.invokeMethod('unregisterTexture');
-      _viewportNative!.destroy(vp);
+    _gameKey.currentState?.setPaused(true);
+    if (_controller.isAttached) {
+      await _controller.detach();
       _log('viewport destroyed');
     }
-    final world = _world;
-    _world = null;
-    if (world != null) {
-      final s = world.stats();
-      world.dispose();
-      _log('world disposed after tick ${s.tick} (${s.liveEntities} entities)');
-    }
+    final s = _world.stats();
+    _world.dispose();
+    _log('world disposed after tick ${s.tick} (${s.liveEntities} entities)');
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _controller.removeListener(_onViewportChanged);
+    _viewportFocus.dispose();
+    _hudTextFocus.dispose();
     // If the parent did not call teardown() first (e.g. navigation), run it
     // now; the async tail (unregister → destroy) completes after dispose.
     teardown();
+    _controller.dispose();
     super.dispose();
   }
 
   // ---- loop ----------------------------------------------------------------
 
-  /// One host frame (ADR-0008): simulate, then render the extract.
-  void _onTick(Duration elapsed) {
-    final world = _world;
-    if (_viewport == nullptr || world == null) return;
-    var dt = 0.0;
-    if (_lastTick != null) {
-      dt = (elapsed - _lastTick!).inMicroseconds / 1e6;
-      _intervalsMs.add(dt * 1000);
-    }
-    _lastTick = elapsed;
+  void _fixedUpdate(int tick) => _scene?.fixedUpdate(_world, tick);
 
-    final sim = Stopwatch()..start();
-    final scene = _scene;
-    final plan = world.frame(dt, fixedUpdate: scene == null ? null : (tick) => scene.fixedUpdate(world, tick));
-    sim.stop();
-    _simMs.add(sim.elapsedMicroseconds / 1000);
-    _ticksThisWindow += plan.steps;
-    if (plan.missedDeadline) _missedDeadlines++;
-
-    if (_resizing) {
-      // Between Rust resize and Swift rebind the presenter has no buffers yet;
-      // the simulation still advanced, so no time is lost.
-      _skippedWhileResizing++;
-      return;
-    }
-    final sw = Stopwatch()..start();
-    final rendered = _viewportNative!.render(_viewport, world.native.handleAddress);
-    sw.stop();
-    _renderCallMs.add(sw.elapsedMicroseconds / 1000);
-    if (rendered == -1) _droppedThisWindow++;
-    if (rendered == renderNoWorld) _log('render: no world (poisoned?)');
-  }
-
-  Future<void> _reportStats() async {
-    final world = _world;
-    if (_viewport == nullptr || _viewportNative == null || world == null) return;
-    final s = _viewportNative!.takeStats(_viewport);
-    final b = world.stats();
-    final swift = await _channel.invokeMapMethod<String, dynamic>('stats');
-    final intervals = List<double>.from(_intervalsMs)..sort();
-    final sim = List<double>.from(_simMs)..sort();
-    final calls = List<double>.from(_renderCallMs)..sort();
-    _intervalsMs.clear();
-    _simMs.clear();
-    _renderCallMs.clear();
-    final dropped = _droppedThisWindow;
-    final skipped = _skippedWhileResizing;
-    final ticks = _ticksThisWindow;
-    final missed = _missedDeadlines;
-    _droppedThisWindow = 0;
-    _skippedWhileResizing = 0;
-    _ticksThisWindow = 0;
-    _missedDeadlines = 0;
-    if (!mounted) return;
+  void _onStats(FynkelFrameStats f) {
+    final s = f.viewport;
+    final b = f.world;
+    final swift = f.platform;
+    if (!mounted || _tornDown) return;
     setState(() {
       _statsText = [
-        'viewport ${_width}x$_height  ring=$_bufferCount  mode=${_syncModeNames[_syncMode]} acquireWait=${_acquireWaitUs}us  ticker.muted=${_ticker?.muted}',
+        'viewport ${f.physicalWidth}x${f.physicalHeight}  ring=$_bufferCount  mode=${_syncModeNames[_syncMode]} acquireWait=${_acquireWaitUs}us  ticker.muted=${f.muted}',
         if (_project != null)
           'project "${_project!.projectName}" scene "${_project!.sceneName}" (${_project!.entityCount} entities, ${_project!.rejectedComponents} rejected)  cache=${_project!.cacheDir}',
-        'world tick=${b.tick} entities=${b.liveEntities} instances=${s.instances} meshes=${s.meshes} placeholders=${s.placeholders} missing=${s.missing} assetErrors=${s.assetErrors} sceneCamera=${s.sceneCamera}  fixed ticks/s=$ticks missedDeadlines=$missed  bridge calls=${b.ffiCalls} bytes in/out=${b.bytesIn}/${b.bytesOut}',
-        'dart tick interval ms  p50=${_p(intervals, .5)} p95=${_p(intervals, .95)} p99=${_p(intervals, .99)}  (n=${intervals.length}, skipped while resizing=$skipped)',
-        'dart simulate ms       p50=${_p(sim, .5)} p95=${_p(sim, .95)} p99=${_p(sim, .99)}  (gameplay + submit + step + snapshot)',
-        'ffi render() call ms   p50=${_p(calls, .5)} p95=${_p(calls, .95)} p99=${_p(calls, .99)}  (extract + encode + submit)',
-        'rust cpu encode+submit p50=${s.cpuP50Ms.toStringAsFixed(3)} p95=${s.cpuP95Ms.toStringAsFixed(3)} p99=${s.cpuP99Ms.toStringAsFixed(3)}',
-        'submit→gpu complete    p50=${s.gpuP50Ms.toStringAsFixed(2)} p95=${s.gpuP95Ms.toStringAsFixed(2)} p99=${s.gpuP99Ms.toStringAsFixed(2)}',
-        'rendered=${s.framesRendered} dropped(ring full)=${s.framesDropped}/$dropped presented=${s.framesPresented} stalePresent=${s.presentsWithoutNewFrame}',
-        'present lag (frames behind newest submit) p50=${s.presentLagP50} p95=${s.presentLagP95} max=${s.presentLagMax}  raster acquire wait ms p50=${s.acquireWaitP50Ms.toStringAsFixed(2)} p95=${s.acquireWaitP95Ms.toStringAsFixed(2)} max=${s.acquireWaitMaxMs.toStringAsFixed(2)}',
-        'resizes=${s.resizes} rust resize ms p50=${s.resizeP50Ms.toStringAsFixed(2)} max=${s.resizeMaxMs.toStringAsFixed(2)}',
+        if (s != null)
+          'world tick=${b.tick} entities=${b.liveEntities} instances=${s.instances} meshes=${s.meshes} placeholders=${s.placeholders} missing=${s.missing} assetErrors=${s.assetErrors} sceneCamera=${s.sceneCamera}  fixed ticks/s=${f.fixedTicks} missedDeadlines=${f.missedDeadlines}  bridge calls=${b.ffiCalls} bytes in/out=${b.bytesIn}/${b.bytesOut}',
+        'dart tick interval ms  ${f.tickInterval.format()}  (n=${f.tickInterval.count}, skipped while resizing=${f.skippedWhileResizing})',
+        'dart simulate ms       ${f.simulate.format()}  (gameplay + submit + step + snapshot)',
+        'ffi render() call ms   ${f.renderCall.format()}  (extract + encode + submit)',
+        if (s != null) ...[
+          'rust cpu encode+submit p50=${s.cpuP50Ms.toStringAsFixed(3)} p95=${s.cpuP95Ms.toStringAsFixed(3)} p99=${s.cpuP99Ms.toStringAsFixed(3)}',
+          'submit→gpu complete    p50=${s.gpuP50Ms.toStringAsFixed(2)} p95=${s.gpuP95Ms.toStringAsFixed(2)} p99=${s.gpuP99Ms.toStringAsFixed(2)}',
+          'rendered=${s.framesRendered} dropped(ring full)=${s.framesDropped}/${f.dropped} presented=${s.framesPresented} stalePresent=${s.presentsWithoutNewFrame}',
+          'present lag (frames behind newest submit) p50=${s.presentLagP50} p95=${s.presentLagP95} max=${s.presentLagMax}  raster acquire wait ms p50=${s.acquireWaitP50Ms.toStringAsFixed(2)} p95=${s.acquireWaitP95Ms.toStringAsFixed(2)} max=${s.acquireWaitMaxMs.toStringAsFixed(2)}',
+          'resizes=${s.resizes} rust resize ms p50=${s.resizeP50Ms.toStringAsFixed(2)} max=${s.resizeMaxMs.toStringAsFixed(2)}',
+        ],
         if (swift != null)
-          'swift copyPixelBuffer=${swift["copyCalls"]} newFrame=${swift["copyWithNewFrame"]} noFrame=${swift["copyNoFrame"]} readySignals=${swift["frameReadySignals"]} rebinds=${swift["rebinds"]}',
+          'swift copyPixelBuffer=${swift.copyCalls} newFrame=${swift.copyWithNewFrame} noFrame=${swift.copyNoFrame} readySignals=${swift.frameReadySignals} rebinds=${swift.rebinds}',
         'input: pointer=$_pointer events/s=$_pointerEventsThisWindow clicks=$_viewportClicks  keysDown=${_keysDown.toList()} keyEvents=$_keyEventsToViewport  focus=${FocusManager.instance.primaryFocus?.debugLabel ?? "?"}',
         '--- events',
         ..._events,
@@ -508,93 +387,77 @@ class _ViewportPageState extends State<ViewportPage>
     debugPrint('[host] ${_statsText.split('\n').take(12).join(' | ')}');
   }
 
-  static String _p(List<double> sorted, double q) {
-    if (sorted.isEmpty) return '-';
-    final i = ((sorted.length - 1) * q).round();
-    return sorted[i].toStringAsFixed(2);
-  }
-
   @override
   Widget build(BuildContext context) {
-    final dpr = MediaQuery.devicePixelRatioOf(context);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final w = (constraints.maxWidth * dpr).round();
-        final h = (constraints.maxHeight * dpr).round();
-        WidgetsBinding.instance.addPostFrameCallback((_) => _requestSize(w, h));
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            if (_textureId != null)
-              // The viewport is an ordinary Flutter layer: pointer events and
-              // keyboard focus are handled by normal Flutter widgets around it.
-              Focus(
-                focusNode: _viewportFocus,
-                onKeyEvent: _onViewportKey,
-                child: Listener(
-                  onPointerDown: _onPointer,
-                  onPointerMove: _onPointer,
-                  onPointerHover: _onPointer,
-                  onPointerUp: _onPointer,
-                  behavior: HitTestBehavior.opaque,
-                  child: Texture(textureId: _textureId!, filterQuality: FilterQuality.none),
-                ),
-              )
-            else
-              Center(child: Text(_error ?? 'creating viewport…', textAlign: TextAlign.center)),
-            // Flutter overlay: the "HUD over the 3D world".
-            Positioned(
-              left: 16,
-              top: 16,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.55),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    _statsText,
-                    style: const TextStyle(fontFamily: 'Menlo', fontSize: 12, height: 1.4),
-                  ),
+    if (_error != null) {
+      return Center(child: Text(_error!, textAlign: TextAlign.center));
+    }
+    return FynkelGameView(
+      key: _gameKey,
+      world: _world,
+      controller: _controller,
+      fixedUpdate: _fixedUpdate,
+      onStats: _onStats,
+      focusNode: _viewportFocus,
+      autofocus: false,
+      onKeyEvent: _onViewportKey,
+      onPointerEvent: _onPointer,
+      placeholder: const Center(child: Text('creating viewport…', textAlign: TextAlign.center)),
+      // Flutter overlay: the "HUD over the 3D world".
+      overlay: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            left: 16,
+            top: 16,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  _statsText,
+                  style: const TextStyle(fontFamily: 'Menlo', fontSize: 12, height: 1.4),
                 ),
               ),
             ),
-            Positioned(
-              right: 16,
-              bottom: 16,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 180,
-                    child: TextField(
-                      focusNode: _hudTextFocus,
-                      decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: 'HUD text field'),
-                    ),
+          ),
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 180,
+                  child: TextField(
+                    focusNode: _hudTextFocus,
+                    decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), hintText: 'HUD text field'),
                   ),
-                  const SizedBox(width: 12),
-                  Text('clicks: $_clicks   ', style: const TextStyle(fontFamily: 'Menlo')),
-                  FilledButton.icon(
-                    onPressed: () {
-                      setState(() => _clicks++);
-                      _log('HUD button click #$_clicks');
-                    },
-                    icon: const Icon(Icons.touch_app),
-                    label: const Text('Flutter button over 3D'),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 12),
+                Text('clicks: $_clicks   ', style: const TextStyle(fontFamily: 'Menlo')),
+                FilledButton.icon(
+                  onPressed: () {
+                    setState(() => _clicks++);
+                    _log('HUD button click #$_clicks');
+                  },
+                  icon: const Icon(Icons.touch_app),
+                  label: const Text('Flutter button over 3D'),
+                ),
+              ],
             ),
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 16,
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          ],
-        );
-      },
+          ),
+          const Positioned(
+            left: 0,
+            right: 0,
+            bottom: 16,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -66,7 +66,7 @@ packages:
     source: hosted
     version: "1.3.3"
   ffi:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: ffi
       sha256: "6d7fd89431262d8f3125e81b50d3847a091d846eafcd4fdb88dd06f36d705a45"
@@ -95,6 +95,13 @@ packages:
     dependency: "direct main"
     description:
       path: "../../packages/fynkel"
+      relative: true
+    source: path
+    version: "0.0.1"
+  fynkel_flutter:
+    dependency: "direct main"
+    description:
+      path: "../../packages/fynkel_flutter"
       relative: true
     source: path
     version: "0.0.1"
@@ -281,4 +288,4 @@ packages:
     version: "3.1.4"
 sdks:
   dart: ">=3.13.2 <4.0.0"
-  flutter: ">=3.18.0-18.0.pre.54"
+  flutter: ">=3.47.0"

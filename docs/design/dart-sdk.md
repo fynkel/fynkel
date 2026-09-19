@@ -32,6 +32,8 @@ package:fynkel/
 
 Keep Flutter-specific helpers in a separate package such as `package:fynkel_flutter/` so gameplay logic and headless tests do not depend on widget APIs.
 
+*Implemented (M3-01):* `package:fynkel_flutter` (`packages/fynkel_flutter`) is that package — the Path A viewport plugin (`FynkelFlutterPlugin` for macOS + iOS), `FynkelViewportController`, the `FynkelViewport` widget and `FynkelGameView`, which owns the Ticker and calls `World.frame` at the §5.1 points before rendering. A game's `lib/main.dart` is `FynkelGameView(world: game.world, controller: FynkelViewportController(assetCache: report.cacheDir), overlay: <HUD>)`; `package:fynkel` itself imports nothing from Flutter (`docs/hosts.md`, "Flutter host").
+
 ### 21.2 Core runtime objects
 
 The minimum public object model should include:

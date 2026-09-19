@@ -1,8 +1,10 @@
 //! `fynkel run [--project <dir>] [-- <flutter run args>]` (blueprint §13.3):
 //! `flutter run` in the project with `FYNKEL_PROJECT` defined, so the app's
 //! `Game.load(projectDirectory())` finds `fynkel.project.json` whatever the
-//! process's working directory is. The project is validated first; a
-//! project with errors does not run.
+//! process's working directory is. The project is validated first (a
+//! project with errors does not run), then cooked into `.fynkel/cache` so
+//! the app's viewport has every mesh and texture (`--no-cook` skips that;
+//! a warm cache costs milliseconds).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -11,13 +13,14 @@ use fynkel_document::{has_errors, validate_project};
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel run [--project <dir>] [-d <device>] [--release] [-- <flutter run args>]\n                                               validate the project, then `flutter run` with FYNKEL_PROJECT set to it"
+        "usage:\n  fynkel run [--project <dir>] [--no-cook] [-d <device>] [--release] [-- <flutter run args>]\n                                               validate and cook the project, then `flutter run` with FYNKEL_PROJECT set to it"
     );
     ExitCode::from(2)
 }
 
 pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let mut project = PathBuf::from(".");
+    let mut cook = true;
     let mut passthrough: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -29,6 +32,7 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                     None => return usage(),
                 }
             }
+            "--no-cook" => cook = false,
             "--root" => i += 1,
             "--" => {
                 passthrough.extend(args[i + 1..].iter().cloned());
@@ -59,6 +63,29 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     };
     let abs = std::fs::canonicalize(&project).unwrap_or(project.clone());
+    if cook {
+        // Same defaults as `fynkel cook` run from the project root.
+        let loaded = match fynkel_document::load_project(&abs) {
+            Ok(l) => l,
+            Err(diags) => {
+                for d in &diags {
+                    eprintln!("{d}");
+                }
+                return ExitCode::from(1);
+            }
+        };
+        let cook_args = [
+            "--assets".to_string(),
+            loaded.assets.display().to_string(),
+            "--cache".to_string(),
+            loaded.cache.display().to_string(),
+        ];
+        let status = crate::cook::run(root, &cook_args);
+        if status != ExitCode::SUCCESS {
+            eprintln!("fynkel run: cooking failed; fix the assets first (`fynkel cook`) or pass --no-cook");
+            return status;
+        }
+    }
     let status = Command::new(flutter)
         .arg("run")
         .arg(format!("--dart-define=FYNKEL_PROJECT={}", abs.display()))

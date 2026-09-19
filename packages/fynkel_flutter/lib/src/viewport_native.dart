@@ -1,8 +1,8 @@
-// dart:ffi bindings for the macOS viewport ABI (platform/apple/include/
+// dart:ffi bindings for the Apple viewport ABI (platform/apple/include/
 // fynkel_apple.h). The engine ABI comes from package:fynkel; both live in
-// the same dylib, provided by package:fynkel's build hook (ADR-0015). This
-// is host glue: when `fynkel_flutter` exists it owns this file (generated
-// with ffigen like the engine bindings).
+// the same dylib, provided by package:fynkel's build hook (ADR-0015), so the
+// symbols below are `@Native` externals on that code asset — nothing is
+// dlopen-ed. Package-private: `FynkelViewportController` is the API.
 
 import 'dart:convert';
 import 'dart:ffi';
@@ -104,18 +104,29 @@ external int _bufferCount(Pointer<Void> vp);
 external Pointer<Void> _iosurface(Pointer<Void> vp, int index);
 @Native<Int32 Function(Pointer<Void>, Pointer<Void>)>(symbol: 'fynkel_apple_viewport_render', assetId: _asset)
 external int _render(Pointer<Void> vp, Pointer<Void> world);
-@Native<Void Function(Pointer<Void>, Pointer<ViewportCamera>)>(symbol: 'fynkel_apple_viewport_set_camera', assetId: _asset)
+@Native<Void Function(Pointer<Void>, Pointer<ViewportCamera>)>(
+  symbol: 'fynkel_apple_viewport_set_camera',
+  assetId: _asset,
+)
 external void _setCamera(Pointer<Void> vp, Pointer<ViewportCamera> camera);
 @Native<Void Function(Pointer<Void>, Uint32)>(symbol: 'fynkel_apple_viewport_set_acquire_wait_us', assetId: _asset)
 external void _setAcquireWait(Pointer<Void> vp, int us);
 @Native<Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>(
-    symbol: 'fynkel_apple_viewport_set_frame_ready_callback', assetId: _asset)
+  symbol: 'fynkel_apple_viewport_set_frame_ready_callback',
+  assetId: _asset,
+)
 external void _setCallback(Pointer<Void> vp, Pointer<Void> fn, Pointer<Void> userData);
 @Native<Int32 Function(Pointer<Void>)>(symbol: 'fynkel_apple_viewport_acquire_presented', assetId: _asset)
 external int _acquirePresented(Pointer<Void> vp);
-@Native<Void Function(Pointer<Void>, Pointer<ViewportStats>)>(symbol: 'fynkel_apple_viewport_take_stats', assetId: _asset)
+@Native<Void Function(Pointer<Void>, Pointer<ViewportStats>)>(
+  symbol: 'fynkel_apple_viewport_take_stats',
+  assetId: _asset,
+)
 external void _takeStats(Pointer<Void> vp, Pointer<ViewportStats> out);
-@Native<Int32 Function(Pointer<Void>, Pointer<Uint8>, Uint32)>(symbol: 'fynkel_apple_viewport_set_asset_cache', assetId: _asset)
+@Native<Int32 Function(Pointer<Void>, Pointer<Uint8>, Uint32)>(
+  symbol: 'fynkel_apple_viewport_set_asset_cache',
+  assetId: _asset,
+)
 external int _setAssetCache(Pointer<Void> vp, Pointer<Uint8> dir, int len);
 @Native<Void Function(Pointer<Void>, Int32)>(symbol: 'fynkel_apple_viewport_set_placeholders', assetId: _asset)
 external void _setPlaceholders(Pointer<Void> vp, int enabled);
@@ -130,9 +141,11 @@ class ViewportNative {
 
   /// Raw symbol addresses handed to Swift so it can call Rust directly from
   /// Flutter's raster thread without dlopen-ing the library a second time.
-  final int acquireFnAddress = Native.addressOf<NativeFunction<Int32 Function(Pointer<Void>)>>(_acquirePresented).address;
+  final int acquireFnAddress = Native.addressOf<NativeFunction<Int32 Function(Pointer<Void>)>>(_acquirePresented)
+      .address;
   final int setCallbackFnAddress =
-      Native.addressOf<NativeFunction<Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>>(_setCallback).address;
+      Native.addressOf<NativeFunction<Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>>(_setCallback)
+          .address;
 
   /// [syncMode]: 0 = wgpu on_submitted_work_done, 1 = blocking, 2 = Metal
   /// completion handler (production).
@@ -146,15 +159,20 @@ class ViewportNative {
 
   int bufferCount(Pointer<Void> vp) => _bufferCount(vp);
 
-  List<int> iosurfaceAddresses(Pointer<Void> vp) =>
-      List.generate(bufferCount(vp), (i) => _iosurface(vp, i).address);
+  List<int> iosurfaceAddresses(Pointer<Void> vp) => List.generate(bufferCount(vp), (i) => _iosurface(vp, i).address);
 
   /// Renders the world's current extract. Returns the slot index, -1 if the
   /// frame was dropped (ring full) or [renderNoWorld].
   int render(Pointer<Void> vp, int worldHandleAddress) => _render(vp, Pointer.fromAddress(worldHandleAddress));
 
-  void setCamera(Pointer<Void> vp,
-      {required List<double> eye, required List<double> target, double fovYDegrees = 60, double near = 0.1, double far = 100}) {
+  void setCamera(
+    Pointer<Void> vp, {
+    required List<double> eye,
+    required List<double> target,
+    double fovYDegrees = 60,
+    double near = 0.1,
+    double far = 100,
+  }) {
     final c = calloc<ViewportCamera>();
     try {
       for (var i = 0; i < 3; i++) {

@@ -1,0 +1,35 @@
+name: fynkel_flutter
+description: "Fynkel Engine - the Flutter side: the native viewport as a widget (Path A, ADR-0002), the game loop at the frame callback (ADR-0007/0008), and the Swift plugin that presents platform/apple's IOSurface ring through Flutter's Texture."
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffi: ^2.1.0
+  # The gameplay API and, through its build hook, the one dylib that exports
+  # both the engine ABI and the viewport ABI (ADR-0015).
+  fynkel:
+    path: ../fynkel
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: FynkelFlutterPlugin
+        sharedDarwinSource: true
+      macos:
+        pluginClass: FynkelFlutterPlugin
+        sharedDarwinSource: true
+
+formatter:
+  page_width: 120

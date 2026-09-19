@@ -2,16 +2,14 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
-  private var viewport: FynkelViewportChannel?
-
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
+    // The viewport plugin (package:fynkel_flutter) registers itself here.
     RegisterGeneratedPlugins(registry: flutterViewController)
-    viewport = FynkelViewportChannel(registrar: flutterViewController.registrar(forPlugin: "FynkelViewport"))
 
     super.awakeFromNib()
   }

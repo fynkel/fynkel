@@ -677,11 +677,11 @@ project — the blueprint's project model, filled in:
 
 ```text
 my_game/
-  pubspec.yaml                 Flutter app on package:fynkel (path dependency into the checkout) + fynkel_generator (dev)
+  pubspec.yaml                 Flutter app on package:fynkel + package:fynkel_flutter (path dependencies into the checkout) + fynkel_generator (dev)
   fynkel.project.json          startup scene, assets root, input-action stub, quality profiles, registry (game.Spinner declared)
   fynkel.lock.json             `expected_lock()` for the tools that created it
   AGENTS.md  README.md         layout, every command, the validate → codegen → build → test loop, do/don't
-  lib/main.dart                the host: a Ticker drives `Game.frame`; shows the simulation as text (viewport widget: M3)
+  lib/main.dart                the app: `FynkelGameView` over the project's cooked cache (loop + viewport) with a HUD overlay
   lib/game/game.dart           `Game.load(dir)`: World, `registerBehaviours(world.registry)`, `loadProject`; `projectDirectory()`
   lib/game/spinner.dart        `@FynkelBehaviour(id: 'game.Spinner')` with `@Expose` speed/axis
   lib/generated/               behaviours.g.dart + .g.json, exactly what `fynkel codegen --project .` emits
@@ -710,9 +710,12 @@ The output passes `fynkel validate`, `fynkel test --headless`, `fynkel
 codegen --project . --check`, `flutter analyze` and `flutter test` (CI runs
 all five on a fresh project) and renders with `fynkel cook && fynkel render`.
 
-`fynkel run [--project <dir>] [-- <flutter run args>]` validates the
-project, then runs `flutter run --dart-define=FYNKEL_PROJECT=<abs dir>` in
-it, which is how `lib/main.dart` finds the project from a bundle.
+`fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]`
+validates the project, cooks it (`fynkel cook` with the project's asset root
+and `.fynkel/cache`; a warm cache costs milliseconds, `--no-cook` skips it)
+so the viewport has every mesh and texture, then runs `flutter run
+--dart-define=FYNKEL_PROJECT=<abs dir>` in it, which is how `lib/main.dart`
+finds the project from a bundle.
 
 Outside the repository the CLI validates against the schema set embedded in
 the build (identical to `schemas/` by `fynkel codegen --check`); `--schemas
@@ -760,7 +763,7 @@ fynkel schema describe <type|kind> [--json]
 fynkel test --headless [--project <dir> | --scene <path> [--prefabs <dir>]] [--steps N] [--seed S] [--json]
 fynkel state dump [--project <dir> | --scene <path> [--prefabs <dir>]] [--steps N] [--json]
 fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter] [--force] [--json]
-fynkel run [--project <dir>] [-- <flutter run args>]
+fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]
 ```
 
 `scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,
