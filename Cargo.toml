@@ -42,6 +42,8 @@ uuid = { version = "1.26", features = ["v4", "v5"] }
 similar = "2"
 gltf = { version = "1.4", default-features = false, features = ["utils", "names", "KHR_materials_emissive_strength"] }
 base64 = "0.23"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+symphonia = { version = "0.6", default-features = false, features = ["wav", "pcm", "ogg", "vorbis"] }
 fynkel_contracts = { path = "crates/fynkel_contracts" }
 fynkel_schema_derive = { path = "crates/fynkel_schema_derive" }
 fynkel_ecs = { path = "crates/fynkel_ecs" }

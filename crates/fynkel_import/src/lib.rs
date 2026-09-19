@@ -18,11 +18,14 @@
 // As in `fynkel_document`: a `Diagnostic` is the error type on purpose.
 #![allow(clippy::result_large_err)]
 
+pub mod audio;
 pub mod gltf;
+pub mod image;
 pub mod intermediate;
 
 pub use intermediate::{
-    ImageData, Intermediate, MaterialData, MeshData, Vertex, INTERMEDIATE_VERSION,
+    AudioData, ColorSpace, ImageData, Intermediate, MaterialData, MeshData, TextureData, Vertex,
+    INTERMEDIATE_VERSION,
 };
 
 use std::path::Path;
@@ -44,6 +47,10 @@ pub struct Limits {
     pub max_images: usize,
     /// Bytes of one embedded image.
     pub max_image_bytes: u64,
+    /// Width and height of a decoded texture.
+    pub max_texture_dimension: u32,
+    /// Decoded audio length, in frames (`sample_rate * seconds`).
+    pub max_audio_frames: u64,
 }
 
 impl Default for Limits {
@@ -56,6 +63,8 @@ impl Default for Limits {
             max_vertices: 1 << 24,
             max_images: 256,
             max_image_bytes: 64 << 20,
+            max_texture_dimension: 16_384,
+            max_audio_frames: 48_000 * 60 * 10,
         }
     }
 }
@@ -88,6 +97,8 @@ impl Imported {
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     match meta.importer.as_str() {
         fynkel_document::asset::GLTF_IMPORTER => gltf::import(path, meta, limits),
+        fynkel_document::asset::IMAGE_IMPORTER => image::import(path, meta, limits),
+        fynkel_document::asset::AUDIO_IMPORTER => audio::import(path, meta, limits),
         other => Imported {
             intermediate: None,
             sub_assets: meta.sub_assets.clone(),
@@ -97,7 +108,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             )
             .with_document(path.display().to_string())
             .with_suggestion(
-                "importers so far: fynkel.gltf; textures and audio arrive with M2-11",
+                "importers: fynkel.gltf (.gltf/.glb), fynkel.image (.png/.jpg), fynkel.audio (.wav/.ogg); fynkel.file has none (the cache, M2-12, carries such files as they are)",
             )],
         },
     }

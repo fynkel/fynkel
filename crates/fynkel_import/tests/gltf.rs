@@ -183,7 +183,7 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
     let i = r.intermediate.unwrap();
     let asset = Uuid::parse_str(ROBOT_ID).unwrap();
     let node = |n: usize| derive_sub_id(asset, &format!("node/{n}")).to_string();
-    let p = &i.prefab;
+    let p = i.prefab.as_ref().unwrap();
     assert_eq!(p["name"], "Robot");
     assert_eq!(p["id"], derive_sub_id(asset, "prefab").to_string());
     assert_eq!(p["roots"], serde_json::json!([node(0), node(4)]));
@@ -435,7 +435,7 @@ fn non_triangle_primitives_are_skipped_with_a_warning() {
     assert_eq!(i.meshes[0].triangle_count(), 4);
     // One primitive survived, so the node carries the renderer itself (the
     // sub id keeps its `/1`, since that is what the file calls it).
-    let entities = i.prefab["entities"].as_object().unwrap();
+    let entities = i.prefab.as_ref().unwrap()["entities"].as_object().unwrap();
     assert_eq!(entities.len(), 1);
     let renderer = entities.values().next().unwrap()["components"]
         .as_object()

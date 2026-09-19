@@ -6,10 +6,11 @@
 //! "FYNI"  u32 version  u32 header_len  header (JSON, header_len bytes)  blobs…
 //! ```
 //!
-//! The header is a JSON object listing meshes, materials, images, the
-//! generated prefab and the sub-asset ids, with every blob given as
-//! `[offset, length]` into the blob section (offsets count from the end of
-//! the header). Vertices are [`Vertex::STRIDE`] bytes each, indices `u32`.
+//! The header is a JSON object listing meshes, materials, images,
+//! textures, audio clips, the generated prefab and the sub-asset ids, with
+//! every blob given as `[offset, length]` into the blob section (offsets
+//! count from the end of the header). Vertices are [`Vertex::STRIDE`]
+//! bytes each, indices `u32`, texels RGBA8, samples `f32` interleaved.
 //! Serialization is deterministic: field order is fixed, there are no
 //! maps with unstable order, floats are written as IEEE bits.
 
@@ -121,6 +122,82 @@ pub struct ImageData {
     pub bytes: Vec<u8>,
 }
 
+/// How the texels of a texture are to be read (§9; the material schema's
+/// `colorSpace`). Colour textures are sRGB, data textures (normal,
+/// roughness, masks) are linear — the importer cannot tell, so the sidecar
+/// says (`settings.colorSpace`, default `srgb`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorSpace {
+    Srgb,
+    Linear,
+}
+
+impl ColorSpace {
+    pub fn parse(s: &str) -> Option<ColorSpace> {
+        match s {
+            "srgb" => Some(ColorSpace::Srgb),
+            "linear" => Some(ColorSpace::Linear),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ColorSpace::Srgb => "srgb",
+            ColorSpace::Linear => "linear",
+        }
+    }
+}
+
+/// A decoded texture: RGBA8, row-major, top row first, no mipmaps (M3
+/// generates them at load or cook time).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextureData {
+    /// Sub-asset id, `None` when the asset itself is the texture (a `.png`).
+    pub sub_id: Option<String>,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub color_space: ColorSpace,
+    /// Whether the source carried an alpha channel (the RGBA8 always has one).
+    pub source_has_alpha: bool,
+    /// `width * height * 4` bytes.
+    pub rgba8: Vec<u8>,
+}
+
+/// A decoded audio clip: interleaved `f32` PCM in `[-1, 1]`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AudioData {
+    /// Sub-asset id, `None` when the asset itself is the clip (a `.wav`).
+    pub sub_id: Option<String>,
+    pub name: String,
+    /// What the source was encoded as (`pcm`, `vorbis`).
+    pub codec: String,
+    pub sample_rate: u32,
+    pub channels: u16,
+    /// `frames * channels` samples.
+    pub samples: Vec<f32>,
+}
+
+impl AudioData {
+    pub fn frames(&self) -> u64 {
+        if self.channels == 0 {
+            0
+        } else {
+            (self.samples.len() / self.channels as usize) as u64
+        }
+    }
+
+    pub fn duration_seconds(&self) -> f64 {
+        if self.sample_rate == 0 {
+            0.0
+        } else {
+            self.frames() as f64 / self.sample_rate as f64
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Intermediate {
     pub importer: String,
@@ -130,10 +207,40 @@ pub struct Intermediate {
     pub meshes: Vec<MeshData>,
     pub materials: Vec<MaterialData>,
     pub images: Vec<ImageData>,
-    /// The node hierarchy as a `.prefab.json` body (sub-asset `prefab`).
-    pub prefab: serde_json::Value,
+    pub textures: Vec<TextureData>,
+    pub clips: Vec<AudioData>,
+    /// The node hierarchy as a `.prefab.json` body (sub-asset `prefab`),
+    /// when the source has one.
+    pub prefab: Option<serde_json::Value>,
     /// Every sub-asset in this intermediate with its uuid, in order.
     pub sub_assets: Vec<(String, uuid::Uuid)>,
+}
+
+impl Intermediate {
+    /// An intermediate with nothing in it yet.
+    pub fn empty(importer: &str, importer_version: u32, source: &str) -> Intermediate {
+        Intermediate {
+            importer: importer.to_string(),
+            importer_version,
+            source: source.to_string(),
+            meshes: Vec::new(),
+            materials: Vec::new(),
+            images: Vec::new(),
+            textures: Vec::new(),
+            clips: Vec::new(),
+            prefab: None,
+            sub_assets: Vec::new(),
+        }
+    }
+
+    pub fn prefab_entity_count(&self) -> usize {
+        self.prefab
+            .as_ref()
+            .and_then(|p| p.get("entities"))
+            .and_then(|e| e.as_object())
+            .map(|o| o.len())
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -145,9 +252,38 @@ struct Header {
     meshes: Vec<MeshHeader>,
     materials: Vec<MaterialHeader>,
     images: Vec<ImageHeader>,
-    prefab: serde_json::Value,
+    textures: Vec<TextureHeader>,
+    clips: Vec<AudioHeader>,
+    prefab: Option<serde_json::Value>,
     #[serde(rename = "subAssets")]
     sub_assets: Vec<(String, String)>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TextureHeader {
+    #[serde(rename = "subId")]
+    sub_id: Option<String>,
+    name: String,
+    width: u32,
+    height: u32,
+    #[serde(rename = "colorSpace")]
+    color_space: ColorSpace,
+    #[serde(rename = "sourceHasAlpha")]
+    source_has_alpha: bool,
+    rgba8: [u64; 2],
+}
+
+#[derive(Serialize, Deserialize)]
+struct AudioHeader {
+    #[serde(rename = "subId")]
+    sub_id: Option<String>,
+    name: String,
+    codec: String,
+    #[serde(rename = "sampleRate")]
+    sample_rate: u32,
+    channels: u16,
+    frames: u64,
+    samples: [u64; 2],
 }
 
 #[derive(Serialize, Deserialize)]
@@ -233,6 +369,38 @@ impl Intermediate {
                 bytes: push(&im.bytes),
             })
             .collect();
+        let textures = self
+            .textures
+            .iter()
+            .map(|t| TextureHeader {
+                sub_id: t.sub_id.clone(),
+                name: t.name.clone(),
+                width: t.width,
+                height: t.height,
+                color_space: t.color_space,
+                source_has_alpha: t.source_has_alpha,
+                rgba8: push(&t.rgba8),
+            })
+            .collect();
+        let clips = self
+            .clips
+            .iter()
+            .map(|c| {
+                let mut bytes = Vec::with_capacity(c.samples.len() * 4);
+                for s in &c.samples {
+                    bytes.extend_from_slice(&s.to_le_bytes());
+                }
+                AudioHeader {
+                    sub_id: c.sub_id.clone(),
+                    name: c.name.clone(),
+                    codec: c.codec.clone(),
+                    sample_rate: c.sample_rate,
+                    channels: c.channels,
+                    frames: c.frames(),
+                    samples: push(&bytes),
+                }
+            })
+            .collect();
         let header = Header {
             importer: self.importer.clone(),
             importer_version: self.importer_version,
@@ -248,6 +416,8 @@ impl Intermediate {
                 })
                 .collect(),
             images,
+            textures,
+            clips,
             prefab: self.prefab.clone(),
             sub_assets: self
                 .sub_assets
@@ -335,6 +505,42 @@ impl Intermediate {
                 bytes: data,
             });
         }
+        let mut textures = Vec::with_capacity(header.textures.len());
+        for t in header.textures {
+            let label = t.sub_id.clone().unwrap_or_else(|| t.name.clone());
+            let data = slice(t.rgba8, &label)?;
+            if data.len() as u64 != t.width as u64 * t.height as u64 * 4 {
+                return Err(bad(&format!("{label}: texel blob size")));
+            }
+            textures.push(TextureData {
+                sub_id: t.sub_id,
+                name: t.name,
+                width: t.width,
+                height: t.height,
+                color_space: t.color_space,
+                source_has_alpha: t.source_has_alpha,
+                rgba8: data.to_vec(),
+            });
+        }
+        let mut clips = Vec::with_capacity(header.clips.len());
+        for c in header.clips {
+            let label = c.sub_id.clone().unwrap_or_else(|| c.name.clone());
+            let data = slice(c.samples, &label)?;
+            if data.len() as u64 != c.frames * c.channels as u64 * 4 {
+                return Err(bad(&format!("{label}: sample blob size")));
+            }
+            clips.push(AudioData {
+                sub_id: c.sub_id,
+                name: c.name,
+                codec: c.codec,
+                sample_rate: c.sample_rate,
+                channels: c.channels,
+                samples: data
+                    .chunks_exact(4)
+                    .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .collect(),
+            });
+        }
         let mut sub_assets = Vec::with_capacity(header.sub_assets.len());
         for (k, v) in header.sub_assets {
             let id: uuid::Uuid = v
@@ -357,6 +563,8 @@ impl Intermediate {
                 })
                 .collect(),
             images,
+            textures,
+            clips,
             prefab: header.prefab,
             sub_assets,
         })
@@ -379,25 +587,53 @@ impl Intermediate {
             "images": self.images.iter().map(|im| serde_json::json!({
                 "subId": im.sub_id, "name": im.name, "mimeType": im.mime_type, "bytes": im.bytes.len(),
             })).collect::<Vec<_>>(),
-            "prefabEntities": self.prefab.get("entities").and_then(|e| e.as_object()).map(|o| o.len()).unwrap_or(0),
+            "textures": self.textures.iter().map(|t| serde_json::json!({
+                "subId": t.sub_id, "name": t.name, "width": t.width, "height": t.height,
+                "colorSpace": t.color_space.name(), "sourceHasAlpha": t.source_has_alpha,
+            })).collect::<Vec<_>>(),
+            "clips": self.clips.iter().map(|c| serde_json::json!({
+                "subId": c.sub_id, "name": c.name, "codec": c.codec, "sampleRate": c.sample_rate,
+                "channels": c.channels, "frames": c.frames(), "seconds": c.duration_seconds(),
+            })).collect::<Vec<_>>(),
+            "prefab": self.prefab.is_some(),
+            "prefabEntities": self.prefab_entity_count(),
             "subAssets": self.sub_assets.iter().map(|(k, v)| serde_json::json!({ "id": k, "uuid": v.to_string() })).collect::<Vec<_>>(),
         })
     }
 
     pub fn summary_text(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.meshes.is_empty() {
+            parts.push(format!("{} mesh(es)", self.meshes.len()));
+        }
+        if !self.materials.is_empty() {
+            parts.push(format!("{} material(s)", self.materials.len()));
+        }
+        if !self.images.is_empty() {
+            parts.push(format!("{} image(s)", self.images.len()));
+        }
+        if !self.textures.is_empty() {
+            parts.push(format!("{} texture(s)", self.textures.len()));
+        }
+        if !self.clips.is_empty() {
+            parts.push(format!("{} clip(s)", self.clips.len()));
+        }
+        if self.prefab.is_some() {
+            parts.push(format!(
+                "prefab with {} entities",
+                self.prefab_entity_count()
+            ));
+        }
         let mut out = format!(
-            "{} ({} v{}): {} mesh(es), {} material(s), {} image(s), prefab with {} entities\n",
+            "{} ({} v{}): {}\n",
             self.source,
             self.importer,
             self.importer_version,
-            self.meshes.len(),
-            self.materials.len(),
-            self.images.len(),
-            self.prefab
-                .get("entities")
-                .and_then(|e| e.as_object())
-                .map(|o| o.len())
-                .unwrap_or(0)
+            if parts.is_empty() {
+                "nothing".to_string()
+            } else {
+                parts.join(", ")
+            }
         );
         for m in &self.meshes {
             out.push_str(&format!(
@@ -419,6 +655,29 @@ impl Intermediate {
                 im.name,
                 im.mime_type,
                 im.bytes.len()
+            ));
+        }
+        for t in &self.textures {
+            out.push_str(&format!(
+                "  {:<14} {} ({}x{} RGBA8, {}{})\n",
+                t.sub_id.as_deref().unwrap_or("(self)"),
+                t.name,
+                t.width,
+                t.height,
+                t.color_space.name(),
+                if t.source_has_alpha { ", alpha" } else { "" }
+            ));
+        }
+        for c in &self.clips {
+            out.push_str(&format!(
+                "  {:<14} {} ({}, {} Hz, {} channel(s), {} frames, {:.3} s)\n",
+                c.sub_id.as_deref().unwrap_or("(self)"),
+                c.name,
+                c.codec,
+                c.sample_rate,
+                c.channels,
+                c.frames(),
+                c.duration_seconds()
             ));
         }
         out

@@ -286,7 +286,7 @@ source `A0002`, duplicate id (across documents, sidecars and sub-assets;
 the first path wins) `A0003`, unknown asset `A0004`, unknown sub-asset
 `A0005`, malformed sidecar entry `A0006`.
 
-## Import (glTF/GLB)
+## Import
 
 `fynkel_import` (blueprint §6 "Asset identity and import", ADR-0006) turns a
 source file, its sidecar's `settings` and the importer's version into a
@@ -296,7 +296,9 @@ It is development-only, never runs in a shipped game, and serializes to
 bytes deterministically — the same source, settings and sidecar give the
 same bytes on every machine, so it can be hashed, cached and diffed.
 
-`fynkel.gltf` (importer version 1) reads glTF 2.0 `.gltf`/`.glb` through
+### glTF/GLB (`fynkel.gltf`, version 1)
+
+The importer reads glTF 2.0 `.gltf`/`.glb` through
 the `gltf` crate (no `import` feature: buffers and images are resolved by
 Fynkel, never by the crate) and produces, per file:
 
@@ -329,13 +331,50 @@ parents) is `A0104`; the `Limits` — file 256 MiB, buffers 256 MiB total,
 are `A0101`; a file that is not glTF at all is `A0100`. Any error means no
 intermediate is produced.
 
-The intermediate's bytes (`.fyni`): `FYNI`, version, a JSON header (source,
-importer, meshes/materials/images with `[offset, length]` into the blob
-area, the prefab document, the sub-asset ids) and 4-byte-aligned blobs.
-`Intermediate::to_bytes`/`from_bytes` round-trip; the committed
-`fixtures/robot.expected.fyni` pins the format and every id derivation
-(`FYNKEL_UPDATE_FIXTURES=1 cargo test -p fynkel_import` regenerates it when
-a change is intended).
+### Textures (`fynkel.image`, version 1)
+
+`.png` / `.jpg` / `.jpeg` → one `TextureData`: RGBA8, row-major, top row
+first, `width × height × 4` bytes, no mipmaps (M3 generates them at load
+or cook time), no resizing. Grey, grey+alpha, RGB, RGBA, palette and
+16-bit sources all normalize to 8-bit RGBA (16-bit is narrowed;
+`sourceHasAlpha` records whether the file had an alpha channel). The
+colour space is **declared, not detected**: the sidecar's
+`settings.colorSpace` (`"srgb"`, the default, for colour; `"linear"` for
+normal, roughness, metallic, occlusion and other data maps) — the same
+`colorSpace` a material's texture binding can state, so the two can be
+checked against each other later. A value that is neither is `FYN-A0104`
+anchored at `/settings/colorSpace` of the sidecar. Only PNG and JPEG are
+compiled in (`image` with `default-features = false`); anything else is
+`A0103`. Limits: `max_image_bytes` (64 MiB of file), `max_texture_dimension`
+(16 384 per side, enforced before decoding) → `A0101`. A standalone
+texture has no sub-assets: an `assetRef` to it is `{ asset }` alone.
+
+### Audio (`fynkel.audio`, version 1)
+
+`.wav` (PCM 8/16/24/32-bit and float) / `.ogg` (Vorbis) → one `AudioData`:
+interleaved `f32` samples in `[-1, 1]` (lossy overshoot clamped), the
+sample rate and channel count as the file had them, and the source codec
+(`pcm`, `vorbis`). No resampling, no channel mixing, no normalization,
+no tags — the runtime's mixer (a later milestone) decides. Decoding is
+`symphonia` with only `wav`/`pcm`/`ogg`/`vorbis` compiled in and no SIMD
+features, so a Vorbis decode is bit-identical across machines; anything
+else (FLAC, MP3, AAC, ...) is `A0103`. A stream that ends early or has a
+corrupt packet is `A0104` — a game asset with a hole in it is fixed at
+the source, not skipped over. Limit: `max_audio_frames` (10 minutes at
+48 kHz) → `A0101`. No settings yet; no sub-assets.
+
+### The intermediate's bytes
+
+`.fyni`: `FYNI`, version, a JSON header (source, importer, meshes /
+materials / images / textures / clips with `[offset, length]` into the
+blob area, the prefab document when there is one, the sub-asset ids) and
+4-byte-aligned blobs (vertices, `u32` indices, encoded image bytes, RGBA8
+texels, `f32` samples). `Intermediate::to_bytes`/`from_bytes` round-trip;
+the committed `fixtures/robot.expected.fyni`,
+`fixtures/textures/swatch.expected.fyni` and
+`fixtures/audio/tone.expected.fyni` pin the format, the normalization and
+every id derivation (`FYNKEL_UPDATE_FIXTURES=1 cargo test -p fynkel_import`
+regenerates them when a change is intended).
 
 ## CLI
 

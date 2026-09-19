@@ -621,6 +621,40 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
     assert_eq!(v["diagnostics"][0]["code"], "FYN-A0102");
     assert_eq!(std::fs::read_dir(&out_dir).unwrap().count(), 1);
 
+    // Textures and audio go through the same command; several files at once.
+    std::fs::copy(
+        fixtures.join("textures/swatch.png"),
+        assets.join("swatch.png"),
+    )
+    .unwrap();
+    std::fs::copy(fixtures.join("audio/tone.ogg"), assets.join("tone.ogg")).unwrap();
+    let out = run(&[
+        "import",
+        "--json",
+        "--out",
+        out_dir.to_str().unwrap(),
+        assets.join("swatch.png").to_str().unwrap(),
+        assets.join("tone.ogg").to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let files = v["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0]["importer"], "fynkel.image");
+    assert_eq!(files[0]["sidecarCreated"], true);
+    assert_eq!(files[0]["summary"]["textures"][0]["width"], 4);
+    assert_eq!(files[0]["summary"]["textures"][0]["colorSpace"], "srgb");
+    assert_eq!(files[1]["importer"], "fynkel.audio");
+    assert_eq!(files[1]["summary"]["clips"][0]["codec"], "vorbis");
+    assert_eq!(files[1]["summary"]["clips"][0]["frames"], 400);
+    assert!(assets.join("swatch.png.meta.json").exists());
+    assert!(assets.join("tone.ogg.meta.json").exists());
+    assert_eq!(std::fs::read_dir(&out_dir).unwrap().count(), 3);
+
     // Usage.
     let out = run(&["import"]);
     assert_eq!(out.status.code(), Some(2));
