@@ -119,6 +119,8 @@ The following component families define the expected 1.0 baseline. Components ma
 
 `Transform` exposes local position, rotation, and scale; read-only world-space state; explicit local/world setters; parenting with keep-local/keep-world policies; direction helpers; and change observation suitable for tooling. Avoid implicit expensive matrix decompositions in common getters.
 
+Writes have two forms with identical semantics (M2, carry-over C1): the value form (`setLocalTransform(Transform)`, property setters) for ordinary code, and the allocation-free form for per-tick hot paths — a reusable `TransformWriter` handed to `writeLocal`/`writePresentation`, or scalar `setLocalPosition(x, y, z)`/`setLocalRotation`/`setLocalScale` where unspecified parts keep their current value. Both are read-your-writes; the value types (ADR-0013) remain the only read surface. Measured: 25 moving objects cost ≈1.5 KB/frame with the writer form versus ≈5 KB with values.
+
 #### Rendering
 
 - `Camera`

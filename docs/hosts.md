@@ -117,7 +117,10 @@ Three probes feed the M1 gate (`docs/m1-gate-report.md`) and are run by
   `packages/fynkel`: the Flutter demo scene without a renderer, driven from
   Dart; reports heap bytes per frame (heap-usage deltas after forced GC, chunks
   with a GC event excluded), GC count and pause time from the VM service.
-  JIT numbers; the class breakdown is indicative only.
+  JIT numbers; the class breakdown is indicative only. With the C1 writers
+  (`TransformWriter`, `GameObject.writeLocal`) the 25-entity scene sits at
+  ≈1.5 KB/frame with no GC in 3 000 frames; the remainder is per-frame SDK
+  results (`FramePlan`/`StepResult`) and event/diagnostic views.
 - `cargo test --release -p fynkel_native --test leak`: counting global
   allocator over repeated runtime + world lifetimes; bytes in use after
   teardown must equal the baseline.

@@ -46,26 +46,24 @@ class DemoScene {
         s.object = world.spawn(transform: _satelliteLocal(s, t), parent: hub);
       }
     }
-    hub.setLocalTransform(_hubLocal(t));
+    // Hot path: reusable writer, no Transform/Vec3/Quat per write (C1).
+    hub.writeLocal(_w.identity().setRotationAxisAngle(0, 1, 0, t * 0.8).rotateAxisAngle(1, 0, 0, t * 0.35).setUniformScale(0.8));
     for (final s in _satellites) {
       final o = s.object;
-      if (o != null && !o.isPending) o.setLocalTransform(_satelliteLocal(s, t));
+      if (o != null && !o.isPending) o.writeLocal(_satelliteInto(s, t, _w));
     }
   }
 
-  static Transform _hubLocal(double t) => Transform(
-        position: Vec3.zero,
-        rotation: Quat.axisAngle(Vec3.up, t * 0.8) * Quat.axisAngle(Vec3.right, t * 0.35),
-        scale: const Vec3.all(0.8),
-      );
+  final TransformWriter _w = TransformWriter();
 
-  static Transform _satelliteLocal(_Satellite s, double t) {
+  static Transform _satelliteLocal(_Satellite s, double t) => _satelliteInto(s, t, TransformWriter()).toTransform();
+
+  static TransformWriter _satelliteInto(_Satellite s, double t, TransformWriter w) {
     final a = s.phase + s.angularSpeed * t;
-    return Transform(
-      position: Vec3(math.cos(a) * s.radius, s.height, math.sin(a) * s.radius),
-      rotation: Quat.axisAngle(Vec3.up, s.spinSpeed * t),
-      scale: Vec3.all(s.scale),
-    );
+    return w
+        .setPosition(math.cos(a) * s.radius, s.height, math.sin(a) * s.radius)
+        .setRotationAxisAngle(0, 1, 0, s.spinSpeed * t)
+        .setUniformScale(s.scale);
   }
 }
 

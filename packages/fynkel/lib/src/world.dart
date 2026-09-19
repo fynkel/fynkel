@@ -10,6 +10,7 @@ import '../math.dart';
 import 'diagnostics.dart';
 import 'events.dart';
 import 'native/bridge.dart';
+import 'transform_writer.dart';
 import 'wire/buffers.dart';
 
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
@@ -133,7 +134,7 @@ class World {
     }
     // Overlays are consumed by the tick they were staged for.
     for (final go in _byEntity.values) {
-      go._overlay = null;
+      go._clearOverlay();
     }
     _collectDiagnostics('step');
     return r;
@@ -219,9 +220,9 @@ class World {
     final targets = context == 'step' ? _simulationTargets : _presentationTargets;
     for (final d in list) {
       if (d.isCommandRejection && d.commandIndex < targets.length) {
-        targets[d.commandIndex]?._overlay = null;
+        targets[d.commandIndex]?._clearOverlay();
       }
-      if (d.entity != 0) _byEntity[d.entity]?._overlay = null;
+      if (d.entity != 0) _byEntity[d.entity]?._clearOverlay();
     }
     if (context == 'step') _simulationTargets.clear();
     if (throwOnDiagnostics && list.any((d) => !d.isInformational)) {
@@ -231,6 +232,15 @@ class World {
   }
 
   // ---------------------------------------------------------------- reads
+
+  /// Seeds [w] with the entity's last-snapshot local transform straight
+  /// from the record bytes (no value objects); false when not subscribed.
+  bool _seedLocal(int entity, TransformWriter w) {
+    final i = _snapshotIndex[entity];
+    if (i == null) return false;
+    w.decode(_snapshot.records, i * gen.SnapshotTransformRecord.wireSize + 8);
+    return true;
+  }
 
   gen.SnapshotTransformRecord? _snapshotOf(int entity) {
     final i = _snapshotIndex[entity];
@@ -275,8 +285,35 @@ class GameObject {
   int? _entity;
   bool _alive = true;
 
-  /// Staged local transform not yet acknowledged by a snapshot (§5.4).
+  /// Staged local transform not yet acknowledged by a snapshot (§5.4):
+  /// scalars in [_staged] (valid while [_stagedValid]), materialised into
+  /// [_overlay] only when read. Writes never allocate; a read after a
+  /// scalar write allocates one `Transform` until the next write.
   Transform? _overlay;
+  TransformWriter? _staged;
+  bool _stagedValid = false;
+
+  void _clearOverlay() {
+    _overlay = null;
+    _stagedValid = false;
+  }
+
+  /// The staged writer, seeded from the current local value when nothing is
+  /// staged yet, so partial writes (position only) keep the rest.
+  TransformWriter _stage() {
+    final w = _staged ??= TransformWriter();
+    if (!_stagedValid) {
+      final o = _overlay;
+      if (o != null) {
+        w.set(o);
+      } else if (!world._seedLocal(_entity ?? -1, w)) {
+        w.set(_initial);
+      }
+      _stagedValid = true;
+    }
+    _overlay = null;
+    return w;
+  }
 
   late final TransformRef transform;
 
@@ -311,7 +348,12 @@ class GameObject {
 
   /// Current local transform: staged overlay, else last snapshot, else the
   /// spawn value.
-  Transform get localTransform => _overlay ?? world._snapshotOf(_entity ?? -1)?.local ?? _initial;
+  Transform get localTransform {
+    final o = _overlay;
+    if (o != null) return o;
+    if (_stagedValid) return _overlay = _staged!.toTransform();
+    return world._snapshotOf(_entity ?? -1)?.local ?? _initial;
+  }
 
   /// World-space transform from the last snapshot (no overlay: it depends
   /// on the parent chain and is only known after a tick).
@@ -321,7 +363,30 @@ class GameObject {
   void setLocalTransform(Transform t) {
     final e = _requireResolved('setLocalTransform');
     _overlay = t;
+    _stagedValid = false;
     world._simulation.setTransformOf(e, t);
+    world._simulationTargets.add(this);
+  }
+
+  /// Simulation-lane write from a reusable writer (allocation-free, C1).
+  void writeLocal(TransformWriter w) {
+    final e = _requireResolved('writeLocal');
+    _stage().copyFrom(w);
+    world._simulation.setTransformFrom(e, w);
+    world._simulationTargets.add(this);
+  }
+
+  /// Allocation-free partial writes; unspecified parts keep their current
+  /// (staged or last-snapshot) value.
+  void setLocalPosition(double x, double y, double z) => _submitLocal(_stage().setPosition(x, y, z));
+  void setLocalRotation(double x, double y, double z, double w) => _submitLocal(_stage().setRotation(x, y, z, w));
+  void setLocalRotationAxisAngle(double ax, double ay, double az, double radians) =>
+      _submitLocal(_stage().setRotationAxisAngle(ax, ay, az, radians));
+  void setLocalScale(double x, double y, double z) => _submitLocal(_stage().setScale(x, y, z));
+
+  void _submitLocal(TransformWriter w) {
+    final e = _requireResolved('setLocal');
+    world._simulation.setTransformFrom(e, w);
     world._simulationTargets.add(this);
   }
 
@@ -330,7 +395,26 @@ class GameObject {
   void setPresentationTransform(Transform t) {
     final e = _requireResolved('setPresentationTransform');
     _overlay = t;
+    _stagedValid = false;
     world._presentation.setTransformOf(e, t);
+    world._presentationTargets.add(this);
+  }
+
+  /// Presentation-lane write from a reusable writer (allocation-free, C1).
+  void writePresentation(TransformWriter w) {
+    final e = _requireResolved('writePresentation');
+    _stage().copyFrom(w);
+    world._presentation.setTransformFrom(e, w);
+    world._presentationTargets.add(this);
+  }
+
+  void setPresentationPosition(double x, double y, double z) => _submitPresentation(_stage().setPosition(x, y, z));
+  void setPresentationRotation(double x, double y, double z, double w) =>
+      _submitPresentation(_stage().setRotation(x, y, z, w));
+
+  void _submitPresentation(TransformWriter w) {
+    final e = _requireResolved('setPresentation');
+    world._presentation.setTransformFrom(e, w);
     world._presentationTargets.add(this);
   }
 

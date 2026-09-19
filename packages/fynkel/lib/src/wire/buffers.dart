@@ -5,6 +5,7 @@
 import 'dart:typed_data';
 
 import '../../generated/schema.g.dart';
+import '../transform_writer.dart';
 import 'support.dart';
 
 const int bufferMagic = 0x4b4e5946; // "FYNK"
@@ -155,6 +156,13 @@ class CommandBatch {
     final o = _begin(SetTransformCommand.commandKind, SetTransformCommand.wireSize);
     _bytes.setUint64(o, entity, Endian.little);
     t.encode(_bytes, o + 8, _strings);
+  }
+
+  /// Same command from a reusable writer: no value objects at all.
+  void setTransformFrom(int entity, TransformWriter w) {
+    final o = _begin(SetTransformCommand.commandKind, SetTransformCommand.wireSize);
+    _bytes.setUint64(o, entity, Endian.little);
+    w.encode(_bytes, o + 8);
   }
 
   void setParent(SetParentCommand c) => command(SetParentCommand.commandKind, SetParentCommand.wireSize, c);
