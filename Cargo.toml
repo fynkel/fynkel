@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["hosts/standalone", "crates/fynkel_m0_scene", "crates/fynkel_m0"]
+members = ["hosts/standalone", "crates/fynkel_m0_scene", "crates/fynkel_m0",
+    "crates/fynkel_native"]
 
 [workspace.package]
 version = "0.0.1"

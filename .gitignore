@@ -2,3 +2,6 @@
 **/.fynkel/cache/
 **/build/
 .DS_Store
+# Dart
+.dart_tool/
+pubspec.lock

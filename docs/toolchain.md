@@ -43,4 +43,5 @@ Later M0 additions (Flutter host, `crates/fynkel_m0`):
 | `objc2-io-surface` | 0.3.2 | |
 | `block2` | 0.6.2 | ObjC blocks for `MTLCommandBuffer.addCompletedHandler` |
 
-Dart side: package `ffi` (pub) for the hand-written M0 bindings only.
+Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`.
+Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.
