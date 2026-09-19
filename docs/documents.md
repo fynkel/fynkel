@@ -668,6 +668,62 @@ profile, `P0006` (warning) no enabled target, `P0007` asset root escapes the
 project or is missing, `P0008` malformed entry, `P0010` no lock, `P0011`
 lock mismatch, `P0012` malformed lock.
 
+## New projects: `fynkel create`
+
+`fynkel create <dir> [--name <package>] [--title <text>] [--org
+<reverse.domain>] [--no-flutter] [--force] [--json]` (`apps/cli/src/create.rs`,
+blueprint §13.2/§13.3, ADR-0017, §19.2c item 17) writes a complete game
+project — the blueprint's project model, filled in:
+
+```text
+my_game/
+  pubspec.yaml                 Flutter app on package:fynkel (path dependency into the checkout) + fynkel_generator (dev)
+  fynkel.project.json          startup scene, assets root, input-action stub, quality profiles, registry (game.Spinner declared)
+  fynkel.lock.json             `expected_lock()` for the tools that created it
+  AGENTS.md  README.md         layout, every command, the validate → codegen → build → test loop, do/don't
+  lib/main.dart                the host: a Ticker drives `Game.frame`; shows the simulation as text (viewport widget: M3)
+  lib/game/game.dart           `Game.load(dir)`: World, `registerBehaviours(world.registry)`, `loadProject`; `projectDirectory()`
+  lib/game/spinner.dart        `@FynkelBehaviour(id: 'game.Spinner')` with `@Expose` speed/axis
+  lib/generated/               behaviours.g.dart + .g.json, exactly what `fynkel codegen --project .` emits
+  schemas/behaviours/          game.Spinner.schema.json
+  assets/scenes/main.scene.json    Camera, Sun (fynkel.DirectionalLight, 10 000 lux) and a Cube with MeshRenderer + game.Spinner { speed: 1.5 }
+  assets/materials/starter.material.json
+  assets/models/cube.glb (+ .meta.json)   a unit cube (24 vertices, normals, UVs); sidecar with the imported sub-asset ids
+  assets/textures/swatch.png (+ .meta.json)
+  assets/prefabs/  assets/audio/           empty (.gitkeep)
+  test/game_test.dart          `flutter test`: the scene loads, `behavioursAttached == 1`, the spinner's authored speed, it spins
+  macos/  ios/                 platform runners from `flutter create --empty` (skipped with --no-flutter or without `flutter` on PATH)
+```
+
+Every file is a template under `apps/cli/templates/create/` embedded into
+the binary; `{{placeholders}}` are the package name (the directory's name,
+`lower_snake_case`, or `--name`), the title (`My Game`, or `--title`), the
+SDK package paths (relative when the project lives inside the checkout,
+absolute otherwise; `--root <repo>` names the checkout when the CLI cannot
+find it from the working directory or its own location) and fresh v4 ids for
+the project, documents, entities and components. The two sources are run
+through `fynkel_import::import` so their sidecars carry sub-asset ids as
+`fynkel import` would leave them. After `flutter create`, the macOS
+entitlements get `com.apple.security.app-sandbox = false` (a dev build
+reads the project directory; the Fynkel Flutter host runs the same way).
+The output passes `fynkel validate`, `fynkel test --headless`, `fynkel
+codegen --project . --check`, `flutter analyze` and `flutter test` (CI runs
+all five on a fresh project) and renders with `fynkel cook && fynkel render`.
+
+`fynkel run [--project <dir>] [-- <flutter run args>]` validates the
+project, then runs `flutter run --dart-define=FYNKEL_PROJECT=<abs dir>` in
+it, which is how `lib/main.dart` finds the project from a bundle.
+
+Outside the repository the CLI validates against the schema set embedded in
+the build (identical to `schemas/` by `fynkel codegen --check`); `--schemas
+<dir>` overrides either. Scene and prefab commands run on a document inside
+a project (`fynkel.project.json` in an ancestor directory) with that
+project's behaviour schemas and registry, so `game.*` components validate
+instead of warning `FYN-D0205`. `fynkel test --headless` and `fynkel state
+dump` take `--project <dir>` (the startup scene through `load_project`,
+prefabs and behaviour schemas included) and default to the current
+directory when it holds a project file.
+
 ## CLI
 
 ```sh
@@ -699,8 +755,10 @@ fynkel codegen [--check] [--root <repo>] [--project <dart package>]
 fynkel render [--project <dir>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--placeholders] [--json]
 fynkel schema list [--json]
 fynkel schema describe <type|kind> [--json]
-fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
-fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
+fynkel test --headless [--project <dir> | --scene <path> [--prefabs <dir>]] [--steps N] [--seed S] [--json]
+fynkel state dump [--project <dir> | --scene <path> [--prefabs <dir>]] [--steps N] [--json]
+fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter] [--force] [--json]
+fynkel run [--project <dir>] [-- <flutter run args>]
 ```
 
 `scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,

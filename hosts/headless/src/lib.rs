@@ -11,7 +11,9 @@ pub mod scene;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use fynkel_core::{Extract, LoadedScene, World, WorldConfig};
+use fynkel_contracts::Diagnostic;
+use fynkel_core::{Extract, LoadedScene, SceneDescription, World, WorldConfig};
+use fynkel_document::load_project;
 use serde::{Deserialize, Serialize};
 
 pub use document::{dump_json, dump_text, read_scene};
@@ -35,6 +37,10 @@ pub struct HeadlessConfig {
     /// Directory scanned for `*.prefab.json` when the scene has prefab
     /// instances (none: instances fail with `FYN-D0401`).
     pub prefabs: Option<PathBuf>,
+    /// A project directory (`fynkel.project.json`) whose startup scene is
+    /// loaded with the project's prefabs and behaviour schemas
+    /// (`fynkel_document::load_project`); takes precedence over `scene`.
+    pub project: Option<PathBuf>,
 }
 
 impl Default for HeadlessConfig {
@@ -49,6 +55,7 @@ impl Default for HeadlessConfig {
             max_steps_per_frame: world.max_steps_per_frame,
             scene: None,
             prefabs: None,
+            project: None,
         }
     }
 }
@@ -104,7 +111,41 @@ impl HeadlessReport {
     }
 }
 
-/// Runs the demo scene (or `config.scene`) for `config.steps` fixed ticks.
+/// Where a document scene comes from: a scene file (plus an optional prefab
+/// directory) or a project's startup scene.
+enum SceneSource {
+    Scene(PathBuf),
+    Project(PathBuf),
+}
+
+impl SceneSource {
+    fn path(&self) -> &std::path::Path {
+        match self {
+            SceneSource::Scene(p) | SceneSource::Project(p) => p,
+        }
+    }
+
+    /// The description to load, the warnings and the scene document's
+    /// path; `Err` carries every diagnostic when any is an error.
+    fn read(
+        &self,
+        prefabs: Option<&std::path::Path>,
+    ) -> Result<(SceneDescription, Vec<Diagnostic>, PathBuf), Vec<Diagnostic>> {
+        match self {
+            SceneSource::Scene(path) => {
+                let d = read_scene(path, prefabs)?;
+                Ok((d.description, d.diagnostics, path.clone()))
+            }
+            SceneSource::Project(dir) => {
+                let p = load_project(dir)?;
+                Ok((p.scene, p.warnings, p.scene_path))
+            }
+        }
+    }
+}
+
+/// Runs the demo scene (or `config.scene` / `config.project`) for
+/// `config.steps` fixed ticks.
 pub fn run(config: &HeadlessConfig) -> HeadlessReport {
     run_with(config).0
 }
@@ -142,43 +183,48 @@ pub fn run_with(config: &HeadlessConfig) -> (HeadlessReport, World, Option<Loade
     // A document scene replaces the demo driver: loaded before tick 0,
     // then the world just ticks.
     let mut loaded: Option<LoadedScene> = None;
-    if let Some(path) = &config.scene {
+    let source = match (&config.project, &config.scene) {
+        (Some(dir), _) => Some(SceneSource::Project(dir.clone())),
+        (None, Some(path)) => Some(SceneSource::Scene(path.clone())),
+        (None, None) => None,
+    };
+    if let Some(source) = source {
         let mut sr = SceneReport {
-            path: path.display().to_string(),
+            path: source.path().display().to_string(),
             ..SceneReport::default()
         };
-        match read_scene(path, config.prefabs.as_deref()) {
+        let (description, diagnostics, path) = match source.read(config.prefabs.as_deref()) {
             Err(diags) => {
                 sr.document_diagnostics = document::diagnostics_json(&diags);
                 report.scene = Some(sr);
                 report.total_ms = start.elapsed().as_secs_f32() * 1e3;
                 return (report, world, None);
             }
-            Ok(described) => {
-                sr.document_diagnostics = document::diagnostics_json(&described.diagnostics);
-                match world.load_scene(&described.description) {
-                    Ok(l) => {
-                        sr.loaded = true;
-                        sr.id = l.id.to_string();
-                        sr.name = l.name.clone();
-                        sr.entities = l.len() as u32;
-                        sr.rejected_components = l.rejected_components;
-                        report.commands_rejected += l.rejected_components as u64;
-                        report.diagnostics += world.diagnostics().len() as u64;
-                        loaded = Some(l);
-                    }
-                    Err(e) => {
-                        sr.document_diagnostics.push(serde_json::json!({
-                            "code": "FYN-D0209",
-                            "severity": "error",
-                            "message": e.to_string(),
-                            "document": path.display().to_string(),
-                        }));
-                        report.scene = Some(sr);
-                        report.total_ms = start.elapsed().as_secs_f32() * 1e3;
-                        return (report, world, None);
-                    }
-                }
+            Ok(ok) => ok,
+        };
+        sr.path = path.display().to_string();
+        sr.document_diagnostics = document::diagnostics_json(&diagnostics);
+        match world.load_scene(&description) {
+            Ok(l) => {
+                sr.loaded = true;
+                sr.id = l.id.to_string();
+                sr.name = l.name.clone();
+                sr.entities = l.len() as u32;
+                sr.rejected_components = l.rejected_components;
+                report.commands_rejected += l.rejected_components as u64;
+                report.diagnostics += world.diagnostics().len() as u64;
+                loaded = Some(l);
+            }
+            Err(e) => {
+                sr.document_diagnostics.push(serde_json::json!({
+                    "code": "FYN-D0209",
+                    "severity": "error",
+                    "message": e.to_string(),
+                    "document": sr.path,
+                }));
+                report.scene = Some(sr);
+                report.total_ms = start.elapsed().as_secs_f32() * 1e3;
+                return (report, world, None);
             }
         }
         report.scene = Some(sr);

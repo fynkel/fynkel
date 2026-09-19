@@ -1,0 +1,83 @@
+{
+  "$schema": "https://fynkel.dev/schemas/project.schema.json",
+  "formatVersion": 1,
+  "id": "{{project_id}}",
+  "name": "{{title}}",
+  "startupScene": {
+    "asset": "{{scene_id}}"
+  },
+  "assets": "assets",
+  "inputActions": {
+    "move": {
+      "type": "axis2d",
+      "description": "Move the player.",
+      "bindings": [
+        "keyboard:WASD",
+        "gamepad:leftStick",
+        "touch:overlay/stick"
+      ]
+    },
+    "jump": {
+      "type": "button",
+      "bindings": [
+        "keyboard:Space",
+        "gamepad:south",
+        "touch:overlay/jump"
+      ]
+    }
+  },
+  "quality": {
+    "default": "medium",
+    "profiles": {
+      "low": {
+        "shadows": false,
+        "msaa": 1,
+        "renderScale": 0.75
+      },
+      "medium": {
+        "shadowResolution": 1024,
+        "msaa": 4
+      },
+      "high": {
+        "shadowResolution": 4096,
+        "msaa": 8,
+        "anisotropy": 16
+      }
+    }
+  },
+  "components": {
+    "fynkel.Transform": {
+      "kind": "native"
+    },
+    "fynkel.MeshRenderer": {
+      "kind": "native"
+    },
+    "fynkel.Camera": {
+      "kind": "native"
+    },
+    "fynkel.DirectionalLight": {
+      "kind": "native"
+    },
+    "fynkel.PointLight": {
+      "kind": "native"
+    },
+    "game.Spinner": {
+      "kind": "behaviour",
+      "version": 1,
+      "description": "Rotates its object (lib/game/spinner.dart)."
+    }
+  },
+  "targets": {
+    "macos": {
+      "enabled": true,
+      "profile": "dev"
+    },
+    "ios": {
+      "enabled": true,
+      "profile": "ios"
+    },
+    "android": {
+      "enabled": false
+    }
+  }
+}

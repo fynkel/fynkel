@@ -80,17 +80,12 @@ fn parse(args: &[String], name: &str) -> Option<Opts> {
 
 // As elsewhere: a `Diagnostic` is the error type on purpose.
 #[allow(clippy::result_large_err)]
-fn load_schemas(root: &Path, opts: &Opts) -> Result<SchemaSet, Diagnostic> {
-    SchemaSet::load(
-        &opts
-            .schemas_dir
-            .clone()
-            .unwrap_or_else(|| root.join("schemas")),
-    )
+fn load_schemas(root: Option<&Path>, opts: &Opts) -> Result<SchemaSet, Diagnostic> {
+    crate::schemas::load(root, opts.schemas_dir.as_deref())
 }
 
 /// `fynkel project …`.
-pub fn run_project(root: &Path, args: &[String]) -> ExitCode {
+pub fn run_project(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some((sub, rest)) = args.split_first() else {
         return usage_project();
     };
@@ -107,7 +102,7 @@ pub fn run_project(root: &Path, args: &[String]) -> ExitCode {
     }
 }
 
-fn describe(root: &Path, opts: &Opts) -> ExitCode {
+fn describe(root: Option<&Path>, opts: &Opts) -> ExitCode {
     let schemas = match load_schemas(root, opts) {
         Ok(s) => s,
         Err(d) => return cannot_open(&[d], opts.json),
@@ -147,7 +142,7 @@ fn describe(root: &Path, opts: &Opts) -> ExitCode {
     exit(&diags)
 }
 
-fn lock(root: &Path, opts: &Opts) -> ExitCode {
+fn lock(root: Option<&Path>, opts: &Opts) -> ExitCode {
     let schemas = match load_schemas(root, opts) {
         Ok(s) => s,
         Err(d) => return cannot_open(&[d], opts.json),
@@ -211,7 +206,7 @@ fn lock(root: &Path, opts: &Opts) -> ExitCode {
 }
 
 /// `fynkel validate`.
-pub fn run_validate(root: &Path, args: &[String]) -> ExitCode {
+pub fn run_validate(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some(opts) = parse(args, "validate") else {
         return usage_validate();
     };

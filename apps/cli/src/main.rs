@@ -5,51 +5,44 @@
 //! headless host. M2 adds `fynkel document` (validate/format/new), `fynkel
 //! scene`, `fynkel prefab`, `fynkel material`, `fynkel shader`, `fynkel asset`,
 //! `fynkel migrate`, `fynkel import`, `fynkel cook`, `fynkel cooked inspect`,
-//! `--scene` for the headless host and `fynkel state dump`. Exit
-//! codes: 0 ok, 1 error, 2 `--check` found drift.
+//! `--scene`/`--project` for the headless host, `fynkel state dump`,
+//! `fynkel create` and `fynkel run`. Outside the repository the commands
+//! validate against the embedded schema set (`schemas.rs`). Exit codes: 0
+//! ok, 1 error, 2 usage or `--check` found drift.
 
 mod asset;
 mod behaviours;
 mod codegen;
 mod cook;
+mod create;
 mod document;
 mod import;
 mod material;
 mod migrate;
 mod project;
 mod render;
+mod run;
 mod scene;
+mod schemas;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+use fynkel_document::project::PROJECT_FILE;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>] [--project <dart package>]\n                                               regenerate schemas/, Dart and Rust codecs (a); with --project also the\n                                               package's behaviours.g.dart/.g.json and schemas/behaviours/ (b, build_runner)\n  fynkel schema [list|describe <type>] [--json] the schema registry: document kinds, component types, fingerprint\n  fynkel test --headless [--scene <path>] [--prefabs <dir>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate|apply ...      scene documents (--prefabs <dir>, --expand; apply --patch <ops.json> [--dry-run])\n  fynkel prefab inspect|validate|apply ...     prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>]        import glTF/GLB sources to their normalized intermediate (sidecars updated)\n  fynkel cook [--assets <dir>] [--cache <dir>] [--profile <name>] [--force]\n                                               cook every asset into the content-addressed cache (.fynkel/cache)\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table\n  fynkel project describe|lock [--project <dir>] [--json]\n                                               the project file (fynkel.project.json) and its lock (fynkel.lock.json)\n  fynkel validate [--project <dir>] [--json]   validate the whole project: exit 0 ok, 1 errors, 2 usage/IO\n  fynkel render [--project <dir>] [--out <png>] [--size WxH]\n                                               render the project's startup scene headlessly to a PNG (after `fynkel cook`)"
+        "usage:\n  fynkel codegen [--check] [--root <repo>] [--project <dart package>]\n                                               regenerate schemas/, Dart and Rust codecs (a); with --project also the\n                                               package's behaviours.g.dart/.g.json and schemas/behaviours/ (b, build_runner)\n  fynkel schema [list|describe <type>] [--json] the schema registry: document kinds, component types, fingerprint\n  fynkel test --headless [--project <dir> | --scene <path> [--prefabs <dir>]] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene, a project's startup scene or a .scene.json) and report\n  fynkel state dump (--project <dir> | --scene <path> [--prefabs <dir>]) [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate|apply ...      scene documents (--prefabs <dir>, --expand; apply --patch <ops.json> [--dry-run])\n  fynkel prefab inspect|validate|apply ...     prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>]        import glTF/GLB sources to their normalized intermediate (sidecars updated)\n  fynkel cook [--assets <dir>] [--cache <dir>] [--profile <name>] [--force]\n                                               cook every asset into the content-addressed cache (.fynkel/cache)\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table\n  fynkel project describe|lock [--project <dir>] [--json]\n                                               the project file (fynkel.project.json) and its lock (fynkel.lock.json)\n  fynkel validate [--project <dir>] [--json]   validate the whole project: exit 0 ok, 1 errors, 2 usage/IO\n  fynkel render [--project <dir>] [--out <png>] [--size WxH]\n                                               render the project's startup scene headlessly to a PNG (after `fynkel cook`)\n  fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter]\n                                               a new game project: Flutter app, fynkel.project.json, assets, one behaviour, AGENTS.md\n  fynkel run [--project <dir>] [-- <flutter run args>]\n                                               validate, then `flutter run` with FYNKEL_PROJECT set to the project"
     );
     ExitCode::from(1)
 }
 
-fn repo_root(explicit: Option<PathBuf>) -> PathBuf {
-    if let Some(p) = explicit {
-        return p;
-    }
-    // Walk up from cwd to the workspace root (Cargo.toml with [workspace]).
-    let mut dir = std::env::current_dir().expect("cwd");
-    loop {
-        let cargo = dir.join("Cargo.toml");
-        if cargo.is_file()
-            && std::fs::read_to_string(&cargo)
-                .map(|s| s.contains("[workspace]"))
-                .unwrap_or(false)
-        {
-            return dir;
-        }
-        if !dir.pop() {
-            eprintln!("fynkel: not inside the Fynkel repository; pass --root");
-            std::process::exit(1);
-        }
-    }
+/// The repository root, or exit: for commands that write into the checkout.
+fn require_repo_root(explicit: Option<PathBuf>) -> PathBuf {
+    schemas::repo_root(explicit).unwrap_or_else(|| {
+        eprintln!("fynkel: not inside the Fynkel repository; pass --root");
+        std::process::exit(1);
+    })
 }
 
 fn main() -> ExitCode {
@@ -81,25 +74,30 @@ fn main() -> ExitCode {
             | "project"
             | "validate"
             | "render"
+            | "create"
+            | "run"
     ) {
         let root = args
             .iter()
             .position(|a| a == "--root")
             .and_then(|i| args.get(i + 1))
             .map(PathBuf::from);
-        let root = repo_root(root);
+        let root = schemas::repo_root(root);
+        let root = root.as_deref();
         return match cmd.as_str() {
-            "asset" => asset::run(&root, &args[1..]),
-            "migrate" => migrate::run(&root, &args[1..]),
-            "import" => import::run(&root, &args[1..]),
-            "cook" => cook::run(&root, &args[1..]),
+            "asset" => asset::run(root, &args[1..]),
+            "migrate" => migrate::run(root, &args[1..]),
+            "import" => import::run(root, &args[1..]),
+            "cook" => cook::run(root, &args[1..]),
             "cooked" => cook::run_cooked(&args[1..]),
-            "project" => project::run_project(&root, &args[1..]),
-            "validate" => project::run_validate(&root, &args[1..]),
+            "project" => project::run_project(root, &args[1..]),
+            "validate" => project::run_validate(root, &args[1..]),
             "render" => render::run(&args[1..]),
-            "document" => document::run(&root, &args[1..]),
-            "scene" | "prefab" => scene::run(&root, cmd, &args[1..]),
-            other => material::run(&root, other, &args[1..]),
+            "create" => create::run(root, &args[1..]),
+            "run" => run::run(root, &args[1..]),
+            "document" => document::run(root, &args[1..]),
+            "scene" | "prefab" => scene::run(root, cmd, &args[1..]),
+            other => material::run(root, other, &args[1..]),
         };
     }
     let mut check = false;
@@ -124,7 +122,7 @@ fn main() -> ExitCode {
         }
         i += 1;
     }
-    let root = repo_root(root);
+    let root = require_repo_root(root);
     match cmd.as_str() {
         "codegen" => {
             let native = match codegen::run(&root, check) {
@@ -255,6 +253,7 @@ fn test_command(args: &[String]) -> ExitCode {
             }
             "--scene" => cfg.scene = value(&mut i).map(PathBuf::from),
             "--prefabs" => cfg.prefabs = value(&mut i).map(PathBuf::from),
+            "--project" => cfg.project = value(&mut i).map(PathBuf::from),
             "--root" => {
                 i += 1;
             }
@@ -267,6 +266,10 @@ fn test_command(args: &[String]) -> ExitCode {
     }
     if !headless && !json {
         eprintln!("fynkel test: M1 runs the Rust headless host (pass --headless to be explicit)");
+    }
+    // Inside a project, the project's startup scene is what a test means.
+    if cfg.project.is_none() && cfg.scene.is_none() && Path::new(PROJECT_FILE).is_file() {
+        cfg.project = Some(PathBuf::from("."));
     }
     let report = run(&cfg);
     let ok = report.scene_ready && report.commands_rejected == 0 && report.diagnostics == 0;
@@ -338,7 +341,7 @@ fn diagnostic_line(d: &serde_json::Value) -> String {
 fn state_command(args: &[String]) -> ExitCode {
     use fynkel_host_headless::{dump_json, dump_text, run_with, HeadlessConfig};
     if args.first().map(String::as_str) != Some("dump") {
-        eprintln!("usage: fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]");
+        eprintln!("usage: fynkel state dump (--project <dir> | --scene <path> [--prefabs <dir>]) [--steps N] [--json]");
         return ExitCode::from(2);
     }
     let mut cfg = HeadlessConfig {
@@ -358,6 +361,10 @@ fn state_command(args: &[String]) -> ExitCode {
                 i += 1;
                 cfg.prefabs = args.get(i).map(PathBuf::from);
             }
+            "--project" => {
+                i += 1;
+                cfg.project = args.get(i).map(PathBuf::from);
+            }
             "--steps" => {
                 i += 1;
                 cfg.steps = args.get(i).and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -370,9 +377,13 @@ fn state_command(args: &[String]) -> ExitCode {
         }
         i += 1;
     }
-    if cfg.scene.is_none() {
-        eprintln!("fynkel state dump: --scene <path> is required");
-        return ExitCode::from(2);
+    if cfg.scene.is_none() && cfg.project.is_none() {
+        if Path::new(PROJECT_FILE).is_file() {
+            cfg.project = Some(PathBuf::from("."));
+        } else {
+            eprintln!("fynkel state dump: --project <dir> or --scene <path> is required");
+            return ExitCode::from(2);
+        }
     }
     let (report, world, loaded) = run_with(&cfg);
     let scene = report.scene.as_ref().expect("scene mode");

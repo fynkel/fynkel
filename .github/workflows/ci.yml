@@ -39,7 +39,7 @@ jobs:
         run: cargo run -p fynkel_cli -- codegen --check
 
   dart:
-    name: dart (package:fynkel, fynkel_generator and example tests)
+    name: dart (package:fynkel, fynkel_generator, example and starter project)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -74,3 +74,17 @@ jobs:
         run: dart pub get && dart analyze --fatal-infos && dart test
       - name: codegen --check --project
         run: cargo run -p fynkel_cli -- codegen --check --project packages/fynkel_generator/example/spinner_game
+      # The M2-17 gate: a fresh `fynkel create` project (with its Flutter
+      # runners) validates, runs on the headless host, analyzes and passes
+      # its own `flutter test`.
+      - name: fynkel create
+        run: cargo run -p fynkel_cli -- create ${{ runner.temp }}/starter_game
+      - name: starter validate + headless
+        working-directory: ${{ runner.temp }}/starter_game
+        run: |
+          "$GITHUB_WORKSPACE/target/debug/fynkel" validate --root "$GITHUB_WORKSPACE"
+          "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless --root "$GITHUB_WORKSPACE"
+          "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project . --root "$GITHUB_WORKSPACE"
+      - name: starter flutter analyze + test
+        working-directory: ${{ runner.temp }}/starter_game
+        run: flutter pub get && flutter analyze && flutter test

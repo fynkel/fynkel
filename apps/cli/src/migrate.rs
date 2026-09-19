@@ -14,7 +14,6 @@ use std::process::ExitCode;
 use fynkel_document::migrate::migrated_json;
 use fynkel_document::{
     diagnostics_json, has_errors, migrate, Diagnostic, Document, DocumentKind, Migrations,
-    SchemaSet,
 };
 
 pub fn usage() -> ExitCode {
@@ -62,7 +61,7 @@ fn parse(args: &[String]) -> Option<Opts> {
     Some(o)
 }
 
-pub fn run(root: &Path, args: &[String]) -> ExitCode {
+pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some(opts) = parse(args) else {
         return usage();
     };
@@ -73,12 +72,7 @@ pub fn run(root: &Path, args: &[String]) -> ExitCode {
     if opts.paths.is_empty() {
         return usage();
     }
-    let schemas = match SchemaSet::load(
-        &opts
-            .schemas_dir
-            .clone()
-            .unwrap_or_else(|| root.join("schemas")),
-    ) {
+    let schemas = match crate::schemas::load(root, opts.schemas_dir.as_deref()) {
         Ok(s) => s,
         Err(d) => return finish(&[d], opts.json),
     };

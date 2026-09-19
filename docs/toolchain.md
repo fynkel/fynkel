@@ -74,4 +74,5 @@ Behaviour generator (`packages/fynkel_generator`, ADR-0012 pipeline (b), M2-16):
 | `glob` | 2.2.0 | `lib/**.dart` discovery |
 
 `fynkel codegen --project` finds the Dart SDK through `$FYNKEL_DART`, the `dart` next to `flutter` on `PATH`, or `dart` on `PATH`.
+`fynkel create` runs `flutter create --empty --platforms macos,ios` from `flutter` on `PATH` for the platform runners (skipped otherwise); a created project is a Flutter app, so its tests run with `flutter test` (Flutter 3.47 builds the native-assets hook for the host under `flutter test`, ~12 s warm), and `flutter_lints` 6 / `build_runner` 2.16 are its dev dependencies.
 Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.

@@ -10,9 +10,7 @@ use std::process::ExitCode;
 
 use fynkel_contracts::AssetRef;
 use fynkel_document::asset::{entry_json, resolved_json, sidecar_path, Meta};
-use fynkel_document::{
-    diagnostics_json, has_errors, parse_uuid, AssetDatabase, Diagnostic, SchemaSet,
-};
+use fynkel_document::{diagnostics_json, has_errors, parse_uuid, AssetDatabase, Diagnostic};
 
 pub fn usage() -> ExitCode {
     eprintln!(
@@ -59,7 +57,7 @@ fn parse(args: &[String]) -> Option<Opts> {
     Some(o)
 }
 
-pub fn run(root: &Path, args: &[String]) -> ExitCode {
+pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some(sub) = args.first() else {
         return usage();
     };
@@ -74,12 +72,7 @@ pub fn run(root: &Path, args: &[String]) -> ExitCode {
     if sub == "resolve" && opts.args.is_empty() {
         return usage();
     }
-    let schemas = match SchemaSet::load(
-        &opts
-            .schemas_dir
-            .clone()
-            .unwrap_or_else(|| root.join("schemas")),
-    ) {
+    let schemas = match crate::schemas::load(root, opts.schemas_dir.as_deref()) {
         Ok(s) => s,
         Err(d) => return finish(&[d], opts.json),
     };

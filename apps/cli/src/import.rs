@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fynkel_document::asset::{sidecar_path, Meta};
-use fynkel_document::{diagnostics_json, has_errors, Diagnostic, Document, SchemaSet};
+use fynkel_document::{diagnostics_json, has_errors, Diagnostic, Document};
 use fynkel_import::{Imported, Limits};
 
 pub fn usage() -> ExitCode {
@@ -63,19 +63,14 @@ fn parse(args: &[String]) -> Option<Opts> {
     Some(o)
 }
 
-pub fn run(root: &Path, args: &[String]) -> ExitCode {
+pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some(opts) = parse(args) else {
         return usage();
     };
     if opts.files.is_empty() {
         return usage();
     }
-    let schemas = match SchemaSet::load(
-        &opts
-            .schemas_dir
-            .clone()
-            .unwrap_or_else(|| root.join("schemas")),
-    ) {
+    let schemas = match crate::schemas::load(root, opts.schemas_dir.as_deref()) {
         Ok(s) => s,
         Err(d) => return finish(&[d], opts.json),
     };

@@ -11,7 +11,7 @@ use std::process::ExitCode;
 
 use fynkel_cooked::ChunkFile;
 use fynkel_document::asset::AssetDatabase;
-use fynkel_document::{diagnostics_json, has_errors, Code, Diagnostic, SchemaSet};
+use fynkel_document::{diagnostics_json, has_errors, Code, Diagnostic};
 use fynkel_import::{cook, Cache, CookOptions, Status};
 
 /// Most a META chunk may be when inspecting.
@@ -80,7 +80,7 @@ fn parse(args: &[String]) -> Option<Opts> {
     Some(o)
 }
 
-pub fn run(root: &Path, args: &[String]) -> ExitCode {
+pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some(opts) = parse(args) else {
         return usage();
     };
@@ -96,12 +96,7 @@ pub fn run(root: &Path, args: &[String]) -> ExitCode {
         eprintln!("fynkel cook: a profile name is ASCII letters, digits, '-' and '_'");
         return usage();
     }
-    let schemas = match SchemaSet::load(
-        &opts
-            .schemas_dir
-            .clone()
-            .unwrap_or_else(|| root.join("schemas")),
-    ) {
+    let schemas = match crate::schemas::load(root, opts.schemas_dir.as_deref()) {
         Ok(s) => s,
         Err(d) => return finish(&[d], opts.json),
     };

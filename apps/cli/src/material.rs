@@ -82,7 +82,7 @@ fn report(diags: &[Diagnostic], json: bool) -> ExitCode {
 }
 
 /// `cmd` is `material` or `shader`.
-pub fn run(root: &Path, cmd: &str, args: &[String]) -> ExitCode {
+pub fn run(root: Option<&Path>, cmd: &str, args: &[String]) -> ExitCode {
     let Some(sub) = args.first() else {
         return usage(cmd);
     };
@@ -92,12 +92,7 @@ pub fn run(root: &Path, cmd: &str, args: &[String]) -> ExitCode {
     if opts.paths.is_empty() && opts.builtin.is_none() {
         return usage(cmd);
     }
-    let schemas = match SchemaSet::load(
-        &opts
-            .schemas_dir
-            .clone()
-            .unwrap_or_else(|| root.join("schemas")),
-    ) {
+    let schemas = match crate::schemas::load(root, opts.schemas_dir.as_deref()) {
         Ok(s) => s,
         Err(d) => return report(&[d], opts.json),
     };

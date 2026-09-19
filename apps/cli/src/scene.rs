@@ -39,7 +39,7 @@ struct Opts {
     dry_run: bool,
 }
 
-pub fn run(root: &Path, cmd: &str, args: &[String]) -> ExitCode {
+pub fn run(root: Option<&Path>, cmd: &str, args: &[String]) -> ExitCode {
     let Some(sub) = args.first() else {
         return usage(cmd);
     };
@@ -82,11 +82,7 @@ pub fn run(root: &Path, cmd: &str, args: &[String]) -> ExitCode {
     if o.paths.is_empty() {
         return usage(cmd);
     }
-    let schemas = match SchemaSet::load(
-        &o.schemas_dir
-            .clone()
-            .unwrap_or_else(|| root.join("schemas")),
-    ) {
+    let schemas = match crate::schemas::load_for(root, o.schemas_dir.as_deref(), &o.paths[0]) {
         Ok(s) => s,
         Err(d) => return report(&[d], o.json),
     };

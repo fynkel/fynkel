@@ -8,9 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fynkel_document::{
-    diagnostics_json, has_errors, Diagnostic, Document, DocumentKind, SchemaSet,
-};
+use fynkel_document::{diagnostics_json, has_errors, Diagnostic, Document, DocumentKind};
 
 pub fn usage() -> ExitCode {
     eprintln!(
@@ -70,7 +68,7 @@ fn parse_opts(args: &[String]) -> Result<Opts, ExitCode> {
     Ok(o)
 }
 
-pub fn run(root: &Path, args: &[String]) -> ExitCode {
+pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some(sub) = args.first() else {
         return usage();
     };
@@ -101,12 +99,11 @@ fn report(diags: &[Diagnostic], json: bool) -> ExitCode {
     }
 }
 
-fn validate(root: &Path, opts: Opts) -> ExitCode {
+fn validate(root: Option<&Path>, opts: Opts) -> ExitCode {
     if opts.paths.is_empty() {
         return usage();
     }
-    let schemas_dir = opts.schemas.clone().unwrap_or_else(|| root.join("schemas"));
-    let schemas = match SchemaSet::load(&schemas_dir) {
+    let schemas = match crate::schemas::load(root, opts.schemas.as_deref()) {
         Ok(s) => s,
         Err(d) => return report(&[d], opts.json),
     };

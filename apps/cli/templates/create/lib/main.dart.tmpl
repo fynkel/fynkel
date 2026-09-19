@@ -1,0 +1,113 @@
+// {{title}} — entry point (created by `fynkel create`; edit freely).
+//
+// The host owns the loop (ADR-0007): a Ticker runs once per Flutter frame
+// and hands the frame time to `Game.frame`, which runs every behaviour's
+// fixedUpdate for the planned ticks, steps the native world and runs
+// update/lateUpdate. The scene is fynkel.project.json's startupScene.
+//
+// The 3D viewport widget (package:fynkel_flutter) arrives with M3; until
+// then this app shows the running simulation as text and `fynkel render`
+// draws the scene to a PNG.
+
+import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
+
+import 'game/game.dart';
+import 'game/spinner.dart';
+
+void main() => runApp(const GameApp());
+
+class GameApp extends StatelessWidget {
+  const GameApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: '{{title}}',
+      theme: ThemeData.dark(useMaterial3: true),
+      home: const GamePage(),
+    );
+  }
+}
+
+class GamePage extends StatefulWidget {
+  const GamePage({super.key});
+
+  @override
+  State<GamePage> createState() => _GamePageState();
+}
+
+class _GamePageState extends State<GamePage> with SingleTickerProviderStateMixin {
+  Game? _game;
+  String? _error;
+  late final Ticker _ticker;
+  Duration _last = Duration.zero;
+  bool _primed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final dir = projectDirectory();
+    if (dir == null) {
+      _error = 'No project directory: run `fynkel run` from the project, '
+          'or pass --dart-define=FYNKEL_PROJECT=<dir> to flutter run.';
+    } else {
+      try {
+        _game = Game.load(dir);
+      } catch (e) {
+        _error = '$e';
+      }
+    }
+    _ticker = createTicker(_onTick)..start();
+  }
+
+  void _onTick(Duration elapsed) {
+    final game = _game;
+    if (game == null) return;
+    if (!_primed) {
+      // The first tick only sets the clock: the window's start-up gap is
+      // not simulated time.
+      _primed = true;
+      _last = elapsed;
+      return;
+    }
+    final dt = (elapsed - _last).inMicroseconds / 1e6;
+    _last = elapsed;
+    game.frame(dt.clamp(0, 0.25));
+    setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _game?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final game = _game;
+    final style = Theme.of(context).textTheme.bodyLarge?.copyWith(fontFamily: 'monospace');
+    final lines = <String>[
+      '{{title}}',
+      ?_error,
+      if (game != null) ...[
+        'scene      ${game.report.sceneName} (${game.report.entityCount} entities)',
+        'tick       ${game.world.tick}',
+        'behaviours ${game.world.behaviours.length} attached',
+        for (final s in game.world.behaviours.whereType<Spinner>())
+          'spinner    ${s.angle.toStringAsFixed(2)} rad at ${s.speed} rad/s',
+        for (final d in game.report.diagnostics) '$d',
+      ],
+    ];
+    return Scaffold(
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [for (final l in lines) Text(l, style: style)],
+        ),
+      ),
+    );
+  }
+}

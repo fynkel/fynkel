@@ -1,0 +1,28 @@
+// The project loads headlessly and its behaviours run: no window, no GPU.
+// `flutter test` runs this; `fynkel test --headless` runs the same scene on
+// the Rust host without the Dart behaviours.
+
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:{{package}}/game/game.dart';
+import 'package:{{package}}/game/spinner.dart';
+
+void main() {
+  test('the startup scene loads and the cube spins', () {
+    final game = Game.load(Directory.current.path);
+    addTearDown(game.dispose);
+
+    expect(game.report.ok, isTrue);
+    expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
+    expect(game.report.behavioursAttached, 1);
+    final spinner = game.world.behaviours.whereType<Spinner>().single;
+    expect(spinner.speed, 1.5, reason: 'authored in assets/scenes/main.scene.json');
+
+    for (var i = 0; i < 30; i++) {
+      game.frame(1 / 60);
+    }
+    expect(game.world.tick, greaterThan(0));
+    expect(spinner.angle, closeTo(1.5 * game.world.tick / 60, 1e-9));
+  });
+}

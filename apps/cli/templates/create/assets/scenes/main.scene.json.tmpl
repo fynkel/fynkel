@@ -1,0 +1,101 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 1,
+  "id": "{{scene_id}}",
+  "name": "Main",
+  "entities": {
+    "{{e_camera}}": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "{{c_camera_transform}}": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [2.6, 1.9, 3.4],
+            "rotation": [-0.149091, 0.3166601, 0.0504723, 0.935388],
+            "scale": [1, 1, 1]
+          }
+        },
+        "{{c_camera}}": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 0.9,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": 0
+          }
+        }
+      }
+    },
+    "{{e_sun}}": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "{{c_sun_transform}}": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [0, 5, 0],
+            "rotation": [-0.5000251, 0.20001, 0.100005, 0.836642],
+            "scale": [1, 1, 1]
+          }
+        },
+        "{{c_sun}}": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [1.0, 0.98, 0.92],
+            "intensity": 10000.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    },
+    "{{e_cube}}": {
+      "name": "Cube",
+      "parent": null,
+      "children": [],
+      "components": {
+        "{{c_cube_transform}}": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [0, 0.5, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+          }
+        },
+        "{{c_cube_mesh}}": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "{{cube_id}}",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "{{material_id}}"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "{{c_cube_spinner}}": {
+          "type": "game.Spinner",
+          "version": 1,
+          "data": {
+            "speed": 1.5,
+            "axis": [0, 1, 0]
+          }
+        }
+      }
+    }
+  }
+}
