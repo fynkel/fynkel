@@ -492,3 +492,138 @@ fn migrate_dry_runs_then_writes_with_backup() {
     assert!(!dir.join("future.scene.json.bak").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn import_writes_intermediate_and_maintains_the_sidecar() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = root.join("crates/fynkel_import/fixtures");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-import-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let assets = dir.join("assets");
+    std::fs::create_dir_all(assets.join("models")).unwrap();
+    let glb = assets.join("models/robot.glb");
+    std::fs::copy(fixtures.join("robot.glb"), &glb).unwrap();
+    let out_dir = dir.join("cache");
+
+    // No sidecar yet: a dry run reports what would happen and writes nothing.
+    let out = run(&[
+        "import",
+        "--dry-run",
+        "--json",
+        "--out",
+        out_dir.to_str().unwrap(),
+        glb.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["dryRun"], true);
+    assert_eq!(v["files"][0]["ok"], true);
+    assert_eq!(v["files"][0]["sidecarCreated"], true);
+    assert_eq!(v["files"][0]["sidecarWritten"], false);
+    assert_eq!(
+        v["files"][0]["summary"]["meshes"].as_array().unwrap().len(),
+        3
+    );
+    assert!(!assets.join("models/robot.glb.meta.json").exists());
+    assert!(!out_dir.exists());
+
+    // The real run creates the sidecar (with every sub-asset id) and the intermediate.
+    let out = run(&[
+        "import",
+        "--json",
+        "--out",
+        out_dir.to_str().unwrap(),
+        glb.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["files"][0]["ok"], true);
+    assert_eq!(v["files"][0]["sidecarWritten"], true);
+    let id = v["files"][0]["id"].as_str().unwrap().to_string();
+    let fyni = out_dir.join(format!("{id}.fyni"));
+    assert_eq!(v["files"][0]["intermediate"], fyni.display().to_string());
+    let bytes = std::fs::read(&fyni).unwrap();
+    assert!(bytes.starts_with(b"FYNI"));
+    let sidecar: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(assets.join("models/robot.glb.meta.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(sidecar["id"], id);
+    assert_eq!(sidecar["importer"], "fynkel.gltf");
+    let subs = sidecar["subAssets"].as_object().unwrap();
+    assert_eq!(subs.len(), 7);
+    assert!(subs.contains_key("mesh/0") && subs.contains_key("prefab"));
+
+    // Re-importing is a no-op for the sidecar and reproduces the bytes.
+    let out = run(&[
+        "import",
+        "--json",
+        "--out",
+        out_dir.to_str().unwrap(),
+        glb.to_str().unwrap(),
+    ]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["files"][0]["sidecarCreated"], false);
+    assert_eq!(v["files"][0]["sidecarWritten"], false);
+    assert_eq!(std::fs::read(&fyni).unwrap(), bytes);
+
+    // The asset database now resolves the sub-assets by the sidecar's ids.
+    let out = run(&[
+        "asset",
+        "resolve",
+        "--json",
+        "--assets",
+        assets.to_str().unwrap(),
+        &format!("{id}#mesh/0"),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["resolved"][0]["sub"]["id"], "mesh/0");
+
+    // An external buffer is refused (exit 1, FYN-A0102) and nothing is written.
+    std::fs::copy(
+        fixtures.join("external.gltf"),
+        assets.join("models/external.gltf"),
+    )
+    .unwrap();
+    std::fs::copy(fixtures.join("robot.bin"), assets.join("models/robot.bin")).unwrap();
+    let out = run(&[
+        "import",
+        "--json",
+        "--out",
+        out_dir.to_str().unwrap(),
+        assets.join("models/external.gltf").to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["files"][0]["ok"], false);
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-A0102");
+    assert_eq!(std::fs::read_dir(&out_dir).unwrap().count(), 1);
+
+    // Usage.
+    let out = run(&["import"]);
+    assert_eq!(out.status.code(), Some(2));
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}

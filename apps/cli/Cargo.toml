@@ -14,6 +14,7 @@ path = "src/main.rs"
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true
 fynkel_document.workspace = true
+fynkel_import.workspace = true
 fynkel_host_headless.workspace = true
 serde.workspace = true
 serde_json.workspace = true

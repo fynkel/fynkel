@@ -54,6 +54,8 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 | `jsonschema` | 0.56.0 | draft 2020-12 validation; `default-features = false` (no HTTP/file retrieval — every `$ref` resolves from the loaded `schemas/` directory) |
 | `uuid` | 1.26.1 | `v4` for fresh document ids, `v5` for prefab-instance derived ids; parsing is canonical-text only |
 | `similar` | 2.7.0 | unified diffs for `fynkel migrate --dry-run` |
+| `gltf` | 1.4.1 | glTF 2.0 / GLB parsing in `fynkel_import`; `default-features = false` with `utils` (accessor readers), `names`, `KHR_materials_emissive_strength` — no `import` feature, so the crate never touches the file system or decodes images; Fynkel resolves every buffer and image itself (external files denied by default) |
+| `base64` | 0.23.1 | `data:` URIs in `.gltf` files |
 
 Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`.
 Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.

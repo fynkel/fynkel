@@ -286,6 +286,57 @@ source `A0002`, duplicate id (across documents, sidecars and sub-assets;
 the first path wins) `A0003`, unknown asset `A0004`, unknown sub-asset
 `A0005`, malformed sidecar entry `A0006`.
 
+## Import (glTF/GLB)
+
+`fynkel_import` (blueprint §6 "Asset identity and import", ADR-0006) turns a
+source file, its sidecar's `settings` and the importer's version into a
+**normalized intermediate**: the one shape the cache (M2-12), the cooked
+container and the renderer's loaders read, whatever the source format was.
+It is development-only, never runs in a shipped game, and serializes to
+bytes deterministically — the same source, settings and sidecar give the
+same bytes on every machine, so it can be hashed, cached and diffed.
+
+`fynkel.gltf` (importer version 1) reads glTF 2.0 `.gltf`/`.glb` through
+the `gltf` crate (no `import` feature: buffers and images are resolved by
+Fynkel, never by the crate) and produces, per file:
+
+| Sub-asset id | What | Notes |
+| --- | --- | --- |
+| `mesh/<n>` (one primitive) or `mesh/<n>/<p>` | one mesh per **triangle** primitive | fixed 72-byte vertex: position, normal, tangent(4), uv0, uv1, colour(4); `u32` indices; bounds. Missing normals → unwelded with flat face normals (per spec); missing tangents → zero (M3 computes them); missing colour → white. Points/lines/strips/fans are skipped with `FYN-A0105`. |
+| `material/<m>` | a `fynkel.pbr@1` material document | `baseColor`, `metallic`, `roughness`, `emissive`, `emissiveStrength` (`KHR_materials_emissive_strength`), `normalScale`, `occlusionStrength`; the five texture slots bound to `{ asset: <this asset>, sub: "image/<i>" }` with `uvSet` (0/1) and the sampler (`filter` from `magFilter`, `mipmaps` from `minFilter`, `wrap` from `wrapS` — a different `wrapT` is warned about once per texture); `alphaMode`/`alphaCutoff`; `doubleSided` → `cull: none`. Validates against the manifest like a hand-written one. |
+| `image/<i>` | the encoded bytes (PNG/JPEG) with their MIME type | decoding is the texture importer's job (M2-11) |
+| `prefab` | the default scene's node hierarchy as a prefab document | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive. Entity and component ids are UUID v5 of the asset id and `node/<i>`, `node/<i>/transform`, `node/<i>/renderer`, `node/<i>/primitive/<p>[/transform|/renderer]`. |
+
+Skins, morph targets, animations and cameras are skipped with `A0105`
+warnings (static meshes are M2's scope; animation import is a later
+milestone). Every sub-asset's uuid comes from the sidecar's `subAssets`
+when present, else UUID v5 of the asset id and the sub-asset id — so a
+fresh checkout and a re-import derive the same ids, and ids assigned once
+survive re-imports; the sidecar is rewritten with any new ones (`fynkel
+import`), and a sidecar id the file no longer produces is reported (`A0105`,
+references to it will stop resolving).
+
+**Boundaries** (ADR-0006, §6): buffers and images from the GLB `BIN` chunk
+or `data:` URIs only, unless the sidecar's settings say
+`"allowExternalFiles": true` — and then only plain relative paths (no
+`..`, no absolute paths, no schemes) inside the source's directory
+(`FYN-A0102` otherwise). A file that *requires* an extension the importer
+does not implement (Draco, meshopt, ...) is refused with `A0103`;
+malformed data (buffer views past their buffer, attribute counts that do
+not match, index out of range, a node graph with a cycle or a node with two
+parents) is `A0104`; the `Limits` — file 256 MiB, buffers 256 MiB total,
+100 000 nodes, depth 64, 16 M vertices per primitive, 256 images of 64 MiB —
+are `A0101`; a file that is not glTF at all is `A0100`. Any error means no
+intermediate is produced.
+
+The intermediate's bytes (`.fyni`): `FYNI`, version, a JSON header (source,
+importer, meshes/materials/images with `[offset, length]` into the blob
+area, the prefab document, the sub-asset ids) and 4-byte-aligned blobs.
+`Intermediate::to_bytes`/`from_bytes` round-trip; the committed
+`fixtures/robot.expected.fyni` pins the format and every id derivation
+(`FYNKEL_UPDATE_FIXTURES=1 cargo test -p fynkel_import` regenerates it when
+a change is intended).
+
 ## CLI
 
 ```sh
@@ -305,6 +356,7 @@ fynkel asset resolve <uuid>[#<sub>]... [--assets <dir>] [--json] [--schemas <dir
 fynkel asset init <file>... [--json]
 fynkel migrate <path|dir>... [--dry-run] [--json] [--schemas <dir>]
 fynkel migrate --list [--json]
+fynkel import <file>... [--out <dir>] [--dry-run] [--json] [--schemas <dir>]
 fynkel test --headless --scene <path> [--prefabs <dir>] [--steps N] [--json]
 fynkel state dump --scene <path> [--prefabs <dir>] [--steps N] [--json]
 ```
@@ -330,7 +382,13 @@ sidecars included); `--dry-run` prints each document's diff and writes
 nothing, otherwise changed files are rewritten with the original kept as
 `<file>.bak` (`--json`: `{ ok, dryRun, documents: [{ path, kind, from, to,
 applied[], diff, written, backup? }], diagnostics }`); `--list` shows the
-current versions and known steps.
+current versions and known steps. `import` runs each file through its
+sidecar's importer and writes `<out>/<asset id>.fyni` (`--out` defaults to
+`.fynkel/cache/import`, ignored by version control); a file without a
+sidecar gets one, a sidecar missing sub-asset ids is updated (existing ids
+kept); `--dry-run` prints the summary and writes nothing (`--json`: `{ ok,
+dryRun, files: [{ file, ok, id, importer, sidecar, sidecarCreated,
+sidecarWritten, summary, intermediate, bytes }], diagnostics }`).
 
 Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
 `--json` prints `{ "ok": bool, "diagnostics": [ ...records... ] }`

@@ -94,6 +94,20 @@ impl Code {
     /// A sidecar entry the schema accepts but the database cannot use.
     pub const ASSET_MALFORMED_ENTRY: Code = Code("FYN-A0006");
 
+    // Import (`FYN-A01##`, blueprint §19.2c items 10–12).
+    /// The file is not what its extension says, or cannot be parsed.
+    pub const IMPORT_UNREADABLE: Code = Code("FYN-A0100");
+    /// A resource budget (file size, buffer bytes, node count/depth, vertices, images) was exceeded.
+    pub const IMPORT_LIMIT: Code = Code("FYN-A0101");
+    /// The file references data outside itself and the import settings do not allow that.
+    pub const IMPORT_EXTERNAL_URI: Code = Code("FYN-A0102");
+    /// A required extension, encoding or feature the importer does not implement.
+    pub const IMPORT_UNSUPPORTED: Code = Code("FYN-A0103");
+    /// Accessor, buffer view or index data that does not add up.
+    pub const IMPORT_INVALID_DATA: Code = Code("FYN-A0104");
+    /// Something was left out of the intermediate (warning; the rest imported).
+    pub const IMPORT_SKIPPED: Code = Code("FYN-A0105");
+
     pub const fn as_str(self) -> &'static str {
         self.0
     }
