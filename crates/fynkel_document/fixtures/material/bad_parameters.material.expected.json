@@ -1,0 +1,7 @@
+[
+  { "code": "FYN-D0301", "pointer": "/parameters/baseColour", "line": 8, "column": 5 },
+  { "code": "FYN-D0302", "pointer": "/parameters/metallic", "line": 14, "column": 5 },
+  { "code": "FYN-D0303", "pointer": "/parameters/roughness", "line": 18, "column": 5 },
+  { "code": "FYN-D0303", "pointer": "/parameters/emissive", "line": 19, "column": 5 },
+  { "code": "FYN-D0302", "pointer": "/parameters/emissiveStrength", "line": 24, "column": 5 }
+]

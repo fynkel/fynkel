@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/shader.schema.json",
+  "title": "Fynkel shader interface manifest",
+  "description": "What a shader exposes to materials (blueprint §6 Materials and shaders): its versioned id, supported passes, typed parameters with defaults and ranges, and texture slots with colour spaces. Built-in shaders ship their manifest inside the engine; a custom shader pairs one with WGSL. Bindings/uniform layout arrive with the renderer.",
+  "type": "object",
+  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "properties": {
+    "shaderId": { "$ref": "#/$defs/shaderId" },
+    "source": {
+      "type": "object",
+      "description": "Where the code comes from: a built-in shader by name, or WGSL as an asset.",
+      "oneOf": [
+        { "properties": { "builtin": { "type": "string", "minLength": 1 } }, "required": ["builtin"], "additionalProperties": false },
+        { "properties": { "wgsl": { "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef" } }, "required": ["wgsl"], "additionalProperties": false }
+      ]
+    },
+    "passes": {
+      "type": "array",
+      "description": "Render passes the shader supports; a material's alphaMode must map onto one.",
+      "items": { "enum": ["opaque", "mask", "blend", "shadow"] },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "features": {
+      "type": "array",
+      "description": "Renderer features the shader needs (none defined yet).",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "parameters": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/parameter" }
+    },
+    "textures": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/textureSlot" }
+    }
+  },
+  "required": ["shaderId", "source", "passes", "parameters", "textures"],
+  "patternProperties": { "^x-": true },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "shaderId": {
+      "type": "string",
+      "description": "`<name>@<version>`; the version bumps on any interface change.",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*@[1-9][0-9]*$"
+    },
+    "identifier": { "type": "string", "pattern": "^[a-z][A-Za-z0-9_]*$" },
+    "parameterType": { "enum": ["float", "int", "bool", "vec2", "vec3", "vec4", "color3", "color4"] },
+    "parameter": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/$defs/parameterType" },
+        "default": { "description": "Value of the parameter's type; what a material gets when it does not set it." },
+        "min": { "type": "number", "description": "Per component, inclusive." },
+        "max": { "type": "number", "description": "Per component, inclusive." },
+        "description": { "type": "string" }
+      },
+      "required": ["type", "default"],
+      "additionalProperties": false
+    },
+    "textureSlot": {
+      "type": "object",
+      "properties": {
+        "colorSpace": { "enum": ["srgb", "linear"], "description": "How texel values are interpreted; a material may override per binding." },
+        "required": { "type": "boolean", "default": false },
+        "default": { "enum": ["white", "black", "normal", "gray"], "description": "Fallback texel when the slot is unbound (ignored for required slots)." },
+        "description": { "type": "string" }
+      },
+      "required": ["colorSpace"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -111,3 +111,66 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     assert_eq!(v["ok"], false);
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0200");
 }
+
+#[test]
+fn material_and_shader_commands_validate_and_inspect() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = root.join("crates/fynkel_document/fixtures");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let rusted = fixtures.join("valid/rusted_metal.material.json");
+
+    let out = run(&["material", "validate", "--json", rusted.to_str().unwrap()]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true);
+
+    let out = run(&["material", "inspect", "--json", rusted.to_str().unwrap()]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["shader"], "fynkel.pbr@1");
+    assert_eq!(v["parameters"].as_array().unwrap().len(), 7);
+    assert_eq!(v["textures"][3]["slot"], "occlusion");
+    assert!(v["textures"][3]["texture"].is_null());
+
+    let bad = fixtures.join("material/bad_parameters.material.json");
+    let out = run(&["material", "validate", "--json", bad.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0301");
+
+    // A custom manifest via --shader; without it the material's shader is unknown.
+    let toon = fixtures.join("material/toon_missing_ramp.material.json");
+    let manifest = fixtures.join("material/toon.shader.json");
+    let out = run(&["material", "validate", "--json", toon.to_str().unwrap()]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0300");
+    let out = run(&[
+        "material",
+        "validate",
+        "--json",
+        toon.to_str().unwrap(),
+        "--shader",
+        manifest.to_str().unwrap(),
+    ]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-D0305");
+
+    let out = run(&["shader", "inspect", "--json", "--builtin", "fynkel.pbr@1"]);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["shaderId"], "fynkel.pbr@1");
+    assert_eq!(v["textures"][2]["name"], "normal");
+
+    let broken = fixtures.join("material/bad_manifest.shader.json");
+    let out = run(&["shader", "validate", "--json", broken.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][2]["code"], "FYN-D0311");
+}

@@ -38,6 +38,22 @@ impl Code {
     pub const SCENE_COMPONENT_NOT_AUTHORED: Code = Code("FYN-D0207");
     pub const SCENE_DUPLICATE_CHILD: Code = Code("FYN-D0208");
     pub const SCENE_MALFORMED_ENTRY: Code = Code("FYN-D0209");
+    // Documents (FYN-D): material vs shader manifest (blueprint §6;
+    // `fynkel_document::material`).
+    pub const MATERIAL_UNKNOWN_SHADER: Code = Code("FYN-D0300");
+    pub const MATERIAL_UNKNOWN_PARAMETER: Code = Code("FYN-D0301");
+    pub const MATERIAL_PARAMETER_TYPE: Code = Code("FYN-D0302");
+    pub const MATERIAL_PARAMETER_RANGE: Code = Code("FYN-D0303");
+    pub const MATERIAL_UNKNOWN_TEXTURE: Code = Code("FYN-D0304");
+    pub const MATERIAL_MISSING_TEXTURE: Code = Code("FYN-D0305");
+    pub const MATERIAL_UNSUPPORTED_ALPHA_MODE: Code = Code("FYN-D0306");
+    pub const MATERIAL_MALFORMED_ENTRY: Code = Code("FYN-D0307");
+    /// A texture binding overrides the slot's colour space (warning).
+    pub const MATERIAL_COLOR_SPACE_OVERRIDE: Code = Code("FYN-D0308");
+    // Documents (FYN-D): shader manifest semantics.
+    pub const SHADER_BAD_DEFAULT: Code = Code("FYN-D0310");
+    pub const SHADER_BAD_RANGE: Code = Code("FYN-D0311");
+    pub const SHADER_MALFORMED_ENTRY: Code = Code("FYN-D0312");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 

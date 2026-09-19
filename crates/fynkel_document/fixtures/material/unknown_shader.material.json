@@ -1,0 +1,8 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 1,
+  "id": "8b2e4d6f-3c5e-4a7b-8d9f-2e3a4b5c6d7e",
+  "name": "Custom",
+  "shader": "studio.toon@9",
+  "parameters": {}
+}

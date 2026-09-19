@@ -1,0 +1,25 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 1,
+  "id": "ad4a6f8b-5e7a-4c9d-8fb0-4a5c6d7e8f90",
+  "name": "Bad textures",
+  "shader": "fynkel.pbr@1",
+  "textures": {
+    "albedo": {
+      "texture": {
+        "asset": "3f8a2b1c-5d6e-4f70-8a9b-0c1d2e3f4a5b"
+      }
+    },
+    "normal": {
+      "texture": {
+        "asset": "4a9b3c2d-6e7f-4081-9bac-1d2e3f4a5b6c"
+      },
+      "colorSpace": "srgb"
+    },
+    "emissive": {
+      "texture": {
+        "asset": "not-a-uuid"
+      }
+    }
+  }
+}

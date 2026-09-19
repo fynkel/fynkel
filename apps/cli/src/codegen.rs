@@ -21,6 +21,10 @@ pub const RUST_OUT: &str = "crates/fynkel_wire/src/generated.rs";
 pub const DOCUMENT_OUT: &str = "crates/fynkel_document/src/generated.rs";
 pub const JSON_INDEX: &str = "schemas/fynkel.schema.json";
 pub const SCENE_SCHEMA: &str = "schemas/scene.schema.json";
+/// Document schemas maintained by hand under `schemas/` (no Rust source of
+/// truth) that `fynkel_document` still embeds; the envelope is embedded by
+/// `SchemaSet` itself.
+pub const HAND_WRITTEN_SCHEMAS: &[&str] = &["material.schema.json", "shader.schema.json"];
 pub const ENVELOPE_ID: &str = "https://fynkel.dev/schemas/envelope.schema.json";
 
 pub fn run(root: &Path, check: bool) -> Result<Outcome, String> {
@@ -747,13 +751,19 @@ fn document_codecs(fp: u64) -> String {
     let _ = writeln!(o);
     let _ = writeln!(
         o,
-        "/// `(file name, text)` of every generated document/component schema."
+        "/// `(file name, text)` of every document/component schema."
     );
     let _ = writeln!(o, "pub const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[");
     let _ = writeln!(
         o,
         "    (\"scene.schema.json\", include_str!(\"../../../{SCENE_SCHEMA}\")),"
     );
+    for hand_written in HAND_WRITTEN_SCHEMAS {
+        let _ = writeln!(
+            o,
+            "    (\"{hand_written}\", include_str!(\"../../../schemas/{hand_written}\")),"
+        );
+    }
     for s in ALL.iter().filter(|s| s.kind == SchemaKind::Component) {
         let _ = writeln!(
             o,

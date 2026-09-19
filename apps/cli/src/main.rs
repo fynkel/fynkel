@@ -3,11 +3,13 @@
 //! M1 scope: `fynkel codegen` (ADR-0012, native schema generator),
 //! `fynkel schema`, and the seed of `fynkel test` (§13.3/§14.1): the Rust
 //! headless host. M2 adds `fynkel document` (validate/format/new), `fynkel
-//! scene`, `--scene` for the headless host and `fynkel state dump`. Exit
+//! scene`, `fynkel material`, `fynkel shader`, `--scene` for the headless
+//! host and `fynkel state dump`. Exit
 //! codes: 0 ok, 1 error, 2 `--check` found drift.
 
 mod codegen;
 mod document;
+mod material;
 mod scene;
 
 use std::path::PathBuf;
@@ -15,7 +17,7 @@ use std::process::ExitCode;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--scene <path>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate ...            scene documents"
+        "usage:\n  fynkel codegen [--check] [--root <repo>]   regenerate schemas/, Dart and Rust codecs\n  fynkel schema [--root <repo>]                print the schema registry and fingerprint\n  fynkel test --headless [--scene <path>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               run the Rust headless host (demo scene or a .scene.json) and report\n  fynkel state dump --scene <path> [--steps N] [--json]\n                                               load a scene headlessly and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate ...            scene documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests"
     );
     ExitCode::from(1)
 }
@@ -53,17 +55,17 @@ fn main() -> ExitCode {
     if cmd == "state" {
         return state_command(&args[1..]);
     }
-    if cmd == "document" || cmd == "scene" {
+    if matches!(cmd.as_str(), "document" | "scene" | "material" | "shader") {
         let root = args
             .iter()
             .position(|a| a == "--root")
             .and_then(|i| args.get(i + 1))
             .map(PathBuf::from);
         let root = repo_root(root);
-        return if cmd == "document" {
-            document::run(&root, &args[1..])
-        } else {
-            scene::run(&root, &args[1..])
+        return match cmd.as_str() {
+            "document" => document::run(&root, &args[1..]),
+            "scene" => scene::run(&root, &args[1..]),
+            other => material::run(&root, other, &args[1..]),
         };
     }
     let mut check = false;

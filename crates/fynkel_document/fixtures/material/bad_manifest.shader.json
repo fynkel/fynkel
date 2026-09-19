@@ -1,0 +1,35 @@
+{
+  "$schema": "https://fynkel.dev/schemas/shader.schema.json",
+  "formatVersion": 1,
+  "id": "e18eadcf-9cbe-4ad1-8df4-8e9a0b1c2d34",
+  "name": "Bad manifest",
+  "shaderId": "studio.bad@1",
+  "source": {
+    "builtin": "nope"
+  },
+  "passes": [
+    "opaque"
+  ],
+  "parameters": {
+    "a": {
+      "type": "float",
+      "default": 2.0,
+      "min": 0.0,
+      "max": 1.0
+    },
+    "b": {
+      "type": "vec3",
+      "default": [
+        1.0,
+        2.0
+      ]
+    },
+    "c": {
+      "type": "float",
+      "default": 0.5,
+      "min": 1.0,
+      "max": 0.0
+    }
+  },
+  "textures": {}
+}

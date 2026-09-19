@@ -126,9 +126,11 @@ impl DocumentCodec for ::fynkel_core::components::PointLight {
     }
 }
 
-/// `(file name, text)` of every generated document/component schema.
+/// `(file name, text)` of every document/component schema.
 pub const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     ("scene.schema.json", include_str!("../../../schemas/scene.schema.json")),
+    ("material.schema.json", include_str!("../../../schemas/material.schema.json")),
+    ("shader.schema.json", include_str!("../../../schemas/shader.schema.json")),
     ("fynkel.Transform.schema.json", include_str!("../../../schemas/components/fynkel.Transform.schema.json")),
     ("fynkel.Name.schema.json", include_str!("../../../schemas/components/fynkel.Name.schema.json")),
     ("fynkel.MeshRenderer.schema.json", include_str!("../../../schemas/components/fynkel.MeshRenderer.schema.json")),

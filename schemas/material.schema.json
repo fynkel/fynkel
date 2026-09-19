@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/material.schema.json",
+  "title": "Fynkel material document",
+  "description": "A shader id plus the values a material sets: typed parameters, texture bindings (assets by identity, with sampler and colour space), alpha mode and cutoff, culling and shadow flags (blueprint §6 Materials and shaders). Parameter names, types and ranges come from the shader's manifest; `fynkel material validate` checks them.",
+  "type": "object",
+  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "properties": {
+    "shader": { "$ref": "https://fynkel.dev/schemas/shader.schema.json#/$defs/shaderId" },
+    "parameters": {
+      "type": "object",
+      "description": "Parameter values; anything not set takes the manifest default.",
+      "propertyNames": { "$ref": "https://fynkel.dev/schemas/shader.schema.json#/$defs/identifier" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "number" },
+          { "type": "boolean" },
+          { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 4 }
+        ]
+      }
+    },
+    "textures": {
+      "type": "object",
+      "description": "Texture slot → binding.",
+      "propertyNames": { "$ref": "https://fynkel.dev/schemas/shader.schema.json#/$defs/identifier" },
+      "additionalProperties": { "$ref": "#/$defs/textureBinding" }
+    },
+    "alphaMode": { "enum": ["opaque", "mask", "blend"], "default": "opaque" },
+    "alphaCutoff": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "Used by `mask` only." },
+    "cull": { "enum": ["back", "front", "none"], "default": "back" },
+    "castShadows": { "type": "boolean", "default": true },
+    "receiveShadows": { "type": "boolean", "default": true }
+  },
+  "required": ["shader"],
+  "patternProperties": { "^x-": true },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "textureBinding": {
+      "type": "object",
+      "properties": {
+        "texture": { "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef" },
+        "colorSpace": { "enum": ["srgb", "linear"], "description": "Overrides the slot's colour space." },
+        "uvSet": { "type": "integer", "minimum": 0, "maximum": 1, "default": 0 },
+        "sampler": { "$ref": "#/$defs/sampler" }
+      },
+      "required": ["texture"],
+      "additionalProperties": false
+    },
+    "sampler": {
+      "type": "object",
+      "properties": {
+        "filter": { "enum": ["linear", "nearest"], "default": "linear" },
+        "mipmaps": { "type": "boolean", "default": true },
+        "wrap": { "enum": ["repeat", "clamp", "mirror"], "default": "repeat" },
+        "anisotropy": { "type": "integer", "minimum": 1, "maximum": 16, "default": 1 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

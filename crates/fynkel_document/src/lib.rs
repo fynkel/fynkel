@@ -21,6 +21,7 @@ pub mod codec;
 #[allow(clippy::all)]
 pub mod generated;
 pub mod json;
+pub mod material;
 pub mod runtime;
 pub mod scene;
 pub mod schema;
@@ -30,6 +31,7 @@ use std::path::Path;
 pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
+pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
 pub use runtime::{describe, DescribedScene};
 pub use scene::Scene;
 pub use schema::{ComponentInfo, SchemaSet};
@@ -133,10 +135,11 @@ pub struct Document {
 }
 
 impl Document {
-    /// A fresh document with a new id and an empty body.
+    /// A fresh document with a new id and the smallest valid body for the
+    /// kind (an empty scene, an untextured PBR material, ...).
     pub fn new(kind: DocumentKind, name: &str) -> Document {
         let id = uuid::Uuid::new_v4();
-        let root = Node::object(vec![
+        let mut members = vec![
             ("$schema".into(), Node::string(kind.schema_id())),
             (
                 "formatVersion".into(),
@@ -144,7 +147,16 @@ impl Document {
             ),
             ("id".into(), Node::string(id.to_string())),
             ("name".into(), Node::string(name)),
-        ]);
+        ];
+        match kind {
+            DocumentKind::Scene => members.push(("entities".into(), Node::object(Vec::new()))),
+            DocumentKind::Material => {
+                members.push(("shader".into(), Node::string(material::PBR_SHADER_ID)));
+                members.push(("parameters".into(), Node::object(Vec::new())));
+            }
+            _ => {}
+        }
+        let root = Node::object(members);
         Document {
             kind,
             path: None,

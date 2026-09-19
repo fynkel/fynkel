@@ -1,0 +1,26 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 1,
+  "id": "9c3f5e7a-4d6f-4b8c-9eaf-3f4b5c6d7e8f",
+  "name": "Bad parameters",
+  "shader": "fynkel.pbr@1",
+  "parameters": {
+    "baseColour": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "metallic": [
+      0.5,
+      0.5
+    ],
+    "roughness": 1.5,
+    "emissive": [
+      0.0,
+      -0.1,
+      0.0
+    ],
+    "emissiveStrength": true
+  }
+}

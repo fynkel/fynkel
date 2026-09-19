@@ -1,0 +1,5 @@
+[
+  { "code": "FYN-D0100", "pointer": "/textures/emissive/texture/asset", "line": 21, "column": 9 },
+  { "code": "FYN-D0304", "pointer": "/textures/albedo", "line": 8, "column": 5 },
+  { "code": "FYN-D0308", "pointer": "/textures/normal/colorSpace", "line": 17, "column": 7, "severity": "warning" }
+]

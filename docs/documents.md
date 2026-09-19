@@ -151,6 +151,41 @@ are the schemas `SchemaSet::embedded()` compiles in, so a shipped runtime
 validates without a `schemas/` directory. `docs/hosts.md` covers
 `fynkel test --headless --scene` and `fynkel state dump`.
 
+## Material and shader documents
+
+`.shader.json` is a shader's **interface manifest** (`schemas/shader.schema.json`,
+hand-written): `shaderId` (`<name>@<version>`, the version bumps on any
+interface change), `source` (`{ "builtin": name }` or `{ "wgsl": assetRef }`),
+`passes` (`opaque | mask | blend | shadow`), `features`, typed `parameters`
+(`float int bool vec2 vec3 vec4 color3 color4`, each with a `default` and
+optional per-component `min`/`max`) and `textures` slots (`colorSpace`
+`srgb | linear`, `required`, fallback texel `white | black | normal | gray`).
+The built-in PBR shader `fynkel.pbr@1` ships its manifest inside the engine
+(`crates/fynkel_document/shaders/fynkel.pbr@1.shader.json`, glTF metallic-
+roughness: `baseColor`, `metallic`, `roughness`, `emissive`,
+`emissiveStrength`, `normalScale`, `occlusionStrength`; slots `baseColor` and
+`emissive` sRGB, `metallicRoughness`, `normal`, `occlusion` linear). Bindings
+and uniform layout are the renderer's business and arrive with it (M3).
+
+`.material.json` (`schemas/material.schema.json`) names a `shader` and sets
+values: `parameters` (anything unset takes the manifest default), `textures`
+(slot → `{ texture: assetRef, colorSpace?, uvSet?, sampler?{filter, mipmaps,
+wrap, anisotropy} }`), `alphaMode` (+ `alphaCutoff` for `mask`), `cull`,
+`castShadows`, `receiveShadows`. `fynkel document new material` yields an
+untextured `fynkel.pbr@1` material.
+
+`fynkel_document::material` holds the typed views (`ShaderManifest`,
+`Material`), `ShaderLibrary::builtin()` (add project manifests with `add`),
+and the rules JSON Schema cannot express. Material vs manifest: unknown shader
+`FYN-D0300`, unknown parameter `D0301`, wrong type (number / bool / vector
+length, whole numbers for `int`) `D0302`, out of range `D0303`, unknown slot
+`D0304`, required slot unbound `D0305`, `alphaMode` naming a pass the shader
+lacks `D0306`, malformed entry `D0307`, colour-space override that disagrees
+with the slot `D0308` (warning). Manifest rules: default not of its type or
+outside its range `D0310`, `min > max` `D0311`, malformed entry `D0312`.
+`Material::resolve(&library)` fills every default into a `ResolvedMaterial`
+(what `inspect` prints and the renderer will consume).
+
 ## CLI
 
 ```sh
@@ -159,13 +194,21 @@ fynkel document format <path>... [--check] [--json]
 fynkel document new <kind> <name> [--out <path>] [--json]
 fynkel scene inspect <path> [--json] [--schemas <dir>]
 fynkel scene validate <path>... [--json] [--schemas <dir>]
+fynkel material inspect <path> [--json] [--schemas <dir>] [--shader <manifest>]...
+fynkel material validate <path>... [--json] [--schemas <dir>] [--shader <manifest>]...
+fynkel shader inspect <path> | --builtin <shaderId> [--json]
+fynkel shader validate <path>... [--json] [--schemas <dir>]
 fynkel test --headless --scene <path> [--steps N] [--json]
 fynkel state dump --scene <path> [--steps N] [--json]
 ```
 
 `scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,
 entityCount, componentCount, componentTypes, roots[] }` with `--json`) followed
-by the diagnostics.
+by the diagnostics. `material inspect` prints the resolved material (every
+manifest parameter with its value, `(default)` where the material did not set
+it; every slot with its binding or fallback); `--shader` adds custom manifests
+to the built-in library (a manifest with errors is reported and left out).
+`shader inspect --builtin fynkel.pbr@1` shows the built-in interface.
 
 Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
 `--json` prints `{ "ok": bool, "diagnostics": [ ...records... ] }`
@@ -176,5 +219,6 @@ Exit codes: 0 ok, 1 errors (or drift for `format --check`), 2 usage.
 `crates/fynkel_document/fixtures/`: `valid/` (parse, validate, canonical
 fixed point), `unknown/` (unknown keys and lexemes byte-for-byte, hoisting
 expectations in `*.expected.json`), `invalid/` (exact code/pointer/line/
-column expectations in `*.expected.json`). Every kind added later extends
-this corpus.
+column expectations in `*.expected.json`), `scene/` and `material/` (semantic
+expectations per kind; `material/` also holds custom manifests the material
+fixtures reference). Every kind added later extends this corpus.

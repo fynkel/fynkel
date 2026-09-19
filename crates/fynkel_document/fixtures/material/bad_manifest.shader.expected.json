@@ -1,0 +1,5 @@
+[
+  { "code": "FYN-D0310", "pointer": "/parameters/a/default", "line": 16, "column": 7 },
+  { "code": "FYN-D0310", "pointer": "/parameters/b/default", "line": 22, "column": 7 },
+  { "code": "FYN-D0311", "pointer": "/parameters/c/min", "line": 30, "column": 7 }
+]
