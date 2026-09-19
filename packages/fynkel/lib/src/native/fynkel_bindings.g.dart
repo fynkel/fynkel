@@ -7,7 +7,7 @@
 // ignore_for_file: unused_import
 import 'dart:ffi' as ffi;
 
-/// Generated dart:ffi bindings for crates/fynkel_native/include/fynkel.h (ABI v0). Do not edit.
+/// Generated dart:ffi bindings for crates/fynkel_native/include/fynkel.h (ABI v1). Do not edit.
 class FynkelNativeBindings {
   /// Holds the symbol lookup function.
   final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
@@ -32,8 +32,8 @@ class FynkelNativeBindings {
   late final _fynkel_abi_version = _fynkel_abi_versionPtr
       .asFunction<int Function()>();
 
-  /// Fingerprint of the component/record schemas this library was built with.
-  /// The Dart side compares it with the one its generated codecs carry.
+  /// Fingerprint of the record schemas this library was built with; the Dart
+  /// codecs carry the one they were generated from.
   int fynkel_schema_fingerprint() {
     return _fynkel_schema_fingerprint();
   }
@@ -102,17 +102,49 @@ class FynkelNativeBindings {
   late final _fynkel_world_destroy = _fynkel_world_destroyPtr
       .asFunction<void Function(ffi.Pointer<FynkelWorld>)>();
 
-  /// Validates and stages a command buffer. Simulation-lane commands apply on
-  /// the next step(); presentation-lane commands apply now. Returns PROTOCOL
+  /// Starts a host frame: accumulates dt, decides the number of fixed ticks,
+  /// clears last frame's presentation overrides (§5.1).
+  FynkelStatus fynkel_world_begin_frame(
+    ffi.Pointer<FynkelWorld> world,
+    double dt_seconds,
+    ffi.Pointer<FynkelFramePlan> out_plan,
+  ) {
+    return FynkelStatus.fromValue(
+      _fynkel_world_begin_frame(world, dt_seconds, out_plan),
+    );
+  }
+
+  late final _fynkel_world_begin_framePtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.UnsignedInt Function(
+            ffi.Pointer<FynkelWorld>,
+            ffi.Float,
+            ffi.Pointer<FynkelFramePlan>,
+          )
+        >
+      >('fynkel_world_begin_frame');
+  late final _fynkel_world_begin_frame = _fynkel_world_begin_framePtr
+      .asFunction<
+        int Function(
+          ffi.Pointer<FynkelWorld>,
+          double,
+          ffi.Pointer<FynkelFramePlan>,
+        )
+      >();
+
+  /// Validates a command buffer. Simulation-lane commands are staged for the
+  /// next step(); presentation-lane commands apply now. Returns PROTOCOL
   /// without applying anything if the buffer does not validate.
   FynkelStatus fynkel_world_submit_commands(
     ffi.Pointer<FynkelWorld> world,
     int lane,
     ffi.Pointer<ffi.Uint8> buffer,
     int length,
+    ffi.Pointer<FynkelSubmitResult> out_result,
   ) {
     return FynkelStatus.fromValue(
-      _fynkel_world_submit_commands(world, lane, buffer, length),
+      _fynkel_world_submit_commands(world, lane, buffer, length, out_result),
     );
   }
 
@@ -124,23 +156,29 @@ class FynkelNativeBindings {
             ffi.Uint32,
             ffi.Pointer<ffi.Uint8>,
             ffi.Uint32,
+            ffi.Pointer<FynkelSubmitResult>,
           )
         >
       >('fynkel_world_submit_commands');
   late final _fynkel_world_submit_commands = _fynkel_world_submit_commandsPtr
       .asFunction<
-        int Function(ffi.Pointer<FynkelWorld>, int, ffi.Pointer<ffi.Uint8>, int)
+        int Function(
+          ffi.Pointer<FynkelWorld>,
+          int,
+          ffi.Pointer<ffi.Uint8>,
+          int,
+          ffi.Pointer<FynkelSubmitResult>,
+        )
       >();
 
-  /// Applies staged simulation commands, advances one fixed tick, then
-  /// rebuilds the snapshot (subscribed entities only), event and diagnostics
-  /// buffers. Returns OK or COMMANDS_REJECTED on a normal step.
+  /// One fixed tick: applies staged simulation commands, runs the native
+  /// phases, publishes the snapshot (subscribed entities only), events and
+  /// diagnostics. Returns OK or COMMANDS_REJECTED on a normal step.
   FynkelStatus fynkel_world_step(
     ffi.Pointer<FynkelWorld> world,
-    ffi.Pointer<FynkelStepDesc> desc,
     ffi.Pointer<FynkelStepResult> out_result,
   ) {
-    return FynkelStatus.fromValue(_fynkel_world_step(world, desc, out_result));
+    return FynkelStatus.fromValue(_fynkel_world_step(world, out_result));
   }
 
   late final _fynkel_world_stepPtr =
@@ -148,21 +186,17 @@ class FynkelNativeBindings {
         ffi.NativeFunction<
           ffi.UnsignedInt Function(
             ffi.Pointer<FynkelWorld>,
-            ffi.Pointer<FynkelStepDesc>,
             ffi.Pointer<FynkelStepResult>,
           )
         >
       >('fynkel_world_step');
   late final _fynkel_world_step = _fynkel_world_stepPtr
       .asFunction<
-        int Function(
-          ffi.Pointer<FynkelWorld>,
-          ffi.Pointer<FynkelStepDesc>,
-          ffi.Pointer<FynkelStepResult>,
-        )
+        int Function(ffi.Pointer<FynkelWorld>, ffi.Pointer<FynkelStepResult>)
       >();
 
   /// Subscribe/unsubscribe `count` entities' `component` for snapshots.
+  /// Only FYNKEL_COMPONENT_TRANSFORM is subscribable in M1.
   FynkelStatus fynkel_world_subscribe(
     ffi.Pointer<FynkelWorld> world,
     int component,
@@ -210,17 +244,6 @@ class FynkelNativeBindings {
   late final _fynkel_world_snapshot = _fynkel_world_snapshotPtr
       .asFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>();
 
-  FynkelBufferView fynkel_world_events(ffi.Pointer<FynkelWorld> world) {
-    return _fynkel_world_events(world);
-  }
-
-  late final _fynkel_world_eventsPtr =
-      _lookup<
-        ffi.NativeFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>
-      >('fynkel_world_events');
-  late final _fynkel_world_events = _fynkel_world_eventsPtr
-      .asFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>();
-
   FynkelBufferView fynkel_world_diagnostics(ffi.Pointer<FynkelWorld> world) {
     return _fynkel_world_diagnostics(world);
   }
@@ -231,6 +254,107 @@ class FynkelNativeBindings {
       >('fynkel_world_diagnostics');
   late final _fynkel_world_diagnostics = _fynkel_world_diagnosticsPtr
       .asFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>();
+
+  /// Pull-only events (ADR-0008): moves pending general-lane events plus the
+  /// last tick's physics events into the view; a second call returns an empty
+  /// buffer until more events are produced.
+  FynkelBufferView fynkel_world_drain_events(ffi.Pointer<FynkelWorld> world) {
+    return _fynkel_world_drain_events(world);
+  }
+
+  late final _fynkel_world_drain_eventsPtr =
+      _lookup<
+        ffi.NativeFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>
+      >('fynkel_world_drain_events');
+  late final _fynkel_world_drain_events = _fynkel_world_drain_eventsPtr
+      .asFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>();
+
+  /// Physics events of the tick just stepped, for afterPhysics; not drained.
+  FynkelBufferView fynkel_world_after_physics_events(
+    ffi.Pointer<FynkelWorld> world,
+  ) {
+    return _fynkel_world_after_physics_events(world);
+  }
+
+  late final _fynkel_world_after_physics_eventsPtr =
+      _lookup<
+        ffi.NativeFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>
+      >('fynkel_world_after_physics_events');
+  late final _fynkel_world_after_physics_events =
+      _fynkel_world_after_physics_eventsPtr
+          .asFunction<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>();
+
+  /// Explicit query; the response is valid until the next mutating call or
+  /// the next query.
+  FynkelStatus fynkel_world_query(
+    ffi.Pointer<FynkelWorld> world,
+    ffi.Pointer<FynkelQueryDesc> desc,
+    ffi.Pointer<FynkelBufferView> out_view,
+  ) {
+    return FynkelStatus.fromValue(_fynkel_world_query(world, desc, out_view));
+  }
+
+  late final _fynkel_world_queryPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.UnsignedInt Function(
+            ffi.Pointer<FynkelWorld>,
+            ffi.Pointer<FynkelQueryDesc>,
+            ffi.Pointer<FynkelBufferView>,
+          )
+        >
+      >('fynkel_world_query');
+  late final _fynkel_world_query = _fynkel_world_queryPtr
+      .asFunction<
+        int Function(
+          ffi.Pointer<FynkelWorld>,
+          ffi.Pointer<FynkelQueryDesc>,
+          ffi.Pointer<FynkelBufferView>,
+        )
+      >();
+
+  FynkelStatus fynkel_world_stats(
+    ffi.Pointer<FynkelWorld> world,
+    ffi.Pointer<FynkelWorldStats> out_stats,
+  ) {
+    return FynkelStatus.fromValue(_fynkel_world_stats(world, out_stats));
+  }
+
+  late final _fynkel_world_statsPtr =
+      _lookup<
+        ffi.NativeFunction<
+          ffi.UnsignedInt Function(
+            ffi.Pointer<FynkelWorld>,
+            ffi.Pointer<FynkelWorldStats>,
+          )
+        >
+      >('fynkel_world_stats');
+  late final _fynkel_world_stats = _fynkel_world_statsPtr
+      .asFunction<
+        int Function(ffi.Pointer<FynkelWorld>, ffi.Pointer<FynkelWorldStats>)
+      >();
+
+  int fynkel_world_tick(ffi.Pointer<FynkelWorld> world) {
+    return _fynkel_world_tick(world);
+  }
+
+  late final _fynkel_world_tickPtr =
+      _lookup<
+        ffi.NativeFunction<ffi.Uint64 Function(ffi.Pointer<FynkelWorld>)>
+      >('fynkel_world_tick');
+  late final _fynkel_world_tick = _fynkel_world_tickPtr
+      .asFunction<int Function(ffi.Pointer<FynkelWorld>)>();
+
+  double fynkel_world_alpha(ffi.Pointer<FynkelWorld> world) {
+    return _fynkel_world_alpha(world);
+  }
+
+  late final _fynkel_world_alphaPtr =
+      _lookup<ffi.NativeFunction<ffi.Float Function(ffi.Pointer<FynkelWorld>)>>(
+        'fynkel_world_alpha',
+      );
+  late final _fynkel_world_alpha = _fynkel_world_alphaPtr
+      .asFunction<double Function(ffi.Pointer<FynkelWorld>)>();
 
   /// Non-zero once a panic or fatal error was caught; every mutating call then
   /// returns FYNKEL_STATUS_POISONED.
@@ -250,7 +374,8 @@ final class FynkelRuntime extends ffi.Opaque {}
 
 final class FynkelWorld extends ffi.Opaque {}
 
-/// Entity handle: (generation << 32) | slot. 0 is never valid.
+/// Entity handle: world id (8) | generation (24, never 0) | slot (32).
+/// 0 is never valid.
 typedef FynkelEntity = ffi.Uint64;
 typedef DartFynkelEntity = int;
 
@@ -265,7 +390,10 @@ enum FynkelStatus {
   FYNKEL_STATUS_PROTOCOL(3),
   FYNKEL_STATUS_POISONED(4),
   FYNKEL_STATUS_PANIC(5),
-  FYNKEL_STATUS_OUT_OF_RESOURCES(6);
+  FYNKEL_STATUS_OUT_OF_RESOURCES(6),
+
+  /// ABI version or schema fingerprint mismatch.
+  FYNKEL_STATUS_INCOMPATIBLE(7);
 
   final int value;
   const FynkelStatus(this.value);
@@ -278,15 +406,26 @@ enum FynkelStatus {
     4 => FYNKEL_STATUS_POISONED,
     5 => FYNKEL_STATUS_PANIC,
     6 => FYNKEL_STATUS_OUT_OF_RESOURCES,
+    7 => FYNKEL_STATUS_INCOMPATIBLE,
     _ => throw ArgumentError('Unknown value for FynkelStatus: $value'),
   };
 }
 
 enum FynkelBufferKind {
+  /// CommandHeader + body per command (kind = FynkelCommandKind).
   FYNKEL_BUFFER_COMMANDS(1),
+
+  /// SnapshotTransformRecord per subscribed entity, handle order.
   FYNKEL_BUFFER_SNAPSHOT(2),
+
+  /// EventHeader + body per event (kind = event kind).
   FYNKEL_BUFFER_EVENTS(3),
-  FYNKEL_BUFFER_DIAGNOSTICS(4);
+
+  /// DiagnosticRecord per diagnostic; messages in the string tail.
+  FYNKEL_BUFFER_DIAGNOSTICS(4),
+
+  /// Query response; record type depends on the query kind.
+  FYNKEL_BUFFER_QUERY(5);
 
   final int value;
   const FynkelBufferKind(this.value);
@@ -296,12 +435,12 @@ enum FynkelBufferKind {
     2 => FYNKEL_BUFFER_SNAPSHOT,
     3 => FYNKEL_BUFFER_EVENTS,
     4 => FYNKEL_BUFFER_DIAGNOSTICS,
+    5 => FYNKEL_BUFFER_QUERY,
     _ => throw ArgumentError('Unknown value for FynkelBufferKind: $value'),
   };
 }
 
-/// Command lanes (blueprint §5.1): simulation commands apply at the start of
-/// the next fixed tick; presentation commands apply immediately on submit.
+/// Command lanes (blueprint §5.1, ADR-0008).
 enum FynkelCommandLane {
   FYNKEL_LANE_SIMULATION(0),
   FYNKEL_LANE_PRESENTATION(1);
@@ -316,28 +455,13 @@ enum FynkelCommandLane {
   };
 }
 
-enum FynkelComponent {
-  FYNKEL_COMPONENT_TRANSFORM(1);
-
-  final int value;
-  const FynkelComponent(this.value);
-
-  static FynkelComponent fromValue(int value) => switch (value) {
-    1 => FYNKEL_COMPONENT_TRANSFORM,
-    _ => throw ArgumentError('Unknown value for FynkelComponent: $value'),
-  };
-}
-
+/// Ids are the schema ids (schemas/fynkel.schema.json); listed for C hosts.
 enum FynkelCommandKind {
-  /// target = caller-chosen temp id (must be non-zero); payload = FynkelTransform.
-  /// Produces an FYNKEL_EVENT_SPAWNED event mapping temp id -> entity.
   FYNKEL_COMMAND_SPAWN(1),
-
-  /// target = entity.
   FYNKEL_COMMAND_DESTROY(2),
-
-  /// target = entity; payload = FynkelTransform.
-  FYNKEL_COMMAND_SET_TRANSFORM(3);
+  FYNKEL_COMMAND_SET_TRANSFORM(3),
+  FYNKEL_COMMAND_SET_PARENT(4),
+  FYNKEL_COMMAND_SET_NAME(5);
 
   final int value;
   const FynkelCommandKind(this.value);
@@ -346,46 +470,58 @@ enum FynkelCommandKind {
     1 => FYNKEL_COMMAND_SPAWN,
     2 => FYNKEL_COMMAND_DESTROY,
     3 => FYNKEL_COMMAND_SET_TRANSFORM,
+    4 => FYNKEL_COMMAND_SET_PARENT,
+    5 => FYNKEL_COMMAND_SET_NAME,
     _ => throw ArgumentError('Unknown value for FynkelCommandKind: $value'),
   };
 }
 
-enum FynkelEventKind {
-  /// a = temp id, b = entity
-  FYNKEL_EVENT_SPAWNED(1),
-
-  /// a = entity
-  FYNKEL_EVENT_DESTROYED(2);
+enum FynkelComponent {
+  FYNKEL_COMPONENT_TRANSFORM(1),
+  FYNKEL_COMPONENT_HIERARCHY(2),
+  FYNKEL_COMPONENT_NAME(3);
 
   final int value;
-  const FynkelEventKind(this.value);
+  const FynkelComponent(this.value);
 
-  static FynkelEventKind fromValue(int value) => switch (value) {
-    1 => FYNKEL_EVENT_SPAWNED,
-    2 => FYNKEL_EVENT_DESTROYED,
-    _ => throw ArgumentError('Unknown value for FynkelEventKind: $value'),
+  static FynkelComponent fromValue(int value) => switch (value) {
+    1 => FYNKEL_COMPONENT_TRANSFORM,
+    2 => FYNKEL_COMPONENT_HIERARCHY,
+    3 => FYNKEL_COMPONENT_NAME,
+    _ => throw ArgumentError('Unknown value for FynkelComponent: $value'),
   };
 }
 
-enum FynkelDiagnosticCode {
-  FYNKEL_DIAG_UNKNOWN_COMMAND(1),
-  FYNKEL_DIAG_STALE_ENTITY(2),
-  FYNKEL_DIAG_INVALID_TEMP_ID(3),
-  FYNKEL_DIAG_INVALID_PAYLOAD(4);
+enum FynkelQueryKind {
+  /// entity -> one SnapshotTransformRecord (0 records if unknown).
+  FYNKEL_QUERY_TRANSFORM(1),
+
+  /// entity -> u64 handles of its children, deterministic order.
+  FYNKEL_QUERY_CHILDREN(2),
+
+  /// entity -> one u64: parent handle or 0.
+  FYNKEL_QUERY_PARENT(3),
+
+  /// entity -> one Name record (0 records if none).
+  FYNKEL_QUERY_NAME(4),
+
+  /// (no entity) -> u64 handles of every live entity, slot order.
+  FYNKEL_QUERY_ALL_ENTITIES(5);
 
   final int value;
-  const FynkelDiagnosticCode(this.value);
+  const FynkelQueryKind(this.value);
 
-  static FynkelDiagnosticCode fromValue(int value) => switch (value) {
-    1 => FYNKEL_DIAG_UNKNOWN_COMMAND,
-    2 => FYNKEL_DIAG_STALE_ENTITY,
-    3 => FYNKEL_DIAG_INVALID_TEMP_ID,
-    4 => FYNKEL_DIAG_INVALID_PAYLOAD,
-    _ => throw ArgumentError('Unknown value for FynkelDiagnosticCode: $value'),
+  static FynkelQueryKind fromValue(int value) => switch (value) {
+    1 => FYNKEL_QUERY_TRANSFORM,
+    2 => FYNKEL_QUERY_CHILDREN,
+    3 => FYNKEL_QUERY_PARENT,
+    4 => FYNKEL_QUERY_NAME,
+    5 => FYNKEL_QUERY_ALL_ENTITIES,
+    _ => throw ArgumentError('Unknown value for FynkelQueryKind: $value'),
   };
 }
 
-/// ---- Wire records -------------------------------------------------------
+/// ---- Buffer header ------------------------------------------------------
 final class FynkelBufferHeader extends ffi.Struct {
   /// FYNKEL_BUFFER_MAGIC
   @ffi.Uint32()
@@ -402,94 +538,17 @@ final class FynkelBufferHeader extends ffi.Struct {
   @ffi.Uint32()
   external int record_count;
 
-  /// including this header
+  /// whole buffer incl. header and tail
   @ffi.Uint32()
   external int byte_length;
-}
 
-final class FynkelTransform extends ffi.Struct {
-  @ffi.Array.multi([3])
-  external ffi.Array<ffi.Float> position;
-
-  /// quaternion x, y, z, w
-  @ffi.Array.multi([4])
-  external ffi.Array<ffi.Float> rotation;
-
-  @ffi.Array.multi([3])
-  external ffi.Array<ffi.Float> scale;
-}
-
-final class FynkelCommand extends ffi.Struct {
-  /// FynkelCommandKind
+  /// offset where the string tail starts
   @ffi.Uint32()
-  external int kind;
+  external int records_end;
 
-  /// reserved, 0
+  /// query responses echo the request id
   @ffi.Uint32()
-  external int flags;
-
-  /// entity or temp id, per kind
-  @ffi.Uint64()
-  external int target;
-
-  /// per kind; FynkelTransform uses 40
-  @ffi.Array.multi([48])
-  external ffi.Array<ffi.Uint8> payload;
-}
-
-final class FynkelSnapshotTransform extends ffi.Struct {
-  @FynkelEntity()
-  external int entity;
-
-  external FynkelTransform transform;
-}
-
-final class FynkelEvent extends ffi.Struct {
-  /// FynkelEventKind
-  @ffi.Uint32()
-  external int kind;
-
-  /// low 32 bits of the tick that produced it
-  @ffi.Uint32()
-  external int tick_lo;
-
-  @ffi.Uint64()
-  external int a;
-
-  @ffi.Uint64()
-  external int b;
-
-  @ffi.Uint64()
-  external int c;
-}
-
-final class FynkelDiagnostic extends ffi.Struct {
-  /// index into the submitted batch
-  @ffi.Uint32()
-  external int command_index;
-
-  /// FynkelDiagnosticCode
-  @ffi.Uint32()
-  external int code;
-
-  /// 0 if not applicable
-  @ffi.Uint64()
-  external int entity;
-
-  /// FynkelComponent, 0 if n/a
-  @ffi.Uint32()
-  external int component;
-
-  /// byte offset from buffer start
-  @ffi.Uint32()
-  external int message_offset;
-
-  @ffi.Uint32()
-  external int message_length;
-
-  /// FynkelCommandLane
-  @ffi.Uint32()
-  external int lane;
+  external int request_id;
 }
 
 /// ---- Call structs -------------------------------------------------------
@@ -502,21 +561,56 @@ final class FynkelBufferView extends ffi.Struct {
 }
 
 final class FynkelWorldDesc extends ffi.Struct {
+  /// 1..255; 0 = default (1)
+  @ffi.Uint8()
+  external int world_id;
+
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Uint8> reserved;
+
+  /// 0 = default 1/60
+  @ffi.Float()
+  external double fixed_dt_seconds;
+
+  /// 0 = default 4
   @ffi.Uint32()
-  external int initial_entity_capacity;
+  external int max_steps_per_frame;
+
+  /// 0 = default 0.25
+  @ffi.Float()
+  external double max_frame_dt_seconds;
 
   /// reserved
   @ffi.Uint32()
   external int flags;
 }
 
-final class FynkelStepDesc extends ffi.Struct {
-  @ffi.Float()
-  external double fixed_dt_seconds;
-
-  /// reserved
+final class FynkelFramePlan extends ffi.Struct {
+  /// fixed ticks to run this frame
   @ffi.Uint32()
-  external int flags;
+  external int steps;
+
+  /// > 0: MissedDeadline recorded
+  @ffi.Float()
+  external double dropped_seconds;
+
+  /// frame dt exceeded max_frame_dt
+  @ffi.Uint32()
+  external int clamped;
+
+  /// interpolation factor after the steps
+  @ffi.Float()
+  external double alpha;
+}
+
+final class FynkelSubmitResult extends ffi.Struct {
+  /// staged (simulation) or applied (presentation)
+  @ffi.Uint32()
+  external int accepted;
+
+  /// diagnostics describe each one
+  @ffi.Uint32()
+  external int rejected;
 }
 
 final class FynkelStepResult extends ffi.Struct {
@@ -533,6 +627,7 @@ final class FynkelStepResult extends ffi.Struct {
   @ffi.Uint32()
   external int snapshot_records;
 
+  /// pending in the general lane
   @ffi.Uint32()
   external int event_records;
 
@@ -543,6 +638,60 @@ final class FynkelStepResult extends ffi.Struct {
   external int live_entities;
 }
 
-const int FYNKEL_ABI_VERSION = 0;
+final class FynkelQueryDesc extends ffi.Struct {
+  /// FynkelQueryKind
+  @ffi.Uint32()
+  external int kind;
+
+  /// echoed in the response header
+  @ffi.Uint32()
+  external int request_id;
+
+  /// subject, per kind
+  @FynkelEntity()
+  external int entity;
+}
+
+/// Bridge statistics since world creation (blueprint §5.7, M1 gate).
+final class FynkelWorldStats extends ffi.Struct {
+  @ffi.Uint64()
+  external int tick;
+
+  @ffi.Uint64()
+  external int frame;
+
+  @ffi.Uint64()
+  external int submit_calls;
+
+  @ffi.Uint64()
+  external int step_calls;
+
+  @ffi.Uint64()
+  external int query_calls;
+
+  /// command bytes received
+  @ffi.Uint64()
+  external int bytes_in;
+
+  /// snapshot+event+diagnostic+query bytes produced
+  @ffi.Uint64()
+  external int bytes_out;
+
+  @ffi.Uint32()
+  external int live_entities;
+
+  @ffi.Uint32()
+  external int subscriptions;
+
+  @ffi.Uint32()
+  external int staged_commands;
+
+  @ffi.Uint32()
+  external int poisoned;
+}
+
+const int FYNKEL_ABI_VERSION = 1;
 
 const int FYNKEL_BUFFER_MAGIC = 1263425862;
+
+const int FYNKEL_BUFFER_HEADER_SIZE = 24;

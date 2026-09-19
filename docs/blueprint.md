@@ -769,7 +769,7 @@ read diagnostics/stats
 resource/asset requests
 ```
 
-Per-frame traffic uses reusable binary/typed buffers with a **hand-defined record layout** (fixed-size little-endian records in `Uint8List`/`Float32List` views). Encoders and decoders on both sides are **generated from the Rust component schemas** (ADR-0012), so the wire layout, the Dart bindings, and the JSON Schema cannot drift independently. No FlatBuffers/Protobuf in 1.0.
+Per-frame traffic uses reusable binary/typed buffers with a **hand-defined record layout** (ABI v1: a 24-byte buffer header, variable-size command/event records with a `kind, size` envelope so unknown kinds can be skipped, fixed-size snapshot/diagnostic records, and a string tail addressed by `(offset, len)`; see `crates/fynkel_native/include/fynkel.h`) (fixed-size little-endian records in `Uint8List`/`Float32List` views). Encoders and decoders on both sides are **generated from the Rust component schemas** (ADR-0012), so the wire layout, the Dart bindings, and the JSON Schema cannot drift independently. No FlatBuffers/Protobuf in 1.0.
 
 Do **not** use:
 

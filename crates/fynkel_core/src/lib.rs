@@ -32,6 +32,6 @@ pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, WorldId};
 pub use fynkel_scene::Transform;
 pub use world::{
-    Diagnostic, Extract, ExtractRecord, Name, PhysicsOwned, SnapshotRecord, StepReport,
+    Diagnostic, Extract, ExtractRecord, Name, PhysicsOwned, Rejected, SnapshotRecord, StepReport,
     SubmitReport, World, WorldConfig,
 };

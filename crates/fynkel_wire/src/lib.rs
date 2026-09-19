@@ -80,6 +80,10 @@ pub fn check_len(b: &[u8], needed: usize) -> Result<(), WireError> {
 }
 
 #[inline]
+pub fn put_u16(b: &mut [u8], off: usize, v: u16) {
+    b[off..off + 2].copy_from_slice(&v.to_le_bytes());
+}
+#[inline]
 pub fn put_u32(b: &mut [u8], off: usize, v: u32) {
     b[off..off + 4].copy_from_slice(&v.to_le_bytes());
 }
@@ -127,6 +131,10 @@ pub fn put_str(b: &mut [u8], off: usize, v: &str, strings: &mut StringTable) {
     put_u32(b, off + 4, l);
 }
 
+#[inline]
+pub fn get_u16(b: &[u8], off: usize) -> u16 {
+    u16::from_le_bytes(b[off..off + 2].try_into().unwrap())
+}
 #[inline]
 pub fn get_u32(b: &[u8], off: usize) -> u32 {
     u32::from_le_bytes(b[off..off + 4].try_into().unwrap())

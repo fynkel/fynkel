@@ -145,12 +145,27 @@ pub struct DiagnosticRecord {
     pub message: String,
 }
 
-/// Event envelope: `kind` selects the body schema by event id.
+/// Command envelope in a command buffer: `kind` selects the body schema
+/// (a `CommandKind`), `size` lets readers skip bodies they do not know.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.CommandHeader")]
+pub struct CommandHeader {
+    pub kind: u32,
+    /// Body bytes following this header.
+    pub size: u32,
+}
+
+/// Event envelope in an event buffer: `kind` selects the body schema (an
+/// `EventKind`; every physics kind uses `ContactEvent`).
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "record", name = "fynkel.rec.EventHeader")]
 pub struct EventHeader {
     pub kind: u32,
+    /// Body bytes following this header.
+    pub size: u32,
+    /// Low 32 bits of the tick that produced the event.
     pub tick_lo: u32,
+    pub flags: u32,
 }
 
 /// The registry, in fingerprint order. Append only.
@@ -170,6 +185,7 @@ pub const ALL: &[&RecordSchema] = &[
     &ContactEvent::SCHEMA,
     &SnapshotTransformRecord::SCHEMA,
     &DiagnosticRecord::SCHEMA,
+    &CommandHeader::SCHEMA,
     &EventHeader::SCHEMA,
 ];
 

@@ -647,6 +647,11 @@ dependencies = [
 name = "fynkel_native"
 version = "0.0.1"
 dependencies = [
+ "fynkel_contracts",
+ "fynkel_core",
+ "fynkel_scene",
+ "fynkel_wire",
+ "glam",
  "log",
 ]
 

@@ -107,6 +107,8 @@ void main() {
     DiagnosticRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
-  check('EventHeader', const EventHeader(kind: 1, tickLo: 0xdeadbeef), EventHeader.wireSize, EventHeader.decode,
+  check('CommandHeader', const CommandHeader(kind: 1, size: 64), CommandHeader.wireSize, CommandHeader.decode,
       (v, d, o, s) => v.encode(d, o, s));
+  check('EventHeader', const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0), EventHeader.wireSize,
+      EventHeader.decode, (v, d, o, s) => v.encode(d, o, s));
 }

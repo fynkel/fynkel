@@ -146,11 +146,14 @@ fn fixtures_match_generated_codecs() {
             message: "stale or unknown entity".into(),
         },
     );
+    check("CommandHeader", &CommandHeader { kind: 1, size: 64 });
     check(
         "EventHeader",
         &EventHeader {
             kind: 1,
+            size: 16,
             tick_lo: 0xdead_beef,
+            flags: 0,
         },
     );
 }

@@ -71,6 +71,13 @@ pub struct Diagnostic {
     pub message: String,
 }
 
+/// A command rejected before it reached the world (bridge decode failure).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Rejected {
+    pub code: DiagnosticCode,
+    pub message: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SubmitReport {
     pub status: Status,
@@ -118,8 +125,10 @@ pub struct World {
     clock: FrameClock,
     ecs: Ecs,
     /// Simulation commands for the next tick with their batch index and
-    /// whether they were staged by the presentation lane.
-    staged: Vec<(u32, Command, bool)>,
+    /// whether they were staged by the presentation lane. An `Err` is a
+    /// command the caller could not decode: it is reported as rejected at
+    /// the tick boundary so its diagnostic sits with the batch's others.
+    staged: Vec<(u32, Result<Command, Rejected>, bool)>,
     /// Entities whose next tick must not interpolate from S[n] (their
     /// authoritative value came from a presentation override already shown).
     teleported: Vec<Entity>,
@@ -228,6 +237,25 @@ impl World {
     /// only validated then; presentation commands are validated and applied
     /// now. Rejections are in [`World::diagnostics`].
     pub fn submit(&mut self, lane: Lane, commands: Vec<Command>) -> SubmitReport {
+        self.submit_indexed(
+            lane,
+            commands
+                .into_iter()
+                .enumerate()
+                .map(|(i, c)| (i as u32, Ok(c)))
+                .collect(),
+        )
+    }
+
+    /// [`World::submit`] with explicit batch indexes, for callers that
+    /// decode a batch and must keep diagnostics aligned with it. `Err`
+    /// entries are rejected (now for presentation, at the tick for
+    /// simulation) with the given code and message.
+    pub fn submit_indexed(
+        &mut self,
+        lane: Lane,
+        commands: Vec<(u32, Result<Command, Rejected>)>,
+    ) -> SubmitReport {
         if self.poisoned {
             return SubmitReport {
                 status: Status::Poisoned,
@@ -240,16 +268,18 @@ impl World {
         match lane {
             Lane::Simulation => {
                 accepted = commands.len() as u32;
-                self.staged.extend(
-                    commands
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, c)| (i as u32, c, false)),
-                );
+                self.staged
+                    .extend(commands.into_iter().map(|(i, c)| (i, c, false)));
             }
             Lane::Presentation => {
-                for (i, cmd) in commands.into_iter().enumerate() {
-                    if self.apply_presentation(i as u32, cmd) {
+                for (i, cmd) in commands {
+                    let ok = match cmd {
+                        Ok(cmd) => self.apply_presentation(i, cmd),
+                        Err(r) => {
+                            self.reject(i, lane, r.code, Entity::NULL, ComponentId::NONE, r.message)
+                        }
+                    };
+                    if ok {
                         accepted += 1;
                     } else {
                         rejected += 1;
@@ -286,6 +316,20 @@ impl World {
             message: message.into(),
         });
         false
+    }
+
+    /// Records a diagnostic on behalf of a caller that rejected a command
+    /// before it reached the world (e.g. the bridge on an unknown kind).
+    pub fn push_diagnostic(
+        &mut self,
+        command_index: u32,
+        lane: Lane,
+        code: DiagnosticCode,
+        entity: Entity,
+        component: ComponentId,
+        message: impl Into<String>,
+    ) {
+        self.reject(command_index, lane, code, entity, component, message);
     }
 
     fn check_entity(&mut self, index: u32, lane: Lane, e: Entity, what: &str) -> bool {
@@ -363,7 +407,7 @@ impl World {
                 // the next tick (ADR-0008).
                 self.overrides.insert(entity, transform);
                 self.staged
-                    .push((index, Command::SetTransform { entity, transform }, true));
+                    .push((index, Ok(Command::SetTransform { entity, transform }), true));
                 true
             }
             Command::SetName { entity, name } => {
@@ -561,6 +605,21 @@ impl World {
         let mut applied = 0;
         let mut rejected = 0;
         for (index, cmd, from_presentation) in staged {
+            let cmd = match cmd {
+                Ok(cmd) => cmd,
+                Err(r) => {
+                    self.reject(
+                        index,
+                        Lane::Simulation,
+                        r.code,
+                        Entity::NULL,
+                        ComponentId::NONE,
+                        r.message,
+                    );
+                    rejected += 1;
+                    continue;
+                }
+            };
             let target = cmd.target();
             if self.apply_simulation(index, cmd, next_tick) {
                 if from_presentation {
@@ -691,6 +750,14 @@ impl World {
 
     pub fn subscriptions(&self) -> impl Iterator<Item = Entity> + '_ {
         self.subscriptions.iter().copied()
+    }
+
+    pub fn subscription_count(&self) -> usize {
+        self.subscriptions.len()
+    }
+
+    pub fn staged_count(&self) -> usize {
+        self.staged.len()
     }
 
     /// Coherent S[n+1] of subscribed entities, in handle order.

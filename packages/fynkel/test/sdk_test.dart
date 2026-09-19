@@ -1,0 +1,158 @@
+// End-to-end SDK tests over the real native library (ABI v1): spawn /
+// write / read-your-writes / destroy, stale handles, diagnostics as
+// FynkelError, presentation lane, hierarchy, frame plan.
+
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/generated/schema.g.dart' show DestroyCommand, DiagnosticRecord;
+import 'package:test/test.dart';
+
+void main() {
+  late NativeLibrary lib;
+  setUpAll(() => lib = NativeLibrary.open());
+  tearDownAll(() => lib.dispose());
+
+  World world() => World.create(library: lib)..throwOnDiagnostics = true;
+
+  test('spawn resolves on the next tick; reads follow writes', () {
+    final w = world();
+    addTearDown(w.dispose);
+    final go = w.spawn(transform: const Transform(position: Vec3(1, 2, 3), rotation: Quat.identity, scale: Vec3.one), name: 'player');
+    expect(go.isPending, isTrue);
+    expect(go.transform.position, const Vec3(1, 2, 3), reason: 'initial value readable while pending');
+    expect(() => go.transform.position = Vec3.zero, throwsStateError);
+
+    final plan = w.frame(1 / 60);
+    expect(plan.steps, 1);
+    expect(go.isPending, isFalse);
+    expect(w.nameOf(go), 'player');
+    expect(go.worldTransform, isNull, reason: 'subscribed after resolution; first snapshot next tick');
+
+    w.frame(1 / 60);
+    expect(go.worldTransform!.position, const Vec3(1, 2, 3));
+
+    // Read-your-writes: overlay before the tick, snapshot after.
+    go.transform.position = const Vec3(5, 0, 0);
+    expect(go.transform.position, const Vec3(5, 0, 0));
+    expect(go.worldTransform!.position, const Vec3(1, 2, 3), reason: 'world transform is snapshot-only');
+    w.frame(1 / 60);
+    expect(go.transform.position, const Vec3(5, 0, 0));
+    expect(go.worldTransform!.position, const Vec3(5, 0, 0));
+
+    go.destroy();
+    expect(go.isAlive, isTrue, reason: 'until the tick');
+    w.frame(1 / 60);
+    expect(go.isAlive, isFalse);
+    expect(() => go.transform.position = Vec3.zero, throwsStateError);
+    expect(w.allEntities(), isEmpty);
+  });
+
+  test('rejected command clears the overlay and throws FynkelError in debug', () {
+    final w = world();
+    addTearDown(w.dispose);
+    final a = w.spawn();
+    w.frame(1 / 60);
+    // Destroy a via a second handle path: stale handle after destruction.
+    a.destroy();
+    w.frame(1 / 60);
+    // Submit a raw stale command through the native layer to reach the
+    // world's rejection path with a live GameObject target too.
+    final b = w.spawn();
+    w.frame(1 / 60);
+    b.transform.position = const Vec3(9, 9, 9);
+    // NaN transform is rejected at the tick with INVALID_PAYLOAD.
+    b.setLocalTransform(const Transform(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+    expect(b.transform.position.x.isNaN, isTrue, reason: 'overlay shows the staged value');
+    expect(() => w.frame(1 / 60), throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.invalidPayload)));
+    expect(b.transform.position, const Vec3(9, 9, 9), reason: 'overlay cleared; earlier applied value from snapshot');
+
+    // Release-mode path: logged, not thrown.
+    w.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    w.onDiagnostics = seen.addAll;
+    b.setLocalTransform(const Transform(position: Vec3(double.infinity, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+    w.frame(1 / 60);
+    expect(seen.single.code, DiagnosticCode.invalidPayload);
+    expect(seen.single.entity, b.entity);
+  });
+
+  test('presentation lane: visible now, authoritative next tick, rejected for physics-owned', () {
+    final w = world();
+    addTearDown(w.dispose);
+    final cam = w.spawn(name: 'camera');
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    // A 120 Hz frame with no tick.
+    final plan = w.beginFrame(1 / 240);
+    expect(plan.steps, 0);
+    cam.setPresentationTransform(const Transform(position: Vec3(0, 3, 0), rotation: Quat.identity, scale: Vec3.one));
+    expect(cam.transform.position, const Vec3(0, 3, 0));
+    w.flushPresentation();
+    expect(w.stats().stagedCommands, 1);
+    w.frame(1 / 60);
+    expect(cam.worldTransform!.position, const Vec3(0, 3, 0));
+
+    // Structural command on the presentation lane is rejected immediately.
+    final r = w.native.submit(CommandLane.presentation, (CommandBatch()..destroy(DestroyCommand(entity: cam.entity))).encoded());
+    expect(r.rejected, 1);
+    final d = w.native.diagnostics.fixed(DiagnosticRecord.wireSize, DiagnosticRecord.decode).map(FynkelDiagnostic.fromRecord).toList();
+    expect(d.single.code, DiagnosticCode.wrongLane);
+  });
+
+  test('hierarchy: parent at spawn, reparent keep-world, subtree destroy', () {
+    final w = world();
+    addTearDown(w.dispose);
+    final root = w.spawn(transform: const Transform(position: Vec3(10, 0, 0), rotation: Quat.identity, scale: Vec3.one), name: 'root');
+    w.frame(1 / 60);
+    final child = w.spawn(transform: const Transform(position: Vec3(1, 0, 0), rotation: Quat.identity, scale: Vec3.one), parent: root, name: 'child');
+    final loose = w.spawn(name: 'loose');
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    expect(root.children, [child.entity]);
+    expect(child.parent, root.entity);
+    expect(child.worldTransform!.position, const Vec3(11, 0, 0));
+
+    loose.setParent(root, keepWorld: true);
+    final events = <EngineEvent>[];
+    w.frame(1 / 60, update: () {});
+    events.addAll(w.drainEvents());
+    w.frame(1 / 60);
+    expect(loose.parent, root.entity);
+    expect(loose.transform.position.x, closeTo(-10, 1e-5), reason: 'local adjusted to keep world');
+    expect(loose.worldTransform!.position.x, closeTo(0, 1e-5));
+
+    root.destroy();
+    w.frame(1 / 60);
+    expect(root.isAlive || child.isAlive || loose.isAlive, isFalse);
+    expect(w.allEntities(), isEmpty);
+  });
+
+  test('frame plan: catch-up cap and MissedDeadline surface as diagnostics', () {
+    final w = World.create(library: lib, maxStepsPerFrame: 2)..throwOnDiagnostics = true;
+    addTearDown(w.dispose);
+    expect(() => w.beginFrame(0.25), throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.missedDeadline)));
+    final events = w.drainEvents();
+    expect(events.single, isA<MissedDeadline>());
+    expect(w.step().tick, 1);
+    expect(w.step().tick, 2);
+  });
+
+  test('bridge stats count calls and bytes', () {
+    final w = world();
+    addTearDown(w.dispose);
+    for (var i = 0; i < 10; i++) {
+      w.spawn();
+    }
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    final s = w.stats();
+    expect(s.liveEntities, 10);
+    expect(s.subscriptions, 10);
+    expect(s.submitCalls, 1, reason: 'ten spawns, one batch');
+    expect(s.stepCalls, 2);
+    expect(s.dartCopies, 1);
+    expect(s.bytesIn, greaterThan(0));
+    expect(s.bytesOut, greaterThan(0));
+    expect(s.ffiCalls, greaterThan(0));
+  });
+}
+
