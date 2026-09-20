@@ -377,10 +377,11 @@ fn test_command(args: &[String]) -> ExitCode {
         }
         if let Some(p) = &report.physics {
             println!(
-                "physics: {} bodies, {} colliders ({} mesh), collisions {} enter / {} stay / {} exit, triggers {} enter / {} exit",
+                "physics: {} bodies, {} colliders ({} mesh), {} characters, collisions {} enter / {} stay / {} exit, triggers {} enter / {} exit",
                 p.bodies,
                 p.colliders,
                 p.mesh_colliders,
+                p.characters,
                 p.collision_enter,
                 p.collision_stay,
                 p.collision_exit,

@@ -5,7 +5,7 @@
 
 use fynkel_core::components::ComponentValue;
 use fynkel_core::*;
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec3, Vec3Swizzles};
 
 fn world() -> World {
     World::new(WorldConfig::default())
@@ -436,4 +436,378 @@ fn the_step_is_deterministic_across_worlds() {
             .collect::<Vec<_>>()
     };
     assert_eq!(run(), run());
+}
+
+fn named(
+    w: &mut World,
+    temp_id: u64,
+    name: &str,
+    at: Vec3,
+    components: Vec<ComponentValue>,
+) -> Entity {
+    let e = spawn(w, temp_id, at, components);
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetName {
+            entity: e,
+            name: name.into(),
+        }],
+    );
+    e
+}
+
+fn playground() -> (World, Entity, Entity) {
+    let mut w = world();
+    let errors = w.bind_input(&[
+        ActionSpec {
+            name: "move".into(),
+            kind: ActionKind::Axis2d,
+            bindings: vec!["keyboard:WASD".into()],
+        },
+        ActionSpec {
+            name: "jump".into(),
+            kind: ActionKind::Button,
+            bindings: vec!["keyboard:Space".into()],
+        },
+        ActionSpec {
+            name: "look".into(),
+            kind: ActionKind::Axis2d,
+            bindings: vec!["mouse:delta".into(), "gamepad:rightStick".into()],
+        },
+    ]);
+    assert!(errors.is_empty(), "{errors:?}");
+    floor(&mut w);
+    let player = named(
+        &mut w,
+        2,
+        "Player",
+        Vec3::ZERO,
+        vec![ComponentValue::CharacterController(CharacterController {
+            move_action: "move".into(),
+            jump_action: "jump".into(),
+            ..CharacterController::default()
+        })],
+    );
+    let camera = named(
+        &mut w,
+        3,
+        "Camera",
+        Vec3::new(0.0, 2.0, 6.0),
+        vec![ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
+            target: "Player".into(),
+            look_action: "look".into(),
+            ..ThirdPersonCamera::default()
+        })],
+    );
+    (w, player, camera)
+}
+
+fn pos(w: &World, e: Entity) -> Vec3 {
+    w.ecs().copy::<Transform>(e).unwrap().position
+}
+
+fn frame(w: &mut World, events: &[InputEvent]) {
+    w.begin_frame(1.0 / 60.0);
+    w.capture_input(events);
+    let r = w.step();
+    assert_eq!(r.status, Status::Ok);
+}
+
+/// Blueprint §19.2d item 9 through the world: the controller's actions
+/// drive it in the frame of the rig that targets it, a jump consumes the
+/// press edge, the rig turns by its look action, follows the pivot and
+/// pulls in before a wall.
+#[test]
+fn a_character_is_driven_by_actions_in_its_cameras_frame() {
+    let (mut w, player, camera) = playground();
+    // The components apply at this tick; the rig is placed the same tick
+    // (pitch 0.35 rad, 5 m behind the pivot 1.5 m above the feet).
+    w.step();
+    let rig = w.ecs().copy::<ThirdPersonCamera>(camera).unwrap();
+    assert_eq!((rig.yaw, rig.pitch), (0.0, 0.35));
+    let expected = Vec3::new(0.0, 1.5 + 0.35f32.sin() * 5.0, 0.35f32.cos() * 5.0);
+    assert!(
+        pos(&w, camera).abs_diff_eq(expected, 1e-3),
+        "{:?}",
+        pos(&w, camera)
+    );
+    let state = w.physics().character_state(player).unwrap();
+    assert_eq!(state.velocity, Vec3::ZERO);
+
+    // W walks along −Z (the rig's forward at yaw 0) at `speed`; the
+    // character stays grounded and the rig follows.
+    frame(&mut w, &[InputEvent::down(Device::Keyboard, "W")]);
+    for _ in 0..29 {
+        frame(&mut w, &[]);
+    }
+    let p = pos(&w, player);
+    assert!((p.z + 30.0 * 4.0 / 60.0).abs() < 1e-3, "{p:?}");
+    assert!(p.x.abs() < 1e-4 && p.y.abs() < 0.01, "{p:?}");
+    let state = w.physics().character_state(player).unwrap();
+    assert!(state.grounded && state.velocity.abs_diff_eq(Vec3::new(0.0, 0.0, -4.0), 1e-4));
+    assert!(pos(&w, camera).abs_diff_eq(expected + Vec3::new(0.0, 0.0, p.z), 1e-3));
+
+    // The stick turns the rig: yaw −= x·sensitivity·dt per tick, written
+    // back to the component; the next walk follows the new forward.
+    frame(
+        &mut w,
+        &[InputEvent::axis(Device::Gamepad, "rightStick", 1.0, 0.0)],
+    );
+    let rig = w.ecs().copy::<ThirdPersonCamera>(camera).unwrap();
+    assert!((rig.yaw + 2.5 / 60.0).abs() < 1e-5, "{}", rig.yaw);
+    frame(&mut w, &[]);
+    let yaw = w.ecs().copy::<ThirdPersonCamera>(camera).unwrap().yaw;
+    assert!((yaw + 2.0 * 2.5 / 60.0).abs() < 1e-5, "held: {yaw}");
+    frame(
+        &mut w,
+        &[InputEvent::axis(Device::Gamepad, "rightStick", 0.0, 0.0)],
+    );
+    assert_eq!(w.ecs().copy::<ThirdPersonCamera>(camera).unwrap().yaw, yaw);
+    let before = pos(&w, player);
+    frame(&mut w, &[]);
+    let step = pos(&w, player) - before;
+    let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos()) * 4.0 / 60.0;
+    assert!(
+        step.xz().abs_diff_eq(forward.xz(), 1e-4),
+        "{step:?} vs {forward:?}"
+    );
+    // The character faces its motion.
+    let facing = w.ecs().copy::<Transform>(player).unwrap().rotation * Vec3::NEG_Z;
+    assert!(facing.dot(forward.normalize()) > 0.99, "{facing:?}");
+
+    // Space: the press edge is consumed by the first tick (a jump), the
+    // catch-up ticks of the same frame see held only (no second jump).
+    w.begin_frame(3.0 / 60.0);
+    w.capture_input(&[InputEvent::down(Device::Keyboard, "Space")]);
+    let mut vy = Vec::new();
+    for _ in 0..3 {
+        w.step();
+        vy.push(w.physics().character_state(player).unwrap().velocity.y);
+    }
+    assert!(vy[0] > 4.5 && vy[1] < vy[0] && vy[2] < vy[1], "{vy:?}");
+    assert!(!w.physics().character_state(player).unwrap().grounded);
+    // Held Space in the air does nothing; landing restores grounded.
+    for _ in 0..80 {
+        frame(&mut w, &[]);
+    }
+    let state = w.physics().character_state(player).unwrap();
+    assert!(state.grounded && state.velocity.y == 0.0, "{state:?}");
+    assert!(pos(&w, player).y.abs() < 0.03);
+    frame(
+        &mut w,
+        &[
+            InputEvent::up(Device::Keyboard, "Space"),
+            InputEvent::up(Device::Keyboard, "W"),
+        ],
+    );
+    frame(&mut w, &[]);
+    assert_eq!(
+        w.physics().character_state(player).unwrap().velocity,
+        Vec3::ZERO
+    );
+    assert_eq!(w.diagnostics().len(), 0);
+}
+
+#[test]
+fn the_rig_pulls_in_before_a_wall_and_needs_a_named_target() {
+    let (mut w, player, camera) = playground();
+    let wall_z = 3.0;
+    let wall = spawn(
+        &mut w,
+        4,
+        Vec3::new(0.0, 2.0, wall_z),
+        vec![ComponentValue::Collider(Collider {
+            size: Vec3::new(3.0, 3.0, 0.25),
+            ..Collider::default()
+        })],
+    );
+    w.step();
+    // A sphere of `collision_radius` cast from the pivot along the rig's
+    // direction touches the wall's near face; the rig sits there.
+    let rig = w.ecs().copy::<ThirdPersonCamera>(camera).unwrap();
+    let pivot = Vec3::new(0.0, 1.5, 0.0);
+    let dir = Vec3::new(0.0, rig.pitch.sin(), rig.pitch.cos());
+    let expected = (wall_z - 0.25 - rig.collision_radius) / rig.pitch.cos();
+    let d = (pos(&w, camera) - pivot).length();
+    assert!((d - expected).abs() < 1e-3, "{d} vs {expected}");
+    assert!((pos(&w, camera) - pivot).normalize().abs_diff_eq(dir, 1e-4));
+    // Looking at the pivot.
+    let look = w.ecs().copy::<Transform>(camera).unwrap().rotation * Vec3::NEG_Z;
+    assert!(look.abs_diff_eq(-dir, 1e-4), "{look:?}");
+    // The wall gone, the rig backs out to `distance`.
+    w.submit(Lane::Simulation, vec![Command::Destroy(wall)]);
+    w.step();
+    w.step();
+    assert!(((pos(&w, camera) - pivot).length() - rig.distance).abs() < 1e-3);
+    // No entity of that name: the rig stays where it is; the pitch is
+    // clamped when written back.
+    let parked = pos(&w, camera);
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetComponent {
+            entity: camera,
+            value: ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
+                target: "Nobody".into(),
+                pitch: 3.0,
+                ..ThirdPersonCamera::default()
+            }),
+        }],
+    );
+    w.step();
+    assert_eq!(pos(&w, camera), parked);
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetComponent {
+            entity: camera,
+            value: ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
+                target: "Player".into(),
+                pitch: 3.0,
+                ..ThirdPersonCamera::default()
+            }),
+        }],
+    );
+    w.step();
+    let rig = w.ecs().copy::<ThirdPersonCamera>(camera).unwrap();
+    assert_eq!(rig.pitch, rig.max_pitch);
+    assert!((pos(&w, camera).y - (1.5 + rig.max_pitch.sin() * 5.0)).abs() < 1e-3);
+    let _ = player;
+}
+
+#[test]
+fn character_commands_and_components_are_checked() {
+    let (mut w, player, _camera) = playground();
+    let plain = spawn(&mut w, 5, Vec3::new(3.0, 0.0, 0.0), vec![]);
+    let ball = spawn(
+        &mut w,
+        6,
+        Vec3::new(-3.0, 1.0, 0.0),
+        vec![
+            ComponentValue::RigidBody(RigidBody::default()),
+            ComponentValue::Collider(Collider::default()),
+        ],
+    );
+    w.step();
+    let r = w.submit(
+        Lane::Simulation,
+        vec![
+            Command::Body {
+                entity: player,
+                op: BodyCommand::Move(Vec3::new(2.0, 0.0, 0.0)),
+            },
+            Command::Body {
+                entity: plain,
+                op: BodyCommand::Move(Vec3::X),
+            },
+            Command::Body {
+                entity: ball,
+                op: BodyCommand::Jump(1.0),
+            },
+            Command::Body {
+                entity: player,
+                op: BodyCommand::ApplyImpulse(Vec3::X),
+            },
+            Command::Body {
+                entity: player,
+                op: BodyCommand::Jump(f32::NAN),
+            },
+        ],
+    );
+    assert_eq!(r.accepted, 5);
+    let r = w.step();
+    assert_eq!((r.applied, r.rejected), (1, 4), "{:?}", w.diagnostics());
+    let d = w.diagnostics();
+    assert_eq!(
+        d.iter()
+            .map(|d| (d.command_index, d.code, d.component))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                1,
+                DiagnosticCode::MISSING_COMPONENT,
+                ComponentId::CHARACTER_CONTROLLER
+            ),
+            (
+                2,
+                DiagnosticCode::MISSING_COMPONENT,
+                ComponentId::CHARACTER_CONTROLLER
+            ),
+            (
+                3,
+                DiagnosticCode::MISSING_COMPONENT,
+                ComponentId::RIGID_BODY
+            ),
+            (
+                4,
+                DiagnosticCode::INVALID_PAYLOAD,
+                ComponentId::CHARACTER_CONTROLLER
+            ),
+        ]
+    );
+    let s = w.physics().character_state(player).unwrap();
+    assert!(
+        s.velocity.abs_diff_eq(Vec3::new(2.0, 0.0, 0.0), 1e-4),
+        "{s:?}"
+    );
+    assert!((pos(&w, player).x - 2.0 / 60.0).abs() < 1e-4);
+    // The next tick has no `move`: standing still.
+    w.step();
+    assert_eq!(
+        w.physics().character_state(player).unwrap().velocity,
+        Vec3::ZERO
+    );
+
+    // A RigidBody next to the controller is reported once (index
+    // u32::MAX) and ignored; an invalid controller value is rejected at
+    // the tick.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetComponent {
+            entity: player,
+            value: ComponentValue::RigidBody(RigidBody::default()),
+        }],
+    );
+    w.step();
+    let d = w.diagnostics();
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(
+        (d[0].command_index, d[0].code, d[0].component),
+        (
+            u32::MAX,
+            DiagnosticCode::INVALID_PAYLOAD,
+            ComponentId::CHARACTER_CONTROLLER
+        )
+    );
+    w.step();
+    assert!(w.diagnostics().is_empty());
+    assert!(w.physics().character_state(player).is_some());
+    let r = w.submit(
+        Lane::Simulation,
+        vec![Command::SetComponent {
+            entity: player,
+            value: ComponentValue::CharacterController(CharacterController {
+                height: 0.1,
+                ..CharacterController::default()
+            }),
+        }],
+    );
+    assert_eq!(r.accepted, 1);
+    let r = w.step();
+    assert_eq!(r.rejected, 1);
+    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
+    assert_eq!(
+        w.diagnostics()[0].component,
+        ComponentId::CHARACTER_CONTROLLER
+    );
+
+    // Removing the controller ends the character; the body takes over.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::RemoveComponent {
+            entity: player,
+            component: ComponentId::CHARACTER_CONTROLLER,
+        }],
+    );
+    w.step();
+    assert!(w.physics().character_state(player).is_none());
+    assert!(w.ecs().has::<PhysicsOwned>(player));
 }

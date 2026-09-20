@@ -152,6 +152,15 @@ impl Code {
     /// A dynamic `RigidBody` without a `Collider` (warning): it falls
     /// through everything.
     pub const PHYSICS_BODY_WITHOUT_COLLIDER: Code = Code("FYN-H0004");
+    /// A `fynkel.CharacterController` value the runtime would reject
+    /// (capsule, slope, speeds, mass; M3-09).
+    pub const CHARACTER_VALUE: Code = Code("FYN-H0005");
+    /// A `fynkel.CharacterController` next to a `RigidBody` or `Collider`:
+    /// the controller is its own kinematic capsule and ignores them.
+    pub const CHARACTER_WITH_BODY: Code = Code("FYN-H0006");
+    /// A `fynkel.ThirdPersonCamera` value the runtime would reject
+    /// (distances, pitch range, sensitivity).
+    pub const CAMERA_RIG_VALUE: Code = Code("FYN-H0007");
 
     // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
     /// The transaction's base revision is not the document's current one.

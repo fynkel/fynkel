@@ -11,6 +11,8 @@ export 'generated/schema.g.dart'
         BodyStateRecord,
         BodyType,
         Camera,
+        CharacterController,
+        CharacterStateRecord,
         Collider,
         ColliderShape,
         ComponentCodec,
@@ -29,6 +31,7 @@ export 'generated/schema.g.dart'
         Projection,
         SnapshotTransformRecord,
         SpotLight,
+        ThirdPersonCamera,
         componentCodecs,
         componentIds;
 export 'src/asset_ref.dart';
@@ -37,7 +40,7 @@ export 'math.dart';
 export 'src/diagnostics.dart';
 export 'src/events.dart';
 export 'src/input.dart';
-export 'src/physics.dart' show BodyState, PhysicsHit, PhysicsSettings;
+export 'src/physics.dart' show BodyState, CharacterState, PhysicsHit, PhysicsSettings;
 export 'src/recording.dart';
 export 'src/transform_writer.dart';
 export 'src/native/bridge.dart'

@@ -160,6 +160,8 @@ pub struct PhysicsReport {
     pub colliders: u32,
     /// Mesh colliders registered from the cooked scene.
     pub mesh_colliders: u32,
+    /// `CharacterController`s stepped (M3-09).
+    pub characters: u32,
     pub collision_enter: u64,
     pub collision_stay: u64,
     pub collision_exit: u64,
@@ -443,6 +445,7 @@ pub fn run_retaining(
             bodies: ps.bodies,
             colliders: ps.colliders,
             mesh_colliders,
+            characters: ps.characters,
             collision_enter: contact_counts[0],
             collision_stay: contact_counts[1],
             collision_exit: contact_counts[2],
@@ -786,6 +789,97 @@ mod replay_tests {
         assert!(!mv.held && mv.x == 0.0 && mv.y == 0.0, "{mv:?}");
         // Same recording, same result (§5.6).
         assert_eq!(run(&cfg).input, Some(input));
+    }
+
+    /// Blueprint §19.2d item 9 gate: from a recorded stream the fixture's
+    /// Player walks toward the Platform, jumps at frame 20, lands on its
+    /// top (y = 0.8) and stops when W is released, with a stable checksum;
+    /// the ThirdPersonCamera sits behind and above it.
+    #[test]
+    fn a_character_walks_jumps_and_lands_on_the_platform_from_a_recording() {
+        let cooked = tests::Cooked::new("character");
+        let recording = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/fynkel_document/fixtures/project/test/platform.input.json");
+        let cfg = HeadlessConfig {
+            steps: 1_000,
+            cache: Some(cooked.0.clone()),
+            scene: Some("c0000000-0000-4000-8000-000000000031".into()),
+            input: Some(recording),
+            ..HeadlessConfig::default()
+        };
+        let (report, world, loaded) = run_with(&cfg);
+        let scene = report.scene.as_ref().expect("scene report");
+        assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
+        assert_eq!(scene.name, "Playground");
+        assert_eq!((scene.entities, scene.rejected_components), (5, 0));
+        assert_eq!((report.frames, report.steps), (120, 120));
+        assert_eq!(report.commands_rejected, 0);
+        let physics = report.physics.as_ref().expect("physics ran");
+        // The character's kinematic capsule counts among the bodies and
+        // colliders (Floor, Platform, capsule).
+        assert_eq!(
+            (physics.bodies, physics.colliders, physics.characters),
+            (1, 3, 1),
+            "{physics:#?}"
+        );
+        assert_eq!(physics.diagnostics, 0);
+        let input = report.input.as_ref().unwrap();
+        let by_name = |n: &str| input.actions.iter().find(|a| a.name == n).unwrap();
+        assert_eq!(by_name("jump").pressed, 1);
+        assert_eq!(by_name("move").held_ticks, 75);
+        assert!(!by_name("move").held);
+
+        let loaded = loaded.unwrap();
+        let entity = |id: &str| loaded.handle_of(id.parse().unwrap()).unwrap();
+        let player = entity("c0000000-0000-4000-8000-0000000001e1");
+        let camera = entity("c0000000-0000-4000-8000-0000000001e0");
+        let state = world
+            .physics()
+            .character_state(player)
+            .expect("a character");
+        assert!(state.grounded && !state.sliding, "{state:?}");
+        assert_eq!(state.velocity, glam::Vec3::ZERO, "stopped: W released");
+        let t = fynkel_scene::local(world.ecs(), player).unwrap();
+        // Resting `skin_width` above the Platform's top (y = 0.4 + 0.4),
+        // well inside its footprint (z in −6.5..−2.5), never off the −Z
+        // line, facing −Z.
+        assert!((t.position.y - 0.82).abs() < 5e-3, "{:?}", t.position);
+        assert!(
+            t.position.z < -3.0 && t.position.z > -6.0,
+            "{:?}",
+            t.position
+        );
+        assert!(t.position.x.abs() < 1e-4, "{:?}", t.position);
+        assert!(
+            t.rotation.abs_diff_eq(glam::Quat::IDENTITY, 1e-3),
+            "{:?}",
+            t.rotation
+        );
+        // Like a kinematic body, a character follows external transform
+        // writes (a teleport), so it is not physics-owned.
+        assert!(!world.ecs().has::<fynkel_core::PhysicsOwned>(player));
+
+        // The rig: pitch 0.35, yaw 0, distance 5 from the pivot 1.5 m up.
+        let c = fynkel_scene::local(world.ecs(), camera).unwrap();
+        let pivot = t.position + glam::Vec3::new(0.0, 1.5, 0.0);
+        let expected = pivot + glam::Vec3::new(0.0, 0.35f32.sin(), 0.35f32.cos()) * 5.0;
+        assert!(
+            c.position.abs_diff_eq(expected, 1e-3),
+            "{:?} vs {expected:?}",
+            c.position
+        );
+        let forward = c.rotation * glam::Vec3::NEG_Z;
+        assert!((forward.normalize() - (pivot - c.position).normalize()).length() < 1e-3);
+
+        // Same recording, same landing (§5.6); a shorter run is mid-air.
+        assert_eq!(run(&cfg).checksum, report.checksum);
+        let airborne = run_with(&HeadlessConfig {
+            steps: 40,
+            ..cfg.clone()
+        });
+        assert_ne!(airborne.0.checksum, report.checksum);
+        let mid = airborne.1.physics().character_state(player).unwrap();
+        assert!(!mid.grounded && mid.velocity.y != 0.0, "{mid:?}");
     }
 
     #[test]

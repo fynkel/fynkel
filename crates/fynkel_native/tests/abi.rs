@@ -925,3 +925,163 @@ fn physics_bodies_commands_queries_and_contacts() {
     let (s, _) = h.step();
     assert_eq!(s, Status::Ok);
 }
+
+/// M3-09 through the ABI: `Move`/`Jump` body ops (a `Jump` carries its
+/// speed in `vector.y`), `FYNKEL_QUERY_CHARACTER`, the two new component
+/// ids in `QUERY_COMPONENTS`, and the rejections of a character command
+/// on a plain entity and of a character next to a body.
+#[test]
+fn character_commands_and_query() {
+    use fynkel_core::components::ComponentValue;
+    use fynkel_core::{CharacterController, Collider, RigidBody, ThirdPersonCamera};
+    let h = Host::new();
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (1, spawn(1, 0.0, None, "Floor")),
+            (1, spawn(2, 0.0, None, "Player")),
+            (1, spawn(3, 0.0, None, "Camera")),
+        ],
+    );
+    h.step();
+    let ids = h.spawned();
+    let (floor, player, camera) = (ids[0], ids[1], ids[2]);
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            floor,
+            &ComponentValue::Collider(Collider {
+                size: Vec3::new(10.0, 0.5, 10.0),
+                offset: Vec3::new(0.0, -0.5, 0.0),
+                ..Collider::default()
+            }),
+        ),
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            player,
+            &ComponentValue::CharacterController(CharacterController::default()),
+        ),
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            camera,
+            &ComponentValue::ThirdPersonCamera(ThirdPersonCamera {
+                target: "Player".into(),
+                ..ThirdPersonCamera::default()
+            }),
+        ),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let (s, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, player);
+    assert_eq!(
+        (s, n),
+        (Status::Ok, 3),
+        "Transform, Name, CharacterController"
+    );
+    let mut at = 0;
+    let mut seen = Vec::new();
+    for _ in 0..n {
+        let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+        at += ComponentHeader::SIZE;
+        seen.push((hd.component, hd.size));
+        at += hd.size as usize;
+    }
+    assert_eq!(seen[2], (12, CharacterController::SIZE as u32));
+    let (_, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, camera);
+    let mut at = 0;
+    for _ in 0..n - 1 {
+        let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+        at += ComponentHeader::SIZE + hd.size as usize;
+    }
+    let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+    assert_eq!(
+        (hd.component, hd.size),
+        (13, ThirdPersonCamera::SIZE as u32)
+    );
+    let rig = ThirdPersonCamera::decode(&body[at + ComponentHeader::SIZE..], &tail).unwrap();
+    assert_eq!(rig.target, "Player");
+
+    // Walk one tick at 3 m/s along +X, then jump at 6 m/s.
+    let walk = |x: f32| {
+        batch![(
+            8,
+            BodyCommandRecord {
+                entity: player,
+                op: BodyOp::Move,
+                vector: Vec3::new(x, 0.0, 0.0),
+                rotation: glam::Quat::IDENTITY,
+            }
+        )]
+    };
+    h.submit(Lane::Simulation, &walk(3.0));
+    h.step();
+    h.submit(Lane::Simulation, &walk(3.0));
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let (s, n, body, tail) = h.query(bridge::QUERY_CHARACTER, player);
+    assert_eq!((s, n), (Status::Ok, 1));
+    let state = CharacterStateRecord::decode(&body, &tail).unwrap();
+    assert_eq!(state.entity, player);
+    assert!(state.grounded && !state.sliding, "{state:?}");
+    assert!((state.velocity.x - 3.0).abs() < 1e-3, "{state:?}");
+    let (s, n, _, _) = h.query(bridge::QUERY_CHARACTER, floor);
+    assert_eq!((s, n), (Status::Ok, 0));
+    h.submit(
+        Lane::Simulation,
+        &batch![(
+            8,
+            BodyCommandRecord {
+                entity: player,
+                op: BodyOp::Jump,
+                vector: Vec3::new(0.0, 6.0, 0.0),
+                rotation: glam::Quat::IDENTITY,
+            }
+        )],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let (_, _, body, tail) = h.query(bridge::QUERY_CHARACTER, player);
+    let state = CharacterStateRecord::decode(&body, &tail).unwrap();
+    assert!(!state.grounded && state.velocity.y > 5.0, "{state:?}");
+
+    // A `Move` on the floor: MISSING_COMPONENT 12 at the tick. A
+    // RigidBody next to the controller: INVALID_PAYLOAD 12, once.
+    h.submit(
+        Lane::Simulation,
+        &batch![(
+            8,
+            BodyCommandRecord {
+                entity: floor,
+                op: BodyOp::Move,
+                vector: Vec3::X,
+                rotation: glam::Quat::IDENTITY,
+            }
+        )],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 1);
+    let d = h.diagnostics();
+    assert_eq!(
+        (d[0].code, d[0].component),
+        (DiagnosticCode::MISSING_COMPONENT.0, 12)
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(player, &ComponentValue::RigidBody(RigidBody::default())),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let d = h.diagnostics();
+    assert_eq!(d.len(), 1);
+    assert_eq!(
+        (d[0].code, d[0].component),
+        (DiagnosticCode::INVALID_PAYLOAD.0, 12)
+    );
+    assert_eq!(d[0].command_index, u32::MAX);
+    h.step();
+    assert!(h.diagnostics().is_empty());
+}

@@ -15,7 +15,7 @@ use fynkel_contracts::{ComponentId, Entity, Uuid};
 use fynkel_scene::{self as scene, Transform};
 
 use crate::command::Command;
-use crate::components::ComponentValue;
+use crate::components::{ComponentValue, ThirdPersonCamera};
 use crate::event::EventPayload;
 use crate::world::{Name, World};
 
@@ -366,6 +366,12 @@ impl ComponentValue {
         }
         if let Ok(v) = ecs.get::<fynkel_physics::Collider>(entity) {
             out.push(ComponentValue::Collider(v.clone()));
+        }
+        if let Ok(v) = ecs.get::<fynkel_physics::CharacterController>(entity) {
+            out.push(ComponentValue::CharacterController(v.clone()));
+        }
+        if let Ok(v) = ecs.get::<ThirdPersonCamera>(entity) {
+            out.push(ComponentValue::ThirdPersonCamera(v.clone()));
         }
         out
     }

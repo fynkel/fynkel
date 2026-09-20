@@ -75,6 +75,12 @@
     "fynkel.Collider": {
       "kind": "native"
     },
+    "fynkel.CharacterController": {
+      "kind": "native"
+    },
+    "fynkel.ThirdPersonCamera": {
+      "kind": "native"
+    },
     "game.Spinner": {
       "kind": "behaviour",
       "version": 1,

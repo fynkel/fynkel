@@ -1,5 +1,6 @@
-//! Fynkel physics (blueprint §9, §19.2d item 8): the `RigidBody`/`Collider`
-//! components and the Rapier adapter that steps them inside the fixed tick.
+//! Fynkel physics (blueprint §9, §19.2d items 8 and 9): the
+//! `RigidBody`/`Collider`/`CharacterController` components and the Rapier
+//! adapter that steps them inside the fixed tick.
 //!
 //! The adapter is a system the core calls at the §5.1 physics slot:
 //!
@@ -8,9 +9,12 @@
 //!   apply C[n]                 body commands are queued here (`queue`)
 //!   propagate                  world matrices reflect the commands
 //!   Physics::step(ecs, dt)     sync components → bodies, apply the queued
-//!                              commands, Rapier step, write dynamic and
-//!                              kinematic poses back to the entities' local
-//!                              transforms, collect the tick's events
+//!                              commands, move the characters (Rapier's
+//!                              kinematic controller against the last
+//!                              step's geometry), Rapier step, write
+//!                              dynamic, kinematic and character poses back
+//!                              to the entities' local transforms, collect
+//!                              the tick's events
 //!   propagate                  the written locals become world matrices
 //!   Physics::record(ecs)       remember every body's world matrix, so the
 //!                              next sync sees only external moves
@@ -21,7 +25,10 @@
 //! a simulation-lane transform write (or [`BodyCommand::Teleport`]) moves
 //! the body. Kinematic bodies follow the entity's transform (or a
 //! [`BodyCommand::SetKinematicTarget`]); static bodies and standalone
-//! colliders move only when their entity is moved.
+//! colliders move only when their entity is moved. A character is a
+//! kinematic capsule the controller moves by [`BodyCommand::Move`] /
+//! [`BodyCommand::Jump`] with gravity of its own; a transform write
+//! teleports it (its vertical velocity resets).
 //!
 //! Determinism: bodies are created in entity order and Rapier is
 //! deterministic on one platform, so equal inputs give equal transforms
@@ -36,13 +43,26 @@ use std::sync::Mutex;
 use fynkel_contracts::{AssetRef, Entity};
 use fynkel_ecs::internal::Handle;
 use fynkel_ecs::World as Ecs;
-use fynkel_scene::{self as scene, Parent, Transform, WorldTransform};
+use fynkel_scene::{self as scene, Transform, WorldTransform};
 use glam::Mat4;
+use rapier3d::control::{
+    CharacterAutostep, CharacterCollision, CharacterLength, KinematicCharacterController,
+};
 use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::*;
 
-pub use components::{BodyType, Collider, ColliderShape, RigidBody};
+pub use components::{BodyType, CharacterController, Collider, ColliderShape, RigidBody};
 pub use glam::{Quat, Vec3};
+
+/// How far below a character's skin the ground may be for it to count as
+/// grounded, metres.
+const GROUND_PROBE: f32 = 0.05;
+/// The downward translation a resting character asks for (metres), so
+/// `move_shape` takes its cast path (see `move_characters`).
+const REST_PROBE: f32 = 1e-4;
+/// A resting character's motion under this length (metres) is the
+/// controller settling into its skin gap, reported as standing still.
+const REST_SETTLE: f32 = 1e-3;
 
 /// A mesh collider is refused above this many triangles (the explicit
 /// limit of the bounded `mesh` shape; §9 "bounded MeshCollider support").
@@ -76,6 +96,14 @@ pub enum BodyCommand {
     /// World pose, now, without interpolation (any body type); velocities
     /// are kept.
     Teleport { position: Vec3, rotation: Quat },
+    /// A `CharacterController`'s velocity for this tick, metres per second
+    /// in world space; the vertical component is ignored unless the
+    /// character has no gravity. Without one the character stands still.
+    Move(Vec3),
+    /// A `CharacterController` takes off at this vertical speed (m/s; `0`
+    /// uses its `jump_speed`) — whether it is grounded is gameplay's
+    /// check (`grounded` in its state).
+    Jump(f32),
 }
 
 impl BodyCommand {
@@ -91,7 +119,15 @@ impl BodyCommand {
             | BodyCommand::Teleport { position, rotation } => {
                 position.is_finite() && rotation.is_finite()
             }
+            BodyCommand::Move(v) => v.is_finite(),
+            BodyCommand::Jump(s) => s.is_finite(),
         }
+    }
+
+    /// Whether the command addresses a `CharacterController` rather than
+    /// a `RigidBody`.
+    pub fn is_character(&self) -> bool {
+        matches!(self, BodyCommand::Move(_) | BodyCommand::Jump(_))
     }
 }
 
@@ -135,6 +171,11 @@ pub enum RejectionKind {
     MeshUnavailable,
     /// A mesh collider on a body that is not static.
     MeshOnMovingBody,
+    /// A `move`/`jump` on an entity without a `CharacterController`.
+    MissingCharacter,
+    /// A `CharacterController` next to a `RigidBody` or `Collider`: the
+    /// character's own capsule is used and they are ignored.
+    CharacterWithBody,
 }
 
 /// A rejected body command (`index` is the command's batch index) or a
@@ -154,6 +195,19 @@ pub struct BodyState {
     pub linear_velocity: Vec3,
     pub angular_velocity: Vec3,
     pub sleeping: bool,
+}
+
+/// A character's held state as the last step left it
+/// (`FYNKEL_QUERY_CHARACTER`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CharacterState {
+    /// Standing on walkable ground after the last move.
+    pub grounded: bool,
+    /// Sliding down a slope steeper than `max_slope`.
+    pub sliding: bool,
+    /// The movement actually applied over the last tick, metres per
+    /// second (gravity included).
+    pub velocity: Vec3,
 }
 
 /// What a spatial query asks (`fynkel.rec.PhysicsQuery`).
@@ -200,6 +254,9 @@ pub struct Hit {
 pub struct PhysicsStats {
     pub bodies: u32,
     pub colliders: u32,
+    /// `CharacterController`s (their capsules count as bodies and
+    /// colliders too).
+    pub characters: u32,
     pub active_bodies: u32,
     pub contact_pairs: u32,
     /// Events collected by the last step.
@@ -211,6 +268,9 @@ struct Entry {
     collider: Option<ColliderHandle>,
     rigid: Option<RigidBody>,
     shape: Option<Collider>,
+    /// The character this entry is a capsule for; `rigid`/`shape` are
+    /// then only remembered for change detection.
+    character: Option<CharacterController>,
     /// World scale the shape was built with.
     scale: Vec3,
     /// The entity's world matrix as recorded after the last propagate; a
@@ -218,6 +278,30 @@ struct Entry {
     last_world: Mat4,
     /// A diagnostic already reported for this entry (once).
     reported: bool,
+}
+
+/// What the sync found on an entity for a new entry.
+struct NewEntry {
+    rigid: Option<RigidBody>,
+    shape: Option<Collider>,
+    character: Option<CharacterController>,
+}
+
+/// The moving state of a character entry.
+struct CharacterRun {
+    controller: KinematicCharacterController,
+    /// Vertical speed, metres per second along +Y.
+    vertical: f32,
+    /// This tick's `Move`, consumed by the step.
+    pending_move: Option<Vec3>,
+    /// This tick's `Jump` speed, consumed by the step.
+    pending_jump: Option<f32>,
+    state: CharacterState,
+    /// Created by this tick's sync: its capsule is not in the broad phase
+    /// yet, so it stands still until the step has placed it.
+    fresh: bool,
+    /// Collision scratch, kept for its capacity.
+    collisions: Vec<CharacterCollision>,
 }
 
 /// Collects the step's collision events; their contact data is read from
@@ -280,6 +364,7 @@ fn groups(c: &Collider) -> InteractionGroups {
 pub struct Physics {
     world: PhysicsWorld,
     entries: BTreeMap<Entity, Entry>,
+    characters: BTreeMap<Entity, CharacterRun>,
     /// Collider → entity, kept until the step after a removal so the
     /// `Stopped` events Rapier emits for a removed collider still resolve.
     by_collider: HashMap<ColliderHandle, Entity>,
@@ -312,6 +397,7 @@ impl Physics {
         Self {
             world: PhysicsWorld::new(),
             entries: BTreeMap::new(),
+            characters: BTreeMap::new(),
             by_collider: HashMap::new(),
             retired: Vec::new(),
             meshes: HashMap::new(),
@@ -401,6 +487,7 @@ impl Physics {
         let h = ecs.hecs();
         h.query::<&RigidBody>().iter().next().is_some()
             || h.query::<&Collider>().iter().next().is_some()
+            || h.query::<&CharacterController>().iter().next().is_some()
     }
 
     /// The events of the last step.
@@ -423,6 +510,16 @@ impl Physics {
             angular_velocity: body.angvel(),
             sleeping: body.is_sleeping(),
         })
+    }
+
+    /// A character's held state, `None` without a `CharacterController`
+    /// (or before its first step).
+    pub fn character_state(&self, entity: Entity) -> Option<CharacterState> {
+        self.characters.get(&entity).map(|c| c.state)
+    }
+
+    pub fn character_count(&self) -> usize {
+        self.characters.len()
     }
 
     /// Whether `entity` currently has a dynamic body (its transform is
@@ -448,6 +545,7 @@ impl Physics {
             return;
         }
         self.world.integration_parameters.dt = dt;
+        self.move_characters(dt);
         let collector = Collector {
             events: Mutex::new(Vec::new()),
         };
@@ -467,6 +565,7 @@ impl Physics {
         self.stats = PhysicsStats {
             bodies: self.world.bodies.len() as u32,
             colliders: self.world.colliders.len() as u32,
+            characters: self.characters.len() as u32,
             active_bodies: self.world.islands.active_bodies().count() as u32,
             contact_pairs: self.world.narrow_phase.contact_pairs().count() as u32,
             events: self.events.len() as u32,
@@ -506,16 +605,17 @@ impl Physics {
             // the world matrix moved by gameplay). A resting or static
             // collider costs a few comparisons here and nothing below.
             let h = ecs.hecs();
-            for (handle, wt, rigid, shape) in h
+            for (handle, wt, rigid, shape, character) in h
                 .query::<(
                     &Handle,
                     &WorldTransform,
                     Option<&RigidBody>,
                     Option<&Collider>,
+                    Option<&CharacterController>,
                 )>()
                 .iter()
             {
-                if rigid.is_none() && shape.is_none() {
+                if rigid.is_none() && shape.is_none() && character.is_none() {
                     continue;
                 }
                 let entity = handle.0;
@@ -523,7 +623,13 @@ impl Physics {
                 let same = self.entries.get(&entity).is_some_and(|entry| {
                     entry.rigid.is_some() == rigid.is_some()
                         && entry.shape.is_some() == shape.is_some()
+                        && entry.character.is_some() == character.is_some()
                         && entry.shape.as_ref().zip(shape).is_none_or(|(a, b)| a == b)
+                        && entry
+                            .character
+                            .as_ref()
+                            .zip(character)
+                            .is_none_or(|(a, b)| a == b)
                         && entry.rigid == rigid.copied()
                         && entry.last_world == wt.matrix
                 });
@@ -556,16 +662,26 @@ impl Physics {
             };
             let rigid = ecs.copy::<RigidBody>(entity).ok();
             let shape = ecs.get::<Collider>(entity).ok();
+            let character = ecs.get::<CharacterController>(entity).ok();
             let existing = self.entries.get(&entity);
+            // A character's capsule follows its every field; its body and
+            // collider components are ignored, so their changes are only
+            // remembered (a new body/collider means a `CharacterWithBody`).
             let structural = match existing {
                 None => true,
                 Some(entry) => {
                     entry.rigid.is_some() != rigid.is_some()
                         || entry.shape.is_some() != shape.is_some()
+                        || entry.character.is_some() != character.is_some()
                         || entry
                             .shape
                             .as_ref()
                             .zip(shape.as_deref())
+                            .is_some_and(|(a, b)| a != b)
+                        || entry
+                            .character
+                            .as_ref()
+                            .zip(character.as_deref())
                             .is_some_and(|(a, b)| a != b)
                 }
             };
@@ -578,14 +694,32 @@ impl Physics {
                 });
             if rebuild {
                 let shape = shape.map(|s| s.clone());
+                let character = character.map(|c| c.clone());
                 self.remove_entry(ecs, entity);
-                self.create_entry(ecs, entity, rigid, shape, position, rotation, scale, world);
+                self.create_entry(
+                    ecs,
+                    entity,
+                    NewEntry {
+                        rigid,
+                        shape,
+                        character,
+                    },
+                    position,
+                    rotation,
+                    scale,
+                    world,
+                );
                 continue;
             }
             drop(shape);
+            drop(character);
             let entry = self.entries.get_mut(&entity).unwrap();
             let mut moved = moved;
-            if let (Some(h), Some(new), Some(old)) = (entry.body, rigid, entry.rigid) {
+            if entry.character.is_some() {
+                // The capsule ignores the body component; remember the
+                // value so the comparison above stays quiet.
+                entry.rigid = rigid;
+            } else if let (Some(h), Some(new), Some(old)) = (entry.body, rigid, entry.rigid) {
                 if new != old {
                     let body = &mut self.world.bodies[h];
                     if new.body_type != old.body_type {
@@ -603,7 +737,21 @@ impl Physics {
             }
             if moved {
                 let p = pose(position, rotation);
-                match (entry.body, entry.collider, entry.rigid.map(|r| r.body_type)) {
+                let kind = if entry.character.is_some() {
+                    Some(BodyType::Kinematic)
+                } else {
+                    entry.rigid.map(|r| r.body_type)
+                };
+                match (entry.body, entry.collider, kind) {
+                    // A character teleports (a transform write is not a
+                    // walk): vertical speed resets.
+                    (Some(h), _, _) if entry.character.is_some() => {
+                        self.world.bodies[h].set_position(p, true);
+                        self.world.bodies[h].set_next_kinematic_position(p);
+                        if let Some(run) = self.characters.get_mut(&entity) {
+                            run.vertical = 0.0;
+                        }
+                    }
                     // A queued `SetKinematicTarget` is applied after the
                     // sync, so it wins over a transform write in the same batch.
                     (Some(h), _, Some(BodyType::Kinematic)) => {
@@ -633,13 +781,23 @@ impl Physics {
         &mut self,
         ecs: &mut Ecs,
         entity: Entity,
-        rigid: Option<RigidBody>,
-        shape: Option<Collider>,
+        new: NewEntry,
         position: Vec3,
         rotation: Quat,
         scale: Vec3,
         world: Mat4,
     ) {
+        let NewEntry {
+            rigid,
+            shape,
+            character,
+        } = new;
+        if let Some(c) = character {
+            self.create_character(
+                ecs, entity, c, rigid, shape, position, rotation, scale, world,
+            );
+            return;
+        }
         let p = pose(position, rotation);
         let user = entity.to_bits() as u128;
         let body = rigid.map(|r| {
@@ -660,6 +818,7 @@ impl Physics {
             collider: None,
             rigid,
             shape: shape.clone(),
+            character: None,
             scale,
             last_world: world,
             reported: false,
@@ -717,6 +876,104 @@ impl Physics {
         self.entries.insert(entity, entry);
     }
 
+    /// A character: a kinematic body with the controller's capsule, a
+    /// controller configured from the component, and a run at rest. A
+    /// `RigidBody`/`Collider` on the entity is reported once and ignored.
+    #[allow(clippy::too_many_arguments)]
+    fn create_character(
+        &mut self,
+        ecs: &mut Ecs,
+        entity: Entity,
+        c: CharacterController,
+        rigid: Option<RigidBody>,
+        shape: Option<Collider>,
+        position: Vec3,
+        rotation: Quat,
+        scale: Vec3,
+        world: Mat4,
+    ) {
+        let p = pose(position, rotation);
+        let user = entity.to_bits() as u128;
+        let body = self.world.insert_body(
+            RigidBodyBuilder::kinematic_position_based()
+                .pose(p)
+                .user_data(user),
+        );
+        let s = scale.abs();
+        let capsule = SharedShape::capsule_y(c.half_height() * s.y, c.radius * s.x.max(s.z));
+        let collider = self.world.insert_collider(
+            ColliderBuilder::new(capsule)
+                .translation(c.center * scale)
+                .friction(0.0)
+                .collision_groups(InteractionGroups::new(
+                    Group::from_bits_retain(c.layer),
+                    Group::from_bits_retain(c.mask),
+                    InteractionTestMode::And,
+                ))
+                .active_events(ActiveEvents::COLLISION_EVENTS)
+                .density(0.0)
+                .user_data(user),
+            Some(body),
+        );
+        self.by_collider.insert(collider, entity);
+        let mut reported = false;
+        if rigid.is_some() || shape.is_some() {
+            reported = true;
+            self.rejections.push(Rejection {
+                index: u32::MAX,
+                entity,
+                kind: RejectionKind::CharacterWithBody,
+                message: "a CharacterController is its own kinematic capsule: the entity's RigidBody/Collider are ignored".into(),
+            });
+        }
+        let up = Vec3::Y;
+        let controller = KinematicCharacterController {
+            up,
+            offset: CharacterLength::Absolute(c.skin_width.max(1e-4)),
+            slide: true,
+            autostep: (c.max_step_height > 0.0).then_some(CharacterAutostep {
+                max_height: CharacterLength::Absolute(c.max_step_height * s.y),
+                min_width: CharacterLength::Absolute(c.radius * s.x.max(s.z)),
+                include_dynamic_bodies: true,
+            }),
+            max_slope_climb_angle: c.max_slope,
+            min_slope_slide_angle: c.max_slope,
+            snap_to_ground: (c.snap_to_ground > 0.0)
+                .then_some(CharacterLength::Absolute(c.snap_to_ground * s.y)),
+            normal_nudge_factor: 1.0e-4,
+        };
+        // A rebuilt character (a field changed) keeps its motion.
+        let previous = self.characters.remove(&entity);
+        self.characters.insert(
+            entity,
+            CharacterRun {
+                controller,
+                vertical: previous.as_ref().map_or(0.0, |r| r.vertical),
+                pending_move: None,
+                pending_jump: None,
+                state: previous
+                    .as_ref()
+                    .map_or(CharacterState::default(), |r| r.state),
+                fresh: previous.is_none(),
+                collisions: previous.map_or(Vec::new(), |r| r.collisions),
+            },
+        );
+        set_owned(ecs, entity, false);
+        self.entries.insert(
+            entity,
+            Entry {
+                body: Some(body),
+                collider: Some(collider),
+                rigid,
+                shape,
+                character: Some(c),
+                scale,
+                last_world: world,
+                reported,
+            },
+        );
+    }
+
     fn build_shape(
         &self,
         c: &Collider,
@@ -770,6 +1027,11 @@ impl Physics {
         if let Some(b) = entry.body {
             self.world.remove_body(b);
         }
+        // A rebuild re-inserts the run (`create_character`); a removal
+        // drops it with the entry.
+        if entry.character.is_some() && !ecs.has::<CharacterController>(entity) {
+            self.characters.remove(&entity);
+        }
         if ecs.contains(entity) {
             set_owned(ecs, entity, false);
         }
@@ -791,6 +1053,17 @@ impl Physics {
                 ));
                 continue;
             }
+            if cmd.is_character() {
+                match (self.characters.get_mut(&entity), cmd) {
+                    (Some(run), BodyCommand::Move(v)) => run.pending_move = Some(v),
+                    (Some(run), BodyCommand::Jump(speed)) => run.pending_jump = Some(speed),
+                    _ => self.rejections.push(reject(
+                        RejectionKind::MissingCharacter,
+                        "entity has no CharacterController".into(),
+                    )),
+                }
+                continue;
+            }
             let Some(entry) = self.entries.get_mut(&entity) else {
                 self.rejections.push(reject(
                     RejectionKind::MissingBody,
@@ -798,6 +1071,14 @@ impl Physics {
                 ));
                 continue;
             };
+            if entry.character.is_some() {
+                self.rejections.push(reject(
+                    RejectionKind::MissingBody,
+                    "a CharacterController has no RigidBody: use move/jump or a transform write"
+                        .into(),
+                ));
+                continue;
+            }
             let (Some(h), Some(rigid)) = (entry.body, entry.rigid) else {
                 self.rejections.push(reject(
                     RejectionKind::MissingBody,
@@ -873,6 +1154,8 @@ impl Physics {
                         }
                         None
                     }
+                    // Routed to the character above.
+                    BodyCommand::Move(_) | BodyCommand::Jump(_) => None,
                 };
             if let Some(r) = err {
                 self.rejections.push(r);
@@ -883,19 +1166,192 @@ impl Physics {
     fn write_back(&mut self, ecs: &mut Ecs) {
         self.scratch_written.clear();
         for (entity, entry) in &mut self.entries {
-            let (Some(h), Some(rigid)) = (entry.body, entry.rigid) else {
+            let Some(h) = entry.body else {
                 continue;
             };
-            if rigid.body_type == BodyType::Static {
-                continue;
-            }
             let body = &self.world.bodies[h];
-            if rigid.body_type == BodyType::Dynamic && body.is_sleeping() {
-                continue;
+            if entry.character.is_none() {
+                let Some(rigid) = entry.rigid else {
+                    continue;
+                };
+                if rigid.body_type == BodyType::Static {
+                    continue;
+                }
+                if rigid.body_type == BodyType::Dynamic && body.is_sleeping() {
+                    continue;
+                }
             }
             let p = body.position();
             write_pose(ecs, *entity, p.translation, p.rotation);
             self.scratch_written.push(*entity);
+        }
+    }
+
+    /// The characters' tick: gravity, this tick's `Move`/`Jump`, Rapier's
+    /// controller against the last step's geometry (slopes, steps, snap),
+    /// the kinematic target for the step, impulses on the dynamic bodies
+    /// met, and the held state. Entity order, so equal inputs give equal
+    /// motion.
+    fn move_characters(&mut self, dt: f32) {
+        if self.characters.is_empty() || dt <= 0.0 {
+            return;
+        }
+        let gravity = self.world.gravity;
+        let up = Vec3::Y;
+        for (entity, run) in &mut self.characters {
+            let Some(entry) = self.entries.get(entity) else {
+                continue;
+            };
+            let (Some(spec), Some(body), Some(collider)) =
+                (entry.character.as_ref(), entry.body, entry.collider)
+            else {
+                continue;
+            };
+            let wanted_move = run.pending_move.take();
+            let jump = run.pending_jump.take();
+            if run.fresh {
+                run.fresh = false;
+                continue;
+            }
+            let flying = spec.gravity_scale == 0.0;
+            let mut planar = wanted_move.unwrap_or(Vec3::ZERO);
+            if !flying {
+                planar.y = 0.0;
+                // Gravity accumulates in the air; on the ground the
+                // controller's own contact test (and the snap when walking
+                // off a bump) keeps `grounded` without a downward probe.
+                let g = gravity.y * spec.gravity_scale;
+                run.vertical = if run.state.grounded {
+                    0.0
+                } else {
+                    run.vertical + g * dt
+                };
+                if let Some(speed) = jump {
+                    run.vertical = if speed == 0.0 { spec.jump_speed } else { speed };
+                }
+            }
+            // A character at rest still asks for a hair of downward motion:
+            // Rapier's `move_shape` depenetrates instead of casting when the
+            // desired translation is zero, and parry's contact query is
+            // unreliable for a capsule resting exactly on a box (it can
+            // report a deep penetration from above and shove the character
+            // into the floor); the cast path is robust there.
+            let resting = !flying && planar == Vec3::ZERO && run.vertical == 0.0;
+            let desired = if resting {
+                Vec3::new(0.0, -REST_PROBE, 0.0)
+            } else if flying {
+                planar * dt
+            } else {
+                planar * dt + Vec3::Y * (run.vertical * dt)
+            };
+            let shape = self.world.colliders[collider].shared_shape().clone();
+            let start = *self.world.colliders[collider].position();
+            let filter = QueryFilter::new()
+                .exclude_rigid_body(body)
+                .exclude_sensors()
+                .groups(InteractionGroups::new(
+                    Group::from_bits_retain(spec.layer),
+                    Group::from_bits_retain(spec.mask),
+                    InteractionTestMode::And,
+                ));
+            run.collisions.clear();
+            let collisions = &mut run.collisions;
+            let moved = {
+                let queries = self.world.query_pipeline_with_filter(filter);
+                run.controller
+                    .move_shape(dt, &queries, &*shape, &start, desired, |c| {
+                        collisions.push(c)
+                    })
+            };
+            if spec.mass > 0.0 && !collisions.is_empty() {
+                let mut queries = self.world.broad_phase.as_query_pipeline_mut(
+                    self.world.narrow_phase.query_dispatcher(),
+                    &mut self.world.bodies,
+                    &mut self.world.colliders,
+                    filter,
+                );
+                run.controller.solve_character_collision_impulses(
+                    dt,
+                    &mut queries,
+                    &*shape,
+                    spec.mass,
+                    collisions.iter(),
+                );
+            }
+            let translation = if !moved.translation.is_finite()
+                || (resting && moved.translation.length_squared() < REST_SETTLE * REST_SETTLE)
+            {
+                Vec3::ZERO
+            } else {
+                moved.translation
+            };
+            // Grounded is our own test — Rapier's counts any contact with
+            // an upward-facing normal (a ledge brushed mid-jump would hold
+            // the character): walkable ground (within `max_slope`) just
+            // below the feet, and not while rising.
+            let ascending = !flying && run.vertical > 0.0 && translation.y > 1e-6;
+            let grounded = !ascending && {
+                let after = Pose::from_translation(translation) * start;
+                let queries = self.world.query_pipeline_with_filter(filter);
+                queries
+                    .cast_shape(
+                        &after,
+                        -up,
+                        &*shape,
+                        ShapeCastOptions {
+                            target_distance: 0.0,
+                            stop_at_penetration: true,
+                            max_time_of_impact: spec.skin_width + GROUND_PROBE,
+                            compute_impact_geometry_on_penetration: true,
+                        },
+                    )
+                    .is_some_and(|(_, hit)| hit.normal1.dot(up) >= spec.max_slope.cos() - 1e-3)
+            };
+            if !flying {
+                run.vertical = if grounded {
+                    0.0
+                } else {
+                    (translation.y / dt).clamp(run.vertical.min(0.0), run.vertical.max(0.0))
+                };
+            }
+            // On the ground the controller settles into its skin gap by a
+            // hair each tick: not motion worth reporting.
+            let mut velocity = translation / dt;
+            if grounded && translation.y.abs() < REST_SETTLE {
+                velocity.y = 0.0;
+            }
+            // Rapier's flag alone also fires on a landing; sliding means
+            // a contact steeper than `max_slope` (a slope or an overhang,
+            // not a wall).
+            let steep = |n: Vec3| {
+                let cos = n.dot(up);
+                cos.abs() > 0.05 && cos < spec.max_slope.cos() - 1e-3
+            };
+            run.state = CharacterState {
+                grounded,
+                sliding: moved.is_sliding_down_slope
+                    && collisions.iter().any(|c| steep(c.hit.normal1)),
+                velocity,
+            };
+            let body_ref = &mut self.world.bodies[body];
+            let current = *body_ref.position();
+            let mut rotation = current.rotation;
+            if spec.turn_speed > 0.0 {
+                let heading = Vec3::new(planar.x, 0.0, planar.z);
+                if heading.length_squared() > 1e-8 {
+                    // Face the motion: -Z is forward.
+                    let target = Quat::from_rotation_y((-heading.x).atan2(-heading.z));
+                    let max = spec.turn_speed * dt;
+                    let angle = rotation.angle_between(target);
+                    rotation = if angle <= max {
+                        target
+                    } else {
+                        rotation.slerp(target, max / angle)
+                    };
+                }
+            }
+            let next = Pose::from_parts(current.translation + translation, rotation.normalize());
+            body_ref.set_next_kinematic_position(next);
         }
     }
 
@@ -1266,32 +1722,9 @@ fn set_owned(ecs: &mut Ecs, entity: Entity, owned: bool) {
     }
 }
 
-/// Writes a world pose as the entity's local transform (scale kept),
-/// relative to its parent's cached world matrix.
+/// Writes a world pose as the entity's local transform (scale kept).
 fn write_pose(ecs: &mut Ecs, entity: Entity, position: Vec3, rotation: Quat) {
-    let Ok(current) = ecs.copy::<Transform>(entity) else {
-        return;
-    };
-    let parent = ecs.get::<Parent>(entity).ok().map(|p| p.0);
-    let local = match parent.and_then(|p| ecs.copy::<WorldTransform>(p).ok()) {
-        Some(pw) => {
-            let m = pw.matrix.inverse() * Mat4::from_rotation_translation(rotation, position);
-            let t = Transform::from_matrix(m);
-            Transform {
-                position: t.position,
-                rotation: t.rotation.normalize(),
-                scale: current.scale,
-            }
-        }
-        None => Transform {
-            position,
-            rotation,
-            scale: current.scale,
-        },
-    };
-    if local != current && local.is_finite() {
-        let _ = scene::set_local(ecs, entity, local);
-    }
+    let _ = scene::set_world_pose(ecs, entity, position, rotation);
 }
 
 #[cfg(test)]
@@ -1299,11 +1732,16 @@ mod tests {
     use super::*;
     use fynkel_contracts::WorldId;
 
-    fn world() -> Ecs {
+    pub(crate) fn world() -> Ecs {
         Ecs::new(WorldId(1))
     }
 
-    fn spawn(ecs: &mut Ecs, at: Vec3, rigid: Option<RigidBody>, shape: Option<Collider>) -> Entity {
+    pub(crate) fn spawn(
+        ecs: &mut Ecs,
+        at: Vec3,
+        rigid: Option<RigidBody>,
+        shape: Option<Collider>,
+    ) -> Entity {
         let e = scene::spawn(ecs, Transform::from_position(at), None).unwrap();
         if let Some(r) = rigid {
             ecs.insert(e, r).unwrap();
@@ -1314,7 +1752,7 @@ mod tests {
         e
     }
 
-    fn tick(p: &mut Physics, ecs: &mut Ecs, watched: &BTreeSet<Entity>) {
+    pub(crate) fn tick(p: &mut Physics, ecs: &mut Ecs, watched: &BTreeSet<Entity>) {
         scene::propagate(ecs);
         p.step(ecs, 1.0 / 60.0, watched);
         scene::propagate(ecs);
@@ -1806,5 +2244,217 @@ mod tests {
         );
         assert!(p.stats().colliders >= 2);
         let _ = ground;
+    }
+
+    #[test]
+    fn a_character_walks_jumps_and_lands_on_a_platform() {
+        let run = |jump_tick: u64| {
+            let mut ecs = world();
+            let mut p = Physics::new();
+            let floor = spawn(
+                &mut ecs,
+                Vec3::new(0.0, -0.5, 0.0),
+                None,
+                Some(Collider {
+                    size: Vec3::new(10.0, 0.5, 10.0),
+                    ..Collider::default()
+                }),
+            );
+            // A platform 0.8 m high, 3 m ahead (-Z).
+            let platform = spawn(
+                &mut ecs,
+                Vec3::new(0.0, 0.4, -4.0),
+                None,
+                Some(Collider {
+                    size: Vec3::new(1.5, 0.4, 1.5),
+                    ..Collider::default()
+                }),
+            );
+            let player =
+                scene::spawn(&mut ecs, Transform::from_position(Vec3::ZERO), None).unwrap();
+            ecs.insert(player, CharacterController::default()).unwrap();
+            let watched = BTreeSet::new();
+            let mut log = Vec::new();
+            for t in 1..=240u64 {
+                if t > 1 && t < 90 {
+                    p.queue(
+                        t as u32,
+                        player,
+                        BodyCommand::Move(Vec3::new(0.0, 7.0, -3.0)),
+                    );
+                }
+                if t == jump_tick {
+                    p.queue(t as u32, player, BodyCommand::Jump(0.0));
+                }
+                tick(&mut p, &mut ecs, &watched);
+                let st = p.character_state(player).unwrap();
+                let pos = ecs.copy::<Transform>(player).unwrap().position;
+                log.push((t, st, pos));
+            }
+            assert!(p.take_rejections().is_empty());
+            (log, player, floor, platform, p, ecs)
+        };
+        let (log, player, _floor, _platform, mut p, mut ecs) = run(60);
+        // Tick 1 is the fresh tick: standing, not yet grounded.
+        assert!(!log[0].1.grounded);
+        // Walking on the floor at 3 m/s along -Z, grounded, facing -Z.
+        let (_, st, pos) = log[20];
+        assert!(st.grounded, "{:?}", log[20]);
+        assert!((st.velocity.z + 3.0).abs() < 1e-3, "{st:?}");
+        assert!(
+            st.velocity.y.abs() < 1e-3,
+            "the vertical move is ignored: {st:?}"
+        );
+        assert!(pos.y.abs() < 0.03, "{pos:?}");
+        assert!(pos.z < -0.5 && pos.z > -1.2, "{pos:?}");
+        // The jump leaves the ground for a while, then lands on the
+        // platform (its top is y = 0.8) still walking.
+        let airborne: Vec<_> = log
+            .iter()
+            .filter(|(t, st, _)| *t >= 60 && *t < 120 && !st.grounded)
+            .collect();
+        assert!(airborne.len() > 20, "airborne {}", airborne.len());
+        let (_, st61, pos61) = log[60];
+        assert!(st61.velocity.y > 3.0, "{st61:?}");
+        assert!(pos61.y > 0.05, "{pos61:?}");
+        let landed = log
+            .iter()
+            .find(|(t, st, _)| *t > 61 && st.grounded)
+            .unwrap();
+        assert!((landed.2.y - 0.8).abs() < 0.05, "{landed:?}");
+        assert!(landed.2.z < -2.5 && landed.2.z > -5.5, "{landed:?}");
+        // After the walk it stands on the platform, still.
+        let (_, st, pos) = log[239];
+        assert!(st.grounded && st.velocity.length() < 1e-3, "{st:?}");
+        assert!((pos.y - 0.8).abs() < 0.05 && pos.z < -2.5, "{pos:?}");
+        let rot = ecs.copy::<Transform>(player).unwrap().rotation;
+        let forward = rot * Vec3::NEG_Z;
+        assert!(forward.z < -0.99, "faces -Z: {forward:?}");
+        // The same inputs give the same walk; a different jump tick does not.
+        let (again, ..) = run(60);
+        assert_eq!(again, log);
+        let (other, ..) = run(70);
+        assert_ne!(other, log);
+        // A move on a plain entity, a force on the character: rejected.
+        let floor2 = spawn(
+            &mut ecs,
+            Vec3::new(0.0, 0.0, 5.0),
+            None,
+            Some(Collider::default()),
+        );
+        p.queue(1, floor2, BodyCommand::Move(Vec3::X));
+        p.queue(2, player, BodyCommand::ApplyImpulse(Vec3::X));
+        p.queue(3, player, BodyCommand::Jump(f32::NAN));
+        tick(&mut p, &mut ecs, &BTreeSet::new());
+        let r = p.take_rejections();
+        assert_eq!(
+            r.iter().map(|r| (r.index, r.kind)).collect::<Vec<_>>(),
+            vec![
+                (1, RejectionKind::MissingCharacter),
+                (2, RejectionKind::MissingBody),
+                (3, RejectionKind::NotFinite),
+            ]
+        );
+        assert_eq!(p.stats().characters, 1);
+        assert!(p.body_state(player).is_none());
+        // A transform write teleports the character and it lands again.
+        scene::set_local(
+            &ecs,
+            player,
+            Transform::from_position(Vec3::new(3.0, 2.0, 3.0)),
+        )
+        .unwrap();
+        for _ in 0..90 {
+            tick(&mut p, &mut ecs, &BTreeSet::new());
+        }
+        let pos = ecs.copy::<Transform>(player).unwrap().position;
+        assert!(pos.y.abs() < 0.03 && (pos.x - 3.0).abs() < 1e-3, "{pos:?}");
+        assert!(p.character_state(player).unwrap().grounded);
+        // A RigidBody next to it is reported once and ignored; removing
+        // the controller drops the capsule.
+        ecs.insert(player, RigidBody::default()).unwrap();
+        tick(&mut p, &mut ecs, &BTreeSet::new());
+        let r = p.take_rejections();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].kind, RejectionKind::CharacterWithBody);
+        assert_eq!(r[0].index, u32::MAX);
+        assert!(!ecs.has::<PhysicsOwned>(player));
+        tick(&mut p, &mut ecs, &BTreeSet::new());
+        assert!(p.take_rejections().is_empty());
+        ecs.remove::<CharacterController>(player).unwrap();
+        tick(&mut p, &mut ecs, &BTreeSet::new());
+        assert_eq!(p.character_count(), 0);
+        assert!(p.character_state(player).is_none());
+        // ... and the dynamic body takes over (it now owns the transform).
+        assert!(ecs.has::<PhysicsOwned>(player));
+    }
+
+    #[test]
+    fn a_character_pushes_a_crate_and_slides_off_a_steep_slope() {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        spawn(
+            &mut ecs,
+            Vec3::new(0.0, -0.5, 0.0),
+            None,
+            Some(Collider {
+                size: Vec3::new(20.0, 0.5, 20.0),
+                ..Collider::default()
+            }),
+        );
+        let crate_ = spawn(
+            &mut ecs,
+            Vec3::new(0.0, 0.5, -2.0),
+            Some(RigidBody {
+                mass: 5.0,
+                ..RigidBody::default()
+            }),
+            Some(Collider::default()),
+        );
+        // A 60° ramp (steeper than the 45° limit) to the right.
+        let ramp = scene::spawn(
+            &mut ecs,
+            Transform {
+                position: Vec3::new(6.0, 0.0, 0.0),
+                rotation: Quat::from_rotation_z(-std::f32::consts::FRAC_PI_3),
+                scale: Vec3::ONE,
+            },
+            None,
+        )
+        .unwrap();
+        ecs.insert(
+            ramp,
+            Collider {
+                size: Vec3::new(3.0, 0.2, 3.0),
+                ..Collider::default()
+            },
+        )
+        .unwrap();
+        let player = scene::spawn(&mut ecs, Transform::from_position(Vec3::ZERO), None).unwrap();
+        ecs.insert(player, CharacterController::default()).unwrap();
+        let watched = BTreeSet::new();
+        for t in 1..=120u32 {
+            p.queue(t, player, BodyCommand::Move(Vec3::new(0.0, 0.0, -2.0)));
+            tick(&mut p, &mut ecs, &watched);
+        }
+        let c = ecs.copy::<Transform>(player).unwrap().position;
+        let k = ecs.copy::<Transform>(crate_).unwrap().position;
+        assert!(c.z < -1.0, "walked into the crate: {c:?}");
+        assert!(k.z < -2.5, "the crate was pushed ahead: {k:?}");
+        assert!(k.y > 0.3, "and stays on the floor: {k:?}");
+        // Back to the origin, then into the ramp: it slides, never climbs.
+        scene::set_local(&ecs, player, Transform::from_position(Vec3::ZERO)).unwrap();
+        let mut max_y: f32 = 0.0;
+        let mut slid = false;
+        for t in 1..=180u32 {
+            p.queue(t, player, BodyCommand::Move(Vec3::new(3.0, 0.0, 0.0)));
+            tick(&mut p, &mut ecs, &watched);
+            let st = p.character_state(player).unwrap();
+            slid |= st.sliding;
+            max_y = max_y.max(ecs.copy::<Transform>(player).unwrap().position.y);
+        }
+        assert!(max_y < 1.0, "did not climb the 60° ramp: {max_y}");
+        assert!(slid, "reported sliding");
+        assert!(p.take_rejections().is_empty());
     }
 }

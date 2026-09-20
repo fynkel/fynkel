@@ -10,13 +10,13 @@
 
 use fynkel_contracts::schema::{fingerprint, RecordSchema};
 use fynkel_contracts::{Entity, HasSchema};
-use fynkel_physics::{Collider, ColliderShape, RigidBody};
+use fynkel_physics::{CharacterController, Collider, ColliderShape, RigidBody};
 use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
 use glam::{Quat, Vec3};
 
 use crate::components::{
-    Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
+    Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight, ThirdPersonCamera,
 };
 use crate::material::PbrMaterial;
 use crate::world::Name;
@@ -139,11 +139,18 @@ pub enum BodyOp {
     /// `vector` + `rotation`: the world pose, now, without interpolation
     /// (any body type).
     Teleport,
+    /// `vector` metres per second for this tick (a `CharacterController`;
+    /// M3-09).
+    Move,
+    /// `vector.y` take-off speed, `0` for the controller's `jump_speed`
+    /// (a `CharacterController`; M3-09).
+    Jump,
 }
 
-/// Moves a `fynkel.RigidBody` (M3-08; simulation lane only). Rejected at
-/// the tick with `MISSING_COMPONENT` (no body) or `INVALID_PAYLOAD` (wrong
-/// body type for the op, non-finite value).
+/// Moves a `fynkel.RigidBody` — or, with `move`/`jump`, a
+/// `fynkel.CharacterController` — (M3-08; simulation lane only). Rejected
+/// at the tick with `MISSING_COMPONENT` (no body / no controller) or
+/// `INVALID_PAYLOAD` (wrong body type for the op, non-finite value).
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "command", id = 8, name = "fynkel.cmd.Body")]
 pub struct BodyCommandRecord {
@@ -216,6 +223,20 @@ pub struct BodyStateRecord {
     pub linear_velocity: Vec3,
     pub angular_velocity: Vec3,
     pub sleeping: bool,
+}
+
+/// `FYNKEL_QUERY_CHARACTER` (M3-09): a `fynkel.CharacterController`'s held
+/// state as the last step left it (no record without one).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.CharacterState")]
+pub struct CharacterStateRecord {
+    pub entity: Entity,
+    /// Standing on ground no steeper than `max_slope`.
+    pub grounded: bool,
+    /// Touching a slope steeper than `max_slope` (sliding down it).
+    pub sliding: bool,
+    /// The movement applied over the last tick, metres per second.
+    pub velocity: Vec3,
 }
 
 /// `FYNKEL_QUERY_ENTITIES` (M3-08b): one per live entity, entity order —
@@ -404,6 +425,9 @@ pub const ALL: &[&RecordSchema] = &[
     &PhysicsHitRecord::SCHEMA,
     &BodyStateRecord::SCHEMA,
     &EntityInfoRecord::SCHEMA,
+    &CharacterController::SCHEMA,
+    &ThirdPersonCamera::SCHEMA,
+    &CharacterStateRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -447,6 +471,10 @@ mod tests {
         assert_eq!(PhysicsQueryRecord::SCHEMA.wire_size(), 88);
         assert_eq!(PhysicsHitRecord::SCHEMA.wire_size(), 48);
         assert_eq!(BodyStateRecord::SCHEMA.wire_size(), 40);
+        // M3-09: entity @0, grounded @8, sliding @9, velocity @12 → 24.
+        assert_eq!(CharacterStateRecord::SCHEMA.offsets(), vec![0, 8, 9, 12]);
+        assert_eq!(CharacterStateRecord::SCHEMA.wire_size(), 24);
+        assert_eq!(ThirdPersonCamera::SCHEMA.wire_size(), 64);
     }
 
     #[test]

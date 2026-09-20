@@ -491,9 +491,9 @@ pub(crate) fn validate_entities<'a>(
     out
 }
 
-/// The physics value rules (`FYN-H0001`/`H0002`, M3-08): what the runtime
-/// rejects with `INVALID_PAYLOAD`, reported at authoring time through the
-/// same `validate()`.
+/// The physics value rules (`FYN-H0001`/`H0002`, M3-08; `H0005`/`H0007`,
+/// M3-09): what the runtime rejects with `INVALID_PAYLOAD`, reported at
+/// authoring time through the same `validate()`.
 fn physics_value_rules(
     c: &Component,
     out: &mut Vec<Diagnostic>,
@@ -503,6 +503,8 @@ fn physics_value_rules(
     let code = match c.type_id.as_str() {
         "fynkel.RigidBody" => Code::PHYSICS_BODY_VALUE,
         "fynkel.Collider" => Code::PHYSICS_COLLIDER_VALUE,
+        "fynkel.CharacterController" => Code::CHARACTER_VALUE,
+        "fynkel.ThirdPersonCamera" => Code::CAMERA_RIG_VALUE,
         _ => return,
     };
     let Some(Ok(value)) = crate::generated::decode_component(&c.type_id, &c.data) else {
@@ -511,6 +513,8 @@ fn physics_value_rules(
     let result = match &value {
         ComponentValue::RigidBody(b) => b.validate(),
         ComponentValue::Collider(k) => k.validate(),
+        ComponentValue::CharacterController(k) => k.validate(),
+        ComponentValue::ThirdPersonCamera(k) => k.validate(),
         _ => Ok(()),
     };
     if let Err(msg) = result {
@@ -521,7 +525,8 @@ fn physics_value_rules(
     }
 }
 
-/// The physics rules between an entity's components (`FYN-H0003`/`H0004`).
+/// The physics rules between an entity's components (`FYN-H0003`/`H0004`,
+/// `H0006`).
 fn physics_entity_rules(
     e: &Entity,
     types: &HashMap<&str, &Component>,
@@ -542,6 +547,22 @@ fn physics_entity_rules(
                 .with_id(k.id.to_string())
                 .with_suggestion("set body_type to static, or use a box, sphere or capsule"),
                 &format!("{}/data/shape", k.pointer),
+            ));
+        }
+    }
+    if types.contains_key("fynkel.CharacterController") {
+        for ignored in [body, collider].into_iter().flatten() {
+            out.push(anchor(
+                Diagnostic::error(
+                    Code::CHARACTER_WITH_BODY,
+                    format!(
+                        "{} has a CharacterController: its own kinematic capsule replaces the {}",
+                        e.name, ignored.type_id
+                    ),
+                )
+                .with_id(ignored.id.to_string())
+                .with_suggestion("remove the RigidBody/Collider, or the CharacterController"),
+                &ignored.pointer,
             ));
         }
     }

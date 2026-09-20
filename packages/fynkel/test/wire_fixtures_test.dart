@@ -294,6 +294,57 @@ void main() {
     (v, d, o, s) => v.encode(d, o, s),
   );
   check(
+    'CharacterController',
+    const CharacterController(
+      radius: 0.35,
+      height: 1.7,
+      center: Vec3(0, 0.85, 0),
+      skinWidth: 0.03,
+      maxSlope: 0.8,
+      maxStepHeight: 0.25,
+      snapToGround: 0.1,
+      gravityScale: 1.5,
+      mass: 60,
+      speed: 3.5,
+      jumpSpeed: 6,
+      turnSpeed: 8,
+      moveAction: 'move',
+      jumpAction: 'jump',
+      layer: 4,
+      mask: 0xfffffffb,
+    ),
+    CharacterController.wireSize,
+    CharacterController.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'ThirdPersonCamera',
+    const ThirdPersonCamera(
+      target: 'Player',
+      pivot: Vec3(0, 1.4, 0),
+      distance: 6,
+      minDistance: 0.75,
+      yaw: 0.5,
+      pitch: 0.25,
+      minPitch: -0.4,
+      maxPitch: 1.2,
+      lookAction: 'look',
+      sensitivity: 2,
+      collisionRadius: 0.15,
+      mask: 0xfffffffe,
+    ),
+    ThirdPersonCamera.wireSize,
+    ThirdPersonCamera.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'CharacterStateRecord',
+    CharacterStateRecord(entity: entity(5, 1), grounded: true, sliding: false, velocity: const Vec3(0, 0, -4)),
+    CharacterStateRecord.wireSize,
+    CharacterStateRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
     'EntityInfoRecord',
     EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp'),
     EntityInfoRecord.wireSize,

@@ -487,7 +487,8 @@ enum FynkelCommandKind {
   FYNKEL_COMMAND_REMOVE_COMPONENT(7),
 
   /// body: BodyCommandRecord { entity, op, vector, rotation }; simulation
-  /// lane only; applied by the tick's physics step (M3-08).
+  /// lane only; applied by the tick's physics step (M3-08); ops `move` and
+  /// `jump` address a CharacterController (M3-09).
   FYNKEL_COMMAND_BODY(8);
 
   final int value;
@@ -517,7 +518,9 @@ enum FynkelComponent {
   FYNKEL_COMPONENT_SPOT_LIGHT(8),
   FYNKEL_COMPONENT_ENVIRONMENT(9),
   FYNKEL_COMPONENT_RIGID_BODY(10),
-  FYNKEL_COMPONENT_COLLIDER(11);
+  FYNKEL_COMPONENT_COLLIDER(11),
+  FYNKEL_COMPONENT_CHARACTER_CONTROLLER(12),
+  FYNKEL_COMPONENT_THIRD_PERSON_CAMERA(13);
 
   final int value;
   const FynkelComponent(this.value);
@@ -534,6 +537,8 @@ enum FynkelComponent {
     9 => FYNKEL_COMPONENT_ENVIRONMENT,
     10 => FYNKEL_COMPONENT_RIGID_BODY,
     11 => FYNKEL_COMPONENT_COLLIDER,
+    12 => FYNKEL_COMPONENT_CHARACTER_CONTROLLER,
+    13 => FYNKEL_COMPONENT_THIRD_PERSON_CAMERA,
     _ => throw ArgumentError('Unknown value for FynkelComponent: $value'),
   };
 }
@@ -564,7 +569,11 @@ enum FynkelQueryKind {
 
   /// (no entity) -> one EntityInfoRecord { entity, parent, name } per live
   /// entity, slot order: the hierarchy and the names in one call.
-  FYNKEL_QUERY_ENTITIES(8);
+  FYNKEL_QUERY_ENTITIES(8),
+
+  /// entity -> one CharacterStateRecord { entity, grounded, sliding,
+  /// velocity } (0 records without a CharacterController) (M3-09).
+  FYNKEL_QUERY_CHARACTER(9);
 
   final int value;
   const FynkelQueryKind(this.value);
@@ -578,6 +587,7 @@ enum FynkelQueryKind {
     6 => FYNKEL_QUERY_COMPONENTS,
     7 => FYNKEL_QUERY_BODY,
     8 => FYNKEL_QUERY_ENTITIES,
+    9 => FYNKEL_QUERY_CHARACTER,
     _ => throw ArgumentError('Unknown value for FynkelQueryKind: $value'),
   };
 }

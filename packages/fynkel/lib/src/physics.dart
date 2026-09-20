@@ -67,6 +67,29 @@ class BodyState {
   String toString() => 'BodyState(v: $linearVelocity, ω: $angularVelocity${sleeping ? ', sleeping' : ''})';
 }
 
+/// A character controller's held state as the last tick left it (M3-09,
+/// [GameObject.characterState]).
+class CharacterState {
+  const CharacterState({required this.grounded, required this.sliding, required this.velocity});
+
+  factory CharacterState.fromRecord(gen.CharacterStateRecord r) =>
+      CharacterState(grounded: r.grounded, sliding: r.sliding, velocity: r.velocity);
+
+  /// Standing on walkable ground (a slope within `maxSlope`) after the
+  /// last move; a jump needs it.
+  final bool grounded;
+
+  /// Pressed against a slope steeper than `maxSlope`, sliding down it.
+  final bool sliding;
+
+  /// The movement actually applied over the last tick, metres per second
+  /// (gravity included; zero when standing still).
+  final Vec3 velocity;
+
+  @override
+  String toString() => 'CharacterState(${grounded ? 'grounded' : 'airborne'}${sliding ? ', sliding' : ''}, v: $velocity)';
+}
+
 /// One hit of a physics query, nearest first within a query.
 class PhysicsHit {
   const PhysicsHit({required this.entity, required this.point, required this.normal, required this.distance});

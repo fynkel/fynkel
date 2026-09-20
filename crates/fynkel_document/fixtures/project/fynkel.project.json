@@ -25,6 +25,14 @@
         "touch:overlay/jump"
       ]
     },
+    "look": {
+      "type": "axis2d",
+      "description": "Turn the third-person camera.",
+      "bindings": [
+        "mouse:delta",
+        "gamepad:rightStick"
+      ]
+    },
     "pause": {
       "type": "button",
       "bindings": [
@@ -91,6 +99,12 @@
       "kind": "native"
     },
     "fynkel.Collider": {
+      "kind": "native"
+    },
+    "fynkel.CharacterController": {
+      "kind": "native"
+    },
+    "fynkel.ThirdPersonCamera": {
       "kind": "native"
     },
     "game.Spinner": {

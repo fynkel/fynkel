@@ -105,7 +105,8 @@ typedef enum FynkelCommandKind {
   FYNKEL_COMMAND_SET_COMPONENT = 6,
   FYNKEL_COMMAND_REMOVE_COMPONENT = 7,
   /* body: BodyCommandRecord { entity, op, vector, rotation }; simulation
-   * lane only; applied by the tick's physics step (M3-08). */
+   * lane only; applied by the tick's physics step (M3-08); ops `move` and
+   * `jump` address a CharacterController (M3-09). */
   FYNKEL_COMMAND_BODY = 8
 } FynkelCommandKind;
 
@@ -120,7 +121,9 @@ typedef enum FynkelComponent {
   FYNKEL_COMPONENT_SPOT_LIGHT = 8,
   FYNKEL_COMPONENT_ENVIRONMENT = 9,
   FYNKEL_COMPONENT_RIGID_BODY = 10,
-  FYNKEL_COMPONENT_COLLIDER = 11
+  FYNKEL_COMPONENT_COLLIDER = 11,
+  FYNKEL_COMPONENT_CHARACTER_CONTROLLER = 12,
+  FYNKEL_COMPONENT_THIRD_PERSON_CAMERA = 13
 } FynkelComponent;
 
 typedef enum FynkelQueryKind {
@@ -142,7 +145,10 @@ typedef enum FynkelQueryKind {
   FYNKEL_QUERY_BODY = 7,
   /* (no entity) -> one EntityInfoRecord { entity, parent, name } per live
    * entity, slot order: the hierarchy and the names in one call. */
-  FYNKEL_QUERY_ENTITIES = 8
+  FYNKEL_QUERY_ENTITIES = 8,
+  /* entity -> one CharacterStateRecord { entity, grounded, sliding,
+   * velocity } (0 records without a CharacterController) (M3-09). */
+  FYNKEL_QUERY_CHARACTER = 9
 } FynkelQueryKind;
 
 /* ---- Buffer header ------------------------------------------------------ */

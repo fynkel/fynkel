@@ -176,6 +176,35 @@ pub fn set_local(world: &World, entity: Entity, transform: Transform) -> Result<
     Ok(())
 }
 
+/// Sets the local transform so the entity's world pose is `position` /
+/// `rotation` (its local scale kept), relative to the parent's cached world
+/// matrix — what physics and native movers write. A pose equal to the
+/// current one leaves the subtree clean.
+pub fn set_world_pose(world: &World, entity: Entity, position: Vec3, rotation: Quat) -> Result<()> {
+    let current = world.copy::<Transform>(entity)?;
+    let parent = world.get::<Parent>(entity).ok().map(|p| p.0);
+    let local = match parent.and_then(|p| world.copy::<WorldTransform>(p).ok()) {
+        Some(pw) => {
+            let m = pw.matrix.inverse() * Mat4::from_rotation_translation(rotation, position);
+            let t = Transform::from_matrix(m);
+            Transform {
+                position: t.position,
+                rotation: t.rotation.normalize(),
+                scale: current.scale,
+            }
+        }
+        None => Transform {
+            position,
+            rotation,
+            scale: current.scale,
+        },
+    };
+    if local != current {
+        set_local(world, entity, local)?;
+    }
+    Ok(())
+}
+
 /// Marks an entity (and, at propagation time, its descendants) as needing a
 /// world-matrix recompute. Descendants are recomputed by `propagate` because
 /// it descends through any dirty node.

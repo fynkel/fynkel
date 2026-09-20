@@ -131,6 +131,8 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                         position: v,
                         rotation: r,
                     },
+                    BodyOp::Move => BodyCommand::Move(v),
+                    BodyOp::Jump => BodyCommand::Jump(v.y),
                 };
                 Command::Body {
                     entity: c.entity,
@@ -252,6 +254,7 @@ pub const QUERY_ALL_ENTITIES: u32 = 5;
 pub const QUERY_COMPONENTS: u32 = 6;
 pub const QUERY_BODY: u32 = 7;
 pub const QUERY_ENTITIES: u32 = 8;
+pub const QUERY_CHARACTER: u32 = 9;
 
 pub fn query(
     world: &World,
@@ -334,6 +337,12 @@ pub fn query(
             if let Ok(v) = ecs.get::<fynkel_core::Collider>(entity) {
                 w.component(ComponentId::COLLIDER.0, &*v);
             }
+            if let Ok(v) = ecs.get::<fynkel_core::CharacterController>(entity) {
+                w.component(ComponentId::CHARACTER_CONTROLLER.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::ThirdPersonCamera>(entity) {
+                w.component(ComponentId::THIRD_PERSON_CAMERA.0, &*v);
+            }
         }
         // The body's motion state (M3-08); no body is an empty response.
         QUERY_BODY => {
@@ -343,6 +352,18 @@ pub fn query(
                     linear_velocity: s.linear_velocity,
                     angular_velocity: s.angular_velocity,
                     sleeping: s.sleeping,
+                });
+            }
+        }
+        // A character's held state (M3-09); no controller is an empty
+        // response.
+        QUERY_CHARACTER => {
+            if let Some(s) = world.physics().character_state(entity) {
+                w.record(&CharacterStateRecord {
+                    entity,
+                    grounded: s.grounded,
+                    sliding: s.sliding,
+                    velocity: s.velocity,
                 });
             }
         }

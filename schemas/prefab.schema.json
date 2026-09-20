@@ -209,6 +209,38 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "fynkel.CharacterController"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.CharacterController.schema.json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "fynkel.ThirdPersonCamera"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.ThirdPersonCamera.schema.json"
+              }
+            }
+          }
         }
       ]
     },

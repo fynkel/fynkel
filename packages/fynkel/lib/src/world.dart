@@ -1027,6 +1027,28 @@ class GameObject {
   /// its velocity is kept. On a static body this is a transform write.
   void teleport(Vec3 position, [Quat rotation = Quat.identity]) => _body(gen.BodyOp.teleport, position, rotation);
 
+  /// Walks a `CharacterController` (M3-09) at [velocity] (metres per
+  /// second, world space, the vertical part ignored) over the next tick;
+  /// no `move` in a tick is standing still. Rejected at the tick on an
+  /// object without a controller. A controller with `moveAction` set is
+  /// walked by the runtime already; a `move` in the same tick wins.
+  void move(Vec3 velocity) => _body(gen.BodyOp.move, velocity);
+
+  /// Starts a jump at [speed] metres per second upward (the controller's
+  /// `jumpSpeed` when 0): the caller decides when — typically on a
+  /// pressed edge while [characterState] says `grounded`.
+  void jump([double speed = 0]) => _body(gen.BodyOp.jump, Vec3(0, speed, 0));
+
+  /// The character's state after the last tick (`FYNKEL_QUERY_CHARACTER`);
+  /// `null` without a `CharacterController` or before it spawned.
+  CharacterState? characterState() {
+    final e = _entity;
+    if (e == null || !_alive) return null;
+    final b = world._native.query(QueryKind.character, entity: e);
+    if (b.recordCount == 0) return null;
+    return CharacterState.fromRecord(gen.CharacterStateRecord.decode(b.records, 0, b.tail));
+  }
+
   /// Current local transform: staged overlay, else last snapshot, else the
   /// spawn value.
   Transform get localTransform {

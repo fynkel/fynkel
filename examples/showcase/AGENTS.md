@@ -111,6 +111,8 @@ Component types:
 - `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply.
 - `fynkel.RigidBody` — `body_type` `static` | `dynamic` | `kinematic`, `mass` (kg, dynamic), `linear_damping`, `angular_damping`, `gravity_scale`, `ccd`. Physics owns a dynamic body's transform; a kinematic one follows the transform your behaviour writes and pushes dynamic bodies.
 - `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `layer`/`mask` (bits of `physics.layers`). Alone it is static geometry; with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
+- `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `layer`/`mask`.
+- `fynkel.ThirdPersonCamera` — on the camera entity: `target` (the followed entity's name), `pivot` (offset from the target's origin), `distance`, `min_distance`, `yaw`/`pitch` (radians, written back each tick), `min_pitch`/`max_pitch`, `look_action` (axis2d turning it at `sensitivity` rad/s per unit), `collision_radius` (a sphere cast from the pivot pulls the camera in before walls; 0 disables), `mask`. Placed after the tick's transforms; its own `Transform` is overwritten.
 - `game.*` — this project's behaviours (Dart classes in `lib/game/`); `data` holds the `@Expose` fields, validated by `schemas/behaviours/<id>.schema.json`.
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for
@@ -222,10 +224,26 @@ world.overlap(ColliderShape.sphere, const Vec3(2, 0, 0), centre);   // also shap
 Contact callbacks run right after each tick's step on the behaviours of
 both objects; `Contact` carries `point`, `normal` (a → b) and `impulse`
 (0 for triggers and exits). `fynkel validate` checks values (`FYN-H0001`/
-`H0002`), a mesh collider on a moving body (`H0003`) and a dynamic body
-without a collider (`H0004`, warning). `fynkel test --headless` prints the
-run's bodies, colliders and contact counts; the simulation is deterministic
-per platform (same scene, same commands → same checksum).
+`H0002`, `H0005`/`H0007` for the character and camera rig), a mesh collider
+on a moving body (`H0003`), a dynamic body without a collider (`H0004`,
+warning) and a body or collider next to a `CharacterController` (`H0006`).
+`fynkel test --headless` prints the run's bodies, colliders, characters
+and contact counts; the simulation is deterministic per platform (same
+scene, same commands → same checksum).
+
+Characters (`fynkel.CharacterController`, above): with `move_action`/
+`jump_action` set the runtime walks the capsule itself — WASD/stick
+relative to the `fynkel.ThirdPersonCamera` whose `target` is the entity's
+name, jump on the press while grounded — and a behaviour only reads:
+
+```dart
+final s = characterState();                        // null without a controller
+if (s != null && s.grounded && Input.pressed('jump')) jump();   // your own rules: leave the actions empty and drive it
+move((right * stick.x + forward * stick.y) * speed);            // metres per second, this tick only; none = standing still
+```
+
+The pattern with sprint and a double jump is
+`packages/fynkel/example/player_controller.dart`.
 
 ## Finding objects, spawning, prefabs
 

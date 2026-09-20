@@ -392,7 +392,7 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     assert_eq!(host.load_project(&cooked.text()), Status::Ok);
     let r = host.report();
     let actions = r["input"]["actions"].as_array().unwrap();
-    assert_eq!(actions.len(), 3, "{r:#}");
+    assert_eq!(actions.len(), 4, "{r:#}");
     assert_eq!(actions[0]["name"], "move");
     assert_eq!(actions[0]["type"], "axis2d");
     assert_eq!(actions[1]["name"], "jump");
@@ -444,7 +444,7 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     assert_eq!(plan.steps, 3);
     assert_eq!(capture(host.w, &[key("Space", 0), key("W", 0)]), Status::Ok);
     let v = view(host.w);
-    assert_eq!(v.len(), 3);
+    assert_eq!(v.len(), 4);
     let jump = &v[1];
     assert!(jump.held && jump.pressed && !jump.released && jump.frame_pressed);
     assert_eq!(jump.x, 1.0);

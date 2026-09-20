@@ -66,11 +66,11 @@ void main() {
     addTearDown(l.dispose);
     l.onLoadDiagnostics = (_) {};
     final report = l.loadProject(fixture, cacheDir: cache);
-    expect([for (final a in report.inputActions) '${a.name}:${a.type}'], ['move:axis2d', 'jump:button', 'pause:button']);
+    expect([for (final a in report.inputActions) '${a.name}:${a.type}'], ['move:axis2d', 'jump:button', 'look:axis2d', 'pause:button']);
     expect(report.inputActions[0].bindings, ['keyboard:WASD', 'gamepad:leftStick', 'touch:overlay/stick']);
     expect(report.inputActions[0].overlayControls, ['stick']);
     l.frame(1 / 60);
-    expect([for (final a in l.input.actions) '${a.name}:${a.kind.name}'], ['move:axis2d', 'jump:button', 'pause:button']);
+    expect([for (final a in l.input.actions) '${a.name}:${a.kind.name}'], ['move:axis2d', 'jump:button', 'look:axis2d', 'pause:button']);
     expect(l.input.state('jump'), isNotNull);
   });
 

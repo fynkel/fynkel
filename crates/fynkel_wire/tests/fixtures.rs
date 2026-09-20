@@ -16,7 +16,9 @@ use fynkel_core::components::{
 };
 use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
-use fynkel_core::{BodyType, Collider, ColliderShape, Name, RigidBody};
+use fynkel_core::{
+    BodyType, CharacterController, Collider, ColliderShape, Name, RigidBody, ThirdPersonCamera,
+};
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
 use glam::{Quat, Vec3, Vec4};
@@ -358,6 +360,53 @@ fn fixtures_match_generated_codecs() {
             linear_velocity: Vec3::new(0.0, -9.81, 0.0),
             angular_velocity: Vec3::new(0.0, 1.0, 0.0),
             sleeping: false,
+        },
+    );
+    check(
+        "CharacterController",
+        &CharacterController {
+            radius: 0.35,
+            height: 1.7,
+            center: Vec3::new(0.0, 0.85, 0.0),
+            skin_width: 0.03,
+            max_slope: 0.8,
+            max_step_height: 0.25,
+            snap_to_ground: 0.1,
+            gravity_scale: 1.5,
+            mass: 60.0,
+            speed: 3.5,
+            jump_speed: 6.0,
+            turn_speed: 8.0,
+            move_action: "move".into(),
+            jump_action: "jump".into(),
+            layer: 4,
+            mask: 0xffff_fffb,
+        },
+    );
+    check(
+        "ThirdPersonCamera",
+        &ThirdPersonCamera {
+            target: "Player".into(),
+            pivot: Vec3::new(0.0, 1.4, 0.0),
+            distance: 6.0,
+            min_distance: 0.75,
+            yaw: 0.5,
+            pitch: 0.25,
+            min_pitch: -0.4,
+            max_pitch: 1.2,
+            look_action: "look".into(),
+            sensitivity: 2.0,
+            collision_radius: 0.15,
+            mask: 0xffff_fffe,
+        },
+    );
+    check(
+        "CharacterStateRecord",
+        &CharacterStateRecord {
+            entity: e(5, 1),
+            grounded: true,
+            sliding: false,
+            velocity: Vec3::new(0.0, 0.0, -4.0),
         },
     );
     check(

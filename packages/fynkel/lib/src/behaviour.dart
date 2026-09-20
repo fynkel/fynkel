@@ -123,6 +123,12 @@ abstract class Behaviour {
   void setLinearVelocity(Vec3 velocity) => gameObject.setLinearVelocity(velocity);
   BodyState? bodyState() => gameObject.bodyState();
 
+  /// The object's character controller (M3-09): [GameObject.move],
+  /// [GameObject.jump], [GameObject.characterState].
+  void move(Vec3 velocity) => gameObject.move(velocity);
+  void jump([double speed = 0]) => gameObject.jump(speed);
+  CharacterState? characterState() => gameObject.characterState();
+
   /// Desired state. Setting it queues `onEnable`/`onDisable` for the next
   /// safe boundary; [isActive] says what the driver has applied.
   bool get enabled => _enabled;

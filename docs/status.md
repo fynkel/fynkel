@@ -13,8 +13,8 @@ changes. Numbers come from the gate reports (`m0-architecture-report.md`,
 | `fynkel_contracts` | Shared types: ids, schema metadata, `AssetRef`/`Uuid`, the §14.2 diagnostic record and code namespaces, wire header | **Solid** | unit tests; every other crate builds on it |
 | `fynkel_ecs` + `fynkel_scene` | `hecs` behind a thin facade (ADR-0003); transforms, hierarchy, propagation | **Solid** | unit tests; deterministic checksum in the headless host; `hecs` provably hidden |
 | `fynkel_core` | The world: command batches in, snapshot/events/diagnostics out, fixed §5.1 step order, `load_scene` from a typed description; the input contract (`input.rs`, `docs/input.md`): the binding grammar, actions compiled from `inputActions`, raw events captured per frame, held state every tick and edges consumed by exactly one; the physics slot (`fynkel_physics` stepped, rejections → diagnostics, contacts on the physics lane) | **Solid** | 3 000-tick deterministic checksum (step p50 2 µs at 25 entities), 25 tests + the input tests (a press across three catch-up ticks, the zero-tick frame, composition, reset), headless host |
-| `fynkel_physics` | `RigidBody` (10) / `Collider` (11) and the Rapier adapter (`docs/physics.md`): stepped by `World::step` at the §5.1 slot only while something has a body or collider, sync of changed entries only, dynamic poses written back (`PhysicsOwned`), body commands (`fynkel.cmd.Body`), contacts with point/normal/impulse (stay for subscribed pairs), raycast/shape-cast/overlap queries, project gravity and named layers, bounded mesh colliders from the cache | **Solid** | 7 crate tests + core/native/headless physics tests; the fixture's Crate B lands and sleeps under the checksum; 500 stress bodies at p50 0.64 ms/tick, checksum repeated |
-| `fynkel_wire` + `fynkel_schema_derive` + `fynkel codegen` (a) | Components and document records written once in Rust → JSON Schema (components, `material.schema.json`), Dart codecs (with `copyWith` and the `componentCodecs`/`componentIds` table), Rust codecs (with the `ComponentValue` wire dispatch), fingerprint `0x2b369001633c9953` | **Solid** — the strongest piece | `codegen --check` in CI; wire fixtures shared by Rust and Dart |
+| `fynkel_physics` | `RigidBody` (10) / `Collider` (11) / `CharacterController` (12) and the Rapier adapter (`docs/physics.md`): stepped by `World::step` at the §5.1 slot only while something has a body, collider or character, sync of changed entries only, dynamic poses written back (`PhysicsOwned`), body commands (`fynkel.cmd.Body`, `Move`/`Jump` for characters), contacts with point/normal/impulse (stay for subscribed pairs), raycast/shape-cast/overlap queries, project gravity and named layers, bounded mesh colliders from the cache; characters over Rapier's kinematic controller (capsule, slopes, steps, gravity, own grounded probe, `FYNKEL_QUERY_CHARACTER` → grounded/sliding/velocity) driven either by `Move`/`Jump` or by the actions named on the component, and `ThirdPersonCamera` (13, in `fynkel_core`) placed after the step behind its named target with a sphere-cast pull-in (M3-09) | **Solid** | 10 crate tests + core/native/headless physics tests; the fixture's Crate B lands and sleeps under the checksum, the Playground's Player walks, jumps and lands on the Platform from `test/platform.input.json` under the checksum; 500 stress bodies at p50 0.64 ms/tick, checksum repeated |
+| `fynkel_wire` + `fynkel_schema_derive` + `fynkel codegen` (a) | Components and document records written once in Rust → JSON Schema (components, `material.schema.json`), Dart codecs (with `copyWith` and the `componentCodecs`/`componentIds` table), Rust codecs (with the `ComponentValue` wire dispatch), fingerprint `0x28dfe79b866c1efa` | **Solid** — the strongest piece | `codegen --check` in CI; wire fixtures shared by Rust and Dart |
 | `fynkel_native` + `package:fynkel` | C ABI v1, `ffigen` bindings, the Dart SDK: `World`, `GameObject`, allocation-free `TransformWriter`, `loadProject(dir)`/`loadScene(cacheDir, sceneId)` from the cooked cache only → `LoadReport` (scene key, residency), `package:fynkel/testing.dart` (`cookProject`), `Behaviour` with the §3.2 lifecycle driven by `World.frame` at the §5.1 points, `GameContext` services with installable test contexts (`Input` over `TestInput`), `BehaviourRegistry`, `World.frame(dt, input:)` with `WorldInput` read in place, recordings (`InputRecording`, `loadInputRecording`); typed native component access — `GameObject.get<T>()`/`has`/`set`/`add`/`setPresentation`/`remove`/`components` (and on `Behaviour`) over `fynkel.cmd.SetComponent`/`RemoveComponent` and `FYNKEL_QUERY_COMPONENTS`, one query per object per tick, read-your-writes, no mirror (M3-07a); physics — body commands, `bodyState()`, contact callbacks on `Behaviour`, `World.raycast`/`shapeCast`/`overlap`, `layerMask` (M3-08); `World.find`/`findAll`, `GameObject.findChild`/`findDescendant` over one `FYNKEL_QUERY_ENTITIES` per tick, spawn-then-configure in one tick through temp references, `World.instantiate(prefab)` over `fynkel_world_instantiate` → `InstantiateReport` (M3-08b); native-assets build hook | **Solid** | 1 000 entities/tick: 191 µs encode+submit, 169 µs step, 47 µs read; 5.1 KB/frame Dart allocation on the 25-entity scene (0.7–1.2 KB of it SDK), 2 GCs in 3 000 frames; leak tests at the ABI and viewport |
 | `package:fynkel_generator` + `fynkel codegen` (b) | `build_runner` aggregate builder: `@FynkelBehaviour`/`@Expose` classes → `behaviours.g.dart` (factories, field get/set, `registerBehaviours`), `behaviours.g.json` (Inspector metadata) and `schemas/behaviours/<id>.schema.json`; `fynkel codegen --project [--check]` runs it and splits the schemas | **Solid** | authored `game.Spinner { speed: 2.5 }` → validated → instantiated → rotates (M2 gate); emit tests; `--check` in CI for the example and the starter project; 1 s warm |
 | `fynkel_document` | Strict JSON with spans, envelope, JSON Schema 2020-12, canonical writer that preserves unknown data; scene, prefab, material (formatVersion 2: the `PbrMaterial` fields flat on the document, custom shaders through their manifest), shader, `.meta.json`, project and lock documents; prefab expansion (UUID v5 ids, overrides, nested refused); asset database (scan, resolve, reference check); migrations with diff + `.bak` (`material/1-2/pbr-fields` is the first real step); scene → runtime description (`describe`, project-aware; the cooker's input); whole-project validation; authoring commands and transactions (`Editor`: revision = blake3, 13 §11.1 commands + `unsetField` as reversible edits, conflicts, rollback to the byte, byte-exact undo/redo) | **Solid** | 55 integration tests over fixture corpora with 30 exact code/pointer/line/column expectations; every command undone to the original text; validate/load ≈20–25 µs per entity, linear to 10 000 entities |
@@ -109,6 +109,17 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
   through the cook and a cyclic pair is refused once each; every cooked
   texture carries its full mip chain and the renderer samples it (the
   showcase render `renders/m3-08b.png` is the before/after). (M3-08b.)
+- **A player walks, jumps and lands.** The fixture's Playground scene has
+  a `fynkel.CharacterController` Player driven by the `move`/`jump`
+  actions and a `fynkel.ThirdPersonCamera` behind it; the headless replay
+  of `test/platform.input.json` (W held, Space once, W released) ends with
+  the Player grounded on the 0.8 m Platform, the camera 5 m behind it
+  looking at the pivot, the checksum repeated; a Dart `PlayerController`
+  (`packages/fynkel/example/player_controller.dart`) does the same from a
+  behaviour with sprint and a double jump; the jump edge is consumed by
+  exactly one tick and a resting character does not oscillate (found and
+  fixed: Rapier's zero-translation depenetration shoved a resting capsule
+  0.45 m into the floor). (M3-09; `docs/physics.md`.)
 
 ## 3. What is *not* proven yet (honest list)
 
@@ -117,7 +128,7 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
 | **SDK packages come from the checkout.** `package:fynkel` and `package:fynkel_flutter` are path dependencies into the repo; the hook's `fynkel.lock.json` is a different shape from the project lock. | A game cannot be built without a Fynkel checkout and a Rust toolchain. | M3 item 17 / C6 (published artifacts) |
 | **The renderer has no IBL and no light culling.** Environment lighting is a constant ambient term, so metals read dark (the showcase's gold and chrome blocks); every draw sees the 8 nearest lights to the camera, whatever it draws; one shadow cascade to 60 m; culling is per instance on the CPU (1.4 ms of prepare at 5 800 records — fine at 120 Hz, not free). | Metallic materials cannot look right; a scene with many small lights lights the wrong things. | IBL and per-object light lists after M3 |
 | **No audio; `targets` unread.** `CLIP` chunks have no consumer; `targets` is validated and unused (`fynkel run -d` picks the device by hand). | Games cannot be heard yet. | M3 (D4; D3's last field) |
-| **Physics V1 is bodies and queries only.** One collider per entity, no joints, no character controller (item 9), mesh colliders static only, collider outlines (`Physics::debug_lines`) not drawn by any host yet. | Enough for the reference game's crates and hazards; ragdolls, vehicles and hinged doors are post-1.0. | item 9 (controller), after M3 |
+| **Physics V1 is bodies, a character and queries.** One collider per entity, no joints, mesh colliders static only, collider outlines (`Physics::debug_lines`) not drawn by any host yet; the character does not push dynamic bodies or ride moving platforms, and a catch-up tick repeats the frame's relative look delta. | Enough for the reference game's player, crates and hazards; ragdolls, vehicles, hinged doors and platform riding are post-1.0. | after M3 |
 | **Input has no Android or web path and no rebinding UI.** `FynkelInputPlugin` is Apple-only (GameController); the touch overlay is fixed to bottom corners; bindings come from the project file alone. | Fine for the Apple targets M3 ships; a settings screen needs a runtime rebind API. | after M3 |
 | **Authoring commands have no ABI; the Inspector metadata has no consumer.** `Editor` is Rust-only behind `fynkel scene apply`; `label`/`tooltip`/`min`/`max`/`step` are generated and unread. | The editor (M4) has the commands and the metadata but no handle on them. | M4 (D5) |
 | **Pointer lookup is linear.** `Node::pointer` scans object members; valid documents are unaffected, a document with thousands of diagnostics is quadratic (16 000 entities with 8 000 warnings: 726 ms to load). | The editor resolving pointers per keystroke on big scenes. | M4 (D7) |
@@ -276,6 +287,23 @@ render → codegen → analyze → test clean. Found on the way: the SDK only
 sent transform subscriptions when the frame had events, so a handle
 attached in a quiet frame had no snapshot until something happened
 (`_flushSubscriptions` now runs on every drain).
+M3-09 (2026-09-20): fmt/clippy clean, `cargo test --workspace` green
+(`fynkel_physics` 10 unit tests — a character walks/jumps/lands, climbs a
+step, slides down a steep ramp, rests without oscillating —,
+`fynkel_core/tests/physics.rs` with the driver in the camera's frame, the
+rig's pull-in and the value/missing-component checks, the native ABI
+`character_commands_and_query`, the `physics_rules` scene corpus
+`H0001`–`H0007`, the headless Playground replay: 120 frames, 1 jump, 75
+held ticks, the Player at y 0.82 on the Platform, camera at pivot + dir·5,
+checksum repeated), both `codegen --check` pipelines up to date
+(fingerprint `0x28dfe79b866c1efa` — two components, two body ops, one
+record, one query; wire fixtures rolled, both locks refreshed, header +
+ffigen), Dart suites green (`packages/fynkel` 90 tests with
+`character_test.dart`: the recorded walk on the Playground, `move`/`jump`/
+`characterState()` and their rejections, the `PlayerController` example;
+`fynkel_flutter` 15, `spinner_game` 4), starter create → validate →
+headless → `--input` → codegen → analyze → test clean, showcase validate →
+headless → render → codegen → analyze → test clean.
 M3-07a (2026-09-20): fmt/clippy clean, `cargo test --workspace` green
 (the native ABI `component_commands_and_query` test: set/replace/query/
 remove through the wire, the presentation lane, the rejections at the
@@ -402,6 +430,10 @@ in its own app, play it, or hear it. That is M3, in this order:
    gravity and layers, the stress scene's 500 bodies; `docs/physics.md`.
    8b (M3-08b): developer ergonomics — mip chains, `find`/`findChild`,
    spawn-then-configure in one tick, `World.instantiate`, nested prefabs.
-9. **Character controller and third-person camera** (blueprint item 9),
-   then **audio** (D4) and the Tier 1 reference game that exercises
-   input, physics and audio — measured with both captures at every step.
+9. ~~**Character controller and third-person camera**~~ — done (M3-09):
+   `CharacterController` (12) over Rapier's kinematic controller,
+   `ThirdPersonCamera` (13), `Move`/`Jump` body ops, `characterState()`,
+   the Dart `PlayerController` example, the Playground headless gate;
+   `docs/physics.md`.
+10. **Audio** (D4), then the Tier 1 reference game that exercises input,
+   physics and audio — measured with both captures at every step.

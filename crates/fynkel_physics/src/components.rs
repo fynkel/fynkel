@@ -1,4 +1,4 @@
-//! The physics components (blueprint §9, §19.2d item 8): pure data,
+//! The physics components (blueprint §9, §19.2d items 8 and 9): pure data,
 //! authored in scenes, crossing the bridge with the generated codecs. The
 //! Rapier side never leaks — a body is addressed by its entity, shapes are
 //! described in metres, masses in kilograms.
@@ -189,10 +189,184 @@ impl Collider {
     }
 }
 
+/// A kinematic capsule walked by gameplay (blueprint §19.2d item 9, over
+/// Rapier's kinematic character controller). The entity's origin is the
+/// capsule's centre minus `center` — with the default `center` the origin
+/// is at the feet. Moved by `move`/`jump` commands (one `move` per tick;
+/// no command is standing still) or, with `move_action`/`jump_action`
+/// named, by the runtime itself from those actions (walking relative to
+/// the `fynkel.ThirdPersonCamera` that targets the entity, if any). Slopes
+/// up to `max_slope` are climbed, steeper ones slid down; steps up to
+/// `max_step_height` are climbed; gravity accumulates while airborne and
+/// the character snaps to ground within `snap_to_ground`. Ground contact,
+/// sliding and the effective velocity are held state
+/// (`characterState()`). Its own kinematic capsule replaces any
+/// `RigidBody`/`Collider` on the entity (`FYN-H0006`), collides by
+/// `layer`/`mask`, reports contact and trigger events and pushes dynamic
+/// bodies as a body of `mass` kilograms would.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 12, name = "fynkel.CharacterController")]
+pub struct CharacterController {
+    /// Capsule radius, metres, `> 0`.
+    pub radius: f32,
+    /// Total capsule height (both caps included), `>= 2 * radius`.
+    pub height: f32,
+    /// The capsule's centre in the entity's local frame (scaled by the
+    /// entity's scale, like a collider offset).
+    pub center: Vec3,
+    /// Skin the controller keeps from geometry, metres, `>= 0`.
+    pub skin_width: f32,
+    /// Steepest climbable slope, radians in `0..pi/2`; steeper ground
+    /// slides the character down.
+    pub max_slope: f32,
+    /// Highest step climbed without a jump, metres (`0` disables).
+    pub max_step_height: f32,
+    /// How far below the feet ground still counts as touched when walking
+    /// off a bump, metres (`0` disables).
+    pub snap_to_ground: f32,
+    /// Multiplies the world's gravity; `0` is a flying character whose
+    /// `move` velocity is used in full (vertical included).
+    pub gravity_scale: f32,
+    /// Kilograms the character pushes dynamic bodies with (`0` pushes
+    /// nothing).
+    pub mass: f32,
+    /// Walk speed of the runtime driver (`move_action`), m/s.
+    pub speed: f32,
+    /// Take-off speed of a `jump` without an explicit speed, m/s.
+    pub jump_speed: f32,
+    /// Radians per second the entity turns towards its horizontal motion
+    /// (`0` leaves the rotation to gameplay).
+    pub turn_speed: f32,
+    /// A 2D action walked by the runtime every tick at `speed` (x right,
+    /// y forward, relative to the camera that targets this entity);
+    /// empty leaves movement to `move` commands.
+    pub move_action: String,
+    /// A button action whose press jumps when grounded; empty leaves it
+    /// to `jump` commands.
+    pub jump_action: String,
+    /// Membership bits (bit `i` = layer `i` of the project's
+    /// `physics.layers`); default layer 0.
+    pub layer: u32,
+    /// Which layers the capsule collides with and walks on.
+    pub mask: u32,
+}
+
+impl Default for CharacterController {
+    fn default() -> Self {
+        Self {
+            radius: 0.4,
+            height: 1.8,
+            center: Vec3::new(0.0, 0.9, 0.0),
+            skin_width: 0.02,
+            max_slope: core::f32::consts::FRAC_PI_4,
+            max_step_height: 0.3,
+            snap_to_ground: 0.2,
+            gravity_scale: 1.0,
+            mass: 70.0,
+            speed: 4.0,
+            jump_speed: 5.0,
+            turn_speed: 10.0,
+            move_action: String::new(),
+            jump_action: String::new(),
+            layer: 1,
+            mask: u32::MAX,
+        }
+    }
+}
+
+impl CharacterController {
+    /// Value rules the schema cannot express (the `INVALID_PAYLOAD` text).
+    pub fn validate(&self) -> Result<(), String> {
+        finite_positive("radius", self.radius)?;
+        if !self.height.is_finite() || self.height < 2.0 * self.radius {
+            return Err(format!(
+                "height must be finite and >= 2 * radius, got {} < {}",
+                self.height,
+                2.0 * self.radius
+            ));
+        }
+        if !self.center.is_finite() {
+            return Err("center must be finite".into());
+        }
+        finite_non_negative("skin_width", self.skin_width)?;
+        if !self.max_slope.is_finite()
+            || self.max_slope < 0.0
+            || self.max_slope >= core::f32::consts::FRAC_PI_2
+        {
+            return Err(format!(
+                "max_slope must be in 0..pi/2 radians, got {}",
+                self.max_slope
+            ));
+        }
+        finite_non_negative("max_step_height", self.max_step_height)?;
+        finite_non_negative("snap_to_ground", self.snap_to_ground)?;
+        if !self.gravity_scale.is_finite() {
+            return Err(format!(
+                "gravity_scale must be finite, got {}",
+                self.gravity_scale
+            ));
+        }
+        finite_non_negative("mass", self.mass)?;
+        finite_non_negative("speed", self.speed)?;
+        finite_non_negative("jump_speed", self.jump_speed)?;
+        finite_non_negative("turn_speed", self.turn_speed)?;
+        Ok(())
+    }
+
+    /// Half height of the cylindrical part.
+    pub fn half_height(&self) -> f32 {
+        (self.height * 0.5 - self.radius).max(0.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use fynkel_contracts::schema::{FieldType, HasEnumSchema, HasSchema};
+
+    #[test]
+    fn character_layout_and_rules() {
+        let s = &CharacterController::SCHEMA;
+        assert_eq!(s.id, 12);
+        assert_eq!(s.name, "fynkel.CharacterController");
+        // radius @0, height @4, center 12 @8, skin @20, slope @24, step @28,
+        // snap @32, gravity @36, mass @40, speed @44, jump @48, turn @52,
+        // move_action (u32,u32) @56, jump_action @64, layer @72, mask @76 → 80.
+        assert_eq!(
+            s.offsets(),
+            vec![0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 64, 72, 76]
+        );
+        assert_eq!(s.wire_size(), 80);
+        assert!(s.has_strings());
+        assert!(matches!(s.fields[12].ty, FieldType::Str));
+        let c = CharacterController::default();
+        assert!(c.validate().is_ok());
+        assert!((c.half_height() - 0.5).abs() < 1e-6);
+        assert!(CharacterController {
+            height: 0.5,
+            ..CharacterController::default()
+        }
+        .validate()
+        .is_err());
+        assert!(CharacterController {
+            max_slope: 2.0,
+            ..CharacterController::default()
+        }
+        .validate()
+        .is_err());
+        assert!(CharacterController {
+            mass: -1.0,
+            ..CharacterController::default()
+        }
+        .validate()
+        .is_err());
+        assert!(CharacterController {
+            radius: f32::NAN,
+            ..CharacterController::default()
+        }
+        .validate()
+        .is_err());
+    }
 
     #[test]
     fn layouts_and_ids() {

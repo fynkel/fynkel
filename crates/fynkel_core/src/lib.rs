@@ -34,15 +34,15 @@ pub use clock::{FrameClock, FramePlan};
 pub use command::{Command, Lane};
 pub use components::{
     Camera, ComponentValue, DirectionalLight, Environment, ExposureMode, MeshRenderer, PointLight,
-    Projection, SpotLight,
+    Projection, SpotLight, ThirdPersonCamera,
 };
 pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{
     AssetId, AssetRef, ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, Uuid, WorldId,
 };
 pub use fynkel_physics::{
-    self as physics, BodyCommand, BodyType, Collider, ColliderShape, Contact, Physics,
-    PhysicsEvent, RigidBody,
+    self as physics, BodyCommand, BodyType, CharacterController, CharacterState, Collider,
+    ColliderShape, Contact, Physics, PhysicsEvent, RigidBody,
 };
 pub use fynkel_scene::Transform;
 pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase};

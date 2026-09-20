@@ -100,7 +100,14 @@ class Mover extends Behaviour {
 ```
 
 `Input` is a static facade over `GameContext.current.input`
-(`InputService`); outside a callback it throws like `Time`. An action the
+(`InputService`); outside a callback it throws like `Time`. Two native
+systems read actions themselves (M3-09, [physics.md](physics.md)): a
+`fynkel.CharacterController` with `move_action`/`jump_action` is walked
+and jumped by `World::step` from the tick's view before the edges are
+consumed (the jump on the press, once per press, exactly as a behaviour
+would see it), and a `fynkel.ThirdPersonCamera` turns by its
+`look_action` every tick — a relative control (`mouse:delta`) is therefore
+applied by each catch-up tick of a long frame, a known gap. An action the
 project does not declare reads as nothing (`false`, `0`, `Vec2.zero`).
 The world's table is `world.input` (`WorldInput`: `actions`, the same
 readers, `refresh()`), decoded in place from the native view before each

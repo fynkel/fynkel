@@ -129,6 +129,7 @@ semantic rules on top of the schema pass:
 | `FYN-D0208` | the same child listed twice |
 | `FYN-D0209` | malformed entity/component entry skipped by the view |
 | `FYN-H0001` … `H0004` | physics rules (M3-08, [physics.md](physics.md)): a `fynkel.RigidBody` value the runtime would reject, a `fynkel.Collider` value (size per shape, friction, restitution, `mesh` missing), a `shape: mesh` collider on a dynamic or kinematic body, a dynamic body without a collider (warning) |
+| `FYN-H0005` … `H0007` | character rules (M3-09): a `fynkel.CharacterController` value the runtime would reject (capsule, slope, negative limits), a `fynkel.RigidBody`/`fynkel.Collider` next to a `fynkel.CharacterController` (its own capsule replaces them; one diagnostic per ignored component), a `fynkel.ThirdPersonCamera` value (distance, pitch range, sensitivity). The corpus fixture `scene/physics_rules.scene.json` lists `H0001`–`H0007` |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule
@@ -1067,5 +1068,12 @@ the lock this build writes — `FYNKEL_UPDATE_FIXTURES=1 cargo test -p
 fynkel_document --test project` refreshes it — and an asset tree with a
 scene, a prefab instance, a glTF mesh, a texture and a material; since
 M3-08 the scene also has a static Floor collider and a dynamic Crate B that
-lands on it, with `physics.layers` `["default", "props"]`). Every kind
-added later extends this corpus.
+lands on it, with `physics.layers` `["default", "props"]`; since M3-09 a
+second scene, Playground (`assets/scenes/playground.scene.json`, id
+`…0031`: Floor, a 0.8 m Platform, a Player with a
+`fynkel.CharacterController` driven by the `move`/`jump` actions, a
+Camera with a `fynkel.ThirdPersonCamera` targeting it by name and turned
+by the `look` action, Sun) with `test/platform.input.json` (120 frames:
+W held, Space at frame 20, W released at 75) — the headless gate of item
+9 — so the main scene's counts are unchanged). Every kind added later
+extends this corpus.

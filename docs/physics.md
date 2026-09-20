@@ -1,18 +1,21 @@
 # Physics
 
 The physics contract: blueprint §5.1 (the physics slot and transform
-ownership), §9 "Physics", §19.2d item 8 (M3-08). `fynkel_physics` is the
-`RigidBody`/`Collider` components plus a Rapier adapter the core steps
-inside the fixed tick. Rapier never leaks: a body is addressed by its
+ownership), §9 "Physics", §19.2d item 8 (M3-08) and item 9 (M3-09, the
+character controller and the third-person camera rig, below).
+`fynkel_physics` is the `RigidBody`/`Collider`/`CharacterController`
+components plus a Rapier adapter the core steps inside the fixed tick. Rapier never leaks: a body is addressed by its
 entity, shapes are metres, masses kilograms, layers are names from the
 project file, and everything a game does goes through the same
 commands, queries and events every other native system uses.
 
 ## Components
 
-Both are ordinary native components: schema-generated, scene-validated,
+All are ordinary native components: schema-generated, scene-validated,
 in the starter's registry, reachable from Dart with `get<T>()`/`set`/
-`add`/`remove` (M3-07a).
+`add`/`remove` (M3-07a). `RigidBody` and `Collider` here; the
+`CharacterController` and the core's `ThirdPersonCamera` in their own
+sections below.
 
 `fynkel.RigidBody` (id 10):
 
@@ -42,7 +45,10 @@ in the starter's registry, reachable from Dart with `get<T>()`/`set`/
 value the runtime would reject (mass, damping), `H0002` a collider value
 (size per shape, friction, restitution, a mesh collider without `mesh`),
 `H0003` a mesh collider on a dynamic or kinematic body, `H0004` (warning)
-a dynamic body without a collider (it falls through everything). The same
+a dynamic body without a collider (it falls through everything), `H0005`
+a character controller value, `H0006` a body or collider next to a
+character controller, `H0007` a camera rig value (the corpus fixture
+`fixtures/scene/physics_rules.scene.json` lists them all). The same
 rules run at the tick for a component set from Dart (`INVALID_PAYLOAD`);
 a mesh the cache does not hold, or one above the limit, is
 `MESH_UNAVAILABLE` (code 13) once per entity and the collider is skipped.
@@ -78,8 +84,9 @@ World::step
                              so the next sync sees only external moves
 ```
 
-The step is skipped entirely while no entity has a `RigidBody` or
-`Collider` (`has_work`), so a scene without physics pays nothing.
+The step is skipped entirely while no entity has a `RigidBody`,
+`Collider` or `CharacterController` (`has_work`), so a scene without
+physics pays nothing.
 Ownership: an entity with a dynamic body carries `PhysicsOwned`; a
 presentation-lane transform write on it is rejected `PHYSICS_OWNED`
 (code 9), a simulation-lane write (`setLocalPosition` in `fixedUpdate`)
@@ -124,6 +131,108 @@ body's mass is computed at creation, so the impulse counts. `bodyState()` is one
 `FYNKEL_QUERY_BODY` (7): `linearVelocity`, `angularVelocity`, `sleeping`,
 or null without a body.
 
+## Character controller (M3-09)
+
+`fynkel.CharacterController` (id 12, in `fynkel_physics`) is a kinematic
+capsule walked by gameplay over Rapier's `KinematicCharacterController`:
+no `RigidBody`/`Collider` next to it (its own capsule replaces them —
+`FYN-H0006` at authoring, `INVALID_PAYLOAD` once at the tick, then the
+body is ignored until the controller is removed, when the body takes
+over). The entity's origin is the capsule's centre minus `center`, so
+with the default `center` the origin is at the feet.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `radius` / `height` | 0.4 / 1.8 | the capsule, metres (`height >= 2·radius`, caps included), scaled by the entity's scale |
+| `center` | (0, 0.9, 0) | the capsule's centre in the entity's frame |
+| `skinWidth` | 0.02 | the gap kept from every surface (Rapier's offset) |
+| `maxSlope` | π/4 | radians; ground steeper than this is not walkable — the character slides down it (`sliding`) |
+| `maxStepHeight` | 0.3 | steps up to this height are climbed without a jump (0 disables) |
+| `snapToGround` | 0.2 | walking off a bump within this distance keeps the feet down (0 disables) |
+| `gravityScale` | 1 | multiplies the world's gravity while airborne; 0 flies (no gravity, `move.y` honoured) |
+| `mass` | 70 | kilograms, what it pushes dynamic bodies with (0 pushes nothing) |
+| `speed` / `jumpSpeed` | 4 / 5 | m/s, what the action driver walks and jumps at |
+| `turnSpeed` | 10 | rad/s, how fast the entity turns to face its motion (0 never turns) |
+| `moveAction` / `jumpAction` | "" | named: the runtime drives the character from these actions (below) |
+| `layer` / `mask` | 1 / all | as a collider's |
+
+Commands (`fynkel.cmd.Body` ops on the simulation lane, `MISSING_COMPONENT`
+12 without a controller, `INVALID_PAYLOAD` 12 when not finite; a body
+command on a character is `MISSING_COMPONENT` 10): `move(v)` — the
+velocity wanted this tick, m/s in world space, planar (`y` ignored unless
+flying); a tick without a `move` stands still — and `jump([speed])` —
+sets the vertical speed (the controller's `jumpSpeed` when 0) whether or
+not grounded: the caller decides when, normally on the action's press
+edge while `characterState().grounded`. Gravity accumulates in the air
+and is zero on the ground. `characterState()` (`FYNKEL_QUERY_CHARACTER`,
+9, `fynkel.rec.CharacterState` 24 B) is held state as the last tick left
+it: `grounded` (walkable ground within `skinWidth` + 5 cm under the feet,
+never while rising — our own test, Rapier's counts any upward contact,
+a ledge brushed mid-jump included), `sliding` (pressed against a contact
+steeper than `maxSlope`, slope or overhang) and `velocity` (the movement
+actually applied, m/s, gravity included, zero at rest). The character is
+not `PhysicsOwned`: like a kinematic body it follows an external
+transform write (a teleport; the vertical speed resets), and physics
+writes its pose back every tick. Contact events are reported like a
+kinematic body's.
+
+Inside `Physics::step` the characters move after the queued commands and
+before Rapier's step, against the previous step's broad phase (a
+character created this tick stands still one tick). Each `move_shape`
+slides along walls, climbs `maxStepHeight`, snaps to ground, and pushes
+dynamic bodies with `mass`; a resting character still asks for a hair of
+downward motion, because Rapier's zero-translation path depenetrates
+through parry's contact query, which is unreliable for a capsule resting
+exactly on a box (it can shove the character into the floor by a quarter
+of its height) — the cast path is robust there and the residual motion is
+reported as standing still. A character placed exactly on the ground
+stays there; one that lands rests `skinWidth` above the surface.
+
+**The action driver.** With `moveAction`/`jumpAction` named, `World::step`
+walks the character before the batch's commands from the tick's input:
+the 2D action (clamped to the unit disc) × `speed` in the frame of the
+`fynkel.ThirdPersonCamera` whose `target` is the entity's `Name` (forward
+= `(−sin yaw, 0, −cos yaw)`, right = `(cos yaw, 0, −sin yaw)`; world axes
+without a rig), and a `jump()` on the action's press while grounded — the
+press edge is consumed by exactly one tick (§5.1), so a 50 ms frame's
+three ticks jump once. The driver's commands are queued ahead of the
+batch's, so a `move`/`jump` from a behaviour in the same tick wins; a
+controller with empty actions is driven by behaviours only
+(`packages/fynkel/example/player_controller.dart` is the pattern, with a
+sprint and a double jump). The fixture project's Playground scene (`fynkel
+test --headless --scene c0000000-0000-4000-8000-000000000031 --input
+test/platform.input.json`) walks its Player onto a 0.8 m platform from a
+recorded stream — the item 9 gate, a headless test with a stable
+checksum.
+
+## Third-person camera (M3-09)
+
+`fynkel.ThirdPersonCamera` (id 13, in `fynkel_core`) turns the entity it
+sits on — normally the one with `fynkel.Camera` — into a rig that orbits a
+target and looks at it; `Follow` from the blueprint §3.5 catalogue,
+specialised:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `target` | "" | the followed entity's `fynkel.Name` (an authored component cannot hold an entity reference; the lowest entity of that name wins and is cached while it keeps the name); empty or unknown: the rig does nothing |
+| `pivot` | (0, 1.5, 0) | the orbit centre in the target's frame |
+| `distance` / `minDistance` | 5 / 0.5 | metres from the pivot, and the closest the pull-in brings it |
+| `yaw` / `pitch` | 0 / 0.35 | radians, the current orbit angles — written back every tick, so a scene value is the start and a `set` from Dart snaps the camera |
+| `minPitch` / `maxPitch` | −0.5 / 1.3 | the pitch clamp |
+| `lookAction` | "" | an axis2d action: `yaw −= x·sensitivity·dt`, `pitch −= y·sensitivity·dt` per tick (a relative control such as `mouse:delta` is applied by every catch-up tick of its frame — a known gap, item 14 decides) |
+| `sensitivity` | 2.5 | rad/s per unit of the action |
+| `collisionRadius` | 0.2 | a sphere of this radius cast from the pivot along the rig's direction (the target excluded, `mask` applied) pulls the camera in to the first collider, never under `minDistance`; 0 disables |
+| `mask` | all | which colliders the cast sees |
+
+The rig is placed by `World::step` after the tick's transform propagate
+(the target's world pose is this tick's, the character's included) and
+before the physics record: position = pivot + `(cos p·sin y, sin p,
+cos p·cos y)`·distance, rotation = `Ry(yaw)·Rx(−pitch)`, written to the
+rig's local transform through its parent (`fynkel_scene::set_world_pose`)
+— a rig with a parent still orbits in world space. No smoothing or lag
+(gap: item 14). `fynkel validate` checks the values (`FYN-H0007`), the
+tick rejects a bad `set` with `INVALID_PAYLOAD` 13.
+
 ## Contacts
 
 The step's events go on the physics lane and reach behaviours the same
@@ -167,10 +276,12 @@ Wire: `fynkel.rec.PhysicsQuery` (88 B) in a `PHYSICS_QUERIES` buffer
 ## Hosts
 
 `fynkel test --headless` prints `physics: N bodies, N colliders (N mesh),
-collisions N enter / N stay / N exit, triggers N enter / N exit` and the
-JSON report gains `physics: { bodies, colliders, mesh_colliders,
-collision_enter, collision_stay, collision_exit, trigger_enter,
-trigger_exit, diagnostics }` when anything stepped. The fixture project's
+N characters, collisions N enter / N stay / N exit, triggers N enter / N
+exit` and the JSON report gains `physics: { bodies, colliders,
+mesh_colliders, characters, collision_enter, collision_stay,
+collision_exit, trigger_enter, trigger_exit, diagnostics }` when anything
+stepped (a character's kinematic capsule counts among the bodies and
+colliders too). The fixture project's
 Crate B falls onto its Floor and sleeps (a test); the starter's crate
 does the same under `flutter test`, pushed by the kinematic cube the
 Mover walks. `Physics::debug_lines` outlines every collider for a host's
@@ -189,7 +300,9 @@ changed.
 
 ## Not in V1
 
-One collider per entity (compound shapes by child entities); no joints,
-no character controller (item 9, on Rapier's kinematic controller); mesh
-colliders are static; no Android/web-specific notes — the adapter is
+One collider per entity (compound shapes by child entities); no joints;
+the character controller has no crouch, no moving-platform carry and no
+depenetration at rest (a platform pushed into a standing character
+tunnels — walk, and the casts handle it); the camera rig has no smoothing;
+mesh colliders are static; no Android/web-specific notes — the adapter is
 pure Rust and runs wherever the core does.

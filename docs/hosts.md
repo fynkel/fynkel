@@ -93,10 +93,15 @@ Physics (M3-08, [physics.md](physics.md)): the host applies the project's
 `physics.gravity`, registers the scene's mesh colliders from the cache
 (`Assets::register_mesh_colliders`) and counts the events of every tick;
 when anything stepped, the report gains `physics: { bodies, colliders,
-mesh_colliders, collision_enter, collision_stay, collision_exit,
-trigger_enter, trigger_exit, diagnostics }` and the text mode prints
-`physics: 2 bodies, 3 colliders (0 mesh), collisions 1 enter / 0 stay / 0
-exit, triggers 0 enter / 0 exit`. The checksum covers the bodies' final
+mesh_colliders, characters, collision_enter, collision_stay,
+collision_exit, trigger_enter, trigger_exit, diagnostics }` and the text
+mode prints `physics: 2 bodies, 3 colliders (0 mesh), 0 characters,
+collisions 1 enter / 0 stay / 0 exit, triggers 0 enter / 0 exit`. The
+fixture project's second scene, Playground (`--scene
+c0000000-0000-4000-8000-000000000031 --input test/platform.input.json`,
+M3-09), walks its `fynkel.CharacterController` Player onto a platform
+from the recording with the `fynkel.ThirdPersonCamera` rig behind it —
+the item 9 gate, a headless test with a stable checksum. The checksum covers the bodies' final
 poses, so a physics regression changes it; the fixture project's Crate B
 landing on its Floor and sleeping is a test of the crate. Read-side:
 
@@ -229,6 +234,11 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `FYNKEL_COMMAND_BODY` (8: `BodyCommandRecord { entity, op, vector,
   rotation }`, simulation lane only, applied by the tick's physics step),
   `bodyState()` is `FYNKEL_QUERY_BODY` (7: one `BodyStateRecord`),
+  `move(v)`/`jump([speed])` the `Move`/`Jump` body ops (a `Jump` carries
+  its speed in `vector.y`) and `characterState()` is
+  `FYNKEL_QUERY_CHARACTER` (9: one `CharacterStateRecord { entity,
+  grounded, sliding, velocity }`) (M3-09; component ids 12
+  `CharacterController` and 13 `ThirdPersonCamera` in the header),
   `raycast`/`raycastAll`/`shapeCast`/`overlap`/`physicsQuery` send a
   `FYNKEL_BUFFER_PHYSICS_QUERIES` (8) batch of `PhysicsQueryRecord`s to
   `fynkel_world_physics_query(world, buffer, len, &view)` and read the

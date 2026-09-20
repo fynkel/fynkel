@@ -7,7 +7,7 @@
 //! candela (point, spot), luminance in nits (sky); exposure in EV100.
 
 use fynkel_contracts::{AssetRef, ComponentId};
-use fynkel_physics::{Collider, RigidBody};
+use fynkel_physics::{CharacterController, Collider, RigidBody};
 use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
 use glam::Vec3;
@@ -304,6 +304,119 @@ mod tests {
     }
 }
 
+/// A camera rig that orbits a target (blueprint §19.2d item 9: `Follow`
+/// specialised for the third person). Every tick, after physics, the
+/// entity is placed `distance` metres from the target's world position +
+/// `pivot` at `yaw`/`pitch` (radians; yaw 0 is behind the target on +Z,
+/// pitch positive above it looking down) and turned to look at the pivot;
+/// with a `look_action` named, that 2D action turns the rig at
+/// `sensitivity` radians per second per unit of input (x turns the view
+/// right, y up) between `min_pitch` and `max_pitch`; `yaw`/`pitch` are
+/// written back so gameplay reads (and may set) them. With
+/// `collision_radius > 0` a sphere of that radius is cast from the pivot
+/// towards the rig against `mask` (the target's own colliders excluded)
+/// and the rig pulls in to the hit, never closer than `min_distance`.
+/// The target is named (`fynkel.Name`, the first match in entity order);
+/// an empty or unknown name leaves the entity where it is.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 13, name = "fynkel.ThirdPersonCamera")]
+pub struct ThirdPersonCamera {
+    /// The followed entity's name; empty follows nothing.
+    pub target: String,
+    /// Offset from the target's world position the rig looks at and
+    /// orbits, metres.
+    pub pivot: Vec3,
+    /// Orbit radius, metres, `> 0`.
+    pub distance: f32,
+    /// Closest the pull-in brings the rig, metres, `0..=distance`.
+    pub min_distance: f32,
+    /// Orbit yaw, radians (state).
+    pub yaw: f32,
+    /// Orbit elevation, radians (state), kept in `min_pitch..=max_pitch`.
+    pub pitch: f32,
+    pub min_pitch: f32,
+    pub max_pitch: f32,
+    /// A 2D action that turns the rig; empty leaves yaw/pitch to gameplay.
+    pub look_action: String,
+    /// Radians per second per unit of `look_action` input.
+    pub sensitivity: f32,
+    /// Radius of the pull-in sphere cast, metres (`0` disables).
+    pub collision_radius: f32,
+    /// Layers the pull-in cast hits.
+    pub mask: u32,
+}
+
+impl Default for ThirdPersonCamera {
+    fn default() -> Self {
+        Self {
+            target: String::new(),
+            pivot: Vec3::new(0.0, 1.5, 0.0),
+            distance: 5.0,
+            min_distance: 0.5,
+            yaw: 0.0,
+            pitch: 0.35,
+            min_pitch: -0.5,
+            max_pitch: 1.3,
+            look_action: String::new(),
+            sensitivity: 2.5,
+            collision_radius: 0.2,
+            mask: u32::MAX,
+        }
+    }
+}
+
+impl ThirdPersonCamera {
+    /// Value rules the schema cannot express (the `INVALID_PAYLOAD` text).
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.pivot.is_finite() {
+            return Err("pivot must be finite".into());
+        }
+        if !self.distance.is_finite() || self.distance <= 0.0 {
+            return Err(format!(
+                "distance must be finite and > 0, got {}",
+                self.distance
+            ));
+        }
+        if !self.min_distance.is_finite()
+            || self.min_distance < 0.0
+            || self.min_distance > self.distance
+        {
+            return Err(format!(
+                "min_distance must be in 0..=distance, got {}",
+                self.min_distance
+            ));
+        }
+        if !self.yaw.is_finite() || !self.pitch.is_finite() {
+            return Err("yaw and pitch must be finite".into());
+        }
+        let half = core::f32::consts::FRAC_PI_2;
+        if !self.min_pitch.is_finite()
+            || !self.max_pitch.is_finite()
+            || self.min_pitch <= -half
+            || self.max_pitch >= half
+            || self.min_pitch > self.max_pitch
+        {
+            return Err(format!(
+                "min_pitch..=max_pitch must lie within (-pi/2, pi/2), got {}..={}",
+                self.min_pitch, self.max_pitch
+            ));
+        }
+        if !self.sensitivity.is_finite() || self.sensitivity < 0.0 {
+            return Err(format!(
+                "sensitivity must be finite and >= 0, got {}",
+                self.sensitivity
+            ));
+        }
+        if !self.collision_radius.is_finite() || self.collision_radius < 0.0 {
+            return Err(format!(
+                "collision_radius must be finite and >= 0, got {}",
+                self.collision_radius
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// One typed built-in component value: what a scene document instantiates
 /// and what `Command::SetComponent` carries. `fynkel.Name` is not here —
 /// it mirrors the entity's `name` (`Command::SetName`).
@@ -319,6 +432,9 @@ pub enum ComponentValue {
     /// `fynkel_physics` (M3-08).
     RigidBody(RigidBody),
     Collider(Collider),
+    /// M3-09.
+    CharacterController(CharacterController),
+    ThirdPersonCamera(ThirdPersonCamera),
 }
 
 impl ComponentValue {
@@ -333,6 +449,8 @@ impl ComponentValue {
             ComponentValue::Environment(_) => ComponentId::ENVIRONMENT,
             ComponentValue::RigidBody(_) => ComponentId::RIGID_BODY,
             ComponentValue::Collider(_) => ComponentId::COLLIDER,
+            ComponentValue::CharacterController(_) => ComponentId::CHARACTER_CONTROLLER,
+            ComponentValue::ThirdPersonCamera(_) => ComponentId::THIRD_PERSON_CAMERA,
         }
     }
 
@@ -437,6 +555,8 @@ impl ComponentValue {
             }
             ComponentValue::RigidBody(b) => b.validate()?,
             ComponentValue::Collider(c) => c.validate()?,
+            ComponentValue::CharacterController(c) => c.validate()?,
+            ComponentValue::ThirdPersonCamera(c) => c.validate()?,
         }
         Ok(())
     }

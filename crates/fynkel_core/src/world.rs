@@ -7,17 +7,22 @@ use fynkel_contracts::{
     AssetRef, ComponentId, DiagnosticCode, Entity, Status, Tick, WorldId, DEFAULT_FIXED_DT,
     DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
 };
+use fynkel_ecs::internal::Handle;
 use fynkel_ecs::{EcsError, World as Ecs};
 pub use fynkel_physics::PhysicsOwned;
-use fynkel_physics::{BodyCommand, Collider, Physics, PhysicsEvent, RejectionKind, RigidBody};
+use fynkel_physics::{
+    BodyCommand, CharacterController, Collider, Physics, PhysicsEvent, QueryKind, QuerySpec,
+    RejectionKind, RigidBody,
+};
 use fynkel_scene::{self as scene, Parent, SceneError, Transform, WorldTransform};
 use fynkel_schema_derive::Schema;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
 use crate::components::{
     Camera, ComponentValue, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
+    ThirdPersonCamera,
 };
 use crate::event::{Event, EventPayload, EventQueue};
 use crate::input::{ActionSpec, ActionState, BindingError, Input, InputEvent};
@@ -208,6 +213,23 @@ pub struct World {
     input: Input,
     /// The Rapier adapter (M3-08), stepped at the §5.1 physics slot.
     physics: Physics,
+    /// Camera rig → the entity its `target` name resolved to (M3-09);
+    /// re-resolved when that entity dies or is renamed.
+    rig_targets: HashMap<Entity, Entity>,
+    /// Scratch of the native systems, kept for its capacity.
+    rig_scratch: Vec<RigPlacement>,
+    driver_scratch: Vec<(Entity, BodyCommand)>,
+    hits_scratch: Vec<fynkel_physics::Hit>,
+}
+
+/// One camera rig's tick, computed while the ECS is borrowed for reading
+/// and applied afterwards.
+struct RigPlacement {
+    rig: Entity,
+    yaw: f32,
+    pitch: f32,
+    position: Vec3,
+    rotation: Quat,
 }
 
 impl World {
@@ -234,6 +256,10 @@ impl World {
             poisoned: false,
             input: Input::default(),
             physics: Physics::new(),
+            rig_targets: HashMap::new(),
+            rig_scratch: Vec::new(),
+            driver_scratch: Vec::new(),
+            hits_scratch: Vec::new(),
         }
     }
 
@@ -733,6 +759,12 @@ impl World {
                     ComponentId::ENVIRONMENT => self.ecs.remove::<Environment>(entity).is_ok(),
                     ComponentId::RIGID_BODY => self.ecs.remove::<RigidBody>(entity).is_ok(),
                     ComponentId::COLLIDER => self.ecs.remove::<Collider>(entity).is_ok(),
+                    ComponentId::CHARACTER_CONTROLLER => {
+                        self.ecs.remove::<CharacterController>(entity).is_ok()
+                    }
+                    ComponentId::THIRD_PERSON_CAMERA => {
+                        self.ecs.remove::<ThirdPersonCamera>(entity).is_ok()
+                    }
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -814,6 +846,8 @@ impl World {
             ComponentValue::Environment(v) => self.ecs.insert(entity, v),
             ComponentValue::RigidBody(v) => self.ecs.insert(entity, v),
             ComponentValue::Collider(v) => self.ecs.insert(entity, v),
+            ComponentValue::CharacterController(v) => self.ecs.insert(entity, v),
+            ComponentValue::ThirdPersonCamera(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -869,6 +903,11 @@ impl World {
         self.diagnostics.clear();
         self.events.begin_tick();
         let next_tick = self.clock.tick() + 1;
+        // Native pre-tick systems read the tick's input first (the
+        // characters' action driver, M3-09): its commands are queued ahead
+        // of the batch's, so an explicit `Move`/`Jump` from the game in the
+        // same tick wins.
+        self.drive_characters();
         // This tick consumed the pending edges (§5.1); catch-up ticks in
         // the same frame see held state only.
         self.input.end_tick();
@@ -912,9 +951,9 @@ impl World {
             }
         }
 
-        // Native pre-tick systems (none yet), then physics at the §5.1 slot:
-        // bodies see the batch's transforms, step, and write their poses
-        // back before the tick's own propagate.
+        // Physics at the §5.1 slot: bodies see the batch's transforms,
+        // step, and write their poses back before the tick's own
+        // propagate.
         if self.physics.has_work(&self.ecs) {
             scene::propagate(&mut self.ecs);
             self.physics
@@ -935,6 +974,11 @@ impl World {
         // Transform/hierarchy work for the tick; new entities start with
         // PrevWorld == current so they do not interpolate from the origin.
         scene::propagate(&mut self.ecs);
+        // Camera rigs follow the tick's final poses (a rig's own subtree
+        // is the only thing left dirty, so the second propagate is cheap).
+        if self.place_camera_rigs() {
+            scene::propagate(&mut self.ecs);
+        }
         self.physics.record(&self.ecs);
         self.seed_prev_world();
         self.apply_teleports();
@@ -997,6 +1041,10 @@ impl World {
                 RejectionKind::MissingBody => {
                     (DiagnosticCode::MISSING_COMPONENT, ComponentId::RIGID_BODY)
                 }
+                RejectionKind::NotFinite if self.physics.character_state(r.entity).is_some() => (
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    ComponentId::CHARACTER_CONTROLLER,
+                ),
                 RejectionKind::NotDynamic
                 | RejectionKind::NotKinematic
                 | RejectionKind::NotFinite => {
@@ -1008,6 +1056,14 @@ impl World {
                 RejectionKind::MeshUnavailable => {
                     (DiagnosticCode::MESH_UNAVAILABLE, ComponentId::COLLIDER)
                 }
+                RejectionKind::MissingCharacter => (
+                    DiagnosticCode::MISSING_COMPONENT,
+                    ComponentId::CHARACTER_CONTROLLER,
+                ),
+                RejectionKind::CharacterWithBody => (
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    ComponentId::CHARACTER_CONTROLLER,
+                ),
             };
             if r.index != u32::MAX {
                 count += 1;
@@ -1022,6 +1078,166 @@ impl World {
             });
         }
         count
+    }
+
+    /// The characters' action driver (M3-09, the pre-tick slot): every
+    /// `CharacterController` naming a `move_action` walks at its `speed`
+    /// along that 2D action, relative to the camera rig targeting it (x
+    /// right, y forward) or the world axes without one; a `jump_action`
+    /// press jumps when grounded (the edge is consumed by this tick, §5.1).
+    /// Queued like body commands, outside any batch (`u32::MAX`).
+    fn drive_characters(&mut self) {
+        let mut cmds = std::mem::take(&mut self.driver_scratch);
+        cmds.clear();
+        {
+            let h = self.ecs.hecs();
+            for (handle, c) in h.query::<(&Handle, &CharacterController)>().iter() {
+                if c.move_action.is_empty() && c.jump_action.is_empty() {
+                    continue;
+                }
+                let entity = handle.0;
+                if !c.move_action.is_empty() {
+                    if let Some(a) = self.input.action(&c.move_action) {
+                        let mut v = glam::Vec2::new(a.x, a.y);
+                        if !v.is_finite() {
+                            v = glam::Vec2::ZERO;
+                        }
+                        if v.length_squared() > 1.0 {
+                            v = v.normalize();
+                        }
+                        // The rig that targets this entity gives the frame.
+                        let yaw = self
+                            .ecs
+                            .get::<Name>(entity)
+                            .ok()
+                            .and_then(|name| {
+                                h.query::<&ThirdPersonCamera>()
+                                    .iter()
+                                    .find(|r| !r.target.is_empty() && r.target == name.value)
+                                    .map(|r| r.yaw)
+                            })
+                            .unwrap_or(0.0);
+                        let (sin, cos) = yaw.sin_cos();
+                        let forward = Vec3::new(-sin, 0.0, -cos);
+                        let right = Vec3::new(cos, 0.0, -sin);
+                        let velocity = (right * v.x + forward * v.y) * c.speed;
+                        cmds.push((entity, BodyCommand::Move(velocity)));
+                    }
+                }
+                if !c.jump_action.is_empty()
+                    && self.input.action(&c.jump_action).is_some_and(|a| a.pressed)
+                    && self
+                        .physics
+                        .character_state(entity)
+                        .is_some_and(|s| s.grounded)
+                {
+                    cmds.push((entity, BodyCommand::Jump(0.0)));
+                }
+            }
+        }
+        for (entity, cmd) in cmds.drain(..) {
+            self.physics.queue(u32::MAX, entity, cmd);
+        }
+        self.driver_scratch = cmds;
+    }
+
+    /// The camera rigs (M3-09), after the tick's propagate: each
+    /// `ThirdPersonCamera` turns by its `look_action`, orbits its target's
+    /// pivot at `distance` (pulled in to the first collider a sphere cast
+    /// from the pivot meets, never under `min_distance`) and looks at it;
+    /// yaw/pitch are written back. Returns whether any rig moved.
+    fn place_camera_rigs(&mut self) -> bool {
+        let mut placements = std::mem::take(&mut self.rig_scratch);
+        placements.clear();
+        let dt = self.config.fixed_dt;
+        {
+            let h = self.ecs.hecs();
+            for (handle, rig) in h.query::<(&Handle, &ThirdPersonCamera)>().iter() {
+                let entity = handle.0;
+                if rig.target.is_empty() {
+                    continue;
+                }
+                // The cached target holds while it lives under that name.
+                let cached = self.rig_targets.get(&entity).copied().filter(|t| {
+                    self.ecs
+                        .get::<Name>(*t)
+                        .is_ok_and(|n| n.value == rig.target)
+                });
+                let target = cached.or_else(|| {
+                    h.query::<(&Handle, &Name)>()
+                        .iter()
+                        .filter(|(_, n)| n.value == rig.target)
+                        .map(|(h, _)| h.0)
+                        .min()
+                });
+                let Some(target) = target else {
+                    continue;
+                };
+                let Ok(target_world) = self.ecs.get::<WorldTransform>(target) else {
+                    continue;
+                };
+                let mut yaw = rig.yaw;
+                let mut pitch = rig.pitch;
+                if !rig.look_action.is_empty() {
+                    if let Some(a) = self.input.action(&rig.look_action) {
+                        if a.x.is_finite() && a.y.is_finite() {
+                            yaw -= a.x * rig.sensitivity * dt;
+                            pitch -= a.y * rig.sensitivity * dt;
+                        }
+                    }
+                }
+                yaw = yaw.rem_euclid(core::f32::consts::TAU);
+                if yaw > core::f32::consts::PI {
+                    yaw -= core::f32::consts::TAU;
+                }
+                pitch = pitch.clamp(rig.min_pitch, rig.max_pitch);
+                let pivot = target_world.matrix.transform_point3(rig.pivot);
+                let (sy, cy) = yaw.sin_cos();
+                let (sp, cp) = pitch.sin_cos();
+                let dir = Vec3::new(cp * sy, sp, cp * cy);
+                let mut distance = rig.distance;
+                if rig.collision_radius > 0.0 {
+                    self.hits_scratch.clear();
+                    self.physics.query(
+                        &QuerySpec {
+                            kind: QueryKind::ShapeCast,
+                            shape: fynkel_physics::ColliderShape::Sphere,
+                            size: Vec3::new(rig.collision_radius, 0.0, 0.0),
+                            origin: pivot,
+                            rotation: Quat::IDENTITY,
+                            direction: dir,
+                            max_distance: rig.distance,
+                            mask: rig.mask,
+                            exclude: Some(target),
+                            max_hits: 1,
+                            hit_sensors: false,
+                        },
+                        &mut self.hits_scratch,
+                    );
+                    if let Some(hit) = self.hits_scratch.first() {
+                        distance = hit.distance.clamp(rig.min_distance, rig.distance);
+                    }
+                }
+                placements.push(RigPlacement {
+                    rig: entity,
+                    yaw,
+                    pitch,
+                    position: pivot + dir * distance,
+                    rotation: Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch),
+                });
+                self.rig_targets.insert(entity, target);
+            }
+        }
+        let moved = !placements.is_empty();
+        for p in placements.drain(..) {
+            if let Ok(mut rig) = self.ecs.get_mut::<ThirdPersonCamera>(p.rig) {
+                rig.yaw = p.yaw;
+                rig.pitch = p.pitch;
+            }
+            let _ = scene::set_world_pose(&self.ecs, p.rig, p.position, p.rotation);
+        }
+        self.rig_scratch = placements;
+        moved
     }
 
     /// The step's contacts on the physics lane (readable by
