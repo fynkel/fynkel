@@ -138,6 +138,46 @@ impl Writer {
         self.count += 1;
     }
 
+    /// Appends a command whose body is already encoded (a `SetComponent`:
+    /// header record + component bytes) with the strings it referenced.
+    pub fn raw_command(&mut self, kind: u32, body: &[u8], strings: StringTable) {
+        debug_assert!(
+            self.strings.as_bytes().is_empty(),
+            "raw_command: the batch's tail must be empty (one composite per batch)"
+        );
+        self.strings = strings;
+        let start = self.bytes.len();
+        self.bytes
+            .resize(start + fynkel_core::schema::CommandHeader::SIZE, 0);
+        fynkel_core::schema::CommandHeader {
+            kind,
+            size: body.len() as u32,
+        }
+        .encode(&mut self.bytes[start..], &mut StringTable::new());
+        self.bytes.extend_from_slice(body);
+        self.count += 1;
+    }
+
+    /// Appends a framed component: `ComponentHeader` + body, counted as
+    /// one record (`QUERY_COMPONENTS`).
+    pub fn component<T: WireRecord>(&mut self, component: u32, body: &T) {
+        let start = self.bytes.len();
+        self.bytes.resize(
+            start + fynkel_core::schema::ComponentHeader::SIZE + T::SIZE,
+            0,
+        );
+        fynkel_core::schema::ComponentHeader {
+            component,
+            size: T::SIZE as u32,
+        }
+        .encode(&mut self.bytes[start..], &mut self.strings);
+        body.encode(
+            &mut self.bytes[start + fynkel_core::schema::ComponentHeader::SIZE..],
+            &mut self.strings,
+        );
+        self.count += 1;
+    }
+
     /// Appends raw record bytes already encoded (e.g. a `u64` handle list).
     pub fn raw(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);

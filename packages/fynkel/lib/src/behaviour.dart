@@ -109,6 +109,14 @@ abstract class Behaviour {
 
   TransformRef get transform => gameObject.transform;
 
+  /// The object's native components (M3-07a): `get<MeshRenderer>()`,
+  /// `set(light.copyWith(intensity: 0))`, `has<Camera>()`,
+  /// `remove<SpotLight>()`. See [GameObject.get].
+  T? get<T extends WireRecord>() => gameObject.get<T>();
+  bool has<T extends WireRecord>() => gameObject.has<T>();
+  void set<T extends WireRecord>(T value) => gameObject.set(value);
+  void remove<T extends WireRecord>() => gameObject.remove<T>();
+
   /// Desired state. Setting it queues `onEnable`/`onDisable` for the next
   /// safe boundary; [isActive] says what the driver has applied.
   bool get enabled => _enabled;

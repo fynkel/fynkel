@@ -7,15 +7,19 @@ export 'generated/schema.g.dart'
     show
         AlphaMode,
         Camera,
+        ComponentCodec,
         DirectionalLight,
         Environment,
         ExposureMode,
         MeshRenderer,
+        Name,
         PbrMaterial,
         PointLight,
         Projection,
         SnapshotTransformRecord,
-        SpotLight;
+        SpotLight,
+        componentCodecs,
+        componentIds;
 export 'src/asset_ref.dart';
 export 'src/context.dart';
 export 'math.dart';
@@ -27,4 +31,5 @@ export 'src/transform_writer.dart';
 export 'src/native/bridge.dart'
     show BridgeStats, CommandLane, FramePlan, NativeLibrary, NativeWorld, QueryKind, StepResult, SubmitResult;
 export 'src/wire/buffers.dart' show CommandBatch, RecordBatch, WireBuffer;
+export 'src/wire/support.dart' show WireRecord;
 export 'src/world.dart';

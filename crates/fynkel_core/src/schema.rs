@@ -28,6 +28,8 @@ pub enum CommandKind {
     SetTransform = 3,
     SetParent = 4,
     SetName = 5,
+    SetComponent = 6,
+    RemoveComponent = 7,
 }
 
 impl CommandKind {
@@ -38,6 +40,8 @@ impl CommandKind {
             3 => Self::SetTransform,
             4 => Self::SetParent,
             5 => Self::SetName,
+            6 => Self::SetComponent,
+            7 => Self::RemoveComponent,
             _ => return None,
         })
     }
@@ -83,6 +87,29 @@ pub struct SetParentCommand {
 pub struct SetNameCommand {
     pub entity: Entity,
     pub name: String,
+}
+
+/// Inserts or replaces one native component (M3-07a): the body is this
+/// record followed by the component's own wire bytes (`component` is its
+/// `ComponentId`; strings in the batch tail), so one command kind carries
+/// every component `ComponentValue` knows. `fynkel.Transform` here is a
+/// `SetTransform`; `fynkel.Name` is not a value (`SetName`).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 6, name = "fynkel.cmd.SetComponent")]
+pub struct SetComponentCommand {
+    pub entity: Entity,
+    /// `ComponentId`.
+    pub component: u32,
+}
+
+/// Removes one native component; `Transform`, the hierarchy and `Name`
+/// cannot be removed (`INVALID_PAYLOAD`).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 7, name = "fynkel.cmd.RemoveComponent")]
+pub struct RemoveComponentCommand {
+    pub entity: Entity,
+    /// `ComponentId`.
+    pub component: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Schema)]
@@ -155,6 +182,17 @@ pub struct DiagnosticRecord {
 #[schema(kind = "record", name = "fynkel.rec.CommandHeader")]
 pub struct CommandHeader {
     pub kind: u32,
+    /// Body bytes following this header.
+    pub size: u32,
+}
+
+/// Component envelope in a `FYNKEL_QUERY_COMPONENTS` response: one per
+/// native component the entity has, `component` its `ComponentId`, `size`
+/// the body bytes following (the component's wire layout).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.ComponentHeader")]
+pub struct ComponentHeader {
+    pub component: u32,
     /// Body bytes following this header.
     pub size: u32,
 }
@@ -233,6 +271,9 @@ pub const ALL: &[&RecordSchema] = &[
     &Environment::SCHEMA,
     &InputEventRecord::SCHEMA,
     &InputActionRecord::SCHEMA,
+    &SetComponentCommand::SCHEMA,
+    &RemoveComponentCommand::SCHEMA,
+    &ComponentHeader::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

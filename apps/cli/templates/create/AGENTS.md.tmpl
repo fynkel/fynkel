@@ -163,6 +163,28 @@ class PlayerController extends Behaviour {
 - After adding/changing a behaviour class or an `@Expose` field: `fynkel codegen --project .`, then commit `lib/generated/` and `schemas/behaviours/`. Register a new type in `fynkel.project.json` → `components` too (`"game.X": { "kind": "behaviour", "version": 1 }`).
 - A scene component of a type that is not registered at runtime loads with warning `FYN-B0001`; data a field rejects is `FYN-B0002`. Neither stops the scene.
 
+## Native components from a behaviour
+
+A behaviour reaches every native component on its object — the same
+classes the scene authors, as immutable values with `copyWith`:
+
+```dart
+final mesh = get<MeshRenderer>()!;                 // null when the object has none
+set(mesh.copyWith(visible: false));                // a command at the next tick; reads back now
+if (!has<PointLight>()) set(const PointLight(color: Vec3(1, .5, .2), intensity: 800, range: 12));
+remove<SpotLight>();                               // Transform and Name cannot be removed
+world.spawn(name: 'Twin', transform: t)..add(mesh)..add(light);   // writes wait for the spawn
+```
+
+- `get`/`has`/`set`/`remove` on `Behaviour` forward to `gameObject`; on any
+  `GameObject` there is also `add` (= `set`), `setPresentation` (the
+  presentation lane: applies at once, for `lateUpdate`) and `components`.
+- Reads are the value the last tick left (one query per object per tick)
+  merged with what you set this tick. A value the world rejects (a negative
+  light range) is a diagnostic on the next tick and the read falls back.
+- Not for a loop over thousands of objects every tick; a behaviour on its
+  own object is the intended use.
+
 ## Input (actions, never keys)
 
 `fynkel.project.json` → `inputActions` declares every action a behaviour

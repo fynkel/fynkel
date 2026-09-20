@@ -214,6 +214,12 @@ void main() {
   );
   check('CommandHeader', const CommandHeader(kind: 1, size: 64), CommandHeader.wireSize, CommandHeader.decode,
       (v, d, o, s) => v.encode(d, o, s));
+  check('SetComponentCommand', SetComponentCommand(entity: entity(1, 1), component: 7), SetComponentCommand.wireSize,
+      SetComponentCommand.decode, (v, d, o, s) => v.encode(d, o, s));
+  check('RemoveComponentCommand', RemoveComponentCommand(entity: entity(2, 1), component: 4),
+      RemoveComponentCommand.wireSize, RemoveComponentCommand.decode, (v, d, o, s) => v.encode(d, o, s));
+  check('ComponentHeader', const ComponentHeader(component: 4, size: 56), ComponentHeader.wireSize,
+      ComponentHeader.decode, (v, d, o, s) => v.encode(d, o, s));
   check('EventHeader', const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0), EventHeader.wireSize,
       EventHeader.decode, (v, d, o, s) => v.encode(d, o, s));
 }

@@ -179,6 +179,13 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   buffer, len)` takes a `FYNKEL_BUFFER_INPUT_EVENTS` (6) batch,
   `fynkel_world_input_view(world)` returns the world's
   `FYNKEL_BUFFER_INPUT_ACTIONS` (7) buffer, read in place by `WorldInput`.
+  Native components from Dart (M3-07a): `GameObject.get<T>()`/`set`/
+  `add`/`remove` are `FYNKEL_COMMAND_SET_COMPONENT` (6: the
+  `SetComponentCommand` header then the component's bytes) and
+  `FYNKEL_COMMAND_REMOVE_COMPONENT` (7) on either lane, read back through
+  `FYNKEL_QUERY_COMPONENTS` (6: every native component of an entity, each
+  framed by a `ComponentHeader { component, size }`) — one query per object
+  per tick; `docs/design/dart-sdk.md` §21.2.
 - `FynkelGameView` — the loop: a `Ticker` runs `World.frame(dt, fixedUpdate:)`
   then `controller.render(world)`; dt is clamped (`maxFrameDt`), the clock is
   re-primed when the app resumes and when the viewport attaches (a start-up

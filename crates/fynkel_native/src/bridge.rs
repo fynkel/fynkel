@@ -1,11 +1,11 @@
 //! Translation between the wire buffers and `fynkel_core` values.
 
-use fynkel_contracts::{DiagnosticCode, Entity, EventKind};
+use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, EventKind};
 use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::schema::*;
 use fynkel_core::{Command, Diagnostic, Event, EventPayload, Rejected, SnapshotRecord, World};
 use fynkel_scene::Transform;
-use fynkel_wire::{get_u32, WireRecord};
+use fynkel_wire::{decode_component_value, get_u32, WireRecord};
 
 use crate::buffer::{self, BufferKind, ProtocolError, Writer};
 
@@ -84,6 +84,30 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                 Command::SetName {
                     entity: c.entity,
                     name: c.name,
+                }
+            }
+            // The component's bytes follow the header record; a component
+            // id the wire cannot carry as a value (`Name`, the hierarchy,
+            // an id this build does not know) is an invalid payload.
+            CommandKind::SetComponent => {
+                let c = SetComponentCommand::decode(body, tail).map_err(bad)?;
+                let value = decode_component_value(
+                    c.component,
+                    &body[SetComponentCommand::SIZE.min(body.len())..],
+                    tail,
+                )
+                .ok_or(DiagnosticCode::INVALID_PAYLOAD)?
+                .map_err(bad)?;
+                Command::SetComponent {
+                    entity: c.entity,
+                    value,
+                }
+            }
+            CommandKind::RemoveComponent => {
+                let c = RemoveComponentCommand::decode(body, tail).map_err(bad)?;
+                Command::RemoveComponent {
+                    entity: c.entity,
+                    component: ComponentId(c.component),
                 }
             }
         },
@@ -188,6 +212,7 @@ pub const QUERY_CHILDREN: u32 = 2;
 pub const QUERY_PARENT: u32 = 3;
 pub const QUERY_NAME: u32 = 4;
 pub const QUERY_ALL_ENTITIES: u32 = 5;
+pub const QUERY_COMPONENTS: u32 = 6;
 
 pub fn query(
     world: &World,
@@ -230,6 +255,39 @@ pub fn query(
         QUERY_ALL_ENTITIES => {
             for e in ecs.entities() {
                 w.raw(&e.to_bits().to_le_bytes());
+            }
+        }
+        // Every native component of the entity, each framed by a
+        // `ComponentHeader` (the id and the body's size), id order; an
+        // unknown entity is an empty response. What Dart's
+        // `GameObject.get<T>()` reads (M3-07a).
+        QUERY_COMPONENTS => {
+            use fynkel_core::components::{
+                Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
+            };
+            if let Ok(t) = ecs.get::<Transform>(entity) {
+                w.component(ComponentId::TRANSFORM.0, &*t);
+            }
+            if let Ok(n) = ecs.get::<fynkel_core::Name>(entity) {
+                w.component(ComponentId::NAME.0, &*n);
+            }
+            if let Ok(v) = ecs.get::<MeshRenderer>(entity) {
+                w.component(ComponentId::MESH_RENDERER.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<Camera>(entity) {
+                w.component(ComponentId::CAMERA.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<DirectionalLight>(entity) {
+                w.component(ComponentId::DIRECTIONAL_LIGHT.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<PointLight>(entity) {
+                w.component(ComponentId::POINT_LIGHT.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<SpotLight>(entity) {
+                w.component(ComponentId::SPOT_LIGHT.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<Environment>(entity) {
+                w.component(ComponentId::ENVIRONMENT.0, &*v);
             }
         }
         _ => return None,

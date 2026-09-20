@@ -258,6 +258,27 @@ fn fixtures_match_generated_codecs() {
     );
     check("CommandHeader", &CommandHeader { kind: 1, size: 64 });
     check(
+        "SetComponentCommand",
+        &SetComponentCommand {
+            entity: e(1, 1),
+            component: 7,
+        },
+    );
+    check(
+        "RemoveComponentCommand",
+        &RemoveComponentCommand {
+            entity: e(2, 1),
+            component: 4,
+        },
+    );
+    check(
+        "ComponentHeader",
+        &ComponentHeader {
+            component: 4,
+            size: 56,
+        },
+    );
+    check(
         "EventHeader",
         &EventHeader {
             kind: 1,

@@ -429,7 +429,12 @@ enum FynkelCommandKind {
   FYNKEL_COMMAND_DESTROY(2),
   FYNKEL_COMMAND_SET_TRANSFORM(3),
   FYNKEL_COMMAND_SET_PARENT(4),
-  FYNKEL_COMMAND_SET_NAME(5);
+  FYNKEL_COMMAND_SET_NAME(5),
+
+  /// body: SetComponentCommand { entity, component } then the component's
+  /// own record bytes (size covers both); strings in the batch tail.
+  FYNKEL_COMMAND_SET_COMPONENT(6),
+  FYNKEL_COMMAND_REMOVE_COMPONENT(7);
 
   final int value;
   const FynkelCommandKind(this.value);
@@ -440,6 +445,8 @@ enum FynkelCommandKind {
     3 => FYNKEL_COMMAND_SET_TRANSFORM,
     4 => FYNKEL_COMMAND_SET_PARENT,
     5 => FYNKEL_COMMAND_SET_NAME,
+    6 => FYNKEL_COMMAND_SET_COMPONENT,
+    7 => FYNKEL_COMMAND_REMOVE_COMPONENT,
     _ => throw ArgumentError('Unknown value for FynkelCommandKind: $value'),
   };
 }
@@ -447,7 +454,13 @@ enum FynkelCommandKind {
 enum FynkelComponent {
   FYNKEL_COMPONENT_TRANSFORM(1),
   FYNKEL_COMPONENT_HIERARCHY(2),
-  FYNKEL_COMPONENT_NAME(3);
+  FYNKEL_COMPONENT_NAME(3),
+  FYNKEL_COMPONENT_MESH_RENDERER(4),
+  FYNKEL_COMPONENT_CAMERA(5),
+  FYNKEL_COMPONENT_DIRECTIONAL_LIGHT(6),
+  FYNKEL_COMPONENT_POINT_LIGHT(7),
+  FYNKEL_COMPONENT_SPOT_LIGHT(8),
+  FYNKEL_COMPONENT_ENVIRONMENT(9);
 
   final int value;
   const FynkelComponent(this.value);
@@ -456,6 +469,12 @@ enum FynkelComponent {
     1 => FYNKEL_COMPONENT_TRANSFORM,
     2 => FYNKEL_COMPONENT_HIERARCHY,
     3 => FYNKEL_COMPONENT_NAME,
+    4 => FYNKEL_COMPONENT_MESH_RENDERER,
+    5 => FYNKEL_COMPONENT_CAMERA,
+    6 => FYNKEL_COMPONENT_DIRECTIONAL_LIGHT,
+    7 => FYNKEL_COMPONENT_POINT_LIGHT,
+    8 => FYNKEL_COMPONENT_SPOT_LIGHT,
+    9 => FYNKEL_COMPONENT_ENVIRONMENT,
     _ => throw ArgumentError('Unknown value for FynkelComponent: $value'),
   };
 }
@@ -474,7 +493,12 @@ enum FynkelQueryKind {
   FYNKEL_QUERY_NAME(4),
 
   /// (no entity) -> u64 handles of every live entity, slot order.
-  FYNKEL_QUERY_ALL_ENTITIES(5);
+  FYNKEL_QUERY_ALL_ENTITIES(5),
+
+  /// entity -> one framed record per native component it has, id order:
+  /// a ComponentHeader { component, size } then the component's body
+  /// (0 records if unknown).
+  FYNKEL_QUERY_COMPONENTS(6);
 
   final int value;
   const FynkelQueryKind(this.value);
@@ -485,6 +509,7 @@ enum FynkelQueryKind {
     3 => FYNKEL_QUERY_PARENT,
     4 => FYNKEL_QUERY_NAME,
     5 => FYNKEL_QUERY_ALL_ENTITIES,
+    6 => FYNKEL_QUERY_COMPONENTS,
     _ => throw ArgumentError('Unknown value for FynkelQueryKind: $value'),
   };
 }

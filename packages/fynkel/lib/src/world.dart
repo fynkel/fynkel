@@ -14,6 +14,7 @@ import 'input.dart';
 import 'native/bridge.dart';
 import 'transform_writer.dart';
 import 'wire/buffers.dart';
+import 'wire/support.dart' show WireRecord;
 
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
@@ -208,6 +209,7 @@ class World {
             go._entity = entity;
             _byEntity[entity] = go;
             _toSubscribe.add(entity);
+            go._flushPendingComponents();
             if (go._behaviours.isNotEmpty) _behaviours.objectChanged();
           }
         case EntityDestroyed(:final entity):
@@ -378,6 +380,32 @@ class World {
 
   List<int> allEntities() => _native.query(QueryKind.allEntities).u64s();
 
+  /// Every native component of [entity] as the last step left it (one
+  /// query; `Transform`, `Name` and the renderable components in id order,
+  /// decoded through [gen.componentCodecs]). [GameObject.get] is the
+  /// read-your-writes view over this.
+  List<WireRecord> componentsOf(int entity) {
+    final out = <WireRecord>[];
+    _decodeComponents(_native.query(QueryKind.components, entity: entity), (_, v) => out.add(v));
+    return out;
+  }
+
+  /// Walks a `FYNKEL_QUERY_COMPONENTS` response: a `ComponentHeader` then
+  /// the body per component; a component this build has no codec for is
+  /// skipped by its size.
+  void _decodeComponents(WireBuffer b, void Function(int id, WireRecord value) sink) {
+    final d = b.records;
+    var off = 0;
+    for (var i = 0; i < b.recordCount; i++) {
+      final id = d.getUint32(off, Endian.little);
+      final size = d.getUint32(off + 4, Endian.little);
+      off += gen.ComponentHeader.wireSize;
+      final codec = gen.componentCodecs[id];
+      if (codec != null && codec.wireSize <= size) sink(id, codec.decode(d, off, b.tail));
+      off += size;
+    }
+  }
+
   // ---------------------------------------------------------------- documents
 
   /// Where `fynkel cook` writes a project's cache: `<dir>/.fynkel/cache`.
@@ -489,9 +517,22 @@ class GameObject {
   TransformWriter? _staged;
   bool _stagedValid = false;
 
+  /// Native components as read this tick (one query per object per tick,
+  /// on the first read) merged with this tick's staged writes — `null` is a
+  /// staged removal. Cleared with the transform overlay after every step
+  /// and on a rejection, so the next read sees what the world applied
+  /// (§5.4: reads are the snapshot or the staged state, never a mirror).
+  Map<int, WireRecord?>? _components;
+  bool _componentsQueried = false;
+
+  /// Writes staged before the spawn resolved; sent once it has.
+  List<(gen.ComponentCodec, WireRecord?)>? _pendingComponents;
+
   void _clearOverlay() {
     _overlay = null;
     _stagedValid = false;
+    _components = null;
+    _componentsQueried = false;
   }
 
   /// The staged writer, seeded from the current local value when nothing is
@@ -568,6 +609,130 @@ class GameObject {
 
   List<int> get children => world.childrenOf(this);
   int? get parent => world.parentOf(this);
+
+  // ------------------------------------------------ native components (M3-07a)
+
+  static gen.ComponentCodec _codecOf(Type t) {
+    final id = gen.componentIds[t];
+    if (id == null) throw ArgumentError('$t is not a native component (componentIds lists them)');
+    return gen.componentCodecs[id]!;
+  }
+
+  /// The native component of type [T] (`MeshRenderer`, `PointLight`,
+  /// `Camera`, …, `Transform`, `Name`), or null when the object has none.
+  /// Read-your-writes: a value [set] this tick reads back before the tick
+  /// applies it; otherwise the value the last step left, fetched with one
+  /// query per object per tick. Not for a hot loop over thousands of
+  /// objects — that is what snapshots are for.
+  T? get<T extends WireRecord>() {
+    if (T == Transform) return localTransform as T;
+    return _lookup(_codecOf(T).id) as T?;
+  }
+
+  bool has<T extends WireRecord>() => T == Transform || _lookup(_codecOf(T).id) != null;
+
+  /// Every native component this object has, id order (`Transform` first,
+  /// as [localTransform]), staged writes included.
+  List<WireRecord> get components {
+    if (!_componentsQueried) _queryComponents();
+    final c = _components!;
+    final ids = c.keys.where((id) => c[id] != null).toList()..sort();
+    return [for (final id in ids) id == gen.Transform.componentId ? localTransform : c[id]!];
+  }
+
+  WireRecord? _lookup(int id) {
+    final c = _components ??= {};
+    if (c.containsKey(id)) return c[id];
+    if (!_componentsQueried) {
+      _queryComponents();
+      return c[id];
+    }
+    return null;
+  }
+
+  void _queryComponents() {
+    _componentsQueried = true;
+    final c = _components ??= {};
+    final e = _entity;
+    if (e == null || !_alive) return;
+    world._decodeComponents(world._native.query(QueryKind.components, entity: e), (id, v) {
+      if (!c.containsKey(id)) c[id] = v; // staged writes win
+    });
+  }
+
+  /// Simulation-lane write: inserts or replaces the component at the next
+  /// tick, readable now through [get]. A `Transform` is [setLocalTransform],
+  /// a `Name` renames. On an object not spawned yet the write waits for
+  /// the spawn. A value the world rejects (a negative light range, a
+  /// removed `Transform`) is a diagnostic on the next step and the read
+  /// falls back to what the world has.
+  void set<T extends WireRecord>(T value) => _setComponent(value, presentation: false);
+
+  /// [set] for readability when the component is new.
+  void add<T extends WireRecord>(T value) => set(value);
+
+  /// Presentation-lane write (lateUpdate): plain data applies immediately
+  /// and stays; a `Transform` is [setPresentationTransform].
+  void setPresentation<T extends WireRecord>(T value) => _setComponent(value, presentation: true);
+
+  void _setComponent(WireRecord value, {required bool presentation}) {
+    if (value is Transform) {
+      presentation ? setPresentationTransform(value) : setLocalTransform(value);
+      return;
+    }
+    final codec = _codecOf(value.runtimeType);
+    (_components ??= {})[codec.id] = value;
+    final e = _entity;
+    if (e == null) {
+      if (!_alive) _requireResolved('set');
+      (_pendingComponents ??= []).add((codec, value));
+      return;
+    }
+    _requireResolved('set');
+    final batch = presentation ? world._presentation : world._simulation;
+    if (value is gen.Name) {
+      batch.setName(gen.SetNameCommand(entity: e, name: value.value));
+    } else {
+      batch.setComponent(e, codec, value);
+    }
+    (presentation ? world._presentationTargets : world._simulationTargets).add(this);
+  }
+
+  /// Removes the component of type [T] at the next tick ([has] reads false
+  /// now). `Transform` and `Name` cannot be removed.
+  void remove<T extends WireRecord>() {
+    final codec = _codecOf(T);
+    if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) {
+      throw ArgumentError('${codec.name} cannot be removed');
+    }
+    (_components ??= {})[codec.id] = null;
+    final e = _entity;
+    if (e == null) {
+      if (!_alive) _requireResolved('remove');
+      (_pendingComponents ??= []).add((codec, null));
+      return;
+    }
+    _requireResolved('remove');
+    world._simulation.removeComponent(e, codec.id);
+    world._simulationTargets.add(this);
+  }
+
+  void _flushPendingComponents() {
+    final pending = _pendingComponents;
+    if (pending == null) return;
+    _pendingComponents = null;
+    final e = _entity!;
+    for (final (codec, value) in pending) {
+      if (value == null) {
+        world._simulation.removeComponent(e, codec.id);
+      } else if (value is gen.Name) {
+        world._simulation.setName(gen.SetNameCommand(entity: e, name: value.value));
+      } else {
+        world._simulation.setComponent(e, codec, value);
+      }
+      world._simulationTargets.add(this);
+    }
+  }
 
   /// Current local transform: staged overlay, else last snapshot, else the
   /// spawn value.

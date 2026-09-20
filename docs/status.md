@@ -13,8 +13,8 @@ changes. Numbers come from the gate reports (`m0-architecture-report.md`,
 | `fynkel_contracts` | Shared types: ids, schema metadata, `AssetRef`/`Uuid`, the §14.2 diagnostic record and code namespaces, wire header | **Solid** | unit tests; every other crate builds on it |
 | `fynkel_ecs` + `fynkel_scene` | `hecs` behind a thin facade (ADR-0003); transforms, hierarchy, propagation | **Solid** | unit tests; deterministic checksum in the headless host; `hecs` provably hidden |
 | `fynkel_core` | The world: command batches in, snapshot/events/diagnostics out, fixed §5.1 step order, `load_scene` from a typed description; the input contract (`input.rs`, `docs/input.md`): the binding grammar, actions compiled from `inputActions`, raw events captured per frame, held state every tick and edges consumed by exactly one | **Solid** | 3 000-tick deterministic checksum (step p50 2 µs at 25 entities), 25 tests + the input tests (a press across three catch-up ticks, the zero-tick frame, composition, reset), headless host |
-| `fynkel_wire` + `fynkel_schema_derive` + `fynkel codegen` (a) | Components and document records written once in Rust → JSON Schema (components, `material.schema.json`), Dart codecs, Rust codecs, fingerprint `0x408b089693b6c6b6` | **Solid** — the strongest piece | `codegen --check` in CI; wire fixtures shared by Rust and Dart |
-| `fynkel_native` + `package:fynkel` | C ABI v1, `ffigen` bindings, the Dart SDK: `World`, `GameObject`, allocation-free `TransformWriter`, `loadProject(dir)`/`loadScene(cacheDir, sceneId)` from the cooked cache only → `LoadReport` (scene key, residency), `package:fynkel/testing.dart` (`cookProject`), `Behaviour` with the §3.2 lifecycle driven by `World.frame` at the §5.1 points, `GameContext` services with installable test contexts (`Input` over `TestInput`), `BehaviourRegistry`, `World.frame(dt, input:)` with `WorldInput` read in place, recordings (`InputRecording`, `loadInputRecording`); native-assets build hook | **Solid** | 1 000 entities/tick: 191 µs encode+submit, 169 µs step, 47 µs read; 5.1 KB/frame Dart allocation on the 25-entity scene (0.7–1.2 KB of it SDK), 2 GCs in 3 000 frames; leak tests at the ABI and viewport |
+| `fynkel_wire` + `fynkel_schema_derive` + `fynkel codegen` (a) | Components and document records written once in Rust → JSON Schema (components, `material.schema.json`), Dart codecs (with `copyWith` and the `componentCodecs`/`componentIds` table), Rust codecs (with the `ComponentValue` wire dispatch), fingerprint `0x27ff561a8b4bc084` | **Solid** — the strongest piece | `codegen --check` in CI; wire fixtures shared by Rust and Dart |
+| `fynkel_native` + `package:fynkel` | C ABI v1, `ffigen` bindings, the Dart SDK: `World`, `GameObject`, allocation-free `TransformWriter`, `loadProject(dir)`/`loadScene(cacheDir, sceneId)` from the cooked cache only → `LoadReport` (scene key, residency), `package:fynkel/testing.dart` (`cookProject`), `Behaviour` with the §3.2 lifecycle driven by `World.frame` at the §5.1 points, `GameContext` services with installable test contexts (`Input` over `TestInput`), `BehaviourRegistry`, `World.frame(dt, input:)` with `WorldInput` read in place, recordings (`InputRecording`, `loadInputRecording`); typed native component access — `GameObject.get<T>()`/`has`/`set`/`add`/`setPresentation`/`remove`/`components` (and on `Behaviour`) over `fynkel.cmd.SetComponent`/`RemoveComponent` and `FYNKEL_QUERY_COMPONENTS`, one query per object per tick, read-your-writes, no mirror (M3-07a); native-assets build hook | **Solid** | 1 000 entities/tick: 191 µs encode+submit, 169 µs step, 47 µs read; 5.1 KB/frame Dart allocation on the 25-entity scene (0.7–1.2 KB of it SDK), 2 GCs in 3 000 frames; leak tests at the ABI and viewport |
 | `package:fynkel_generator` + `fynkel codegen` (b) | `build_runner` aggregate builder: `@FynkelBehaviour`/`@Expose` classes → `behaviours.g.dart` (factories, field get/set, `registerBehaviours`), `behaviours.g.json` (Inspector metadata) and `schemas/behaviours/<id>.schema.json`; `fynkel codegen --project [--check]` runs it and splits the schemas | **Solid** | authored `game.Spinner { speed: 2.5 }` → validated → instantiated → rotates (M2 gate); emit tests; `--check` in CI for the example and the starter project; 1 s warm |
 | `fynkel_document` | Strict JSON with spans, envelope, JSON Schema 2020-12, canonical writer that preserves unknown data; scene, prefab, material (formatVersion 2: the `PbrMaterial` fields flat on the document, custom shaders through their manifest), shader, `.meta.json`, project and lock documents; prefab expansion (UUID v5 ids, overrides, nested refused); asset database (scan, resolve, reference check); migrations with diff + `.bak` (`material/1-2/pbr-fields` is the first real step); scene → runtime description (`describe`, project-aware; the cooker's input); whole-project validation; authoring commands and transactions (`Editor`: revision = blake3, 13 §11.1 commands + `unsetField` as reversible edits, conflicts, rollback to the byte, byte-exact undo/redo) | **Solid** | 55 integration tests over fixture corpora with 30 exact code/pointer/line/column expectations; every command undone to the original text; validate/load ≈20–25 µs per entity, linear to 10 000 entities |
 | `fynkel_import` | glTF/GLB, PNG/JPEG, WAV/Ogg Vorbis → deterministic `FYNI` intermediates: meshes in the one 72-byte vertex layout, `fynkel.pbr@1` materials in the model's document form with all five texture slots, RGBA8 textures with a declared colour space (a glTF image used as both colour and data is imported twice), f32 PCM clips, node hierarchy as a prefab; sub-asset ids from the sidecar or derived; external files denied by default; limits | **Solid for static meshes, 8-bit textures and PCM/Vorbis clips** — no skins, morphs, animations, Draco, HDR, FLAC/MP3 | 37 tests; 3 committed expected intermediates; a 2 MiB / 79 k-triangle GLB imports in 16 ms |
@@ -83,6 +83,13 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
   `flutter test` (the cube ends where the arithmetic says) and through
   `fynkel test --headless --input`; the overlay walked and jumped the cube
   on the iOS simulator. (M3-07.)
+- **A behaviour reaches every native component on its object.** `get<
+  MeshRenderer>()`, `set(mesh.copyWith(visible: false))`, `add(const
+  PointLight(…))`, `remove<SpotLight>()` — the same commands the loader
+  uses, validated the same way, read back before the tick applies them;
+  a scratch starter's `Mover` spawned a twin cube with the mesh read off
+  its own object and both rendered, the twin blinking through `visible`.
+  (M3-07a.)
 
 ## 3. What is *not* proven yet (honest list)
 
@@ -202,6 +209,20 @@ green, starter create → validate → headless → render → codegen → analy
 → test clean; 11 shading pixel tests (exposure, point/spot/budget,
 ambient, orthographic, maps, mask, double-sided, emissive, sky) and the
 fixture render with its normal + metallic-roughness maps.
+M3-07a (2026-09-20): fmt/clippy clean, `cargo test --workspace` green
+(the native ABI `component_commands_and_query` test: set/replace/query/
+remove through the wire, the presentation lane, the rejections at the
+tick), both `codegen --check` pipelines up to date (fingerprint
+`0x27ff561a8b4bc084` — two commands and a record; wire fixtures rolled,
+both locks refreshed), Dart suites green (`packages/fynkel`
+`components_test.dart`: typed reads with one query per object per tick,
+a behaviour hiding its mesh and adding a light across ticks, remove/
+rename/rejection fallback, spawn-then-add, the presentation lane, the
+codec table), starter create → validate → headless → `--input` → codegen
+→ analyze → test (its new component test) clean, showcase suite clean; a
+scratch starter whose `Mover.start` spawned a twin cube from Dart built
+for macOS and launched from its bundle: `meshes 2 drawn in 1 draws`, the
+twin blinking every second through `visible` (HUD `1 drawn`/`2 drawn`).
 M3-07 (2026-09-20): fmt/clippy clean, `cargo test --workspace` green
 (core input tests, the native ABI capture/view test, the headless replay
 of the fixture's `test/walk.input.json`, `FYN-P0009` document test), both
@@ -307,5 +328,7 @@ in its own app, play it, or hear it. That is M3, in this order:
    the §5.1 held/edge rules in the core, keyboard/mouse/gamepad/touch
    overlay in the Flutter host, recordings replayed headlessly and in
    `flutter test`; `docs/input.md`.
+   7a (M3-07a): typed native component access from Dart — the one path
+   `RigidBody`/`Collider` will use; `docs/design/dart-sdk.md` §21.2.
 8. **Audio** (D4) and the Tier 1 reference game that exercises input and
    audio — measured with both captures at every step.

@@ -19,9 +19,12 @@ fields that the scene sets; `lib/game/mover.dart` walks the cube with the
 `move` action and hops it on `jump` — WASD and Space, a gamepad's left
 stick and A button, or the touch overlay on a phone, as
 `fynkel.project.json` → `inputActions` binds them (`Input.action2D('move')`,
-`Input.pressed('jump')`; docs/input.md in the engine). After changing an
-exposed field, an id or adding a behaviour class, run `fynkel codegen
---project .` and commit the regenerated `lib/generated/` and
+`Input.pressed('jump')`; docs/input.md in the engine). A behaviour reads
+and writes its object's native components too — `get<MeshRenderer>()`,
+`set(mesh.copyWith(visible: false))`, `add(const PointLight(…))`,
+`remove<SpotLight>()` — and `test/game_test.dart` shows it. After
+changing an exposed field, an id or adding a behaviour class, run `fynkel
+codegen --project .` and commit the regenerated `lib/generated/` and
 `schemas/behaviours/`.
 
 `AGENTS.md` describes the layout, every command and the validate → codegen →

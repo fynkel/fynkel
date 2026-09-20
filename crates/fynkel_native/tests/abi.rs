@@ -377,6 +377,192 @@ fn hierarchy_queries() {
     assert_eq!(h.events()[0].0, EventKind::PARENT_CHANGED.0);
 }
 
+/// A `SetComponent` command: the header record then the value's bytes.
+fn set_component(entity: Entity, value: &fynkel_core::components::ComponentValue) -> Vec<u8> {
+    use fynkel_wire::{component_value_size, encode_component_value, StringTable};
+    let mut w = Writer::begin(Vec::new(), BufferKind::Commands);
+    let mut body = vec![0u8; SetComponentCommand::SIZE + component_value_size(value)];
+    let mut strings = StringTable::new();
+    SetComponentCommand {
+        entity,
+        component: value.id().0,
+    }
+    .encode(&mut body, &mut strings);
+    encode_component_value(value, &mut body[SetComponentCommand::SIZE..], &mut strings);
+    // The writer frames a typed record; hand-frame the composite body.
+    w.raw_command(6, &body, strings);
+    w.finish()
+}
+
+#[test]
+fn component_commands_and_query() {
+    use fynkel_core::components::{ComponentValue, MeshRenderer, PointLight};
+    let h = Host::new();
+    h.submit(Lane::Simulation, &batch![(1, spawn(1, 1.0, None, "lamp"))]);
+    h.step();
+    let lamp = h.spawned()[0];
+
+    // Add a light and a renderer (with strings: the material's sub id).
+    let light = PointLight {
+        color: Vec3::new(1.0, 0.5, 0.25),
+        intensity: 800.0,
+        range: 12.0,
+    };
+    let renderer = MeshRenderer {
+        mesh: fynkel_contracts::AssetRef::with_sub(
+            fynkel_contracts::AssetId::from_bytes([7; 16]),
+            "mesh/0",
+        ),
+        material: fynkel_contracts::AssetRef::new(fynkel_contracts::AssetId::from_bytes([8; 16])),
+        cast_shadows: true,
+        receive_shadows: false,
+        visible: true,
+    };
+    let (s, r) = h.submit(
+        Lane::Simulation,
+        &set_component(lamp, &ComponentValue::PointLight(light)),
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    h.submit(
+        Lane::Simulation,
+        &set_component(lamp, &ComponentValue::MeshRenderer(renderer.clone())),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+
+    // The query frames every component, id order: Transform, Name, then ours.
+    let (s, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, lamp);
+    assert_eq!((s, n), (Status::Ok, 4));
+    let mut off = 0;
+    let mut seen = Vec::new();
+    for _ in 0..n {
+        let hdr = ComponentHeader::decode(&body[off..], &tail).unwrap();
+        off += ComponentHeader::SIZE;
+        let value = fynkel_wire::decode_component_value(
+            hdr.component,
+            &body[off..off + hdr.size as usize],
+            &tail,
+        );
+        seen.push((hdr.component, value.map(|v| v.unwrap())));
+        off += hdr.size as usize;
+    }
+    assert_eq!(seen[0].0, 1);
+    assert_eq!(seen[1].0, 3, "Name is framed too (no ComponentValue)");
+    assert!(seen[1].1.is_none());
+    assert_eq!(seen[2].1, Some(ComponentValue::MeshRenderer(renderer)));
+    assert_eq!(seen[3].1, Some(ComponentValue::PointLight(light)));
+
+    // Replace on the presentation lane (plain data applies immediately),
+    // remove on the simulation lane, and the rejections.
+    let dim = PointLight {
+        intensity: 1.0,
+        ..light
+    };
+    let (s, r) = h.submit(
+        Lane::Presentation,
+        &set_component(lamp, &ComponentValue::PointLight(dim)),
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let (_, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, lamp);
+    assert_eq!(n, 4);
+    let last = ComponentHeader::decode(
+        &body[body.len() - ComponentHeader::SIZE - PointLight::SIZE..],
+        &tail,
+    )
+    .unwrap();
+    assert_eq!(last.component, 7);
+    assert_eq!(
+        PointLight::decode(&body[body.len() - PointLight::SIZE..], &tail).unwrap(),
+        dim
+    );
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (
+                7,
+                RemoveComponentCommand {
+                    entity: lamp,
+                    component: 4
+                }
+            ),
+            (
+                7,
+                RemoveComponentCommand {
+                    entity: lamp,
+                    component: 1
+                }
+            ),
+            (
+                7,
+                RemoveComponentCommand {
+                    entity: lamp,
+                    component: 4
+                }
+            ),
+        ],
+    );
+    let (_, r) = h.step();
+    assert_eq!(
+        r.commands_rejected, 2,
+        "Transform cannot be removed; the renderer is already gone"
+    );
+    let d = h.diagnostics();
+    assert_eq!(d[0].code, DiagnosticCode::INVALID_PAYLOAD.0);
+    assert_eq!(d[0].component, 1);
+    assert_eq!(d[1].code, DiagnosticCode::MISSING_COMPONENT.0);
+    let (_, n, _, _) = h.query(bridge::QUERY_COMPONENTS, lamp);
+    assert_eq!(n, 3);
+
+    // A value that fails validation, a component id the wire cannot carry
+    // as a value, a truncated body: rejected at the batch index, the rest
+    // still applies.
+    let bad = PointLight {
+        range: -1.0,
+        ..light
+    };
+    let (s, r) = h.submit(
+        Lane::Simulation,
+        &set_component(lamp, &ComponentValue::PointLight(bad)),
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0), "validated at the tick");
+    let mut name_as_value = Writer::begin(Vec::new(), BufferKind::Commands);
+    name_as_value.command(
+        6,
+        &SetComponentCommand {
+            entity: lamp,
+            component: 3,
+        },
+    );
+    let (s, r) = h.submit(Lane::Simulation, &name_as_value.finish());
+    assert_eq!(
+        (s, r.rejected),
+        (Status::Ok, 0),
+        "a bad body is rejected at the tick, with the batch's others"
+    );
+    let mut short = Writer::begin(Vec::new(), BufferKind::Commands);
+    short.command(
+        6,
+        &SetComponentCommand {
+            entity: lamp,
+            component: 7,
+        },
+    );
+    let (s, r) = h.submit(Lane::Simulation, &short.finish());
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 3);
+    let d = h.diagnostics();
+    assert!(
+        d.iter()
+            .all(|d| d.code == DiagnosticCode::INVALID_PAYLOAD.0),
+        "{d:?}"
+    );
+    assert!(d[0].message.contains("range"), "{}", d[0].message);
+    assert_eq!(d[1].component, 0, "undecodable: no component known");
+    let (_, n, _, _) = h.query(bridge::QUERY_COMPONENTS, Entity::NULL);
+    assert_eq!(n, 0);
+}
+
 #[test]
 fn protocol_errors_apply_nothing() {
     let h = Host::new();

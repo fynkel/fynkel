@@ -168,6 +168,22 @@ class CommandBatch {
   void setParent(SetParentCommand c) => command(SetParentCommand.commandKind, SetParentCommand.wireSize, c);
   void setName(SetNameCommand c) => command(SetNameCommand.commandKind, SetNameCommand.wireSize, c);
 
+  /// Inserts or replaces a native component (M3-07a): the
+  /// `SetComponentCommand` header then the component's own bytes, one
+  /// command; [codec] is the component's entry in `componentCodecs`.
+  void setComponent(int entity, ComponentCodec codec, WireRecord value) {
+    final o = _begin(SetComponentCommand.commandKind, SetComponentCommand.wireSize + codec.wireSize);
+    _bytes.setUint64(o, entity, Endian.little);
+    _bytes.setUint32(o + 8, codec.id, Endian.little);
+    value.encode(_bytes, o + SetComponentCommand.wireSize, _strings);
+  }
+
+  void removeComponent(int entity, int componentId) {
+    final o = _begin(RemoveComponentCommand.commandKind, RemoveComponentCommand.wireSize);
+    _bytes.setUint64(o, entity, Endian.little);
+    _bytes.setUint32(o + 8, componentId, Endian.little);
+  }
+
   /// Finalizes header and tail; returns a view (valid until [clear]).
   Uint8List encoded() => Uint8List.sublistView(_view, 0, finalize());
 

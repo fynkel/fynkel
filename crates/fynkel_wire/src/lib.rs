@@ -10,7 +10,9 @@
 pub mod generated;
 pub mod material;
 
-pub use generated::SCHEMA_FINGERPRINT;
+pub use generated::{
+    component_value_size, decode_component_value, encode_component_value, SCHEMA_FINGERPRINT,
+};
 
 use fynkel_contracts::schema::HasEnumSchema;
 use fynkel_contracts::{AssetId, AssetRef, Entity};

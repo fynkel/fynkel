@@ -8,6 +8,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:{{package}}/game/game.dart';
 import 'package:{{package}}/game/mover.dart';
@@ -64,5 +65,38 @@ void main() {
     expect(mover.airTime, isNull);
     expect(end.y, closeTo(start.y, 1e-6), reason: 'landed');
     expect(game.world.input.held('move'), isFalse, reason: 'the reset released everything');
+  });
+
+  test('native components are typed from Dart: read, change, add, remove', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    game.frame(1 / 60);
+    final cube = game.world.behaviours.whereType<Mover>().single.gameObject;
+    final sun = game.world.attach(game.world.allEntities().firstWhere((e) => game.world.nameOfEntity(e) == 'Sun'));
+
+    // Read what the scene authored, typed.
+    final mesh = cube.get<MeshRenderer>()!;
+    expect(mesh.visible, isTrue);
+    expect(cube.has<Camera>(), isFalse);
+    expect(sun.get<DirectionalLight>()!.intensity, greaterThan(0));
+
+    // Change a value: a command at the next tick, readable now.
+    cube.set(mesh.copyWith(visible: false));
+    expect(cube.get<MeshRenderer>()!.visible, isFalse);
+    sun.set(sun.get<DirectionalLight>()!.copyWith(intensity: 0));
+    game.frame(1 / 60);
+    expect(game.world.componentsOf(cube.entity).whereType<MeshRenderer>().single.visible, isFalse);
+    expect(game.world.componentsOf(sun.entity).whereType<DirectionalLight>().single.intensity, 0);
+
+    // A second cube spawned from Dart with the same mesh and material, and
+    // a light on it; the sun's light removed.
+    final twin = game.world.spawn(name: 'Twin', transform: cube.localTransform.copyWith(position: const Vec3(2, 0, 0)))
+      ..add(mesh)
+      ..add(const PointLight(color: Vec3(1, 0.6, 0.2), intensity: 400, range: 8));
+    sun.remove<DirectionalLight>();
+    game.frame(1 / 60); // spawns
+    game.frame(1 / 60); // applies the twin's components
+    expect(game.world.componentsOf(twin.entity).map((c) => c.runtimeType), [Transform, Name, MeshRenderer, PointLight]);
+    expect(sun.has<DirectionalLight>(), isFalse);
   });
 }
