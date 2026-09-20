@@ -283,6 +283,10 @@ pub fn cook(
             }
         }
     }
+    // Nested prefabs expand once; a prefab that cannot (a cycle, a bad
+    // inner override) stays as it is and fails its own cook below, where
+    // the diagnostics are re-derived against its cooked object.
+    let (library, _) = library.flattened(schemas);
 
     // 3. Cook in that order; keys need the dependencies' keys.
     let mut keys: HashMap<Uuid, CacheKey> = HashMap::new();
@@ -748,6 +752,15 @@ fn cook_one(
                 diagnostics,
             )?);
         }
+        Input::Document(doc) if doc.kind == DocumentKind::Prefab => {
+            chunks.push(prefab_chunk(
+                doc,
+                schemas,
+                library,
+                &entry.name,
+                diagnostics,
+            )?);
+        }
         Input::Document(doc) => {
             let text = match doc.write() {
                 Ok(t) => t,
@@ -756,15 +769,11 @@ fn cook_one(
                     return None;
                 }
             };
-            let mut info = json!({ "documentKind": doc.kind.name() });
-            if doc.kind == DocumentKind::Prefab {
-                info["entities"] = Prefab::from_document(doc.clone()).entities.len().into();
-            }
             chunks.push(ChunkPlan {
                 kind: KIND_JSON,
                 name: entry.name.clone(),
                 sub: None,
-                info,
+                info: json!({ "documentKind": doc.kind.name() }),
                 payload: text.into_bytes(),
             });
             if let Some(c) = material_chunk(doc, &entry.name, None) {
@@ -1120,6 +1129,83 @@ fn plan_intermediate(
     }
 }
 
+/// The `JSON` chunk of a prefab: the document with its own instances
+/// expanded (nested prefabs, M3-08b) and every component decodable, so
+/// the runtime instantiates it without a validator (`World.instantiate`).
+/// Refused like a scene when it would not load.
+fn prefab_chunk(
+    doc: &Document,
+    schemas: &SchemaSet,
+    library: &PrefabLibrary,
+    name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ChunkPlan> {
+    let shown = doc.path.clone().unwrap_or_default();
+    let prefab = Prefab::from_document(doc.clone());
+    let checked = prefab.validate(schemas);
+    let bad = has_errors(&checked);
+    diagnostics.extend(checked);
+    if bad {
+        return None;
+    }
+    let instances = prefab
+        .entities
+        .iter()
+        .filter(|e| e.prefab.is_some())
+        .count();
+    let flat = if instances > 0 {
+        let expanded = expand(&prefab.scene(), library, schemas);
+        let bad = expanded.has_errors();
+        diagnostics.extend(expanded.diagnostics.iter().cloned());
+        if bad {
+            return None;
+        }
+        Prefab::from_document(Document {
+            kind: DocumentKind::Prefab,
+            path: doc.path.clone(),
+            root: expanded.document.root,
+            envelope: doc.envelope.clone(),
+        })
+    } else {
+        prefab
+    };
+    let described = describe(&flat.scene(), schemas);
+    let bad = described.has_errors();
+    diagnostics.extend(described.diagnostics.iter().cloned());
+    if bad {
+        return None;
+    }
+    let mut behaviour_types: Vec<(String, u32)> = described
+        .behaviours
+        .iter()
+        .filter(|b| b.known)
+        .map(|b| (b.type_id.clone(), b.version))
+        .collect();
+    behaviour_types.sort();
+    behaviour_types.dedup();
+    let text = match flat.document.write() {
+        Ok(t) => t,
+        Err(d) => {
+            diagnostics.push(d.with_document(shown));
+            return None;
+        }
+    };
+    Some(ChunkPlan {
+        kind: KIND_JSON,
+        name: name.to_string(),
+        sub: None,
+        info: json!({
+            "documentKind": "prefab",
+            "entities": flat.entities.len(),
+            "roots": flat.roots.len(),
+            "instances": instances,
+            "expanded": true,
+            "behaviourTypes": behaviour_types.iter().map(|(t, v)| json!({ "type": t, "version": v })).collect::<Vec<_>>(),
+        }),
+        payload: text.into_bytes(),
+    })
+}
+
 /// The `MATL` chunk of a `fynkel.pbr@1` material document: the typed
 /// `PbrMaterial` (`fynkel_wire::material`), what the renderer reads. A
 /// custom-shader material has only its `JSON` chunk.
@@ -1149,7 +1235,7 @@ fn texture_chunk(t: &TextureData, sub: Option<String>) -> ChunkPlan {
             "height": t.height,
             "colorSpace": t.color_space.name(),
             "sourceHasAlpha": t.source_has_alpha,
-            "mipLevels": 1,
+            "mipLevels": fynkel_cooked::payload::full_mip_count(t.width, t.height),
         }),
         payload: encode_texture(t),
     }
@@ -1165,17 +1251,85 @@ pub fn encode_mesh(mesh: &MeshData) -> Vec<u8> {
     )
 }
 
-/// `TEXR` (see `fynkel_cooked::payload`).
+/// `TEXR` (see `fynkel_cooked::payload`): the image and its full mip
+/// chain down to 1×1 (M3-08b), so the renderer never filters at load.
 pub fn encode_texture(t: &TextureData) -> Vec<u8> {
+    let (format, srgb) = match t.color_space {
+        ColorSpace::Srgb => (TEXTURE_FORMAT_RGBA8_SRGB, true),
+        ColorSpace::Linear => (TEXTURE_FORMAT_RGBA8_LINEAR, false),
+    };
+    let chain = mip_chain(t.width, t.height, &t.rgba8, srgb);
     fynkel_cooked::payload::encode_texture(
         t.width,
         t.height,
-        match t.color_space {
-            ColorSpace::Srgb => TEXTURE_FORMAT_RGBA8_SRGB,
-            ColorSpace::Linear => TEXTURE_FORMAT_RGBA8_LINEAR,
-        },
-        &t.rgba8,
+        format,
+        fynkel_cooked::payload::full_mip_count(t.width, t.height),
+        &chain,
     )
+}
+
+/// Every level of `base` (`width`×`height` RGBA8) concatenated, each a
+/// 2×2 box filter of the one above (an odd trailing row or column is
+/// dropped, as GL does). An sRGB image is averaged in linear light and
+/// re-encoded, so a mip of a checkerboard is mid-grey, not dark; alpha is
+/// linear either way.
+pub fn mip_chain(width: u32, height: u32, base: &[u8], srgb: bool) -> Vec<u8> {
+    let levels = fynkel_cooked::payload::full_mip_count(width, height);
+    let mut out = Vec::with_capacity(base.len() * 4 / 3 + 4);
+    out.extend_from_slice(base);
+    let (mut w, mut h) = (width as usize, height as usize);
+    let mut prev = base.to_vec();
+    let to_linear: Vec<f32> = (0..256).map(|v| srgb_to_linear(v as f32 / 255.0)).collect();
+    for _ in 1..levels {
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = vec![0u8; nw * nh * 4];
+        for y in 0..nh {
+            for x in 0..nw {
+                let (x0, y0) = (2 * x, 2 * y);
+                let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+                let mut sum = [0f32; 4];
+                for (sx, sy) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+                    let at = (sy * w + sx) * 4;
+                    for c in 0..3 {
+                        sum[c] += if srgb {
+                            to_linear[prev[at + c] as usize]
+                        } else {
+                            prev[at + c] as f32 / 255.0
+                        };
+                    }
+                    sum[3] += prev[at + 3] as f32 / 255.0;
+                }
+                let at = (y * nw + x) * 4;
+                for c in 0..3 {
+                    let v = sum[c] * 0.25;
+                    let v = if srgb { linear_to_srgb(v) } else { v };
+                    next[at + c] = (v * 255.0 + 0.5) as u8;
+                }
+                next[at + 3] = (sum[3] * 0.25 * 255.0 + 0.5) as u8;
+            }
+        }
+        out.extend_from_slice(&next);
+        prev = next;
+        (w, h) = (nw, nh);
+    }
+    out
+}
+
+fn srgb_to_linear(v: f32) -> f32 {
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(v: f32) -> f32 {
+    let v = v.clamp(0.0, 1.0);
+    if v <= 0.003_130_8 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    }
 }
 
 /// `CLIP` (see `fynkel_cooked::payload`).

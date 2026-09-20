@@ -17,7 +17,7 @@ fynkel_scene.workspace = true
 fynkel_wire.workspace = true
 log.workspace = true
 serde_json.workspace = true
+glam.workspace = true
 
 [dev-dependencies]
-glam.workspace = true
 fynkel_import.workspace = true

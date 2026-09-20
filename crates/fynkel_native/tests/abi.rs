@@ -354,6 +354,30 @@ fn hierarchy_queries() {
     assert_eq!(t.world.position.x, 3.0, "root 1 + local 2");
     let (_, n, _, _) = h.query(bridge::QUERY_ALL_ENTITIES, Entity::NULL);
     assert_eq!(n, 3);
+    // The whole table in one answer (M3-08b): entity, parent, name.
+    h.submit(
+        Lane::Simulation,
+        &batch![(
+            5,
+            SetNameCommand {
+                entity: c1,
+                name: "Left".into()
+            }
+        )],
+    );
+    h.step();
+    let (s, n, body, tail) = h.query(bridge::QUERY_ENTITIES, Entity::NULL);
+    assert_eq!((s, n), (Status::Ok, 3));
+    let rows: Vec<EntityInfoRecord> = (0..3)
+        .map(|i| EntityInfoRecord::decode(&body[i * EntityInfoRecord::SIZE..], &tail).unwrap())
+        .collect();
+    let row = |e: Entity| rows.iter().find(|r| r.entity == e).unwrap();
+    assert_eq!(
+        (row(root).parent, row(root).name.as_str()),
+        (Entity::NULL, "")
+    );
+    assert_eq!((row(c1).parent, row(c1).name.as_str()), (root, "Left"));
+    assert_eq!(row(c2).parent, root);
     let (s, _, _, _) = h.query(999, root);
     assert_eq!(s, Status::InvalidArgument);
     let (_, n, _, _) = h.query(bridge::QUERY_TRANSFORM, Entity::NULL);

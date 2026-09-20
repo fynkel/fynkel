@@ -218,6 +218,17 @@ pub struct BodyStateRecord {
     pub sleeping: bool,
 }
 
+/// `FYNKEL_QUERY_ENTITIES` (M3-08b): one per live entity, entity order —
+/// its parent (`NULL` at the root) and name (empty without one). What
+/// `World.find`/`findAll`/`findChild` read, one query per tick.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.EntityInfo")]
+pub struct EntityInfoRecord {
+    pub entity: Entity,
+    pub parent: Entity,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "event", id = 1, name = "fynkel.ev.Spawned")]
 pub struct SpawnedEvent {
@@ -392,6 +403,7 @@ pub const ALL: &[&RecordSchema] = &[
     &PhysicsQueryRecord::SCHEMA,
     &PhysicsHitRecord::SCHEMA,
     &BodyStateRecord::SCHEMA,
+    &EntityInfoRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

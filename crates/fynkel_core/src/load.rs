@@ -67,6 +67,10 @@ pub enum LoadError {
     },
     /// The ECS refused a spawn (a stale parent handle mid-load).
     Spawn(Uuid),
+    /// `instantiate`: the anchor's parent is not a live entity of this world.
+    UnknownAnchorParent(Entity),
+    /// `instantiate`: the anchor's transform is not finite.
+    AnchorTransform,
 }
 
 impl core::fmt::Display for LoadError {
@@ -91,6 +95,13 @@ impl core::fmt::Display for LoadError {
                 component.name().unwrap_or("component")
             ),
             LoadError::Spawn(id) => write!(f, "entity {id}: spawn failed"),
+            LoadError::UnknownAnchorParent(e) => {
+                write!(
+                    f,
+                    "instantiate: parent {e} is not a live entity of this world"
+                )
+            }
+            LoadError::AnchorTransform => write!(f, "instantiate: transform is not finite"),
         }
     }
 }
@@ -140,6 +151,53 @@ impl World {
     /// fail the command path are counted in `rejected_components` and
     /// reported in [`World::diagnostics`] (command index `u32::MAX`).
     pub fn load_scene(&mut self, scene: &SceneDescription) -> Result<LoadedScene, LoadError> {
+        let loaded = self.load_under(scene, None)?;
+        self.push_event(EventPayload::SceneReady);
+        Ok(loaded)
+    }
+
+    /// Instantiates a cooked prefab now (M3-08b, blueprint item 12's
+    /// `world.instantiate`): an **anchor** entity (`name`, `transform`,
+    /// under `parent`) whose children are the prefab's roots, exactly the
+    /// shape a scene instance expands to. Components go through the
+    /// command path as for a scene; no `SceneReady`. The anchor's handle
+    /// and the prefab's entities are returned; `parent` must be live.
+    pub fn instantiate(
+        &mut self,
+        prefab: &SceneDescription,
+        name: &str,
+        transform: Transform,
+        parent: Option<Entity>,
+    ) -> Result<(Entity, LoadedScene), LoadError> {
+        if self.is_poisoned() {
+            return Err(LoadError::Poisoned);
+        }
+        if !transform.is_finite() {
+            return Err(LoadError::AnchorTransform);
+        }
+        if let Some(p) = parent {
+            if p.world() != self.id() || !self.ecs().contains(p) {
+                return Err(LoadError::UnknownAnchorParent(p));
+            }
+        }
+        // The structure is checked before anything is spawned.
+        spawn_order(prefab)?;
+        let anchor = scene::spawn(self.ecs_mut(), transform, parent)
+            .map_err(|_| LoadError::Spawn(prefab.id))?;
+        if !name.is_empty() {
+            let _ = self.ecs_mut().insert(anchor, Name::new(name.to_string()));
+        }
+        let loaded = self.load_under(prefab, Some(anchor))?;
+        Ok((anchor, loaded))
+    }
+
+    /// Spawns `scene`'s entities, its roots under `root_parent`, then their
+    /// components through the command path; propagates.
+    fn load_under(
+        &mut self,
+        scene: &SceneDescription,
+        root_parent: Option<Entity>,
+    ) -> Result<LoadedScene, LoadError> {
         if self.is_poisoned() {
             return Err(LoadError::Poisoned);
         }
@@ -152,7 +210,7 @@ impl World {
         };
         for &i in &order {
             let d = &scene.entities[i];
-            let parent = d.parent.map(|p| loaded.by_id[&p]);
+            let parent = d.parent.map(|p| loaded.by_id[&p]).or(root_parent);
             let transform = d
                 .components
                 .iter()
@@ -187,7 +245,6 @@ impl World {
             }
         }
         scene::propagate(self.ecs_mut());
-        self.push_event(EventPayload::SceneReady);
         Ok(loaded)
     }
 

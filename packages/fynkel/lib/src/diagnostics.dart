@@ -221,6 +221,83 @@ class BoundAction {
       .map((b) => b.substring('touch:overlay/'.length));
 }
 
+/// What [World.instantiate] produced: the anchor is the returned object.
+class InstantiateReport {
+  const InstantiateReport({
+    required this.ok,
+    required this.diagnostics,
+    this.prefabId,
+    this.prefabPath,
+    this.name = '',
+    this.anchor = 0,
+    this.entityCount = 0,
+    this.rejectedComponents = 0,
+    this.assetCount = 0,
+    this.behaviours = const [],
+    this.behavioursAttached = 0,
+    this.residency = const ResidencyStats(),
+  });
+
+  factory InstantiateReport.fromJson(Map<String, Object?> j) {
+    final inst = j['instance'] as Map<String, Object?>?;
+    final residency = j['residency'] as Map<String, Object?>?;
+    return InstantiateReport(
+      ok: j['ok'] == true,
+      diagnostics: [
+        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
+      ],
+      prefabId: inst?['prefab'] as String?,
+      prefabPath: inst?['path'] as String?,
+      name: inst?['name'] as String? ?? '',
+      anchor: (inst?['anchor'] as num?)?.toInt() ?? 0,
+      entityCount: (inst?['entities'] as num?)?.toInt() ?? 0,
+      rejectedComponents: (inst?['rejectedComponents'] as num?)?.toInt() ?? 0,
+      assetCount: (inst?['assets'] as num?)?.toInt() ?? 0,
+      behaviours: [
+        for (final b in (inst?['behaviours'] as List?) ?? const [])
+          AuthoredBehaviour.fromJson((b as Map).cast<String, Object?>()),
+      ],
+      residency: residency == null ? const ResidencyStats() : ResidencyStats.fromJson(residency),
+    );
+  }
+
+  final bool ok;
+  final List<LoadDiagnostic> diagnostics;
+  final String? prefabId;
+  final String? prefabPath;
+
+  /// The anchor's name.
+  final String name;
+
+  /// The anchor entity's handle.
+  final int anchor;
+
+  /// The prefab's entities spawned under the anchor (the anchor excluded).
+  final int entityCount;
+  final int rejectedComponents;
+  final int assetCount;
+  final List<AuthoredBehaviour> behaviours;
+  final int behavioursAttached;
+  final ResidencyStats residency;
+
+  Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => d.severity == 'warning');
+
+  InstantiateReport withBehaviours({required int attached, required List<LoadDiagnostic> extra}) => InstantiateReport(
+        ok: ok,
+        diagnostics: [...diagnostics, ...extra],
+        prefabId: prefabId,
+        prefabPath: prefabPath,
+        name: name,
+        anchor: anchor,
+        entityCount: entityCount,
+        rejectedComponents: rejectedComponents,
+        assetCount: assetCount,
+        behaviours: behaviours,
+        behavioursAttached: attached,
+        residency: residency,
+      );
+}
+
 /// What [World.loadScene] / [World.loadProject] produced.
 class LoadReport {
   const LoadReport({
@@ -395,6 +472,18 @@ class ResidencyStats {
 }
 
 /// A scene or project failed to load; [report] says why.
+/// [World.instantiate] failed; the world is unchanged.
+class FynkelInstantiateError extends Error {
+  FynkelInstantiateError(this.report);
+  final InstantiateReport report;
+
+  @override
+  String toString() {
+    final lines = report.diagnostics.map((d) => '  $d').join('\n');
+    return 'FynkelInstantiateError:\n$lines';
+  }
+}
+
 class FynkelLoadError extends Error {
   FynkelLoadError(this.report, {this.context = ''});
   final LoadReport report;

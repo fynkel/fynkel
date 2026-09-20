@@ -107,6 +107,83 @@ fn loads_hierarchy_in_document_order_with_components() {
     assert_eq!(w.step().status, Status::Ok);
 }
 
+/// `World::instantiate` (M3-08b): the description's roots become the
+/// children of a new anchor — the shape a scene instance expands to — with
+/// the anchor's name, transform and parent as given; the anchor's world
+/// matrix is applied to the prefab's own transforms; the structural checks
+/// run before anything is spawned.
+#[test]
+fn instantiate_places_a_description_under_an_anchor() {
+    let mut w = World::new(WorldConfig::default());
+    let base = w.load_scene(&scene()).unwrap();
+    let e1 = base.handle_of(id(1)).unwrap();
+    let live = w.live_entities();
+
+    let at_anchor = Transform::from_position(Vec3::new(0.0, 5.0, 0.0));
+    let (anchor, loaded) = w
+        .instantiate(&scene(), "Copy", at_anchor, Some(e1))
+        .unwrap();
+    assert_eq!(loaded.len(), 4);
+    assert_eq!(loaded.rejected_components, 0, "{:?}", w.diagnostics());
+    assert_eq!(
+        w.live_entities(),
+        live + 5,
+        "the four entities plus the anchor"
+    );
+    assert_eq!(w.ecs().copy::<Name>(anchor).unwrap().value, "Copy");
+    assert_eq!(w.ecs().copy::<Transform>(anchor).unwrap(), at_anchor);
+    assert_eq!(scene::parent_of(w.ecs(), anchor), Some(e1));
+    let c1 = loaded.handle_of(id(1)).unwrap();
+    let c4 = loaded.handle_of(id(4)).unwrap();
+    assert_eq!(
+        scene::children_of(w.ecs(), anchor),
+        vec![c1, c4],
+        "the roots, in instantiation order"
+    );
+    assert_eq!(scene::parent_of(w.ecs(), c1), Some(anchor));
+    assert_ne!(c1, e1, "fresh handles; the same description twice is fine");
+    // e1 at x 10 → anchor at y 5 under it → c1 at x 10 → c2 at x 1.
+    let c2 = loaded.handle_of(id(2)).unwrap();
+    let m = scene::world_matrix(w.ecs(), c2).unwrap();
+    assert_eq!(m.transform_point3(Vec3::ZERO), Vec3::new(21.0, 5.0, 0.0));
+    // Components went through the command path, like a scene's.
+    assert!(w.ecs().has::<Camera>(c2));
+
+    // No name: the anchor has none. No parent: a root.
+    let (bare, _) = w
+        .instantiate(&scene(), "", Transform::IDENTITY, None)
+        .unwrap();
+    assert!(w.ecs().copy::<Name>(bare).is_err());
+    assert_eq!(scene::parent_of(w.ecs(), bare), None);
+
+    // Refusals spawn nothing.
+    let live = w.live_entities();
+    let stale = Entity::new(w.id(), 7, 60_000);
+    assert_eq!(
+        w.instantiate(&scene(), "", Transform::IDENTITY, Some(stale))
+            .unwrap_err(),
+        LoadError::UnknownAnchorParent(stale)
+    );
+    assert_eq!(
+        w.instantiate(
+            &scene(),
+            "",
+            Transform::from_position(Vec3::new(f32::NAN, 0.0, 0.0)),
+            None
+        )
+        .unwrap_err(),
+        LoadError::AnchorTransform
+    );
+    let mut s = scene();
+    s.entities.push(entity(1, None, &[], vec![]));
+    assert_eq!(
+        w.instantiate(&s, "", Transform::IDENTITY, None)
+            .unwrap_err(),
+        LoadError::DuplicateEntity(id(1))
+    );
+    assert_eq!(w.live_entities(), live);
+}
+
 #[test]
 fn structural_errors_load_nothing() {
     let mut w = World::new(WorldConfig::default());

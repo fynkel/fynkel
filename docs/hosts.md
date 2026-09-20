@@ -112,6 +112,33 @@ transform and typed `components[]` in the document's own JSON shapes; exit
 scene outside any project (nothing could cook it). This is the M2 gate
 "project can be validated/imported headlessly", now from the cache.
 
+### Prefabs at runtime (M3-08b)
+
+`fynkel_world_instantiate(world, &FynkelInstantiateDesc { prefab_id_utf8,
+prefab_id_len, name_utf8, name_len, parent, position, rotation, scale })`
+spawns a cooked prefab **now**, outside the command path, the way a scene
+instance expands: a new *anchor* entity (named `name`, or the prefab's
+name when empty; at the transform; a child of `parent`, or a root when
+`parent` is 0) whose children are the prefab's roots, the prefab's entities
+under them with their own local transforms, their components applied
+through the same command path a scene load uses (`rejectedComponents`),
+its mesh colliders registered and its asset closure retained on the
+world. The prefab comes from the loaded project's cache only
+(`Assets::prefab(id)` reads the flat `document/prefab` chunk the cook
+wrote): no project loaded is `FYN-R0001`, an id that is not a prefab
+`FYN-R0006`, one not in the cache `FYN-R0003`, a dead or foreign `parent`
+or a non-finite transform is a load error; every refusal returns
+`FYNKEL_STATUS_LOAD_FAILED` with nothing spawned, a malformed id or
+string `FYNKEL_STATUS_INVALID_ARGUMENT`. `fynkel_world_load_report`
+then carries `{ ok, scene: null, instance: { prefab, name, path, anchor,
+entities, rejectedComponents, assets, meshColliders, behaviours[] },
+cache, residency, diagnostics }` — the `behaviours` are the prefab's
+authored Dart behaviours with their spawned handles, attached by the SDK
+like a scene's (`FYN-B0001`/`B0002` warnings through
+`onLoadDiagnostics`). `World.instantiate` returns the anchor as a
+resolved `GameObject` (`lastInstantiate` is the `InstantiateReport`);
+`FynkelInstantiateError` wraps a refusal.
+
 ## Flutter host
 
 `hosts/flutter_apple` uses **one** dylib, `libfynkel_platform_apple.dylib`,
@@ -209,6 +236,20 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `ContactEvent`s on the physics lane (`fynkel_world_after_physics_events`)
   and reach `onCollisionEnter`/… the same tick. The load report gains
   `physics: { gravity, layers, meshColliders }`.
+  Developer ergonomics (M3-08b): `World.find(name)`/`findAll(name)`,
+  `GameObject.findChild('Arm/Hand')`/`findDescendant(name)` read the
+  hierarchy as the last tick left it from **one** `FYNKEL_QUERY_ENTITIES`
+  (8: an `EntityInfoRecord { entity, parent, name }` per live entity)
+  per tick, cached in the SDK until the next step or load. A temp
+  reference (`FynkelEntity` with generation 0 and the spawn's temp id in
+  the slot bits, `Entity::temp(id)`) may stand for an entity spawned
+  **earlier in the same tick's simulation batch** in any command's entity
+  field — the world resolves it against that tick's spawns before applying
+  the command (`INVALID_TEMP_ID` when nothing spawned under that id, or
+  on the presentation lane) — so `spawn()` then `add(RigidBody)` then
+  `applyImpulse` in one `fixedUpdate` all land in the spawn's tick.
+  `World.instantiate(prefab, transform:, parent:, name:)` is
+  `fynkel_world_instantiate(world, &FynkelInstantiateDesc)` (below).
 - `FynkelGameView` — the loop: a `Ticker` runs `World.frame(dt, fixedUpdate:)`
   then `controller.render(world)`; dt is clamped (`maxFrameDt`), the clock is
   re-primed when the app resumes and when the viewport attaches (a start-up

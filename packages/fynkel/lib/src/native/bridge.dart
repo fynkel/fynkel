@@ -16,7 +16,7 @@ export 'fynkel_bindings.g.dart' show FynkelStatus;
 
 enum CommandLane { simulation, presentation }
 
-enum QueryKind { transform, children, parent, name, allEntities, components, body }
+enum QueryKind { transform, children, parent, name, allEntities, components, body, entities }
 
 class FramePlan {
   const FramePlan(this.steps, this.droppedSeconds, this.clamped, this.alpha);
@@ -344,6 +344,39 @@ class NativeWorld {
         cacheDir,
         (c, cl) => _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_load_scene(_w, c, cl, s, sl))),
       );
+
+  /// `fynkel_world_instantiate`: the cooked prefab [prefabId] (UUID text)
+  /// under a new anchor entity named [name] (empty: the prefab's) with the
+  /// given local transform, child of [parent] (0: a root); the status and
+  /// the JSON report of that call.
+  (FynkelStatus, Map<String, Object?>) instantiate(
+    String prefabId,
+    String name,
+    int parent,
+    List<double> position,
+    List<double> rotation,
+    List<double> scale,
+  ) =>
+      _withUtf8(prefabId, (p, pl) => _withUtf8(name, (n, nl) {
+            final d = calloc<FynkelInstantiateDesc>();
+            try {
+              d.ref.prefab_id_utf8 = p;
+              d.ref.prefab_id_len = pl;
+              d.ref.name_utf8 = n;
+              d.ref.name_len = nl;
+              d.ref.parent = parent;
+              for (var i = 0; i < 3; i++) {
+                d.ref.position[i] = position[i];
+                d.ref.scale[i] = scale[i];
+              }
+              for (var i = 0; i < 4; i++) {
+                d.ref.rotation[i] = rotation[i];
+              }
+              return _load(() => fynkel_world_instantiate(_w, d));
+            } finally {
+              calloc.free(d);
+            }
+          }));
 
   T _withUtf8<T>(String text, T Function(Pointer<Uint8>, int) body) {
     final bytes = utf8.encode(text);

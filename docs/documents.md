@@ -300,8 +300,24 @@ lifetime, `overrides` an ordered op list addressed by **prefab-local** ids:
 | `removeObject` | `entity` | removes the subtree |
 
 Array indices, display names and deep merges are not override targets.
-Prefab entities may not carry `prefab` themselves (`D0402`, no nesting in
-M2); two anchors sharing an `instance` id is `D0405`.
+Two anchors sharing an `instance` id is `D0405`.
+
+**Nested prefabs** (M3-08b): a prefab entity may carry `prefab` itself. The
+library is *flattened* before anything expands
+(`PrefabLibrary::flattened(schemas)`): every prefab's own instances are
+expanded into plain entities, innermost first, with the same derivation rule
+(the inner instance id is the namespace), so a scene instantiating the outer
+prefab gets the whole tree remapped once more by its own instance id. A
+chain that leads back to a prefab being flattened (a cycle) is `D0402`,
+anchored at the closing instance's `prefab/asset` in the prefab document;
+the prefabs involved stay unflattened and a scene instantiating one is
+refused for that instance (`D0402` at the scene's instance). `fynkel
+validate --project` flattens the library once and reports every prefab's
+problems where they are; a single scene's expansion only carries the
+problems of the prefabs it reaches. The cook writes each prefab's chunk
+**flat** (`documentKind: prefab`, info `entities`, `roots`, `instances`,
+`expanded`, `behaviourTypes`), which is what `fynkel_assets::Assets::prefab`
+describes for runtime instantiation (hosts.md § Prefabs at runtime).
 
 `fynkel_document::expand(&scene, &library, &schemas) -> Expanded` replaces
 every anchor's instance by the prefab's entities: each prefab-local entity
@@ -616,8 +632,10 @@ intermediate is produced.
 ### Textures (`fynkel.image`, version 1)
 
 `.png` / `.jpg` / `.jpeg` → one `TextureData`: RGBA8, row-major, top row
-first, `width × height × 4` bytes, no mipmaps (M3 generates them at load
-or cook time), no resizing. Grey, grey+alpha, RGB, RGBA, palette and
+first, `width × height × 4` bytes, no resizing; the **cook** appends the
+full mip chain (M3-08b: `TEXR` holds every level down to 1×1, a 2×2 box
+filter applied in linear light for sRGB textures — alpha linear —, an odd
+trailing row or column dropped; `mipLevels` in the chunk info). Grey, grey+alpha, RGB, RGBA, palette and
 16-bit sources all normalize to 8-bit RGBA (16-bit is narrowed;
 `sourceHasAlpha` records whether the file had an alpha channel). The
 colour space is **declared, not detected**: the sidecar's
@@ -761,7 +779,7 @@ Chunk kinds and payloads:
 | `JSON` | A document's canonical text (scene, prefab, material, …) |
 | `MATL` | `u32` payload version (1), `u32` record size (`PbrMaterial::SIZE`, 184), `u32` string-tail length, `u32` reserved, then the `fynkel.PbrMaterial` wire record (ADR-0012 layout: `Vec4` 16 bytes, optional asset refs as a nil id when unbound) and its string tail (the `sub` ids). `fynkel_wire::material::{encode_material, decode_material}`. META extras: `shader`, `alphaMode`, `textures` (the bound slot names). |
 | `MESH` | `u32` vertex count, `u32` index count, `[f32; 3]` bounds min, `[f32; 3]` bounds max, vertices (72 bytes each, the intermediate's layout), `u32` indices |
-| `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear), `u32` mip levels (1), then `width × height × 4` texels, top row first |
+| `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear), `u32` mip levels (the full chain, `full_mip_count(w, h)`), then every level's `w × h × 4` texels concatenated, level 0 first, top row first (`TexturePayload::level(i)` / `base()`) |
 | `CLIP` | `u32` sample rate, `u32` channels, `u64` frames, interleaved `f32` samples |
 | `BLOB` | The source file's bytes |
 

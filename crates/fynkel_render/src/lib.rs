@@ -1605,19 +1605,13 @@ impl ExtractRenderer {
         let white = upload_rgba8(
             device,
             queue,
-            1,
-            1,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &[255, 255, 255, 255],
+            Rgba8Image::flat(wgpu::TextureFormat::Rgba8Unorm, &[255, 255, 255, 255]),
             "fynkel white",
         );
         let flat_normal = upload_rgba8(
             device,
             queue,
-            1,
-            1,
-            wgpu::TextureFormat::Rgba8Unorm,
-            &[128, 128, 255, 255],
+            Rgba8Image::flat(wgpu::TextureFormat::Rgba8Unorm, &[128, 128, 255, 255]),
             "fynkel flat normal",
         );
         let default_material = create_material_bind_group(
@@ -1676,10 +1670,13 @@ impl ExtractRenderer {
                 Some(upload_rgba8(
                     device,
                     queue,
-                    payload.width,
-                    payload.height,
-                    format,
-                    &payload.rgba8,
+                    Rgba8Image {
+                        width: payload.width,
+                        height: payload.height,
+                        format,
+                        mip_levels: payload.mip_levels,
+                        rgba8: &payload.rgba8,
+                    },
                     &format!("fynkel texture {r}"),
                 ))
             }
@@ -2386,46 +2383,85 @@ fn upload_mesh(
     }
 }
 
-/// Uploads a top-row-first RGBA8 image.
-fn upload_rgba8(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+/// A top-row-first RGBA8 image with `mip_levels` levels concatenated in
+/// `rgba8` (the cooked `TEXR` layout; 1 for a flat image).
+struct Rgba8Image<'a> {
     width: u32,
     height: u32,
     format: wgpu::TextureFormat,
-    rgba8: &[u8],
+    mip_levels: u32,
+    rgba8: &'a [u8],
+}
+
+impl<'a> Rgba8Image<'a> {
+    fn flat(format: wgpu::TextureFormat, rgba8: &'a [u8; 4]) -> Self {
+        Rgba8Image {
+            width: 1,
+            height: 1,
+            format,
+            mip_levels: 1,
+            rgba8,
+        }
+    }
+}
+
+/// Uploads every level of `image`.
+fn upload_rgba8(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    image: Rgba8Image,
     label: &str,
 ) -> GpuTexture {
-    let size = wgpu::Extent3d {
+    let Rgba8Image {
         width,
         height,
-        depth_or_array_layers: 1,
-    };
+        format,
+        mip_levels,
+        rgba8,
+    } = image;
+    let mip_levels = mip_levels.max(1);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
-        size,
-        mip_level_count: 1,
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: mip_levels,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        rgba8,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(width * 4),
-            rows_per_image: Some(height),
-        },
-        size,
-    );
+    let mut at = 0usize;
+    for level in 0..mip_levels {
+        let (w, h) = fynkel_cooked::payload::mip_size(width, height, level);
+        let len = w as usize * h as usize * 4;
+        let Some(bytes) = rgba8.get(at..at + len) else {
+            break;
+        };
+        at += len;
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: level,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
     GpuTexture {
         view: texture.create_view(&Default::default()),
     }

@@ -18,13 +18,21 @@
 //! `unsetField` removes the field. No array indices, no names, no deep
 //! merge.
 //!
-//! Out of scope until after M2: nested instances (a prefab containing an
-//! instance is `D0402`), variants, apply/revert.
+//! A prefab may itself contain instances (nested prefabs, M3-08b):
+//! [`PrefabLibrary::flattened`] expands every prefab's instances against
+//! the library first, innermost first, so a scene's expansion sees plain
+//! entities only. Ids nest the same way — an inner entity's scene id is
+//! `derive_id(outer_instance, derive_id(inner_instance, local))` — and an
+//! outer override addresses an inner entity by that derived (inner) id. A
+//! prefab that instantiates itself, directly or through others, is
+//! `D0402` and is left unexpanded.
 //!
-//! Codes: `D0400` roots mismatch, `D0401` unknown prefab, `D0402` nested,
-//! `D0403` override target missing, `D0404` override not applicable,
-//! `D0405` duplicate instance id, `D0406` derived id collision, `D0407`
-//! malformed entry.
+//! Out of scope: variants, apply/revert.
+//!
+//! Codes: `D0400` roots mismatch, `D0401` unknown prefab, `D0402`
+//! instantiation cycle, `D0403` override target missing, `D0404` override
+//! not applicable, `D0405` duplicate instance id, `D0406` derived id
+//! collision, `D0407` malformed entry.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -33,7 +41,9 @@ use fynkel_contracts::{Code, Diagnostic};
 use uuid::Uuid;
 
 use crate::json::{Member, Node, Span, Value};
-use crate::scene::{read_entities, validate_entities, Component, Entity, OverrideOp, Scene};
+use crate::scene::{
+    read_entities, validate_entities, Component, Entity, OverrideOp, PrefabInstance, Scene,
+};
 use crate::schema::SchemaSet;
 use crate::{Document, DocumentKind};
 
@@ -114,8 +124,25 @@ impl Prefab {
         &self.read_diagnostics
     }
 
+    /// Whether an entity of this prefab is itself a prefab instance.
+    pub fn has_instances(&self) -> bool {
+        self.entities.iter().any(|e| e.prefab.is_some())
+    }
+
+    /// The prefab read as a scene (same entities, `roots` ignored), for
+    /// expansion and description with the scene machinery.
+    pub fn scene(&self) -> Scene {
+        Scene::from_document(Document {
+            kind: DocumentKind::Scene,
+            path: self.document.path.clone(),
+            root: self.document.root.clone(),
+            envelope: self.document.envelope.clone(),
+        })
+    }
+
     /// Envelope + JSON Schema, read problems, hierarchy/component rules,
-    /// and the prefab rules (`roots`, no nesting).
+    /// and the prefab rules (`roots`). Its own instances are checked by
+    /// expansion (`PrefabLibrary::flattened`), as a scene's are.
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
         let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();
@@ -200,18 +227,6 @@ impl Prefab {
                 "/roots",
             ));
         }
-        for e in self.entities.iter().filter(|e| e.prefab.is_some()) {
-            out.push(anchor(
-                root,
-                Diagnostic::error(
-                    Code::PREFAB_NESTED,
-                    "a prefab cannot contain a prefab instance (nested prefabs are not supported yet)",
-                )
-                .with_id(e.id.to_string())
-                .with_suggestion("expand the instance into plain entities"),
-                &format!("{}/prefab", e.pointer),
-            ));
-        }
         for d in &mut out {
             if d.document.is_none() {
                 d.document = self.document.path.clone();
@@ -225,6 +240,9 @@ impl Prefab {
 #[derive(Clone, Debug, Default)]
 pub struct PrefabLibrary {
     prefabs: HashMap<Uuid, Prefab>,
+    /// Prefabs whose own instances could not be expanded (reported by the
+    /// `flattened` call that found out); kept as they are, not retried.
+    unresolved: HashSet<Uuid>,
 }
 
 impl PrefabLibrary {
@@ -247,6 +265,121 @@ impl PrefabLibrary {
 
     pub fn is_empty(&self) -> bool {
         self.prefabs.is_empty()
+    }
+
+    /// Whether any prefab still carries an instance.
+    pub fn has_instances(&self) -> bool {
+        self.prefabs.values().any(Prefab::has_instances)
+    }
+
+    /// The same library with every prefab's own instances expanded into
+    /// plain entities (nested prefabs), innermost first; a prefab whose
+    /// instances cannot be expanded (unknown prefab, a cycle — `D0402` —,
+    /// invalid overrides) is reported and left as it is, so a scene
+    /// instantiating it is refused for the instance it still carries. The
+    /// diagnostics are anchored in the prefab documents.
+    pub fn flattened(&self, schemas: &SchemaSet) -> (PrefabLibrary, Vec<Diagnostic>) {
+        let mut out = PrefabLibrary::empty();
+        let mut diagnostics = Vec::new();
+        let mut ids: Vec<Uuid> = self.prefabs.keys().copied().collect();
+        ids.sort();
+        for id in ids {
+            let mut visiting = Vec::new();
+            self.flatten_one(id, schemas, &mut visiting, &mut out, &mut diagnostics);
+        }
+        (out, diagnostics)
+    }
+
+    fn flatten_one(
+        &self,
+        id: Uuid,
+        schemas: &SchemaSet,
+        visiting: &mut Vec<Uuid>,
+        out: &mut PrefabLibrary,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        if out.get(id).is_some() || visiting.contains(&id) {
+            return;
+        }
+        let Some(prefab) = self.get(id) else {
+            return;
+        };
+        if !prefab.has_instances() || self.unresolved.contains(&id) {
+            out.add(prefab.clone());
+            if self.unresolved.contains(&id) {
+                out.unresolved.insert(id);
+            }
+            return;
+        }
+        visiting.push(id);
+        // The prefabs this one instantiates, flattened first; one that is
+        // being flattened further up the stack is a cycle.
+        let mut cycle = None;
+        for e in prefab.entities.iter().filter(|e| e.prefab.is_some()) {
+            let inner = e.prefab.as_ref().unwrap();
+            let target = inner.prefab_id();
+            if visiting.contains(&target) {
+                cycle = Some((e, target));
+                break;
+            }
+            self.flatten_one(target, schemas, visiting, out, diagnostics);
+        }
+        visiting.pop();
+        if let Some((e, target)) = cycle {
+            let inst = e.prefab.as_ref().unwrap();
+            let mut d = anchor(
+                &prefab.document.root,
+                Diagnostic::error(
+                    Code::PREFAB_NESTED,
+                    format!("prefab {target} instantiates itself through this instance (a cycle)"),
+                )
+                .with_id(e.id.to_string())
+                .with_suggestion(
+                    "a prefab cannot contain itself; expand the instance into plain entities",
+                ),
+                &format!("{}/asset", inst.pointer),
+            );
+            d.document = prefab.document.path.clone();
+            diagnostics.push(d);
+            out.add(prefab.clone());
+            out.unresolved.insert(id);
+            return;
+        }
+        let expanded = expand_in(&prefab.scene(), out, schemas);
+        if expanded.has_errors() {
+            diagnostics.extend(expanded.diagnostics);
+            out.add(prefab.clone());
+            out.unresolved.insert(id);
+            return;
+        }
+        diagnostics.extend(expanded.diagnostics);
+        out.add(Prefab::from_document(Document {
+            kind: DocumentKind::Prefab,
+            path: prefab.document.path.clone(),
+            root: expanded.document.root,
+            envelope: prefab.document.envelope.clone(),
+        }));
+    }
+
+    /// The prefabs reachable from `ids` through their instances (the ids
+    /// themselves included, when the library has them).
+    pub fn reachable_from(&self, ids: impl IntoIterator<Item = Uuid>) -> HashSet<Uuid> {
+        let mut seen = HashSet::new();
+        let mut stack: Vec<Uuid> = ids.into_iter().collect();
+        while let Some(id) = stack.pop() {
+            let Some(prefab) = self.get(id) else {
+                continue;
+            };
+            if !seen.insert(id) {
+                continue;
+            }
+            for e in prefab.entities.iter() {
+                if let Some(inst) = &e.prefab {
+                    stack.push(inst.prefab_id());
+                }
+            }
+        }
+        seen
     }
 
     /// Prefabs sorted by id.
@@ -362,11 +495,39 @@ impl Expanded {
 }
 
 /// Expands every instance of `scene`. Instances that cannot be expanded
-/// (unknown prefab, nested prefab, invalid overrides) are reported and left
-/// as their anchor entity without `prefab`; the rest expand. Component
-/// `data` touched by overrides is validated against the component schema
-/// (`D0404`, at the last op that touched it).
+/// (unknown prefab, a prefab whose own instances did not expand, invalid
+/// overrides) are reported and left as their anchor entity without
+/// `prefab`; the rest expand. Component `data` touched by overrides is
+/// validated against the component schema (`D0404`, at the last op that
+/// touched it). The library is flattened first (nested prefabs); its
+/// diagnostics come along, anchored in the prefab documents.
 pub fn expand(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Expanded {
+    let (flat, flat_diagnostics) = library.flattened(schemas);
+    let mut expanded = expand_in(scene, &flat, schemas);
+    // Only the flattening problems of prefabs this scene reaches are its
+    // business (a project validation reports every prefab's, once).
+    let reachable = library.reachable_from(scene.instances().map(|e| {
+        e.prefab
+            .as_ref()
+            .map(PrefabInstance::prefab_id)
+            .unwrap_or_default()
+    }));
+    let paths: HashSet<&str> = reachable
+        .iter()
+        .filter_map(|id| library.get(*id))
+        .filter_map(|p| p.document.path.as_deref())
+        .collect();
+    expanded.diagnostics.splice(
+        0..0,
+        flat_diagnostics
+            .into_iter()
+            .filter(|d| d.document.as_deref().is_none_or(|p| paths.contains(p))),
+    );
+    expanded
+}
+
+/// [`expand`] against a library already flattened.
+fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Expanded {
     let src = &scene.document.root;
     let mut diagnostics = Vec::new();
     let mut root = src.clone();
@@ -414,17 +575,19 @@ pub fn expand(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Ex
             ));
             continue;
         };
-        if prefab.entities.iter().any(|p| p.prefab.is_some()) {
+        if prefab.has_instances() {
+            // Left unflattened: its own expansion failed (reported there).
             diagnostics.push(anchor(
                 src,
                 Diagnostic::error(
                     Code::PREFAB_NESTED,
                     format!(
-                        "prefab {} contains a prefab instance; nested prefabs are not supported yet",
+                        "prefab {} still contains a prefab instance its own expansion could not resolve",
                         prefab.id()
                     ),
                 )
-                .with_id(e.id.to_string()),
+                .with_id(e.id.to_string())
+                .with_suggestion("fix the prefab's own instances first (see its diagnostics)"),
                 &format!("{}/asset", inst.pointer),
             ));
             continue;

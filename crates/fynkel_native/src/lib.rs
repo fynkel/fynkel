@@ -110,6 +110,18 @@ pub struct FynkelStepResult {
 }
 
 #[repr(C)]
+pub struct FynkelInstantiateDesc {
+    pub prefab_id_utf8: *const u8,
+    pub prefab_id_len: u32,
+    pub name_utf8: *const u8,
+    pub name_len: u32,
+    pub parent: u64,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+}
+
+#[repr(C)]
 pub struct FynkelQueryDesc {
     pub kind: u32,
     pub request_id: u32,

@@ -143,20 +143,23 @@ void main() {
     expect(w.componentsOf(sun.entity).whereType<DirectionalLight>().single, before);
   });
 
-  test('a spawned object takes components before its spawn resolves; the presentation lane applies now', () {
+  test('a spawned object takes components in the tick of its spawn; the presentation lane applies now', () {
     final w = loaded();
     final lamp = w.spawn(name: 'Lamp')
       ..add(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4))
-      ..set(const Name(value: 'Lamp'));
+      ..set(const Name(value: 'Lamp 2'));
     expect(lamp.isPending, isTrue);
     expect(lamp.get<PointLight>()!.intensity, 50, reason: 'read-your-writes before the spawn');
     expect(lamp.has<PointLight>(), isTrue);
-    w.frame(1 / 60); // spawns; the pending writes are staged when the spawn resolves
+    final shade = w.spawn(name: 'Shade', parent: lamp)..add(const MeshRenderer(mesh: AssetRef.none, material: AssetRef.none, castShadows: true, receiveShadows: true, visible: true));
+    w.frame(1 / 60); // one tick: spawn, components, child — temp references (M3-08b)
     expect(lamp.isPending, isFalse);
+    expect(shade.isPending, isFalse);
     expect(lamp.get<PointLight>()!.intensity, 50);
-    w.frame(1 / 60); // applies them
     expect(w.componentsOf(lamp.entity).whereType<PointLight>().single.range, 4);
-    expect(w.nameOf(lamp), 'Lamp');
+    expect(w.nameOf(lamp), 'Lamp 2');
+    expect(shade.parent, lamp.entity);
+    expect(w.componentsOf(shade.entity).whereType<MeshRenderer>(), hasLength(1));
 
     lamp.setPresentation(lamp.get<PointLight>()!.copyWith(intensity: 5));
     expect(lamp.get<PointLight>()!.intensity, 5);
@@ -170,10 +173,51 @@ void main() {
     expect(w.componentsOf(entity), isEmpty, reason: 'a destroyed entity has nothing');
   });
 
+  findTests(loaded);
+
   test('the typed table covers every native component the wire knows', () {
     expect(componentIds.keys, containsAll([Transform, Name, MeshRenderer, Camera, DirectionalLight, PointLight, SpotLight, Environment]));
     for (final MapEntry(key: type, value: id) in componentIds.entries) {
       expect(componentCodecs[id]!.type, type);
     }
+  });
+}
+
+void findTests(World Function() loaded) {
+  test('find, findAll, findChild and findDescendant read names and the hierarchy with one query per tick', () {
+    final w = loaded();
+    final q0 = w.stats().queryCalls;
+    final robot = w.find('Robot');
+    expect(robot, isNotNull);
+    expect(robot!.name, 'Robot');
+    expect(w.find('Robot'), same(robot), reason: 'the same handle for the same entity');
+    expect(w.find('Nobody'), isNull);
+    expect(w.findAll('Crate A').map((g) => g.entity), [w.find('Crate A')!.entity]);
+    expect(w.stats().queryCalls - q0, 1, reason: 'one FYNKEL_QUERY_ENTITIES for the tick');
+
+    // Build a small tree in one tick, then walk it from the next.
+    final arm = w.spawn(name: 'Arm', parent: robot);
+    final hand = w.spawn(name: 'Hand', parent: arm);
+    w.spawn(name: 'Finger', parent: hand);
+    w.spawn(name: 'Hand', parent: robot); // a second Hand, a direct child
+    expect(w.find('Arm'), isNull, reason: 'not spawned until the tick');
+    w.frame(1 / 60);
+    expect(w.find('Arm')!.entity, arm.entity);
+    expect(robot.findChild('Arm')!.entity, arm.entity);
+    expect(robot.findChild('Finger'), isNull, reason: 'direct children only');
+    expect(robot.findChild('Arm/Hand')!.entity, hand.entity);
+    expect(robot.findChild('Arm/Hand/Finger')!.name, 'Finger');
+    expect(robot.findChild('Arm/Nothing'), isNull);
+    expect(robot.findDescendant('Finger')!.entity, robot.findChild('Arm/Hand/Finger')!.entity);
+    expect(w.findAll('Hand'), hasLength(2));
+    expect(robot.findChild('Hand')!.entity, isNot(hand.entity), reason: 'the direct child, not the one under Arm');
+    expect(hand.findChild(''), same(hand), reason: 'an empty path is the object itself');
+
+    // A rename lands at the tick, and the table follows.
+    arm.set(const Name(value: 'Limb'));
+    expect(w.find('Limb'), isNull);
+    w.frame(1 / 60);
+    expect(w.find('Limb')!.entity, arm.entity);
+    expect(w.find('Arm'), isNull);
   });
 }

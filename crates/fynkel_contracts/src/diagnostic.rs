@@ -67,7 +67,8 @@ impl Code {
     pub const PREFAB_ROOTS_MISMATCH: Code = Code("FYN-D0400");
     /// An instance names a prefab the library does not have.
     pub const PREFAB_UNKNOWN: Code = Code("FYN-D0401");
-    /// A prefab contains a prefab instance (nested prefabs are post-M2).
+    /// A prefab's nesting cannot be resolved: an instance chain leads back
+    /// to the prefab itself (a cycle), so the instance stays unexpanded.
     pub const PREFAB_NESTED: Code = Code("FYN-D0402");
     /// An override addresses an entity/component/field that does not exist.
     pub const PREFAB_OVERRIDE_TARGET: Code = Code("FYN-D0403");

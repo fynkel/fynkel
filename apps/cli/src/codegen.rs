@@ -387,52 +387,55 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
             "allOf": bindings,
         },
     });
+    // Both documents may hold prefab instances: a scene's are expanded at
+    // load/cook, a prefab's when the library is flattened (nested prefabs,
+    // M3-08b; a cycle is `FYN-D0402`).
+    entity_properties["prefab"] = json!({"$ref": "#/$defs/prefabInstance"});
+    defs["prefabInstance"] = json!({
+        "type": "object",
+        "description": "Makes this entity a prefab instance: the prefab's roots are expanded as its children (after the authored ones), with prefab-local ids remapped per instance. Overrides apply in order.",
+        "properties": {
+            "asset": asset_ref,
+            "instance": {"allOf": [uuid], "description": "Stable per instance; prefab-local ids are derived from it."},
+            "overrides": {"type": "array", "items": {"$ref": "#/$defs/override"}},
+        },
+        "required": ["asset", "instance"],
+        "patternProperties": {"^x-": true},
+        "additionalProperties": false,
+    });
+    defs["override"] = json!({
+        "type": "object",
+        "description": "One explicit operation on the instance, addressed by prefab-local ids (or ids introduced by an earlier addObject/addComponent). `setField` with a null value sets null; `unsetField` removes the field.",
+        "properties": {
+            "op": {"enum": ["setField", "unsetField", "addComponent", "removeComponent", "addObject", "removeObject"]},
+            "entity": uuid,
+            "component": uuid,
+            "field": {"type": "string", "minLength": 1},
+            "value": {},
+            "type": type_id,
+            "version": {"type": "integer", "minimum": 1},
+            "data": {"type": "object"},
+            "name": {"type": "string", "maxLength": 256},
+            "parent": {"oneOf": [uuid, {"type": "null"}], "description": "addObject: prefab-local parent, or null for a new instance root."},
+            "components": {
+                "type": "object",
+                "propertyNames": uuid,
+                "additionalProperties": {"$ref": "#/$defs/component"},
+            },
+        },
+        "required": ["op", "entity"],
+        "allOf": [
+            {"if": {"properties": {"op": {"const": "setField"}}}, "then": {"required": ["component", "field", "value"]}},
+            {"if": {"properties": {"op": {"const": "unsetField"}}}, "then": {"required": ["component", "field"]}},
+            {"if": {"properties": {"op": {"const": "addComponent"}}}, "then": {"required": ["component", "type", "version", "data"]}},
+            {"if": {"properties": {"op": {"const": "removeComponent"}}}, "then": {"required": ["component"]}},
+            {"if": {"properties": {"op": {"const": "addObject"}}}, "then": {"required": ["name", "parent"]}},
+        ],
+        "patternProperties": {"^x-": true},
+        "additionalProperties": false,
+    });
     let (id, title, description, required) = match kind {
         EntityDocument::Scene => {
-            entity_properties["prefab"] = json!({"$ref": "#/$defs/prefabInstance"});
-            defs["prefabInstance"] = json!({
-                "type": "object",
-                "description": "Makes this entity a prefab instance: the prefab's roots are expanded as its children (after the authored ones), with prefab-local ids remapped per instance. Overrides apply in order.",
-                "properties": {
-                    "asset": asset_ref,
-                    "instance": {"allOf": [uuid], "description": "Stable per instance; prefab-local ids are derived from it."},
-                    "overrides": {"type": "array", "items": {"$ref": "#/$defs/override"}},
-                },
-                "required": ["asset", "instance"],
-                "patternProperties": {"^x-": true},
-                "additionalProperties": false,
-            });
-            defs["override"] = json!({
-                "type": "object",
-                "description": "One explicit operation on the instance, addressed by prefab-local ids (or ids introduced by an earlier addObject/addComponent). `setField` with a null value sets null; `unsetField` removes the field.",
-                "properties": {
-                    "op": {"enum": ["setField", "unsetField", "addComponent", "removeComponent", "addObject", "removeObject"]},
-                    "entity": uuid,
-                    "component": uuid,
-                    "field": {"type": "string", "minLength": 1},
-                    "value": {},
-                    "type": type_id,
-                    "version": {"type": "integer", "minimum": 1},
-                    "data": {"type": "object"},
-                    "name": {"type": "string", "maxLength": 256},
-                    "parent": {"oneOf": [uuid, {"type": "null"}], "description": "addObject: prefab-local parent, or null for a new instance root."},
-                    "components": {
-                        "type": "object",
-                        "propertyNames": uuid,
-                        "additionalProperties": {"$ref": "#/$defs/component"},
-                    },
-                },
-                "required": ["op", "entity"],
-                "allOf": [
-                    {"if": {"properties": {"op": {"const": "setField"}}}, "then": {"required": ["component", "field", "value"]}},
-                    {"if": {"properties": {"op": {"const": "unsetField"}}}, "then": {"required": ["component", "field"]}},
-                    {"if": {"properties": {"op": {"const": "addComponent"}}}, "then": {"required": ["component", "type", "version", "data"]}},
-                    {"if": {"properties": {"op": {"const": "removeComponent"}}}, "then": {"required": ["component"]}},
-                    {"if": {"properties": {"op": {"const": "addObject"}}}, "then": {"required": ["name", "parent"]}},
-                ],
-                "patternProperties": {"^x-": true},
-                "additionalProperties": false,
-            });
             (
                 "scene",
                 "Fynkel scene document",
@@ -450,7 +453,7 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
             (
                 "prefab",
                 "Fynkel prefab document",
-                "The scene entity model plus declared `roots` (blueprint §6 Prefabs). A prefab may not contain prefab instances (nested prefabs are post-M2). `fynkel prefab validate` checks the semantic rules.",
+                "The scene entity model plus declared `roots` (blueprint §6 Prefabs). An entity with `prefab` is a nested prefab instance, expanded when the prefab is (a cycle is `FYN-D0402`). `fynkel prefab validate` checks the semantic rules.",
                 json!(["entities", "roots"]),
             )
         }

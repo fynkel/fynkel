@@ -1127,6 +1127,11 @@ pub fn validate_project(
             _ => {}
         }
     }
+    // Nested prefabs expand once here (a cycle or a bad inner override is
+    // reported whether or not a scene instantiates the prefab); the
+    // scenes below expand against the flat library.
+    let (prefabs, flat) = prefabs.flattened(schemas);
+    report.diagnostics.extend(flat);
 
     let mut unregistered: HashSet<String> = HashSet::new();
     for (kind, doc) in docs {

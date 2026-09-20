@@ -189,6 +189,9 @@ pub struct World {
     /// command the caller could not decode: it is reported as rejected at
     /// the tick boundary so its diagnostic sits with the batch's others.
     staged: Vec<(u32, Result<Command, Rejected>, bool)>,
+    /// The tick's spawns by temp id, what a temp reference
+    /// (`Entity::temp`) in a later command of the same tick resolves to.
+    spawned_this_tick: HashMap<u64, Entity>,
     /// Entities whose next tick must not interpolate from S[n] (their
     /// authoritative value came from a presentation override already shown).
     teleported: Vec<Entity>,
@@ -219,6 +222,7 @@ impl World {
             config,
             clock,
             staged: Vec::new(),
+            spawned_this_tick: HashMap::new(),
             teleported: Vec::new(),
             overrides: HashMap::new(),
             events: EventQueue::default(),
@@ -430,6 +434,16 @@ impl World {
     }
 
     fn check_entity(&mut self, index: u32, lane: Lane, e: Entity, what: &str) -> bool {
+        if let Some(t) = e.temp_id() {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::INVALID_TEMP_ID,
+                e,
+                ComponentId::NONE,
+                format!("{what}: temp reference #{t} is only valid on the simulation lane"),
+            );
+        }
         if e.world() != self.config.id {
             return self.reject(
                 index,
@@ -526,6 +540,54 @@ impl World {
         }
     }
 
+    /// Replaces every temp reference (`Entity::temp`, M3-08b) in `cmd`
+    /// with the entity a spawn earlier in this tick produced; `None` (and a
+    /// diagnostic) when no applied spawn carried that temp id.
+    fn resolve_temps(&mut self, index: u32, mut cmd: Command) -> Option<Command> {
+        let mut failed = None;
+        let mut resolve = |e: &mut Entity| {
+            if let Some(t) = e.temp_id() {
+                match self.spawned_this_tick.get(&(t as u64)) {
+                    Some(real) => *e = *real,
+                    None => failed = Some(t),
+                }
+            }
+        };
+        match &mut cmd {
+            Command::Spawn { parent, .. } => {
+                if let Some(p) = parent {
+                    resolve(p);
+                }
+            }
+            Command::Destroy(e) => resolve(e),
+            Command::SetTransform { entity, .. }
+            | Command::SetName { entity, .. }
+            | Command::SetComponent { entity, .. }
+            | Command::RemoveComponent { entity, .. }
+            | Command::Body { entity, .. } => resolve(entity),
+            Command::SetParent { child, parent, .. } => {
+                resolve(child);
+                if let Some(p) = parent {
+                    resolve(p);
+                }
+            }
+        }
+        match failed {
+            None => Some(cmd),
+            Some(t) => {
+                self.reject(
+                    index,
+                    Lane::Simulation,
+                    DiagnosticCode::INVALID_TEMP_ID,
+                    Entity::temp(t),
+                    ComponentId::NONE,
+                    format!("temp reference #{t}: no spawn of this tick, earlier in its batch, carries that temp id"),
+                );
+                None
+            }
+        }
+    }
+
     pub(crate) fn apply_simulation(&mut self, index: u32, cmd: Command, tick: Tick) -> bool {
         let lane = Lane::Simulation;
         match cmd {
@@ -567,6 +629,7 @@ impl World {
                 if let Some(n) = name {
                     let _ = self.ecs.insert(e, Name::new(n));
                 }
+                self.spawned_this_tick.insert(temp_id, e);
                 self.events.push(Event {
                     tick,
                     payload: EventPayload::Spawned { temp_id, entity: e },
@@ -815,6 +878,7 @@ impl World {
 
         // Validate/apply C[n] at the tick boundary.
         let staged = std::mem::take(&mut self.staged);
+        self.spawned_this_tick.clear();
         let mut applied: u32 = 0;
         let mut rejected = 0;
         for (index, cmd, from_presentation) in staged {
@@ -832,6 +896,10 @@ impl World {
                     rejected += 1;
                     continue;
                 }
+            };
+            let Some(cmd) = self.resolve_temps(index, cmd) else {
+                rejected += 1;
+                continue;
             };
             let target = cmd.target();
             if self.apply_simulation(index, cmd, next_tick) {

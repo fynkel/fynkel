@@ -15,6 +15,7 @@ export 'generated/schema.g.dart'
         ColliderShape,
         ComponentCodec,
         DirectionalLight,
+        EntityInfoRecord,
         Environment,
         ExposureMode,
         MeshRenderer,

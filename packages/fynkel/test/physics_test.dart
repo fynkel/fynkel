@@ -136,10 +136,9 @@ void main() {
     final crate = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)), name: 'crate')
       ..add(dynamicBody)
       ..add(unitBox);
-    final wall = w.spawn(name: 'wall')..add(unitBox);
-    w.frame(1 / 60);
-    // Components and the impulse in one batch: the body sees the impulse
-    // the tick it is created.
+    final wall = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 5)), name: 'wall')
+      ..add(unitBox);
+    w.frame(1 / 60); // spawns, components and bodies in one tick (M3-08b)
     crate.applyImpulse(const Vec3(4, 0, 0));
     w.frame(1 / 60);
     expect(crate.bodyState()!.linearVelocity.x, closeTo(1.9, 0.1), reason: 'j = m·Δv, minus friction over one tick');
@@ -251,9 +250,20 @@ void main() {
         isNot(crate.entity));
   });
 
-  test('the SDK rejects a body command on an object not spawned yet', () {
+  test('a body added and pushed on an object spawned in the same tick moves', () {
     final w = fresh();
-    final go = w.spawn(name: 'late');
-    expect(() => go.applyForce(Vec3.up), throwsStateError);
+    final go = w.spawn(name: 'early')
+      ..add(dynamicBody.copyWith(gravityScale: 0))
+      ..add(unitBox.copyWith(shape: ColliderShape.sphere))
+      ..setLinearVelocity(const Vec3(0, 0, 6));
+    expect(go.isPending, isTrue);
+    w.frame(1 / 60); // creates the body and applies the velocity in that tick
+    expect(go.isPending, isFalse);
+    expect(go.bodyState()!.linearVelocity.z, closeTo(6, 1e-4));
+    w.frame(1 / 60);
+    expect(go.localTransform.position.z, closeTo(2 * 6 / 60, 1e-3));
+    go.destroy();
+    w.frame(1 / 60);
+    expect(() => go.applyForce(Vec3.up), throwsStateError, reason: 'destroyed');
   });
 }

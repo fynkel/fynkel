@@ -22,21 +22,26 @@ void main() {
     final go = w.spawn(transform: const Transform(position: Vec3(1, 2, 3), rotation: Quat.identity, scale: Vec3.one), name: 'player');
     expect(go.isPending, isTrue);
     expect(go.transform.position, const Vec3(1, 2, 3), reason: 'initial value readable while pending');
-    expect(() => go.transform.position = Vec3.zero, throwsStateError);
+    expect(() => go.setPresentationPosition(0, 0, 0), throwsStateError, reason: 'the presentation lane needs the handle');
+    // A simulation write while pending rides in the spawn's batch as a
+    // temp reference (M3-08b) and lands in the spawn's tick.
+    go.transform.position = const Vec3(1, 2, 3.5);
+    expect(go.transform.position, const Vec3(1, 2, 3.5), reason: 'read-your-writes while pending');
 
     final plan = w.frame(1 / 60);
     expect(plan.steps, 1);
     expect(go.isPending, isFalse);
     expect(w.nameOf(go), 'player');
+    expect(go.transform.position, const Vec3(1, 2, 3.5));
     expect(go.worldTransform, isNull, reason: 'subscribed after resolution; first snapshot next tick');
 
     w.frame(1 / 60);
-    expect(go.worldTransform!.position, const Vec3(1, 2, 3));
+    expect(go.worldTransform!.position, const Vec3(1, 2, 3.5));
 
     // Read-your-writes: overlay before the tick, snapshot after.
     go.transform.position = const Vec3(5, 0, 0);
     expect(go.transform.position, const Vec3(5, 0, 0));
-    expect(go.worldTransform!.position, const Vec3(1, 2, 3), reason: 'world transform is snapshot-only');
+    expect(go.worldTransform!.position, const Vec3(1, 2, 3.5), reason: 'world transform is snapshot-only');
     w.frame(1 / 60);
     expect(go.transform.position, const Vec3(5, 0, 0));
     expect(go.worldTransform!.position, const Vec3(5, 0, 0));

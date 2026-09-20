@@ -274,6 +274,21 @@ impl CacheIndex {
     }
 }
 
+/// A cooked prefab ready to instantiate (M3-08b): [`Assets::prefab`].
+#[derive(Clone, Debug)]
+pub struct CookedPrefab {
+    pub id: Uuid,
+    /// The prefab document's name.
+    pub name: String,
+    pub path: String,
+    /// The parentless entities in instantiation order.
+    pub roots: Vec<Uuid>,
+    pub description: SceneDescription,
+    pub behaviours: Vec<AuthoredBehaviour>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub closure: Vec<Uuid>,
+}
+
 /// A cooked scene as the runtime loads it.
 #[derive(Clone, Debug)]
 pub struct CookedScene {
@@ -644,6 +659,76 @@ impl Assets {
         })
     }
 
+    /// The cooked prefab `id` as a `SceneDescription` (its entities, roots
+    /// parentless) plus the authored behaviours and the roots, for
+    /// `World::instantiate` (M3-08b). The cook expanded nested instances
+    /// and checked every component, so this only decodes; `Err` as for
+    /// [`Assets::scene`] (`FYN-R0006` for an asset that is not a prefab,
+    /// `R0008` when the chunk does not describe: recook).
+    pub fn prefab(&self, id: Uuid) -> Result<CookedPrefab, Vec<Diagnostic>> {
+        let (entry, meta) = {
+            let mut s = self.lock();
+            let entry = s.index.object(id).map_err(|d| vec![d])?.clone();
+            let meta = s.meta(&entry).map_err(|d| vec![d])?;
+            (entry, meta)
+        };
+        if entry.kind != "document/prefab" {
+            return Err(vec![Diagnostic::error(
+                Code::RUNTIME_CHUNK_MISSING,
+                format!(
+                    "{}: {id} is a {} asset, not a prefab",
+                    entry.path, entry.kind
+                ),
+            )
+            .with_id(id.to_string())]);
+        }
+        let bytes = self
+            .read_chunk(&entry, &meta, KIND_JSON, "")
+            .map_err(|d| vec![d])?;
+        let text =
+            String::from_utf8(bytes).map_err(|_| vec![self.malformed_entry(&entry, "JSON")])?;
+        let path = entry.path.clone();
+        let doc =
+            Document::parse(DocumentKind::Prefab, Some(&path), &text).map_err(|mut diags| {
+                diags.insert(0, self.scene_invalid(&entry));
+                diags
+            })?;
+        let mut schemas = SchemaSet::embedded();
+        if let Some(info) = &meta.scene_info {
+            for b in info["behaviourTypes"].as_array().into_iter().flatten() {
+                if let Some(t) = b["type"].as_str() {
+                    schemas.declare_behaviour(t, b["version"].as_u64().unwrap_or(1) as u32);
+                }
+            }
+        }
+        let prefab = fynkel_document::prefab::Prefab::from_document(doc);
+        let mut diagnostics = prefab.read_diagnostics().to_vec();
+        if prefab.has_instances() {
+            diagnostics.push(self.scene_invalid(&entry));
+        }
+        let described = describe(&prefab.scene(), &schemas);
+        diagnostics.extend(described.diagnostics);
+        if fynkel_contracts::has_errors(&diagnostics) {
+            diagnostics.insert(0, self.scene_invalid(&entry));
+            return Err(diagnostics);
+        }
+        let closure = self.lock().index.closure(id);
+        Ok(CookedPrefab {
+            id,
+            name: described.description.name.clone(),
+            path,
+            roots: prefab
+                .roots
+                .iter()
+                .map(|u| Uuid::from_bytes(*u.as_bytes()))
+                .collect(),
+            description: described.description,
+            behaviours: described.behaviours,
+            diagnostics,
+            closure,
+        })
+    }
+
     fn scene_invalid(&self, entry: &IndexEntry) -> Diagnostic {
         Diagnostic::error(
             Code::RUNTIME_SCENE_INVALID,
@@ -746,7 +831,9 @@ impl Store {
                 Ok(k) => k,
                 Err(_) => continue,
             };
-            if kind_bytes == KIND_JSON && c["documentKind"] == "scene" {
+            if kind_bytes == KIND_JSON
+                && (c["documentKind"] == "scene" || c["documentKind"] == "prefab")
+            {
                 scene_info = Some(c.clone());
             }
             chunks.push((

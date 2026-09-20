@@ -6,12 +6,13 @@
 use std::path::{Path, PathBuf};
 
 use fynkel_assets::{Assets, CookedScene};
-use fynkel_contracts::{Diagnostic, Status, Uuid};
-use fynkel_core::{LoadError, LoadedScene};
+use fynkel_contracts::{Diagnostic, Entity, Status, Uuid};
+use fynkel_core::{LoadError, LoadedScene, Transform};
 use fynkel_document::diagnostic_json;
+use glam::{Quat, Vec3};
 use serde_json::{json, Value};
 
-use crate::{guarded, FynkelBufferView, FynkelWorld};
+use crate::{guarded, FynkelBufferView, FynkelInstantiateDesc, FynkelWorld};
 
 /// What one load call produced.
 struct Outcome {
@@ -51,6 +52,7 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
         LoadError::ChildParentMismatch { .. } => Code::SCENE_CHILD_PARENT_MISMATCH,
         LoadError::Unreachable(_) => Code::SCENE_HIERARCHY_CYCLE,
         LoadError::DuplicateComponent { .. } => Code::SCENE_DUPLICATE_COMPONENT,
+        LoadError::UnknownAnchorParent(_) | LoadError::AnchorTransform => Code::IO,
     };
     Diagnostic::error(code, e.to_string())
 }
@@ -208,6 +210,136 @@ fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>) -> Outcome {
         Ok(scene) => instantiate(w, assets, scene),
         Err(diags) => failed(&diags, cache),
     }
+}
+
+/// Instantiates a cooked prefab from the world's store (M3-08b).
+fn instantiate_prefab(
+    w: &mut FynkelWorld,
+    id: Uuid,
+    name: Option<&str>,
+    transform: Transform,
+    parent: Option<Entity>,
+) -> Outcome {
+    let Some(assets) = w.assets.clone() else {
+        return failed(
+            &[Diagnostic::error(
+                fynkel_contracts::Code::RUNTIME_CACHE_UNREADABLE,
+                "instantiate: no cooked project is loaded in this world",
+            )
+            .with_suggestion("load the project (fynkel_world_load_project) first")],
+            Value::Null,
+        );
+    };
+    let cache = cache_json(&assets);
+    let prefab = match assets.prefab(id) {
+        Ok(p) => p,
+        Err(diags) => return failed(&diags, cache),
+    };
+    let (meshes, mesh_diags) =
+        assets.register_mesh_colliders(&prefab.description, w.core_mut().physics_mut());
+    let name = name.unwrap_or(&prefab.name);
+    match w
+        .core_mut()
+        .instantiate(&prefab.description, name, transform, parent)
+    {
+        Ok((anchor, loaded)) => {
+            let residency = assets.retain(&prefab.closure);
+            let stats = assets.stats();
+            w.residency.push(residency);
+            let behaviours: Vec<Value> = prefab
+                .behaviours
+                .iter()
+                .filter_map(|b| {
+                    let entity = loaded.handle_of(b.entity)?;
+                    Some(json!({
+                        "entity": entity.to_bits(),
+                        "authoringId": b.entity.to_string(),
+                        "component": b.component.to_string(),
+                        "type": b.type_id,
+                        "version": b.version,
+                        "known": b.known,
+                        "data": b.data,
+                        "pointer": b.pointer,
+                    }))
+                })
+                .collect();
+            let mut diagnostics: Vec<Value> =
+                prefab.diagnostics.iter().map(diagnostic_json).collect();
+            diagnostics.extend(mesh_diags.iter().map(diagnostic_json));
+            Outcome {
+                status: Status::Ok,
+                report: json!({
+                    "ok": true,
+                    "scene": Value::Null,
+                    "instance": {
+                        "prefab": prefab.id.to_string(),
+                        "name": name,
+                        "path": prefab.path,
+                        "anchor": anchor.to_bits(),
+                        "entities": loaded.entities().len(),
+                        "rejectedComponents": loaded.rejected_components,
+                        "assets": prefab.closure.len(),
+                        "meshColliders": meshes,
+                        "behaviours": behaviours,
+                    },
+                    "cache": cache,
+                    "residency": {
+                        "retained": stats.retained,
+                        "meshes": stats.meshes,
+                        "textures": stats.textures,
+                        "materials": stats.materials,
+                        "bytes": stats.bytes,
+                    },
+                    "diagnostics": diagnostics,
+                }),
+            }
+        }
+        Err(e) => {
+            let mut diags = prefab.diagnostics;
+            diags.push(load_error_diagnostic(&e));
+            failed(&diags, cache)
+        }
+    }
+}
+
+/// Instantiates the cooked prefab `desc.prefab_id_utf8` as the children
+/// of a new anchor entity (see the header).
+///
+/// # Safety
+/// `world` live or NULL; `desc` NULL or valid, its strings readable for
+/// their lengths.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_instantiate(
+    world: *mut FynkelWorld,
+    desc: *const FynkelInstantiateDesc,
+) -> Status {
+    let Some(d) = desc.as_ref() else {
+        return Status::InvalidArgument;
+    };
+    let Some(id) = utf8(d.prefab_id_utf8, d.prefab_id_len) else {
+        return Status::InvalidArgument;
+    };
+    let Ok(id) = id.parse::<Uuid>() else {
+        return Status::InvalidArgument;
+    };
+    let name = if d.name_len == 0 {
+        None
+    } else {
+        match utf8(d.name_utf8, d.name_len) {
+            Some(n) => Some(n.to_string()),
+            None => return Status::InvalidArgument,
+        }
+    };
+    let transform = Transform {
+        position: Vec3::from_array(d.position),
+        rotation: Quat::from_array(d.rotation),
+        scale: Vec3::from_array(d.scale),
+    };
+    let parent = (d.parent != 0).then(|| Entity::from_bits(d.parent));
+    guarded(world, move |w| {
+        let out = instantiate_prefab(w, id, name.as_deref(), transform, parent);
+        finish(w, out)
+    })
 }
 
 /// Loads the startup scene of the cooked project at `cache_utf8` (the

@@ -251,6 +251,7 @@ pub const QUERY_NAME: u32 = 4;
 pub const QUERY_ALL_ENTITIES: u32 = 5;
 pub const QUERY_COMPONENTS: u32 = 6;
 pub const QUERY_BODY: u32 = 7;
+pub const QUERY_ENTITIES: u32 = 8;
 
 pub fn query(
     world: &World,
@@ -342,6 +343,22 @@ pub fn query(
                     linear_velocity: s.linear_velocity,
                     angular_velocity: s.angular_velocity,
                     sleeping: s.sleeping,
+                });
+            }
+        }
+        // Every live entity with its parent and name (M3-08b), entity
+        // order: the hierarchy and the names in one call, for `find`.
+        QUERY_ENTITIES => {
+            for e in ecs.entities() {
+                let parent = fynkel_scene::parent_of(ecs, e).unwrap_or(Entity::NULL);
+                let name = ecs
+                    .get::<fynkel_core::Name>(e)
+                    .map(|n| n.value.clone())
+                    .unwrap_or_default();
+                w.record(&EntityInfoRecord {
+                    entity: e,
+                    parent,
+                    name,
                 });
             }
         }

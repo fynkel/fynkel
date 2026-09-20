@@ -175,7 +175,7 @@ final mesh = get<MeshRenderer>()!;                 // null when the object has n
 set(mesh.copyWith(visible: false));                // a command at the next tick; reads back now
 if (!has<PointLight>()) set(const PointLight(color: Vec3(1, .5, .2), intensity: 800, range: 12));
 remove<SpotLight>();                               // Transform and Name cannot be removed
-world.spawn(name: 'Twin', transform: t)..add(mesh)..add(light);   // writes wait for the spawn
+world.spawn(name: 'Twin', transform: t)..add(mesh)..add(light);   // lands in the spawn's tick
 ```
 
 - `get`/`has`/`set`/`remove` on `Behaviour` forward to `gameObject`; on any
@@ -218,6 +218,30 @@ both objects; `Contact` carries `point`, `normal` (a → b) and `impulse`
 without a collider (`H0004`, warning). `fynkel test --headless` prints the
 run's bodies, colliders and contact counts; the simulation is deterministic
 per platform (same scene, same commands → same checksum).
+
+## Finding objects, spawning, prefabs
+
+```dart
+final player = world.find('Player');                // by name, as the last tick left it
+final hand = player?.findChild('Arm/Hand');         // a path of direct children; findDescendant(name) searches deep
+for (final crate in world.findAll('Crate')) { … }   // every entity with that name
+final box = world.spawn(name: 'Box', transform: t, parent: player)
+  ..add(const RigidBody(bodyType: BodyType.dynamic, mass: 2, …))
+  ..add(const Collider(shape: ColliderShape.box, size: Vec3.one, …))
+  ..applyImpulse(const Vec3(0, 4, 0));               // all in the spawn's tick
+final turret = world.instantiate(turretPrefab, transform: t, name: 'Turret');
+turret.findChild('Barrel');                          // the prefab's entities are its children
+```
+
+- `find`/`findAll`/`findChild`/`findDescendant` read one entity table per
+  tick; a rename or reparent staged this tick shows up next tick.
+- A freshly spawned object can be configured — components, transform,
+  parent, body commands, children — in the same `fixedUpdate`; everything
+  lands in the spawn's tick.
+- `instantiate(prefab)` takes the prefab's asset id (`AssetRef` or UUID
+  text) from the cooked cache and returns the anchor object immediately;
+  `world.lastInstantiate` is the report, a bad id throws
+  `FynkelInstantiateError`. Prefabs may nest; a cycle is `FYN-D0402`.
 
 ## Input (actions, never keys)
 

@@ -189,3 +189,136 @@ fn derived_ids_are_stable_and_distinct_per_instance() {
     assert_ne!(derive_id(i1, local), local);
     assert!(fynkel_document::parse_uuid(&derive_id(i1, local).to_string()).is_ok());
 }
+
+/// Nested prefabs (M3-08b): `nested.prefab.json` instantiates the turret;
+/// flattening the library expands it into plain entities (innermost first,
+/// ids derived from the inner instance id), a scene instantiating `Nested`
+/// gets the turret's entities under the holder, and the `cycle_a`/`cycle_b`
+/// pair is refused with `FYN-D0402` in the prefab documents, once each.
+#[test]
+fn nested_prefabs_flatten_and_cycles_are_refused() {
+    let schemas = schemas();
+    let lib = library();
+    assert!(lib.has_instances());
+    let (flat, diags) = lib.flattened(&schemas);
+    assert_eq!(flat.len(), lib.len());
+    assert!(!flat
+        .get("10000000-0000-4000-8000-000000000003".parse().unwrap())
+        .unwrap()
+        .has_instances());
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.code == fynkel_contracts::Code::PREFAB_NESTED),
+        "{diags:#?}"
+    );
+    // Flattening A reaches B, which reaches A again: the cycle is reported
+    // in B (the instance that closes it) and A stays unresolved for it.
+    let mut where_: Vec<(String, String)> = diags
+        .iter()
+        .map(|d| (d.document.clone().unwrap(), d.pointer.clone().unwrap()))
+        .collect();
+    where_.sort();
+    assert_eq!(where_.len(), 2, "{diags:#?}");
+    assert!(where_[0].0.ends_with("cycle_a.prefab.json"), "{where_:?}");
+    assert_eq!(
+        where_[0].1,
+        "/entities/10000000-0000-4000-8000-0000000000c1/prefab/asset"
+    );
+    assert!(where_[1].0.ends_with("cycle_b.prefab.json"), "{where_:?}");
+    assert_eq!(
+        where_[1].1,
+        "/entities/10000000-0000-4000-8000-0000000000d1/prefab/asset"
+    );
+    // Idempotent: a flat library flattens to itself, silently.
+    let (again, none) = flat.flattened(&schemas);
+    assert!(none.is_empty());
+    assert_eq!(again.len(), flat.len());
+
+    // The flattened `Nested`: holder → base (derived from the inner instance) → barrel.
+    let nested = flat
+        .get("10000000-0000-4000-8000-000000000003".parse().unwrap())
+        .unwrap();
+    let holder: Uuid = "10000000-0000-4000-8000-0000000000b1".parse().unwrap();
+    let inner_instance: Uuid = "10000000-0000-4000-8000-0000000000e1".parse().unwrap();
+    let base = derive_id(
+        inner_instance,
+        "10000000-0000-4000-8000-0000000000b1".parse().unwrap(),
+    );
+    let barrel = derive_id(
+        inner_instance,
+        "10000000-0000-4000-8000-0000000000b2".parse().unwrap(),
+    );
+    assert_eq!(nested.entities.len(), 3);
+    assert_eq!(nested.entity(holder).unwrap().children, vec![base]);
+    assert_eq!(nested.entity(base).unwrap().children, vec![barrel]);
+    assert!(nested
+        .entity(base)
+        .unwrap()
+        .component_of("fynkel.MeshRenderer")
+        .is_some());
+    assert!(nested.validate(&schemas).is_empty());
+
+    // A scene instantiating `Nested` gets the same three entities, remapped
+    // once more by the scene instance; one that instantiates a cyclic
+    // prefab is refused for that instance (and only sees its own prefab's
+    // problems).
+    let scene_json = r#"{
+      "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+      "formatVersion": 2,
+      "id": "20000000-0000-4000-8000-000000000077",
+      "name": "Nesting",
+      "entities": {
+        "20000000-0000-4000-8000-0000000000a1": {
+          "name": "Turret Stand", "parent": null, "children": [], "components": {},
+          "prefab": { "asset": { "asset": "10000000-0000-4000-8000-000000000003" }, "instance": "20000000-0000-4000-8000-0000000000e1" }
+        }
+      }
+    }"#;
+    let scene = Scene::from_document(
+        Document::parse(DocumentKind::Scene, Some("nesting.scene.json"), scene_json).unwrap(),
+    );
+    assert!(scene.validate(&schemas).is_empty());
+    let expanded = expand(&scene, &lib, &schemas);
+    assert!(
+        expanded.diagnostics.is_empty(),
+        "{:#?}",
+        expanded.diagnostics
+    );
+    assert_eq!(expanded.instances.len(), 1);
+    let inst = &expanded.instances[0];
+    assert_eq!(inst.entities.len(), 3);
+    let out = expanded.scene();
+    assert_eq!(out.entities.len(), 4);
+    assert_eq!(
+        out.entity(inst.entity(holder).unwrap()).unwrap().children,
+        vec![inst.entity(base).unwrap()]
+    );
+    assert!(out.validate(&schemas).is_empty());
+    assert!(!describe(&out, &schemas).has_errors());
+
+    let cyclic = scene_json.replace(
+        "10000000-0000-4000-8000-000000000003",
+        "10000000-0000-4000-8000-000000000004",
+    );
+    let scene = Scene::from_document(
+        Document::parse(DocumentKind::Scene, Some("cyclic.scene.json"), &cyclic).unwrap(),
+    );
+    let expanded = expand(&scene, &lib, &schemas);
+    let codes: Vec<&str> = expanded
+        .diagnostics
+        .iter()
+        .map(|d| d.code.as_str())
+        .collect();
+    assert_eq!(
+        codes,
+        ["FYN-D0402", "FYN-D0402", "FYN-D0402"],
+        "{:#?}",
+        expanded.diagnostics
+    );
+    assert!(expanded.diagnostics[2].document.as_deref() == Some("cyclic.scene.json"));
+    assert_eq!(
+        expanded.diagnostics[2].pointer.as_deref(),
+        Some("/entities/20000000-0000-4000-8000-0000000000a1/prefab/asset")
+    );
+}

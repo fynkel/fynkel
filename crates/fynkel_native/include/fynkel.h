@@ -139,7 +139,10 @@ typedef enum FynkelQueryKind {
    * (0 records if unknown). */
   FYNKEL_QUERY_COMPONENTS = 6,
   /* entity -> one BodyStateRecord (0 records without a RigidBody). */
-  FYNKEL_QUERY_BODY = 7
+  FYNKEL_QUERY_BODY = 7,
+  /* (no entity) -> one EntityInfoRecord { entity, parent, name } per live
+   * entity, slot order: the hierarchy and the names in one call. */
+  FYNKEL_QUERY_ENTITIES = 8
 } FynkelQueryKind;
 
 /* ---- Buffer header ------------------------------------------------------ */
@@ -326,13 +329,39 @@ FynkelStatus fynkel_world_load_scene(FynkelWorld* world,
                                      uint32_t cache_len,
                                      const uint8_t* scene_id_utf8,
                                      uint32_t scene_id_len);
-/* UTF-8 JSON describing the last load call on this world (empty before
- * any): {"ok": bool, "scene": {"id", "name", "path", "key", "entities",
- * "rejectedComponents", "assets", "behaviours": [...]} | null,
- * "cache": {"dir", "profile", "project", "startupScene"} | null,
- * "residency": {"retained", "meshes", "textures", "materials", "bytes"}?,
- * "diagnostics": [{"code", "severity", "message", "document"?, "pointer"?,
- * ...}]}. Valid until the next load call. */
+/* Runtime prefab instantiation (M3-08b, blueprint §6 item 12). Spawns,
+ * now, an anchor entity named `name_utf8` (empty: the prefab's name) with
+ * the given local transform under `parent` (0 = root), and the cooked
+ * prefab `prefab_id_utf8` (36-char UUID text) as the anchor's children —
+ * the shape a scene instance expands to. The prefab comes from the cache
+ * the last successful load opened (FYNKEL_STATUS_LOAD_FAILED before any);
+ * its closure is retained with the scene's. Components go through the
+ * command path; the anchor and the entities are in the report:
+ * {"ok", "instance": {"prefab", "name", "path", "anchor": u64,
+ * "entities": n, "rejectedComponents", "assets", "behaviours": [...]},
+ * "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED when the prefab is not
+ * in the cache, does not decode (recook) or `parent` is not live (the
+ * world is unchanged). */
+typedef struct FynkelInstantiateDesc {
+  const uint8_t* prefab_id_utf8;
+  uint32_t prefab_id_len;
+  const uint8_t* name_utf8;           /* NULL with name_len 0 for none */
+  uint32_t name_len;
+  FynkelEntity parent;                /* 0: a root */
+  float position[3];
+  float rotation[4];                  /* x, y, z, w */
+  float scale[3];
+} FynkelInstantiateDesc;
+FynkelStatus fynkel_world_instantiate(FynkelWorld* world,
+                                      const FynkelInstantiateDesc* desc);
+
+/* UTF-8 JSON describing the last load or instantiate call on this world
+ * (empty before any): {"ok": bool, "scene": {"id", "name", "path", "key",
+ * "entities", "rejectedComponents", "assets", "behaviours": [...]} | null,
+ * "instance": {...}?, "cache": {"dir", "profile", "project",
+ * "startupScene"} | null, "residency": {"retained", "meshes", "textures",
+ * "materials", "bytes"}?, "diagnostics": [{"code", "severity", "message",
+ * "document"?, "pointer"?, ...}]}. Valid until the next such call. */
 FynkelBufferView fynkel_world_load_report(const FynkelWorld* world);
 
 #ifdef __cplusplus

@@ -167,6 +167,35 @@ fn scenes_describe_from_the_expanded_chunk() {
     assert_eq!(d[0].code, Code::RUNTIME_ASSET_MISSING);
 }
 
+/// A prefab describes from its own cooked chunk (M3-08b): flat entities,
+/// the declared roots, its closure; a scene is not a prefab.
+#[test]
+fn prefabs_describe_from_their_chunk() {
+    let cooked = Cooked::new("prefab");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let prefab = assets
+        .prefab(id(CRATE_PREFAB))
+        .unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(prefab.id, id(CRATE_PREFAB));
+    assert_eq!(prefab.name, "Crate");
+    assert_eq!(prefab.path, "prefabs/crate.prefab.json");
+    assert_eq!(prefab.diagnostics, vec![]);
+    assert_eq!(prefab.description.entities.len(), 1);
+    assert_eq!(prefab.description.entities[0].name, "Crate");
+    assert_eq!(prefab.roots, vec![prefab.description.entities[0].id]);
+    assert!(prefab.behaviours.is_empty());
+    // The prefab, the robot mesh, the material and its three maps.
+    assert_eq!(prefab.closure.len(), 6);
+
+    let d = assets.prefab(id(MAIN)).unwrap_err();
+    assert_eq!(d[0].code, Code::RUNTIME_CHUNK_MISSING);
+    assert_eq!(d[0].id.as_deref(), Some(MAIN));
+    let d = assets
+        .prefab(id("c0000000-0000-4000-8000-0000000000ff"))
+        .unwrap_err();
+    assert_eq!(d[0].code, Code::RUNTIME_ASSET_MISSING);
+}
+
 #[test]
 fn payloads_load_by_reference_and_residency_evicts() {
     let cooked = Cooked::new("residency");

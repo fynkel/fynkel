@@ -341,13 +341,29 @@ FynkelStatus fynkel_world_load_scene(
   ),
 );
 
-/// UTF-8 JSON describing the last load call on this world (empty before
-/// any): {"ok": bool, "scene": {"id", "name", "path", "key", "entities",
-/// "rejectedComponents", "assets", "behaviours": [...]} | null,
-/// "cache": {"dir", "profile", "project", "startupScene"} | null,
-/// "residency": {"retained", "meshes", "textures", "materials", "bytes"}?,
-/// "diagnostics": [{"code", "severity", "message", "document"?, "pointer"?,
-/// ...}]}. Valid until the next load call.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<FynkelInstantiateDesc>,
+  )
+>(symbol: 'fynkel_world_instantiate')
+external int _fynkel_world_instantiate(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<FynkelInstantiateDesc> desc,
+);
+
+FynkelStatus fynkel_world_instantiate(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<FynkelInstantiateDesc> desc,
+) => FynkelStatus.fromValue(_fynkel_world_instantiate(world, desc));
+
+/// UTF-8 JSON describing the last load or instantiate call on this world
+/// (empty before any): {"ok": bool, "scene": {"id", "name", "path", "key",
+/// "entities", "rejectedComponents", "assets", "behaviours": [...]} | null,
+/// "instance": {...}?, "cache": {"dir", "profile", "project",
+/// "startupScene"} | null, "residency": {"retained", "meshes", "textures",
+/// "materials", "bytes"}?, "diagnostics": [{"code", "severity", "message",
+/// "document"?, "pointer"?, ...}]}. Valid until the next such call.
 @ffi.Native<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>()
 external FynkelBufferView fynkel_world_load_report(
   ffi.Pointer<FynkelWorld> world,
@@ -544,7 +560,11 @@ enum FynkelQueryKind {
   FYNKEL_QUERY_COMPONENTS(6),
 
   /// entity -> one BodyStateRecord (0 records without a RigidBody).
-  FYNKEL_QUERY_BODY(7);
+  FYNKEL_QUERY_BODY(7),
+
+  /// (no entity) -> one EntityInfoRecord { entity, parent, name } per live
+  /// entity, slot order: the hierarchy and the names in one call.
+  FYNKEL_QUERY_ENTITIES(8);
 
   final int value;
   const FynkelQueryKind(this.value);
@@ -557,6 +577,7 @@ enum FynkelQueryKind {
     5 => FYNKEL_QUERY_ALL_ENTITIES,
     6 => FYNKEL_QUERY_COMPONENTS,
     7 => FYNKEL_QUERY_BODY,
+    8 => FYNKEL_QUERY_ENTITIES,
     _ => throw ArgumentError('Unknown value for FynkelQueryKind: $value'),
   };
 }
@@ -728,6 +749,46 @@ final class FynkelWorldStats extends ffi.Struct {
 
   @ffi.Uint32()
   external int poisoned;
+}
+
+/// Runtime prefab instantiation (M3-08b, blueprint §6 item 12). Spawns,
+/// now, an anchor entity named `name_utf8` (empty: the prefab's name) with
+/// the given local transform under `parent` (0 = root), and the cooked
+/// prefab `prefab_id_utf8` (36-char UUID text) as the anchor's children —
+/// the shape a scene instance expands to. The prefab comes from the cache
+/// the last successful load opened (FYNKEL_STATUS_LOAD_FAILED before any);
+/// its closure is retained with the scene's. Components go through the
+/// command path; the anchor and the entities are in the report:
+/// {"ok", "instance": {"prefab", "name", "path", "anchor": u64,
+/// "entities": n, "rejectedComponents", "assets", "behaviours": [...]},
+/// "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED when the prefab is not
+/// in the cache, does not decode (recook) or `parent` is not live (the
+/// world is unchanged).
+final class FynkelInstantiateDesc extends ffi.Struct {
+  external ffi.Pointer<ffi.Uint8> prefab_id_utf8;
+
+  @ffi.Uint32()
+  external int prefab_id_len;
+
+  /// NULL with name_len 0 for none
+  external ffi.Pointer<ffi.Uint8> name_utf8;
+
+  @ffi.Uint32()
+  external int name_len;
+
+  /// 0: a root
+  @FynkelEntity()
+  external int parent;
+
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> position;
+
+  /// x, y, z, w
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Float> rotation;
+
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> scale;
 }
 
 const int FYNKEL_ABI_VERSION = 1;

@@ -354,3 +354,88 @@ fn batch_of_ten_thousand_round_trips() {
     assert_eq!(w.step().live_entities, 0);
     assert_eq!(w.extract().records.len(), 0);
 }
+
+#[test]
+fn temp_references_build_an_object_in_the_tick_of_its_spawn() {
+    // M3-08b: a command later in the tick may name an entity spawned
+    // earlier in it through `Entity::temp(temp_id)`.
+    let mut w = world();
+    let root = spawn_one(&mut w, 0.0);
+    w.submit(
+        Lane::Simulation,
+        vec![
+            Command::Spawn {
+                temp_id: 5,
+                transform: at(1.0),
+                parent: None,
+                name: None,
+            },
+            Command::SetName {
+                entity: Entity::temp(5),
+                name: "lamp".into(),
+            },
+            Command::SetComponent {
+                entity: Entity::temp(5),
+                value: ComponentValue::PointLight(PointLight::default()),
+            },
+            Command::SetParent {
+                child: Entity::temp(5),
+                parent: Some(root),
+                keep_world: false,
+            },
+            // A child under the same-tick parent, then moved.
+            Command::Spawn {
+                temp_id: 6,
+                transform: at(0.5),
+                parent: Some(Entity::temp(5)),
+                name: None,
+            },
+            Command::SetTransform {
+                entity: Entity::temp(6),
+                transform: at(0.25),
+            },
+            // Rejected: nothing spawned #9; the rest of the batch still applies.
+            Command::Destroy(Entity::temp(9)),
+        ],
+    );
+    let r = w.step();
+    assert_eq!(r.status, Status::CommandsRejected);
+    assert_eq!((r.applied, r.rejected), (6, 1));
+    let d = &w.diagnostics()[0];
+    assert_eq!(
+        (d.command_index, d.code, d.entity),
+        (6, DiagnosticCode::INVALID_TEMP_ID, Entity::temp(9))
+    );
+    let ev = w.drain_events();
+    let spawned = |t: u64| {
+        ev.iter()
+            .find_map(|e| match e.payload {
+                EventPayload::Spawned { temp_id, entity } if temp_id == t => Some(entity),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (lamp, bulb) = (spawned(5), spawned(6));
+    assert_eq!(w.ecs().get::<Name>(lamp).unwrap().value, "lamp");
+    assert!(w.ecs().get::<PointLight>(lamp).is_ok());
+    assert_eq!(w.ecs().get::<fynkel_scene::Parent>(lamp).unwrap().0, root);
+    assert_eq!(w.ecs().get::<fynkel_scene::Parent>(bulb).unwrap().0, lamp);
+    assert_eq!(w.ecs().get::<Transform>(bulb).unwrap().position.x, 0.25);
+
+    // The map is per tick: the same temp id is unknown next tick, and a
+    // temp reference is never accepted on the presentation lane.
+    w.submit(Lane::Simulation, vec![Command::Destroy(Entity::temp(5))]);
+    let r = w.step();
+    assert_eq!(r.rejected, 1);
+    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_TEMP_ID);
+    let r = w.submit(
+        Lane::Presentation,
+        vec![Command::SetName {
+            entity: Entity::temp(5),
+            name: "x".into(),
+        }],
+    );
+    assert_eq!(r.rejected, 1);
+    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_TEMP_ID);
+    assert_eq!(w.live_entities(), 3);
+}

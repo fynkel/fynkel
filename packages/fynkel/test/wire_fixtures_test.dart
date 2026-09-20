@@ -293,4 +293,11 @@ void main() {
     BodyStateRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
+  check(
+    'EntityInfoRecord',
+    EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp'),
+    EntityInfoRecord.wireSize,
+    EntityInfoRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
 }

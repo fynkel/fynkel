@@ -116,8 +116,11 @@ common ones, `Behaviour`:
 A command on an entity without a body is `MISSING_COMPONENT` (component
 10), the wrong body type or a non-finite value `INVALID_PAYLOAD`, a
 presentation-lane body command `WRONG_LANE` — all diagnostics carrying the
-command's batch index. A command on an object not yet spawned throws
-`StateError` (spawn first, push from the next tick). `bodyState()` is one
+command's batch index. A command on an object spawned this tick is
+addressed by its temp reference and lands in the spawn's tick, after the
+batch's component writes (M3-08b) — `spawn`, `add(RigidBody)`,
+`add(Collider)`, `applyImpulse` in one `fixedUpdate` is one tick; the
+body's mass is computed at creation, so the impulse counts. `bodyState()` is one
 `FYNKEL_QUERY_BODY` (7): `linearVelocity`, `angularVelocity`, `sleeping`,
 or null without a body.
 

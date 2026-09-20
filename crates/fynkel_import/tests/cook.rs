@@ -406,9 +406,20 @@ fn containers_read_back_with_bounded_decoding() {
     );
     assert_eq!(image.format, TEXTURE_FORMAT_RGBA8_SRGB);
     assert_eq!(chunks[8]["colorSpace"], "srgb");
+    assert_eq!(chunks[8]["mipLevels"], image.mip_levels);
     let linear = decode_texture(&f.read(9, 1 << 24).unwrap()).unwrap();
     assert_eq!(linear.format, TEXTURE_FORMAT_RGBA8_LINEAR);
-    assert_eq!(linear.rgba8, image.rgba8);
+    assert_eq!(
+        linear.base(),
+        image.base(),
+        "the base level is the source either way"
+    );
+    assert_eq!(linear.mip_levels, image.mip_levels);
+    assert_ne!(
+        linear.level(linear.mip_levels - 1),
+        image.level(image.mip_levels - 1),
+        "the sRGB chain averages in linear light, the linear one as stored"
+    );
     assert_eq!(chunks[9]["colorSpace"], "linear");
     let prefab: serde_json::Value = serde_json::from_slice(&f.read(10, 1 << 20).unwrap()).unwrap();
     assert!(prefab["entities"].is_object());
@@ -434,10 +445,16 @@ fn containers_read_back_with_bounded_decoding() {
         (t.width, t.height, t.format),
         (4, 3, TEXTURE_FORMAT_RGBA8_SRGB)
     );
-    assert_eq!(t.rgba8.len(), 48);
+    assert_eq!(t.mip_levels, 3, "4×3 → 2×1 → 1×1: the full chain");
+    assert_eq!(t.rgba8.len(), 48 + 8 + 4);
+    let base = t.base();
+    assert_eq!(base.len(), 48);
+    assert!(base[0] < base[12], "red rises along x, as in the source");
+    let top = t.level(2).unwrap();
+    assert_eq!(top.len(), 4);
     assert!(
-        t.rgba8[0] < t.rgba8[12],
-        "red rises along x, as in the source"
+        base[0] < top[0] && top[0] < base[12],
+        "the 1×1 level averages the base (sRGB-aware, so between its samples)"
     );
 
     // The clip.

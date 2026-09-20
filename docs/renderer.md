@@ -228,8 +228,11 @@ for point and spot lights, spot lights further scaled by
 image-based lighting. Emissive adds `emissive · strength · L_max`.
 
 Every material map is sampled with one repeat/trilinear sampler at `uv0`
-(anisotropic up to the profile's `anisotropy`; mip chains come with a
-later cook item, so today the anisotropy only sharpens the base level):
+(anisotropic up to the profile's `anisotropy`) over the **full mip chain
+the cook wrote** (M3-08b: `TEXR` carries every level down to 1×1, box
+filtered in linear light for sRGB maps; `upload_rgba8` creates the
+texture with `mip_level_count = mip_levels` and writes each level, so a
+distant textured floor stops shimmering):
 
 | Map | Use | Fallback |
 | --- | --- | --- |

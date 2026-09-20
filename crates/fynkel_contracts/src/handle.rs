@@ -10,6 +10,14 @@
 //!
 //! The all-zero handle is [`Entity::NULL`] and is never valid. A handle is
 //! valid only while the world's slot still carries the same generation.
+//!
+//! A **temp reference** (M3-08b) is a handle with world 0 and generation 0
+//! — never a live entity — whose slot is the `temp_id` of a `Spawn`
+//! command: [`Entity::temp`]. Simulation-lane commands may name an entity
+//! spawned earlier in the same tick this way (the spawn's `Spawned` event
+//! carries the real handle); the world resolves the reference when it
+//! applies the batch and rejects one no spawn of the tick produced
+//! (`INVALID_TEMP_ID`). The presentation lane never accepts one.
 
 use core::fmt;
 
@@ -59,6 +67,21 @@ impl Entity {
         self.0 as u32
     }
 
+    /// A reference to the entity a `Spawn` with this temp id creates in the
+    /// same tick (see the module doc). `temp_id` must be non-zero.
+    pub const fn temp(temp_id: u32) -> Self {
+        Entity(temp_id as u64)
+    }
+
+    /// The temp id when this is a temp reference rather than a live handle.
+    pub const fn temp_id(self) -> Option<u32> {
+        if self.0 != 0 && (self.0 >> 32) == 0 {
+            Some(self.0 as u32)
+        } else {
+            None
+        }
+    }
+
     /// Next generation for a slot; skips 0 so a reused slot never yields NULL.
     pub const fn next_generation(g: u32) -> u32 {
         let n = (g + 1) & Self::GENERATION_MASK;
@@ -74,6 +97,9 @@ impl fmt::Debug for Entity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_null() {
             return f.write_str("Entity(NULL)");
+        }
+        if let Some(t) = self.temp_id() {
+            return write!(f, "Entity(temp #{t})");
         }
         write!(
             f,
@@ -104,6 +130,17 @@ mod tests {
         assert_eq!(Entity::from_bits(e.to_bits()), e);
         assert!(!e.is_null());
         assert!(Entity::NULL.is_null());
+    }
+
+    #[test]
+    fn temp_references_are_never_live_handles() {
+        let t = Entity::temp(7);
+        assert_eq!(t.temp_id(), Some(7));
+        assert!(!t.is_null());
+        assert_eq!(format!("{t}"), "Entity(temp #7)");
+        assert_eq!(Entity::NULL.temp_id(), None);
+        assert_eq!(Entity::new(WorldId(1), 7, 1).temp_id(), None);
+        assert_eq!(Entity::new(WorldId(0), 7, 1).temp_id(), None);
     }
 
     #[test]

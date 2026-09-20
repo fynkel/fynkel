@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
+import 'asset_ref.dart';
 import 'context.dart';
 import 'diagnostics.dart';
 import 'events.dart';
@@ -126,14 +127,21 @@ class World {
   // ---------------------------------------------------------------- spawn
 
   /// Queues a spawn for the next fixed tick. The returned handle is
-  /// [GameObject.isPending] until that tick resolves it; writes to a pending
-  /// object throw, reads return the initial transform.
+  /// [GameObject.isPending] until that tick resolves it. Simulation-lane
+  /// writes on a pending object (`add`, `set`, `remove`, `setLocal…`,
+  /// body commands, `setParent`, `destroy`, spawning a child under it) go
+  /// into the same batch as a *temp reference* the world resolves at the
+  /// tick, so an object is spawned and fully built in one `fixedUpdate`;
+  /// presentation-lane writes and native reads need the real handle and
+  /// wait for the tick. Reads return the initial transform and the writes
+  /// staged so far.
   GameObject spawn({Transform transform = identityTransform, GameObject? parent, String name = ''}) {
-    if (parent != null) parent._requireResolved('spawn parent');
     final tempId = _nextTempId++;
     final go = GameObject._(this, tempId, transform, name);
     _pendingByTempId[tempId] = go;
-    _simulation.spawn(gen.SpawnCommand(tempId: tempId, transform: transform, parent: parent?._entity, name: name));
+    _simulation.spawn(
+      gen.SpawnCommand(tempId: tempId, transform: transform, parent: parent?._simulationEntity('spawn parent'), name: name),
+    );
     _simulationTargets.add(go);
     return go;
   }
@@ -200,14 +208,19 @@ class World {
     for (final go in _byEntity.values) {
       go._clearOverlay();
     }
+    _entityTable = null;
     _collectDiagnostics('step');
     return r;
   }
 
-  /// Pull-only event drain; resolves spawn/destroy bookkeeping on the way.
+  /// Pull-only event drain; resolves spawn/destroy bookkeeping on the way
+  /// and sends the transform subscriptions of handles attached since.
   List<EngineEvent> drainEvents() {
     final buffer = _native.drainEvents();
-    if (buffer.recordCount == 0) return const [];
+    if (buffer.recordCount == 0) {
+      _flushSubscriptions();
+      return const [];
+    }
     final events = decodeEvents(buffer).toList();
     for (final e in events) {
       switch (e) {
@@ -217,7 +230,11 @@ class World {
             go._entity = entity;
             _byEntity[entity] = go;
             _toSubscribe.add(entity);
-            go._flushPendingComponents();
+            // The staged writes were applied with the spawn (a rejection
+            // cleared them at the step); they stay readable until the
+            // first snapshot, and the next read of a native component asks
+            // the world.
+            go._componentsQueried = false;
             if (go._behaviours.isNotEmpty) _behaviours.objectChanged();
           }
         case EntityDestroyed(:final entity):
@@ -230,11 +247,14 @@ class World {
           break;
       }
     }
-    if (_toSubscribe.isNotEmpty) {
-      _native.subscribeTransforms(_toSubscribe);
-      _toSubscribe.clear();
-    }
+    _flushSubscriptions();
     return events;
+  }
+
+  void _flushSubscriptions() {
+    if (_toSubscribe.isEmpty) return;
+    _native.subscribeTransforms(_toSubscribe);
+    _toSubscribe.clear();
   }
 
   /// Flushes presentation-lane writes (call after lateUpdate, before
@@ -298,11 +318,12 @@ class World {
 
   /// A handle for an entity that already exists (loaded from a scene, or
   /// found by a query); the same handle comes back for the same entity.
-  /// Its transform is subscribed from the next tick.
-  GameObject attach(int entity, {String name = ''}) {
+  /// Its transform is subscribed from the next tick; until then
+  /// [GameObject.localTransform] reads [initial].
+  GameObject attach(int entity, {String name = '', Transform initial = identityTransform}) {
     final existing = _byEntity[entity];
     if (existing != null) return existing;
-    final go = GameObject._(this, 0, identityTransform, name.isEmpty ? (nameOfEntity(entity) ?? '') : name);
+    final go = GameObject._(this, 0, initial, name.isEmpty ? (nameOfEntity(entity) ?? '') : name);
     go._entity = entity;
     _byEntity[entity] = go;
     _toSubscribe.add(entity);
@@ -387,6 +408,34 @@ class World {
   }
 
   List<int> allEntities() => _native.query(QueryKind.allEntities).u64s();
+
+  // ---------------------------------------------------------------- find (M3-08b)
+
+  /// Every live entity with its parent and name as the last step left
+  /// them (`FYNKEL_QUERY_ENTITIES`), fetched once per tick on the first
+  /// [find]; objects spawned this tick are not in it yet.
+  _EntityTable get _entities => _entityTable ??= _EntityTable.query(_native);
+  _EntityTable? _entityTable;
+
+  /// The first entity named [name] in the world (scene order), as a
+  /// [GameObject] — an existing handle when there is one, else one
+  /// attached now ([attach]). Null when no entity carries the name. Reads
+  /// the world as the last tick left it: an object spawned or renamed
+  /// this tick is found from the next one. One query per tick, then a map
+  /// lookup — fine in `start`, not meant for every `fixedUpdate` of a
+  /// thousand behaviours (keep the handle).
+  GameObject? find(String name) {
+    final e = _entities.firstNamed(name);
+    return e == null ? null : attach(e, name: name);
+  }
+
+  /// Every entity named [name], scene order (see [find]).
+  List<GameObject> findAll(String name) => [for (final e in _entities.allNamed(name)) attach(e, name: name)];
+
+  /// The entities under [parent] (direct children in scene order), from
+  /// the per-tick table rather than a query per node.
+  List<int> _childrenFromTable(int parent) => _entities.childrenOf(parent);
+  String? _nameFromTable(int entity) => _entities.nameOf(entity);
 
   /// Every native component of [entity] as the last step left it (one
   /// query; `Transform`, `Name` and the renderable components in id order,
@@ -551,6 +600,7 @@ class World {
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
         input.invalidate();
+        _entityTable = null;
         if (op == 'loadProject') physics = report.physics;
         report = _attachAuthoredBehaviours(report);
         if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
@@ -570,15 +620,20 @@ class World {
   /// other components are loaded regardless.
   LoadReport _attachAuthoredBehaviours(LoadReport report) {
     if (report.behaviours.isEmpty) return report;
+    final (attached, extra) = _attachBehaviours(report.behaviours, report.scenePath);
+    return report.withBehaviours(attached: attached, extra: extra);
+  }
+
+  (int, List<LoadDiagnostic>) _attachBehaviours(List<AuthoredBehaviour> behaviours, String? document) {
     final extra = <LoadDiagnostic>[];
     var attached = 0;
-    for (final b in report.behaviours) {
+    for (final b in behaviours) {
       if (!registry.contains(b.type)) {
         extra.add(LoadDiagnostic(
           code: 'FYN-B0001',
           severity: 'warning',
           message: 'behaviour type ${b.type} is not registered; the component is loaded without a behaviour',
-          document: report.scenePath,
+          document: document,
           pointer: b.pointer,
           suggestion: 'call registerBehaviours(world.registry) from the generated behaviours.g.dart',
         ));
@@ -592,14 +647,70 @@ class World {
           code: 'FYN-B0002',
           severity: 'warning',
           message: '${b.type}${e.field == null ? '' : '.${e.field}'}: ${e.message}',
-          document: report.scenePath,
+          document: document,
           pointer: b.pointer == null ? null : '${b.pointer}/data${e.field == null ? '' : '/${e.field}'}',
           suggestion: 'fix the component data or regenerate behaviours.g.dart (`fynkel codegen --project`)',
         ));
       }
     }
-    return report.withBehaviours(attached: attached, extra: extra);
+    return (attached, extra);
   }
+
+  // ---------------------------------------------------------------- prefabs (M3-08b)
+
+  /// Instantiates the cooked prefab [prefab] (its asset id as UUID text, or
+  /// an [AssetRef]) **now**: an anchor object named [name] (the prefab's
+  /// name by default) at [transform] under [parent], whose children are
+  /// the prefab's entities — the shape a scene instance expands to — with
+  /// the prefab's authored behaviours attached from [registry]. Returns
+  /// the anchor, already resolved (no tick needed); the prefab's
+  /// components apply through the command path like a scene's, so a
+  /// rejected value is a diagnostic on the next step. [lastInstantiate]
+  /// has the report. Throws [FynkelInstantiateError] when the prefab is
+  /// not in the loaded cache, does not decode (recook) or [parent] is not
+  /// spawned yet; throws [StateError] before any project is loaded.
+  GameObject instantiate(
+    Object prefab, {
+    Transform transform = identityTransform,
+    GameObject? parent,
+    String? name,
+  }) {
+    final id = switch (prefab) {
+      AssetRef r => r.asset,
+      String s => s,
+      _ => throw ArgumentError.value(prefab, 'prefab', 'a prefab asset id (UUID text) or an AssetRef'),
+    };
+    final parentEntity = parent?._requireResolved('instantiate parent') ?? 0;
+    final (status, json) = _native.instantiate(
+      id,
+      name ?? '',
+      parentEntity,
+      [transform.position.x, transform.position.y, transform.position.z],
+      [transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w],
+      [transform.scale.x, transform.scale.y, transform.scale.z],
+    );
+    var report = InstantiateReport.fromJson(json);
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        break;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        throw FynkelInstantiateError(report);
+      default:
+        throw FynkelBridgeError('instantiate: $status');
+    }
+    _entityTable = null;
+    final anchor = attach(report.anchor, name: report.name, initial: transform);
+    if (report.behaviours.isNotEmpty) {
+      final (attached, extra) = _attachBehaviours(report.behaviours, report.prefabPath);
+      report = report.withBehaviours(attached: attached, extra: extra);
+    }
+    lastInstantiate = report;
+    if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
+    return anchor;
+  }
+
+  /// The report of the last [instantiate] (null before any).
+  InstantiateReport? lastInstantiate;
 
   /// Called with the warnings of a successful load. Defaults to `print`.
   void Function(List<LoadDiagnostic>) onLoadDiagnostics = (d) => print(d.join('\n'));
@@ -640,9 +751,6 @@ class GameObject {
   /// (§5.4: reads are the snapshot or the staged state, never a mirror).
   Map<int, WireRecord?>? _components;
   bool _componentsQueried = false;
-
-  /// Writes staged before the spawn resolved; sent once it has.
-  List<(gen.ComponentCodec, WireRecord?)>? _pendingComponents;
 
   void _clearOverlay() {
     _overlay = null;
@@ -710,21 +818,68 @@ class GameObject {
     return e;
   }
 
+  /// The handle a simulation-lane command names: the real one, or — while
+  /// the spawn is still in this tick's batch — the temp reference the
+  /// world resolves at the tick (`Entity::temp`: world 0, generation 0,
+  /// slot = temp id). Throws once destroyed.
+  int _simulationEntity(String what) {
+    final e = _entity;
+    if (e != null) return _requireResolved(what);
+    if (!_alive) throw StateError('GameObject "$name" (temp #$_tempId) was destroyed');
+    return _tempId;
+  }
+
   /// Queues destruction of this object and its subtree for the next tick.
   void destroy() {
-    final e = _requireResolved('destroy');
+    final e = _simulationEntity('destroy');
     world._simulation.destroy(gen.DestroyCommand(entity: e));
     world._simulationTargets.add(this);
   }
 
   void setParent(GameObject? parent, {bool keepWorld = false}) {
-    final e = _requireResolved('setParent');
-    world._simulation.setParent(gen.SetParentCommand(child: e, parent: parent?._requireResolved('setParent'), keepWorld: keepWorld));
+    final e = _simulationEntity('setParent');
+    world._simulation.setParent(
+      gen.SetParentCommand(child: e, parent: parent?._simulationEntity('setParent'), keepWorld: keepWorld),
+    );
     world._simulationTargets.add(this);
   }
 
   List<int> get children => world.childrenOf(this);
   int? get parent => world.parentOf(this);
+
+  /// The direct child named [name] (scene order), or null; a `/` walks
+  /// down: `findChild('Arm/Hand')` is the `Hand` under the `Arm` under
+  /// this object. Reads the hierarchy as the last tick left it (see
+  /// [World.find]); the result is an attached [GameObject].
+  GameObject? findChild(String path) {
+    var at = _requireResolved('findChild');
+    for (final segment in path.split('/')) {
+      if (segment.isEmpty) continue;
+      int? next;
+      for (final c in world._childrenFromTable(at)) {
+        if (world._nameFromTable(c) == segment) {
+          next = c;
+          break;
+        }
+      }
+      if (next == null) return null;
+      at = next;
+    }
+    return at == _entity ? this : world.attach(at);
+  }
+
+  /// The first descendant named [name], depth first in scene order (a
+  /// child before its siblings' subtrees), or null. See [findChild].
+  GameObject? findDescendant(String name) {
+    final root = _requireResolved('findDescendant');
+    final stack = <int>[...world._childrenFromTable(root).reversed];
+    while (stack.isNotEmpty) {
+      final e = stack.removeLast();
+      if (world._nameFromTable(e) == name) return world.attach(e, name: name);
+      stack.addAll(world._childrenFromTable(e).reversed);
+    }
+    return null;
+  }
 
   // ------------------------------------------------ native components (M3-07a)
 
@@ -778,10 +933,11 @@ class GameObject {
 
   /// Simulation-lane write: inserts or replaces the component at the next
   /// tick, readable now through [get]. A `Transform` is [setLocalTransform],
-  /// a `Name` renames. On an object not spawned yet the write waits for
-  /// the spawn. A value the world rejects (a negative light range, a
-  /// removed `Transform`) is a diagnostic on the next step and the read
-  /// falls back to what the world has.
+  /// a `Name` renames. On an object not spawned yet the write goes into
+  /// the spawn's own batch (a temp reference), so `spawn` then `add` in
+  /// one `fixedUpdate` is one tick. A value the world rejects (a negative
+  /// light range, a removed `Transform`) is a diagnostic on the next step
+  /// and the read falls back to what the world has.
   void set<T extends WireRecord>(T value) => _setComponent(value, presentation: false);
 
   /// [set] for readability when the component is new.
@@ -797,14 +953,8 @@ class GameObject {
       return;
     }
     final codec = _codecOf(value.runtimeType);
+    final e = presentation ? _requireResolved('setPresentation') : _simulationEntity('set');
     (_components ??= {})[codec.id] = value;
-    final e = _entity;
-    if (e == null) {
-      if (!_alive) _requireResolved('set');
-      (_pendingComponents ??= []).add((codec, value));
-      return;
-    }
-    _requireResolved('set');
     final batch = presentation ? world._presentation : world._simulation;
     if (value is gen.Name) {
       batch.setName(gen.SetNameCommand(entity: e, name: value.value));
@@ -821,33 +971,10 @@ class GameObject {
     if (codec.id == gen.Transform.componentId || codec.id == gen.Name.componentId) {
       throw ArgumentError('${codec.name} cannot be removed');
     }
+    final e = _simulationEntity('remove');
     (_components ??= {})[codec.id] = null;
-    final e = _entity;
-    if (e == null) {
-      if (!_alive) _requireResolved('remove');
-      (_pendingComponents ??= []).add((codec, null));
-      return;
-    }
-    _requireResolved('remove');
     world._simulation.removeComponent(e, codec.id);
     world._simulationTargets.add(this);
-  }
-
-  void _flushPendingComponents() {
-    final pending = _pendingComponents;
-    if (pending == null) return;
-    _pendingComponents = null;
-    final e = _entity!;
-    for (final (codec, value) in pending) {
-      if (value == null) {
-        world._simulation.removeComponent(e, codec.id);
-      } else if (value is gen.Name) {
-        world._simulation.setName(gen.SetNameCommand(entity: e, name: value.value));
-      } else {
-        world._simulation.setComponent(e, codec, value);
-      }
-      world._simulationTargets.add(this);
-    }
   }
 
   // ------------------------------------------------ rigid body (M3-08)
@@ -865,9 +992,11 @@ class GameObject {
   /// A body command for the next tick (simulation lane): rejected there
   /// with a diagnostic when the object has no `RigidBody`, the body type
   /// does not take it (forces need `dynamic`, a kinematic target needs
-  /// `kinematic`) or a value is not finite.
+  /// `kinematic`) or a value is not finite. Allowed on a pending object
+  /// whose body was `add`ed in the same batch: the tick creates the body,
+  /// then applies the command.
   void _body(gen.BodyOp op, Vec3 v, [Quat q = Quat.identity]) {
-    final e = _requireResolved('body command');
+    final e = _simulationEntity('body command');
     world._simulation.body(e, op, v.x, v.y, v.z, q.x, q.y, q.z, q.w);
     world._simulationTargets.add(this);
   }
@@ -913,7 +1042,7 @@ class GameObject {
 
   /// Simulation-lane write: applied at the next tick, readable now.
   void setLocalTransform(Transform t) {
-    final e = _requireResolved('setLocalTransform');
+    final e = _simulationEntity('setLocalTransform');
     _overlay = t;
     _stagedValid = false;
     world._simulation.setTransformOf(e, t);
@@ -922,7 +1051,7 @@ class GameObject {
 
   /// Simulation-lane write from a reusable writer (allocation-free, C1).
   void writeLocal(TransformWriter w) {
-    final e = _requireResolved('writeLocal');
+    final e = _simulationEntity('writeLocal');
     _stage().copyFrom(w);
     world._simulation.setTransformFrom(e, w);
     world._simulationTargets.add(this);
@@ -937,7 +1066,7 @@ class GameObject {
   void setLocalScale(double x, double y, double z) => _submitLocal(_stage().setScale(x, y, z));
 
   void _submitLocal(TransformWriter w) {
-    final e = _requireResolved('setLocal');
+    final e = _simulationEntity('setLocal');
     world._simulation.setTransformFrom(e, w);
     world._simulationTargets.add(this);
   }
@@ -1033,4 +1162,42 @@ class _WorldTime implements TimeService {
   int get frame => world._frameCount;
   @override
   double get alpha => world.alpha;
+}
+
+/// The world's entities, parents and names as one query (M3-08b); built
+/// lazily per tick by [World.find] and friends.
+class _EntityTable {
+  _EntityTable._(this._parents, this._names, this._byName, this._children);
+
+  factory _EntityTable.query(NativeWorld native) {
+    final b = native.query(QueryKind.entities);
+    final parents = <int, int>{};
+    final names = <int, String>{};
+    final byName = <String, List<int>>{};
+    final children = <int, List<int>>{};
+    final size = gen.EntityInfoRecord.wireSize;
+    for (var i = 0; i < b.recordCount; i++) {
+      final r = gen.EntityInfoRecord.decode(b.records, i * size, b.tail);
+      if (r.parent != 0) {
+        parents[r.entity] = r.parent;
+        (children[r.parent] ??= []).add(r.entity);
+      }
+      if (r.name.isNotEmpty) {
+        names[r.entity] = r.name;
+        (byName[r.name] ??= []).add(r.entity);
+      }
+    }
+    return _EntityTable._(parents, names, byName, children);
+  }
+
+  final Map<int, int> _parents;
+  final Map<int, String> _names;
+  final Map<String, List<int>> _byName;
+  final Map<int, List<int>> _children;
+
+  int? firstNamed(String name) => _byName[name]?.first;
+  List<int> allNamed(String name) => _byName[name] ?? const [];
+  String? nameOf(int entity) => _names[entity];
+  int? parentOf(int entity) => _parents[entity];
+  List<int> childrenOf(int parent) => _children[parent] ?? const [];
 }

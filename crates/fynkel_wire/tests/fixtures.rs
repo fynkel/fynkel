@@ -360,6 +360,14 @@ fn fixtures_match_generated_codecs() {
             sleeping: false,
         },
     );
+    check(
+        "EntityInfoRecord",
+        &EntityInfoRecord {
+            entity: e(4, 2),
+            parent: e(1, 1),
+            name: "Lamp".into(),
+        },
+    );
 }
 
 #[test]

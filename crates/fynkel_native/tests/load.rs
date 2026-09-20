@@ -6,10 +6,13 @@
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use fynkel_contracts::Status;
+use fynkel_contracts::{Entity, Status};
+use fynkel_core::Name;
 use fynkel_import::{cook_project, CookOptions};
 use fynkel_native::load::*;
 use fynkel_native::*;
+use fynkel_scene::{self as scene, Transform};
+use glam::Vec3;
 
 fn fixture() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -238,6 +241,140 @@ fn bad_input_is_reported_not_fatal() {
     let r = host.report();
     assert_eq!(r["diagnostics"][0]["code"], "FYN-R0001");
     assert_eq!(host.live(), 0);
+    assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
+}
+
+/// `fynkel_world_instantiate` (M3-08b): the cooked prefab becomes the
+/// children of a new anchor — named, placed, parented as asked — its
+/// closure retained on the world; bad ids and a missing project fail
+/// with a report and leave the world alone.
+#[test]
+fn prefabs_instantiate_through_the_abi() {
+    let cooked = Cooked::new("instantiate");
+    let cache = cooked.text();
+    let host = Host::new();
+    const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
+
+    let desc = |id: &str, name: &str, parent: u64| FynkelInstantiateDesc {
+        prefab_id_utf8: id.as_ptr(),
+        prefab_id_len: id.len() as u32,
+        name_utf8: name.as_ptr(),
+        name_len: name.len() as u32,
+        parent,
+        position: [2.0, 0.0, -3.0],
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: [1.0, 1.0, 1.0],
+    };
+
+    // Before any project: refused, reported, nothing spawned.
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", 0)) },
+        Status::LoadFailed
+    );
+    assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0001");
+    assert_eq!(host.live(), 0);
+
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    assert_eq!(host.live(), 7);
+    let retained = host.report()["residency"]["retained"].as_u64().unwrap();
+
+    // The prefab's name by default, at the transform, a root.
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "", 0)) },
+        Status::Ok
+    );
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    assert!(r["scene"].is_null());
+    let i = &r["instance"];
+    assert_eq!(i["prefab"], CRATE);
+    assert_eq!(i["name"], "Crate");
+    assert_eq!(i["path"], "prefabs/crate.prefab.json");
+    assert_eq!(
+        i["entities"], 1,
+        "the prefab's entities; the anchor is extra"
+    );
+    assert_eq!(i["rejectedComponents"], 0);
+    assert_eq!(i["behaviours"].as_array().unwrap().len(), 0);
+    assert_eq!(host.live(), 9);
+    let anchor = Entity::from_bits(i["anchor"].as_u64().unwrap());
+    assert_eq!(
+        r["residency"]["retained"].as_u64().unwrap(),
+        retained,
+        "the prefab's closure is already in the store"
+    );
+    {
+        let ecs = unsafe { &*host.w }.core().ecs();
+        assert_eq!(ecs.copy::<Name>(anchor).unwrap().value, "Crate");
+        assert_eq!(scene::parent_of(ecs, anchor), None);
+        let t = ecs.copy::<Transform>(anchor).unwrap();
+        assert_eq!(t.position, Vec3::new(2.0, 0.0, -3.0));
+        let kids = scene::children_of(ecs, anchor);
+        assert_eq!(kids.len(), 1);
+        assert_eq!(ecs.copy::<Name>(kids[0]).unwrap().value, "Crate");
+        assert_eq!(scene::parent_of(ecs, kids[0]), Some(anchor));
+        assert_eq!(
+            ecs.copy::<Transform>(kids[0]).unwrap().position,
+            Vec3::new(0.0, 0.5, 0.0),
+            "the prefab's own transform, local to the anchor"
+        );
+    }
+
+    // Named and parented under the first anchor.
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "Cargo", anchor.to_bits())) },
+        Status::Ok
+    );
+    let r = host.report();
+    assert_eq!(r["instance"]["name"], "Cargo");
+    let second = Entity::from_bits(r["instance"]["anchor"].as_u64().unwrap());
+    {
+        let ecs = unsafe { &*host.w }.core().ecs();
+        assert_eq!(scene::parent_of(ecs, second), Some(anchor));
+        assert_eq!(scene::children_of(ecs, anchor).len(), 2);
+    }
+    assert_eq!(host.live(), 11);
+
+    // Not a prefab, unknown, a dead parent, malformed input.
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &desc(MAIN_SCENE, "", 0)) },
+        Status::LoadFailed
+    );
+    assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0006");
+    assert_eq!(
+        unsafe {
+            fynkel_world_instantiate(host.w, &desc("c0000000-0000-4000-8000-0000000000ff", "", 0))
+        },
+        Status::LoadFailed
+    );
+    assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0003");
+    assert_eq!(
+        unsafe {
+            fynkel_world_instantiate(
+                host.w,
+                &desc(
+                    CRATE,
+                    "",
+                    Entity::from_bits(0x0000_0001_0000_ffff).to_bits(),
+                ),
+            )
+        },
+        Status::LoadFailed
+    );
+    assert_eq!(host.report()["ok"], false);
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &desc("crate", "", 0)) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, ptr::null()) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        host.live(),
+        11,
+        "a failed instantiate leaves the world alone"
+    );
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
 }
 
