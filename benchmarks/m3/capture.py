@@ -17,7 +17,13 @@ Gate (item 6): 5 000 static meshes at the display's 120 Hz on the profile,
 draw calls ≤ distinct (mesh, material) pairs, culling dropping what is off
 screen. Gate (item 8): the 500 rigid bodies settle in the headless host
 (`fynkel test --headless --steps 600`) at a fixed per-tick cost — p50 step
-time under 4 ms while they fall and once they sleep. Aggregation as in
+time under 4 ms while they fall and once they sleep. Gate (item 10): the
+5 000 statics are native movers (Rotator/Oscillate/LookAtCamera) ticked
+in the catalogue's slots for under 1 ms a tick together, the per-system
+times are in the headless report, and the scene still holds 120 Hz. The
+300 ticking Dart behaviours need the `--app` project (generate.py --app,
+`game.Wobble`); their HUD numbers are recorded by hand in the results
+(capture.py drives the bare project). Aggregation as in
 benchmarks/m0/capture.py (median of per-second p50/p95, max of per-second
 p99).
 
@@ -77,6 +83,10 @@ def capture_physics(steps=600):
                              "--steps", str(steps * 3), "--json"]))
     return {"steps": steps, "step_time_us": r["step_time"], "total_ms": r["total_ms"], "checksum": r["checksum"],
             "settled_steps": steps * 3, "settled_step_time_us": tail["step_time"], "settled_checksum": tail["checksum"],
+            "live_entities": tail["live_entities"],
+            # Per-system time (item 10): the settled run's mean/max per
+            # `World::step` phase and what the last tick touched.
+            "systems": tail.get("systems", []),
             **(r.get("physics") or {})}
 
 
@@ -164,6 +174,19 @@ def gate(r):
              p["checksum"] == json.loads(m0.sh([str(FYNKEL), "test", "--headless", "--project", str(STRESS), "--no-cook",
                                                 "--steps", str(p["steps"]), "--json"]))["checksum"]),
         ]
+    systems = {x["system"]: x for x in p.get("systems", [])}
+    if systems:
+        movers = {k: systems.get(k, {"entities": 0, "mean_us": 0.0}) for k in ("rotator", "oscillate", "lookAtCamera")}
+        moved = sum(m["entities"] for m in movers.values())
+        cost = sum(m["mean_us"] for m in movers.values()) / 1000
+        parts = sum(x["mean_us"] for k, x in systems.items() if k != "step")
+        checks += [
+            (f"5 000 native movers ticked by the catalogue ({moved} components, {cost:.2f} ms a tick together, < 1 ms)",
+             moved >= 5000 and cost < 1),
+            (f"per-system time in the stats ({len(systems)} phases; step {systems['step']['mean_us'] / 1000:.2f} ms ≥ "
+             f"the phases' {parts / 1000:.2f} ms; emitter keeps {systems.get('lifetimeDespawn', {}).get('entities', 0)} sparks alive)",
+             len(systems) == 13 and systems["step"]["mean_us"] >= parts * 0.9 and systems.get("emitter", {}).get("entities", 0) == 1),
+        ]
     return [{"check": c, "passed": bool(ok)} for c, ok in checks]
 
 
@@ -202,7 +225,13 @@ def markdown(r):
             f"{p['settled_step_time_us']['max_us'] / 1000:.2f} ms; {p['collision_enter']} enter / {p['collision_exit']} exit "
             f"events; checksum `{p['checksum']}`.",
         ]
-    lines += ["", "## Gate (items 6 and 8)", ""]
+    if p.get("systems"):
+        lines += ["", "## Per-system time (`fynkel test --headless --json` → `systems`, item 10)", "",
+                  f"The settled run ({p['settled_steps']} ticks, {p['live_entities']} live entities at the end): "
+                  "wall time per `World::step` phase, mean and worst tick, and what the last tick touched.", "",
+                  "| System | mean µs | max µs | entities (last tick) |", "| --- | --- | --- | --- |"]
+        lines += [f"| {x['system']} | {x['mean_us']:.0f} | {x['max_us']} | {x['entities']} |" for x in p["systems"]]
+    lines += ["", "## Gate (items 6, 8 and 10)", ""]
     lines += [f"- {'PASS' if g['passed'] else 'FAIL'} — {g['check']}" for g in r["gate"]]
     return "\n".join(lines) + "\n"
 

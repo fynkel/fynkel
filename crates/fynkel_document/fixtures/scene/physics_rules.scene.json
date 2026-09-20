@@ -381,6 +381,158 @@
           }
         }
       }
+    },
+    "bbbbbbbb-0000-4000-8000-000000000007": {
+      "name": "Bad catalogue",
+      "parent": null,
+      "children": [],
+      "components": {
+        "22222222-0000-4000-8000-000000000017": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "22222222-0000-4000-8000-000000000018": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              0,
+              0
+            ],
+            "speed": 1.0,
+            "space": "local"
+          }
+        },
+        "22222222-0000-4000-8000-000000000019": {
+          "type": "fynkel.Oscillate",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "amplitude": -1.0,
+            "frequency": 0.5,
+            "phase": 0.0,
+            "space": "world"
+          }
+        },
+        "22222222-0000-4000-8000-000000000020": {
+          "type": "fynkel.Follow",
+          "version": 1,
+          "data": {
+            "target": "Player",
+            "offset": [
+              0,
+              2,
+              0
+            ],
+            "smoothing": -1.0,
+            "look_at": false
+          }
+        },
+        "22222222-0000-4000-8000-000000000021": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": -1.0
+          }
+        },
+        "22222222-0000-4000-8000-000000000022": {
+          "type": "fynkel.Emitter",
+          "version": 1,
+          "data": {
+            "prefab": {
+              "asset": "c0000000-0000-4000-8000-000000000041"
+            },
+            "rate": -5.0,
+            "lifetime": 5.0,
+            "max_alive": 0,
+            "velocity": [
+              0,
+              0,
+              0
+            ],
+            "enabled": true
+          }
+        }
+      }
+    },
+    "bbbbbbbb-0000-4000-8000-000000000008": {
+      "name": "Fine catalogue",
+      "parent": null,
+      "children": [],
+      "components": {
+        "22222222-0000-4000-8000-000000000023": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "22222222-0000-4000-8000-000000000024": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.0,
+            "space": "local"
+          }
+        },
+        "22222222-0000-4000-8000-000000000025": {
+          "type": "fynkel.LookAtCamera",
+          "version": 1,
+          "data": {
+            "lock_y": true
+          }
+        },
+        "22222222-0000-4000-8000-000000000026": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 3.0
+          }
+        }
+      }
     }
   }
 }

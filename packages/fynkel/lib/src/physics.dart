@@ -13,7 +13,12 @@ export '../generated/schema.g.dart' show BodyOp, BodyType, Collider, ColliderSha
 /// The project's `physics` settings as the world applied them on load
 /// (`LoadReport.physics`).
 class PhysicsSettings {
-  const PhysicsSettings({this.gravity = const Vec3(0, -9.81, 0), this.layers = const ['default'], this.meshColliders = 0});
+  const PhysicsSettings({
+    this.gravity = const Vec3(0, -9.81, 0),
+    this.layers = const ['default'],
+    this.meshColliders = 0,
+    this.prefabs = 0,
+  });
 
   factory PhysicsSettings.fromJson(Map<String, Object?> j) {
     final g = (j['gravity'] as List?)?.cast<num>();
@@ -21,6 +26,7 @@ class PhysicsSettings {
       gravity: g == null || g.length != 3 ? const Vec3(0, -9.81, 0) : Vec3(g[0].toDouble(), g[1].toDouble(), g[2].toDouble()),
       layers: [for (final l in (j['layers'] as List?) ?? const ['default']) l as String],
       meshColliders: (j['meshColliders'] as num?)?.toInt() ?? 0,
+      prefabs: (j['prefabs'] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -32,6 +38,9 @@ class PhysicsSettings {
 
   /// Mesh colliders registered from the scene's cooked meshes.
   final int meshColliders;
+
+  /// Prefabs registered for the scene's `Emitter`s (M3-10).
+  final int prefabs;
 
   /// The bit mask of the named layers, or null when a name is unknown.
   int? mask(Iterable<String> names) {

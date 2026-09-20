@@ -2,9 +2,28 @@
 //! events, diagnostics, render extraction.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::Arc;
+use std::time::Instant;
+
+/// `SystemKind` in declaration order — the index into `system_times`.
+const SYSTEMS: [SystemKind; 13] = [
+    SystemKind::Step,
+    SystemKind::Commands,
+    SystemKind::Characters,
+    SystemKind::Rotator,
+    SystemKind::Oscillate,
+    SystemKind::LifetimeDespawn,
+    SystemKind::Emitter,
+    SystemKind::Physics,
+    SystemKind::CameraRigs,
+    SystemKind::Follow,
+    SystemKind::LookAtCamera,
+    SystemKind::Transforms,
+    SystemKind::Publish,
+];
 
 use fynkel_contracts::{
-    AssetRef, ComponentId, DiagnosticCode, Entity, Status, Tick, WorldId, DEFAULT_FIXED_DT,
+    AssetRef, ComponentId, DiagnosticCode, Entity, Status, Tick, Uuid, WorldId, DEFAULT_FIXED_DT,
     DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
 };
 use fynkel_ecs::internal::Handle;
@@ -21,11 +40,16 @@ use glam::{Mat4, Quat, Vec3};
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
 use crate::components::{
-    Camera, ComponentValue, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
-    ThirdPersonCamera,
+    Camera, ComponentValue, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn,
+    LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, SpotLight, ThirdPersonCamera,
 };
 use crate::event::{Event, EventPayload, EventQueue};
 use crate::input::{ActionSpec, ActionState, BindingError, Input, InputEvent};
+use crate::load::SceneDescription;
+use crate::schema::{SystemKind, SystemTimeRecord};
+
+mod catalogue;
+pub use catalogue::{EmitterRun, Oscillation};
 
 #[derive(Clone, Debug)]
 pub struct WorldConfig {
@@ -213,13 +237,25 @@ pub struct World {
     input: Input,
     /// The Rapier adapter (M3-08), stepped at the §5.1 physics slot.
     physics: Physics,
-    /// Camera rig → the entity its `target` name resolved to (M3-09);
-    /// re-resolved when that entity dies or is renamed.
-    rig_targets: HashMap<Entity, Entity>,
+    /// Named-target component (`ThirdPersonCamera`, `Follow`) → the entity
+    /// its `target` name resolved to (M3-09); re-resolved when that entity
+    /// dies or is renamed.
+    named_targets: HashMap<Entity, Entity>,
+    /// Prefab descriptions `Emitter`s may instantiate (M3-10).
+    prefabs: HashMap<Uuid, Arc<SceneDescription>>,
+    /// The last step's per-phase wall time, one entry per `SystemKind`.
+    system_times: Vec<SystemTimeRecord>,
     /// Scratch of the native systems, kept for its capacity.
     rig_scratch: Vec<RigPlacement>,
     driver_scratch: Vec<(Entity, BodyCommand)>,
     hits_scratch: Vec<fynkel_physics::Hit>,
+    entity_scratch: Vec<Entity>,
+    emission_scratch: Vec<catalogue::Emission>,
+    placement_scratch: Vec<catalogue::Placement>,
+}
+
+fn micros(since: Instant) -> u64 {
+    since.elapsed().as_micros() as u64
 }
 
 /// One camera rig's tick, computed while the ECS is borrowed for reading
@@ -256,11 +292,35 @@ impl World {
             poisoned: false,
             input: Input::default(),
             physics: Physics::new(),
-            rig_targets: HashMap::new(),
+            named_targets: HashMap::new(),
+            prefabs: HashMap::new(),
+            system_times: SYSTEMS
+                .iter()
+                .map(|&system| SystemTimeRecord {
+                    system,
+                    entities: 0,
+                    micros: 0,
+                })
+                .collect(),
             rig_scratch: Vec::new(),
             driver_scratch: Vec::new(),
             hits_scratch: Vec::new(),
+            entity_scratch: Vec::new(),
+            emission_scratch: Vec::new(),
+            placement_scratch: Vec::new(),
         }
+    }
+
+    /// The last step's wall time per phase (`SystemKind` order, M3-10):
+    /// what `FYNKEL_QUERY_SYSTEMS` answers.
+    pub fn system_times(&self) -> &[SystemTimeRecord] {
+        &self.system_times
+    }
+
+    fn set_time(&mut self, system: SystemKind, entities: u32, micros: u64) {
+        let i = system as usize;
+        self.system_times[i].entities = entities;
+        self.system_times[i].micros = micros.min(u32::MAX as u64) as u32;
     }
 
     pub fn physics(&self) -> &Physics {
@@ -666,19 +726,10 @@ impl World {
                 if !self.check_entity(index, lane, entity, "destroy") {
                     return false;
                 }
-                let gone = match scene::despawn_subtree(&mut self.ecs, entity) {
-                    Ok(v) => v,
-                    Err(err) => return self.reject_scene(index, lane, entity, err),
-                };
-                for e in gone {
-                    self.subscriptions.remove(&e);
-                    self.overrides.remove(&e);
-                    self.events.push(Event {
-                        tick,
-                        payload: EventPayload::Destroyed { entity: e },
-                    });
+                match self.destroy_subtree(entity, tick) {
+                    Ok(()) => true,
+                    Err(err) => self.reject_scene(index, lane, entity, err),
                 }
-                true
             }
             Command::SetTransform { entity, transform } => {
                 if !self.check_entity(index, lane, entity, "set_transform") {
@@ -765,6 +816,14 @@ impl World {
                     ComponentId::THIRD_PERSON_CAMERA => {
                         self.ecs.remove::<ThirdPersonCamera>(entity).is_ok()
                     }
+                    ComponentId::ROTATOR => self.ecs.remove::<Rotator>(entity).is_ok(),
+                    ComponentId::OSCILLATE => self.ecs.remove::<Oscillate>(entity).is_ok(),
+                    ComponentId::FOLLOW => self.ecs.remove::<Follow>(entity).is_ok(),
+                    ComponentId::LOOK_AT_CAMERA => self.ecs.remove::<LookAtCamera>(entity).is_ok(),
+                    ComponentId::LIFETIME_DESPAWN => {
+                        self.ecs.remove::<LifetimeDespawn>(entity).is_ok()
+                    }
+                    ComponentId::EMITTER => self.ecs.remove::<Emitter>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -814,6 +873,23 @@ impl World {
         }
     }
 
+    /// Destroys `entity` and its subtree with the bookkeeping and the
+    /// `Destroyed` events of `Command::Destroy` (also what an expired
+    /// `LifetimeDespawn` does).
+    fn destroy_subtree(&mut self, entity: Entity, tick: Tick) -> Result<(), SceneError> {
+        let gone = scene::despawn_subtree(&mut self.ecs, entity)?;
+        for e in gone {
+            self.subscriptions.remove(&e);
+            self.overrides.remove(&e);
+            self.named_targets.remove(&e);
+            self.events.push(Event {
+                tick,
+                payload: EventPayload::Destroyed { entity: e },
+            });
+        }
+        Ok(())
+    }
+
     /// Shared by both lanes and by `load_scene`: validates the value and
     /// inserts (or replaces) the component. Not for `Transform`.
     fn set_component(
@@ -848,6 +924,12 @@ impl World {
             ComponentValue::Collider(v) => self.ecs.insert(entity, v),
             ComponentValue::CharacterController(v) => self.ecs.insert(entity, v),
             ComponentValue::ThirdPersonCamera(v) => self.ecs.insert(entity, v),
+            ComponentValue::Rotator(v) => self.ecs.insert(entity, v),
+            ComponentValue::Oscillate(v) => self.ecs.insert(entity, v),
+            ComponentValue::Follow(v) => self.ecs.insert(entity, v),
+            ComponentValue::LookAtCamera(v) => self.ecs.insert(entity, v),
+            ComponentValue::LifetimeDespawn(v) => self.ecs.insert(entity, v),
+            ComponentValue::Emitter(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -900,6 +982,9 @@ impl World {
                 live_entities: self.ecs.len(),
             };
         }
+        let step_start = Instant::now();
+        let mut transforms_us: u64 = 0;
+        let mut propagated: u32 = 0;
         self.diagnostics.clear();
         self.events.begin_tick();
         let next_tick = self.clock.tick() + 1;
@@ -907,15 +992,20 @@ impl World {
         // characters' action driver, M3-09): its commands are queued ahead
         // of the batch's, so an explicit `Move`/`Jump` from the game in the
         // same tick wins.
-        self.drive_characters();
+        let t0 = Instant::now();
+        let characters = self.drive_characters();
+        self.set_time(SystemKind::Characters, characters, micros(t0));
         // This tick consumed the pending edges (§5.1); catch-up ticks in
         // the same frame see held state only.
         self.input.end_tick();
 
         // S[n] becomes the interpolation source.
+        let t0 = Instant::now();
         self.record_prev_world();
+        transforms_us += micros(t0);
 
         // Validate/apply C[n] at the tick boundary.
+        let t0 = Instant::now();
         let staged = std::mem::take(&mut self.staged);
         self.spawned_this_tick.clear();
         let mut applied: u32 = 0;
@@ -950,12 +1040,30 @@ impl World {
                 rejected += 1;
             }
         }
+        self.set_time(SystemKind::Commands, applied, micros(t0));
+
+        // The catalogue's pre-tick movers (§3.5, M3-10): they see the
+        // batch's writes and physics sees theirs.
+        let t0 = Instant::now();
+        let n = self.run_rotators();
+        self.set_time(SystemKind::Rotator, n, micros(t0));
+        let t0 = Instant::now();
+        let n = self.run_oscillators();
+        self.set_time(SystemKind::Oscillate, n, micros(t0));
+        let t0 = Instant::now();
+        let n = self.run_lifetimes(next_tick);
+        self.set_time(SystemKind::LifetimeDespawn, n, micros(t0));
+        let t0 = Instant::now();
+        let n = self.run_emitters(next_tick);
+        self.set_time(SystemKind::Emitter, n, micros(t0));
 
         // Physics at the §5.1 slot: bodies see the batch's transforms,
         // step, and write their poses back before the tick's own
         // propagate.
+        let t0 = Instant::now();
+        let mut physics_entities = 0;
         if self.physics.has_work(&self.ecs) {
-            scene::propagate(&mut self.ecs);
+            propagated += scene::propagate(&mut self.ecs) as u32;
             self.physics
                 .step(&mut self.ecs, self.config.fixed_dt, &self.subscriptions);
             // A body command counted as applied above may fail here.
@@ -963,9 +1071,13 @@ impl World {
             rejected += failed;
             applied = applied.saturating_sub(failed);
             self.physics_events(next_tick);
+            let ps = self.physics.stats();
+            physics_entities = ps.bodies + ps.colliders + ps.characters;
         }
+        self.set_time(SystemKind::Physics, physics_entities, micros(t0));
 
         // Deferred structural changes.
+        let t0 = Instant::now();
         for e in self.ecs.flush_deferred() {
             self.subscriptions.remove(&e);
             self.overrides.remove(&e);
@@ -973,23 +1085,47 @@ impl World {
 
         // Transform/hierarchy work for the tick; new entities start with
         // PrevWorld == current so they do not interpolate from the origin.
-        scene::propagate(&mut self.ecs);
+        propagated += scene::propagate(&mut self.ecs) as u32;
+        transforms_us += micros(t0);
         // Camera rigs follow the tick's final poses (a rig's own subtree
         // is the only thing left dirty, so the second propagate is cheap).
-        if self.place_camera_rigs() {
-            scene::propagate(&mut self.ecs);
+        let t0 = Instant::now();
+        let (rigs, moved) = self.place_camera_rigs();
+        self.set_time(SystemKind::CameraRigs, rigs, micros(t0));
+        if moved {
+            let t0 = Instant::now();
+            propagated += scene::propagate(&mut self.ecs) as u32;
+            transforms_us += micros(t0);
+        }
+        // Followers and billboards read the propagated poses, the camera's
+        // included (M3-10).
+        let t0 = Instant::now();
+        let (followers, moved_followers) = self.run_followers();
+        self.set_time(SystemKind::Follow, followers, micros(t0));
+        let t0 = Instant::now();
+        let (billboards, moved_billboards) = self.run_billboards();
+        self.set_time(SystemKind::LookAtCamera, billboards, micros(t0));
+        let t0 = Instant::now();
+        if moved_followers || moved_billboards {
+            propagated += scene::propagate(&mut self.ecs) as u32;
         }
         self.physics.record(&self.ecs);
         self.seed_prev_world();
         self.apply_teleports();
+        transforms_us += micros(t0);
+        self.set_time(SystemKind::Transforms, propagated, transforms_us);
 
         let tick = self.clock.consume_step();
         debug_assert_eq!(tick, next_tick);
         self.applied_this_tick = applied;
 
+        let t0 = Instant::now();
         self.publish_snapshot();
         self.events.publish_tick();
         self.last_events = self.events.pending() as u32;
+        let records = self.snapshot.len() as u32;
+        self.set_time(SystemKind::Publish, records, micros(t0));
+        self.set_time(SystemKind::Step, self.ecs.len(), micros(step_start));
 
         let diagnostic_records = self.diagnostics.len() as u32;
         StepReport {
@@ -1086,15 +1222,17 @@ impl World {
     /// right, y forward) or the world axes without one; a `jump_action`
     /// press jumps when grounded (the edge is consumed by this tick, §5.1).
     /// Queued like body commands, outside any batch (`u32::MAX`).
-    fn drive_characters(&mut self) {
+    fn drive_characters(&mut self) -> u32 {
         let mut cmds = std::mem::take(&mut self.driver_scratch);
         cmds.clear();
+        let mut driven = 0;
         {
             let h = self.ecs.hecs();
             for (handle, c) in h.query::<(&Handle, &CharacterController)>().iter() {
                 if c.move_action.is_empty() && c.jump_action.is_empty() {
                     continue;
                 }
+                driven += 1;
                 let entity = handle.0;
                 if !c.move_action.is_empty() {
                     if let Some(a) = self.input.action(&c.move_action) {
@@ -1139,16 +1277,19 @@ impl World {
             self.physics.queue(u32::MAX, entity, cmd);
         }
         self.driver_scratch = cmds;
+        driven
     }
 
     /// The camera rigs (M3-09), after the tick's propagate: each
     /// `ThirdPersonCamera` turns by its `look_action`, orbits its target's
     /// pivot at `distance` (pulled in to the first collider a sphere cast
     /// from the pivot meets, never under `min_distance`) and looks at it;
-    /// yaw/pitch are written back. Returns whether any rig moved.
-    fn place_camera_rigs(&mut self) -> bool {
+    /// yaw/pitch are written back. Returns the rig count and whether any
+    /// moved.
+    fn place_camera_rigs(&mut self) -> (u32, bool) {
         let mut placements = std::mem::take(&mut self.rig_scratch);
         placements.clear();
+        let mut placements_targets: Vec<(Entity, Entity)> = Vec::new();
         let dt = self.config.fixed_dt;
         {
             let h = self.ecs.hecs();
@@ -1157,20 +1298,7 @@ impl World {
                 if rig.target.is_empty() {
                     continue;
                 }
-                // The cached target holds while it lives under that name.
-                let cached = self.rig_targets.get(&entity).copied().filter(|t| {
-                    self.ecs
-                        .get::<Name>(*t)
-                        .is_ok_and(|n| n.value == rig.target)
-                });
-                let target = cached.or_else(|| {
-                    h.query::<(&Handle, &Name)>()
-                        .iter()
-                        .filter(|(_, n)| n.value == rig.target)
-                        .map(|(h, _)| h.0)
-                        .min()
-                });
-                let Some(target) = target else {
+                let Some(target) = self.resolve_named(entity, &rig.target) else {
                     continue;
                 };
                 let Ok(target_world) = self.ecs.get::<WorldTransform>(target) else {
@@ -1225,10 +1353,14 @@ impl World {
                     position: pivot + dir * distance,
                     rotation: Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-pitch),
                 });
-                self.rig_targets.insert(entity, target);
+                placements_targets.push((entity, target));
             }
         }
+        for (rig, target) in placements_targets.drain(..) {
+            self.named_targets.insert(rig, target);
+        }
         let moved = !placements.is_empty();
+        let rigs = placements.len() as u32;
         for p in placements.drain(..) {
             if let Ok(mut rig) = self.ecs.get_mut::<ThirdPersonCamera>(p.rig) {
                 rig.yaw = p.yaw;
@@ -1237,7 +1369,7 @@ impl World {
             let _ = scene::set_world_pose(&self.ecs, p.rig, p.position, p.rotation);
         }
         self.rig_scratch = placements;
-        moved
+        (rigs, moved)
     }
 
     /// The step's contacts on the physics lane (readable by

@@ -81,6 +81,24 @@
     "fynkel.ThirdPersonCamera": {
       "kind": "native"
     },
+    "fynkel.Rotator": {
+      "kind": "native"
+    },
+    "fynkel.Oscillate": {
+      "kind": "native"
+    },
+    "fynkel.Follow": {
+      "kind": "native"
+    },
+    "fynkel.LookAtCamera": {
+      "kind": "native"
+    },
+    "fynkel.LifetimeDespawn": {
+      "kind": "native"
+    },
+    "fynkel.Emitter": {
+      "kind": "native"
+    },
     "game.Spinner": {
       "kind": "behaviour",
       "version": 1,

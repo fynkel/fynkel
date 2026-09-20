@@ -129,7 +129,8 @@ semantic rules on top of the schema pass:
 | `FYN-D0208` | the same child listed twice |
 | `FYN-D0209` | malformed entity/component entry skipped by the view |
 | `FYN-H0001` … `H0004` | physics rules (M3-08, [physics.md](physics.md)): a `fynkel.RigidBody` value the runtime would reject, a `fynkel.Collider` value (size per shape, friction, restitution, `mesh` missing), a `shape: mesh` collider on a dynamic or kinematic body, a dynamic body without a collider (warning) |
-| `FYN-H0005` … `H0007` | character rules (M3-09): a `fynkel.CharacterController` value the runtime would reject (capsule, slope, negative limits), a `fynkel.RigidBody`/`fynkel.Collider` next to a `fynkel.CharacterController` (its own capsule replaces them; one diagnostic per ignored component), a `fynkel.ThirdPersonCamera` value (distance, pitch range, sensitivity). The corpus fixture `scene/physics_rules.scene.json` lists `H0001`–`H0007` |
+| `FYN-H0005` … `H0007` | character rules (M3-09): a `fynkel.CharacterController` value the runtime would reject (capsule, slope, negative limits), a `fynkel.RigidBody`/`fynkel.Collider` next to a `fynkel.CharacterController` (its own capsule replaces them; one diagnostic per ignored component), a `fynkel.ThirdPersonCamera` value (distance, pitch range, sensitivity). The corpus fixture `scene/physics_rules.scene.json` lists `H0001`–`H0008` |
+| `FYN-H0008` | catalogue rules (M3-10): a `fynkel.Rotator`/`Oscillate`/`Follow`/`LifetimeDespawn`/`Emitter` value the runtime would reject (a zero or non-finite axis, a negative amplitude, frequency, smoothing, seconds, rate or lifetime, a non-finite offset or velocity) — the same `validate()` the tick runs (`docs/catalogue.md`) |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule

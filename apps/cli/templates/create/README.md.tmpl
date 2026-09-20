@@ -27,7 +27,11 @@ two more of those components: the Crate has a `fynkel.RigidBody` and a
 `fynkel.Collider` and falls onto the Floor (a collider alone); the Cube is
 a kinematic body, so walking it pushes the crate. A behaviour applies
 forces (`applyImpulse`), reads `bodyState()`, gets `onCollisionEnter` and
-casts rays (`world.raycast`). After
+casts rays (`world.raycast`). Motion that needs no rules at all —
+turning, bobbing, following, billboards, timed despawns, spawning at a
+rate — is the native catalogue (`fynkel.Rotator`, `Oscillate`, `Follow`,
+`LookAtCamera`, `LifetimeDespawn`, `Emitter`): components the runtime
+ticks itself, authored in the scene, no Dart. After
 changing an exposed field, an id or adding a behaviour class, run `fynkel
 codegen --project .` and commit the regenerated `lib/generated/` and
 `schemas/behaviours/`.

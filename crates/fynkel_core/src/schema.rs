@@ -16,7 +16,8 @@ use fynkel_schema_derive::Schema;
 use glam::{Quat, Vec3};
 
 use crate::components::{
-    Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight, ThirdPersonCamera,
+    Camera, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn, LookAtCamera,
+    MeshRenderer, Oscillate, PointLight, Rotator, SpotLight, ThirdPersonCamera,
 };
 use crate::material::PbrMaterial;
 use crate::world::Name;
@@ -239,6 +240,72 @@ pub struct CharacterStateRecord {
     pub velocity: Vec3,
 }
 
+/// A phase of `World::step` whose time is measured (M3-10, blueprint
+/// §15.4): the whole step, then its phases in tick order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Schema)]
+#[schema(name = "fynkel.SystemKind")]
+pub enum SystemKind {
+    /// The whole `step`; `entities` is the live count.
+    Step,
+    /// Validating and applying the tick's command batch; `entities` is
+    /// the number applied.
+    Commands,
+    /// The characters' action driver (M3-09).
+    Characters,
+    /// Catalogue movers in the pre-tick slot.
+    Rotator,
+    Oscillate,
+    LifetimeDespawn,
+    /// `entities` is the number of emitters; instances spawned count in
+    /// their own components.
+    Emitter,
+    /// Sync, the Rapier step and the write-back; `entities` is bodies +
+    /// colliders + characters.
+    Physics,
+    CameraRigs,
+    Follow,
+    LookAtCamera,
+    /// Propagation, deferred destroys and the interpolation bookkeeping;
+    /// `entities` is the number of world matrices recomputed.
+    Transforms,
+    /// Snapshot and event publication; `entities` is the snapshot's
+    /// records.
+    Publish,
+}
+
+impl SystemKind {
+    /// The schema's enum value (`lifetimeDespawn`), for reports.
+    pub const fn name(self) -> &'static str {
+        match self {
+            SystemKind::Step => "step",
+            SystemKind::Commands => "commands",
+            SystemKind::Characters => "characters",
+            SystemKind::Rotator => "rotator",
+            SystemKind::Oscillate => "oscillate",
+            SystemKind::LifetimeDespawn => "lifetimeDespawn",
+            SystemKind::Emitter => "emitter",
+            SystemKind::Physics => "physics",
+            SystemKind::CameraRigs => "cameraRigs",
+            SystemKind::Follow => "follow",
+            SystemKind::LookAtCamera => "lookAtCamera",
+            SystemKind::Transforms => "transforms",
+            SystemKind::Publish => "publish",
+        }
+    }
+}
+
+/// `FYNKEL_QUERY_SYSTEMS` (M3-10): one per [`SystemKind`], the last
+/// step's wall time and the number of things that phase touched. What the
+/// HUD and the headless report print as per-system time.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.SystemTime")]
+pub struct SystemTimeRecord {
+    pub system: SystemKind,
+    pub entities: u32,
+    /// Microseconds of wall time in the last step.
+    pub micros: u32,
+}
+
 /// `FYNKEL_QUERY_ENTITIES` (M3-08b): one per live entity, entity order —
 /// its parent (`NULL` at the root) and name (empty without one). What
 /// `World.find`/`findAll`/`findChild` read, one query per tick.
@@ -428,6 +495,13 @@ pub const ALL: &[&RecordSchema] = &[
     &CharacterController::SCHEMA,
     &ThirdPersonCamera::SCHEMA,
     &CharacterStateRecord::SCHEMA,
+    &Rotator::SCHEMA,
+    &Oscillate::SCHEMA,
+    &Follow::SCHEMA,
+    &LookAtCamera::SCHEMA,
+    &LifetimeDespawn::SCHEMA,
+    &Emitter::SCHEMA,
+    &SystemTimeRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -475,6 +549,20 @@ mod tests {
         assert_eq!(CharacterStateRecord::SCHEMA.offsets(), vec![0, 8, 9, 12]);
         assert_eq!(CharacterStateRecord::SCHEMA.wire_size(), 24);
         assert_eq!(ThirdPersonCamera::SCHEMA.wire_size(), 64);
+        // M3-10: axis 12 @0, speed @12, space u32 @16 → 24 (padded).
+        assert_eq!(Rotator::SCHEMA.offsets(), vec![0, 12, 16]);
+        assert_eq!(Rotator::SCHEMA.wire_size(), 24);
+        assert_eq!(Oscillate::SCHEMA.wire_size(), 32);
+        // target (u32,u32) @0, offset @8, smoothing @20, look_at @24 → 32.
+        assert_eq!(Follow::SCHEMA.offsets(), vec![0, 8, 20, 24]);
+        assert_eq!(Follow::SCHEMA.wire_size(), 32);
+        assert_eq!(LookAtCamera::SCHEMA.wire_size(), 8);
+        assert_eq!(LifetimeDespawn::SCHEMA.wire_size(), 8);
+        // prefab 24 @0, rate @24, lifetime @28, max_alive @32, velocity
+        // @36, enabled @48 → 56.
+        assert_eq!(Emitter::SCHEMA.offsets(), vec![0, 24, 28, 32, 36, 48]);
+        assert_eq!(Emitter::SCHEMA.wire_size(), 56);
+        assert_eq!(SystemTimeRecord::SCHEMA.wire_size(), 16);
     }
 
     #[test]

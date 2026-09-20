@@ -101,7 +101,16 @@ fixture project's second scene, Playground (`--scene
 c0000000-0000-4000-8000-000000000031 --input test/platform.input.json`,
 M3-09), walks its `fynkel.CharacterController` Player onto a platform
 from the recording with the `fynkel.ThirdPersonCamera` rig behind it —
-the item 9 gate, a headless test with a stable checksum. The checksum covers the bodies' final
+the item 9 gate, a headless test with a stable checksum. The third
+scene, Catalogue (`--scene c0000000-0000-4000-8000-000000000032`,
+M3-10), runs the six native catalogue components with no behaviour —
+a headless test with a stable checksum ([catalogue.md](catalogue.md));
+the host registers the prefabs the scene's `Emitter`s name
+(`Assets::register_prefabs`, the scene report's `prefabs`) and
+accumulates `World::system_times` over the run into `systems: [{ system,
+entities, total_us, max_us, mean_us }]` (tick order, `step` first),
+printed by the text mode as `systems (mean per tick, last count): commands
+0 µs (0), … physics 2017 µs (6081), …`. The checksum covers the bodies' final
 poses, so a physics regression changes it; the fixture project's Crate B
 landing on its Floor and sleeping is a test of the crate. Read-side:
 
@@ -239,13 +248,21 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `FYNKEL_QUERY_CHARACTER` (9: one `CharacterStateRecord { entity,
   grounded, sliding, velocity }`) (M3-09; component ids 12
   `CharacterController` and 13 `ThirdPersonCamera` in the header),
+  the native catalogue's six components are ids 14–19 in the header
+  and travel the M3-07a path, and `World.systemTimes()` is
+  `FYNKEL_QUERY_SYSTEMS` (10: one `SystemTimeRecord { system, entities,
+  micros }` per `SystemKind` in tick order, the last step's wall time —
+  the starter HUD's `systems` line; M3-10, [catalogue.md](catalogue.md)),
   `raycast`/`raycastAll`/`shapeCast`/`overlap`/`physicsQuery` send a
   `FYNKEL_BUFFER_PHYSICS_QUERIES` (8) batch of `PhysicsQueryRecord`s to
   `fynkel_world_physics_query(world, buffer, len, &view)` and read the
   `QUERY` buffer of `PhysicsHitRecord`s it answers with; contacts arrive as
   `ContactEvent`s on the physics lane (`fynkel_world_after_physics_events`)
   and reach `onCollisionEnter`/… the same tick. The load report gains
-  `physics: { gravity, layers, meshColliders }`.
+  `physics: { gravity, layers, meshColliders, prefabs }` — `prefabs` is
+  how many prefabs the scene's (or an instantiated prefab's) `Emitter`s
+  name and the host registered with the world
+  (`Assets::register_prefabs`, M3-10).
   Developer ergonomics (M3-08b): `World.find(name)`/`findAll(name)`,
   `GameObject.findChild('Arm/Hand')`/`findDescendant(name)` read the
   hierarchy as the last tick left it from **one** `FYNKEL_QUERY_ENTITIES`

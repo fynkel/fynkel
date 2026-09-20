@@ -1,0 +1,75 @@
+{
+  "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+  "formatVersion": 2,
+  "id": "c0000000-0000-4000-8000-000000000041",
+  "name": "Spark",
+  "entities": {
+    "c0000000-0000-4000-8000-0000000000b2": {
+      "name": "Spark",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000000c8": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000000c9": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 0.2,
+            "linear_damping": 0.0,
+            "angular_damping": 0.05,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "c0000000-0000-4000-8000-0000000000ca": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.3,
+              0.3,
+              0.3
+            ],
+            "mesh": null,
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "friction": 0.5,
+            "restitution": 0.3,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 4294967295
+          }
+        }
+      }
+    }
+  },
+  "roots": [
+    "c0000000-0000-4000-8000-0000000000b2"
+  ]
+}

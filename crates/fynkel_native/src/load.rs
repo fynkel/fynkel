@@ -98,13 +98,17 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outco
             core.physics_mut()
                 .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
         }
-        let (meshes, diags) =
+        let (meshes, mut diags) =
             assets.register_mesh_colliders(&scene.description, core.physics_mut());
+        // The catalogue (M3-10): every prefab an emitter names.
+        let (prefabs, prefab_diags) = assets.register_prefabs(&scene.description, core);
+        diags.extend(prefab_diags);
         let gravity = core.physics().gravity();
         json!({
             "gravity": [gravity.x, gravity.y, gravity.z],
             "layers": assets.project().map(|p| p.physics.layers.clone()).unwrap_or_default(),
             "meshColliders": meshes,
+            "prefabs": prefabs,
             "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
         })
     };
@@ -235,8 +239,10 @@ fn instantiate_prefab(
         Ok(p) => p,
         Err(diags) => return failed(&diags, cache),
     };
-    let (meshes, mesh_diags) =
+    let (meshes, mut mesh_diags) =
         assets.register_mesh_colliders(&prefab.description, w.core_mut().physics_mut());
+    let (prefabs, prefab_diags) = assets.register_prefabs(&prefab.description, w.core_mut());
+    mesh_diags.extend(prefab_diags);
     let name = name.unwrap_or(&prefab.name);
     match w
         .core_mut()
@@ -280,6 +286,7 @@ fn instantiate_prefab(
                         "rejectedComponents": loaded.rejected_components,
                         "assets": prefab.closure.len(),
                         "meshColliders": meshes,
+                        "prefabs": prefabs,
                         "behaviours": behaviours,
                     },
                     "cache": cache,

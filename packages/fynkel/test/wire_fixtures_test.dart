@@ -345,6 +345,62 @@ void main() {
     (v, d, o, s) => v.encode(d, o, s),
   );
   check(
+    'Rotator',
+    const Rotator(axis: Vec3(0, 1, 0), speed: 1.5, space: MotionSpace.world),
+    Rotator.wireSize,
+    Rotator.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Oscillate',
+    const Oscillate(axis: Vec3(0, 1, 0), amplitude: 0.5, frequency: 0.25, phase: 1, space: MotionSpace.local),
+    Oscillate.wireSize,
+    Oscillate.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Follow',
+    const Follow(target: 'Player', offset: Vec3(0, 3, -1), smoothing: 4, lookAt: true),
+    Follow.wireSize,
+    Follow.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'LookAtCamera',
+    const LookAtCamera(lockY: false),
+    LookAtCamera.wireSize,
+    LookAtCamera.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'LifetimeDespawn',
+    const LifetimeDespawn(seconds: 2.5),
+    LifetimeDespawn.wireSize,
+    LifetimeDespawn.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Emitter',
+    const Emitter(
+      prefab: AssetRef('0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff'),
+      rate: 10,
+      lifetime: 4,
+      maxAlive: 40,
+      velocity: Vec3(0, 6, 0),
+      enabled: true,
+    ),
+    Emitter.wireSize,
+    Emitter.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SystemTimeRecord',
+    const SystemTimeRecord(system: SystemKind.physics, entities: 500, micros: 640),
+    SystemTimeRecord.wireSize,
+    SystemTimeRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
     'EntityInfoRecord',
     EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp'),
     EntityInfoRecord.wireSize,

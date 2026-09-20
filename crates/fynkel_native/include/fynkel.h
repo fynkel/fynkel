@@ -123,7 +123,14 @@ typedef enum FynkelComponent {
   FYNKEL_COMPONENT_RIGID_BODY = 10,
   FYNKEL_COMPONENT_COLLIDER = 11,
   FYNKEL_COMPONENT_CHARACTER_CONTROLLER = 12,
-  FYNKEL_COMPONENT_THIRD_PERSON_CAMERA = 13
+  FYNKEL_COMPONENT_THIRD_PERSON_CAMERA = 13,
+  /* The native component catalogue (blueprint §3.5, M3-10). */
+  FYNKEL_COMPONENT_ROTATOR = 14,
+  FYNKEL_COMPONENT_OSCILLATE = 15,
+  FYNKEL_COMPONENT_FOLLOW = 16,
+  FYNKEL_COMPONENT_LOOK_AT_CAMERA = 17,
+  FYNKEL_COMPONENT_LIFETIME_DESPAWN = 18,
+  FYNKEL_COMPONENT_EMITTER = 19
 } FynkelComponent;
 
 typedef enum FynkelQueryKind {
@@ -148,7 +155,10 @@ typedef enum FynkelQueryKind {
   FYNKEL_QUERY_ENTITIES = 8,
   /* entity -> one CharacterStateRecord { entity, grounded, sliding,
    * velocity } (0 records without a CharacterController) (M3-09). */
-  FYNKEL_QUERY_CHARACTER = 9
+  FYNKEL_QUERY_CHARACTER = 9,
+  /* (no entity) -> one SystemTimeRecord { system, entities, micros } per
+   * SystemKind: the last step's per-phase wall time (M3-10). */
+  FYNKEL_QUERY_SYSTEMS = 10
 } FynkelQueryKind;
 
 /* ---- Buffer header ------------------------------------------------------ */

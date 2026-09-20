@@ -389,6 +389,15 @@ fn test_command(args: &[String]) -> ExitCode {
                 p.trigger_exit
             );
         }
+        if !report.systems.is_empty() {
+            let parts: Vec<String> = report
+                .systems
+                .iter()
+                .filter(|s| s.system != "step")
+                .map(|s| format!("{} {:.0} µs ({})", s.system, s.mean_us, s.entities))
+                .collect();
+            println!("systems (mean per tick, last count): {}", parts.join(", "));
+        }
         println!(
             "fynkel test --headless: {} ticks in {:.1} ms, {} entities, {} commands applied, {} rejected, {} diagnostics, checksum {} — {}",
             report.tick,

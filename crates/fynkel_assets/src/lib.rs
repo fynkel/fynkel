@@ -514,6 +514,54 @@ impl Assets {
         (registered, diags)
     }
 
+    /// Registers with `world` every prefab the `Emitter`s in `scene` name
+    /// (M3-10), recursively through the prefabs' own emitters, so the
+    /// catalogue can instantiate them at the tick: each prefab is read from
+    /// the cache once, its mesh colliders registered as for a scene. An
+    /// unreadable prefab is a diagnostic (the store's) and the emitter
+    /// reports `PREFAB_UNAVAILABLE` at its first tick. Returns the number
+    /// of prefabs registered by this call.
+    pub fn register_prefabs(
+        &self,
+        scene: &SceneDescription,
+        world: &mut fynkel_core::World,
+    ) -> (usize, Vec<Diagnostic>) {
+        use fynkel_core::components::ComponentValue;
+        let mut registered = 0;
+        let mut diags = Vec::new();
+        let mut seen = HashSet::new();
+        let mut pending: Vec<Uuid> = Vec::new();
+        let mut collect = |scene: &SceneDescription, pending: &mut Vec<Uuid>| {
+            for e in &scene.entities {
+                for c in &e.components {
+                    if let ComponentValue::Emitter(em) = c {
+                        if !em.prefab.asset.is_nil() && seen.insert(em.prefab.asset) {
+                            pending.push(em.prefab.asset);
+                        }
+                    }
+                }
+            }
+        };
+        collect(scene, &mut pending);
+        while let Some(id) = pending.pop() {
+            if world.has_prefab(id) {
+                continue;
+            }
+            match self.prefab(id) {
+                Ok(p) => {
+                    let (_, mesh_diags) =
+                        self.register_mesh_colliders(&p.description, world.physics_mut());
+                    diags.extend(mesh_diags);
+                    collect(&p.description, &mut pending);
+                    world.register_prefab(id, p.description);
+                    registered += 1;
+                }
+                Err(d) => diags.extend(d),
+            }
+        }
+        (registered, diags)
+    }
+
     /// Keeps `ids` (a scene's closure) resident until the returned token is
     /// released or dropped. Nothing is loaded here — payloads still load on
     /// first use — but releasing evicts every payload of an asset no other

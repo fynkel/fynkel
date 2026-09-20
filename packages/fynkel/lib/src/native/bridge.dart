@@ -16,7 +16,7 @@ export 'fynkel_bindings.g.dart' show FynkelStatus;
 
 enum CommandLane { simulation, presentation }
 
-enum QueryKind { transform, children, parent, name, allEntities, components, body, entities, character }
+enum QueryKind { transform, children, parent, name, allEntities, components, body, entities, character, systems }
 
 class FramePlan {
   const FramePlan(this.steps, this.droppedSeconds, this.clamped, this.alpha);

@@ -33,8 +33,9 @@ pub mod world;
 pub use clock::{FrameClock, FramePlan};
 pub use command::{Command, Lane};
 pub use components::{
-    Camera, ComponentValue, DirectionalLight, Environment, ExposureMode, MeshRenderer, PointLight,
-    Projection, SpotLight, ThirdPersonCamera,
+    Camera, ComponentValue, DirectionalLight, Emitter, Environment, ExposureMode, Follow,
+    LifetimeDespawn, LookAtCamera, MeshRenderer, MotionSpace, Oscillate, PointLight, Projection,
+    Rotator, SpotLight, ThirdPersonCamera,
 };
 pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{

@@ -114,8 +114,24 @@ pub struct SceneReport {
     pub rejected_components: u32,
     /// Assets retained for the scene (its dependency closure).
     pub retained: u32,
+    /// Prefabs registered for the scene's `Emitter`s (M3-10).
+    #[serde(default)]
+    pub prefabs: u32,
     /// §14.2 document diagnostics and `FYN-R` runtime diagnostics.
     pub document_diagnostics: Vec<serde_json::Value>,
+}
+
+/// One `World::step` phase over the run (`HeadlessReport::systems`,
+/// M3-10): the schema's `fynkel.SystemKind` name, what the last step
+/// touched, and its wall time summed and at its worst over every step.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct SystemReport {
+    pub system: String,
+    pub entities: u32,
+    pub total_us: u64,
+    pub max_us: u32,
+    /// `total_us / steps`, for reading.
+    pub mean_us: f32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -151,6 +167,10 @@ pub struct HeadlessReport {
     pub input: Option<InputReport>,
     /// Present when the world stepped any physics (M3-08).
     pub physics: Option<PhysicsReport>,
+    /// Per-system time (M3-10), `World::system_times` accumulated over
+    /// the run, in tick order (`step` first).
+    #[serde(default)]
+    pub systems: Vec<SystemReport>,
 }
 
 /// The physics of a run (`HeadlessReport::physics`).
@@ -240,6 +260,7 @@ pub fn run_retaining(
         extract_records: 0,
         checksum: String::new(),
         physics: None,
+        systems: Vec::new(),
         step_time: Timing::default(),
         total_ms: 0.0,
         scene_ready: false,
@@ -304,6 +325,11 @@ pub fn run_retaining(
         physics_diagnostics += mesh_diags.len() as u64;
         sr.document_diagnostics
             .extend(document::diagnostics_json(&mesh_diags));
+        // The catalogue's prefabs (M3-10).
+        let (prefabs, prefab_diags) = assets.register_prefabs(&cooked.description, &mut world);
+        sr.prefabs = prefabs as u32;
+        sr.document_diagnostics
+            .extend(document::diagnostics_json(&prefab_diags));
         match world.load_scene(&cooked.description) {
             Ok(l) => {
                 let residency = assets.retain(&cooked.closure);
@@ -405,6 +431,18 @@ pub fn run_retaining(
             let r = world.step();
             step_us.push(t0.elapsed().as_micros() as u32);
             report.steps += 1;
+            for (i, t) in world.system_times().iter().enumerate() {
+                if report.systems.len() <= i {
+                    report.systems.push(SystemReport {
+                        system: t.system.name().to_string(),
+                        ..SystemReport::default()
+                    });
+                }
+                let s = &mut report.systems[i];
+                s.entities = t.entities;
+                s.total_us += u64::from(t.micros);
+                s.max_us = s.max_us.max(t.micros);
+            }
             report.commands_applied += r.applied as u64;
             report.commands_rejected += r.rejected as u64;
             report.diagnostics += r.diagnostic_records as u64;
@@ -439,6 +477,9 @@ pub fn run_retaining(
         }
     }
     report.input = input;
+    for s in &mut report.systems {
+        s.mean_us = s.total_us as f32 / report.steps.max(1) as f32;
+    }
     let ps = world.physics().stats();
     if ps.bodies > 0 || ps.colliders > 0 || mesh_colliders > 0 {
         report.physics = Some(PhysicsReport {
@@ -740,6 +781,92 @@ mod tests {
         let json = r.to_json();
         let back: HeadlessReport = serde_json::from_str(&json).unwrap();
         assert_eq!(back, r);
+    }
+}
+
+#[cfg(test)]
+mod catalogue_tests {
+    use super::*;
+    use glam::Vec3Swizzles;
+
+    /// Blueprint §19.2d item 10: the fixture's Catalogue scene runs its
+    /// six native components with no behaviour — the Beacon turns, the
+    /// Buoy bobs, the Lamp follows it, the Sign faces the camera, the
+    /// Puff despawns with its child at 1 s, the Fountain keeps 12 Sparks
+    /// alive from the registered prefab — with per-system times in the
+    /// report and a stable checksum.
+    #[test]
+    fn the_catalogue_scene_moves_without_a_behaviour() {
+        let cooked = tests::Cooked::new("catalogue");
+        let cfg = HeadlessConfig {
+            steps: 300,
+            cache: Some(cooked.0.clone()),
+            scene: Some("c0000000-0000-4000-8000-000000000032".into()),
+            ..HeadlessConfig::default()
+        };
+        let (report, world, loaded) = run_with(&cfg);
+        let scene = report.scene.as_ref().expect("scene report");
+        assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
+        assert_eq!(scene.name, "Catalogue");
+        assert_eq!((scene.entities, scene.rejected_components), (10, 0));
+        assert_eq!(scene.prefabs, 1, "the Spark prefab was registered");
+        assert_eq!(report.commands_rejected, 0);
+        assert_eq!(report.diagnostics, 0);
+        // Puff and its core gone; 12 Sparks alive, each an anchor + root.
+        assert_eq!(report.live_entities, 10 - 2 + 12 * 2);
+        let physics = report.physics.as_ref().expect("physics ran");
+        assert_eq!(
+            (physics.bodies, physics.colliders),
+            (12, 13),
+            "{physics:#?}"
+        );
+        assert!(physics.collision_enter > 0, "sparks land on the floor");
+
+        let loaded = loaded.unwrap();
+        let entity = |id: &str| loaded.handle_of(id.parse().unwrap()).unwrap();
+        let ecs = world.ecs();
+        let local = |e| fynkel_scene::local(ecs, e).unwrap();
+        // 300 ticks at 1.5 rad/s: 7.5 rad about Y.
+        let beacon = local(entity("c0000000-0000-4000-8000-0000000002e2"));
+        let expected = glam::Quat::from_axis_angle(glam::Vec3::Y, 7.5);
+        assert!(beacon.rotation.dot(expected).abs() > 0.999, "{beacon:?}");
+        // 5 s at 0.5 Hz is 2.5 periods: the Buoy is back at its rest
+        // height, 1 m.
+        let buoy = local(entity("c0000000-0000-4000-8000-0000000002e4"));
+        assert!((buoy.position.y - 1.0).abs() < 1e-2, "{buoy:?}");
+        // The lamp trails the bobbing buoy (smoothing 5/s against a peak
+        // speed of 1.57 m/s) on its axis, 2 m up.
+        let lamp = local(entity("c0000000-0000-4000-8000-0000000002e5"));
+        assert!(
+            (lamp.position.xz()).length() < 1e-4 && (lamp.position.y - 3.0).abs() < 0.4,
+            "the lamp follows the buoy: {lamp:?}"
+        );
+        let sign = local(entity("c0000000-0000-4000-8000-0000000002e6"));
+        let facing = sign.rotation * glam::Vec3::Z;
+        let to_camera =
+            (glam::Vec3::new(0.0, 4.0, 10.0) - sign.position) * glam::Vec3::new(1.0, 0.0, 1.0);
+        assert!(facing.dot(to_camera.normalize()) > 0.999, "{facing:?}");
+        assert!(loaded
+            .handle_of("c0000000-0000-4000-8000-0000000002e7".parse().unwrap())
+            .is_some_and(|e| !ecs.contains(e)));
+        assert!(loaded
+            .handle_of("c0000000-0000-4000-8000-0000000002e8".parse().unwrap())
+            .is_some_and(|e| !ecs.contains(e)));
+
+        let by_name = |n: &str| report.systems.iter().find(|s| s.system == n).unwrap();
+        assert_eq!(report.systems[0].system, "step");
+        assert_eq!(report.systems.len(), 13);
+        assert_eq!(by_name("rotator").entities, 1);
+        assert_eq!(by_name("oscillate").entities, 1);
+        assert_eq!(by_name("emitter").entities, 1);
+        assert_eq!(by_name("follow").entities, 1);
+        assert_eq!(by_name("lookAtCamera").entities, 1);
+        // Counted before this tick's emission.
+        assert!((11..=12).contains(&by_name("lifetimeDespawn").entities));
+        assert!(by_name("physics").total_us > 0);
+        assert!(by_name("step").total_us >= by_name("physics").total_us);
+
+        assert_eq!(run(&cfg).checksum, report.checksum, "deterministic");
     }
 }
 

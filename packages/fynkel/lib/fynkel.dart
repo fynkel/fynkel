@@ -17,20 +17,29 @@ export 'generated/schema.g.dart'
         ColliderShape,
         ComponentCodec,
         DirectionalLight,
+        Emitter,
         EntityInfoRecord,
         Environment,
         ExposureMode,
+        Follow,
+        LifetimeDespawn,
+        LookAtCamera,
         MeshRenderer,
+        MotionSpace,
         Name,
+        Oscillate,
         PbrMaterial,
         PhysicsHitRecord,
         PhysicsQueryKind,
         PhysicsQueryRecord,
         PointLight,
         RigidBody,
+        Rotator,
         Projection,
         SnapshotTransformRecord,
         SpotLight,
+        SystemKind,
+        SystemTimeRecord,
         ThirdPersonCamera,
         componentCodecs,
         componentIds;
@@ -41,6 +50,7 @@ export 'src/diagnostics.dart';
 export 'src/events.dart';
 export 'src/input.dart';
 export 'src/physics.dart' show BodyState, CharacterState, PhysicsHit, PhysicsSettings;
+export 'src/systems.dart';
 export 'src/recording.dart';
 export 'src/transform_writer.dart';
 export 'src/native/bridge.dart'

@@ -21,7 +21,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, Vec2, Vec3;
+import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SystemKind, SystemTime, Vec2, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
@@ -208,8 +208,12 @@ class Hud extends StatelessWidget {
       if (s != null) ...[
         'fps        ${s.fps.toStringAsFixed(0)}  frame ${s.tickInterval.p50.toStringAsFixed(2)} ms '
             '(p99 ${s.tickInterval.p99.toStringAsFixed(2)})  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
-        'viewport   ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
+        'simulate   ${s.simulate.p50.toStringAsFixed(2)} ms (p99 ${s.simulate.p99.toStringAsFixed(2)})  '
+            'viewport ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
             '${s.missedDeadlines} missed, ${s.dropped} dropped',
+        // The last tick's phases (`World.systemTimes`, M3-10): where a
+        // slow tick goes — physics, the native movers, the transforms.
+        'systems    ${_systems(game.world.systemTimes())}',
         if (s.viewport case final v?) 'meshes     ${v.instances} drawn in ${v.draws} draws, ${v.culled} culled, ${v.missing} missing, ${v.assetErrors} errors',
       ],
       for (final d in game.report.diagnostics) '$d',
@@ -220,6 +224,12 @@ class Hud extends StatelessWidget {
       children: [for (final l in lines) Text(l, style: style)],
     );
   }
+
+  /// The step's total, then every phase that touched something.
+  static String _systems(List<SystemTime> times) => [
+        for (final t in times)
+          if (t.system == SystemKind.step || t.entities > 0) '${t.system.name} ${t.micros} µs${t.system == SystemKind.step ? '' : ' (${t.entities})'}',
+      ].join('  ');
 
   static String _xy(Vec2 v) => '(${v.x.toStringAsFixed(2)}, ${v.y.toStringAsFixed(2)})';
   static String _xyz(Vec3 v) => '(${v.x.toStringAsFixed(2)}, ${v.y.toStringAsFixed(2)}, ${v.z.toStringAsFixed(2)})';

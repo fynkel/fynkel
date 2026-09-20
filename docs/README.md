@@ -11,6 +11,7 @@
 | [`m0-architecture-report.md`](m0-architecture-report.md) | M0 go/no-go: gate results, measured numbers, Path A selected, Path C fallback. |
 | [`m1-gate-report.md`](m1-gate-report.md) | M1 go/no-go: gate results, Dart allocation per frame, leak tests, bandwidth. |
 | [`toolchain.md`](toolchain.md) | Frozen toolchain matrix (M0). |
+| [`catalogue.md`](catalogue.md) | The native component catalogue (M3-10): `Rotator`, `Oscillate`, `Follow`, `LookAtCamera`, `LifetimeDespawn`, `Emitter` — semantics, where in the tick they run, prefab registration, per-system time, cost. |
 | [`codegen.md`](codegen.md) | Schema codegen pipeline: Rust structs → JSON Schema, Dart and Rust codecs, fixtures (M1). |
 | [`documents.md`](documents.md) | Authoring documents (M2): envelope, strict JSON rules, canonical form, diagnostics, `fynkel document`. |
 | [`hosts.md`](hosts.md) | The hosts sharing the core (headless, standalone, Flutter) and how each drives `step()` (M1). |

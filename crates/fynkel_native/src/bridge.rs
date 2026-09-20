@@ -255,6 +255,7 @@ pub const QUERY_COMPONENTS: u32 = 6;
 pub const QUERY_BODY: u32 = 7;
 pub const QUERY_ENTITIES: u32 = 8;
 pub const QUERY_CHARACTER: u32 = 9;
+pub const QUERY_SYSTEMS: u32 = 10;
 
 pub fn query(
     world: &World,
@@ -342,6 +343,31 @@ pub fn query(
             }
             if let Ok(v) = ecs.get::<fynkel_core::ThirdPersonCamera>(entity) {
                 w.component(ComponentId::THIRD_PERSON_CAMERA.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::Rotator>(entity) {
+                w.component(ComponentId::ROTATOR.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::Oscillate>(entity) {
+                w.component(ComponentId::OSCILLATE.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::Follow>(entity) {
+                w.component(ComponentId::FOLLOW.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::LookAtCamera>(entity) {
+                w.component(ComponentId::LOOK_AT_CAMERA.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::LifetimeDespawn>(entity) {
+                w.component(ComponentId::LIFETIME_DESPAWN.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::Emitter>(entity) {
+                w.component(ComponentId::EMITTER.0, &*v);
+            }
+        }
+        // The last step's per-phase wall time (M3-10), one record per
+        // `SystemKind`; the entity is ignored.
+        QUERY_SYSTEMS => {
+            for t in world.system_times() {
+                w.record(t);
             }
         }
         // The body's motion state (M3-08); no body is an empty response.

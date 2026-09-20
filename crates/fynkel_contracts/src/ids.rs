@@ -23,6 +23,13 @@ impl ComponentId {
     pub const COLLIDER: ComponentId = ComponentId(11);
     pub const CHARACTER_CONTROLLER: ComponentId = ComponentId(12);
     pub const THIRD_PERSON_CAMERA: ComponentId = ComponentId(13);
+    /// The native component catalogue (blueprint §3.5, M3-10).
+    pub const ROTATOR: ComponentId = ComponentId(14);
+    pub const OSCILLATE: ComponentId = ComponentId(15);
+    pub const FOLLOW: ComponentId = ComponentId(16);
+    pub const LOOK_AT_CAMERA: ComponentId = ComponentId(17);
+    pub const LIFETIME_DESPAWN: ComponentId = ComponentId(18);
+    pub const EMITTER: ComponentId = ComponentId(19);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -39,6 +46,12 @@ impl ComponentId {
             11 => Some("fynkel.Collider"),
             12 => Some("fynkel.CharacterController"),
             13 => Some("fynkel.ThirdPersonCamera"),
+            14 => Some("fynkel.Rotator"),
+            15 => Some("fynkel.Oscillate"),
+            16 => Some("fynkel.Follow"),
+            17 => Some("fynkel.LookAtCamera"),
+            18 => Some("fynkel.LifetimeDespawn"),
+            19 => Some("fynkel.Emitter"),
             _ => None,
         }
     }

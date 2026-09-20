@@ -417,6 +417,240 @@ impl ThirdPersonCamera {
     }
 }
 
+/// Which frame a catalogue mover's axis is given in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Schema)]
+#[schema(name = "fynkel.MotionSpace")]
+pub enum MotionSpace {
+    /// The entity's own axes (a tilted object spins about its own tilt).
+    #[default]
+    Local,
+    /// The world's axes, whatever the parent's rotation.
+    World,
+}
+
+/// Spins the entity about `axis` at `speed` radians per second, every
+/// tick, in the pre-tick slot (blueprint §3.5 catalogue, M3-10). A
+/// `RigidBody` on the same entity follows as a kinematic target.
+#[derive(Clone, Copy, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 14, name = "fynkel.Rotator")]
+pub struct Rotator {
+    /// Spin axis, normalised at use; must not be zero.
+    pub axis: Vec3,
+    /// Radians per second (negative spins the other way).
+    pub speed: f32,
+    pub space: MotionSpace,
+}
+
+impl Default for Rotator {
+    fn default() -> Self {
+        Self {
+            axis: Vec3::Y,
+            speed: 1.0,
+            space: MotionSpace::Local,
+        }
+    }
+}
+
+impl Rotator {
+    /// Value rules the schema cannot express (the `INVALID_PAYLOAD` text).
+    pub fn validate(&self) -> Result<(), String> {
+        finite_axis("axis", self.axis)?;
+        if !self.speed.is_finite() {
+            return Err(format!("speed must be finite, got {}", self.speed));
+        }
+        Ok(())
+    }
+}
+
+/// Moves the entity back and forth along `axis`: its position is the
+/// rest position plus `axis · amplitude · sin(2π · frequency · t + phase)`,
+/// where `t` starts at 0 when the component is added and the rest position
+/// is wherever the entity is when nothing else moves it — a transform
+/// write from gameplay shifts the rest position, it does not fight the
+/// oscillation. Pre-tick slot; a kinematic `RigidBody` on the entity rides
+/// along (a moving platform).
+#[derive(Clone, Copy, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 15, name = "fynkel.Oscillate")]
+pub struct Oscillate {
+    /// Direction of travel, normalised at use; must not be zero.
+    pub axis: Vec3,
+    /// Metres either side of the rest position, `>= 0`.
+    pub amplitude: f32,
+    /// Cycles per second, `>= 0`.
+    pub frequency: f32,
+    /// Radians into the cycle at `t = 0`.
+    pub phase: f32,
+    pub space: MotionSpace,
+}
+
+impl Default for Oscillate {
+    fn default() -> Self {
+        Self {
+            axis: Vec3::Y,
+            amplitude: 1.0,
+            frequency: 0.5,
+            phase: 0.0,
+            space: MotionSpace::Local,
+        }
+    }
+}
+
+impl Oscillate {
+    pub fn validate(&self) -> Result<(), String> {
+        finite_axis("axis", self.axis)?;
+        non_negative("amplitude", self.amplitude)?;
+        non_negative("frequency", self.frequency)?;
+        if !self.phase.is_finite() {
+            return Err(format!("phase must be finite, got {}", self.phase));
+        }
+        Ok(())
+    }
+}
+
+/// Keeps the entity at a named entity's world position plus `offset`,
+/// after the tick's physics, optionally turned to look at it. With
+/// `smoothing` 0 it snaps; otherwise it closes the gap at that rate per
+/// second (`1 − e^(−smoothing·dt)` of the distance per tick), the usual
+/// exponential follow. The target is named (`fynkel.Name`, the first
+/// match in entity order); an empty or unknown name leaves the entity
+/// where it is. A camera follows with `ThirdPersonCamera` instead.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 16, name = "fynkel.Follow")]
+pub struct Follow {
+    /// The followed entity's name; empty follows nothing.
+    pub target: String,
+    /// Metres from the target's world position, world axes.
+    pub offset: Vec3,
+    /// Per second, `>= 0`; `0` snaps.
+    pub smoothing: f32,
+    /// Also turn the entity's -Z towards the target's position.
+    pub look_at: bool,
+}
+
+impl Default for Follow {
+    fn default() -> Self {
+        Self {
+            target: String::new(),
+            offset: Vec3::new(0.0, 2.0, 0.0),
+            smoothing: 0.0,
+            look_at: false,
+        }
+    }
+}
+
+impl Follow {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.offset.is_finite() {
+            return Err("offset must be finite".into());
+        }
+        non_negative("smoothing", self.smoothing)
+    }
+}
+
+/// Turns the entity so its local +Z faces the active camera (the enabled
+/// `Camera` with the highest priority, lowest entity on a tie), after the
+/// tick's physics and camera rigs: a billboard. A quad authored in its XY
+/// plane faces the viewer.
+#[derive(Clone, Copy, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 17, name = "fynkel.LookAtCamera")]
+pub struct LookAtCamera {
+    /// Turn about the world Y axis only, staying upright (a tree card);
+    /// `false` also tilts to face a camera above or below.
+    pub lock_y: bool,
+}
+
+impl Default for LookAtCamera {
+    fn default() -> Self {
+        Self { lock_y: true }
+    }
+}
+
+/// Destroys the entity and its subtree `seconds` after the component is
+/// added (pre-tick slot; `Destroyed` events as for `Command::Destroy`).
+/// `seconds` counts down and reads as the time left.
+#[derive(Clone, Copy, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 18, name = "fynkel.LifetimeDespawn")]
+pub struct LifetimeDespawn {
+    /// Seconds left, `>= 0`.
+    pub seconds: f32,
+}
+
+impl Default for LifetimeDespawn {
+    fn default() -> Self {
+        Self { seconds: 5.0 }
+    }
+}
+
+impl LifetimeDespawn {
+    pub fn validate(&self) -> Result<(), String> {
+        non_negative("seconds", self.seconds)
+    }
+}
+
+/// Instantiates `prefab` at the entity's world pose `rate` times per
+/// second (pre-tick slot; the fractional remainder carries over so 2.5/s
+/// alternates 2 and 3 per second): each instance is an unparented anchor
+/// named after the prefab whose children are the prefab's roots — exactly
+/// `World::instantiate` — with a `LifetimeDespawn { seconds: lifetime }`
+/// when `lifetime > 0`, and every dynamic `RigidBody` in it starts at
+/// `velocity` (world axes). With `max_alive > 0` no more are spawned while
+/// that many of this emitter's instances live. The world must know the
+/// prefab (`World::register_prefab`; the loaders register every prefab a
+/// loaded scene's emitters name, `PREFAB_UNAVAILABLE` once otherwise).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 19, name = "fynkel.Emitter")]
+pub struct Emitter {
+    /// The `.prefab.json` asset to instantiate.
+    pub prefab: AssetRef,
+    /// Instances per second, `>= 0`; `0` pauses.
+    pub rate: f32,
+    /// Seconds each instance lives, `>= 0`; `0` keeps them.
+    pub lifetime: f32,
+    /// Ceiling on this emitter's live instances; `0` is unlimited.
+    pub max_alive: u32,
+    /// Initial linear velocity of each instance's dynamic bodies, m/s.
+    pub velocity: Vec3,
+    pub enabled: bool,
+}
+
+impl Default for Emitter {
+    fn default() -> Self {
+        Self {
+            prefab: AssetRef::default(),
+            rate: 1.0,
+            lifetime: 5.0,
+            max_alive: 0,
+            velocity: Vec3::ZERO,
+            enabled: true,
+        }
+    }
+}
+
+impl Emitter {
+    pub fn validate(&self) -> Result<(), String> {
+        non_negative("rate", self.rate)?;
+        non_negative("lifetime", self.lifetime)?;
+        if !self.velocity.is_finite() {
+            return Err("velocity must be finite".into());
+        }
+        Ok(())
+    }
+}
+
+fn finite_axis(what: &str, v: Vec3) -> Result<(), String> {
+    if !v.is_finite() || v.length_squared() < 1e-12 {
+        return Err(format!("{what} must be finite and non-zero, got {v:?}"));
+    }
+    Ok(())
+}
+
+fn non_negative(what: &str, v: f32) -> Result<(), String> {
+    if !v.is_finite() || v < 0.0 {
+        return Err(format!("{what} must be finite and >= 0, got {v}"));
+    }
+    Ok(())
+}
+
 /// One typed built-in component value: what a scene document instantiates
 /// and what `Command::SetComponent` carries. `fynkel.Name` is not here —
 /// it mirrors the entity's `name` (`Command::SetName`).
@@ -435,6 +669,13 @@ pub enum ComponentValue {
     /// M3-09.
     CharacterController(CharacterController),
     ThirdPersonCamera(ThirdPersonCamera),
+    /// The catalogue (M3-10).
+    Rotator(Rotator),
+    Oscillate(Oscillate),
+    Follow(Follow),
+    LookAtCamera(LookAtCamera),
+    LifetimeDespawn(LifetimeDespawn),
+    Emitter(Emitter),
 }
 
 impl ComponentValue {
@@ -451,6 +692,12 @@ impl ComponentValue {
             ComponentValue::Collider(_) => ComponentId::COLLIDER,
             ComponentValue::CharacterController(_) => ComponentId::CHARACTER_CONTROLLER,
             ComponentValue::ThirdPersonCamera(_) => ComponentId::THIRD_PERSON_CAMERA,
+            ComponentValue::Rotator(_) => ComponentId::ROTATOR,
+            ComponentValue::Oscillate(_) => ComponentId::OSCILLATE,
+            ComponentValue::Follow(_) => ComponentId::FOLLOW,
+            ComponentValue::LookAtCamera(_) => ComponentId::LOOK_AT_CAMERA,
+            ComponentValue::LifetimeDespawn(_) => ComponentId::LIFETIME_DESPAWN,
+            ComponentValue::Emitter(_) => ComponentId::EMITTER,
         }
     }
 
@@ -557,6 +804,12 @@ impl ComponentValue {
             ComponentValue::Collider(c) => c.validate()?,
             ComponentValue::CharacterController(c) => c.validate()?,
             ComponentValue::ThirdPersonCamera(c) => c.validate()?,
+            ComponentValue::Rotator(c) => c.validate()?,
+            ComponentValue::Oscillate(c) => c.validate()?,
+            ComponentValue::Follow(c) => c.validate()?,
+            ComponentValue::LookAtCamera(_) => {}
+            ComponentValue::LifetimeDespawn(c) => c.validate()?,
+            ComponentValue::Emitter(c) => c.validate()?,
         }
         Ok(())
     }

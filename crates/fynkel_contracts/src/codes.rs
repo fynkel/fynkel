@@ -66,6 +66,11 @@ impl DiagnosticCode {
     /// (not cooked, not registered, or over the triangle limit); the
     /// collider is skipped (M3-08).
     pub const MESH_UNAVAILABLE: DiagnosticCode = DiagnosticCode(13);
+    /// A `fynkel.Emitter` whose prefab the world has not been given
+    /// (`World::register_prefab` — the loaders register every prefab a
+    /// loaded scene's emitters name); reported once, nothing is spawned
+    /// (M3-10).
+    pub const PREFAB_UNAVAILABLE: DiagnosticCode = DiagnosticCode(14);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -82,6 +87,7 @@ impl DiagnosticCode {
             11 => "duplicate_component",
             12 => "wrong_lane",
             13 => "mesh_unavailable",
+            14 => "prefab_unavailable",
             _ => "unknown",
         }
     }

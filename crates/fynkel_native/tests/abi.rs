@@ -1085,3 +1085,152 @@ fn character_commands_and_query() {
     h.step();
     assert!(h.diagnostics().is_empty());
 }
+
+/// M3-10: the six catalogue components travel through `SetComponent` and
+/// come back from `QUERY_COMPONENTS` under ids 14–19; the entities move
+/// without a command; `FYNKEL_QUERY_SYSTEMS` answers one record per
+/// `SystemKind` in tick order with the counts of the last step.
+#[test]
+fn catalogue_components_and_the_systems_query() {
+    use fynkel_core::components::ComponentValue;
+    use fynkel_core::schema::{SystemKind, SystemTimeRecord};
+    use fynkel_core::{
+        Emitter, Follow, LifetimeDespawn, LookAtCamera, MotionSpace, Oscillate, Rotator,
+    };
+    let h = Host::new();
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (1, spawn(1, 0.0, None, "Hero")),
+            (1, spawn(2, 5.0, None, "Spinner")),
+            (1, spawn(3, 0.0, None, "Lamp")),
+        ],
+    );
+    h.step();
+    let ids = h.spawned();
+    let (hero, spinner, lamp) = (ids[0], ids[1], ids[2]);
+    let values: [(Entity, ComponentValue, u32, usize); 6] = [
+        (
+            spinner,
+            ComponentValue::Rotator(Rotator {
+                axis: Vec3::Y,
+                speed: 1.0,
+                space: MotionSpace::Local,
+            }),
+            14,
+            Rotator::SIZE,
+        ),
+        (
+            spinner,
+            ComponentValue::Oscillate(Oscillate {
+                amplitude: 0.25,
+                ..Oscillate::default()
+            }),
+            15,
+            Oscillate::SIZE,
+        ),
+        (
+            lamp,
+            ComponentValue::Follow(Follow {
+                target: "Hero".into(),
+                offset: Vec3::new(0.0, 2.0, 0.0),
+                smoothing: 0.0,
+                look_at: false,
+            }),
+            16,
+            Follow::SIZE,
+        ),
+        (
+            spinner,
+            ComponentValue::LookAtCamera(LookAtCamera { lock_y: true }),
+            17,
+            LookAtCamera::SIZE,
+        ),
+        (
+            hero,
+            ComponentValue::LifetimeDespawn(LifetimeDespawn { seconds: 30.0 }),
+            18,
+            LifetimeDespawn::SIZE,
+        ),
+        (
+            hero,
+            ComponentValue::Emitter(Emitter {
+                enabled: false,
+                ..Emitter::default()
+            }),
+            19,
+            Emitter::SIZE,
+        ),
+    ];
+    for (entity, value, _, _) in &values {
+        h.submit(Lane::Simulation, &set_component(*entity, value));
+    }
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
+    let components_of = |e: Entity| {
+        let (s, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, e);
+        assert_eq!(s, Status::Ok);
+        let mut at = 0;
+        let mut seen = Vec::new();
+        for _ in 0..n {
+            let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+            at += ComponentHeader::SIZE;
+            seen.push((
+                hd.component,
+                hd.size,
+                body[at..at + hd.size as usize].to_vec(),
+            ));
+            at += hd.size as usize;
+        }
+        (seen, tail)
+    };
+    for (entity, _, id, size) in &values {
+        let (seen, _) = components_of(*entity);
+        assert!(
+            seen.iter().any(|(c, s, _)| (*c, *s) == (*id, *size as u32)),
+            "{id} on {entity:?}: {:?}",
+            seen.iter().map(|(c, s, _)| (*c, *s)).collect::<Vec<_>>()
+        );
+    }
+    let (seen, tail) = components_of(lamp);
+    let follow = seen.iter().find(|(c, _, _)| *c == 16).unwrap();
+    assert_eq!(Follow::decode(&follow.2, &tail).unwrap().target, "Hero");
+
+    // They moved at the tick without a command: the lamp is 2 m over the
+    // hero, the spinner turned.
+    let snapshot = |e: Entity| {
+        let handles = [e.to_bits()];
+        let s = unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 1, 1) };
+        assert_eq!(s, Status::Ok);
+        h.step();
+        h.snapshot().into_iter().find(|r| r.entity == e).unwrap()
+    };
+    let lamp_pose = snapshot(lamp);
+    assert!((lamp_pose.world.position - Vec3::new(0.0, 2.0, 0.0)).length() < 1e-4);
+    let spinner_pose = snapshot(spinner);
+    assert!(
+        spinner_pose.local.rotation.y.abs() > 0.01,
+        "{spinner_pose:?}"
+    );
+
+    let (s, n, body, tail) = h.query(bridge::QUERY_SYSTEMS, Entity::NULL);
+    assert_eq!((s, n), (Status::Ok, 13));
+    let times: Vec<SystemTimeRecord> = (0..n as usize)
+        .map(|i| SystemTimeRecord::decode(&body[i * SystemTimeRecord::SIZE..], &tail).unwrap())
+        .collect();
+    assert_eq!(times[0].system, SystemKind::Step);
+    assert_eq!(times[0].entities, 3);
+    let by = |k: SystemKind| times.iter().find(|t| t.system == k).unwrap();
+    assert_eq!(by(SystemKind::Rotator).entities, 1);
+    assert_eq!(by(SystemKind::Oscillate).entities, 1);
+    assert_eq!(by(SystemKind::Follow).entities, 1);
+    assert_eq!(
+        by(SystemKind::LookAtCamera).entities,
+        0,
+        "no camera: skipped"
+    );
+    assert_eq!(by(SystemKind::LifetimeDespawn).entities, 1);
+    assert_eq!(by(SystemKind::Emitter).entities, 1);
+    assert_eq!(by(SystemKind::Publish).entities, 2, "two subscribed");
+    assert_eq!(times.last().unwrap().system, SystemKind::Publish);
+}

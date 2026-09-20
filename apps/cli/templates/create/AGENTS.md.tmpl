@@ -105,6 +105,7 @@ Component types:
 - `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `layer`/`mask` (bits of `physics.layers`). Alone it is static geometry (the starter's Floor); with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
 - `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `layer`/`mask`.
 - `fynkel.ThirdPersonCamera` — on the camera entity: `target` (the followed entity's name), `pivot` (offset from the target's origin), `distance`, `min_distance`, `yaw`/`pitch` (radians, written back each tick), `min_pitch`/`max_pitch`, `look_action` (axis2d turning it at `sensitivity` rad/s per unit), `collision_radius` (a sphere cast from the pivot pulls the camera in before walls; 0 disables), `mask`. Placed after the tick's transforms; its own `Transform` is overwritten.
+- `fynkel.Rotator` / `fynkel.Oscillate` / `fynkel.Follow` / `fynkel.LookAtCamera` / `fynkel.LifetimeDespawn` / `fynkel.Emitter` — the native catalogue (below): motion, following, billboards, timed despawn and spawning at a rate with no Dart code.
 - `game.*` — this project's behaviours (Dart classes in `lib/game/`); `data` holds the `@Expose` fields, validated by `schemas/behaviours/<id>.schema.json`.
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for
@@ -236,6 +237,25 @@ move((right * stick.x + forward * stick.y) * speed);            // metres per se
 
 The pattern with sprint and a double jump is
 `packages/fynkel/example/player_controller.dart`.
+
+## The native catalogue (movement without a behaviour)
+
+Six components the runtime ticks itself, in Rust, before physics — a
+scene with 5 000 of them costs microseconds per tick where 5 000 Dart
+`fixedUpdate`s would not. Author them in the scene (or `add` them from a
+behaviour like any native component); nothing to write or register.
+
+- `fynkel.Rotator` — turns the local rotation `speed` rad/s about `axis` in `space` `local` (the entity's own axes) or `world`.
+- `fynkel.Oscillate` — moves along `axis` by `amplitude · sin(2π · frequency · t + phase)`; it adds the *change* in offset each tick, so a transform you write from gameplay shifts the rest position instead of fighting the motion.
+- `fynkel.Follow` — places the entity at the world position of the entity named `target` plus `offset` (snapped when `smoothing` is 0, else eased at `smoothing`/s); `look_at` turns its −Z at the target. Runs after physics on the tick's final poses, like the camera rig.
+- `fynkel.LookAtCamera` — turns the entity's +Z at the active camera (highest `priority`); `lock_y` keeps it upright (a billboard). After physics.
+- `fynkel.LifetimeDespawn` — destroys the entity and its subtree `seconds` after the component appeared (`onDestroy` runs as for `destroy()`).
+- `fynkel.Emitter` — instantiates `prefab` `rate` times per second at the emitter's world pose (unparented, an anchor named after the prefab), each with a `LifetimeDespawn` of `lifetime` (0 keeps them) and its dynamic bodies launched at `velocity`; `max_alive` caps the live ones (0 = unlimited); `enabled` pauses it. A prefab the scene does not reference loads nothing and reports `prefab_unavailable` once.
+
+Values the runtime would reject are `FYN-H0008` at `fynkel validate`
+(a zero axis, a negative amplitude/rate/lifetime/smoothing/seconds).
+`World.systemTimes()` (the starter's HUD `systems` line, `fynkel test
+--headless`'s `systems:` line) shows what each of these cost last tick.
 
 ## Finding objects, spawning, prefabs
 

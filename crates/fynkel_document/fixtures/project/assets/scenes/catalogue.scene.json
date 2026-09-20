@@ -1,0 +1,439 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 2,
+  "id": "c0000000-0000-4000-8000-000000000032",
+  "name": "Catalogue",
+  "entities": {
+    "c0000000-0000-4000-8000-0000000002e0": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002c0": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              4,
+              10
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002c1": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 1.0,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e1": {
+      "name": "Floor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002c2": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              -0.5,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002c3": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              20,
+              0.5,
+              20
+            ],
+            "mesh": null,
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "friction": 0.6,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "layer": 1,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e2": {
+      "name": "Beacon",
+      "parent": null,
+      "children": [
+        "c0000000-0000-4000-8000-0000000002e3"
+      ],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002c4": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -3,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002c5": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 1.5,
+            "space": "local"
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e3": {
+      "name": "Beacon light",
+      "parent": "c0000000-0000-4000-8000-0000000002e2",
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002c6": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              1,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002c7": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.8,
+              0.6
+            ],
+            "intensity": 40.0,
+            "range": 8.0
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e4": {
+      "name": "Buoy",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002c8": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002c9": {
+          "type": "fynkel.Oscillate",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "amplitude": 0.5,
+            "frequency": 0.5,
+            "phase": 0.0,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e5": {
+      "name": "Lamp",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002ca": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002cb": {
+          "type": "fynkel.Follow",
+          "version": 1,
+          "data": {
+            "target": "Buoy",
+            "offset": [
+              0,
+              2,
+              0
+            ],
+            "smoothing": 5.0,
+            "look_at": true
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002cc": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "intensity": 20.0,
+            "range": 6.0
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e6": {
+      "name": "Sign",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002cd": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              3,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002ce": {
+          "type": "fynkel.LookAtCamera",
+          "version": 1,
+          "data": {
+            "lock_y": true
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e7": {
+      "name": "Puff",
+      "parent": null,
+      "children": [
+        "c0000000-0000-4000-8000-0000000002e8"
+      ],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002cf": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              3,
+              -3
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002d0": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 1.0
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e8": {
+      "name": "Puff core",
+      "parent": "c0000000-0000-4000-8000-0000000002e7",
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002d1": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000002e9": {
+      "name": "Fountain",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000002d2": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              2,
+              3
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000002d3": {
+          "type": "fynkel.Emitter",
+          "version": 1,
+          "data": {
+            "prefab": {
+              "asset": "c0000000-0000-4000-8000-000000000041"
+            },
+            "rate": 10.0,
+            "lifetime": 2.0,
+            "max_alive": 12,
+            "velocity": [
+              0,
+              3,
+              0
+            ],
+            "enabled": true
+          }
+        }
+      }
+    }
+  }
+}

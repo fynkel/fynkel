@@ -15,7 +15,10 @@ use fynkel_contracts::{ComponentId, Entity, Uuid};
 use fynkel_scene::{self as scene, Transform};
 
 use crate::command::Command;
-use crate::components::{ComponentValue, ThirdPersonCamera};
+use crate::components::{
+    ComponentValue, Emitter, Follow, LifetimeDespawn, LookAtCamera, Oscillate, Rotator,
+    ThirdPersonCamera,
+};
 use crate::event::EventPayload;
 use crate::world::{Name, World};
 
@@ -151,7 +154,8 @@ impl World {
     /// fail the command path are counted in `rejected_components` and
     /// reported in [`World::diagnostics`] (command index `u32::MAX`).
     pub fn load_scene(&mut self, scene: &SceneDescription) -> Result<LoadedScene, LoadError> {
-        let loaded = self.load_under(scene, None)?;
+        let tick = self.tick();
+        let loaded = self.load_under(scene, None, tick, true)?;
         self.push_event(EventPayload::SceneReady);
         Ok(loaded)
     }
@@ -168,6 +172,22 @@ impl World {
         name: &str,
         transform: Transform,
         parent: Option<Entity>,
+    ) -> Result<(Entity, LoadedScene), LoadError> {
+        let tick = self.tick();
+        self.instantiate_inner(prefab, name, transform, parent, tick, true)
+    }
+
+    /// `instantiate` with the tick its component writes belong to and
+    /// whether to propagate afterwards (an `Emitter` inside `step` leaves
+    /// that to the tick's own propagate).
+    pub(crate) fn instantiate_inner(
+        &mut self,
+        prefab: &SceneDescription,
+        name: &str,
+        transform: Transform,
+        parent: Option<Entity>,
+        tick: u64,
+        propagate: bool,
     ) -> Result<(Entity, LoadedScene), LoadError> {
         if self.is_poisoned() {
             return Err(LoadError::Poisoned);
@@ -187,7 +207,7 @@ impl World {
         if !name.is_empty() {
             let _ = self.ecs_mut().insert(anchor, Name::new(name.to_string()));
         }
-        let loaded = self.load_under(prefab, Some(anchor))?;
+        let loaded = self.load_under(prefab, Some(anchor), tick, propagate)?;
         Ok((anchor, loaded))
     }
 
@@ -197,12 +217,13 @@ impl World {
         &mut self,
         scene: &SceneDescription,
         root_parent: Option<Entity>,
+        tick: u64,
+        propagate: bool,
     ) -> Result<LoadedScene, LoadError> {
         if self.is_poisoned() {
             return Err(LoadError::Poisoned);
         }
         let order = spawn_order(scene)?;
-        let tick = self.tick();
         let mut loaded = LoadedScene {
             id: scene.id,
             name: scene.name.clone(),
@@ -244,7 +265,9 @@ impl World {
                 }
             }
         }
-        scene::propagate(self.ecs_mut());
+        if propagate {
+            scene::propagate(self.ecs_mut());
+        }
         Ok(loaded)
     }
 
@@ -372,6 +395,24 @@ impl ComponentValue {
         }
         if let Ok(v) = ecs.get::<ThirdPersonCamera>(entity) {
             out.push(ComponentValue::ThirdPersonCamera(v.clone()));
+        }
+        if let Ok(v) = ecs.copy::<Rotator>(entity) {
+            out.push(ComponentValue::Rotator(v));
+        }
+        if let Ok(v) = ecs.copy::<Oscillate>(entity) {
+            out.push(ComponentValue::Oscillate(v));
+        }
+        if let Ok(v) = ecs.get::<Follow>(entity) {
+            out.push(ComponentValue::Follow(v.clone()));
+        }
+        if let Ok(v) = ecs.copy::<LookAtCamera>(entity) {
+            out.push(ComponentValue::LookAtCamera(v));
+        }
+        if let Ok(v) = ecs.copy::<LifetimeDespawn>(entity) {
+            out.push(ComponentValue::LifetimeDespawn(v));
+        }
+        if let Ok(v) = ecs.get::<Emitter>(entity) {
+            out.push(ComponentValue::Emitter(v.clone()));
         }
         out
     }

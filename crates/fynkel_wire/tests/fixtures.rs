@@ -17,7 +17,8 @@ use fynkel_core::components::{
 use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
 use fynkel_core::{
-    BodyType, CharacterController, Collider, ColliderShape, Name, RigidBody, ThirdPersonCamera,
+    BodyType, CharacterController, Collider, ColliderShape, Emitter, Follow, LifetimeDespawn,
+    LookAtCamera, MotionSpace, Name, Oscillate, RigidBody, Rotator, ThirdPersonCamera,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
@@ -407,6 +408,54 @@ fn fixtures_match_generated_codecs() {
             grounded: true,
             sliding: false,
             velocity: Vec3::new(0.0, 0.0, -4.0),
+        },
+    );
+    check(
+        "Rotator",
+        &Rotator {
+            axis: Vec3::new(0.0, 1.0, 0.0),
+            speed: 1.5,
+            space: MotionSpace::World,
+        },
+    );
+    check(
+        "Oscillate",
+        &Oscillate {
+            axis: Vec3::new(0.0, 1.0, 0.0),
+            amplitude: 0.5,
+            frequency: 0.25,
+            phase: 1.0,
+            space: MotionSpace::Local,
+        },
+    );
+    check(
+        "Follow",
+        &Follow {
+            target: "Player".into(),
+            offset: Vec3::new(0.0, 3.0, -1.0),
+            smoothing: 4.0,
+            look_at: true,
+        },
+    );
+    check("LookAtCamera", &LookAtCamera { lock_y: false });
+    check("LifetimeDespawn", &LifetimeDespawn { seconds: 2.5 });
+    check(
+        "Emitter",
+        &Emitter {
+            prefab: AssetRef::new(material_id),
+            rate: 10.0,
+            lifetime: 4.0,
+            max_alive: 40,
+            velocity: Vec3::new(0.0, 6.0, 0.0),
+            enabled: true,
+        },
+    );
+    check(
+        "SystemTimeRecord",
+        &SystemTimeRecord {
+            system: SystemKind::Physics,
+            entities: 500,
+            micros: 640,
         },
     );
     check(

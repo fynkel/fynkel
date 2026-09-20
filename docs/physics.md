@@ -296,7 +296,11 @@ colliders): p50 tick 0.64 ms while they fall and 0.64 ms settled, against
 touching, p50 under 4 ms both phases and the checksum repeated. The sync
 is the non-Rapier cost: one ECS query per tick over the entities with a
 body or collider, work only for the ones whose world matrix or components
-changed.
+changed. Since M3-10 the stress scene's 5 000 statics move
+(`docs/catalogue.md`) and keep their colliders, so every tick moves 5 000
+fixed bodies through the broad phase: the settled step is ≈ 2.0 ms of
+physics for 540 bodies and 5 541 colliders — the price of moving geometry
+that can be walked on; a visual-only mover should carry no collider.
 
 ## Not in V1
 

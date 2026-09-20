@@ -161,6 +161,10 @@ impl Code {
     /// A `fynkel.ThirdPersonCamera` value the runtime would reject
     /// (distances, pitch range, sensitivity).
     pub const CAMERA_RIG_VALUE: Code = Code("FYN-H0007");
+    /// A catalogue component value the runtime would reject (`Rotator`,
+    /// `Oscillate`, `Follow`, `LookAtCamera`, `LifetimeDespawn`,
+    /// `Emitter`: axes, rates, lifetimes; M3-10).
+    pub const CATALOGUE_VALUE: Code = Code("FYN-H0008");
 
     // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
     /// The transaction's base revision is not the document's current one.

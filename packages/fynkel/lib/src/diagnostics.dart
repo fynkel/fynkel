@@ -25,7 +25,9 @@ enum DiagnosticCode {
   physicsOwned(9),
   missedDeadline(10),
   duplicateComponent(11),
-  wrongLane(12);
+  wrongLane(12),
+  meshUnavailable(13),
+  prefabUnavailable(14);
 
   const DiagnosticCode(this.value);
   final int value;

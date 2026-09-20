@@ -492,8 +492,9 @@ pub(crate) fn validate_entities<'a>(
 }
 
 /// The physics value rules (`FYN-H0001`/`H0002`, M3-08; `H0005`/`H0007`,
-/// M3-09): what the runtime rejects with `INVALID_PAYLOAD`, reported at
-/// authoring time through the same `validate()`.
+/// M3-09; the catalogue's `H0008`, M3-10): what the runtime rejects with
+/// `INVALID_PAYLOAD`, reported at authoring time through the same
+/// `validate()`.
 fn physics_value_rules(
     c: &Component,
     out: &mut Vec<Diagnostic>,
@@ -505,6 +506,11 @@ fn physics_value_rules(
         "fynkel.Collider" => Code::PHYSICS_COLLIDER_VALUE,
         "fynkel.CharacterController" => Code::CHARACTER_VALUE,
         "fynkel.ThirdPersonCamera" => Code::CAMERA_RIG_VALUE,
+        "fynkel.Rotator"
+        | "fynkel.Oscillate"
+        | "fynkel.Follow"
+        | "fynkel.LifetimeDespawn"
+        | "fynkel.Emitter" => Code::CATALOGUE_VALUE,
         _ => return,
     };
     let Some(Ok(value)) = crate::generated::decode_component(&c.type_id, &c.data) else {
@@ -515,6 +521,11 @@ fn physics_value_rules(
         ComponentValue::Collider(k) => k.validate(),
         ComponentValue::CharacterController(k) => k.validate(),
         ComponentValue::ThirdPersonCamera(k) => k.validate(),
+        ComponentValue::Rotator(k) => k.validate(),
+        ComponentValue::Oscillate(k) => k.validate(),
+        ComponentValue::Follow(k) => k.validate(),
+        ComponentValue::LifetimeDespawn(k) => k.validate(),
+        ComponentValue::Emitter(k) => k.validate(),
         _ => Ok(()),
     };
     if let Err(msg) = result {

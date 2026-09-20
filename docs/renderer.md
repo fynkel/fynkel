@@ -394,7 +394,11 @@ is also the physics gate — `capture.py` runs it headlessly for 600 and
 1 800 ticks (`physics.step_time_us` while the bodies fall,
 `settled_step_time_us` once they rest: p50 0.64 ms both, against 0.28 ms
 without physics; 1 430 collision enters, the checksum repeated;
-`docs/physics.md`). `benchmarks/m3/capture.py` generates, locks and cooks it,
+`docs/physics.md`). Since M3-10 the 5 000 "static" meshes move too:
+native `Rotator`/`Oscillate`/`LookAtCamera` components (`docs/catalogue.md`),
+colliders kept — the settled tick is p50 2.34 ms, physics 2.0 ms of it
+(`--no-movers` restores the still baseline), and `capture.py` tabulates
+the per-system times from the headless report. `benchmarks/m3/capture.py` generates, locks and cooks it,
 renders it once for the counts, runs it in the standalone host
 (`--cache <dir>`) and the Flutter host (`FYNKEL_PROJECT`) and writes
 `benchmarks/m3/results/<date>-<commit>.{json,md}` with the item 6 gate:

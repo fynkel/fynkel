@@ -14,6 +14,7 @@ import 'events.dart';
 import 'input.dart';
 import 'native/bridge.dart';
 import 'physics.dart';
+import 'systems.dart';
 import 'transform_writer.dart';
 import 'wire/buffers.dart';
 import 'wire/support.dart' show WireRecord;
@@ -408,6 +409,18 @@ class World {
   }
 
   List<int> allEntities() => _native.query(QueryKind.allEntities).u64s();
+
+  /// The last step's per-system wall time (`FYNKEL_QUERY_SYSTEMS`, M3-10):
+  /// one [SystemTime] per [gen.SystemKind] in tick order, `step` first —
+  /// what a HUD shows next to the frame time. One query; not free at
+  /// every frame of a shipped game, fine behind a stats toggle.
+  List<SystemTime> systemTimes() {
+    final b = _native.query(QueryKind.systems);
+    return [
+      for (var i = 0; i < b.recordCount; i++)
+        SystemTime.fromRecord(gen.SystemTimeRecord.decode(b.records, i * gen.SystemTimeRecord.wireSize, b.tail)),
+    ];
+  }
 
   // ---------------------------------------------------------------- find (M3-08b)
 
