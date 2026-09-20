@@ -9,6 +9,7 @@ fynkel validate                  # the whole project: documents, references, loc
 fynkel test --headless           # the startup scene on the Rust headless host
 flutter test                     # test/game_test.dart: the scene loads, the cube spins
 fynkel run                       # validate, cook, then flutter run with FYNKEL_PROJECT set to this directory
+fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/, bundled)
 fynkel cook && fynkel render --out render.png   # the scene as a picture, no window
 ```
 
@@ -23,5 +24,7 @@ build → test loop for tools and AI agents (and is a good tour for people).
 `lib/main.dart` shows the scene in a `FynkelGameView` (`package:fynkel_flutter`:
 the 3D viewport and the frame loop) with a Flutter HUD over it; the
 renderer reads the cooked cache, so `fynkel run` cooks before it runs (plain
-`flutter run` needs a `fynkel cook` first). `fynkel render` draws the same
+`flutter run` needs a `fynkel cook` first). On a device the project
+directory does not exist, so the app opens the copy of the cache it bundles
+(`fynkel_cache/`, staged by every cook). `fynkel render` draws the same
 scene to a PNG without a window.

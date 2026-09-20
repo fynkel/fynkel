@@ -62,6 +62,10 @@ const FILES: &[TemplateFile] = &[
     text!("analysis_options.yaml", "analysis_options.yaml"),
     text!(".gitignore", "gitignore"),
     text!("README.md", "README.md.tmpl"),
+    TemplateFile {
+        path: "fynkel_cache/README.md",
+        body: Body::Text(crate::bundle::KEEP_TEXT),
+    },
     text!("AGENTS.md", "AGENTS.md.tmpl"),
     text!("fynkel.project.json", "fynkel.project.json.tmpl"),
     text!("lib/main.dart", "lib/main.dart.tmpl"),

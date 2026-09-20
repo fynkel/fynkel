@@ -828,7 +828,8 @@ my_game/
   fynkel.project.json          startup scene, assets root, input-action stub, quality profiles, registry (game.Spinner declared)
   fynkel.lock.json             `expected_lock()` for the tools that created it
   AGENTS.md  README.md         layout, every command, the validate → codegen → build → test loop, do/don't
-  lib/main.dart                the app: `FynkelGameView` over the project's cooked cache (loop + viewport) with a HUD overlay
+  lib/main.dart                the app: `FynkelGameView` over the project's cooked cache (loop + viewport) with a HUD overlay; FYNKEL_PROJECT on this machine, the bundled cache on a device
+  fynkel_cache/README.md       keep file: the cook stages the cache here and pubspec.yaml bundles the directory as assets (the rest git-ignored)
   lib/game/game.dart           `Game.load(dir)`: World, `registerBehaviours(world.registry)`, `loadProject`; `projectDirectory()`
   lib/game/spinner.dart        `@FynkelBehaviour(id: 'game.Spinner')` with `@Expose` speed/axis
   lib/generated/               behaviours.g.dart + .g.json, exactly what `fynkel codegen --project .` emits
@@ -864,7 +865,29 @@ validates the project, cooks it into `.fynkel/cache` (a warm cache costs
 milliseconds, `--no-cook` skips it) — the app loads its scene, meshes and
 textures from that cache and nothing else — then runs `flutter run
 --dart-define=FYNKEL_PROJECT=<abs dir>` in it, which is how `lib/main.dart`
-finds the project from a bundle.
+finds the project from a bundle on the same machine.
+
+**The bundled cache.** A device cannot see that directory (an iPhone is
+not the Mac that holds the project; the iOS simulator is), so a cook of a
+project that is an app (`pubspec.yaml` beside `fynkel.project.json`) also
+*stages* the cache: `fynkel cook`, and the cook every runtime tool does
+first, mirror `.fynkel/cache/index.json` and exactly the `.fyna` objects
+the index names into `<project>/fynkel_cache/` — flat, since a Flutter
+asset directory is not recursive (`staged N object(s) into ./fynkel_cache
+… (C copied, R removed)`; stale objects are removed, present ones kept). The
+created project's `pubspec.yaml` lists `fynkel_cache/` under `assets:`,
+its `.gitignore` ignores everything in it but the keep file
+`fynkel_cache/README.md` (so a clean checkout still has the asset
+directory and `flutter build` does not fail), and `lib/main.dart` loads
+`FYNKEL_PROJECT` when that directory exists on the device and otherwise
+unpacks the bundle through `package:fynkel_flutter`'s
+`unpackBundledCache()` into the app's temp directory and loads that
+(`Game.load(dir, cacheDir: …)`). `fynkel run` refuses with exit 1 when
+`fynkel_cache/index.json` is missing (a `--no-cook` before any cook), and
+a device build after editing the project needs a cook (any `fynkel` runtime
+command) before `flutter build`/`flutter run` for the app to carry the
+change; a project that is never cooked bundles nothing and the app says so
+(`… and the app bundles no cache: run \`fynkel cook\`, then build again`).
 
 Outside the repository the CLI validates against the schema set embedded in
 the build (identical to `schemas/` by `fynkel codegen --check`); `--schemas

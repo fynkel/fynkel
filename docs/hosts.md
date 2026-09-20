@@ -153,6 +153,19 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   (tick interval / simulate / render-call percentiles, fixed ticks, missed
   deadlines, dropped frames, world + viewport + platform counters), and
   `overlay` is the HUD composited over the texture.
+- `unpackBundledCache({into, bundle})` — the cooked cache on a device: the
+  cook stages `<project>/fynkel_cache/` (`index.json` + the `.fyna` objects
+  flat) and the app bundles it as Flutter assets (documents.md § `fynkel
+  run`); Flutter assets are readable through `rootBundle` only while the
+  runtime opens a cache *directory* by path, so this writes the bundle to
+  `<system temp>/fynkel_cache/{index.json, objects/}` (content-addressed:
+  objects already there are kept, unnamed ones deleted, the index always
+  rewritten — a warm unpack is milliseconds) and returns the path for
+  `World.loadProject(dir, cacheDir: …)`, or `null` when the app bundles no
+  `fynkel_cache/index.json`. A created project's `main.dart` takes
+  `FYNKEL_PROJECT` when that directory exists on the device (macOS, the
+  simulator) and the bundle otherwise (an iPhone). Tested against a fake
+  `AssetBundle` (`test/bundled_cache_test.dart`).
 
 `flutter test` runs the package's tests against the real Rust viewport (the
 hook builds the dylib; Metal creates the ring headlessly) with the texture
@@ -198,7 +211,11 @@ Measured (profile mode, 1320×2508, 24 satellites):
 
 The cube renders on the device through the same interop; M1-09 gate item
 met. Full iOS qualification (touch overlay, lifecycle, thermal, packaging)
-is M6.
+is M6. A created game (and the showcase) on a **physical** iPhone reads its
+scene from the bundled cache (`unpackBundledCache`, above): the simulator
+shares the Mac's filesystem and hid that `FYNKEL_PROJECT` cannot name a
+directory on the phone (first seen on the showcase, `FYN-R0001` for the
+Mac path).
 
 Path C (engine-owned `CAMetalLayer`) was an M0 prototype; it is not carried
 into `platform/apple`. Its numbers remain in `benchmarks/m0/results`, its

@@ -14,6 +14,7 @@
 
 mod asset;
 mod behaviours;
+mod bundle;
 mod codegen;
 mod cook;
 mod create;

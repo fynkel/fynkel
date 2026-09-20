@@ -2,7 +2,8 @@
 //
 // One `World` on the native runtime, the project's startup scene loaded
 // into it from the cooked cache (`.fynkel/cache`, written by `fynkel cook`;
-// `fynkel run` and `fynkel test` cook first, a test calls `cookProject`),
+// `fynkel run` and `fynkel test` cook first, a test calls `cookProject`,
+// and on a device lib/main.dart unpacks the copy the app bundles),
 // and every `@FynkelBehaviour` class of this package registered so the
 // scene's behaviour components become live Dart objects. The host
 // (lib/main.dart, or a test) owns the loop and calls [frame] once per frame

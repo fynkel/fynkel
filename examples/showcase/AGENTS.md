@@ -37,6 +37,7 @@ assets/textures/        PNG/JPEG sources + sidecars
 assets/audio/           WAV/Ogg sources + sidecars
 test/                   `flutter test`: headless simulation, no window or GPU
 .fynkel/cache/          cooked assets (`fynkel cook`); ignored by git — the only thing the running game reads
+fynkel_cache/           the cache staged for the app bundle (`pubspec.yaml` assets:); ignored by git except its README — what the app reads on a device
 ```
 
 ## The loop: validate → codegen → build → test
@@ -55,7 +56,10 @@ The runtime reads `.fynkel/cache` only — never a source document or model.
 `fynkel run` validates, cooks and runs the app (`flutter run` with
 `FYNKEL_PROJECT` pointing here); a plain `flutter run` needs `fynkel cook`
 first, and a missing or stale cache is a load error (`FYN-R0001`/`R0002`)
-naming the fix. `fynkel render --out out.png` cooks and draws the startup
+naming the fix. Every cook also stages the cache into `fynkel_cache/`
+(bundled as assets by `pubspec.yaml`), which is what the app loads where
+this directory does not exist — on an iPhone: `fynkel run -d <iphone>`, and
+cook again before a device build after editing the project. `fynkel render --out out.png` cooks and draws the startup
 scene without a window (needs a GPU; not for headless CI).
 
 ## Commands (all support `--json`; exit 0 ok, 1 errors, 2 usage/unopenable)

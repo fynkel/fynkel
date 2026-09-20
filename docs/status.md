@@ -25,7 +25,7 @@ changes. Numbers come from the gate reports (`m0-architecture-report.md`,
 | `hosts/headless` + `hosts/standalone` | Rust hosts: deterministic runs, cooked scenes from the cache (headless through `fynkel test --headless` `--project`/`--scene <path\|id>`/`--cache`; standalone `--cache <dir> [--scene <id>] [--quality <profile>]`, never cooking), state dump by authoring id; winit window with the renderer's counts on its stats line | **Solid** | CLI tests; the stress capture runs the standalone host on the cooked stress scene |
 | `apps/cli` | `fynkel codegen [--project]`, `schema`, `test --headless`, `state dump`, `document`, `scene`, `prefab`, `material`, `shader`, `asset`, `migrate`, `import`, `cook`, `cooked inspect`, `project describe\|lock`, `validate`, `render`, `scene\|prefab apply --patch`, `create`, `run` — every command with `--json`, exit codes 0/1/2 fixed (ADR-0017); works outside the checkout on the embedded schemas; document commands know the enclosing project's behaviour types; `test --headless`, `state dump`, `render` and `run` cook first and load from the cache (`--no-cook`) | **Solid** | 16 CLI tests incl. a fresh `fynkel create` project through validate, headless, state dump and `codegen --check`; every command under 30 ms on the fixture project except `codegen --project` (1 s warm) |
 | `examples/showcase` | The renderer's example scene: an ordinary created game authored to exercise the sun's shadow (with per-mesh opt-outs), a spot and two point lights, an `Environment` with a generated sky, textured PBR, gold/chrome, three overlapping blend panels, a mask leaf card, the fixture robot as a hierarchy, `game.Orbit` circling the camera, three quality profiles; the HUD prints the viewport's frame counts (blended, lights, casters/map, MSAA, render size, GPU/CPU ms — appended to `FynkelAppleViewportStats`); `renders/<item>.png` committed per renderer item | **Solid** | CI validates, runs headless, renders and `flutter test`s it; `renders/m3-05.png`; launched on macOS (34 entities, 27 meshes, 5 blended, 18 casters in a 2048² map, MSAA 4, GPU ≈ 2 ms at 1600×1200) |
-| `fynkel create` template (`apps/cli/templates/create/`) | A new game: Flutter app (`flutter create --empty` runners, sandbox off) on `package:fynkel` + `package:fynkel_flutter`, `lib/main.dart` = `FynkelGameView` over the project's cooked cache with a HUD overlay, `lib/game/game.dart` (`Game.load`), `game.Spinner` with committed generated files and schema, cube/material/scene with fresh ids and real import sidecars, `test/game_test.dart`, `AGENTS.md`, `README.md`; `fynkel run` validates, cooks and runs it | **Solid** — the created app shows its lit, spinning cube (M3-01 gate) | CI creates one and runs `validate`, `test --headless`, `codegen --check`, `flutter analyze`, `flutter test`; built and launched on macOS by hand (1 mesh drawn, 60 ticks/s, 120 Hz) |
+| `fynkel create` template (`apps/cli/templates/create/`) | A new game: Flutter app (`flutter create --empty` runners, sandbox off) on `package:fynkel` + `package:fynkel_flutter`, `lib/main.dart` = `FynkelGameView` over the project's cooked cache with a HUD overlay, `lib/game/game.dart` (`Game.load`), `game.Spinner` with committed generated files and schema, cube/material/scene with fresh ids and real import sidecars, `test/game_test.dart`, `AGENTS.md`, `README.md`; `fynkel run` validates, cooks and runs it; every cook stages the cache into `fynkel_cache/` (bundled as Flutter assets, `pubspec.yaml`) and `main.dart` unpacks it through `unpackBundledCache()` where `FYNKEL_PROJECT` is not on the device — an iPhone, a shipped build (M3-06a) | **Solid** — the created app shows its lit, spinning cube (M3-01 gate) | CI creates one and runs `validate`, `test --headless`, `codegen --check`, `flutter analyze`, `flutter test`; built and launched on macOS by hand (1 mesh drawn, 60 ticks/s, 120 Hz) |
 
 Size: ≈47 k lines (Rust 37.2 k, Dart + templates 8.8 k, Swift/ObjC 0.9 k,
 Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
@@ -67,7 +67,13 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
   `fynkel run` (validate, cook, `flutter run`): the starter's lit, spinning
   cube in `FynkelGameView` with the HUD over it on macOS; the same package
   runs the measurement host on macOS (numbers unchanged) and the iOS
-  simulator. (M3-01.)
+  simulator. (M3-01.) The same app runs where the project directory does
+  not exist: the cook stages the cache into `fynkel_cache/`, the app
+  bundles it and unpacks it at start-up (`unpackBundledCache()`); the
+  showcase loads from the bundle on macOS with `FYNKEL_PROJECT` pointing
+  nowhere (22 objects retained from the temp cache). Not yet run on the
+  phone itself after the change — the iOS simulator hid this by sharing the
+  Mac's filesystem (M1-09). (M3-06a.)
 
 ## 3. What is *not* proven yet (honest list)
 
@@ -204,6 +210,15 @@ noise (122/120 fps, engine CPU 0.12 / 0.20 / 0.26 ms; GPU p50 1.05 ms vs
 0.74 with the p95 unchanged at 1.08 and Flutter's own raster thread up by
 the same 0.3 ms in both of two runs — the GPU's clock state, the cube
 scene's draws are the same).
+M3-06a (2026-09-20): fmt/clippy clean, `cargo test --workspace` green,
+both `codegen --check` pipelines up to date, Dart suites green (9
+`fynkel_flutter` tests: `bundled_cache_test.dart` unpacks a fake
+`AssetBundle` and prunes stale objects), starter create (`fynkel_cache/
+README.md` keep file) → validate → headless (staged 4 objects) → render →
+codegen → analyze → test clean, showcase validate → headless → codegen →
+analyze → test clean and the showcase app launched on macOS from the
+bundled cache alone (`FYNKEL_PROJECT=/nonexistent`: 22 retained from
+`$TMPDIR/fynkel_cache`, 27 drawn in 16 draws).
 M3-05a (2026-09-20): `examples/showcase` validate → headless (34 entities,
 22 assets) → render (`medium`: 27 meshes, 5 blended, 3 lights, 18 casters
 in a 2048² map; `low` 960×540 no shadow; `high` 1920×1080, 4096² map) →

@@ -36,6 +36,7 @@ What is in the scene (`assets/scenes/main.scene.json`):
 
 ```sh
 fynkel run                       # validate, cook, then the app: Q cycles quality, Space pauses the orbit
+fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/) as assets
 fynkel render --out render.png   # the same view as a PNG; --quality low|medium|high
 fynkel validate                  # documents, references, lock
 fynkel test --headless           # the scene on the Rust headless host (no Dart, no GPU)

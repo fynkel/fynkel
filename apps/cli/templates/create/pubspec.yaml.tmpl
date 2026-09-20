@@ -30,3 +30,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The cooked cache `fynkel cook` stages into fynkel_cache/, bundled so the
+  # app runs where it cannot see this directory (an iPhone, a shipped
+  # build); lib/main.dart unpacks it when FYNKEL_PROJECT is not on this
+  # machine.
+  assets:
+    - fynkel_cache/

@@ -1,5 +1,7 @@
 # Fynkel
 .fynkel/
+fynkel_cache/*
+!fynkel_cache/README.md
 *.bak
 
 # Dart / Flutter

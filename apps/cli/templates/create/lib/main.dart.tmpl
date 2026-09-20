@@ -6,8 +6,13 @@
 // runs update/lateUpdate; then it renders the world into the viewport
 // texture. Flutter widgets drawn over it are the HUD. The scene is
 // fynkel.project.json's startupScene; meshes and textures come from the
-// project's cooked cache (`fynkel cook`, which `fynkel run` does for you).
+// project's cooked cache (`fynkel cook`, which `fynkel run` does for you):
+// by path when this process can see the project directory, else from the
+// copy the app bundles (fynkel_cache/, unpacked at start-up) — which is
+// how the same build runs on an iPhone.
 // Q cycles the project's quality profiles (fynkel.project.json `quality`).
+
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -62,14 +67,28 @@ class _GamePageState extends State<GamePage> {
   @override
   void initState() {
     super.initState();
-    final dir = projectDirectory();
-    if (dir == null) {
-      _error = 'No project directory: run `fynkel run` from the project, '
-          'or pass --dart-define=FYNKEL_PROJECT=<dir> to flutter run.';
-      return;
-    }
+    _start();
+  }
+
+  Future<void> _start() async {
     try {
-      _game = Game.load(dir);
+      final dir = projectDirectory();
+      if (dir != null && Directory(dir).existsSync()) {
+        _game = Game.load(dir);
+      } else {
+        // Not on the machine that holds the project (a device): the cache
+        // the app bundles, or nothing to show.
+        final cache = await unpackBundledCache();
+        if (cache == null) {
+          throw StateError(
+            dir == null
+                ? 'No project directory and no bundled cache: run `fynkel run` from the project '
+                    '(or pass --dart-define=FYNKEL_PROJECT=<dir> to flutter run).'
+                : '$dir is not on this device and the app bundles no cache: run `fynkel cook`, then build again.',
+          );
+        }
+        _game = Game.load(dir ?? '(bundled)', cacheDir: cache);
+      }
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.
@@ -79,6 +98,7 @@ class _GamePageState extends State<GamePage> {
     } catch (e) {
       _error = '$e';
     }
+    if (mounted) setState(() {});
   }
 
   @override

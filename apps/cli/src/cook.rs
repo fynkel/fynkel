@@ -164,7 +164,13 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                 .clone()
                 .unwrap_or_else(|| project_cache_dir(&project));
             match cook_project(&project, Some(&cache_dir), &cook_opts) {
-                Ok(report) => (report, Cache::at(&cache_dir), Vec::new()),
+                Ok(report) => {
+                    let mut diags = Vec::new();
+                    if !report.has_errors() {
+                        stage_for_app(&project, &cache_dir, &mut diags);
+                    }
+                    (report, Cache::at(&cache_dir), diags)
+                }
                 Err(diags) => {
                     let mut diags = diags;
                     diags.push(
@@ -217,6 +223,34 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         report.count(Status::Failed)
     );
     exit(&diags)
+}
+
+/// Stages the cache into the project's app bundle directory when the
+/// project is a Flutter app (`crate::bundle`); a failure is a diagnostic,
+/// the cook itself stands.
+pub fn stage_for_app(project: &Path, cache: &Path, diags: &mut Vec<Diagnostic>) {
+    if !crate::bundle::is_app(project) {
+        return;
+    }
+    match crate::bundle::stage(project, cache) {
+        Ok(s) => eprintln!(
+            "fynkel cook: staged {} object(s) into {} for the app bundle ({} copied, {} removed)",
+            s.objects,
+            s.dir.display(),
+            s.copied,
+            s.removed
+        ),
+        Err(e) => diags.push(
+            Diagnostic::error(
+                Code::IO,
+                format!(
+                    "cannot stage the cache into {}: {e}",
+                    project.join(crate::bundle::STAGE_DIR).display()
+                ),
+            )
+            .with_suggestion("the app bundles it from there (pubspec.yaml `assets:`)"),
+        ),
+    }
 }
 
 /// A cache ready to load from, for the tools that run the runtime.
@@ -316,6 +350,11 @@ pub fn prepare(tool: &str, target: &Target) -> Result<Prepared, ExitCode> {
                 if report.has_errors() {
                     eprintln!("{tool}: cooking failed; fix the assets first (`fynkel cook`)");
                     return Err(ExitCode::from(1));
+                }
+                let mut diags = Vec::new();
+                stage_for_app(&project, &cache, &mut diags);
+                for d in &diags {
+                    eprintln!("{d}");
                 }
             }
             Err(diags) => {

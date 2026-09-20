@@ -2,9 +2,11 @@
 //! `flutter run` in the project with `FYNKEL_PROJECT` defined, so the app's
 //! `Game.load(projectDirectory())` finds `fynkel.project.json` whatever the
 //! process's working directory is. The project is validated first (a
-//! project with errors does not run), then cooked into `.fynkel/cache`:
-//! the app loads its scenes, meshes and textures from that cache and
-//! nothing else (`--no-cook` skips the cook; a warm cache costs
+//! project with errors does not run), then cooked into `.fynkel/cache`
+//! and staged into `fynkel_cache/` (`crate::bundle`): on this Mac the app
+//! loads from the cache by path; on a device (`-d <iphone>`) that path
+//! does not exist and the app unpacks the staged copy it carries as
+//! Flutter assets (`--no-cook` skips both; a warm cache costs
 //! milliseconds).
 
 use std::path::{Path, PathBuf};
@@ -73,6 +75,19 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     };
     if let Err(code) = crate::cook::prepare("fynkel run", &target) {
         return code;
+    }
+    // On a device the app finds no project directory and opens the
+    // cache it bundles; it must exist before `flutter run` builds.
+    if !abs
+        .join(crate::bundle::STAGE_DIR)
+        .join("index.json")
+        .is_file()
+    {
+        eprintln!(
+            "fynkel run: {} is not staged (run without --no-cook once)",
+            abs.join(crate::bundle::STAGE_DIR).display()
+        );
+        return ExitCode::from(1);
     }
     let status = Command::new(flutter)
         .arg("run")
