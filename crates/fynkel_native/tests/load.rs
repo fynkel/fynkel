@@ -119,14 +119,15 @@ fn project_and_scene_load_through_the_abi() {
     assert_eq!(r["scene"]["path"], "scenes/main.scene.json");
     assert_eq!(r["scene"]["key"].as_str().unwrap().len(), 64);
     // Camera, Robot, Sun, the "Crate A" instance and the crate it expands
-    // to — expanded by the cook, not here.
-    assert_eq!(r["scene"]["entities"], 5);
+    // to — expanded by the cook, not here — plus the physics Floor and
+    // Crate B (M3-08).
+    assert_eq!(r["scene"]["entities"], 7);
     assert_eq!(r["scene"]["rejectedComponents"], 0);
     // The scene, its prefab, the robot, the material and its three maps.
     assert_eq!(r["scene"]["assets"], 7);
     assert_eq!(r["residency"]["retained"], 7);
     assert_eq!(r["residency"]["meshes"], 0, "nothing loaded until drawn");
-    assert_eq!(host.live(), 5);
+    assert_eq!(host.live(), 7);
     // The Robot's `game.Spinner` is a Dart behaviour: known through the
     // cook's record of the project's registry, so no warning, and handed
     // to the SDK with its authored data and the spawned entity's handle.
@@ -145,7 +146,7 @@ fn project_and_scene_load_through_the_abi() {
     // The same scene by id: a second instance (ids are per load), and the
     // residency count of its closure goes up, not the store's size.
     assert_eq!(host.load_scene(&cache, MAIN_SCENE), Status::Ok);
-    assert_eq!(host.live(), 10);
+    assert_eq!(host.live(), 14);
     assert_eq!(host.report()["residency"]["retained"], 7);
 
     // Not a scene, not in the cache, not a UUID.
@@ -154,7 +155,7 @@ fn project_and_scene_load_through_the_abi() {
     let r = host.report();
     assert_eq!(r["ok"], false);
     assert_eq!(r["diagnostics"][0]["code"], "FYN-R0006");
-    assert_eq!(host.live(), 10, "a failed load leaves the world alone");
+    assert_eq!(host.live(), 14, "a failed load leaves the world alone");
     let unknown = "c0000000-0000-4000-8000-0000000000ff";
     assert_eq!(host.load_scene(&cache, unknown), Status::LoadFailed);
     assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0003");
@@ -173,7 +174,7 @@ fn the_cache_is_the_only_source() {
     let host = Host::new();
     let cache = moved.display().to_string();
     assert_eq!(host.load_project(&cache), Status::Ok);
-    assert_eq!(host.live(), 5);
+    assert_eq!(host.live(), 7);
 
     // A stale cache (another fingerprint) is refused, never re-read from
     // source; a missing one says to cook.
@@ -259,6 +260,14 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     assert_eq!(actions[0]["type"], "axis2d");
     assert_eq!(actions[1]["name"], "jump");
     assert_eq!(r["input"]["bindingErrors"].as_array().unwrap().len(), 0);
+    // The project's physics block reaches the world (M3-08).
+    assert_eq!(r["physics"]["gravity"][1].as_f64().unwrap() as f32, -9.81);
+    assert_eq!(
+        r["physics"]["layers"],
+        serde_json::json!(["default", "props"])
+    );
+    assert_eq!(r["physics"]["meshColliders"], 0);
+    assert_eq!(r["physics"]["diagnostics"], serde_json::json!([]));
 
     let view = |w: *mut FynkelWorld| -> Vec<InputActionRecord> {
         let v = unsafe { fynkel_world_input_view(w) };
@@ -359,5 +368,5 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     };
     assert_eq!(capture(host.w, &[alien]), Status::Ok);
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
-    assert_eq!(host.live(), 5);
+    assert_eq!(host.live(), 7);
 }

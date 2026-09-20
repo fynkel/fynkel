@@ -1,6 +1,7 @@
 //! Pull-only events in two lanes (ADR-0008).
 
 use fynkel_contracts::{Entity, EventKind, Tick};
+pub use fynkel_physics::Contact;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Event {
@@ -26,27 +27,13 @@ pub enum EventPayload {
         dropped_seconds: f32,
     },
     SceneReady,
-    // Physics lane (no producer in M1; the lane exists so the contract does).
-    CollisionEnter {
-        a: Entity,
-        b: Entity,
-    },
-    CollisionStay {
-        a: Entity,
-        b: Entity,
-    },
-    CollisionExit {
-        a: Entity,
-        b: Entity,
-    },
-    TriggerEnter {
-        a: Entity,
-        b: Entity,
-    },
-    TriggerExit {
-        a: Entity,
-        b: Entity,
-    },
+    // Physics lane (M3-08): produced by the physics step, drained by
+    // `after_physics`.
+    CollisionEnter(Contact),
+    CollisionStay(Contact),
+    CollisionExit(Contact),
+    TriggerEnter(Contact),
+    TriggerExit(Contact),
 }
 
 impl EventPayload {
@@ -57,11 +44,11 @@ impl EventPayload {
             EventPayload::ParentChanged { .. } => EventKind::PARENT_CHANGED,
             EventPayload::MissedDeadline { .. } => EventKind::MISSED_DEADLINE,
             EventPayload::SceneReady => EventKind::SCENE_READY,
-            EventPayload::CollisionEnter { .. } => EventKind::COLLISION_ENTER,
-            EventPayload::CollisionStay { .. } => EventKind::COLLISION_STAY,
-            EventPayload::CollisionExit { .. } => EventKind::COLLISION_EXIT,
-            EventPayload::TriggerEnter { .. } => EventKind::TRIGGER_ENTER,
-            EventPayload::TriggerExit { .. } => EventKind::TRIGGER_EXIT,
+            EventPayload::CollisionEnter(_) => EventKind::COLLISION_ENTER,
+            EventPayload::CollisionStay(_) => EventKind::COLLISION_STAY,
+            EventPayload::CollisionExit(_) => EventKind::COLLISION_EXIT,
+            EventPayload::TriggerEnter(_) => EventKind::TRIGGER_ENTER,
+            EventPayload::TriggerExit(_) => EventKind::TRIGGER_EXIT,
         }
     }
 

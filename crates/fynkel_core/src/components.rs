@@ -7,6 +7,7 @@
 //! candela (point, spot), luminance in nits (sky); exposure in EV100.
 
 use fynkel_contracts::{AssetRef, ComponentId};
+use fynkel_physics::{Collider, RigidBody};
 use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
 use glam::Vec3;
@@ -315,6 +316,9 @@ pub enum ComponentValue {
     PointLight(PointLight),
     SpotLight(SpotLight),
     Environment(Environment),
+    /// `fynkel_physics` (M3-08).
+    RigidBody(RigidBody),
+    Collider(Collider),
 }
 
 impl ComponentValue {
@@ -327,6 +331,8 @@ impl ComponentValue {
             ComponentValue::PointLight(_) => ComponentId::POINT_LIGHT,
             ComponentValue::SpotLight(_) => ComponentId::SPOT_LIGHT,
             ComponentValue::Environment(_) => ComponentId::ENVIRONMENT,
+            ComponentValue::RigidBody(_) => ComponentId::RIGID_BODY,
+            ComponentValue::Collider(_) => ComponentId::COLLIDER,
         }
     }
 
@@ -429,6 +435,8 @@ impl ComponentValue {
                     ));
                 }
             }
+            ComponentValue::RigidBody(b) => b.validate()?,
+            ComponentValue::Collider(c) => c.validate()?,
         }
         Ok(())
     }

@@ -80,7 +80,11 @@ typedef enum FynkelBufferKind {
   /* InputEventRecord per raw control event (host -> world; fynkel_world_capture_input). */
   FYNKEL_BUFFER_INPUT_EVENTS = 6,
   /* InputActionRecord per bound action (world -> host; fynkel_world_input_view). */
-  FYNKEL_BUFFER_INPUT_ACTIONS = 7
+  FYNKEL_BUFFER_INPUT_ACTIONS = 7,
+  /* PhysicsQueryRecord per spatial query (host -> world;
+   * fynkel_world_physics_query); answered in a QUERY buffer of
+   * PhysicsHitRecords. */
+  FYNKEL_BUFFER_PHYSICS_QUERIES = 8
 } FynkelBufferKind;
 
 /* Command lanes (blueprint §5.1, ADR-0008). */
@@ -99,7 +103,10 @@ typedef enum FynkelCommandKind {
   /* body: SetComponentCommand { entity, component } then the component's
    * own record bytes (size covers both); strings in the batch tail. */
   FYNKEL_COMMAND_SET_COMPONENT = 6,
-  FYNKEL_COMMAND_REMOVE_COMPONENT = 7
+  FYNKEL_COMMAND_REMOVE_COMPONENT = 7,
+  /* body: BodyCommandRecord { entity, op, vector, rotation }; simulation
+   * lane only; applied by the tick's physics step (M3-08). */
+  FYNKEL_COMMAND_BODY = 8
 } FynkelCommandKind;
 
 typedef enum FynkelComponent {
@@ -111,7 +118,9 @@ typedef enum FynkelComponent {
   FYNKEL_COMPONENT_DIRECTIONAL_LIGHT = 6,
   FYNKEL_COMPONENT_POINT_LIGHT = 7,
   FYNKEL_COMPONENT_SPOT_LIGHT = 8,
-  FYNKEL_COMPONENT_ENVIRONMENT = 9
+  FYNKEL_COMPONENT_ENVIRONMENT = 9,
+  FYNKEL_COMPONENT_RIGID_BODY = 10,
+  FYNKEL_COMPONENT_COLLIDER = 11
 } FynkelComponent;
 
 typedef enum FynkelQueryKind {
@@ -128,7 +137,9 @@ typedef enum FynkelQueryKind {
   /* entity -> one framed record per native component it has, id order:
    * a ComponentHeader { component, size } then the component's body
    * (0 records if unknown). */
-  FYNKEL_QUERY_COMPONENTS = 6
+  FYNKEL_QUERY_COMPONENTS = 6,
+  /* entity -> one BodyStateRecord (0 records without a RigidBody). */
+  FYNKEL_QUERY_BODY = 7
 } FynkelQueryKind;
 
 /* ---- Buffer header ------------------------------------------------------ */
@@ -274,6 +285,15 @@ FynkelBufferView fynkel_world_after_physics_events(const FynkelWorld* world);
 FynkelStatus fynkel_world_query(FynkelWorld* world,
                                 const FynkelQueryDesc* desc,
                                 FynkelBufferView* out_view);
+
+/* Spatial queries (M3-08): `buffer` is a PHYSICS_QUERIES buffer; the
+ * response (a QUERY buffer of PhysicsHitRecords, query order, nearest
+ * first within a query) is valid until the next query or mutating call.
+ * A framing error is FYNKEL_STATUS_PROTOCOL with an empty view. */
+FynkelStatus fynkel_world_physics_query(FynkelWorld* world,
+                                        const uint8_t* buffer,
+                                        uint32_t length,
+                                        FynkelBufferView* out_view);
 
 FynkelStatus fynkel_world_stats(const FynkelWorld* world, FynkelWorldStats* out_stats);
 

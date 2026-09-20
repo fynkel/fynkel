@@ -11,4 +11,5 @@ fynkel_contracts.workspace = true
 fynkel_schema_derive.workspace = true
 fynkel_ecs.workspace = true
 fynkel_scene.workspace = true
+fynkel_physics.workspace = true
 glam.workspace = true

@@ -10,8 +10,10 @@
 
 use fynkel_contracts::schema::{fingerprint, RecordSchema};
 use fynkel_contracts::{Entity, HasSchema};
+use fynkel_physics::{Collider, ColliderShape, RigidBody};
 use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
+use glam::{Quat, Vec3};
 
 use crate::components::{
     Camera, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
@@ -30,6 +32,7 @@ pub enum CommandKind {
     SetName = 5,
     SetComponent = 6,
     RemoveComponent = 7,
+    Body = 8,
 }
 
 impl CommandKind {
@@ -42,6 +45,7 @@ impl CommandKind {
             5 => Self::SetName,
             6 => Self::SetComponent,
             7 => Self::RemoveComponent,
+            8 => Self::Body,
             _ => return None,
         })
     }
@@ -112,6 +116,108 @@ pub struct RemoveComponentCommand {
     pub component: u32,
 }
 
+/// What a `fynkel.cmd.Body` does with its `vector`/`rotation`
+/// (`fynkel_physics::BodyCommand`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
+#[schema(name = "fynkel.BodyOp")]
+pub enum BodyOp {
+    /// `vector` newtons, this tick (dynamic).
+    ApplyForce,
+    /// `vector` newton-seconds, once (dynamic).
+    ApplyImpulse,
+    /// `vector` newton-metres, this tick (dynamic).
+    ApplyTorque,
+    /// `vector` newton-metre-seconds, once (dynamic).
+    ApplyTorqueImpulse,
+    /// `vector` metres per second (dynamic).
+    SetLinearVelocity,
+    /// `vector` radians per second (dynamic).
+    SetAngularVelocity,
+    /// `vector` + `rotation`: the world pose a kinematic body reaches at
+    /// the end of this tick.
+    SetKinematicTarget,
+    /// `vector` + `rotation`: the world pose, now, without interpolation
+    /// (any body type).
+    Teleport,
+}
+
+/// Moves a `fynkel.RigidBody` (M3-08; simulation lane only). Rejected at
+/// the tick with `MISSING_COMPONENT` (no body) or `INVALID_PAYLOAD` (wrong
+/// body type for the op, non-finite value).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 8, name = "fynkel.cmd.Body")]
+pub struct BodyCommandRecord {
+    pub entity: Entity,
+    pub op: BodyOp,
+    pub vector: Vec3,
+    /// Used by `setKinematicTarget` and `teleport`; identity otherwise.
+    pub rotation: Quat,
+}
+
+/// A spatial query kind (`fynkel.rec.PhysicsQuery`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
+#[schema(name = "fynkel.PhysicsQueryKind")]
+pub enum PhysicsQueryKind {
+    /// A ray from `origin` along `direction`, up to `max_distance`.
+    Raycast,
+    /// A shape swept from `origin` along `direction`; the first hit only.
+    ShapeCast,
+    /// Every collider intersecting a shape at `origin`.
+    Overlap,
+}
+
+/// One spatial query in a `PhysicsQueries` buffer
+/// (`fynkel_world_physics_query`); answered by `fynkel.rec.PhysicsHit`
+/// records carrying its `id`. Colliders are candidates when their `layer`
+/// shares a bit with `mask`; the `exclude` entity's colliders are skipped;
+/// sensors are hit only with `hit_sensors`.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.PhysicsQuery")]
+pub struct PhysicsQueryRecord {
+    /// Echoed by every hit of this query.
+    pub id: u32,
+    pub kind: PhysicsQueryKind,
+    /// `shapeCast`/`overlap`: `box`, `sphere` or `capsule` (never `mesh`)
+    /// with `size` as `fynkel.Collider` defines it.
+    pub shape: ColliderShape,
+    pub size: Vec3,
+    pub origin: Vec3,
+    /// The shape's orientation.
+    pub rotation: Quat,
+    /// `raycast`/`shapeCast`; need not be normalised.
+    pub direction: Vec3,
+    pub max_distance: f32,
+    pub mask: u32,
+    pub exclude: Option<Entity>,
+    /// `raycast`/`overlap`: at most this many hits, nearest first (0 = 1).
+    pub max_hits: u32,
+    pub hit_sensors: bool,
+}
+
+/// One hit of a `fynkel.rec.PhysicsQuery`: `point`/`normal` on the hit
+/// collider in world space (zero for `overlap`), `distance` along the
+/// ray or sweep (0 for `overlap`).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.PhysicsHit")]
+pub struct PhysicsHitRecord {
+    pub query: u32,
+    pub entity: Entity,
+    pub point: Vec3,
+    pub normal: Vec3,
+    pub distance: f32,
+}
+
+/// `FYNKEL_QUERY_BODY`: the motion state of an entity's `fynkel.RigidBody`
+/// (`MISSING_COMPONENT` without one).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.BodyState")]
+pub struct BodyStateRecord {
+    pub entity: Entity,
+    pub linear_velocity: Vec3,
+    pub angular_velocity: Vec3,
+    pub sleeping: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "event", id = 1, name = "fynkel.ev.Spawned")]
 pub struct SpawnedEvent {
@@ -143,12 +249,18 @@ pub struct MissedDeadlineEvent {
 #[schema(kind = "event", id = 5, name = "fynkel.ev.SceneReady")]
 pub struct SceneReadyEvent;
 
-/// Physics-lane events share one body (collision/trigger enter/stay/exit).
+/// Physics-lane events share one body (collision/trigger enter/stay/exit):
+/// `point` and `normal` in world space, the normal pointing from `a`
+/// towards `b`; `impulse` the pair's total impulse over the step (0 for
+/// triggers and exits).
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "event", id = 256, name = "fynkel.ev.Contact")]
 pub struct ContactEvent {
     pub a: Entity,
     pub b: Entity,
+    pub point: Vec3,
+    pub normal: Vec3,
+    pub impulse: f32,
 }
 
 /// Snapshot record for a subscribed transform.
@@ -274,6 +386,12 @@ pub const ALL: &[&RecordSchema] = &[
     &SetComponentCommand::SCHEMA,
     &RemoveComponentCommand::SCHEMA,
     &ComponentHeader::SCHEMA,
+    &RigidBody::SCHEMA,
+    &Collider::SCHEMA,
+    &BodyCommandRecord::SCHEMA,
+    &PhysicsQueryRecord::SCHEMA,
+    &PhysicsHitRecord::SCHEMA,
+    &BodyStateRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -310,6 +428,13 @@ mod tests {
         assert!(s.has_strings());
         assert_eq!(SceneReadyEvent::SCHEMA.wire_size(), 0);
         assert_eq!(SnapshotTransformRecord::SCHEMA.wire_size(), 88);
+        // M3-08: entity @0, op @8, vector @12, rotation @24 → 40.
+        assert_eq!(BodyCommandRecord::SCHEMA.offsets(), vec![0, 8, 12, 24]);
+        assert_eq!(BodyCommandRecord::SCHEMA.wire_size(), 40);
+        assert_eq!(ContactEvent::SCHEMA.wire_size(), 48);
+        assert_eq!(PhysicsQueryRecord::SCHEMA.wire_size(), 88);
+        assert_eq!(PhysicsHitRecord::SCHEMA.wire_size(), 48);
+        assert_eq!(BodyStateRecord::SCHEMA.wire_size(), 40);
     }
 
     #[test]

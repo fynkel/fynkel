@@ -40,6 +40,10 @@ pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{
     AssetId, AssetRef, ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, Uuid, WorldId,
 };
+pub use fynkel_physics::{
+    self as physics, BodyCommand, BodyType, Collider, ColliderShape, Contact, Physics,
+    PhysicsEvent, RigidBody,
+};
 pub use fynkel_scene::Transform;
 pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase};
 pub use load::{EntityDescription, LoadError, LoadedScene, SceneDescription};

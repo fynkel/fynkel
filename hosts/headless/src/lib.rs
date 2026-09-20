@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use fynkel_assets::Assets;
 use fynkel_contracts::{Diagnostic, Uuid};
-use fynkel_core::{Extract, LoadedScene, World, WorldConfig};
+use fynkel_core::{EventPayload, Extract, LoadedScene, World, WorldConfig};
 use serde::{Deserialize, Serialize};
 
 pub use document::{dump_json, dump_text};
@@ -149,6 +149,24 @@ pub struct HeadlessReport {
     pub scene: Option<SceneReport>,
     /// Present when `HeadlessConfig::input` was set.
     pub input: Option<InputReport>,
+    /// Present when the world stepped any physics (M3-08).
+    pub physics: Option<PhysicsReport>,
+}
+
+/// The physics of a run (`HeadlessReport::physics`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct PhysicsReport {
+    pub bodies: u32,
+    pub colliders: u32,
+    /// Mesh colliders registered from the cooked scene.
+    pub mesh_colliders: u32,
+    pub collision_enter: u64,
+    pub collision_stay: u64,
+    pub collision_exit: u64,
+    pub trigger_enter: u64,
+    pub trigger_exit: u64,
+    /// `MESH_UNAVAILABLE` and other physics diagnostics from the steps.
+    pub diagnostics: u64,
 }
 
 impl HeadlessReport {
@@ -219,6 +237,7 @@ pub fn run_retaining(
         dropped_seconds: 0.0,
         extract_records: 0,
         checksum: String::new(),
+        physics: None,
         step_time: Timing::default(),
         total_ms: 0.0,
         scene_ready: false,
@@ -232,6 +251,9 @@ pub fn run_retaining(
     let mut loaded: Option<LoadedScene> = None;
     let mut retained: Option<(Assets, fynkel_assets::Residency)> = None;
     let mut binding_errors: Vec<[String; 3]> = Vec::new();
+    let mut mesh_colliders = 0u32;
+    let mut physics_diagnostics = 0u64;
+    let mut contact_counts = [0u64; 5];
     // The recording is read before the scene so a bad file fails fast.
     let recording = match &config.input {
         Some(path) => match Recording::read(path) {
@@ -267,6 +289,19 @@ pub fn run_retaining(
         sr.name = cooked.name.clone();
         sr.key = cooked.key.clone();
         sr.document_diagnostics = document::diagnostics_json(&cooked.diagnostics);
+        // Physics (M3-08): the project's gravity and the mesh colliders'
+        // meshes, before the first step builds the bodies.
+        if let Some(p) = assets.project() {
+            world
+                .physics_mut()
+                .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
+        }
+        let (meshes, mesh_diags) =
+            assets.register_mesh_colliders(&cooked.description, world.physics_mut());
+        mesh_colliders = meshes as u32;
+        physics_diagnostics += mesh_diags.len() as u64;
+        sr.document_diagnostics
+            .extend(document::diagnostics_json(&mesh_diags));
         match world.load_scene(&cooked.description) {
             Ok(l) => {
                 let residency = assets.retain(&cooked.closure);
@@ -371,6 +406,24 @@ pub fn run_retaining(
             report.commands_applied += r.applied as u64;
             report.commands_rejected += r.rejected as u64;
             report.diagnostics += r.diagnostic_records as u64;
+            for e in world.after_physics_events() {
+                match e.payload {
+                    EventPayload::CollisionEnter(_) => contact_counts[0] += 1,
+                    EventPayload::CollisionStay(_) => contact_counts[1] += 1,
+                    EventPayload::CollisionExit(_) => contact_counts[2] += 1,
+                    EventPayload::TriggerEnter(_) => contact_counts[3] += 1,
+                    EventPayload::TriggerExit(_) => contact_counts[4] += 1,
+                    _ => {}
+                }
+            }
+            physics_diagnostics += world
+                .diagnostics()
+                .iter()
+                .filter(|d| {
+                    d.component == fynkel_contracts::ComponentId::RIGID_BODY
+                        || d.component == fynkel_contracts::ComponentId::COLLIDER
+                })
+                .count() as u64;
         }
         if plan.steps == 0 && config.frame_dt <= 0.0 && recording.is_none() {
             break; // nothing will ever advance
@@ -384,6 +437,20 @@ pub fn run_retaining(
         }
     }
     report.input = input;
+    let ps = world.physics().stats();
+    if ps.bodies > 0 || ps.colliders > 0 || mesh_colliders > 0 {
+        report.physics = Some(PhysicsReport {
+            bodies: ps.bodies,
+            colliders: ps.colliders,
+            mesh_colliders,
+            collision_enter: contact_counts[0],
+            collision_stay: contact_counts[1],
+            collision_exit: contact_counts[2],
+            trigger_enter: contact_counts[3],
+            trigger_exit: contact_counts[4],
+            diagnostics: physics_diagnostics,
+        });
+    }
     let events = world.drain_events();
     report.events += events.len() as u64;
     scene.on_events(&events);
@@ -522,15 +589,16 @@ mod tests {
         let (report, world, loaded) = run_with(&cfg);
         let scene = report.scene.as_ref().unwrap();
         assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
-        // Camera, Robot, Sun, the "Crate A" instance and its expanded crate.
-        assert_eq!((scene.entities, scene.rejected_components), (5, 0));
+        // Camera, Robot, Sun, the "Crate A" instance and its expanded
+        // crate, the physics Floor and Crate B (M3-08).
+        assert_eq!((scene.entities, scene.rejected_components), (7, 0));
         assert_eq!(scene.name, "Main");
         assert_eq!(scene.path, "scenes/main.scene.json");
         assert_eq!(scene.key.len(), 64);
         assert_eq!(scene.retained, 7);
         assert!(report.scene_ready);
         assert_eq!(report.tick, 5);
-        assert_eq!(report.live_entities, 5);
+        assert_eq!(report.live_entities, 7);
         assert_eq!(
             (
                 report.commands_applied,
@@ -544,7 +612,7 @@ mod tests {
 
         let loaded = loaded.unwrap();
         let dump = dump_json(&world, &loaded);
-        assert_eq!(dump["entityCount"], 5);
+        assert_eq!(dump["entityCount"], 7);
         assert_eq!(dump["tick"], 5);
         let text = dump.to_string();
         assert!(!text.contains("handle:"), "authoring ids only: {text}");
@@ -576,6 +644,49 @@ mod tests {
             ..cfg.clone()
         };
         assert_eq!(run(&by_id).checksum, report.checksum);
+    }
+
+    /// Blueprint §19.2d item 8 gate: the fixture's Crate B falls from
+    /// y = 3 onto the static Floor and comes to rest, deterministically.
+    #[test]
+    fn fixture_crate_falls_onto_the_floor_deterministically() {
+        let cooked = Cooked::new("physics");
+        let cfg = HeadlessConfig {
+            steps: 240,
+            cache: Some(cooked.0.clone()),
+            ..HeadlessConfig::default()
+        };
+        let (report, world, loaded) = run_with(&cfg);
+        let physics = report.physics.as_ref().expect("physics ran");
+        assert_eq!((physics.bodies, physics.colliders), (1, 2));
+        assert_eq!(physics.collision_enter, 1, "{physics:#?}");
+        assert_eq!(physics.diagnostics, 0);
+        assert_eq!(report.commands_rejected, 0);
+        let loaded = loaded.unwrap();
+        let crate_b = loaded
+            .handle_of("c0000000-0000-4000-8000-0000000000e5".parse().unwrap())
+            .unwrap();
+        let t = fynkel_scene::local(world.ecs(), crate_b).unwrap();
+        // Half extents 0.5 on a floor whose top is y = 0 (after the
+        // restitution bounce settles).
+        assert!((t.position.y - 0.5).abs() < 0.02, "{:?}", t.position);
+        assert!((t.position.x + 2.0).abs() < 0.05, "{:?}", t.position);
+        assert!(world.ecs().has::<fynkel_core::PhysicsOwned>(crate_b));
+        assert!(
+            world.physics().body_state(crate_b).unwrap().sleeping,
+            "at rest after 4 s"
+        );
+        let again = run(&cfg);
+        assert_eq!(again.checksum, report.checksum, "same inputs, same fall");
+        assert_ne!(
+            run(&HeadlessConfig {
+                steps: 30,
+                ..cfg.clone()
+            })
+            .checksum,
+            report.checksum,
+            "the crate is still falling at 0.5 s"
+        );
     }
 
     #[test]

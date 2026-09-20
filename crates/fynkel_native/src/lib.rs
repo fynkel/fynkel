@@ -423,6 +423,56 @@ pub unsafe extern "C" fn fynkel_world_input_view(world: *mut FynkelWorld) -> Fyn
     }
 }
 
+/// Answers a `FYNKEL_BUFFER_PHYSICS_QUERIES` buffer against the last
+/// stepped physics state (M3-08): the view is a `Query` buffer of
+/// `fynkel.rec.PhysicsHit` records, in query order, nearest first within
+/// a query, valid until the next query call or mutating call. A framing
+/// error is `Status::Protocol` with an empty view; the world stays usable.
+///
+/// # Safety
+/// `buffer` must point to `length` readable bytes for the call;
+/// `out_view` may be NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_physics_query(
+    world: *mut FynkelWorld,
+    buffer: *const u8,
+    length: u32,
+    out_view: *mut FynkelBufferView,
+) -> Status {
+    if buffer.is_null() && length != 0 {
+        return Status::InvalidArgument;
+    }
+    let bytes: &[u8] = if length == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(buffer, length as usize)
+    };
+    let status = guarded(world, |w| {
+        w.stats.query_calls += 1;
+        w.stats.bytes_in += bytes.len() as u64;
+        let buf = std::mem::take(&mut w.query_buf);
+        match bridge::physics_queries(&w.inner, bytes, buf) {
+            Ok(b) => {
+                w.query_buf = b;
+                w.stats.bytes_out += w.query_buf.len() as u64;
+                Status::Ok
+            }
+            Err(e) => {
+                log::warn!("fynkel_world_physics_query: protocol error {e:?}");
+                w.query_buf = buffer::empty(BufferKind::Query);
+                Status::Protocol
+            }
+        }
+    });
+    if let Some(out) = out_view.as_mut() {
+        *out = match (status, world.as_ref()) {
+            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_buf),
+            _ => FynkelBufferView::empty(),
+        };
+    }
+    status
+}
+
 /// # Safety
 /// `entities` must point to `count` handles for the call.
 #[no_mangle]

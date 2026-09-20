@@ -74,6 +74,9 @@ pub struct CookProject {
     /// runtime's binding table (`fynkel_assets::ProjectInfo::input_actions`;
     /// §19.2d item 7).
     pub input_actions: Vec<fynkel_document::project::InputAction>,
+    /// The project's `physics` block (gravity, layers), carried into the
+    /// index for the runtime (`fynkel_assets::ProjectInfo::physics`; M3-08).
+    pub physics: fynkel_document::project::PhysicsSettings,
 }
 
 impl Default for CookOptions {
@@ -452,6 +455,7 @@ pub fn cook_project(
             startup_scene,
             quality: project.quality.clone(),
             input_actions: project.input_actions.clone(),
+            physics: project.physics.clone(),
         }),
         ..opts.clone()
     };
@@ -1201,6 +1205,7 @@ fn write_index(
                 "description": a.description,
                 "bindings": a.bindings,
             })).collect::<Vec<_>>(),
+            "physics": p.physics.to_json(),
         })),
         "assets": report.assets.iter().map(|a| json!({
             "id": a.id.to_string(),

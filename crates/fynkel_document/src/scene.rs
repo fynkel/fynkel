@@ -472,17 +472,96 @@ pub(crate) fn validate_entities<'a>(
                         &format!("{}/type", c.pointer),
                     )),
                     Some(_) => {
+                        let mut fits = true;
                         for mut d in schemas.validate_component(&c.type_id, &c.data) {
+                            fits = false;
                             d.code = Code::SCENE_COMPONENT_DATA;
                             d.id = Some(c.id.to_string());
                             let pointer = format!("{}/data{}", c.pointer, d.pointer.as_deref().unwrap_or(""));
                             out.push(anchor(d, &pointer));
                         }
+                        if fits {
+                            physics_value_rules(c, &mut out, &anchor);
+                        }
                     }
                 }
         }
+        physics_entity_rules(e, &types, &mut out, &anchor);
     }
     out
+}
+
+/// The physics value rules (`FYN-H0001`/`H0002`, M3-08): what the runtime
+/// rejects with `INVALID_PAYLOAD`, reported at authoring time through the
+/// same `validate()`.
+fn physics_value_rules(
+    c: &Component,
+    out: &mut Vec<Diagnostic>,
+    anchor: &dyn Fn(Diagnostic, &str) -> Diagnostic,
+) {
+    use fynkel_core::components::ComponentValue;
+    let code = match c.type_id.as_str() {
+        "fynkel.RigidBody" => Code::PHYSICS_BODY_VALUE,
+        "fynkel.Collider" => Code::PHYSICS_COLLIDER_VALUE,
+        _ => return,
+    };
+    let Some(Ok(value)) = crate::generated::decode_component(&c.type_id, &c.data) else {
+        return;
+    };
+    let result = match &value {
+        ComponentValue::RigidBody(b) => b.validate(),
+        ComponentValue::Collider(k) => k.validate(),
+        _ => Ok(()),
+    };
+    if let Err(msg) = result {
+        out.push(anchor(
+            Diagnostic::error(code, msg).with_id(c.id.to_string()),
+            &format!("{}/data", c.pointer),
+        ));
+    }
+}
+
+/// The physics rules between an entity's components (`FYN-H0003`/`H0004`).
+fn physics_entity_rules(
+    e: &Entity,
+    types: &HashMap<&str, &Component>,
+    out: &mut Vec<Diagnostic>,
+    anchor: &dyn Fn(Diagnostic, &str) -> Diagnostic,
+) {
+    let body = types.get("fynkel.RigidBody");
+    let collider = types.get("fynkel.Collider");
+    let body_type = body.and_then(|b| b.data.get("body_type").and_then(Node::as_str));
+    let moving = body.is_some() && body_type != Some("static");
+    if let (true, Some(k)) = (moving, collider) {
+        if k.data.get("shape").and_then(Node::as_str) == Some("mesh") {
+            out.push(anchor(
+                Diagnostic::error(
+                    Code::PHYSICS_MESH_ON_MOVING_BODY,
+                    "a mesh collider needs a static RigidBody (or none)",
+                )
+                .with_id(k.id.to_string())
+                .with_suggestion("set body_type to static, or use a box, sphere or capsule"),
+                &format!("{}/data/shape", k.pointer),
+            ));
+        }
+    }
+    if let (Some(b), None) = (body, collider) {
+        if body_type.is_none_or(|t| t == "dynamic") {
+            out.push(anchor(
+                Diagnostic::new(
+                    Code::PHYSICS_BODY_WITHOUT_COLLIDER,
+                    Severity::Warning,
+                    format!(
+                        "{} has a dynamic RigidBody but no Collider: it falls through everything",
+                        e.name
+                    ),
+                )
+                .with_id(b.id.to_string())
+                .with_suggestion("add a fynkel.Collider"),
+                &b.pointer,
+            ));
+        }
+    }
 }
 
 /// Reads `entities` into views; malformed entries are reported and skipped.

@@ -8,7 +8,7 @@ Fynkel CLI. Created by `fynkel create`.
 fynkel validate                  # the whole project: documents, references, lock
 fynkel test --headless           # the startup scene on the Rust headless host
 fynkel test --headless --input test/walk.input.json   # the same with a recorded input stream against the project's actions
-flutter test                     # test/game_test.dart: the scene loads, the cube spins, the recording walks it
+flutter test                     # test/game_test.dart: the scene loads, the cube spins, the recording walks it, the crate lands
 fynkel run                       # validate, cook, then flutter run with FYNKEL_PROJECT set to this directory
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/, bundled)
 fynkel cook && fynkel render --out render.png   # the scene as a picture, no window
@@ -22,7 +22,12 @@ stick and A button, or the touch overlay on a phone, as
 `Input.pressed('jump')`; docs/input.md in the engine). A behaviour reads
 and writes its object's native components too — `get<MeshRenderer>()`,
 `set(mesh.copyWith(visible: false))`, `add(const PointLight(…))`,
-`remove<SpotLight>()` — and `test/game_test.dart` shows it. After
+`remove<SpotLight>()` — and `test/game_test.dart` shows it. Physics is
+two more of those components: the Crate has a `fynkel.RigidBody` and a
+`fynkel.Collider` and falls onto the Floor (a collider alone); the Cube is
+a kinematic body, so walking it pushes the crate. A behaviour applies
+forces (`applyImpulse`), reads `bodyState()`, gets `onCollisionEnter` and
+casts rays (`world.raycast`). After
 changing an exposed field, an id or adding a behaviour class, run `fynkel
 codegen --project .` and commit the regenerated `lib/generated/` and
 `schemas/behaviours/`.

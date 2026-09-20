@@ -318,6 +318,17 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         "c_cube_mesh",
         "c_cube_spinner",
         "c_cube_mover",
+        "c_cube_body",
+        "c_cube_collider",
+        "e_floor",
+        "c_floor_transform",
+        "c_floor_mesh",
+        "c_floor_collider",
+        "e_crate",
+        "c_crate_transform",
+        "c_crate_mesh",
+        "c_crate_body",
+        "c_crate_collider",
     ] {
         vars.push((key.into(), Uuid::new_v4().to_string()));
     }

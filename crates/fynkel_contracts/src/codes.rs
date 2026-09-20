@@ -62,6 +62,10 @@ impl DiagnosticCode {
     /// A structural or simulation-only command was submitted on the
     /// presentation lane.
     pub const WRONG_LANE: DiagnosticCode = DiagnosticCode(12);
+    /// A `shape: mesh` collider whose mesh is not available for collision
+    /// (not cooked, not registered, or over the triangle limit); the
+    /// collider is skipped (M3-08).
+    pub const MESH_UNAVAILABLE: DiagnosticCode = DiagnosticCode(13);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -77,6 +81,7 @@ impl DiagnosticCode {
             10 => "missed_deadline",
             11 => "duplicate_component",
             12 => "wrong_lane",
+            13 => "mesh_unavailable",
             _ => "unknown",
         }
     }

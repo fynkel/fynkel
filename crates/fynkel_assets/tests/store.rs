@@ -149,8 +149,9 @@ fn scenes_describe_from_the_expanded_chunk() {
         vec![],
         "game.Spinner is known to the cook"
     );
-    // Camera, Robot, Sun, Crate A and the crate the prefab expands to.
-    assert_eq!(scene.description.entities.len(), 5);
+    // Camera, Robot, Sun, Crate A and the crate the prefab expands to,
+    // the physics Floor and Crate B.
+    assert_eq!(scene.description.entities.len(), 7);
     assert_eq!(scene.closure.len(), 7);
     assert_eq!(scene.behaviours.len(), 1);
     assert_eq!(scene.behaviours[0].type_id, "game.Spinner");

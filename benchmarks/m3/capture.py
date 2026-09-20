@@ -15,8 +15,11 @@ writes:
 
 Gate (item 6): 5 000 static meshes at the display's 120 Hz on the profile,
 draw calls ≤ distinct (mesh, material) pairs, culling dropping what is off
-screen. Aggregation as in benchmarks/m0/capture.py (median of per-second
-p50/p95, max of per-second p99).
+screen. Gate (item 8): the 500 rigid bodies settle in the headless host
+(`fynkel test --headless --steps 600`) at a fixed per-tick cost — p50 step
+time under 4 ms while they fall and once they sleep. Aggregation as in
+benchmarks/m0/capture.py (median of per-second p50/p95, max of per-second
+p99).
 
 Usage: python3 benchmarks/m3/capture.py [--skip-build] [--sample 10] [--warmup 2]
        [--quality <profile>] [--no-flutter]
@@ -61,6 +64,20 @@ def prepare_stress():
         "shadow_casters": r["shadowCasters"], "shadow_draws": r["shadowDraws"], "shadow_map": r["shadowMap"],
         "quality": r["quality"],
     }
+
+
+def capture_physics(steps=600):
+    """The stress scene's bodies in the headless host: step-time
+    percentiles and the physics counts of a run of `steps` ticks (item 8)."""
+    print("headless host, stress scene physics…", flush=True)
+    out = m0.sh([str(FYNKEL), "test", "--headless", "--project", str(STRESS), "--no-cook", "--steps", str(steps), "--json"])
+    r = json.loads(out)
+    # The tail of the run, bodies asleep: the settled cost.
+    tail = json.loads(m0.sh([str(FYNKEL), "test", "--headless", "--project", str(STRESS), "--no-cook",
+                             "--steps", str(steps * 3), "--json"]))
+    return {"steps": steps, "step_time_us": r["step_time"], "total_ms": r["total_ms"], "checksum": r["checksum"],
+            "settled_steps": steps * 3, "settled_step_time_us": tail["step_time"], "settled_checksum": tail["checksum"],
+            **(r.get("physics") or {})}
 
 
 def capture_standalone(warmup, sample, quality):
@@ -135,6 +152,18 @@ def gate(r):
         (f"draw calls ≤ distinct (mesh, material) pairs ({st['draws']} ≤ {pairs})", st["draws"] <= pairs),
         (f"culling drops off-screen instances ({st['culled']} culled)", st["culled"] > 0),
     ]
+    p = r.get("physics") or {}
+    if p:
+        falling, settled = p["step_time_us"]["p50_us"] / 1000, p["settled_step_time_us"]["p50_us"] / 1000
+        checks += [
+            (f"≥ 500 rigid bodies stepped headlessly ({p['bodies']} bodies, {p['colliders']} colliders, "
+             f"{p['collision_enter']} contacts)", p["bodies"] >= 500 and p["collision_enter"] >= p["bodies"]),
+            (f"physics at a fixed cost: p50 tick {falling:.2f} ms falling, {settled:.2f} ms settled (< 4 ms)",
+             falling < 4 and settled < 4),
+            (f"deterministic: the {p['steps']}-tick checksum repeats ({p['checksum']})",
+             p["checksum"] == json.loads(m0.sh([str(FYNKEL), "test", "--headless", "--project", str(STRESS), "--no-cook",
+                                                "--steps", str(p["steps"]), "--json"]))["checksum"]),
+        ]
     return [{"check": c, "passed": bool(ok)} for c, ok in checks]
 
 
@@ -161,8 +190,20 @@ def markdown(r):
         f"| skipped / dropped (sample) | {s.get('skipped_total')} | {f.get('dropped_total')} |",
         f"| instances / draws / culled | {s.get('instances')} / {s.get('draws')} / {s.get('culled')} | {f.get('instances')} / {f.get('draws')} / {f.get('culled')} |",
         f"| viewport (physical px) | 2560×1440 | {'×'.join(map(str, f.get('viewport_physical', ['?'])))} |",
-        "", "## Gate (item 6)", "",
-    ] + [f"- {'PASS' if g['passed'] else 'FAIL'} — {g['check']}" for g in r["gate"]]
+    ]
+    p = r.get("physics") or {}
+    if p:
+        lines += [
+            "", "## Physics (`fynkel test --headless`, item 8)", "",
+            f"{p['bodies']} dynamic bodies over {p['colliders']} colliders; {p['steps']} ticks in {p['total_ms']:.0f} ms, "
+            f"step p50 / p95 / max {p['step_time_us']["p50_us"] / 1000:.2f} / {p['step_time_us']['p95_us'] / 1000:.2f} / "
+            f"{p['step_time_us']['max_us'] / 1000:.2f} ms; settled ({p['settled_steps']} ticks) "
+            f"{p['settled_step_time_us']["p50_us"] / 1000:.2f} / {p['settled_step_time_us']['p95_us'] / 1000:.2f} / "
+            f"{p['settled_step_time_us']['max_us'] / 1000:.2f} ms; {p['collision_enter']} enter / {p['collision_exit']} exit "
+            f"events; checksum `{p['checksum']}`.",
+        ]
+    lines += ["", "## Gate (items 6 and 8)", ""]
+    lines += [f"- {'PASS' if g['passed'] else 'FAIL'} — {g['check']}" for g in r["gate"]]
     return "\n".join(lines) + "\n"
 
 
@@ -183,6 +224,7 @@ def main():
         "profile": profile, "environment": m0.environment(), "warmup_seconds": warmup, "sample_seconds": sample,
         "stress": prepare_stress(),
     }
+    result["physics"] = capture_physics()
     result["standalone"] = capture_standalone(warmup, sample, a.quality)
     result["flutter_path_a"] = {} if a.no_flutter else capture_flutter(warmup, sample)
     result["gate"] = gate(result)

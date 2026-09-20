@@ -2,6 +2,7 @@
 // diagnostic records. Debug builds throw FynkelError; release builds log.
 
 import '../generated/schema.g.dart' as gen;
+import 'physics.dart';
 
 /// True in debug mode (asserts enabled), false in profile/release.
 final bool isDebugMode = () {
@@ -241,6 +242,7 @@ class LoadReport {
     this.startupScene,
     this.residency = const ResidencyStats(),
     this.inputActions = const [],
+    this.physics = const PhysicsSettings(),
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
@@ -248,6 +250,7 @@ class LoadReport {
     final cache = j['cache'] as Map<String, Object?>?;
     final residency = j['residency'] as Map<String, Object?>?;
     final input = j['input'] as Map<String, Object?>?;
+    final physics = j['physics'] as Map<String, Object?>?;
     return LoadReport(
       ok: j['ok'] == true,
       diagnostics: [
@@ -272,6 +275,7 @@ class LoadReport {
       inputActions: [
         for (final a in (input?['actions'] as List?) ?? const []) BoundAction.fromJson((a as Map).cast<String, Object?>()),
       ],
+      physics: physics == null ? const PhysicsSettings() : PhysicsSettings.fromJson(physics),
     );
   }
 
@@ -322,6 +326,10 @@ class LoadReport {
   /// empty for a `loadScene` of a cache without a project).
   final List<BoundAction> inputActions;
 
+  /// The project's physics settings as applied (gravity, layer names, mesh
+  /// colliders registered); defaults for a `loadScene`.
+  final PhysicsSettings physics;
+
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
@@ -344,6 +352,7 @@ class LoadReport {
         startupScene: startupScene,
         residency: residency,
         inputActions: inputActions,
+        physics: physics,
       );
 
   /// This report after the SDK attached [attached] behaviours and found

@@ -149,6 +149,65 @@ pub struct Target {
     pub profile: String,
 }
 
+/// The `physics` block (M3-08): world gravity and the named collision
+/// layers (`fynkel.Collider.layer`/`mask` bit `i` is `layers[i]`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicsSettings {
+    /// Metres per second squared.
+    pub gravity: [f32; 3],
+    /// At most 32 unique names; absent layers are addressed by bit.
+    pub layers: Vec<String>,
+}
+
+impl Default for PhysicsSettings {
+    fn default() -> Self {
+        Self {
+            gravity: [0.0, -9.81, 0.0],
+            layers: vec!["default".to_string()],
+        }
+    }
+}
+
+impl PhysicsSettings {
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({ "gravity": self.gravity, "layers": self.layers })
+    }
+
+    pub fn from_json(v: &serde_json::Value) -> Self {
+        let d = Self::default();
+        let gravity = v["gravity"]
+            .as_array()
+            .filter(|a| a.len() == 3)
+            .map(|a| {
+                let mut g = d.gravity;
+                for (i, x) in a.iter().enumerate() {
+                    g[i] = x.as_f64().unwrap_or(d.gravity[i] as f64) as f32;
+                }
+                g
+            })
+            .unwrap_or(d.gravity);
+        let layers = v["layers"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or(d.layers);
+        Self { gravity, layers }
+    }
+
+    /// The bit mask of the named layers; an unknown name is `None`.
+    pub fn mask(&self, names: &[&str]) -> Option<u32> {
+        let mut mask = 0;
+        for n in names {
+            let i = self.layers.iter().position(|l| l == n)?;
+            mask |= 1u32 << i;
+        }
+        Some(mask)
+    }
+}
+
 /// Typed view of `fynkel.project.json`.
 #[derive(Clone, Debug)]
 pub struct Project {
@@ -158,6 +217,8 @@ pub struct Project {
     pub assets: String,
     pub input_actions: Vec<InputAction>,
     pub quality: Option<Quality>,
+    /// `physics` block or the defaults (M3-08).
+    pub physics: PhysicsSettings,
     /// `None` = every built-in component type.
     pub components: Option<Vec<ComponentEntry>>,
     pub targets: Vec<Target>,
@@ -259,6 +320,46 @@ impl Project {
             }
         }
 
+        let mut physics = PhysicsSettings::default();
+        if let Some(p) = root.get("physics").and_then(Node::as_object) {
+            let get = |key: &str| p.iter().find(|m| m.key == key).map(|m| &m.value);
+            if let Some(g) = get("gravity") {
+                match g.as_array() {
+                    Some(items) if items.len() == 3 => {
+                        for (i, x) in items.iter().enumerate() {
+                            match x.as_f64() {
+                                Some(v) => physics.gravity[i] = v as f32,
+                                None => malformed(
+                                    "/physics/gravity",
+                                    "gravity must be three numbers",
+                                    &mut diags,
+                                ),
+                            }
+                        }
+                    }
+                    _ => malformed(
+                        "/physics/gravity",
+                        "gravity must be three numbers",
+                        &mut diags,
+                    ),
+                }
+            }
+            if let Some(l) = get("layers") {
+                match l.as_array() {
+                    Some(items) => {
+                        physics.layers = items
+                            .iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect();
+                        if physics.layers.len() != items.len() {
+                            malformed("/physics/layers", "layers must be strings", &mut diags);
+                        }
+                    }
+                    None => malformed("/physics/layers", "layers must be an array", &mut diags),
+                }
+            }
+        }
+
         let quality = root.get("quality").and_then(|q| {
             let default = q.get("default").and_then(Node::as_str)?.to_string();
             let profiles = q
@@ -353,6 +454,7 @@ impl Project {
             assets,
             input_actions,
             quality,
+            physics,
             components,
             targets,
             read_diagnostics: diags,
@@ -505,6 +607,47 @@ impl Project {
                         ),
                     ));
                 }
+            }
+        }
+        // Physics (M3-08): a layer is one bit of a 32-bit mask.
+        if root.get("physics").is_some() {
+            if self.physics.layers.len() > 32 {
+                out.push(anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::PROJECT_PHYSICS,
+                        format!(
+                            "physics.layers has {} names; a collision mask has 32 bits",
+                            self.physics.layers.len()
+                        ),
+                    ),
+                    "/physics/layers",
+                ));
+            }
+            for (i, name) in self.physics.layers.iter().enumerate() {
+                if name.is_empty() {
+                    out.push(anchor(
+                        root,
+                        Diagnostic::error(Code::PROJECT_PHYSICS, "a layer name is empty"),
+                        &format!("/physics/layers/{i}"),
+                    ));
+                } else if self.physics.layers[..i].contains(name) {
+                    out.push(anchor(
+                        root,
+                        Diagnostic::error(
+                            Code::PROJECT_PHYSICS,
+                            format!("layer {name:?} is listed twice"),
+                        ),
+                        &format!("/physics/layers/{i}"),
+                    ));
+                }
+            }
+            if self.physics.gravity.iter().any(|g| !g.is_finite()) {
+                out.push(anchor(
+                    root,
+                    Diagnostic::error(Code::PROJECT_PHYSICS, "gravity must be finite"),
+                    "/physics/gravity",
+                ));
             }
         }
         out
@@ -1112,6 +1255,7 @@ pub fn describe_json(
             "name": a.name, "type": a.kind, "description": a.description, "bindings": a.bindings,
         })).collect::<Vec<_>>(),
         "quality": project.quality.as_ref().map(Quality::to_json),
+        "physics": project.physics.to_json(),
         "components": project.components.as_ref().map(|list| list.iter().map(|c| serde_json::json!({
             "type": c.type_id, "kind": c.kind, "version": c.version,
         })).collect::<Vec<_>>()),
@@ -1171,6 +1315,13 @@ pub fn describe_text(project: &Project, db: Option<&AssetDatabase>, lock: Option
         )),
         None => out.push_str("  quality: engine defaults\n"),
     }
+    out.push_str(&format!(
+        "  physics: gravity [{}, {}, {}], layers [{}]\n",
+        project.physics.gravity[0],
+        project.physics.gravity[1],
+        project.physics.gravity[2],
+        project.physics.layers.join(", ")
+    ));
     match &project.components {
         Some(list) => out.push_str(&format!(
             "  components: {} registered ({} native, {} behaviour)\n",

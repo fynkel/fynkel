@@ -218,6 +218,34 @@ FynkelStatus fynkel_world_query(
   ffi.Pointer<FynkelBufferView> out_view,
 ) => FynkelStatus.fromValue(_fynkel_world_query(world, desc, out_view));
 
+/// Spatial queries (M3-08): `buffer` is a PHYSICS_QUERIES buffer; the
+/// response (a QUERY buffer of PhysicsHitRecords, query order, nearest
+/// first within a query) is valid until the next query or mutating call.
+/// A framing error is FYNKEL_STATUS_PROTOCOL with an empty view.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_physics_query')
+external int _fynkel_world_physics_query(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_physics_query(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_physics_query(world, buffer, length, out_view),
+);
+
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
@@ -391,7 +419,12 @@ enum FynkelBufferKind {
   FYNKEL_BUFFER_INPUT_EVENTS(6),
 
   /// InputActionRecord per bound action (world -> host; fynkel_world_input_view).
-  FYNKEL_BUFFER_INPUT_ACTIONS(7);
+  FYNKEL_BUFFER_INPUT_ACTIONS(7),
+
+  /// PhysicsQueryRecord per spatial query (host -> world;
+  /// fynkel_world_physics_query); answered in a QUERY buffer of
+  /// PhysicsHitRecords.
+  FYNKEL_BUFFER_PHYSICS_QUERIES(8);
 
   final int value;
   const FynkelBufferKind(this.value);
@@ -404,6 +437,7 @@ enum FynkelBufferKind {
     5 => FYNKEL_BUFFER_QUERY,
     6 => FYNKEL_BUFFER_INPUT_EVENTS,
     7 => FYNKEL_BUFFER_INPUT_ACTIONS,
+    8 => FYNKEL_BUFFER_PHYSICS_QUERIES,
     _ => throw ArgumentError('Unknown value for FynkelBufferKind: $value'),
   };
 }
@@ -434,7 +468,11 @@ enum FynkelCommandKind {
   /// body: SetComponentCommand { entity, component } then the component's
   /// own record bytes (size covers both); strings in the batch tail.
   FYNKEL_COMMAND_SET_COMPONENT(6),
-  FYNKEL_COMMAND_REMOVE_COMPONENT(7);
+  FYNKEL_COMMAND_REMOVE_COMPONENT(7),
+
+  /// body: BodyCommandRecord { entity, op, vector, rotation }; simulation
+  /// lane only; applied by the tick's physics step (M3-08).
+  FYNKEL_COMMAND_BODY(8);
 
   final int value;
   const FynkelCommandKind(this.value);
@@ -447,6 +485,7 @@ enum FynkelCommandKind {
     5 => FYNKEL_COMMAND_SET_NAME,
     6 => FYNKEL_COMMAND_SET_COMPONENT,
     7 => FYNKEL_COMMAND_REMOVE_COMPONENT,
+    8 => FYNKEL_COMMAND_BODY,
     _ => throw ArgumentError('Unknown value for FynkelCommandKind: $value'),
   };
 }
@@ -460,7 +499,9 @@ enum FynkelComponent {
   FYNKEL_COMPONENT_DIRECTIONAL_LIGHT(6),
   FYNKEL_COMPONENT_POINT_LIGHT(7),
   FYNKEL_COMPONENT_SPOT_LIGHT(8),
-  FYNKEL_COMPONENT_ENVIRONMENT(9);
+  FYNKEL_COMPONENT_ENVIRONMENT(9),
+  FYNKEL_COMPONENT_RIGID_BODY(10),
+  FYNKEL_COMPONENT_COLLIDER(11);
 
   final int value;
   const FynkelComponent(this.value);
@@ -475,6 +516,8 @@ enum FynkelComponent {
     7 => FYNKEL_COMPONENT_POINT_LIGHT,
     8 => FYNKEL_COMPONENT_SPOT_LIGHT,
     9 => FYNKEL_COMPONENT_ENVIRONMENT,
+    10 => FYNKEL_COMPONENT_RIGID_BODY,
+    11 => FYNKEL_COMPONENT_COLLIDER,
     _ => throw ArgumentError('Unknown value for FynkelComponent: $value'),
   };
 }
@@ -498,7 +541,10 @@ enum FynkelQueryKind {
   /// entity -> one framed record per native component it has, id order:
   /// a ComponentHeader { component, size } then the component's body
   /// (0 records if unknown).
-  FYNKEL_QUERY_COMPONENTS(6);
+  FYNKEL_QUERY_COMPONENTS(6),
+
+  /// entity -> one BodyStateRecord (0 records without a RigidBody).
+  FYNKEL_QUERY_BODY(7);
 
   final int value;
   const FynkelQueryKind(this.value);
@@ -510,6 +556,7 @@ enum FynkelQueryKind {
     4 => FYNKEL_QUERY_NAME,
     5 => FYNKEL_QUERY_ALL_ENTITIES,
     6 => FYNKEL_QUERY_COMPONENTS,
+    7 => FYNKEL_QUERY_BODY,
     _ => throw ArgumentError('Unknown value for FynkelQueryKind: $value'),
   };
 }

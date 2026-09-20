@@ -19,6 +19,8 @@ impl ComponentId {
     pub const POINT_LIGHT: ComponentId = ComponentId(7);
     pub const SPOT_LIGHT: ComponentId = ComponentId(8);
     pub const ENVIRONMENT: ComponentId = ComponentId(9);
+    pub const RIGID_BODY: ComponentId = ComponentId(10);
+    pub const COLLIDER: ComponentId = ComponentId(11);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -31,6 +33,8 @@ impl ComponentId {
             7 => Some("fynkel.PointLight"),
             8 => Some("fynkel.SpotLight"),
             9 => Some("fynkel.Environment"),
+            10 => Some("fynkel.RigidBody"),
+            11 => Some("fynkel.Collider"),
             _ => None,
         }
     }

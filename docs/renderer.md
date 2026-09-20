@@ -384,11 +384,20 @@ material)` pairs — plus 500 "Body" cubes and 300 "Behaviour" pyramids
 standing in for the rigid bodies and Dart behaviours items 8 and 10 add,
 a floor, a casting sun, an `Environment` and a camera above the near edge
 looking across the field (the corners and the strip behind it are
-culled). `benchmarks/m3/capture.py` generates, locks and cooks it,
+culled). Since M3-08 the bodies are real: every Body cube has a dynamic
+`fynkel.RigidBody` (mass `size³·2`) and a box `fynkel.Collider` on layer
+`bodies`, the floor and every static mesh a box collider, so the project
+is also the physics gate — `capture.py` runs it headlessly for 600 and
+1 800 ticks (`physics.step_time_us` while the bodies fall,
+`settled_step_time_us` once they rest: p50 0.64 ms both, against 0.28 ms
+without physics; 1 430 collision enters, the checksum repeated;
+`docs/physics.md`). `benchmarks/m3/capture.py` generates, locks and cooks it,
 renders it once for the counts, runs it in the standalone host
 (`--cache <dir>`) and the Flutter host (`FYNKEL_PROJECT`) and writes
 `benchmarks/m3/results/<date>-<commit>.{json,md}` with the item 6 gate:
-5 000 meshes at 120 Hz, `draws ≤` distinct pairs, `culled > 0`. First
+5 000 meshes at 120 Hz, `draws ≤` distinct pairs, `culled > 0`, and (item
+8) ≥ 500 bodies touching, p50 tick under 4 ms falling and settled, the
+checksum repeated. First
 capture (`2026-09-20-cf2b3eb`, profile `medium`): 5 804 entities, 5 343
 instances drawn in 15 draws (458 culled, 5 702 casters in 14 shadow
 draws), standalone 122 frames/s with prepare + encode + submit 1.4 ms

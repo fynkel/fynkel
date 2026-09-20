@@ -96,7 +96,11 @@ void main() {
       MissedDeadlineEvent.decode, (v, d, o, s) => v.encode(d, o, s));
   check('SceneReadyEvent', const SceneReadyEvent(), SceneReadyEvent.wireSize, SceneReadyEvent.decode,
       (v, d, o, s) => v.encode(d, o, s));
-  check('ContactEvent', ContactEvent(a: entity(1, 1), b: entity(2, 1)), ContactEvent.wireSize, ContactEvent.decode,
+  check(
+      'ContactEvent',
+      ContactEvent(a: entity(1, 1), b: entity(2, 1), point: const Vec3(0.5, 1.0, -0.25), normal: const Vec3(0, 1, 0), impulse: 3.5),
+      ContactEvent.wireSize,
+      ContactEvent.decode,
       (v, d, o, s) => v.encode(d, o, s));
   check('SnapshotTransformRecord', SnapshotTransformRecord(entity: entity(3, 4), local: transform, world: identity),
       SnapshotTransformRecord.wireSize, SnapshotTransformRecord.decode, (v, d, o, s) => v.encode(d, o, s));
@@ -222,4 +226,71 @@ void main() {
       ComponentHeader.decode, (v, d, o, s) => v.encode(d, o, s));
   check('EventHeader', const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0), EventHeader.wireSize,
       EventHeader.decode, (v, d, o, s) => v.encode(d, o, s));
+  check(
+    'RigidBody',
+    const RigidBody(bodyType: BodyType.kinematic, mass: 2.5, linearDamping: 0.1, angularDamping: 0.2, gravityScale: 0.5, ccd: true),
+    RigidBody.wireSize,
+    RigidBody.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Collider',
+    Collider(
+      shape: ColliderShape.mesh,
+      size: const Vec3(0.5, 1.0, 0.25),
+      mesh: const AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'mesh/0'),
+      offset: const Vec3(0, 0.5, 0),
+      friction: 0.6,
+      restitution: 0.1,
+      isSensor: true,
+      layer: 2,
+      mask: 0xfffffffd,
+    ),
+    Collider.wireSize,
+    Collider.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'BodyCommandRecord',
+    BodyCommandRecord(
+        entity: entity(1, 1), op: BodyOp.setKinematicTarget, vector: const Vec3(1, 2, 3), rotation: const Quat(0, 0.5, 0, 0.5)),
+    BodyCommandRecord.wireSize,
+    BodyCommandRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'PhysicsQueryRecord',
+    PhysicsQueryRecord(
+      id: 7,
+      kind: PhysicsQueryKind.shapeCast,
+      shape: ColliderShape.sphere,
+      size: const Vec3(0.25, 0, 0),
+      origin: const Vec3(0, 3, 0),
+      rotation: Quat.identity,
+      direction: const Vec3(0, 0, -1),
+      maxDistance: 100,
+      mask: 0xffffffff,
+      exclude: entity(2, 1),
+      maxHits: 4,
+      hitSensors: false,
+    ),
+    PhysicsQueryRecord.wireSize,
+    PhysicsQueryRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'PhysicsHitRecord',
+    PhysicsHitRecord(query: 7, entity: entity(3, 1), point: const Vec3(0, 3, -4.5), normal: const Vec3(0, 0, 1), distance: 4.5),
+    PhysicsHitRecord.wireSize,
+    PhysicsHitRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'BodyStateRecord',
+    BodyStateRecord(
+        entity: entity(1, 1), linearVelocity: const Vec3(0, -9.81, 0), angularVelocity: const Vec3(0, 1, 0), sleeping: false),
+    BodyStateRecord.wireSize,
+    BodyStateRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
 }

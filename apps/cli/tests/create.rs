@@ -105,7 +105,14 @@ fn a_fresh_project_validates_and_runs_headlessly() {
     assert!(ok, "{stdout}{stderr}");
     let t: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(t["scene"]["loaded"], true, "{stdout}");
-    assert_eq!(t["scene"]["entities"], 3);
+    assert_eq!(t["scene"]["entities"], 5);
+    // The crate is a dynamic body on the floor: physics ran headlessly.
+    assert_eq!(t["physics"]["bodies"], 2, "{stdout}");
+    assert_eq!(t["physics"]["colliders"], 3, "{stdout}");
+    assert!(
+        t["physics"]["collision_enter"].as_u64().unwrap() >= 1,
+        "{stdout}"
+    );
     assert_eq!(t["scene"]["name"], "Main");
     assert_eq!(t["tick"], 120);
     assert_eq!(t["diagnostics"], 0);

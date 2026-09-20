@@ -81,4 +81,13 @@ package on macOS and iOS; the podspec lists it too) instead of the `gilrs`
 crate the blueprint named for macOS — one framework for both Apple targets,
 the controllers the OS pairs, nothing added to the Rust runtime path.
 
+M3-08 (physics): `rapier3d` 0.35.3 in `crates/fynkel_physics` only, default
+features (`dim3`, `f32`, `std`; not `parallel`, not `simd-*`, not
+`enhanced-determinism` — one platform steps the same scene the same way,
+which the headless checksum asserts; cross-platform bit equality is not
+claimed). It builds on the workspace's `glam` 0.33.7 through `glamx`
+0.3.1 / `parry3d` 0.30.2, so poses cross without conversion. `fynkel_core`
+depends on `fynkel_physics` for the step; nothing above the core names a
+Rapier type (`docs/physics.md`).
+
 Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.

@@ -304,6 +304,12 @@ impl ComponentValue {
         if let Ok(v) = ecs.get::<Environment>(entity) {
             out.push(ComponentValue::Environment(v.clone()));
         }
+        if let Ok(v) = ecs.copy::<fynkel_physics::RigidBody>(entity) {
+            out.push(ComponentValue::RigidBody(v));
+        }
+        if let Ok(v) = ecs.get::<fynkel_physics::Collider>(entity) {
+            out.push(ComponentValue::Collider(v.clone()));
+        }
         out
     }
 }

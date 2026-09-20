@@ -11,7 +11,7 @@ import 'support.dart';
 const int bufferMagic = 0x4b4e5946; // "FYNK"
 const int bufferHeaderSize = 24;
 
-enum BufferKind { commands, snapshot, events, diagnostics, query, inputEvents, inputActions }
+enum BufferKind { commands, snapshot, events, diagnostics, query, inputEvents, inputActions, physicsQueries }
 
 int bufferKindValue(BufferKind k) => k.index + 1;
 
@@ -176,6 +176,22 @@ class CommandBatch {
     _bytes.setUint64(o, entity, Endian.little);
     _bytes.setUint32(o + 8, codec.id, Endian.little);
     value.encode(_bytes, o + SetComponentCommand.wireSize, _strings);
+  }
+
+  /// A body command (M3-08, kind 8): [op] with its vector and, for
+  /// `setKinematicTarget`/`teleport`, the rotation. Allocation-free.
+  void body(int entity, BodyOp op, double x, double y, double z,
+      [double qx = 0, double qy = 0, double qz = 0, double qw = 1]) {
+    final o = _begin(BodyCommandRecord.commandKind, BodyCommandRecord.wireSize);
+    _bytes.setUint64(o, entity, Endian.little);
+    _bytes.setUint32(o + 8, op.index, Endian.little);
+    _bytes.setFloat32(o + 12, x, Endian.little);
+    _bytes.setFloat32(o + 16, y, Endian.little);
+    _bytes.setFloat32(o + 20, z, Endian.little);
+    _bytes.setFloat32(o + 24, qx, Endian.little);
+    _bytes.setFloat32(o + 28, qy, Endian.little);
+    _bytes.setFloat32(o + 32, qz, Endian.little);
+    _bytes.setFloat32(o + 36, qw, Endian.little);
   }
 
   void removeComponent(int entity, int componentId) {

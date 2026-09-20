@@ -3,6 +3,7 @@
 import 'dart:typed_data';
 
 import '../generated/schema.g.dart' as gen;
+import '../math.dart';
 import 'wire/buffers.dart';
 
 sealed class EngineEvent {
@@ -39,10 +40,36 @@ class SceneReady extends EngineEvent {
 
 enum ContactKind { collisionEnter, collisionStay, collisionExit, triggerEnter, triggerExit }
 
+/// A collision or trigger event between two colliders (M3-08). For
+/// collisions, [point] is the deepest contact point (world space), [normal]
+/// points from [a] towards [b] and [impulse] is the impulse the solver
+/// applied at this pair (N·s; 0 on exit). Triggers carry no contact
+/// geometry (zeros).
 class Contact extends EngineEvent {
-  const Contact(super.tickLo, this.kind, this.a, this.b);
+  const Contact(super.tickLo, this.kind, this.a, this.b,
+      {this.point = Vec3.zero, this.normal = Vec3.zero, this.impulse = 0});
   final ContactKind kind;
   final int a, b;
+  final Vec3 point;
+  final Vec3 normal;
+  final double impulse;
+
+  bool get isTrigger => kind == ContactKind.triggerEnter || kind == ContactKind.triggerExit;
+
+  bool involves(int entity) => a == entity || b == entity;
+
+  /// The other side seen from [entity] (which must be [a] or [b]).
+  int other(int entity) {
+    if (entity == a) return b;
+    if (entity == b) return a;
+    throw ArgumentError.value(entity, 'entity', 'not a side of this contact');
+  }
+
+  /// [normal] as seen from [entity]: pointing away from it.
+  Vec3 normalFor(int entity) => entity == a ? normal : Vec3(-normal.x, -normal.y, -normal.z);
+
+  @override
+  String toString() => 'Contact($kind ${a.toRadixString(16)}↔${b.toRadixString(16)} at $point n=$normal j=$impulse)';
 }
 
 /// An event whose kind this SDK does not know (newer engine); skipped safely.
@@ -87,5 +114,6 @@ ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {
 
 Contact _contact(ByteData d, int o, Uint8List tail, gen.EventHeader h) {
   final e = gen.ContactEvent.decode(d, o, tail);
-  return Contact(h.tickLo, ContactKind.values[h.kind - _physicsFirst], e.a, e.b);
+  return Contact(h.tickLo, ContactKind.values[h.kind - _physicsFirst], e.a, e.b,
+      point: e.point, normal: e.normal, impulse: e.impulse);
 }

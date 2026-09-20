@@ -375,6 +375,19 @@ fn test_command(args: &[String]) -> ExitCode {
                 return ExitCode::from(1);
             }
         }
+        if let Some(p) = &report.physics {
+            println!(
+                "physics: {} bodies, {} colliders ({} mesh), collisions {} enter / {} stay / {} exit, triggers {} enter / {} exit",
+                p.bodies,
+                p.colliders,
+                p.mesh_colliders,
+                p.collision_enter,
+                p.collision_stay,
+                p.collision_exit,
+                p.trigger_enter,
+                p.trigger_exit
+            );
+        }
         println!(
             "fynkel test --headless: {} ticks in {:.1} ms, {} entities, {} commands applied, {} rejected, {} diagnostics, checksum {} — {}",
             report.tick,

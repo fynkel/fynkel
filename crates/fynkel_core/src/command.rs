@@ -1,6 +1,7 @@
 //! Commands are the only way gameplay mutates the world (§5.4).
 
 use fynkel_contracts::{ComponentId, Entity};
+use fynkel_physics::BodyCommand;
 use fynkel_scene::Transform;
 
 use crate::components::ComponentValue;
@@ -63,6 +64,14 @@ pub enum Command {
         entity: Entity,
         component: ComponentId,
     },
+    /// Moves a `RigidBody` (M3-08): forces, impulses, velocities, a
+    /// kinematic target or a teleport. Applied by the physics step of this
+    /// tick, after the batch's component writes (a body set in the same
+    /// batch receives it). Simulation lane only.
+    Body {
+        entity: Entity,
+        op: BodyCommand,
+    },
 }
 
 impl Command {
@@ -81,7 +90,8 @@ impl Command {
             Command::SetTransform { entity, .. }
             | Command::SetName { entity, .. }
             | Command::SetComponent { entity, .. }
-            | Command::RemoveComponent { entity, .. } => Some(*entity),
+            | Command::RemoveComponent { entity, .. }
+            | Command::Body { entity, .. } => Some(*entity),
             Command::SetParent { child, .. } => Some(*child),
         }
     }

@@ -6,7 +6,13 @@ library;
 export 'generated/schema.g.dart'
     show
         AlphaMode,
+        BodyCommandRecord,
+        BodyOp,
+        BodyStateRecord,
+        BodyType,
         Camera,
+        Collider,
+        ColliderShape,
         ComponentCodec,
         DirectionalLight,
         Environment,
@@ -14,7 +20,11 @@ export 'generated/schema.g.dart'
         MeshRenderer,
         Name,
         PbrMaterial,
+        PhysicsHitRecord,
+        PhysicsQueryKind,
+        PhysicsQueryRecord,
         PointLight,
+        RigidBody,
         Projection,
         SnapshotTransformRecord,
         SpotLight,
@@ -26,6 +36,7 @@ export 'math.dart';
 export 'src/diagnostics.dart';
 export 'src/events.dart';
 export 'src/input.dart';
+export 'src/physics.dart' show BodyState, PhysicsHit, PhysicsSettings;
 export 'src/recording.dart';
 export 'src/transform_writer.dart';
 export 'src/native/bridge.dart'

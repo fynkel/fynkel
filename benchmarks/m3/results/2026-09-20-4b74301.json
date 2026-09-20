@@ -1,0 +1,215 @@
+{
+  "profile": {
+    "profile": "mac-m3max-2026",
+    "frozen": "2026-09-19",
+    "machine": {
+      "model": "MacBook Pro 16-inch, Apple M3 Max",
+      "cpu": "Apple M3 Max, 14 cores",
+      "gpu": "Apple M3 Max, 30 cores, Metal 4",
+      "ram_gib": 36,
+      "display": "built-in 3456x2234 Retina, 120 Hz ProMotion, scale 2.0"
+    },
+    "os": "macOS 26.5.1",
+    "graphics_backend": "Metal (wgpu 30.0.1)",
+    "toolchain": {
+      "rust": "1.93.0 aarch64-apple-darwin",
+      "flutter": "3.47.2 (Impeller)",
+      "dart": "3.13.2",
+      "xcode": "26.5 (17F42)"
+    },
+    "resolution": {
+      "standalone_window_logical": [
+        1280,
+        720
+      ],
+      "flutter_window_logical": [
+        1200,
+        820
+      ],
+      "flutter_viewport_physical_note": "window minus host bar, times dpr 2.0; recorded per run"
+    },
+    "quality": "M0 cube scene, no MSAA, Depth32Float, Bgra8Unorm, Fifo/vsync",
+    "scene_version": "fynkel_m0_scene 0.0.1 (one lit cube)",
+    "warm_up_seconds": 2,
+    "sample_seconds": 10,
+    "capture_command": "python3 benchmarks/m0/capture.py",
+    "power": "capture on mains power, no other GPU-heavy apps; display at native scaling"
+  },
+  "environment": {
+    "captured_at": "2026-09-20T15:07:57+02:00",
+    "commit": "4b74301",
+    "dirty": true,
+    "os": "26.5.1",
+    "cpu": "Apple M3 Max",
+    "ram_gib": 36,
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "flutter": "Flutter 3.47.2 \u2022 channel stable \u2022 https://github.com/flutter/flutter.git",
+    "dart": "Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on \"macos_arm64\"",
+    "xcode": "Xcode 26.5"
+  },
+  "warmup_seconds": 2,
+  "sample_seconds": 10,
+  "stress": {
+    "generator": "/Users/oumari/Desktop/Code/fynkelengine/benchmarks/stress/project: 5804 entities (5000 static, 500 bodies, 300 behaviours), 7 materials, 15 distinct (mesh, material) pairs",
+    "entities": 5804,
+    "meshes": 5801,
+    "instances": 5343,
+    "culled": 458,
+    "draws": 15,
+    "batches": 15,
+    "transparent": 0,
+    "shadow_casters": 5702,
+    "shadow_draws": 14,
+    "shadow_map": 2048,
+    "quality": {
+      "profile": "medium",
+      "shadows": true,
+      "shadowResolution": 2048,
+      "msaa": 4,
+      "renderScale": 1.0,
+      "anisotropy": 8,
+      "renderSize": [
+        1280,
+        720
+      ]
+    }
+  },
+  "physics": {
+    "steps": 600,
+    "step_time_us": {
+      "p50_us": 675,
+      "p95_us": 1422,
+      "max_us": 5815
+    },
+    "total_ms": 646.34235,
+    "checksum": "fdce91f4c8a52bfc",
+    "settled_steps": 1800,
+    "settled_step_time_us": {
+      "p50_us": 608,
+      "p95_us": 939,
+      "max_us": 5962
+    },
+    "settled_checksum": "db70e859f56f8903",
+    "bodies": 500,
+    "colliders": 5501,
+    "mesh_colliders": 0,
+    "collision_enter": 1430,
+    "collision_stay": 0,
+    "collision_exit": 657,
+    "trigger_enter": 0,
+    "trigger_exit": 0,
+    "diagnostics": 0
+  },
+  "standalone": {
+    "windows_total": 13,
+    "frames_per_s": 122.0,
+    "skipped_total": 0.0,
+    "interval_ms": {
+      "p50": 8.34,
+      "p95": 8.9,
+      "p99": 9.13,
+      "windows": 11
+    },
+    "cpu_encode_submit_ms": {
+      "p50": 1.675,
+      "p95": 1.784,
+      "p99": 1.921,
+      "windows": 11
+    },
+    "draws": 15,
+    "instances": 5350,
+    "culled": 451,
+    "batches": 15,
+    "shadow_casters": 5702,
+    "shadow_draws": 14
+  },
+  "flutter_path_a": {
+    "windows_total": 15,
+    "instances": 5147,
+    "draws": 15,
+    "culled": 654,
+    "shadow_casters": 5609,
+    "shadow_draws": 14,
+    "viewport_physical": [
+      2400,
+      1480
+    ],
+    "ticks_per_s": 120,
+    "dropped_total": 0,
+    "stale_presents_total": 83,
+    "rendered_per_s": 120,
+    "tick_interval_ms": {
+      "p50": 8.33,
+      "p95": 8.34,
+      "p99": 25.0,
+      "windows": 13
+    },
+    "render_call_ms": {
+      "p50": 2.67,
+      "p95": 2.86,
+      "p99": 3.09,
+      "windows": 13
+    },
+    "rust_cpu_ms": {
+      "p50": 0.147,
+      "p95": 0.203,
+      "p99": 0.31,
+      "windows": 13
+    },
+    "gpu_complete_ms": {
+      "p50": 2.53,
+      "p95": 3.68,
+      "p99": 6.35,
+      "windows": 13
+    },
+    "present_lag_frames": {
+      "p50": 0,
+      "p95": 0,
+      "p99": 1,
+      "windows": 13
+    },
+    "flutter_frames_per_s": 121.0,
+    "ui_build_ms": {
+      "p50": 3.4400000000000004,
+      "p95": 3.91,
+      "p99": 4.27,
+      "windows": 12
+    },
+    "raster_ms": {
+      "p50": 2.4299999999999997,
+      "p95": 3.705,
+      "p99": 3.99,
+      "windows": 12
+    }
+  },
+  "gate": [
+    {
+      "check": "5 000 static meshes cooked and drawn",
+      "passed": true
+    },
+    {
+      "check": "standalone at the display's 120 Hz (\u2265 118 frames/s, p99 interval < 10 ms)",
+      "passed": true
+    },
+    {
+      "check": "draw calls \u2264 distinct (mesh, material) pairs (15 \u2264 15)",
+      "passed": true
+    },
+    {
+      "check": "culling drops off-screen instances (458 culled)",
+      "passed": true
+    },
+    {
+      "check": "\u2265 500 rigid bodies stepped headlessly (500 bodies, 5501 colliders, 1430 contacts)",
+      "passed": true
+    },
+    {
+      "check": "physics at a fixed cost: p50 tick 0.68 ms falling, 0.61 ms settled (< 4 ms)",
+      "passed": true
+    },
+    {
+      "check": "deterministic: the 600-tick checksum repeats (fdce91f4c8a52bfc)",
+      "passed": true
+    }
+  ]
+}

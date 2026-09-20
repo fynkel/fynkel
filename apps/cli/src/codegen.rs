@@ -643,7 +643,13 @@ fn dart(fp: u64) -> String {
             "  @override\n  void encode(ByteData d, int offset, WireStrings strings) {{"
         );
         for (f, off) in s.fields.iter().zip(&offsets) {
+            // A field may share a name with a parameter (`offset`).
             let v = camel(f.name);
+            let v = if matches!(v.as_str(), "d" | "offset" | "strings") {
+                format!("this.{v}")
+            } else {
+                v
+            };
             let line = match f.ty {
                 FieldType::F32 => format!("d.setFloat32(offset + {off}, {v}, Endian.little);"),
                 FieldType::U32 => format!("d.setUint32(offset + {off}, {v}, Endian.little);"),

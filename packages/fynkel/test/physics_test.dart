@@ -1,0 +1,259 @@
+// Physics from Dart (M3-08, blueprint §9): RigidBody/Collider are native
+// components on the M3-07a path, forces are body commands, contacts reach
+// the object's behaviours as callbacks, and spatial queries go through one
+// buffer. The simulation itself is native (Rapier); nothing is mirrored.
+
+import 'dart:io';
+
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
+import 'package:test/test.dart';
+
+/// Counts its contacts and hops once when it first lands.
+class Crate extends Behaviour {
+  final List<String> log = [];
+  int enters = 0, stays = 0, exits = 0;
+
+  @override
+  void onCollisionEnter(Contact contact) {
+    enters++;
+    final other = world.byEntity(contact.other(gameObject.entity));
+    log.add('enter ${other?.name ?? '?'} n=${contact.normalFor(gameObject.entity).y.toStringAsFixed(1)} '
+        'j>0=${contact.impulse > 0}');
+    if (enters == 1) applyImpulse(const Vec3(0, 6, 0));
+  }
+
+  @override
+  void onCollisionStay(Contact contact) => stays++;
+
+  @override
+  void onCollisionExit(Contact contact) {
+    exits++;
+    log.add('exit');
+  }
+}
+
+class Sensor extends Behaviour {
+  final List<String> log = [];
+  @override
+  void onTriggerEnter(Contact contact) => log.add('in ${world.byEntity(contact.other(gameObject.entity))?.name}');
+  @override
+  void onTriggerExit(Contact contact) => log.add('out ${world.byEntity(contact.other(gameObject.entity))?.name}');
+}
+
+void main() {
+  final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
+  late String cache;
+  late NativeLibrary lib;
+
+  setUpAll(() {
+    cache = Directory.systemTemp.createTempSync('fynkel-physics-cache-').path;
+    cookProject(fixture, cacheDir: cache);
+    lib = NativeLibrary.open();
+  });
+  tearDownAll(() {
+    Directory(cache).deleteSync(recursive: true);
+    lib.dispose();
+  });
+
+  World fresh() {
+    final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8);
+    addTearDown(w.dispose);
+    return w;
+  }
+
+  /// A 20×1×20 slab whose top is y = 0.
+  GameObject floor(World w) => w.spawn(name: 'floor')
+    ..add(const Collider(
+        shape: ColliderShape.box,
+        size: Vec3(10, 0.5, 10),
+        offset: Vec3(0, -0.5, 0),
+        friction: 0.6,
+        restitution: 0,
+        isSensor: false,
+        layer: 1,
+        mask: 0xffffffff));
+
+  const unitBox = Collider(
+      shape: ColliderShape.box,
+      size: Vec3(0.5, 0.5, 0.5),
+      offset: Vec3.zero,
+      friction: 0.5,
+      restitution: 0,
+      isSensor: false,
+      layer: 1,
+      mask: 0xffffffff);
+  // f32-exact values so the read-back compares equal.
+  const dynamicBody = RigidBody(
+      bodyType: BodyType.dynamic, mass: 2, linearDamping: 0, angularDamping: 0.0625, gravityScale: 1, ccd: false);
+
+  test('a crate falls onto the floor: physics owns it, contacts reach its behaviour, it sleeps', () {
+    final w = fresh();
+    floor(w);
+    final crate = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 3, 0)), name: 'crate')
+      ..add(dynamicBody)
+      ..add(unitBox);
+    final b = crate.addBehaviour(Crate());
+    expect(crate.get<RigidBody>(), dynamicBody, reason: 'read-your-writes before the spawn');
+    w.frame(1 / 60); // the spawn; the components follow it into the next tick
+    w.frame(1 / 60);
+    expect(crate.get<RigidBody>(), dynamicBody);
+    expect(crate.get<Collider>(), unitBox);
+    expect(crate.components.map((c) => c.runtimeType), [Transform, Name, RigidBody, Collider]);
+    var state = crate.bodyState()!;
+    expect(state.linearVelocity.y, lessThan(0), reason: 'falling after one tick');
+    expect(state.sleeping, isFalse);
+
+    for (var i = 0; i < 300; i++) {
+      w.frame(1 / 60);
+    }
+    expect(b.enters, 2, reason: 'lands, hops on the first contact, lands again: ${b.log}');
+    expect(b.exits, 1);
+    expect(b.stays, greaterThan(10));
+    expect(b.log.first, 'enter floor n=-1.0 j>0=true');
+    expect(crate.localTransform.position.y, closeTo(0.5, 0.05));
+    state = crate.bodyState()!;
+    expect(state.sleeping, isTrue, reason: '$state');
+    expect(state.speed, lessThan(1e-3));
+
+    // Physics owns the transform: a presentation write is rejected, a
+    // simulation-lane write is a teleport.
+    w.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    w.onDiagnostics = seen.addAll;
+    crate.setPresentationPosition(5, 5, 5);
+    w.flushPresentation();
+    expect(seen.map((d) => d.code), [DiagnosticCode.physicsOwned]);
+    crate.setLocalPosition(2, 4, 0);
+    w.frame(1 / 60);
+    expect(crate.localTransform.position.x, closeTo(2, 1e-3));
+    expect(crate.localTransform.position.y, lessThan(4), reason: 'falling again after the teleport');
+  });
+
+  test('body commands: impulse, velocity, teleport; rejections name the reason', () {
+    final w = fresh();
+    floor(w);
+    final crate = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)), name: 'crate')
+      ..add(dynamicBody)
+      ..add(unitBox);
+    final wall = w.spawn(name: 'wall')..add(unitBox);
+    w.frame(1 / 60);
+    // Components and the impulse in one batch: the body sees the impulse
+    // the tick it is created.
+    crate.applyImpulse(const Vec3(4, 0, 0));
+    w.frame(1 / 60);
+    expect(crate.bodyState()!.linearVelocity.x, closeTo(1.9, 0.1), reason: 'j = m·Δv, minus friction over one tick');
+    crate.setLinearVelocity(const Vec3(0, 0, -1));
+    crate.setAngularVelocity(Vec3.zero); // the push also tipped it
+    w.frame(1 / 60);
+    var v = crate.bodyState()!.linearVelocity;
+    expect(v.z, closeTo(-1, 0.15), reason: 'set, minus one tick of friction');
+    expect(v.x.abs(), lessThan(0.3), reason: 'the push is gone (warm-started friction aside)');
+    crate.teleport(const Vec3(-3, 0.5, 0));
+    w.frame(1 / 60);
+    expect(crate.localTransform.position.x, closeTo(-3, 1e-3));
+    expect(wall.bodyState(), isNull, reason: 'a collider alone is static geometry, no body state');
+
+    w.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    w.onDiagnostics = seen.addAll;
+    wall.applyForce(Vec3.up); // no body
+    crate.setKinematicTarget(Vec3.zero); // not kinematic
+    crate.applyForce(const Vec3(double.nan, 0, 0)); // not finite
+    w.frame(1 / 60);
+    expect(seen.map((d) => d.code),
+        [DiagnosticCode.missingComponent, DiagnosticCode.invalidPayload, DiagnosticCode.invalidPayload]);
+    expect(seen.map((d) => d.component), [RigidBody.componentId, RigidBody.componentId, RigidBody.componentId]);
+    expect(seen[1].message, contains('kinematic'));
+  });
+
+  test('a sensor reports triggers once per entry and exit', () {
+    final w = fresh();
+    final zone = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 2, 0)), name: 'zone')
+      ..add(unitBox.copyWith(isSensor: true, size: const Vec3(1, 0.5, 1)));
+    final s = zone.addBehaviour(Sensor());
+    w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 5, 0)), name: 'ball')
+      ..add(dynamicBody)
+      ..add(unitBox.copyWith(shape: ColliderShape.sphere, size: const Vec3(0.25, 0, 0)));
+    for (var i = 0; i < 120; i++) {
+      w.frame(1 / 60);
+    }
+    expect(s.log, ['in ball', 'out ball']);
+  });
+
+  test('raycast, shape cast and overlap read the last step', () {
+    final w = fresh();
+    final f = floor(w);
+    final crate = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)), name: 'crate')
+      ..add(dynamicBody)
+      ..add(unitBox);
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    final hit = w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0));
+    expect(hit, isNotNull);
+    expect(hit!.entity, crate.entity);
+    expect(hit.point.y, closeTo(1, 0.05));
+    expect(hit.normal.y, closeTo(1, 1e-3));
+    expect(hit.distance, closeTo(4, 0.05));
+    final all = w.raycastAll(const Vec3(0, 5, 0), const Vec3(0, -1, 0));
+    expect(all.map((h) => h.entity), [crate.entity, f.entity]);
+    expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), exclude: crate)!.entity, f.entity);
+    expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), maxDistance: 1), isNull);
+    expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), mask: 2), isNull, reason: 'nothing on layer 1');
+
+    final sweep = w.shapeCast(ColliderShape.sphere, const Vec3(0.25, 0, 0), const Vec3(3, 0.5, 0), const Vec3(-1, 0, 0));
+    expect(sweep, isNotNull);
+    expect(sweep!.entity, crate.entity);
+    expect(sweep.distance, closeTo(3 - 0.5 - 0.25, 0.05));
+
+    final around = w.overlap(ColliderShape.box, const Vec3(2, 2, 2), Vec3.zero);
+    expect(around.map((h) => h.entity).toSet(), {crate.entity, f.entity});
+    expect(w.overlap(ColliderShape.sphere, const Vec3(0.1, 0, 0), const Vec3(0, 10, 0)), isEmpty);
+
+    // Several queries in one call, answered in order with their ids.
+    final hits = w.physicsQuery([
+      for (final (id, x) in [(7, 0.0), (9, 50.0)])
+        PhysicsQueryRecord(
+          id: id,
+          kind: PhysicsQueryKind.raycast,
+          shape: ColliderShape.box,
+          size: Vec3.zero,
+          origin: Vec3(x, 5, 0),
+          rotation: Quat.identity,
+          direction: const Vec3(0, -1, 0),
+          maxDistance: 100,
+          mask: 0xffffffff,
+          maxHits: 4,
+          hitSensors: false,
+        ),
+    ]);
+    expect(hits.map((h) => (h.query, h.entity)), [(7, crate.entity), (7, f.entity)]);
+  });
+
+  test('the fixture project brings gravity, named layers and its own crate', () {
+    final w = fresh();
+    w.onLoadDiagnostics = (_) {};
+    final report = w.loadProject(fixture, cacheDir: cache);
+    expect(report.physics.gravity.y, closeTo(-9.81, 1e-5));
+    expect(w.physics.layers, ['default', 'props']);
+    expect(report.physics.layers, ['default', 'props']);
+    expect(w.layerMask(['props']), 2);
+    expect(w.layerMask(['default', 'props']), 3);
+    expect(() => w.layerMask(['ghosts']), throwsArgumentError);
+    final crate = w.attach(w.allEntities().firstWhere((e) => w.nameOfEntity(e) == 'Crate B'));
+    for (var i = 0; i < 240; i++) {
+      w.frame(1 / 60);
+    }
+    expect(crate.localTransform.position.y, closeTo(0.5, 0.05));
+    expect(crate.get<Collider>()!.layer, 2);
+    expect(w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['props']))!.entity, crate.entity);
+    expect(w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['default']))!.entity,
+        isNot(crate.entity));
+  });
+
+  test('the SDK rejects a body command on an object not spawned yet', () {
+    final w = fresh();
+    final go = w.spawn(name: 'late');
+    expect(() => go.applyForce(Vec3.up), throwsStateError);
+  });
+}

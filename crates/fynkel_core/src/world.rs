@@ -8,6 +8,8 @@ use fynkel_contracts::{
     DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
 };
 use fynkel_ecs::{EcsError, World as Ecs};
+pub use fynkel_physics::PhysicsOwned;
+use fynkel_physics::{BodyCommand, Collider, Physics, PhysicsEvent, RejectionKind, RigidBody};
 use fynkel_scene::{self as scene, Parent, SceneError, Transform, WorldTransform};
 use fynkel_schema_derive::Schema;
 use glam::{Mat4, Vec3};
@@ -53,11 +55,6 @@ impl Name {
         }
     }
 }
-
-/// Marker: the transform is written by physics; presentation-lane transform
-/// commands are rejected with `PHYSICS_OWNED` (ADR-0008).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct PhysicsOwned;
 
 /// World transform at the start of the last tick (S[n]) for interpolation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -206,6 +203,8 @@ pub struct World {
     poisoned: bool,
     /// The binding table and raw control state (§5.1 input rules).
     input: Input,
+    /// The Rapier adapter (M3-08), stepped at the §5.1 physics slot.
+    physics: Physics,
 }
 
 impl World {
@@ -230,7 +229,15 @@ impl World {
             applied_this_tick: 0,
             poisoned: false,
             input: Input::default(),
+            physics: Physics::new(),
         }
+    }
+
+    pub fn physics(&self) -> &Physics {
+        &self.physics
+    }
+    pub fn physics_mut(&mut self) -> &mut Physics {
+        &mut self.physics
     }
 
     pub fn config(&self) -> &WorldConfig {
@@ -661,6 +668,8 @@ impl World {
                     ComponentId::POINT_LIGHT => self.ecs.remove::<PointLight>(entity).is_ok(),
                     ComponentId::SPOT_LIGHT => self.ecs.remove::<SpotLight>(entity).is_ok(),
                     ComponentId::ENVIRONMENT => self.ecs.remove::<Environment>(entity).is_ok(),
+                    ComponentId::RIGID_BODY => self.ecs.remove::<RigidBody>(entity).is_ok(),
+                    ComponentId::COLLIDER => self.ecs.remove::<Collider>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -692,6 +701,19 @@ impl World {
                         format!("entity has no {}", component.name().unwrap()),
                     );
                 }
+                true
+            }
+            Command::Body { entity, op } => {
+                if !self.check_entity(index, lane, entity, "body") {
+                    return false;
+                }
+                // Applied by the physics step, after this batch's component
+                // writes; a rejection there carries this index. A teleport
+                // is shown at its target, never interpolated towards it.
+                if matches!(op, BodyCommand::Teleport { .. }) {
+                    self.teleported.push(entity);
+                }
+                self.physics.queue(index, entity, op);
                 true
             }
         }
@@ -727,6 +749,8 @@ impl World {
             ComponentValue::PointLight(v) => self.ecs.insert(entity, v),
             ComponentValue::SpotLight(v) => self.ecs.insert(entity, v),
             ComponentValue::Environment(v) => self.ecs.insert(entity, v),
+            ComponentValue::RigidBody(v) => self.ecs.insert(entity, v),
+            ComponentValue::Collider(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -791,7 +815,7 @@ impl World {
 
         // Validate/apply C[n] at the tick boundary.
         let staged = std::mem::take(&mut self.staged);
-        let mut applied = 0;
+        let mut applied: u32 = 0;
         let mut rejected = 0;
         for (index, cmd, from_presentation) in staged {
             let cmd = match cmd {
@@ -820,8 +844,19 @@ impl World {
             }
         }
 
-        // Native pre-tick systems, physics, post-physics sync, animation:
-        // no producers in M1; the phase order is fixed here.
+        // Native pre-tick systems (none yet), then physics at the §5.1 slot:
+        // bodies see the batch's transforms, step, and write their poses
+        // back before the tick's own propagate.
+        if self.physics.has_work(&self.ecs) {
+            scene::propagate(&mut self.ecs);
+            self.physics
+                .step(&mut self.ecs, self.config.fixed_dt, &self.subscriptions);
+            // A body command counted as applied above may fail here.
+            let failed = self.physics_rejections();
+            rejected += failed;
+            applied = applied.saturating_sub(failed);
+            self.physics_events(next_tick);
+        }
 
         // Deferred structural changes.
         for e in self.ecs.flush_deferred() {
@@ -832,6 +867,7 @@ impl World {
         // Transform/hierarchy work for the tick; new entities start with
         // PrevWorld == current so they do not interpolate from the origin.
         scene::propagate(&mut self.ecs);
+        self.physics.record(&self.ecs);
         self.seed_prev_world();
         self.apply_teleports();
 
@@ -881,6 +917,57 @@ impl World {
                     prev.0 = Transform::from_matrix(wt.matrix);
                 }
             }
+        }
+    }
+
+    /// Physics rejections become diagnostics: a command's carries its batch
+    /// index; a component the sync could not realise carries `u32::MAX`.
+    fn physics_rejections(&mut self) -> u32 {
+        let mut count = 0;
+        for r in self.physics.take_rejections() {
+            let (code, component) = match r.kind {
+                RejectionKind::MissingBody => {
+                    (DiagnosticCode::MISSING_COMPONENT, ComponentId::RIGID_BODY)
+                }
+                RejectionKind::NotDynamic
+                | RejectionKind::NotKinematic
+                | RejectionKind::NotFinite => {
+                    (DiagnosticCode::INVALID_PAYLOAD, ComponentId::RIGID_BODY)
+                }
+                RejectionKind::MeshOnMovingBody => {
+                    (DiagnosticCode::INVALID_PAYLOAD, ComponentId::COLLIDER)
+                }
+                RejectionKind::MeshUnavailable => {
+                    (DiagnosticCode::MESH_UNAVAILABLE, ComponentId::COLLIDER)
+                }
+            };
+            if r.index != u32::MAX {
+                count += 1;
+            }
+            self.diagnostics.push(Diagnostic {
+                command_index: r.index,
+                lane: Lane::Simulation,
+                code,
+                entity: r.entity,
+                component,
+                message: r.message,
+            });
+        }
+        count
+    }
+
+    /// The step's contacts on the physics lane (readable by
+    /// `after_physics_events` this tick, drained next).
+    fn physics_events(&mut self, tick: Tick) {
+        for e in self.physics.events() {
+            let payload = match *e {
+                PhysicsEvent::CollisionEnter(c) => EventPayload::CollisionEnter(c),
+                PhysicsEvent::CollisionStay(c) => EventPayload::CollisionStay(c),
+                PhysicsEvent::CollisionExit(c) => EventPayload::CollisionExit(c),
+                PhysicsEvent::TriggerEnter(c) => EventPayload::TriggerEnter(c),
+                PhysicsEvent::TriggerExit(c) => EventPayload::TriggerExit(c),
+            };
+            self.events.push(Event { tick, payload });
         }
     }
 

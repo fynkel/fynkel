@@ -33,7 +33,7 @@ use fynkel_cooked::{ChunkFile, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE
 use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
 use fynkel_core::SceneDescription;
-pub use fynkel_document::project::{Quality, QualityProfile};
+pub use fynkel_document::project::{PhysicsSettings, Quality, QualityProfile};
 pub use fynkel_document::AuthoredBehaviour;
 use fynkel_document::{describe, Document, DocumentKind, Scene, SchemaSet};
 use fynkel_wire::material::decode_material;
@@ -53,6 +53,8 @@ pub struct ProjectInfo {
     /// The project's input actions as cooked (the world's binding table
     /// on load; empty when the project declares none).
     pub input_actions: Vec<ActionSpec>,
+    /// The project's `physics` block as cooked (defaults when absent).
+    pub physics: PhysicsSettings,
 }
 
 /// One asset as the index lists it.
@@ -171,6 +173,7 @@ impl CacheIndex {
                     })
                 })
                 .collect(),
+            physics: PhysicsSettings::from_json(&p["physics"]),
         });
         Ok(CacheIndex {
             root: cache_dir.to_path_buf(),
@@ -441,6 +444,59 @@ impl Assets {
                     .sum::<u64>(),
             evictions: s.evictions,
         }
+    }
+
+    /// Registers the mesh of every `shape: mesh` collider in `scene` with
+    /// the physics adapter (M3-08), so the world's first step can build
+    /// them. Returns the registered mesh count; a mesh that cannot be
+    /// loaded or is over the triangle limit is a diagnostic
+    /// (the store's, or the adapter's reason as `FYN-R0007`) and the
+    /// collider is skipped at the step
+    /// (`MESH_UNAVAILABLE`).
+    pub fn register_mesh_colliders(
+        &self,
+        scene: &SceneDescription,
+        physics: &mut fynkel_core::Physics,
+    ) -> (usize, Vec<Diagnostic>) {
+        use fynkel_core::components::ComponentValue;
+        use fynkel_core::ColliderShape;
+        let mut registered = 0;
+        let mut diags = Vec::new();
+        let mut seen = HashSet::new();
+        for e in &scene.entities {
+            for c in &e.components {
+                let ComponentValue::Collider(c) = c else {
+                    continue;
+                };
+                if c.shape != ColliderShape::Mesh {
+                    continue;
+                }
+                let Some(key) = &c.mesh else {
+                    continue;
+                };
+                if !seen.insert(key.clone()) || physics.has_mesh(key) {
+                    continue;
+                }
+                match self.mesh(key) {
+                    Ok(m) => {
+                        let positions: Vec<[f32; 3]> =
+                            m.vertices.iter().map(|v| v.position).collect();
+                        match physics.register_mesh(key.clone(), &positions, &m.indices) {
+                            Ok(_) => registered += 1,
+                            Err(msg) => diags.push(
+                                Diagnostic::error(
+                                    Code::RUNTIME_PAYLOAD_MALFORMED,
+                                    format!("mesh collider {key}: {msg}"),
+                                )
+                                .with_id(key.to_string()),
+                            ),
+                        }
+                    }
+                    Err(d) => diags.push(d),
+                }
+            }
+        }
+        (registered, diags)
     }
 
     /// Keeps `ids` (a scene's closure) resident until the returned token is

@@ -117,6 +117,12 @@ abstract class Behaviour {
   void set<T extends WireRecord>(T value) => gameObject.set(value);
   void remove<T extends WireRecord>() => gameObject.remove<T>();
 
+  /// The object's rigid body (M3-08): [GameObject.applyForce] and friends.
+  void applyForce(Vec3 force) => gameObject.applyForce(force);
+  void applyImpulse(Vec3 impulse) => gameObject.applyImpulse(impulse);
+  void setLinearVelocity(Vec3 velocity) => gameObject.setLinearVelocity(velocity);
+  BodyState? bodyState() => gameObject.bodyState();
+
   /// Desired state. Setting it queues `onEnable`/`onDisable` for the next
   /// safe boundary; [isActive] says what the driver has applied.
   bool get enabled => _enabled;
@@ -173,6 +179,16 @@ abstract class Behaviour {
 
   /// Optional post-physics hook ([wantsAfterPhysics]).
   void afterPhysics(AfterPhysicsContext context) {}
+
+  /// Contact callbacks (M3-08): right after the tick's step, for every
+  /// contact one of whose sides is this behaviour's object. `contact.other(
+  /// gameObject.entity)` is the other side; `world.byEntity` finds its
+  /// object. Writes here are commands for the next tick.
+  void onCollisionEnter(Contact contact) {}
+  void onCollisionStay(Contact contact) {}
+  void onCollisionExit(Contact contact) {}
+  void onTriggerEnter(Contact contact) {}
+  void onTriggerExit(Contact contact) {}
 
   /// Presentation-rate gameplay logic, once per host frame.
   void update(UpdateContext context) {}
@@ -415,12 +431,45 @@ class _BehaviourSystem {
     });
   }
 
-  /// Right after `step()`, for behaviours that opted in.
+  /// Right after `step()`: the contact callbacks of the objects involved
+  /// (in contact order, side `a` then `b`), then `afterPhysics` for the
+  /// behaviours that opted in.
   void afterPhysics(int tick, List<Contact> contacts) {
+    if (contacts.isNotEmpty) _dispatchContacts(contacts);
     final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
     _run(ctx.context, (b) {
       if (b.wantsAfterPhysics) b.afterPhysics(ctx);
     });
+  }
+
+  void _dispatchContacts(List<Contact> contacts) {
+    if (_all.isEmpty) return;
+    world.context.run(() {
+      for (final c in contacts) {
+        _contactTo(world._byEntity[c.a], c);
+        if (c.b != c.a) _contactTo(world._byEntity[c.b], c);
+      }
+    });
+  }
+
+  static void _contactTo(GameObject? go, Contact c) {
+    if (go == null || go._behaviours.isEmpty) return;
+    // A callback may attach or destroy: iterate a copy of the short list.
+    for (final b in go._behaviours.toList(growable: false)) {
+      if (!b._active || b._destroyRequested) continue;
+      switch (c.kind) {
+        case ContactKind.collisionEnter:
+          b.onCollisionEnter(c);
+        case ContactKind.collisionStay:
+          b.onCollisionStay(c);
+        case ContactKind.collisionExit:
+          b.onCollisionExit(c);
+        case ContactKind.triggerEnter:
+          b.onTriggerEnter(c);
+        case ContactKind.triggerExit:
+          b.onTriggerExit(c);
+      }
+    }
   }
 
   /// Once per host frame: every `update`, then every `lateUpdate`.

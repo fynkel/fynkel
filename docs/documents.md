@@ -81,7 +81,8 @@ Every authoring diagnostic is the §14.2 record
 `column`, `suggestion`, `related`. Absent fields are omitted in JSON. Code
 namespaces: `FYN-D` documents, `FYN-A` assets, `FYN-P` project, `FYN-G`
 codegen, `FYN-E` editing (authoring commands), `FYN-B` behaviours (the Dart
-SDK attaching authored behaviours at load), `FYN-R` runtime loading (the
+SDK attaching authored behaviours at load), `FYN-H` physics (scene rules the
+component schemas cannot express, [physics.md](physics.md)), `FYN-R` runtime loading (the
 cooked cache: `R0001` unreadable, `R0002` stale — cooked for another schema
 fingerprint, `R0003` asset not in the cache, `R0004` its cook failed,
 `R0005` object unreadable, `R0006` chunk missing, `R0007` payload
@@ -127,6 +128,7 @@ semantic rules on top of the schema pass:
 | `FYN-D0207` | type is not authorable (e.g. `fynkel.Name` — set `name` instead) |
 | `FYN-D0208` | the same child listed twice |
 | `FYN-D0209` | malformed entity/component entry skipped by the view |
+| `FYN-H0001` … `H0004` | physics rules (M3-08, [physics.md](physics.md)): a `fynkel.RigidBody` value the runtime would reject, a `fynkel.Collider` value (size per shape, friction, restitution, `mesh` missing), a `shape: mesh` collider on a dynamic or kinematic body, a dynamic body without a collider (warning) |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule
@@ -781,6 +783,7 @@ makes a directory a project. It is a document (envelope, strict JSON,
 | `startupScene` | `{ asset }` — required; must resolve to a scene document in the asset database |
 | `assets` | The asset root, relative to the project directory (default `assets`; no `..`, no absolute path) |
 | `inputActions` | The game's actions (§5.1, [input.md](input.md)): `name → { type: button \| axis1d \| axis2d, description?, bindings: ["<device>:<control>", …] }` — `keyboard:WASD`, `keyboard:Space`, `mouse:delta`, `gamepad:leftStick`, `touch:overlay/jump`, …; every binding is checked against the runtime's grammar (`FYN-P0009`). The cook copies the block into the cache index; the runtime compiles it into the world's binding table when the project loads (M3-07) |
+| `physics` | `{ gravity: [x, y, z], layers: [name, …] }` ([physics.md](physics.md), M3-08): the world's gravity (default `[0, -9.81, 0]`) and up to 32 unique collision layer names (bit `i` of a collider's `layer`/`mask`; default `["default"]`) — `FYN-P0013` on more than 32, an empty or duplicate name, or a non-finite gravity. The cook copies the block into the cache index; the world applies it when the project loads |
 | `quality` | `{ default, profiles: { name → { shadows, shadowResolution, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults (shadows on, 2048, MSAA 4, scale 1, anisotropy 8, 4096). The cook copies the block into the cache index and the renderer reads it there (`docs/renderer.md` — MSAA runs at 1 or 4, the other values are clamped); `textureMaxSize` is for the cook |
 | `components` | The component registry: `typeId → { kind: native \| behaviour, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
 | `targets` | `macos \| ios \| android \| windows \| linux \| web → { enabled (default true), profile (default dev) }`; all disabled is a warning |
@@ -815,7 +818,8 @@ profile, `P0006` (warning) no enabled target, `P0007` asset root escapes the
 project or is missing, `P0008` malformed entry, `P0009` an input binding
 the runtime grammar rejects (at `/inputActions/<name>/bindings/<i>`,
 [input.md](input.md)), `P0010` no lock, `P0011` lock mismatch, `P0012`
-malformed lock.
+malformed lock, `P0013` a `physics` block the runtime cannot apply (layers,
+gravity).
 
 ## New projects: `fynkel create`
 
@@ -1043,5 +1047,7 @@ expectations per kind; `material/` also holds custom manifests the material
 fixtures reference), `project/` (a complete project: `fynkel.project.json`,
 the lock this build writes — `FYNKEL_UPDATE_FIXTURES=1 cargo test -p
 fynkel_document --test project` refreshes it — and an asset tree with a
-scene, a prefab instance, a glTF mesh, a texture and a material). Every kind
+scene, a prefab instance, a glTF mesh, a texture and a material; since
+M3-08 the scene also has a static Floor collider and a dynamic Crate B that
+lands on it, with `physics.layers` `["default", "props"]`). Every kind
 added later extends this corpus.

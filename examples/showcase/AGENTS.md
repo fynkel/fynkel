@@ -109,6 +109,8 @@ Component types:
 - `fynkel.Camera` — `projection`, `fov_y` (radians), `ortho_height`, `near`, `far`, `priority`, `exposure_mode` (`auto` meters the sun; `manual` uses `exposure`, EV100).
 - `fynkel.DirectionalLight` (`intensity` in lux), `fynkel.PointLight` / `fynkel.SpotLight` (`intensity` in candela, `range` in metres; spot `inner_angle` / `outer_angle` in radians) — `color` is linear RGB.
 - `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply.
+- `fynkel.RigidBody` — `body_type` `static` | `dynamic` | `kinematic`, `mass` (kg, dynamic), `linear_damping`, `angular_damping`, `gravity_scale`, `ccd`. Physics owns a dynamic body's transform; a kinematic one follows the transform your behaviour writes and pushes dynamic bodies.
+- `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `layer`/`mask` (bits of `physics.layers`). Alone it is static geometry; with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
 - `game.*` — this project's behaviours (Dart classes in `lib/game/`); `data` holds the `@Expose` fields, validated by `schemas/behaviours/<id>.schema.json`.
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for
@@ -192,6 +194,38 @@ world.spawn(name: 'Twin', transform: t)..add(mesh)..add(light);   // writes wait
   light range) is a diagnostic on the next tick and the read falls back.
 - Not for a loop over thousands of objects every tick; a behaviour on its
   own object is the intended use.
+
+## Physics (Rapier, native; the Dart side sends commands and reads state)
+
+`fynkel.project.json` → `physics`: `gravity` `[x,y,z]` and `layers` (up
+to 32 names; `world.layerMask(['props'])` turns names into collider
+`layer`/`mask` bits). Bodies and colliders are components (above); a
+behaviour on a dynamic body drives it with forces, never by writing its
+transform (a simulation-lane transform write is a teleport, a presentation
+write is rejected `FYN-…physics_owned`):
+
+```dart
+applyImpulse(const Vec3(0, 5, 0));                 // also applyForce, applyTorque, setLinearVelocity, …
+gameObject.setKinematicTarget(p, q);                // kinematic bodies; teleport(p) for any body
+final v = bodyState()?.linearVelocity;             // one query; null without a RigidBody
+
+@override
+void onCollisionEnter(Contact c) {                  // also Stay/Exit, onTriggerEnter/Exit
+  final other = world.byEntity(c.other(gameObject.entity));
+  if (c.impulse > 10) crack(c.point, c.normalFor(gameObject.entity));
+}
+
+final hit = world.raycast(origin, direction, maxDistance: 20, mask: world.layerMask(['default']));
+world.overlap(ColliderShape.sphere, const Vec3(2, 0, 0), centre);   // also shapeCast, raycastAll
+```
+
+Contact callbacks run right after each tick's step on the behaviours of
+both objects; `Contact` carries `point`, `normal` (a → b) and `impulse`
+(0 for triggers and exits). `fynkel validate` checks values (`FYN-H0001`/
+`H0002`), a mesh collider on a moving body (`H0003`) and a dynamic body
+without a collider (`H0004`, warning). `fynkel test --headless` prints the
+run's bodies, colliders and contact counts; the simulation is deterministic
+per platform (same scene, same commands → same checksum).
 
 ## Input (actions, never keys)
 

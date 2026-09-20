@@ -16,7 +16,7 @@ use fynkel_core::components::{
 };
 use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
-use fynkel_core::Name;
+use fynkel_core::{BodyType, Collider, ColliderShape, Name, RigidBody};
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
 use glam::{Quat, Vec3, Vec4};
@@ -130,6 +130,9 @@ fn fixtures_match_generated_codecs() {
         &ContactEvent {
             a: e(1, 1),
             b: e(2, 1),
+            point: Vec3::new(0.5, 1.0, -0.25),
+            normal: Vec3::Y,
+            impulse: 3.5,
         },
     );
     check(
@@ -285,6 +288,76 @@ fn fixtures_match_generated_codecs() {
             size: 16,
             tick_lo: 0xdead_beef,
             flags: 0,
+        },
+    );
+    check(
+        "RigidBody",
+        &RigidBody {
+            body_type: BodyType::Kinematic,
+            mass: 2.5,
+            linear_damping: 0.1,
+            angular_damping: 0.2,
+            gravity_scale: 0.5,
+            ccd: true,
+        },
+    );
+    check(
+        "Collider",
+        &Collider {
+            shape: ColliderShape::Mesh,
+            size: Vec3::new(0.5, 1.0, 0.25),
+            mesh: Some(AssetRef::with_sub(mesh_id, "mesh/0")),
+            offset: Vec3::new(0.0, 0.5, 0.0),
+            friction: 0.6,
+            restitution: 0.1,
+            is_sensor: true,
+            layer: 2,
+            mask: 0xffff_fffd,
+        },
+    );
+    check(
+        "BodyCommandRecord",
+        &BodyCommandRecord {
+            entity: e(1, 1),
+            op: BodyOp::SetKinematicTarget,
+            vector: Vec3::new(1.0, 2.0, 3.0),
+            rotation: Quat::from_xyzw(0.0, 0.5, 0.0, 0.5),
+        },
+    );
+    check(
+        "PhysicsQueryRecord",
+        &PhysicsQueryRecord {
+            id: 7,
+            kind: PhysicsQueryKind::ShapeCast,
+            shape: ColliderShape::Sphere,
+            size: Vec3::new(0.25, 0.0, 0.0),
+            origin: Vec3::new(0.0, 3.0, 0.0),
+            rotation: Quat::IDENTITY,
+            direction: Vec3::NEG_Z,
+            max_distance: 100.0,
+            mask: u32::MAX,
+            exclude: Some(e(2, 1)),
+            max_hits: 4,
+            hit_sensors: false,
+        },
+    );
+    check(
+        "PhysicsHitRecord",
+        &PhysicsHitRecord {
+            query: 7,
+            entity: e(3, 1),
+            point: Vec3::new(0.0, 3.0, -4.5),
+            normal: Vec3::Z,
+            distance: 4.5,
+        },
+    );
+    check(
+        "BodyStateRecord",
+        &BodyStateRecord {
+            entity: e(1, 1),
+            linear_velocity: Vec3::new(0.0, -9.81, 0.0),
+            angular_velocity: Vec3::new(0.0, 1.0, 0.0),
+            sleeping: false,
         },
     );
 }

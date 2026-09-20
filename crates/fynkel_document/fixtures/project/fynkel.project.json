@@ -54,6 +54,17 @@
       }
     }
   },
+  "physics": {
+    "gravity": [
+      0,
+      -9.81,
+      0
+    ],
+    "layers": [
+      "default",
+      "props"
+    ]
+  },
   "components": {
     "fynkel.Transform": {
       "kind": "native"
@@ -74,6 +85,12 @@
       "kind": "native"
     },
     "fynkel.Environment": {
+      "kind": "native"
+    },
+    "fynkel.RigidBody": {
+      "kind": "native"
+    },
+    "fynkel.Collider": {
       "kind": "native"
     },
     "game.Spinner": {

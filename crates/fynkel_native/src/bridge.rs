@@ -2,8 +2,11 @@
 
 use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, EventKind};
 use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
+use fynkel_core::physics::{Hit, QueryKind, QuerySpec};
 use fynkel_core::schema::*;
-use fynkel_core::{Command, Diagnostic, Event, EventPayload, Rejected, SnapshotRecord, World};
+use fynkel_core::{
+    BodyCommand, Command, Diagnostic, Event, EventPayload, Rejected, SnapshotRecord, World,
+};
 use fynkel_scene::Transform;
 use fynkel_wire::{decode_component_value, get_u32, WireRecord};
 
@@ -110,6 +113,30 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                     component: ComponentId(c.component),
                 }
             }
+            CommandKind::Body => {
+                let c = BodyCommandRecord::decode(body, tail).map_err(bad)?;
+                let (v, r) = (c.vector, c.rotation);
+                let op = match c.op {
+                    BodyOp::ApplyForce => BodyCommand::ApplyForce(v),
+                    BodyOp::ApplyImpulse => BodyCommand::ApplyImpulse(v),
+                    BodyOp::ApplyTorque => BodyCommand::ApplyTorque(v),
+                    BodyOp::ApplyTorqueImpulse => BodyCommand::ApplyTorqueImpulse(v),
+                    BodyOp::SetLinearVelocity => BodyCommand::SetLinearVelocity(v),
+                    BodyOp::SetAngularVelocity => BodyCommand::SetAngularVelocity(v),
+                    BodyOp::SetKinematicTarget => BodyCommand::SetKinematicTarget {
+                        position: v,
+                        rotation: r,
+                    },
+                    BodyOp::Teleport => BodyCommand::Teleport {
+                        position: v,
+                        rotation: r,
+                    },
+                };
+                Command::Body {
+                    entity: c.entity,
+                    op,
+                }
+            }
         },
     )
 }
@@ -182,11 +209,21 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>) {
             push(out, &MissedDeadlineEvent { dropped_seconds }, &mut strings)
         }
         EventPayload::SceneReady => push(out, &SceneReadyEvent, &mut strings),
-        EventPayload::CollisionEnter { a, b }
-        | EventPayload::CollisionStay { a, b }
-        | EventPayload::CollisionExit { a, b }
-        | EventPayload::TriggerEnter { a, b }
-        | EventPayload::TriggerExit { a, b } => push(out, &ContactEvent { a, b }, &mut strings),
+        EventPayload::CollisionEnter(c)
+        | EventPayload::CollisionStay(c)
+        | EventPayload::CollisionExit(c)
+        | EventPayload::TriggerEnter(c)
+        | EventPayload::TriggerExit(c) => push(
+            out,
+            &ContactEvent {
+                a: c.a,
+                b: c.b,
+                point: c.point,
+                normal: c.normal,
+                impulse: c.impulse,
+            },
+            &mut strings,
+        ),
     }
     debug_assert!(strings.is_empty(), "event bodies carry no strings");
 }
@@ -213,6 +250,7 @@ pub const QUERY_PARENT: u32 = 3;
 pub const QUERY_NAME: u32 = 4;
 pub const QUERY_ALL_ENTITIES: u32 = 5;
 pub const QUERY_COMPONENTS: u32 = 6;
+pub const QUERY_BODY: u32 = 7;
 
 pub fn query(
     world: &World,
@@ -289,10 +327,76 @@ pub fn query(
             if let Ok(v) = ecs.get::<Environment>(entity) {
                 w.component(ComponentId::ENVIRONMENT.0, &*v);
             }
+            if let Ok(v) = ecs.get::<fynkel_core::RigidBody>(entity) {
+                w.component(ComponentId::RIGID_BODY.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::Collider>(entity) {
+                w.component(ComponentId::COLLIDER.0, &*v);
+            }
+        }
+        // The body's motion state (M3-08); no body is an empty response.
+        QUERY_BODY => {
+            if let Some(s) = world.physics().body_state(entity) {
+                w.record(&BodyStateRecord {
+                    entity,
+                    linear_velocity: s.linear_velocity,
+                    angular_velocity: s.angular_velocity,
+                    sleeping: s.sleeping,
+                });
+            }
         }
         _ => return None,
     }
     Some(w.finish())
+}
+
+/// Answers a `PhysicsQueries` buffer (M3-08): one `PhysicsHitRecord` per
+/// hit, in query order, nearest first within a query; a malformed record
+/// is a protocol error, a query that cannot be answered (`mesh` shape,
+/// zero direction, non-finite values) yields no hits.
+pub fn physics_queries(world: &World, buf: &[u8], out: Vec<u8>) -> Result<Vec<u8>, ProtocolError> {
+    let (h, records, tail) = buffer::validate(buf, BufferKind::PhysicsQueries)?;
+    let size = PhysicsQueryRecord::SIZE;
+    let mut w = Writer::begin(out, BufferKind::Query);
+    let mut hits: Vec<Hit> = Vec::new();
+    for i in 0..h.record_count as usize {
+        let off = i * size;
+        if off + size > records.len() {
+            return Err(ProtocolError::Truncated { at: off });
+        }
+        let Ok(q) = PhysicsQueryRecord::decode(&records[off..off + size], tail) else {
+            return Err(ProtocolError::Truncated { at: off });
+        };
+        let spec = QuerySpec {
+            kind: match q.kind {
+                PhysicsQueryKind::Raycast => QueryKind::Raycast,
+                PhysicsQueryKind::ShapeCast => QueryKind::ShapeCast,
+                PhysicsQueryKind::Overlap => QueryKind::Overlap,
+            },
+            shape: q.shape,
+            size: q.size,
+            origin: q.origin,
+            rotation: q.rotation,
+            direction: q.direction,
+            max_distance: q.max_distance,
+            mask: q.mask,
+            exclude: q.exclude,
+            max_hits: q.max_hits,
+            hit_sensors: q.hit_sensors,
+        };
+        hits.clear();
+        world.physics().query(&spec, &mut hits);
+        for hit in &hits {
+            w.record(&PhysicsHitRecord {
+                query: q.id,
+                entity: hit.entity,
+                point: hit.point,
+                normal: hit.normal,
+                distance: hit.distance,
+            });
+        }
+    }
+    Ok(w.finish())
 }
 
 /// Decodes a host frame's raw control events. A record with an unknown

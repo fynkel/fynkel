@@ -28,6 +28,10 @@
       "$ref": "#/$defs/quality",
       "description": "Graphics quality profiles a game can switch between at run time (blueprint §15). Distinct from cook profiles, which are per build target."
     },
+    "physics": {
+      "$ref": "#/$defs/physics",
+      "description": "World gravity and the named collision layers (blueprint §9, M3-08). Absent means gravity [0, -9.81, 0] and one layer, `default`."
+    },
     "components": {
       "type": "object",
       "description": "The component registry: every component type the project's documents may use. Absent means \"every built-in type\". Native entries must exist in the loaded component schemas; behaviour entries are Dart Behaviours (M2-15) and are only recorded here for now.",
@@ -46,6 +50,28 @@
   "patternProperties": { "^x-": true },
   "unevaluatedProperties": false,
   "$defs": {
+    "physics": {
+      "type": "object",
+      "properties": {
+        "gravity": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "default": [0, -9.81, 0],
+          "description": "Metres per second squared."
+        },
+        "layers": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "maxItems": 32,
+          "uniqueItems": true,
+          "default": ["default"],
+          "description": "Collision layer names, one per bit of `fynkel.Collider.layer`/`mask` (bit i = layers[i]); `World.layerMask(names)` turns names into a mask."
+        }
+      },
+      "additionalProperties": false
+    },
     "actionName": {
       "type": "string",
       "pattern": "^[a-z][A-Za-z0-9_]{0,63}$"

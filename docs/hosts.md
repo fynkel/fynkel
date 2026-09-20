@@ -87,7 +87,18 @@ one line: `replayed test/walk.input.json (70 frames, 11 events): move held
 11 ticks, ends at (0.00, 0.00), jump pressed 2 released 2 held 4 ticks, …`.
 Behaviours do not run in the Rust host, so this proves the stream and the
 table; `hosts/headless/src/recording.rs` is the format's Rust reader and
-writer (`Recording`, `RecordedFrame`, `RecordedEvent`). Read-side:
+writer (`Recording`, `RecordedFrame`, `RecordedEvent`).
+
+Physics (M3-08, [physics.md](physics.md)): the host applies the project's
+`physics.gravity`, registers the scene's mesh colliders from the cache
+(`Assets::register_mesh_colliders`) and counts the events of every tick;
+when anything stepped, the report gains `physics: { bodies, colliders,
+mesh_colliders, collision_enter, collision_stay, collision_exit,
+trigger_enter, trigger_exit, diagnostics }` and the text mode prints
+`physics: 2 bodies, 3 colliders (0 mesh), collisions 1 enter / 0 stay / 0
+exit, triggers 0 enter / 0 exit`. The checksum covers the bodies' final
+poses, so a physics regression changes it; the fixture project's Crate B
+landing on its Floor and sleeping is a test of the crate. Read-side:
 
 ```sh
 cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json
@@ -186,6 +197,18 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `FYNKEL_QUERY_COMPONENTS` (6: every native component of an entity, each
   framed by a `ComponentHeader { component, size }`) — one query per object
   per tick; `docs/design/dart-sdk.md` §21.2.
+  Physics (M3-08, [physics.md](physics.md)): `applyForce`/`applyImpulse`/
+  `setLinearVelocity`/`setKinematicTarget`/`teleport` and friends are
+  `FYNKEL_COMMAND_BODY` (8: `BodyCommandRecord { entity, op, vector,
+  rotation }`, simulation lane only, applied by the tick's physics step),
+  `bodyState()` is `FYNKEL_QUERY_BODY` (7: one `BodyStateRecord`),
+  `raycast`/`raycastAll`/`shapeCast`/`overlap`/`physicsQuery` send a
+  `FYNKEL_BUFFER_PHYSICS_QUERIES` (8) batch of `PhysicsQueryRecord`s to
+  `fynkel_world_physics_query(world, buffer, len, &view)` and read the
+  `QUERY` buffer of `PhysicsHitRecord`s it answers with; contacts arrive as
+  `ContactEvent`s on the physics lane (`fynkel_world_after_physics_events`)
+  and reach `onCollisionEnter`/… the same tick. The load report gains
+  `physics: { gravity, layers, meshColliders }`.
 - `FynkelGameView` — the loop: a `Ticker` runs `World.frame(dt, fixedUpdate:)`
   then `controller.render(world)`; dt is clamped (`maxFrameDt`), the clock is
   re-primed when the app resumes and when the viewport attaches (a start-up

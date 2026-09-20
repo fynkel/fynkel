@@ -9,12 +9,16 @@ git — the generator is the source):
                           showcase's cube.glb and robot.glb over four
                           materials — 12 distinct (mesh, material) pairs, so
                           the renderer's draw count has a ceiling to check
-  500 rigid bodies       "Body NNN": cubes with the `body` material, static
-                          until item 8 gives them a RigidBody + Collider
+  500 rigid bodies       "Body NNN": cubes with the `body` material, each a
+                          dynamic RigidBody on a box Collider, dropped from
+                          3–7 m onto the field (item 8: the physics stress)
   300 behaviours         "Behaviour NNN": pyramids with the `behaviour`
                           material, static until item 10 attaches the 300
                           ticking Dart behaviours (and the native movers)
-  floor, sun (casting), Environment, one perspective camera over the field
+  floor (a box Collider: the ground the bodies land on), sun (casting),
+  Environment, one perspective camera over the field. The static meshes
+  carry box colliders too (5 500 colliders in the broad phase), so the
+  bodies come to rest on them as well as on the floor.
 
 The camera sits above the near edge looking across the field, so the far
 corners and the strip behind it fall outside the frustum: `culled` is never
@@ -117,6 +121,18 @@ def mesh_renderer(mesh, material, cast=True, receive=True):
         "cast_shadows": cast, "receive_shadows": receive, "visible": True}}
 
 
+def collider(size=(0.5, 0.5, 0.5), friction=0.6, layer=1):
+    return {"type": "fynkel.Collider", "version": 1, "data": {
+        "shape": "box", "size": list(size), "mesh": None, "offset": [0.0, 0.0, 0.0],
+        "friction": friction, "restitution": 0.05, "is_sensor": False, "layer": layer, "mask": 4294967295}}
+
+
+def rigid_body(mass):
+    return {"type": "fynkel.RigidBody", "version": 1, "data": {
+        "body_type": "dynamic", "mass": round(mass, 3), "linear_damping": 0.0, "angular_damping": 0.05,
+        "gravity_scale": 1.0, "ccd": False}}
+
+
 def entity(name, components):
     return uid(f"entity/{name}"), {"name": name, "parent": None, "children": [],
                                    "components": {uid(f"component/{name}/{c['type']}"): c for c in components}}
@@ -131,12 +147,13 @@ def material_doc(name):
 
 def project_doc():
     native = ["fynkel.Transform", "fynkel.MeshRenderer", "fynkel.Camera", "fynkel.DirectionalLight",
-              "fynkel.PointLight", "fynkel.SpotLight", "fynkel.Environment"]
+              "fynkel.PointLight", "fynkel.SpotLight", "fynkel.Environment", "fynkel.RigidBody", "fynkel.Collider"]
     return {
         "$schema": "https://fynkel.dev/schemas/project.schema.json", "formatVersion": 1,
         "id": str(PROJECT_ID), "name": "Fynkel Stress", "startupScene": {"asset": str(SCENE_ID)},
         "assets": "assets",
         "inputActions": {"move": {"type": "axis2d", "bindings": ["keyboard:WASD", "gamepad:leftStick", "touch:overlay/stick"]}},
+        "physics": {"gravity": [0.0, -9.81, 0.0], "layers": ["default", "bodies"]},
         "quality": {"default": "medium", "profiles": {
             "low": {"shadows": False, "msaa": 1, "renderScale": 0.75, "anisotropy": 1},
             "medium": {"shadowResolution": 2048, "msaa": 4},
@@ -174,7 +191,8 @@ def scene_doc(n_static, n_bodies, n_behaviours, seed, orbit=False):
                 {"type": "fynkel.DirectionalLight", "version": 1, "data": {"color": [1.0, 0.95, 0.85], "intensity": 10000.0, "cast_shadows": True}}])
     add("Environment", [{"type": "fynkel.Environment", "version": 1, "data": {
         "ambient_color": [0.55, 0.65, 0.9], "ambient_intensity": 2500.0, "sky": None, "sky_intensity": 0.0, "sky_rotation": 0.0}}])
-    add("Floor", [transform((0, -0.1, 0), scale=(FIELD_W + 20, 0.2, FIELD_D + 20)), mesh_renderer("cube", "floor", cast=False)])
+    add("Floor", [transform((0, -0.1, 0), scale=(FIELD_W + 20, 0.2, FIELD_D + 20)), mesh_renderer("cube", "floor", cast=False),
+                  collider()])
 
     # A jittered grid over the field for everything that stands on it.
     total = n_static + n_bodies + n_behaviours
@@ -197,12 +215,12 @@ def scene_doc(n_static, n_bodies, n_behaviours, seed, orbit=False):
         s = rng.uniform(0.4, 1.1)
         yaw = quat_axis_angle((0, 1, 0), rng.uniform(0, math.tau))
         y = s * 0.5
-        add(f"Static {n:04}", [transform((x, y, z), yaw, (s, s, s)), mesh_renderer(mesh, mat)])
+        add(f"Static {n:04}", [transform((x, y, z), yaw, (s, s, s)), mesh_renderer(mesh, mat), collider()])
     for n in range(n_bodies):
         x, z = place(i); i += 1
         s = rng.uniform(0.5, 0.9)
         add(f"Body {n:03}", [transform((x, 3.0 + rng.uniform(0, 4), z), quat_axis_angle((0, 1, 0), rng.uniform(0, math.tau)), (s, s, s)),
-                              mesh_renderer("cube", "body")])
+                              mesh_renderer("cube", "body"), rigid_body(mass=s ** 3 * 2.0), collider(friction=0.5, layer=2)])
     for n in range(n_behaviours):
         x, z = place(i); i += 1
         add(f"Behaviour {n:03}", [transform((x, 0.5, z), quat_axis_angle((0, 1, 0), rng.uniform(0, math.tau)), (0.8, 0.8, 0.8)),

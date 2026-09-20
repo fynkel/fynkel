@@ -89,6 +89,33 @@
             "visible": true
           }
         },
+        "{{c_cube_body}}": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "kinematic",
+            "mass": 0.0,
+            "linear_damping": 0.0,
+            "angular_damping": 0.0,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "{{c_cube_collider}}": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [0.5, 0.5, 0.5],
+            "mesh": null,
+            "offset": [0, 0, 0],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "layer": 1,
+            "mask": 4294967295
+          }
+        },
         "{{c_cube_spinner}}": {
           "type": "game.Spinner",
           "version": 1,
@@ -103,6 +130,112 @@
           "data": {
             "speed": 2.0,
             "jumpHeight": 1.0
+          }
+        }
+      }
+    },
+    "{{e_floor}}": {
+      "name": "Floor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "{{c_floor_transform}}": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [0, -0.5, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [20, 1, 20]
+          }
+        },
+        "{{c_floor_mesh}}": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "{{cube_id}}",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "{{material_id}}"
+            },
+            "cast_shadows": false,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "{{c_floor_collider}}": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [0.5, 0.5, 0.5],
+            "mesh": null,
+            "offset": [0, 0, 0],
+            "friction": 0.6,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "layer": 1,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "{{e_crate}}": {
+      "name": "Crate",
+      "parent": null,
+      "children": [],
+      "components": {
+        "{{c_crate_transform}}": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [-1.6, 1.6, -0.4],
+            "rotation": [0, 0.258819, 0, 0.9659258],
+            "scale": [1, 1, 1]
+          }
+        },
+        "{{c_crate_mesh}}": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "{{cube_id}}",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "{{material_id}}"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "{{c_crate_body}}": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 1.0,
+            "linear_damping": 0.0,
+            "angular_damping": 0.05,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "{{c_crate_collider}}": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [0.5, 0.5, 0.5],
+            "mesh": null,
+            "offset": [0, 0, 0],
+            "friction": 0.5,
+            "restitution": 0.1,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 4294967295
           }
         }
       }

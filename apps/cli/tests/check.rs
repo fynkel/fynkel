@@ -217,10 +217,10 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     assert_eq!(v["scene"]["name"], "Main");
     assert_eq!(v["scene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["scene"]["cache"], cache.to_str().unwrap());
-    assert_eq!(v["scene"]["entities"], 5);
+    assert_eq!(v["scene"]["entities"], 7);
     assert_eq!(v["scene"]["retained"], 7);
     assert_eq!(v["scene"]["document_diagnostics"], serde_json::json!([]));
-    assert_eq!(v["live_entities"], 5);
+    assert_eq!(v["live_entities"], 7);
     assert!(cache.join("index.json").is_file());
 
     // A scene by path resolves the enclosing project; by id it reads the
@@ -282,7 +282,7 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     ]);
     assert!(out.status.success());
     let v = json(&out);
-    assert_eq!(v["entityCount"], 5);
+    assert_eq!(v["entityCount"], 7);
     let crate_entity = &v["entities"][4];
     assert_eq!(
         crate_entity["parent"],

@@ -145,7 +145,12 @@ fn the_fixture_project_reads_and_validates_clean() {
         .unwrap();
     assert_eq!((medium.shadow_resolution, medium.msaa), (1024, 4));
     assert!(medium.shadows, "shadows default to on");
-    assert_eq!(project.components.as_ref().unwrap().len(), 8);
+    assert_eq!(project.components.as_ref().unwrap().len(), 10);
+    assert_eq!(project.physics.gravity, [0.0, -9.81, 0.0]);
+    assert_eq!(project.physics.layers, ["default", "props"]);
+    assert_eq!(project.physics.mask(&["props"]), Some(2));
+    assert_eq!(project.physics.mask(&["default", "props"]), Some(3));
+    assert_eq!(project.physics.mask(&["enemies"]), None);
     assert!(project.allows_component("fynkel.Transform"));
     assert!(project.allows_component("game.Spinner"));
     assert!(!project.allows_component("fynkel.Name"));
@@ -193,7 +198,11 @@ fn describe_json_lists_everything() {
     assert_eq!(v["assetCount"], 7);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 3);
     assert_eq!(v["quality"]["default"], "medium");
-    assert_eq!(v["components"].as_array().unwrap().len(), 8);
+    assert_eq!(v["components"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        v["physics"]["layers"],
+        serde_json::json!(["default", "props"])
+    );
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     assert_eq!(v["lock"]["schemaFingerprint"], lock.schema_fingerprint);
 }
@@ -420,6 +429,58 @@ fn input_bindings_are_checked_by_the_runtime_grammar() {
     );
     assert_eq!(bad[3].0, "/inputActions/jump/bindings/2");
     assert!(report.has_errors());
+}
+
+#[test]
+fn physics_layers_and_gravity_are_checked() {
+    let t = Temp::new("physics");
+    t.edit_project(|v| {
+        let mut layers: Vec<String> = (0..33).map(|i| format!("layer{i}")).collect();
+        layers[5] = "layer2".into();
+        layers[7] = String::new();
+        v["physics"]["layers"] = serde_json::json!(layers);
+        v["physics"]["gravity"] = serde_json::json!([0, -9.81]);
+    });
+    let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
+    let bad: Vec<(String, String)> = report
+        .diagnostics
+        .iter()
+        .map(|d| (d.pointer.clone().unwrap_or_default(), d.message.clone()))
+        .collect();
+    // The schema reports the short gravity (once); the layer rules are
+    // `FYN-P0013`.
+    assert!(bad.iter().any(|(p, _)| p == "/physics/gravity"), "{bad:?}");
+    assert_eq!(
+        report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code.as_str() == "FYN-P0013")
+            .count(),
+        3,
+        "{bad:?}"
+    );
+    assert!(bad
+        .iter()
+        .any(|(p, m)| p == "/physics/layers" && m.contains("33 names")));
+    assert!(bad
+        .iter()
+        .any(|(p, m)| p == "/physics/layers/5" && m.contains("twice")));
+    assert!(bad
+        .iter()
+        .any(|(p, m)| p == "/physics/layers/7" && m.contains("empty")));
+    assert!(report.has_errors());
+    // A project without the block validates and gets the defaults.
+    let t = Temp::new("physics-default");
+    t.edit_project(|v| {
+        v.as_object_mut().unwrap().remove("physics");
+    });
+    let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
+    assert!(!report.has_errors(), "{:#?}", report.diagnostics);
+    let p = report.project.unwrap();
+    assert_eq!(
+        p.physics,
+        fynkel_document::project::PhysicsSettings::default()
+    );
 }
 
 #[test]

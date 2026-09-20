@@ -663,7 +663,7 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert_eq!(info["kind"], "JSON");
     assert_eq!(info["documentKind"], "scene");
     assert_eq!(info["expanded"], true);
-    assert_eq!(info["entities"], 5);
+    assert_eq!(info["entities"], 7);
     assert_eq!(info["instances"], 1);
     assert_eq!(
         info["behaviourTypes"],
@@ -671,7 +671,7 @@ fn cook_project_expands_scenes_and_records_the_project() {
     );
     let scene: serde_json::Value = serde_json::from_slice(c.read(1, 1 << 20).unwrap()).unwrap();
     let entities = scene["entities"].as_object().unwrap();
-    assert_eq!(entities.len(), 5);
+    assert_eq!(entities.len(), 7);
     let host = &entities["c0000000-0000-4000-8000-0000000000e2"];
     assert!(host.get("prefab").is_none(), "expanded: {host}");
     let child = host["children"][0].as_str().unwrap();

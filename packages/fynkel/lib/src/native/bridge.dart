@@ -16,7 +16,7 @@ export 'fynkel_bindings.g.dart' show FynkelStatus;
 
 enum CommandLane { simulation, presentation }
 
-enum QueryKind { transform, children, parent, name, allEntities, components }
+enum QueryKind { transform, children, parent, name, allEntities, components, body }
 
 class FramePlan {
   const FramePlan(this.steps, this.droppedSeconds, this.clamped, this.alpha);
@@ -261,6 +261,7 @@ class NativeWorld {
   final _afterPhysicsView = _ViewCache();
   final _queryView = _ViewCache();
   final _inputView = _ViewCache();
+  final _physicsView = _ViewCache();
 
   WireBuffer _wrap(FynkelBufferView v, _ViewCache cache) {
     if (v.length == 0) return WireBuffer.empty;
@@ -310,6 +311,26 @@ class NativeWorld {
     final b = _wrap(_view.ref, _queryView);
     assert(b.requestId == _requestId);
     return b;
+  }
+
+  /// Answers a `PhysicsQueries` buffer (the first [length] bytes of
+  /// [bytes], M3-08): one memcpy into the reused scratch, one FFI call; the
+  /// hits come back as `PhysicsHitRecord`s in a query buffer read in
+  /// place, valid until the next query or mutating call.
+  WireBuffer physicsQuery(Uint8List bytes, int length) {
+    if (length > _scratchLen) {
+      if (_scratch != nullptr) calloc.free(_scratch);
+      _scratchLen = length * 2;
+      _scratch = calloc<Uint8>(_scratchLen);
+      _scratchView = _scratch.asTypedList(_scratchLen);
+    }
+    _scratchView.setRange(0, length, bytes);
+    dartCopies++;
+    dartBytesCopied += length;
+    ffiCalls++;
+    final s = fynkel_world_physics_query(_w, _scratch, length, _view);
+    _check(s, 'physics_query');
+    return _wrap(_view.ref, _physicsView);
   }
 
   /// `fynkel_world_load_project`: the startup scene of the cooked cache at

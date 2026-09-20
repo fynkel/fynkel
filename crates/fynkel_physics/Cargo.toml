@@ -1,0 +1,15 @@
+[package]
+name = "fynkel_physics"
+description = "Fynkel physics: the RigidBody/Collider components and the Rapier adapter that steps them inside the fixed tick (blueprint §9, §19.2d item 8). Fynkel-owned components and handles; Rapier never crosses the ABI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fynkel_contracts.workspace = true
+fynkel_schema_derive.workspace = true
+fynkel_ecs.workspace = true
+fynkel_scene.workspace = true
+glam.workspace = true
+rapier3d.workspace = true

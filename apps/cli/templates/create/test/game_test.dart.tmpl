@@ -99,4 +99,55 @@ void main() {
     expect(game.world.componentsOf(twin.entity).map((c) => c.runtimeType), [Transform, Name, MeshRenderer, PointLight]);
     expect(sun.has<DirectionalLight>(), isFalse);
   });
+
+  test('the crate falls onto the floor and the cube pushes it', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final world = game.world;
+    final crate = world.attach(world.allEntities().firstWhere((e) => world.nameOfEntity(e) == 'Crate'));
+    final landings = crate.addBehaviour(_Landings());
+    final cube = world.behaviours.whereType<Mover>().single.gameObject;
+    expect(game.report.physics.layers, ['default', 'props']);
+
+    for (var i = 0; i < 180; i++) {
+      game.frame(1 / 60);
+    }
+    expect(crate.get<RigidBody>()!.bodyType, BodyType.dynamic);
+    expect(crate.transform.position.y, closeTo(0.5, 0.05), reason: 'resting on the floor');
+    expect(landings.floorHits, greaterThanOrEqualTo(1));
+    expect(landings.lastImpulse, greaterThan(0));
+    final rest = crate.bodyState()!;
+    expect(rest.sleeping, isTrue, reason: '$rest');
+    expect(cube.bodyState(), isNotNull, reason: 'the cube is a kinematic body');
+
+    // A ray from above finds the crate on the `props` layer, then the floor.
+    final from = Vec3(crate.transform.position.x, 5, crate.transform.position.z);
+    final hits = world.raycastAll(from, const Vec3(0, -1, 0));
+    expect(hits.map((h) => world.nameOfEntity(h.entity)), ['Crate', 'Floor']);
+    expect(world.raycast(from, const Vec3(0, -1, 0), mask: world.layerMask(['default']))!.entity, isNot(crate.entity));
+
+    // Teleport the crate in front of the cube and walk into it: the
+    // kinematic cube pushes the dynamic crate along -z.
+    crate.teleport(Vec3(cube.transform.position.x, 0.5, cube.transform.position.z - 1.2));
+    game.frame(1 / 60);
+    final before = crate.transform.position.z;
+    // W held for a second, as a recording: the first frame presses it.
+    InputRecording([
+      for (var i = 0; i < 60; i++)
+        RecordedFrame(1 / 60, i == 0 ? const [InputEvent.down(InputDevice.keyboard, 'W')] : const []),
+    ]).replay(world);
+    expect(crate.transform.position.z, lessThan(before - 0.3), reason: 'pushed');
+  });
+}
+
+/// Counts the crate's landings on the floor.
+class _Landings extends Behaviour {
+  int floorHits = 0;
+  double lastImpulse = 0;
+
+  @override
+  void onCollisionEnter(Contact contact) {
+    if (world.nameOfEntity(contact.other(gameObject.entity)) == 'Floor') floorHits++;
+    lastImpulse = contact.impulse;
+  }
 }

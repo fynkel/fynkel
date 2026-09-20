@@ -134,6 +134,23 @@ impl Code {
     pub const LOCK_MISMATCH: Code = Code("FYN-P0011");
     /// The lock file is not valid (JSON, schema).
     pub const LOCK_MALFORMED: Code = Code("FYN-P0012");
+    /// `physics.layers` has more than 32 names, a duplicate, or an empty
+    /// name; `physics.gravity` is not three finite numbers (M3-08).
+    pub const PROJECT_PHYSICS: Code = Code("FYN-P0013");
+
+    // Physics (`FYN-H`, blueprint §9, §19.2d item 8): scene rules the
+    // component schemas cannot express.
+    /// A `fynkel.RigidBody` value the runtime would reject (mass, damping).
+    pub const PHYSICS_BODY_VALUE: Code = Code("FYN-H0001");
+    /// A `fynkel.Collider` value the runtime would reject (size per shape,
+    /// friction, restitution, a mesh collider without `mesh`).
+    pub const PHYSICS_COLLIDER_VALUE: Code = Code("FYN-H0002");
+    /// A `shape: mesh` collider on a dynamic or kinematic body: mesh
+    /// colliders are static only.
+    pub const PHYSICS_MESH_ON_MOVING_BODY: Code = Code("FYN-H0003");
+    /// A dynamic `RigidBody` without a `Collider` (warning): it falls
+    /// through everything.
+    pub const PHYSICS_BODY_WITHOUT_COLLIDER: Code = Code("FYN-H0004");
 
     // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
     /// The transaction's base revision is not the document's current one.

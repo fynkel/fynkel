@@ -88,6 +88,24 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 /// Spawns the cooked scene, retains its closure and builds the report.
 fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outcome {
     let cache = cache_json(&assets);
+    // Physics (M3-08): the project's gravity, and every mesh collider's
+    // mesh registered before the first step builds the colliders.
+    let physics = {
+        let core = w.core_mut();
+        if let Some(p) = assets.project() {
+            core.physics_mut()
+                .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
+        }
+        let (meshes, diags) =
+            assets.register_mesh_colliders(&scene.description, core.physics_mut());
+        let gravity = core.physics().gravity();
+        json!({
+            "gravity": [gravity.x, gravity.y, gravity.z],
+            "layers": assets.project().map(|p| p.physics.layers.clone()).unwrap_or_default(),
+            "meshColliders": meshes,
+            "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
+        })
+    };
     match w.core_mut().load_scene(&scene.description) {
         Ok(loaded) => {
             let residency = assets.retain(&scene.closure);
@@ -123,6 +141,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outco
                     },
                     "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
                     "input": input,
+                    "physics": physics,
                 }),
             }
         }

@@ -654,3 +654,250 @@ fn world_desc_and_entity_world_id() {
     unsafe { fynkel_world_begin_frame(h.w, 0.3, &mut plan) };
     assert_eq!(plan.steps, 1);
 }
+
+/// A `PhysicsQueries` buffer with one raycast down the Y axis from `origin`.
+fn raycast_buffer(id: u32, origin: Vec3, exclude: Option<Entity>) -> Vec<u8> {
+    let mut w = Writer::begin(Vec::new(), BufferKind::PhysicsQueries);
+    w.record(&PhysicsQueryRecord {
+        id,
+        kind: PhysicsQueryKind::Raycast,
+        shape: fynkel_core::ColliderShape::Box,
+        size: Vec3::ZERO,
+        origin,
+        rotation: glam::Quat::IDENTITY,
+        direction: Vec3::NEG_Y,
+        max_distance: 100.0,
+        mask: u32::MAX,
+        exclude,
+        max_hits: 8,
+        hit_sensors: false,
+    });
+    w.finish()
+}
+
+#[test]
+fn physics_bodies_commands_queries_and_contacts() {
+    use fynkel_core::components::ComponentValue;
+    use fynkel_core::{Collider, RigidBody};
+    let h = Host::new();
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (1, spawn(1, 0.0, None, "floor")),
+            (
+                1,
+                SpawnCommand {
+                    temp_id: 2,
+                    transform: Transform::from_position(Vec3::new(0.0, 3.0, 0.0)),
+                    parent: None,
+                    name: "crate".into(),
+                }
+            ),
+        ],
+    );
+    h.step();
+    let ids = h.spawned();
+    let (floor, krate) = (ids[0], ids[1]);
+
+    // Static floor: a collider alone. The crate: a dynamic body on a box.
+    let floor_shape = Collider {
+        size: Vec3::new(10.0, 0.5, 10.0),
+        offset: Vec3::new(0.0, -0.5, 0.0),
+        ..Collider::default()
+    };
+    let (s, r) = h.submit(
+        Lane::Simulation,
+        &set_component(floor, &ComponentValue::Collider(floor_shape.clone())),
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            krate,
+            &ComponentValue::RigidBody(RigidBody {
+                mass: 2.0,
+                ..RigidBody::default()
+            }),
+        ),
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(krate, &ComponentValue::Collider(Collider::default())),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+
+    // The components come back through QUERY_COMPONENTS in id order.
+    let (s, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, krate);
+    assert_eq!(
+        (s, n),
+        (Status::Ok, 4),
+        "Transform, Name, RigidBody, Collider"
+    );
+    let mut off = 0;
+    let mut seen = Vec::new();
+    for _ in 0..n {
+        let hdr = ComponentHeader::decode(&body[off..], &tail).unwrap();
+        off += ComponentHeader::SIZE;
+        seen.push((
+            hdr.component,
+            fynkel_wire::decode_component_value(
+                hdr.component,
+                &body[off..off + hdr.size as usize],
+                &tail,
+            )
+            .map(|v| v.unwrap()),
+        ));
+        off += hdr.size as usize;
+    }
+    assert_eq!(seen[2].0, 10);
+    assert!(matches!(seen[2].1, Some(ComponentValue::RigidBody(ref b)) if b.mass == 2.0));
+    assert_eq!(
+        seen[3].1,
+        Some(ComponentValue::Collider(Collider::default()))
+    );
+
+    // QUERY_BODY: falling after one tick, no body on the floor.
+    let (s, n, body, tail) = h.query(bridge::QUERY_BODY, krate);
+    assert_eq!((s, n), (Status::Ok, 1));
+    let state = BodyStateRecord::decode(&body, &tail).unwrap();
+    assert_eq!(state.entity, krate);
+    assert!(state.linear_velocity.y < 0.0, "{state:?}");
+    assert!(!state.sleeping);
+    let (s, n, _, _) = h.query(bridge::QUERY_BODY, floor);
+    assert_eq!((s, n), (Status::Ok, 0));
+
+    // A body command through the wire (kind 8): a sideways impulse.
+    let (s, r) = h.submit(
+        Lane::Simulation,
+        &batch![(
+            8,
+            BodyCommandRecord {
+                entity: krate,
+                op: BodyOp::ApplyImpulse,
+                vector: Vec3::new(4.0, 0.0, 0.0),
+                rotation: glam::Quat::IDENTITY,
+            }
+        )],
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let (_, _, body, tail) = h.query(bridge::QUERY_BODY, krate);
+    let state = BodyStateRecord::decode(&body, &tail).unwrap();
+    assert!((state.linear_velocity.x - 2.0).abs() < 1e-3, "{state:?}");
+
+    // Rejected at the tick: a body command on the floor (no body), on the
+    // presentation lane (wrong lane, rejected at submit).
+    let (_, r) = h.submit(
+        Lane::Simulation,
+        &batch![(
+            8,
+            BodyCommandRecord {
+                entity: floor,
+                op: BodyOp::ApplyForce,
+                vector: Vec3::Y,
+                rotation: glam::Quat::IDENTITY,
+            }
+        )],
+    );
+    assert_eq!(r.rejected, 0);
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 1);
+    let d = h.diagnostics();
+    assert_eq!(d[0].code, DiagnosticCode::MISSING_COMPONENT.0);
+    assert_eq!(d[0].component, 10);
+    let (s, r) = h.submit(
+        Lane::Presentation,
+        &batch![(
+            8,
+            BodyCommandRecord {
+                entity: krate,
+                op: BodyOp::ApplyForce,
+                vector: Vec3::Y,
+                rotation: glam::Quat::IDENTITY,
+            }
+        )],
+    );
+    assert_eq!((s, r.rejected), (Status::CommandsRejected, 1));
+    assert_eq!(
+        h.diagnostics().last().unwrap().code,
+        DiagnosticCode::WRONG_LANE.0
+    );
+
+    // Let it land: a CollisionEnter with a contact (point, normal, impulse).
+    let mut entered = Vec::new();
+    for _ in 0..240 {
+        h.step();
+        entered.extend(
+            h.events()
+                .into_iter()
+                .filter(|(k, _)| *k == EventKind::COLLISION_ENTER.0)
+                .map(|(_, b)| ContactEvent::decode(&b, &[]).unwrap()),
+        );
+    }
+    assert_eq!(entered.len(), 1, "{entered:?}");
+    let c = &entered[0];
+    assert_eq!(
+        [c.a, c.b].iter().filter(|e| **e == krate).count(),
+        1,
+        "the crate is one side"
+    );
+    assert!(c.normal.y.abs() > 0.9, "{c:?}");
+    assert!(c.impulse > 0.0);
+    assert!((c.point.y).abs() < 0.2, "{c:?}");
+    let (_, _, body, tail) = h.query(bridge::QUERY_BODY, krate);
+    let state = BodyStateRecord::decode(&body, &tail).unwrap();
+    assert!(state.sleeping, "{state:?}");
+
+    // A raycast from above hits the crate first, then the floor;
+    // excluding the crate leaves the floor.
+    let (_, _, body, tail) = h.query(bridge::QUERY_TRANSFORM, krate);
+    let crate_pos = SnapshotTransformRecord::decode(&body, &tail)
+        .unwrap()
+        .world
+        .position;
+    let origin = Vec3::new(crate_pos.x, 10.0, crate_pos.z);
+    fn empty_view() -> FynkelBufferView {
+        FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        }
+    }
+    let mut v = empty_view();
+    let buf = raycast_buffer(3, origin, None);
+    let s = unsafe { fynkel_world_physics_query(h.w, buf.as_ptr(), buf.len() as u32, &mut v) };
+    assert_eq!(s, Status::Ok);
+    let (hdr, records, tail) = buffer::validate(Host::view(v), BufferKind::Query).unwrap();
+    assert_eq!(hdr.record_count, 2);
+    let first = PhysicsHitRecord::decode(records, tail).unwrap();
+    let second = PhysicsHitRecord::decode(&records[PhysicsHitRecord::SIZE..], tail).unwrap();
+    assert_eq!((first.query, first.entity), (3, krate));
+    assert_eq!(second.entity, floor);
+    assert!(first.distance < second.distance);
+    assert!(
+        (first.point.y - (crate_pos.y + 0.5)).abs() < 0.05,
+        "{first:?}"
+    );
+    assert!((second.point.y).abs() < 1e-3, "{second:?}");
+    let buf = raycast_buffer(4, origin, Some(krate));
+    let mut v = empty_view();
+    let s = unsafe { fynkel_world_physics_query(h.w, buf.as_ptr(), buf.len() as u32, &mut v) };
+    assert_eq!(s, Status::Ok);
+    let (hdr, records, tail) = buffer::validate(Host::view(v), BufferKind::Query).unwrap();
+    assert_eq!(hdr.record_count, 1);
+    assert_eq!(
+        PhysicsHitRecord::decode(records, tail).unwrap().entity,
+        floor
+    );
+
+    // A malformed buffer is a protocol error with an empty view; the
+    // world stays usable.
+    let bad = buffer::empty(BufferKind::Commands);
+    let mut v = empty_view();
+    let s = unsafe { fynkel_world_physics_query(h.w, bad.as_ptr(), bad.len() as u32, &mut v) };
+    assert_eq!(s, Status::Protocol);
+    assert_eq!(v.length, 0);
+    let (s, _) = h.step();
+    assert_eq!(s, Status::Ok);
+}

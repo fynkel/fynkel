@@ -20,6 +20,9 @@ pub enum BufferKind {
     InputEvents = 6,
     /// `InputActionRecord` per bound action (world → host).
     InputActions = 7,
+    /// `PhysicsQueryRecord` per spatial query (host → world); answered
+    /// in a `Query` buffer of `PhysicsHitRecord`s (M3-08).
+    PhysicsQueries = 8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

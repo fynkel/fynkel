@@ -12,6 +12,7 @@ import 'diagnostics.dart';
 import 'events.dart';
 import 'input.dart';
 import 'native/bridge.dart';
+import 'physics.dart';
 import 'transform_writer.dart';
 import 'wire/buffers.dart';
 import 'wire/support.dart' show WireRecord;
@@ -67,6 +68,13 @@ class World {
 
   final RecordBatch _inputEvents = RecordBatch(BufferKind.inputEvents, gen.InputEventRecord.wireSize);
   bool _inputDirty = false;
+
+  /// The physics settings of the last `loadProject` (gravity, layer names);
+  /// the defaults before a load. [layerMask] reads the names.
+  PhysicsSettings physics = const PhysicsSettings();
+
+  final RecordBatch _physicsQueries = RecordBatch(BufferKind.physicsQueries, gen.PhysicsQueryRecord.wireSize);
+  int _nextQueryId = 1;
 
   late final _BehaviourSystem _behaviours;
 
@@ -406,6 +414,113 @@ class World {
     }
   }
 
+  // ---------------------------------------------------------------- physics (M3-08)
+
+  /// The collision mask of the named project layers (`physics.layers`);
+  /// throws on a name the project does not declare.
+  int layerMask(Iterable<String> names) {
+    final m = physics.mask(names);
+    if (m == null) throw ArgumentError('unknown physics layer in $names; the project declares ${physics.layers}');
+    return m;
+  }
+
+  /// The nearest collider along a ray, or null. Spatial queries read the
+  /// world as the last step left it (one FFI call each; batch with
+  /// [physicsQuery] when asking many at once).
+  PhysicsHit? raycast(Vec3 origin, Vec3 direction,
+          {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false}) =>
+      raycastAll(origin, direction, maxDistance: maxDistance, mask: mask, exclude: exclude, hitSensors: hitSensors, maxHits: 1)
+          .firstOrNull;
+
+  /// Every collider along a ray, nearest first, at most [maxHits].
+  List<PhysicsHit> raycastAll(Vec3 origin, Vec3 direction,
+      {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false, int maxHits = 16}) {
+    _physicsQueries.clear();
+    _physicsQueries.add(gen.PhysicsQueryRecord(
+      id: _nextQueryId++,
+      kind: gen.PhysicsQueryKind.raycast,
+      shape: gen.ColliderShape.box,
+      size: Vec3.zero,
+      origin: origin,
+      rotation: Quat.identity,
+      direction: direction,
+      maxDistance: maxDistance,
+      mask: mask,
+      exclude: exclude?._entity,
+      maxHits: maxHits,
+      hitSensors: hitSensors,
+    ));
+    return _runPhysicsQueries();
+  }
+
+  /// Sweeps a `box`/`sphere`/`capsule` of [size] (as `Collider.size`
+  /// defines it) from [origin] along [direction]: the first collider it
+  /// would touch, or null.
+  PhysicsHit? shapeCast(gen.ColliderShape shape, Vec3 size, Vec3 origin, Vec3 direction,
+      {Quat rotation = Quat.identity,
+      double maxDistance = 1000,
+      int mask = 0xffffffff,
+      GameObject? exclude,
+      bool hitSensors = false}) {
+    _physicsQueries.clear();
+    _physicsQueries.add(gen.PhysicsQueryRecord(
+      id: _nextQueryId++,
+      kind: gen.PhysicsQueryKind.shapeCast,
+      shape: shape,
+      size: size,
+      origin: origin,
+      rotation: rotation,
+      direction: direction,
+      maxDistance: maxDistance,
+      mask: mask,
+      exclude: exclude?._entity,
+      maxHits: 1,
+      hitSensors: hitSensors,
+    ));
+    return _runPhysicsQueries().firstOrNull;
+  }
+
+  /// Every collider intersecting a `box`/`sphere`/`capsule` of [size] at
+  /// [origin] (distance 0, normal zero).
+  List<PhysicsHit> overlap(gen.ColliderShape shape, Vec3 size, Vec3 origin,
+      {Quat rotation = Quat.identity, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false, int maxHits = 16}) {
+    _physicsQueries.clear();
+    _physicsQueries.add(gen.PhysicsQueryRecord(
+      id: _nextQueryId++,
+      kind: gen.PhysicsQueryKind.overlap,
+      shape: shape,
+      size: size,
+      origin: origin,
+      rotation: rotation,
+      direction: Vec3.zero,
+      maxDistance: 0,
+      mask: mask,
+      exclude: exclude?._entity,
+      maxHits: maxHits,
+      hitSensors: hitSensors,
+    ));
+    return _runPhysicsQueries();
+  }
+
+  /// Several queries in one FFI call: the hits of every record, in query
+  /// order (`PhysicsHitRecord.query` echoes each record's `id`).
+  List<gen.PhysicsHitRecord> physicsQuery(List<gen.PhysicsQueryRecord> queries) {
+    _physicsQueries.clear();
+    queries.forEach(_physicsQueries.add);
+    final b = _native.physicsQuery(_physicsQueries.backingStore, _physicsQueries.finalize());
+    _physicsQueries.clear();
+    return b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode).toList(growable: false);
+  }
+
+  List<PhysicsHit> _runPhysicsQueries() {
+    final b = _native.physicsQuery(_physicsQueries.backingStore, _physicsQueries.finalize());
+    _physicsQueries.clear();
+    if (b.recordCount == 0) return const [];
+    return [
+      for (final r in b.fixed(gen.PhysicsHitRecord.wireSize, gen.PhysicsHitRecord.decode)) PhysicsHit.fromRecord(r),
+    ];
+  }
+
   // ---------------------------------------------------------------- documents
 
   /// Where `fynkel cook` writes a project's cache: `<dir>/.fynkel/cache`.
@@ -436,6 +551,7 @@ class World {
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
         input.invalidate();
+        if (op == 'loadProject') physics = report.physics;
         report = _attachAuthoredBehaviours(report);
         if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
         return report;
@@ -733,6 +849,54 @@ class GameObject {
       world._simulationTargets.add(this);
     }
   }
+
+  // ------------------------------------------------ rigid body (M3-08)
+
+  /// The body's motion as the last step left it, or null without a
+  /// `RigidBody` (one query; not for a hot loop).
+  BodyState? bodyState() {
+    final e = _entity;
+    if (e == null || !_alive) return null;
+    final b = world._native.query(QueryKind.body, entity: e);
+    if (b.recordCount == 0) return null;
+    return BodyState.fromRecord(gen.BodyStateRecord.decode(b.records, 0, b.tail));
+  }
+
+  /// A body command for the next tick (simulation lane): rejected there
+  /// with a diagnostic when the object has no `RigidBody`, the body type
+  /// does not take it (forces need `dynamic`, a kinematic target needs
+  /// `kinematic`) or a value is not finite.
+  void _body(gen.BodyOp op, Vec3 v, [Quat q = Quat.identity]) {
+    final e = _requireResolved('body command');
+    world._simulation.body(e, op, v.x, v.y, v.z, q.x, q.y, q.z, q.w);
+    world._simulationTargets.add(this);
+  }
+
+  /// Newtons, world space, applied over the next tick (dynamic bodies).
+  void applyForce(Vec3 force) => _body(gen.BodyOp.applyForce, force);
+
+  /// Newton-seconds, world space: an instant velocity change (dynamic).
+  void applyImpulse(Vec3 impulse) => _body(gen.BodyOp.applyImpulse, impulse);
+
+  /// Newton-metres, world space, over the next tick (dynamic).
+  void applyTorque(Vec3 torque) => _body(gen.BodyOp.applyTorque, torque);
+
+  void applyTorqueImpulse(Vec3 impulse) => _body(gen.BodyOp.applyTorqueImpulse, impulse);
+
+  /// Metres per second, world space (dynamic).
+  void setLinearVelocity(Vec3 velocity) => _body(gen.BodyOp.setLinearVelocity, velocity);
+
+  /// Radians per second, world space (dynamic).
+  void setAngularVelocity(Vec3 velocity) => _body(gen.BodyOp.setAngularVelocity, velocity);
+
+  /// Where a kinematic body should be after the next tick: it moves there
+  /// with the velocity that implies, pushing dynamic bodies on the way.
+  void setKinematicTarget(Vec3 position, [Quat rotation = Quat.identity]) =>
+      _body(gen.BodyOp.setKinematicTarget, position, rotation);
+
+  /// Moves any body instantly (no interpolation, no contacts on the way);
+  /// its velocity is kept. On a static body this is a transform write.
+  void teleport(Vec3 position, [Quat rotation = Quat.identity]) => _body(gen.BodyOp.teleport, position, rotation);
 
   /// Current local transform: staged overlay, else last snapshot, else the
   /// spawn value.
