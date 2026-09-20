@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "acd709a6-2033-57f0-b198-ffd1c8f5478e",
+  "name": "Crate",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.72,
+    0.45,
+    0.2,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.75
+}

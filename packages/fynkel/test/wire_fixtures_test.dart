@@ -293,6 +293,8 @@ void main() {
       frameReleased: false,
       x: 1.0,
       y: 0.0,
+      frameX: 1.0,
+      frameY: 0.0,
     ),
     InputActionRecord.wireSize,
     InputActionRecord.decode,

@@ -89,7 +89,7 @@
           "description": "`<device>:<control>`, e.g. keyboard:Space, keyboard:W, mouse:left, gamepad:south, gamepad:leftStick, touch:overlay/jump. Checked by `fynkel validate` (FYN-P0009) with the grammar in docs/input.md: keyboard keys and layouts (WASD, Arrows, IJKL, a/b or l/r/d/u key list), mouse buttons/wheel/delta, gamepad buttons/axes/sticks in GameController naming, touch:overlay/<name>.",
           "items": {
             "type": "string",
-            "pattern": "^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}$"
+            "pattern": "^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}(\\*[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)?$"
           },
           "uniqueItems": true,
           "default": []

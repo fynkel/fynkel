@@ -575,6 +575,24 @@ fn a_character_is_driven_by_actions_in_its_cameras_frame() {
     let facing = w.ecs().copy::<Transform>(player).unwrap().rotation * Vec3::NEG_Z;
     assert!(facing.dot(forward.normalize()) > 0.99, "{facing:?}");
 
+    // The mouse turns it too: a relative control's motion is the rate that
+    // covers it in one tick, so one tick turns by motion·sensitivity —
+    // seen by the rig even though it runs late in the tick — and the
+    // catch-up ticks of the same frame add nothing.
+    w.begin_frame(2.0 / 60.0);
+    w.capture_input(&[InputEvent::moved(Device::Mouse, "delta", 0.2, 0.0)]);
+    w.step();
+    let turned = w.ecs().copy::<ThirdPersonCamera>(camera).unwrap().yaw;
+    assert!(
+        (turned - (yaw - 0.2 * 2.5)).abs() < 1e-4,
+        "{turned} vs {yaw}"
+    );
+    w.step();
+    assert_eq!(
+        w.ecs().copy::<ThirdPersonCamera>(camera).unwrap().yaw,
+        turned
+    );
+
     // Space: the press edge is consumed by the first tick (a jump), the
     // catch-up ticks of the same frame see held only (no second jump).
     w.begin_frame(3.0 / 60.0);

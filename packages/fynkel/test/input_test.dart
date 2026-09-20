@@ -31,6 +31,18 @@ class Reader extends Behaviour {
   void update(UpdateContext context) => log.add('update ${_jump()}');
 }
 
+class _Looker extends Behaviour {
+  _Looker(this.read);
+
+  /// [scale] turns the tick's rate back into the motion it covers.
+  final void Function(String phase, double scale) read;
+
+  @override
+  void fixedUpdate(FixedUpdateContext context) => read('fixed', context.dt);
+  @override
+  void update(UpdateContext context) => read('update', 1);
+}
+
 void main() {
   final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
   late String cache;
@@ -129,6 +141,42 @@ void main() {
     w.frame(1 / 60, input: const [InputEvent.reset()]);
     expect(r.log, ['fixed@6 --R move=Vec2(0.0, 0.0)', 'after@6 --R', 'update --R']);
     expect(w.isPoisoned, isFalse);
+  });
+
+  test('a mouse delta is consumed by one tick; update sees the frame\'s sum (M3-14)', () {
+    final w = loaded();
+    final go = w.attach(w.allEntities().first);
+    final looks = <String>[];
+    go.addBehaviour(
+      _Looker((phase, scale) {
+        final v = Input.action2D('look');
+        looks.add('$phase (${(v.x * scale).toStringAsFixed(1)}, ${(v.y * scale).toStringAsFixed(1)}) ${Input.held('look') ? 'H' : '-'}');
+      }),
+    );
+    w.frame(1 / 60);
+    looks.clear();
+
+    // 50 ms with two mouse movements: the first tick turns by the sum (a
+    // rate — times its dt, the motion), the catch-up ticks by nothing;
+    // update reads the whole frame's motion.
+    final plan = w.frame(
+      0.05,
+      input: const [
+        InputEvent.move(InputDevice.mouse, 'delta', 3, -1),
+        InputEvent.move(InputDevice.mouse, 'delta', 4, 0.5),
+      ],
+    );
+    expect(plan.steps, 3);
+    expect(looks, ['fixed (7.0, -0.5) H', 'fixed (0.0, 0.0) -', 'fixed (0.0, 0.0) -', 'update (7.0, -0.5) H']);
+    expect(w.input.action2D('look').x, closeTo(7.0, 1e-3), reason: 'the frame view is the motion itself');
+    looks.clear();
+
+    // A frame too short to tick carries its motion to the next tick.
+    expect(w.frame(0.004, input: const [InputEvent.move(InputDevice.mouse, 'delta', 1, 1)]).steps, 0);
+    expect(looks, ['update (1.0, 1.0) H']);
+    looks.clear();
+    expect(w.frame(0.014, input: const [InputEvent.move(InputDevice.mouse, 'delta', 1, 0)]).steps, 1);
+    expect(looks, ['fixed (2.0, 1.0) H', 'update (1.0, 0.0) H']);
   });
 
   test('a recording replays frame by frame (the fixture walk)', () {

@@ -1,0 +1,538 @@
+{
+  "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+  "formatVersion": 2,
+  "id": "88641ff3-d525-5d0b-b21f-226ee8e246a8",
+  "name": "Burst",
+  "entities": {
+    "366a6680-70bd-5910-b02a-a5087f64cd47": {
+      "name": "Spark 1",
+      "parent": null,
+      "children": [],
+      "components": {
+        "3b0f5cc5-0b5e-5597-8bb7-ee10f5007ce8": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.25,
+              0.6,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.18,
+              0.18,
+              0.18
+            ]
+          }
+        },
+        "7bdfd83e-3a7a-5554-9077-2ee36b64b8db": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "d93c32f4-be69-59aa-af33-13240b0fbce9": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 0.05,
+            "linear_damping": 0.0,
+            "angular_damping": 0.5,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "4351c932-d02b-509a-a7d0-e28fddbc1502": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "mesh": null,
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.3,
+            "restitution": 0.4,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 1
+          }
+        },
+        "df0e7ca0-c04d-5630-8915-d3dbcc8d8769": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 1.2
+          }
+        }
+      }
+    },
+    "af962ff6-bd17-5003-ae95-ca9968780b19": {
+      "name": "Spark 2",
+      "parent": null,
+      "children": [],
+      "components": {
+        "7c75f1b9-a468-509d-9a65-64187c5fc37d": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.125,
+              0.6,
+              0.216506
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.18,
+              0.18,
+              0.18
+            ]
+          }
+        },
+        "5ee1a827-8185-5f58-bd57-9a0fd141133b": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "f34ecbc6-9716-503a-95a9-b0026f573037": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 0.05,
+            "linear_damping": 0.0,
+            "angular_damping": 0.5,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "80ac4c0d-1372-5a3c-be93-0eaeedfdb044": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "mesh": null,
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.3,
+            "restitution": 0.4,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 1
+          }
+        },
+        "6c61f1df-3566-5fc4-83b5-3d017e56ecab": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 1.2
+          }
+        }
+      }
+    },
+    "cac5bfca-af81-55d8-9a04-d875c98f781c": {
+      "name": "Spark 3",
+      "parent": null,
+      "children": [],
+      "components": {
+        "6081ba8f-8c62-5075-bab0-e92eee2009fa": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -0.125,
+              0.6,
+              0.216506
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.18,
+              0.18,
+              0.18
+            ]
+          }
+        },
+        "639aa9c4-67c9-5cc4-8376-3713bb6dfcce": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "b6d270f0-06af-519a-99dc-ed509e06903c": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 0.05,
+            "linear_damping": 0.0,
+            "angular_damping": 0.5,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "4cde561b-8937-545e-b043-40b991057dc6": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "mesh": null,
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.3,
+            "restitution": 0.4,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 1
+          }
+        },
+        "6d3e9588-8e22-5647-9daf-add7ad93b536": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 1.2
+          }
+        }
+      }
+    },
+    "0842e392-8f77-500e-885d-501269df4c0f": {
+      "name": "Spark 4",
+      "parent": null,
+      "children": [],
+      "components": {
+        "95bd63d6-0b6d-5a5f-8ed3-aa8b63c98cb6": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -0.25,
+              0.6,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.18,
+              0.18,
+              0.18
+            ]
+          }
+        },
+        "e3eed916-f70c-5f43-ac42-9bb6317e5fac": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "178c4800-dcb2-5a74-9e3f-cec0df2e7f26": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 0.05,
+            "linear_damping": 0.0,
+            "angular_damping": 0.5,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "ad80d46a-df36-5dcd-9287-93cf711accc4": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "mesh": null,
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.3,
+            "restitution": 0.4,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 1
+          }
+        },
+        "96299864-67d1-5c7d-9a01-7861437abb05": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 1.2
+          }
+        }
+      }
+    },
+    "5746334d-ab90-5a97-9d00-46bdfeff8b3b": {
+      "name": "Spark 5",
+      "parent": null,
+      "children": [],
+      "components": {
+        "58c0da79-7bcb-5440-9332-d0576919189e": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -0.125,
+              0.6,
+              -0.216506
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.18,
+              0.18,
+              0.18
+            ]
+          }
+        },
+        "50bc041b-ae46-5c89-a5ab-93a604e028e3": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "e86c93a9-80a1-58e5-bf09-b285280b0a3f": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 0.05,
+            "linear_damping": 0.0,
+            "angular_damping": 0.5,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "4c506a63-b2fb-5c6e-9f43-8cd36ef29661": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "mesh": null,
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.3,
+            "restitution": 0.4,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 1
+          }
+        },
+        "c378c8aa-0177-5349-82f9-0e280a0011e1": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 1.2
+          }
+        }
+      }
+    },
+    "bb388879-32c5-5fca-bb2a-0dd759e641fe": {
+      "name": "Spark 6",
+      "parent": null,
+      "children": [],
+      "components": {
+        "4dee922e-0ea8-54f2-956d-d4c9835a19cd": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.125,
+              0.6,
+              -0.216506
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.18,
+              0.18,
+              0.18
+            ]
+          }
+        },
+        "01a29ad5-3089-5876-b152-ff9cee27649e": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "48a9be55-8a82-5d5a-afad-a98f90c7a88f": {
+          "type": "fynkel.RigidBody",
+          "version": 1,
+          "data": {
+            "body_type": "dynamic",
+            "mass": 0.05,
+            "linear_damping": 0.0,
+            "angular_damping": 0.5,
+            "gravity_scale": 1.0,
+            "ccd": false
+          }
+        },
+        "0ca2726f-97d6-556f-8b7d-90a61468475a": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              0.5,
+              0.5,
+              0.5
+            ],
+            "mesh": null,
+            "offset": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "friction": 0.3,
+            "restitution": 0.4,
+            "is_sensor": false,
+            "layer": 2,
+            "mask": 1
+          }
+        },
+        "7f50fe4e-b1d6-57bc-9ba4-033a41884f4a": {
+          "type": "fynkel.LifetimeDespawn",
+          "version": 1,
+          "data": {
+            "seconds": 1.2
+          }
+        }
+      }
+    }
+  },
+  "roots": [
+    "366a6680-70bd-5910-b02a-a5087f64cd47",
+    "af962ff6-bd17-5003-ae95-ca9968780b19",
+    "cac5bfca-af81-55d8-9a04-d875c98f781c",
+    "0842e392-8f77-500e-885d-501269df4c0f",
+    "5746334d-ab90-5a97-9d00-46bdfeff8b3b",
+    "bb388879-32c5-5fca-bb2a-0dd759e641fe"
+  ]
+}

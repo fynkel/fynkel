@@ -285,6 +285,7 @@ impl World {
             config.max_steps_per_frame,
             config.max_frame_dt,
         );
+        let input = Input::with_tick_dt(config.fixed_dt);
         Self {
             ecs: Ecs::new(config.id),
             config,
@@ -300,7 +301,7 @@ impl World {
             last_events: 0,
             applied_this_tick: 0,
             poisoned: false,
-            input: Input::default(),
+            input,
             physics: Physics::new(),
             named_targets: HashMap::new(),
             prefabs: HashMap::new(),
@@ -1013,9 +1014,6 @@ impl World {
         let t0 = Instant::now();
         let characters = self.drive_characters();
         self.set_time(SystemKind::Characters, characters, micros(t0));
-        // This tick consumed the pending edges (§5.1); catch-up ticks in
-        // the same frame see held state only.
-        self.input.end_tick();
 
         // S[n] becomes the interpolation source.
         let t0 = Instant::now();
@@ -1132,6 +1130,12 @@ impl World {
         self.apply_teleports();
         transforms_us += micros(t0);
         self.set_time(SystemKind::Transforms, propagated, transforms_us);
+
+        // Every native system of the tick has read the same view the game
+        // did (the rigs above read `look` last); this tick consumed the
+        // pending edges and relative motion (§5.1), so catch-up ticks in the
+        // same frame see held state only.
+        self.input.end_tick();
 
         let tick = self.clock.consume_step();
         debug_assert_eq!(tick, next_tick);

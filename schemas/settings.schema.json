@@ -53,7 +53,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}$"
+              "pattern": "^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}(\\*[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)?$"
             }
           },
           "default": {}

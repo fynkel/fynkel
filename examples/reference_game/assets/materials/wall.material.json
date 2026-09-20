@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "0dccf1fe-4ee8-5fba-b86d-db3e09d42273",
+  "name": "Wall",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.78,
+    0.74,
+    0.66,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.8
+}

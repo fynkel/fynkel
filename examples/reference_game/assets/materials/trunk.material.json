@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "83f07c47-5e26-54eb-82d0-723a341ae5c6",
+  "name": "Trunk",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.3,
+    0.2,
+    0.12,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.95
+}

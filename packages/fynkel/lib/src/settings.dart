@@ -135,7 +135,7 @@ class SettingsDocument {
     return copyWith(rebinds: Map.unmodifiable(next));
   }
 
-  static final RegExp _binding = RegExp(r'^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}$');
+  static final RegExp _binding = RegExp(r'^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}(\*[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)?$');
 
   /// What is wrong with these values (empty when nothing): a gain out
   /// of `0..1`, a binding that does not fit the `<device>:<control>`

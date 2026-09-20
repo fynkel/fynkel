@@ -329,7 +329,9 @@ can read: `"<name>": { "type": button | axis1d | axis2d, "bindings":
 `<l>/<r>/<d>/<u>` for `axis2d`, `keyboard:<neg>/<pos>` for `axis1d`;
 `mouse:left|right|middle|back|forward`, `mouse:wheel`, `mouse:delta`;
 `gamepad:south|east|west|north|leftShoulder|…|menu|options|home`,
-`gamepad:leftTrigger|leftStickX|…`, `gamepad:leftStick|rightStick|dpad`;
+`gamepad:leftTrigger|leftStickX|…`, `gamepad:leftStick|rightStick|dpad`
+(an axis control takes a scale — `mouse:delta*0.0025` turns pixels into
+stick units);
 `touch:overlay/<name>` (a stick or button the app's `TouchOverlay` draws on
 phones). `fynkel validate` rejects a binding the runtime cannot compile
 (`FYN-P0009`).

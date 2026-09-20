@@ -266,6 +266,8 @@ fn fixtures_match_generated_codecs() {
             frame_released: false,
             x: 1.0,
             y: 0.0,
+            frame_x: 1.0,
+            frame_y: 0.0,
         },
     );
     check("CommandHeader", &CommandHeader { kind: 1, size: 64 });

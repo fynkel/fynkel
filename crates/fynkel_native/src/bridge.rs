@@ -586,6 +586,8 @@ pub fn encode_input_view(buf: Vec<u8>, actions: &[ActionState]) -> Vec<u8> {
             frame_released: a.frame_released,
             x: a.x,
             y: a.y,
+            frame_x: a.frame_x,
+            frame_y: a.frame_y,
         });
     }
     w.finish()

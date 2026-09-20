@@ -508,9 +508,15 @@ pub struct InputActionRecord {
     pub released: bool,
     pub frame_pressed: bool,
     pub frame_released: bool,
-    /// `axis1d` value, `axis2d` x, a button 1/0.
+    /// `axis1d` value, `axis2d` x, a button 1/0 (the tick view). A relative
+    /// control's motion pending for the next tick, as the rate that covers
+    /// it in one tick (`x · fixed_dt` is the motion).
     pub x: f32,
     pub y: f32,
+    /// The frame's view of `x`/`y`: a relative control's motion summed
+    /// over the current frame (what `update` reads); otherwise the same.
+    pub frame_x: f32,
+    pub frame_y: f32,
 }
 
 /// The registry, in fingerprint order. Append only.

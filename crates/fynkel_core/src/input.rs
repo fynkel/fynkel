@@ -385,7 +385,7 @@ pub const KEY_LAYOUTS_2D: &[(&str, [&str; 4])] = &[
 ];
 
 /// A compiled binding.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Binding {
     /// A button action from one button control.
     Button(Control),
@@ -394,15 +394,17 @@ pub enum Binding {
     /// An `axis2d` from four keys: left, right, down, up.
     KeyQuad([Control; 4]),
     /// An `axis1d`/`axis2d` from a native axis control (stick, trigger,
-    /// mouse delta/wheel, overlay stick).
-    Axis(Control),
+    /// mouse delta/wheel, overlay stick), multiplied by `scale` (the
+    /// grammar's `*<factor>` suffix, 1 without one — how a mouse's pixels
+    /// become the units a stick reads in, M3-14).
+    Axis { control: Control, scale: f32 },
 }
 
 impl Binding {
     /// Every control the binding reads.
     pub fn controls(&self) -> Vec<&Control> {
         match self {
-            Binding::Button(c) | Binding::Axis(c) => vec![c],
+            Binding::Button(c) | Binding::Axis { control: c, .. } => vec![c],
             Binding::KeyPair { neg, pos } => vec![neg, pos],
             Binding::KeyQuad(k) => k.iter().collect(),
         }
@@ -414,6 +416,9 @@ impl Binding {
 pub enum BindingError {
     /// Not `<device>:<control>` with a known device.
     Malformed(String),
+    /// A `*<factor>` suffix that is not a positive number, or one on a
+    /// binding that is not an axis control.
+    BadScale(String),
     UnknownDevice(String),
     /// The device has no such control for this action kind; the message
     /// lists what it has.
@@ -429,6 +434,10 @@ impl std::fmt::Display for BindingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BindingError::Malformed(b) => write!(f, "binding {b:?} is not `<device>:<control>`"),
+            BindingError::BadScale(b) => write!(
+                f,
+                "binding {b:?}: `*<factor>` takes a positive number and scales an axis control (a stick, trigger, mouse delta/wheel or overlay stick)"
+            ),
             BindingError::UnknownDevice(d) => write!(
                 f,
                 "unknown device {d:?} (keyboard, mouse, gamepad or touch)"
@@ -463,6 +472,28 @@ fn key(name: &str) -> Option<Control> {
 
 /// Parses one `<device>:<control>` binding for an action of `kind`.
 pub fn parse_binding(kind: ActionKind, text: &str) -> Result<Binding, BindingError> {
+    // `<device>:<control>*<factor>`: the factor scales an axis control.
+    let (text, scale) = match text.rsplit_once('*') {
+        Some((head, factor)) => {
+            let scale: f32 = factor
+                .trim()
+                .parse()
+                .ok()
+                .filter(|s: &f32| s.is_finite() && *s > 0.0)
+                .ok_or_else(|| BindingError::BadScale(text.to_string()))?;
+            (head, Some(scale))
+        }
+        None => (text, None),
+    };
+    let binding = parse_control(kind, text)?;
+    match (binding, scale) {
+        (b, None) => Ok(b),
+        (Binding::Axis { control, .. }, Some(scale)) => Ok(Binding::Axis { control, scale }),
+        (_, Some(_)) => Err(BindingError::BadScale(text.to_string())),
+    }
+}
+
+fn parse_control(kind: ActionKind, text: &str) -> Result<Binding, BindingError> {
     let Some((device, control)) = text.split_once(':') else {
         return Err(BindingError::Malformed(text.to_string()));
     };
@@ -479,6 +510,10 @@ pub fn parse_binding(kind: ActionKind, text: &str) -> Result<Binding, BindingErr
         expected: expected.to_string(),
     };
     let ctl = |name: &str| Control::new(device, name);
+    let axis = |control: Control| Binding::Axis {
+        control,
+        scale: 1.0,
+    };
     let one_of = |list: &[&str]| list.contains(&control).then(|| ctl(control));
     let listed = |list: &[&str]| list.join(", ");
     match (device, kind) {
@@ -517,10 +552,10 @@ pub fn parse_binding(kind: ActionKind, text: &str) -> Result<Binding, BindingErr
             .map(Binding::Button)
             .ok_or_else(|| unknown(&listed(MOUSE_BUTTONS))),
         (Device::Mouse, ActionKind::Axis1d) => one_of(MOUSE_AXES_1D)
-            .map(Binding::Axis)
+            .map(axis)
             .ok_or_else(|| unknown(&listed(MOUSE_AXES_1D))),
         (Device::Mouse, ActionKind::Axis2d) => one_of(MOUSE_AXES_2D)
-            .map(Binding::Axis)
+            .map(axis)
             .ok_or_else(|| unknown(&listed(MOUSE_AXES_2D))),
         (Device::Gamepad, ActionKind::Button) => {
             let name = GAMEPAD_BUTTON_ALIASES
@@ -537,10 +572,10 @@ pub fn parse_binding(kind: ActionKind, text: &str) -> Result<Binding, BindingErr
             }
         }
         (Device::Gamepad, ActionKind::Axis1d) => one_of(GAMEPAD_AXES_1D)
-            .map(Binding::Axis)
+            .map(axis)
             .ok_or_else(|| unknown(&listed(GAMEPAD_AXES_1D))),
         (Device::Gamepad, ActionKind::Axis2d) => one_of(GAMEPAD_AXES_2D)
-            .map(Binding::Axis)
+            .map(axis)
             .ok_or_else(|| unknown(&listed(GAMEPAD_AXES_2D))),
         (Device::Touch, kind) => {
             let Some(name) = control.strip_prefix("overlay/") else {
@@ -553,7 +588,7 @@ pub fn parse_binding(kind: ActionKind, text: &str) -> Result<Binding, BindingErr
             }
             match kind {
                 ActionKind::Button => Ok(Binding::Button(ctl(control))),
-                ActionKind::Axis2d => Ok(Binding::Axis(ctl(control))),
+                ActionKind::Axis2d => Ok(axis(ctl(control))),
                 ActionKind::Axis1d => Err(unknown(
                     "`overlay/<control>` for a button (a button) or an axis2d (a stick) only",
                 )),
@@ -573,9 +608,15 @@ struct Raw {
     /// Edges since the last capture (the frame's).
     frame_pressed: u32,
     frame_released: u32,
+    /// The value (an axis), 1/0 (a button), or — for a relative control —
+    /// the motion pending for the next tick (zeroed when a tick consumes it).
     x: f32,
     y: f32,
-    /// Summed per frame (mouse delta/wheel): zeroed by the next capture.
+    /// A relative control's motion summed over the frame (`update`'s view):
+    /// zeroed by the next capture.
+    frame_x: f32,
+    frame_y: f32,
+    /// Mouse delta/wheel: motion, not a value (M3-14: consumed by one tick).
     relative: bool,
 }
 
@@ -592,9 +633,17 @@ pub struct ActionState {
     /// Went down during the current frame's capture (`update`'s view).
     pub frame_pressed: bool,
     pub frame_released: bool,
-    /// `axis1d` in `x`; `axis2d` in `x`, `y`; a button 1/0 in `x`.
+    /// `axis1d` in `x`; `axis2d` in `x`, `y`; a button 1/0 in `x`: a
+    /// rate. A relative control (mouse delta, wheel) contributes the
+    /// motion this tick consumes as the rate covering it in one tick
+    /// (`x · fixed dt` is the motion; a catch-up tick reads zero).
     pub x: f32,
     pub y: f32,
+    /// The same as the frame sees it (`update`'s view): a relative
+    /// control's motion summed over the current frame, as motion (not a
+    /// rate); keys and sticks read the same as `x`, `y`.
+    pub frame_x: f32,
+    pub frame_y: f32,
 }
 
 struct Action {
@@ -604,15 +653,35 @@ struct Action {
 }
 
 /// The binding table and raw control state of one world.
-#[derive(Default)]
 pub struct Input {
     actions: Vec<Action>,
     raw: HashMap<Control, Raw>,
     frames: u64,
     events: u64,
+    /// Seconds per fixed tick: a relative control's motion, consumed by
+    /// one tick, is reported to that tick as the rate that covers it in
+    /// `tick_dt` (`x · dt` is the motion), so an axis always reads a rate.
+    tick_dt: f32,
+}
+
+impl Default for Input {
+    fn default() -> Self {
+        Input::with_tick_dt(1.0 / 60.0)
+    }
 }
 
 impl Input {
+    /// A table whose relative controls are rated for ticks of `tick_dt`.
+    pub fn with_tick_dt(tick_dt: f32) -> Self {
+        Input {
+            actions: Vec::new(),
+            raw: HashMap::new(),
+            frames: 0,
+            events: 0,
+            tick_dt: if tick_dt > 0.0 { tick_dt } else { 1.0 / 60.0 },
+        }
+    }
+
     /// Compiles the actions; a binding that does not parse is skipped and
     /// returned (`fynkel validate` reports them before a project runs).
     pub fn bind(&mut self, specs: &[ActionSpec]) -> Vec<(String, String, BindingError)> {
@@ -672,17 +741,17 @@ impl Input {
         (self.frames, self.events)
     }
 
-    /// Applies a host frame's raw events. Relative controls (mouse delta,
-    /// wheel) start the frame at zero; the frame's edge counters restart.
+    /// Applies a host frame's raw events. The frame's edge counters and
+    /// the relative controls' frame sums restart; the motion pending for
+    /// the next tick (like the pending edges) carries over a frame that
+    /// ran no tick.
     pub fn capture(&mut self, events: &[InputEvent]) {
         self.frames += 1;
         for r in self.raw.values_mut() {
             r.frame_pressed = 0;
             r.frame_released = 0;
-            if r.relative {
-                r.x = 0.0;
-                r.y = 0.0;
-            }
+            r.frame_x = 0.0;
+            r.frame_y = 0.0;
         }
         for e in events {
             self.events += 1;
@@ -696,6 +765,8 @@ impl Input {
                         }
                         r.x = 0.0;
                         r.y = 0.0;
+                        r.frame_x = 0.0;
+                        r.frame_y = 0.0;
                     }
                 }
                 Phase::Down => {
@@ -727,16 +798,23 @@ impl Input {
                     r.relative = true;
                     r.x += finite(e.x);
                     r.y += finite(e.y);
+                    r.frame_x += finite(e.x);
+                    r.frame_y += finite(e.y);
                 }
             }
         }
     }
 
-    /// A tick ran: its edges are consumed. Held state stays.
+    /// A tick ran: its edges and the relative controls' pending motion are
+    /// consumed. Held state stays.
     pub fn end_tick(&mut self) {
         for r in self.raw.values_mut() {
             r.pressed = 0;
             r.released = 0;
+            if r.relative {
+                r.x = 0.0;
+                r.y = 0.0;
+            }
         }
     }
 
@@ -772,6 +850,8 @@ impl Input {
             frame_released: false,
             x: 0.0,
             y: 0.0,
+            frame_x: 0.0,
+            frame_y: 0.0,
         };
         let mut clamp = true;
         for b in &a.bindings {
@@ -786,39 +866,62 @@ impl Input {
                     }
                 }
                 Binding::KeyPair { neg, pos } => {
-                    s.x += unit(pos) - unit(neg);
+                    let v = unit(pos) - unit(neg);
+                    s.x += v;
+                    s.frame_x += v;
                 }
                 Binding::KeyQuad([l, r, d, u]) => {
-                    s.x += unit(r) - unit(l);
-                    s.y += unit(u) - unit(d);
+                    let (x, y) = (unit(r) - unit(l), unit(u) - unit(d));
+                    s.x += x;
+                    s.y += y;
+                    s.frame_x += x;
+                    s.frame_y += y;
                 }
-                Binding::Axis(c) => {
-                    if let Some(r) = get(c) {
-                        s.x += r.x;
-                        s.y += r.y;
+                Binding::Axis { control, scale } => {
+                    if let Some(r) = get(control) {
                         if r.relative {
+                            // Motion (this tick's, as a rate; the frame's
+                            // as it is), never clamped: pixels are not
+                            // a stick.
                             clamp = false;
+                            s.x += r.x * scale / self.tick_dt;
+                            s.y += r.y * scale / self.tick_dt;
+                            s.frame_x += r.frame_x * scale;
+                            s.frame_y += r.frame_y * scale;
+                        } else {
+                            s.x += r.x * scale;
+                            s.y += r.y * scale;
+                            s.frame_x += r.x * scale;
+                            s.frame_y += r.y * scale;
                         }
                     }
                 }
             }
         }
+        // Keys and sticks read the same in both views; only a relative
+        // control's contribution differs (added above).
         match a.kind {
             ActionKind::Button => {
                 s.x = if s.held { 1.0 } else { 0.0 };
                 s.y = 0.0;
+                s.frame_x = s.x;
+                s.frame_y = 0.0;
             }
             ActionKind::Axis1d => {
                 if clamp {
                     s.x = s.x.clamp(-1.0, 1.0);
+                    s.frame_x = s.frame_x.clamp(-1.0, 1.0);
                 }
                 s.y = 0.0;
+                s.frame_y = 0.0;
                 s.held = s.x != 0.0;
             }
             ActionKind::Axis2d => {
                 if clamp {
                     s.x = s.x.clamp(-1.0, 1.0);
                     s.y = s.y.clamp(-1.0, 1.0);
+                    s.frame_x = s.frame_x.clamp(-1.0, 1.0);
+                    s.frame_y = s.frame_y.clamp(-1.0, 1.0);
                 }
                 s.held = s.x != 0.0 || s.y != 0.0;
             }
@@ -978,30 +1081,64 @@ mod tests {
         assert_eq!((m.x, m.y), (0.5, 0.75));
         input.capture(&[InputEvent::axis(Device::Gamepad, "leftStick", 0.9, 0.0)]);
         assert_eq!(input.action("move").unwrap().x, 0.9);
-        // Mouse deltas sum within a frame, unclamped, and read zero the
-        // frame after.
+        // Mouse deltas sum within a frame, unclamped; the motion is
+        // consumed by exactly one tick, like an edge (M3-14), which reads
+        // it as the rate covering it in one tick (`x · dt` = the motion):
+        // the frame's second tick reads zero while `update`'s view keeps
+        // the frame's motion.
+        input.end_tick();
         input.capture(&[
             InputEvent::moved(Device::Mouse, "delta", 3.0, -1.0),
             InputEvent::moved(Device::Mouse, "delta", 4.0, 0.5),
         ]);
         let l = input.action("look").unwrap();
-        assert_eq!((l.x, l.y), (7.0, -0.5));
+        assert!(
+            (l.x - 420.0).abs() < 1e-3 && (l.y + 30.0).abs() < 1e-3,
+            "{l:?}"
+        );
+        assert_eq!((l.frame_x, l.frame_y), (7.0, -0.5));
+        assert!(l.held);
+        input.end_tick();
+        let l = input.action("look").unwrap();
+        assert_eq!((l.x, l.y), (0.0, 0.0), "a catch-up tick sees no motion");
+        assert_eq!((l.frame_x, l.frame_y), (7.0, -0.5), "update sees the frame");
+        assert!(!l.held);
         input.capture(&[]);
         let l = input.action("look").unwrap();
-        assert_eq!((l.x, l.y), (0.0, 0.0));
-        assert!(!l.held);
-        // axis1d: wheel steps and the key pair, clamped.
+        assert_eq!(
+            (l.frame_x, l.frame_y),
+            (0.0, 0.0),
+            "a new frame starts at zero"
+        );
+        // A frame that runs no tick carries its motion to the next tick.
+        input.capture(&[InputEvent::moved(Device::Mouse, "delta", 1.0, 1.0)]);
+        input.capture(&[InputEvent::moved(Device::Mouse, "delta", 1.0, 0.0)]);
+        let l = input.action("look").unwrap();
+        assert!(
+            (l.x - 120.0).abs() < 1e-3 && (l.y - 60.0).abs() < 1e-3,
+            "{l:?}"
+        );
+        assert_eq!((l.frame_x, l.frame_y), (1.0, 0.0));
+        input.end_tick();
+        // axis1d: wheel steps and the key pair, clamped; keys read the same
+        // in both views.
         input.capture(&[
             InputEvent::moved(Device::Mouse, "wheel", 2.0, 0.0),
             InputEvent::down(Device::Keyboard, "Equal"),
         ]);
-        assert_eq!(
-            input.action("zoom").unwrap().x,
-            3.0,
-            "a relative control is not clamped"
+        let z = input.action("zoom").unwrap();
+        assert!(
+            (z.x - 121.0).abs() < 1e-3,
+            "a relative control is not clamped: {z:?}"
         );
+        assert_eq!(z.frame_x, 3.0);
+        input.end_tick();
+        let z = input.action("zoom").unwrap();
+        assert_eq!((z.x, z.frame_x), (1.0, 3.0));
         input.capture(&[]);
         assert_eq!(input.action("zoom").unwrap().x, 1.0);
+        let m = input.action("move").unwrap();
+        assert_eq!((m.frame_x, m.frame_y), (m.x, m.y));
         // Reset releases everything with edges.
         input.end_tick();
         input.capture(&[InputEvent::reset()]);
@@ -1013,6 +1150,62 @@ mod tests {
             input.raw(&Control::new(Device::Keyboard, "W")),
             Some((false, 0.0, 0.0))
         );
+    }
+
+    #[test]
+    fn a_binding_scale_turns_pixels_into_units() {
+        let mut input = Input::with_tick_dt(0.02);
+        let specs = vec![
+            ActionSpec {
+                name: "look".into(),
+                kind: ActionKind::Axis2d,
+                bindings: vec!["mouse:delta*0.01".into(), "gamepad:rightStick".into()],
+            },
+            ActionSpec {
+                name: "throttle".into(),
+                kind: ActionKind::Axis1d,
+                bindings: vec!["gamepad:rightTrigger*0.5".into()],
+            },
+        ];
+        assert!(input.bind(&specs).is_empty());
+        input.capture(&[
+            InputEvent::moved(Device::Mouse, "delta", 200.0, -100.0),
+            InputEvent::axis(Device::Gamepad, "rightStick", 0.5, 0.0),
+            InputEvent::axis(Device::Gamepad, "rightTrigger", 1.0, 0.0),
+        ]);
+        let l = input.action("look").unwrap();
+        // 2 units of motion in a 20 ms tick is a rate of 100/s, plus the
+        // stick's 0.5; the frame view holds the motion itself.
+        assert!(
+            (l.x - 100.5).abs() < 1e-3 && (l.y + 50.0).abs() < 1e-3,
+            "{l:?}"
+        );
+        assert!((l.frame_x - 2.5).abs() < 1e-6 && (l.frame_y + 1.0).abs() < 1e-6);
+        assert_eq!(input.action("throttle").unwrap().x, 0.5);
+        input.end_tick();
+        assert_eq!(
+            input.action("look").unwrap().x,
+            0.5,
+            "the stick stays, the motion is spent"
+        );
+        for bad in [
+            "mouse:delta*0",
+            "mouse:delta*x",
+            "keyboard:WASD*2",
+            "mouse:delta*-1",
+        ] {
+            assert!(
+                matches!(
+                    parse_binding(ActionKind::Axis2d, bad),
+                    Err(BindingError::BadScale(_))
+                ),
+                "{bad}"
+            );
+        }
+        assert!(matches!(
+            parse_binding(ActionKind::Button, "keyboard:Space*2"),
+            Err(BindingError::BadScale(_))
+        ));
     }
 
     #[test]

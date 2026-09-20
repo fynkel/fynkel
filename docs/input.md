@@ -21,12 +21,18 @@ overlay or a recording — a gameplay test needs no window.
 | `type` | Reads as | Held | Edges |
 | --- | --- | --- | --- |
 | `button` | `held`, `pressed`, `released` (`axis` is 1 or 0) | any bound button down | one `pressed`/`released` per press of any bound button |
-| `axis1d` | `axis` in `-1..1` (mouse wheel: unclamped steps) | non-zero | none |
-| `axis2d` | `action2D` in the unit square (mouse delta: unclamped pixels) | non-zero | none |
+| `axis1d` | `axis` in `-1..1` (mouse wheel: unclamped, see rule 5) | non-zero | none |
+| `axis2d` | `action2D` in the unit square (mouse delta: unclamped, see rule 5) | non-zero | none |
 
 Several bindings **compose**: key pairs and sticks are summed, then
 clamped (a relative mouse control leaves the sum unclamped). `keyboard:WASD`
-plus a stick pushed left reads `-1`, not `-2`.
+plus a stick pushed left reads `-1`, not `-2`. An axis binding takes a
+**scale** — `mouse:delta*0.0025`, `gamepad:rightTrigger*0.5` — that
+multiplies the control before it composes (M3-14): the way to turn mouse
+pixels into stick units, so one `sensitivity` on the consumer serves every
+device. `*<factor>` is a positive number and only an axis control (a
+stick, a trigger, the mouse's delta or wheel, an overlay stick) takes it;
+anything else is `FYN-P0009`.
 
 ### Binding grammar (`<device>:<control>`)
 
@@ -63,7 +69,9 @@ that a behaviour reads:
    50 ms frame is held on all three of its catch-up ticks.
 2. **An edge is consumed by exactly one tick.** Edges captured since the
    last tick are pending; the next tick sees them as `pressed`/`released`
-   and `World::step` consumes them (`Input::end_tick`). A press during a
+   and `World::step` consumes them (`Input::end_tick`, at the end of the
+   tick, so the game's behaviours and every native system of the tick —
+   the character driver, the camera rigs — read one view). A press during a
    frame that runs three catch-up ticks triggers on the first and the other
    two see it held; a jump pressed once jumps once. A frame too short to
    tick (`plan.steps == 0`) carries its edges to the next tick — nothing
@@ -75,13 +83,22 @@ that a behaviour reads:
 4. **A `reset` releases everything** with `released` edges — the host
    sends one when the viewport loses focus, the loop is paused or the app is
    hidden, so nothing stays held across a pause.
-5. **Relative controls start every frame at zero** (`mouse:delta`,
-   `mouse:wheel`) and sum the frame's movement.
+5. **Relative motion is consumed by exactly one tick, like an edge**
+   (`mouse:delta`, `mouse:wheel`; decided by item 14). The frame's events
+   sum; the first tick of the frame reads the sum as a **rate** — the
+   motion divided by the fixed dt, so a consumer that multiplies by `dt`
+   (the camera rig, a behaviour turning by `look · sensitivity · dt`)
+   turns by the motion exactly once — and its catch-up ticks read zero; a
+   frame that runs no tick carries its motion to the next tick. In
+   `update`/`lateUpdate` the value is the frame's motion itself
+   (`frame_x`/`frame_y` on the wire), in the binding's units (pixels,
+   scaled by its `*<factor>`).
 
 The wire: `fynkel.rec.InputEvent { device, control, phase (down | up |
 axis | move | reset), x, y }` batches in (`FYNKEL_BUFFER_INPUT_EVENTS`,
 `fynkel_world_capture_input`), `fynkel.rec.InputAction { name, kind, held,
-pressed, released, frame_pressed, frame_released, x, y }` per action out
+pressed, released, frame_pressed, frame_released, x, y, frame_x, frame_y }`
+per action out
 (`FYNKEL_BUFFER_INPUT_ACTIONS`, `fynkel_world_input_view`, the world's own
 buffer — read in place, no copy). A malformed batch is
 `FYNKEL_STATUS_PROTOCOL` and the world stands; an unknown device or phase
@@ -114,8 +131,9 @@ systems read actions themselves (M3-09, [physics.md](physics.md)): a
 and jumped by `World::step` from the tick's view before the edges are
 consumed (the jump on the press, once per press, exactly as a behaviour
 would see it), and a `fynkel.ThirdPersonCamera` turns by its
-`look_action` every tick — a relative control (`mouse:delta`) is therefore
-applied by each catch-up tick of a long frame, a known gap. An action the
+`look_action · sensitivity · dt` every tick — a relative control
+(`mouse:delta`) is a rate consumed by one tick (rule 5), so a long frame's
+catch-up ticks add nothing and a stick turns steadily. An action the
 project does not declare reads as nothing (`false`, `0`, `Vec2.zero`).
 The world's table is `world.input` (`WorldInput`: `actions`, the same
 readers, `refresh()`), decoded in place from the native view before each

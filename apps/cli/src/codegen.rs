@@ -265,7 +265,7 @@ fn settings_schema(s: &RecordSchema) -> Value {
                     "propertyNames": {"type": "string", "minLength": 1},
                     "additionalProperties": {
                         "type": "array",
-                        "items": {"type": "string", "pattern": "^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}$"},
+                        "items": {"type": "string", "pattern": "^(keyboard|mouse|gamepad|touch):[A-Za-z0-9_./+-]{1,64}(\\*[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?)?$"},
                     },
                     "default": {},
                 },

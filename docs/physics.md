@@ -219,7 +219,7 @@ specialised:
 | `distance` / `minDistance` | 5 / 0.5 | metres from the pivot, and the closest the pull-in brings it |
 | `yaw` / `pitch` | 0 / 0.35 | radians, the current orbit angles — written back every tick, so a scene value is the start and a `set` from Dart snaps the camera |
 | `minPitch` / `maxPitch` | −0.5 / 1.3 | the pitch clamp |
-| `lookAction` | "" | an axis2d action: `yaw −= x·sensitivity·dt`, `pitch −= y·sensitivity·dt` per tick (a relative control such as `mouse:delta` is applied by every catch-up tick of its frame — a known gap, item 14 decides) |
+| `lookAction` | "" | an axis2d action: `yaw −= x·sensitivity·dt`, `pitch −= y·sensitivity·dt` per tick. A relative control (`mouse:delta`) is a rate consumed by one tick ([input.md](input.md) rule 5, decided by item 14): the rig turns by the frame's motion once, whatever the tick count; bind it with a scale (`mouse:delta*0.0025`) so pixels become stick units and `sensitivity` is one knob for every device |
 | `sensitivity` | 2.5 | rad/s per unit of the action |
 | `collisionRadius` | 0.2 | a sphere of this radius cast from the pivot along the rig's direction (the target excluded, `mask` applied) pulls the camera in to the first collider, never under `minDistance`; 0 disables |
 | `mask` | all | which colliders the cast sees |
@@ -229,9 +229,12 @@ The rig is placed by `World::step` after the tick's transform propagate
 before the physics record: position = pivot + `(cos p·sin y, sin p,
 cos p·cos y)`·distance, rotation = `Ry(yaw)·Rx(−pitch)`, written to the
 rig's local transform through its parent (`fynkel_scene::set_world_pose`)
-— a rig with a parent still orbits in world space. No smoothing or lag
-(gap: item 14). `fynkel validate` checks the values (`FYN-H0007`), the
-tick rejects a bad `set` with `INVALID_PAYLOAD` 13.
+— a rig with a parent still orbits in world space. No smoothing or lag,
+decided by item 14: the rig snaps to its pose every tick, so what the
+player sees is the tick's state (the presenter interpolates between
+ticks); a game that wants a lazy camera writes its own rig behaviour.
+`fynkel validate` checks the values (`FYN-H0007`), the tick rejects a bad
+`set` with `INVALID_PAYLOAD` 13.
 
 ## Contacts
 

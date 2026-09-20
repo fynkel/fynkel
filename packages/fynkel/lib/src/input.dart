@@ -39,7 +39,8 @@ enum InputPhase {
   /// An absolute axis value (`x`, or `x`/`y`): a stick, a trigger.
   axis,
 
-  /// Relative movement summed over the frame (mouse delta, wheel).
+  /// Relative movement (mouse delta, wheel): summed over the frame and,
+  /// like an edge, consumed by exactly one tick.
   move,
 
   /// Every control released (focus lost, pause): the edges are seen by the
@@ -147,7 +148,11 @@ class ActionState {
   bool pressed = false;
   bool released = false;
 
-  /// `axis1d` value; `axis2d` x; a button 1/0.
+  /// `axis1d` value; `axis2d` x; a button 1/0. A relative control
+  /// (`mouse:delta`, `mouse:wheel`) is motion, scaled by its binding's
+  /// `*<factor>`: in a tick it is the rate that covers the motion in that
+  /// one tick (`x · dt` is the motion; a catch-up tick reads zero), in
+  /// `update`/`lateUpdate` the frame's summed motion itself.
   double x = 0;
   double y = 0;
 
@@ -170,7 +175,8 @@ abstract interface class InputService {
   double axis(String action);
 
   /// An `axis2d` action's vector (`x` right, `y` up; inside the unit
-  /// square for keys and sticks, unclamped pixels for `mouse:delta`).
+  /// square for keys and sticks, unclamped for `mouse:delta` — see
+  /// [ActionState.x]).
   Vec2 action2D(String action);
 
   /// The action's state, or null when the project does not declare it.
@@ -312,8 +318,9 @@ class WorldInput extends ActionTable {
   void invalidate() => _stale = true;
 
   /// Re-reads the world's view. With [frameEdges], `pressed`/`released`
-  /// are the current frame's raw edges (for `update`/`lateUpdate`); else
-  /// the edges the next tick consumes.
+  /// are the current frame's raw edges and a relative control's value the
+  /// frame's summed motion (for `update`/`lateUpdate`); else the edges
+  /// and the motion the next tick consumes.
   void refresh({bool frameEdges = false}) {
     final b = _view();
     final n = b.recordCount;
@@ -327,14 +334,17 @@ class WorldInput extends ActionTable {
     }
     final pressedAt = frameEdges ? 15 : 13;
     final releasedAt = frameEdges ? 16 : 14;
+    final xAt = frameEdges ? 28 : 20;
+    final yAt = frameEdges ? 32 : 24;
     for (var i = 0; i < n; i++) {
       final o = i * size;
       final s = _states[i];
-      s.held = d.getUint8(o + 12) != 0;
       s.pressed = d.getUint8(o + pressedAt) != 0;
       s.released = d.getUint8(o + releasedAt) != 0;
-      s.x = d.getFloat32(o + 20, Endian.little);
-      s.y = d.getFloat32(o + 24, Endian.little);
+      s.x = d.getFloat32(o + xAt, Endian.little);
+      s.y = d.getFloat32(o + yAt, Endian.little);
+      // An axis is held while away from zero in the view being read.
+      s.held = s.kind == ActionKind.button ? d.getUint8(o + 12) != 0 : (s.x != 0 || s.y != 0);
     }
   }
 }

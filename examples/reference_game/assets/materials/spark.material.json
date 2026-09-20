@@ -1,0 +1,21 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "11594507-794b-55f4-8c82-00d80d9b5403",
+  "name": "Spark",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    1.0,
+    0.9,
+    0.5,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.4,
+  "emissive": [
+    1.0,
+    0.8,
+    0.3
+  ],
+  "emissive_strength": 2.0
+}

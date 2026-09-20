@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "b775f8f9-a01f-5ddd-9bfa-efa53ae38a44",
+  "name": "Barrel",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.35,
+    0.22,
+    0.12,
+    1.0
+  ],
+  "metallic": 0.2,
+  "roughness": 0.55
+}
