@@ -97,7 +97,7 @@ fn loads_hierarchy_in_document_order_with_components() {
     assert!(matches!(
         ev.as_slice(),
         [Event {
-            payload: EventPayload::SceneReady,
+            payload: EventPayload::SceneReady { .. },
             ..
         }]
     ));

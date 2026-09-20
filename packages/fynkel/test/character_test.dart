@@ -41,7 +41,7 @@ void main() {
   (World, GameObject, GameObject) loaded() {
     final w = fresh();
     w.onLoadDiagnostics = (_) {};
-    final report = w.loadScene(cache, playground);
+    final report = w.loadScene(playground, cacheDir: cache);
     expect(report.ok, isTrue, reason: '$report');
     // The project's actions come with the cache index.
     expect(report.inputActions.map((a) => a.name), ['move', 'jump', 'look', 'pause']);

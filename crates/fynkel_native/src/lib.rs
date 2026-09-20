@@ -35,9 +35,13 @@ pub struct FynkelWorld {
     /// The cache the last load opened (a renderer drawing this world adopts
     /// it, so both see one residency store).
     assets: Option<fynkel_assets::Assets>,
-    /// One token per loaded scene: its closure stays resident until the
-    /// world is destroyed (scene unload is M3 item 12).
-    residency: Vec<fynkel_assets::Residency>,
+    /// One token per loaded scene (keyed by its id) or instantiated prefab
+    /// (`None`): the closure stays resident until the scene is unloaded, a
+    /// replace load empties the world, or the world is destroyed (M3-12).
+    residency: Vec<(Option<fynkel_contracts::Uuid>, fynkel_assets::Residency)>,
+    /// Action → bindings the user chose over the project's
+    /// (`fynkel_world_bind_actions`, M3-12), re-applied after every load.
+    rebinds: std::collections::BTreeMap<String, Vec<String>>,
     stats: Counters,
 }
 
@@ -180,6 +184,7 @@ impl FynkelWorld {
             load_report: Vec::new(),
             assets: None,
             residency: Vec::new(),
+            rebinds: std::collections::BTreeMap::new(),
             stats: Counters::default(),
         }
     }

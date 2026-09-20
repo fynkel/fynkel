@@ -30,6 +30,7 @@ pub mod project;
 pub mod runtime;
 pub mod scene;
 pub mod schema;
+pub mod settings;
 
 use std::path::Path;
 

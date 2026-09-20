@@ -281,6 +281,37 @@ turret.findChild('Barrel');                          // the prefab's entities ar
   `world.lastInstantiate` is the report, a bad id throws
   `FynkelInstantiateError`. Prefabs may nest; a cycle is `FYN-D0402`.
 
+## Scenes at runtime, zones, settings
+
+```dart
+world.scenes.transition(resultsSceneId);            // from any callback: loads at the start of the next frame
+await world.scenes.transition(levelTwo);            // the LoadReport, or a FynkelLoadError
+world.loadScene(hudScene, mode: LoadMode.additive); // now, on top of what is loaded (not from a callback)
+world.unloadScene(hudScene);                        // only that scene's entities; runtime spawns stay
+world.loadedScenes; world.scenes.current; world.scenes.state; // empty | pending | ready | failed
+```
+
+- `loadScene(id)` (the default `LoadMode.replace`) unloads **everything**
+  first — every loaded scene, every `spawn`/`instantiate` — so nothing
+  survives a level change; `additive` keeps the world and refuses an id
+  that is loaded already (`FYN-R0011`). Handles of destroyed objects go
+  dead on the next frame; a behaviour on one gets `onDestroy`.
+- `fynkel.TriggerZone { event, once }` next to a sensor `fynkel.Collider`
+  (`is_sensor: true`, else `FYN-H0009`) turns enter/exit into a named
+  event: `Behaviour.onZoneEnter(e)`/`onZoneExit(e)` on the zone's and the
+  visitor's behaviours, `world.zones.on('collect', (e) { … })` anywhere;
+  `e.zone`, `e.other`, `e.event`. `once: true` fires one enter and
+  removes the zone (a pickup).
+- Settings: `settings.json` under the platform's application-support
+  directory (`SettingsStore.defaultPath('{{title}}')`, wired in
+  `Game.load(settingsPath:)`): `master_volume`, `music_volume`,
+  `sfx_volume`, `muted`, `quality`, `input.rebinds` (`action →
+  [bindings]`, the input grammar below, laid over the project's actions
+  at once and after every load). `game.settings.current`,
+  `game.settings.update(doc)` / `edit((s) => s.rebind('jump',
+  ['keyboard:J']))` write the file immediately; a missing file is the
+  defaults, an invalid one is reported and ignored. Q writes `quality`.
+
 ## Input (actions, never keys)
 
 `fynkel.project.json` → `inputActions` declares every action a behaviour

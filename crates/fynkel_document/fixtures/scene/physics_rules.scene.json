@@ -533,6 +533,66 @@
           }
         }
       }
+    },
+    "bbbbbbbb-0000-4000-8000-000000000009": {
+      "name": "Solid zone",
+      "parent": null,
+      "children": [],
+      "components": {
+        "22222222-0000-4000-8000-000000000027": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "22222222-0000-4000-8000-000000000028": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              1,
+              1,
+              1
+            ],
+            "mesh": null,
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "layer": 1,
+            "mask": 4294967295
+          }
+        },
+        "22222222-0000-4000-8000-000000000029": {
+          "type": "fynkel.TriggerZone",
+          "version": 1,
+          "data": {
+            "event": "",
+            "once": false
+          }
+        }
+      }
     }
   }
 }

@@ -196,6 +196,13 @@ abstract class Behaviour {
   void onTriggerEnter(Contact contact) {}
   void onTriggerExit(Contact contact) {}
 
+  /// Zone callbacks (M3-12): right after the tick's step, for every
+  /// `fynkel.TriggerZone` event one of whose sides — the zone or what
+  /// entered it — is this behaviour's object. `event.event` is the zone's
+  /// name (`"collect"`); `world.byEntity` finds the other side.
+  void onZoneEnter(ZoneEvent event) {}
+  void onZoneExit(ZoneEvent event) {}
+
   /// Presentation-rate gameplay logic, once per host frame.
   void update(UpdateContext context) {}
 
@@ -440,8 +447,9 @@ class _BehaviourSystem {
   /// Right after `step()`: the contact callbacks of the objects involved
   /// (in contact order, side `a` then `b`), then `afterPhysics` for the
   /// behaviours that opted in.
-  void afterPhysics(int tick, List<Contact> contacts) {
+  void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones) {
     if (contacts.isNotEmpty) _dispatchContacts(contacts);
+    if (zones.isNotEmpty) _dispatchZones(zones);
     final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
     _run(ctx.context, (b) {
       if (b.wantsAfterPhysics) b.afterPhysics(ctx);
@@ -456,6 +464,29 @@ class _BehaviourSystem {
         if (c.b != c.a) _contactTo(world._byEntity[c.b], c);
       }
     });
+  }
+
+  void _dispatchZones(List<ZoneEvent> zones) {
+    world.context.run(() {
+      for (final z in zones) {
+        _zoneTo(world._byEntity[z.zone], z);
+        if (z.other != z.zone) _zoneTo(world._byEntity[z.other], z);
+        world.zones._dispatch(z);
+      }
+    });
+  }
+
+  static void _zoneTo(GameObject? go, ZoneEvent z) {
+    if (go == null || go._behaviours.isEmpty) return;
+    for (final b in go._behaviours.toList(growable: false)) {
+      if (!b._active || b._destroyRequested) continue;
+      switch (z) {
+        case ZoneEntered():
+          b.onZoneEnter(z);
+        case ZoneExited():
+          b.onZoneExit(z);
+      }
+    }
   }
 
   static void _contactTo(GameObject? go, Contact c) {

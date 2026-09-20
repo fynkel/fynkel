@@ -203,24 +203,94 @@ class AuthoredBehaviour {
 /// (`LoadReport.inputActions`): the name, the kind and the bindings in
 /// the project's grammar (`keyboard:WASD`, `touch:overlay/stick`, …).
 class BoundAction {
-  const BoundAction({required this.name, required this.type, required this.bindings});
+  const BoundAction({required this.name, required this.type, required this.bindings, this.rebound = false});
 
   factory BoundAction.fromJson(Map<String, Object?> j) => BoundAction(
         name: j['name'] as String? ?? '',
         type: j['type'] as String? ?? 'button',
         bindings: [for (final b in (j['bindings'] as List?) ?? const []) b as String],
+        rebound: j['rebound'] == true,
       );
 
   final String name;
 
   /// `button`, `axis1d` or `axis2d`.
   final String type;
+
+  /// The bindings in force: the user's rebinds when [rebound], the
+  /// project's otherwise (M3-12).
   final List<String> bindings;
+  final bool rebound;
 
   /// The `touch:overlay/<control>` control names this action binds.
   Iterable<String> get overlayControls => bindings
       .where((b) => b.startsWith('touch:overlay/'))
       .map((b) => b.substring('touch:overlay/'.length));
+}
+
+/// One scene the world holds (`LoadReport.scenes`, M3-12): its asset id,
+/// name and how many entities it spawned.
+class LoadedScene {
+  const LoadedScene({required this.id, required this.name, required this.entityCount});
+
+  factory LoadedScene.fromJson(Map<String, Object?> j) => LoadedScene(
+        id: j['id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        entityCount: (j['entities'] as num?)?.toInt() ?? 0,
+      );
+
+  final String id;
+  final String name;
+  final int entityCount;
+
+  @override
+  String toString() => '$name ($id, $entityCount entities)';
+}
+
+/// What [World.unloadScene] did (M3-12): the scene that went, what the
+/// world still holds.
+class UnloadReport {
+  const UnloadReport({
+    required this.ok,
+    required this.diagnostics,
+    this.sceneId,
+    this.sceneName,
+    this.entityCount = 0,
+    this.scenes = const [],
+    this.residency = const ResidencyStats(),
+  });
+
+  factory UnloadReport.fromJson(Map<String, Object?> j) {
+    final gone = j['unloaded'] as Map<String, Object?>?;
+    final residency = j['residency'] as Map<String, Object?>?;
+    return UnloadReport(
+      ok: j['ok'] == true,
+      diagnostics: [
+        for (final d in (j['diagnostics'] as List?) ?? const []) LoadDiagnostic.fromJson(d as Map<String, Object?>),
+      ],
+      sceneId: gone?['id'] as String?,
+      sceneName: gone?['name'] as String?,
+      entityCount: (gone?['entities'] as num?)?.toInt() ?? 0,
+      scenes: [
+        for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
+      ],
+      residency: residency == null ? const ResidencyStats() : ResidencyStats.fromJson(residency),
+    );
+  }
+
+  final bool ok;
+  final List<LoadDiagnostic> diagnostics;
+  final String? sceneId;
+  final String? sceneName;
+
+  /// The scene's entities that were still alive and went with it.
+  final int entityCount;
+
+  /// The scenes the world holds after the unload.
+  final List<LoadedScene> scenes;
+  final ResidencyStats residency;
+
+  Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
 }
 
 /// What [World.instantiate] produced: the anchor is the returned object.
@@ -322,6 +392,8 @@ class LoadReport {
     this.residency = const ResidencyStats(),
     this.inputActions = const [],
     this.physics = const PhysicsSettings(),
+    this.mode,
+    this.scenes = const [],
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
@@ -355,6 +427,10 @@ class LoadReport {
         for (final a in (input?['actions'] as List?) ?? const []) BoundAction.fromJson((a as Map).cast<String, Object?>()),
       ],
       physics: physics == null ? const PhysicsSettings() : PhysicsSettings.fromJson(physics),
+      mode: j['mode'] as String?,
+      scenes: [
+        for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
+      ],
     );
   }
 
@@ -362,6 +438,13 @@ class LoadReport {
   final List<LoadDiagnostic> diagnostics;
   final String? sceneId;
   final String? sceneName;
+
+  /// `replace` or `additive` for a scene load (M3-12); null for a report
+  /// that loaded no scene (`bindActions`).
+  final String? mode;
+
+  /// Every scene the world holds after this call, load order.
+  final List<LoadedScene> scenes;
 
   /// The scene's authoring path as the cache index records it (relative to
   /// the asset root; for messages — the runtime never opens it).
@@ -432,6 +515,8 @@ class LoadReport {
         residency: residency,
         inputActions: inputActions,
         physics: physics,
+        mode: mode,
+        scenes: scenes,
       );
 
   /// This report after the SDK attached [attached] behaviours and found
@@ -483,6 +568,18 @@ class FynkelInstantiateError extends Error {
   String toString() {
     final lines = report.diagnostics.map((d) => '  $d').join('\n');
     return 'FynkelInstantiateError:\n$lines';
+  }
+}
+
+/// [World.unloadScene] failed; the world is unchanged.
+class FynkelUnloadError extends Error {
+  FynkelUnloadError(this.report);
+  final UnloadReport report;
+
+  @override
+  String toString() {
+    final lines = report.diagnostics.map((d) => '  $d').join('\n');
+    return 'FynkelUnloadError:\n$lines';
   }
 }
 

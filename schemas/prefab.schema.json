@@ -337,6 +337,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "fynkel.TriggerZone"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.TriggerZone.schema.json"
+              }
+            }
+          }
         }
       ]
     },

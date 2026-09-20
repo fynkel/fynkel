@@ -198,7 +198,8 @@ def project_doc():
     native = ["fynkel.Transform", "fynkel.MeshRenderer", "fynkel.Camera", "fynkel.DirectionalLight",
               "fynkel.PointLight", "fynkel.SpotLight", "fynkel.Environment", "fynkel.RigidBody", "fynkel.Collider",
               "fynkel.CharacterController", "fynkel.ThirdPersonCamera", "fynkel.Rotator", "fynkel.Oscillate",
-              "fynkel.Follow", "fynkel.LookAtCamera", "fynkel.LifetimeDespawn", "fynkel.Emitter"]
+              "fynkel.Follow", "fynkel.LookAtCamera", "fynkel.LifetimeDespawn", "fynkel.Emitter",
+              "fynkel.TriggerZone"]
     return {
         "$schema": "https://fynkel.dev/schemas/project.schema.json", "formatVersion": 1,
         "id": str(PROJECT_ID), "name": "Fynkel Stress", "startupScene": {"asset": str(SCENE_ID)},

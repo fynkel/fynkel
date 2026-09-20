@@ -6,12 +6,15 @@
 use std::path::{Path, PathBuf};
 use std::ptr;
 
-use fynkel_contracts::{Entity, Status};
+use fynkel_contracts::{Entity, EventKind, Status};
+use fynkel_core::schema::{EventHeader, SceneReadyEvent, SceneUnloadedEvent, ZoneEvent};
 use fynkel_core::Name;
 use fynkel_import::{cook_project, CookOptions};
+use fynkel_native::buffer::{self, BufferKind};
 use fynkel_native::load::*;
 use fynkel_native::*;
 use fynkel_scene::{self as scene, Transform};
+use fynkel_wire::{get_u32, WireRecord};
 use glam::Vec3;
 
 fn fixture() -> PathBuf {
@@ -90,6 +93,53 @@ impl Host {
             )
         }
     }
+
+    fn load_scene_with(&self, cache: &str, id: &str, flags: u32) -> Status {
+        unsafe {
+            fynkel_world_load_scene_with(
+                self.w,
+                cache.as_ptr(),
+                cache.len() as u32,
+                id.as_ptr(),
+                id.len() as u32,
+                flags,
+            )
+        }
+    }
+
+    fn unload_scene(&self, id: &str) -> Status {
+        unsafe { fynkel_world_unload_scene(self.w, id.as_ptr(), id.len() as u32) }
+    }
+
+    fn bind_actions(&self, json: &str) -> Status {
+        unsafe { fynkel_world_bind_actions(self.w, json.as_ptr(), json.len() as u32) }
+    }
+
+    fn step(&self) -> Status {
+        let mut r = FynkelStepResult::default();
+        unsafe { fynkel_world_step(self.w, &mut r) }
+    }
+
+    /// The drained events as `(kind, body, tail)` — the tail is the
+    /// buffer's string table, shared by every body.
+    fn events(&self) -> Vec<(u32, Vec<u8>, Vec<u8>)> {
+        let v = unsafe { fynkel_world_drain_events(self.w) };
+        if v.length == 0 {
+            return Vec::new();
+        }
+        let b = unsafe { std::slice::from_raw_parts(v.data, v.length as usize) };
+        let (h, records, tail) = buffer::validate(b, BufferKind::Events).unwrap();
+        let mut out = Vec::new();
+        let mut off = 0;
+        for _ in 0..h.record_count {
+            let kind = get_u32(records, off);
+            let size = get_u32(records, off + 4) as usize;
+            off += EventHeader::SIZE;
+            out.push((kind, records[off..off + size].to_vec(), tail.to_vec()));
+            off += size;
+        }
+        out
+    }
 }
 
 impl Drop for Host {
@@ -102,6 +152,9 @@ impl Drop for Host {
 }
 
 const MAIN_SCENE: &str = "c0000000-0000-4000-8000-000000000030";
+const PLAYGROUND: &str = "c0000000-0000-4000-8000-000000000031";
+const RESULTS: &str = "c0000000-0000-4000-8000-000000000033";
+const COIN: &str = "c0000000-0000-4000-8000-000000000042";
 
 #[test]
 fn project_and_scene_load_through_the_abi() {
@@ -146,11 +199,17 @@ fn project_and_scene_load_through_the_abi() {
     assert_eq!(b["component"], "c0000000-0000-4000-8000-0000000000c2");
     assert!(b["entity"].as_u64().unwrap() != 0);
 
-    // The same scene by id: a second instance (ids are per load), and the
-    // residency count of its closure goes up, not the store's size.
+    // The same scene by id: `load_scene` replaces (M3-12) — the first
+    // instance is unloaded, the world holds one Main again, residency
+    // is the scene's closure alone.
     assert_eq!(host.load_scene(&cache, MAIN_SCENE), Status::Ok);
-    assert_eq!(host.live(), 14);
-    assert_eq!(host.report()["residency"]["retained"], 7);
+    assert_eq!(host.live(), 7);
+    let r = host.report();
+    assert_eq!(r["mode"], "replace");
+    assert_eq!(r["residency"]["retained"], 7);
+    assert_eq!(r["scenes"].as_array().unwrap().len(), 1);
+    assert_eq!(r["scenes"][0]["name"], "Main");
+    assert_eq!(r["scenes"][0]["entities"], 7);
 
     // Not a scene, not in the cache, not a UUID.
     let prefab = "c0000000-0000-4000-8000-000000000040";
@@ -158,7 +217,7 @@ fn project_and_scene_load_through_the_abi() {
     let r = host.report();
     assert_eq!(r["ok"], false);
     assert_eq!(r["diagnostics"][0]["code"], "FYN-R0006");
-    assert_eq!(host.live(), 14, "a failed load leaves the world alone");
+    assert_eq!(host.live(), 7, "a failed load leaves the world alone");
     let unknown = "c0000000-0000-4000-8000-0000000000ff";
     assert_eq!(host.load_scene(&cache, unknown), Status::LoadFailed);
     assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0003");
@@ -506,4 +565,194 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     assert_eq!(capture(host.w, &[alien]), Status::Ok);
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
     assert_eq!(host.live(), 7);
+}
+
+/// M3-12: scenes stack additively and unload one at a time, a replace
+/// load clears everything (runtime prefabs included), a `TriggerZone`
+/// on a runtime-spawned coin names its event through the wire, and the
+/// user's rebinds sit over the project's actions across loads.
+#[test]
+fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
+    let cooked = Cooked::new("scenes");
+    let cache = cooked.text();
+    let host = Host::new();
+
+    // Nothing to unload before a project.
+    assert_eq!(host.unload_scene(MAIN_SCENE), Status::LoadFailed);
+    assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0010");
+    assert_eq!(host.bind_actions("{}"), Status::LoadFailed);
+
+    assert_eq!(host.load_project(&cache), Status::Ok);
+    assert_eq!(host.live(), 7);
+    let _ = host.events();
+
+    // Additive: Playground joins Main; the same id again is refused.
+    assert_eq!(
+        host.load_scene_with(&cache, PLAYGROUND, FYNKEL_LOAD_ADDITIVE),
+        Status::Ok
+    );
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    assert_eq!(r["mode"], "additive");
+    assert_eq!(r["scene"]["name"], "Playground");
+    let scenes = r["scenes"].as_array().unwrap();
+    assert_eq!(scenes.len(), 2);
+    assert_eq!(scenes[0]["name"], "Main");
+    assert_eq!(scenes[1]["name"], "Playground");
+    assert_eq!(scenes[1]["entities"], 5);
+    assert_eq!(host.live(), 12);
+    let ev = host.events();
+    let ready: Vec<_> = ev
+        .iter()
+        .filter(|e| e.0 == EventKind::SCENE_READY.0)
+        .collect();
+    assert_eq!(ready.len(), 1);
+    let ready = SceneReadyEvent::decode(&ready[0].1, &ready[0].2).unwrap();
+    assert_eq!(ready.scene.asset.to_string(), PLAYGROUND);
+    assert_eq!(
+        host.load_scene_with(&cache, PLAYGROUND, FYNKEL_LOAD_ADDITIVE),
+        Status::LoadFailed
+    );
+    let r = host.report();
+    assert_eq!(r["diagnostics"][0]["code"], "FYN-R0011");
+    assert_eq!(host.live(), 12, "a refused load leaves the world alone");
+    assert_eq!(
+        host.load_scene_with(&cache, PLAYGROUND, 0x80),
+        Status::InvalidArgument,
+        "unknown flag bits"
+    );
+
+    // A coin spawned into Playground on top of the Player: its sensor
+    // overlaps the character's capsule, so the first tick fires the
+    // zone's named event on the general lane.
+    let desc = FynkelInstantiateDesc {
+        prefab_id_utf8: COIN.as_ptr(),
+        prefab_id_len: COIN.len() as u32,
+        name_utf8: ptr::null(),
+        name_len: 0,
+        parent: 0,
+        position: [0.0, 0.0, 0.0],
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: [1.0, 1.0, 1.0],
+    };
+    assert_eq!(
+        unsafe { fynkel_world_instantiate(host.w, &desc) },
+        Status::Ok
+    );
+    assert_eq!(host.live(), 14);
+    let _ = host.events();
+    assert_eq!(host.step(), Status::Ok);
+    let ev = host.events();
+    let zones: Vec<_> = ev
+        .iter()
+        .filter(|e| e.0 == EventKind::ZONE_ENTERED.0)
+        .collect();
+    assert_eq!(
+        zones.len(),
+        1,
+        "{:?}",
+        ev.iter().map(|e| e.0).collect::<Vec<_>>()
+    );
+    let z = ZoneEvent::decode(&zones[0].1, &zones[0].2).unwrap();
+    assert_eq!(z.event, "collect");
+    assert_ne!(z.zone, z.other);
+    {
+        let ecs = unsafe { &*host.w }.core().ecs();
+        assert_eq!(ecs.copy::<Name>(z.other).unwrap().value, "Player");
+        assert_eq!(ecs.copy::<Name>(z.zone).unwrap().value, "Coin");
+        assert!(
+            ecs.get::<fynkel_core::TriggerZone>(z.zone).is_err(),
+            "`once` removed the zone after its first entry"
+        );
+    }
+    assert!(
+        ev.iter().any(|e| e.0 == EventKind::TRIGGER_ENTER.0),
+        "the physics-lane event is still there"
+    );
+
+    // Unload Main: its 7 go, the coin (a runtime spawn) and Playground
+    // stay; unloading it again is FYN-R0010.
+    assert_eq!(host.unload_scene(MAIN_SCENE), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    assert_eq!(r["unloaded"]["name"], "Main");
+    assert_eq!(r["unloaded"]["id"], MAIN_SCENE);
+    assert_eq!(r["unloaded"]["entities"], 7);
+    assert_eq!(r["scenes"].as_array().unwrap().len(), 1);
+    assert_eq!(r["scenes"][0]["name"], "Playground");
+    assert_eq!(host.live(), 7);
+    let ev = host.events();
+    assert_eq!(
+        ev.iter().filter(|e| e.0 == EventKind::DESTROYED.0).count(),
+        7
+    );
+    let gone = ev
+        .iter()
+        .find(|e| e.0 == EventKind::SCENE_UNLOADED.0)
+        .unwrap();
+    let gone = SceneUnloadedEvent::decode(&gone.1, &gone.2).unwrap();
+    assert_eq!(gone.scene.asset.to_string(), MAIN_SCENE);
+    assert_eq!(gone.entities, 7);
+    assert_eq!(host.unload_scene(MAIN_SCENE), Status::LoadFailed);
+    assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0010");
+    assert_eq!(host.unload_scene("nope"), Status::InvalidArgument);
+
+    // Rebinds sit over the project's actions and survive the next load.
+    assert_eq!(
+        host.bind_actions(r#"{ "jump": ["keyboard:J"], "nope": ["keyboard:K"] }"#),
+        Status::Ok
+    );
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    let actions = r["input"]["actions"].as_array().unwrap();
+    let jump = actions.iter().find(|a| a["name"] == "jump").unwrap();
+    assert_eq!(jump["rebound"], true);
+    assert_eq!(jump["bindings"], serde_json::json!(["keyboard:J"]));
+    let mv = actions.iter().find(|a| a["name"] == "move").unwrap();
+    assert_eq!(mv["rebound"], false);
+    assert!(
+        actions.iter().all(|a| a["name"] != "nope"),
+        "a rebind for an unknown action binds nothing"
+    );
+    assert_eq!(host.bind_actions("[1]"), Status::InvalidArgument);
+
+    // Replace: Results alone, the coin gone with everything else.
+    assert_eq!(host.load_scene(&cache, RESULTS), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["mode"], "replace");
+    assert_eq!(r["scene"]["name"], "Results");
+    assert_eq!(r["scenes"].as_array().unwrap().len(), 1);
+    assert_eq!(host.live(), 3);
+    let jump = r["input"]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "jump")
+        .unwrap()
+        .clone();
+    assert_eq!(jump["rebound"], true, "{r:#}");
+    let ev = host.events();
+    assert_eq!(
+        ev.iter()
+            .filter(|e| e.0 == EventKind::SCENE_UNLOADED.0)
+            .count(),
+        1
+    );
+    assert_eq!(
+        ev.iter().filter(|e| e.0 == EventKind::DESTROYED.0).count(),
+        7,
+        "Playground's 5 and the coin's anchor + entity"
+    );
+    assert_eq!(ev.last().map(|e| e.0), Some(EventKind::SCENE_READY.0));
+    assert_eq!(host.bind_actions("{}"), Status::Ok);
+    let r = host.report();
+    let jump = r["input"]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["name"] == "jump")
+        .unwrap()
+        .clone();
+    assert_eq!(jump["rebound"], false);
+    assert_eq!(jump["bindings"].as_array().unwrap().len(), 3);
 }

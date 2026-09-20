@@ -1,13 +1,17 @@
 //! `fynkel_world_load_project` / `fynkel_world_load_scene` /
-//! `fynkel_world_load_report`: cooked scenes into the world through
-//! `fynkel_assets` (M3-03: a host reads the cache only — no source
-//! document is ever opened here), with a JSON report the host can show.
+//! `fynkel_world_load_scene_with` / `fynkel_world_unload_scene` /
+//! `fynkel_world_bind_actions` / `fynkel_world_load_report`: cooked scenes
+//! into the world through `fynkel_assets` (M3-03: a host reads the cache
+//! only — no source document is ever opened here), with a JSON report the
+//! host can show. Loads replace by default (M3-12: every loaded scene
+//! unloaded, every other entity destroyed, every residency token
+//! dropped); `FYNKEL_LOAD_ADDITIVE` keeps the world.
 
 use std::path::{Path, PathBuf};
 
 use fynkel_assets::{Assets, CookedScene};
 use fynkel_contracts::{Diagnostic, Entity, Status, Uuid};
-use fynkel_core::{LoadError, LoadedScene, Transform};
+use fynkel_core::{LoadError, LoadMode, LoadedScene, Transform};
 use fynkel_document::diagnostic_json;
 use glam::{Quat, Vec3};
 use serde_json::{json, Value};
@@ -53,6 +57,8 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
         LoadError::Unreachable(_) => Code::SCENE_HIERARCHY_CYCLE,
         LoadError::DuplicateComponent { .. } => Code::SCENE_DUPLICATE_COMPONENT,
         LoadError::UnknownAnchorParent(_) | LoadError::AnchorTransform => Code::IO,
+        LoadError::AlreadyLoaded(_) => Code::RUNTIME_SCENE_ALREADY_LOADED,
+        LoadError::NotLoaded(_) => Code::RUNTIME_SCENE_NOT_LOADED,
     };
     Diagnostic::error(code, e.to_string())
 }
@@ -87,8 +93,51 @@ fn same_dir(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// The world's binding table from the project's actions with the user's
+/// rebinds over them (M3-12), as the report's `input` entry.
+fn bind_project_input(w: &mut FynkelWorld, assets: &Assets) -> Value {
+    let Some(p) = assets.project() else {
+        return Value::Null;
+    };
+    let mut specs = p.input_actions.clone();
+    for spec in &mut specs {
+        if let Some(b) = w.rebinds.get(&spec.name) {
+            spec.bindings = b.clone();
+        }
+    }
+    let errors = w.core_mut().bind_input(&specs);
+    json!({
+        "actions": specs.iter().map(|a| json!({
+            "name": a.name, "type": a.kind.name(), "bindings": a.bindings,
+            "rebound": w.rebinds.contains_key(&a.name),
+        })).collect::<Vec<_>>(),
+        "bindingErrors": errors.iter().map(|(action, binding, e)| json!({
+            "action": action, "binding": binding, "message": e.to_string(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn residency_json(assets: &Assets) -> Value {
+    let stats = assets.stats();
+    json!({
+        "retained": stats.retained,
+        "meshes": stats.meshes,
+        "textures": stats.textures,
+        "materials": stats.materials,
+        "bytes": stats.bytes,
+    })
+}
+
+fn scenes_json(w: &FynkelWorld) -> Vec<Value> {
+    w.core()
+        .loaded_scenes()
+        .iter()
+        .map(|s| json!({"id": s.id.to_string(), "name": s.name, "entities": s.len()}))
+        .collect()
+}
+
 /// Spawns the cooked scene, retains its closure and builds the report.
-fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outcome {
+fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: LoadMode) -> Outcome {
     let cache = cache_json(&assets);
     // Physics (M3-08): the project's gravity, and every mesh collider's
     // mesh registered before the first step builds the colliders.
@@ -112,39 +161,30 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outco
             "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
         })
     };
-    match w.core_mut().load_scene(&scene.description) {
+    match w.core_mut().load_scene_with(&scene.description, mode) {
         Ok(loaded) => {
+            // A replace load emptied the world: nothing keeps the previous
+            // closures resident.
+            if mode == LoadMode::Replace {
+                w.residency.clear();
+            }
             let residency = assets.retain(&scene.closure);
-            let stats = assets.stats();
-            // The project's actions become the world's binding table
-            // (§19.2d item 7); validation reported bad bindings before the
-            // cook, so any here are a report entry, never a failure.
-            let input = assets.project().map(|p| {
-                let errors = w.core_mut().bind_input(&p.input_actions);
-                json!({
-                    "actions": p.input_actions.iter().map(|a| json!({
-                        "name": a.name, "type": a.kind.name(), "bindings": a.bindings,
-                    })).collect::<Vec<_>>(),
-                    "bindingErrors": errors.iter().map(|(action, binding, e)| json!({
-                        "action": action, "binding": binding, "message": e.to_string(),
-                    })).collect::<Vec<_>>(),
-                })
-            });
-            w.residency.push(residency);
+            w.residency.push((Some(loaded.id), residency));
+            let input = bind_project_input(w, &assets);
+            let residency = residency_json(&assets);
             w.assets = Some(assets);
             Outcome {
                 status: Status::Ok,
                 report: json!({
                     "ok": true,
-                    "scene": scene_json(&loaded, &scene),
-                    "cache": cache,
-                    "residency": {
-                        "retained": stats.retained,
-                        "meshes": stats.meshes,
-                        "textures": stats.textures,
-                        "materials": stats.materials,
-                        "bytes": stats.bytes,
+                    "mode": match mode {
+                        LoadMode::Replace => "replace",
+                        LoadMode::Additive => "additive",
                     },
+                    "scene": scene_json(&loaded, &scene),
+                    "scenes": scenes_json(w),
+                    "cache": cache,
+                    "residency": residency,
                     "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
                     "input": input,
                     "physics": physics,
@@ -156,6 +196,65 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outco
             diags.push(load_error_diagnostic(&e));
             failed(&diags, cache)
         }
+    }
+}
+
+/// Unloads a loaded scene (M3-12): its entities go, its residency token
+/// with them.
+fn unload(w: &mut FynkelWorld, id: Uuid) -> Outcome {
+    let cache = w.assets.as_ref().map(cache_json).unwrap_or(Value::Null);
+    match w.core_mut().unload_scene(id) {
+        Ok(gone) => {
+            w.residency.retain(|(scene, _)| *scene != Some(id));
+            let residency = w.assets.as_ref().map(residency_json).unwrap_or(Value::Null);
+            Outcome {
+                status: Status::Ok,
+                report: json!({
+                    "ok": true,
+                    "scene": Value::Null,
+                    "unloaded": {
+                        "id": gone.id.to_string(),
+                        "name": gone.name,
+                        "entities": gone.entities,
+                    },
+                    "scenes": scenes_json(w),
+                    "cache": cache,
+                    "residency": residency,
+                    "diagnostics": [],
+                }),
+            }
+        }
+        Err(e) => failed(&[load_error_diagnostic(&e)], cache),
+    }
+}
+
+/// Replaces the user's rebinds and rebinds the world's actions from the
+/// loaded project with them (M3-12).
+fn bind_actions(
+    w: &mut FynkelWorld,
+    rebinds: std::collections::BTreeMap<String, Vec<String>>,
+) -> Outcome {
+    w.rebinds = rebinds;
+    let Some(assets) = w.assets.clone() else {
+        return failed(
+            &[Diagnostic::error(
+                fynkel_contracts::Code::RUNTIME_CACHE_UNREADABLE,
+                "bind_actions: no cooked project is loaded in this world",
+            )
+            .with_suggestion("load the project (fynkel_world_load_project) first")],
+            Value::Null,
+        );
+    };
+    let input = bind_project_input(w, &assets);
+    Outcome {
+        status: Status::Ok,
+        report: json!({
+            "ok": true,
+            "scene": Value::Null,
+            "cache": cache_json(&assets),
+            "diagnostics": [],
+            "input": input,
+        }),
     }
 }
 
@@ -200,7 +299,7 @@ fn finish(w: &mut FynkelWorld, out: Outcome) -> Status {
     out.status
 }
 
-fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>) -> Outcome {
+fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>, mode: LoadMode) -> Outcome {
     let assets = match open(w, cache_dir) {
         Ok(a) => a,
         Err(d) => return failed(&[d], Value::Null),
@@ -211,7 +310,7 @@ fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>) -> Outcome {
         Err(d) => return failed(&[d], cache),
     };
     match assets.scene(id) {
-        Ok(scene) => instantiate(w, assets, scene),
+        Ok(scene) => instantiate(w, assets, scene, mode),
         Err(diags) => failed(&diags, cache),
     }
 }
@@ -251,7 +350,7 @@ fn instantiate_prefab(
         Ok((anchor, loaded)) => {
             let residency = assets.retain(&prefab.closure);
             let stats = assets.stats();
-            w.residency.push(residency);
+            w.residency.push((None, residency));
             let behaviours: Vec<Value> = prefab
                 .behaviours
                 .iter()
@@ -365,7 +464,7 @@ pub unsafe extern "C" fn fynkel_world_load_project(
     };
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
-        let out = load(w, &dir, None);
+        let out = load(w, &dir, None, LoadMode::Replace);
         finish(w, out)
     })
 }
@@ -394,7 +493,102 @@ pub unsafe extern "C" fn fynkel_world_load_scene(
     };
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
-        let out = load(w, &dir, Some(id));
+        let out = load(w, &dir, Some(id), LoadMode::Replace);
+        finish(w, out)
+    })
+}
+
+/// `fynkel_world_load_scene` with `flags` (M3-12): `0` replaces (every
+/// loaded scene unloaded and every other entity destroyed first),
+/// `FYNKEL_LOAD_ADDITIVE` (1) keeps the world and refuses a scene id that
+/// is loaded already (`FYN-R0011`). Unknown flag bits are
+/// `InvalidArgument`.
+///
+/// # Safety
+/// `world` live or NULL; the two strings point at their lengths' bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_load_scene_with(
+    world: *mut FynkelWorld,
+    cache_utf8: *const u8,
+    cache_len: u32,
+    scene_id_utf8: *const u8,
+    scene_id_len: u32,
+    flags: u32,
+) -> Status {
+    let (Some(dir), Some(id)) = (
+        utf8(cache_utf8, cache_len),
+        utf8(scene_id_utf8, scene_id_len),
+    ) else {
+        return Status::InvalidArgument;
+    };
+    let Ok(id) = id.parse::<Uuid>() else {
+        return Status::InvalidArgument;
+    };
+    let mode = match flags {
+        0 => LoadMode::Replace,
+        FYNKEL_LOAD_ADDITIVE => LoadMode::Additive,
+        _ => return Status::InvalidArgument,
+    };
+    let dir = PathBuf::from(dir);
+    guarded(world, move |w| {
+        let out = load(w, &dir, Some(id), mode);
+        finish(w, out)
+    })
+}
+
+/// `fynkel_world_load_scene_with` flag: keep what the world holds.
+pub const FYNKEL_LOAD_ADDITIVE: u32 = 1;
+
+/// Unloads the loaded scene `scene_id_utf8` (M3-12): its still-alive
+/// entities are destroyed (`DESTROYED` events, then `SCENE_UNLOADED`) and
+/// its assets released from residency. A scene the world does not hold
+/// is `LoadFailed` with `FYN-R0010` in the report.
+///
+/// # Safety
+/// `world` live or NULL; the string points at `scene_id_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_unload_scene(
+    world: *mut FynkelWorld,
+    scene_id_utf8: *const u8,
+    scene_id_len: u32,
+) -> Status {
+    let Some(id) = utf8(scene_id_utf8, scene_id_len) else {
+        return Status::InvalidArgument;
+    };
+    let Ok(id) = id.parse::<Uuid>() else {
+        return Status::InvalidArgument;
+    };
+    guarded(world, move |w| {
+        let out = unload(w, id);
+        finish(w, out)
+    })
+}
+
+/// Replaces the user's input rebinds with `json_utf8` — a JSON object
+/// `{ "<action>": ["<device>:<control>", …], … }` (an empty object clears
+/// them) — and rebinds the world's actions from the loaded project with
+/// those bindings over its own (M3-12; `settings.json` → `input.rebinds`).
+/// They stay over every later load. The report's `input` entry lists the
+/// table and its binding errors (a bad binding is reported, never fatal).
+/// `LoadFailed` before any project is loaded.
+///
+/// # Safety
+/// `world` live or NULL; the string points at `json_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_bind_actions(
+    world: *mut FynkelWorld,
+    json_utf8: *const u8,
+    json_len: u32,
+) -> Status {
+    let Some(text) = utf8(json_utf8, json_len) else {
+        return Status::InvalidArgument;
+    };
+    let Ok(rebinds) = serde_json::from_str::<std::collections::BTreeMap<String, Vec<String>>>(text)
+    else {
+        return Status::InvalidArgument;
+    };
+    guarded(world, move |w| {
+        let out = bind_actions(w, rebinds);
         finish(w, out)
     })
 }

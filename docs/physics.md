@@ -242,8 +242,14 @@ on every behaviour of both objects (side `a` then `b`, contact order).
 `Contact` carries `a`, `b`, `point` (world, the deepest point), `normal`
 (from `a` towards `b`; `normalFor(entity)` flips it), `impulse` (N·s the
 solver applied to the pair this step; 0 for exits and triggers),
-`other(entity)`, `involves`, `isTrigger`. Enter/exit are exact (a removed
-collider still exits); **stay** is reported only for pairs where at least
+`other(entity)`, `involves`, `isTrigger`. A sensor overlaps dynamic
+*and* kinematic bodies — a character's capsule walking into a static
+pickup fires its trigger (Rapier's default pairs a fixed collider with
+dynamic bodies only; sensors are widened) — while two non-sensor
+kinematic/static colliders never report a contact. A `fynkel.TriggerZone`
+next to a sensor turns its enter/exit into a named general-lane event
+(`ZONE_ENTERED`/`ZONE_EXITED`, [scenes.md](scenes.md)). Enter/exit are
+exact (a removed collider still exits); **stay** is reported only for pairs where at least
 one entity is subscribed — every `GameObject`, so every object with a
 behaviour — so
 the stay stream scales with what gameplay observes, not with the scene

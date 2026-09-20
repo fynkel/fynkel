@@ -42,10 +42,11 @@ use crate::command::{Command, Lane};
 use crate::components::{
     Camera, ComponentValue, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn,
     LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, SpotLight, ThirdPersonCamera,
+    TriggerZone,
 };
 use crate::event::{Event, EventPayload, EventQueue};
 use crate::input::{ActionSpec, ActionState, BindingError, Input, InputEvent};
-use crate::load::SceneDescription;
+use crate::load::{LoadedScene, SceneDescription};
 use crate::schema::{SystemKind, SystemTimeRecord};
 
 mod catalogue;
@@ -243,6 +244,9 @@ pub struct World {
     named_targets: HashMap<Entity, Entity>,
     /// Prefab descriptions `Emitter`s may instantiate (M3-10).
     prefabs: HashMap<Uuid, Arc<SceneDescription>>,
+    /// The scenes this world holds, in load order (M3-12): what a replace
+    /// load or `unload_scene` takes down.
+    pub(crate) scenes: Vec<LoadedScene>,
     /// The last step's per-phase wall time, one entry per `SystemKind`.
     system_times: Vec<SystemTimeRecord>,
     /// Scratch of the native systems, kept for its capacity.
@@ -294,6 +298,7 @@ impl World {
             physics: Physics::new(),
             named_targets: HashMap::new(),
             prefabs: HashMap::new(),
+            scenes: Vec::new(),
             system_times: SYSTEMS
                 .iter()
                 .map(|&system| SystemTimeRecord {
@@ -727,7 +732,7 @@ impl World {
                     return false;
                 }
                 match self.destroy_subtree(entity, tick) {
-                    Ok(()) => true,
+                    Ok(_) => true,
                     Err(err) => self.reject_scene(index, lane, entity, err),
                 }
             }
@@ -824,6 +829,7 @@ impl World {
                         self.ecs.remove::<LifetimeDespawn>(entity).is_ok()
                     }
                     ComponentId::EMITTER => self.ecs.remove::<Emitter>(entity).is_ok(),
+                    ComponentId::TRIGGER_ZONE => self.ecs.remove::<TriggerZone>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -875,9 +881,14 @@ impl World {
 
     /// Destroys `entity` and its subtree with the bookkeeping and the
     /// `Destroyed` events of `Command::Destroy` (also what an expired
-    /// `LifetimeDespawn` does).
-    fn destroy_subtree(&mut self, entity: Entity, tick: Tick) -> Result<(), SceneError> {
+    /// `LifetimeDespawn` does). Returns how many entities went.
+    pub(crate) fn destroy_subtree(
+        &mut self,
+        entity: Entity,
+        tick: Tick,
+    ) -> Result<usize, SceneError> {
         let gone = scene::despawn_subtree(&mut self.ecs, entity)?;
+        let count = gone.len();
         for e in gone {
             self.subscriptions.remove(&e);
             self.overrides.remove(&e);
@@ -887,7 +898,7 @@ impl World {
                 payload: EventPayload::Destroyed { entity: e },
             });
         }
-        Ok(())
+        Ok(count)
     }
 
     /// Shared by both lanes and by `load_scene`: validates the value and
@@ -930,6 +941,7 @@ impl World {
             ComponentValue::LookAtCamera(v) => self.ecs.insert(entity, v),
             ComponentValue::LifetimeDespawn(v) => self.ecs.insert(entity, v),
             ComponentValue::Emitter(v) => self.ecs.insert(entity, v),
+            ComponentValue::TriggerZone(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -1375,6 +1387,10 @@ impl World {
     /// The step's contacts on the physics lane (readable by
     /// `after_physics_events` this tick, drained next).
     fn physics_events(&mut self, tick: Tick) {
+        // A trigger pair with a `TriggerZone` on either side also fires the
+        // zone's named event on the general lane (M3-12); `once` zones are
+        // removed after their entry, collected while the events are read.
+        let mut fired: Vec<Entity> = Vec::new();
         for e in self.physics.events() {
             let payload = match *e {
                 PhysicsEvent::CollisionEnter(c) => EventPayload::CollisionEnter(c),
@@ -1384,6 +1400,34 @@ impl World {
                 PhysicsEvent::TriggerExit(c) => EventPayload::TriggerExit(c),
             };
             self.events.push(Event { tick, payload });
+            let (entered, c) = match *e {
+                PhysicsEvent::TriggerEnter(c) => (true, c),
+                PhysicsEvent::TriggerExit(c) => (false, c),
+                _ => continue,
+            };
+            for (zone, other) in [(c.a, c.b), (c.b, c.a)] {
+                if fired.contains(&zone) {
+                    continue;
+                }
+                let Ok(z) = self.ecs.get::<TriggerZone>(zone) else {
+                    continue;
+                };
+                let event = z.event.clone();
+                let once = z.once;
+                drop(z);
+                let payload = if entered {
+                    EventPayload::ZoneEntered { zone, other, event }
+                } else {
+                    EventPayload::ZoneExited { zone, other, event }
+                };
+                self.events.push(Event { tick, payload });
+                if entered && once {
+                    fired.push(zone);
+                }
+            }
+        }
+        for zone in fired {
+            let _ = self.ecs.remove::<TriggerZone>(zone);
         }
     }
 

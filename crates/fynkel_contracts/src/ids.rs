@@ -30,6 +30,8 @@ impl ComponentId {
     pub const LOOK_AT_CAMERA: ComponentId = ComponentId(17);
     pub const LIFETIME_DESPAWN: ComponentId = ComponentId(18);
     pub const EMITTER: ComponentId = ComponentId(19);
+    /// A sensor collider that names an event for Dart (M3-12).
+    pub const TRIGGER_ZONE: ComponentId = ComponentId(20);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -52,6 +54,7 @@ impl ComponentId {
             17 => Some("fynkel.LookAtCamera"),
             18 => Some("fynkel.LifetimeDespawn"),
             19 => Some("fynkel.Emitter"),
+            20 => Some("fynkel.TriggerZone"),
             _ => None,
         }
     }
@@ -69,6 +72,12 @@ impl EventKind {
     pub const PARENT_CHANGED: EventKind = EventKind(3);
     pub const MISSED_DEADLINE: EventKind = EventKind(4);
     pub const SCENE_READY: EventKind = EventKind(5);
+    /// A scene's entities were unloaded (M3-12; after their `DESTROYED`s).
+    pub const SCENE_UNLOADED: EventKind = EventKind(6);
+    /// A `fynkel.TriggerZone`'s sensor saw a collider enter / leave (M3-12;
+    /// general lane, next to the physics lane's `TRIGGER_ENTER`/`EXIT`).
+    pub const ZONE_ENTERED: EventKind = EventKind(7);
+    pub const ZONE_EXITED: EventKind = EventKind(8);
 
     pub const PHYSICS_FIRST: u32 = 0x100;
     pub const COLLISION_ENTER: EventKind = EventKind(0x100);

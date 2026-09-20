@@ -31,7 +31,14 @@ casts rays (`world.raycast`). Motion that needs no rules at all —
 turning, bobbing, following, billboards, timed despawns, spawning at a
 rate — is the native catalogue (`fynkel.Rotator`, `Oscillate`, `Follow`,
 `LookAtCamera`, `LifetimeDespawn`, `Emitter`): components the runtime
-ticks itself, authored in the scene, no Dart. After
+ticks itself, authored in the scene, no Dart. Levels change at runtime —
+`world.scenes.transition(id)` loads the next scene at the next frame,
+`loadScene(id, mode: LoadMode.additive)` stacks one, `unloadScene` takes
+it out — and a `fynkel.TriggerZone` on a sensor names the event a
+behaviour or `world.zones.on('collect', …)` gets when something walks in.
+The user's settings (volumes, the quality profile Q picks, input rebinds)
+live in a `settings.json` under the platform's application-support
+directory and are read at launch. After
 changing an exposed field, an id or adding a behaviour class, run `fynkel
 codegen --project .` and commit the regenerated `lib/generated/` and
 `schemas/behaviours/`.

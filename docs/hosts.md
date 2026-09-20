@@ -153,6 +153,37 @@ like a scene's (`FYN-B0001`/`B0002` warnings through
 resolved `GameObject` (`lastInstantiate` is the `InstantiateReport`);
 `FynkelInstantiateError` wraps a refusal.
 
+### Scenes at runtime (M3-12)
+
+`fynkel_world_load_scene(world, cache, scene_id)` **replaces**: every
+loaded scene is unloaded (last first) and every remaining root subtree
+destroyed — runtime prefabs and spawns included — before the scene
+loads, so nothing survives a level change (`DESTROYED` events, one
+`SCENE_UNLOADED { scene, entities }` per scene, then `SCENE_READY {
+scene }`, in that order on the next drain). `fynkel_world_load_scene_with(
+world, cache, scene_id, flags)` takes `FYNKEL_LOAD_ADDITIVE` (1) to keep
+the world and stack the scene (an id that is loaded already is
+`FYN-R0011`, nothing changes; unknown flag bits are
+`INVALID_ARGUMENT`). `fynkel_world_unload_scene(world, scene_id)`
+destroys the still-alive entities of that scene only (runtime spawns
+stay) and releases its residency; a scene the world does not hold is
+`FYN-R0010`. The load report gains `mode` (`replace` | `additive`) and
+`scenes: [{ id, name, entities }]` (what the world holds, load order);
+an unload's report is `{ ok, unloaded: { id, name, entities }, scenes,
+residency, diagnostics }`. `fynkel_world_bind_actions(world, json)`
+lays the user's rebinds — a JSON object `{ "<action>": ["<device>:
+<control>", …] }`, `{}` to clear — over the loaded project's actions
+now and after every later load (the world keeps them); the report is `{
+ok, input: { actions: [{ name, type, bindings, rebound }],
+bindingErrors[] } }`, `LoadFailed` before a project. Event kinds on the
+general lane are `SCENE_READY` 5 (now with its scene's `AssetRef`),
+`SCENE_UNLOADED` 6, `ZONE_ENTERED` 7 and `ZONE_EXITED` 8 (both a
+`fynkel.ev.Zone { zone, other, event }` — the `fynkel.TriggerZone`'s
+string comes through the events buffer's string table). The reference
+tests: `crates/fynkel_native/tests/load.rs`
+(`scenes_stack_unload_replace_and_zones_fire_through_the_abi`),
+`crates/fynkel_core/tests/scenes.rs`; the contract [scenes.md](scenes.md).
+
 ## Flutter host
 
 `hosts/flutter_apple` uses **one** dylib, `libfynkel_platform_apple.dylib`,

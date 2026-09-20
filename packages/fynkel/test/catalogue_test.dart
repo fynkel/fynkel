@@ -103,7 +103,7 @@ void main() {
   test('the Catalogue scene runs with no behaviour and reports per-system time', () {
     final w = fresh();
     w.onLoadDiagnostics = (_) {};
-    final report = w.loadScene(cache, catalogue);
+    final report = w.loadScene(catalogue, cacheDir: cache);
     expect(report.ok, isTrue, reason: '$report');
     expect(report.entityCount, 10);
     expect(report.physics.prefabs, 1, reason: 'the Spark prefab the Fountain names');

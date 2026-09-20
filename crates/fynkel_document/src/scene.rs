@@ -510,7 +510,8 @@ fn physics_value_rules(
         | "fynkel.Oscillate"
         | "fynkel.Follow"
         | "fynkel.LifetimeDespawn"
-        | "fynkel.Emitter" => Code::CATALOGUE_VALUE,
+        | "fynkel.Emitter"
+        | "fynkel.TriggerZone" => Code::CATALOGUE_VALUE,
         _ => return,
     };
     let Some(Ok(value)) = crate::generated::decode_component(&c.type_id, &c.data) else {
@@ -526,6 +527,7 @@ fn physics_value_rules(
         ComponentValue::Follow(k) => k.validate(),
         ComponentValue::LifetimeDespawn(k) => k.validate(),
         ComponentValue::Emitter(k) => k.validate(),
+        ComponentValue::TriggerZone(k) => k.validate(),
         _ => Ok(()),
     };
     if let Err(msg) = result {
@@ -536,7 +538,7 @@ fn physics_value_rules(
     }
 }
 
-/// The physics rules between an entity's components (`FYN-H0003`/`H0004`,
+/// The physics rules between an entity's components (`FYN-H0003`/`H0004`, `H0009`,
 /// `H0006`).
 fn physics_entity_rules(
     e: &Entity,
@@ -574,6 +576,28 @@ fn physics_entity_rules(
                 .with_id(ignored.id.to_string())
                 .with_suggestion("remove the RigidBody/Collider, or the CharacterController"),
                 &ignored.pointer,
+            ));
+        }
+    }
+    // A trigger zone fires from its sensor collider only (M3-12).
+    if let Some(z) = types.get("fynkel.TriggerZone") {
+        let sensor = collider
+            .and_then(|k| k.data.get("is_sensor"))
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false);
+        if !sensor {
+            out.push(anchor(
+                Diagnostic::new(
+                    Code::TRIGGER_ZONE_WITHOUT_SENSOR,
+                    Severity::Warning,
+                    format!(
+                        "{} has a TriggerZone but no sensor Collider: it never fires",
+                        e.name
+                    ),
+                )
+                .with_id(z.id.to_string())
+                .with_suggestion("add a fynkel.Collider with is_sensor: true"),
+                &z.pointer,
             ));
         }
     }

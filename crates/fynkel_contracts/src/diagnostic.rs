@@ -165,6 +165,9 @@ impl Code {
     /// `Oscillate`, `Follow`, `LookAtCamera`, `LifetimeDespawn`,
     /// `Emitter`: axes, rates, lifetimes; M3-10).
     pub const CATALOGUE_VALUE: Code = Code("FYN-H0008");
+    /// A `fynkel.TriggerZone` on an entity without a sensor `Collider`
+    /// (`is_sensor: true`): it never fires (M3-12).
+    pub const TRIGGER_ZONE_WITHOUT_SENSOR: Code = Code("FYN-H0009");
 
     // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
     /// The transaction's base revision is not the document's current one.
@@ -220,6 +223,20 @@ impl Code {
     /// The cache names no startup scene (`fynkel cook` ran without a
     /// project file).
     pub const RUNTIME_NO_STARTUP_SCENE: Code = Code("FYN-R0009");
+    /// `unload_scene` named a scene the world has not loaded (M3-12).
+    pub const RUNTIME_SCENE_NOT_LOADED: Code = Code("FYN-R0010");
+    /// An additive load named a scene the world already holds (M3-12).
+    pub const RUNTIME_SCENE_ALREADY_LOADED: Code = Code("FYN-R0011");
+
+    // User settings (`FYN-U`, blueprint §19.2d item 12): `settings.json`.
+    /// The settings file is not a settings document (wrong `fynkel` kind
+    /// or `formatVersion`, not an object).
+    pub const SETTINGS_NOT_A_DOCUMENT: Code = Code("FYN-U0001");
+    /// A settings value is out of range (a volume outside `0..=1`, an
+    /// unknown quality profile, a binding the grammar rejects).
+    pub const SETTINGS_VALUE: Code = Code("FYN-U0002");
+    /// The settings file could not be read or written.
+    pub const SETTINGS_IO: Code = Code("FYN-U0003");
 
     pub const fn as_str(self) -> &'static str {
         self.0

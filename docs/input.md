@@ -45,6 +45,14 @@ binding it cannot compile in the load report (`input.bindingErrors`).
 Gamepad names are the GameController framework's; every controller Apple
 pairs (Xbox, PlayStation, MFi) maps to them.
 
+The user's **rebinds** (M3-12, [scenes.md](scenes.md) § Settings) sit
+over the project's bindings per action: `settings.json` → `input.rebinds`
+`{ "<action>": ["<binding>", …] }` in the same grammar, applied by the
+`SettingsStore` through `World.bindActions` (`fynkel_world_bind_actions`)
+now and after every load; `LoadReport.inputActions[i].rebound` says which
+actions are the user's. An action the project lacks binds nothing; a bad
+binding is a `bindingErrors` entry, never fatal.
+
 ## The rules (§5.1)
 
 Raw controls carry **held** state (a button down, an axis value) and

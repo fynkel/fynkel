@@ -1,0 +1,151 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 2,
+  "id": "c0000000-0000-4000-8000-000000000033",
+  "name": "Results",
+  "entities": {
+    "c0000000-0000-4000-8000-0000000003e0": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000003c0": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              1.5,
+              5
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000003c1": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 0.9,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000003e1": {
+      "name": "Trophy",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000003c2": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000003c3": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "c0000000-0000-4000-8000-000000000001",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "c0000000-0000-4000-8000-000000000020"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "c0000000-0000-4000-8000-0000000003c4": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 1.0,
+            "space": "local"
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000003e2": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-0000000003c5": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              10,
+              0
+            ],
+            "rotation": [
+              -0.422618,
+              0,
+              0,
+              0.906308
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000003c6": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1,
+              0.97,
+              0.9
+            ],
+            "intensity": 10000.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    }
+  }
+}

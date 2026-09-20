@@ -281,11 +281,15 @@ external int fynkel_world_is_poisoned(ffi.Pointer<FynkelWorld> world);
 /// `scene_id_utf8` (36-char UUID text). Entities are spawned immediately
 /// with their authoring ids kept for the report; other components go
 /// through the command path and any rejection is in
-/// fynkel_world_diagnostics. The scene's closure of assets stays resident
-/// in the world's store (a viewport rendering this world draws from it)
-/// until the world is destroyed. FYNKEL_STATUS_LOAD_FAILED when the cache is
-/// missing or stale, the scene is not in it or the hierarchy has errors
-/// (FYN-R#### diagnostics; the world is unchanged);
+/// fynkel_world_diagnostics. Both **replace** (M3-12): every loaded scene
+/// is unloaded and every other entity destroyed first (DESTROYED events,
+/// one SCENE_UNLOADED per scene, then the new scene's SCENE_READY), and
+/// every residency token is dropped before the new scene's closure is
+/// retained. The scene's closure of assets stays resident in the world's
+/// store (a viewport rendering this world draws from it) until the scene
+/// is unloaded, replaced, or the world destroyed. FYNKEL_STATUS_LOAD_FAILED
+/// when the cache is missing or stale, the scene is not in it or the
+/// hierarchy has errors (FYN-R#### diagnostics; the world is unchanged);
 /// FYNKEL_STATUS_INVALID_ARGUMENT for NULL, non-UTF-8 or non-UUID input.
 @ffi.Native<
   ffi.UnsignedInt Function(
@@ -344,6 +348,101 @@ FynkelStatus fynkel_world_load_scene(
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_load_scene_with')
+external int _fynkel_world_load_scene_with(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+  int flags,
+);
+
+FynkelStatus fynkel_world_load_scene_with(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> cache_utf8,
+  int cache_len,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+  int flags,
+) => FynkelStatus.fromValue(
+  _fynkel_world_load_scene_with(
+    world,
+    cache_utf8,
+    cache_len,
+    scene_id_utf8,
+    scene_id_len,
+    flags,
+  ),
+);
+
+/// Unloads a loaded scene (M3-12): its still-alive entities are destroyed
+/// with their subtrees (DESTROYED events, then SCENE_UNLOADED with the
+/// count) and its closure released from residency; entities gameplay
+/// spawned or instantiated since stay. FYNKEL_STATUS_LOAD_FAILED with
+/// FYN-R0010 when the world does not hold the scene. The report:
+/// {"ok", "unloaded": {"id", "name", "entities"}, "scenes": [...],
+/// "residency": {...}}.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_unload_scene')
+external int _fynkel_world_unload_scene(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+);
+
+FynkelStatus fynkel_world_unload_scene(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> scene_id_utf8,
+  int scene_id_len,
+) => FynkelStatus.fromValue(
+  _fynkel_world_unload_scene(world, scene_id_utf8, scene_id_len),
+);
+
+/// Input rebinds (M3-12; the `input.rebinds` of settings.json): `json_utf8`
+/// is a JSON object {"<action>": ["<device>:<control>", ...], ...} whose
+/// bindings replace the loaded project's for those actions (an empty
+/// object clears every rebind). The world's action table is rebound at
+/// once and the rebinds stay over every later load. The report's "input"
+/// lists the actions (with "rebound": bool) and "bindingErrors" — a bad
+/// binding is reported, never fatal. FYNKEL_STATUS_LOAD_FAILED before any
+/// project is loaded; FYNKEL_STATUS_INVALID_ARGUMENT when the text is not
+/// such an object.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_bind_actions')
+external int _fynkel_world_bind_actions(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> json_utf8,
+  int json_len,
+);
+
+FynkelStatus fynkel_world_bind_actions(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> json_utf8,
+  int json_len,
+) => FynkelStatus.fromValue(
+  _fynkel_world_bind_actions(world, json_utf8, json_len),
+);
+
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
     ffi.Pointer<FynkelInstantiateDesc>,
   )
 >(symbol: 'fynkel_world_instantiate')
@@ -357,13 +456,16 @@ FynkelStatus fynkel_world_instantiate(
   ffi.Pointer<FynkelInstantiateDesc> desc,
 ) => FynkelStatus.fromValue(_fynkel_world_instantiate(world, desc));
 
-/// UTF-8 JSON describing the last load or instantiate call on this world
-/// (empty before any): {"ok": bool, "scene": {"id", "name", "path", "key",
-/// "entities", "rejectedComponents", "assets", "behaviours": [...]} | null,
+/// UTF-8 JSON describing the last load, unload, instantiate or bind call
+/// on this world (empty before any): {"ok": bool, "mode": "replace" |
+/// "additive"?, "scene": {"id", "name", "path", "key", "entities",
+/// "rejectedComponents", "assets", "behaviours": [...]} | null,
+/// "scenes": [{"id", "name", "entities"}]?, "unloaded": {...}?,
 /// "instance": {...}?, "cache": {"dir", "profile", "project",
 /// "startupScene"} | null, "residency": {"retained", "meshes", "textures",
-/// "materials", "bytes"}?, "diagnostics": [{"code", "severity", "message",
-/// "document"?, "pointer"?, ...}]}. Valid until the next such call.
+/// "materials", "bytes"}?, "input": {"actions", "bindingErrors"}?,
+/// "diagnostics": [{"code", "severity", "message", "document"?,
+/// "pointer"?, ...}]}. Valid until the next such call.
 @ffi.Native<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>()
 external FynkelBufferView fynkel_world_load_report(
   ffi.Pointer<FynkelWorld> world,
@@ -528,7 +630,10 @@ enum FynkelComponent {
   FYNKEL_COMPONENT_FOLLOW(16),
   FYNKEL_COMPONENT_LOOK_AT_CAMERA(17),
   FYNKEL_COMPONENT_LIFETIME_DESPAWN(18),
-  FYNKEL_COMPONENT_EMITTER(19);
+  FYNKEL_COMPONENT_EMITTER(19),
+
+  /// A sensor collider that names an event for Dart (M3-12).
+  FYNKEL_COMPONENT_TRIGGER_ZONE(20);
 
   final int value;
   const FynkelComponent(this.value);
@@ -553,7 +658,51 @@ enum FynkelComponent {
     17 => FYNKEL_COMPONENT_LOOK_AT_CAMERA,
     18 => FYNKEL_COMPONENT_LIFETIME_DESPAWN,
     19 => FYNKEL_COMPONENT_EMITTER,
+    20 => FYNKEL_COMPONENT_TRIGGER_ZONE,
     _ => throw ArgumentError('Unknown value for FynkelComponent: $value'),
+  };
+}
+
+/// Event kinds in fynkel_world_drain_events (the schema's `fynkel.ev.*`
+/// records; physics-lane kinds are 0x100..0x1ff).
+enum FynkelEventKind {
+  FYNKEL_EVENT_SPAWNED(1),
+  FYNKEL_EVENT_DESTROYED(2),
+  FYNKEL_EVENT_PARENT_CHANGED(3),
+  FYNKEL_EVENT_MISSED_DEADLINE(4),
+  FYNKEL_EVENT_SCENE_READY(5),
+
+  /// M3-12: a scene's entities were unloaded (after their DESTROYEDs).
+  FYNKEL_EVENT_SCENE_UNLOADED(6),
+
+  /// M3-12: a fynkel.TriggerZone's sensor saw a collider enter / leave
+  /// (`fynkel.ev.Zone` body: zone, other, event name).
+  FYNKEL_EVENT_ZONE_ENTERED(7),
+  FYNKEL_EVENT_ZONE_EXITED(8),
+  FYNKEL_EVENT_COLLISION_ENTER(256),
+  FYNKEL_EVENT_COLLISION_STAY(257),
+  FYNKEL_EVENT_COLLISION_EXIT(258),
+  FYNKEL_EVENT_TRIGGER_ENTER(259),
+  FYNKEL_EVENT_TRIGGER_EXIT(260);
+
+  final int value;
+  const FynkelEventKind(this.value);
+
+  static FynkelEventKind fromValue(int value) => switch (value) {
+    1 => FYNKEL_EVENT_SPAWNED,
+    2 => FYNKEL_EVENT_DESTROYED,
+    3 => FYNKEL_EVENT_PARENT_CHANGED,
+    4 => FYNKEL_EVENT_MISSED_DEADLINE,
+    5 => FYNKEL_EVENT_SCENE_READY,
+    6 => FYNKEL_EVENT_SCENE_UNLOADED,
+    7 => FYNKEL_EVENT_ZONE_ENTERED,
+    8 => FYNKEL_EVENT_ZONE_EXITED,
+    256 => FYNKEL_EVENT_COLLISION_ENTER,
+    257 => FYNKEL_EVENT_COLLISION_STAY,
+    258 => FYNKEL_EVENT_COLLISION_EXIT,
+    259 => FYNKEL_EVENT_TRIGGER_ENTER,
+    260 => FYNKEL_EVENT_TRIGGER_EXIT,
+    _ => throw ArgumentError('Unknown value for FynkelEventKind: $value'),
   };
 }
 
@@ -825,3 +974,5 @@ const int FYNKEL_ABI_VERSION = 1;
 const int FYNKEL_BUFFER_MAGIC = 1263425862;
 
 const int FYNKEL_BUFFER_HEADER_SIZE = 24;
+
+const int FYNKEL_LOAD_ADDITIVE = 1;

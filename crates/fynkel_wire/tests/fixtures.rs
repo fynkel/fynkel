@@ -18,7 +18,8 @@ use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
 use fynkel_core::{
     BodyType, CharacterController, Collider, ColliderShape, Emitter, Follow, LifetimeDespawn,
-    LookAtCamera, MotionSpace, Name, Oscillate, RigidBody, Rotator, ThirdPersonCamera,
+    LookAtCamera, MotionSpace, Name, Oscillate, RigidBody, Rotator, Settings, ThirdPersonCamera,
+    TriggerZone,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
@@ -127,7 +128,12 @@ fn fixtures_match_generated_codecs() {
             dropped_seconds: 0.1,
         },
     );
-    check("SceneReadyEvent", &SceneReadyEvent);
+    check(
+        "SceneReadyEvent",
+        &SceneReadyEvent {
+            scene: AssetRef::new("0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff".parse().unwrap()),
+        },
+    );
     check(
         "ContactEvent",
         &ContactEvent {
@@ -464,6 +470,39 @@ fn fixtures_match_generated_codecs() {
             entity: e(4, 2),
             parent: e(1, 1),
             name: "Lamp".into(),
+        },
+    );
+    // M3-12.
+    check(
+        "TriggerZone",
+        &TriggerZone {
+            event: "collect".into(),
+            once: true,
+        },
+    );
+    check(
+        "SceneUnloadedEvent",
+        &SceneUnloadedEvent {
+            scene: AssetRef::new(material_id),
+            entities: 12,
+        },
+    );
+    check(
+        "ZoneEvent",
+        &ZoneEvent {
+            zone: e(7, 1),
+            other: e(2, 3),
+            event: "collect".into(),
+        },
+    );
+    check(
+        "Settings",
+        &Settings {
+            master_volume: 0.8,
+            music_volume: 0.5,
+            sfx_volume: 1.0,
+            muted: true,
+            quality: "high".into(),
         },
     );
 }

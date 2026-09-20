@@ -6,6 +6,7 @@
 // gameplay code against a `TestGameContext` with its own clock.
 
 import 'input.dart';
+import 'settings.dart';
 
 /// Frame and fixed-step timing.
 abstract interface class TimeService {
@@ -45,8 +46,10 @@ class PrintDiagnostics implements DiagnosticsService {
 /// [GameContext.current]; a world makes its context current around every
 /// behaviour callback ([run]).
 class GameContext {
-  GameContext({required this.time, this.diagnostics = const PrintDiagnostics(), InputService? input})
-      : input = input ?? NoInput();
+  GameContext(
+      {required this.time, this.diagnostics = const PrintDiagnostics(), InputService? input, SettingsService? settings})
+      : input = input ?? NoInput(),
+        settings = settings ?? SettingsStore();
 
   final TimeService time;
   final DiagnosticsService diagnostics;
@@ -54,6 +57,10 @@ class GameContext {
   /// The project's actions ([Input] facade): the world's binding table in
   /// a game, a [TestInput] in a test, [NoInput] when neither.
   final InputService input;
+
+  /// The user's settings (M3-12): a memory-only [SettingsStore] until the
+  /// game installs one over its `settings.json` (`World.useSettings`).
+  SettingsService settings;
   final Map<Type, Object> _services = {};
 
   /// Installs (or replaces) a service by its static type: a test installs

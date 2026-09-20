@@ -827,12 +827,23 @@ impl Physics {
             match self.build_shape(c, scale, rigid.map(|r| r.body_type)) {
                 Ok(s) => {
                     let offset = c.offset * scale;
+                    // A sensor also sees kinematic bodies — the character
+                    // controller's capsule walking into a static pickup
+                    // (Rapier's default is dynamic-vs-anything only).
+                    let types = if c.is_sensor {
+                        ActiveCollisionTypes::default()
+                            | ActiveCollisionTypes::KINEMATIC_FIXED
+                            | ActiveCollisionTypes::KINEMATIC_KINEMATIC
+                    } else {
+                        ActiveCollisionTypes::default()
+                    };
                     let builder = ColliderBuilder::new(s)
                         .friction(c.friction)
                         .restitution(c.restitution)
                         .sensor(c.is_sensor)
                         .collision_groups(groups(c))
                         .active_events(ActiveEvents::COLLISION_EVENTS)
+                        .active_collision_types(types)
                         .density(0.0)
                         .user_data(user);
                     let handle = match body {

@@ -1,6 +1,6 @@
 //! Pull-only events in two lanes (ADR-0008).
 
-use fynkel_contracts::{Entity, EventKind, Tick};
+use fynkel_contracts::{Entity, EventKind, Tick, Uuid};
 pub use fynkel_physics::Contact;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,7 +26,27 @@ pub enum EventPayload {
     MissedDeadline {
         dropped_seconds: f32,
     },
-    SceneReady,
+    SceneReady {
+        scene: Uuid,
+    },
+    /// M3-12: a scene's still-alive entities were destroyed (their
+    /// `Destroyed` events come first).
+    SceneUnloaded {
+        scene: Uuid,
+        entities: u32,
+    },
+    /// M3-12: a `TriggerZone`'s sensor saw `other` enter / leave; general
+    /// lane, produced with the tick's physics events.
+    ZoneEntered {
+        zone: Entity,
+        other: Entity,
+        event: String,
+    },
+    ZoneExited {
+        zone: Entity,
+        other: Entity,
+        event: String,
+    },
     // Physics lane (M3-08): produced by the physics step, drained by
     // `after_physics`.
     CollisionEnter(Contact),
@@ -43,7 +63,10 @@ impl EventPayload {
             EventPayload::Destroyed { .. } => EventKind::DESTROYED,
             EventPayload::ParentChanged { .. } => EventKind::PARENT_CHANGED,
             EventPayload::MissedDeadline { .. } => EventKind::MISSED_DEADLINE,
-            EventPayload::SceneReady => EventKind::SCENE_READY,
+            EventPayload::SceneReady { .. } => EventKind::SCENE_READY,
+            EventPayload::SceneUnloaded { .. } => EventKind::SCENE_UNLOADED,
+            EventPayload::ZoneEntered { .. } => EventKind::ZONE_ENTERED,
+            EventPayload::ZoneExited { .. } => EventKind::ZONE_EXITED,
             EventPayload::CollisionEnter(_) => EventKind::COLLISION_ENTER,
             EventPayload::CollisionStay(_) => EventKind::COLLISION_STAY,
             EventPayload::CollisionExit(_) => EventKind::COLLISION_EXIT,

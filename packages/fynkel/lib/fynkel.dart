@@ -36,11 +36,13 @@ export 'generated/schema.g.dart'
         RigidBody,
         Rotator,
         Projection,
+        Settings,
         SnapshotTransformRecord,
         SpotLight,
         SystemKind,
         SystemTimeRecord,
         ThirdPersonCamera,
+        TriggerZone,
         componentCodecs,
         componentIds;
 export 'src/asset_ref.dart';
@@ -52,6 +54,7 @@ export 'src/input.dart';
 export 'src/physics.dart' show BodyState, CharacterState, PhysicsHit, PhysicsSettings;
 export 'src/systems.dart';
 export 'src/recording.dart';
+export 'src/settings.dart';
 export 'src/transform_writer.dart';
 export 'src/native/bridge.dart'
     show BridgeStats, CommandLane, FramePlan, NativeLibrary, NativeWorld, QueryKind, StepResult, SubmitResult;

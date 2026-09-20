@@ -181,6 +181,14 @@ impl Writer {
         self.count += 1;
     }
 
+    /// Appends one record built by `f` into the buffer's own string table
+    /// (an event: header + body, counted as one record; the body's
+    /// strings land in this buffer's tail, M3-12).
+    pub fn raw_with(&mut self, f: impl FnOnce(&mut Vec<u8>, &mut StringTable)) {
+        f(&mut self.bytes, &mut self.strings);
+        self.count += 1;
+    }
+
     /// Appends raw record bytes already encoded (e.g. a `u64` handle list).
     pub fn raw(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);

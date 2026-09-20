@@ -93,7 +93,7 @@ impl DemoScene {
     /// hand-shakes resolve temp ids to handles.
     pub fn on_events(&mut self, events: &[Event]) {
         for ev in events {
-            if matches!(ev.payload, EventPayload::SceneReady) {
+            if matches!(ev.payload, EventPayload::SceneReady { .. }) {
                 self.scene_ready = true;
             }
             if let EventPayload::Spawned { temp_id, entity } = ev.payload {

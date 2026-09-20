@@ -28,6 +28,7 @@ pub mod input;
 pub mod load;
 pub mod material;
 pub mod schema;
+pub mod settings;
 pub mod world;
 
 pub use clock::{FrameClock, FramePlan};
@@ -35,7 +36,7 @@ pub use command::{Command, Lane};
 pub use components::{
     Camera, ComponentValue, DirectionalLight, Emitter, Environment, ExposureMode, Follow,
     LifetimeDespawn, LookAtCamera, MeshRenderer, MotionSpace, Oscillate, PointLight, Projection,
-    Rotator, SpotLight, ThirdPersonCamera,
+    Rotator, SpotLight, ThirdPersonCamera, TriggerZone,
 };
 pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{
@@ -47,7 +48,10 @@ pub use fynkel_physics::{
 };
 pub use fynkel_scene::Transform;
 pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase};
-pub use load::{EntityDescription, LoadError, LoadedScene, SceneDescription};
+pub use load::{
+    EntityDescription, LoadError, LoadMode, LoadedScene, SceneDescription, UnloadedScene,
+};
+pub use settings::Settings;
 pub use world::{
     Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight, ExtractEnvironment, ExtractMesh,
     ExtractPointLight, ExtractRecord, ExtractSpotLight, Name, PhysicsOwned, Rejected,

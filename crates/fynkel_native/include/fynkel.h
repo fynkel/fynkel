@@ -130,8 +130,31 @@ typedef enum FynkelComponent {
   FYNKEL_COMPONENT_FOLLOW = 16,
   FYNKEL_COMPONENT_LOOK_AT_CAMERA = 17,
   FYNKEL_COMPONENT_LIFETIME_DESPAWN = 18,
-  FYNKEL_COMPONENT_EMITTER = 19
+  FYNKEL_COMPONENT_EMITTER = 19,
+  /* A sensor collider that names an event for Dart (M3-12). */
+  FYNKEL_COMPONENT_TRIGGER_ZONE = 20
 } FynkelComponent;
+
+/* Event kinds in fynkel_world_drain_events (the schema's `fynkel.ev.*`
+ * records; physics-lane kinds are 0x100..0x1ff). */
+typedef enum FynkelEventKind {
+  FYNKEL_EVENT_SPAWNED = 1,
+  FYNKEL_EVENT_DESTROYED = 2,
+  FYNKEL_EVENT_PARENT_CHANGED = 3,
+  FYNKEL_EVENT_MISSED_DEADLINE = 4,
+  FYNKEL_EVENT_SCENE_READY = 5,
+  /* M3-12: a scene's entities were unloaded (after their DESTROYEDs). */
+  FYNKEL_EVENT_SCENE_UNLOADED = 6,
+  /* M3-12: a fynkel.TriggerZone's sensor saw a collider enter / leave
+   * (`fynkel.ev.Zone` body: zone, other, event name). */
+  FYNKEL_EVENT_ZONE_ENTERED = 7,
+  FYNKEL_EVENT_ZONE_EXITED = 8,
+  FYNKEL_EVENT_COLLISION_ENTER = 0x100,
+  FYNKEL_EVENT_COLLISION_STAY = 0x101,
+  FYNKEL_EVENT_COLLISION_EXIT = 0x102,
+  FYNKEL_EVENT_TRIGGER_ENTER = 0x103,
+  FYNKEL_EVENT_TRIGGER_EXIT = 0x104
+} FynkelEventKind;
 
 typedef enum FynkelQueryKind {
   /* entity -> one SnapshotTransformRecord (0 records if unknown). */
@@ -331,11 +354,15 @@ int32_t fynkel_world_is_poisoned(const FynkelWorld* world);
  * `scene_id_utf8` (36-char UUID text). Entities are spawned immediately
  * with their authoring ids kept for the report; other components go
  * through the command path and any rejection is in
- * fynkel_world_diagnostics. The scene's closure of assets stays resident
- * in the world's store (a viewport rendering this world draws from it)
- * until the world is destroyed. FYNKEL_STATUS_LOAD_FAILED when the cache is
- * missing or stale, the scene is not in it or the hierarchy has errors
- * (FYN-R#### diagnostics; the world is unchanged);
+ * fynkel_world_diagnostics. Both **replace** (M3-12): every loaded scene
+ * is unloaded and every other entity destroyed first (DESTROYED events,
+ * one SCENE_UNLOADED per scene, then the new scene's SCENE_READY), and
+ * every residency token is dropped before the new scene's closure is
+ * retained. The scene's closure of assets stays resident in the world's
+ * store (a viewport rendering this world draws from it) until the scene
+ * is unloaded, replaced, or the world destroyed. FYNKEL_STATUS_LOAD_FAILED
+ * when the cache is missing or stale, the scene is not in it or the
+ * hierarchy has errors (FYN-R#### diagnostics; the world is unchanged);
  * FYNKEL_STATUS_INVALID_ARGUMENT for NULL, non-UTF-8 or non-UUID input. */
 FynkelStatus fynkel_world_load_project(FynkelWorld* world,
                                        const uint8_t* cache_utf8,
@@ -345,6 +372,40 @@ FynkelStatus fynkel_world_load_scene(FynkelWorld* world,
                                      uint32_t cache_len,
                                      const uint8_t* scene_id_utf8,
                                      uint32_t scene_id_len);
+/* fynkel_world_load_scene with `flags` (M3-12): 0 replaces as above;
+ * FYNKEL_LOAD_ADDITIVE keeps the world and refuses a scene id it already
+ * holds (FYNKEL_STATUS_LOAD_FAILED, FYN-R0011). Other bits are
+ * FYNKEL_STATUS_INVALID_ARGUMENT. The report's "scenes" lists what the
+ * world holds afterwards. */
+#define FYNKEL_LOAD_ADDITIVE 1u
+FynkelStatus fynkel_world_load_scene_with(FynkelWorld* world,
+                                          const uint8_t* cache_utf8,
+                                          uint32_t cache_len,
+                                          const uint8_t* scene_id_utf8,
+                                          uint32_t scene_id_len,
+                                          uint32_t flags);
+/* Unloads a loaded scene (M3-12): its still-alive entities are destroyed
+ * with their subtrees (DESTROYED events, then SCENE_UNLOADED with the
+ * count) and its closure released from residency; entities gameplay
+ * spawned or instantiated since stay. FYNKEL_STATUS_LOAD_FAILED with
+ * FYN-R0010 when the world does not hold the scene. The report:
+ * {"ok", "unloaded": {"id", "name", "entities"}, "scenes": [...],
+ * "residency": {...}}. */
+FynkelStatus fynkel_world_unload_scene(FynkelWorld* world,
+                                       const uint8_t* scene_id_utf8,
+                                       uint32_t scene_id_len);
+/* Input rebinds (M3-12; the `input.rebinds` of settings.json): `json_utf8`
+ * is a JSON object {"<action>": ["<device>:<control>", ...], ...} whose
+ * bindings replace the loaded project's for those actions (an empty
+ * object clears every rebind). The world's action table is rebound at
+ * once and the rebinds stay over every later load. The report's "input"
+ * lists the actions (with "rebound": bool) and "bindingErrors" — a bad
+ * binding is reported, never fatal. FYNKEL_STATUS_LOAD_FAILED before any
+ * project is loaded; FYNKEL_STATUS_INVALID_ARGUMENT when the text is not
+ * such an object. */
+FynkelStatus fynkel_world_bind_actions(FynkelWorld* world,
+                                       const uint8_t* json_utf8,
+                                       uint32_t json_len);
 /* Runtime prefab instantiation (M3-08b, blueprint §6 item 12). Spawns,
  * now, an anchor entity named `name_utf8` (empty: the prefab's name) with
  * the given local transform under `parent` (0 = root), and the cooked
@@ -371,13 +432,16 @@ typedef struct FynkelInstantiateDesc {
 FynkelStatus fynkel_world_instantiate(FynkelWorld* world,
                                       const FynkelInstantiateDesc* desc);
 
-/* UTF-8 JSON describing the last load or instantiate call on this world
- * (empty before any): {"ok": bool, "scene": {"id", "name", "path", "key",
- * "entities", "rejectedComponents", "assets", "behaviours": [...]} | null,
+/* UTF-8 JSON describing the last load, unload, instantiate or bind call
+ * on this world (empty before any): {"ok": bool, "mode": "replace" |
+ * "additive"?, "scene": {"id", "name", "path", "key", "entities",
+ * "rejectedComponents", "assets", "behaviours": [...]} | null,
+ * "scenes": [{"id", "name", "entities"}]?, "unloaded": {...}?,
  * "instance": {...}?, "cache": {"dir", "profile", "project",
  * "startupScene"} | null, "residency": {"retained", "meshes", "textures",
- * "materials", "bytes"}?, "diagnostics": [{"code", "severity", "message",
- * "document"?, "pointer"?, ...}]}. Valid until the next such call. */
+ * "materials", "bytes"}?, "input": {"actions", "bindingErrors"}?,
+ * "diagnostics": [{"code", "severity", "message", "document"?,
+ * "pointer"?, ...}]}. Valid until the next such call. */
 FynkelBufferView fynkel_world_load_report(const FynkelWorld* world);
 
 #ifdef __cplusplus

@@ -17,7 +17,7 @@ use fynkel_scene::{self as scene, Transform};
 use crate::command::Command;
 use crate::components::{
     ComponentValue, Emitter, Follow, LifetimeDespawn, LookAtCamera, Oscillate, Rotator,
-    ThirdPersonCamera,
+    ThirdPersonCamera, TriggerZone,
 };
 use crate::event::EventPayload;
 use crate::world::{Name, World};
@@ -74,6 +74,10 @@ pub enum LoadError {
     UnknownAnchorParent(Entity),
     /// `instantiate`: the anchor's transform is not finite.
     AnchorTransform,
+    /// An additive load named a scene the world already holds (M3-12).
+    AlreadyLoaded(Uuid),
+    /// `unload_scene` named a scene the world does not hold (M3-12).
+    NotLoaded(Uuid),
 }
 
 impl core::fmt::Display for LoadError {
@@ -105,6 +109,8 @@ impl core::fmt::Display for LoadError {
                 )
             }
             LoadError::AnchorTransform => write!(f, "instantiate: transform is not finite"),
+            LoadError::AlreadyLoaded(id) => write!(f, "scene {id} is already loaded"),
+            LoadError::NotLoaded(id) => write!(f, "scene {id} is not loaded"),
         }
     }
 }
@@ -148,16 +154,136 @@ impl LoadedScene {
     }
 }
 
+/// How `World::load_scene_with` treats what the world already holds
+/// (M3-12, blueprint §19.2d item 12).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LoadMode {
+    /// Unload every loaded scene and destroy every other entity first — the
+    /// world starts the new scene empty. The default of `load_scene`.
+    #[default]
+    Replace,
+    /// Keep everything; the scene's id must not be loaded already.
+    Additive,
+}
+
+/// What `World::unload_scene` (or a replace load) took down.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UnloadedScene {
+    pub id: Uuid,
+    pub name: String,
+    /// Entities destroyed (the scene's still-alive ones with their
+    /// subtrees; one `Destroyed` event each).
+    pub entities: u32,
+}
+
 impl World {
-    /// Instantiates `scene` now, at the current tick boundary. Emits
-    /// `SceneReady`. Structural errors load nothing; component values that
-    /// fail the command path are counted in `rejected_components` and
-    /// reported in [`World::diagnostics`] (command index `u32::MAX`).
+    /// Instantiates `scene` now, at the current tick boundary, in
+    /// [`LoadMode::Replace`]: every loaded scene is unloaded and every
+    /// other entity destroyed first. Emits `SceneReady { scene }`.
+    /// Structural errors load nothing (and unload nothing); component
+    /// values that fail the command path are counted in
+    /// `rejected_components` and reported in [`World::diagnostics`]
+    /// (command index `u32::MAX`).
     pub fn load_scene(&mut self, scene: &SceneDescription) -> Result<LoadedScene, LoadError> {
+        self.load_scene_with(scene, LoadMode::Replace)
+    }
+
+    /// [`load_scene`](World::load_scene) with an explicit mode. Additive
+    /// keeps the world and refuses an id already loaded
+    /// ([`LoadError::AlreadyLoaded`]).
+    pub fn load_scene_with(
+        &mut self,
+        scene: &SceneDescription,
+        mode: LoadMode,
+    ) -> Result<LoadedScene, LoadError> {
+        if self.is_poisoned() {
+            return Err(LoadError::Poisoned);
+        }
+        // The structure is checked before anything is taken down.
+        spawn_order(scene)?;
+        match mode {
+            LoadMode::Replace => {
+                self.unload_all();
+            }
+            LoadMode::Additive => {
+                if self.scenes.iter().any(|s| s.id == scene.id) {
+                    return Err(LoadError::AlreadyLoaded(scene.id));
+                }
+            }
+        }
         let tick = self.tick();
         let loaded = self.load_under(scene, None, tick, true)?;
-        self.push_event(EventPayload::SceneReady);
+        self.scenes.push(loaded.clone());
+        self.push_event(EventPayload::SceneReady { scene: scene.id });
         Ok(loaded)
+    }
+
+    /// Destroys the still-alive entities of the loaded scene `id` (with
+    /// their subtrees, `Destroyed` events as for `Command::Destroy`) and
+    /// forgets it; emits `SceneUnloaded`. Entities the scene's
+    /// behaviours spawned since are not the scene's and stay.
+    pub fn unload_scene(&mut self, id: Uuid) -> Result<UnloadedScene, LoadError> {
+        if self.is_poisoned() {
+            return Err(LoadError::Poisoned);
+        }
+        let Some(i) = self.scenes.iter().position(|s| s.id == id) else {
+            return Err(LoadError::NotLoaded(id));
+        };
+        let scene = self.scenes.remove(i);
+        Ok(self.take_down(scene))
+    }
+
+    /// Every loaded scene, in load order.
+    pub fn loaded_scenes(&self) -> &[LoadedScene] {
+        &self.scenes
+    }
+
+    /// The loaded scene `entity` was spawned by, if any (an entity
+    /// instantiated or spawned at runtime belongs to none).
+    pub fn scene_of(&self, entity: Entity) -> Option<&LoadedScene> {
+        self.scenes.iter().find(|s| s.id_of(entity).is_some())
+    }
+
+    /// A replace load: the loaded scenes (last first) and then every
+    /// remaining entity, so nothing of the previous state survives.
+    fn unload_all(&mut self) {
+        while let Some(scene) = self.scenes.pop() {
+            self.take_down(scene);
+        }
+        let tick = self.tick();
+        let roots: Vec<Entity> = self
+            .ecs()
+            .entities()
+            .filter(|&e| scene::parent_of(self.ecs(), e).is_none())
+            .collect();
+        for root in roots {
+            if self.ecs().contains(root) {
+                let _ = self.destroy_subtree(root, tick);
+            }
+        }
+    }
+
+    fn take_down(&mut self, scene: LoadedScene) -> UnloadedScene {
+        let tick = self.tick();
+        let mut entities = 0u32;
+        // Parents before children in spawn order: a parent's subtree takes
+        // its children, which then read as gone.
+        for &(_, e) in scene.entities() {
+            if self.ecs().contains(e) {
+                if let Ok(n) = self.destroy_subtree(e, tick) {
+                    entities += n as u32;
+                }
+            }
+        }
+        self.push_event(EventPayload::SceneUnloaded {
+            scene: scene.id,
+            entities,
+        });
+        UnloadedScene {
+            id: scene.id,
+            name: scene.name,
+            entities,
+        }
     }
 
     /// Instantiates a cooked prefab now (M3-08b, blueprint item 12's
@@ -413,6 +539,9 @@ impl ComponentValue {
         }
         if let Ok(v) = ecs.get::<Emitter>(entity) {
             out.push(ComponentValue::Emitter(v.clone()));
+        }
+        if let Ok(v) = ecs.get::<TriggerZone>(entity) {
+            out.push(ComponentValue::TriggerZone(v.clone()));
         }
         out
     }

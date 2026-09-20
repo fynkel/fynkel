@@ -1035,9 +1035,9 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["project"]["name"], "Fixture Game");
-    assert_eq!(v["documents"], 6);
+    assert_eq!(v["documents"], 8);
     assert_eq!(v["sources"], 4);
-    assert_eq!(v["references"], 11);
+    assert_eq!(v["references"], 15);
     assert_eq!(v["lock"]["cache"]["container"], 1);
     let out = run(&["validate", "--project", fixture.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
@@ -1132,7 +1132,7 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
-    assert_eq!(v["assetCount"], 10);
+    assert_eq!(v["assetCount"], 12);
     assert_eq!(v["quality"]["default"], "medium");
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     let out = run(&[

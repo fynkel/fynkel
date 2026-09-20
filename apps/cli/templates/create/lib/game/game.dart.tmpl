@@ -26,10 +26,13 @@ class Game {
 
   /// Loads the project at [projectDir] (the directory holding
   /// `fynkel.project.json`) from its cooked cache ([cacheDir], default
-  /// `<projectDir>/.fynkel/cache`). Throws when the cache is missing or
+  /// `<projectDir>/.fynkel/cache`), and the user's `settings.json` at
+  /// [settingsPath] when given (the app passes the platform's
+  /// application-support directory; a test leaves it out for a memory
+  /// store). Throws when the cache is missing or
   /// stale (`FYN-R0001`/`R0002`: run `fynkel cook`) or the scene does not
   /// load; warnings stay in [report].diagnostics.
-  static Game load(String projectDir, {String? cacheDir, NativeLibrary? library}) {
+  static Game load(String projectDir, {String? cacheDir, String? settingsPath, NativeLibrary? library}) {
     final world = World.create(library: library);
     registerBehaviours(world.registry);
     final warnings = <LoadDiagnostic>[];
@@ -39,8 +42,18 @@ class Game {
       world.dispose();
       throw StateError('$projectDir did not load:\n${report.diagnostics.join('\n')}');
     }
+    // The user's settings (volumes, quality, rebinds) read once here and
+    // written on every `settings.update`/`edit`; the rebinds sit over the
+    // project's actions from now on.
+    if (settingsPath != null) world.useSettings(SettingsStore.open(settingsPath, world: world));
     return Game._(world, report);
   }
+
+  /// The user's settings service (`world.context.settings`).
+  SettingsService get settings => world.context.settings;
+
+  /// Scene flow: `scenes.transition(id)` loads at the next frame.
+  SceneManager get scenes => world.scenes;
 
   /// One host frame of [dtSeconds]: fixed ticks (behaviour `fixedUpdate`,
   /// native step, `afterPhysics`), then `update`/`lateUpdate`.

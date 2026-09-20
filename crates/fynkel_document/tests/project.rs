@@ -146,7 +146,7 @@ fn the_fixture_project_reads_and_validates_clean() {
         .unwrap();
     assert_eq!((medium.shadow_resolution, medium.msaa), (1024, 4));
     assert!(medium.shadows, "shadows default to on");
-    assert_eq!(project.components.as_ref().unwrap().len(), 18);
+    assert_eq!(project.components.as_ref().unwrap().len(), 19);
     assert_eq!(project.physics.gravity, [0.0, -9.81, 0.0]);
     assert_eq!(project.physics.layers, ["default", "props"]);
     assert_eq!(project.physics.mask(&["props"]), Some(2));
@@ -176,7 +176,7 @@ fn the_fixture_project_reads_and_validates_clean() {
     );
     assert_eq!(
         (report.documents, report.sources, report.references),
-        (6, 4, 11)
+        (8, 4, 15)
     );
     assert!(report.lock.is_some());
     let json = report.json();
@@ -196,10 +196,10 @@ fn describe_json_lists_everything() {
     assert_eq!(v["name"], "Fixture Game");
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["assets"], "assets");
-    assert_eq!(v["assetCount"], 10);
+    assert_eq!(v["assetCount"], 12);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 4);
     assert_eq!(v["quality"]["default"], "medium");
-    assert_eq!(v["components"].as_array().unwrap().len(), 18);
+    assert_eq!(v["components"].as_array().unwrap().len(), 19);
     assert_eq!(
         v["physics"]["layers"],
         serde_json::json!(["default", "props"])
@@ -256,7 +256,7 @@ fn a_missing_lock_is_p0010_and_a_stale_lock_is_p0011_per_field() {
     );
     // A stale lock never stops the rest of the project being checked.
     let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
-    assert_eq!(report.documents, 6);
+    assert_eq!(report.documents, 8);
 }
 
 #[test]
@@ -350,12 +350,13 @@ fn the_component_registry_is_checked_both_ways() {
         .iter()
         .map(|d| (d.code.as_str(), d.document.as_deref().unwrap_or("")))
         .collect();
-    // All three scenes place a camera.
-    assert_eq!(warnings.len(), 3, "{warnings:?}");
+    // All four scenes place a camera.
+    assert_eq!(warnings.len(), 4, "{warnings:?}");
     assert!(warnings.iter().all(|w| w.0 == "FYN-P0004"));
     assert!(warnings[0].1.ends_with("catalogue.scene.json"));
     assert!(warnings[1].1.ends_with("main.scene.json"));
     assert!(warnings[2].1.ends_with("playground.scene.json"));
+    assert!(warnings[3].1.ends_with("results.scene.json"));
     assert!(report.diagnostics[0].message.contains("fynkel.Camera"));
     // No registry at all means every built-in is allowed.
     t.edit_project(|v| {

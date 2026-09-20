@@ -9,7 +9,7 @@
 //! components use `ComponentId` values. Append only; never renumber.
 
 use fynkel_contracts::schema::{fingerprint, RecordSchema};
-use fynkel_contracts::{Entity, HasSchema};
+use fynkel_contracts::{AssetRef, Entity, HasSchema};
 use fynkel_physics::{CharacterController, Collider, ColliderShape, RigidBody};
 use fynkel_scene::Transform;
 use fynkel_schema_derive::Schema;
@@ -17,9 +17,10 @@ use glam::{Quat, Vec3};
 
 use crate::components::{
     Camera, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn, LookAtCamera,
-    MeshRenderer, Oscillate, PointLight, Rotator, SpotLight, ThirdPersonCamera,
+    MeshRenderer, Oscillate, PointLight, Rotator, SpotLight, ThirdPersonCamera, TriggerZone,
 };
 use crate::material::PbrMaterial;
+use crate::settings::Settings;
 use crate::world::Name;
 
 /// Stable command ids (wire `kind` of a command record).
@@ -344,9 +345,38 @@ pub struct MissedDeadlineEvent {
     pub dropped_seconds: f32,
 }
 
+/// A scene's entities exist and its components are applied (M3-12: names
+/// the scene, so a manager loading several tells them apart).
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "event", id = 5, name = "fynkel.ev.SceneReady")]
-pub struct SceneReadyEvent;
+pub struct SceneReadyEvent {
+    /// The scene's asset id.
+    pub scene: AssetRef,
+}
+
+/// A scene was unloaded (M3-12): its still-alive entities were destroyed
+/// (their `Destroyed` events precede this one) and the host released its
+/// asset residency.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "event", id = 6, name = "fynkel.ev.SceneUnloaded")]
+pub struct SceneUnloadedEvent {
+    pub scene: AssetRef,
+    /// Entities destroyed by the unload.
+    pub entities: u32,
+}
+
+/// A `fynkel.TriggerZone` fired (M3-12): the body of `ZONE_ENTERED` (7)
+/// and `ZONE_EXITED` (8), on the general lane the tick the sensor saw it.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "event", id = 7, name = "fynkel.ev.Zone")]
+pub struct ZoneEvent {
+    /// The entity carrying the `TriggerZone`.
+    pub zone: Entity,
+    /// The collider that entered or left.
+    pub other: Entity,
+    /// The zone's `event` name.
+    pub event: String,
+}
 
 /// Physics-lane events share one body (collision/trigger enter/stay/exit):
 /// `point` and `normal` in world space, the normal pointing from `a`
@@ -502,6 +532,10 @@ pub const ALL: &[&RecordSchema] = &[
     &LifetimeDespawn::SCHEMA,
     &Emitter::SCHEMA,
     &SystemTimeRecord::SCHEMA,
+    &TriggerZone::SCHEMA,
+    &SceneUnloadedEvent::SCHEMA,
+    &ZoneEvent::SCHEMA,
+    &Settings::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -536,7 +570,11 @@ mod tests {
         assert_eq!(s.offsets(), vec![0, 8, 48, 56]);
         assert_eq!(s.wire_size(), 64);
         assert!(s.has_strings());
-        assert_eq!(SceneReadyEvent::SCHEMA.wire_size(), 0);
+        // M3-12: the scene's AssetRef (16 id bytes + a str slot).
+        assert_eq!(SceneReadyEvent::SCHEMA.wire_size(), 24);
+        assert_eq!(SceneUnloadedEvent::SCHEMA.wire_size(), 32);
+        assert_eq!(ZoneEvent::SCHEMA.wire_size(), 24);
+        assert_eq!(TriggerZone::SCHEMA.wire_size(), 16);
         assert_eq!(SnapshotTransformRecord::SCHEMA.wire_size(), 88);
         // M3-08: entity @0, op @8, vector @12, rotation @24 → 40.
         assert_eq!(BodyCommandRecord::SCHEMA.offsets(), vec![0, 8, 12, 24]);

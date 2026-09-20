@@ -13,6 +13,7 @@ components the runtime ticks itself, in Rust, with no `Behaviour`:
 | `fynkel.Emitter` | 19 | instantiates `prefab` `rate` times a second at the emitter's world pose, each instance living `lifetime` seconds, at most `max_alive` alive, dynamic bodies launched at `velocity`; `enabled` pauses it | pre-tick |
 | `fynkel.Follow` | 16 | places the entity at the world position of the entity named `target` plus `offset`, snapped (`smoothing` 0) or eased at `smoothing`/s; `look_at` turns its −Z at the target | post-physics |
 | `fynkel.LookAtCamera` | 17 | turns the entity's +Z at the active camera; `lock_y` keeps it upright (a billboard) | post-physics |
+| `fynkel.TriggerZone` | 20 | (M3-12, [scenes.md](scenes.md)) names the general-lane event (`ZONE_ENTERED`/`ZONE_EXITED` with `event`) the entity's sensor `Collider` raises; `once` fires one enter and removes the zone | physics events |
 
 They are ordinary native components: authored in a scene or prefab
 (`fynkel validate` checks the values, `FYN-H0008`), generated into every

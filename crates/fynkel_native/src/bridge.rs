@@ -1,6 +1,6 @@
 //! Translation between the wire buffers and `fynkel_core` values.
 
-use fynkel_contracts::{ComponentId, DiagnosticCode, Entity, EventKind};
+use fynkel_contracts::{AssetRef, ComponentId, DiagnosticCode, Entity, EventKind};
 use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::physics::{Hit, QueryKind, QuerySpec};
 use fynkel_core::schema::*;
@@ -172,45 +172,86 @@ pub fn encode_diagnostics(buf: Vec<u8>, diags: &[Diagnostic]) -> Vec<u8> {
 
 pub fn encode_events(buf: Vec<u8>, events: &[Event]) -> Vec<u8> {
     let mut w = Writer::begin(buf, BufferKind::Events);
-    let mut scratch = Vec::new();
     for e in events {
-        scratch.clear();
         let kind = e.payload.kind();
-        encode_event_body(&e.payload, &mut scratch);
-        let header = EventHeader {
-            kind: kind.0,
-            size: scratch.len() as u32,
-            tick_lo: e.tick as u32,
-            flags: 0,
-        };
-        // header + body count as one record
-        let mut rec = vec![0u8; EventHeader::SIZE];
-        header.encode(&mut rec, &mut fynkel_wire::StringTable::new());
-        rec.extend_from_slice(&scratch);
-        w.raw(&rec);
+        // header + body count as one record; the body's strings (a zone's
+        // event name) go to the buffer's tail like any record's.
+        w.raw_with(|out, strings| {
+            let header_at = out.len();
+            out.resize(header_at + EventHeader::SIZE, 0);
+            let body_at = out.len();
+            encode_event_body(&e.payload, out, strings);
+            let size = (out.len() - body_at) as u32;
+            EventHeader {
+                kind: kind.0,
+                size,
+                tick_lo: e.tick as u32,
+                flags: 0,
+            }
+            .encode(&mut out[header_at..body_at], strings);
+        });
     }
     w.finish()
 }
 
-fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>) {
-    let mut strings = fynkel_wire::StringTable::new();
+fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_wire::StringTable) {
     fn push<T: WireRecord>(out: &mut Vec<u8>, v: &T, s: &mut fynkel_wire::StringTable) {
         let start = out.len();
         out.resize(start + T::SIZE, 0);
         v.encode(&mut out[start..], s);
     }
-    match *p {
-        EventPayload::Spawned { temp_id, entity } => {
-            push(out, &SpawnedEvent { temp_id, entity }, &mut strings)
+    match p {
+        EventPayload::Spawned { temp_id, entity } => push(
+            out,
+            &SpawnedEvent {
+                temp_id: *temp_id,
+                entity: *entity,
+            },
+            strings,
+        ),
+        EventPayload::Destroyed { entity } => {
+            push(out, &DestroyedEvent { entity: *entity }, strings)
         }
-        EventPayload::Destroyed { entity } => push(out, &DestroyedEvent { entity }, &mut strings),
-        EventPayload::ParentChanged { child, parent } => {
-            push(out, &ParentChangedEvent { child, parent }, &mut strings)
-        }
-        EventPayload::MissedDeadline { dropped_seconds } => {
-            push(out, &MissedDeadlineEvent { dropped_seconds }, &mut strings)
-        }
-        EventPayload::SceneReady => push(out, &SceneReadyEvent, &mut strings),
+        EventPayload::ParentChanged { child, parent } => push(
+            out,
+            &ParentChangedEvent {
+                child: *child,
+                parent: *parent,
+            },
+            strings,
+        ),
+        EventPayload::MissedDeadline { dropped_seconds } => push(
+            out,
+            &MissedDeadlineEvent {
+                dropped_seconds: *dropped_seconds,
+            },
+            strings,
+        ),
+        EventPayload::SceneReady { scene } => push(
+            out,
+            &SceneReadyEvent {
+                scene: AssetRef::new(*scene),
+            },
+            strings,
+        ),
+        EventPayload::SceneUnloaded { scene, entities } => push(
+            out,
+            &SceneUnloadedEvent {
+                scene: AssetRef::new(*scene),
+                entities: *entities,
+            },
+            strings,
+        ),
+        EventPayload::ZoneEntered { zone, other, event }
+        | EventPayload::ZoneExited { zone, other, event } => push(
+            out,
+            &ZoneEvent {
+                zone: *zone,
+                other: *other,
+                event: event.clone(),
+            },
+            strings,
+        ),
         EventPayload::CollisionEnter(c)
         | EventPayload::CollisionStay(c)
         | EventPayload::CollisionExit(c)
@@ -224,10 +265,9 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>) {
                 normal: c.normal,
                 impulse: c.impulse,
             },
-            &mut strings,
+            strings,
         ),
     }
-    debug_assert!(strings.is_empty(), "event bodies carry no strings");
 }
 
 /// Sanity: every event kind has a body encoder (compile-time exhaustiveness
@@ -239,6 +279,8 @@ pub fn event_body_size(kind: EventKind) -> Option<usize> {
         EventKind::PARENT_CHANGED => ParentChangedEvent::SIZE,
         EventKind::MISSED_DEADLINE => MissedDeadlineEvent::SIZE,
         EventKind::SCENE_READY => SceneReadyEvent::SIZE,
+        EventKind::SCENE_UNLOADED => SceneUnloadedEvent::SIZE,
+        EventKind::ZONE_ENTERED | EventKind::ZONE_EXITED => ZoneEvent::SIZE,
         k if k.is_physics() => ContactEvent::SIZE,
         _ => return None,
     })
@@ -361,6 +403,9 @@ pub fn query(
             }
             if let Ok(v) = ecs.get::<fynkel_core::Emitter>(entity) {
                 w.component(ComponentId::EMITTER.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::TriggerZone>(entity) {
+                w.component(ComponentId::TRIGGER_ZONE.0, &*v);
             }
         }
         // The last step's per-phase wall time (M3-10), one record per

@@ -345,6 +345,25 @@ class NativeWorld {
         (c, cl) => _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_load_scene(_w, c, cl, s, sl))),
       );
 
+  /// `FYNKEL_LOAD_ADDITIVE`: the [loadSceneWith] flag that keeps the world.
+  static const int loadAdditive = FYNKEL_LOAD_ADDITIVE;
+
+  /// `fynkel_world_load_scene_with` (M3-12): [loadScene] with [flags] —
+  /// 0 replaces what the world holds, [loadAdditive] keeps it.
+  (FynkelStatus, Map<String, Object?>) loadSceneWith(String cacheDir, String sceneId, int flags) => _withUtf8(
+        cacheDir,
+        (c, cl) => _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_load_scene_with(_w, c, cl, s, sl, flags))),
+      );
+
+  /// `fynkel_world_unload_scene` (M3-12): the loaded scene [sceneId] goes.
+  (FynkelStatus, Map<String, Object?>) unloadScene(String sceneId) =>
+      _withUtf8(sceneId, (s, sl) => _load(() => fynkel_world_unload_scene(_w, s, sl)));
+
+  /// `fynkel_world_bind_actions` (M3-12): [rebindsJson] is the JSON object
+  /// `{ action: [bindings] }` laid over the project's actions.
+  (FynkelStatus, Map<String, Object?>) bindActions(String rebindsJson) =>
+      _withUtf8(rebindsJson, (s, sl) => _load(() => fynkel_world_bind_actions(_w, s, sl)));
+
   /// `fynkel_world_instantiate`: the cooked prefab [prefabId] (UUID text)
   /// under a new anchor entity named [name] (empty: the prefab's) with the
   /// given local transform, child of [parent] (0: a root); the status and

@@ -94,8 +94,8 @@ void main() {
       ParentChangedEvent.wireSize, ParentChangedEvent.decode, (v, d, o, s) => v.encode(d, o, s));
   check('MissedDeadlineEvent', const MissedDeadlineEvent(droppedSeconds: 0.1), MissedDeadlineEvent.wireSize,
       MissedDeadlineEvent.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('SceneReadyEvent', const SceneReadyEvent(), SceneReadyEvent.wireSize, SceneReadyEvent.decode,
-      (v, d, o, s) => v.encode(d, o, s));
+  check('SceneReadyEvent', const SceneReadyEvent(scene: AssetRef('0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff')),
+      SceneReadyEvent.wireSize, SceneReadyEvent.decode, (v, d, o, s) => v.encode(d, o, s));
   check(
       'ContactEvent',
       ContactEvent(a: entity(1, 1), b: entity(2, 1), point: const Vec3(0.5, 1.0, -0.25), normal: const Vec3(0, 1, 0), impulse: 3.5),
@@ -405,6 +405,35 @@ void main() {
     EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp'),
     EntityInfoRecord.wireSize,
     EntityInfoRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  // M3-12.
+  check(
+    'TriggerZone',
+    const TriggerZone(event: 'collect', once: true),
+    TriggerZone.wireSize,
+    TriggerZone.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SceneUnloadedEvent',
+    const SceneUnloadedEvent(scene: AssetRef('0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff'), entities: 12),
+    SceneUnloadedEvent.wireSize,
+    SceneUnloadedEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'ZoneEvent',
+    ZoneEvent(zone: entity(7, 1), other: entity(2, 3), event: 'collect'),
+    ZoneEvent.wireSize,
+    ZoneEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Settings',
+    const Settings(masterVolume: 0.8, musicVolume: 0.5, sfxVolume: 1, muted: true, quality: 'high'),
+    Settings.wireSize,
+    Settings.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
 }

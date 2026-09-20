@@ -34,8 +34,43 @@ class MissedDeadline extends EngineEvent {
   final double droppedSeconds;
 }
 
+/// A scene finished loading; [scene] is its asset id (M3-12).
 class SceneReady extends EngineEvent {
-  const SceneReady(super.tickLo);
+  const SceneReady(super.tickLo, {this.scene = ''});
+  final String scene;
+}
+
+/// A loaded scene was unloaded (M3-12): [scene] is its asset id,
+/// [entities] how many of its entities went (their `EntityDestroyed`
+/// events precede this one).
+class SceneUnloaded extends EngineEvent {
+  const SceneUnloaded(super.tickLo, this.scene, this.entities);
+  final String scene;
+  final int entities;
+}
+
+/// Something entered or left a `fynkel.TriggerZone`'s sensor (M3-12):
+/// [zone] is the zone's entity, [other] what came in, [event] the
+/// zone's named event (`"collect"`). General lane — behaviours see it in
+/// `onZoneEnter`/`onZoneExit`, gameplay in `world.zones`.
+sealed class ZoneEvent extends EngineEvent {
+  const ZoneEvent(super.tickLo, this.zone, this.other, this.event);
+  final int zone, other;
+  final String event;
+}
+
+class ZoneEntered extends ZoneEvent {
+  const ZoneEntered(super.tickLo, super.zone, super.other, super.event);
+
+  @override
+  String toString() => 'ZoneEntered($event zone=${zone.toRadixString(16)} other=${other.toRadixString(16)})';
+}
+
+class ZoneExited extends ZoneEvent {
+  const ZoneExited(super.tickLo, super.zone, super.other, super.event);
+
+  @override
+  String toString() => 'ZoneExited($event zone=${zone.toRadixString(16)} other=${other.toRadixString(16)})';
 }
 
 enum ContactKind { collisionEnter, collisionStay, collisionExit, triggerEnter, triggerExit }
@@ -80,6 +115,9 @@ class UnknownEvent extends EngineEvent {
 
 const int _physicsFirst = 0x100;
 
+/// `ZONE_EXITED` shares `fynkel.ev.Zone`'s body with `ZONE_ENTERED` (kind 7).
+const int _zoneExitedKind = gen.ZoneEvent.eventKind + 1;
+
 Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
   final d = b.records;
   var off = 0;
@@ -95,7 +133,10 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
       gen.ParentChangedEvent.eventKind => _parent(d, body, tail, h.tickLo),
       gen.MissedDeadlineEvent.eventKind =>
         MissedDeadline(h.tickLo, gen.MissedDeadlineEvent.decode(d, body, tail).droppedSeconds),
-      gen.SceneReadyEvent.eventKind => SceneReady(h.tickLo),
+      gen.SceneReadyEvent.eventKind => SceneReady(h.tickLo, scene: gen.SceneReadyEvent.decode(d, body, tail).scene.asset),
+      gen.SceneUnloadedEvent.eventKind => _unloaded(d, body, tail, h.tickLo),
+      gen.ZoneEvent.eventKind => _zone(d, body, tail, h.tickLo, entered: true),
+      _zoneExitedKind => _zone(d, body, tail, h.tickLo, entered: false),
       >= _physicsFirst && < _physicsFirst + 5 => _contact(d, body, tail, h),
       _ => UnknownEvent(h.tickLo, h.kind),
     };
@@ -105,6 +146,16 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
 EntitySpawned _spawned(ByteData d, int o, Uint8List tail, int tickLo) {
   final e = gen.SpawnedEvent.decode(d, o, tail);
   return EntitySpawned(tickLo, e.tempId, e.entity);
+}
+
+SceneUnloaded _unloaded(ByteData d, int o, Uint8List tail, int tickLo) {
+  final e = gen.SceneUnloadedEvent.decode(d, o, tail);
+  return SceneUnloaded(tickLo, e.scene.asset, e.entities);
+}
+
+ZoneEvent _zone(ByteData d, int o, Uint8List tail, int tickLo, {required bool entered}) {
+  final e = gen.ZoneEvent.decode(d, o, tail);
+  return entered ? ZoneEntered(tickLo, e.zone, e.other, e.event) : ZoneExited(tickLo, e.zone, e.other, e.event);
 }
 
 ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {

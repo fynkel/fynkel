@@ -3,6 +3,8 @@
 // the Behaviour lifecycle the world drives at the §5.1 points of a host
 // frame. Scenes come from the cooked cache through `loadProject`/`loadScene`.
 
+import 'dart:async' show Completer;
+import 'dart:convert' show jsonEncode;
 import 'dart:typed_data';
 
 import '../generated/schema.g.dart' as gen;
@@ -14,6 +16,7 @@ import 'events.dart';
 import 'input.dart';
 import 'native/bridge.dart';
 import 'physics.dart';
+import 'settings.dart';
 import 'systems.dart';
 import 'transform_writer.dart';
 import 'wire/buffers.dart';
@@ -22,6 +25,7 @@ import 'wire/support.dart' show WireRecord;
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
 part 'behaviour.dart';
+part 'scenes.dart';
 
 /// Immutable local transform value (position, rotation, scale).
 typedef Transform = gen.Transform;
@@ -35,6 +39,7 @@ class World {
     input = WorldInput(() => _native.inputView);
     context = GameContext(time: _WorldTime(this), input: input);
     _behaviours = _BehaviourSystem(this);
+    scenes = SceneManager._(this);
   }
 
   /// Creates a world on a fresh [NativeLibrary] (or the given one).
@@ -70,6 +75,29 @@ class World {
 
   final RecordBatch _inputEvents = RecordBatch(BufferKind.inputEvents, gen.InputEventRecord.wireSize);
   bool _inputDirty = false;
+
+  /// Scene flow (M3-12): the scenes the world holds, `transition(to)`
+  /// performed at the start of the next [frame], its observable state.
+  late final SceneManager scenes;
+
+  /// Named zone events (M3-12): `zones.on('collect', (e) { … })` runs
+  /// right after the tick whose step produced the `ZoneEntered`.
+  final ZoneEvents zones = ZoneEvents();
+
+  /// The cooked cache the last successful load came from; the default
+  /// [loadScene] cache.
+  String? get cacheDir => _cacheDir;
+  String? _cacheDir;
+
+  /// Installs [store] as [context]'s settings and attaches it to this
+  /// world (M3-12): its rebinds go over the project's actions now and
+  /// after every update. `world.useSettings(SettingsStore.open(
+  /// SettingsStore.defaultPath('My Game'), world: world))` is the usual
+  /// startup line, after `loadProject`.
+  void useSettings(SettingsStore store) {
+    context.settings = store;
+    store.attach(this);
+  }
 
   /// The physics settings of the last `loadProject` (gravity, layer names);
   /// the defaults before a load. [layerMask] reads the names.
@@ -276,6 +304,7 @@ class World {
   /// frame's raw edges.
   FramePlan frame(double dtSeconds,
       {List<InputEvent> input = const [], void Function(int tick)? fixedUpdate, void Function()? update}) {
+    scenes._perform();
     final plan = beginFrame(dtSeconds);
     captureInput(input);
     _carry(drainEvents());
@@ -286,7 +315,7 @@ class World {
       final stepped = tick;
       step();
       final events = drainEvents();
-      _behaviours.afterPhysics(stepped, _contacts(events));
+      _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events));
       _carry(events);
     }
     this.input.refresh(frameEdges: true);
@@ -315,6 +344,11 @@ class World {
   static List<Contact> _contacts(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
     return [for (final e in events) if (e is Contact) e];
+  }
+
+  static List<ZoneEvent> _zoneEvents(List<EngineEvent> events) {
+    if (events.isEmpty) return const [];
+    return [for (final e in events) if (e is ZoneEvent) e];
   }
 
   /// A handle for an entity that already exists (loaded from a scene, or
@@ -599,13 +633,81 @@ class World {
   /// [FynkelLoadError] when the cache or the scene has errors.
   LoadReport loadProject(String dir, {String? cacheDir}) {
     final cache = cacheDir ?? cacheDirOf(dir);
-    return _load(_native.loadProject(cache), 'loadProject').withProjectDir(dir);
+    final report = _load(_native.loadProject(cache), 'loadProject').withProjectDir(dir);
+    _cacheDir = cache;
+    scenes._projectLoaded(report);
+    return report;
   }
 
-  /// Loads the cooked scene with asset id [sceneId] (UUID text) from the
-  /// cache at [cacheDir]; see [loadProject]. Throws [FynkelLoadError] when
-  /// the scene is not in the cache (`FYN-R0003`) or does not load.
-  LoadReport loadScene(String cacheDir, String sceneId) => _load(_native.loadScene(cacheDir, sceneId), 'loadScene');
+  /// Loads the cooked scene with asset id [sceneId] (UUID text, or an
+  /// [AssetRef]) from the cache at [cacheDir] (default: the cache of the
+  /// last load, [World.cacheDir]); see [loadProject]. [LoadMode.replace]
+  /// (the default) first unloads everything the world holds — every
+  /// loaded scene, last first, and every runtime spawn — so nothing
+  /// survives; [LoadMode.additive] keeps the world and refuses a scene
+  /// that is loaded already (`FYN-R0011`). The unloads' `EntityDestroyed`
+  /// and `SceneUnloaded` events and the new scene's `SceneReady` arrive
+  /// on the next drain, in that order; handles of destroyed objects go
+  /// dead then. Throws [FynkelLoadError] when the scene is not in the
+  /// cache (`FYN-R0003`) or does not load; [StateError] without a cache.
+  LoadReport loadScene(Object sceneId, {String? cacheDir, LoadMode mode = LoadMode.replace}) {
+    final id = _assetId(sceneId, 'sceneId');
+    final cache = cacheDir ?? _cacheDir;
+    if (cache == null) {
+      throw StateError('loadScene($id): no cache directory — pass cacheDir, or loadProject first');
+    }
+    final flags = mode == LoadMode.additive ? NativeWorld.loadAdditive : 0;
+    final report = _load(_native.loadSceneWith(cache, id, flags), 'loadScene');
+    _cacheDir = cache;
+    scenes._loaded(report, mode);
+    return report;
+  }
+
+  /// Unloads the loaded scene [sceneId] (M3-12): its entities that are
+  /// still alive are destroyed (their handles go dead on the next drain,
+  /// after `EntityDestroyed` events and one `SceneUnloaded`), its assets
+  /// released. Runtime spawns — [instantiate]d prefabs, [spawn]ed
+  /// objects — are not the scene's and stay. Throws [FynkelUnloadError]
+  /// when the world does not hold the scene (`FYN-R0010`).
+  UnloadReport unloadScene(Object sceneId) {
+    final id = _assetId(sceneId, 'sceneId');
+    final (status, json) = _native.unloadScene(id);
+    final report = UnloadReport.fromJson(json);
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        _entityTable = null;
+        _loadedScenes = report.scenes;
+        scenes._unloaded(report);
+        return report;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        throw FynkelUnloadError(report);
+      default:
+        throw FynkelBridgeError('unloadScene: $status');
+    }
+  }
+
+  /// The scenes the world holds, load order (from the last load or
+  /// unload report; empty before any).
+  List<LoadedScene> get loadedScenes => _loadedScenes;
+  List<LoadedScene> _loadedScenes = const [];
+
+  /// Lays the user's [rebinds] (`action → bindings`, the grammar of
+  /// [docs/input.md]) over the project's actions (M3-12): an empty map
+  /// restores the project's. They stay over every later load. An action
+  /// the project lacks binds nothing; a bad binding is a `bindingErrors`
+  /// entry on the report, never fatal. The report's [LoadReport.inputActions]
+  /// show what is bound (`rebound` per action). Throws [FynkelLoadError]
+  /// before a project is loaded.
+  LoadReport bindActions(Map<String, List<String>> rebinds) {
+    final json = jsonEncode(rebinds);
+    return _load(_native.bindActions(json), 'bindActions');
+  }
+
+  static String _assetId(Object id, String what) => switch (id) {
+        AssetRef r => r.asset,
+        String s => s,
+        _ => throw ArgumentError.value(id, what, 'an asset id (UUID text) or an AssetRef'),
+      };
 
   LoadReport _load((FynkelStatus, Map<String, Object?>) r, String op) {
     final (status, json) = r;
@@ -615,6 +717,7 @@ class World {
         input.invalidate();
         _entityTable = null;
         if (op == 'loadProject') physics = report.physics;
+        if (op != 'bindActions') _loadedScenes = report.scenes;
         report = _attachAuthoredBehaviours(report);
         if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
         return report;

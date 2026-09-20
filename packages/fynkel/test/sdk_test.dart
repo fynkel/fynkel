@@ -196,23 +196,27 @@ void main() {
     expect(w.allEntities(), hasLength(7));
     w.frame(1 / 60);
 
-    // Any scene by id from the same cache; a second copy of the same one.
-    final again = w.loadScene(cache, r.sceneId!);
+    // Any scene by id from the same cache (the world remembers it); the
+    // same one again replaces the first copy (M3-12).
+    expect(w.cacheDir, cache);
+    final again = w.loadScene(r.sceneId!);
     expect(again.sceneName, 'Main');
+    expect(again.mode, 'replace');
     expect(again.projectDir, isNull);
-    expect(w.allEntities(), hasLength(14));
+    expect(again.scenes.map((s) => s.name), ['Main']);
+    expect(w.allEntities(), hasLength(7));
 
     // A prefab is not a scene; an id the cache lacks; not a UUID at all.
     expect(
-      () => w.loadScene(cache, 'c0000000-0000-4000-8000-000000000040'),
+      () => w.loadScene('c0000000-0000-4000-8000-000000000040', cacheDir: cache),
       throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0006'))),
     );
     expect(
-      () => w.loadScene(cache, 'c0000000-0000-4000-8000-0000000000ff'),
+      () => w.loadScene('c0000000-0000-4000-8000-0000000000ff'),
       throwsA(isA<FynkelLoadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0003'))),
     );
-    expect(() => w.loadScene(cache, 'robot'), throwsA(isA<FynkelBridgeError>()));
-    expect(w.allEntities(), hasLength(14), reason: 'a failed load leaves the world alone');
+    expect(() => w.loadScene('robot'), throwsA(isA<FynkelBridgeError>()));
+    expect(w.allEntities(), hasLength(7), reason: 'a failed load leaves the world alone');
 
     // No cache: the runtime never falls back to the source tree.
     expect(

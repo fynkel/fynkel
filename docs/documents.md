@@ -87,7 +87,12 @@ cooked cache: `R0001` unreadable, `R0002` stale — cooked for another schema
 fingerprint, `R0003` asset not in the cache, `R0004` its cook failed,
 `R0005` object unreadable, `R0006` chunk missing, `R0007` payload
 malformed, `R0008` cooked scene invalid for this build, `R0009` no startup
-scene); append only.
+scene, `R0010` unload of a scene the world does not hold, `R0011` an
+additive load of a scene loaded already — M3-12), `FYN-U` the user's
+settings document ([scenes.md](scenes.md) § Settings: `U0001` not a
+settings document or another format version, `U0002` a field or rebind
+of the wrong shape or out of range, `U0003` the file could not be read or
+written); append only.
 
 Human form: `error[FYN-D0012] assets/scenes/main.scene.json:3:3 /id: id is not a canonical UUID: upper-case hex (use lower-case …)`.
 
@@ -130,6 +135,7 @@ semantic rules on top of the schema pass:
 | `FYN-D0209` | malformed entity/component entry skipped by the view |
 | `FYN-H0001` … `H0004` | physics rules (M3-08, [physics.md](physics.md)): a `fynkel.RigidBody` value the runtime would reject, a `fynkel.Collider` value (size per shape, friction, restitution, `mesh` missing), a `shape: mesh` collider on a dynamic or kinematic body, a dynamic body without a collider (warning) |
 | `FYN-H0005` … `H0007` | character rules (M3-09): a `fynkel.CharacterController` value the runtime would reject (capsule, slope, negative limits), a `fynkel.RigidBody`/`fynkel.Collider` next to a `fynkel.CharacterController` (its own capsule replaces them; one diagnostic per ignored component), a `fynkel.ThirdPersonCamera` value (distance, pitch range, sensitivity). The corpus fixture `scene/physics_rules.scene.json` lists `H0001`–`H0008` |
+| `FYN-H0009` | (warning, M3-12, [scenes.md](scenes.md)) a `fynkel.TriggerZone` on an entity without a `fynkel.Collider` whose `is_sensor` is true: it never fires. A blank `event` is a value error (`H0008`, the zone's own `validate()`) |
 | `FYN-H0008` | catalogue rules (M3-10): a `fynkel.Rotator`/`Oscillate`/`Follow`/`LifetimeDespawn`/`Emitter` value the runtime would reject (a zero or non-finite axis, a negative amplitude, frequency, smoothing, seconds, rate or lifetime, a non-finite offset or velocity) — the same `validate()` the tick runs (`docs/catalogue.md`) |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
@@ -1076,5 +1082,14 @@ second scene, Playground (`assets/scenes/playground.scene.json`, id
 Camera with a `fynkel.ThirdPersonCamera` targeting it by name and turned
 by the `look` action, Sun) with `test/platform.input.json` (120 frames:
 W held, Space at frame 20, W released at 75) — the headless gate of item
-9 — so the main scene's counts are unchanged). Every kind added later
-extends this corpus.
+9 — so the main scene's counts are unchanged; since M3-10 a third scene,
+Catalogue (`…0032`); since M3-12 a fourth, Results
+(`assets/scenes/results.scene.json`, id `…0033`: a Camera, a turning
+Trophy, Sun — the scene the Dart gate transitions to) and a third prefab,
+Coin (`assets/prefabs/coin.prefab.json`, id `…0042`: a half-size mesh, a
+sensor sphere `fynkel.Collider` and `fynkel.TriggerZone { event:
+"collect", once: true }`), instantiated at runtime by the tests — the
+project validates as 8 documents, 4 sources, 15 references, 12 assets).
+`scene/physics_rules.scene.json` gained a `Solid zone` entity (a
+`TriggerZone` with an empty event on a non-sensor collider: `H0008` and
+the `H0009` warning). Every kind added later extends this corpus.

@@ -637,6 +637,42 @@ impl Emitter {
     }
 }
 
+/// Names the event Dart hears when a collider enters or leaves this
+/// entity's **sensor** `Collider` (M3-12; `docs/scenes.md`): every physics
+/// `TriggerEnter`/`TriggerExit` the entity takes part in also produces a
+/// general-lane `ZoneEntered`/`ZoneExited` event carrying `event`, the zone
+/// entity and the other one, so gameplay subscribes by name
+/// (`world.zones.on('collect', …)`) instead of matching colliders. With
+/// `once` the component is removed right after the first entry (no exit
+/// follows; the collider stays until the entity goes). An entity without a
+/// sensor collider never fires (`fynkel validate`: `FYN-H0009`).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 20, name = "fynkel.TriggerZone")]
+pub struct TriggerZone {
+    /// The event name, non-empty.
+    pub event: String,
+    /// Fire on the first entry only, then drop the component.
+    pub once: bool,
+}
+
+impl Default for TriggerZone {
+    fn default() -> Self {
+        Self {
+            event: "zone".into(),
+            once: false,
+        }
+    }
+}
+
+impl TriggerZone {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.event.trim().is_empty() {
+            return Err("event must not be empty".into());
+        }
+        Ok(())
+    }
+}
+
 fn finite_axis(what: &str, v: Vec3) -> Result<(), String> {
     if !v.is_finite() || v.length_squared() < 1e-12 {
         return Err(format!("{what} must be finite and non-zero, got {v:?}"));
@@ -676,6 +712,8 @@ pub enum ComponentValue {
     LookAtCamera(LookAtCamera),
     LifetimeDespawn(LifetimeDespawn),
     Emitter(Emitter),
+    /// M3-12.
+    TriggerZone(TriggerZone),
 }
 
 impl ComponentValue {
@@ -698,6 +736,7 @@ impl ComponentValue {
             ComponentValue::LookAtCamera(_) => ComponentId::LOOK_AT_CAMERA,
             ComponentValue::LifetimeDespawn(_) => ComponentId::LIFETIME_DESPAWN,
             ComponentValue::Emitter(_) => ComponentId::EMITTER,
+            ComponentValue::TriggerZone(_) => ComponentId::TRIGGER_ZONE,
         }
     }
 
@@ -810,6 +849,7 @@ impl ComponentValue {
             ComponentValue::LookAtCamera(_) => {}
             ComponentValue::LifetimeDespawn(c) => c.validate()?,
             ComponentValue::Emitter(c) => c.validate()?,
+            ComponentValue::TriggerZone(c) => c.validate()?,
         }
         Ok(())
     }

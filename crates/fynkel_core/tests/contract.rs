@@ -282,7 +282,9 @@ fn events_are_pull_only_and_drained_once() {
     let mut w = world();
     let _ = spawn_one(&mut w, 0.0);
     assert!(w.drain_events().is_empty(), "already drained by spawn_one");
-    w.push_event(EventPayload::SceneReady);
+    w.push_event(EventPayload::SceneReady {
+        scene: fynkel_core::Uuid::NIL,
+    });
     w.step();
     let ev = w.drain_events();
     assert_eq!(ev.len(), 1);

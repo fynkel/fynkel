@@ -21,7 +21,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SystemKind, SystemTime, Vec2, Vec3;
+import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SettingsStore, SystemKind, SystemTime, Vec2, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
@@ -75,7 +75,10 @@ class _GamePageState extends State<GamePage> {
     if (event.logicalKey != LogicalKeyboardKey.keyQ) return KeyEventResult.ignored;
     final viewport = _viewport!;
     final current = profiles.indexOf(viewport.quality ?? 'medium');
-    setState(() => viewport.quality = profiles[(current + 1) % profiles.length]);
+    final next = profiles[(current + 1) % profiles.length];
+    setState(() => viewport.quality = next);
+    // Remembered in the user's settings.json for the next launch.
+    _game!.settings.update(_game!.settings.current.copyWith(quality: next));
     return KeyEventResult.handled;
   }
 
@@ -100,8 +103,9 @@ class _GamePageState extends State<GamePage> {
   Future<void> _start() async {
     try {
       final dir = projectDirectory();
+      final settings = SettingsStore.defaultPath('{{title}}');
       if (dir != null && Directory(dir).existsSync()) {
-        _game = Game.load(dir);
+        _game = Game.load(dir, settingsPath: settings);
       } else {
         // Not on the machine that holds the project (a device): the cache
         // the app bundles, or nothing to show.
@@ -114,12 +118,15 @@ class _GamePageState extends State<GamePage> {
                 : '$dir is not on this device and the app bundles no cache: run `fynkel cook`, then build again.',
           );
         }
-        _game = Game.load(dir ?? '(bundled)', cacheDir: cache);
+        _game = Game.load(dir ?? '(bundled)', cacheDir: cache, settingsPath: settings);
       }
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.
       _viewport = FynkelViewportController(placeholders: false);
+      // The profile the user picked last time (empty: the project's default).
+      final quality = _game!.settings.current.quality;
+      if (profiles.contains(quality)) _viewport!.quality = quality;
     } on FynkelLoadError catch (e) {
       _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {
