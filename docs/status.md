@@ -223,8 +223,8 @@ bundled cache alone (`FYNKEL_PROJECT=/nonexistent`: 22 retained from
 `$TMPDIR/fynkel_cache`, 27 drawn in 16 draws); confirmed by the user on
 the iPhone. Follow-up (same day): `FynkelFrameStats.frames/fps` and an
 `fps` HUD line (showcase + starter), `generate.py --app` wraps the stress
-scene in the starter app — built and launched on macOS from its bundle
-(4 591 drawn in 15 draws, 120 fps, `render()` 2.7 ms).
+scene in the starter app with an orbiting camera — built and launched on
+macOS from its bundle (≈4 700 drawn in 15 draws, 120 fps, `render()` 2.7 ms).
 M3-05a (2026-09-20): `examples/showcase` validate → headless (34 entities,
 22 assets) → render (`medium`: 27 meshes, 5 blended, 3 lights, 18 casters
 in a 2048² map; `low` 960×540 no shadow; `high` 1920×1080, 4096² map) →

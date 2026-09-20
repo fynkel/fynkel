@@ -396,10 +396,14 @@ p50, Flutter 120 ticks/s with `render()` 2.6 ms and GPU 3.2 ms p50.
 
 `generate.py --app` wraps the same project in the `fynkel create`
 starter app (runners, `main.dart` with the HUD, the Spinner behaviour;
-the starter's own scene, cube, material, swatch and test are dropped) so
-it runs on a phone: `fynkel run --project benchmarks/stress/project -d
-<iphone>` — the cook stages the cache into the bundle (M3-06a) and the
-HUD's first line is the frame rate. On macOS from the bundle: 4 591
-instances in view from the app's window aspect, 15 draws, 120 fps with
-`render()` 2.7 ms. The bare project stays what CI and `capture.py`
-measure; ids, scene and cache keys are identical either way.
+the starter's own scene, cube, material, swatch and test are dropped)
+and puts the showcase's `game.Orbit` on the camera (target the field's
+centre, radius 60, height 26, phase 0 — the bare camera's exact pose, so
+the first frame matches the bare render — at 0.08 rad/s, so the culled
+count breathes as the view turns), so it runs on a phone: `fynkel run
+--project benchmarks/stress/project -d <iphone>` — the cook stages the
+cache into the bundle (M3-06a) and the HUD's first line is the frame
+rate. On macOS from the bundle: 4 600–4 700 instances in view, 15
+draws, 120 fps with `render()` 2.7 ms. The bare project stays what CI
+and `capture.py` measure; the ids and the field are identical, the app's
+scene differs by that one component.

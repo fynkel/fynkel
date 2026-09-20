@@ -29,12 +29,14 @@ With --app the project is a runnable game as well: `fynkel create` writes
 the starter app around it (runners, `lib/main.dart` with the HUD — fps,
 draws, culled, shadow map, GPU/CPU ms — `game.dart`, the Spinner behaviour
 and its generated files; the starter's own scene, cube, material, swatch
-and test are dropped, since the stress scene is the startup scene), so it
-runs on this Mac and on a phone: `fynkel run --project
-benchmarks/stress/project -d <iphone>` (the cook stages the cache into the
-bundle; Q cycles the quality profiles). The bare project (the default) is
-what CI and capture.py cook and measure; the ids, the scene and the cache
-keys are the same either way. `fynkel create` needs `flutter` on PATH and
+and test are dropped, since the stress scene is the startup scene) and
+the showcase's `game.Orbit` circles the camera around the field (its
+start pose is the bare camera's, 0.08 rad/s), so it runs on this Mac and
+on a phone: `fynkel run --project benchmarks/stress/project -d <iphone>`
+(the cook stages the cache into the bundle; Q cycles the quality
+profiles). The bare project (the default) is what CI and capture.py cook
+and measure; the ids and the field are the same either way, the app's
+scene differs by the one Orbit component on the camera. `fynkel create` needs `flutter` on PATH and
 the CLI at $FYNKEL_CLI or target/debug/fynkel.
 
 Usage: python3 benchmarks/stress/generate.py [--out DIR] [--static 5000]
@@ -144,7 +146,7 @@ def project_doc():
     }
 
 
-def scene_doc(n_static, n_bodies, n_behaviours, seed):
+def scene_doc(n_static, n_bodies, n_behaviours, seed, orbit=False):
     rng = random.Random(seed)
     entities = {}
 
@@ -153,12 +155,19 @@ def scene_doc(n_static, n_bodies, n_behaviours, seed):
         entities[k] = v
 
     # Camera above the near edge (+Z), looking across the field and down.
+    # With --app the showcase's game.Orbit circles it around the field's
+    # centre; its start pose (phase 0) is this exact transform, so the
+    # app's first frame and the bare project's render agree.
     eye = (0.0, 26.0, FIELD_D / 2 + 30.0)
     pitch = -math.atan2(eye[1], eye[2] - 0.0)
-    add("Camera", [transform(eye, quat_axis_angle((1, 0, 0), pitch)),
-                   {"type": "fynkel.Camera", "version": 1, "data": {
-                       "projection": "perspective", "fov_y": 1.0, "ortho_height": 10.0, "near": 0.1, "far": 200.0,
-                       "priority": 0, "exposure_mode": "auto", "exposure": 12.0}}])
+    camera = [transform(eye, quat_axis_angle((1, 0, 0), pitch)),
+              {"type": "fynkel.Camera", "version": 1, "data": {
+                  "projection": "perspective", "fov_y": 1.0, "ortho_height": 10.0, "near": 0.1, "far": 200.0,
+                  "priority": 0, "exposure_mode": "auto", "exposure": 12.0}}]
+    if orbit:
+        camera.append({"type": "game.Orbit", "version": 1, "data": {
+            "target": [0.0, 0.0, 0.0], "radius": eye[2], "height": eye[1], "speed": 0.08, "phase": 0.0}})
+    add("Camera", camera)
     # A morning sun from +X, 40° up.
     sun_rot = quat_mul(quat_axis_angle((0, 1, 0), math.radians(-60)), quat_axis_angle((1, 0, 0), math.radians(-40)))
     add("Sun", [transform((0, 10, 0), sun_rot),
@@ -216,6 +225,9 @@ def create_app(out):
                 "assets/models/cube.glb.meta.json", "assets/textures/swatch.png", "assets/textures/swatch.png.meta.json",
                 "test/game_test.dart"):
         (out / rel).unlink(missing_ok=True)
+    # The showcase's orbiting camera; `fynkel codegen` (below) generates
+    # its schema and registers it.
+    shutil.copyfile(SHOWCASE / "lib/game/orbit.dart", out / "lib/game/orbit.dart")
 
 
 def main():
@@ -245,6 +257,8 @@ def main():
         for key in ("id", "name", "startupScene", "quality"):
             created[key] = project[key]
         created["components"].update(project["components"])
+        created["components"]["game.Orbit"] = {"kind": "behaviour", "version": 1,
+                                               "description": "Circles the camera around the field (lib/game/orbit.dart)."}
         project = created
     else:
         # The lock names this build's tools; `fynkel project lock` rewrites it.
@@ -252,8 +266,11 @@ def main():
         if not (out / ".gitignore").exists():  # an earlier --app run keeps the starter's
             (out / ".gitignore").write_text(".fynkel/\n")
     (out / "fynkel.project.json").write_text(json.dumps(project, indent=2) + "\n")
-    scene = scene_doc(a.static, a.bodies, a.behaviours, a.seed)
+    scene = scene_doc(a.static, a.bodies, a.behaviours, a.seed, orbit=a.app)
     (out / "assets/scenes/stress.scene.json").write_text(json.dumps(scene) + "\n")
+    if a.app:
+        cli = os.environ.get("FYNKEL_CLI") or str(ROOT / "target/debug/fynkel")
+        subprocess.run([cli, "codegen", "--project", str(out), "--root", str(ROOT)], check=True)
     pairs = len(STATIC_PAIRS) + 2 + 1  # + body, behaviour, floor
     print(f"{out}: {len(scene['entities'])} entities ({a.static} static, {a.bodies} bodies, {a.behaviours} behaviours), "
           f"{len(MATERIALS)} materials, {pairs} distinct (mesh, material) pairs")
