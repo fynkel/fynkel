@@ -435,5 +435,8 @@ in its own app, play it, or hear it. That is M3, in this order:
    `ThirdPersonCamera` (13), `Move`/`Jump` body ops, `characterState()`,
    the Dart `PlayerController` example, the Playground headless gate;
    `docs/physics.md`.
-10. **Audio** (D4), then the Tier 1 reference game that exercises input,
-   physics and audio — measured with both captures at every step.
+10. **Native component catalogue** (blueprint item 10: `Rotator`,
+   `Oscillate`, `Follow`, `LookAtCamera`, `LifetimeDespawn`, `Emitter`),
+   then **audio** (item 11, D4) and the Tier 1 reference game that
+   exercises input, physics and audio — measured with both captures at
+   every step.
