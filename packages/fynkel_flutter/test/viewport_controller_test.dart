@@ -109,6 +109,15 @@ void main() {
     final stats = controller.takeStats();
     expect(stats, isNotNull);
     expect(stats!.framesRendered, greaterThanOrEqualTo(1));
+    // The frame counts the renderer reports for the last frame (engine
+    // defaults: MSAA 4 at the viewport size before the resize; the demo
+    // world has no scene, so no casters and nothing blended).
+    expect(stats.msaa, 4);
+    expect(stats.renderWidth, 64);
+    expect(stats.renderHeight, 48);
+    expect(stats.shadowMap, 0);
+    expect(stats.transparent, 0);
+    expect(stats.lightsDropped, 0);
     final platform = await controller.platformStats();
     expect(platform!.copyCalls, 3);
 

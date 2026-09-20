@@ -1,0 +1,16 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "4423ce05-5501-5d45-8f0b-85e274ed7bb1",
+  "name": "Glass Amber",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    1.0,
+    0.7,
+    0.3,
+    0.55
+  ],
+  "metallic": 0.0,
+  "roughness": 0.15,
+  "alpha_mode": "blend"
+}

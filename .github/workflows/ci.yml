@@ -39,7 +39,7 @@ jobs:
         run: cargo run -p fynkel_cli -- codegen --check
 
   dart:
-    name: dart (package:fynkel, fynkel_flutter, fynkel_generator, example and starter project)
+    name: dart (package:fynkel, fynkel_flutter, fynkel_generator, example, starter project and showcase)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -103,3 +103,18 @@ jobs:
         env:
           FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
         run: flutter pub get && flutter analyze && flutter test
+      # The renderer's example scene (examples/showcase, M3-05a): validates,
+      # runs headless, renders from its cache (the macOS runner has a GPU;
+      # exit 2 = no adapter would fail this step) and passes its own test.
+      - name: showcase validate + headless + render + codegen
+        working-directory: examples/showcase
+        run: |
+          "$GITHUB_WORKSPACE/target/debug/fynkel" validate
+          "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless
+          "$GITHUB_WORKSPACE/target/debug/fynkel" render --out "${{ runner.temp }}/showcase.png"
+          "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project .
+      - name: showcase flutter analyze + test
+        working-directory: examples/showcase
+        env:
+          FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
+        run: flutter pub get && flutter analyze --fatal-infos && flutter test

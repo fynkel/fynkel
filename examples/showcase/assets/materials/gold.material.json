@@ -1,0 +1,15 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "f8495363-c3df-5a03-90ce-252226704098",
+  "name": "Gold",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    1.0,
+    0.78,
+    0.35,
+    1.0
+  ],
+  "metallic": 1.0,
+  "roughness": 0.4
+}

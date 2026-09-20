@@ -173,6 +173,17 @@ pub struct FynkelAppleViewportStats {
     pub missing_last_frame: u32,
     pub asset_errors: u32,
     pub scene_camera: u32,
+    /// Last frame (M3-05): blend instances, lights kept / dropped, sun
+    /// shadow casters and the map side (0 when none), samples per pixel,
+    /// the internal render size.
+    pub transparent_last_frame: u32,
+    pub lights: u32,
+    pub lights_dropped: u32,
+    pub shadow_casters: u32,
+    pub shadow_map: u32,
+    pub msaa: u32,
+    pub render_width: u32,
+    pub render_height: u32,
 }
 
 /// Returned by `fynkel_apple_viewport_render` when the world pointer is
@@ -474,5 +485,13 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
         missing_last_frame: v.frame_stats().missing,
         asset_errors: v.asset_errors().len() as u32,
         scene_camera: v.frame_stats().scene_camera as u32,
+        transparent_last_frame: v.frame_stats().transparent,
+        lights: v.frame_stats().lights,
+        lights_dropped: v.frame_stats().lights_dropped,
+        shadow_casters: v.frame_stats().shadow_casters,
+        shadow_map: v.frame_stats().shadow_map,
+        msaa: v.frame_stats().msaa,
+        render_width: v.frame_stats().render_width,
+        render_height: v.frame_stats().render_height,
     };
 }

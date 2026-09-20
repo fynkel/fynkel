@@ -1,0 +1,21 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "21e2c746-1c49-5cd0-8204-a6a28942f6b5",
+  "name": "Lamp Warm",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.1,
+    0.05,
+    0.02,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.5,
+  "emissive": [
+    1.0,
+    0.55,
+    0.25
+  ],
+  "emissive_strength": 1.2
+}

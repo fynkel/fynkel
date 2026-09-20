@@ -299,6 +299,16 @@ texture reference, and the `Environment` component is where a scene
 author looks for it. A `fynkel.sky@1` shader id remains free for a
 procedural or custom sky later.
 
+## The showcase
+
+`examples/showcase` (README there) is the scene to look at: an evening
+sun with long shadows, a spot and two point lights, the sky, textured
+PBR, metals, overlapping blend panels, a mask card, an orbiting camera,
+three quality profiles. `fynkel render --project examples/showcase` draws
+the view the app opens on; `renders/<item>.png` is committed at the end of
+every renderer item, so a change is a before/after in the history and a
+number in the app's HUD.
+
 ## Tests
 
 `crates/fynkel_render/tests/shading.rs` — one pixel test per feature:

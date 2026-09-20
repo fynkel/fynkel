@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 1,
+  "id": "945c36ef-3598-41c1-b04b-195ccdda7e35",
+  "name": "rusted_mr.png",
+  "importer": "fynkel.image",
+  "importerVersion": 1,
+  "settings": {},
+  "subAssets": {}
+}

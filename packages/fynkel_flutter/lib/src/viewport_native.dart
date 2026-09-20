@@ -68,6 +68,22 @@ final class ViewportStats extends Struct {
   external int assetErrors;
   @Uint32()
   external int sceneCamera;
+  @Uint32()
+  external int transparentLastFrame;
+  @Uint32()
+  external int lights;
+  @Uint32()
+  external int lightsDropped;
+  @Uint32()
+  external int shadowCasters;
+  @Uint32()
+  external int shadowMap;
+  @Uint32()
+  external int msaa;
+  @Uint32()
+  external int renderWidth;
+  @Uint32()
+  external int renderHeight;
 }
 
 final class ViewportCamera extends Struct {
@@ -265,6 +281,14 @@ class ViewportNative {
         missing: s.missingLastFrame,
         assetErrors: s.assetErrors,
         sceneCamera: s.sceneCamera != 0,
+        transparent: s.transparentLastFrame,
+        lights: s.lights,
+        lightsDropped: s.lightsDropped,
+        shadowCasters: s.shadowCasters,
+        shadowMap: s.shadowMap,
+        msaa: s.msaa,
+        renderWidth: s.renderWidth,
+        renderHeight: s.renderHeight,
       );
     } finally {
       calloc.free(out);
@@ -299,9 +323,24 @@ class ViewportStatsSnapshot {
     this.missing = 0,
     this.assetErrors = 0,
     this.sceneCamera = false,
+    this.transparent = 0,
+    this.lights = 0,
+    this.lightsDropped = 0,
+    this.shadowCasters = 0,
+    this.shadowMap = 0,
+    this.msaa = 1,
+    this.renderWidth = 0,
+    this.renderHeight = 0,
   });
   final int meshes, placeholders, missing, assetErrors;
   final bool sceneCamera;
+
+  /// Last frame: blend instances drawn in the transparent pass; point/spot
+  /// lights kept and dropped over the per-draw budget; the sun's shadow
+  /// casters and the shadow map side in texels (0 when no shadow was
+  /// drawn); samples per pixel; the internal render size (the target ×
+  /// the quality profile's render scale).
+  final int transparent, lights, lightsDropped, shadowCasters, shadowMap, msaa, renderWidth, renderHeight;
   final double acquireWaitP50Ms, acquireWaitP95Ms, acquireWaitMaxMs;
   final int framesRendered, framesDropped, framesPresented, presentsWithoutNewFrame, resizes, instances;
   final int presentLagP50, presentLagP95, presentLagMax;

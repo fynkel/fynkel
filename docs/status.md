@@ -24,6 +24,7 @@ changes. Numbers come from the gate reports (`m0-architecture-report.md`,
 | `platform/apple` + `package:fynkel_flutter` + `hosts/flutter_apple` | IOSurface ring → Flutter `Texture` (Path A), 0 copies, GPU-completion hand-off; macOS + iOS. `package:fynkel_flutter` is the Flutter plugin a game depends on: Swift `FynkelFlutterPlugin` (texture registration, multi-viewport by `textureId`, ordered teardown), `FynkelViewportController` (create/resize/rebind, adopts the world's asset store, placeholders, camera, stats), `FynkelViewport` widget (layout × DPR, focus, pointer in physical px) and `FynkelGameView` (Ticker loop: `World.frame` then render, lifecycle mute, per-second `FynkelFrameStats`, overlay). `hosts/flutter_apple` is the measurement harness as a thin app on it; `FYNKEL_PROJECT=<dir>` shows a project's startup scene from its cooked cache | **Solid** | 120 Hz, lag 0, raster p95 0.96 ms after the port (M0 capture `2026-09-19-b35f603`); iOS simulator 60 Hz, 0 drops; package tests create → render → resize → detach against the real Rust viewport under `flutter test`; 60-lifetime leak test |
 | `hosts/headless` + `hosts/standalone` | Rust hosts: deterministic runs, cooked scenes from the cache (`--project`/`--scene <path\|id>`/`--cache`), state dump by authoring id; winit window | **Solid** | CLI tests |
 | `apps/cli` | `fynkel codegen [--project]`, `schema`, `test --headless`, `state dump`, `document`, `scene`, `prefab`, `material`, `shader`, `asset`, `migrate`, `import`, `cook`, `cooked inspect`, `project describe\|lock`, `validate`, `render`, `scene\|prefab apply --patch`, `create`, `run` — every command with `--json`, exit codes 0/1/2 fixed (ADR-0017); works outside the checkout on the embedded schemas; document commands know the enclosing project's behaviour types; `test --headless`, `state dump`, `render` and `run` cook first and load from the cache (`--no-cook`) | **Solid** | 16 CLI tests incl. a fresh `fynkel create` project through validate, headless, state dump and `codegen --check`; every command under 30 ms on the fixture project except `codegen --project` (1 s warm) |
+| `examples/showcase` | The renderer's example scene: an ordinary created game authored to exercise the sun's shadow (with per-mesh opt-outs), a spot and two point lights, an `Environment` with a generated sky, textured PBR, gold/chrome, three overlapping blend panels, a mask leaf card, the fixture robot as a hierarchy, `game.Orbit` circling the camera, three quality profiles; the HUD prints the viewport's frame counts (blended, lights, casters/map, MSAA, render size, GPU/CPU ms — appended to `FynkelAppleViewportStats`); `renders/<item>.png` committed per renderer item | **Solid** | CI validates, runs headless, renders and `flutter test`s it; `renders/m3-05.png`; launched on macOS (34 entities, 27 meshes, 5 blended, 18 casters in a 2048² map, MSAA 4, GPU ≈ 2 ms at 1600×1200) |
 | `fynkel create` template (`apps/cli/templates/create/`) | A new game: Flutter app (`flutter create --empty` runners, sandbox off) on `package:fynkel` + `package:fynkel_flutter`, `lib/main.dart` = `FynkelGameView` over the project's cooked cache with a HUD overlay, `lib/game/game.dart` (`Game.load`), `game.Spinner` with committed generated files and schema, cube/material/scene with fresh ids and real import sidecars, `test/game_test.dart`, `AGENTS.md`, `README.md`; `fynkel run` validates, cooks and runs it | **Solid** — the created app shows its lit, spinning cube (M3-01 gate) | CI creates one and runs `validate`, `test --headless`, `codegen --check`, `flutter analyze`, `flutter test`; built and launched on macOS by hand (1 mesh drawn, 60 ticks/s, 120 Hz) |
 
 Size: ≈47 k lines (Rust 37.2 k, Dart + templates 8.8 k, Swift/ObjC 0.9 k,
@@ -73,7 +74,7 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
 | Gap | Why it matters | Owner |
 | --- | --- | --- |
 | **SDK packages come from the checkout.** `package:fynkel` and `package:fynkel_flutter` are path dependencies into the repo; the hook's `fynkel.lock.json` is a different shape from the project lock. | A game cannot be built without a Fynkel checkout and a Rust toolchain. | M3 item 17 / C6 (published artifacts) |
-| **The renderer has no shadows, transparency or quality profiles yet.** V1 (a) shades physically but casts nothing; `alpha_mode: blend` draws opaque; MSAA/render scale from `quality` are unread; environment lighting is a constant ambient term (no IBL); every draw sees the 8 nearest lights (no culling). | Scenes read flat without contact shadows; glass and particles are impossible; the reference game cannot tune quality. | M3 items 5–6 (renderer V1 b/c) |
+| **The renderer has no IBL, culling or instancing beyond batching.** Environment lighting is a constant ambient term, so metals read dark (the showcase's gold and chrome blocks); every draw sees the 8 nearest lights; every instance is drawn whether or not it is in view; one shadow cascade to 60 m. | Large scenes pay for what is off screen; metallic materials cannot look right. | M3 item 6 (renderer V1 c) for culling and instancing; IBL after M3 |
 | **No input contract, no audio, unread project fields.** §5.1 held-state + edge is in no host; `CLIP` chunks have no consumer; `inputActions`, `quality`, `targets` are validated and unused. | Games cannot be played or heard yet. | M3 (C2, D3, D4) |
 | **Authoring commands have no ABI; the Inspector metadata has no consumer.** `Editor` is Rust-only behind `fynkel scene apply`; `label`/`tooltip`/`min`/`max`/`step` are generated and unread. | The editor (M4) has the commands and the metadata but no handle on them. | M4 (D5) |
 | **Pointer lookup is linear.** `Node::pointer` scans object members; valid documents are unaffected, a document with thousands of diagnostics is quadratic (16 000 entities with 8 000 warnings: 726 ms to load). | The editor resolving pointers per keystroke on big scenes. | M4 (D7) |
@@ -144,6 +145,7 @@ cd packages/fynkel_generator/example/spinner_game && dart pub get && dart analyz
 cargo run -p fynkel_cli -- codegen --check --project packages/fynkel_generator/example/spinner_game
 cargo run -p fynkel_cli -- create /tmp/starter_game && cd /tmp/starter_game
 fynkel validate && fynkel test --headless && fynkel codegen --check --project . && flutter analyze && flutter test
+cd examples/showcase && fynkel validate && fynkel test --headless && fynkel render --out /tmp/showcase.png && fynkel codegen --check --project . && flutter analyze --fatal-infos && flutter test
 ```
 
 (`cargo test -p fynkel_cli` runs the `codegen --check` lines itself when a
@@ -182,6 +184,12 @@ green, starter create → validate → headless → render → codegen → analy
 → test clean; 11 shading pixel tests (exposure, point/spot/budget,
 ambient, orthographic, maps, mask, double-sided, emissive, sky) and the
 fixture render with its normal + metallic-roughness maps.
+M3-05a (2026-09-20): `examples/showcase` validate → headless (34 entities,
+22 assets) → render (`medium`: 27 meshes, 5 blended, 3 lights, 18 casters
+in a 2048² map; `low` 960×540 no shadow; `high` 1920×1080, 4096² map) →
+codegen → analyze → test clean; the app launched on macOS with the orbit
+running and the HUD's frame counts live; fynkel_flutter's controller test
+checks the appended stats.
 M3-05 (2026-09-20): fmt/clippy clean, `cargo test --workspace` green
 (18 shading pixel tests, `PIPELINE_VARIANTS` 9), both `codegen --check`
 pipelines up to date, Dart suites green (the viewport controller test
@@ -223,6 +231,8 @@ in its own app, play it, or hear it. That is M3, in this order:
 5. ~~**Renderer V1 (b)**~~ — done (M3-05): the sun's PCF shadow,
    transparency, MSAA 1/4, render scale, quality profiles switched at
    runtime from every surface, debug lines; the M0 capture unchanged.
+   5a (M3-05a): `examples/showcase`, the scene every renderer item is
+   looked at through (`renders/<item>.png`).
 6. **Renderer V1 (c)** (instancing, frustum culling, the stress benchmark).
 7. **Input** (C2, D3), **audio** (D4), and the Tier 1 reference game that
    exercises them — measured with both captures at every step.

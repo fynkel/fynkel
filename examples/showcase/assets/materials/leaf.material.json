@@ -1,0 +1,21 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "a5f2375e-d315-56d6-a58f-5190a9a2afac",
+  "name": "Leaf",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.4,
+    0.75,
+    0.3,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.8,
+  "alpha_mode": "mask",
+  "alpha_cutoff": 0.5,
+  "double_sided": true,
+  "base_color_texture": {
+    "asset": "ecd17976-2be3-45e9-9205-63125dea989d"
+  }
+}

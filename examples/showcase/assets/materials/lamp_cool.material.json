@@ -1,0 +1,21 @@
+{
+  "$schema": "https://fynkel.dev/schemas/material.schema.json",
+  "formatVersion": 2,
+  "id": "e0db342f-de9d-5a2c-bdaa-20fa4f3ec47b",
+  "name": "Lamp Cool",
+  "shader": "fynkel.pbr@1",
+  "base_color": [
+    0.02,
+    0.04,
+    0.1,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.5,
+  "emissive": [
+    0.35,
+    0.55,
+    1.0
+  ],
+  "emissive_strength": 1.2
+}

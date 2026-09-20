@@ -53,6 +53,14 @@ typedef struct FynkelAppleViewportStats {
   uint32_t meshes_last_frame, placeholders_last_frame, missing_last_frame;
   uint32_t asset_errors;
   uint32_t scene_camera;
+  /* Last frame (M3-05): blend instances, lights kept / dropped, sun shadow
+   * casters and the map side (0 when none), samples per pixel, the
+   * internal render size. */
+  uint32_t transparent_last_frame;
+  uint32_t lights, lights_dropped;
+  uint32_t shadow_casters, shadow_map;
+  uint32_t msaa;
+  uint32_t render_width, render_height;
 } FynkelAppleViewportStats;
 
 typedef void (*FynkelAppleFrameReadyFn)(void *userdata);

@@ -94,6 +94,11 @@ per planned tick, presentation flush), then
 `fynkel_apple_viewport_render(viewport, world)` which extracts the world in
 Rust and renders into a free ring slot. Swift's `FynkelViewportTexture`
 hands the newest GPU-complete slot to Flutter's `Texture`.
+`FynkelAppleViewportStats` ends (M3-05a, appended) with the last frame's
+counts — `transparent_last_frame`, `lights`, `lights_dropped`,
+`shadow_casters`, `shadow_map` (side, 0 when none), `msaa`,
+`render_width`, `render_height` — which `ViewportStatsSnapshot` carries to
+Dart (the showcase HUD prints them).
 `fynkel_apple_viewport_set_quality(viewport, name, len)` (M3-05, additive
 to ABI 2) selects a quality profile of the loaded project by name (an
 empty name: the project default); `-1` and a logged warning naming the
