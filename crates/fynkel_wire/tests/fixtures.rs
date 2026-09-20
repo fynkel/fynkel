@@ -232,6 +232,30 @@ fn fixtures_match_generated_codecs() {
             sky_rotation: 0.25,
         },
     );
+    check(
+        "InputEventRecord",
+        &InputEventRecord {
+            device: 2,
+            control: "leftStick".into(),
+            phase: 2,
+            x: -0.5,
+            y: 0.25,
+        },
+    );
+    check(
+        "InputActionRecord",
+        &InputActionRecord {
+            name: "jump".into(),
+            kind: 0,
+            held: true,
+            pressed: true,
+            released: false,
+            frame_pressed: true,
+            frame_released: false,
+            x: 1.0,
+            y: 0.0,
+        },
+    );
     check("CommandHeader", &CommandHeader { kind: 1, size: 64 });
     check(
         "EventHeader",

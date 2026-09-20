@@ -70,6 +70,10 @@ pub struct CookProject {
     /// The project's quality profiles, carried into the index for the
     /// renderer (`fynkel_assets::ProjectInfo::quality`; §19.2d item 5).
     pub quality: Option<fynkel_document::project::Quality>,
+    /// The project's input actions, carried into the index for the
+    /// runtime's binding table (`fynkel_assets::ProjectInfo::input_actions`;
+    /// §19.2d item 7).
+    pub input_actions: Vec<fynkel_document::project::InputAction>,
 }
 
 impl Default for CookOptions {
@@ -447,6 +451,7 @@ pub fn cook_project(
             name: project.name().to_string(),
             startup_scene,
             quality: project.quality.clone(),
+            input_actions: project.input_actions.clone(),
         }),
         ..opts.clone()
     };
@@ -1190,6 +1195,12 @@ fn write_index(
             "name": p.name,
             "startupScene": p.startup_scene.map(|u| u.to_string()),
             "quality": p.quality.as_ref().map(|q| q.to_json()),
+            "inputActions": p.input_actions.iter().map(|a| json!({
+                "name": a.name,
+                "type": a.kind,
+                "description": a.description,
+                "bindings": a.bindings,
+            })).collect::<Vec<_>>(),
         })),
         "assets": report.assets.iter().map(|a| json!({
             "id": a.id.to_string(),

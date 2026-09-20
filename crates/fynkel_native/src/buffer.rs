@@ -16,6 +16,10 @@ pub enum BufferKind {
     Events = 3,
     Diagnostics = 4,
     Query = 5,
+    /// `InputEventRecord` per raw control event (host → world).
+    InputEvents = 6,
+    /// `InputActionRecord` per bound action (world → host).
+    InputActions = 7,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

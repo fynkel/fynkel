@@ -30,6 +30,7 @@ use fynkel_contracts::{AssetRef, Code, Diagnostic, Uuid};
 use fynkel_cooked::payload::{decode_mesh, decode_texture};
 pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
 use fynkel_cooked::{ChunkFile, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE};
+use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
 use fynkel_core::SceneDescription;
 pub use fynkel_document::project::{Quality, QualityProfile};
@@ -49,6 +50,9 @@ pub struct ProjectInfo {
     /// The project's `quality` profiles as cooked (`None`: the project
     /// declares none; the renderer uses the engine defaults).
     pub quality: Option<Quality>,
+    /// The project's input actions as cooked (the world's binding table
+    /// on load; empty when the project declares none).
+    pub input_actions: Vec<ActionSpec>,
 }
 
 /// One asset as the index lists it.
@@ -150,6 +154,23 @@ impl CacheIndex {
             name: p["name"].as_str().unwrap_or("").to_string(),
             startup_scene: p["startupScene"].as_str().and_then(parse_uuid),
             quality: Quality::from_json(&p["quality"]),
+            input_actions: p["inputActions"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|a| {
+                    Some(ActionSpec {
+                        name: a["name"].as_str()?.to_string(),
+                        kind: ActionKind::parse(a["type"].as_str()?)?,
+                        bindings: a["bindings"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|b| b.as_str().map(str::to_string))
+                            .collect(),
+                    })
+                })
+                .collect(),
         });
         Ok(CacheIndex {
             root: cache_dir.to_path_buf(),

@@ -23,6 +23,10 @@ let package = Package(
             name: "fynkel_flutter",
             dependencies: [
                 .product(name: "FlutterFramework", package: "FlutterFramework")
+            ],
+            linkerSettings: [
+                // Gamepads (FynkelInputPlugin) on both targets.
+                .linkedFramework("GameController")
             ]
         )
     ]

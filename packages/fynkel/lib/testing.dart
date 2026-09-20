@@ -11,6 +11,13 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'src/recording.dart';
+
+/// Reads an input recording (`*.input.json`, `docs/input.md`) to replay
+/// with [InputRecording.replay]. Throws [FormatException] when the file is
+/// not a recording.
+InputRecording loadInputRecording(String path) => InputRecording.parse(File(path).readAsStringSync());
+
 /// Cooks the project at [projectDir] (its `fynkel.project.json`) into
 /// [cacheDir] (default `<projectDir>/.fynkel/cache`) with the `fynkel` CLI
 /// and returns the cache directory. A warm cache costs milliseconds.

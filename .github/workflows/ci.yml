@@ -95,6 +95,7 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/target/debug/fynkel" validate --root "$GITHUB_WORKSPACE"
           "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless --root "$GITHUB_WORKSPACE"
+          "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless --input test/walk.input.json --root "$GITHUB_WORKSPACE"
           "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project . --root "$GITHUB_WORKSPACE"
       # The starter's test cooks the project first (package:fynkel/testing.dart);
       # FYNKEL_CLI points it at the built CLI instead of a `cargo run`.

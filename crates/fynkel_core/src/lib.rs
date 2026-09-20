@@ -24,6 +24,7 @@ pub mod clock;
 pub mod command;
 pub mod components;
 pub mod event;
+pub mod input;
 pub mod load;
 pub mod material;
 pub mod schema;
@@ -40,6 +41,7 @@ pub use fynkel_contracts::{
     AssetId, AssetRef, ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, Uuid, WorldId,
 };
 pub use fynkel_scene::Transform;
+pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase};
 pub use load::{EntityDescription, LoadError, LoadedScene, SceneDescription};
 pub use world::{
     Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight, ExtractEnvironment, ExtractMesh,

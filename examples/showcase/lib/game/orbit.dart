@@ -22,6 +22,10 @@ class Orbit extends Behaviour {
   @Expose(step: 0.1, tooltip: 'Starting angle in radians')
   double phase = 0.0;
 
+  /// Radians per second the `move` action's x scrubs the orbit at
+  /// (A/D, the left stick, the touch overlay's stick), on top of [speed].
+  static const scrubSpeed = 0.6;
+
   /// The current angle around the target (runtime state).
   double angle = 0;
 
@@ -33,7 +37,7 @@ class Orbit extends Behaviour {
 
   @override
   void fixedUpdate(FixedUpdateContext context) {
-    angle += speed * context.dt;
+    angle += (speed + Input.action2D('move').x * scrubSpeed) * context.dt;
     _place();
   }
 

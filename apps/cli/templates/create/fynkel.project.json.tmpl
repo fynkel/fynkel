@@ -24,6 +24,14 @@
         "gamepad:south",
         "touch:overlay/jump"
       ]
+    },
+    "pause": {
+      "type": "button",
+      "description": "Pause the game (the app's business, not a behaviour's).",
+      "bindings": [
+        "keyboard:Escape",
+        "gamepad:menu"
+      ]
     }
   },
   "quality": {
@@ -71,6 +79,11 @@
       "kind": "behaviour",
       "version": 1,
       "description": "Rotates its object (lib/game/spinner.dart)."
+    },
+    "game.Mover": {
+      "kind": "behaviour",
+      "version": 1,
+      "description": "Walks its object with `move`, hops on `jump` (lib/game/mover.dart)."
     }
   },
   "targets": {

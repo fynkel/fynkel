@@ -1,14 +1,16 @@
 // The project loads headlessly and its behaviours run: no window, no GPU.
 // `flutter test` runs this; `fynkel test --headless` runs the same scene on
-// the Rust host without the Dart behaviours. The world reads the cooked
-// cache only, so the test cooks the project first (`cookProject` runs the
-// `fynkel` CLI; a warm cache costs milliseconds).
+// the Rust host without the Dart behaviours (`--input test/walk.input.json`
+// replays the recording there too). The world reads the cooked cache only,
+// so the test cooks the project first (`cookProject` runs the `fynkel` CLI;
+// a warm cache costs milliseconds).
 
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/testing.dart';
 import 'package:{{package}}/game/game.dart';
+import 'package:{{package}}/game/mover.dart';
 import 'package:{{package}}/game/spinner.dart';
 
 void main() {
@@ -21,7 +23,7 @@ void main() {
 
     expect(game.report.ok, isTrue);
     expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
-    expect(game.report.behavioursAttached, 1);
+    expect(game.report.behavioursAttached, 2);
     final spinner = game.world.behaviours.whereType<Spinner>().single;
     expect(spinner.speed, 1.5, reason: 'authored in assets/scenes/main.scene.json');
 
@@ -30,5 +32,37 @@ void main() {
     }
     expect(game.world.tick, greaterThan(0));
     expect(spinner.angle, closeTo(1.5 * game.world.tick / 60, 1e-9));
+  });
+
+  test('a recorded input stream walks the cube', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final mover = game.world.behaviours.whereType<Mover>().single;
+    final cube = mover.gameObject;
+    game.frame(1 / 60); // the behaviours are created on the first frame
+    final start = cube.transform.position;
+
+    // test/walk.input.json: W for five frames, D for four (overlapping), a
+    // Space press during a 50 ms frame (three catch-up ticks: one jump),
+    // the left stick held left for two frames, then — once the jump has
+    // landed — the touch overlay's jump button, a reset (focus lost) and
+    // idle frames until that jump lands too.
+    final recording = loadInputRecording('$projectDir/test/walk.input.json');
+    var airborneTicks = 0;
+    final plans = recording.replay(game.world, fixedUpdate: (_) {
+      if (mover.airTime != null) airborneTicks++;
+    });
+    expect(plans, hasLength(recording.frames.length));
+
+    final end = cube.transform.position;
+    const step = 2.0 / 60; // metres per tick at the authored speed
+    expect(end.z, closeTo(start.z - 5 * step, 1e-3), reason: 'W held for five ticks; forward is -z');
+    expect(end.x, closeTo(start.x + (6 - 2) * step, 1e-3),
+        reason: 'D held for six ticks (the 50 ms frame runs three), the stick left for two');
+    expect(mover.jumps, 2, reason: 'one press per press, however many ticks a frame runs');
+    expect(airborneTicks, inInclusiveRange(58, 61), reason: 'two jumps of ${Mover.jumpDuration} s at 60 ticks/s');
+    expect(mover.airTime, isNull);
+    expect(end.y, closeTo(start.y, 1e-6), reason: 'landed');
+    expect(game.world.input.held('move'), isFalse, reason: 'the reset released everything');
   });
 }

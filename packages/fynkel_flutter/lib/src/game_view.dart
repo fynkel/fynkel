@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fynkel/fynkel.dart';
 
+import 'input_capture.dart';
 import 'viewport.dart';
 import 'viewport_controller.dart';
 
@@ -83,6 +84,7 @@ class FynkelGameView extends StatefulWidget {
     super.key,
     required this.world,
     this.controller,
+    this.input,
     this.fixedUpdate,
     this.onFrame,
     this.onStats,
@@ -103,6 +105,13 @@ class FynkelGameView extends StatefulWidget {
   /// Viewport settings; the view creates (and disposes) a default one when
   /// null. Reads `assetCache`/`placeholders`/`camera` from it as given.
   final FynkelViewportController? controller;
+
+  /// Where the frame's raw control events collect (keys and mouse from the
+  /// viewport, gamepad and captured-mouse deltas from the platform, a
+  /// [TouchOverlay]'s controls); `World.frame` takes them every tick. The
+  /// view creates one when null; pass your own to share it with an overlay
+  /// or to record (`FynkelInputCapture(recorder: ...)`).
+  final FynkelInputCapture? input;
 
   /// Host-side code for every fixed tick, after the behaviours' `fixedUpdate`
   /// (see `World.frame`).
@@ -126,6 +135,8 @@ class FynkelGameView extends StatefulWidget {
   final double maxFrameDt;
   final bool autofocus;
   final FocusNode? focusNode;
+  /// Called first for every key/pointer event; a key the callback marks
+  /// handled does not reach the input capture.
   final FocusOnKeyEventCallback? onKeyEvent;
   final ViewportPointerCallback? onPointerEvent;
   final Widget? placeholder;
@@ -137,6 +148,27 @@ class FynkelGameView extends StatefulWidget {
 class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   FynkelViewportController? _owned;
   FynkelViewportController get controller => widget.controller ?? (_owned ??= FynkelViewportController());
+  FynkelInputCapture? _ownedInput;
+  FynkelInputCapture get input => widget.input ?? (_ownedInput ??= FynkelInputCapture());
+  bool _hasFocus = false;
+  bool _pointerCaptured = false;
+
+  /// Whether the viewport has keyboard focus (keys reach the game).
+  bool get hasFocus => _hasFocus;
+
+  /// Whether the mouse is captured ([capturePointer]).
+  bool get pointerCaptured => _pointerCaptured;
+
+  /// Hides the cursor and routes its movement to `mouse:delta` (macOS;
+  /// elsewhere the request is refused and false comes back). Released by
+  /// a focus loss, a pause and [dispose].
+  Future<bool> capturePointer(bool capture) async {
+    if (capture == _pointerCaptured) return _pointerCaptured;
+    final ok = await FynkelInputChannel.capturePointer(capture);
+    _pointerCaptured = capture && ok;
+    input.pointerCaptured = _pointerCaptured;
+    return _pointerCaptured;
+  }
   late final Ticker _ticker;
   Timer? _statsTimer;
   Duration? _lastTick;
@@ -163,9 +195,32 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     final mute = _pausedByUser || (widget.pauseWhenHidden && _hidden);
     if (_ticker.muted == mute) return;
     _ticker.muted = mute;
-    if (!mute) {
+    if (mute) {
+      // Nothing is held across a pause: the next frame captures a reset.
+      input.reset();
+      unawaited(capturePointer(false));
+    } else {
       _primed = false;
     }
+  }
+
+  void _onFocusChange(bool focused) {
+    _hasFocus = focused;
+    if (!focused) {
+      input.reset();
+      unawaited(capturePointer(false));
+    }
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    final user = widget.onKeyEvent?.call(node, event);
+    if (user == KeyEventResult.handled) return user!;
+    return input.handleKey(event) ? KeyEventResult.handled : (user ?? KeyEventResult.ignored);
+  }
+
+  void _onPointer(PointerEvent event, Offset physical) {
+    widget.onPointerEvent?.call(event, physical);
+    input.handlePointer(event, MediaQuery.devicePixelRatioOf(context));
   }
 
   ViewportState? _seenState;
@@ -186,6 +241,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     controller.addListener(_onViewportChanged);
+    FynkelInputChannel.attach(input);
     _ticker = createTicker(_onTick)..start();
     if (widget.onStats != null) {
       _statsTimer = Timer.periodic(widget.statsInterval, (_) => _report());
@@ -202,6 +258,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
         _owned = null;
       }
       controller.addListener(_onViewportChanged);
+    }
+    if (oldWidget.input != widget.input) {
+      FynkelInputChannel.detach(oldWidget.input ?? _ownedInput ?? input);
+      if (widget.input != null) _ownedInput = null;
+      FynkelInputChannel.attach(input);
     }
     if ((oldWidget.onStats == null) != (widget.onStats == null) || oldWidget.statsInterval != widget.statsInterval) {
       _statsTimer?.cancel();
@@ -223,6 +284,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     WidgetsBinding.instance.removeObserver(this);
     _ticker.dispose();
     _statsTimer?.cancel();
+    FynkelInputChannel.detach(input);
+    if (_pointerCaptured) unawaited(FynkelInputChannel.capturePointer(false));
     controller.removeListener(_onViewportChanged);
     // Detach first so no render lands on a controller the owner disposes next.
     unawaited(controller.detach());
@@ -245,7 +308,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _frames++;
 
     final sim = Stopwatch()..start();
-    final plan = world.frame(dt, fixedUpdate: widget.fixedUpdate);
+    final plan = world.frame(dt, input: input.take(dt), fixedUpdate: widget.fixedUpdate);
     sim.stop();
     _simMs.add(sim.elapsedMicroseconds / 1000);
     _ticks += plan.steps;
@@ -309,8 +372,9 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       controller: controller,
       focusNode: widget.focusNode,
       autofocus: widget.autofocus,
-      onKeyEvent: widget.onKeyEvent,
-      onPointerEvent: widget.onPointerEvent,
+      onKeyEvent: _onKey,
+      onPointerEvent: _onPointer,
+      onFocusChange: _onFocusChange,
       placeholder: widget.placeholder,
     );
     final overlay = widget.overlay;

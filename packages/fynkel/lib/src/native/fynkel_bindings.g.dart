@@ -149,6 +149,40 @@ external FynkelBufferView fynkel_world_diagnostics(
   ffi.Pointer<FynkelWorld> world,
 );
 
+/// Input (blueprint §5.1, §19.2d item 7). The world's binding table comes
+/// from the cooked project's inputActions on load. A host captures its raw
+/// control events (keys, mouse buttons and movement, gamepad, touch
+/// overlay) once per frame, before the ticks, as InputEventRecords; the
+/// view is one InputActionRecord per action: held state every tick sees,
+/// `pressed`/`released` edges the next fynkel_world_step consumes (a
+/// catch-up tick sees held state only; a frame with no tick carries them),
+/// `frame_pressed`/`frame_released` the current frame's raw edges for
+/// update/lateUpdate. The view is valid until the next call or mutating
+/// call.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_capture_input')
+external int _fynkel_world_capture_input(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+);
+
+FynkelStatus fynkel_world_capture_input(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+) => FynkelStatus.fromValue(_fynkel_world_capture_input(world, buffer, length));
+
+@ffi.Native<FynkelBufferView Function(ffi.Pointer<FynkelWorld>)>()
+external FynkelBufferView fynkel_world_input_view(
+  ffi.Pointer<FynkelWorld> world,
+);
+
 /// Pull-only events (ADR-0008): moves pending general-lane events plus the
 /// last tick's physics events into the view; a second call returns an empty
 /// buffer until more events are produced.
@@ -351,7 +385,13 @@ enum FynkelBufferKind {
   FYNKEL_BUFFER_DIAGNOSTICS(4),
 
   /// Query response; record type depends on the query kind.
-  FYNKEL_BUFFER_QUERY(5);
+  FYNKEL_BUFFER_QUERY(5),
+
+  /// InputEventRecord per raw control event (host -> world; fynkel_world_capture_input).
+  FYNKEL_BUFFER_INPUT_EVENTS(6),
+
+  /// InputActionRecord per bound action (world -> host; fynkel_world_input_view).
+  FYNKEL_BUFFER_INPUT_ACTIONS(7);
 
   final int value;
   const FynkelBufferKind(this.value);
@@ -362,6 +402,8 @@ enum FynkelBufferKind {
     3 => FYNKEL_BUFFER_EVENTS,
     4 => FYNKEL_BUFFER_DIAGNOSTICS,
     5 => FYNKEL_BUFFER_QUERY,
+    6 => FYNKEL_BUFFER_INPUT_EVENTS,
+    7 => FYNKEL_BUFFER_INPUT_ACTIONS,
     _ => throw ArgumentError('Unknown value for FynkelBufferKind: $value'),
   };
 }

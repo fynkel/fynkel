@@ -208,6 +208,30 @@ class NativeWorld {
     return SubmitResult(s, _submit.ref.accepted, _submit.ref.rejected);
   }
 
+  /// Hands the frame's raw control events (an input-events buffer, the
+  /// first [length] bytes of [bytes]) to the world: one memcpy into the
+  /// reused scratch, one FFI call.
+  FynkelStatus captureInputBytes(Uint8List bytes, int length) {
+    if (length > _scratchLen) {
+      if (_scratch != nullptr) calloc.free(_scratch);
+      _scratchLen = length * 2;
+      _scratch = calloc<Uint8>(_scratchLen);
+      _scratchView = _scratch.asTypedList(_scratchLen);
+    }
+    _scratchView.setRange(0, length, bytes);
+    dartCopies++;
+    dartBytesCopied += length;
+    ffiCalls++;
+    return fynkel_world_capture_input(_w, _scratch, length);
+  }
+
+  /// The bound actions as the next tick (and this frame) sees them: one
+  /// `InputActionRecord` per action in declaration order, read in place.
+  WireBuffer get inputView {
+    ffiCalls++;
+    return _wrap(fynkel_world_input_view(_w), _inputView);
+  }
+
   StepResult step() {
     ffiCalls++;
     final s = fynkel_world_step(_w, _step);
@@ -236,6 +260,7 @@ class NativeWorld {
   final _eventsView = _ViewCache();
   final _afterPhysicsView = _ViewCache();
   final _queryView = _ViewCache();
+  final _inputView = _ViewCache();
 
   WireBuffer _wrap(FynkelBufferView v, _ViewCache cache) {
     if (v.length == 0) return WireBuffer.empty;

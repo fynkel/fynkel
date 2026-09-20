@@ -92,6 +92,20 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outco
         Ok(loaded) => {
             let residency = assets.retain(&scene.closure);
             let stats = assets.stats();
+            // The project's actions become the world's binding table
+            // (§19.2d item 7); validation reported bad bindings before the
+            // cook, so any here are a report entry, never a failure.
+            let input = assets.project().map(|p| {
+                let errors = w.core_mut().bind_input(&p.input_actions);
+                json!({
+                    "actions": p.input_actions.iter().map(|a| json!({
+                        "name": a.name, "type": a.kind.name(), "bindings": a.bindings,
+                    })).collect::<Vec<_>>(),
+                    "bindingErrors": errors.iter().map(|(action, binding, e)| json!({
+                        "action": action, "binding": binding, "message": e.to_string(),
+                    })).collect::<Vec<_>>(),
+                })
+            });
             w.residency.push(residency);
             w.assets = Some(assets);
             Outcome {
@@ -108,6 +122,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene) -> Outco
                         "bytes": stats.bytes,
                     },
                     "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
+                    "input": input,
                 }),
             }
         }

@@ -10,6 +10,7 @@ import '../math.dart';
 import 'context.dart';
 import 'diagnostics.dart';
 import 'events.dart';
+import 'input.dart';
 import 'native/bridge.dart';
 import 'transform_writer.dart';
 import 'wire/buffers.dart';
@@ -27,7 +28,8 @@ const Transform identityTransform = Transform(position: Vec3.zero, rotation: Qua
 class World {
   World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt, BehaviourRegistry? registry})
       : registry = registry ?? BehaviourRegistry() {
-    context = GameContext(time: _WorldTime(this));
+    input = WorldInput(() => _native.inputView);
+    context = GameContext(time: _WorldTime(this), input: input);
     _behaviours = _BehaviourSystem(this);
   }
 
@@ -56,6 +58,14 @@ class World {
   /// The services behaviours see; current during every callback. Replace it
   /// (a [TestGameContext], say) before the first frame.
   late GameContext context;
+
+  /// The project's actions as the native binding table reports them
+  /// (`inputActions`, bound on load), refreshed by [frame] before each
+  /// tick's callbacks and before `update`. [context]'s input service.
+  late final WorldInput input;
+
+  final RecordBatch _inputEvents = RecordBatch(BufferKind.inputEvents, gen.InputEventRecord.wireSize);
+  bool _inputDirty = false;
 
   late final _BehaviourSystem _behaviours;
 
@@ -136,6 +146,24 @@ class World {
     return plan;
   }
 
+  /// Hands this frame's raw control events to the world (§5.1): once per
+  /// frame after [beginFrame], before the ticks. Held state is immediate;
+  /// `pressed`/`released` edges wait for the next tick. [frame] does this
+  /// for its `input` argument; hosts with their own loop call it directly.
+  void captureInput(List<InputEvent> events) {
+    // A frame without events after a frame without events changes nothing
+    // (no relative control to zero, no frame edge to clear): skip the call.
+    if (events.isEmpty && !_inputDirty) return;
+    _inputDirty = events.isNotEmpty;
+    _inputEvents.clear();
+    for (final e in events) {
+      _inputEvents.add(e.toRecord());
+    }
+    final s = _native.captureInputBytes(_inputEvents.backingStore, _inputEvents.finalize());
+    _inputEvents.clear();
+    _checkFatal(s, 'captureInput');
+  }
+
   /// One fixed tick: flushes staged simulation commands, steps the native
   /// world, resolves spawns, refreshes the snapshot, reports diagnostics.
   StepResult step() {
@@ -210,11 +238,18 @@ class World {
   /// `afterPhysics` with its contacts for behaviours that opted in; then
   /// `update`/`lateUpdate` (and [update]) and the presentation flush.
   /// [fixedUpdate] runs before the behaviours, [update] after them. Every
-  /// non-physics event reaches exactly one `fixedUpdate`.
-  FramePlan frame(double dtSeconds, {void Function(int tick)? fixedUpdate, void Function()? update}) {
+  /// non-physics event reaches exactly one `fixedUpdate`. [input] is the
+  /// frame's raw control events ([captureInput]): each tick's callbacks
+  /// see the edges that tick consumes (a catch-up tick sees held state
+  /// only), `afterPhysics` the same tick's, `update`/`lateUpdate` the
+  /// frame's raw edges.
+  FramePlan frame(double dtSeconds,
+      {List<InputEvent> input = const [], void Function(int tick)? fixedUpdate, void Function()? update}) {
     final plan = beginFrame(dtSeconds);
+    captureInput(input);
     _carry(drainEvents());
     for (var i = 0; i < plan.steps; i++) {
+      this.input.refresh();
       fixedUpdate?.call(tick);
       _behaviours.fixedUpdate(tick, _takeCarried());
       final stepped = tick;
@@ -223,6 +258,7 @@ class World {
       _behaviours.afterPhysics(stepped, _contacts(events));
       _carry(events);
     }
+    this.input.refresh(frameEdges: true);
     _behaviours.update(dtSeconds);
     update?.call();
     flushPresentation();
@@ -371,6 +407,7 @@ class World {
     var report = LoadReport.fromJson(json);
     switch (status) {
       case FynkelStatus.FYNKEL_STATUS_OK:
+        input.invalidate();
         report = _attachAuthoredBehaviours(report);
         if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
         return report;

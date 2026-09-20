@@ -35,7 +35,7 @@ What is in the scene (`assets/scenes/main.scene.json`):
   anisotropy 16)
 
 ```sh
-fynkel run                       # validate, cook, then the app: Q cycles quality, Space pauses the orbit
+fynkel run                       # validate, cook, then the app: Q cycles quality, Space pauses the orbit, A/D (or a stick) scrub it
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/) as assets
 fynkel render --out render.png   # the same view as a PNG; --quality low|medium|high
 fynkel validate                  # documents, references, lock

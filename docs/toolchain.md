@@ -75,4 +75,10 @@ Behaviour generator (`packages/fynkel_generator`, ADR-0012 pipeline (b), M2-16):
 
 `fynkel codegen --project` finds the Dart SDK through `$FYNKEL_DART`, the `dart` next to `flutter` on `PATH`, or `dart` on `PATH`.
 `fynkel create` runs `flutter create --empty --platforms macos,ios` from `flutter` on `PATH` for the platform runners (skipped otherwise); a created project is a Flutter app, so its tests run with `flutter test` (Flutter 3.47 builds the native-assets hook for the host under `flutter test`, ~12 s warm), and `flutter_lints` 6 / `build_runner` 2.16 are its dev dependencies. `package:fynkel_flutter` is a Flutter plugin whose Swift sources ship as one shared-darwin Swift package (`darwin/fynkel_flutter/Package.swift`, swift-tools 5.9, macOS 12 / iOS 15) plus a podspec: Flutter 3.47 apps use Swift Package Manager for plugins, older CocoaPods projects use the podspec. Its tests and the host app's analysis use `flutter` (not `dart`): `flutter pub get && flutter analyze --fatal-infos && flutter test`. Flutter's native-assets step rewrites the dylib's install name to the app's absolute path with `install_name_tool`; `platform/apple` and `fynkel_native` link with `-headerpad_max_install_names` (their `build.rs`) so that works from deep project directories.
+M3-07 (input): no new crate. Gamepads come from Apple's **GameController**
+framework (`GCController`, linked by `packages/fynkel_flutter`'s Swift
+package on macOS and iOS; the podspec lists it too) instead of the `gilrs`
+crate the blueprint named for macOS — one framework for both Apple targets,
+the controllers the OS pairs, nothing added to the Rust runtime path.
+
 Note: run Dart tooling for `packages/` with Flutter's Dart (`<flutter>/bin/dart`, 3.13.2); a Homebrew `dart` on PATH may be older.

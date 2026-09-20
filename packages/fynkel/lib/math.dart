@@ -2,11 +2,49 @@
 /// metres, radians; quaternions are `[x, y, z, w]`, matching `glam`.
 ///
 /// M1 provides `Vec3` and `Quat` (what the wire records need), M3 `Vec4`
-/// (material colours); `Vec2`, `Mat4` and `Transform3` follow with the
-/// gameplay API.
+/// (material colours) and `Vec2` (input axes); `Mat4` and `Transform3`
+/// follow with the gameplay API.
 library;
 
 import 'dart:math' as math;
+
+class Vec2 {
+  const Vec2(this.x, this.y);
+  const Vec2.all(double v) : this(v, v);
+
+  static const Vec2 zero = Vec2(0, 0);
+  static const Vec2 one = Vec2(1, 1);
+
+  final double x, y;
+
+  Vec2 operator +(Vec2 o) => Vec2(x + o.x, y + o.y);
+  Vec2 operator -(Vec2 o) => Vec2(x - o.x, y - o.y);
+  Vec2 operator -() => Vec2(-x, -y);
+  Vec2 operator *(double s) => Vec2(x * s, y * s);
+  Vec2 operator /(double s) => Vec2(x / s, y / s);
+
+  double dot(Vec2 o) => x * o.x + y * o.y;
+  double get lengthSquared => dot(this);
+  double get length => math.sqrt(lengthSquared);
+  Vec2 get normalized {
+    final l = length;
+    return l == 0 ? zero : this / l;
+  }
+
+  /// This vector, or its direction when it is longer than one (a stick
+  /// pushed diagonally, two keys held).
+  Vec2 get clamped => lengthSquared > 1 ? normalized : this;
+
+  Vec2 lerp(Vec2 o, double t) => this + (o - this) * t;
+  bool get isFinite => x.isFinite && y.isFinite;
+
+  @override
+  bool operator ==(Object other) => other is Vec2 && other.x == x && other.y == y;
+  @override
+  int get hashCode => Object.hash(x, y);
+  @override
+  String toString() => 'Vec2($x, $y)';
+}
 
 class Vec3 {
   const Vec3(this.x, this.y, this.z);

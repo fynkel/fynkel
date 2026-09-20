@@ -1,6 +1,7 @@
 //! Translation between the wire buffers and `fynkel_core` values.
 
 use fynkel_contracts::{DiagnosticCode, Entity, EventKind};
+use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::schema::*;
 use fynkel_core::{Command, Diagnostic, Event, EventPayload, Rejected, SnapshotRecord, World};
 use fynkel_scene::Transform;
@@ -234,4 +235,51 @@ pub fn query(
         _ => return None,
     }
     Some(w.finish())
+}
+
+/// Decodes a host frame's raw control events. A record with an unknown
+/// device or phase is skipped (a newer host); framing errors reject the
+/// buffer.
+pub fn decode_input_events(buf: &[u8]) -> Result<Vec<InputEvent>, ProtocolError> {
+    let (h, records, tail) = buffer::validate(buf, BufferKind::InputEvents)?;
+    let mut out = Vec::with_capacity(h.record_count as usize);
+    let size = InputEventRecord::SIZE;
+    for i in 0..h.record_count as usize {
+        let off = i * size;
+        if off + size > records.len() {
+            return Err(ProtocolError::Truncated { at: off });
+        }
+        let Ok(r) = InputEventRecord::decode(&records[off..off + size], tail) else {
+            return Err(ProtocolError::Truncated { at: off });
+        };
+        let (Some(device), Some(phase)) = (Device::from_u32(r.device), Phase::from_u32(r.phase))
+        else {
+            continue;
+        };
+        out.push(InputEvent {
+            control: Control::new(device, r.control),
+            phase,
+            x: r.x,
+            y: r.y,
+        });
+    }
+    Ok(out)
+}
+
+pub fn encode_input_view(buf: Vec<u8>, actions: &[ActionState]) -> Vec<u8> {
+    let mut w = Writer::begin(buf, BufferKind::InputActions);
+    for a in actions {
+        w.record(&InputActionRecord {
+            name: a.name.clone(),
+            kind: a.kind as u32,
+            held: a.held,
+            pressed: a.pressed,
+            released: a.released,
+            frame_pressed: a.frame_pressed,
+            frame_released: a.frame_released,
+            x: a.x,
+            y: a.y,
+        });
+    }
+    w.finish()
 }

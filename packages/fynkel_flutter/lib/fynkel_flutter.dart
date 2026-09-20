@@ -11,5 +11,7 @@ library;
 
 export 'src/bundled_cache.dart';
 export 'src/game_view.dart';
+export 'src/input_capture.dart';
+export 'src/touch_overlay.dart';
 export 'src/viewport.dart';
 export 'src/viewport_controller.dart';

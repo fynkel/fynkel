@@ -780,7 +780,7 @@ makes a directory a project. It is a document (envelope, strict JSON,
 | --- | --- |
 | `startupScene` | `{ asset }` — required; must resolve to a scene document in the asset database |
 | `assets` | The asset root, relative to the project directory (default `assets`; no `..`, no absolute path) |
-| `inputActions` | A stub for §5.1: `name → { type: button \| axis1d \| axis2d, description?, bindings: ["keyboard:…", "mouse:…", "gamepad:…", "touch:…"] }`; nothing consumes it yet |
+| `inputActions` | The game's actions (§5.1, [input.md](input.md)): `name → { type: button \| axis1d \| axis2d, description?, bindings: ["<device>:<control>", …] }` — `keyboard:WASD`, `keyboard:Space`, `mouse:delta`, `gamepad:leftStick`, `touch:overlay/jump`, …; every binding is checked against the runtime's grammar (`FYN-P0009`). The cook copies the block into the cache index; the runtime compiles it into the world's binding table when the project loads (M3-07) |
 | `quality` | `{ default, profiles: { name → { shadows, shadowResolution, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults (shadows on, 2048, MSAA 4, scale 1, anisotropy 8, 4096). The cook copies the block into the cache index and the renderer reads it there (`docs/renderer.md` — MSAA runs at 1 or 4, the other values are clamped); `textureMaxSize` is for the cook |
 | `components` | The component registry: `typeId → { kind: native \| behaviour, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
 | `targets` | `macos \| ios \| android \| windows \| linux \| web → { enabled (default true), profile (default dev) }`; all disabled is a warning |
@@ -812,8 +812,10 @@ Codes: `FYN-P0001` no project file, `P0002` startup scene unset/unresolved/
 not a scene, `P0003` unknown native component in the registry, `P0004`
 (warning) unregistered component used, `P0005` quality default not a
 profile, `P0006` (warning) no enabled target, `P0007` asset root escapes the
-project or is missing, `P0008` malformed entry, `P0010` no lock, `P0011`
-lock mismatch, `P0012` malformed lock.
+project or is missing, `P0008` malformed entry, `P0009` an input binding
+the runtime grammar rejects (at `/inputActions/<name>/bindings/<i>`,
+[input.md](input.md)), `P0010` no lock, `P0011` lock mismatch, `P0012`
+malformed lock.
 
 ## New projects: `fynkel create`
 
@@ -825,21 +827,23 @@ project — the blueprint's project model, filled in:
 ```text
 my_game/
   pubspec.yaml                 Flutter app on package:fynkel + package:fynkel_flutter (path dependencies into the checkout) + fynkel_generator (dev)
-  fynkel.project.json          startup scene, assets root, input-action stub, quality profiles, registry (game.Spinner declared)
+  fynkel.project.json          startup scene, assets root, input actions (move, jump, pause), quality profiles, registry (game.Spinner, game.Mover declared)
   fynkel.lock.json             `expected_lock()` for the tools that created it
   AGENTS.md  README.md         layout, every command, the validate → codegen → build → test loop, do/don't
-  lib/main.dart                the app: `FynkelGameView` over the project's cooked cache (loop + viewport) with a HUD overlay; FYNKEL_PROJECT on this machine, the bundled cache on a device
+  lib/main.dart                the app: `FynkelGameView` over the project's cooked cache (loop + viewport) with a HUD overlay; FYNKEL_PROJECT on this machine, the bundled cache on a device — `FynkelInputCapture` feeds the world (keys, mouse, gamepad), `TouchOverlay.fromActions` on phones, the `pause` action pauses the loop
   fynkel_cache/README.md       keep file: the cook stages the cache here and pubspec.yaml bundles the directory as assets (the rest git-ignored)
   lib/game/game.dart           `Game.load(dir)`: World, `registerBehaviours(world.registry)`, `loadProject`; `projectDirectory()`
   lib/game/spinner.dart        `@FynkelBehaviour(id: 'game.Spinner')` with `@Expose` speed/axis
+  lib/game/mover.dart          `game.Mover`: walks the cube with `Input.action2D('move')`, hops on `Input.pressed('jump')` (input.md)
   lib/generated/               behaviours.g.dart + .g.json, exactly what `fynkel codegen --project .` emits
-  schemas/behaviours/          game.Spinner.schema.json
-  assets/scenes/main.scene.json    Camera, Sun (fynkel.DirectionalLight, 10 000 lux) and a Cube with MeshRenderer + game.Spinner { speed: 1.5 }
+  schemas/behaviours/          game.Spinner.schema.json, game.Mover.schema.json
+  assets/scenes/main.scene.json    Camera, Sun (fynkel.DirectionalLight, 10 000 lux) and a Cube with MeshRenderer + game.Spinner { speed: 1.5 } + game.Mover
   assets/materials/starter.material.json
   assets/models/cube.glb (+ .meta.json)   a unit cube (24 vertices, normals, UVs); sidecar with the imported sub-asset ids
   assets/textures/swatch.png (+ .meta.json)
   assets/prefabs/  assets/audio/           empty (.gitkeep)
-  test/game_test.dart          `flutter test`: the scene loads, `behavioursAttached == 1`, the spinner's authored speed, it spins
+  test/game_test.dart          `flutter test`: the scene loads, `behavioursAttached == 2`, the spinner's authored speed, it spins; `test/walk.input.json` replayed through the Mover walks the cube (one jump per press across a 50 ms frame)
+  test/walk.input.json         a recorded input stream (input.md § Recordings); also `fynkel test --headless --input test/walk.input.json`
   macos/  ios/                 platform runners from `flutter create --empty` (skipped with --no-flutter or without `flutter` on PATH)
 ```
 
@@ -938,7 +942,7 @@ fynkel codegen [--check] [--root <repo>] [--project <dart package>]
 fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--no-cook] [--placeholders] [--quality <profile>] [--json]
 fynkel schema list [--json]
 fynkel schema describe <type|kind> [--json]
-fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--seed S] [--json]
+fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--input <file.input.json>] [--steps N] [--seed S] [--json]
 fynkel state dump [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--json]
 fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter] [--force] [--json]
 fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]

@@ -35,7 +35,7 @@ use fynkel_document::project::PROJECT_FILE;
 
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>] [--project <dart package>]\n                                               regenerate schemas/, Dart and Rust codecs (a); with --project also the\n                                               package's behaviours.g.dart/.g.json and schemas/behaviours/ (b, build_runner)\n  fynkel schema [list|describe <type>] [--json] the schema registry: document kinds, component types, fingerprint\n  fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               cook the project, run its startup scene (or --scene) in the Rust headless host from the cache and report;\n                                               outside a project: the procedural demo scene\n  fynkel state dump [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--json]\n                                               cook, load a scene headlessly from the cache and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate|apply ...      scene documents (--prefabs <dir>, --expand; apply --patch <ops.json> [--dry-run])\n  fynkel prefab inspect|validate|apply ...     prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>]        import glTF/GLB sources to their normalized intermediate (sidecars updated)\n  fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune]\n                                               cook the project's assets into its content-addressed cache (.fynkel/cache); --assets <dir> for a bare root\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table\n  fynkel project describe|lock [--project <dir>] [--json]\n                                               the project file (fynkel.project.json) and its lock (fynkel.lock.json)\n  fynkel validate [--project <dir>] [--json]   validate the whole project: exit 0 ok, 1 errors, 2 usage/IO\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <png>] [--size WxH] [--no-cook]\n                                               cook, then render the project's startup scene (or --scene) headlessly from the cache to a PNG\n  fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter]\n                                               a new game project: Flutter app, fynkel.project.json, assets, one behaviour, AGENTS.md\n  fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]\n                                               validate and cook, then `flutter run` with FYNKEL_PROJECT set to the project"
+        "usage:\n  fynkel codegen [--check] [--root <repo>] [--project <dart package>]\n                                               regenerate schemas/, Dart and Rust codecs (a); with --project also the\n                                               package's behaviours.g.dart/.g.json and schemas/behaviours/ (b, build_runner)\n  fynkel schema [list|describe <type>] [--json] the schema registry: document kinds, component types, fingerprint\n  fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--input <file.input.json>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               cook the project, run its startup scene (or --scene) in the Rust headless host from the cache and report;\n                                               --input replays a recorded input stream against the project's actions; outside a project: the procedural demo scene\n  fynkel state dump [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--json]\n                                               cook, load a scene headlessly from the cache and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate|apply ...      scene documents (--prefabs <dir>, --expand; apply --patch <ops.json> [--dry-run])\n  fynkel prefab inspect|validate|apply ...     prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>]        import glTF/GLB sources to their normalized intermediate (sidecars updated)\n  fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune]\n                                               cook the project's assets into its content-addressed cache (.fynkel/cache); --assets <dir> for a bare root\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table\n  fynkel project describe|lock [--project <dir>] [--json]\n                                               the project file (fynkel.project.json) and its lock (fynkel.lock.json)\n  fynkel validate [--project <dir>] [--json]   validate the whole project: exit 0 ok, 1 errors, 2 usage/IO\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <png>] [--size WxH] [--no-cook]\n                                               cook, then render the project's startup scene (or --scene) headlessly from the cache to a PNG\n  fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter]\n                                               a new game project: Flutter app, fynkel.project.json, assets, one behaviour, AGENTS.md\n  fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]\n                                               validate and cook, then `flutter run` with FYNKEL_PROJECT set to the project"
     );
     ExitCode::from(1)
 }
@@ -262,6 +262,10 @@ fn test_command(args: &[String]) -> ExitCode {
             "--scene" => target.scene = value(&mut i).cloned(),
             "--project" => target.project = value(&mut i).map(PathBuf::from),
             "--cache" => target.cache = value(&mut i).map(PathBuf::from),
+            "--input" => match value(&mut i) {
+                Some(v) => cfg.input = Some(PathBuf::from(v)),
+                None => return usage(),
+            },
             "--prefabs" => {
                 eprintln!("fynkel test: --prefabs is gone; prefabs come from the scene's project (cooked)");
                 return usage();
@@ -294,10 +298,60 @@ fn test_command(args: &[String]) -> ExitCode {
         }
     }
     let report = run(&cfg);
-    let ok = report.scene_ready && report.commands_rejected == 0 && report.diagnostics == 0;
+    // A recording that does not parse, or a binding the table could not
+    // compile, fails the run: the stream would not drive what it was
+    // recorded against.
+    let input_ok = report
+        .input
+        .as_ref()
+        .is_none_or(|i| i.binding_errors.is_empty());
+    let ok =
+        report.scene_ready && report.commands_rejected == 0 && report.diagnostics == 0 && input_ok;
     if json {
         println!("{}", report.to_json());
     } else {
+        if let Some(input) = &report.input {
+            for [action, binding, message] in &input.binding_errors {
+                if action.is_empty() {
+                    eprintln!("fynkel test --headless: --input {message}");
+                } else {
+                    eprintln!(
+                        "fynkel test --headless: action `{action}` binding `{binding}`: {message}"
+                    );
+                }
+            }
+            if input.binding_errors.is_empty() {
+                println!(
+                    "replayed {} ({} frames, {} events): {}",
+                    input.recording,
+                    input.frames,
+                    input.events,
+                    if input.actions.is_empty() {
+                        "no actions".to_string()
+                    } else {
+                        input
+                            .actions
+                            .iter()
+                            .map(|a| match a.kind.as_str() {
+                                "button" => format!(
+                                    "{} pressed {} released {} held {} ticks",
+                                    a.name, a.pressed, a.released, a.held_ticks
+                                ),
+                                "axis1d" => format!(
+                                    "{} held {} ticks, ends at {:.2}",
+                                    a.name, a.held_ticks, a.x
+                                ),
+                                _ => format!(
+                                    "{} held {} ticks, ends at ({:.2}, {:.2})",
+                                    a.name, a.held_ticks, a.x, a.y
+                                ),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                );
+            }
+        }
         if let Some(scene) = &report.scene {
             for d in &scene.document_diagnostics {
                 eprintln!("{}", diagnostic_line(d));

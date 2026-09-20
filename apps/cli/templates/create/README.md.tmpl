@@ -7,16 +7,22 @@ Fynkel CLI. Created by `fynkel create`.
 ```sh
 fynkel validate                  # the whole project: documents, references, lock
 fynkel test --headless           # the startup scene on the Rust headless host
-flutter test                     # test/game_test.dart: the scene loads, the cube spins
+fynkel test --headless --input test/walk.input.json   # the same with a recorded input stream against the project's actions
+flutter test                     # test/game_test.dart: the scene loads, the cube spins, the recording walks it
 fynkel run                       # validate, cook, then flutter run with FYNKEL_PROJECT set to this directory
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/, bundled)
 fynkel cook && fynkel render --out render.png   # the scene as a picture, no window
 ```
 
 Gameplay is Dart: `lib/game/spinner.dart` is a `Behaviour` with `@Expose`
-fields that the scene sets. After changing an exposed field, an id or
-adding a behaviour class, run `fynkel codegen --project .` and commit the
-regenerated `lib/generated/` and `schemas/behaviours/`.
+fields that the scene sets; `lib/game/mover.dart` walks the cube with the
+`move` action and hops it on `jump` — WASD and Space, a gamepad's left
+stick and A button, or the touch overlay on a phone, as
+`fynkel.project.json` → `inputActions` binds them (`Input.action2D('move')`,
+`Input.pressed('jump')`; docs/input.md in the engine). After changing an
+exposed field, an id or adding a behaviour class, run `fynkel codegen
+--project .` and commit the regenerated `lib/generated/` and
+`schemas/behaviours/`.
 
 `AGENTS.md` describes the layout, every command and the validate → codegen →
 build → test loop for tools and AI agents (and is a good tour for people).

@@ -30,6 +30,9 @@ public class FynkelFlutterPlugin: NSObject, FlutterPlugin {
     let channel = FlutterMethodChannel(name: "fynkel_flutter/viewport", binaryMessenger: messenger)
     let instance = FynkelFlutterPlugin(textures: textures)
     registrar.addMethodCallDelegate(instance, channel: channel)
+    // The input half (gamepads, captured pointer) shares the registrar:
+    // Flutter's tooling registers one class per plugin.
+    FynkelInputPlugin.register(with: registrar)
   }
 
   init(textures: FlutterTextureRegistry) {

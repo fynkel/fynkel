@@ -11,7 +11,7 @@ import 'support.dart';
 const int bufferMagic = 0x4b4e5946; // "FYNK"
 const int bufferHeaderSize = 24;
 
-enum BufferKind { commands, snapshot, events, diagnostics, query }
+enum BufferKind { commands, snapshot, events, diagnostics, query, inputEvents, inputActions }
 
 int bufferKindValue(BufferKind k) => k.index + 1;
 
@@ -192,6 +192,79 @@ class CommandBatch {
     _bytes.setUint32(20, 0, Endian.little);
     return total;
   }
+
+  Uint8List get backingStore => _view;
+}
+
+/// Reusable batch of fixed-size records (no per-record header): the input
+/// event buffer a host captures once per frame. Same reuse discipline as
+/// [CommandBatch].
+class RecordBatch {
+  RecordBatch(this.kind, this.recordSize, [int initialCapacity = 1024])
+      : _bytes = ByteData(initialCapacity),
+        _view = Uint8List(0) {
+    _view = _bytes.buffer.asUint8List();
+  }
+
+  final BufferKind kind;
+  final int recordSize;
+  ByteData _bytes;
+  Uint8List _view;
+  int _len = bufferHeaderSize;
+  int _count = 0;
+  final WireStrings _strings = WireStrings();
+
+  int get length => _count;
+  bool get isEmpty => _count == 0;
+
+  void clear() {
+    _len = bufferHeaderSize;
+    _count = 0;
+    _strings.clear();
+  }
+
+  void _reserve(int extra) {
+    if (_len + extra <= _bytes.lengthInBytes) return;
+    var cap = _bytes.lengthInBytes * 2;
+    while (cap < _len + extra) {
+      cap *= 2;
+    }
+    final grown = ByteData(cap);
+    grown.buffer.asUint8List().setRange(0, _len, _view);
+    _bytes = grown;
+    _view = grown.buffer.asUint8List();
+  }
+
+  void add(WireRecord record) {
+    _reserve(recordSize);
+    _bytes.buffer.asUint8List(_len, recordSize).fillRange(0, recordSize, 0);
+    record.encode(_bytes, _len, _strings);
+    _len += recordSize;
+    _count++;
+  }
+
+  /// Finalizes header and tail in place; the bytes are the first
+  /// [finalize] bytes of [backingStore].
+  int finalize() {
+    final recordsEnd = _len;
+    var total = _len;
+    if (_strings.length != 0) {
+      final tail = _strings.takeBytes();
+      _reserve(tail.length);
+      _view.setRange(_len, _len + tail.length, tail);
+      total += tail.length;
+    }
+    _bytes.setUint32(0, bufferMagic, Endian.little);
+    _bytes.setUint16(4, abiVersion, Endian.little);
+    _bytes.setUint16(6, bufferKindValue(kind), Endian.little);
+    _bytes.setUint32(8, _count, Endian.little);
+    _bytes.setUint32(12, total, Endian.little);
+    _bytes.setUint32(16, recordsEnd, Endian.little);
+    _bytes.setUint32(20, 0, Endian.little);
+    return total;
+  }
+
+  Uint8List encoded() => Uint8List.sublistView(_view, 0, finalize());
 
   Uint8List get backingStore => _view;
 }

@@ -196,6 +196,30 @@ class AuthoredBehaviour {
   final String? pointer;
 }
 
+/// One `inputActions` entry of the loaded project as the world bound it
+/// (`LoadReport.inputActions`): the name, the kind and the bindings in
+/// the project's grammar (`keyboard:WASD`, `touch:overlay/stick`, …).
+class BoundAction {
+  const BoundAction({required this.name, required this.type, required this.bindings});
+
+  factory BoundAction.fromJson(Map<String, Object?> j) => BoundAction(
+        name: j['name'] as String? ?? '',
+        type: j['type'] as String? ?? 'button',
+        bindings: [for (final b in (j['bindings'] as List?) ?? const []) b as String],
+      );
+
+  final String name;
+
+  /// `button`, `axis1d` or `axis2d`.
+  final String type;
+  final List<String> bindings;
+
+  /// The `touch:overlay/<control>` control names this action binds.
+  Iterable<String> get overlayControls => bindings
+      .where((b) => b.startsWith('touch:overlay/'))
+      .map((b) => b.substring('touch:overlay/'.length));
+}
+
 /// What [World.loadScene] / [World.loadProject] produced.
 class LoadReport {
   const LoadReport({
@@ -216,12 +240,14 @@ class LoadReport {
     this.cacheProfile,
     this.startupScene,
     this.residency = const ResidencyStats(),
+    this.inputActions = const [],
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
     final scene = j['scene'] as Map<String, Object?>?;
     final cache = j['cache'] as Map<String, Object?>?;
     final residency = j['residency'] as Map<String, Object?>?;
+    final input = j['input'] as Map<String, Object?>?;
     return LoadReport(
       ok: j['ok'] == true,
       diagnostics: [
@@ -243,6 +269,9 @@ class LoadReport {
       cacheProfile: cache?['profile'] as String?,
       startupScene: cache?['startupScene'] as String?,
       residency: residency == null ? const ResidencyStats() : ResidencyStats.fromJson(residency),
+      inputActions: [
+        for (final a in (input?['actions'] as List?) ?? const []) BoundAction.fromJson((a as Map).cast<String, Object?>()),
+      ],
     );
   }
 
@@ -289,6 +318,10 @@ class LoadReport {
   /// The world's asset store after the load.
   final ResidencyStats residency;
 
+  /// The project's `inputActions` as the world bound them (a `loadProject`;
+  /// empty for a `loadScene` of a cache without a project).
+  final List<BoundAction> inputActions;
+
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
@@ -310,6 +343,7 @@ class LoadReport {
         cacheProfile: cacheProfile,
         startupScene: startupScene,
         residency: residency,
+        inputActions: inputActions,
       );
 
   /// This report after the SDK attached [attached] behaviours and found

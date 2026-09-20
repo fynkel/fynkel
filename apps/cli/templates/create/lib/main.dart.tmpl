@@ -10,16 +10,22 @@
 // by path when this process can see the project directory, else from the
 // copy the app bundles (fynkel_cache/, unpacked at start-up) — which is
 // how the same build runs on an iPhone.
-// Q cycles the project's quality profiles (fynkel.project.json `quality`).
+// Input: the view captures keys, the mouse and gamepads into a
+// `FynkelInputCapture` and hands each frame's events to the world, which
+// turns them into the project's actions (`inputActions`; behaviours read
+// `Input.action2D('move')` and friends). On a phone a `TouchOverlay` puts
+// the same actions on screen. Q cycles the project's quality profiles
+// (fynkel.project.json `quality`); Escape (the `pause` action) pauses.
 
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show FynkelLoadError;
+import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, Vec2, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
+import 'game/mover.dart';
 import 'game/spinner.dart';
 
 void main() => runApp(const GameApp());
@@ -52,16 +58,37 @@ class _GamePageState extends State<GamePage> {
   String? _error;
   FynkelViewportController? _viewport;
   FynkelFrameStats? _stats;
+  final _input = FynkelInputCapture();
+  final _view = GlobalKey<FynkelGameViewState>();
+  bool _paused = false;
 
-  /// Q: the next quality profile (the project default, `medium`, first).
+  /// Q: the next quality profile (the project default, `medium`, first);
+  /// Escape while paused: resume (the loop does not run while paused, so
+  /// the `pause` action cannot be read then). Every other key goes to the
+  /// input capture (WASD, Space, …).
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.keyQ) {
-      return KeyEventResult.ignored;
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (_paused && event.logicalKey == LogicalKeyboardKey.escape) {
+      _setPaused(false);
+      return KeyEventResult.handled;
     }
+    if (event.logicalKey != LogicalKeyboardKey.keyQ) return KeyEventResult.ignored;
     final viewport = _viewport!;
     final current = profiles.indexOf(viewport.quality ?? 'medium');
     setState(() => viewport.quality = profiles[(current + 1) % profiles.length]);
     return KeyEventResult.handled;
+  }
+
+  /// The `pause` action (Escape, the gamepad's menu button), read after
+  /// each frame: the app owns pausing, so it reads the action here rather
+  /// than in a behaviour.
+  void _onFrame(double dt, FramePlan plan) {
+    if (_game!.world.input.pressed('pause')) _setPaused(true);
+  }
+
+  void _setPaused(bool v) {
+    setState(() => _paused = v);
+    _view.currentState?.setPaused(v);
   }
 
   @override
@@ -116,25 +143,36 @@ class _GamePageState extends State<GamePage> {
     }
     return Scaffold(
       body: FynkelGameView(
+        key: _view,
         world: game.world,
         controller: _viewport,
+        input: _input,
         onKeyEvent: _onKey,
+        onFrame: _onFrame,
         onStats: (s) => setState(() => _stats = s),
-        overlay: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Hud(game: game, stats: _stats, viewport: _viewport!),
+        overlay: Stack(
+          fit: StackFit.expand,
+          children: [
+            // The project's `touch:overlay/*` bindings as a stick and
+            // buttons, on touch platforms only (`visible:` to force it).
+            TouchOverlay.fromActions(game.report.inputActions, input: _input),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Hud(game: game, stats: _stats, viewport: _viewport!, paused: _paused),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -143,11 +181,12 @@ class _GamePageState extends State<GamePage> {
 
 /// The HUD: ordinary Flutter widgets composited over the 3D viewport.
 class Hud extends StatelessWidget {
-  const Hud({super.key, required this.game, required this.stats, required this.viewport});
+  const Hud({super.key, required this.game, required this.stats, required this.viewport, this.paused = false});
 
   final Game game;
   final FynkelFrameStats? stats;
   final FynkelViewportController viewport;
+  final bool paused;
 
   @override
   Widget build(BuildContext context) {
@@ -160,6 +199,10 @@ class Hud extends StatelessWidget {
       'behaviours ${game.world.behaviours.length} attached',
       for (final sp in game.world.behaviours.whereType<Spinner>())
         'spinner    ${sp.angle.toStringAsFixed(2)} rad at ${sp.speed} rad/s',
+      for (final m in game.world.behaviours.whereType<Mover>())
+        'mover      ${_xyz(m.gameObject.transform.position)}  ${m.jumps} jumps${m.airTime != null ? ' (airborne)' : ''}',
+      'input      move ${_xy(game.world.input.action2D('move'))}  jump ${game.world.input.held('jump') ? 'held' : '-'}  '
+          '[WASD/stick, Space/A; Esc pauses]${paused ? '  PAUSED' : ''}',
       'assets     ${game.report.assetCount} retained from ${game.report.cacheDir}',
       'quality    ${viewport.quality ?? 'medium (project default)'}  [Q cycles]',
       if (s != null) ...[
@@ -177,4 +220,7 @@ class Hud extends StatelessWidget {
       children: [for (final l in lines) Text(l, style: style)],
     );
   }
+
+  static String _xy(Vec2 v) => '(${v.x.toStringAsFixed(2)}, ${v.y.toStringAsFixed(2)})';
+  static String _xyz(Vec3 v) => '(${v.x.toStringAsFixed(2)}, ${v.y.toStringAsFixed(2)}, ${v.z.toStringAsFixed(2)})';
 }

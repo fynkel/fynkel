@@ -71,6 +71,7 @@ const FILES: &[TemplateFile] = &[
     text!("lib/main.dart", "lib/main.dart.tmpl"),
     text!("lib/game/game.dart", "lib/game/game.dart.tmpl"),
     text!("lib/game/spinner.dart", "lib/game/spinner.dart"),
+    text!("lib/game/mover.dart", "lib/game/mover.dart"),
     text!(
         "lib/generated/behaviours.g.dart",
         "lib/generated/behaviours.g.dart.tmpl"
@@ -82,6 +83,10 @@ const FILES: &[TemplateFile] = &[
     text!(
         "schemas/behaviours/game.Spinner.schema.json",
         "schemas/behaviours/game.Spinner.schema.json.tmpl"
+    ),
+    text!(
+        "schemas/behaviours/game.Mover.schema.json",
+        "schemas/behaviours/game.Mover.schema.json.tmpl"
     ),
     text!(
         "assets/scenes/main.scene.json",
@@ -96,6 +101,7 @@ const FILES: &[TemplateFile] = &[
     text!("assets/prefabs/.gitkeep", "assets/prefabs/.gitkeep"),
     text!("assets/audio/.gitkeep", "assets/audio/.gitkeep"),
     text!("test/game_test.dart", "test/game_test.dart.tmpl"),
+    text!("test/walk.input.json", "test/walk.input.json"),
 ];
 
 /// Source files that get an imported sidecar, in `FILES` order.
@@ -311,6 +317,7 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         "c_cube_transform",
         "c_cube_mesh",
         "c_cube_spinner",
+        "c_cube_mover",
     ] {
         vars.push((key.into(), Uuid::new_v4().to_string()));
     }

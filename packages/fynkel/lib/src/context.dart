@@ -5,6 +5,8 @@
 // callback — never through hidden process-global state, so a test can run
 // gameplay code against a `TestGameContext` with its own clock.
 
+import 'input.dart';
+
 /// Frame and fixed-step timing.
 abstract interface class TimeService {
   /// Seconds of the current (or last) host frame.
@@ -43,10 +45,15 @@ class PrintDiagnostics implements DiagnosticsService {
 /// [GameContext.current]; a world makes its context current around every
 /// behaviour callback ([run]).
 class GameContext {
-  GameContext({required this.time, this.diagnostics = const PrintDiagnostics()});
+  GameContext({required this.time, this.diagnostics = const PrintDiagnostics(), InputService? input})
+      : input = input ?? NoInput();
 
   final TimeService time;
   final DiagnosticsService diagnostics;
+
+  /// The project's actions ([Input] facade): the world's binding table in
+  /// a game, a [TestInput] in a test, [NoInput] when neither.
+  final InputService input;
   final Map<Type, Object> _services = {};
 
   /// Installs (or replaces) a service by its static type: a test installs
@@ -124,16 +131,21 @@ class RecordingDiagnostics implements DiagnosticsService {
 /// A context for tests: a hand-driven clock and recorded logs, plus whatever
 /// services the test installs.
 class TestGameContext extends GameContext {
-  factory TestGameContext({TestTime? time, RecordingDiagnostics? diagnostics}) =>
-      TestGameContext._(time ?? TestTime(), diagnostics ?? RecordingDiagnostics());
+  factory TestGameContext({TestTime? time, RecordingDiagnostics? diagnostics, TestInput? input}) =>
+      TestGameContext._(time ?? TestTime(), diagnostics ?? RecordingDiagnostics(), input ?? TestInput());
 
-  TestGameContext._(TestTime time, RecordingDiagnostics diagnostics) : super(time: time, diagnostics: diagnostics);
+  TestGameContext._(TestTime time, RecordingDiagnostics diagnostics, TestInput input)
+      : super(time: time, diagnostics: diagnostics, input: input);
 
   @override
   TestTime get time => super.time as TestTime;
 
   @override
   RecordingDiagnostics get diagnostics => super.diagnostics as RecordingDiagnostics;
+
+  /// The hand-driven actions (`press`, `release`, `setAxis`, `endTick`).
+  @override
+  TestInput get input => super.input as TestInput;
 }
 
 /// Static facade over the current context's [TimeService].

@@ -172,6 +172,39 @@ pub struct EventHeader {
     pub flags: u32,
 }
 
+/// One raw control event of a host frame (`fynkel_world_capture_input`,
+/// §5.1): `device` a `fynkel_core::input::Device`, `phase` a `Phase`;
+/// `x`/`y` the axis value or movement (a button's `x` is 1 down, 0 up).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.InputEvent")]
+pub struct InputEventRecord {
+    pub device: u32,
+    /// The control's name in the binding grammar (`Space`, `left`,
+    /// `leftStick`, `overlay/jump`).
+    pub control: String,
+    pub phase: u32,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// One bound action's state (`fynkel_world_input_view`): `kind` an
+/// `ActionKind`; `pressed`/`released` are the edges the next tick
+/// consumes, `frame_pressed`/`frame_released` the current frame's.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.InputAction")]
+pub struct InputActionRecord {
+    pub name: String,
+    pub kind: u32,
+    pub held: bool,
+    pub pressed: bool,
+    pub released: bool,
+    pub frame_pressed: bool,
+    pub frame_released: bool,
+    /// `axis1d` value, `axis2d` x, a button 1/0.
+    pub x: f32,
+    pub y: f32,
+}
+
 /// The registry, in fingerprint order. Append only.
 pub const ALL: &[&RecordSchema] = &[
     &Transform::SCHEMA,
@@ -198,6 +231,8 @@ pub const ALL: &[&RecordSchema] = &[
     &PbrMaterial::SCHEMA,
     &SpotLight::SCHEMA,
     &Environment::SCHEMA,
+    &InputEventRecord::SCHEMA,
+    &InputActionRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

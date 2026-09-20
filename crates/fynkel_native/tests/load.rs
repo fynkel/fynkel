@@ -239,3 +239,125 @@ fn bad_input_is_reported_not_fatal() {
     assert_eq!(host.live(), 0);
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
 }
+
+/// The input contract over the ABI: the cooked project's actions bind on
+/// load, a captured event buffer drives them, the view reports them
+/// (§5.1: a press across catch-up ticks is seen once).
+#[test]
+fn input_binds_on_load_captures_and_views_through_the_abi() {
+    use fynkel_core::schema::{InputActionRecord, InputEventRecord};
+    use fynkel_native::buffer::{BufferKind, Writer};
+    use fynkel_wire::WireRecord;
+
+    let cooked = Cooked::new("input");
+    let host = Host::new();
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    let r = host.report();
+    let actions = r["input"]["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 3, "{r:#}");
+    assert_eq!(actions[0]["name"], "move");
+    assert_eq!(actions[0]["type"], "axis2d");
+    assert_eq!(actions[1]["name"], "jump");
+    assert_eq!(r["input"]["bindingErrors"].as_array().unwrap().len(), 0);
+
+    let view = |w: *mut FynkelWorld| -> Vec<InputActionRecord> {
+        let v = unsafe { fynkel_world_input_view(w) };
+        let bytes = unsafe { std::slice::from_raw_parts(v.data, v.length as usize) };
+        let (h, records, tail) =
+            fynkel_native::buffer::validate(bytes, BufferKind::InputActions).unwrap();
+        (0..h.record_count as usize)
+            .map(|i| {
+                let off = i * InputActionRecord::SIZE;
+                InputActionRecord::decode(&records[off..off + InputActionRecord::SIZE], tail)
+                    .unwrap()
+            })
+            .collect()
+    };
+    let capture = |w: *mut FynkelWorld, events: &[InputEventRecord]| -> Status {
+        let mut wr = Writer::begin(Vec::new(), BufferKind::InputEvents);
+        for e in events {
+            wr.record(e);
+        }
+        let buf = wr.finish();
+        unsafe { fynkel_world_capture_input(w, buf.as_ptr(), buf.len() as u32) }
+    };
+    let key = |control: &str, phase: u32| InputEventRecord {
+        device: 0,
+        control: control.to_string(),
+        phase,
+        x: if phase == 0 { 1.0 } else { 0.0 },
+        y: 0.0,
+    };
+
+    // A 50 ms frame: three ticks. Space and W go down.
+    let mut plan = FynkelFramePlan::default();
+    assert_eq!(
+        unsafe { fynkel_world_begin_frame(host.w, 0.05, &mut plan) },
+        Status::Ok
+    );
+    assert_eq!(plan.steps, 3);
+    assert_eq!(capture(host.w, &[key("Space", 0), key("W", 0)]), Status::Ok);
+    let v = view(host.w);
+    assert_eq!(v.len(), 3);
+    let jump = &v[1];
+    assert!(jump.held && jump.pressed && !jump.released && jump.frame_pressed);
+    assert_eq!(jump.x, 1.0);
+    let mv = &v[0];
+    assert!(mv.held && mv.x == 0.0 && mv.y == 1.0, "{mv:?}");
+    let mut sr = FynkelStepResult::default();
+    assert_eq!(unsafe { fynkel_world_step(host.w, &mut sr) }, Status::Ok);
+    let v = view(host.w);
+    assert!(v[1].held && !v[1].pressed, "the second tick sees held only");
+    assert!(
+        v[1].frame_pressed,
+        "the frame's raw edge stays for update()"
+    );
+    assert_eq!(unsafe { fynkel_world_step(host.w, &mut sr) }, Status::Ok);
+    assert_eq!(unsafe { fynkel_world_step(host.w, &mut sr) }, Status::Ok);
+
+    // Next frame: release. A gamepad stick as well (device 2, axis phase).
+    assert_eq!(
+        unsafe { fynkel_world_begin_frame(host.w, 1.0 / 60.0, &mut plan) },
+        Status::Ok
+    );
+    let stick = InputEventRecord {
+        device: 2,
+        control: "leftStick".into(),
+        phase: 2,
+        x: -0.5,
+        y: 0.25,
+    };
+    assert_eq!(
+        capture(host.w, &[key("Space", 1), key("W", 1), stick]),
+        Status::Ok
+    );
+    let v = view(host.w);
+    assert!(!v[1].held && v[1].released && !v[1].pressed);
+    assert!(
+        (v[0].x + 0.5).abs() < 1e-6 && (v[0].y - 0.25).abs() < 1e-6,
+        "{:?}",
+        v[0]
+    );
+
+    // An empty capture is fine; a wrong buffer kind is a protocol error and
+    // leaves the world usable; an unknown device is skipped.
+    assert_eq!(
+        unsafe { fynkel_world_capture_input(host.w, ptr::null(), 0) },
+        Status::Ok
+    );
+    let wrong = Writer::begin(Vec::new(), BufferKind::Query).finish();
+    assert_eq!(
+        unsafe { fynkel_world_capture_input(host.w, wrong.as_ptr(), wrong.len() as u32) },
+        Status::Protocol
+    );
+    let alien = InputEventRecord {
+        device: 9,
+        control: "X".into(),
+        phase: 0,
+        x: 1.0,
+        y: 0.0,
+    };
+    assert_eq!(capture(host.w, &[alien]), Status::Ok);
+    assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
+    assert_eq!(host.live(), 5);
+}

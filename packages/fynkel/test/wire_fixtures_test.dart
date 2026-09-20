@@ -188,6 +188,30 @@ void main() {
     PbrMaterial.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
+  check(
+    'InputEventRecord',
+    const InputEventRecord(device: 2, control: 'leftStick', phase: 2, x: -0.5, y: 0.25),
+    InputEventRecord.wireSize,
+    InputEventRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'InputActionRecord',
+    const InputActionRecord(
+      name: 'jump',
+      kind: 0,
+      held: true,
+      pressed: true,
+      released: false,
+      framePressed: true,
+      frameReleased: false,
+      x: 1.0,
+      y: 0.0,
+    ),
+    InputActionRecord.wireSize,
+    InputActionRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   check('CommandHeader', const CommandHeader(kind: 1, size: 64), CommandHeader.wireSize, CommandHeader.decode,
       (v, d, o, s) => v.encode(d, o, s));
   check('EventHeader', const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0), EventHeader.wireSize,

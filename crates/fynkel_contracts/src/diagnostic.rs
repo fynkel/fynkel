@@ -126,6 +126,8 @@ impl Code {
     pub const PROJECT_ASSET_ROOT: Code = Code("FYN-P0007");
     /// An entry of the project file that could not be read as its shape says.
     pub const PROJECT_MALFORMED_ENTRY: Code = Code("FYN-P0008");
+    /// An `inputActions` binding the grammar does not accept (§5.1).
+    pub const PROJECT_INPUT_BINDING: Code = Code("FYN-P0009");
     /// No `fynkel.lock.json` next to the project file.
     pub const LOCK_MISSING: Code = Code("FYN-P0010");
     /// The lock records versions this build does not match.

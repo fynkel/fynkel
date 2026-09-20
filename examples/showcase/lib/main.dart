@@ -17,7 +17,8 @@
 // copy the app bundles (fynkel_cache/, unpacked at start-up) — which is
 // how the same build runs on an iPhone.
 // Q cycles the project's quality profiles (fynkel.project.json `quality`);
-// Space pauses and resumes the orbit.
+// Space pauses and resumes the orbit. The `move` action (A/D, the left
+// stick, the touch overlay's stick on a phone) scrubs the orbit.
 
 import 'dart:io';
 
@@ -60,6 +61,7 @@ class _GamePageState extends State<GamePage> {
   String? _error;
   FynkelViewportController? _viewport;
   FynkelFrameStats? _stats;
+  final _input = FynkelInputCapture();
 
   /// The orbit's authored speed while paused (0 = paused).
   double _pausedSpeed = 0;
@@ -144,23 +146,30 @@ class _GamePageState extends State<GamePage> {
       body: FynkelGameView(
         world: game.world,
         controller: _viewport,
+        input: _input,
         onKeyEvent: _onKey,
         onStats: (s) => setState(() => _stats = s),
-        overlay: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Hud(game: game, stats: _stats, viewport: _viewport!),
+        overlay: Stack(
+          fit: StackFit.expand,
+          children: [
+            TouchOverlay.fromActions(game.report.inputActions, input: _input),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Hud(game: game, stats: _stats, viewport: _viewport!),
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         ),
       ),
     );
@@ -187,7 +196,7 @@ class Hud extends StatelessWidget {
       for (final sp in game.world.behaviours.whereType<Spinner>())
         'spinner    ${sp.angle.toStringAsFixed(2)} rad at ${sp.speed} rad/s',
       for (final o in game.world.behaviours.whereType<Orbit>())
-        'orbit      ${o.angle.toStringAsFixed(2)} rad at ${o.speed} rad/s  [Space pauses]',
+        'orbit      ${o.angle.toStringAsFixed(2)} rad at ${o.speed} rad/s  [Space pauses, A/D scrub]',
       'assets     ${game.report.assetCount} retained from ${game.report.cacheDir}',
       'quality    ${viewport.quality ?? 'medium (project default)'}  [Q cycles]',
       if (s != null) ...[

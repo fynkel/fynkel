@@ -76,7 +76,11 @@ typedef enum FynkelBufferKind {
   /* DiagnosticRecord per diagnostic; messages in the string tail. */
   FYNKEL_BUFFER_DIAGNOSTICS = 4,
   /* Query response; record type depends on the query kind. */
-  FYNKEL_BUFFER_QUERY = 5
+  FYNKEL_BUFFER_QUERY = 5,
+  /* InputEventRecord per raw control event (host -> world; fynkel_world_capture_input). */
+  FYNKEL_BUFFER_INPUT_EVENTS = 6,
+  /* InputActionRecord per bound action (world -> host; fynkel_world_input_view). */
+  FYNKEL_BUFFER_INPUT_ACTIONS = 7
 } FynkelBufferKind;
 
 /* Command lanes (blueprint §5.1, ADR-0008). */
@@ -228,6 +232,21 @@ FynkelStatus fynkel_world_subscribe(FynkelWorld* world,
 /* Borrowed views; see ownership rules at the top. */
 FynkelBufferView fynkel_world_snapshot(const FynkelWorld* world);
 FynkelBufferView fynkel_world_diagnostics(const FynkelWorld* world);
+
+/* Input (blueprint §5.1, §19.2d item 7). The world's binding table comes
+ * from the cooked project's inputActions on load. A host captures its raw
+ * control events (keys, mouse buttons and movement, gamepad, touch
+ * overlay) once per frame, before the ticks, as InputEventRecords; the
+ * view is one InputActionRecord per action: held state every tick sees,
+ * `pressed`/`released` edges the next fynkel_world_step consumes (a
+ * catch-up tick sees held state only; a frame with no tick carries them),
+ * `frame_pressed`/`frame_released` the current frame's raw edges for
+ * update/lateUpdate. The view is valid until the next call or mutating
+ * call. */
+FynkelStatus fynkel_world_capture_input(FynkelWorld* world,
+                                        const uint8_t* buffer,
+                                        uint32_t length);
+FynkelBufferView fynkel_world_input_view(FynkelWorld* world);
 
 /* Pull-only events (ADR-0008): moves pending general-lane events plus the
  * last tick's physics events into the view; a second call returns an empty

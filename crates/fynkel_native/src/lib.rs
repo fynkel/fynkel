@@ -29,6 +29,7 @@ pub struct FynkelWorld {
     after_physics_buf: Vec<u8>,
     diagnostics_buf: Vec<u8>,
     query_buf: Vec<u8>,
+    input_buf: Vec<u8>,
     /// JSON of the last `fynkel_world_load_*` call; empty before any.
     load_report: Vec<u8>,
     /// The cache the last load opened (a renderer drawing this world adopts
@@ -163,6 +164,7 @@ impl FynkelWorld {
             after_physics_buf: buffer::empty(BufferKind::Events),
             diagnostics_buf: buffer::empty(BufferKind::Diagnostics),
             query_buf: buffer::empty(BufferKind::Query),
+            input_buf: buffer::empty(BufferKind::InputActions),
             load_report: Vec::new(),
             assets: None,
             residency: Vec::new(),
@@ -356,6 +358,69 @@ pub unsafe extern "C" fn fynkel_world_step(
         }
         r.status
     })
+}
+
+/// Applies a host frame's raw control events (`FYNKEL_BUFFER_INPUT_EVENTS`;
+/// §5.1): once per frame, before the ticks. Edges wait for the next tick,
+/// held state is immediate.
+///
+/// # Safety
+/// `buffer` must point to `length` readable bytes for the call.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_capture_input(
+    world: *mut FynkelWorld,
+    buffer: *const u8,
+    length: u32,
+) -> Status {
+    if buffer.is_null() && length != 0 {
+        return Status::InvalidArgument;
+    }
+    let bytes: &[u8] = if length == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(buffer, length as usize)
+    };
+    guarded(world, |w| {
+        w.stats.bytes_in += bytes.len() as u64;
+        let events = if bytes.is_empty() {
+            Vec::new()
+        } else {
+            match bridge::decode_input_events(bytes) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!("fynkel_world_capture_input: protocol error {e:?}");
+                    return Status::Protocol;
+                }
+            }
+        };
+        w.inner.capture_input(&events);
+        Status::Ok
+    })
+}
+
+/// The bound actions as the next tick — and this frame — see them
+/// (`FYNKEL_BUFFER_INPUT_ACTIONS`, one record per action in declaration
+/// order). Valid until the next call or mutating call.
+///
+/// # Safety
+/// `world` live or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_input_view(world: *mut FynkelWorld) -> FynkelBufferView {
+    let Some(w) = world.as_mut() else {
+        return FynkelBufferView::empty();
+    };
+    let status = guarded(world, |w| {
+        let view = w.inner.input_view();
+        let buf = std::mem::take(&mut w.input_buf);
+        w.input_buf = bridge::encode_input_view(buf, &view);
+        w.stats.bytes_out += w.input_buf.len() as u64;
+        Status::Ok
+    });
+    if status == Status::Ok {
+        FynkelBufferView::of(&w.input_buf)
+    } else {
+        FynkelBufferView::empty()
+    }
 }
 
 /// # Safety

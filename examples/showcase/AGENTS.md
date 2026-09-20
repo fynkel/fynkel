@@ -79,7 +79,7 @@ fynkel asset list | resolve <uuid>[#sub] | init <file>   the asset database (ids
 fynkel import <file>...                                  (re)import sources; fills sidecar sub-asset ids
 fynkel cook [--force] [--prune]                          cook the project's assets into .fynkel/cache (scenes expanded, prefabs applied)
 fynkel codegen --project . [--check]                     behaviour registration + schemas from @FynkelBehaviour classes
-fynkel test --headless [--scene <path|id>] [--steps N]   cook, then the Rust headless host over the startup scene (or --scene)
+fynkel test --headless [--scene <path|id>] [--steps N] [--input <file.input.json>]   cook, then the Rust headless host over the startup scene (or --scene); --input replays a recording against the actions
 fynkel state dump [--scene <path|id>] [--steps N]        cook, then the world state after N ticks, keyed by authoring id
 fynkel render [--scene <path|id>] [--out <png>] [--size WxH] [--quality <profile>]  cook, then an offscreen render of the scene
 fynkel run [--no-cook] [-- <flutter run args>]           validate, cook, then `flutter run` with FYNKEL_PROJECT set
@@ -170,6 +170,36 @@ class PlayerController extends Behaviour {
 - Exposed field types: `double`, `int`, `bool`, `String`, `Vec3`, `Quat`, `AssetRef`, each optionally nullable; literal initializers become defaults.
 - After adding/changing a behaviour class or an `@Expose` field: `fynkel codegen --project .`, then commit `lib/generated/` and `schemas/behaviours/`. Register a new type in `fynkel.project.json` → `components` too (`"game.X": { "kind": "behaviour", "version": 1 }`).
 - A scene component of a type that is not registered at runtime loads with warning `FYN-B0001`; data a field rejects is `FYN-B0002`. Neither stops the scene.
+
+## Input (actions, never keys)
+
+`fynkel.project.json` → `inputActions` declares every action a behaviour
+can read: `"<name>": { "type": button | axis1d | axis2d, "bindings":
+["<device>:<control>", …] }`. Bindings: `keyboard:<Key>` (`A`…`Z`,
+`Space`, `ArrowUp`, `ShiftLeft`, `F1`, …), `keyboard:WASD` / `Arrows` /
+`<l>/<r>/<d>/<u>` for `axis2d`, `keyboard:<neg>/<pos>` for `axis1d`;
+`mouse:left|right|middle|back|forward`, `mouse:wheel`, `mouse:delta`;
+`gamepad:south|east|west|north|leftShoulder|…|menu|options|home`,
+`gamepad:leftTrigger|leftStickX|…`, `gamepad:leftStick|rightStick|dpad`;
+`touch:overlay/<name>` (a stick or button the app's `TouchOverlay` draws on
+phones). `fynkel validate` rejects a binding the runtime cannot compile
+(`FYN-P0009`).
+
+```dart
+final move = Input.action2D('move');   // Vec2 in the unit square, every tick while held
+if (Input.pressed('jump')) jump();      // exactly one tick per press, whatever the frame's tick count
+if (Input.held('run')) speed = 2;
+```
+
+`pressed`/`released` are edges (button actions only); `held`/`axis`/
+`action2D` are state. Read them in `fixedUpdate`; `update` sees the
+frame's raw edges. Tests: a recording is (`{ "fynkel":
+"input-recording", "formatVersion": 1, "frames": [{ "dt", "events": [{
+"device", "control", "phase": down|up|axis|move|reset, "x", "y" }] }] }`);
+`loadInputRecording(path).replay(world)` runs it in `flutter test`,
+`fynkel test --headless --input <file>` on the Rust host (per action: ticks
+pressed/released/held). Without a world: `TestGameContext(input:
+TestInput(actions: [('jump', ActionKind.button)]))`.
 
 ## Do
 

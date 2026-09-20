@@ -6,6 +6,7 @@
 //! game host (Behaviours) arrives with the Dart Behaviour lifecycle.
 
 pub mod document;
+pub mod recording;
 pub mod scene;
 
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ use fynkel_core::{Extract, LoadedScene, World, WorldConfig};
 use serde::{Deserialize, Serialize};
 
 pub use document::{dump_json, dump_text};
+pub use recording::{RecordedEvent, RecordedFrame, Recording};
 pub use scene::DemoScene;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,6 +41,12 @@ pub struct HeadlessConfig {
     /// The scene to load from `cache` (its asset id, text form); `None`
     /// loads the project's startup scene from the index.
     pub scene: Option<String>,
+    /// An input recording (`*.input.json`) replayed frame by frame: each
+    /// recorded frame is one host frame (its `dt`, its events captured
+    /// before the ticks) and the run ends with the recording (or at
+    /// `steps`, whichever comes first). The cooked project's
+    /// `inputActions` are the binding table.
+    pub input: Option<PathBuf>,
 }
 
 impl Default for HeadlessConfig {
@@ -53,8 +61,40 @@ impl Default for HeadlessConfig {
             max_steps_per_frame: world.max_steps_per_frame,
             cache: None,
             scene: None,
+            input: None,
         }
     }
+}
+
+/// One action over a replayed recording (`InputReport::actions`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ActionReport {
+    pub name: String,
+    /// `button`, `axis1d`, `axis2d`.
+    pub kind: String,
+    /// Ticks that saw a `pressed` / `released` edge (each edge is seen by
+    /// exactly one tick, §5.1).
+    pub pressed: u64,
+    pub released: u64,
+    /// Ticks that saw the action held.
+    pub held_ticks: u64,
+    /// The state after the last frame.
+    pub held: bool,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// What replaying a recording produced (`HeadlessReport::input`).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct InputReport {
+    pub recording: String,
+    /// Recorded frames replayed (a run capped by `steps` replays fewer).
+    pub frames: u64,
+    pub events: u64,
+    pub actions: Vec<ActionReport>,
+    /// `[action, binding, message]` per binding the table could not
+    /// compile (`fynkel validate` reports these first).
+    pub binding_errors: Vec<[String; 3]>,
 }
 
 /// What loading a cooked scene produced (`HeadlessReport::scene`).
@@ -107,6 +147,8 @@ pub struct HeadlessReport {
     pub scene_ready: bool,
     /// Present when `HeadlessConfig::cache` was set.
     pub scene: Option<SceneReport>,
+    /// Present when `HeadlessConfig::input` was set.
+    pub input: Option<InputReport>,
 }
 
 impl HeadlessReport {
@@ -181,6 +223,7 @@ pub fn run_retaining(
         total_ms: 0.0,
         scene_ready: false,
         scene: None,
+        input: None,
     };
     let mut step_us: Vec<u32> = Vec::with_capacity(config.steps as usize);
 
@@ -188,6 +231,23 @@ pub fn run_retaining(
     // the world just ticks.
     let mut loaded: Option<LoadedScene> = None;
     let mut retained: Option<(Assets, fynkel_assets::Residency)> = None;
+    let mut binding_errors: Vec<[String; 3]> = Vec::new();
+    // The recording is read before the scene so a bad file fails fast.
+    let recording = match &config.input {
+        Some(path) => match Recording::read(path) {
+            Ok(r) => Some((path.display().to_string(), r)),
+            Err(message) => {
+                report.input = Some(InputReport {
+                    recording: path.display().to_string(),
+                    binding_errors: vec![[String::new(), String::new(), message]],
+                    ..InputReport::default()
+                });
+                report.total_ms = start.elapsed().as_secs_f32() * 1e3;
+                return (report, world, None, None);
+            }
+        },
+        None => None,
+    };
     if let Some(cache) = &config.cache {
         let mut sr = SceneReport {
             cache: cache.display().to_string(),
@@ -210,6 +270,13 @@ pub fn run_retaining(
         match world.load_scene(&cooked.description) {
             Ok(l) => {
                 let residency = assets.retain(&cooked.closure);
+                if let Some(p) = assets.project() {
+                    binding_errors = world
+                        .bind_input(&p.input_actions)
+                        .into_iter()
+                        .map(|(a, b, e)| [a, b, e.to_string()])
+                        .collect();
+                }
                 sr.loaded = true;
                 sr.entities = l.len() as u32;
                 sr.rejected_components = l.rejected_components;
@@ -235,9 +302,45 @@ pub fn run_retaining(
         scene = DemoScene::empty();
     }
 
+    let mut input = recording.as_ref().map(|(path, _)| InputReport {
+        recording: path.clone(),
+        actions: world
+            .input()
+            .actions()
+            .map(|(name, kind)| ActionReport {
+                name: name.to_string(),
+                kind: kind.name().to_string(),
+                ..ActionReport::default()
+            })
+            .collect(),
+        binding_errors: binding_errors.clone(),
+        frames: 0,
+        events: 0,
+    });
+    let mut replay_frame = 0usize;
     while report.steps < config.steps {
-        let plan = world.begin_frame(config.frame_dt);
+        // A recording drives the frames: its dt, its events (captured
+        // before the ticks, §5.1), and its end ends the run.
+        let frame_dt = match &recording {
+            Some((_, r)) => {
+                if replay_frame >= r.frames.len() {
+                    break;
+                }
+                r.frames[replay_frame].dt
+            }
+            None => config.frame_dt,
+        };
+        let plan = world.begin_frame(frame_dt);
         report.frames += 1;
+        if let Some((_, r)) = &recording {
+            let events = r.events(replay_frame);
+            world.capture_input(&events);
+            if let Some(ir) = &mut input {
+                ir.frames += 1;
+                ir.events += events.len() as u64;
+            }
+            replay_frame += 1;
+        }
         if plan.dropped_seconds > 0.0 {
             report.missed_deadlines += 1;
             report.dropped_seconds += plan.dropped_seconds;
@@ -254,6 +357,13 @@ pub fn run_retaining(
             scene.on_events(&events);
             let tick = world.tick();
             scene.fixed_update(&mut world, tick);
+            if let Some(ir) = &mut input {
+                for (a, s) in ir.actions.iter_mut().zip(world.input_view()) {
+                    a.pressed += u64::from(s.pressed);
+                    a.released += u64::from(s.released);
+                    a.held_ticks += u64::from(s.held);
+                }
+            }
             let t0 = Instant::now();
             let r = world.step();
             step_us.push(t0.elapsed().as_micros() as u32);
@@ -262,10 +372,18 @@ pub fn run_retaining(
             report.commands_rejected += r.rejected as u64;
             report.diagnostics += r.diagnostic_records as u64;
         }
-        if plan.steps == 0 && config.frame_dt <= 0.0 {
+        if plan.steps == 0 && config.frame_dt <= 0.0 && recording.is_none() {
             break; // nothing will ever advance
         }
     }
+    if let Some(ir) = &mut input {
+        for (a, s) in ir.actions.iter_mut().zip(world.input_view()) {
+            a.held = s.held;
+            a.x = s.x;
+            a.y = s.y;
+        }
+    }
+    report.input = input;
     let events = world.drain_events();
     report.events += events.len() as u64;
     scene.on_events(&events);
@@ -367,10 +485,10 @@ mod tests {
     }
 
     /// The fixture project cooked into a cache of its own (removed on drop).
-    struct Cooked(PathBuf);
+    pub(crate) struct Cooked(pub(crate) PathBuf);
 
     impl Cooked {
-        fn new(name: &str) -> Cooked {
+        pub(crate) fn new(name: &str) -> Cooked {
             let project = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../crates/fynkel_document/fixtures/project");
             let dir =
@@ -508,5 +626,75 @@ mod tests {
         let json = r.to_json();
         let back: HeadlessReport = serde_json::from_str(&json).unwrap();
         assert_eq!(back, r);
+    }
+}
+
+#[cfg(test)]
+mod replay_tests {
+    use super::*;
+
+    #[test]
+    fn a_recording_drives_the_projects_actions() {
+        let cooked = tests::Cooked::new("replay");
+        let recording = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../crates/fynkel_document/fixtures/project/test/walk.input.json");
+        let cfg = HeadlessConfig {
+            steps: 1_000,
+            cache: Some(cooked.0.clone()),
+            input: Some(recording.clone()),
+            ..HeadlessConfig::default()
+        };
+        let r = run(&cfg);
+        assert!(r.scene.as_ref().is_some_and(|s| s.loaded), "{:?}", r.scene);
+        let input = r.input.clone().expect("input report");
+        assert_eq!(input.recording, recording.display().to_string());
+        assert!(
+            input.binding_errors.is_empty(),
+            "{:?}",
+            input.binding_errors
+        );
+        // Ten recorded frames: nine of one tick, one (50 ms) of three.
+        assert_eq!(input.frames, 10, "{r:?}");
+        assert_eq!(r.frames, 10);
+        assert_eq!(r.steps, 12);
+        assert_eq!(input.events, 9);
+        let by_name = |n: &str| input.actions.iter().find(|a| a.name == n).unwrap().clone();
+        let jump = by_name("jump");
+        assert_eq!(jump.kind, "button");
+        // Space across the three-tick frame: one press, three held ticks;
+        // then the overlay press, released by the reset.
+        assert_eq!((jump.pressed, jump.released), (2, 2));
+        assert_eq!(jump.held_ticks, 3 + 1);
+        assert!(!jump.held);
+        let mv = by_name("move");
+        assert_eq!(mv.kind, "axis2d");
+        // Ticks 1–5 are frames 1–5, ticks 6–8 the 50 ms frame, ticks 9–12
+        // frames 7–10. W is down for ticks 1–4, D for 3–8 (the catch-up
+        // ticks included), the stick for 10–11; the reset ends it.
+        assert_eq!(mv.held_ticks, 8 + 2);
+        assert!(!mv.held && mv.x == 0.0 && mv.y == 0.0, "{mv:?}");
+        // Same recording, same result (§5.6).
+        assert_eq!(run(&cfg).input, Some(input));
+    }
+
+    #[test]
+    fn a_bad_recording_is_reported_not_run() {
+        let dir = std::env::temp_dir().join(format!("fynkel-replay-bad-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bad.input.json");
+        std::fs::write(
+            &path,
+            r#"{"fynkel":"input-recording","formatVersion":2,"frames":[]}"#,
+        )
+        .unwrap();
+        let r = run(&HeadlessConfig {
+            input: Some(path),
+            ..HeadlessConfig::default()
+        });
+        let input = r.input.unwrap();
+        assert_eq!(input.frames, 0);
+        assert!(input.binding_errors[0][2].contains("formatVersion 2 is not 1"));
+        assert_eq!(r.steps, 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

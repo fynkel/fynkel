@@ -134,6 +134,33 @@ fn a_fresh_project_validates_and_runs_headlessly() {
     assert!(ok, "{stdout}{stderr}");
     assert!(stdout.contains("\"Cube\""));
 
+    // The starter's recorded input stream replays against its actions
+    // (M3-07): move held while W/D/the stick are, two jump presses.
+    let (ok, stdout, stderr) = fynkel(
+        &dir,
+        &[
+            "test",
+            "--headless",
+            "--input",
+            "test/walk.input.json",
+            "--json",
+        ],
+    );
+    assert!(ok, "{stdout}{stderr}");
+    let t: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let input = &t["input"];
+    assert_eq!(input["frames"], 70, "{stdout}");
+    assert_eq!(input["events"], 11);
+    assert!(input["binding_errors"].as_array().unwrap().is_empty());
+    let actions = input["actions"].as_array().unwrap();
+    assert_eq!(actions[0]["name"], "move");
+    assert_eq!(actions[0]["held_ticks"], 11);
+    assert_eq!(actions[1]["name"], "jump");
+    assert_eq!(actions[1]["pressed"], 2);
+    assert_eq!(actions[1]["released"], 2);
+    assert_eq!(actions[2]["name"], "pause");
+    assert_eq!(actions[2]["pressed"], 0);
+
     // The committed generated files are exactly what the generator emits
     // (needs a Dart SDK; skipped otherwise).
     let has_dart = std::env::var_os("FYNKEL_DART").is_some()
@@ -145,7 +172,7 @@ fn a_fresh_project_validates_and_runs_headlessly() {
         let (ok, stdout, stderr) = fynkel(&dir, &["codegen", "--check", "--project", "."]);
         assert!(ok, "{stdout}{stderr}");
         assert!(
-            stdout.contains("up to date (1 behaviour types)"),
+            stdout.contains("up to date (2 behaviour types)"),
             "{stdout}"
         );
     } else {

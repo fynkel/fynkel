@@ -487,6 +487,26 @@ impl Project {
                 "/assets",
             ));
         }
+        // Bindings are compiled by the same grammar the runtime binds with
+        // (`fynkel_core::input`), so a project that validates runs with
+        // every binding in force.
+        for a in &self.input_actions {
+            let Some(kind) = fynkel_core::input::ActionKind::parse(&a.kind) else {
+                continue; // the schema reports the type
+            };
+            for (i, b) in a.bindings.iter().enumerate() {
+                if let Err(e) = fynkel_core::input::parse_binding(kind, b) {
+                    out.push(anchor(
+                        root,
+                        Diagnostic::error(Code::PROJECT_INPUT_BINDING, e.to_string()),
+                        &format!(
+                            "/inputActions/{}/bindings/{i}",
+                            crate::scene::escape(&a.name)
+                        ),
+                    ));
+                }
+            }
+        }
         out
     }
 

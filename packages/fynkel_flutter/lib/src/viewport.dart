@@ -20,6 +20,7 @@ class FynkelViewport extends StatefulWidget {
     this.autofocus = false,
     this.onKeyEvent,
     this.onPointerEvent,
+    this.onFocusChange,
     this.filterQuality = FilterQuality.none,
     this.placeholder,
   });
@@ -29,6 +30,10 @@ class FynkelViewport extends StatefulWidget {
   final bool autofocus;
   final FocusOnKeyEventCallback? onKeyEvent;
   final ViewportPointerCallback? onPointerEvent;
+
+  /// The viewport gained or lost keyboard focus (a focus loss releases
+  /// every held key in the game view's input capture).
+  final ValueChanged<bool>? onFocusChange;
 
   /// The ring is rendered at the widget's physical size, so nearest is the
   /// correct default; a resize in flight shows the old size scaled.
@@ -81,6 +86,7 @@ class _FynkelViewportState extends State<FynkelViewport> {
           focusNode: _focus,
           autofocus: widget.autofocus,
           onKeyEvent: widget.onKeyEvent,
+          onFocusChange: widget.onFocusChange,
           child: Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: (e) => _pointer(e, dpr),

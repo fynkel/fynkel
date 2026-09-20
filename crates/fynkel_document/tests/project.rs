@@ -385,6 +385,44 @@ fn quality_targets_and_asset_root_are_checked() {
 }
 
 #[test]
+fn input_bindings_are_checked_by_the_runtime_grammar() {
+    let t = Temp::new("bindings");
+    assert!(t.codes().is_empty(), "the fixture's bindings all parse");
+    t.edit_project(|v| {
+        v["inputActions"]["jump"]["bindings"] =
+            serde_json::json!(["keyboard:Space", "gamepad:cross", "joystick:a"]);
+        v["inputActions"]["move"]["bindings"] =
+            serde_json::json!(["keyboard:WASD", "mouse:left", "keyboard:A/D"]);
+    });
+    let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
+    let bad: Vec<(String, String)> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code.as_str() == "FYN-P0009")
+        .map(|d| (d.pointer.clone().unwrap_or_default(), d.message.clone()))
+        .collect();
+    // Document order: `move` is declared before `jump`.
+    assert_eq!(bad.len(), 4, "{bad:?}");
+    assert_eq!(bad[0].0, "/inputActions/move/bindings/1");
+    assert!(
+        bad[0].1.contains("mouse:left is not an axis2d control"),
+        "{}",
+        bad[0].1
+    );
+    assert_eq!(bad[1].0, "/inputActions/move/bindings/2");
+    assert_eq!(bad[2].0, "/inputActions/jump/bindings/1");
+    assert!(
+        bad[2]
+            .1
+            .starts_with("gamepad:cross is not a button control"),
+        "{}",
+        bad[2].1
+    );
+    assert_eq!(bad[3].0, "/inputActions/jump/bindings/2");
+    assert!(report.has_errors());
+}
+
+#[test]
 fn schema_violations_in_the_project_file_are_reported_once_each() {
     let t = Temp::new("schema");
     t.edit_project(|v| {

@@ -12,6 +12,7 @@ Presents the Fynkel runtime's IOSurface ring (platform/apple) through Flutter's 
   s.author           = { 'Fynkel' => 'noreply@fynkel.dev' }
   s.source           = { :path => '.' }
   s.source_files     = 'fynkel_flutter/Sources/fynkel_flutter/**/*.swift'
+  s.frameworks       = 'GameController'
   s.osx.dependency 'FlutterMacOS'
   s.ios.dependency 'Flutter'
   s.osx.deployment_target = '12.0'

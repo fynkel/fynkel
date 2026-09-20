@@ -18,6 +18,7 @@ use crate::components::{
     Camera, ComponentValue, DirectionalLight, Environment, MeshRenderer, PointLight, SpotLight,
 };
 use crate::event::{Event, EventPayload, EventQueue};
+use crate::input::{ActionSpec, ActionState, BindingError, Input, InputEvent};
 
 #[derive(Clone, Debug)]
 pub struct WorldConfig {
@@ -203,6 +204,8 @@ pub struct World {
     last_events: u32,
     applied_this_tick: u32,
     poisoned: bool,
+    /// The binding table and raw control state (§5.1 input rules).
+    input: Input,
 }
 
 impl World {
@@ -226,6 +229,7 @@ impl World {
             last_events: 0,
             applied_this_tick: 0,
             poisoned: false,
+            input: Input::default(),
         }
     }
 
@@ -291,6 +295,30 @@ impl World {
             });
         }
         plan
+    }
+
+    // ----------------------------------------------------------------- input
+
+    /// Compiles the project's actions into the binding table (a load does
+    /// this from the cooked index; a host may rebind). Bindings that do
+    /// not parse are skipped and returned.
+    pub fn bind_input(&mut self, actions: &[ActionSpec]) -> Vec<(String, String, BindingError)> {
+        self.input.bind(actions)
+    }
+
+    /// Applies a host frame's raw control events (once per frame, before
+    /// the ticks). Edges wait for the next tick, held state is immediate.
+    pub fn capture_input(&mut self, events: &[InputEvent]) {
+        self.input.capture(events);
+    }
+
+    /// The bound actions as the next tick — and this frame — see them.
+    pub fn input_view(&self) -> Vec<ActionState> {
+        self.input.view()
+    }
+
+    pub fn input(&self) -> &Input {
+        &self.input
     }
 
     // -------------------------------------------------------------- commands
@@ -754,6 +782,9 @@ impl World {
         self.diagnostics.clear();
         self.events.begin_tick();
         let next_tick = self.clock.tick() + 1;
+        // This tick consumed the pending edges (§5.1); catch-up ticks in
+        // the same frame see held state only.
+        self.input.end_tick();
 
         // S[n] becomes the interpolation source.
         self.record_prev_world();

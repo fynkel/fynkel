@@ -71,7 +71,23 @@ store (placeholders off) and ticks it without gameplay — it never cooks
 (exit 1 on a missing or stale cache, 2 on usage or an unknown profile).
 Its per-second line ends with the renderer's counts — `draws=… instances=…
 culled=… batches=… shadow=<casters>/<draws>` — which
-`benchmarks/m3/capture.py` reads for the stress scene. Read-side:
+`benchmarks/m3/capture.py` reads for the stress scene.
+
+`--input <file.input.json>` (M3-07, [input.md](input.md)) replays a
+recorded input stream: the project's `inputActions` are bound after the
+scene loads, each recorded frame is `capture_input(events)` + the frame's
+ticks at the recorded `dt` (the recording's end ends the run, as does the
+ordinary `--steps` cap), and the report
+gains `input: { recording, frames, events, actions: [{ name, kind,
+pressed, released, held_ticks, held, x, y }], binding_errors }` — per
+action the ticks that saw an edge (exactly one per press, §5.1), the ticks
+it was held and its final state. A binding the table cannot compile or an
+unreadable recording is reported and fails the run. The text mode prints
+one line: `replayed test/walk.input.json (70 frames, 11 events): move held
+11 ticks, ends at (0.00, 0.00), jump pressed 2 released 2 held 4 ticks, …`.
+Behaviours do not run in the Rust host, so this proves the stream and the
+table; `hosts/headless/src/recording.rs` is the format's Rust reader and
+writer (`Recording`, `RecordedFrame`, `RecordedEvent`). Read-side:
 
 ```sh
 cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json
@@ -143,8 +159,26 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   destroy) and the controller is reusable afterwards.
 - `FynkelViewport` — the widget: `LayoutBuilder` × device pixel ratio →
   `requestSize`, the `Texture`, `Focus` + `Listener` (pointer positions in
-  viewport physical pixels), a placeholder until attached and the error when
-  creation failed.
+  viewport physical pixels; `onFocusChange`), a placeholder until attached
+  and the error when creation failed.
+- Input (M3-07, [input.md](input.md)) — `FynkelGameView(input:
+  FynkelInputCapture)` hands `capture.take(dt)` to `World.frame` each frame
+  (a capture is owned when none is given): keys from the viewport's focus
+  after `onKeyEvent` declined them, mouse buttons/movement/wheel from its
+  `Listener`; `FynkelGameViewState.capturePointer(bool)` hides and captures
+  the cursor (macOS), `hasFocus`/`pointerCaptured`; a focus loss, a pause
+  and a hidden app reset the capture and release the pointer.
+  `FynkelInputChannel` is the method channel `fynkel_flutter/input`: the
+  Swift `FynkelInputPlugin` (registered with the viewport plugin) sends
+  `events` batches of `[device, control, phase, x, y]` rows — gamepad
+  changes from `GCController` on macOS and iOS, captured-mouse deltas on
+  macOS — and answers `capturePointer {capture}` and `gamepads`.
+  `TouchOverlay` (`OverlayStick`/`OverlayButton`, `fromActions(report.
+  inputActions)`) draws `touch:overlay/<name>` controls into the same
+  capture on touch platforms. The ABI: `fynkel_world_capture_input(world,
+  buffer, len)` takes a `FYNKEL_BUFFER_INPUT_EVENTS` (6) batch,
+  `fynkel_world_input_view(world)` returns the world's
+  `FYNKEL_BUFFER_INPUT_ACTIONS` (7) buffer, read in place by `WorldInput`.
 - `FynkelGameView` — the loop: a `Ticker` runs `World.frame(dt, fixedUpdate:)`
   then `controller.render(world)`; dt is clamped (`maxFrameDt`), the clock is
   re-primed when the app resumes and when the viewport attaches (a start-up

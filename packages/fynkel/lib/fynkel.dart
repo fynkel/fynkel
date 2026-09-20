@@ -21,8 +21,10 @@ export 'src/context.dart';
 export 'math.dart';
 export 'src/diagnostics.dart';
 export 'src/events.dart';
+export 'src/input.dart';
+export 'src/recording.dart';
 export 'src/transform_writer.dart';
 export 'src/native/bridge.dart'
     show BridgeStats, CommandLane, FramePlan, NativeLibrary, NativeWorld, QueryKind, StepResult, SubmitResult;
-export 'src/wire/buffers.dart' show CommandBatch, WireBuffer;
+export 'src/wire/buffers.dart' show CommandBatch, RecordBatch, WireBuffer;
 export 'src/world.dart';
