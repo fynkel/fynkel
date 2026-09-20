@@ -1,8 +1,11 @@
 
 // Post pass: HDR (Rgba16Float, nits) → exposure → ACES (Hill fit) →
 // sRGB encode (unless the target format encodes itself) into the host's
-// target. Alpha 0 texels are background and get the exact clear colour;
-// alpha 2 texels are display-referred (unlit) and are only encoded.
+// target (or the render-scale intermediate). The HDR alpha is a tag with
+// coverage: 0 background (the exact clear colour), (0, 1] scene-referred
+// radiance premultiplied by coverage — a multisample resolve or a blended
+// transparent over the background — composited over the clear colour by
+// that coverage, ~2 display-referred (unlit): clamped and encoded only.
 
 @group(1) @binding(0) var hdr_sampler: sampler;
 @group(1) @binding(1) var hdr_tex: texture_2d<f32>;
@@ -49,18 +52,23 @@ fn aces(c: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fs_main(in: PostOut) -> @location(0) vec4<f32> {
     let hdr = textureLoad(hdr_tex, vec2<i32>(in.clip.xy), 0);
-    if hdr.a < 0.5 {
+    if hdr.a < 0.001 {
         // Written as-is: CLEAR_COLOR names the bytes in the target.
         return vec4<f32>(post.clear_color.rgb, 1.0);
     }
     var color: vec3<f32>;
+    var coverage: f32;
     if hdr.a > 1.5 {
-        color = clamp(hdr.rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+        coverage = min(hdr.a * 0.5, 1.0);
+        color = clamp(hdr.rgb / coverage, vec3<f32>(0.0), vec3<f32>(1.0));
     } else {
-        color = aces(hdr.rgb * frame.camera_pos.w);
+        coverage = min(hdr.a, 1.0);
+        color = aces(hdr.rgb / coverage * frame.camera_pos.w);
     }
     if frame.counts.z == 1u {
         color = srgb_encode(color);
     }
+    // The clear colour is already in the target's encoding.
+    color = mix(post.clear_color.rgb, color, coverage);
     return vec4<f32>(color, 1.0);
 }

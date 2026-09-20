@@ -62,11 +62,14 @@ pub struct CookOptions {
 }
 
 /// What the cache index says about its project.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CookProject {
     pub name: String,
     /// The startup scene's asset id (`fynkel_world_load_project` loads it).
     pub startup_scene: Option<Uuid>,
+    /// The project's quality profiles, carried into the index for the
+    /// renderer (`fynkel_assets::ProjectInfo::quality`; §19.2d item 5).
+    pub quality: Option<fynkel_document::project::Quality>,
 }
 
 impl Default for CookOptions {
@@ -443,6 +446,7 @@ pub fn cook_project(
         project: Some(CookProject {
             name: project.name().to_string(),
             startup_scene,
+            quality: project.quality.clone(),
         }),
         ..opts.clone()
     };
@@ -1185,6 +1189,7 @@ fn write_index(
         "project": project.map(|p| json!({
             "name": p.name,
             "startupScene": p.startup_scene.map(|u| u.to_string()),
+            "quality": p.quality.as_ref().map(|q| q.to_json()),
         })),
         "assets": report.assets.iter().map(|a| json!({
             "id": a.id.to_string(),

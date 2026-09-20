@@ -69,7 +69,7 @@ fynkel cook [--force] [--prune]                          cook the project's asse
 fynkel codegen --project . [--check]                     behaviour registration + schemas from @FynkelBehaviour classes
 fynkel test --headless [--scene <path|id>] [--steps N]   cook, then the Rust headless host over the startup scene (or --scene)
 fynkel state dump [--scene <path|id>] [--steps N]        cook, then the world state after N ticks, keyed by authoring id
-fynkel render [--scene <path|id>] [--out <png>] [--size WxH]  cook, then an offscreen render of the scene
+fynkel render [--scene <path|id>] [--out <png>] [--size WxH] [--quality <profile>]  cook, then an offscreen render of the scene
 fynkel run [--no-cook] [-- <flutter run args>]           validate, cook, then `flutter run` with FYNKEL_PROJECT set
 fynkel migrate <path|dir> [--dry-run]                    bring documents to the current formatVersion
 ```
@@ -93,7 +93,7 @@ apply` mint them.
 Component types:
 
 - `fynkel.Transform` — position `[x,y,z]`, rotation quaternion `[x,y,z,w]`, scale. Every drawn entity has one.
-- `fynkel.MeshRenderer` — `mesh: { asset, sub: "mesh/<n>" }`, `material: { asset }`, `cast_shadows`, `receive_shadows`, `visible`.
+- `fynkel.MeshRenderer` — `mesh: { asset, sub: "mesh/<n>" }`, `material: { asset }`, `cast_shadows`, `receive_shadows` (the first `DirectionalLight` with `cast_shadows` casts one PCF shadow map), `visible`.
 - `fynkel.Camera` — `projection`, `fov_y` (radians), `ortho_height`, `near`, `far`, `priority`, `exposure_mode` (`auto` meters the sun; `manual` uses `exposure`, EV100).
 - `fynkel.DirectionalLight` (`intensity` in lux), `fynkel.PointLight` / `fynkel.SpotLight` (`intensity` in candela, `range` in metres; spot `inner_angle` / `outer_angle` in radians) — `color` is linear RGB.
 - `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply.
@@ -101,6 +101,16 @@ Component types:
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for
 native types, `schemas/behaviours/*.schema.json` for behaviours.
+
+Materials (`assets/materials/*.material.json`, `fynkel.pbr@1`): `alpha_mode`
+`opaque` | `mask` (+ `alpha_cutoff`) | `blend` (drawn after the opaque
+scene, sorted back-to-front, casts no shadow), `double_sided`.
+
+Quality (`fynkel.project.json` `quality.profiles`, `default`): `shadows`,
+`shadowResolution`, `msaa` (1 or 4 in V1), `renderScale`, `anisotropy`.
+The renderer runs the default profile; switch at runtime with
+`FynkelViewportController.quality = '<name>'` (the starter's HUD cycles
+them on Q) or render one with `fynkel render --quality <name>`.
 
 Asset references are `{ "asset": "<uuid>", "sub": "<sub-asset id>"? }`. The
 uuid is the `id` in the source's `.meta.json` sidecar or the document's

@@ -79,6 +79,19 @@ void main() {
     expect(slot, greaterThanOrEqualTo(0));
     expect(controller.render(world), isNot(renderNoWorld));
 
+    // Quality profiles come from the project the world's cache was cooked
+    // from; this world has none, so any name is accepted and the engine
+    // defaults apply. Switching is a plain property write, applied by the
+    // next frame.
+    expect(controller.quality, isNull);
+    expect(controller.qualityOk, isTrue);
+    controller.quality = 'low';
+    expect(controller.quality, 'low');
+    expect(controller.qualityOk, isTrue);
+    expect(controller.render(world), greaterThanOrEqualTo(0));
+    controller.quality = null;
+    expect(controller.qualityOk, isTrue);
+
     // Same size → no resize; new size → native resize + rebind.
     controller.requestSize(64, 48);
     await settle();

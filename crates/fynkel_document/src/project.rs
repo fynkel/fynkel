@@ -48,10 +48,89 @@ pub struct QualityProfile {
     pub texture_max_size: u32,
 }
 
+impl QualityProfile {
+    /// The engine defaults: what an absent field means in a profile and
+    /// what a project without `quality` renders with (blueprint §15;
+    /// `docs/renderer.md` §"Quality").
+    pub fn engine_default() -> QualityProfile {
+        QualityProfile {
+            name: "default".to_string(),
+            shadows: true,
+            shadow_resolution: 2048,
+            msaa: 4,
+            render_scale: 1.0,
+            anisotropy: 8,
+            texture_max_size: 4096,
+        }
+    }
+
+    /// The profile as the cache index and `fynkel project describe` write
+    /// it.
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name, "shadows": self.shadows, "shadowResolution": self.shadow_resolution,
+            "msaa": self.msaa, "renderScale": self.render_scale, "anisotropy": self.anisotropy,
+            "textureMaxSize": self.texture_max_size,
+        })
+    }
+
+    /// Reads [`to_json`](Self::to_json)'s shape; absent fields take the
+    /// engine defaults. `None` without a name.
+    pub fn from_json(v: &serde_json::Value) -> Option<QualityProfile> {
+        let d = QualityProfile::engine_default();
+        let int = |key: &str, fallback: u32| v[key].as_u64().map(|n| n as u32).unwrap_or(fallback);
+        Some(QualityProfile {
+            name: v["name"].as_str()?.to_string(),
+            shadows: v["shadows"].as_bool().unwrap_or(d.shadows),
+            shadow_resolution: int("shadowResolution", d.shadow_resolution),
+            msaa: int("msaa", d.msaa),
+            render_scale: v["renderScale"].as_f64().unwrap_or(d.render_scale),
+            anisotropy: int("anisotropy", d.anisotropy),
+            texture_max_size: int("textureMaxSize", d.texture_max_size),
+        })
+    }
+}
+
+impl Default for QualityProfile {
+    fn default() -> Self {
+        QualityProfile::engine_default()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Quality {
     pub default: String,
     pub profiles: Vec<QualityProfile>,
+}
+
+impl Quality {
+    pub fn profile(&self, name: &str) -> Option<&QualityProfile> {
+        self.profiles.iter().find(|p| p.name == name)
+    }
+
+    /// The `default` profile (validation guarantees it exists; the first
+    /// profile otherwise).
+    pub fn default_profile(&self) -> Option<&QualityProfile> {
+        self.profile(&self.default).or(self.profiles.first())
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "default": self.default,
+            "profiles": self.profiles.iter().map(QualityProfile::to_json).collect::<Vec<_>>(),
+        })
+    }
+
+    pub fn from_json(v: &serde_json::Value) -> Option<Quality> {
+        Some(Quality {
+            default: v["default"].as_str()?.to_string(),
+            profiles: v["profiles"]
+                .as_array()?
+                .iter()
+                .filter_map(QualityProfile::from_json)
+                .collect(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -194,22 +273,23 @@ impl Project {
                             .map(|v| v as u32)
                             .unwrap_or(fallback)
                     };
+                    let d = QualityProfile::engine_default();
                     QualityProfile {
                         name: m.key.clone(),
                         shadows: m
                             .value
                             .get("shadows")
                             .and_then(Node::as_bool)
-                            .unwrap_or(true),
-                        shadow_resolution: int("shadowResolution", 2048),
-                        msaa: int("msaa", 4),
+                            .unwrap_or(d.shadows),
+                        shadow_resolution: int("shadowResolution", d.shadow_resolution),
+                        msaa: int("msaa", d.msaa),
                         render_scale: m
                             .value
                             .get("renderScale")
                             .and_then(Node::as_f64)
-                            .unwrap_or(1.0),
-                        anisotropy: int("anisotropy", 8),
-                        texture_max_size: int("textureMaxSize", 4096),
+                            .unwrap_or(d.render_scale),
+                        anisotropy: int("anisotropy", d.anisotropy),
+                        texture_max_size: int("textureMaxSize", d.texture_max_size),
                     }
                 })
                 .collect();
@@ -1011,14 +1091,7 @@ pub fn describe_json(
         "inputActions": project.input_actions.iter().map(|a| serde_json::json!({
             "name": a.name, "type": a.kind, "description": a.description, "bindings": a.bindings,
         })).collect::<Vec<_>>(),
-        "quality": project.quality.as_ref().map(|q| serde_json::json!({
-            "default": q.default,
-            "profiles": q.profiles.iter().map(|p| serde_json::json!({
-                "name": p.name, "shadows": p.shadows, "shadowResolution": p.shadow_resolution,
-                "msaa": p.msaa, "renderScale": p.render_scale, "anisotropy": p.anisotropy,
-                "textureMaxSize": p.texture_max_size,
-            })).collect::<Vec<_>>(),
-        })),
+        "quality": project.quality.as_ref().map(Quality::to_json),
         "components": project.components.as_ref().map(|list| list.iter().map(|c| serde_json::json!({
             "type": c.type_id, "kind": c.kind, "version": c.version,
         })).collect::<Vec<_>>()),

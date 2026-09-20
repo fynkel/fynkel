@@ -30,12 +30,16 @@ propagation, staged commands and alpha interpolation.
 `ExtractRenderer` (crate `fynkel_render`, `docs/renderer.md`) draws an
 `Extract`: the scene's cooked meshes with their PBR materials (or, for the
 demo scene, instanced placeholder cubes) from its camera and lights,
-through an HDR pass and a post pass into the host's target. It is
-host-agnostic: it takes a `wgpu::Device`, a target format and a
-`TextureView`; the host's format decides whether the post pass sRGB
-encodes itself. `render_offscreen` is the readback helper for tests. A
-scene that authors no lighting (the demo scene) is lit by the renderer's
-fallback sun.
+through the `shadow → opaque → transparent → post → presentation` chain
+into the host's target. It is host-agnostic: it takes a `wgpu::Device`,
+a target format and a `TextureView`; the host's format decides whether
+the post pass sRGB encodes itself. The project's `quality` profiles
+(MSAA, shadows, render scale, anisotropy) come from the cooked cache
+through the world's store and a host switches them by name
+(`set_quality_profile`); a host can also queue debug lines (`debug()`).
+`render_offscreen` is the readback helper for tests. A scene that authors
+no lighting (the demo scene) is lit by the renderer's fallback sun, which
+casts a shadow.
 
 ## Headless host and `fynkel test`
 
@@ -90,6 +94,10 @@ per planned tick, presentation flush), then
 `fynkel_apple_viewport_render(viewport, world)` which extracts the world in
 Rust and renders into a free ring slot. Swift's `FynkelViewportTexture`
 hands the newest GPU-complete slot to Flutter's `Texture`.
+`fynkel_apple_viewport_set_quality(viewport, name, len)` (M3-05, additive
+to ABI 2) selects a quality profile of the loaded project by name (an
+empty name: the project default); `-1` and a logged warning naming the
+profiles when it does not exist.
 
 Since M3-01 all of that lives in **`package:fynkel_flutter`**
 (`packages/fynkel_flutter`), the Flutter plugin every game depends on:
@@ -111,7 +119,10 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   null in between so the simulation never waits); `assetCache` (only for a
   world that loaded no cooked scene — a viewport rendering a world that
   `loadProject`/`loadScene` filled adopts that world's `fynkel_assets` store
-  at the first `render`, M3-03), `placeholders`, `camera`; `takeStats()` (Rust) and `platformStats()`
+  at the first `render`, M3-03), `placeholders`, `camera`, `quality` (a
+  project profile name or null for the default, pushed to the viewport
+  when attached; `qualityOk` says whether the last name was known;
+  M3-05); `takeStats()` (Rust) and `platformStats()`
   (Swift); `detach()` is the ordered teardown (clear callback → unregister →
   destroy) and the controller is reusable afterwards.
 - `FynkelViewport` — the widget: `LayoutBuilder` × device pixel ratio →

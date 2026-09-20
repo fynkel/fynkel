@@ -1,5 +1,6 @@
-// Shared by every pass: the per-frame uniform (docs/renderer.md §"Uniform
-// layout"). Concatenated in front of mesh.wgsl, sky.wgsl and post.wgsl.
+// Shared by every scene pass: the per-frame uniform and the sun's shadow
+// map (docs/renderer.md §"Uniform layout"). Concatenated in front of
+// mesh.wgsl, sky.wgsl, debug.wgsl and post.wgsl.
 
 const MAX_LIGHTS: u32 = 8u;
 const LIGHT_POINT: f32 = 0.0;
@@ -20,6 +21,8 @@ struct Light {
 struct Frame {
     view_proj: mat4x4<f32>,
     inv_view_proj: mat4x4<f32>,
+    // World → the sun's shadow clip space (orthographic, depth 0..1).
+    sun_view_proj: mat4x4<f32>,
     // xyz: camera position; w: exposure factor 1 / L_max.
     camera_pos: vec4<f32>,
     // xyz: unit vector toward the sun; w: 1 when a sun is present.
@@ -30,6 +33,9 @@ struct Frame {
     ambient: vec4<f32>,
     // x: sky radiance scale (nits); y: sky rotation about +Y (radians).
     sky: vec4<f32>,
+    // x: 1 when the shadow map holds this frame's sun; y: one shadow
+    // texel in map uv; z: receiver normal offset (world units); w: unused.
+    shadow: vec4<f32>,
     // x: light count; y: 1 when the sky is drawn; z: 1 when the post pass
     // must sRGB-encode (the target is a Unorm format); w: unused.
     counts: vec4<u32>,
@@ -37,6 +43,8 @@ struct Frame {
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
+@group(0) @binding(1) var shadow_map: texture_depth_2d;
+@group(0) @binding(2) var shadow_sampler: sampler_comparison;
 
 fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
     let lo = c * 12.92;

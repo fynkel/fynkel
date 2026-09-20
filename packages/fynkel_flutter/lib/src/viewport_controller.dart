@@ -67,6 +67,7 @@ class FynkelViewportController extends ChangeNotifier {
     this.acquireWaitUs = 3000,
     bool placeholders = true,
     String? assetCache,
+    String? quality,
     ViewportCameraSpec? camera,
   }) // The setters below push changes to the live viewport; the constructor
     // only seeds the fields.
@@ -74,6 +75,8 @@ class FynkelViewportController extends ChangeNotifier {
     : _placeholders = placeholders,
        // ignore: prefer_initializing_formals
        _assetCache = assetCache,
+       // ignore: prefer_initializing_formals
+       _quality = quality,
        // ignore: prefer_initializing_formals
        _camera = camera;
 
@@ -98,6 +101,8 @@ class FynkelViewportController extends ChangeNotifier {
   bool _placeholders;
   String? _assetCache;
   bool _assetCacheOk = true;
+  String? _quality;
+  bool _qualityOk = true;
   ViewportCameraSpec? _camera;
   Future<void>? _detaching;
 
@@ -139,6 +144,23 @@ class FynkelViewportController extends ChangeNotifier {
   /// False when [assetCache] is set but is not a readable cache (the world
   /// then renders magenta meshes and `assetErrors` in the stats climb).
   bool get assetCacheOk => _assetCacheOk;
+
+  /// The quality profile the renderer runs with, by name from the
+  /// project's `quality.profiles` (shadows, shadow map size, MSAA, render
+  /// scale, anisotropy). Null: the project's default (the engine defaults
+  /// without a project). Switchable at any time; the next frame applies
+  /// it.
+  String? get quality => _quality;
+  set quality(String? profile) {
+    _quality = profile;
+    if (_viewport != nullptr) {
+      _qualityOk = _native!.setQuality(_viewport, profile);
+    }
+  }
+
+  /// False when [quality] names no profile of the project being drawn (its
+  /// default applies meanwhile).
+  bool get qualityOk => _qualityOk;
 
   ViewportCameraSpec? get camera => _camera;
   set camera(ViewportCameraSpec? c) {
@@ -197,6 +219,9 @@ class FynkelViewportController extends ChangeNotifier {
       native.setPlaceholders(vp, _placeholders);
       if (_assetCache != null) {
         _assetCacheOk = native.setAssetCache(vp, _assetCache);
+      }
+      if (_quality != null) {
+        _qualityOk = native.setQuality(vp, _quality);
       }
       final cam = _camera;
       if (cam != null) {

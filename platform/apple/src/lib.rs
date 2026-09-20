@@ -100,6 +100,16 @@ impl Viewport {
         self.renderer.placeholders = enabled;
     }
 
+    /// Selects the project's quality profile by name (`None`: the project
+    /// default); see [`ExtractRenderer::set_quality_profile`].
+    pub fn set_quality(&mut self, profile: Option<&str>) -> bool {
+        self.renderer.set_quality_profile(profile)
+    }
+
+    pub fn quality(&self) -> fynkel_render::QualityStatus {
+        self.renderer.quality()
+    }
+
     pub fn asset_errors(&self) -> &[String] {
         self.renderer.asset_errors()
     }
@@ -343,6 +353,47 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_asset_cache(
 pub unsafe extern "C" fn fynkel_apple_viewport_set_placeholders(vp: *mut Viewport, enabled: i32) {
     if let Some(v) = vp.as_mut() {
         v.set_placeholders(enabled != 0);
+    }
+}
+
+/// Selects the quality profile the renderer runs with, by name from the
+/// project the world's cache was cooked from (`quality.profiles` in
+/// `fynkel.project.json`; `name` NULL or empty: the project's default,
+/// or the engine defaults without a project). Applied by the next render.
+/// Returns 0, or -1 when the store the viewport currently draws from has
+/// profiles and none is called `name` (the default applies meanwhile; a
+/// viewport that has not rendered a world yet accepts any name and
+/// resolves it on the first frame).
+///
+/// # Safety
+/// `vp` must be a live viewport; `name_utf8` points at `name_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_quality(
+    vp: *mut Viewport,
+    name_utf8: *const u8,
+    name_len: u32,
+) -> i32 {
+    let Some(v) = vp.as_mut() else {
+        return -1;
+    };
+    let name = if name_utf8.is_null() || name_len == 0 {
+        None
+    } else {
+        let bytes = std::slice::from_raw_parts(name_utf8, name_len as usize);
+        match std::str::from_utf8(bytes) {
+            Ok(s) => Some(s.to_string()),
+            Err(_) => return -1,
+        }
+    };
+    if v.set_quality(name.as_deref()) {
+        0
+    } else {
+        log::warn!(
+            "fynkel_apple_viewport_set_quality: no profile {:?} (profiles: {})",
+            name.unwrap_or_default(),
+            v.renderer.quality_profiles().join(", ")
+        );
+        -1
     }
 }
 

@@ -200,7 +200,8 @@ An invalid scene is a failed cook, never an object.
 - `CacheIndex::open(cache_dir)` reads `index.json` and refuses a cache
   cooked for another schema fingerprint (`FYN-R0002`; a missing or
   malformed index is `FYN-R0001`, "run `fynkel cook`"). It knows the
-  profile, the project (`name`, `startupScene`) and, per asset, the
+  profile, the project (`name`, `startupScene`, `quality` — the profiles
+  the renderer switches between, D3) and, per asset, the
   authoring path (for messages), kind, status, key, object file and
   dependencies; `closure(id)` is an asset and everything it depends on.
 - `Assets` is the shared, thread-safe **residency store** a world and its
@@ -450,7 +451,12 @@ two groups are exclusive: PBR fields on a custom material, or
 `parameters`/`textures` on a PBR one, are `FYN-D0307` (the schema itself
 lists both so one bad field is one diagnostic, not a cascade). Shadow
 casting/receiving is the `fynkel.MeshRenderer`'s (`cast_shadows`,
-`receive_shadows`), not the material's. `fynkel document new material`
+`receive_shadows`), not the material's — a `blend` material never casts,
+and the sun is the only light that shadows (`DirectionalLight.cast_shadows`).
+`alpha_mode` decides the pass: `opaque` and `mask` (texels under
+`alpha_cutoff` discarded) draw in the opaque pass, `blend` in the
+transparent pass sorted back to front per mesh and without depth writes
+(`docs/renderer.md`). `fynkel document new material`
 yields an untextured `fynkel.pbr@1` material carrying only `shader`.
 
 Texture colour spaces are fixed per slot: `base_color_texture` and
@@ -693,8 +699,10 @@ the database still cooks.
 (both written to a temporary name and renamed, the object first), and
 `<cache>/index.json` after every cook: `{ fynkel: "cache-index",
 cacheVersion, containerVersion, schemaFingerprint, profile, project: {
-name, startupScene } | null, assets: [{ id, path, name, kind, status, key,
-file, dependencies }] }` — how the runtime finds "the current cooked file
+name, startupScene, quality: { default, profiles: [{ name, shadows,
+shadowResolution, msaa, renderScale, anisotropy, textureMaxSize }] } |
+null } | null, assets: [{ id, path, name, kind, status, key, file,
+dependencies }] }` — how the runtime finds "the current cooked file
 for this asset" without recomputing keys, and whether this build may read
 the cache at all (`schemaFingerprint` is the build's `fynkel schema`
 fingerprint; it is also part of every document's key through the key's
@@ -773,7 +781,7 @@ makes a directory a project. It is a document (envelope, strict JSON,
 | `startupScene` | `{ asset }` — required; must resolve to a scene document in the asset database |
 | `assets` | The asset root, relative to the project directory (default `assets`; no `..`, no absolute path) |
 | `inputActions` | A stub for §5.1: `name → { type: button \| axis1d \| axis2d, description?, bindings: ["keyboard:…", "mouse:…", "gamepad:…", "touch:…"] }`; nothing consumes it yet |
-| `quality` | `{ default, profiles: { name → { shadows, shadowResolution, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults |
+| `quality` | `{ default, profiles: { name → { shadows, shadowResolution, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults (shadows on, 2048, MSAA 4, scale 1, anisotropy 8, 4096). The cook copies the block into the cache index and the renderer reads it there (`docs/renderer.md` — MSAA runs at 1 or 4, the other values are clamped); `textureMaxSize` is for the cook |
 | `components` | The component registry: `typeId → { kind: native \| behaviour, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
 | `targets` | `macos \| ios \| android \| windows \| linux \| web → { enabled (default true), profile (default dev) }`; all disabled is a warning |
 | `x-*` | Tool extensions, kept verbatim |
@@ -902,7 +910,7 @@ fynkel project describe [--project <dir>] [--json] [--schemas <dir>]
 fynkel project lock [--project <dir>] [--check] [--json] [--schemas <dir>]
 fynkel validate [--project <dir>] [--json] [--schemas <dir>]
 fynkel codegen [--check] [--root <repo>] [--project <dart package>]
-fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--no-cook] [--placeholders] [--json]
+fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--no-cook] [--placeholders] [--quality <profile>] [--json]
 fynkel schema list [--json]
 fynkel schema describe <type|kind> [--json]
 fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--seed S] [--json]
@@ -975,11 +983,15 @@ schema id and envelope. `--project` defaults to the current directory.
 the cache through `fynkel_assets`, steps the world once and draws the
 extract offscreen from the same store to a PNG, 1280×720 by default
 (`--json`: `{ ok, out, size, project, scene: { id, name, key, entities,
-rejectedComponents }, cache, instances,
-meshes, placeholders, missing, batches, sceneCamera, sceneLight, lights,
-lightsDropped, sky, ev100, assetErrors, diagnostics }`; `docs/renderer.md`
-names the counts); exit 1 on a project/scene/asset error, 2 when
-no GPU adapter is available. `codegen` regenerates the native schemas and
+rejectedComponents }, cache, instances, meshes, placeholders, missing,
+transparent, batches, sceneCamera, sceneLight, lights, lightsDropped,
+sky, ev100, shadowCasters, shadowMap, quality: { profile, shadows,
+shadowResolution, msaa, renderScale, anisotropy, renderSize },
+assetErrors, diagnostics }`; `docs/renderer.md` names the counts).
+`--quality <profile>` renders with one of the project's quality profiles
+instead of its default (exit 2 naming the profiles when it does not
+exist); exit 1 on a project/scene/asset error, 2 when no GPU adapter is
+available. `codegen` regenerates the native schemas and
 codecs (pipeline (a)); with `--project <dart package>` it also runs the
 behaviour generator in that package and splits its schemas into
 `schemas/behaviours/` (pipeline (b), `docs/codegen.md`); `--check` compares

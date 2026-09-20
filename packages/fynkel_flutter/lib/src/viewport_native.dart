@@ -130,6 +130,11 @@ external void _takeStats(Pointer<Void> vp, Pointer<ViewportStats> out);
 external int _setAssetCache(Pointer<Void> vp, Pointer<Uint8> dir, int len);
 @Native<Void Function(Pointer<Void>, Int32)>(symbol: 'fynkel_apple_viewport_set_placeholders', assetId: _asset)
 external void _setPlaceholders(Pointer<Void> vp, int enabled);
+@Native<Int32 Function(Pointer<Void>, Pointer<Uint8>, Uint32)>(
+  symbol: 'fynkel_apple_viewport_set_quality',
+  assetId: _asset,
+)
+external int _setQuality(Pointer<Void> vp, Pointer<Uint8> name, int len);
 
 class ViewportNative {
   ViewportNative() {
@@ -205,6 +210,21 @@ class ViewportNative {
 
   /// Whether entities without a MeshRenderer draw as placeholder cubes.
   void setPlaceholders(Pointer<Void> vp, bool enabled) => _setPlaceholders(vp, enabled ? 1 : 0);
+
+  /// Selects the project's quality profile by name (null: the project's
+  /// default). False when the store being drawn from has profiles and none
+  /// has that name.
+  bool setQuality(Pointer<Void> vp, String? profile) {
+    if (profile == null || profile.isEmpty) return _setQuality(vp, nullptr, 0) == 0;
+    final bytes = utf8.encode(profile);
+    final p = calloc<Uint8>(bytes.length + 1);
+    try {
+      p.asTypedList(bytes.length).setAll(0, bytes);
+      return _setQuality(vp, p, bytes.length) == 0;
+    } finally {
+      calloc.free(p);
+    }
+  }
 
   /// Bounded wait the presenter (raster thread) may spend on the newest
   /// in-flight frame so it composites this tick's frame (0 disables).

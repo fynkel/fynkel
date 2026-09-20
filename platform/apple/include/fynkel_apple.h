@@ -80,6 +80,12 @@ int32_t fynkel_apple_viewport_set_asset_cache(FynkelAppleViewport *vp,
                                               const uint8_t *dir_utf8, uint32_t dir_len);
 /* Entities without a MeshRenderer draw as placeholder cubes (default on). */
 void fynkel_apple_viewport_set_placeholders(FynkelAppleViewport *vp, int32_t enabled);
+/* The quality profile (fynkel.project.json `quality.profiles`) the renderer
+ * runs with, by name; NULL/empty = the project's default. Applied by the
+ * next render. -1 when the store being drawn from has profiles and none
+ * has that name (the default stays). */
+int32_t fynkel_apple_viewport_set_quality(FynkelAppleViewport *vp,
+                                          const uint8_t *name_utf8, uint32_t name_len);
 
 /* Presenter (raster) thread: the only call it makes. */
 int32_t fynkel_apple_viewport_acquire_presented(const FynkelAppleViewport *vp);

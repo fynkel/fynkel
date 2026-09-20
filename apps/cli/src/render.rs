@@ -15,7 +15,7 @@ use fynkel_render::{headless_device, render_offscreen, Assets, ExtractRenderer};
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--no-cook] [--placeholders] [--json]\n                                               cook the project, then render its startup scene (or --scene) headlessly from the cache to a PNG"
+        "usage:\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--quality <profile>] [--cache <dir>] [--no-cook] [--placeholders] [--json]\n                                               cook the project, then render its startup scene (or --scene) headlessly from the cache to a PNG (--quality: one of the project's profiles; its default otherwise)"
     );
     ExitCode::from(2)
 }
@@ -26,6 +26,7 @@ struct Opts {
     width: u32,
     height: u32,
     placeholders: bool,
+    quality: Option<String>,
     json: bool,
 }
 
@@ -36,6 +37,7 @@ fn parse(args: &[String]) -> Option<Opts> {
         width: 1280,
         height: 720,
         placeholders: false,
+        quality: None,
         json: false,
     };
     let mut i = 0;
@@ -59,6 +61,10 @@ fn parse(args: &[String]) -> Option<Opts> {
             "--cache" => {
                 i += 1;
                 o.target.cache = Some(PathBuf::from(args.get(i)?));
+            }
+            "--quality" => {
+                i += 1;
+                o.quality = Some(args.get(i)?.clone());
             }
             "--size" => {
                 i += 1;
@@ -144,8 +150,18 @@ pub fn run(args: &[String]) -> ExitCode {
     );
     renderer.placeholders = opts.placeholders;
     renderer.set_assets(Some(assets));
+    if !renderer.set_quality_profile(opts.quality.as_deref()) {
+        eprintln!(
+            "fynkel render: --quality {}: not a profile of {} (profiles: {})",
+            opts.quality.unwrap_or_default(),
+            project_name,
+            renderer.quality_profiles().join(", ")
+        );
+        return ExitCode::from(2);
+    }
     let pixels = render_offscreen(&device, &queue, &mut renderer, &extract);
     let stats = renderer.stats();
+    let quality = renderer.quality();
     let errors = renderer.asset_errors().to_vec();
 
     let mut rgba = Vec::with_capacity(pixels.len() * 4);
@@ -184,13 +200,25 @@ pub fn run(args: &[String]) -> ExitCode {
                 "lightsDropped": stats.lights_dropped,
                 "sky": stats.sky,
                 "ev100": renderer.ev100(),
+                "transparent": stats.transparent,
+                "shadowCasters": stats.shadow_casters,
+                "shadowMap": stats.shadow_map,
+                "quality": {
+                    "profile": quality.profile,
+                    "shadows": quality.settings.shadows,
+                    "shadowResolution": quality.settings.shadow_resolution,
+                    "msaa": quality.settings.msaa,
+                    "renderScale": quality.settings.render_scale,
+                    "anisotropy": quality.settings.anisotropy,
+                    "renderSize": [quality.internal_size.0, quality.internal_size.1],
+                },
                 "assetErrors": errors,
                 "diagnostics": diagnostics_json(&cooked.diagnostics),
             })
         );
     } else {
         println!(
-            "{}: {}x{} — {} \"{}\": {} entities, {} instances ({} meshes, {} placeholders, {} missing), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}",
+            "{}: {}x{} — {} \"{}\": {} entities, {} instances ({} meshes, {} placeholders, {} missing, {} transparent), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}, quality {} (msaa {}, {}, {}x{})",
             opts.out.display(),
             opts.width,
             opts.height,
@@ -201,6 +229,7 @@ pub fn run(args: &[String]) -> ExitCode {
             stats.meshes,
             stats.placeholders,
             stats.missing,
+            stats.transparent,
             if stats.scene_camera { "scene" } else { "default" },
             if stats.scene_light { "scene" } else { "default" },
             stats.lights,
@@ -211,6 +240,15 @@ pub fn run(args: &[String]) -> ExitCode {
             },
             renderer.ev100(),
             if stats.sky { ", sky" } else { "" },
+            quality.profile,
+            quality.settings.msaa,
+            if stats.shadow_map > 0 {
+                format!("{} caster(s) in a {}² shadow map", stats.shadow_casters, stats.shadow_map)
+            } else {
+                "no shadow".to_string()
+            },
+            quality.internal_size.0,
+            quality.internal_size.1,
         );
         for e in &errors {
             eprintln!("asset error: {e}");

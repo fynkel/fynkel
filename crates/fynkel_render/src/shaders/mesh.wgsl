@@ -1,11 +1,13 @@
 
-// Opaque mesh pass (docs/renderer.md): Cook-Torrance (GGX, height-
-// correlated Smith, Schlick) in physical units into the linear HDR
-// target — one sun (lux), constant ambient (lux), up to MAX_LIGHTS
-// point/spot lights (candela), every material map, normal mapping from
-// the vertex tangent, `alphaMode` mask by discard. The HDR alpha tells
-// the post pass what the texel is: 0 background, 1 scene-referred
-// radiance (nits), 2 display-referred colour (unlit; encode only).
+// Opaque and transparent mesh stages (docs/renderer.md): Cook-Torrance
+// (GGX, height-correlated Smith, Schlick) in physical units into the
+// linear HDR target — one sun (lux) shadowed by its PCF-filtered map,
+// constant ambient (lux), up to MAX_LIGHTS point/spot lights (candela),
+// every material map, normal mapping from the vertex tangent, `alphaMode`
+// mask by discard. The HDR alpha tells the post pass what the texel is:
+// 0 background, 1 scene-referred radiance (nits) — a `blend` material
+// writes its alpha instead, so the blended result is radiance
+// premultiplied by coverage — 2 display-referred colour (unlit).
 
 @group(1) @binding(0) var material_sampler: sampler;
 @group(1) @binding(1) var base_color_tex: texture_2d<f32>;
@@ -25,7 +27,8 @@ struct VsIn {
     // Per-instance (fynkel_render::Instance): model matrix columns, base
     // colour factor, emissive (rgb × strength, nits-relative), params
     // (metallic, roughness, normal_scale, occlusion_strength), flags
-    // (alpha cutoff or -1, unlit, double-sided, unused).
+    // (alpha cutoff, -1 opaque or -2 blend; unlit; double-sided;
+    // receives shadows).
     @location(6) m0: vec4<f32>,
     @location(7) m1: vec4<f32>,
     @location(8) m2: vec4<f32>,
@@ -120,12 +123,40 @@ fn punctual(light: Light, p: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(l, e);
 }
 
+// The sun's visibility at `p` (surface normal `n`): 3×3 PCF over the
+// shadow map, each tap hardware-filtered (2×2) by the comparison sampler.
+// A normal offset of one texel keeps flat receivers acne-free; points
+// outside the map or beyond its far plane are lit.
+fn sun_visibility(p: vec3<f32>, n: vec3<f32>) -> f32 {
+    let c = frame.sun_view_proj * vec4<f32>(p + n * frame.shadow.z, 1.0);
+    let ndc = c.xyz / c.w;
+    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || ndc.z > 1.0 {
+        return 1.0;
+    }
+    let texel = frame.shadow.y;
+    var lit = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            let offset = vec2<f32>(f32(x), f32(y)) * texel;
+            lit += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, ndc.z);
+        }
+    }
+    return lit / 9.0;
+}
+
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let base = textureSample(base_color_tex, material_sampler, in.uv) * in.color;
     let cutoff = in.flags.x;
     if cutoff >= 0.0 && base.a < cutoff {
         discard;
+    }
+    // Opaque and mask texels are tagged 1; a blend material writes its
+    // alpha (the transparent pipeline blends by it).
+    var tag = 1.0;
+    if cutoff < -1.5 {
+        tag = clamp(base.a, 0.0, 1.0);
     }
     let albedo = base.rgb;
     if in.flags.y > 0.5 {
@@ -137,6 +168,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     if !front_facing {
         n = -n;
     }
+    let geometric_n = n;
     let t_raw = in.world_tangent.xyz;
     if dot(t_raw, t_raw) > 0.25 {
         // Normal map in tangent space; a zero tangent (no UVs at cook)
@@ -159,7 +191,11 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
 
     var radiance = vec3<f32>(0.0);
     if frame.sun_dir.w > 0.5 {
-        radiance += shade(n, v, frame.sun_dir.xyz, frame.sun_color.rgb, diffuse, f0, a2);
+        var visibility = 1.0;
+        if frame.shadow.x > 0.5 && in.flags.w > 0.5 {
+            visibility = sun_visibility(in.world_pos, geometric_n);
+        }
+        radiance += visibility * shade(n, v, frame.sun_dir.xyz, frame.sun_color.rgb, diffuse, f0, a2);
     }
     for (var i = 0u; i < frame.counts.x; i++) {
         let le = punctual(frame.lights[i], in.world_pos);
@@ -170,5 +206,5 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // Emissive is relative to the exposure's white (L_max).
     let emissive = in.emissive.rgb * textureSample(emissive_tex, material_sampler, in.uv).rgb;
     radiance += emissive * frame.ambient.w;
-    return vec4<f32>(radiance, 1.0);
+    return vec4<f32>(radiance, tag);
 }

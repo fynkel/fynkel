@@ -7,8 +7,10 @@
 // texture. Flutter widgets drawn over it are the HUD. The scene is
 // fynkel.project.json's startupScene; meshes and textures come from the
 // project's cooked cache (`fynkel cook`, which `fynkel run` does for you).
+// Q cycles the project's quality profiles (fynkel.project.json `quality`).
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:fynkel/fynkel.dart' show FynkelLoadError;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
@@ -38,10 +40,24 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> {
+  /// The project's quality profiles, in the order Q cycles them.
+  static const profiles = ['low', 'medium', 'high'];
+
   Game? _game;
   String? _error;
   FynkelViewportController? _viewport;
   FynkelFrameStats? _stats;
+
+  /// Q: the next quality profile (the project default, `medium`, first).
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.keyQ) {
+      return KeyEventResult.ignored;
+    }
+    final viewport = _viewport!;
+    final current = profiles.indexOf(viewport.quality ?? 'medium');
+    setState(() => viewport.quality = profiles[(current + 1) % profiles.length]);
+    return KeyEventResult.handled;
+  }
 
   @override
   void initState() {
@@ -82,6 +98,7 @@ class _GamePageState extends State<GamePage> {
       body: FynkelGameView(
         world: game.world,
         controller: _viewport,
+        onKeyEvent: _onKey,
         onStats: (s) => setState(() => _stats = s),
         overlay: Padding(
           padding: const EdgeInsets.all(16),
@@ -124,6 +141,7 @@ class Hud extends StatelessWidget {
       for (final sp in game.world.behaviours.whereType<Spinner>())
         'spinner    ${sp.angle.toStringAsFixed(2)} rad at ${sp.speed} rad/s',
       'assets     ${game.report.assetCount} retained from ${game.report.cacheDir}',
+      'quality    ${viewport.quality ?? 'medium (project default)'}  [Q cycles]',
       if (s != null) ...[
         'viewport   ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
             'frame ${s.tickInterval.p50.toStringAsFixed(2)} ms  render ${s.renderCall.p50.toStringAsFixed(2)} ms',

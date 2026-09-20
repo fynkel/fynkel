@@ -32,6 +32,7 @@ pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
 use fynkel_cooked::{ChunkFile, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE};
 pub use fynkel_core::material::PbrMaterial;
 use fynkel_core::SceneDescription;
+pub use fynkel_document::project::{Quality, QualityProfile};
 pub use fynkel_document::AuthoredBehaviour;
 use fynkel_document::{describe, Document, DocumentKind, Scene, SchemaSet};
 use fynkel_wire::material::decode_material;
@@ -41,10 +42,13 @@ pub const MAX_CHUNK_BYTES: u64 = 256 << 20;
 const MAX_META_BYTES: u64 = 16 << 20;
 
 /// The cache index's project record.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProjectInfo {
     pub name: String,
     pub startup_scene: Option<Uuid>,
+    /// The project's `quality` profiles as cooked (`None`: the project
+    /// declares none; the renderer uses the engine defaults).
+    pub quality: Option<Quality>,
 }
 
 /// One asset as the index lists it.
@@ -145,6 +149,7 @@ impl CacheIndex {
         let project = index["project"].as_object().map(|p| ProjectInfo {
             name: p["name"].as_str().unwrap_or("").to_string(),
             startup_scene: p["startupScene"].as_str().and_then(parse_uuid),
+            quality: Quality::from_json(&p["quality"]),
         });
         Ok(CacheIndex {
             root: cache_dir.to_path_buf(),
