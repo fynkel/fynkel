@@ -93,7 +93,9 @@ Determinism: bodies are created in entity order and Rapier is
 deterministic on one platform, so the same scene and commands give the
 same transforms — the headless checksum covers the stress scene's 500
 bodies (`fdce91f4c8a52bfc` at 600 ticks). Bodies at rest sleep and cost
-the solver nothing.
+the solver nothing. Rendering interpolates every entity between the
+previous and the current tick (`World::extract` by the clock's alpha,
+ADR-0008), bodies included, so 60 Hz physics draws smoothly at 120 Hz.
 
 ## Body commands (Dart, simulation lane)
 
@@ -186,6 +188,5 @@ changed.
 
 One collider per entity (compound shapes by child entities); no joints,
 no character controller (item 9, on Rapier's kinematic controller); mesh
-colliders are static; no interpolation between ticks (the renderer draws
-the last stepped pose); no Android/web-specific notes — the adapter is
+colliders are static; no Android/web-specific notes — the adapter is
 pure Rust and runs wherever the core does.
