@@ -471,7 +471,11 @@ in its own app, play it, or hear it. That is M3, in this order:
    (14–19) ticked by the core, per-system time everywhere, the stress
    scene's 5 000 movers next to 300 `Wobble` behaviours;
    `docs/catalogue.md`.
-11. **Audio** (blueprint item 11, D4: `AudioSource`/`AudioListener`,
-   the cooked `CLIP` chunks finally consumed), then the Tier 1 reference
-   game that exercises input, physics and audio — measured with both
-   captures at every step.
+11. **Runtime scenes, trigger zones, settings** (blueprint item 12 —
+   the backlog's execution order was revised after item 10: 12 → 13 →
+   14 → 19 → 11 → 15 → 16 → 17 → 18; scenes before polish), then the
+   HUD models and projected labels (13), the reference game's world and
+   loop (14), animation (19, pulled forward from M5), audio (11, when the
+   game wants a sound), the reference game's menus/settings/results (15),
+   instrumentation (16), public readiness (17), the gate report (18) —
+   measured with both captures at every step.
