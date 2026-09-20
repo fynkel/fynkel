@@ -882,7 +882,9 @@ directory and `flutter build` does not fail), and `lib/main.dart` loads
 `FYNKEL_PROJECT` when that directory exists on the device and otherwise
 unpacks the bundle through `package:fynkel_flutter`'s
 `unpackBundledCache()` into the app's temp directory and loads that
-(`Game.load(dir, cacheDir: …)`). `fynkel run` refuses with exit 1 when
+(`Game.load(dir, cacheDir: …)`). `fynkel run` refuses with exit 1 when the
+project is not a Flutter app (no `pubspec.yaml` — the bare stress project;
+the message names `fynkel create` / `generate.py --app`) or when
 `fynkel_cache/index.json` is missing (a `--no-cook` before any cook), and
 a device build after editing the project needs a cook (any `fynkel` runtime
 command) before `flutter build`/`flutter run` for the app to carry the

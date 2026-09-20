@@ -73,6 +73,15 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         no_cook: !cook,
         ..crate::cook::Target::default()
     };
+    // A project without a Flutter app has nothing to run (the stress
+    // scene is generated bare unless `generate.py --app`).
+    if !crate::bundle::is_app(&abs) {
+        eprintln!(
+            "fynkel run: {} is not a Flutter app (no pubspec.yaml) — `fynkel create` makes one; benchmarks/stress: `generate.py --app`",
+            abs.display()
+        );
+        return ExitCode::from(1);
+    }
     if let Err(code) = crate::cook::prepare("fynkel run", &target) {
         return code;
     }
