@@ -135,6 +135,7 @@ class FynkelGameView extends StatefulWidget {
   final double maxFrameDt;
   final bool autofocus;
   final FocusNode? focusNode;
+
   /// Called first for every key/pointer event; a key the callback marks
   /// handled does not reach the input capture.
   final FocusOnKeyEventCallback? onKeyEvent;
@@ -169,6 +170,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     input.pointerCaptured = _pointerCaptured;
     return _pointerCaptured;
   }
+
   late final Ticker _ticker;
   Timer? _statsTimer;
   Duration? _lastTick;
@@ -314,6 +316,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _ticks += plan.steps;
     if (plan.missedDeadline) {
       _missed++;
+    }
+    // World labels: one projection call for the frame's anchors, after the
+    // frame so they see the poses the render interpolates (docs/hud.md).
+    if (!world.projection.isEmpty) {
+      world.projection.update();
     }
     widget.onFrame?.call(dt, plan);
 

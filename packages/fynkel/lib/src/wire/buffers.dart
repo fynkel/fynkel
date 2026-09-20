@@ -11,7 +11,17 @@ import 'support.dart';
 const int bufferMagic = 0x4b4e5946; // "FYNK"
 const int bufferHeaderSize = 24;
 
-enum BufferKind { commands, snapshot, events, diagnostics, query, inputEvents, inputActions, physicsQueries }
+enum BufferKind {
+  commands,
+  snapshot,
+  events,
+  diagnostics,
+  query,
+  inputEvents,
+  inputActions,
+  physicsQueries,
+  projectionAnchors,
+}
 
 int bufferKindValue(BufferKind k) => k.index + 1;
 

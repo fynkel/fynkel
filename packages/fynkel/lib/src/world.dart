@@ -25,6 +25,7 @@ import 'wire/support.dart' show WireRecord;
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
 part 'behaviour.dart';
+part 'projection.dart';
 part 'scenes.dart';
 
 /// Immutable local transform value (position, rotation, scale).
@@ -40,6 +41,7 @@ class World {
     context = GameContext(time: _WorldTime(this), input: input);
     _behaviours = _BehaviourSystem(this);
     scenes = SceneManager._(this);
+    projection = ProjectionView._(this);
   }
 
   /// Creates a world on a fresh [NativeLibrary] (or the given one).
@@ -83,6 +85,12 @@ class World {
   /// Named zone events (M3-12): `zones.on('collect', (e) { … })` runs
   /// right after the tick whose step produced the `ZoneEntered`.
   final ZoneEvents zones = ZoneEvents();
+
+  /// Projected world anchors (M3-13, docs/hud.md): where entities land on
+  /// the screen this frame, for labels drawn over the viewport. Register
+  /// anchors, set the viewport, `update()` once per frame after [frame]
+  /// (`FynkelGameView` does).
+  late final ProjectionView projection;
 
   /// The cooked cache the last successful load came from; the default
   /// [loadScene] cache.
@@ -884,7 +892,7 @@ class GameObject {
       if (o != null) {
         w.set(o);
       } else if (!world._seedLocal(_entity ?? -1, w)) {
-        w.set(_initial);
+        w.set(_queriedTransform() ?? _initial);
       }
       _stagedValid = true;
     }
@@ -1165,13 +1173,23 @@ class GameObject {
     return CharacterState.fromRecord(gen.CharacterStateRecord.decode(b.records, 0, b.tail));
   }
 
-  /// Current local transform: staged overlay, else last snapshot, else the
-  /// spawn value.
+  /// Current local transform: staged overlay, else last snapshot, else
+  /// (an object attached this tick, its subscription not yet served) the
+  /// world's value through the component query, else the spawn value.
   Transform get localTransform {
     final o = _overlay;
     if (o != null) return o;
     if (_stagedValid) return _overlay = _staged!.toTransform();
-    return world._snapshotOf(_entity ?? -1)?.local ?? _initial;
+    return world._snapshotOf(_entity ?? -1)?.local ?? _queriedTransform() ?? _initial;
+  }
+
+  /// The world's own local transform before the first snapshot (one
+  /// query per object per tick, shared with [get]), so a partial write at
+  /// the first tick keeps the authored pose instead of seeding from
+  /// identity.
+  Transform? _queriedTransform() {
+    if (_entity == null || !_alive) return null;
+    return _lookup(gen.Transform.componentId) as Transform?;
   }
 
   /// World-space transform from the last snapshot (no overlay: it depends

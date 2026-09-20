@@ -51,6 +51,12 @@ use crate::schema::{SystemKind, SystemTimeRecord};
 
 mod catalogue;
 pub use catalogue::{EmitterRun, Oscillation};
+mod projection;
+pub use projection::{
+    projection_matrix, view_matrix, ProjectionInfo, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED,
+    PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED,
+    PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
+};
 
 #[derive(Clone, Debug)]
 pub struct WorldConfig {

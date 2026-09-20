@@ -17,6 +17,7 @@
 | [`hosts.md`](hosts.md) | The hosts sharing the core (headless, standalone, Flutter) and how each drives `step()` (M1). |
 | [`input.md`](input.md) | The input contract (M3-07): actions and the binding grammar, the §5.1 held/edge rules, recordings, the Flutter capture, gamepads, the touch overlay. |
 | [`scenes.md`](scenes.md) | Scenes at runtime (M3-12): replace and additive loads, unload, the Dart `SceneManager`, `fynkel.TriggerZone` and named zone events, runtime prefabs, the user's `settings.json` and the `SettingsStore`. |
+| [`hud.md`](hud.md) | HUD models and world labels (M3-13): `GameModel`/`ModelValue` written by behaviours and bound with `ModelBinding`/`ModelBuilder`, the screen pattern (menu / HUD / pause / settings / results), the bounded projection view (`World.projection`, `fynkel_world_project`), `ProjectionLayer`/`WorldLabel`, the occlusion policy, the 64-anchor bound and `FYN-R0012`. |
 | [`physics.md`](physics.md) | The physics contract (M3-08/09): `RigidBody`/`Collider`, the project's gravity and layers, the step and transform ownership, body commands, contacts, queries, the character controller and the third-person camera, the headless report, cost. |
 | [`../platform/apple/README.md`](../platform/apple/README.md) | Apple (macOS + iOS) platform integration contract (§8.4): IOSurface ring, synchronization, resize, lifecycle. |
 

@@ -5,7 +5,8 @@ use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::physics::{Hit, QueryKind, QuerySpec};
 use fynkel_core::schema::*;
 use fynkel_core::{
-    BodyCommand, Command, Diagnostic, Event, EventPayload, Rejected, SnapshotRecord, World,
+    BodyCommand, Command, Diagnostic, Event, EventPayload, ProjectionInfo, Rejected,
+    SnapshotRecord, World,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{decode_component_value, get_u32, WireRecord};
@@ -506,6 +507,41 @@ pub fn physics_queries(world: &World, buf: &[u8], out: Vec<u8>) -> Result<Vec<u8
         }
     }
     Ok(w.finish())
+}
+
+/// Answers a `ProjectionAnchors` buffer (M3-13): every anchor projected
+/// into a `width` × `height` viewport with the frame's camera, one
+/// `ProjectedPointRecord` per anchor in order, in a `Query` buffer. At
+/// most `MAX_PROJECTION_ANCHORS` are projected (the rest `DROPPED`, with
+/// the world's `TOO_MANY_ANCHORS` diagnostic).
+pub fn project(
+    world: &mut World,
+    width: u32,
+    height: u32,
+    buf: &[u8],
+    out: Vec<u8>,
+    anchors: &mut Vec<ProjectionAnchorRecord>,
+    points: &mut Vec<ProjectedPointRecord>,
+) -> Result<(Vec<u8>, ProjectionInfo), ProtocolError> {
+    let (h, records, tail) = buffer::validate(buf, BufferKind::ProjectionAnchors)?;
+    let size = ProjectionAnchorRecord::SIZE;
+    anchors.clear();
+    for i in 0..h.record_count as usize {
+        let off = i * size;
+        if off + size > records.len() {
+            return Err(ProtocolError::Truncated { at: off });
+        }
+        let Ok(a) = ProjectionAnchorRecord::decode(&records[off..off + size], tail) else {
+            return Err(ProtocolError::Truncated { at: off });
+        };
+        anchors.push(a);
+    }
+    let info = world.project(width, height, anchors, points);
+    let mut w = Writer::begin(out, BufferKind::Query);
+    for p in points.iter() {
+        w.record(p);
+    }
+    Ok((w.finish(), info))
 }
 
 /// Decodes a host frame's raw control events. A record with an unknown

@@ -307,6 +307,35 @@ pub struct SystemTimeRecord {
     pub micros: u32,
 }
 
+/// One anchor of a projection request (`fynkel_world_project`, M3-13,
+/// blueprint §10): a point `offset` from the entity's origin in its local
+/// frame, projected into the viewport the request names. `mask` (collider
+/// layers) enables the explicit occlusion policy: a raycast from the
+/// camera to the point that hits a collider on those layers first marks
+/// the anchor `OCCLUDED`; 0 tests nothing.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.ProjectionAnchor")]
+pub struct ProjectionAnchorRecord {
+    pub entity: Entity,
+    pub offset: Vec3,
+    pub mask: u32,
+}
+
+/// The answer to one `fynkel.rec.ProjectionAnchor`, in request order:
+/// `x`/`y` in the requested viewport's pixels (origin top-left, y down),
+/// `depth` metres in front of the camera along its view axis, `flags` the
+/// `PROJECTED_*` bits (`fynkel_core::projection`). `x`/`y` are meaningful
+/// only with `PROJECTED_IN_FRONT`.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.ProjectedPoint")]
+pub struct ProjectedPointRecord {
+    pub entity: Entity,
+    pub x: f32,
+    pub y: f32,
+    pub depth: f32,
+    pub flags: u32,
+}
+
 /// `FYNKEL_QUERY_ENTITIES` (M3-08b): one per live entity, entity order —
 /// its parent (`NULL` at the root) and name (empty without one). What
 /// `World.find`/`findAll`/`findChild` read, one query per tick.
@@ -536,6 +565,8 @@ pub const ALL: &[&RecordSchema] = &[
     &SceneUnloadedEvent::SCHEMA,
     &ZoneEvent::SCHEMA,
     &Settings::SCHEMA,
+    &ProjectionAnchorRecord::SCHEMA,
+    &ProjectedPointRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

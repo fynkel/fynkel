@@ -23,6 +23,9 @@ pub enum BufferKind {
     /// `PhysicsQueryRecord` per spatial query (host → world); answered
     /// in a `Query` buffer of `PhysicsHitRecord`s (M3-08).
     PhysicsQueries = 8,
+    /// `ProjectionAnchorRecord` per anchor (host → world); answered in a
+    /// `Query` buffer of `ProjectedPointRecord`s (M3-13).
+    ProjectionAnchors = 9,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

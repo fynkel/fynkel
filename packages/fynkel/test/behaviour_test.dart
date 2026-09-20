@@ -84,7 +84,8 @@ void main() {
   setUpAll(() => lib = NativeLibrary.open());
   tearDownAll(() => lib.dispose());
 
-  World world({BehaviourRegistry? registry}) => World.create(library: lib, registry: registry)..throwOnDiagnostics = true;
+  World world({BehaviourRegistry? registry}) =>
+      World.create(library: lib, registry: registry)..throwOnDiagnostics = true;
 
   test('lifecycle: pending object → create/enable at the first boundary after it spawns, start once', () {
     final w = world();
@@ -110,8 +111,21 @@ void main() {
     log.clear();
     go.addBehaviour(Recorder(log, tag: 'b:'));
     w.frame(1 / 60);
-    expect(log, ['b:onCreate', 'b:onEnable', 'fixedUpdate@2', 'b:start', 'b:fixedUpdate@2', 'update', 'b:update', 'lateUpdate', 'b:lateUpdate'],
-        reason: 'created before the phase; same order (0), later sequence, so it runs after the first one, and start runs right before its first callback');
+    expect(
+      log,
+      [
+        'b:onCreate',
+        'b:onEnable',
+        'fixedUpdate@2',
+        'b:start',
+        'b:fixedUpdate@2',
+        'update',
+        'b:update',
+        'lateUpdate',
+        'b:lateUpdate',
+      ],
+      reason: 'created before the phase; same order (0), later sequence, so it runs after the first one, and start runs right before its first callback',
+    );
   });
 
   test('disabled behaviours receive no gameplay callbacks; re-enabling does not restart', () {
@@ -210,10 +224,12 @@ void main() {
     // Attaching from inside a callback: created at the next boundary, so it
     // does not run in the pass that attached it.
     log.clear();
-    alpha.addBehaviour(_OnFixed(log, (b) {
-      b.gameObject.addBehaviour(Recorder(log, tag: 'nested:'));
-      b.destroy();
-    }));
+    alpha.addBehaviour(
+      _OnFixed(log, (b) {
+        b.gameObject.addBehaviour(Recorder(log, tag: 'nested:'));
+        b.destroy();
+      }),
+    );
     w.frame(1 / 60);
     expect(log.indexOf('nested:onCreate'), greaterThan(log.indexOf('fixedUpdate')));
     expect(log.contains('nested:fixedUpdate@2'), isFalse);
@@ -230,7 +246,15 @@ void main() {
     w.frame(1 / 60);
     log.clear();
     w.frame(1 / 60);
-    expect(log, ['in:fixedUpdate@1', 'out:fixedUpdate@1', 'in:afterPhysics@1', 'in:update', 'out:update', 'in:lateUpdate', 'out:lateUpdate']);
+    expect(log, [
+      'in:fixedUpdate@1',
+      'out:fixedUpdate@1',
+      'in:afterPhysics@1',
+      'in:update',
+      'out:update',
+      'in:lateUpdate',
+      'out:lateUpdate',
+    ]);
   });
 
   test('every non-physics event reaches exactly one fixedUpdate', () {
@@ -259,25 +283,34 @@ void main() {
 
     final seen = <String>[];
     final go = w.spawn();
-    go.addBehaviour(_OnFixed(<String>[], (b) {
-      seen.add('tick=${Time.tick} fixed=${Time.fixedDelta.toStringAsFixed(4)} delta=${Time.delta.toStringAsFixed(4)} frame=${Time.frame}');
-      expect(GameContext.current, same(w.context));
-      expect(b.context, same(w.context));
-    }));
+    go.addBehaviour(
+      _OnFixed(<String>[], (b) {
+        seen.add(
+          'tick=${Time.tick} fixed=${Time.fixedDelta.toStringAsFixed(4)} delta=${Time.delta.toStringAsFixed(4)} frame=${Time.frame}',
+        );
+        expect(GameContext.current, same(w.context));
+        expect(b.context, same(w.context));
+      }),
+    );
     w.frame(1 / 60);
     w.frame(1 / 30);
-    expect(seen, ['tick=1 fixed=0.0167 delta=0.0333 frame=2', 'tick=2 fixed=0.0167 delta=0.0333 frame=2'], reason: 'a 1/30 s frame runs two ticks');
+    expect(seen, [
+      'tick=1 fixed=0.0167 delta=0.0333 frame=2',
+      'tick=2 fixed=0.0167 delta=0.0333 frame=2',
+    ], reason: 'a 1/30 s frame runs two ticks');
 
     // A test context: its clock and log, its installed services.
     final ctx = TestGameContext(time: TestTime(fixedDelta: 0.5, tick: 41));
     ctx.install<_Scores>(_Scores());
     w.context = ctx;
     seen.clear();
-    go.addBehaviour(_OnFixed(<String>[], (b) {
-      Diagnostics.log('fixed=${Time.fixedDelta} tick=${Time.tick}');
-      GameContext.require().service<_Scores>().total += 1;
-      expect(() => GameContext.require().service<_Unused>(), throwsStateError);
-    }));
+    go.addBehaviour(
+      _OnFixed(<String>[], (b) {
+        Diagnostics.log('fixed=${Time.fixedDelta} tick=${Time.tick}');
+        GameContext.require().service<_Scores>().total += 1;
+        expect(() => GameContext.require().service<_Unused>(), throwsStateError);
+      }),
+    );
     w.frame(1 / 60);
     expect(ctx.diagnostics.lines, ['[game] fixed=0.5 tick=41']);
     expect(ctx.service<_Scores>().total, 1);
@@ -309,12 +342,18 @@ void main() {
     expect(spinnerType.field('speed')!.get(s), 2.5);
     expect((go.addBehaviourFromData('game.Spinner') as Spinner).speed, 1.0, reason: 'defaults kept');
 
-    expect(() => go.addBehaviourFromData('game.Missing'),
-        throwsA(isA<BehaviourDataError>().having((e) => e.typeId, 'typeId', 'game.Missing')));
-    expect(() => go.addBehaviourFromData('game.Spinner', fields: {'spedd': 1}),
-        throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'spedd')));
-    expect(() => go.addBehaviourFromData('game.Spinner', fields: {'speed': 'fast'}),
-        throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'speed')));
+    expect(
+      () => go.addBehaviourFromData('game.Missing'),
+      throwsA(isA<BehaviourDataError>().having((e) => e.typeId, 'typeId', 'game.Missing')),
+    );
+    expect(
+      () => go.addBehaviourFromData('game.Spinner', fields: {'spedd': 1}),
+      throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'spedd')),
+    );
+    expect(
+      () => go.addBehaviourFromData('game.Spinner', fields: {'speed': 'fast'}),
+      throwsA(isA<BehaviourDataError>().having((e) => e.field, 'field', 'speed')),
+    );
     expect(() => go.addBehaviourFromData('game.Spinner', version: 2), throwsA(isA<BehaviourDataError>()));
     expect(go.behaviours, hasLength(2), reason: 'nothing was attached by the failures');
   });

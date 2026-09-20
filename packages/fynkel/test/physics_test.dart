@@ -18,8 +18,10 @@ class Crate extends Behaviour {
   void onCollisionEnter(Contact contact) {
     enters++;
     final other = world.byEntity(contact.other(gameObject.entity));
-    log.add('enter ${other?.name ?? '?'} n=${contact.normalFor(gameObject.entity).y.toStringAsFixed(1)} '
-        'j>0=${contact.impulse > 0}');
+    log.add(
+      'enter ${other?.name ?? '?'} n=${contact.normalFor(gameObject.entity).y.toStringAsFixed(1)} '
+      'j>0=${contact.impulse > 0}',
+    );
     if (enters == 1) applyImpulse(const Vec3(0, 6, 0));
   }
 
@@ -64,7 +66,8 @@ void main() {
 
   /// A 20×1×20 slab whose top is y = 0.
   GameObject floor(World w) => w.spawn(name: 'floor')
-    ..add(const Collider(
+    ..add(
+      const Collider(
         shape: ColliderShape.box,
         size: Vec3(10, 0.5, 10),
         offset: Vec3(0, -0.5, 0),
@@ -72,27 +75,40 @@ void main() {
         restitution: 0,
         isSensor: false,
         layer: 1,
-        mask: 0xffffffff));
+        mask: 0xffffffff,
+      ),
+    );
 
   const unitBox = Collider(
-      shape: ColliderShape.box,
-      size: Vec3(0.5, 0.5, 0.5),
-      offset: Vec3.zero,
-      friction: 0.5,
-      restitution: 0,
-      isSensor: false,
-      layer: 1,
-      mask: 0xffffffff);
+    shape: ColliderShape.box,
+    size: Vec3(0.5, 0.5, 0.5),
+    offset: Vec3.zero,
+    friction: 0.5,
+    restitution: 0,
+    isSensor: false,
+    layer: 1,
+    mask: 0xffffffff,
+  );
   // f32-exact values so the read-back compares equal.
   const dynamicBody = RigidBody(
-      bodyType: BodyType.dynamic, mass: 2, linearDamping: 0, angularDamping: 0.0625, gravityScale: 1, ccd: false);
+    bodyType: BodyType.dynamic,
+    mass: 2,
+    linearDamping: 0,
+    angularDamping: 0.0625,
+    gravityScale: 1,
+    ccd: false,
+  );
 
   test('a crate falls onto the floor: physics owns it, contacts reach its behaviour, it sleeps', () {
     final w = fresh();
     floor(w);
-    final crate = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 3, 0)), name: 'crate')
-      ..add(dynamicBody)
-      ..add(unitBox);
+    final crate =
+        w.spawn(
+            transform: identityTransform.copyWith(position: const Vec3(0, 3, 0)),
+            name: 'crate',
+          )
+          ..add(dynamicBody)
+          ..add(unitBox);
     final b = crate.addBehaviour(Crate());
     expect(crate.get<RigidBody>(), dynamicBody, reason: 'read-your-writes before the spawn');
     w.frame(1 / 60); // the spawn; the components follow it into the next tick
@@ -133,11 +149,17 @@ void main() {
   test('body commands: impulse, velocity, teleport; rejections name the reason', () {
     final w = fresh();
     floor(w);
-    final crate = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)), name: 'crate')
-      ..add(dynamicBody)
-      ..add(unitBox);
-    final wall = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 5)), name: 'wall')
-      ..add(unitBox);
+    final crate =
+        w.spawn(
+            transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)),
+            name: 'crate',
+          )
+          ..add(dynamicBody)
+          ..add(unitBox);
+    final wall = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 5)),
+      name: 'wall',
+    )..add(unitBox);
     w.frame(1 / 60); // spawns, components and bodies in one tick (M3-08b)
     crate.applyImpulse(const Vec3(4, 0, 0));
     w.frame(1 / 60);
@@ -160,18 +182,26 @@ void main() {
     crate.setKinematicTarget(Vec3.zero); // not kinematic
     crate.applyForce(const Vec3(double.nan, 0, 0)); // not finite
     w.frame(1 / 60);
-    expect(seen.map((d) => d.code),
-        [DiagnosticCode.missingComponent, DiagnosticCode.invalidPayload, DiagnosticCode.invalidPayload]);
+    expect(seen.map((d) => d.code), [
+      DiagnosticCode.missingComponent,
+      DiagnosticCode.invalidPayload,
+      DiagnosticCode.invalidPayload,
+    ]);
     expect(seen.map((d) => d.component), [RigidBody.componentId, RigidBody.componentId, RigidBody.componentId]);
     expect(seen[1].message, contains('kinematic'));
   });
 
   test('a sensor reports triggers once per entry and exit', () {
     final w = fresh();
-    final zone = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 2, 0)), name: 'zone')
-      ..add(unitBox.copyWith(isSensor: true, size: const Vec3(1, 0.5, 1)));
+    final zone = w.spawn(
+      transform: identityTransform.copyWith(position: const Vec3(0, 2, 0)),
+      name: 'zone',
+    )..add(unitBox.copyWith(isSensor: true, size: const Vec3(1, 0.5, 1)));
     final s = zone.addBehaviour(Sensor());
-    w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 5, 0)), name: 'ball')
+    w.spawn(
+        transform: identityTransform.copyWith(position: const Vec3(0, 5, 0)),
+        name: 'ball',
+      )
       ..add(dynamicBody)
       ..add(unitBox.copyWith(shape: ColliderShape.sphere, size: const Vec3(0.25, 0, 0)));
     for (var i = 0; i < 120; i++) {
@@ -183,9 +213,13 @@ void main() {
   test('raycast, shape cast and overlap read the last step', () {
     final w = fresh();
     final f = floor(w);
-    final crate = w.spawn(transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)), name: 'crate')
-      ..add(dynamicBody)
-      ..add(unitBox);
+    final crate =
+        w.spawn(
+            transform: identityTransform.copyWith(position: const Vec3(0, 0.5, 0)),
+            name: 'crate',
+          )
+          ..add(dynamicBody)
+          ..add(unitBox);
     w.frame(1 / 60);
     w.frame(1 / 60);
     final hit = w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0));
@@ -200,7 +234,12 @@ void main() {
     expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), maxDistance: 1), isNull);
     expect(w.raycast(const Vec3(0, 5, 0), const Vec3(0, -1, 0), mask: 2), isNull, reason: 'nothing on layer 1');
 
-    final sweep = w.shapeCast(ColliderShape.sphere, const Vec3(0.25, 0, 0), const Vec3(3, 0.5, 0), const Vec3(-1, 0, 0));
+    final sweep = w.shapeCast(
+      ColliderShape.sphere,
+      const Vec3(0.25, 0, 0),
+      const Vec3(3, 0.5, 0),
+      const Vec3(-1, 0, 0),
+    );
     expect(sweep, isNotNull);
     expect(sweep!.entity, crate.entity);
     expect(sweep.distance, closeTo(3 - 0.5 - 0.25, 0.05));
@@ -246,8 +285,10 @@ void main() {
     expect(crate.localTransform.position.y, closeTo(0.5, 0.05));
     expect(crate.get<Collider>()!.layer, 2);
     expect(w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['props']))!.entity, crate.entity);
-    expect(w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['default']))!.entity,
-        isNot(crate.entity));
+    expect(
+      w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['default']))!.entity,
+      isNot(crate.entity),
+    );
   });
 
   test('a body added and pushed on an object spawned in the same tick moves', () {

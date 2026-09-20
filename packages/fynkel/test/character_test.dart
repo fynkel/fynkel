@@ -50,7 +50,8 @@ void main() {
 
   /// A 20×1×20 slab whose top is y = 0.
   GameObject floor(World w) => w.spawn(name: 'floor')
-    ..add(const Collider(
+    ..add(
+      const Collider(
         shape: ColliderShape.box,
         size: Vec3(10, 0.5, 10),
         offset: Vec3(0, -0.5, 0),
@@ -58,26 +59,29 @@ void main() {
         restitution: 0,
         isSensor: false,
         layer: 1,
-        mask: 0xffffffff));
+        mask: 0xffffffff,
+      ),
+    );
 
   /// A controller nothing drives: the game sends `move`/`jump`.
   const bare = CharacterController(
-      radius: 0.4,
-      height: 1.8,
-      center: Vec3(0, 0.9, 0),
-      skinWidth: 0.02,
-      maxSlope: 0.7853982,
-      maxStepHeight: 0.3,
-      snapToGround: 0.2,
-      gravityScale: 1,
-      mass: 70,
-      speed: 4,
-      jumpSpeed: 5,
-      turnSpeed: 10,
-      moveAction: '',
-      jumpAction: '',
-      layer: 1,
-      mask: 0xffffffff);
+    radius: 0.4,
+    height: 1.8,
+    center: Vec3(0, 0.9, 0),
+    skinWidth: 0.02,
+    maxSlope: 0.7853982,
+    maxStepHeight: 0.3,
+    snapToGround: 0.2,
+    gravityScale: 1,
+    mass: 70,
+    speed: 4,
+    jumpSpeed: 5,
+    turnSpeed: 10,
+    moveAction: '',
+    jumpAction: '',
+    layer: 1,
+    mask: 0xffffffff,
+  );
 
   test('the recorded walk lands the Player on the Platform and the rig follows', () {
     final (w, player, camera) = loaded();
@@ -85,9 +89,12 @@ void main() {
     expect(camera.get<ThirdPersonCamera>()!.target, 'Player');
     final recording = loadInputRecording('$fixture/test/platform.input.json');
     var airborne = 0;
-    recording.replay(w, fixedUpdate: (_) {
-      if (!(player.characterState()?.grounded ?? true)) airborne++;
-    });
+    recording.replay(
+      w,
+      fixedUpdate: (_) {
+        if (!(player.characterState()?.grounded ?? true)) airborne++;
+      },
+    );
     expect(airborne, inInclusiveRange(40, 60), reason: 'one jump of ~0.8 s');
     final state = player.characterState()!;
     expect(state.grounded, isTrue);
@@ -161,14 +168,28 @@ void main() {
     hero.applyImpulse(Vec3.up); // a character takes no body command
     hero.move(const Vec3(double.nan, 0, 0)); // not finite
     w.frame(1 / 60);
-    expect(seen.map((d) => d.code),
-        [DiagnosticCode.missingComponent, DiagnosticCode.missingComponent, DiagnosticCode.invalidPayload]);
-    expect(seen.map((d) => d.component),
-        [CharacterController.componentId, RigidBody.componentId, CharacterController.componentId]);
+    expect(seen.map((d) => d.code), [
+      DiagnosticCode.missingComponent,
+      DiagnosticCode.missingComponent,
+      DiagnosticCode.invalidPayload,
+    ]);
+    expect(seen.map((d) => d.component), [
+      CharacterController.componentId,
+      RigidBody.componentId,
+      CharacterController.componentId,
+    ]);
     seen.clear();
     // A RigidBody next to the controller is reported once and ignored.
-    hero.add(const RigidBody(
-        bodyType: BodyType.dynamic, mass: 1, linearDamping: 0, angularDamping: 0, gravityScale: 1, ccd: false));
+    hero.add(
+      const RigidBody(
+        bodyType: BodyType.dynamic,
+        mass: 1,
+        linearDamping: 0,
+        angularDamping: 0,
+        gravityScale: 1,
+        ccd: false,
+      ),
+    );
     w.frame(1 / 60);
     w.frame(1 / 60);
     expect(seen.map((d) => (d.code, d.component)), [(DiagnosticCode.invalidPayload, CharacterController.componentId)]);
@@ -197,10 +218,13 @@ void main() {
     }
     final yaw = camera.get<ThirdPersonCamera>()!.yaw;
     expect(yaw, closeTo(math.pi / 2, 1e-3));
-    w.frame(1 / 60, input: const [
-      InputEvent.axis(InputDevice.gamepad, 'rightStick', 0, 0),
-      InputEvent.down(InputDevice.keyboard, 'W'),
-    ]);
+    w.frame(
+      1 / 60,
+      input: const [
+        InputEvent.axis(InputDevice.gamepad, 'rightStick', 0, 0),
+        InputEvent.down(InputDevice.keyboard, 'W'),
+      ],
+    );
     final start = player.localTransform.position;
     for (var i = 0; i < 30; i++) {
       w.frame(1 / 60);

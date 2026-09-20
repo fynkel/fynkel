@@ -927,37 +927,16 @@ impl ExtractRenderer {
         let aspect = self.width as f32 / self.height as f32;
         let (view_proj, camera_pos, component, shape) = match &extract.camera {
             Some(c) => {
-                let (_, rotation, translation) = c.world.to_scale_rotation_translation();
-                let view = Mat4::from_rotation_translation(rotation, translation).inverse();
-                let (proj, shape) = match c.camera.projection {
-                    Projection::Perspective => (
-                        glam::camera::rh::proj::directx::perspective(
-                            c.camera.fov_y,
-                            aspect,
-                            c.camera.near,
-                            c.camera.far,
-                        ),
-                        shadow::Shape::Perspective {
-                            fov_y: c.camera.fov_y,
-                        },
-                    ),
-                    Projection::Orthographic => {
-                        let h = c.camera.ortho_height * 0.5;
-                        let w = h * aspect;
-                        (
-                            glam::camera::rh::proj::directx::orthographic(
-                                -w,
-                                w,
-                                -h,
-                                h,
-                                c.camera.near,
-                                c.camera.far,
-                            ),
-                            shadow::Shape::Orthographic {
-                                height: c.camera.ortho_height,
-                            },
-                        )
-                    }
+                let (_, _, translation) = c.world.to_scale_rotation_translation();
+                let view = fynkel_core::view_matrix(&c.world);
+                let proj = fynkel_core::projection_matrix(&c.camera, aspect);
+                let shape = match c.camera.projection {
+                    Projection::Perspective => shadow::Shape::Perspective {
+                        fov_y: c.camera.fov_y,
+                    },
+                    Projection::Orthographic => shadow::Shape::Orthographic {
+                        height: c.camera.ortho_height,
+                    },
                 };
                 stats.scene_camera = true;
                 (

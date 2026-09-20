@@ -50,8 +50,12 @@ void main() {
     final s = w.stats();
     final inKib = s.bytesIn / steps / 1024;
     final outKib = s.bytesOut / steps / 1024;
-    print('[bench] bridge @ $n entities: encode+submit ${encodeUs ~/ steps} us/tick, step ${stepUs ~/ steps} us/tick, '
-        'read ${readUs ~/ steps} us/tick | in ${inKib.toStringAsFixed(1)} KiB/tick, out ${outKib.toStringAsFixed(1)} KiB/tick');
-    print('[bench] ffi calls/tick: ${(s.ffiCalls / steps).toStringAsFixed(1)}, copies/tick: ${(s.dartCopies / steps).toStringAsFixed(1)}');
+    print(
+      '[bench] bridge @ $n entities: encode+submit ${encodeUs ~/ steps} us/tick, step ${stepUs ~/ steps} us/tick, '
+      'read ${readUs ~/ steps} us/tick | in ${inKib.toStringAsFixed(1)} KiB/tick, out ${outKib.toStringAsFixed(1)} KiB/tick',
+    );
+    print(
+      '[bench] ffi calls/tick: ${(s.ffiCalls / steps).toStringAsFixed(1)}, copies/tick: ${(s.dartCopies / steps).toStringAsFixed(1)}',
+    );
   });
 }

@@ -36,6 +36,8 @@ export 'generated/schema.g.dart'
         RigidBody,
         Rotator,
         Projection,
+        ProjectedPointRecord,
+        ProjectionAnchorRecord,
         Settings,
         SnapshotTransformRecord,
         SpotLight,
@@ -51,6 +53,7 @@ export 'math.dart';
 export 'src/diagnostics.dart';
 export 'src/events.dart';
 export 'src/input.dart';
+export 'src/model.dart';
 export 'src/physics.dart' show BodyState, CharacterState, PhysicsHit, PhysicsSettings;
 export 'src/systems.dart';
 export 'src/recording.dart';

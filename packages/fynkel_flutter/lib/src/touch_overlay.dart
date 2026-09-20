@@ -244,10 +244,7 @@ class _ButtonState extends State<_Button> {
         width: r * 2,
         height: r * 2,
         alignment: Alignment.center,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: down ? widget.activeColor : widget.color,
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: down ? widget.activeColor : widget.color),
         child: Text(
           widget.control.label ?? widget.control.name,
           style: const TextStyle(color: Color(0xDD000000), fontWeight: FontWeight.w600),

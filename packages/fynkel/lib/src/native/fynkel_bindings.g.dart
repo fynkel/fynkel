@@ -246,6 +246,54 @@ FynkelStatus fynkel_world_physics_query(
   _fynkel_world_physics_query(world, buffer, length, out_view),
 );
 
+/// Projects a PROJECTION_ANCHORS buffer into a width x height viewport
+/// (the frame's camera and interpolated poses, the renderer's matrices):
+/// the response is a QUERY buffer of one ProjectedPointRecord per anchor
+/// in request order (x/y in that viewport's pixels, origin top-left, y
+/// down; depth metres along the view axis; flags above), valid until the
+/// next query or mutating call. out_info/out_view may be NULL. A framing
+/// error is FYNKEL_STATUS_PROTOCOL with an empty view.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Uint32,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<FynkelProjectionInfo>,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_project')
+external int _fynkel_world_project(
+  ffi.Pointer<FynkelWorld> world,
+  int width,
+  int height,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+  ffi.Pointer<FynkelProjectionInfo> out_info,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_project(
+  ffi.Pointer<FynkelWorld> world,
+  int width,
+  int height,
+  ffi.Pointer<ffi.Uint8> buffer,
+  int length,
+  ffi.Pointer<FynkelProjectionInfo> out_info,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_project(
+    world,
+    width,
+    height,
+    buffer,
+    length,
+    out_info,
+    out_view,
+  ),
+);
+
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelWorld>,
@@ -542,7 +590,11 @@ enum FynkelBufferKind {
   /// PhysicsQueryRecord per spatial query (host -> world;
   /// fynkel_world_physics_query); answered in a QUERY buffer of
   /// PhysicsHitRecords.
-  FYNKEL_BUFFER_PHYSICS_QUERIES(8);
+  FYNKEL_BUFFER_PHYSICS_QUERIES(8),
+
+  /// ProjectionAnchorRecord per anchor (host -> world; fynkel_world_project);
+  /// answered in a QUERY buffer of ProjectedPointRecords (M3-13).
+  FYNKEL_BUFFER_PROJECTION_ANCHORS(9);
 
   final int value;
   const FynkelBufferKind(this.value);
@@ -556,6 +608,7 @@ enum FynkelBufferKind {
     6 => FYNKEL_BUFFER_INPUT_EVENTS,
     7 => FYNKEL_BUFFER_INPUT_ACTIONS,
     8 => FYNKEL_BUFFER_PHYSICS_QUERIES,
+    9 => FYNKEL_BUFFER_PROJECTION_ANCHORS,
     _ => throw ArgumentError('Unknown value for FynkelBufferKind: $value'),
   };
 }
@@ -929,6 +982,20 @@ final class FynkelWorldStats extends ffi.Struct {
   external int poisoned;
 }
 
+final class FynkelProjectionInfo extends ffi.Struct {
+  /// the entity rendered from; 0 = no camera
+  @ffi.Uint64()
+  external int camera;
+
+  /// anchors projected
+  @ffi.Uint32()
+  external int projected;
+
+  /// anchors beyond the bound
+  @ffi.Uint32()
+  external int dropped;
+}
+
 /// Runtime prefab instantiation (M3-08b, blueprint §6 item 12). Spawns,
 /// now, an anchor entity named `name_utf8` (empty: the prefab's name) with
 /// the given local transform under `parent` (0 = root), and the cooked
@@ -974,5 +1041,19 @@ const int FYNKEL_ABI_VERSION = 1;
 const int FYNKEL_BUFFER_MAGIC = 1263425862;
 
 const int FYNKEL_BUFFER_HEADER_SIZE = 24;
+
+const int FYNKEL_MAX_PROJECTION_ANCHORS = 64;
+
+const int FYNKEL_PROJECTED_IN_FRONT = 1;
+
+const int FYNKEL_PROJECTED_ON_SCREEN = 2;
+
+const int FYNKEL_PROJECTED_OCCLUDED = 4;
+
+const int FYNKEL_PROJECTED_MISSING = 8;
+
+const int FYNKEL_PROJECTED_NO_CAMERA = 16;
+
+const int FYNKEL_PROJECTED_DROPPED = 32;
 
 const int FYNKEL_LOAD_ADDITIVE = 1;

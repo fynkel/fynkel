@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:{{package}}/game/game.dart';
+import 'package:{{package}}/game/hud_model.dart';
 import 'package:{{package}}/game/mover.dart';
 import 'package:{{package}}/game/spinner.dart';
 
@@ -65,6 +66,37 @@ void main() {
     expect(mover.airTime, isNull);
     expect(end.y, closeTo(start.y, 1e-6), reason: 'landed');
     expect(game.world.input.held('move'), isFalse, reason: 'the reset released everything');
+  });
+
+  test('the mover writes the HUD model; a label follows the cube', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final hud = game.hud;
+    expect(game.world.context.service<HudModel>(), same(hud));
+    var positionChanges = 0, jumpChanges = 0;
+    hud.position.addListener(() => positionChanges++);
+    hud.jumps.addListener(() => jumpChanges++);
+    game.frame(1 / 60);
+    expect(hud.position.value, game.world.find('Cube')!.transform.position, reason: 'written from update');
+    expect(positionChanges, 1);
+    game.frame(1 / 60);
+    expect(positionChanges, 1, reason: 'nothing moved: no notification');
+    final recording = loadInputRecording('$projectDir/test/walk.input.json');
+    recording.replay(game.world);
+    expect(hud.jumps.value, 2);
+    expect(jumpChanges, 2, reason: 'once per jump, not per frame');
+    expect(hud.airborne.value, isFalse);
+    expect(positionChanges, greaterThan(1));
+
+    // The projection view (docs/hud.md) places a point above the cube for
+    // the scene's camera — what a `WorldLabel` in lib/main.dart sits at.
+    final anchor = game.world.projection.add(game.world.find('Cube')!, offset: const Vec3(0, 0.9, 0));
+    game.world.projection.setViewport(1280, 720);
+    expect(game.world.projection.update(), 1);
+    expect(anchor.visible, isTrue, reason: '$anchor');
+    expect(anchor.x, inInclusiveRange(0, 1280));
+    expect(anchor.y, inInclusiveRange(0, 720));
+    expect(anchor.depth, greaterThan(0));
   });
 
   test('native components are typed from Dart: read, change, add, remove', () {

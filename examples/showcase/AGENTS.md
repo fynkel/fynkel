@@ -350,6 +350,42 @@ frame's raw edges. Tests: a recording is (`{ "fynkel":
 pressed/released/held). Without a world: `TestGameContext(input:
 TestInput(actions: [('jump', ActionKind.button)]))`.
 
+## HUD models and world labels (screens never read the engine snapshot)
+
+A `GameModel` holds one `ModelValue<T>` per fact a screen shows (`late
+final score = field(ModelValue(0));`); install it in the world's context
+(`world.context.install(HudModel())`, read back with
+`world.context.service<HudModel>()`) and write the fields from a
+behaviour's `update` (the starter's `Mover.update`: position, jumps,
+airborne); the app writes app facts (`hud.paused`). A field notifies on `!=` only, so a bound
+widget rebuilds when the game changed what it shows and never per frame.
+Bind in Flutter (package:fynkel_flutter): `ModelBinding<HudModel>(model:
+game.hud, child: …)` hands the model down, `ModelBuilder<int>(value:
+hud.score, builder: (_, score, _) => Text('$score'))` rebuilds one
+widget, `hud.score.listenable` is a `ValueListenable` for
+`ValueListenableBuilder`. Menu / HUD / pause / settings / results: a model
+field (`screen`, `paused`) the widget tree switches on, with the game's
+own state left in the world (`setPaused` on the view stops the loop;
+`SceneManager.transition` changes scenes).
+
+Labels in the 3D scene (lib/main.dart labels the Robot, the crates and
+the gold block): `ProjectionLayer(world: game.world, children:
+[WorldLabel(target: robot, offset: Vec3(0, 2.4, 0), text: 'Robot'),
+ProjectedAnchor(target: crate, alignment: Alignment.center, child: …)])`
+in the view's `overlay` — the layer sizes the world's projection view from
+its own layout, `FynkelGameView` projects every anchor once per frame
+(`world.projection.update()`) with the frame's camera and interpolated
+poses, and the layer moves its children with paint transforms (no
+rebuilds). A child whose point is off screen, behind the camera or on a
+dead object is not painted (`clampToEdges: true` keeps an in-front marker
+on the edge). Occlusion is opt-in: `occlusionMask: world.layerMask(['walls'])`
+hides the child when a collider on those layers sits between the camera
+and the point; without a mask a label is never hidden by geometry. At most
+64 anchors project per frame (blueprint §10); beyond that the newest are
+dropped and `FYN-R0012` (`tooManyAnchors`, informational) is reported
+once. In a test: `world.projection.add(object, offset:)`, `setViewport(w,
+h)`, `update()`, then `anchor.x`/`y`/`visible`/`occluded`/`depth`.
+
 ## Do
 
 - Run the loop above before declaring work done; paste the failing command's output when it fails.

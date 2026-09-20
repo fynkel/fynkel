@@ -41,7 +41,9 @@ void main() {
   });
 
   test('returns null when the app bundles no cache', () async {
-    final bundle = _FakeBundle({'assets/logo.png': [1, 2, 3]});
+    final bundle = _FakeBundle({
+      'assets/logo.png': [1, 2, 3],
+    });
     expect(await unpackBundledCache(into: tmp.path, bundle: bundle), isNull);
     expect(File('${tmp.path}/index.json').existsSync(), isFalse);
   });

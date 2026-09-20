@@ -142,7 +142,8 @@ class NativeWorld {
         _step = calloc<FynkelStepResult>(),
         _query = calloc<FynkelQueryDesc>(),
         _view = calloc<FynkelBufferView>(),
-        _stats = calloc<FynkelWorldStats>();
+        _stats = calloc<FynkelWorldStats>(),
+        _projection = calloc<FynkelProjectionInfo>();
 
   Pointer<FynkelWorld> _w;
   final Pointer<FynkelFramePlan> _plan;
@@ -151,6 +152,7 @@ class NativeWorld {
   final Pointer<FynkelQueryDesc> _query;
   final Pointer<FynkelBufferView> _view;
   final Pointer<FynkelWorldStats> _stats;
+  final Pointer<FynkelProjectionInfo> _projection;
 
   // Reused native scratch for command bytes (grown on demand) so a submit is
   // one memcpy + one FFI call, no allocation in steady state.
@@ -262,6 +264,7 @@ class NativeWorld {
   final _queryView = _ViewCache();
   final _inputView = _ViewCache();
   final _physicsView = _ViewCache();
+  final _projectionView = _ViewCache();
 
   WireBuffer _wrap(FynkelBufferView v, _ViewCache cache) {
     if (v.length == 0) return WireBuffer.empty;
@@ -331,6 +334,33 @@ class NativeWorld {
     final s = fynkel_world_physics_query(_w, _scratch, length, _view);
     _check(s, 'physics_query');
     return _wrap(_view.ref, _physicsView);
+  }
+
+  /// Projects a `ProjectionAnchors` buffer (the first [length] bytes of
+  /// [bytes], M3-13) into a [width] × [height] viewport: one memcpy into
+  /// the reused scratch, one FFI call; the points come back as
+  /// `ProjectedPointRecord`s in a query buffer read in place, valid until
+  /// the next query or mutating call, with the camera entity (0 = none)
+  /// and the projected/dropped counts.
+  (WireBuffer, int camera, int projected, int dropped) project(Uint8List bytes, int length, int width, int height) {
+    _copyToScratch(bytes, length);
+    ffiCalls++;
+    final s = fynkel_world_project(_w, width, height, _scratch, length, _projection, _view);
+    _check(s, 'project');
+    final info = _projection.ref;
+    return (_wrap(_view.ref, _projectionView), info.camera, info.projected, info.dropped);
+  }
+
+  void _copyToScratch(Uint8List bytes, int length) {
+    if (length > _scratchLen) {
+      if (_scratch != nullptr) calloc.free(_scratch);
+      _scratchLen = length * 2;
+      _scratch = calloc<Uint8>(_scratchLen);
+      _scratchView = _scratch.asTypedList(_scratchLen);
+    }
+    _scratchView.setRange(0, length, bytes);
+    dartCopies++;
+    dartBytesCopied += length;
   }
 
   /// `fynkel_world_load_project`: the startup scene of the cooked cache at
@@ -455,6 +485,7 @@ class NativeWorld {
     calloc.free(_query);
     calloc.free(_view);
     calloc.free(_stats);
+    calloc.free(_projection);
     if (_scratch != nullptr) calloc.free(_scratch);
   }
 }

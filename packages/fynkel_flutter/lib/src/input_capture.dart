@@ -84,8 +84,14 @@ class FynkelInputCapture {
       case PointerMoveEvent() || PointerHoverEvent():
         if (event is PointerMoveEvent) _buttonsChanged(event.buttons);
         if (!pointerCaptured && event.delta != Offset.zero) {
-          _events.add(InputEvent.move(
-              InputDevice.mouse, 'delta', event.delta.dx * devicePixelRatio, -event.delta.dy * devicePixelRatio));
+          _events.add(
+            InputEvent.move(
+              InputDevice.mouse,
+              'delta',
+              event.delta.dx * devicePixelRatio,
+              -event.delta.dy * devicePixelRatio,
+            ),
+          );
         }
       case PointerScrollEvent():
         // Positive away from the user (up), in logical pixels of scroll.

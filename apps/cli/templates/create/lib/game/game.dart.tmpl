@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:fynkel/fynkel.dart';
 
 import '../generated/behaviours.g.dart';
+import 'hud_model.dart';
 
 class Game {
   Game._(this.world, this.report);
@@ -35,6 +36,8 @@ class Game {
   static Game load(String projectDir, {String? cacheDir, String? settingsPath, NativeLibrary? library}) {
     final world = World.create(library: library);
     registerBehaviours(world.registry);
+    // The HUD's observable model: behaviours write it, widgets bind to it.
+    world.context.install(HudModel());
     final warnings = <LoadDiagnostic>[];
     world.onLoadDiagnostics = warnings.addAll;
     final report = world.loadProject(projectDir, cacheDir: cacheDir);
@@ -52,6 +55,9 @@ class Game {
   /// The user's settings service (`world.context.settings`).
   SettingsService get settings => world.context.settings;
 
+  /// The HUD's fields (`Mover.update` writes them; lib/main.dart binds them).
+  HudModel get hud => world.context.service<HudModel>();
+
   /// Scene flow: `scenes.transition(id)` loads at the next frame.
   SceneManager get scenes => world.scenes;
 
@@ -59,7 +65,10 @@ class Game {
   /// native step, `afterPhysics`), then `update`/`lateUpdate`.
   FramePlan frame(double dtSeconds) => world.frame(dtSeconds);
 
-  void dispose() => world.dispose();
+  void dispose() {
+    hud.dispose();
+    world.dispose();
+  }
 }
 
 /// The project directory this process should load: `FYNKEL_PROJECT`

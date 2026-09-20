@@ -47,11 +47,15 @@ void main() {
     final hero = w.spawn(name: 'Hero');
     final lamp = w.spawn(name: 'Lamp')
       ..add(const Follow(target: 'Hero', offset: Vec3(0, 2, 0), smoothing: 0, lookAt: false));
-    final spinner = w.spawn(name: 'Spinner', transform: const Transform(position: Vec3(3, 0, 0), rotation: Quat.identity, scale: Vec3.one))
-      ..add(const Rotator(axis: Vec3(0, 1, 0), speed: 2, space: MotionSpace.local))
-      ..add(const Oscillate(axis: Vec3(0, 1, 0), amplitude: 0.5, frequency: 1, phase: 0, space: MotionSpace.world))
-      ..add(const LookAtCamera(lockY: true))
-      ..add(const LifetimeDespawn(seconds: 0.5));
+    final spinner =
+        w.spawn(
+            name: 'Spinner',
+            transform: const Transform(position: Vec3(3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+          )
+          ..add(const Rotator(axis: Vec3(0, 1, 0), speed: 2, space: MotionSpace.local))
+          ..add(const Oscillate(axis: Vec3(0, 1, 0), amplitude: 0.5, frequency: 1, phase: 0, space: MotionSpace.world))
+          ..add(const LookAtCamera(lockY: true))
+          ..add(const LifetimeDespawn(seconds: 0.5));
     tick(w, 2);
     expect(lamp.get<Follow>()?.target, 'Hero');
     expect(spinner.get<Rotator>()?.speed, 2);
@@ -86,13 +90,18 @@ void main() {
     w
       ..throwOnDiagnostics = false
       ..onDiagnostics = seen.addAll;
-    w.spawn(name: 'Fountain').add(const Emitter(
-        prefab: AssetRef('c0000000-0000-4000-8000-000000000041'),
-        rate: 60,
-        lifetime: 1,
-        maxAlive: 0,
-        velocity: Vec3(0, 0, 0),
-        enabled: true));
+    w
+        .spawn(name: 'Fountain')
+        .add(
+          const Emitter(
+            prefab: AssetRef('c0000000-0000-4000-8000-000000000041'),
+            rate: 60,
+            lifetime: 1,
+            maxAlive: 0,
+            velocity: Vec3(0, 0, 0),
+            enabled: true,
+          ),
+        );
     tick(w, 4);
     final reports = seen.where((d) => d.code == DiagnosticCode.prefabUnavailable).toList();
     expect(reports, hasLength(1), reason: '$seen');
@@ -143,7 +152,11 @@ void main() {
     expect(by[SystemKind.step]!.entities, 32);
     expect(by[SystemKind.rotator]!.entities, 1);
     expect(by[SystemKind.oscillate]!.entities, 1);
-    expect(by[SystemKind.lifetimeDespawn]!.entities, inInclusiveRange(11, 12), reason: 'counted before this tick\'s emission');
+    expect(
+      by[SystemKind.lifetimeDespawn]!.entities,
+      inInclusiveRange(11, 12),
+      reason: 'counted before this tick\'s emission',
+    );
     expect(by[SystemKind.emitter]!.entities, 1);
     expect(by[SystemKind.physics]!.entities, 12 + 13);
     expect(by[SystemKind.follow]!.entities, 1);

@@ -71,6 +71,10 @@ impl DiagnosticCode {
     /// loaded scene's emitters name); reported once, nothing is spawned
     /// (M3-10).
     pub const PREFAB_UNAVAILABLE: DiagnosticCode = DiagnosticCode(14);
+    /// A projection request (`World::project`, M3-13) with more than
+    /// `MAX_PROJECTION_ANCHORS` anchors: the first 64 are projected, the
+    /// rest come back `PROJECTED_DROPPED`.
+    pub const TOO_MANY_ANCHORS: DiagnosticCode = DiagnosticCode(15);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -88,6 +92,7 @@ impl DiagnosticCode {
             12 => "wrong_lane",
             13 => "mesh_unavailable",
             14 => "prefab_unavailable",
+            15 => "too_many_anchors",
             _ => "unknown",
         }
     }

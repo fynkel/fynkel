@@ -78,36 +78,99 @@ void main() {
     SpawnCommand.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
-  check('DestroyCommand', DestroyCommand(entity: entity(9, 1)), DestroyCommand.wireSize, DestroyCommand.decode,
-      (v, d, o, s) => v.encode(d, o, s));
-  check('SetTransformCommand', SetTransformCommand(entity: entity(2, 2), transform: transform),
-      SetTransformCommand.wireSize, SetTransformCommand.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('SetParentCommand', SetParentCommand(child: entity(5, 1), parent: null, keepWorld: true),
-      SetParentCommand.wireSize, SetParentCommand.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('SetNameCommand', SetNameCommand(entity: entity(1, 1), name: ''), SetNameCommand.wireSize,
-      SetNameCommand.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('SpawnedEvent', SpawnedEvent(tempId: 42, entity: entity(11, 1)), SpawnedEvent.wireSize, SpawnedEvent.decode,
-      (v, d, o, s) => v.encode(d, o, s));
-  check('DestroyedEvent', DestroyedEvent(entity: entity(11, 1)), DestroyedEvent.wireSize, DestroyedEvent.decode,
-      (v, d, o, s) => v.encode(d, o, s));
-  check('ParentChangedEvent', ParentChangedEvent(child: entity(5, 1), parent: entity(6, 1)),
-      ParentChangedEvent.wireSize, ParentChangedEvent.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('MissedDeadlineEvent', const MissedDeadlineEvent(droppedSeconds: 0.1), MissedDeadlineEvent.wireSize,
-      MissedDeadlineEvent.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('SceneReadyEvent', const SceneReadyEvent(scene: AssetRef('0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff')),
-      SceneReadyEvent.wireSize, SceneReadyEvent.decode, (v, d, o, s) => v.encode(d, o, s));
   check(
-      'ContactEvent',
-      ContactEvent(a: entity(1, 1), b: entity(2, 1), point: const Vec3(0.5, 1.0, -0.25), normal: const Vec3(0, 1, 0), impulse: 3.5),
-      ContactEvent.wireSize,
-      ContactEvent.decode,
-      (v, d, o, s) => v.encode(d, o, s));
-  check('SnapshotTransformRecord', SnapshotTransformRecord(entity: entity(3, 4), local: transform, world: identity),
-      SnapshotTransformRecord.wireSize, SnapshotTransformRecord.decode, (v, d, o, s) => v.encode(d, o, s));
+    'DestroyCommand',
+    DestroyCommand(entity: entity(9, 1)),
+    DestroyCommand.wireSize,
+    DestroyCommand.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SetTransformCommand',
+    SetTransformCommand(entity: entity(2, 2), transform: transform),
+    SetTransformCommand.wireSize,
+    SetTransformCommand.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SetParentCommand',
+    SetParentCommand(child: entity(5, 1), parent: null, keepWorld: true),
+    SetParentCommand.wireSize,
+    SetParentCommand.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SetNameCommand',
+    SetNameCommand(entity: entity(1, 1), name: ''),
+    SetNameCommand.wireSize,
+    SetNameCommand.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SpawnedEvent',
+    SpawnedEvent(tempId: 42, entity: entity(11, 1)),
+    SpawnedEvent.wireSize,
+    SpawnedEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'DestroyedEvent',
+    DestroyedEvent(entity: entity(11, 1)),
+    DestroyedEvent.wireSize,
+    DestroyedEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'ParentChangedEvent',
+    ParentChangedEvent(child: entity(5, 1), parent: entity(6, 1)),
+    ParentChangedEvent.wireSize,
+    ParentChangedEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'MissedDeadlineEvent',
+    const MissedDeadlineEvent(droppedSeconds: 0.1),
+    MissedDeadlineEvent.wireSize,
+    MissedDeadlineEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SceneReadyEvent',
+    const SceneReadyEvent(scene: AssetRef('0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0ff')),
+    SceneReadyEvent.wireSize,
+    SceneReadyEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'ContactEvent',
+    ContactEvent(
+      a: entity(1, 1),
+      b: entity(2, 1),
+      point: const Vec3(0.5, 1.0, -0.25),
+      normal: const Vec3(0, 1, 0),
+      impulse: 3.5,
+    ),
+    ContactEvent.wireSize,
+    ContactEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SnapshotTransformRecord',
+    SnapshotTransformRecord(entity: entity(3, 4), local: transform, world: identity),
+    SnapshotTransformRecord.wireSize,
+    SnapshotTransformRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   check(
     'DiagnosticRecord',
     DiagnosticRecord(
-        commandIndex: 3, code: 2, entity: entity(8, 8), component: 1, lane: 1, message: 'stale or unknown entity'),
+      commandIndex: 3,
+      code: 2,
+      entity: entity(8, 8),
+      component: 1,
+      lane: 1,
+      message: 'stale or unknown entity',
+    ),
     DiagnosticRecord.wireSize,
     DiagnosticRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -128,45 +191,64 @@ void main() {
   check(
     'Camera',
     const Camera(
-        projection: Projection.orthographic,
-        fovY: 1.25,
-        orthoHeight: 10.0,
-        near: 0.1,
-        far: 1000.0,
-        priority: -1,
-        exposureMode: ExposureMode.manual,
-        exposure: 13.5),
+      projection: Projection.orthographic,
+      fovY: 1.25,
+      orthoHeight: 10.0,
+      near: 0.1,
+      far: 1000.0,
+      priority: -1,
+      exposureMode: ExposureMode.manual,
+      exposure: 13.5,
+    ),
     Camera.wireSize,
     Camera.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
-  check('DirectionalLight', const DirectionalLight(color: Vec3(1.0, 0.95, 0.9), intensity: 10000.0, castShadows: true),
-      DirectionalLight.wireSize, DirectionalLight.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('PointLight', const PointLight(color: Vec3(0.2, 0.4, 1.0), intensity: 800.0, range: 12.5), PointLight.wireSize,
-      PointLight.decode, (v, d, o, s) => v.encode(d, o, s));
   check(
-      'SpotLight',
-      const SpotLight(color: Vec3(1.0, 0.9, 0.8), intensity: 1500.0, range: 15.0, innerAngle: 0.4, outerAngle: 0.6),
-      SpotLight.wireSize,
-      SpotLight.decode,
-      (v, d, o, s) => v.encode(d, o, s));
+    'DirectionalLight',
+    const DirectionalLight(color: Vec3(1.0, 0.95, 0.9), intensity: 10000.0, castShadows: true),
+    DirectionalLight.wireSize,
+    DirectionalLight.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   check(
-      'Environment',
-      const Environment(
-          ambientColor: Vec3(0.8, 0.9, 1.0),
-          ambientIntensity: 1500.0,
-          sky: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'image/1'),
-          skyIntensity: 5000.0,
-          skyRotation: 0.25),
-      Environment.wireSize,
-      Environment.decode,
-      (v, d, o, s) => v.encode(d, o, s));
+    'PointLight',
+    const PointLight(color: Vec3(0.2, 0.4, 1.0), intensity: 800.0, range: 12.5),
+    PointLight.wireSize,
+    PointLight.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SpotLight',
+    const SpotLight(color: Vec3(1.0, 0.9, 0.8), intensity: 1500.0, range: 15.0, innerAngle: 0.4, outerAngle: 0.6),
+    SpotLight.wireSize,
+    SpotLight.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Environment',
+    const Environment(
+      ambientColor: Vec3(0.8, 0.9, 1.0),
+      ambientIntensity: 1500.0,
+      sky: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'image/1'),
+      skyIntensity: 5000.0,
+      skyRotation: 0.25,
+    ),
+    Environment.wireSize,
+    Environment.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   test('unknown enum index and malformed asset ids fail loudly', () {
     final d = ByteData(Camera.wireSize);
     d.setUint32(0, 2, Endian.little);
     expect(() => Camera.decode(d, 0, Uint8List(0)), throwsFormatException);
     final bad = const MeshRenderer(
-        mesh: AssetRef('not-a-uuid'), material: AssetRef.none, castShadows: true, receiveShadows: true, visible: true);
+      mesh: AssetRef('not-a-uuid'),
+      material: AssetRef.none,
+      castShadows: true,
+      receiveShadows: true,
+      visible: true,
+    );
     expect(() => bad.encode(ByteData(MeshRenderer.wireSize), 0, WireStrings()), throwsFormatException);
     expect(const AssetRef('70D7BA8B-F7FB-4EBA-920D-EC9E6B968330').isValid, isFalse);
     expect(AssetRef.none.isNone, isTrue);
@@ -216,19 +298,51 @@ void main() {
     InputActionRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
-  check('CommandHeader', const CommandHeader(kind: 1, size: 64), CommandHeader.wireSize, CommandHeader.decode,
-      (v, d, o, s) => v.encode(d, o, s));
-  check('SetComponentCommand', SetComponentCommand(entity: entity(1, 1), component: 7), SetComponentCommand.wireSize,
-      SetComponentCommand.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('RemoveComponentCommand', RemoveComponentCommand(entity: entity(2, 1), component: 4),
-      RemoveComponentCommand.wireSize, RemoveComponentCommand.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('ComponentHeader', const ComponentHeader(component: 4, size: 56), ComponentHeader.wireSize,
-      ComponentHeader.decode, (v, d, o, s) => v.encode(d, o, s));
-  check('EventHeader', const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0), EventHeader.wireSize,
-      EventHeader.decode, (v, d, o, s) => v.encode(d, o, s));
+  check(
+    'CommandHeader',
+    const CommandHeader(kind: 1, size: 64),
+    CommandHeader.wireSize,
+    CommandHeader.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'SetComponentCommand',
+    SetComponentCommand(entity: entity(1, 1), component: 7),
+    SetComponentCommand.wireSize,
+    SetComponentCommand.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'RemoveComponentCommand',
+    RemoveComponentCommand(entity: entity(2, 1), component: 4),
+    RemoveComponentCommand.wireSize,
+    RemoveComponentCommand.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'ComponentHeader',
+    const ComponentHeader(component: 4, size: 56),
+    ComponentHeader.wireSize,
+    ComponentHeader.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'EventHeader',
+    const EventHeader(kind: 1, size: 16, tickLo: 0xdeadbeef, flags: 0),
+    EventHeader.wireSize,
+    EventHeader.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
   check(
     'RigidBody',
-    const RigidBody(bodyType: BodyType.kinematic, mass: 2.5, linearDamping: 0.1, angularDamping: 0.2, gravityScale: 0.5, ccd: true),
+    const RigidBody(
+      bodyType: BodyType.kinematic,
+      mass: 2.5,
+      linearDamping: 0.1,
+      angularDamping: 0.2,
+      gravityScale: 0.5,
+      ccd: true,
+    ),
     RigidBody.wireSize,
     RigidBody.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -253,7 +367,11 @@ void main() {
   check(
     'BodyCommandRecord',
     BodyCommandRecord(
-        entity: entity(1, 1), op: BodyOp.setKinematicTarget, vector: const Vec3(1, 2, 3), rotation: const Quat(0, 0.5, 0, 0.5)),
+      entity: entity(1, 1),
+      op: BodyOp.setKinematicTarget,
+      vector: const Vec3(1, 2, 3),
+      rotation: const Quat(0, 0.5, 0, 0.5),
+    ),
     BodyCommandRecord.wireSize,
     BodyCommandRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -280,7 +398,13 @@ void main() {
   );
   check(
     'PhysicsHitRecord',
-    PhysicsHitRecord(query: 7, entity: entity(3, 1), point: const Vec3(0, 3, -4.5), normal: const Vec3(0, 0, 1), distance: 4.5),
+    PhysicsHitRecord(
+      query: 7,
+      entity: entity(3, 1),
+      point: const Vec3(0, 3, -4.5),
+      normal: const Vec3(0, 0, 1),
+      distance: 4.5,
+    ),
     PhysicsHitRecord.wireSize,
     PhysicsHitRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -288,7 +412,11 @@ void main() {
   check(
     'BodyStateRecord',
     BodyStateRecord(
-        entity: entity(1, 1), linearVelocity: const Vec3(0, -9.81, 0), angularVelocity: const Vec3(0, 1, 0), sleeping: false),
+      entity: entity(1, 1),
+      linearVelocity: const Vec3(0, -9.81, 0),
+      angularVelocity: const Vec3(0, 1, 0),
+      sleeping: false,
+    ),
     BodyStateRecord.wireSize,
     BodyStateRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -434,6 +562,21 @@ void main() {
     const Settings(masterVolume: 0.8, musicVolume: 0.5, sfxVolume: 1, muted: true, quality: 'high'),
     Settings.wireSize,
     Settings.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  // M3-13.
+  check(
+    'ProjectionAnchorRecord',
+    ProjectionAnchorRecord(entity: entity(4, 2), offset: const Vec3(0, 1.5, 0), mask: 5),
+    ProjectionAnchorRecord.wireSize,
+    ProjectionAnchorRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'ProjectedPointRecord',
+    ProjectedPointRecord(entity: entity(4, 2), x: 640.5, y: 300.25, depth: 7.5, flags: 3),
+    ProjectedPointRecord.wireSize,
+    ProjectedPointRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
 }

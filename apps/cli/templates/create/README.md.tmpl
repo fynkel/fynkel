@@ -8,7 +8,7 @@ Fynkel CLI. Created by `fynkel create`.
 fynkel validate                  # the whole project: documents, references, lock
 fynkel test --headless           # the startup scene on the Rust headless host
 fynkel test --headless --input test/walk.input.json   # the same with a recorded input stream against the project's actions
-flutter test                     # test/game_test.dart: the scene loads, the cube spins, the recording walks it, the crate lands
+flutter test                     # test/game_test.dart: the scene loads, the cube spins, the recording walks it, the crate lands, the HUD model updates
 fynkel run                       # validate, cook, then flutter run with FYNKEL_PROJECT set to this directory
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/, bundled)
 fynkel cook && fynkel render --out render.png   # the scene as a picture, no window
@@ -38,8 +38,13 @@ it out — and a `fynkel.TriggerZone` on a sensor names the event a
 behaviour or `world.zones.on('collect', …)` gets when something walks in.
 The user's settings (volumes, the quality profile Q picks, input rebinds)
 live in a `settings.json` under the platform's application-support
-directory and are read at launch. After
-changing an exposed field, an id or adding a behaviour class, run `fynkel
+directory and are read at launch. What the screen shows lives in
+`lib/game/hud_model.dart`, a `GameModel` of observable fields the Mover
+writes from `update` and the HUD binds with `ModelBuilder` — a bound
+widget rebuilds when a value changed, never per frame — and the labels
+over the Cube and the Crate are `WorldLabel`s in a `ProjectionLayer`,
+pinned to the objects through the world's projection view (docs/hud.md).
+After changing an exposed field, an id or adding a behaviour class, run `fynkel
 codegen --project .` and commit the regenerated `lib/generated/` and
 `schemas/behaviours/`.
 

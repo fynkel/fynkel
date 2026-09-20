@@ -72,6 +72,7 @@ const FILES: &[TemplateFile] = &[
     text!("lib/game/game.dart", "lib/game/game.dart.tmpl"),
     text!("lib/game/spinner.dart", "lib/game/spinner.dart"),
     text!("lib/game/mover.dart", "lib/game/mover.dart"),
+    text!("lib/game/hud_model.dart", "lib/game/hud_model.dart"),
     text!(
         "lib/generated/behaviours.g.dart",
         "lib/generated/behaviours.g.dart.tmpl"

@@ -84,7 +84,10 @@ typedef enum FynkelBufferKind {
   /* PhysicsQueryRecord per spatial query (host -> world;
    * fynkel_world_physics_query); answered in a QUERY buffer of
    * PhysicsHitRecords. */
-  FYNKEL_BUFFER_PHYSICS_QUERIES = 8
+  FYNKEL_BUFFER_PHYSICS_QUERIES = 8,
+  /* ProjectionAnchorRecord per anchor (host -> world; fynkel_world_project);
+   * answered in a QUERY buffer of ProjectedPointRecords (M3-13). */
+  FYNKEL_BUFFER_PROJECTION_ANCHORS = 9
 } FynkelBufferKind;
 
 /* Command lanes (blueprint §5.1, ADR-0008). */
@@ -336,6 +339,40 @@ FynkelStatus fynkel_world_physics_query(FynkelWorld* world,
                                         const uint8_t* buffer,
                                         uint32_t length,
                                         FynkelBufferView* out_view);
+
+/* Projected world anchors (M3-13, blueprint §10). At most this many
+ * anchors project per request; the rest come back PROJECTED_DROPPED and
+ * the world reports TOO_MANY_ANCHORS (15). */
+#define FYNKEL_MAX_PROJECTION_ANCHORS 64u
+
+/* ProjectedPointRecord.flags bits. */
+#define FYNKEL_PROJECTED_IN_FRONT 1u   /* in front of the near plane; x/y meaningful */
+#define FYNKEL_PROJECTED_ON_SCREEN 2u  /* in front and inside the viewport */
+#define FYNKEL_PROJECTED_OCCLUDED 4u   /* a collider on the anchor's mask is in the way */
+#define FYNKEL_PROJECTED_MISSING 8u    /* the entity is dead or has no transform */
+#define FYNKEL_PROJECTED_NO_CAMERA 16u /* the world has no enabled camera */
+#define FYNKEL_PROJECTED_DROPPED 32u   /* beyond FYNKEL_MAX_PROJECTION_ANCHORS */
+
+typedef struct FynkelProjectionInfo {
+  uint64_t camera;    /* the entity rendered from; 0 = no camera */
+  uint32_t projected; /* anchors projected */
+  uint32_t dropped;   /* anchors beyond the bound */
+} FynkelProjectionInfo;
+
+/* Projects a PROJECTION_ANCHORS buffer into a width x height viewport
+ * (the frame's camera and interpolated poses, the renderer's matrices):
+ * the response is a QUERY buffer of one ProjectedPointRecord per anchor
+ * in request order (x/y in that viewport's pixels, origin top-left, y
+ * down; depth metres along the view axis; flags above), valid until the
+ * next query or mutating call. out_info/out_view may be NULL. A framing
+ * error is FYNKEL_STATUS_PROTOCOL with an empty view. */
+FynkelStatus fynkel_world_project(FynkelWorld* world,
+                                  uint32_t width,
+                                  uint32_t height,
+                                  const uint8_t* buffer,
+                                  uint32_t length,
+                                  FynkelProjectionInfo* out_info,
+                                  FynkelBufferView* out_view);
 
 FynkelStatus fynkel_world_stats(const FynkelWorld* world, FynkelWorldStats* out_stats);
 

@@ -53,7 +53,9 @@ pub use load::{
 };
 pub use settings::Settings;
 pub use world::{
-    Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight, ExtractEnvironment, ExtractMesh,
-    ExtractPointLight, ExtractRecord, ExtractSpotLight, Name, PhysicsOwned, Rejected,
-    SnapshotRecord, StepReport, SubmitReport, World, WorldConfig,
+    projection_matrix, view_matrix, Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight,
+    ExtractEnvironment, ExtractMesh, ExtractPointLight, ExtractRecord, ExtractSpotLight, Name,
+    PhysicsOwned, ProjectionInfo, Rejected, SnapshotRecord, StepReport, SubmitReport, World,
+    WorldConfig, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED, PROJECTED_IN_FRONT, PROJECTED_MISSING,
+    PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED, PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
 };

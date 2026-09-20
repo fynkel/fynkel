@@ -1,4 +1,5 @@
 import 'dart:io';
+
 import 'package:code_assets/code_assets.dart';
 import 'package:fynkel/src/hook/resolve.dart';
 import 'package:test/test.dart';
@@ -47,16 +48,24 @@ void main() {
 
   test('lock file rejects malformed entries', () {
     expect(() => RuntimeLock.parse('[]'), throwsFormatException);
-    expect(() => RuntimeLock.parse('{"runtime_version": "", "abi_version": 1, "release_base_url": "", "artifacts": {}}'),
-        throwsFormatException);
     expect(
-        () => RuntimeLock.parse('{"runtime_version": "1", "abi_version": 1, "release_base_url": "", '
-            '"artifacts": {"macos-arm64": {"file": "x", "sha256": "nothex"}}}'),
-        throwsFormatException);
+      () => RuntimeLock.parse('{"runtime_version": "", "abi_version": 1, "release_base_url": "", "artifacts": {}}'),
+      throwsFormatException,
+    );
     expect(
-        () => RuntimeLock.parse('{"runtime_version": "1", "abi_version": 1, "release_base_url": "", '
-            '"artifacts": {"macos-arm64": {"sha256": null}}}'),
-        throwsFormatException);
+      () => RuntimeLock.parse(
+        '{"runtime_version": "1", "abi_version": 1, "release_base_url": "", '
+        '"artifacts": {"macos-arm64": {"file": "x", "sha256": "nothex"}}}',
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => RuntimeLock.parse(
+        '{"runtime_version": "1", "abi_version": 1, "release_base_url": "", '
+        '"artifacts": {"macos-arm64": {"sha256": null}}}',
+      ),
+      throwsFormatException,
+    );
   });
 
   test('the shipped lock file is valid and pins ABI v1', () {

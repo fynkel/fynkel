@@ -42,6 +42,9 @@ pub struct FynkelWorld {
     /// Action → bindings the user chose over the project's
     /// (`fynkel_world_bind_actions`, M3-12), re-applied after every load.
     rebinds: std::collections::BTreeMap<String, Vec<String>>,
+    /// Scratch of `fynkel_world_project`, kept for its capacity (M3-13).
+    anchors: Vec<fynkel_core::schema::ProjectionAnchorRecord>,
+    points: Vec<fynkel_core::schema::ProjectedPointRecord>,
     stats: Counters,
 }
 
@@ -185,6 +188,8 @@ impl FynkelWorld {
             assets: None,
             residency: Vec::new(),
             rebinds: std::collections::BTreeMap::new(),
+            anchors: Vec::new(),
+            points: Vec::new(),
             stats: Counters::default(),
         }
     }
@@ -481,6 +486,100 @@ pub unsafe extern "C" fn fynkel_world_physics_query(
             }
         }
     });
+    if let Some(out) = out_view.as_mut() {
+        *out = match (status, world.as_ref()) {
+            (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_buf),
+            _ => FynkelBufferView::empty(),
+        };
+    }
+    status
+}
+
+/// What `fynkel_world_project` projected from (M3-13).
+#[repr(C)]
+#[derive(Default)]
+pub struct FynkelProjectionInfo {
+    /// The camera entity the frame is rendered from; 0 when the world has
+    /// no enabled camera (every point is then `PROJECTED_NO_CAMERA`).
+    pub camera: u64,
+    /// Anchors projected (at most `FYNKEL_MAX_PROJECTION_ANCHORS`).
+    pub projected: u32,
+    /// Anchors beyond that bound (`PROJECTED_DROPPED`).
+    pub dropped: u32,
+}
+
+/// Answers a `FYNKEL_BUFFER_PROJECTION_ANCHORS` buffer (M3-13, blueprint
+/// §10): every anchor projected into a `width` × `height` viewport from
+/// the frame's camera and interpolated poses — the same matrices the
+/// renderer uses — as a `Query` buffer of `fynkel.rec.ProjectedPoint`
+/// records in request order, valid until the next query call or mutating
+/// call. At most 64 anchors are projected; the rest come back
+/// `PROJECTED_DROPPED` and the world reports `TOO_MANY_ANCHORS`. A framing
+/// error is `Status::Protocol` with an empty view; the world stays usable.
+///
+/// # Safety
+/// `buffer` must point to `length` readable bytes for the call;
+/// `out_info` and `out_view` may be NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_project(
+    world: *mut FynkelWorld,
+    width: u32,
+    height: u32,
+    buffer: *const u8,
+    length: u32,
+    out_info: *mut FynkelProjectionInfo,
+    out_view: *mut FynkelBufferView,
+) -> Status {
+    if buffer.is_null() && length != 0 {
+        return Status::InvalidArgument;
+    }
+    let bytes: &[u8] = if length == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(buffer, length as usize)
+    };
+    let mut info = FynkelProjectionInfo::default();
+    let status = guarded(world, |w| {
+        w.stats.query_calls += 1;
+        w.stats.bytes_in += bytes.len() as u64;
+        let buf = std::mem::take(&mut w.query_buf);
+        let mut anchors = std::mem::take(&mut w.anchors);
+        let mut points = std::mem::take(&mut w.points);
+        let r = bridge::project(
+            &mut w.inner,
+            width,
+            height,
+            bytes,
+            buf,
+            &mut anchors,
+            &mut points,
+        );
+        w.anchors = anchors;
+        w.points = points;
+        match r {
+            Ok((b, i)) => {
+                w.query_buf = b;
+                w.stats.bytes_out += w.query_buf.len() as u64;
+                if i.dropped > 0 {
+                    w.rebuild_diagnostics();
+                }
+                info = FynkelProjectionInfo {
+                    camera: i.camera.map(|e| e.to_bits()).unwrap_or(0),
+                    projected: i.projected,
+                    dropped: i.dropped,
+                };
+                Status::Ok
+            }
+            Err(e) => {
+                log::warn!("fynkel_world_project: protocol error {e:?}");
+                w.query_buf = buffer::empty(BufferKind::Query);
+                Status::Protocol
+            }
+        }
+    });
+    if let Some(out) = out_info.as_mut() {
+        *out = info;
+    }
     if let Some(out) = out_view.as_mut() {
         *out = match (status, world.as_ref()) {
             (Status::Ok, Some(w)) => FynkelBufferView::of(&w.query_buf),

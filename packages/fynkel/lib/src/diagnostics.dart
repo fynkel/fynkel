@@ -27,7 +27,8 @@ enum DiagnosticCode {
   duplicateComponent(11),
   wrongLane(12),
   meshUnavailable(13),
-  prefabUnavailable(14);
+  prefabUnavailable(14),
+  tooManyAnchors(15);
 
   const DiagnosticCode(this.value);
   final int value;
@@ -70,8 +71,9 @@ class FynkelDiagnostic {
 
   /// Runtime conditions that are reported, never thrown: a missed deadline
   /// is the clock dropping time after a stall (ADR-0008), not a program
-  /// error, and a host must keep ticking through it.
-  bool get isInformational => code == DiagnosticCode.missedDeadline;
+  /// error, and a host must keep ticking through it; a projection view
+  /// over its 64-anchor bound (`FYN-R0012`) hides the excess labels.
+  bool get isInformational => code == DiagnosticCode.missedDeadline || code == DiagnosticCode.tooManyAnchors;
 
   @override
   String toString() =>

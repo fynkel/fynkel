@@ -19,10 +19,17 @@ void main() {
   test('spawn resolves on the next tick; reads follow writes', () {
     final w = world();
     addTearDown(w.dispose);
-    final go = w.spawn(transform: const Transform(position: Vec3(1, 2, 3), rotation: Quat.identity, scale: Vec3.one), name: 'player');
+    final go = w.spawn(
+      transform: const Transform(position: Vec3(1, 2, 3), rotation: Quat.identity, scale: Vec3.one),
+      name: 'player',
+    );
     expect(go.isPending, isTrue);
     expect(go.transform.position, const Vec3(1, 2, 3), reason: 'initial value readable while pending');
-    expect(() => go.setPresentationPosition(0, 0, 0), throwsStateError, reason: 'the presentation lane needs the handle');
+    expect(
+      () => go.setPresentationPosition(0, 0, 0),
+      throwsStateError,
+      reason: 'the presentation lane needs the handle',
+    );
     // A simulation write while pending rides in the spawn's batch as a
     // temp reference (M3-08b) and lands in the spawn's tick.
     go.transform.position = const Vec3(1, 2, 3.5);
@@ -70,14 +77,19 @@ void main() {
     // NaN transform is rejected at the tick with INVALID_PAYLOAD.
     b.setLocalTransform(const Transform(position: Vec3(double.nan, 0, 0), rotation: Quat.identity, scale: Vec3.one));
     expect(b.transform.position.x.isNaN, isTrue, reason: 'overlay shows the staged value');
-    expect(() => w.frame(1 / 60), throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.invalidPayload)));
+    expect(
+      () => w.frame(1 / 60),
+      throwsA(isA<FynkelError>().having((e) => e.diagnostics.single.code, 'code', DiagnosticCode.invalidPayload)),
+    );
     expect(b.transform.position, const Vec3(9, 9, 9), reason: 'overlay cleared; earlier applied value from snapshot');
 
     // Release-mode path: logged, not thrown.
     w.throwOnDiagnostics = false;
     final seen = <FynkelDiagnostic>[];
     w.onDiagnostics = seen.addAll;
-    b.setLocalTransform(const Transform(position: Vec3(double.infinity, 0, 0), rotation: Quat.identity, scale: Vec3.one));
+    b.setLocalTransform(
+      const Transform(position: Vec3(double.infinity, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+    );
     w.frame(1 / 60);
     expect(seen.single.code, DiagnosticCode.invalidPayload);
     expect(seen.single.entity, b.entity);
@@ -100,18 +112,31 @@ void main() {
     expect(cam.worldTransform!.position, const Vec3(0, 3, 0));
 
     // Structural command on the presentation lane is rejected immediately.
-    final r = w.native.submit(CommandLane.presentation, (CommandBatch()..destroy(DestroyCommand(entity: cam.entity))).encoded());
+    final r = w.native.submit(
+      CommandLane.presentation,
+      (CommandBatch()..destroy(DestroyCommand(entity: cam.entity))).encoded(),
+    );
     expect(r.rejected, 1);
-    final d = w.native.diagnostics.fixed(DiagnosticRecord.wireSize, DiagnosticRecord.decode).map(FynkelDiagnostic.fromRecord).toList();
+    final d = w.native.diagnostics
+        .fixed(DiagnosticRecord.wireSize, DiagnosticRecord.decode)
+        .map(FynkelDiagnostic.fromRecord)
+        .toList();
     expect(d.single.code, DiagnosticCode.wrongLane);
   });
 
   test('hierarchy: parent at spawn, reparent keep-world, subtree destroy', () {
     final w = world();
     addTearDown(w.dispose);
-    final root = w.spawn(transform: const Transform(position: Vec3(10, 0, 0), rotation: Quat.identity, scale: Vec3.one), name: 'root');
+    final root = w.spawn(
+      transform: const Transform(position: Vec3(10, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      name: 'root',
+    );
     w.frame(1 / 60);
-    final child = w.spawn(transform: const Transform(position: Vec3(1, 0, 0), rotation: Quat.identity, scale: Vec3.one), parent: root, name: 'child');
+    final child = w.spawn(
+      transform: const Transform(position: Vec3(1, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+      parent: root,
+      name: 'child',
+    );
     final loose = w.spawn(name: 'loose');
     w.frame(1 / 60);
     w.frame(1 / 60);

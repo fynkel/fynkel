@@ -1234,3 +1234,173 @@ fn catalogue_components_and_the_systems_query() {
     assert_eq!(by(SystemKind::Publish).entities, 2, "two subscribed");
     assert_eq!(times.last().unwrap().system, SystemKind::Publish);
 }
+
+fn anchors_buffer(anchors: &[(Entity, Vec3, u32)]) -> Vec<u8> {
+    let mut w = Writer::begin(Vec::new(), BufferKind::ProjectionAnchors);
+    for (entity, offset, mask) in anchors {
+        w.record(&ProjectionAnchorRecord {
+            entity: *entity,
+            offset: *offset,
+            mask: *mask,
+        });
+    }
+    w.finish()
+}
+
+#[test]
+fn projection_of_world_anchors() {
+    use fynkel_core::components::{Camera, ComponentValue};
+    use fynkel_core::{
+        Collider, PROJECTED_DROPPED, PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA,
+        PROJECTED_OCCLUDED, PROJECTED_ON_SCREEN,
+    };
+    let h = Host::new();
+    let project = |buf: &[u8], width: u32, height: u32| {
+        let mut info = FynkelProjectionInfo::default();
+        let mut v = FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        };
+        let s = unsafe {
+            fynkel_world_project(
+                h.w,
+                width,
+                height,
+                buf.as_ptr(),
+                buf.len() as u32,
+                &mut info,
+                &mut v,
+            )
+        };
+        let b = Host::view(v);
+        let points: Vec<ProjectedPointRecord> = if b.is_empty() {
+            Vec::new()
+        } else {
+            let (hd, records, tail) = buffer::validate(b, BufferKind::Query).unwrap();
+            (0..hd.record_count as usize)
+                .map(|i| {
+                    ProjectedPointRecord::decode(&records[i * ProjectedPointRecord::SIZE..], tail)
+                        .unwrap()
+                })
+                .collect()
+        };
+        (s, info, points)
+    };
+
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (
+                1,
+                SpawnCommand {
+                    temp_id: 1,
+                    transform: Transform::from_position(Vec3::new(0.0, 0.0, 5.0)),
+                    parent: None,
+                    name: "camera".into(),
+                }
+            ),
+            (1, spawn(2, 0.0, None, "cube")),
+            (
+                1,
+                SpawnCommand {
+                    temp_id: 3,
+                    transform: Transform::from_position(Vec3::new(0.0, 0.0, 2.5)),
+                    parent: None,
+                    name: "wall".into(),
+                }
+            ),
+        ],
+    );
+    h.step();
+    let ids = h.spawned();
+    let (camera, cube, wall) = (ids[0], ids[1], ids[2]);
+
+    // No camera yet: flagged, nothing placed.
+    let (s, info, points) = project(&anchors_buffer(&[(cube, Vec3::ZERO, 0)]), 800, 600);
+    assert_eq!(s, Status::Ok);
+    assert_eq!((info.camera, info.projected, info.dropped), (0, 1, 0));
+    assert_eq!(points[0].flags, PROJECTED_NO_CAMERA);
+
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            camera,
+            &ComponentValue::Camera(Camera {
+                fov_y: 60f32.to_radians(),
+                ..Camera::default()
+            }),
+        ),
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            wall,
+            &ComponentValue::Collider(Collider {
+                size: Vec3::new(4.0, 4.0, 0.2),
+                layer: 0b10,
+                ..Collider::default()
+            }),
+        ),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+
+    let (s, info, points) = project(
+        &anchors_buffer(&[
+            (cube, Vec3::ZERO, 0),
+            (cube, Vec3::new(0.0, 1.0, 0.0), 0),
+            (cube, Vec3::ZERO, 0b10),
+            (Entity::from_bits(0xdead_0000_0001), Vec3::ZERO, 0),
+        ]),
+        800,
+        600,
+    );
+    assert_eq!(s, Status::Ok);
+    assert_eq!(info.camera, camera.to_bits());
+    assert_eq!((info.projected, info.dropped), (4, 0));
+    assert_eq!(points.len(), 4);
+    let c = &points[0];
+    assert_eq!(c.entity, cube);
+    assert_eq!(c.flags, PROJECTED_IN_FRONT | PROJECTED_ON_SCREEN);
+    assert!(
+        (c.x - 400.0).abs() < 1e-3 && (c.y - 300.0).abs() < 1e-3,
+        "{c:?}"
+    );
+    assert!((c.depth - 5.0).abs() < 1e-5);
+    assert!(points[1].y < 300.0 - 100.0, "one metre up: {:?}", points[1]);
+    assert_eq!(
+        points[2].flags,
+        PROJECTED_IN_FRONT | PROJECTED_ON_SCREEN | PROJECTED_OCCLUDED,
+        "the wall on layer 2 is between the camera and the cube"
+    );
+    assert_eq!(points[3].flags, PROJECTED_MISSING);
+
+    // The bound: 64 projected, the rest dropped, the diagnostic is in the
+    // world's list (cleared by the next step like the others).
+    let many: Vec<(Entity, Vec3, u32)> = (0..70).map(|_| (cube, Vec3::ZERO, 0)).collect();
+    let (s, info, points) = project(&anchors_buffer(&many), 800, 600);
+    assert_eq!(s, Status::Ok);
+    assert_eq!((info.projected, info.dropped), (64, 6));
+    assert_eq!(points.len(), 70);
+    assert_eq!(points[63].flags, PROJECTED_IN_FRONT | PROJECTED_ON_SCREEN);
+    assert_eq!(points[64].flags, PROJECTED_DROPPED);
+    let d = h.diagnostics();
+    assert_eq!(d.len(), 1);
+    assert_eq!(d[0].code, DiagnosticCode::TOO_MANY_ANCHORS.0);
+    assert_eq!(d[0].command_index, u32::MAX);
+
+    // A malformed buffer is a protocol error with an empty view; the world
+    // keeps working.
+    let bad = anchors_buffer(&[(cube, Vec3::ZERO, 0)]);
+    let (s, _, points) = project(&bad[..bad.len() - 4], 800, 600);
+    assert_eq!(s, Status::Protocol);
+    assert!(points.is_empty());
+    let (s, _, points) = project(&raycast_buffer(1, Vec3::ZERO, None), 800, 600);
+    assert_eq!(s, Status::Protocol, "wrong buffer kind");
+    assert!(points.is_empty());
+    let (s, info, points) = project(&anchors_buffer(&[]), 320, 200);
+    assert_eq!((s, info.projected, points.len()), (Status::Ok, 0, 0));
+    assert_eq!(unsafe { fynkel_world_is_poisoned(h.w) }, 0);
+    let (s, _) = h.step();
+    assert_eq!(s, Status::Ok);
+}

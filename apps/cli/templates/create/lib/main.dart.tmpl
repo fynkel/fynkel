@@ -16,6 +16,12 @@
 // `Input.action2D('move')` and friends). On a phone a `TouchOverlay` puts
 // the same actions on screen. Q cycles the project's quality profiles
 // (fynkel.project.json `quality`); Escape (the `pause` action) pauses.
+// HUD: the mover's readout and the pause banner are bound to the game's
+// `HudModel` fields (`ModelBuilder`; docs/hud.md) — behaviours write them,
+// the bound widgets rebuild on change only; the stats block refreshes once
+// a second from `onStats`. World labels: a `ProjectionLayer` pins
+// `WorldLabel`s to the Cube and the Crate through the world's bounded
+// projection view (one call per frame, no rebuilds).
 
 import 'dart:io';
 
@@ -25,7 +31,7 @@ import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SettingsSto
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
-import 'game/mover.dart';
+import 'game/hud_model.dart';
 import 'game/spinner.dart';
 
 void main() => runApp(const GameApp());
@@ -91,6 +97,7 @@ class _GamePageState extends State<GamePage> {
 
   void _setPaused(bool v) {
     setState(() => _paused = v);
+    _game!.hud.paused.value = v;
     _view.currentState?.setPaused(v);
   }
 
@@ -157,43 +164,60 @@ class _GamePageState extends State<GamePage> {
         onKeyEvent: _onKey,
         onFrame: _onFrame,
         onStats: (s) => setState(() => _stats = s),
-        overlay: Stack(
-          fit: StackFit.expand,
-          children: [
-            // The project's `touch:overlay/*` bindings as a stick and
-            // buttons, on touch platforms only (`visible:` to force it).
-            TouchOverlay.fromActions(game.report.inputActions, input: _input),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.55),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Hud(game: game, stats: _stats, viewport: _viewport!, paused: _paused),
+        overlay: ModelBinding<HudModel>(
+          model: game.hud,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // Labels pinned to scene objects: the layer sizes the
+              // projection view from its own layout and moves the labels
+              // with paint transforms as the objects move.
+              ProjectionLayer(
+                world: game.world,
+                children: [
+                  if (game.world.find('Cube') case final cube?)
+                    WorldLabel(target: cube, offset: const Vec3(0, 0.9, 0), text: 'Cube'),
+                  if (game.world.find('Crate') case final crate?)
+                    WorldLabel(target: crate, offset: const Vec3(0, 0.9, 0), text: 'Crate'),
+                ],
+              ),
+              // The project's `touch:overlay/*` bindings as a stick and
+              // buttons, on touch platforms only (`visible:` to force it).
+              TouchOverlay.fromActions(game.report.inputActions, input: _input),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Hud(game: game, stats: _stats, viewport: _viewport!),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+              const PauseBanner(),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// The HUD: ordinary Flutter widgets composited over the 3D viewport.
+/// The HUD: ordinary Flutter widgets composited over the 3D viewport. The
+/// stats lines rebuild once a second (`onStats`); the mover's readout is
+/// bound to the `HudModel` fields the Mover writes ([MoverReadout]).
 class Hud extends StatelessWidget {
-  const Hud({super.key, required this.game, required this.stats, required this.viewport, this.paused = false});
+  const Hud({super.key, required this.game, required this.stats, required this.viewport});
 
   final Game game;
   final FynkelFrameStats? stats;
   final FynkelViewportController viewport;
-  final bool paused;
 
   @override
   Widget build(BuildContext context) {
@@ -206,10 +230,8 @@ class Hud extends StatelessWidget {
       'behaviours ${game.world.behaviours.length} attached',
       for (final sp in game.world.behaviours.whereType<Spinner>())
         'spinner    ${sp.angle.toStringAsFixed(2)} rad at ${sp.speed} rad/s',
-      for (final m in game.world.behaviours.whereType<Mover>())
-        'mover      ${_xyz(m.gameObject.transform.position)}  ${m.jumps} jumps${m.airTime != null ? ' (airborne)' : ''}',
       'input      move ${_xy(game.world.input.action2D('move'))}  jump ${game.world.input.held('jump') ? 'held' : '-'}  '
-          '[WASD/stick, Space/A; Esc pauses]${paused ? '  PAUSED' : ''}',
+          '[WASD/stick, Space/A; Esc pauses]',
       'assets     ${game.report.assetCount} retained from ${game.report.cacheDir}',
       'quality    ${viewport.quality ?? 'medium (project default)'}  [Q cycles]',
       if (s != null) ...[
@@ -228,7 +250,10 @@ class Hud extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [for (final l in lines) Text(l, style: style)],
+      children: [
+        for (final l in lines) Text(l, style: style),
+        MoverReadout(style: style),
+      ],
     );
   }
 
@@ -239,5 +264,52 @@ class Hud extends StatelessWidget {
       ].join('  ');
 
   static String _xy(Vec2 v) => '(${v.x.toStringAsFixed(2)}, ${v.y.toStringAsFixed(2)})';
+}
+
+/// The mover's line, one widget per model field: `position` rebuilds its
+/// text when the cube moves, `jumps` when a jump starts, `airborne` at
+/// take-off and landing — never on a frame where nothing changed.
+class MoverReadout extends StatelessWidget {
+  const MoverReadout({super.key, this.style});
+
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final hud = ModelBinding.of<HudModel>(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('mover      ', style: style),
+        ModelBuilder<Vec3>(value: hud.position, builder: (_, p, _) => Text(_xyz(p), style: style)),
+        ModelBuilder<int>(value: hud.jumps, builder: (_, n, _) => Text('  $n jumps', style: style)),
+        ModelBuilder<bool>(value: hud.airborne, builder: (_, air, _) => Text(air ? ' (airborne)' : '', style: style)),
+      ],
+    );
+  }
+
   static String _xyz(Vec3 v) => '(${v.x.toStringAsFixed(2)}, ${v.y.toStringAsFixed(2)}, ${v.z.toStringAsFixed(2)})';
+}
+
+/// The pause screen: shown while `HudModel.paused` is set (the pattern for
+/// any screen — menu, settings, results — is a model field the widgets
+/// switch on; docs/hud.md).
+class PauseBanner extends StatelessWidget {
+  const PauseBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final hud = ModelBinding.of<HudModel>(context);
+    return ModelBuilder<bool>(
+      value: hud.paused,
+      builder: (context, paused, _) => paused
+          ? ColoredBox(
+              color: Colors.black.withValues(alpha: 0.5),
+              child: Center(
+                child: Text('PAUSED — Esc resumes', style: Theme.of(context).textTheme.headlineMedium),
+              ),
+            )
+          : const SizedBox.shrink(),
+    );
+  }
 }

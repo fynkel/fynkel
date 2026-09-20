@@ -289,7 +289,18 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `fynkel_world_physics_query(world, buffer, len, &view)` and read the
   `QUERY` buffer of `PhysicsHitRecord`s it answers with; contacts arrive as
   `ContactEvent`s on the physics lane (`fynkel_world_after_physics_events`)
-  and reach `onCollisionEnter`/… the same tick. The load report gains
+  and reach `onCollisionEnter`/… the same tick. World labels
+  (`World.projection.update()`, M3-13, [hud.md](hud.md)) send a
+  `FYNKEL_BUFFER_PROJECTION_ANCHORS` (9) batch of `ProjectionAnchorRecord`s
+  to `fynkel_world_project(world, width, height, buffer, len, &info,
+  &view)` — `FynkelProjectionInfo { camera, projected, dropped }` and a
+  `QUERY` buffer of `ProjectedPointRecord`s, one per anchor in order,
+  from the frame's camera and interpolated poses; at most
+  `FYNKEL_MAX_PROJECTION_ANCHORS` (64) are projected, the rest come back
+  `FYNKEL_PROJECTED_DROPPED` with a `TOO_MANY_ANCHORS` (15) diagnostic
+  (`fynkel_world_diagnostics` is rebuilt so the host sees it before the
+  next step); a framing error is `Protocol` with an empty view and the
+  world stays usable. The load report gains
   `physics: { gravity, layers, meshColliders, prefabs }` — `prefabs` is
   how many prefabs the scene's (or an instantiated prefab's) `Emitter`s
   name and the host registered with the world

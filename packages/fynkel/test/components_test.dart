@@ -151,7 +151,16 @@ void main() {
     expect(lamp.isPending, isTrue);
     expect(lamp.get<PointLight>()!.intensity, 50, reason: 'read-your-writes before the spawn');
     expect(lamp.has<PointLight>(), isTrue);
-    final shade = w.spawn(name: 'Shade', parent: lamp)..add(const MeshRenderer(mesh: AssetRef.none, material: AssetRef.none, castShadows: true, receiveShadows: true, visible: true));
+    final shade = w.spawn(name: 'Shade', parent: lamp)
+      ..add(
+        const MeshRenderer(
+          mesh: AssetRef.none,
+          material: AssetRef.none,
+          castShadows: true,
+          receiveShadows: true,
+          visible: true,
+        ),
+      );
     w.frame(1 / 60); // one tick: spawn, components, child — temp references (M3-08b)
     expect(lamp.isPending, isFalse);
     expect(shade.isPending, isFalse);
@@ -176,7 +185,10 @@ void main() {
   findTests(loaded);
 
   test('the typed table covers every native component the wire knows', () {
-    expect(componentIds.keys, containsAll([Transform, Name, MeshRenderer, Camera, DirectionalLight, PointLight, SpotLight, Environment]));
+    expect(
+      componentIds.keys,
+      containsAll([Transform, Name, MeshRenderer, Camera, DirectionalLight, PointLight, SpotLight, Environment]),
+    );
     for (final MapEntry(key: type, value: id) in componentIds.entries) {
       expect(componentCodecs[id]!.type, type);
     }

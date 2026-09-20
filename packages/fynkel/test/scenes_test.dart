@@ -106,12 +106,16 @@ void main() {
     final recording = loadInputRecording('$fixture/test/platform.input.json');
     var framesToResults = -1;
     var frame = 0;
-    recording.replay(w, fixedUpdate: (_) {
-      frame++;
-      if (framesToResults < 0 && w.scenes.current == results) framesToResults = frame;
-    }, update: () {
-      carried.addAll(w.drainEvents());
-    });
+    recording.replay(
+      w,
+      fixedUpdate: (_) {
+        frame++;
+        if (framesToResults < 0 && w.scenes.current == results) framesToResults = frame;
+      },
+      update: () {
+        carried.addAll(w.drainEvents());
+      },
+    );
 
     // The zone fired once, to the behaviour on the Player, to the hub,
     // with the zone's name; `once` means no exit even though the coin
@@ -143,8 +147,11 @@ void main() {
     expect(w.find('Player'), isNull);
     expect(w.find('Trophy'), isNotNull);
     expect(w.allEntities(), hasLength(3));
-    expect(carried.whereType<SceneUnloaded>(), isEmpty,
-        reason: 'the frame drained the transition\'s events into the next fixedUpdate (pull-only, ADR-0008)');
+    expect(
+      carried.whereType<SceneUnloaded>(),
+      isEmpty,
+      reason: 'the frame drained the transition\'s events into the next fixedUpdate (pull-only, ADR-0008)',
+    );
 
     // Settings: the defaults on a first open (no file), a change is on
     // disk at once and its rebinds sit over the project's actions; a
@@ -167,7 +174,9 @@ void main() {
 
     final again = SettingsStore.open(path);
     expect(again.current, store.current);
-    expect(again.current.rebinds, {'jump': ['keyboard:J']});
+    expect(again.current.rebinds, {
+      'jump': ['keyboard:J'],
+    });
     expect(again.current.quality, 'high');
     expect(again.lastError, isNull);
 
@@ -216,7 +225,9 @@ void main() {
     expect(w.find('Player'), isNull);
     expect(
       () => w.unloadScene(playground),
-      throwsA(isA<FynkelUnloadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0010'))),
+      throwsA(
+        isA<FynkelUnloadError>().having((e) => e.report.errors.map((d) => d.code), 'codes', contains('FYN-R0010')),
+      ),
     );
     expect(() => w.unloadScene('nope'), throwsA(isA<FynkelBridgeError>()));
 
@@ -273,20 +284,36 @@ void main() {
     expect(doc.rebinds, isEmpty);
     expect(doc.record, const Settings(masterVolume: 1, musicVolume: 1, sfxVolume: 0.25, muted: false, quality: ''));
     expect(SettingsDocument.fromJson(doc.toJson()), doc);
-    expect(doc.toJson().keys, ['fynkel', 'formatVersion', 'master_volume', 'music_volume', 'sfx_volume', 'muted', 'quality', 'input']);
+    expect(doc.toJson().keys, [
+      'fynkel',
+      'formatVersion',
+      'master_volume',
+      'music_volume',
+      'sfx_volume',
+      'muted',
+      'quality',
+      'input',
+    ]);
     expect(() => SettingsDocument.fromJson({'fynkel': 'scene', 'formatVersion': 1}), throwsFormatException);
     expect(() => SettingsDocument.fromJson({'fynkel': 'settings', 'formatVersion': 2}), throwsFormatException);
-    expect(() => SettingsDocument.fromJson({'fynkel': 'settings', 'formatVersion': 1, 'muted': 'yes'}), throwsFormatException);
+    expect(
+      () => SettingsDocument.fromJson({'fynkel': 'settings', 'formatVersion': 1, 'muted': 'yes'}),
+      throwsFormatException,
+    );
     expect(
       () => SettingsDocument.fromJson({
         'fynkel': 'settings',
         'formatVersion': 1,
-        'input': {'rebinds': {'jump': 'keyboard:J'}},
+        'input': {
+          'rebinds': {'jump': 'keyboard:J'},
+        },
       }),
       throwsFormatException,
     );
     expect(doc.copyWith(masterVolume: 2).validate(), ['master_volume must be within 0..1, got 2.0']);
-    expect(doc.rebind('jump', ['keyboard:J!']).validate(), ['input.rebinds.jump: "keyboard:J!" is not <device>:<control>']);
+    expect(doc.rebind('jump', ['keyboard:J!']).validate(), [
+      'input.rebinds.jump: "keyboard:J!" is not <device>:<control>',
+    ]);
     expect(doc.rebind('jump', ['keyboard:J', 'gamepad:south']).validate(), isEmpty);
 
     final dir = Directory.systemTemp.createTempSync('fynkel-settings-');

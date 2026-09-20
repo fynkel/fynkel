@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
 
+import 'hud_model.dart';
+
 /// Walks its object with the `move` action and hops on `jump`.
 ///
 /// Input reaches a behaviour through the project's actions
@@ -12,6 +14,10 @@ import 'package:fynkel/fynkel.dart';
 /// `Input.held` read the state as of this tick; `Input.pressed` is true
 /// on exactly one tick per press, however many ticks a frame runs.
 /// `test/game_test.dart` replays `test/walk.input.json` through this class.
+///
+/// After the frame's ticks, [update] writes what the HUD shows into the
+/// [HudModel] the game installed (docs/hud.md): the widgets bound to those
+/// fields rebuild when a value changed, and only then.
 @FynkelBehaviour(id: 'game.Mover')
 class Mover extends Behaviour {
   @Expose(min: 0, step: 0.1, tooltip: 'Walking speed in metres per second')
@@ -34,15 +40,19 @@ class Mover extends Behaviour {
 
   @override
   void fixedUpdate(FixedUpdateContext context) {
-    final p = transform.position;
-    final ground = _groundY ??= p.y;
-
     // `move.y` is forward (W, stick up); forward is -z in this scene.
     final move = Input.action2D('move');
+    final takeOff = airTime == null && Input.pressed('jump');
+    // Idle on the ground: no transform write (no command, no snapshot
+    // churn), and the authored pose stays exactly what the scene says.
+    if (move == Vec2.zero && airTime == null && !takeOff) return;
+
+    final p = transform.position;
+    final ground = _groundY ??= p.y;
     var x = p.x + move.x * speed * context.dt;
     var z = p.z - move.y * speed * context.dt;
 
-    if (airTime == null && Input.pressed('jump')) {
+    if (takeOff) {
       jumps++;
       airTime = 0;
     }
@@ -57,5 +67,14 @@ class Mover extends Behaviour {
       }
     }
     transform.position = Vec3(x, y, z);
+  }
+
+  @override
+  void update(UpdateContext context) {
+    final hud = world.context.serviceOrNull<HudModel>();
+    if (hud == null) return;
+    hud.position.value = transform.position;
+    hud.jumps.value = jumps;
+    hud.airborne.value = airTime != null;
   }
 }

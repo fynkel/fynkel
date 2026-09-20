@@ -24,7 +24,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show FynkelLoadError;
+import 'package:fynkel/fynkel.dart' show FynkelLoadError, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
@@ -152,6 +152,29 @@ class _GamePageState extends State<GamePage> {
         overlay: Stack(
           fit: StackFit.expand,
           children: [
+            // World labels (docs/hud.md): pinned to scene objects through the
+            // world's projection view — one call per frame, paint transforms,
+            // no rebuilds. The crate labels opt into occlusion by colliders
+            // on the `default` layer (this scene has none yet, so they stay
+            // visible; a collider on a pillar would hide the label behind
+            // it); the robot's label is never hidden by geometry.
+            ProjectionLayer(
+              world: game.world,
+              children: [
+                if (game.world.find('Robot') case final robot?)
+                  WorldLabel(target: robot, offset: const Vec3(0, 2.4, 0), text: 'Robot'),
+                for (final name in const ['Crate A', 'Crate B', 'Crate C'])
+                  if (game.world.find(name) case final crate?)
+                    WorldLabel(
+                      target: crate,
+                      offset: const Vec3(0, 0.8, 0),
+                      text: name,
+                      occlusionMask: game.world.layerMask(const ['default']),
+                    ),
+                if (game.world.find('Gold Block') case final gold?)
+                  WorldLabel(target: gold, offset: const Vec3(0, 0.8, 0), text: 'Gold', background: const Color(0xB3806000)),
+              ],
+            ),
             TouchOverlay.fromActions(game.report.inputActions, input: _input),
             Padding(
               padding: const EdgeInsets.all(16),

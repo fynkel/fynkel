@@ -49,23 +49,42 @@ void main() {
   test('keys: physical keys by grammar name, repeats are not edges', () {
     final c = FynkelInputCapture();
     const down = KeyDownEvent(
-        physicalKey: PhysicalKeyboardKey.keyW, logicalKey: LogicalKeyboardKey.keyZ, timeStamp: Duration.zero);
+      physicalKey: PhysicalKeyboardKey.keyW,
+      logicalKey: LogicalKeyboardKey.keyZ,
+      timeStamp: Duration.zero,
+    );
     expect(c.handleKey(down), isTrue);
     expect(
-        c.handleKey(const KeyRepeatEvent(
-            physicalKey: PhysicalKeyboardKey.keyW, logicalKey: LogicalKeyboardKey.keyZ, timeStamp: Duration.zero)),
-        isTrue);
+      c.handleKey(
+        const KeyRepeatEvent(
+          physicalKey: PhysicalKeyboardKey.keyW,
+          logicalKey: LogicalKeyboardKey.keyZ,
+          timeStamp: Duration.zero,
+        ),
+      ),
+      isTrue,
+    );
     expect(
-        c.handleKey(const KeyUpEvent(
-            physicalKey: PhysicalKeyboardKey.keyW, logicalKey: LogicalKeyboardKey.keyZ, timeStamp: Duration.zero)),
-        isTrue);
+      c.handleKey(
+        const KeyUpEvent(
+          physicalKey: PhysicalKeyboardKey.keyW,
+          logicalKey: LogicalKeyboardKey.keyZ,
+          timeStamp: Duration.zero,
+        ),
+      ),
+      isTrue,
+    );
     expect(
-        c.handleKey(const KeyDownEvent(
-            physicalKey: PhysicalKeyboardKey.mediaPlayPause,
-            logicalKey: LogicalKeyboardKey.mediaPlayPause,
-            timeStamp: Duration.zero)),
-        isFalse,
-        reason: 'not a key the grammar names');
+      c.handleKey(
+        const KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.mediaPlayPause,
+          logicalKey: LogicalKeyboardKey.mediaPlayPause,
+          timeStamp: Duration.zero,
+        ),
+      ),
+      isFalse,
+      reason: 'not a key the grammar names',
+    );
     expect(c.take(1 / 60), const [
       InputEvent.down(InputDevice.keyboard, 'W'),
       InputEvent.up(InputDevice.keyboard, 'W'),
@@ -81,7 +100,9 @@ void main() {
     const mouse = PointerDeviceKind.mouse;
     c.handlePointer(const PointerDownEvent(kind: mouse, buttons: kPrimaryMouseButton), 2);
     c.handlePointer(
-        const PointerMoveEvent(kind: mouse, buttons: kPrimaryMouseButton | kSecondaryMouseButton, delta: Offset(3, -2)), 2);
+      const PointerMoveEvent(kind: mouse, buttons: kPrimaryMouseButton | kSecondaryMouseButton, delta: Offset(3, -2)),
+      2,
+    );
     c.handlePointer(const PointerUpEvent(kind: mouse, buttons: 0), 2);
     c.handlePointer(const PointerHoverEvent(kind: mouse, delta: Offset(0, 1)), 2);
     c.handlePointer(const PointerScrollEvent(kind: mouse, scrollDelta: Offset(0, -10)), 2);
@@ -120,11 +141,13 @@ void main() {
     FynkelInputChannel.attach(c);
     addTearDown(() => FynkelInputChannel.detach(c));
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    final message = FynkelInputChannel.channel.codec.encodeMethodCall(const MethodCall('events', [
-      [2, 'south', 0, 1.0, 0.0],
-      [2, 'leftStick', 2, -0.5, 0.25],
-      [1, 'delta', 3, 4.0, -6.0],
-    ]));
+    final message = FynkelInputChannel.channel.codec.encodeMethodCall(
+      const MethodCall('events', [
+        [2, 'south', 0, 1.0, 0.0],
+        [2, 'leftStick', 2, -0.5, 0.25],
+        [1, 'delta', 3, 4.0, -6.0],
+      ]),
+    );
     await messenger.handlePlatformMessage(FynkelInputChannel.channel.name, message, (_) {});
     expect(c.take(1 / 60), const [
       InputEvent.down(InputDevice.gamepad, 'south'),

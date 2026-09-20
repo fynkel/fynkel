@@ -23,7 +23,8 @@ class Reader extends Behaviour {
   }
 
   @override
-  void fixedUpdate(FixedUpdateContext context) => log.add('fixed@${context.tick} ${_jump()} move=${Input.action2D('move')}');
+  void fixedUpdate(FixedUpdateContext context) =>
+      log.add('fixed@${context.tick} ${_jump()} move=${Input.action2D('move')}');
   @override
   void afterPhysics(AfterPhysicsContext context) => log.add('after@${context.tick} ${_jump()}');
   @override
@@ -66,11 +67,17 @@ void main() {
     addTearDown(l.dispose);
     l.onLoadDiagnostics = (_) {};
     final report = l.loadProject(fixture, cacheDir: cache);
-    expect([for (final a in report.inputActions) '${a.name}:${a.type}'], ['move:axis2d', 'jump:button', 'look:axis2d', 'pause:button']);
+    expect(
+      [for (final a in report.inputActions) '${a.name}:${a.type}'],
+      ['move:axis2d', 'jump:button', 'look:axis2d', 'pause:button'],
+    );
     expect(report.inputActions[0].bindings, ['keyboard:WASD', 'gamepad:leftStick', 'touch:overlay/stick']);
     expect(report.inputActions[0].overlayControls, ['stick']);
     l.frame(1 / 60);
-    expect([for (final a in l.input.actions) '${a.name}:${a.kind.name}'], ['move:axis2d', 'jump:button', 'look:axis2d', 'pause:button']);
+    expect(
+      [for (final a in l.input.actions) '${a.name}:${a.kind.name}'],
+      ['move:axis2d', 'jump:button', 'look:axis2d', 'pause:button'],
+    );
     expect(l.input.state('jump'), isNotNull);
   });
 
@@ -82,10 +89,10 @@ void main() {
     r.log.clear();
 
     // 50 ms: three ticks. Space and W went down during the frame.
-    final plan = w.frame(0.05, input: const [
-      InputEvent.down(InputDevice.keyboard, 'Space'),
-      InputEvent.down(InputDevice.keyboard, 'W'),
-    ]);
+    final plan = w.frame(
+      0.05,
+      input: const [InputEvent.down(InputDevice.keyboard, 'Space'), InputEvent.down(InputDevice.keyboard, 'W')],
+    );
     expect(plan.steps, 3);
     expect(r.log, [
       'fixed@1 HP- move=Vec2(0.0, 1.0)',
@@ -99,11 +106,14 @@ void main() {
     r.log.clear();
 
     // Release: one tick sees released; update sees the frame's release.
-    w.frame(1 / 60, input: const [
-      InputEvent.up(InputDevice.keyboard, 'Space'),
-      InputEvent.up(InputDevice.keyboard, 'W'),
-      InputEvent.axis(InputDevice.gamepad, 'leftStick', -0.5, 0.25),
-    ]);
+    w.frame(
+      1 / 60,
+      input: const [
+        InputEvent.up(InputDevice.keyboard, 'Space'),
+        InputEvent.up(InputDevice.keyboard, 'W'),
+        InputEvent.axis(InputDevice.gamepad, 'leftStick', -0.5, 0.25),
+      ],
+    );
     expect(r.log, ['fixed@4 --R move=Vec2(-0.5, 0.25)', 'after@4 --R', 'update --R']);
     r.log.clear();
 
@@ -127,10 +137,13 @@ void main() {
     expect(recording.frames, hasLength(10));
     expect(recording.eventCount, 9);
     var jumps = 0, moving = 0;
-    final plans = recording.replay(w, fixedUpdate: (_) {
-      if (w.input.pressed('jump')) jumps++;
-      if (w.input.held('move')) moving++;
-    });
+    final plans = recording.replay(
+      w,
+      fixedUpdate: (_) {
+        if (w.input.pressed('jump')) jumps++;
+        if (w.input.held('move')) moving++;
+      },
+    );
     expect(plans, hasLength(10));
     expect(plans.fold(0, (n, p) => n + p.steps), 12);
     expect(jumps, 2, reason: 'Space across the 50 ms frame, then the overlay');
@@ -139,8 +152,10 @@ void main() {
     // Round trip.
     expect(InputRecording.parse(recording.encode()).toJson(), recording.toJson());
     expect(() => InputRecording.parse('{"fynkel":"x","formatVersion":1,"frames":[]}'), throwsFormatException);
-    expect(() => InputRecording.parse('{"fynkel":"input-recording","formatVersion":1,"frames":[{"dt":-1}]}'),
-        throwsFormatException);
+    expect(
+      () => InputRecording.parse('{"fynkel":"input-recording","formatVersion":1,"frames":[{"dt":-1}]}'),
+      throwsFormatException,
+    );
   });
 
   test('a recorder captures what the frames were given', () {
@@ -153,8 +168,8 @@ void main() {
     expect((json['frames'] as List)[0], {
       'dt': 1 / 60,
       'events': [
-        {'device': 'keyboard', 'control': 'W', 'phase': 'down', 'x': 1.0}
-      ]
+        {'device': 'keyboard', 'control': 'W', 'phase': 'down', 'x': 1.0},
+      ],
     });
     expect((json['frames'] as List)[1], {'dt': 1 / 60});
     expect(((json['frames'] as List)[2] as Map)['events'], [
@@ -165,7 +180,9 @@ void main() {
   });
 
   test('TestInput drives the facade without a world', () {
-    final ctx = TestGameContext(input: TestInput(actions: const [('jump', ActionKind.button), ('move', ActionKind.axis2d)]));
+    final ctx = TestGameContext(
+      input: TestInput(actions: const [('jump', ActionKind.button), ('move', ActionKind.axis2d)]),
+    );
     ctx.run(() {
       expect(Input.pressed('jump'), isFalse);
       ctx.input.press('jump');

@@ -505,6 +505,25 @@ fn fixtures_match_generated_codecs() {
             quality: "high".into(),
         },
     );
+    // M3-13.
+    check(
+        "ProjectionAnchorRecord",
+        &ProjectionAnchorRecord {
+            entity: e(4, 2),
+            offset: Vec3::new(0.0, 1.5, 0.0),
+            mask: 0b101,
+        },
+    );
+    check(
+        "ProjectedPointRecord",
+        &ProjectedPointRecord {
+            entity: e(4, 2),
+            x: 640.5,
+            y: 300.25,
+            depth: 7.5,
+            flags: 3,
+        },
+    );
 }
 
 #[test]
