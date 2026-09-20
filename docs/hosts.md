@@ -150,9 +150,12 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   re-primed when the app resumes and when the viewport attaches (a start-up
   stall is not simulated time), the ticker is muted while hidden/paused
   (`pauseWhenHidden`), `onStats` delivers a `FynkelFrameStats` per window
-  (tick interval / simulate / render-call percentiles, fixed ticks, missed
-  deadlines, dropped frames, world + viewport + platform counters), and
-  `overlay` is the HUD composited over the texture.
+  (`frames` and `fps` — ticker callbacks over the window's wall time, the
+  rate the game actually runs at; tick interval / simulate / render-call
+  percentiles, fixed ticks, missed deadlines, dropped frames, world +
+  viewport + platform counters), and `overlay` is the HUD composited over
+  the texture. The showcase and starter HUDs open with `fps N  frame p50
+  ms (p99)  render ms`.
 - `unpackBundledCache({into, bundle})` — the cooked cache on a device: the
   cook stages `<project>/fynkel_cache/` (`index.json` + the `.fyna` objects
   flat) and the app bundles it as Flutter assets (documents.md § `fynkel

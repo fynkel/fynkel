@@ -71,9 +71,11 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
   not exist: the cook stages the cache into `fynkel_cache/`, the app
   bundles it and unpacks it at start-up (`unpackBundledCache()`); the
   showcase loads from the bundle on macOS with `FYNKEL_PROJECT` pointing
-  nowhere (22 objects retained from the temp cache). Not yet run on the
-  phone itself after the change — the iOS simulator hid this by sharing the
-  Mac's filesystem (M1-09). (M3-06a.)
+  nowhere (22 objects retained from the temp cache) and on the iPhone by
+  hand (the iOS simulator had hidden this by sharing the Mac's filesystem,
+  M1-09). (M3-06a.) The stress scene runs there too: `benchmarks/stress/
+  generate.py --app` wraps it in the starter app (`fynkel run -d
+  <iphone>`), the HUD shows the frame rate.
 
 ## 3. What is *not* proven yet (honest list)
 
@@ -218,7 +220,11 @@ README.md` keep file) → validate → headless (staged 4 objects) → render �
 codegen → analyze → test clean, showcase validate → headless → codegen →
 analyze → test clean and the showcase app launched on macOS from the
 bundled cache alone (`FYNKEL_PROJECT=/nonexistent`: 22 retained from
-`$TMPDIR/fynkel_cache`, 27 drawn in 16 draws).
+`$TMPDIR/fynkel_cache`, 27 drawn in 16 draws); confirmed by the user on
+the iPhone. Follow-up (same day): `FynkelFrameStats.frames/fps` and an
+`fps` HUD line (showcase + starter), `generate.py --app` wraps the stress
+scene in the starter app — built and launched on macOS from its bundle
+(4 591 drawn in 15 draws, 120 fps, `render()` 2.7 ms).
 M3-05a (2026-09-20): `examples/showcase` validate → headless (34 entities,
 22 assets) → render (`medium`: 27 meshes, 5 blended, 3 lights, 18 casters
 in a 2048² map; `low` 960×540 no shadow; `high` 1920×1080, 4096² map) →

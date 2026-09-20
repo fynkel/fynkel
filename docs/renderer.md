@@ -393,3 +393,13 @@ capture (`2026-09-20-cf2b3eb`, profile `medium`): 5 804 entities, 5 343
 instances drawn in 15 draws (458 culled, 5 702 casters in 14 shadow
 draws), standalone 122 frames/s with prepare + encode + submit 1.4 ms
 p50, Flutter 120 ticks/s with `render()` 2.6 ms and GPU 3.2 ms p50.
+
+`generate.py --app` wraps the same project in the `fynkel create`
+starter app (runners, `main.dart` with the HUD, the Spinner behaviour;
+the starter's own scene, cube, material, swatch and test are dropped) so
+it runs on a phone: `fynkel run --project benchmarks/stress/project -d
+<iphone>` — the cook stages the cache into the bundle (M3-06a) and the
+HUD's first line is the frame rate. On macOS from the bundle: 4 591
+instances in view from the app's window aspect, 15 draws, 120 fps with
+`render()` 2.7 ms. The bare project stays what CI and `capture.py`
+measure; ids, scene and cache keys are identical either way.

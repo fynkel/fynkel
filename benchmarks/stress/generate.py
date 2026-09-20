@@ -25,14 +25,29 @@ the entity's name in the project's namespace, so a regenerated project cooks
 to the same cache keys. Run it, then `fynkel project lock`, `fynkel cook`:
 benchmarks/m3/capture.py does all of that.
 
+With --app the project is a runnable game as well: `fynkel create` writes
+the starter app around it (runners, `lib/main.dart` with the HUD — fps,
+draws, culled, shadow map, GPU/CPU ms — `game.dart`, the Spinner behaviour
+and its generated files; the starter's own scene, cube, material, swatch
+and test are dropped, since the stress scene is the startup scene), so it
+runs on this Mac and on a phone: `fynkel run --project
+benchmarks/stress/project -d <iphone>` (the cook stages the cache into the
+bundle; Q cycles the quality profiles). The bare project (the default) is
+what CI and capture.py cook and measure; the ids, the scene and the cache
+keys are the same either way. `fynkel create` needs `flutter` on PATH and
+the CLI at $FYNKEL_CLI or target/debug/fynkel.
+
 Usage: python3 benchmarks/stress/generate.py [--out DIR] [--static 5000]
-       [--bodies 500] [--behaviours 300] [--seed 1]
+       [--bodies 500] [--behaviours 300] [--seed 1] [--app]
 """
 import argparse
 import json
 import math
+import os
 import random
 import shutil
+import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -187,6 +202,22 @@ def scene_doc(n_static, n_bodies, n_behaviours, seed):
             "id": str(SCENE_ID), "name": "Stress", "entities": entities}
 
 
+def create_app(out):
+    """`fynkel create` the starter app into `out` (once: a pubspec marks it
+    done), then drop the starter's own content the stress scene replaces."""
+    if not (out / "pubspec.yaml").is_file():
+        cli = os.environ.get("FYNKEL_CLI") or str(ROOT / "target/debug/fynkel")
+        if out.exists():
+            shutil.rmtree(out)
+        cmd = [cli, "create", str(out), "--name", "fynkel_stress", "--title", "Fynkel Stress", "--root", str(ROOT)]
+        print(" ".join(cmd), flush=True)
+        subprocess.run(cmd, check=True)
+    for rel in ("assets/scenes/main.scene.json", "assets/materials/starter.material.json", "assets/models/cube.glb",
+                "assets/models/cube.glb.meta.json", "assets/textures/swatch.png", "assets/textures/swatch.png.meta.json",
+                "test/game_test.dart"):
+        (out / rel).unlink(missing_ok=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, default=ROOT / "benchmarks/stress/project")
@@ -194,20 +225,35 @@ def main():
     ap.add_argument("--bodies", type=int, default=500)
     ap.add_argument("--behaviours", type=int, default=300)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--app", action="store_true", help="wrap the project in the `fynkel create` starter app so it runs on a device")
     a = ap.parse_args()
     out = a.out
+    if a.app:
+        create_app(out)
     for d in ("assets/models", "assets/materials", "assets/scenes", "assets/prefabs", "assets/textures", "assets/audio"):
         (out / d).mkdir(parents=True, exist_ok=True)
     for f in ("cube.glb", "cube.glb.meta.json", "robot.glb", "robot.glb.meta.json"):
         shutil.copyfile(SHOWCASE / "assets/models" / f, out / "assets/models" / f)
-    # The lock names this build's tools; `fynkel project lock` rewrites it.
-    shutil.copyfile(SHOWCASE / "fynkel.lock.json", out / "fynkel.lock.json")
     for name in MATERIALS:
         (out / f"assets/materials/{name}.material.json").write_text(json.dumps(material_doc(name), indent=2) + "\n")
-    (out / "fynkel.project.json").write_text(json.dumps(project_doc(), indent=2) + "\n")
+    project = project_doc()
+    if a.app:
+        # The starter's project file keeps its registry (game.Spinner stays
+        # registered, no scene uses it), input actions and targets; the
+        # stress scene, ids, name and quality profiles are ours.
+        created = json.loads((out / "fynkel.project.json").read_text())
+        for key in ("id", "name", "startupScene", "quality"):
+            created[key] = project[key]
+        created["components"].update(project["components"])
+        project = created
+    else:
+        # The lock names this build's tools; `fynkel project lock` rewrites it.
+        shutil.copyfile(SHOWCASE / "fynkel.lock.json", out / "fynkel.lock.json")
+        if not (out / ".gitignore").exists():  # an earlier --app run keeps the starter's
+            (out / ".gitignore").write_text(".fynkel/\n")
+    (out / "fynkel.project.json").write_text(json.dumps(project, indent=2) + "\n")
     scene = scene_doc(a.static, a.bodies, a.behaviours, a.seed)
     (out / "assets/scenes/stress.scene.json").write_text(json.dumps(scene) + "\n")
-    (out / ".gitignore").write_text(".fynkel/\n")
     pairs = len(STATIC_PAIRS) + 2 + 1  # + body, behaviour, floor
     print(f"{out}: {len(scene['entities'])} entities ({a.static} static, {a.bodies} bodies, {a.behaviours} behaviours), "
           f"{len(MATERIALS)} materials, {pairs} distinct (mesh, material) pairs")

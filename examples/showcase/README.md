@@ -43,7 +43,8 @@ fynkel test --headless           # the scene on the Rust headless host (no Dart,
 flutter test                     # test/game_test.dart: the scene loads, the robot spins, the camera orbits
 ```
 
-The HUD (`lib/main.dart`) prints the frame counts the viewport reports —
+The HUD (`lib/main.dart`) prints the frame rate (`fps`, with the frame
+interval's p50 and p99) and the frame counts the viewport reports —
 instances drawn in how many draws (one per `(mesh, material)` pair plus
 one per blended instance), how many were culled, lights kept and
 dropped, shadow casters and draws and the map size, the internal render

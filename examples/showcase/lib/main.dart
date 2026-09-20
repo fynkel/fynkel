@@ -191,8 +191,10 @@ class Hud extends StatelessWidget {
       'assets     ${game.report.assetCount} retained from ${game.report.cacheDir}',
       'quality    ${viewport.quality ?? 'medium (project default)'}  [Q cycles]',
       if (s != null) ...[
+        'fps        ${s.fps.toStringAsFixed(0)}  frame ${s.tickInterval.p50.toStringAsFixed(2)} ms '
+            '(p99 ${s.tickInterval.p99.toStringAsFixed(2)})  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
         'viewport   ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
-            'frame ${s.tickInterval.p50.toStringAsFixed(2)} ms  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
+            '${s.missedDeadlines} missed, ${s.dropped} dropped',
         if (s.viewport case final v?) ...[
           'meshes     ${v.instances} drawn in ${v.draws} draws (${v.transparent} blended), '
               '${v.culled} culled, ${v.missing} missing, ${v.assetErrors} errors',

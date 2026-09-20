@@ -77,6 +77,8 @@ void main() {
     await tester.pump();
     expect(last, isNotNull);
     expect(last!.tickInterval.count, greaterThan(0));
+    expect(last!.frames, greaterThanOrEqualTo(last!.tickInterval.count));
+    expect(last!.fps, greaterThan(0));
     expect(last!.renderCall.count, greaterThan(0));
     expect(last!.viewport!.framesRendered, greaterThan(0));
     expect(last!.platform!.copyCalls, 1);

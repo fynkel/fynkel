@@ -35,6 +35,8 @@ class MsPercentiles {
 /// One reporting window (about a second) of the game view's loop.
 class FynkelFrameStats {
   const FynkelFrameStats({
+    required this.frames,
+    required this.fps,
     required this.tickInterval,
     required this.simulate,
     required this.renderCall,
@@ -49,6 +51,12 @@ class FynkelFrameStats {
     required this.physicalHeight,
     required this.muted,
   });
+
+  /// Ticker callbacks (frames simulated and rendered) this window, and
+  /// that count over the window's wall time — the rate the game runs at,
+  /// which is the display's refresh rate when nothing is missed.
+  final int frames;
+  final double fps;
 
   /// Time between consecutive Ticker callbacks.
   final MsPercentiles tickInterval;
@@ -137,7 +145,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   final _intervalsMs = <double>[];
   final _simMs = <double>[];
   final _renderCallMs = <double>[];
-  int _ticks = 0, _missed = 0, _dropped = 0, _skipped = 0;
+  int _ticks = 0, _missed = 0, _dropped = 0, _skipped = 0, _frames = 0;
+  final _window = Stopwatch()..start();
 
   /// Whether the loop is currently muted (hidden, or [setPaused]).
   bool get paused => _ticker.muted;
@@ -233,6 +242,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     }
     _lastTick = elapsed;
     _primed = true;
+    _frames++;
 
     final sim = Stopwatch()..start();
     final plan = world.frame(dt, fixedUpdate: widget.fixedUpdate);
@@ -267,7 +277,10 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     final viewport = c.takeStats();
     final platform = await c.platformStats();
     if (!mounted) return;
+    final seconds = _window.elapsedMicroseconds / 1e6;
     final stats = FynkelFrameStats(
+      frames: _frames,
+      fps: seconds > 0 ? _frames / seconds : 0,
       tickInterval: MsPercentiles.of(_intervalsMs),
       simulate: MsPercentiles.of(_simMs),
       renderCall: MsPercentiles.of(_renderCallMs),
@@ -285,7 +298,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _intervalsMs.clear();
     _simMs.clear();
     _renderCallMs.clear();
-    _ticks = _missed = _dropped = _skipped = 0;
+    _ticks = _missed = _dropped = _skipped = _frames = 0;
+    _window.reset();
     widget.onStats?.call(stats);
   }
 
