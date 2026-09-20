@@ -61,6 +61,9 @@ typedef struct FynkelAppleViewportStats {
   uint32_t shadow_casters, shadow_map;
   uint32_t msaa;
   uint32_t render_width, render_height;
+  /* Last frame (M3-06): instances outside the camera frustum (not drawn),
+   * mesh draw calls in the scene pass, draw calls in the shadow pass. */
+  uint32_t culled_last_frame, draws_last_frame, shadow_draws_last_frame;
 } FynkelAppleViewportStats;
 
 typedef void (*FynkelAppleFrameReadyFn)(void *userdata);

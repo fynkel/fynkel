@@ -5,3 +5,4 @@
 # Dart
 .dart_tool/
 pubspec.lock
+__pycache__/

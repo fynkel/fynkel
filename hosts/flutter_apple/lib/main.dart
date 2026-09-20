@@ -362,7 +362,7 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
         if (_project != null)
           'project "${_project!.projectName}" scene "${_project!.sceneName}" (${_project!.entityCount} entities, ${_project!.rejectedComponents} rejected)  cache=${_project!.cacheDir}',
         if (s != null)
-          'world tick=${b.tick} entities=${b.liveEntities} instances=${s.instances} meshes=${s.meshes} placeholders=${s.placeholders} missing=${s.missing} assetErrors=${s.assetErrors} sceneCamera=${s.sceneCamera}  fixed ticks/s=${f.fixedTicks} missedDeadlines=${f.missedDeadlines}  bridge calls=${b.ffiCalls} bytes in/out=${b.bytesIn}/${b.bytesOut}',
+          'world tick=${b.tick} entities=${b.liveEntities} instances=${s.instances} draws=${s.draws} culled=${s.culled} shadow=${s.shadowCasters}/${s.shadowDraws} meshes=${s.meshes} placeholders=${s.placeholders} missing=${s.missing} assetErrors=${s.assetErrors} sceneCamera=${s.sceneCamera}  fixed ticks/s=${f.fixedTicks} missedDeadlines=${f.missedDeadlines}  bridge calls=${b.ffiCalls} bytes in/out=${b.bytesIn}/${b.bytesOut}',
         'dart tick interval ms  ${f.tickInterval.format()}  (n=${f.tickInterval.count}, skipped while resizing=${f.skippedWhileResizing})',
         'dart simulate ms       ${f.simulate.format()}  (gameplay + submit + step + snapshot)',
         'ffi render() call ms   ${f.renderCall.format()}  (extract + encode + submit)',

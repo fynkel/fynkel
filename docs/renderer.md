@@ -58,13 +58,15 @@ share one render pass because they share the attachments.
 | **presentation** | LDR intermediate | the host's target, bilinear | `render_scale ≠ 1` |
 
 1. **Shadow**: the sun's orthographic view (`src/shadow.rs`, below) is
-   rendered depth-only, no culling, depth bias constant 2 / slope 2, one
-   `draw_indexed` per batch over its casters (they sort first inside each
-   `(mesh, material)` batch, `Batch::casters`). `alpha_mode: mask`
-   casters discard exactly as in the opaque pass; `blend` materials never
-   cast. `MeshRenderer.cast_shadows` opts a mesh out; placeholders and
-   missing-mesh cubes cast.
-2. **Opaque**: culled batches first, then double-sided ones, then the
+   rendered depth-only, no face culling, depth bias constant 2 / slope 2,
+   one `draw_indexed` per batch over its shadow range (the casters inside
+   the sun's box, `Batch::shadow_first..+shadow_count`). `alpha_mode:
+   mask` casters discard exactly as in the opaque pass; `blend` materials
+   never cast. `MeshRenderer.cast_shadows` opts a mesh out; placeholders
+   and missing-mesh cubes cast.
+2. **Opaque**: back-face-culled batches first, then double-sided ones,
+   one `draw_indexed` per batch over its scene range (the instances
+   inside the camera frustum, `Batch::first..+count`), then the
    **sky**, when the `Environment` names a texture: a fullscreen triangle
    at depth 1 with `LessEqual`, so only untouched texels get the
    equirectangular lookup (`u = 0.5 + atan2(d.x, −d.z) / 2π` — `u = 0.5`
@@ -113,6 +115,38 @@ project it by `sun_view_proj`, and take a 3×3 **PCF** with a linear
 one texel apart, so the penumbra is about three texels wide. Points
 outside the map or beyond its far plane are lit. Only the sun's direct
 term is shadowed; ambient and punctual lights are not.
+
+### Instancing and culling (`src/culling.rs`)
+
+Every frame `prepare` rebuilds one instance buffer from the extract
+(ADR-0011: thousands of objects, one draw per distinct `(mesh, material)`
+pair). Each record's mesh carries its cooked bounds — `MeshPayload
+{ bounds_min, bounds_max }`, turned into a `Sphere` (centre, half
+diagonal) when the mesh is uploaded; the placeholder cube's is the unit
+cube's — and `Sphere::transformed` carries it into world space (centre
+by the model matrix, radius by the largest axis scale, so a non-uniform
+scale stays conservative). Two `Frustum`s are built before the instance
+loop (Gribb–Hartmann planes of a `view_proj` with `0..=1` clip depth):
+the camera's and, when the sun casts, the light's box from `shadow::fit`
+— which is why the fit now precedes the instances. The test is
+sphere-vs-plane with the sphere kept when it touches, so culling never
+changes the picture: `frustum_culling = false` renders pixel-identically
+(the culling test asserts it).
+
+Each opaque instance is tagged with where it is drawn — a caster outside
+the view but inside the light's box is **shadow only**, a caster in view
+**both**, a non-caster in view **scene only**; anything in neither is
+dropped before upload, and a `blend` instance out of view is dropped
+outright (it never casts). Within a batch the instances are laid out
+`[shadow only][both][scene only]`, so the shadow draw is the first two
+categories and the scene draw the last two: two contiguous ranges, one
+upload, no duplicate instance. `FrameStats::instances` is what the scene
+passes draw, `culled` the records outside the camera frustum (drawn into
+the shadow map or not), `draws` the scene pass's mesh draw calls (opaque
+batches with something in view + one per transparent instance),
+`shadow_draws` the shadow pass's, `batches` the distinct opaque pairs.
+The stress capture checks `draws ≤ batches` at 5 000 meshes
+(`benchmarks/m3/capture.py`, below).
 
 ### Transparency
 
@@ -278,10 +312,10 @@ the attachments (`resize`, a quality change), the frame bind group with
 the shadow map, the sky bind group when the `Environment` names a
 different texture, and every material bind group when the sampler
 changes (anisotropy). Opaque instances are batched by `(mesh, material)`
-in order of first appearance, casters first within a batch; the culled
-batches draw before the double-sided ones, so a frame switches pipeline
-at most once between them. Transparent instances are not batched: their
-order is their depth.
+in order of first appearance, laid out per batch as § Instancing and
+culling describes; the back-face-culled batches draw before the
+double-sided ones, so a frame switches pipeline at most once between
+them. Transparent instances are not batched: their order is their depth.
 
 Eviction: at the start of `prepare` the renderer compares
 `Assets::evictions` with what it last saw and drops the GPU copies of
@@ -326,12 +360,36 @@ blending silhouette edges (and 8 ≡ 4, 2 ≡ 1), render scale 0.5 / 0.75 /
 2 presenting at the target size (and back to native pixel-identical),
 the fixture project's `low` / `medium` / `high` profiles switching at
 runtime (an unknown name refused, the override), debug lines on top and
-depth tested. `tests/project.rs` renders the fixture project (rusted
+depth tested; from V1 (c): frustum culling dropping four off-screen cubes
+(one of them still casting its shadow into the view) with the picture
+identical to `frustum_culling = false`. `tests/offscreen.rs` counts a
+40 × 25 grid of placeholders as drawn + culled = 1 000 in one draw.
+`tests/project.rs` renders the fixture project (rusted
 robot with its swatch, normal and metallic-roughness maps under its
 `Sun`) from the cache alone. `FYNKEL_RENDER_DUMP_DIR=<dir>` /
 `FYNKEL_RENDER_DUMP=<file>` write the frames as PPM for eyeballing.
-`src/exposure.rs`, `src/shadow.rs`, `src/quality.rs` and `src/debug.rs`
-have unit tests for the meter, the light fit, the clamps and the
-primitives. The M0 capture (`benchmarks/m0/results/2026-09-20-12859e1`)
-shows the cube scene unchanged at MSAA 4 with the shadow pass: 122 / 120
-frames per second, engine CPU ≈ 0.1 ms, GPU ≈ 0.7–1 ms.
+`src/exposure.rs`, `src/shadow.rs`, `src/quality.rs`, `src/culling.rs`
+and `src/debug.rs` have unit tests for the meter, the light fit, the
+clamps, the sphere/frustum test and the primitives. The M0 capture
+(`benchmarks/m0/results/2026-09-20-12859e1`) shows the cube scene
+unchanged at MSAA 4 with the shadow pass: 122 / 120 frames per second,
+engine CPU ≈ 0.1 ms, GPU ≈ 0.7–1 ms.
+
+### The stress scene (`benchmarks/stress`, `benchmarks/m3/capture.py`)
+
+`benchmarks/stress/generate.py` writes an ordinary project (git-ignored;
+the generator is the source) with 5 000 static meshes — the showcase's
+cube, pyramid and quad over four materials, 12 distinct `(mesh,
+material)` pairs — plus 500 "Body" cubes and 300 "Behaviour" pyramids
+standing in for the rigid bodies and Dart behaviours items 8 and 10 add,
+a floor, a casting sun, an `Environment` and a camera above the near edge
+looking across the field (the corners and the strip behind it are
+culled). `benchmarks/m3/capture.py` generates, locks and cooks it,
+renders it once for the counts, runs it in the standalone host
+(`--cache <dir>`) and the Flutter host (`FYNKEL_PROJECT`) and writes
+`benchmarks/m3/results/<date>-<commit>.{json,md}` with the item 6 gate:
+5 000 meshes at 120 Hz, `draws ≤` distinct pairs, `culled > 0`. First
+capture (`2026-09-20-cf2b3eb`, profile `medium`): 5 804 entities, 5 343
+instances drawn in 15 draws (458 culled, 5 702 casters in 14 shadow
+draws), standalone 122 frames/s with prepare + encode + submit 1.4 ms
+p50, Flutter 120 ticks/s with `render()` 2.6 ms and GPU 3.2 ms p50.

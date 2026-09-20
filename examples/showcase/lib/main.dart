@@ -174,9 +174,10 @@ class Hud extends StatelessWidget {
         'viewport   ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
             'frame ${s.tickInterval.p50.toStringAsFixed(2)} ms  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
         if (s.viewport case final v?) ...[
-          'meshes     ${v.meshes} drawn (${v.transparent} blended), ${v.missing} missing, ${v.assetErrors} errors',
+          'meshes     ${v.instances} drawn in ${v.draws} draws (${v.transparent} blended), '
+              '${v.culled} culled, ${v.missing} missing, ${v.assetErrors} errors',
           'lights     ${v.lights} point/spot (${v.lightsDropped} dropped), '
-              '${v.shadowMap == 0 ? 'no shadow' : '${v.shadowCasters} casters in a ${v.shadowMap}² shadow map'}',
+              '${v.shadowMap == 0 ? 'no shadow' : '${v.shadowCasters} casters in ${v.shadowDraws} draws into a ${v.shadowMap}² shadow map'}',
           'render     ${v.renderWidth}x${v.renderHeight} at msaa ${v.msaa}  '
               'gpu ${v.gpuP50Ms.toStringAsFixed(2)} ms  cpu ${v.cpuP50Ms.toStringAsFixed(2)} ms',
         ],

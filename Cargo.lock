@@ -828,7 +828,10 @@ name = "fynkel_host_standalone"
 version = "0.0.1"
 dependencies = [
  "env_logger",
+ "fynkel_assets",
+ "fynkel_contracts",
  "fynkel_core",
+ "fynkel_document",
  "fynkel_host_headless",
  "fynkel_render",
  "glam",

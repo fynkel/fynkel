@@ -17,7 +17,7 @@ render                     (host-specific target)
 | Host | Crate / app | Loop source | Gameplay | Render target |
 | --- | --- | --- | --- | --- |
 | Rust headless | `hosts/headless` (`fynkel_host_headless`, lib + bin) | test loop, one fixed step per frame by default | Rust `DemoScene` (commands) | none; reports JSON |
-| Standalone | `hosts/standalone` (`fynkel_host_standalone`) | winit `RedrawRequested`, vsync (`Fifo`) | Rust `DemoScene` | winit swapchain via `fynkel_render` |
+| Standalone | `hosts/standalone` (`fynkel_host_standalone`) | winit `RedrawRequested`, vsync (`Fifo`) | Rust `DemoScene`, or a cooked scene (`--cache`) | winit swapchain via `fynkel_render` |
 | Flutter macOS + iOS | `hosts/flutter_apple` (`macos/`, `ios/`), a thin app on `package:fynkel_flutter` | `FynkelGameView`'s Flutter `Ticker` on the main isolate | Dart `DemoScene` on `package:fynkel` | `platform/apple` IOSurface ring → Flutter `Texture` (`FynkelViewport`) |
 
 All three render (or checksum) the same scene: a tumbling hub cube with
@@ -63,7 +63,15 @@ source document is opened, prefabs were expanded by the cook), retains the
 scene's closure, then just ticks `--steps` times. The report gains `scene:
 { cache, path, loaded, id, name, key, entities, rejected_components,
 retained, document_diagnostics[] }` (`FYN-R` codes when the cache is
-missing, stale or lacks the scene). Read-side:
+missing, stale or lacks the scene). The standalone host takes the same
+cache (M3-06): `fynkel_host_standalone --cache <dir> [--scene <id>]
+[--quality <profile>] [--seconds N]` loads the cooked startup scene (or
+`--scene`) into its world, retains the closure, points the renderer at the
+store (placeholders off) and ticks it without gameplay — it never cooks
+(exit 1 on a missing or stale cache, 2 on usage or an unknown profile).
+Its per-second line ends with the renderer's counts — `draws=… instances=…
+culled=… batches=… shadow=<casters>/<draws>` — which
+`benchmarks/m3/capture.py` reads for the stress scene. Read-side:
 
 ```sh
 cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json
@@ -94,11 +102,14 @@ per planned tick, presentation flush), then
 `fynkel_apple_viewport_render(viewport, world)` which extracts the world in
 Rust and renders into a free ring slot. Swift's `FynkelViewportTexture`
 hands the newest GPU-complete slot to Flutter's `Texture`.
-`FynkelAppleViewportStats` ends (M3-05a, appended) with the last frame's
-counts — `transparent_last_frame`, `lights`, `lights_dropped`,
+`FynkelAppleViewportStats` ends (appended) with the last frame's
+counts — M3-05a: `transparent_last_frame`, `lights`, `lights_dropped`,
 `shadow_casters`, `shadow_map` (side, 0 when none), `msaa`,
-`render_width`, `render_height` — which `ViewportStatsSnapshot` carries to
-Dart (the showcase HUD prints them).
+`render_width`, `render_height`; M3-06: `culled_last_frame`,
+`draws_last_frame`, `shadow_draws_last_frame` (`instances_last_frame` is
+what the scene passes drew, the culled are not in it) — which
+`ViewportStatsSnapshot` carries to Dart (the showcase HUD prints them;
+the Flutter host's stats line has `draws=… culled=… shadow=…`).
 `fynkel_apple_viewport_set_quality(viewport, name, len)` (M3-05, additive
 to ABI 2) selects a quality profile of the loaded project by name (an
 empty name: the project default); `-1` and a logged warning naming the

@@ -6,7 +6,7 @@ at and compare. It is a normal Fynkel game (created by `fynkel create`,
 then authored): a Flutter app plus `fynkel.project.json`, an `assets/`
 tree of strict JSON documents and the Fynkel CLI.
 
-![The showcase after M3-05](renders/m3-05.png)
+![The showcase after M3-06](renders/m3-06.png)
 
 What is in the scene (`assets/scenes/main.scene.json`):
 
@@ -43,9 +43,12 @@ flutter test                     # test/game_test.dart: the scene loads, the rob
 ```
 
 The HUD (`lib/main.dart`) prints the frame counts the viewport reports —
-meshes drawn and blended, lights kept and dropped, shadow casters and
-map size, the internal render size and MSAA, GPU and CPU time — so a
-change in the renderer is visible as a number as well as a picture.
+instances drawn in how many draws (one per `(mesh, material)` pair plus
+one per blended instance), how many were culled, lights kept and
+dropped, shadow casters and draws and the map size, the internal render
+size and MSAA, GPU and CPU time — so a change in the renderer is visible
+as a number as well as a picture. Watch the culled count rise and fall
+as the orbit turns: what is behind the camera is never uploaded.
 
 ## Renders
 
@@ -56,6 +59,7 @@ renderer item so the history is a before/after:
 | Render | After |
 | --- | --- |
 | `m3-05.png` | M3-05 — Renderer V1 (b): shadows, transparency, MSAA, quality |
+| `m3-06.png` | M3-06 — Renderer V1 (c): instancing and frustum culling (byte-identical to `m3-05.png` — culling changes counts, never pixels: 27 instances in 16 draws, 0 culled from the start pose) |
 
 To regenerate: `fynkel render --project examples/showcase --out examples/showcase/renders/<item>.png`.
 

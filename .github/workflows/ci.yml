@@ -118,3 +118,13 @@ jobs:
         env:
           FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
         run: flutter pub get && flutter analyze --fatal-infos && flutter test
+      # The stress scene (benchmarks/stress, M3-06): generated, locked,
+      # cooked and rendered once headlessly; the draw-call ceiling of the
+      # item 6 gate is checked here, the frame rate only by the capture.
+      - name: stress scene generate + cook + render (draws ≤ pairs)
+        run: |
+          python3 benchmarks/stress/generate.py
+          "$GITHUB_WORKSPACE/target/debug/fynkel" project lock --project benchmarks/stress/project
+          "$GITHUB_WORKSPACE/target/debug/fynkel" cook --project benchmarks/stress/project
+          "$GITHUB_WORKSPACE/target/debug/fynkel" render --project benchmarks/stress/project --no-cook --json --out "${{ runner.temp }}/stress.png" > "${{ runner.temp }}/stress.json"
+          python3 -c "import json,sys; r=json.load(open(sys.argv[1])); print({k: r[k] for k in ('meshes','instances','culled','draws','batches')}); assert r['meshes'] >= 5000 and r['draws'] <= r['batches'] and r['culled'] > 0" "${{ runner.temp }}/stress.json"

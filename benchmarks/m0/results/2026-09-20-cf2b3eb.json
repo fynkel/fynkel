@@ -1,0 +1,262 @@
+{
+  "profile": {
+    "profile": "mac-m3max-2026",
+    "frozen": "2026-09-19",
+    "machine": {
+      "model": "MacBook Pro 16-inch, Apple M3 Max",
+      "cpu": "Apple M3 Max, 14 cores",
+      "gpu": "Apple M3 Max, 30 cores, Metal 4",
+      "ram_gib": 36,
+      "display": "built-in 3456x2234 Retina, 120 Hz ProMotion, scale 2.0"
+    },
+    "os": "macOS 26.5.1",
+    "graphics_backend": "Metal (wgpu 30.0.1)",
+    "toolchain": {
+      "rust": "1.93.0 aarch64-apple-darwin",
+      "flutter": "3.47.2 (Impeller)",
+      "dart": "3.13.2",
+      "xcode": "26.5 (17F42)"
+    },
+    "resolution": {
+      "standalone_window_logical": [
+        1280,
+        720
+      ],
+      "flutter_window_logical": [
+        1200,
+        820
+      ],
+      "flutter_viewport_physical_note": "window minus host bar, times dpr 2.0; recorded per run"
+    },
+    "quality": "M0 cube scene, no MSAA, Depth32Float, Bgra8Unorm, Fifo/vsync",
+    "scene_version": "fynkel_m0_scene 0.0.1 (one lit cube)",
+    "warm_up_seconds": 2,
+    "sample_seconds": 10,
+    "capture_command": "python3 benchmarks/m0/capture.py",
+    "power": "capture on mains power, no other GPU-heavy apps; display at native scaling"
+  },
+  "environment": {
+    "captured_at": "2026-09-20T02:54:58+02:00",
+    "commit": "cf2b3eb",
+    "dirty": true,
+    "os": "26.5.1",
+    "cpu": "Apple M3 Max",
+    "ram_gib": 36,
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "flutter": "Flutter 3.47.2 \u2022 channel stable \u2022 https://github.com/flutter/flutter.git",
+    "dart": "Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on \"macos_arm64\"",
+    "xcode": "Xcode 26.5"
+  },
+  "warmup_seconds": 2,
+  "sample_seconds": 10,
+  "standalone": {
+    "windows_total": 13,
+    "frames_per_s": 122.0,
+    "interval_ms": {
+      "p50": 8.33,
+      "p95": 8.55,
+      "p99": 8.74,
+      "windows": 11
+    },
+    "cpu_encode_submit_ms": {
+      "p50": 0.124,
+      "p95": 0.196,
+      "p99": 0.264,
+      "windows": 11
+    }
+  },
+  "flutter_path_a": {
+    "windows_total": 14,
+    "flutter_frame_windows_total": 14,
+    "viewport_physical": [
+      2400,
+      1480
+    ],
+    "ticks_per_s": 120.0,
+    "dropped_total": 0,
+    "stale_presents_total": 0,
+    "rendered_per_s": 120.0,
+    "tick_interval_ms": {
+      "p50": 8.33,
+      "p95": 8.34,
+      "p99": 16.67,
+      "windows": 12
+    },
+    "render_call_ms": {
+      "p50": 0.135,
+      "p95": 0.2,
+      "p99": 0.28,
+      "windows": 12
+    },
+    "rust_cpu_ms": {
+      "p50": 0.0875,
+      "p95": 0.127,
+      "p99": 0.188,
+      "windows": 12
+    },
+    "gpu_complete_ms": {
+      "p50": 1.05,
+      "p95": 1.08,
+      "p99": 1.34,
+      "windows": 12
+    },
+    "present_lag_frames": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0,
+      "windows": 12
+    },
+    "raster_acquire_wait_ms": {
+      "p50": 0.89,
+      "p95": 0.93,
+      "p99": 1.15,
+      "windows": 12
+    },
+    "flutter_frames_per_s": 121.0,
+    "ui_build_ms": {
+      "p50": 0.28,
+      "p95": 0.42,
+      "p99": 0.55,
+      "windows": 12
+    },
+    "raster_ms": {
+      "p50": 1.1349999999999998,
+      "p95": 1.19,
+      "p99": 1.61,
+      "windows": 12
+    }
+  },
+  "flutter_path_c": {},
+  "flutter_no_viewport": {
+    "windows_total": 0,
+    "flutter_frame_windows_total": 14,
+    "flutter_frames_per_s": 121.0,
+    "ui_build_ms": {
+      "p50": 0.07500000000000001,
+      "p95": 0.13,
+      "p99": 0.16,
+      "windows": 12
+    },
+    "raster_ms": {
+      "p50": 0.14,
+      "p95": 0.225,
+      "p99": 0.3,
+      "windows": 12
+    }
+  },
+  "bridge": {
+    "entities": 1000,
+    "encode_submit_us": 185,
+    "step_us": 161,
+    "read_us": 44,
+    "in_kib": 54.8,
+    "out_kib": 86.2,
+    "runtime": "dart test (JIT)"
+  },
+  "alloc": {
+    "frames": 3000,
+    "entities": 25,
+    "heap_bytes_per_frame": 2282.3946666666666,
+    "frames_counted_for_bytes": 3000,
+    "counted_objects_per_frame": 153.40433333333334,
+    "frame_us": 22.387333333333334,
+    "gc_count": 2,
+    "gc_total_ms": 0.7629999999999998,
+    "gc_reasons": {
+      "StartCMark/old space": 1,
+      "MarkSweep/finalize": 1
+    },
+    "top_classes": [
+      {
+        "class": "_List",
+        "per_frame": 21.231,
+        "bytes_per_frame": 2602.7413333333334
+      },
+      {
+        "class": "_OneByteString",
+        "per_frame": 42.12766666666667,
+        "bytes_per_frame": 2031.6213333333333
+      },
+      {
+        "class": "_Uint32List",
+        "per_frame": 4.622,
+        "bytes_per_frame": 619.1093333333333
+      },
+      {
+        "class": "Instructions",
+        "per_frame": 0.9996666666666667,
+        "bytes_per_frame": 598.736
+      },
+      {
+        "class": "Function",
+        "per_frame": 4.459666666666666,
+        "bytes_per_frame": 570.8373333333333
+      },
+      {
+        "class": "Context",
+        "per_frame": 12.881,
+        "bytes_per_frame": 523.584
+      },
+      {
+        "class": "_Closure",
+        "per_frame": 5.961333333333333,
+        "bytes_per_frame": 286.144
+      },
+      {
+        "class": "_TwoByteString",
+        "per_frame": 0.0036666666666666666,
+        "bytes_per_frame": 276.4053333333333
+      },
+      {
+        "class": "_Map",
+        "per_frame": 4.196,
+        "bytes_per_frame": 268.544
+      },
+      {
+        "class": "_Uint8List",
+        "per_frame": 4.709333333333333,
+        "bytes_per_frame": 260.8693333333333
+      },
+      {
+        "class": "ICData",
+        "per_frame": 4.022666666666667,
+        "bytes_per_frame": 257.4506666666667
+      },
+      {
+        "class": "_FunctionType",
+        "per_frame": 2.9396666666666667,
+        "bytes_per_frame": 235.17333333333335
+      }
+    ],
+    "runtime": "dart run (JIT)"
+  },
+  "headless": {
+    "steps": 3000,
+    "frames": 3000,
+    "tick": 3000,
+    "live_entities": 25,
+    "commands_applied": 74976,
+    "commands_rejected": 0,
+    "events": 25,
+    "diagnostics": 0,
+    "missed_deadlines": 0,
+    "dropped_seconds": 0.0,
+    "extract_records": 25,
+    "checksum": "b4597e697bfaa3dd",
+    "step_time": {
+      "p50_us": 2,
+      "p95_us": 2,
+      "max_us": 972
+    },
+    "total_ms": 11.297541,
+    "scene_ready": true,
+    "scene": null
+  },
+  "leaks": {
+    "passed": true,
+    "lines": [
+      "[leak] baseline 20651 B, after 20 cycles 20651 B (peak 20651 B), 7634 allocations/cycle",
+      "[leak] viewport: rss 34 MiB -> 34 MiB after 60 lifetimes (-704512 B)"
+    ]
+  }
+}

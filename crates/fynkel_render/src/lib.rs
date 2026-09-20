@@ -49,11 +49,13 @@ use fynkel_core::{Environment, Extract, Projection};
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
 
+pub mod culling;
 pub mod debug;
 pub mod exposure;
 pub mod quality;
 pub mod shadow;
 
+pub use culling::{Frustum, Sphere};
 pub use debug::{DebugDraw, DebugVertex};
 pub use fynkel_assets::{Assets, PbrMaterial, QualityProfile};
 pub use quality::{Quality, QualityStatus};
@@ -196,6 +198,8 @@ struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    /// The cooked bounds as a sphere, in mesh space (culling).
+    bounds: Sphere,
 }
 
 /// A texture ready for sampling.
@@ -221,13 +225,31 @@ struct BatchKey {
     material: Option<AssetRef>,
 }
 
-/// An opaque (or mask) batch; its shadow casters come first in the range.
+/// Where an opaque instance is drawn; the order is the batch layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Visibility {
+    /// A caster outside the camera frustum but inside the sun's box.
+    ShadowOnly = 0,
+    /// A caster in view.
+    Both = 1,
+    /// In view, not casting.
+    SceneOnly = 2,
+}
+
+/// An opaque (or mask) batch: one contiguous instance range for the
+/// scene draw and one for the shadow draw.
 struct Batch {
     key: BatchKey,
     double_sided: bool,
+    /// The scene draw: `count` instances from `first` (those inside the
+    /// camera frustum).
     first: u32,
     count: u32,
-    casters: u32,
+    /// The shadow draw: `shadow_count` instances from `shadow_first`
+    /// (casters inside the light's box). The two ranges overlap on the
+    /// casters that are in both; see `prepare` for the layout.
+    shadow_first: u32,
+    shadow_count: u32,
 }
 
 /// One `blend` instance, drawn on its own in back-to-front order.
@@ -240,16 +262,26 @@ struct TransparentDraw {
 /// Counts from the last `prepare`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStats {
+    /// Instances drawn in the scene passes (inside the camera frustum).
     pub instances: u32,
+    /// Instances outside the camera frustum, not drawn in the scene (they
+    /// may still cast into the shadow map).
+    pub culled: u32,
+    /// Cooked meshes among the records (before culling).
     pub meshes: u32,
     pub placeholders: u32,
     pub missing: u32,
-    /// Opaque batches (one draw each).
+    /// Distinct opaque `(mesh, material)` batches.
     pub batches: u32,
+    /// Mesh draw calls in the scene pass: opaque batches with something
+    /// in view, plus one per transparent instance.
+    pub draws: u32,
     /// `blend` instances drawn back-to-front (one draw each).
     pub transparent: u32,
     /// Instances drawn into the shadow map (0 when no shadow was drawn).
     pub shadow_casters: u32,
+    /// Draw calls in the shadow pass.
+    pub shadow_draws: u32,
     /// The shadow map side drawn this frame (0: no shadow — the profile
     /// has shadows off, or no sun casts).
     pub shadow_map: u32,
@@ -387,6 +419,10 @@ pub struct ExtractRenderer {
     /// Draw a lit cube for spatial entities without a `MeshRenderer`
     /// (the M1 behaviour; on by default).
     pub placeholders: bool,
+    /// Test every instance's bounding sphere against the camera frustum
+    /// (and the sun's box) before uploading it; off, everything is drawn.
+    /// On by default; off only to prove the picture does not change.
+    pub frustum_culling: bool,
 }
 
 impl ExtractRenderer {
@@ -539,7 +575,13 @@ impl ExtractRenderer {
         );
 
         let (vertices, indices) = cube_mesh();
-        let cube = upload_mesh(device, "fynkel cube", &vertices, &indices);
+        let cube = upload_mesh(
+            device,
+            "fynkel cube",
+            &vertices,
+            &indices,
+            Sphere::from_bounds([-0.5; 3], [0.5; 3]),
+        );
         let (width, height) = (width.max(1), height.max(1));
         let attachments = create_attachments(
             device,
@@ -616,6 +658,7 @@ impl ExtractRenderer {
             camera: Camera::default(),
             light_dir: Vec3::new(0.4, 1.0, 0.6).normalize(),
             placeholders: true,
+            frustum_culling: true,
         }
     }
 
@@ -860,9 +903,10 @@ impl ExtractRenderer {
 
     /// Applies a pending quality change, then uploads the camera, the
     /// lights, the sun's shadow fit, the environment, the extract's
-    /// instances (opaque batches with their casters first, then the
-    /// transparent ones back-to-front) and the debug lines. Returns the
-    /// number of instances queued for [`draw`](Self::draw).
+    /// instances (culled against the camera frustum and the sun's box,
+    /// grouped into one range per opaque `(mesh, material)` batch, then
+    /// the transparent ones back-to-front) and the debug lines. Returns
+    /// the number of instances the scene passes will draw.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -1056,10 +1100,18 @@ impl ExtractRenderer {
         stats.lights = n_lights as u32;
         stats.lights_dropped = (lights.len() - n_lights) as u32;
 
+        // The sun's shadow fit depends only on the camera, so it comes
+        // before the instances: casters are culled against its box.
+        let fit = (self.quality.shadows && sun_present && sun_casts)
+            .then(|| shadow::fit(sun_dir, &shape.shadow_corners(), self.shadow_map.resolution));
+        let camera_frustum = Frustum::from_view_proj(&view_proj);
+        let light_frustum = fit.as_ref().map(|f| Frustum::from_view_proj(&f.view_proj));
+
         // Instances: opaque and mask by (mesh, material) in order of
-        // first appearance, casters first within each batch; blend on
-        // their own, sorted back-to-front.
-        let mut grouped: Vec<(bool, Vec<(Instance, bool)>)> = Vec::new();
+        // first appearance; blend on their own, sorted back-to-front.
+        // Each instance is tagged with where it is drawn — see the batch
+        // layout below.
+        let mut grouped: Vec<(bool, Vec<(Instance, Visibility)>)> = Vec::new();
         let mut blended: Vec<(f32, BatchKey, bool, Instance)> = Vec::new();
         self.batch_index.clear();
         let mut mesh_of_record: HashMap<u32, usize> = HashMap::with_capacity(extract.meshes.len());
@@ -1070,63 +1122,93 @@ impl ExtractRenderer {
             mesh: None,
             material: None,
         };
+        let cube_bounds = self.cube.bounds;
         for (ri, r) in extract.records.iter().enumerate() {
-            let (key, double_sided, instance, casts, blend) = match mesh_of_record.get(&(ri as u32))
-            {
-                Some(&mi) => {
-                    let m = &extract.meshes[mi];
-                    let have_mesh = self.mesh(device, &m.mesh);
-                    let (material_key, material) = self.material(device, queue, &m.material);
-                    if have_mesh {
-                        stats.meshes += 1;
-                        let blend = material.alpha_mode == AlphaMode::Blend;
-                        (
-                            BatchKey {
-                                mesh: Some(m.mesh.clone()),
-                                material: material_key,
-                            },
-                            material.double_sided,
-                            instance_for(&material, r.world, m.receive_shadows),
-                            m.cast_shadows && !blend,
-                            blend,
-                        )
-                    } else {
-                        stats.missing += 1;
+            let (key, double_sided, instance, casts, blend, bounds) =
+                match mesh_of_record.get(&(ri as u32)) {
+                    Some(&mi) => {
+                        let m = &extract.meshes[mi];
+                        let have_mesh = self.mesh(device, &m.mesh);
+                        let (material_key, material) = self.material(device, queue, &m.material);
+                        if have_mesh {
+                            stats.meshes += 1;
+                            let blend = material.alpha_mode == AlphaMode::Blend;
+                            let bounds = self
+                                .meshes
+                                .get(&m.mesh)
+                                .and_then(Option::as_ref)
+                                .map_or(cube_bounds, |g| g.bounds);
+                            (
+                                BatchKey {
+                                    mesh: Some(m.mesh.clone()),
+                                    material: material_key,
+                                },
+                                material.double_sided,
+                                instance_for(&material, r.world, m.receive_shadows),
+                                m.cast_shadows && !blend,
+                                blend,
+                                bounds,
+                            )
+                        } else {
+                            stats.missing += 1;
+                            (
+                                cube_key(),
+                                false,
+                                Instance {
+                                    model: r.world.to_cols_array_2d(),
+                                    tint: MISSING_TINT,
+                                    emissive: [0.0; 4],
+                                    params: [0.0, 1.0, 1.0, 1.0],
+                                    flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
+                                },
+                                m.cast_shadows,
+                                false,
+                                cube_bounds,
+                            )
+                        }
+                    }
+                    None => {
+                        if !self.placeholders {
+                            continue;
+                        }
+                        stats.placeholders += 1;
                         (
                             cube_key(),
                             false,
                             Instance {
                                 model: r.world.to_cols_array_2d(),
-                                tint: MISSING_TINT,
+                                tint: tint_for(r.entity.slot()),
                                 emissive: [0.0; 4],
                                 params: [0.0, 1.0, 1.0, 1.0],
-                                flags: [NO_CUTOFF, 1.0, 0.0, 0.0],
+                                flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
                             },
-                            m.cast_shadows,
+                            true,
                             false,
+                            cube_bounds,
                         )
                     }
-                }
-                None => {
-                    if !self.placeholders {
-                        continue;
-                    }
-                    stats.placeholders += 1;
-                    (
-                        cube_key(),
-                        false,
-                        Instance {
-                            model: r.world.to_cols_array_2d(),
-                            tint: tint_for(r.entity.slot()),
-                            emissive: [0.0; 4],
-                            params: [0.0, 1.0, 1.0, 1.0],
-                            flags: [NO_CUTOFF, 0.0, 0.0, 1.0],
-                        },
-                        true,
-                        false,
-                    )
-                }
+                };
+            // Culling: the mesh's bounding sphere in world space against
+            // the camera frustum and, for casters, the sun's box. A
+            // caster outside the view still shadows what is in it.
+            let (in_view, casts) = if self.frustum_culling {
+                let sphere = bounds.transformed(&r.world);
+                (
+                    camera_frustum.intersects(&sphere),
+                    casts
+                        && light_frustum
+                            .as_ref()
+                            .is_some_and(|f| f.intersects(&sphere)),
+                )
+            } else {
+                (true, casts && fit.is_some())
             };
+            if !in_view {
+                stats.culled += 1;
+                if !casts {
+                    continue;
+                }
+            }
             if blend {
                 let origin = r.world.w_axis.truncate();
                 blended.push((
@@ -1145,9 +1227,20 @@ impl ExtractRenderer {
                     grouped.len() - 1
                 }
             };
-            grouped[slot].1.push((instance, casts));
+            grouped[slot].1.push((
+                instance,
+                match (casts, in_view) {
+                    (true, false) => Visibility::ShadowOnly,
+                    (true, true) => Visibility::Both,
+                    (false, true) => Visibility::SceneOnly,
+                    (false, false) => unreachable!("skipped above"),
+                },
+            ));
         }
 
+        // Batch layout: [shadow only][both][scene only], so the shadow
+        // draw is the first two and the scene draw the last two — one
+        // contiguous range each, one upload.
         self.instances.clear();
         self.batches.clear();
         self.transparent.clear();
@@ -1156,16 +1249,29 @@ impl ExtractRenderer {
         let mut casters_total = 0;
         for (key, slot) in keys {
             let (double_sided, list) = &mut grouped[slot];
-            // Stable: casters keep their order, non-casters follow.
-            list.sort_by_key(|(_, casts)| !*casts);
-            let casters = list.iter().filter(|(_, c)| *c).count() as u32;
-            casters_total += casters;
+            // Stable: instances keep their order within a category.
+            list.sort_by_key(|(_, v)| *v as u8);
+            let count_of = |v: Visibility| list.iter().filter(|(_, x)| *x == v).count() as u32;
+            let (shadow_only, both) =
+                (count_of(Visibility::ShadowOnly), count_of(Visibility::Both));
+            let start = self.instances.len() as u32;
+            let shadow_count = shadow_only + both;
+            let count = list.len() as u32 - shadow_only;
+            casters_total += shadow_count;
+            if count > 0 {
+                stats.draws += 1;
+            }
+            if shadow_count > 0 {
+                stats.shadow_draws += 1;
+            }
+            stats.instances += count;
             self.batches.push(Batch {
                 key,
                 double_sided: *double_sided,
-                first: self.instances.len() as u32,
-                count: list.len() as u32,
-                casters,
+                first: start + shadow_only,
+                count,
+                shadow_first: start,
+                shadow_count,
             });
             self.instances.extend(list.iter().map(|(i, _)| *i));
         }
@@ -1191,17 +1297,17 @@ impl ExtractRenderer {
                 bytemuck::cast_slice(&self.instances),
             );
         }
-        stats.instances = n;
         stats.batches = self.batches.len() as u32;
         stats.transparent = self.transparent.len() as u32;
+        stats.instances += stats.transparent;
+        stats.draws += stats.transparent;
 
-        // The sun's shadow: fitted to the camera frustum when the profile
-        // draws shadows, the sun casts and something is there to cast.
-        self.shadow_active = self.quality.shadows && sun_present && sun_casts && casters_total > 0;
+        // The sun's shadow: drawn when the profile draws shadows, the sun
+        // casts and something is there to cast.
+        self.shadow_active = casters_total > 0;
         let mut shadow = [0.0f32; 4];
         let mut sun_view_proj = Mat4::IDENTITY;
-        if self.shadow_active {
-            let fit = shadow::fit(sun_dir, &shape.shadow_corners(), self.shadow_map.resolution);
+        if let Some(fit) = fit.filter(|_| self.shadow_active) {
             sun_view_proj = fit.view_proj;
             shadow = [
                 1.0,
@@ -1218,6 +1324,9 @@ impl ExtractRenderer {
             );
             stats.shadow_casters = casters_total;
             stats.shadow_map = self.shadow_map.resolution;
+        } else {
+            self.shadow_active = false;
+            stats.shadow_draws = 0;
         }
 
         let u = FrameUniforms {
@@ -1260,7 +1369,7 @@ impl ExtractRenderer {
         self.debug.clear();
 
         self.stats = stats;
-        n
+        stats.instances
     }
 
     // -------------------------------------------------------------- draw
@@ -1304,8 +1413,8 @@ impl ExtractRenderer {
         }
     }
 
-    /// Depth only, from the sun, every caster (`Batch::casters` first in
-    /// each batch's range).
+    /// Depth only, from the sun, every caster inside its box (each
+    /// batch's shadow range).
     fn shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("fynkel shadow"),
@@ -1326,14 +1435,18 @@ impl ExtractRenderer {
         pass.set_pipeline(&self.pipelines.shadow);
         pass.set_bind_group(0, &self.shadow_bind_group, &[]);
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        for b in self.batches.iter().filter(|b| b.casters > 0) {
+        for b in self.batches.iter().filter(|b| b.shadow_count > 0) {
             let Some(mesh) = self.mesh_for(&b.key) else {
                 continue;
             };
             pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
             pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
             pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, b.first..b.first + b.casters);
+            pass.draw_indexed(
+                0..mesh.index_count,
+                0,
+                b.shadow_first..b.shadow_first + b.shadow_count,
+            );
         }
     }
 
@@ -1383,7 +1496,7 @@ impl ExtractRenderer {
                 for b in self
                     .batches
                     .iter()
-                    .filter(|b| b.double_sided == double_sided)
+                    .filter(|b| b.double_sided == double_sided && b.count > 0)
                 {
                     let Some(mesh) = self.mesh_for(&b.key) else {
                         continue;
@@ -1532,6 +1645,7 @@ impl ExtractRenderer {
                 &format!("fynkel mesh {r}"),
                 &payload.vertices,
                 &payload.indices,
+                Sphere::from_bounds(payload.bounds_min, payload.bounds_max),
             )),
             Some(Err(e)) => {
                 self.asset_errors.push(format!("mesh {r}: {}", e.message));
@@ -2247,6 +2361,7 @@ fn upload_mesh(
     label: &str,
     vertices: &[Vertex],
     indices: &[u32],
+    bounds: Sphere,
 ) -> GpuMesh {
     // The cooked layout is the GPU layout: 18 little-endian f32 per vertex.
     let mut bytes = Vec::with_capacity(vertices.len() * Vertex::STRIDE);
@@ -2267,6 +2382,7 @@ fn upload_mesh(
         vertex_buffer,
         index_buffer,
         index_count: indices.len() as u32,
+        bounds,
     }
 }
 

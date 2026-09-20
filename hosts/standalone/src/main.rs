@@ -5,6 +5,11 @@
 //! `fynkel_core`, runs the demo scene's gameplay for every planned fixed
 //! tick, steps the world, and renders the world's extract interpolated by
 //! alpha. Prints frame-time statistics for the benchmark capture.
+//!
+//! `--cache <dir>` loads a cooked project's startup scene (or `--scene
+//! <id>`) instead of the demo scene — a host never cooks, so run `fynkel
+//! cook` first; `--quality <profile>` picks one of its profiles. This is
+//! how `benchmarks/m3/capture.py` runs the stress scene.
 
 mod stats;
 
@@ -16,10 +21,18 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 
+use fynkel_assets::{Assets, Residency};
 use fynkel_core::{World, WorldConfig};
 use fynkel_host_headless::DemoScene;
 use fynkel_render::ExtractRenderer;
 use stats::{FrameStats, FrameTiming};
+
+/// A cooked project to run instead of the demo scene.
+struct Project {
+    cache: std::path::PathBuf,
+    scene: Option<fynkel_contracts::Uuid>,
+    quality: Option<String>,
+}
 
 struct Gpu {
     window: Arc<Window>,
@@ -31,7 +44,7 @@ struct Gpu {
 }
 
 impl Gpu {
-    fn new(window: Arc<Window>) -> Self {
+    fn new(window: Arc<Window>, assets: Option<(Assets, Option<String>)>) -> Self {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::METAL,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -69,7 +82,20 @@ impl Gpu {
         config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
 
-        let renderer = ExtractRenderer::new(&device, config.format, config.width, config.height);
+        let mut renderer =
+            ExtractRenderer::new(&device, config.format, config.width, config.height);
+        if let Some((assets, quality)) = assets {
+            renderer.placeholders = false;
+            renderer.set_assets(Some(assets));
+            if !renderer.set_quality_profile(quality.as_deref()) {
+                log::error!(
+                    "--quality {}: not a profile of the project (profiles: {})",
+                    quality.unwrap_or_default(),
+                    renderer.quality_profiles().join(", ")
+                );
+                std::process::exit(2);
+            }
+        }
 
         Self {
             window,
@@ -111,6 +137,9 @@ impl Gpu {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         self.renderer.prepare(&self.device, &self.queue, extract);
+        for e in self.renderer.asset_errors() {
+            log::error!("asset error: {e}");
+        }
 
         let mut encoder = self
             .device
@@ -125,6 +154,7 @@ impl Gpu {
             acquire_wait: t_cpu.duration_since(t_acquire),
             cpu: t_cpu.elapsed(),
             presented: true,
+            render: Some(self.renderer.stats()),
         })
     }
 }
@@ -135,22 +165,78 @@ struct App {
     last_frame: Option<Instant>,
     stats: FrameStats,
     world: World,
-    scene: DemoScene,
+    /// The demo scene's gameplay; `None` when a cooked project is loaded.
+    scene: Option<DemoScene>,
+    /// The cooked project to load on resume (`--cache`).
+    project: Option<Project>,
+    /// The loaded scene's assets, kept resident while the host runs.
+    residency: Option<Residency>,
     /// Auto-exit after this many seconds (`--seconds N`), for scripted captures.
     run_for: Option<f32>,
 }
 
 impl App {
-    fn new(satellites: u32, seed: u64) -> Self {
+    fn new(satellites: u32, seed: u64, project: Option<Project>) -> Self {
         Self {
             gpu: None,
             start: None,
             last_frame: None,
             stats: FrameStats::default(),
             world: World::new(WorldConfig::default()),
-            scene: DemoScene::new(satellites, seed),
+            scene: project.is_none().then(|| DemoScene::new(satellites, seed)),
+            project,
+            residency: None,
             run_for: None,
         }
+    }
+
+    /// Loads the project's scene into the world and returns the store the
+    /// renderer reads from. Exits the process on a broken cache: a host
+    /// never cooks.
+    fn load_project(&mut self, p: &Project) -> (Assets, Option<String>) {
+        let fail = |what: &str, diags: &[fynkel_document::Diagnostic]| -> ! {
+            for d in diags {
+                log::error!("{d}");
+            }
+            log::error!(
+                "{what}: cannot load {} (run `fynkel cook` first)",
+                p.cache.display()
+            );
+            std::process::exit(1);
+        };
+        let assets = Assets::open(&p.cache).unwrap_or_else(|d| fail("cache", &[d]));
+        let scene_id = match p.scene {
+            Some(id) => id,
+            None => assets
+                .startup_scene()
+                .unwrap_or_else(|d| fail("startup scene", &[d])),
+        };
+        let cooked = assets
+            .scene(scene_id)
+            .unwrap_or_else(|ds| fail("scene", &ds));
+        for d in &cooked.diagnostics {
+            log::warn!("{d}");
+        }
+        let loaded = self
+            .world
+            .load_scene(&cooked.description)
+            .unwrap_or_else(|e| {
+                log::error!("scene: {e}");
+                std::process::exit(1);
+            });
+        self.residency = Some(assets.retain(&cooked.closure));
+        log::info!(
+            "project {}: scene \"{}\" ({} entities, {} rejected components, {} assets retained)",
+            assets
+                .project()
+                .map(|p| p.name)
+                .unwrap_or_else(|| "(no project)".to_string()),
+            loaded.name,
+            loaded.entities().len(),
+            loaded.rejected_components,
+            cooked.closure.len(),
+        );
+        (assets, p.quality.clone())
     }
 
     /// One host frame of simulation (ADR-0008 order): begin_frame → per
@@ -162,13 +248,17 @@ impl App {
         }
         for _ in 0..plan.steps {
             let events = self.world.drain_events();
-            self.scene.on_events(&events);
-            let tick = self.world.tick();
-            self.scene.fixed_update(&mut self.world, tick);
+            if let Some(scene) = self.scene.as_mut() {
+                scene.on_events(&events);
+                let tick = self.world.tick();
+                scene.fixed_update(&mut self.world, tick);
+            }
             self.world.step();
         }
         let events = self.world.drain_events();
-        self.scene.on_events(&events);
+        if let Some(scene) = self.scene.as_mut() {
+            scene.on_events(&events);
+        }
         self.world.extract()
     }
 }
@@ -182,7 +272,8 @@ impl ApplicationHandler for App {
             .with_title("Fynkel — standalone host")
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
-        self.gpu = Some(Gpu::new(window));
+        let assets = self.project.take().map(|p| self.load_project(&p));
+        self.gpu = Some(Gpu::new(window, assets));
         self.start = Some(Instant::now());
     }
 
@@ -234,10 +325,23 @@ fn main() {
     let mut satellites = 24;
     let mut seed = 42;
     let mut run_for = None;
+    let mut cache = None;
+    let mut scene = None;
+    let mut quality = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--seconds" => run_for = args.next().and_then(|v| v.parse().ok()),
+            "--cache" => cache = args.next().map(std::path::PathBuf::from),
+            "--scene" => {
+                scene = args.next().map(|v| {
+                    v.parse().unwrap_or_else(|_| {
+                        eprintln!("--scene {v}: not a scene id (uuid)");
+                        std::process::exit(2);
+                    })
+                })
+            }
+            "--quality" => quality = args.next(),
             "--satellites" => {
                 satellites = args
                     .next()
@@ -245,10 +349,24 @@ fn main() {
                     .unwrap_or(satellites)
             }
             "--seed" => seed = args.next().and_then(|v| v.parse().ok()).unwrap_or(seed),
-            _ => {}
+            _ => {
+                eprintln!(
+                    "usage: fynkel_host_standalone [--seconds N] [--satellites N] [--seed N] [--cache <dir> [--scene <id>] [--quality <profile>]]"
+                );
+                std::process::exit(2);
+            }
         }
     }
-    let mut app = App::new(satellites, seed);
+    if cache.is_none() && (scene.is_some() || quality.is_some()) {
+        eprintln!("--scene and --quality need --cache <dir>");
+        std::process::exit(2);
+    }
+    let project = cache.map(|cache| Project {
+        cache,
+        scene,
+        quality,
+    });
+    let mut app = App::new(satellites, seed, project);
     app.run_for = run_for;
     event_loop.run_app(&mut app).expect("run");
 }

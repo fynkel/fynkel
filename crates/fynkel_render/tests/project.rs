@@ -220,12 +220,18 @@ fn placeholders_off_hides_entities_without_meshes() {
 
     let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
     // No assets, placeholders on: the camera and the instance host entity
-    // become cubes too.
+    // become cubes too (the Sun's cube sits outside the view: culled).
     render_offscreen(&device, &queue, &mut renderer, &extract);
     let s = renderer.stats();
-    assert_eq!((s.instances, s.placeholders, s.missing), (5, 3, 2));
+    assert_eq!(
+        (s.instances, s.culled, s.placeholders, s.missing),
+        (4, 1, 3, 2)
+    );
     renderer.placeholders = false;
     render_offscreen(&device, &queue, &mut renderer, &extract);
     let s = renderer.stats();
-    assert_eq!((s.instances, s.placeholders, s.missing), (2, 0, 2));
+    assert_eq!(
+        (s.instances, s.culled, s.placeholders, s.missing),
+        (2, 0, 0, 2)
+    );
 }

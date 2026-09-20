@@ -1,8 +1,8 @@
-//! Renderer V1 (a) and (b) feature gate (blueprint §19.2d items 4 and 5):
+//! Renderer V1 (a), (b) and (c) feature gate (blueprint §19.2d items 4–6):
 //! one pixel test per feature. Hand-built extracts (the renderer reads
 //! nothing else) for the camera, exposure, lights, environment, shadows,
-//! MSAA, render scale and debug lines; a project cooked on the fly for
-//! everything that needs a material or a quality profile.
+//! MSAA, render scale, culling and debug lines; a project cooked on the
+//! fly for everything that needs a material or a quality profile.
 
 use std::path::{Path, PathBuf};
 
@@ -805,6 +805,73 @@ fn the_sun_casts_a_pcf_shadow_that_the_quality_profile_can_turn_off() {
     e.directional_lights[0].light.cast_shadows = false;
     render_offscreen(&device, &queue, &mut r, &e);
     assert_eq!(r.stats().shadow_map, 0);
+}
+
+#[test]
+fn culling_drops_what_is_off_screen_without_changing_the_picture() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    r.camera.eye = Vec3::new(0.0, 8.0, 6.0);
+    // The shadow test's slab and cube, plus: a cube high up and to -X,
+    // outside the view but whose shadow lands on the slab at (0, 2); a
+    // cube behind the camera; one beyond the far plane; one far to +X.
+    let mut e = Extract::default();
+    e.records.push(record(
+        0,
+        Mat4::from_scale_rotation_translation(
+            Vec3::new(10.0, 0.2, 10.0),
+            Quat::IDENTITY,
+            Vec3::new(0.0, -0.6, 0.0),
+        ),
+    ));
+    e.records.push(record(1, Mat4::IDENTITY));
+    e.records
+        .push(record(2, Mat4::from_translation(Vec3::new(-6.0, 9.5, 2.0))));
+    e.records
+        .push(record(3, Mat4::from_translation(Vec3::new(0.0, 8.0, 20.0))));
+    e.records.push(record(
+        4,
+        Mat4::from_translation(Vec3::new(0.0, 0.0, -300.0)),
+    ));
+    e.records
+        .push(record(5, Mat4::from_translation(Vec3::new(80.0, 0.0, 0.0))));
+    let mut sun = sun(Vec3::new(0.6, -1.0, 0.0), 10_000.0);
+    sun.light.cast_shadows = true;
+    e.directional_lights.push(sun);
+    let sample = |px: &[[u8; 4]], (x, y): (u32, u32)| px[(y * W + x) as usize];
+    let shadowed_at = pixel_of(&r, Vec3::new(0.0, -0.5, 2.0));
+    let lit_at = pixel_of(&r, Vec3::new(-2.0, -0.5, -2.0));
+
+    let culled = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&culled, "culling");
+    let stats = r.stats();
+    assert_eq!(
+        (
+            stats.instances,
+            stats.culled,
+            stats.draws,
+            stats.shadow_draws
+        ),
+        (2, 4, 1, 1),
+        "{stats:?}"
+    );
+    // The off-screen cube above the slab is still a caster.
+    assert!(stats.shadow_casters >= 3, "{stats:?}");
+    assert!(
+        luminance(sample(&culled, shadowed_at)) < luminance(sample(&culled, lit_at)) * 0.7,
+        "an off-screen caster shadows the view"
+    );
+
+    r.frustum_culling = false;
+    let all = render_offscreen(&device, &queue, &mut r, &e);
+    let stats = r.stats();
+    assert_eq!(
+        (stats.instances, stats.culled, stats.shadow_casters),
+        (6, 0, 6)
+    );
+    assert!(culled == all, "culling changed the picture");
 }
 
 #[test]

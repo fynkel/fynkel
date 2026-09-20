@@ -84,6 +84,12 @@ final class ViewportStats extends Struct {
   external int renderWidth;
   @Uint32()
   external int renderHeight;
+  @Uint32()
+  external int culledLastFrame;
+  @Uint32()
+  external int drawsLastFrame;
+  @Uint32()
+  external int shadowDrawsLastFrame;
 }
 
 final class ViewportCamera extends Struct {
@@ -289,6 +295,9 @@ class ViewportNative {
         msaa: s.msaa,
         renderWidth: s.renderWidth,
         renderHeight: s.renderHeight,
+        culled: s.culledLastFrame,
+        draws: s.drawsLastFrame,
+        shadowDraws: s.shadowDrawsLastFrame,
       );
     } finally {
       calloc.free(out);
@@ -331,6 +340,9 @@ class ViewportStatsSnapshot {
     this.msaa = 1,
     this.renderWidth = 0,
     this.renderHeight = 0,
+    this.culled = 0,
+    this.draws = 0,
+    this.shadowDraws = 0,
   });
   final int meshes, placeholders, missing, assetErrors;
   final bool sceneCamera;
@@ -341,6 +353,12 @@ class ViewportStatsSnapshot {
   /// drawn); samples per pixel; the internal render size (the target ×
   /// the quality profile's render scale).
   final int transparent, lights, lightsDropped, shadowCasters, shadowMap, msaa, renderWidth, renderHeight;
+
+  /// Last frame: instances outside the camera frustum (not drawn — they
+  /// are not in [instances]); mesh draw calls in the scene pass (one per
+  /// opaque `(mesh, material)` batch in view plus one per transparent
+  /// instance); draw calls in the shadow pass.
+  final int culled, draws, shadowDraws;
   final double acquireWaitP50Ms, acquireWaitP95Ms, acquireWaitMaxMs;
   final int framesRendered, framesDropped, framesPresented, presentsWithoutNewFrame, resizes, instances;
   final int presentLagP50, presentLagP95, presentLagMax;

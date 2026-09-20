@@ -983,9 +983,10 @@ schema id and envelope. `--project` defaults to the current directory.
 the cache through `fynkel_assets`, steps the world once and draws the
 extract offscreen from the same store to a PNG, 1280×720 by default
 (`--json`: `{ ok, out, size, project, scene: { id, name, key, entities,
-rejectedComponents }, cache, instances, meshes, placeholders, missing,
-transparent, batches, sceneCamera, sceneLight, lights, lightsDropped,
-sky, ev100, shadowCasters, shadowMap, quality: { profile, shadows,
+rejectedComponents }, cache, instances, culled, draws, shadowDraws,
+meshes, placeholders, missing, transparent, batches, sceneCamera,
+sceneLight, lights, lightsDropped, sky, ev100, shadowCasters, shadowMap,
+quality: { profile, shadows,
 shadowResolution, msaa, renderScale, anisotropy, renderSize },
 assetErrors, diagnostics }`; `docs/renderer.md` names the counts).
 `--quality <profile>` renders with one of the project's quality profiles

@@ -65,5 +65,14 @@ fn extract_renders_cubes_where_the_world_puts_them() {
     world.begin_frame(1.0 / 60.0);
     world.step();
     render_offscreen(&device, &queue, &mut renderer, &world.extract());
+    // The grid runs past the fallback camera's view: what is off-screen is
+    // culled, and every cube is accounted for either way.
+    let stats = renderer.stats();
+    assert_eq!(stats.instances + stats.culled, 1000);
+    assert!(stats.culled > 0, "{stats:?}");
+    assert_eq!(stats.draws, 1, "one (cube, placeholder) batch");
+    renderer.frustum_culling = false;
+    render_offscreen(&device, &queue, &mut renderer, &world.extract());
     assert_eq!(renderer.instance_count(), 1000);
+    assert_eq!(renderer.stats().culled, 0);
 }

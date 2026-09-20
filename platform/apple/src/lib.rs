@@ -184,6 +184,12 @@ pub struct FynkelAppleViewportStats {
     pub msaa: u32,
     pub render_width: u32,
     pub render_height: u32,
+    /// Last frame (M3-06): instances outside the camera frustum (not
+    /// drawn), mesh draw calls in the scene pass, draw calls in the shadow
+    /// pass.
+    pub culled_last_frame: u32,
+    pub draws_last_frame: u32,
+    pub shadow_draws_last_frame: u32,
 }
 
 /// Returned by `fynkel_apple_viewport_render` when the world pointer is
@@ -493,5 +499,8 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
         msaa: v.frame_stats().msaa,
         render_width: v.frame_stats().render_width,
         render_height: v.frame_stats().render_height,
+        culled_last_frame: v.frame_stats().culled,
+        draws_last_frame: v.frame_stats().draws,
+        shadow_draws_last_frame: v.frame_stats().shadow_draws,
     };
 }

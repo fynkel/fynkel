@@ -190,6 +190,9 @@ pub fn run(args: &[String]) -> ExitCode {
                 "scene": { "id": scene.id.to_string(), "name": scene.name, "key": cooked.key, "entities": scene.entities().len(), "rejectedComponents": scene.rejected_components },
                 "cache": cache.display().to_string(),
                 "instances": stats.instances,
+                "culled": stats.culled,
+                "draws": stats.draws,
+                "shadowDraws": stats.shadow_draws,
                 "meshes": stats.meshes,
                 "placeholders": stats.placeholders,
                 "missing": stats.missing,
@@ -218,7 +221,7 @@ pub fn run(args: &[String]) -> ExitCode {
         );
     } else {
         println!(
-            "{}: {}x{} — {} \"{}\": {} entities, {} instances ({} meshes, {} placeholders, {} missing, {} transparent), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}, quality {} (msaa {}, {}, {}x{})",
+            "{}: {}x{} — {} \"{}\": {} entities, {} instances in {} draw(s) ({} meshes, {} placeholders, {} missing, {} transparent, {} culled), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}, quality {} (msaa {}, {}, {}x{})",
             opts.out.display(),
             opts.width,
             opts.height,
@@ -226,10 +229,12 @@ pub fn run(args: &[String]) -> ExitCode {
             scene.name,
             scene.entities().len(),
             stats.instances,
+            stats.draws,
             stats.meshes,
             stats.placeholders,
             stats.missing,
             stats.transparent,
+            stats.culled,
             if stats.scene_camera { "scene" } else { "default" },
             if stats.scene_light { "scene" } else { "default" },
             stats.lights,
@@ -243,7 +248,10 @@ pub fn run(args: &[String]) -> ExitCode {
             quality.profile,
             quality.settings.msaa,
             if stats.shadow_map > 0 {
-                format!("{} caster(s) in a {}² shadow map", stats.shadow_casters, stats.shadow_map)
+                format!(
+                    "{} caster(s) in {} draw(s) into a {}² shadow map",
+                    stats.shadow_casters, stats.shadow_draws, stats.shadow_map
+                )
             } else {
                 "no shadow".to_string()
             },

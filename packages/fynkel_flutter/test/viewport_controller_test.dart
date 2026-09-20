@@ -118,6 +118,10 @@ void main() {
     expect(stats.shadowMap, 0);
     expect(stats.transparent, 0);
     expect(stats.lightsDropped, 0);
+    // The demo world spawns nothing: no draws, nothing culled.
+    expect(stats.draws, 0);
+    expect(stats.culled, 0);
+    expect(stats.shadowDraws, 0);
     final platform = await controller.platformStats();
     expect(platform!.copyCalls, 3);
 

@@ -10,6 +10,8 @@ pub struct FrameTiming {
     pub acquire_wait: Duration,
     pub cpu: Duration,
     pub presented: bool,
+    /// The renderer's counts for this frame (draws, instances, culled …).
+    pub render: Option<fynkel_render::FrameStats>,
 }
 
 impl FrameTiming {
@@ -18,6 +20,7 @@ impl FrameTiming {
             acquire_wait: Duration::ZERO,
             cpu: Duration::ZERO,
             presented: false,
+            render: None,
         }
     }
 }
@@ -28,6 +31,8 @@ struct Series {
     acquire_us: Vec<u32>,
     cpu_us: Vec<u32>,
     skipped: u32,
+    /// The last presented frame's renderer counts.
+    render: Option<fynkel_render::FrameStats>,
 }
 
 impl Series {
@@ -36,6 +41,7 @@ impl Series {
         other.acquire_us.append(&mut self.acquire_us);
         other.cpu_us.append(&mut self.cpu_us);
         other.skipped += std::mem::take(&mut self.skipped);
+        other.render = self.render.or(other.render);
     }
 }
 
@@ -71,6 +77,7 @@ impl FrameStats {
                 .acquire_us
                 .push(t.acquire_wait.as_micros() as u32);
             self.window.cpu_us.push(t.cpu.as_micros() as u32);
+            self.window.render = t.render.or(self.window.render);
         } else {
             self.window.skipped += 1;
         }
@@ -102,8 +109,9 @@ fn print(label: &str, s: &Series) {
     if s.interval_us.is_empty() {
         return;
     }
+    let r = s.render.unwrap_or_default();
     log::info!(
-        "[{label}] frames={} skipped={} | interval ms p50={:.2} p95={:.2} p99={:.2} | acquire-wait ms p50={:.2} p95={:.2} | cpu ms p50={:.3} p95={:.3} p99={:.3}",
+        "[{label}] frames={} skipped={} | interval ms p50={:.2} p95={:.2} p99={:.2} | acquire-wait ms p50={:.2} p95={:.2} | cpu ms p50={:.3} p95={:.3} p99={:.3} | draws={} instances={} culled={} batches={} shadow={}/{}",
         s.interval_us.len() + 1,
         s.skipped,
         pct(&s.interval_us, 0.50),
@@ -114,5 +122,11 @@ fn print(label: &str, s: &Series) {
         pct(&s.cpu_us, 0.50),
         pct(&s.cpu_us, 0.95),
         pct(&s.cpu_us, 0.99),
+        r.draws,
+        r.instances,
+        r.culled,
+        r.batches,
+        r.shadow_casters,
+        r.shadow_draws,
     );
 }

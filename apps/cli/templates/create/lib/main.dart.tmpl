@@ -145,7 +145,7 @@ class Hud extends StatelessWidget {
       if (s != null) ...[
         'viewport   ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
             'frame ${s.tickInterval.p50.toStringAsFixed(2)} ms  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
-        if (s.viewport case final v?) 'meshes     ${v.meshes} drawn, ${v.missing} missing, ${v.assetErrors} errors',
+        if (s.viewport case final v?) 'meshes     ${v.instances} drawn in ${v.draws} draws, ${v.culled} culled, ${v.missing} missing, ${v.assetErrors} errors',
       ],
       for (final d in game.report.diagnostics) '$d',
     ];
