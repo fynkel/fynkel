@@ -83,7 +83,7 @@ void main() {
     final project = session.openProject(dir.path);
     expect(project.name, 'Fixture Game');
     expect(project.isReadOnly, isFalse);
-    expect(project.assetCount, 15);
+    expect(project.assetCount, 16);
     expect(project.componentTypes, contains('fynkel.Transform'));
     expect(session.project, same(project));
     expect(session.commands(), Command.names);
@@ -165,7 +165,7 @@ void main() {
     final gold = File('${dir.path}/assets/materials/gold.material.json');
     expect(gold.existsSync(), isTrue, reason: 'written into the project, not the cwd');
     expect(main.state.dirty, isFalse, reason: 'saveDocument saved');
-    expect(session.refreshProject().assetCount, 16, reason: 'the new material is in the database');
+    expect(session.refreshProject().assetCount, 17, reason: 'the new material is in the database');
     expect(session.assets(kind: 'document', document: 'material').map((a) => a['path']),
         containsAll(['materials/rusted.material.json', 'materials/gold.material.json']));
     const transactions = 13;
@@ -249,7 +249,7 @@ void main() {
     expect(main.state.canUndo, isFalse);
     expect(main.state.name, 'Main (edited)');
     File(copyPath).deleteSync();
-    expect(session.rescan([copyPath]).assetCount, 16, reason: 'the deleted copy left the database');
+    expect(session.rescan([copyPath]).assetCount, 17, reason: 'the deleted copy left the database');
 
     // Events: one per change, in order, synchronously.
     final changes = events.whereType<DocumentChanged>().toList();
@@ -411,11 +411,11 @@ void main() {
     final doc = preview.documents.single;
     expect(doc.kind, 'scene');
     expect(doc.from, 0);
-    expect(doc.to, 2, reason: 'scenes are at formatVersion 2: two steps');
+    expect(doc.to, 3, reason: 'scenes are at formatVersion 3 (M3-19c): three steps');
     expect(doc.ok, isTrue);
     expect(doc.path, target.path);
     expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
-    expect(doc.applied.map((a) => a.from), [0, 1]);
+    expect(doc.applied.map((a) => a.from), [0, 1, 2]);
     expect(doc.diff, contains('formatVersion'));
     expect(target.readAsStringSync(), before, reason: 'a preview writes nothing');
     expect(session.validateProject().diagnostics.map((d) => d.code), contains('FYN-D0016'));

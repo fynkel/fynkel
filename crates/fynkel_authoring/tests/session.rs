@@ -91,8 +91,8 @@ fn a_project_opens_with_its_lock_assets_schemas_and_references() {
     let p = s.project().unwrap();
     assert!(p.read_only.is_none(), "{:?}", p.read_only);
     assert!(p.lock.is_some());
-    // 10 documents (5 scenes, 3 prefabs, 1 material, 1 rig) + 5 sources.
-    assert_eq!(p.assets.len(), 15);
+    // 11 documents (5 scenes, 3 prefabs, 1 material, 1 rig, 1 blend space) + 5 sources.
+    assert_eq!(p.assets.len(), 16);
     assert!(p.metadata.is_none(), "the fixture has no lib/generated");
     // Declared behaviour, no metadata → a warning saying to run codegen.
     let codes = code_of(&p.diagnostics);
@@ -114,7 +114,7 @@ fn a_project_opens_with_its_lock_assets_schemas_and_references() {
     assert_eq!(v["name"], "Fixture Game");
     assert_eq!(v["dir"], copy.dir.display().to_string());
     assert_eq!(v["readOnly"], Value::Null);
-    assert_eq!(v["assetCount"], 15);
+    assert_eq!(v["assetCount"], 16);
     assert!(v["componentTypes"]
         .as_array()
         .unwrap()
@@ -153,7 +153,7 @@ fn a_project_opens_with_its_lock_assets_schemas_and_references() {
     assert_eq!(s.query("commands", &json!({})).unwrap(), json!(COMMANDS));
 
     let all = s.query("assets", &json!({})).unwrap();
-    assert_eq!(all.as_array().unwrap().len(), 15);
+    assert_eq!(all.as_array().unwrap().len(), 16);
     let scenes = s.query("assets", &json!({"document": "scene"})).unwrap();
     assert_eq!(scenes.as_array().unwrap().len(), 5);
     let sources = s.query("assets", &json!({"kind": "source"})).unwrap();
@@ -227,11 +227,11 @@ fn project_validation_is_the_cli_report() {
     let s = open(&copy);
     let report = s.validate_project().unwrap();
     assert!(!report.has_errors(), "{:?}", report.diagnostics);
-    assert_eq!(report.documents, 10);
+    assert_eq!(report.documents, 11);
     assert_eq!(report.sources, 5);
     let v = s.query("validateProject", &json!({})).unwrap();
     assert_eq!(v["ok"], true);
-    assert_eq!(v["documents"], 10);
+    assert_eq!(v["documents"], 11);
     assert_eq!(v["project"]["name"], "Fixture Game");
 }
 
@@ -373,7 +373,7 @@ fn a_scene_edits_undoes_to_its_bytes_saves_and_conflicts() {
         .len();
     assert!(in_memory > 9, "{in_memory}");
     assert_eq!(scene.entities.len(), in_memory);
-    assert_eq!(s.project().unwrap().assets.len(), 15);
+    assert_eq!(s.project().unwrap().assets.len(), 16);
 
     // Save-as: a new file the database picks up (16 assets) with the same id
     // is a duplicate — the scan says so and keeps the first path.
@@ -385,7 +385,7 @@ fn a_scene_edits_undoes_to_its_bytes_saves_and_conflicts() {
         other.display().to_string()
     );
     let p = s.project().unwrap();
-    assert_eq!(p.assets.len(), 15, "a duplicate id is not a second asset");
+    assert_eq!(p.assets.len(), 16, "a duplicate id is not a second asset");
     assert!(
         code_of(&p.diagnostics).contains(&"FYN-A0003"),
         "{:?}",
@@ -627,7 +627,7 @@ fn rescan_reads_new_documents_and_drops_removed_ones() {
     let scan = s.rescan(std::slice::from_ref(&new_path)).unwrap();
     assert!(!scan.iter().any(|d| d.is_error()), "{scan:?}");
     let p = s.project().unwrap();
-    assert_eq!(p.assets.len(), 16);
+    assert_eq!(p.assets.len(), 17);
     assert_eq!(
         p.dependents(uuid::Uuid::parse_str(swatch).unwrap()).len(),
         before + 1
@@ -637,7 +637,7 @@ fn rescan_reads_new_documents_and_drops_removed_ones() {
     s.rescan(&[PathBuf::from("assets/materials/second.material.json")])
         .unwrap();
     let p = s.project().unwrap();
-    assert_eq!(p.assets.len(), 15);
+    assert_eq!(p.assets.len(), 16);
     assert_eq!(
         p.dependents(uuid::Uuid::parse_str(swatch).unwrap()).len(),
         before
@@ -730,11 +730,11 @@ fn the_migrations_query_previews_outdated_documents_without_writing() {
     let doc = &preview["documents"][0];
     assert_eq!(doc["kind"], "scene");
     assert_eq!(doc["from"], 0);
-    // Scenes are at formatVersion 2: two steps, the v0 one first.
-    assert_eq!(doc["to"], 2);
+    // Scenes are at formatVersion 3 (M3-19c): three steps, the v0 one first.
+    assert_eq!(doc["to"], 3);
     assert_eq!(doc["ok"], true);
     assert_eq!(doc["path"], target.display().to_string());
-    assert_eq!(doc["applied"].as_array().unwrap().len(), 2);
+    assert_eq!(doc["applied"].as_array().unwrap().len(), 3);
     assert_eq!(doc["applied"][0]["name"], "scene/0-1/entities-keyed-by-id");
     assert_eq!(doc["applied"][1]["from"], 1);
     assert!(doc["diff"].as_str().unwrap().contains("formatVersion"));

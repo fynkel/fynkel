@@ -123,7 +123,7 @@ void main() {
     final doc = project.migrations!.documents.single;
     expect(project.relative(doc.path), 'assets/scenes/training.scene.json');
     expect(doc.from, 0);
-    expect(doc.to, 2);
+    expect(doc.to, 3); // scenes are at formatVersion 3 since M3-19c
     expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
     expect(doc.diff, contains('formatVersion'));
     expect(project.diagnostics.map((d) => d.code), contains('FYN-D0016'));
