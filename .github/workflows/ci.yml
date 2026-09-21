@@ -37,9 +37,22 @@ jobs:
         run: cargo test --workspace
       - name: codegen --check
         run: cargo run -p fynkel_cli -- codegen --check
+      # A game's runtime carries no editor code (blueprint §19.2e item 1):
+      # built without the `authoring` feature — what package:fynkel's hook
+      # does for an app that does not ask for it — the dylibs export no
+      # `fynkel_authoring_*` symbol, and the workspace build exports them.
+      - name: no editor code in a game runtime
+        run: |
+          cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
+          for lib in target/debug/libfynkel_native.dylib target/debug/libfynkel_platform_apple.dylib; do
+            if nm -gU "$lib" | grep -q fynkel_authoring_; then echo "$lib exports the authoring ABI"; exit 1; fi
+            nm -gU "$lib" | grep -q _fynkel_world_step
+          done
+          cargo build -p fynkel_native -p fynkel_platform_apple
+          nm -gU target/debug/libfynkel_platform_apple.dylib | grep -q _fynkel_authoring_apply
 
   dart:
-    name: dart (package:fynkel, fynkel_flutter, fynkel_generator, example, starter project and showcase)
+    name: dart (package:fynkel, fynkel_authoring, fynkel_flutter, fynkel_generator, example, starter project and showcase)
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -63,6 +76,13 @@ jobs:
       - name: test
         working-directory: packages/fynkel
         run: dart test
+      # The editor's Dart surface over the authoring ABI (M4-01): its pubspec
+      # opts into the `authoring` cargo feature, so the hook builds the
+      # runtime once more with the fynkel_authoring_* entry points, and the
+      # test drives a complete edit session on a copy of the fixture project.
+      - name: fynkel_authoring pub get + analyze + test
+        working-directory: packages/fynkel_authoring
+        run: dart pub get && dart analyze --fatal-infos && dart test
       # The Flutter host package (M3-01): viewport controller + game view
       # against the real Rust viewport (headless Metal) and a mocked
       # texture channel.

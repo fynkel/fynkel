@@ -34,7 +34,15 @@ hooks:
       lock_file: fynkel.lock.json   # project runtime pin; default: the package's
       build_from_source: true       # skip the download
       native_lib: path/to/libfynkel_platform_apple.dylib
+      features: [authoring]         # cargo features of the runtime — the editor only, never a game
 ```
+
+`features` opts into cargo features of the native crates; the hook always
+builds with `--no-default-features` and adds exactly what is listed, so a
+game's runtime carries none of them. The only known feature is `authoring`
+(the editor's `fynkel_authoring_*` ABI, `package:fynkel_authoring`); a
+requested feature also skips the prebuilt download, since the published
+runtime is a game's.
 
 Hooks run with a stripped environment (only `PATH`, `HOME` and a few tool
 variables survive), which is why these are user-defines rather than

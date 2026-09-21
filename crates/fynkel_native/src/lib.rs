@@ -6,7 +6,13 @@
 //!   `FYNKEL_STATUS_PANIC`;
 //! * never hands out pointers into world storage except the read-only
 //!   output buffers, which are valid until the next mutating call.
+//!
+//! With the cargo feature `authoring` (on by default, off in a game's
+//! runtime) the crate also exports the editor's authoring ABI
+//! (`include/fynkel_authoring.h`, [`authoring`]).
 
+#[cfg(feature = "authoring")]
+pub mod authoring;
 pub mod bridge;
 pub mod buffer;
 pub mod load;

@@ -21,6 +21,7 @@
 //         lock_file: fynkel.lock.json   # project runtime pin (default: the package's)
 //         build_from_source: true       # skip the download
 //         native_lib: path/to/lib.dylib # use this library as-is
+//         features: [authoring]         # cargo features (the editor; never a game)
 //
 // Hooks run with a stripped environment (only PATH/HOME and a few tool
 // variables survive), so `FYNKEL_BUILD_FROM_SOURCE` is a user-define here.
@@ -48,6 +49,7 @@ void main(List<String> args) async {
     final workspace = _sourceWorkspace(input.packageRoot);
     final userLib = input.userDefines.path('native_lib');
     final forceSource = _flag(input, 'build_from_source');
+    final features = _features(input);
 
     final Uri built;
     final RuntimeSource source;
@@ -59,12 +61,14 @@ void main(List<String> args) async {
       built = userLib;
       source = RuntimeSource.userDefine;
     } else if (workspace != null) {
-      built = await _cargoBuild(workspace, crate, os, arch, iosSdk, output, log);
+      built = await _cargoBuild(workspace, crate, os, arch, iosSdk, features, output, log);
       source = RuntimeSource.workspace;
     } else {
       final url = lock.artifactUrl(key);
       final cargo = _findCargo();
-      if (url != null && !forceSource) {
+      // The published artifacts are game runtimes: no optional feature is in
+      // them, so an app that asks for one builds from source.
+      if (url != null && !forceSource && features.isEmpty) {
         built = await _download(input, lock, key, url, log);
         source = RuntimeSource.prebuilt;
       } else if (cargo != null) {
@@ -73,12 +77,14 @@ void main(List<String> args) async {
           throw _fail('No prebuilt Fynkel runtime for $key and no Rust source alongside the package. '
               'Set hooks.user_defines.fynkel.native_lib to a built library, or use a Fynkel source checkout.');
         }
-        built = await _cargoBuild(vendored, crate, os, arch, iosSdk, output, log);
+        built = await _cargoBuild(vendored, crate, os, arch, iosSdk, features, output, log);
         source = RuntimeSource.cargoFallback;
       } else {
         final why = url == null
             ? 'fynkel.lock.json has no published artifact for target "$key" (runtime ${lock.runtimeVersion})'
-            : 'build_from_source is set';
+            : features.isNotEmpty
+                ? 'hooks.user_defines.fynkel.features (${features.join(', ')}) are not in the prebuilt runtime'
+                : 'build_from_source is set';
         throw _fail('$why and no Rust toolchain was found (looked for `cargo` on PATH and in ~/.cargo/bin).\n'
             'Fix one of:\n'
             '  - install Rust (https://rustup.rs) so the runtime can be built from source;\n'
@@ -125,6 +131,21 @@ bool _flag(BuildInput input, String key) {
   return v ?? false;
 }
 
+/// `hooks.user_defines.fynkel.features`: a list of [knownFeatures] names.
+List<String> _features(BuildInput input) {
+  final v = input.userDefines['features'];
+  if (v == null) return const [];
+  if (v is! List || v.any((e) => e is! String)) {
+    throw _fail('hooks.user_defines.fynkel.features must be a list of strings (one of: ${knownFeatures.join(', ')})');
+  }
+  final names = v.cast<String>().toSet().toList()..sort();
+  final unknown = names.where((f) => !knownFeatures.contains(f)).toList();
+  if (unknown.isNotEmpty) {
+    throw _fail('hooks.user_defines.fynkel.features: unknown ${unknown.join(', ')} (known: ${knownFeatures.join(', ')})');
+  }
+  return names;
+}
+
 // ---- source builds ---------------------------------------------------------
 
 /// The Fynkel Cargo workspace when this package is checked out inside it
@@ -169,6 +190,7 @@ Future<Uri> _cargoBuild(
   OS os,
   Architecture arch,
   IOSSdk? iosSdk,
+  List<String> features,
   BuildOutputBuilder output,
   _Log log,
 ) async {
@@ -180,7 +202,7 @@ Future<Uri> _cargoBuild(
   final triple = rustTriple(os, arch, iosSdk: iosSdk);
   if (triple == null) throw _fail('Fynkel does not build for ${os.name}/${arch.name}${iosSdk == null ? '' : ' ($iosSdk)'}.');
   final crossCompile = triple != _hostTriple();
-  final args = ['build', '--release', '-p', crate, if (crossCompile) ...['--target', triple]];
+  final args = cargoBuildArgs(crate, targetTriple: crossCompile ? triple : null, features: features);
   log.info('${workspace.toFilePath()}: cargo ${args.join(' ')}');
   final result = await Process.run(
     cargo,

@@ -27,6 +27,25 @@ void main() {
     expect(cargoLibraryFileName('fynkel_native', OS.linux), 'libfynkel_native.so');
   });
 
+  test('cargo arguments carry exactly the requested features', () {
+    // A game: no feature, so the runtime has no editor code.
+    expect(cargoBuildArgs('fynkel_platform_apple'),
+        ['build', '--release', '-p', 'fynkel_platform_apple', '--no-default-features']);
+    // The editor: the authoring ABI, plus a cross-compile target.
+    expect(cargoBuildArgs('fynkel_native', targetTriple: 'aarch64-apple-ios', features: ['authoring']), [
+      'build',
+      '--release',
+      '-p',
+      'fynkel_native',
+      '--no-default-features',
+      '--features',
+      'authoring',
+      '--target',
+      'aarch64-apple-ios',
+    ]);
+    expect(knownFeatures, {'authoring'});
+  });
+
   test('lock file parses and resolves published artifacts only', () {
     final lock = RuntimeLock.parse('''
 {

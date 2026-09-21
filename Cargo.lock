@@ -776,6 +776,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_authoring"
+version = "0.0.1"
+dependencies = [
+ "fynkel_contracts",
+ "fynkel_document",
+ "fynkel_import",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "fynkel_cli"
 version = "0.0.1"
 dependencies = [
@@ -902,6 +913,7 @@ name = "fynkel_native"
 version = "0.0.1"
 dependencies = [
  "fynkel_assets",
+ "fynkel_authoring",
  "fynkel_contracts",
  "fynkel_core",
  "fynkel_document",

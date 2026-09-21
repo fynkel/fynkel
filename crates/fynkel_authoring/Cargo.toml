@@ -1,0 +1,16 @@
+[package]
+name = "fynkel_authoring"
+description = "The editor's session layer over fynkel_document (ADR-0016, blueprint §19.2e item 1): one open project — schemas, lock, asset database, behaviour metadata — and one authoring Editor per open document, addressed by handle, with every read as JSON. Editor-only: never linked into a game build (fynkel_native links it behind the `authoring` feature)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fynkel_contracts.workspace = true
+fynkel_document.workspace = true
+# `expected_lock()` for the lock check and the imported-prefab provider
+# for project validation. Development-only code, like this crate.
+fynkel_import.workspace = true
+serde_json.workspace = true
+uuid.workspace = true

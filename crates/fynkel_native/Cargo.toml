@@ -8,7 +8,19 @@ description = "Fynkel C ABI v1 — the native host boundary over fynkel_core (bl
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The editor's authoring ABI (`include/fynkel_authoring.h`, blueprint
+# §19.2e item 1): on in the workspace and in the editor's build, off in the
+# runtime a game links — `package:fynkel`'s hook builds with
+# `--no-default-features` and adds `--features authoring` only when the
+# app's `hooks.user_defines.fynkel.features` lists it, so no
+# `fynkel_authoring_*` symbol and none of `fynkel_authoring`'s code reaches
+# a game (§1.1 rule 6; CI asserts it with `nm`).
+default = ["authoring"]
+authoring = ["dep:fynkel_authoring"]
+
 [dependencies]
+fynkel_authoring = { workspace = true, optional = true }
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true
 fynkel_assets.workspace = true

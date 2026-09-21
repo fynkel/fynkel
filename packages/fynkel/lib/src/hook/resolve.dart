@@ -39,6 +39,26 @@ String? rustTriple(OS os, Architecture arch, {IOSSdk? iosSdk}) {
   };
 }
 
+/// Cargo features of the native crates an app may opt into through
+/// `hooks.user_defines.fynkel.features`. Anything else is refused by the
+/// hook. `authoring`: the editor's authoring ABI (`fynkel_authoring_*`,
+/// `include/fynkel_authoring.h`); a game never lists it, so its runtime
+/// carries no editor code (blueprint §19.2e item 1).
+const knownFeatures = {'authoring'};
+
+/// The `cargo build` arguments for one target: always `--no-default-features`
+/// so the built runtime carries exactly the features the app asked for — the
+/// crates' defaults are for the workspace, not for a game.
+List<String> cargoBuildArgs(String crate, {String? targetTriple, Iterable<String> features = const []}) => [
+      'build',
+      '--release',
+      '-p',
+      crate,
+      '--no-default-features',
+      if (features.isNotEmpty) ...['--features', (features.toList()..sort()).join(',')],
+      if (targetTriple != null) ...['--target', targetTriple],
+    ];
+
 /// Dynamic library file name cargo produces for [crate] on [os].
 String cargoLibraryFileName(String crate, OS os) => switch (os) {
       OS.windows => '$crate.dll',

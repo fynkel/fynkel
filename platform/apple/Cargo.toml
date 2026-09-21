@@ -9,6 +9,14 @@ license.workspace = true
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Passes `fynkel_native`'s `authoring` feature through: this dylib is the
+# one a macOS/iOS app loads, so it decides whether the editor's
+# `fynkel_authoring_*` entry points are exported. Same rule as there: on by
+# default for the workspace, off in a game's build.
+default = ["authoring"]
+authoring = ["fynkel_native/authoring"]
+
 [dependencies]
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true

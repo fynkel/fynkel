@@ -14,6 +14,7 @@ members = [
     "crates/fynkel_import",
     "crates/fynkel_cooked",
     "crates/fynkel_assets",
+    "crates/fynkel_authoring",
     "platform/apple",
     "hosts/headless",
     "hosts/standalone",
@@ -60,10 +61,11 @@ fynkel_physics = { path = "crates/fynkel_physics" }
 fynkel_core = { path = "crates/fynkel_core" }
 fynkel_wire = { path = "crates/fynkel_wire" }
 fynkel_render = { path = "crates/fynkel_render" }
-fynkel_native = { path = "crates/fynkel_native" }
+fynkel_native = { path = "crates/fynkel_native", default-features = false }   # `authoring` is opted into per dependent (platform/apple passes it through)
 fynkel_document = { path = "crates/fynkel_document" }
 fynkel_import = { path = "crates/fynkel_import" }
 fynkel_assets = { path = "crates/fynkel_assets" }
+fynkel_authoring = { path = "crates/fynkel_authoring" }
 fynkel_host_headless = { path = "hosts/headless" }
 
 [profile.release]
