@@ -259,7 +259,7 @@ fn skinned_meshes_follow_their_joint_palette() {
     let mut world = World::new(WorldConfig::default());
     world.load_scene(&cooked.description).unwrap();
     let (clips, skins, diags) = assets.register_animation(&cooked.description, &mut world);
-    assert_eq!((clips, skins, diags.len()), (2, 1, 0));
+    assert_eq!((clips, skins, diags.len()), (3, 1, 0));
     let _residency = assets.retain(&cooked.closure);
 
     let (w, h) = (320, 240);

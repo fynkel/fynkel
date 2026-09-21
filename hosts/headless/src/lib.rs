@@ -1112,8 +1112,10 @@ mod animation_tests {
     /// found by name below it, the Prop's non-looping `bob` ends once, the
     /// Body's skin resolves and the extract carries its palette — with a
     /// stable checksum. Item 19a: the scene's `Imported` entity instances
-    /// `rig.glb#prefab`, the same rig from the source's own hierarchy,
-    /// waving beside the hand-authored one over its own six joints.
+    /// the same rig from the source's own hierarchy, waving beside the
+    /// hand-authored one over its own six joints — since 19b through the
+    /// Column rig document (`column.rig.json#prefab`, its `anim/wave` a
+    /// third registered clip with the source's `wave` bytes).
     #[test]
     fn the_rig_scene_animates_and_skins_without_a_behaviour() {
         let cooked = tests::Cooked::new("rig");
@@ -1138,7 +1140,7 @@ mod animation_tests {
                 anim.skinned_meshes,
                 anim.joints
             ),
-            (5, 2, 1, 2, 6),
+            (5, 3, 1, 2, 6),
             "{anim:#?}"
         );
         assert_eq!(anim.ended, 0, "bob (2 s) has not ended at 0.5 s");

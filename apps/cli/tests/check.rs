@@ -1098,9 +1098,9 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["project"]["name"], "Fixture Game");
-    assert_eq!(v["documents"], 9);
+    assert_eq!(v["documents"], 10);
     assert_eq!(v["sources"], 5);
-    assert_eq!(v["references"], 25);
+    assert_eq!(v["references"], 28);
     assert_eq!(v["lock"]["cache"]["container"], 1);
     let out = run(&["validate", "--project", fixture.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
@@ -1195,7 +1195,7 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
-    assert_eq!(v["assetCount"], 14);
+    assert_eq!(v["assetCount"], 15);
     assert_eq!(v["quality"]["default"], "medium");
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     let out = run(&[
@@ -1646,6 +1646,369 @@ fn khronos_rigs_instance_from_the_source_alone() {
         let (start, later) = (pose("1"), pose("60"));
         assert_ne!(start, later, "{model}: {joint} did not move");
     }
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// M3-19b (b): the Khronos rigs assembled through the rig document —
+/// `fynkel import --rig` writes it (the first file the skeleton, every
+/// file's clips named by bone), `rig inspect`/`validate` read it back,
+/// a scene names `{rig, prefab}` and `anim/<name>` and plays through
+/// `cook`, `test --headless` and `state dump`; two rigs with different
+/// bone names refuse to share a clip (`FYN-A0106`).
+#[test]
+fn khronos_rigs_assemble_into_a_rig_document() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-rigdoc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&root.join("crates/fynkel_document/fixtures/project"), &dir);
+    let _ = std::fs::remove_dir_all(dir.join(".fynkel"));
+    let project = dir.to_str().unwrap();
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    };
+    let json = |out: &std::process::Output| -> serde_json::Value {
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{e}: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            )
+        })
+    };
+    for model in ["Fox", "CesiumMan", "RiggedFigure"] {
+        std::fs::copy(
+            root.join(format!("crates/fynkel_import/fixtures/khronos/{model}.glb")),
+            dir.join(format!("assets/models/{model}.glb")),
+        )
+        .unwrap();
+    }
+
+    // Sidecars for the two the Fox does not use (the database refuses a
+    // source without one), then the Fox alone: skeleton and three clips
+    // from one file.
+    let out = run(&[
+        "import",
+        "--json",
+        "--out",
+        ".fynkel/cache/import",
+        "assets/models/CesiumMan.glb",
+        "assets/models/RiggedFigure.glb",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let out = run(&[
+        "import",
+        "--json",
+        "--out",
+        ".fynkel/cache/import",
+        "--rig",
+        "fox",
+        "assets/models/Fox.glb",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    let rig = &v["rig"];
+    assert_eq!(
+        (
+            rig["ok"].as_bool(),
+            rig["written"].as_bool(),
+            rig["created"].as_bool()
+        ),
+        (Some(true), Some(true), Some(true)),
+        "{rig}"
+    );
+    let rig_id = rig["id"].as_str().unwrap().to_string();
+    let clips: Vec<(&str, u64, u64)> = rig["clips"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            (
+                c["name"].as_str().unwrap(),
+                c["channels"].as_u64().unwrap(),
+                c["matched"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(clips.len(), 3, "{rig}");
+    assert_eq!(
+        clips.iter().map(|c| c.0).collect::<Vec<_>>(),
+        ["survey", "walk", "run"]
+    );
+    for (name, channels, matched) in &clips {
+        assert_eq!(channels, matched, "{name}: every channel found a bone");
+    }
+    let rig_path = dir.join("assets/models/fox.rig.json");
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&rig_path).unwrap()).unwrap();
+    assert_eq!(doc["id"], rig_id.as_str());
+    assert_eq!(doc["name"], "fox");
+    assert_eq!(doc["skeleton"]["asset"], v["files"][0]["id"]);
+    assert_eq!(doc["clips"]["run"]["sub"], "anim/2");
+    let written = std::fs::read_to_string(&rig_path).unwrap();
+
+    // A dry run over an existing rig keeps its id and touches nothing.
+    let out = run(&[
+        "import",
+        "--json",
+        "--dry-run",
+        "--out",
+        ".fynkel/cache/import",
+        "--rig",
+        "fox",
+        "assets/models/Fox.glb",
+    ]);
+    assert!(out.status.success());
+    let rig = &json(&out)["rig"];
+    assert_eq!(
+        (
+            rig["ok"].as_bool(),
+            rig["written"].as_bool(),
+            rig["created"].as_bool()
+        ),
+        (Some(true), Some(false), Some(false)),
+        "{rig}"
+    );
+    assert_eq!(rig["id"], rig_id.as_str());
+    assert_eq!(std::fs::read_to_string(&rig_path).unwrap(), written);
+
+    // `rig inspect` reads the document back, text and JSON.
+    let out = run(&["rig", "inspect", "assets/models/fox.rig.json", "--json"]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["ok"], true);
+    assert_eq!(v["id"], rig_id.as_str());
+    assert_eq!(v["skeleton"]["joints"].as_array().unwrap().len(), 24);
+    assert_eq!(v["skeleton"]["entities"], 26);
+    assert_eq!(v["skeleton"]["roots"], serde_json::json!(["_rootJoint"]));
+    assert_eq!(v["clips"][1]["name"], "walk");
+    assert_eq!(v["clips"][1]["sub"], "anim/walk");
+    assert_eq!(v["clips"][1]["matched"], v["clips"][1]["channels"]);
+    assert_eq!(v["diagnostics"].as_array().unwrap().len(), 0);
+    let out = run(&["rig", "inspect", "assets/models/fox.rig.json"]);
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("fox (assets/models/fox.rig.json)"), "{text}");
+    assert!(
+        text.contains("24 joint(s) (root _rootJoint), 26 entities"),
+        "{text}"
+    );
+    assert!(text.contains("clips (3)"), "{text}");
+    assert!(text.contains("run "), "{text}");
+    let out = run(&["rig", "validate", "assets/models/fox.rig.json"]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("1/1 rig(s) ok"));
+
+    // A scene instances `{rig, prefab}` and plays `anim/run`.
+    let rig_scene: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("assets/scenes/rig.scene.json")).unwrap(),
+    )
+    .unwrap();
+    let scene_id = "c0000000-0000-4000-8000-000000000038";
+    let scene = serde_json::json!({
+        "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+        "formatVersion": 2,
+        "id": scene_id,
+        "name": "Fox",
+        "entities": {
+            "c0000000-0000-4000-8000-0000000005e0": rig_scene["entities"]["c0000000-0000-4000-8000-0000000004e0"],
+            "c0000000-0000-4000-8000-0000000005e1": rig_scene["entities"]["c0000000-0000-4000-8000-0000000004e1"],
+            "c0000000-0000-4000-8000-0000000005e2": {
+                "name": "Character", "parent": null, "children": [],
+                "components": {
+                    "c0000000-0000-4000-8000-000000000504": {
+                        "type": "fynkel.Transform", "version": 1,
+                        "data": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [0.01, 0.01, 0.01] }
+                    },
+                    "c0000000-0000-4000-8000-000000000505": {
+                        "type": "fynkel.Animator", "version": 1,
+                        "data": { "clip": { "asset": rig_id, "sub": "anim/run" }, "speed": 1.0, "looping": true, "playing": true }
+                    }
+                },
+                "prefab": { "asset": { "asset": rig_id, "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000005f0", "overrides": [] }
+            }
+        }
+    });
+    std::fs::write(
+        dir.join("assets/scenes/fox.scene.json"),
+        serde_json::to_string_pretty(&scene).unwrap(),
+    )
+    .unwrap();
+    let out = run(&["validate", "--project", project, "--json"]);
+    let v = json(&out);
+    assert_eq!(
+        (
+            out.status.code(),
+            v["errors"].as_u64(),
+            v["warnings"].as_u64()
+        ),
+        (Some(0), Some(0), Some(0)),
+        "{v}"
+    );
+    let out = run(&["cook", "--project", project, "--json"]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run(&[
+        "test",
+        "--headless",
+        "--project",
+        project,
+        "--no-cook",
+        "--scene",
+        scene_id,
+        "--steps",
+        "60",
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["scene"]["entities"], 26 + 3);
+    assert_eq!(v["diagnostics"], 0);
+    let anim = &v["animation"];
+    assert_eq!(
+        (
+            anim["clips"].as_u64(),
+            anim["skins"].as_u64(),
+            anim["joints"].as_u64(),
+            anim["diagnostics"].as_u64()
+        ),
+        (Some(1), Some(1), Some(24), Some(0)),
+        "{anim}"
+    );
+    let pose = |steps: &str| -> serde_json::Value {
+        let out = run(&[
+            "state",
+            "dump",
+            "--project",
+            project,
+            "--no-cook",
+            "--scene",
+            scene_id,
+            "--steps",
+            steps,
+            "--json",
+        ]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        json(&out)["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "b_Neck_04")
+            .expect("the fox's neck")["world"]
+            .clone()
+    };
+    assert_ne!(pose("1"), pose("60"), "the run did not move the neck");
+
+    // Two rigs with different bone names: the CesiumMan clip animates
+    // bones the RiggedFigure does not have, so the rig is written with an
+    // error and refused by `rig validate` and `validate`.
+    let out = run(&[
+        "import",
+        "--json",
+        "--out",
+        ".fynkel/cache/import",
+        "--rig",
+        "mismatch",
+        "assets/models/RiggedFigure.glb",
+        "assets/models/CesiumMan.glb",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = json(&out);
+    assert_eq!(v["rig"]["ok"], false);
+    assert_eq!(v["rig"]["written"], true);
+    let clips = v["rig"]["clips"].as_array().unwrap();
+    assert_eq!(clips[0]["name"], "riggedfigure");
+    assert_eq!(clips[0]["matched"], clips[0]["channels"]);
+    assert_eq!(clips[1]["name"], "cesiumman");
+    assert_eq!(clips[1]["matched"], 27);
+    assert_eq!(clips[1]["missing"].as_array().unwrap().len(), 10, "{v}");
+    let codes: Vec<(&str, &str)> = v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["code"].as_str().unwrap(),
+                d["pointer"].as_str().unwrap_or(""),
+            )
+        })
+        .collect();
+    assert_eq!(codes, [("FYN-A0106", "/clips/cesiumman")], "{v}");
+    let out = run(&[
+        "rig",
+        "validate",
+        "assets/models/mismatch.rig.json",
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = json(&out);
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-A0106");
+    assert_eq!(v["diagnostics"][0]["pointer"], "/clips/cesiumman");
+    // The document itself is valid (`validate` reads sources for their
+    // ids, not their bones); the cook matches bones and refuses the rig.
+    let out = run(&["validate", "--project", project, "--json"]);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let out = run(&["cook", "--project", project, "--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = json(&out);
+    let codes: Vec<(&str, &str)> = v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| {
+            (
+                d["code"].as_str().unwrap(),
+                d["pointer"].as_str().unwrap_or(""),
+            )
+        })
+        .collect();
+    assert!(
+        codes.contains(&("FYN-A0106", "/clips/cesiumman")),
+        "{codes:?}"
+    );
 
     std::fs::remove_dir_all(&dir).unwrap();
 }

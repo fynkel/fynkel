@@ -472,13 +472,18 @@ impl PrefabLibrary {
     /// a `wanted` entry that is not a source of `db`, or whose sidecar
     /// lacks the sub-asset, is skipped (expansion reports it as `D0401`
     /// with the hint); a source that does not import is reported here,
-    /// once. Returns the provider's diagnostics.
+    /// once. A rig document's `prefab` (M3-19b) is its skeleton source's
+    /// hierarchy adopted under the rig's id ([`crate::rig::Rig::adopt_prefab`]);
+    /// a rig whose skeleton is not an imported model is skipped here and
+    /// reported by the rig's own validation. Returns the provider's
+    /// diagnostics.
     pub fn add_sources(
         &mut self,
         db: &crate::asset::AssetDatabase,
         wanted: &[(Uuid, String)],
         sources: &dyn crate::project::SourcePrefabs,
     ) -> Vec<Diagnostic> {
+        use crate::asset::AssetKind;
         let mut diags = Vec::new();
         for (source, sub) in wanted {
             if self.imported.contains_key(&(*source, sub.clone())) {
@@ -487,15 +492,58 @@ impl PrefabLibrary {
             let Some(entry) = db.get(*source) else {
                 continue;
             };
-            if !matches!(entry.kind, crate::asset::AssetKind::Source { .. })
-                || !entry.sub_assets.contains_key(sub)
-            {
+            if !entry.sub_assets.contains_key(sub) {
                 continue;
             }
-            match sources.prefab(db.root(), entry, sub) {
-                Ok(Some(doc)) => self.add_imported(Prefab::from_document(doc), *source, sub),
-                Ok(None) => {}
-                Err(d) => diags.extend(d),
+            match &entry.kind {
+                AssetKind::Source { .. } => match sources.prefab(db.root(), entry, sub) {
+                    Ok(Some(doc)) => self.add_imported(Prefab::from_document(doc), *source, sub),
+                    Ok(None) => {}
+                    Err(d) => diags.extend(d),
+                },
+                AssetKind::Document(DocumentKind::Rig) if sub == crate::rig::RIG_PREFAB_SUB => {
+                    let rig = match Document::read(&entry.file(db.root()), Some(DocumentKind::Rig))
+                    {
+                        Ok(doc) => crate::rig::Rig::from_document(doc),
+                        Err(d) => {
+                            diags.extend(d);
+                            continue;
+                        }
+                    };
+                    let Some(skeleton) = rig
+                        .skeleton
+                        .as_ref()
+                        .filter(|s| s.sub.is_empty())
+                        .and_then(|s| db.get(Uuid::from_bytes(s.asset.0)))
+                    else {
+                        continue;
+                    };
+                    if !crate::rig::is_model(&skeleton.kind)
+                        || !skeleton.sub_assets.contains_key(sub)
+                    {
+                        continue;
+                    }
+                    let shown = format!("{}#{sub}", entry.path);
+                    let adopted =
+                        sources
+                            .prefab(db.root(), skeleton, sub)
+                            .and_then(|doc| match doc {
+                                Some(doc) => doc
+                                    .write()
+                                    .map_err(|d| vec![d])
+                                    .and_then(|text| rig.adopt_prefab(&text, &shown))
+                                    .map(Some),
+                                None => Ok(None),
+                            });
+                    match adopted {
+                        Ok(Some(doc)) => {
+                            self.add_imported(Prefab::from_document(doc), *source, sub)
+                        }
+                        Ok(None) => {}
+                        Err(d) => diags.extend(d),
+                    }
+                }
+                AssetKind::Document(_) => {}
             }
         }
         diags
@@ -658,7 +706,7 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                         inst.asset.sub
                     )
                 } else if !inst.asset.sub.is_empty() {
-                    "the source must import as a model with a node hierarchy (fynkel.gltf, fynkel.fbx); prefab documents need no sub".to_string()
+                    "the asset must be a rig document or a source that imports as a model with a node hierarchy (fynkel.gltf, fynkel.fbx); prefab documents need no sub".to_string()
                 } else if library.is_empty() {
                     "pass the prefab directory (--prefabs <dir>)".to_string()
                 } else {

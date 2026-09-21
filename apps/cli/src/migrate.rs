@@ -1,7 +1,7 @@
 //! `fynkel migrate <path|dir>... [--dry-run] [--json]` (§14.1, blueprint
 //! §19.2c item 9): brings documents to the current `formatVersion`. A
 //! directory means every document under it (`.scene.json`, `.prefab.json`,
-//! `.material.json`, `.shader.json`, `.meta.json`, `fynkel.project.json`;
+//! `.material.json`, `.shader.json`, `.rig.json`, `.meta.json`, `fynkel.project.json`;
 //! hidden entries skipped). `--dry-run` prints the unified diff per document
 //! and writes nothing; otherwise each changed file is rewritten with the
 //! original kept as `<file>.bak`. Newer documents are reported (`FYN-D0013`)

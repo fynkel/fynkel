@@ -215,7 +215,13 @@ struct Prepared {
     source: CacheKey,
     extra_inputs: Vec<(String, CacheKey)>,
     settings: String,
+    /// What the key covers and what must cook first: every resolved
+    /// reference.
     dependencies: Vec<Uuid>,
+    /// What a load of the cooked object needs (the index's
+    /// `dependencies`): the same, except for a rig, whose clip sources
+    /// are copied into its object and stay out of the bundle (M3-19b).
+    runtime_dependencies: Vec<Uuid>,
     /// The loaded document (documents) or sidecar (sources).
     input: Input,
     failed: bool,
@@ -327,6 +333,42 @@ pub fn cook(
             }
         }
     }
+    // A rig's `prefab` is its skeleton source's hierarchy under the rig's
+    // own id (M3-19b), so `{ asset: <rig>, sub: "prefab" }` expands like
+    // the source's; a rig whose skeleton did not cook fails below.
+    for p in &prepared {
+        let Input::Document(doc) = &p.input else {
+            continue;
+        };
+        if doc.kind != DocumentKind::Rig || p.failed {
+            continue;
+        }
+        let rig = fynkel_document::Rig::from_document(doc.clone());
+        let Some(skeleton) = rig.skeleton.as_ref().filter(|s| s.sub.is_empty()) else {
+            continue;
+        };
+        let source = fynkel_contracts::AssetRef {
+            asset: skeleton.asset,
+            sub: fynkel_document::rig::RIG_PREFAB_SUB.to_string(),
+        };
+        let Some(prefab) = library.get_ref(&source) else {
+            continue;
+        };
+        let shown = format!("{}#prefab", doc.path.as_deref().unwrap_or(""));
+        match prefab
+            .document
+            .write()
+            .map_err(|d| vec![d])
+            .and_then(|text| rig.adopt_prefab(&text, &shown))
+        {
+            Ok(adopted) => library.add_imported(
+                Prefab::from_document(adopted),
+                rig.id(),
+                fynkel_document::rig::RIG_PREFAB_SUB,
+            ),
+            Err(d) => diagnostics.extend(d),
+        }
+    }
     // Nested prefabs expand once; a prefab that cannot (a cycle, a bad
     // inner override) stays as it is and fails its own cook below, where
     // the diagnostics are re-derived against its cooked object.
@@ -418,7 +460,7 @@ fn cook_index(
             key: None,
             file: None,
             status: Status::Failed,
-            dependencies: p.dependencies.clone(),
+            dependencies: p.runtime_dependencies.clone(),
             chunks: Vec::new(),
             bytes: 0,
         };
@@ -496,6 +538,7 @@ fn cook_index(
             p,
             &inputs,
             &key,
+            cache,
             opts,
             diagnostics,
         ) {
@@ -700,6 +743,17 @@ fn prepare(
                 Input::Document(d) => d.envelope.format_version,
                 _ => 0,
             };
+            let dependencies: Vec<Uuid> = dependencies.into_iter().collect();
+            let runtime_dependencies = match &input {
+                Input::Document(doc) if *kind == DocumentKind::Rig => {
+                    fynkel_document::Rig::from_document(doc.clone())
+                        .skeleton
+                        .and_then(|s| db.resolve(&s).ok().map(|r| r.entry.id))
+                        .into_iter()
+                        .collect()
+                }
+                _ => dependencies.clone(),
+            };
             Prepared {
                 kind: format!("document/{}", kind.name()),
                 version,
@@ -709,7 +763,8 @@ fn prepare(
                 // (a scene is described and expanded against them), so the
                 // fingerprint is an input: a schema change recooks it.
                 settings: document_settings(),
-                dependencies: dependencies.into_iter().collect(),
+                dependencies,
+                runtime_dependencies,
                 input,
                 failed,
             }
@@ -762,6 +817,7 @@ fn prepare(
                 extra_inputs,
                 settings,
                 dependencies: Vec::new(),
+                runtime_dependencies: Vec::new(),
                 input: match meta {
                     Some(meta) if !failed => Input::Source { meta, bytes },
                     _ => Input::None,
@@ -856,6 +912,7 @@ fn cook_one(
     p: &Prepared,
     inputs: &KeyInputs,
     key: &CacheKey,
+    cache: &Cache,
     opts: &CookOptions,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<(Vec<u8>, Manifest)> {
@@ -884,6 +941,20 @@ fn cook_one(
                 &entry.name,
                 diagnostics,
             )?);
+        }
+        Input::Document(doc) if doc.kind == DocumentKind::Rig => {
+            rig_chunks(
+                doc,
+                db,
+                schemas,
+                library,
+                entry,
+                inputs,
+                cache,
+                &mut chunks,
+                &mut sub_assets,
+                diagnostics,
+            )?;
         }
         Input::Document(doc) => {
             let text = match doc.write() {
@@ -990,7 +1061,7 @@ fn cook_one(
         "importerVersion": importer_version,
         "profile": opts.profile,
         "key": key.hex(),
-        "dependencies": p.dependencies.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
+        "dependencies": p.runtime_dependencies.iter().map(|d| d.to_string()).collect::<Vec<_>>(),
         "subAssets": sub_assets.iter().map(|(k, v)| (k.clone(), Value::from(v.to_string()))).collect::<serde_json::Map<_, _>>(),
         "chunks": chunk_meta,
     });
@@ -1061,6 +1132,185 @@ fn cook_one(
         bytes: bytes.len() as u64,
     };
     Some((bytes, manifest))
+}
+
+/// A rig's cooked object (M3-19b) is self-contained for what a game
+/// names: its own `JSON` (the document), the skeleton source's hierarchy
+/// as its `prefab` chunk (adopted under the rig's id, through the library
+/// like any prefab — expanded and described), and one `ANIM` chunk per
+/// clip, `anim/<name>`, read from the clip source's cooked object and
+/// matched to the skeleton by bone name ([`crate::rig::retarget`]; a
+/// mismatch is `FYN-A0106` and fails the rig). Meshes, skins and
+/// materials stay in the skeleton source, which the rig depends on at
+/// runtime; the clip sources do not enter the bundle.
+#[allow(clippy::too_many_arguments)]
+fn rig_chunks(
+    doc: &Document,
+    db: &AssetDatabase,
+    schemas: &SchemaSet,
+    library: &PrefabLibrary,
+    entry: &AssetEntry,
+    inputs: &KeyInputs,
+    cache: &Cache,
+    chunks: &mut Vec<ChunkPlan>,
+    sub_assets: &mut BTreeMap<String, Uuid>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<()> {
+    use fynkel_document::rig::{Rig, RIG_PREFAB_SUB};
+    let shown = entry.file(db.root()).display().to_string();
+    let rig = Rig::from_document(doc.clone());
+    let checked = rig.validate_references(db);
+    let bad = has_errors(&checked);
+    diagnostics.extend(checked);
+    if bad {
+        return None;
+    }
+    let text = match doc.write() {
+        Ok(t) => t,
+        Err(d) => {
+            diagnostics.push(d.with_document(shown));
+            return None;
+        }
+    };
+    chunks.push(ChunkPlan {
+        kind: KIND_JSON,
+        name: entry.name.clone(),
+        sub: None,
+        info: json!({ "documentKind": doc.kind.name() }),
+        payload: text.into_bytes(),
+    });
+    for (sub, id) in rig.sub_assets() {
+        sub_assets.insert(sub, id);
+    }
+    let object_of = |asset: fynkel_contracts::AssetId| -> Option<PathBuf> {
+        let id = Uuid::from_bytes(asset.0);
+        inputs
+            .dependencies
+            .iter()
+            .find(|(d, _)| *d == id)
+            .map(|(_, key)| cache.object_path(key))
+    };
+    let failed = |diagnostics: &mut Vec<Diagnostic>, message: String| {
+        diagnostics.push(
+            Diagnostic::error(Code::IMPORT_INVALID_DATA, message)
+                .with_document(shown.clone())
+                .with_id(entry.id.to_string()),
+        );
+    };
+
+    // The skeleton: its hierarchy (the library's adopted copy) and its
+    // names.
+    let skeleton = rig.skeleton.clone()?;
+    let own = fynkel_contracts::AssetRef {
+        asset: fynkel_contracts::Uuid::from_bytes(*rig.id().as_bytes()),
+        sub: RIG_PREFAB_SUB.to_string(),
+    };
+    let Some(prefab) = library.get_ref(&own) else {
+        failed(
+            diagnostics,
+            format!(
+                "{}: the skeleton {} has no cooked hierarchy (its prefab sub-asset)",
+                entry.path, skeleton
+            ),
+        );
+        return None;
+    };
+    let mut hierarchy = prefab_chunk(&prefab.document, schemas, library, &entry.name, diagnostics)?;
+    hierarchy.sub = Some(RIG_PREFAB_SUB.to_string());
+    hierarchy.info["skeleton"] = Value::from(skeleton.asset.to_string());
+    chunks.push(hierarchy);
+    let Some(skeleton_object) = object_of(skeleton.asset) else {
+        failed(
+            diagnostics,
+            format!("{}: the skeleton {} is not cooked", entry.path, skeleton),
+        );
+        return None;
+    };
+    let names = match crate::rig::cooked::skeleton_names(&skeleton_object) {
+        Ok(n) => n,
+        Err(e) => {
+            failed(
+                diagnostics,
+                format!(
+                    "{}: the skeleton's cooked object does not read ({e})",
+                    entry.path
+                ),
+            );
+            return None;
+        }
+    };
+
+    // The clips, each against the skeleton.
+    let mut ok = true;
+    for clip in &rig.clips {
+        let source_shown = db
+            .get(Uuid::from_bytes(clip.asset.asset.0))
+            .map(|e| e.path.clone())
+            .unwrap_or_else(|| clip.asset.asset.to_string());
+        let Some(object) = object_of(clip.asset.asset) else {
+            failed(
+                diagnostics,
+                format!(
+                    "{}: clip {:?}: {source_shown} is not cooked",
+                    entry.path, clip.name
+                ),
+            );
+            ok = false;
+            continue;
+        };
+        let read = crate::rig::cooked::animation(&object, &clip.asset.sub)
+            .and_then(|a| crate::rig::cooked::joint_names(&object).map(|joints| (a, joints)));
+        let (payload, joints) = match read {
+            Ok((Some(a), joints)) => (a, joints),
+            Ok((None, _)) => {
+                failed(
+                    diagnostics,
+                    format!(
+                        "{}: clip {:?}: {source_shown} has no cooked clip {}",
+                        entry.path, clip.name, clip.asset.sub
+                    ),
+                );
+                ok = false;
+                continue;
+            }
+            Err(e) => {
+                failed(
+                    diagnostics,
+                    format!(
+                        "{}: clip {:?}: {source_shown}'s cooked object does not read ({e})",
+                        entry.path, clip.name
+                    ),
+                );
+                ok = false;
+                continue;
+            }
+        };
+        let (retargeted, mut diags) =
+            crate::rig::retarget(&clip.name, &payload, joints.as_ref(), &names);
+        for d in &mut diags {
+            d.document = Some(shown.clone());
+            d.pointer = Some(clip.pointer.clone());
+            if let Some(span) = doc.root.pointer_span(&clip.pointer) {
+                d.line = Some(span.start.line);
+                d.column = Some(span.start.column);
+            }
+        }
+        ok &= !has_errors(&diags);
+        diagnostics.extend(diags);
+        chunks.push(ChunkPlan {
+            kind: KIND_ANIMATION,
+            name: clip.name.clone(),
+            sub: Some(Rig::clip_sub(&clip.name)),
+            info: json!({
+                "channels": retargeted.payload.channels.len(),
+                "seconds": retargeted.payload.duration,
+                "source": format!("{}#{}", source_shown, clip.asset.sub),
+                "dropped": retargeted.dropped,
+            }),
+            payload: fynkel_cooked::payload::encode_animation(&retargeted.payload),
+        });
+    }
+    ok.then_some(())
 }
 
 /// A scene's `JSON` chunk is the **expanded** scene (M3-03): every prefab

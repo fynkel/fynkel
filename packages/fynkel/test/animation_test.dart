@@ -15,6 +15,9 @@ const rigScene = 'c0000000-0000-4000-8000-000000000034';
 const rigAsset = 'c0000000-0000-4000-8000-000000000005';
 const wave = AssetRef(rigAsset, sub: 'anim/0');
 const bob = AssetRef(rigAsset, sub: 'anim/1');
+// The Column rig document (M3-19b): rig.glb as the skeleton, `wave` and
+// `bob` named.
+const columnRig = 'c0000000-0000-4000-8000-000000000050';
 
 /// Logs the clips that end on its object and replays the last one once.
 class Listener extends Behaviour {
@@ -60,7 +63,7 @@ void main() {
     expect(report.ok, isTrue);
     expect(report.sceneName, 'Rig');
     expect(report.entityCount, 15, reason: 'the authored rig and, since M3-19a, its import instanced beside it');
-    expect((report.animation.clips, report.animation.skins), (2, 1), reason: 'wave, bob; one skin');
+    expect((report.animation.clips, report.animation.skins), (3, 1), reason: 'wave, bob, the Column rig\'s anim/wave; one skin');
     expect(w.systemTimes().map((s) => s.system), contains(SystemKind.animation));
 
     final rig = w.find('Rig')!;
@@ -175,6 +178,53 @@ void main() {
       () => w.instantiate(const AssetRef('c0000000-0000-4000-8000-000000000010', sub: World.importedPrefabSub)),
       throwsA(isA<FynkelInstantiateError>()),
     );
+  });
+
+  test('a rig document instantiates its skeleton and plays its clips by name (M3-19b)', () {
+    final w = fresh();
+    w.loadProject(fixture, cacheDir: cache);
+    w.frame(1 / 60);
+    final before = w.allEntities().length;
+
+    // `column.rig.json#prefab` is rig.glb's hierarchy adopted by the rig:
+    // the same six entities (the source's ids), the report naming the rig.
+    final statue = w.instantiate(
+      const AssetRef(columnRig, sub: World.importedPrefabSub),
+      name: 'Column',
+      transform: const Transform(position: Vec3(-3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+    );
+    final report = w.lastInstantiate!;
+    expect(report.ok, isTrue, reason: report.diagnostics.join('\n'));
+    expect(report.prefabId, columnRig);
+    expect(report.prefabPath, 'rigs/column.rig.json');
+    expect(report.entityCount, 6);
+    expect(w.allEntities().length, before + 7);
+    final root = statue.findChild('Rig')!;
+    final body = root.findChild('Body')!;
+    final hips = root.findChild('hips')!;
+    final head = hips.findChild('spine')!.findChild('head')!;
+    w.frame(1 / 60);
+    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/0'), skeleton: 'hips'),
+        reason: 'meshes and skins stay the skeleton source\'s');
+
+    // The clips are the rig's, by name: `anim/wave` poses the joints like
+    // the source's `anim/0`; `anim/bob` moves the Prop.
+    statue.add(const Animator(clip: AssetRef(columnRig, sub: 'anim/wave'), speed: 1, looping: true, playing: true));
+    for (var i = 0; i < 31; i++) {
+      w.frame(1 / 60);
+    }
+    expect(statue.animation.state!.clip, const AssetRef(columnRig, sub: 'anim/wave'));
+    expect(statue.animation.state!.time, closeTo(0.5, 1e-4));
+    expect(hips.localTransform.position.y, closeTo(0.125, 1e-3));
+    expect(head.worldTransform!.position.y, closeTo(0.125 + 0.5 + 0.5 * 0.7071, 1e-3));
+    final prop = root.findChild('Prop')!;
+    final propY = prop.localTransform.position.y;
+    statue.animation.play(const AssetRef(columnRig, sub: 'anim/bob'), looping: false);
+    for (var i = 0; i < 31; i++) {
+      w.frame(1 / 60);
+    }
+    expect(statue.animation.state!.clip, const AssetRef(columnRig, sub: 'anim/bob'));
+    expect(prop.localTransform.position.y, isNot(closeTo(propY, 1e-6)), reason: 'bob lifts the Prop');
   });
 
   test('play, crossfade, pause, speed, time and stop from a behaviour; the end event reaches it', () {

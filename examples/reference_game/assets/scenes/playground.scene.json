@@ -68,7 +68,11 @@
             "sprintFactor": 1.75,
             "jumpSpeed": 5.5,
             "cameraName": "Camera",
-            "fallY": -6.0
+            "fallY": -6.0,
+            "idleAnim": "anim/0",
+            "walkAnim": "anim/1",
+            "runAnim": "anim/2",
+            "jumpAnim": "anim/3"
           }
         },
         "973546b9-5862-5208-a67e-04c0be7073d4": {

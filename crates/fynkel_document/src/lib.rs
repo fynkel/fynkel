@@ -27,6 +27,7 @@ pub mod material;
 pub mod migrate;
 pub mod prefab;
 pub mod project;
+pub mod rig;
 pub mod runtime;
 pub mod scene;
 pub mod schema;
@@ -49,6 +50,7 @@ pub use project::{
     validate_project, validate_project_with, Lock, NoSourcePrefabs, Project, ProjectReport,
     SourcePrefabs,
 };
+pub use rig::Rig;
 pub use runtime::{describe, AuthoredBehaviour, DescribedScene};
 pub use scene::Scene;
 pub use schema::{BehaviourInfo, ComponentInfo, SchemaSet};
@@ -63,16 +65,19 @@ pub enum DocumentKind {
     Project,
     /// `.meta.json` asset sidecar (ADR-0006).
     Meta,
+    /// `.rig.json`: a character assembled from imported models (M3-19b).
+    Rig,
 }
 
 impl DocumentKind {
-    pub const ALL: [DocumentKind; 6] = [
+    pub const ALL: [DocumentKind; 7] = [
         DocumentKind::Scene,
         DocumentKind::Prefab,
         DocumentKind::Material,
         DocumentKind::Shader,
         DocumentKind::Project,
         DocumentKind::Meta,
+        DocumentKind::Rig,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -83,6 +88,7 @@ impl DocumentKind {
             DocumentKind::Shader => "shader",
             DocumentKind::Project => "project",
             DocumentKind::Meta => "meta",
+            DocumentKind::Rig => "rig",
         }
     }
 
@@ -95,6 +101,7 @@ impl DocumentKind {
             DocumentKind::Shader => ".shader.json",
             DocumentKind::Project => "fynkel.project.json",
             DocumentKind::Meta => ".meta.json",
+            DocumentKind::Rig => ".rig.json",
         }
     }
 
@@ -185,6 +192,16 @@ impl Document {
                 members.push(("importerVersion".into(), Node::integer(1)));
                 members.push(("settings".into(), Node::object(Vec::new())));
                 members.push(("subAssets".into(), Node::object(Vec::new())));
+            }
+            DocumentKind::Rig => {
+                members.push((
+                    "skeleton".into(),
+                    Node::object(vec![(
+                        "asset".into(),
+                        Node::string(uuid::Uuid::nil().to_string()),
+                    )]),
+                ));
+                members.push(("clips".into(), Node::object(Vec::new())));
             }
             _ => {}
         }

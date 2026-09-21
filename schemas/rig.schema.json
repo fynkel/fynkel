@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/rig.schema.json",
+  "title": "Fynkel rig",
+  "description": "`<name>.rig.json` (blueprint §19.2d item 19b): one character assembled from downloads — the model file whose skeleton and mesh it uses and the animation clips it plays, each clip taken from any imported model that carries it (a Mixamo pack is one file per clip). The rig is what a game names: `{ asset: <rig>, sub: \"prefab\" }` instantiates the skeleton file's hierarchy, `{ asset: <rig>, sub: \"anim/<name>\" }` plays a clip under the name the rig gives it. Clips are matched to the skeleton by bone name when the rig is cooked (`FYN-A0106` names the first bone a clip animates that the skeleton lacks).",
+  "type": "object",
+  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "properties": {
+    "skeleton": {
+      "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
+      "description": "The imported model (glTF, FBX) whose hierarchy, skin and meshes the rig uses: the source asset itself, no `sub`."
+    },
+    "clips": {
+      "type": "object",
+      "description": "Clip name the game uses (`anim/<name>` on the rig) → the imported clip it plays: a model source's `anim/<n>` sub-asset, from the skeleton file or any other.",
+      "propertyNames": { "$ref": "#/$defs/clipName" },
+      "additionalProperties": { "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef" },
+      "default": {}
+    }
+  },
+  "required": ["skeleton"],
+  "patternProperties": { "^x-": true },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "clipName": {
+      "type": "string",
+      "description": "An identifier-shaped name: `idle`, `walk`, `fast_run`.",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+    }
+  }
+}

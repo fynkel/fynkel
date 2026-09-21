@@ -407,7 +407,7 @@ whose `Hero` carries an `Animator` on `anim/0` and instances
 `{ asset: <fbx id>, sub: "prefab" }` on a `Rig` child turned to face
 −Z — the same scene shape as the glTF path. The Blender recipe above is
 no longer needed for import; what a game still wants is one name per
-clip across files, which is the rig document (part 2).
+clip across files, which is the rig document (part 2, below).
 
 The importer is the glTF importer's twin, not a general FBX tool: the
 same intermediate through the same code (`crates/fynkel_import/src/
@@ -419,3 +419,55 @@ cluster order, `inverse_bind` is the cluster's bind matrix, clips are
 baked per frame at the file's rate and named after their stacks, and
 anything outside mesh + skin + clips + embedded textures + hierarchy is
 a named `FYN-A0105` skip or an `A010x` refusal.
+
+## Four downloads, one character: the rig document (M3-19b, part 2)
+
+Mixamo hands out one FBX per clip, each with the whole character in it.
+The **rig document** (`<name>.rig.json`; documents.md § Rig documents)
+says which file is the character and what each clip is called:
+
+```sh
+fynkel import Idle.fbx Walking.fbx "Fast Run.fbx" Jumping.fbx --rig hero
+#   idle      Idle.fbx#anim/0      1.97 s  156/156 channel(s)
+#   walking   Walking.fbx#anim/0   0.97 s  156/156 channel(s)
+#   fast_run  Fast Run.fbx#anim/0  0.53 s  156/156 channel(s)
+#   jumping   Jumping.fbx#anim/0   1.90 s  156/156 channel(s)
+# hero.rig.json: created (4 clip(s), skeleton Idle.fbx)
+```
+
+The first file is the **skeleton** — its meshes, skins and joints are
+the character —, every file's clips become entries named after the
+files (edit the names in the document: `"walk"`, `"run"`, `"jump"`),
+and the rig's sub-assets are `prefab` (the skeleton's hierarchy) and
+`anim/<name>` per clip. A scene instances `{ asset: <rig>, sub:
+"prefab" }` and its `Animator` plays `{ asset: <rig>, sub: "anim/walk"
+}`; from Dart the clips are `AssetRef(rig, sub: 'anim/run')` — names,
+not the index a re-export could shuffle. Clips are matched to the
+skeleton **by bone name** at cook (and by `fynkel rig inspect|validate`
+and `import --rig` before that): Mixamo names every bone `mixamorig:…`
+identically across downloads of one character, so all 156 channels of
+each file find their joint; a clip downloaded for another character
+has bones the skeleton lacks and is refused with `FYN-A0106` naming the
+first of them (the Khronos `CesiumMan` clip on the `RiggedFigure`
+skeleton: 27 of 57 channels match, 10 bones missing) — extra bones in
+the skeleton are fine, a clip file's own meshes are ignored. The cooked
+rig is one object (the hierarchy and one `ANIM` per clip) whose runtime
+closure is the rig and the skeleton file: the clip files stay on the
+authoring side.
+
+Acceptance on content nobody here made: the Khronos `Fox` through
+`import --rig` (skeleton and Survey/Walk/Run from the one file, 21/21
+channels each), `rig inspect|validate`, a scene on `<rig>#prefab` and
+`anim/run` that cooks, runs headless (24 joints) and moves `b_Neck_04`
+(`apps/cli/tests/check.rs::khronos_rigs_assemble_into_a_rig_document`);
+the fixture project's Column rig (`crates/fynkel_import/tests/cook.rs`,
+`crates/fynkel_assets/tests/store.rs`: cook, cache invalidation per
+file, the runtime reading `prefab` and `anim/wave` off the rig); and the
+user's four Mixamo files as `hero.rig.json` with the one command above
+— `rig inspect` 65 joints / 67 entities, every clip 156/156 —, the
+reference game on it (`tools/playground.py --hero
+assets/models/hero/hero.rig.json`: the Player's `Rig` child instances
+`<rig>#prefab`, `game.Player` is told `anim/idle` … by name), the
+recorded route replayed (233 entities, 2 skins over 129 joints, 0
+diagnostics), the Dart tests green and the Playground rendered with the
+X Bot in its idle. The box character stays the committed default.

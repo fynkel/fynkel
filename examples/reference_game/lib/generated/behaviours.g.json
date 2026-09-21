@@ -145,6 +145,19 @@
           "description": "Falling below this height is a death."
         },
         {
+          "name": "idleAnim",
+          "type": "string",
+          "nullable": false,
+          "default": "anim/0",
+          "description": "The clips' sub-asset names on the character the scene's animator names: `anim/[index]` for a model whose file carries them (the box character), `anim/[name]` for a rig document (M3-19b; `--hero [name].rig.json` sets these). So the model can be swapped without touching the code."
+        },
+        {
+          "name": "jumpAnim",
+          "type": "string",
+          "nullable": false,
+          "default": "anim/3"
+        },
+        {
           "name": "jumpSpeed",
           "type": "number",
           "nullable": false,
@@ -154,6 +167,12 @@
           "description": "Upward speed of a jump."
         },
         {
+          "name": "runAnim",
+          "type": "string",
+          "nullable": false,
+          "default": "anim/2"
+        },
+        {
           "name": "sprintFactor",
           "type": "number",
           "nullable": false,
@@ -161,6 +180,12 @@
           "min": 1,
           "step": 0.1,
           "description": "Multiplier while the `sprint` action is held."
+        },
+        {
+          "name": "walkAnim",
+          "type": "string",
+          "nullable": false,
+          "default": "anim/1"
         },
         {
           "name": "walkSpeed",
@@ -208,6 +233,21 @@
               "step": 0.5
             }
           },
+          "idleAnim": {
+            "type": "string",
+            "default": "anim/0",
+            "description": "The clips' sub-asset names on the character the scene's animator names: `anim/[index]` for a model whose file carries them (the box character), `anim/[name]` for a rig document (M3-19b; `--hero [name].rig.json` sets these). So the model can be swapped without touching the code.",
+            "x-fynkel": {
+              "type": "string"
+            }
+          },
+          "jumpAnim": {
+            "type": "string",
+            "default": "anim/3",
+            "x-fynkel": {
+              "type": "string"
+            }
+          },
           "jumpSpeed": {
             "type": "number",
             "minimum": 0,
@@ -219,6 +259,13 @@
               "step": 0.1
             }
           },
+          "runAnim": {
+            "type": "string",
+            "default": "anim/2",
+            "x-fynkel": {
+              "type": "string"
+            }
+          },
           "sprintFactor": {
             "type": "number",
             "minimum": 1,
@@ -228,6 +275,13 @@
               "type": "number",
               "min": 1,
               "step": 0.1
+            }
+          },
+          "walkAnim": {
+            "type": "string",
+            "default": "anim/1",
+            "x-fynkel": {
+              "type": "string"
             }
           },
           "walkSpeed": {

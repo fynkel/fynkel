@@ -192,7 +192,7 @@ fn the_fixture_project_reads_and_validates_clean() {
     );
     assert_eq!(
         (report.documents, report.sources, report.references),
-        (9, 5, 25)
+        (10, 5, 28)
     );
     assert!(report.lock.is_some());
     let json = report.json();
@@ -212,7 +212,7 @@ fn describe_json_lists_everything() {
     assert_eq!(v["name"], "Fixture Game");
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["assets"], "assets");
-    assert_eq!(v["assetCount"], 14);
+    assert_eq!(v["assetCount"], 15);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 4);
     assert_eq!(v["quality"]["default"], "medium");
     assert_eq!(v["components"].as_array().unwrap().len(), 21);
@@ -272,7 +272,7 @@ fn a_missing_lock_is_p0010_and_a_stale_lock_is_p0011_per_field() {
     );
     // A stale lock never stops the rest of the project being checked.
     let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
-    assert_eq!(report.documents, 9);
+    assert_eq!(report.documents, 10);
 }
 
 #[test]
@@ -543,12 +543,14 @@ fn broken_references_and_documents_under_the_asset_root_fail_validate() {
     assert_eq!(report.json()["ok"], false);
 }
 
-/// M3-19a: the Rig scene's `Imported` entity instances `rig.glb#prefab`.
-/// Without a provider the instance is `D0401` (the source's hierarchy is
-/// not a document); with one the import expands like a prefab document,
-/// its override on the Prop node applies, a wrong sub or a source without
-/// a hierarchy is `D0401` with the hint, and a nested prefab may instance
-/// an import too.
+/// M3-19a/19b: the Rig scene's `Imported` entity instances the Column
+/// rig's `prefab` — the skeleton file `rig.glb`'s hierarchy under the rig
+/// document's id. Without a provider the instance is `D0401` (the
+/// source's hierarchy is not a document); with one the import expands
+/// like a prefab document, its override on the Prop node applies (the
+/// entity ids are the skeleton file's), a wrong sub or a source without a
+/// hierarchy is `D0401` with the hint, and a nested prefab may instance
+/// the source itself too.
 #[test]
 fn imported_hierarchies_instantiate_like_prefabs() {
     use fynkel_document::prefab::expand;
@@ -556,6 +558,7 @@ fn imported_hierarchies_instantiate_like_prefabs() {
 
     const RIG_SCENE: &str = "assets/scenes/rig.scene.json";
     const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+    const COLUMN: &str = "c0000000-0000-4000-8000-000000000050";
     const SWATCH: &str = "c0000000-0000-4000-8000-000000000010";
     let at = "/entities/c0000000-0000-4000-8000-0000000004e8/prefab/asset";
 
@@ -574,7 +577,7 @@ fn imported_hierarchies_instantiate_like_prefabs() {
     assert_eq!(codes, [("FYN-D0401", Some(at))], "{:#?}", bare.diagnostics);
     assert!(bare.diagnostics[0]
         .message
-        .contains(&format!("prefab {RIG}#prefab is not available")));
+        .contains(&format!("prefab {COLUMN}#prefab is not available")));
 
     // With the importer: clean, and the expansion has the six nodes under
     // the anchor with the Prop's material overridden to `rusted`.
@@ -620,12 +623,34 @@ fn imported_hierarchies_instantiate_like_prefabs() {
         "the setField override on node/5/renderer applied"
     );
 
-    // A wrong sub: D0401 with the hint. A source without a hierarchy (the
-    // swatch texture): its sidecar has no `prefab`, so the reference is
-    // `A0004` and the instance `D0401`; the importer is not consulted.
+    // The rig's prefab is the skeleton file's under the rig's own
+    // sub-asset id; the library answers both references with the same
+    // hierarchy.
+    let column_id: uuid::Uuid = COLUMN.parse().unwrap();
+    let column = lib
+        .get_ref(&fynkel_contracts::AssetRef::with_sub(
+            fynkel_contracts::Uuid::from_bytes(*column_id.as_bytes()),
+            "prefab",
+        ))
+        .expect("the rig's prefab");
+    assert_eq!(
+        column.id(),
+        fynkel_document::Rig::sub_id(column_id, "prefab")
+    );
+    assert_eq!(column.document.envelope.name, "Column");
+    assert_eq!(column.entities.len(), 6);
+
+    // A wrong sub (a clip of the rig, a mesh of the source): D0401 with
+    // the hint. A source without a hierarchy (the swatch texture): its
+    // sidecar has no `prefab`, so the reference is `A0004` and the
+    // instance `D0401`; the importer is not consulted.
     let mut v: serde_json::Value = serde_json::from_str(&t.read(RIG_SCENE)).unwrap();
     v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["asset"]["sub"] =
-        "mesh/0".into();
+        "anim/wave".into();
+    t.write(RIG_SCENE, &serde_json::to_string_pretty(&v).unwrap());
+    assert_eq!(t.codes(), [("FYN-D0401".to_string(), Some(at.to_string()))]);
+    v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["asset"] =
+        serde_json::json!({ "asset": RIG, "sub": "mesh/0" });
     t.write(RIG_SCENE, &serde_json::to_string_pretty(&v).unwrap());
     assert_eq!(t.codes(), [("FYN-D0401".to_string(), Some(at.to_string()))]);
     v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["asset"] =
@@ -667,4 +692,143 @@ fn imported_hierarchies_instantiate_like_prefabs() {
         &serde_json::to_string_pretty(&crate_doc).unwrap(),
     );
     assert_eq!(t.codes(), []);
+}
+
+/// M3-19b: the Column rig document — its sub-assets in the database
+/// (`prefab`, `anim/<name>`, derived from its id), and the rules: the
+/// skeleton must be an imported model without a sub (`D0500`), a clip an
+/// imported model's `anim/<n>` (`D0501`), a clip name an identifier
+/// (`D0502`), unknown ids the database's `A0004`/`A0005`.
+#[test]
+fn rig_documents_validate_against_the_database() {
+    use fynkel_document::Rig;
+
+    const COLUMN_DOC: &str = "assets/rigs/column.rig.json";
+    const COLUMN: &str = "c0000000-0000-4000-8000-000000000050";
+    const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+    const SWATCH: &str = "c0000000-0000-4000-8000-000000000003";
+    const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
+
+    let schemas = schemas();
+    let (db, diags) = AssetDatabase::scan(&fixtures().join("assets"), &schemas);
+    assert!(diags.is_empty(), "{diags:#?}");
+    let column_id: uuid::Uuid = COLUMN.parse().unwrap();
+    let entry = db.get(column_id).unwrap();
+    assert_eq!(
+        entry.kind,
+        fynkel_document::AssetKind::Document(fynkel_document::DocumentKind::Rig)
+    );
+    assert_eq!(
+        entry.sub_assets.keys().collect::<Vec<_>>(),
+        ["anim/bob", "anim/wave", "prefab"]
+    );
+    assert_eq!(
+        entry.sub_assets["anim/wave"],
+        Rig::sub_id(column_id, "anim/wave")
+    );
+    let resolved = db
+        .resolve(&fynkel_contracts::AssetRef::with_sub(
+            fynkel_contracts::Uuid::from_bytes(*column_id.as_bytes()),
+            "anim/wave",
+        ))
+        .unwrap();
+    assert_eq!(resolved.entry.path, "rigs/column.rig.json");
+    let by_sub_id = db
+        .resolve(&fynkel_contracts::AssetRef::new(
+            fynkel_contracts::Uuid::from_bytes(*entry.sub_assets["prefab"].as_bytes()),
+        ))
+        .unwrap();
+    assert_eq!(
+        by_sub_id.sub.as_ref().map(|(s, _)| s.as_str()),
+        Some("prefab")
+    );
+
+    let t = Temp::new("rig-doc");
+    let original = t.read(COLUMN_DOC);
+    let edit = |f: &dyn Fn(&mut serde_json::Value)| {
+        let mut v: serde_json::Value = serde_json::from_str(&original).unwrap();
+        f(&mut v);
+        t.write(COLUMN_DOC, &serde_json::to_string_pretty(&v).unwrap());
+        t.codes()
+    };
+    // A skeleton that is a texture, a prefab document, a sub-asset of the
+    // model, or unset: D0500, and the scene's instance of the rig's
+    // prefab cannot expand (D0401).
+    let instance = (
+        "FYN-D0401".to_string(),
+        Some("/entities/c0000000-0000-4000-8000-0000000004e8/prefab/asset".to_string()),
+    );
+    let skeleton = |pointer: &str| ("FYN-D0500".to_string(), Some(pointer.to_string()));
+    assert_eq!(
+        edit(&|v| v["skeleton"] = serde_json::json!({ "asset": SWATCH })),
+        [skeleton("/skeleton"), instance.clone()]
+    );
+    assert_eq!(
+        edit(&|v| v["skeleton"] = serde_json::json!({ "asset": CRATE })),
+        [skeleton("/skeleton"), instance.clone()]
+    );
+    assert_eq!(
+        edit(&|v| v["skeleton"] = serde_json::json!({ "asset": RIG, "sub": "mesh/0" })),
+        [skeleton("/skeleton"), instance.clone()]
+    );
+    assert_eq!(
+        edit(&|v| v["skeleton"] =
+            serde_json::json!({ "asset": "00000000-0000-0000-0000-000000000000" })),
+        [skeleton("/skeleton/asset"), instance.clone()]
+    );
+    // A clip that is the model itself, its mesh, a texture, or an unknown
+    // sub; a clip name that is not an identifier.
+    assert_eq!(
+        edit(&|v| v["clips"]["wave"] = serde_json::json!({ "asset": RIG })),
+        [("FYN-D0501".to_string(), Some("/clips/wave".to_string()))]
+    );
+    assert_eq!(
+        edit(&|v| v["clips"]["wave"] = serde_json::json!({ "asset": RIG, "sub": "mesh/0" })),
+        [("FYN-D0501".to_string(), Some("/clips/wave".to_string()))]
+    );
+    assert_eq!(
+        edit(&|v| v["clips"]["wave"] = serde_json::json!({ "asset": SWATCH })),
+        [("FYN-D0501".to_string(), Some("/clips/wave".to_string()))]
+    );
+    let codes =
+        edit(&|v| v["clips"]["wave"] = serde_json::json!({ "asset": RIG, "sub": "anim/9" }));
+    assert_eq!(
+        codes.iter().map(|(c, _)| c.as_str()).collect::<Vec<_>>(),
+        ["FYN-A0005"],
+        "{codes:?}"
+    );
+    let codes = edit(&|v| {
+        let wave = v["clips"].as_object_mut().unwrap().remove("wave").unwrap();
+        v["clips"]["fast run"] = wave;
+    });
+    assert_eq!(
+        codes
+            .iter()
+            .map(|(c, p)| (c.as_str(), p.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("FYN-D0100", Some("/clips")),
+            ("FYN-D0502", Some("/clips/fast run")),
+            (
+                "FYN-A0005",
+                Some("/entities/c0000000-0000-4000-8000-0000000004e8/components/c0000000-0000-4000-8000-000000000411/data/clip")
+            ),
+        ],
+        "{codes:?}"
+    );
+    // The scene's Animator naming a clip the rig does not declare: A0005.
+    let codes = edit(&|v| {
+        v["clips"].as_object_mut().unwrap().remove("wave");
+    });
+    assert_eq!(
+        codes
+            .iter()
+            .map(|(c, p)| (c.as_str(), p.as_deref()))
+            .collect::<Vec<_>>(),
+        [(
+            "FYN-A0005",
+            Some("/entities/c0000000-0000-4000-8000-0000000004e8/components/c0000000-0000-4000-8000-000000000411/data/clip")
+        )],
+        "{codes:?}"
+    );
 }

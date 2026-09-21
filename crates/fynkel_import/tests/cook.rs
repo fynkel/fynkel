@@ -645,8 +645,8 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert!(!r.has_errors(), "{}", r.text());
     assert_eq!(
         r.assets.len(),
-        14,
-        "five scenes, three prefabs, robot, rig, material, swatch, normal, metallic-roughness"
+        15,
+        "five scenes, three prefabs, the column rig, robot, rig, material, swatch, normal, metallic-roughness"
     );
     let cache = project_cache_dir(&dir);
     assert_eq!(cache, dir.join(".fynkel/cache"));
@@ -819,4 +819,220 @@ fn an_fbx_source_cooks_like_a_gltf_one() {
     assert_eq!(meta["chunks"][6]["entities"], 6);
     let again = p.cook();
     assert_eq!(status(&again, RIG), Status::Cached);
+}
+
+/// M3-19b: a rig document cooks into one object a game names — the
+/// skeleton file's hierarchy as its `prefab` (the entity ids kept) and
+/// one `ANIM` per clip under the rig's names, clips taken from the
+/// skeleton file and from another file (the FBX twin of the rig) matched
+/// by bone name; at runtime the rig depends on the skeleton only, while
+/// its key covers every clip source (a clip file's re-import recooks the
+/// rig, nothing else). A clip whose bones the skeleton lacks is
+/// `FYN-A0106` and fails the rig; a scene naming it is blocked.
+#[test]
+fn a_rig_document_cooks_its_skeleton_and_clips() {
+    const GLB: &str = "b0000000-0000-4000-8000-000000000012";
+    const FBX: &str = "c0000000-0000-4000-8000-0000000000fb";
+    const HERO: &str = "c0000000-0000-4000-8000-000000000050";
+    let p = Project::new("rig-doc");
+    for name in ["rig.glb", "rig.fbx"] {
+        std::fs::copy(fixtures().join(name), p.assets().join("models").join(name)).unwrap();
+    }
+    // Sidecars as `fynkel import` writes them: every sub-asset listed.
+    let sidecar = |name: &str, asset: &str, importer: &str, settings: &str| {
+        let file = p.assets().join("models").join(name);
+        let text = format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{asset}","name":"{name}","importer":"{importer}","importerVersion":1,"settings":{settings},"subAssets":{{}}}}"#
+        );
+        let mut meta = fynkel_document::Meta::from_document(
+            fynkel_document::Document::parse(fynkel_document::DocumentKind::Meta, None, &text)
+                .unwrap(),
+        );
+        let imported = fynkel_import::import(&file, &meta, &fynkel_import::Limits::default());
+        assert!(!imported.has_errors(), "{:?}", imported.diagnostics);
+        meta.sub_assets = imported.sub_assets;
+        p.write(
+            &format!("models/{name}.meta.json"),
+            &meta.to_document().write().unwrap(),
+        );
+    };
+    sidecar("rig.glb", GLB, "fynkel.gltf", "{}");
+    sidecar("rig.fbx", FBX, "fynkel.fbx", "{}");
+    std::fs::create_dir_all(p.assets().join("rigs")).unwrap();
+    let rig_doc = |skeleton: &str, clips: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{skeleton}"}},"clips":{{{clips}}}}}"#
+        )
+    };
+    // The glTF's wave (anim/0) and the FBX's bob (anim/0) and wave (anim/1).
+    p.write(
+        "rigs/hero.rig.json",
+        &rig_doc(
+            GLB,
+            &format!(
+                r#""wave":{{"asset":"{GLB}","sub":"anim/0"}},"bob":{{"asset":"{FBX}","sub":"anim/0"}},"wave_fbx":{{"asset":"{FBX}","sub":"anim/1"}}"#
+            ),
+        ),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(r.assets.len(), 9);
+    let hero = r.get(id(HERO)).unwrap();
+    assert_eq!(hero.status, Status::Cooked);
+    assert_eq!(hero.kind, "document/rig");
+    assert_eq!(
+        hero.dependencies,
+        vec![id(GLB)],
+        "the runtime needs the skeleton only"
+    );
+    let mut f = ChunkFile::open_path(hero.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(&f.meta(1 << 20).unwrap()).unwrap();
+    assert_eq!(meta["dependencies"], serde_json::json!([GLB]));
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(kinds, ["META", "JSON", "JSON", "ANIM", "ANIM", "ANIM"]);
+    let chunks = meta["chunks"].as_array().unwrap();
+    let subs: Vec<&str> = chunks
+        .iter()
+        .map(|c| c["sub"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        subs,
+        ["", "", "prefab", "anim/wave", "anim/bob", "anim/wave_fbx"]
+    );
+    assert_eq!(chunks[1]["documentKind"], "rig");
+    assert_eq!(chunks[2]["documentKind"], "prefab");
+    assert_eq!(chunks[2]["entities"], 6);
+    assert_eq!(chunks[2]["skeleton"], GLB);
+    let derived = |sub: &str| Uuid::new_v5(&id(HERO), sub.as_bytes()).to_string();
+    assert_eq!(chunks[2]["id"], derived("prefab"));
+    assert_eq!(chunks[3]["id"], derived("anim/wave"));
+    assert_eq!(chunks[3]["channels"], 3);
+    assert_eq!(chunks[3]["source"], "models/rig.glb#anim/0");
+    // The FBX clips are baked over every node (M3-19b part 1), and every
+    // node name of the FBX twin exists in the glTF hierarchy: nothing
+    // dropped, nothing missing.
+    let fbx = r.get(id(FBX)).unwrap();
+    let mut fbx_file = ChunkFile::open_path(fbx.file.as_ref().unwrap()).unwrap();
+    let fbx_meta: serde_json::Value =
+        serde_json::from_slice(&fbx_file.meta(1 << 20).unwrap()).unwrap();
+    let fbx_channels = |sub: &str| {
+        fbx_meta["chunks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["sub"] == sub)
+            .map(|c| c["channels"].clone())
+            .unwrap()
+    };
+    assert_eq!(chunks[4]["channels"], fbx_channels("anim/0"));
+    assert_eq!(chunks[4]["source"], "models/rig.fbx#anim/0");
+    assert_eq!(chunks[4]["dropped"], serde_json::json!([]));
+    assert_eq!(chunks[5]["channels"], fbx_channels("anim/1"));
+    assert_eq!(chunks[5]["dropped"], serde_json::json!([]));
+    assert_eq!(
+        meta["subAssets"]["anim/bob"],
+        serde_json::Value::from(derived("anim/bob"))
+    );
+    // The prefab chunk is the skeleton's hierarchy under the rig's id.
+    let prefab: serde_json::Value = serde_json::from_slice(&f.read(2, 1 << 20).unwrap()).unwrap();
+    assert_eq!(prefab["id"], derived("prefab"));
+    assert_eq!(prefab["name"], "Hero");
+    let source = r.get(id(GLB)).unwrap();
+    let mut g = ChunkFile::open_path(source.file.as_ref().unwrap()).unwrap();
+    let source_meta: serde_json::Value = serde_json::from_slice(&g.meta(1 << 20).unwrap()).unwrap();
+    let source_prefab_index = source_meta["chunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["sub"] == "prefab")
+        .unwrap()["index"]
+        .as_u64()
+        .unwrap() as usize;
+    let source_prefab: serde_json::Value =
+        serde_json::from_slice(&g.read(source_prefab_index, 1 << 20).unwrap()).unwrap();
+    assert_eq!(prefab["entities"], source_prefab["entities"]);
+    assert_eq!(prefab["roots"], source_prefab["roots"]);
+    // The FBX's bob moves the glTF hierarchy's Prop node.
+    let bob = fynkel_cooked::payload::decode_animation(&f.read(4, 1 << 20).unwrap()).unwrap();
+    assert!(bob
+        .channels
+        .iter()
+        .any(|c| c.target == "Prop"
+            && c.property == fynkel_cooked::payload::ANIM_PROPERTY_TRANSLATION));
+    assert!((bob.duration - 2.0).abs() < 1e-3);
+
+    // Cached; a clip file's sidecar edit recooks it and the rig, not the
+    // skeleton; a rig edit recooks the rig alone.
+    let again = p.cook();
+    assert!(all(&again, Status::Cached), "{:?}", statuses(&again));
+    sidecar("rig.fbx", FBX, "fynkel.fbx", r#"{"x-note":1}"#);
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(status(&r, FBX), Status::Cooked);
+    assert_eq!(status(&r, HERO), Status::Cooked);
+    assert_eq!(status(&r, GLB), Status::Cached);
+    p.write(
+        "rigs/hero.rig.json",
+        &rig_doc(
+            GLB,
+            &format!(r#""wave":{{"asset":"{GLB}","sub":"anim/0"}}"#),
+        ),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(status(&r, HERO), Status::Cooked);
+    assert_eq!(status(&r, FBX), Status::Cached);
+    assert_eq!(status(&r, GLB), Status::Cached);
+    assert_eq!(r.get(id(HERO)).unwrap().chunks.len(), 4);
+
+    // The robot has no skin: the glTF rig's wave animates hips/spine/head,
+    // which it lacks — A0106 naming the first, the rig fails, a scene
+    // naming it is blocked.
+    p.write(
+        "rigs/hero.rig.json",
+        &rig_doc(
+            ROBOT,
+            &format!(r#""wave":{{"asset":"{GLB}","sub":"anim/0"}}"#),
+        ),
+    );
+    let mut scene: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(p.assets().join("scenes/main.scene.json")).unwrap(),
+    )
+    .unwrap();
+    scene["entities"]["c0000000-0000-4000-8000-0000000000e9"] = serde_json::json!({
+        "name": "Hero", "parent": null, "children": [],
+        "components": {
+            "c0000000-0000-4000-8000-0000000000c9": {
+                "type": "fynkel.Animator", "version": 1,
+                "data": { "clip": { "asset": HERO, "sub": "anim/wave" }, "speed": 1.0, "looping": true, "playing": true }
+            }
+        },
+        "prefab": { "asset": { "asset": HERO, "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000000f9" }
+    });
+    p.write(
+        "scenes/main.scene.json",
+        &serde_json::to_string_pretty(&scene).unwrap(),
+    );
+    let r = p.cook();
+    assert_eq!(status(&r, HERO), Status::Failed);
+    assert_eq!(status(&r, MAIN), Status::Failed);
+    let mismatch: Vec<&fynkel_contracts::Diagnostic> = r
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == fynkel_contracts::Code::RIG_BONE_MISMATCH)
+        .collect();
+    assert_eq!(mismatch.len(), 1, "{:?}", r.diagnostics);
+    assert!(
+        mismatch[0].message.contains("\"head\"") && mismatch[0].message.contains("2 more"),
+        "{}",
+        mismatch[0].message
+    );
+    assert_eq!(mismatch[0].pointer.as_deref(), Some("/clips/wave"));
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.code == fynkel_contracts::Code::IMPORT_SKIPPED
+            && d.message.contains("main.scene.json")
+            && d.message.contains("hero.rig.json failed")));
 }

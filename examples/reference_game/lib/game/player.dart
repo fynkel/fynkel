@@ -13,7 +13,7 @@ import 'game_state.dart';
 ///
 /// Its rigged character (tools/character.py) is posed from the same
 /// state: the `fynkel.Animator` the scene puts on the player starts on
-/// `anim/0` idle, and every tick this behaviour crossfades to the clip the
+/// [idleAnim], and every tick this behaviour crossfades to the clip the
 /// controller's state calls for — walk or run on the ground with the stick
 /// moving, jump (one-shot) on the jump press — and back to idle. The clips
 /// are authored in place: the controller moves the entity, the animator
@@ -51,8 +51,21 @@ class Player extends Behaviour {
   @Expose(min: 0, step: 0.05)
   double blend = 0.15;
 
-  /// The clips: the character asset the scene's animator names, so the
-  /// model can be swapped without touching the code.
+  /// The clips' sub-asset names on the character the scene's animator
+  /// names: `anim/[index]` for a model whose file carries them (the box
+  /// character), `anim/[name]` for a rig document (M3-19b; `--hero
+  /// [name].rig.json` sets these). So the model can be swapped without
+  /// touching the code.
+  @Expose()
+  String idleAnim = 'anim/0';
+  @Expose()
+  String walkAnim = 'anim/1';
+  @Expose()
+  String runAnim = 'anim/2';
+  @Expose()
+  String jumpAnim = 'anim/3';
+
+  /// The clips resolved against the animator's asset.
   late AssetRef idleClip, walkClip, runClip, jumpClip;
 
   /// The clip last chosen (what the animator plays).
@@ -70,10 +83,10 @@ class Player extends Behaviour {
   void start() {
     spawn = transform.position;
     final character = get<Animator>()?.clip.asset ?? AssetRef.none.asset;
-    idleClip = AssetRef(character, sub: 'anim/0');
-    walkClip = AssetRef(character, sub: 'anim/1');
-    runClip = AssetRef(character, sub: 'anim/2');
-    jumpClip = AssetRef(character, sub: 'anim/3');
+    idleClip = AssetRef(character, sub: idleAnim);
+    walkClip = AssetRef(character, sub: walkAnim);
+    runClip = AssetRef(character, sub: runAnim);
+    jumpClip = AssetRef(character, sub: jumpAnim);
     clip = idleClip; // the scene's animator starts there
   }
 

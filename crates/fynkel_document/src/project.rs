@@ -1240,6 +1240,11 @@ pub fn validate_project_with(
                     .diagnostics
                     .extend(ShaderManifest::from_document(doc).validate(schemas));
             }
+            DocumentKind::Rig => {
+                let rig = crate::rig::Rig::from_document(doc);
+                report.diagnostics.extend(rig.validate(schemas));
+                report.diagnostics.extend(rig.validate_references(&db));
+            }
             DocumentKind::Project | DocumentKind::Meta => {
                 report.diagnostics.extend(doc.validate(schemas));
             }

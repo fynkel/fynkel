@@ -84,6 +84,20 @@ final BehaviourType gamePlayerType = BehaviourType(
       set: (b, v) => (b as _lib2.Player).fallY = _double(v),
     ),
     BehaviourField(
+      name: 'idleAnim',
+      type: 'string',
+      defaultValue: 'anim/0',
+      get: (b) => (b as _lib2.Player).idleAnim,
+      set: (b, v) => (b as _lib2.Player).idleAnim = v as String,
+    ),
+    BehaviourField(
+      name: 'jumpAnim',
+      type: 'string',
+      defaultValue: 'anim/3',
+      get: (b) => (b as _lib2.Player).jumpAnim,
+      set: (b, v) => (b as _lib2.Player).jumpAnim = v as String,
+    ),
+    BehaviourField(
       name: 'jumpSpeed',
       type: 'number',
       defaultValue: 5.5,
@@ -93,6 +107,13 @@ final BehaviourType gamePlayerType = BehaviourType(
       set: (b, v) => (b as _lib2.Player).jumpSpeed = _double(v),
     ),
     BehaviourField(
+      name: 'runAnim',
+      type: 'string',
+      defaultValue: 'anim/2',
+      get: (b) => (b as _lib2.Player).runAnim,
+      set: (b, v) => (b as _lib2.Player).runAnim = v as String,
+    ),
+    BehaviourField(
       name: 'sprintFactor',
       type: 'number',
       defaultValue: 1.75,
@@ -100,6 +121,13 @@ final BehaviourType gamePlayerType = BehaviourType(
       step: 0.1,
       get: (b) => (b as _lib2.Player).sprintFactor,
       set: (b, v) => (b as _lib2.Player).sprintFactor = _double(v),
+    ),
+    BehaviourField(
+      name: 'walkAnim',
+      type: 'string',
+      defaultValue: 'anim/1',
+      get: (b) => (b as _lib2.Player).walkAnim,
+      set: (b, v) => (b as _lib2.Player).walkAnim = v as String,
     ),
     BehaviourField(
       name: 'walkSpeed',

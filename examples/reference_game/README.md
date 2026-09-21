@@ -40,11 +40,16 @@ barrels); 16 PBR materials; a sun with shadows and a cool ambient; the
 player with its skinned `Body` (`fynkel.Skin`), the joint entities
 `hips` → `spine` → `head` … in their bind pose (the visor hangs off
 `head`) and a `fynkel.Animator` on idle — or, opt-in, a downloaded
-character: `python3 tools/playground.py --hero assets/models/hero.glb`
-instances the file's own hierarchy under the Player (`prefab: { asset,
-sub: "prefab" }`, M3-19a; the clips are its `anim/0..3` as idle, walk,
-run, jump, the order docs/animation.md's Blender recipe builds a Mixamo
-set in), never committed — rerun without `--hero` first. The route: two
+character: `fynkel import Idle.fbx Walking.fbx "Fast Run.fbx"
+Jumping.fbx --rig hero` writes `hero.rig.json` (the first file's
+skeleton, every file's clip, matched by bone name; rename its clips to
+`idle`, `walk`, `run`, `jump`) and `python3 tools/playground.py --hero
+assets/models/hero/hero.rig.json` instances the rig's hierarchy under
+the Player (`prefab: { asset: <rig>, sub: "prefab" }`, M3-19b) with the
+clips `anim/idle` … told to `game.Player` by name (`--hero <file.glb>`
+still takes one glTF whose `anim/0..3` are idle, walk, run, jump, the
+order docs/animation.md's Blender recipe builds a Mixamo set in), never
+committed — rerun without `--hero` first. The route: two
 coins ahead, a ramp onto a platform (coins 3–4), a corridor swept by an
 `Oscillate` blade whose child sensor is a `hazard` zone (coins 5–6), a lane
 where an `Emitter` launches a dynamic ball prefab every 4 s (its sensor is

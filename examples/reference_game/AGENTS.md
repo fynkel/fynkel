@@ -252,12 +252,19 @@ children of the Player in their bind pose, the skinned `Body` next to
 them with a `fynkel.Skin { skin, skeleton: "hips" }`, and the `Visor`
 under `head`. The clips are authored in place (no root motion): the
 `CharacterController` moves the entity, the animator only poses the
-joints. `tools/playground.py --hero <file.glb>` (M3-19a, opt-in, never
-committed) dresses the Player in a downloaded character instead: a `Rig`
-child instances the file's own hierarchy (`prefab: { asset, sub:
-"prefab" }`, turned to face -Z) and the clips are its `anim/0..3` as
-idle, walk, run, jump — `fynkel import <file.glb>` first; `test/game_test.dart`'s
-posed test is rig-agnostic (it watches every joint under the Player).
+joints. `game.Player` is told the four clips' sub-asset names
+(`idleAnim` … `jumpAnim`, `anim/0..3` for the box character) so the
+scene decides which character it drives. `tools/playground.py --hero
+<name>.rig.json` (M3-19b, opt-in, never committed) dresses the Player in
+a downloaded character instead: `fynkel import Idle.fbx Walking.fbx
+"Fast Run.fbx" Jumping.fbx --rig hero` writes the rig document (the
+first file is the skeleton, every file's clip is matched to it by bone
+name — rename the clips to `idle`, `walk`, `run`, `jump`), then a `Rig`
+child instances `{ asset: <rig>, sub: "prefab" }` (turned to face -Z)
+and the clips are the rig's `anim/idle` … (`--hero <file.glb>`, M3-19a,
+still takes one glTF whose `anim/0..3` are idle, walk, run, jump);
+`test/game_test.dart`'s posed test is rig-agnostic (it reads the clip
+names off the Player and watches every joint under it).
 A behaviour drives it:
 
 ```dart

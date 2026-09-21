@@ -258,7 +258,9 @@ pub struct AssetEntry {
     pub path: String,
     pub name: String,
     pub kind: AssetKind,
-    /// Sub-asset id → uuid (sources only).
+    /// Sub-asset id → uuid: a source's from its sidecar, a rig document's
+    /// derived from its clips (`prefab`, `anim/<name>`); empty for the
+    /// other documents.
     pub sub_assets: BTreeMap<String, Uuid>,
 }
 
@@ -378,14 +380,22 @@ impl AssetDatabase {
                         continue;
                     }
                 };
+                // A rig exposes the skeleton's hierarchy and its named
+                // clips as its own sub-assets (M3-19b), with ids derived
+                // from the document id, so they resolve like a source's.
+                let subs = if kind == DocumentKind::Rig {
+                    crate::rig::Rig::from_document(doc.clone()).sub_assets()
+                } else {
+                    Vec::new()
+                };
                 let entry = AssetEntry {
                     id: doc.envelope.id,
                     path: rel,
                     name: doc.envelope.name.clone(),
                     kind: AssetKind::Document(kind),
-                    sub_assets: BTreeMap::new(),
+                    sub_assets: subs.iter().cloned().collect(),
                 };
-                db.insert(entry, &[], &shown, &doc.root, &mut diags);
+                db.insert(entry, &subs, &shown, &doc.root, &mut diags);
             } else if !sidecar_path(path).is_file() {
                 diags.push(
                     Diagnostic::error(

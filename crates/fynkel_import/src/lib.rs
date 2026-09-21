@@ -29,6 +29,7 @@ pub mod gltf;
 pub(crate) mod graph;
 pub mod image;
 pub mod intermediate;
+pub mod rig;
 pub mod tangents;
 
 pub use cache::{Cache, CacheKey, KeyInputs, Manifest, CACHE_VERSION};

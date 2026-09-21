@@ -98,9 +98,11 @@ void main() {
     final me = player.gameObject;
     final character = me.get<Animator>()!.clip.asset;
 
-    // Rig-agnostic (M3-19a): the committed box character authors its
-    // joints under the Player; `tools/playground.py --hero <glb>` instances
-    // a downloaded one under a `Rig` child instead. Either way a skinned
+    // Rig-agnostic (M3-19a/b): the committed box character authors its
+    // joints under the Player; `tools/playground.py --hero <rig.json>`
+    // instances a downloaded one under a `Rig` child instead, its clips
+    // named (`anim/idle`) where the box character's are numbered
+    // (`anim/0`) — the scene tells the Player which. Either way a skinned
     // body sits somewhere below the Player and the clips pose the joints
     // — every entity under the Player is watched, not a named thigh.
     Iterable<GameObject> descendants(GameObject o) sync* {
@@ -131,7 +133,7 @@ void main() {
 
     // Standing: idle (the box character's legs straight).
     var s = me.animation.state!;
-    expect(s.clip, AssetRef(character, sub: 'anim/0'));
+    expect(s.clip, AssetRef(character, sub: player.idleAnim));
     expect((s.playing, s.looping), (true, true));
     expect(s.duration, greaterThan(0));
     final idle = pose();
@@ -144,7 +146,7 @@ void main() {
     // box walk's thigh peaks at ±30° = sin 15° about X).
     game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
     s = me.animation.state!;
-    expect(s.clip, AssetRef(character, sub: 'anim/1'));
+    expect(s.clip, AssetRef(character, sub: player.walkAnim));
     expect(s.isFading, isTrue);
     for (var i = 0; i < 30; i++) {
       game.frame(1 / 60);
@@ -158,10 +160,10 @@ void main() {
 
     // Sprinting: run.
     game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'ShiftLeft')]);
-    expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/2'));
+    expect(me.animation.state!.clip, AssetRef(character, sub: player.runAnim));
     if (boxRig) expect(me.animation.state!.duration, closeTo(0.6, 1e-6));
     game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'ShiftLeft'), InputEvent.up(InputDevice.keyboard, 'W')]);
-    expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/0'), reason: 'released: back to idle');
+    expect(me.animation.state!.clip, AssetRef(character, sub: player.idleAnim), reason: 'released: back to idle');
 
     // A jump: the one-shot is held in the air (the box character's 0.8 s
     // clip ends before the landing and holds its last frame; a longer
@@ -170,12 +172,12 @@ void main() {
     game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
     game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
     s = me.animation.state!;
-    expect(s.clip, AssetRef(character, sub: 'anim/3'));
+    expect(s.clip, AssetRef(character, sub: player.jumpAnim));
     expect(s.looping, isFalse);
     expect(player.jumps, 1);
     var airborne = 0;
     while (!player.characterState()!.grounded && airborne < 180) {
-      expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/3'), reason: 'held until grounded');
+      expect(me.animation.state!.clip, AssetRef(character, sub: player.jumpAnim), reason: 'held until grounded');
       game.frame(1 / 60);
       airborne++;
     }
@@ -187,7 +189,7 @@ void main() {
       game.frame(1 / 60);
     }
     expect(player.characterState()!.grounded, isTrue);
-    expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/0'));
+    expect(me.animation.state!.clip, AssetRef(character, sub: player.idleAnim));
     expect(game.world.isPoisoned, isFalse);
   });
 

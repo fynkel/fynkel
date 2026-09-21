@@ -789,13 +789,16 @@ class World {
   // ---------------------------------------------------------------- prefabs (M3-08b)
 
   /// The sub-asset an imported model's node hierarchy is stored under
-  /// (`{ asset: <glb>, sub: 'prefab' }` in a scene, [instantiate] at runtime).
+  /// (`{ asset: <glb>, sub: 'prefab' }` in a scene, [instantiate] at
+  /// runtime), and a rig document's skeleton hierarchy too
+  /// (`AssetRef(rig, sub: 'prefab')`; its clips are `anim/<name>`, M3-19b).
   static const importedPrefabSub = 'prefab';
 
   /// Instantiates the cooked prefab [prefab] (its asset id as UUID text, or
-  /// an [AssetRef] — a prefab document, or an imported model with its
-  /// `prefab` sub-asset, `AssetRef(glb, sub: 'prefab')`, whose node
-  /// hierarchy then spawns with its meshes and `Skin`s; M3-19a) **now**:
+  /// an [AssetRef] — a prefab document, or an imported model or rig
+  /// document with its `prefab` sub-asset, `AssetRef(glb, sub: 'prefab')`,
+  /// whose node hierarchy then spawns with its meshes and `Skin`s;
+  /// M3-19a/b) **now**:
   /// an anchor object named [name] (the prefab's
   /// name by default) at [transform] under [parent], whose children are
   /// the prefab's entities — the shape a scene instance expands to — with

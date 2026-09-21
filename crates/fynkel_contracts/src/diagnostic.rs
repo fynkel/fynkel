@@ -79,6 +79,15 @@ impl Code {
     /// A derived id collides with an existing entity or component id.
     pub const PREFAB_ID_COLLISION: Code = Code("FYN-D0406");
     pub const PREFAB_MALFORMED_ENTRY: Code = Code("FYN-D0407");
+    // Documents (FYN-D): rig documents (blueprint §19.2d item 19b;
+    // `fynkel_document::rig`).
+    /// `skeleton` does not name an imported model (a source without a sub).
+    pub const RIG_SKELETON: Code = Code("FYN-D0500");
+    /// A clip does not name an imported model's `anim/<n>` sub-asset.
+    pub const RIG_CLIP: Code = Code("FYN-D0501");
+    /// A field the schema accepts but the rig cannot use (a malformed
+    /// assetRef, a clip name that is not an identifier).
+    pub const RIG_MALFORMED_ENTRY: Code = Code("FYN-D0502");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 
@@ -109,6 +118,9 @@ impl Code {
     pub const IMPORT_INVALID_DATA: Code = Code("FYN-A0104");
     /// Something was left out of the intermediate (warning; the rest imported).
     pub const IMPORT_SKIPPED: Code = Code("FYN-A0105");
+    /// A rig's clip animates a bone its skeleton does not have (item 19b:
+    /// clips are matched by bone name; the message names the first).
+    pub const RIG_BONE_MISMATCH: Code = Code("FYN-A0106");
 
     // Project (`FYN-P`, blueprint §19.2c item 13).
     /// No `fynkel.project.json` where one was expected.

@@ -19,6 +19,7 @@ const RUSTED: &str = "c0000000-0000-4000-8000-000000000020";
 const RUSTED_NORMAL: &str = "c0000000-0000-4000-8000-000000000003";
 const RUSTED_MR: &str = "c0000000-0000-4000-8000-000000000004";
 const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+const COLUMN: &str = "c0000000-0000-4000-8000-000000000050";
 
 fn id(s: &str) -> Uuid {
     s.parse().unwrap()
@@ -58,8 +59,8 @@ fn the_index_opens_and_refuses_other_builds() {
     assert_eq!(index.profile(), "dev");
     assert_eq!(
         index.len(),
-        14,
-        "five scenes, robot, rig, material, three textures, three prefabs"
+        15,
+        "five scenes, robot, rig, the column rig document, material, three textures, three prefabs"
     );
     let p = index.project().unwrap();
     assert_eq!(p.name, "Fixture Game");
@@ -221,6 +222,70 @@ fn prefabs_describe_from_their_chunk() {
         .iter()
         .any(|c| matches!(c, fynkel_core::components::ComponentValue::Skin(_))));
     assert_eq!(rig.closure, vec![id(RIG)]);
+
+    // M3-19b: a rig document is a prefab too — the skeleton file's
+    // hierarchy adopted under the rig's id (the same six nodes, the same
+    // entity ids), its closure the rig plus the skeleton source, whose
+    // meshes and skin the hierarchy still references. Its clips answer
+    // under the rig's names.
+    let column = assets
+        .prefab(id(COLUMN))
+        .unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(column.id, id(COLUMN));
+    assert_eq!(
+        (column.name.as_str(), column.path.as_str()),
+        ("Column", "rigs/column.rig.json")
+    );
+    assert_eq!(column.diagnostics, vec![]);
+    let column_names: Vec<&str> = column
+        .description
+        .entities
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect();
+    assert_eq!(column_names, names);
+    assert_eq!(
+        column
+            .description
+            .entities
+            .iter()
+            .map(|e| e.id)
+            .collect::<Vec<_>>(),
+        rig.description
+            .entities
+            .iter()
+            .map(|e| e.id)
+            .collect::<Vec<_>>(),
+        "the entity ids are the skeleton file's"
+    );
+    let mut closure = column.closure.clone();
+    closure.sort();
+    assert_eq!(closure, vec![id(RIG), id(COLUMN)]);
+    let wave = assets
+        .clip(&AssetRef::with_sub(id(COLUMN), "anim/wave"))
+        .unwrap_or_else(|d| panic!("{d}"));
+    let source = assets.clip(&AssetRef::with_sub(id(RIG), "anim/0")).unwrap();
+    assert_eq!(wave.duration, source.duration);
+    assert_eq!(wave.channels.len(), source.channels.len());
+    assert_eq!(
+        wave.channels
+            .iter()
+            .map(|c| c.target.as_str())
+            .collect::<Vec<_>>(),
+        source
+            .channels
+            .iter()
+            .map(|c| c.target.as_str())
+            .collect::<Vec<_>>()
+    );
+    let bob = assets
+        .clip(&AssetRef::with_sub(id(COLUMN), "anim/bob"))
+        .unwrap();
+    assert_eq!(bob.channels[0].target, "Prop");
+    let d = assets
+        .clip(&AssetRef::with_sub(id(COLUMN), "anim/0"))
+        .unwrap_err();
+    assert_eq!(d.code, Code::RUNTIME_CHUNK_MISSING, "{d}");
     let d = assets.prefab(id(SWATCH)).unwrap_err();
     assert_eq!(d[0].code, Code::RUNTIME_CHUNK_MISSING);
     assert!(

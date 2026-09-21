@@ -11,15 +11,21 @@ tools/character.py and `fynkel import assets/models/*.glb`:
 
     python3 tools/playground.py && fynkel document format assets/**/*.json && fynkel validate
 
-`--hero <file.glb>` (M3-19a, opt-in, never committed) dresses the Player
-in a downloaded character instead: the file's own node hierarchy is
-instanced as `{ asset: <glb>, sub: "prefab" }` under a `Rig` child (so
-`game.Player` and the tests reach the joints by name below the Player as
-before) and the four clips come from its `anim/0..3` in the order idle,
-walk, run, jump — the order docs/animation.md's Blender recipe builds a
-Mixamo set in. The GLB must be imported first (`fynkel import <file.glb>`
-writes the sidecar) and face +Z as glTF characters do: the Rig turns it
-to the game's -Z. The Visor stays with the box character.
+`--hero <name>.rig.json` (M3-19b, opt-in, never committed) dresses the
+Player in a downloaded character instead: the rig document's skeleton
+hierarchy is instanced as `{ asset: <rig>, sub: "prefab" }` under a
+`Rig` child (so `game.Player` and the tests reach the joints by name
+below the Player as before) and the four clips are the rig's `idle`,
+`walk`, `run` and `jump` (`anim/<name>`), which `game.Player` is told
+by name. Write the rig with `fynkel import Idle.fbx Walking.fbx "Fast
+Run.fbx" Jumping.fbx --rig hero` (the first file is the skeleton; the
+clips are named after the files, so rename the downloads or edit the
+document's `clips` to those four names). `--hero <file.glb>` (M3-19a)
+still takes one glTF carrying the clips as its `anim/0..3` in that
+order — the order docs/animation.md's Blender recipe builds a Mixamo
+set in — imported first with `fynkel import <file.glb>`. Either way the
+character faces +Z as glTF characters do: the Rig turns it to the
+game's -Z. The Visor stays with the box character.
 
 Layout (metres, +Y up, the player spawns at the origin facing -Z; the
 camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
@@ -205,26 +211,36 @@ MESHES = {"cube": 0, "capsule": 1, "sphere": 2, "coin": 3, "ramp": 4, "cylinder"
 for m in MESHES.values():
     assert f"mesh/{m}" in meta["subAssets"], "run `fynkel import assets/models/kit.glb` first"
 
-# `--hero <file.glb>`: the Player wears that file's hierarchy (see the module doc).
+# `--hero <name>.rig.json` or `--hero <file.glb>`: the Player wears that
+# character's hierarchy (see the module doc).
 HERO = None
+CLIP_NAMES = ("idle", "walk", "run", "jump")
 if "--hero" in sys.argv:
     HERO = Path(sys.argv[sys.argv.index("--hero") + 1])
     if not HERO.is_absolute():
         HERO = ROOT / HERO
-    hero_sidecar = HERO.with_name(HERO.name + ".meta.json")
-    assert hero_sidecar.exists(), f"run `fynkel import {HERO}` first (no sidecar at {hero_sidecar})"
-    character_meta = json.loads(hero_sidecar.read_text())
-    assert "prefab" in character_meta["subAssets"], f"{HERO.name} has no node hierarchy (`prefab` sub-asset)"
+if HERO and HERO.name.endswith(".rig.json"):
+    rig = json.loads(HERO.read_text())
+    CHARACTER = rig["id"]
+    missing = [n for n in CLIP_NAMES if n not in rig.get("clips", {})]
+    assert not missing, f"{HERO.name} needs clips named {', '.join(CLIP_NAMES)}; missing {missing} (it has {sorted(rig.get('clips', {}))})"
+    CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{name}"} for name in CLIP_NAMES}
 else:
-    character_meta = json.loads((ASSETS / "models" / "character.glb.meta.json").read_text())
-CHARACTER = character_meta["id"]
-CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{i}"} for i, name in enumerate(("idle", "walk", "run", "jump"))}
-for sub in (["prefab"] if HERO else ["mesh/0", "skin/0"]) + [c["sub"] for c in CLIPS.values()]:
-    assert sub in character_meta["subAssets"], (
-        f"{HERO.name} needs anim/0..3 (idle, walk, run, jump) and its prefab; the sidecar lists {sorted(character_meta['subAssets'])}"
-        if HERO
-        else "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
-    )
+    if HERO:
+        hero_sidecar = HERO.with_name(HERO.name + ".meta.json")
+        assert hero_sidecar.exists(), f"run `fynkel import {HERO}` first (no sidecar at {hero_sidecar})"
+        character_meta = json.loads(hero_sidecar.read_text())
+        assert "prefab" in character_meta["subAssets"], f"{HERO.name} has no node hierarchy (`prefab` sub-asset)"
+    else:
+        character_meta = json.loads((ASSETS / "models" / "character.glb.meta.json").read_text())
+    CHARACTER = character_meta["id"]
+    CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{i}"} for i, name in enumerate(CLIP_NAMES)}
+    for sub in (["prefab"] if HERO else ["mesh/0", "skin/0"]) + [c["sub"] for c in CLIPS.values()]:
+        assert sub in character_meta["subAssets"], (
+            f"{HERO.name} needs anim/0..3 (idle, walk, run, jump) and its prefab; the sidecar lists {sorted(character_meta['subAssets'])}"
+            if HERO
+            else "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
+        )
 
 MATERIAL_DOCS = {
     "floor": dict(base_color=[0.55, 0.56, 0.52, 1.0], metallic=0.0, roughness=0.9),
@@ -374,7 +390,16 @@ def playground():
                     "mask": ALL,
                 },
             ),
-            behaviour("game.Player", walkSpeed=4.0, sprintFactor=1.75, jumpSpeed=5.5, cameraName="Camera", fallY=-6.0),
+            behaviour(
+                "game.Player",
+                walkSpeed=4.0,
+                sprintFactor=1.75,
+                jumpSpeed=5.5,
+                cameraName="Camera",
+                fallY=-6.0,
+                # The clips by sub-asset name, as the character carries them.
+                **{f"{name}Anim": CLIPS[name]["sub"] for name in CLIP_NAMES},
+            ),
             # Idle from the first tick; game.Player crossfades between the
             # four clips (all authored in place: the controller moves).
             ("fynkel.Animator", {"clip": CLIPS["idle"], "speed": 1.0, "looping": True, "playing": True}),

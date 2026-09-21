@@ -2,7 +2,7 @@
 
 Status: M2 (blueprint §6, §7, §14.2; ADR-0006, ADR-0016). Implemented in
 `crates/fynkel_document`; `fynkel document …` in the CLI. Kind-specific
-bodies (scene, prefab, material, shader, project, meta) are added by the
+bodies (scene, prefab, material, shader, rig, project, meta) are added by the
 following M2 items and documented here as they land.
 
 ## Envelope
@@ -377,7 +377,8 @@ sources with sidecars as well as `.prefab.json` files. `fynkel import
 over an existing file; a source without a hierarchy is `A0105`) for the
 cases that want authored, stable, hand-edited ids. The fixture project's
 Rig scene holds both forms: the hand-authored column and `Imported`, an
-instance of `rig.glb#prefab` with its Prop's material overridden.
+instance of the Column rig document's `prefab` (the same hierarchy as
+`rig.glb#prefab`, § Rig documents) with its Prop's material overridden.
 
 ## Authoring commands and transactions
 
@@ -541,6 +542,92 @@ its range `D0310`, `min > max` `D0311`, malformed entry `D0312`.
 manifest's parameters and slots, `authored` marking the ones the document
 set; `pbr` and `doubleSided` alongside).
 
+## Rig documents (M3-19b)
+
+`<name>.rig.json` (`schemas/rig.schema.json`, hand-written; kind `rig`)
+is the answer to "four downloads, one character": a character assembled
+from imported models — one **skeleton** and any number of **clips**
+named by the game, each from whichever file carries it:
+
+```json
+{ "$schema": "https://fynkel.dev/schemas/rig.schema.json", "formatVersion": 1,
+  "id": "…", "name": "hero",
+  "skeleton": { "asset": "<Idle.fbx>" },
+  "clips": { "idle": { "asset": "<Idle.fbx>", "sub": "anim/0" },
+             "walk": { "asset": "<Walking.fbx>", "sub": "anim/0" },
+             "run":  { "asset": "<Fast Run.fbx>", "sub": "anim/0" },
+             "jump": { "asset": "<Jumping.fbx>", "sub": "anim/0" } } }
+```
+
+`skeleton.asset` names a source that imports as a model with a node
+hierarchy (`fynkel.gltf`, `fynkel.fbx`; no `sub`), whose meshes, skins
+and joints *are* the character; each clip is an `anim/<n>` of any such
+source (the skeleton's own file included). Clip names are identifiers
+(`[A-Za-z_][A-Za-z0-9_]{0,63}`). The rig is an asset like any document
+(`fynkel_document::Rig`): the asset database lists its **sub-assets** —
+`prefab` (the skeleton file's hierarchy) and one `anim/<clip name>` per
+entry, uuids v5 of the rig id and the sub — so a scene names
+`prefab: { asset: <rig>, sub: "prefab" }` and an `Animator`
+`{ asset: <rig>, sub: "anim/walk" }`: the game reads as text, a
+re-export never renumbers its clips, and swapping the character is
+editing one document. Meshes and skins stay the skeleton source's own
+sub-assets (the rig does not re-export them; the runtime's closure of a
+rig is the rig plus its skeleton, never the clip files).
+
+Validation: the schema, then against the database — a nil or missing
+skeleton `FYN-D0500` (`/skeleton/asset`), a skeleton that is not a
+model or carries a `sub` `D0500` (`/skeleton`), a clip that is not a
+model's `anim/*` `D0501` (`/clips/<name>`, the hint lists the source's
+clips; an unknown sub is also `A0005`), a malformed entry or a name
+that is not an identifier `D0502`. Instancing `<rig>#prefab` goes
+through the same `PrefabLibrary` path as `<source>#prefab` (§ Prefab
+documents › Imported hierarchies): the skeleton's hierarchy is imported
+and **adopted** under the rig's `prefab` sub uuid as its document id and
+the rig's name (`Rig::adopt_prefab`); the entity and component ids stay
+the skeleton file's (`node/<i>` of the *source* id), so overrides
+written against the file keep working and a scene can move from
+`<fbx>#prefab` to `<rig>#prefab` by changing the asset.
+
+The cook writes the rig as one object: the document, a `prefab` JSON
+chunk (the adopted hierarchy, expanded and described like a prefab
+document's; `info.skeleton` names the source) and one `ANIM` chunk per
+clip named `<name>` under `anim/<name>`, **matched to the skeleton by
+bone name**: a channel whose target is a joint of the skeleton or an
+entity of its hierarchy is kept; a target the skeleton lacks is
+`FYN-A0106` (the first missing bone named, "(N more)"; one per clip)
+when the clip's file has no skin or the target is one of its own joints
+— the clip was made for another skeleton —, else dropped with an
+`A0105` warning (a prop node the clip's file happened to animate);
+extra bones in the skeleton are fine, a clip's own meshes are ignored,
+the clip keeps its duration. The `ANIM` info carries `channels`,
+`seconds`, `source` (`<path>#anim/<n>`) and `dropped`. Runtime
+dependencies are the skeleton only (the index and META
+`dependencies`), while the cache key covers every clip source: editing
+a clip file's sidecar recooks the file and the rig, editing the rig
+recooks the rig alone.
+
+`fynkel import <files>... --rig <name>` writes `<name>.rig.json` next
+to the first file: the first file is the skeleton (`FYN-D0500` when it
+has no hierarchy), every file's clips are entries named from the file
+stem when the file carries one clip (`Fast Run.fbx` → `fast_run`) or
+the clip's own name otherwise, lower-cased, runs of other characters to
+`_`, a leading digit prefixed, later duplicates `_2`, `_3`; every clip is
+matched against the skeleton as the cook will (`A0106` at
+`/clips/<name>`, the document still written so it can be fixed; not
+written when a file failed to import, `A0105`), an existing rig of that
+name keeps its id and gets its `skeleton` and `clips` rewritten (the
+report: `rig: { file, ok, written, created, id, clips: [{ name, sub,
+source, seconds, channels, matched, dropped, missing }] }`; `--dry-run`
+matches and writes nothing). `fynkel rig inspect <rig.json>` imports
+the skeleton and every clip in memory and prints the skeleton (path,
+joints, roots, entities) and each clip's source, seconds and
+`matched/channels` with what was dropped or missing (`--json`: `{ ok,
+id, name, path, skeleton: { asset, path, joints[], roots[], entities },
+clips[], diagnostics }`); `fynkel rig validate <rig.json>...` runs the
+same match and exits 1 on any error — the check `fynkel validate` does
+not run (it resolves references, the bones are the cook's or `rig
+validate`'s to compare).
+
 ## Migrations
 
 Each kind has a current `formatVersion` (`DocumentKind::supported_format_version`:
@@ -604,7 +691,9 @@ else),
 id (`mesh/Body`, `material/0`; the `sub` of an `assetRef`) → that
 sub-asset's own stable uuid, written on first import and kept across
 re-imports. Documents (`.scene.json`, `.prefab.json`, `.material.json`,
-`.shader.json`) are their own identity and have no sidecar.
+`.shader.json`, `.rig.json`) are their own identity and have no sidecar;
+a rig document declares sub-assets of its own (`prefab`, `anim/<name>`;
+§ Rig documents).
 `fynkel asset init <file>` writes a fresh sidecar (new v4 id); moving an
 asset means moving the file **and** its sidecar — the id, and every
 `assetRef` to it, survive because references never hold a path. A copy
@@ -709,7 +798,7 @@ vertex, normal, UVs, tangent and colour are welded back into one vertex
 | `material/<m>` | a `fynkel.pbr@1` material document | from `ufbx`'s PBR view of the material — a classic Phong/Lambert material maps diffuse → `base_color`, shininess → `roughness`, emissive; a real PBR material (Maya Standard Surface, 3ds Max Physical, Blender Principled) keeps its own values. Emission colour × factor; anything past 1 becomes `emissive_strength` (white at 3 → `[1, 1, 1]` at 3, like `KHR_materials_emissive_strength`). Opacity below 1 (or an opacity texture) → `alpha_mode: blend`; double-sided from the material's feature flag. Textures are bound for `base_color`, `normal`, `occlusion` and `emissive` slots only; a roughness, metalness or opacity texture is reported (`A0105`) and left unbound — the PBR model reads roughness and metallic from one packed `metallic_roughness_texture` and opacity from the base colour's alpha, both set on the material document afterwards. Clamped wrap or a UV transform on a texture is warned about once per texture (`A0105`, the sampler is the default); layered and procedural textures are skipped. Validates like a hand-written material. |
 | `image/<t>` | the **embedded** bytes of a file texture bound by a slot, colour space by use as in glTF (`image/<t>/linear` for a dual-use image) | `<t>` is the texture's typed id. PNG and JPEG only (sniffed, `A0103` otherwise; `max_image_bytes` → `A0101`). A texture that is not embedded is refused with `A0102` unless the sidecar says `"allowExternalFiles": true`, and then it is read from the plain relative path the file names (`\` → `/`; a drive, scheme, absolute path or `..` is `A0102`) next to the source — the same boundary as glTF. Textures no slot binds are not imported. |
 | `skin/<s>` | one per skin deformer | the joints in **cluster order**, each named after its bone node with its parent when that bone is in the same skin, `inverse_bind` = the cluster's `geometry_to_bone` (checked against the bind pose on Mixamo and Blender files), rest pose = the bone's local TRS; the skeleton root = the one joint whose parent is not in the skin (`""` when there are several). A cluster bound to no bone or two joints sharing a name is `A0104`; more than `max_joints` is `A0101`. |
-| `anim/<n>` | one per **animation stack**, in file order, named after the stack (`"mixamo.com"`, `"Take 001"`, Blender's action/NLA-track name) | baked by `ufbx` at the file's frame rate (`trim_start_time`: the clip starts at 0; key reduction on) into translation/rotation/scale channels targeting nodes by name, linear interpolation, duration = the last key; channels that do not move keep one key. A stack that animates nothing (Mixamo's empty `Take 001`) produces no clip and no warning. A target name that is not unique in the file is `A0105`. Clip names are what the file says — the rig document (19b part 2) is where a game names its clips (`walk`, `idle`, …) and matches them across files by bone name. |
+| `anim/<n>` | one per **animation stack**, in file order, named after the stack (`"mixamo.com"`, `"Take 001"`, Blender's action/NLA-track name) | baked by `ufbx` at the file's frame rate (`trim_start_time`: the clip starts at 0; key reduction on) into translation/rotation/scale channels targeting nodes by name, linear interpolation, duration = the last key; channels that do not move keep one key. A stack that animates nothing (Mixamo's empty `Take 001`) produces no clip and no warning. A target name that is not unique in the file is `A0105`. Clip names are what the file says — the rig document (§ Rig documents) is where a game names its clips (`walk`, `idle`, …) and matches them across files by bone name. |
 | `prefab` | the node hierarchy under the scene root as a prefab document, the glTF layout | entity ids from `node/<typed id>`; the file's root node is not an entity, its children are the prefab's roots; a mesh node carries `fynkel.MeshRenderer` (a multi-material mesh gets one child per part, `<name>[<p>]`) and, when skinned, `fynkel.Skin { skin, skeleton }`; the prefab is named after the file stem. Blender's FBX exporter writes its armature convention as a −90° X turn on the armature node and +90° X on the root bone: world poses are what was authored, the local numbers differ from the glTF export of the same rig. |
 
 Cameras, lights, NURBS/procedural surfaces and curves are skipped
@@ -1046,7 +1135,9 @@ fynkel asset resolve <uuid>[#<sub>]... [--assets <dir>] [--json] [--schemas <dir
 fynkel asset init <file>... [--json]
 fynkel migrate <path|dir>... [--dry-run] [--json] [--schemas <dir>]
 fynkel migrate --list [--json]
-fynkel import <file>... [--out <dir>] [--prefab] [--dry-run] [--json] [--schemas <dir>]
+fynkel import <file>... [--out <dir>] [--prefab] [--rig <name>] [--dry-run] [--json] [--schemas <dir>]
+fynkel rig inspect <path> [--json] [--schemas <dir>]
+fynkel rig validate <path>... [--json] [--schemas <dir>]
 fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json]
 fynkel cook --assets <dir> [--cache <dir>] [--schemas <dir>] ...
 fynkel cooked inspect <file.fyna>... [--json]
@@ -1096,7 +1187,8 @@ to the source (§ Prefab documents › Imported hierarchies; `prefab` in the
 file's report); `--dry-run` prints the summary and writes nothing
 (`--json`: `{ ok, dryRun, files: [{ file, ok, id, importer, sidecar,
 sidecarCreated, sidecarWritten, summary, intermediate, bytes, prefab? }],
-diagnostics }`). `cook`
+rig?, diagnostics }`; `--rig <name>` and `fynkel rig inspect|validate`:
+§ Rig documents). `cook`
 reads the project (`--project`, default the current directory), scans its
 asset root with its behaviour schemas and cooks every asset into the cache
 (`--cache`, default `<project>/.fynkel/cache`) for `--profile` (default
@@ -1184,8 +1276,12 @@ with its joints `hips` → `spine` → `head` as entities and a `fynkel.Skin`
 on the Body, a Prop under a one-shot "bob", a Camera, Sun) over
 `assets/models/rig.glb` (a copy of `crates/fynkel_import/fixtures/rig.glb`,
 written by `rig.py`) — the headless, render and Dart gates of item 19 —
-and `fynkel.Animator`/`fynkel.Skin` in the registry — the project
-validates as 9 documents, 5 sources, 22 references).
+and `fynkel.Animator`/`fynkel.Skin` in the registry; since M3-19b a
+rig document, Column (`assets/rigs/column.rig.json`, id `…0050`: the
+skeleton `rig.glb`, clips `wave` = `anim/0` and `bob` = `anim/1`) that
+the Rig scene's `Imported` entity instances as `{ …0050, sub: "prefab" }`
+under an `Animator` on `anim/wave` — the project validates as 10
+documents, 5 sources, 28 references and cooks 15 assets).
 `scene/physics_rules.scene.json` gained a `Solid zone` entity (a
 `TriggerZone` with an empty event on a non-sensor collider: `H0008` and
 the `H0009` warning). Every kind added later extends this corpus.
