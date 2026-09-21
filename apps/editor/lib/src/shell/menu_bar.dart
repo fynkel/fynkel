@@ -1,0 +1,140 @@
+// The menu bar over the command registry. On macOS it is the native menu
+// bar (`PlatformMenuBar`: the system shows the shortcuts and the app menu
+// gets About / Preferences / Quit); everywhere else — widget tests included —
+// it is Flutter's in-window `MenuBar`. Both list exactly the registry.
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+import '../commands/commands.dart';
+
+/// Native menus on macOS, unless a test turns them off.
+bool useNativeMenuBar() => !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
+class EditorMenuBar extends StatelessWidget {
+  const EditorMenuBar({
+    super.key,
+    required this.registry,
+    required this.child,
+    this.native,
+    this.aboutCommand = 'help.about',
+    this.preferencesCommand = 'app.preferences',
+  });
+
+  final CommandRegistry registry;
+  final Widget child;
+  final bool? native;
+  final String aboutCommand;
+  final String preferencesCommand;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: registry,
+      builder: (context, _) {
+        if (native ?? useNativeMenuBar()) {
+          return PlatformMenuBar(menus: platformMenus(), child: child);
+        }
+        return Column(
+          children: [
+            MenuBar(key: const Key('menubar'), children: _widgetMenus(context)),
+            Expanded(child: child),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Menu items grouped by `group`, in registry order.
+  List<List<EditorCommand>> _groups(EditorMenu menu) {
+    final groups = <List<EditorCommand>>[];
+    int? current;
+    for (final c in registry.inMenu(menu)) {
+      if (c.group != current) {
+        groups.add([]);
+        current = c.group;
+      }
+      groups.last.add(c);
+    }
+    return groups;
+  }
+
+  /// The native menus. About, Preferences and Quit live in the app menu, so a
+  /// group or a menu left empty by that move is dropped: `PlatformMenuItemGroup`
+  /// asserts on an empty member list (the Edit menu only carries Preferences).
+  @visibleForTesting
+  List<PlatformMenu> platformMenus() {
+    final about = registry.byId(aboutCommand);
+    final prefs = registry.byId(preferencesCommand);
+    List<PlatformMenuItemGroup> groupsOf(EditorMenu menu) => [
+      for (final group in _groups(menu))
+        if (group.any(_inOwnMenu))
+          PlatformMenuItemGroup(
+            members: [
+              for (final c in group)
+                if (_inOwnMenu(c))
+                  PlatformMenuItem(
+                    label: c.label,
+                    shortcut: c.shortcut,
+                    onSelected: c.isEnabled ? () => registry.execute(c.id) : null,
+                  ),
+            ],
+          ),
+    ];
+    return [
+      PlatformMenu(
+        label: 'Fynkel Editor',
+        menus: [
+          if (about != null) PlatformMenuItem(label: about.label, onSelected: () => registry.execute(about.id)),
+          if (prefs != null)
+            PlatformMenuItemGroup(
+              members: [
+                PlatformMenuItem(
+                  label: prefs.label,
+                  shortcut: prefs.shortcut,
+                  onSelected: () => registry.execute(prefs.id),
+                ),
+              ],
+            ),
+          if (PlatformProvidedMenuItem.hasMenu(PlatformProvidedMenuItemType.servicesSubmenu))
+            const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.servicesSubmenu),
+          const PlatformMenuItemGroup(
+            members: [
+              PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+              PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hideOtherApplications),
+              PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.showAllApplications),
+            ],
+          ),
+          const PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.quit),
+        ],
+      ),
+      for (final menu in EditorMenu.values)
+        if (groupsOf(menu) case final groups when groups.isNotEmpty) PlatformMenu(label: menu.title, menus: groups),
+    ];
+  }
+
+  /// False for the commands the app menu already carries.
+  bool _inOwnMenu(EditorCommand c) => c.id != aboutCommand && c.id != preferencesCommand && c.id != 'app.quit';
+
+  List<Widget> _widgetMenus(BuildContext context) {
+    return [
+      for (final menu in EditorMenu.values)
+        SubmenuButton(
+          key: Key('menu.${menu.name}'),
+          menuChildren: [
+            for (final (i, group) in _groups(menu).indexed) ...[
+              if (i > 0) const Divider(height: 1),
+              for (final c in group)
+                MenuItemButton(
+                  key: Key('menuitem.${c.id}'),
+                  // Our own label (⇧⌘P), not Flutter's platform spelling.
+                  trailingIcon: c.shortcut == null ? null : Text(CommandRegistry.shortcutLabel(c.shortcut!)),
+                  onPressed: c.isEnabled ? () => registry.execute(c.id) : null,
+                  child: Text(c.label),
+                ),
+            ],
+          ],
+          child: Text(menu.title),
+        ),
+    ];
+  }
+}

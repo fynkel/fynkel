@@ -52,4 +52,4 @@
 - Whether Windows is 1.1 or later.
 - MCP server on top of the CLI (post-1.0, cheap).
 - ~~Runtime-inspection channel between editor and the separate Play process (design in M4).~~ Resolved 2026-09-21 (ADR-0016 resolutions): JSON lines on the game's stdout under `FYNKEL_EDITOR_CHANNEL=stdio`; inspection itself is built after Editor V0.
-- The docking package for Editor V0 (spike in M4 item 2; ADR-0016 resolutions).
+- ~~The docking package for Editor V0 (spike in M4 item 2; ADR-0016 resolutions).~~ Resolved 2026-09-21: `docking` 1.16.2 passes all seven criteria (`apps/editor/test/spike/docking_spike_test.dart`); the shell is built on it.

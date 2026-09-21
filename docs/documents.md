@@ -512,7 +512,11 @@ window, never running game code and never reading a cooked cache
   document's diagnostics now), `validate`, `validateProject` (the
   `fynkel validate --json` report), `assets` (`kind` document|source,
   `document` a kind name), `asset`, `dependents`, `schemas`, `schema`
-  (with the `x-fynkel` display hints), `metadata`, `commands`.
+  (with the `x-fynkel` display hints), `metadata`, `migrations` (what
+  `fynkel migrate` would do to every document behind its kind's
+  `formatVersion` — the steps this build knows and, per outdated document,
+  the applied steps, the diff and any diagnostics; nothing is written —
+  the editor's Preview migration, M4-02), `commands`.
 - **`rescan(paths)`** refreshes the reference index of the paths a file
   watcher reports (or everything); the database itself is always re-scanned
   whole — milliseconds for thousands of assets.

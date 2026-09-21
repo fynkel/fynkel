@@ -64,6 +64,16 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 
 Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`; the same `ffigen` in `packages/fynkel_authoring` (M4-01) generating `lib/src/native/fynkel_authoring_bindings.g.dart` from `include/fynkel_authoring.h` (`dart run ffigen --config ffigen.yaml`; only `fynkel_authoring_*`, `FynkelBufferView`, `FynkelStatus` and the ABI-version macro) onto the same code asset — that package's pubspec opts into the runtime's `authoring` cargo feature through `hooks.user_defines.fynkel.features`, so its hook build is `cargo build --release -p <crate> --no-default-features --features authoring`.
 
+The editor (`apps/editor`, M4 item 2; a Flutter macOS app, `flutter pub get && flutter analyze --fatal-infos && flutter test`, formatted with `dart format` at `page_width: 120`):
+
+| Package | Version | Why |
+| --- | --- | --- |
+| `docking` | 1.16.2 | the workspace: tabs, splits, drag to re-dock, `keepAlive` items, `stringify`/`load`; picked by the spike recorded in ADR-0016's resolutions (`apps/editor/test/spike/docking_spike_test.dart`, all seven criteria) |
+| `multi_split_view` / `tabbed_view` | 2.4.0 / 1.18.1 | pinned by `docking` (its splitter and tab strip); 3.x of both exist, `docking` owns that upgrade |
+| `file_picker` | 10.3.10 | the native directory picker behind Open and New Project (macOS `NSOpenPanel`); injected in tests |
+| `watcher` | 1.2.1 | the project-directory watcher that rescans and revalidates on every change (400 ms debounce; caches, build output, `.git/` and the platform runner directories ignored) |
+| `path` | 1.9.x | the layout and preferences files under `~/Library/Application Support/Fynkel Editor/`, project-relative diagnostic paths |
+
 Behaviour generator (`packages/fynkel_generator`, ADR-0012 pipeline (b), M2-16):
 
 | Package | Version | Why |
