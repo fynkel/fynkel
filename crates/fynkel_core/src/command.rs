@@ -110,6 +110,14 @@ pub enum AnimateOp {
     SetSpeed(f32),
     /// Seek to `seconds` (clamped to the clip).
     SetTime(f32),
+    /// Set the layer weight (M3-19c), within `[0, 1]`.
+    SetWeight(f32),
+    /// Set a blend-space parameter by name (M3-19c); an animator keeps its
+    /// parameters across clips, a blend space reads the one it names.
+    SetParameter {
+        name: String,
+        value: f32,
+    },
 }
 
 impl Command {

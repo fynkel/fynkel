@@ -211,6 +211,8 @@ pub struct AnimationReport {
     pub joints: u32,
     /// `ANIMATION_ENDED` events over the run.
     pub ended: u64,
+    /// `ANIMATION_MARKER` events over the run (M3-19c).
+    pub markers: u64,
     /// `CLIP_UNAVAILABLE` / `SKIN_UNAVAILABLE` and other animation
     /// diagnostics from the steps.
     pub diagnostics: u64,
@@ -226,6 +228,13 @@ fn count_ended(events: &[fynkel_core::Event]) -> u64 {
     events
         .iter()
         .filter(|e| matches!(e.payload, EventPayload::AnimationEnded { .. }))
+        .count() as u64
+}
+
+fn count_markers(events: &[fynkel_core::Event]) -> u64 {
+    events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::AnimationMarker { .. }))
         .count() as u64
 }
 
@@ -312,6 +321,7 @@ pub fn run_retaining(
     let mut registered_clips = 0u32;
     let mut registered_skins = 0u32;
     let mut animation_ended = 0u64;
+    let mut animation_markers = 0u64;
     let mut animation_diagnostics = 0u64;
     let mut contact_counts = [0u64; 5];
     // The recording is read before the scene so a bad file fails fast.
@@ -462,6 +472,7 @@ pub fn run_retaining(
             let events = world.drain_events();
             report.events += events.len() as u64;
             animation_ended += count_ended(&events);
+            animation_markers += count_markers(&events);
             scene.on_events(&events);
             let tick = world.tick();
             scene.fixed_update(&mut world, tick);
@@ -551,6 +562,7 @@ pub fn run_retaining(
     let events = world.drain_events();
     report.events += events.len() as u64;
     animation_ended += count_ended(&events);
+    animation_markers += count_markers(&events);
     scene.on_events(&events);
 
     let extract = world.extract();
@@ -569,6 +581,7 @@ pub fn run_retaining(
             skinned_meshes,
             joints: extract.joints.len() as u32,
             ended: animation_ended,
+            markers: animation_markers,
             diagnostics: animation_diagnostics,
         });
     }

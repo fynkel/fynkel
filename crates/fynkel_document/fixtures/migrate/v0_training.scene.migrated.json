@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "b0000000-0000-4000-8000-000000000001",
   "name": "Training room (v0)",
   "editorNotes": "written by the v0 tool; arrays instead of keyed objects",

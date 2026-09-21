@@ -188,7 +188,7 @@ class Scene:
     def document(self, kind, id_, extra=None):
         doc = {
             "$schema": f"https://fynkel.dev/schemas/{kind}.schema.json",
-            "formatVersion": 2,
+            "formatVersion": 3,
             "id": id_,
             "name": self.name,
             "entities": self.entities,
@@ -402,7 +402,8 @@ def playground():
             ),
             # Idle from the first tick; game.Player crossfades between the
             # four clips (all authored in place: the controller moves).
-            ("fynkel.Animator", {"clip": CLIPS["idle"], "speed": 1.0, "looping": True, "playing": True}),
+            ("fynkel.Animator", {"clip": CLIPS["idle"], "speed": 1.0, "looping": True, "playing": True,
+                                 "weight": 1.0, "additive": False, "root_motion": False}),
         ],
     )
     if HERO:

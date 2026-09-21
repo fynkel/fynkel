@@ -9,6 +9,7 @@ export 'generated/schema.g.dart'
         AnimateCommandRecord,
         AnimateOp,
         AnimationEndedEvent,
+        AnimationMarkerEvent,
         Animator,
         AnimatorStateRecord,
         BodyCommandRecord,

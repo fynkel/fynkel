@@ -86,6 +86,20 @@ class AnimationEnded extends EngineEvent {
   String toString() => 'AnimationEnded(${entity.toRadixString(16)} $clip)';
 }
 
+/// A `fynkel.Animator`'s clip crossed a marker (M3-19c): [entity] is the
+/// animator's, [clip] the clip carrying the marker, [name] the marker's.
+/// Once per crossing, loops and backwards playback included; behaviours
+/// see it in `onAnimationMarker`.
+class AnimationMarker extends EngineEvent {
+  const AnimationMarker(super.tickLo, this.entity, this.clip, this.name);
+  final int entity;
+  final AssetRef clip;
+  final String name;
+
+  @override
+  String toString() => 'AnimationMarker(${entity.toRadixString(16)} $clip "$name")';
+}
+
 enum ContactKind { collisionEnter, collisionStay, collisionExit, triggerEnter, triggerExit }
 
 /// A collision or trigger event between two colliders (M3-08). For
@@ -151,6 +165,7 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
       gen.ZoneEvent.eventKind => _zone(d, body, tail, h.tickLo, entered: true),
       _zoneExitedKind => _zone(d, body, tail, h.tickLo, entered: false),
       gen.AnimationEndedEvent.eventKind => _animationEnded(d, body, tail, h.tickLo),
+      gen.AnimationMarkerEvent.eventKind => _animationMarker(d, body, tail, h.tickLo),
       >= _physicsFirst && < _physicsFirst + 5 => _contact(d, body, tail, h),
       _ => UnknownEvent(h.tickLo, h.kind),
     };
@@ -175,6 +190,11 @@ ZoneEvent _zone(ByteData d, int o, Uint8List tail, int tickLo, {required bool en
 AnimationEnded _animationEnded(ByteData d, int o, Uint8List tail, int tickLo) {
   final e = gen.AnimationEndedEvent.decode(d, o, tail);
   return AnimationEnded(tickLo, e.entity, e.clip);
+}
+
+AnimationMarker _animationMarker(ByteData d, int o, Uint8List tail, int tickLo) {
+  final e = gen.AnimationMarkerEvent.decode(d, o, tail);
+  return AnimationMarker(tickLo, e.entity, e.clip, e.name);
 }
 
 ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {

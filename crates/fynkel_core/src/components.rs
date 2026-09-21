@@ -683,15 +683,34 @@ impl TriggerZone {
 /// pauses, resumes, re-speeds and seeks it from Dart; the world must know
 /// the clip (`World::register_clip`; the loaders register every clip a
 /// loaded scene's animators name, `CLIP_UNAVAILABLE` once otherwise).
+///
+/// Layers (M3-19c): a second animator on a descendant is a layer over the
+/// first — animators apply ancestor-first, so the deeper one owns the
+/// entities its clip names (a mask by placement: an `Animator` on the
+/// spine drives the upper body over the one on the root). `weight` blends
+/// its pose over what is under it (`0` leaves it untouched), `additive`
+/// adds the clip's difference from its first frame instead of replacing
+/// the pose (a wave over a walk). `root_motion` takes the planar
+/// translation and yaw of the clip's root channel out of the pose and
+/// publishes the per-tick delta: a `CharacterController` on the entity
+/// walks by it, else the entity's own transform moves.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 21, name = "fynkel.Animator")]
 pub struct Animator {
-    /// The clip (an imported glTF `anim/<a>` sub-asset); nil plays nothing.
+    /// The clip (an imported glTF `anim/<a>` sub-asset or a blend space
+    /// `.blend.json`); nil plays nothing.
     pub clip: AssetRef,
     /// Playback rate, `1` is authored speed; finite.
     pub speed: f32,
     pub looping: bool,
     pub playing: bool,
+    /// Blend weight of this animator's pose over the pose beneath it, in
+    /// `[0, 1]`; `1` (the default) replaces it.
+    pub weight: f32,
+    /// Add the clip's delta from its first frame instead of replacing.
+    pub additive: bool,
+    /// Extract the root channel's planar motion (see above).
+    pub root_motion: bool,
 }
 
 impl Default for Animator {
@@ -701,6 +720,9 @@ impl Default for Animator {
             speed: 1.0,
             looping: true,
             playing: true,
+            weight: 1.0,
+            additive: false,
+            root_motion: false,
         }
     }
 }
@@ -709,6 +731,9 @@ impl Animator {
     pub fn validate(&self) -> Result<(), String> {
         if !self.speed.is_finite() {
             return Err(format!("speed must be finite, got {}", self.speed));
+        }
+        if !(0.0..=1.0).contains(&self.weight) {
+            return Err(format!("weight must be within [0, 1], got {}", self.weight));
         }
         Ok(())
     }

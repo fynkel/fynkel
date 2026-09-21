@@ -85,6 +85,8 @@ impl EventKind {
     pub const ZONE_EXITED: EventKind = EventKind(8);
     /// A `fynkel.Animator`'s non-looping clip reached its end (M3-19).
     pub const ANIMATION_ENDED: EventKind = EventKind(9);
+    /// An animator's clock crossed a clip marker (M3-19c).
+    pub const ANIMATION_MARKER: EventKind = EventKind(10);
 
     pub const PHYSICS_FIRST: u32 = 0x100;
     pub const COLLISION_ENTER: EventKind = EventKind(0x100);

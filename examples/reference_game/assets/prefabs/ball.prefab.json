@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "26ab61df-fda0-55ef-b68b-aafac1611f58",
   "name": "Ball",
   "entities": {

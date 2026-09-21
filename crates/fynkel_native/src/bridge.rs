@@ -159,6 +159,11 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                     AnimateOp::Resume => CoreAnimateOp::Resume,
                     AnimateOp::SetSpeed => CoreAnimateOp::SetSpeed(c.speed),
                     AnimateOp::SetTime => CoreAnimateOp::SetTime(c.seconds),
+                    AnimateOp::SetWeight => CoreAnimateOp::SetWeight(c.value),
+                    AnimateOp::SetParameter => CoreAnimateOp::SetParameter {
+                        name: c.name,
+                        value: c.value,
+                    },
                 };
                 Command::Animate {
                     entity: c.entity,
@@ -286,6 +291,15 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
             },
             strings,
         ),
+        EventPayload::AnimationMarker { entity, clip, name } => push(
+            out,
+            &AnimationMarkerEvent {
+                entity: *entity,
+                clip: clip.clone(),
+                name: name.clone(),
+            },
+            strings,
+        ),
         EventPayload::CollisionEnter(c)
         | EventPayload::CollisionStay(c)
         | EventPayload::CollisionExit(c)
@@ -316,6 +330,7 @@ pub fn event_body_size(kind: EventKind) -> Option<usize> {
         EventKind::SCENE_UNLOADED => SceneUnloadedEvent::SIZE,
         EventKind::ZONE_ENTERED | EventKind::ZONE_EXITED => ZoneEvent::SIZE,
         EventKind::ANIMATION_ENDED => AnimationEndedEvent::SIZE,
+        EventKind::ANIMATION_MARKER => AnimationMarkerEvent::SIZE,
         k if k.is_physics() => ContactEvent::SIZE,
         _ => return None,
     })

@@ -205,6 +205,17 @@ test/platform.input.json`) walks its Player onto a 0.8 m platform from a
 recorded stream — the item 9 gate, a headless test with a stable
 checksum.
 
+**Root motion (M3-19c).** An `Animator` with `root_motion` on the same
+entity hands the tick's extracted travel to the character as a velocity
+(`Physics::add_root_motion(entity, v)`, summed into the tick's pending
+`move` after the batch's commands are applied — so a clip that walks
+adds to, or by itself is, the movement): the capsule then collides,
+climbs and snaps like any `move`, `characterState().velocity` reports
+what was applied, and the entity turns toward its motion at `turnSpeed`
+(the clip's yaw is reported in `AnimatorState.root_yaw`, not applied —
+the controller owns the facing; `docs/animation.md` § Root motion).
+`Physics::has_character(entity)` is what the animator asks.
+
 **The character's animation (M3-19, [animation.md](animation.md)).** A
 rigged character on a controller is the skinned mesh and the joint
 entities under the controller's entity, and the controller stays the one

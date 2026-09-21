@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 /// Bump to invalidate every cached object (a change in how keys or
 /// chunks are computed that the other versions do not capture).
-pub const CACHE_VERSION: u32 = 4;
+pub const CACHE_VERSION: u32 = 5;
 
 /// A BLAKE3 hash, shown as 64 hex characters.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

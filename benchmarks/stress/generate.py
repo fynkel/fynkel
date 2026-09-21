@@ -183,7 +183,7 @@ def spark_prefab():
     """A small dynamic cube the Fountain emits (item 10)."""
     k, v = entity("Spark", [transform((0, 0, 0), scale=(0.3, 0.3, 0.3)), mesh_renderer("cube", "body"),
                             rigid_body(mass=0.1), collider(friction=0.5, layer=2)])
-    return {"$schema": "https://fynkel.dev/schemas/prefab.schema.json", "formatVersion": 2,
+    return {"$schema": "https://fynkel.dev/schemas/prefab.schema.json", "formatVersion": 3,
             "id": str(SPARK_ID), "name": "Spark", "roots": [k], "entities": {k: v}}
 
 
@@ -296,7 +296,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, seed, orbit=False, movers=True):
                 "amplitude": round(rng.uniform(0.2, 0.5), 3), "frequency": round(rng.uniform(0.3, 0.8), 3),
                 "spin": round(rng.uniform(0.5, 2.0), 3), "phase": round(rng.uniform(0, math.tau), 3)}})
         add(f"Behaviour {n:03}", components)
-    return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 2,
+    return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 3,
             "id": str(SCENE_ID), "name": "Stress", "entities": entities}
 
 

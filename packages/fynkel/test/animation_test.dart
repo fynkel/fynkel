@@ -35,6 +35,18 @@ class Listener extends Behaviour {
   }
 }
 
+/// Logs the markers its object's animator crosses, in order.
+class Stepper extends Behaviour {
+  final List<String> markers = [];
+
+  @override
+  void onAnimationMarker(AnimationMarker event) {
+    expect(event.entity, gameObject.entity);
+    expect(event.clip, const AssetRef(columnRig, sub: 'anim/wave'));
+    markers.add(event.name);
+  }
+}
+
 void main() {
   final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
   late String cache;
@@ -72,7 +84,8 @@ void main() {
     final spine = hips.findChild('spine')!;
     final head = spine.findChild('head')!;
     final prop = rig.findChild('Prop')!;
-    expect(rig.get<Animator>(), const Animator(clip: wave, speed: 1, looping: true, playing: true));
+    expect(rig.get<Animator>(),
+        const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false));
     expect(
       body.get<Skin>(),
       const Skin(
@@ -161,7 +174,8 @@ void main() {
     // players): one added to the anchor finds its targets by name below
     // it — half a second in the statue waves like the scene's rig.
     expect(statue.animation.state, isNull);
-    statue.add(const Animator(clip: wave, speed: 1, looping: true, playing: true));
+    statue.add(
+        const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false));
     for (var i = 0; i < 31; i++) {
       w.frame(1 / 60);
     }
@@ -209,7 +223,14 @@ void main() {
 
     // The clips are the rig's, by name: `anim/wave` poses the joints like
     // the source's `anim/0`; `anim/bob` moves the Prop.
-    statue.add(const Animator(clip: AssetRef(columnRig, sub: 'anim/wave'), speed: 1, looping: true, playing: true));
+    statue.add(const Animator(
+        clip: AssetRef(columnRig, sub: 'anim/wave'),
+        speed: 1,
+        looping: true,
+        playing: true,
+        weight: 1,
+        additive: false,
+        rootMotion: false));
     for (var i = 0; i < 31; i++) {
       w.frame(1 / 60);
     }
@@ -300,7 +321,8 @@ void main() {
     // animator by name, so a child named "Prop" is what "bob" moves.
     final host = w.spawn(name: 'host');
     final target = w.spawn(name: 'Prop', parent: host);
-    host.add(const Animator(clip: bob, speed: 2, looping: true, playing: true));
+    host.add(
+        const Animator(clip: bob, speed: 2, looping: true, playing: true, weight: 1, additive: false, rootMotion: false));
     w.frame(1 / 60);
     expect(host.animation.state!.clip, bob);
     for (var i = 0; i < 30; i++) {
@@ -336,10 +358,67 @@ void main() {
 
     // A pending object is driven through its temp id: the spawn, the
     // animator and the play land in one tick.
-    final pending = w.spawn(name: 'pending')..add(const Animator(clip: wave, speed: 1, looping: true, playing: true));
+    final pending = w.spawn(name: 'pending')
+      ..add(const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false));
     pending.animation.play(bob, looping: false);
     w.frame(1 / 60);
     expect(pending.animation.state!.clip, bob);
     expect(w.byEntity(target.entity)!.animation.state, isNull, reason: 'no animator');
+  });
+
+  test('markers reach onAnimationMarker across loops and backwards; weight and parameter read back (M3-19c)', () {
+    final w = fresh();
+    w.loadProject(fixture, cacheDir: cache);
+    w.frame(1 / 60);
+    // The Column rig's `wave` carries `peak` at 0.25 s and `trough` at
+    // 0.75 s (rigs/column.rig.json `markers`); the clip is 1 s long.
+    const wave = AssetRef(columnRig, sub: 'anim/wave');
+    final statue = w.instantiate(const AssetRef(columnRig, sub: World.importedPrefabSub), name: 'Column');
+    final stepper = statue.addBehaviour(Stepper());
+    statue.add(const Animator(clip: wave, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false));
+    for (var i = 0; i < 61; i++) {
+      w.frame(1 / 60);
+    }
+    expect(statue.animation.state!.time, closeTo(1, 1e-4));
+    expect(stepper.markers, ['peak', 'trough']);
+    for (var i = 0; i < 30; i++) {
+      w.frame(1 / 60);
+    }
+    expect(stepper.markers, ['peak', 'trough', 'peak'], reason: 'the second lap crossed peak');
+    statue.animation.speed = -1;
+    for (var i = 0; i < 30; i++) {
+      w.frame(1 / 60);
+    }
+    expect(stepper.markers, ['peak', 'trough', 'peak', 'peak'], reason: 'crossed again on the way back');
+    expect(w.drainEvents().whereType<AnimationMarker>(), isEmpty, reason: 'delivered with the tick');
+
+    // Weight and a named parameter are commands like the others and read
+    // back in the state; out of range is a rejection.
+    final state = statue.animation.state!;
+    expect((state.weight, state.parameter, state.rootDelta, state.rootYaw), (1.0, 0.0, Vec3.zero, 0.0));
+    statue.animation.weight = 0.5;
+    statue.animation.setParameter('speed', 4);
+    w.frame(1 / 60);
+    expect(statue.animation.state!.weight, 0.5);
+    expect(statue.animation.state!.parameter, 4);
+    w.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    w.onDiagnostics = seen.addAll;
+    statue.animation.weight = 2;
+    statue.animation.setParameter('', 1);
+    w.frame(1 / 60);
+    expect(seen.map((d) => d.code), [DiagnosticCode.invalidPayload, DiagnosticCode.invalidPayload]);
+    expect(statue.animation.state!.weight, 0.5);
+
+    // Root motion opted in on a clip that only bobs vertically: nothing
+    // planar to take out, the hips still rise.
+    statue.set(statue.get<Animator>()!.copyWith(rootMotion: true, speed: 1, weight: 1));
+    statue.animation.time = 0;
+    for (var i = 0; i < 31; i++) {
+      w.frame(1 / 60);
+    }
+    expect(statue.animation.state!.rootDelta, Vec3.zero);
+    expect(statue.animation.state!.rootYaw, 0);
+    expect(statue.findChild('Rig')!.findChild('hips')!.localTransform.position.y, closeTo(0.125, 1e-3));
   });
 }

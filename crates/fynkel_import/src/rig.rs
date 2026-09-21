@@ -163,6 +163,7 @@ pub fn retarget(
             payload: AnimationPayload {
                 duration: if kept.is_empty() { 0.0 } else { clip.duration },
                 channels: kept,
+                markers: clip.markers.clone(),
             },
             matched,
             dropped: dropped.into_iter().collect(),
@@ -308,6 +309,7 @@ mod tests {
         let clip = AnimationPayload {
             duration: 1.0,
             channels: vec![channel("hips"), channel("Prop"), channel("spine")],
+            markers: Vec::new(),
         };
         let sk = skeleton(&["hips", "spine"], &["Rig", "hips", "spine", "Prop"]);
         let (r, diags) = retarget("wave", &clip, Some(&sk.joints), &sk);
@@ -328,6 +330,7 @@ mod tests {
         let clip = AnimationPayload {
             duration: 1.0,
             channels: vec![channel("hips"), channel("tail"), channel("tail2")],
+            markers: Vec::new(),
         };
         let sk = skeleton(&["hips"], &["hips"]);
         let clip_joints: BTreeSet<String> = ["hips", "tail", "tail2"]
@@ -352,6 +355,7 @@ mod tests {
         let clip = AnimationPayload {
             duration: 2.0,
             channels: vec![channel("hips"), channel("Armature"), channel("Body")],
+            markers: Vec::new(),
         };
         let sk = skeleton(&["hips"], &["Rig", "hips"]);
         let clip_joints: BTreeSet<String> = ["hips".to_string()].into_iter().collect();
@@ -369,6 +373,7 @@ mod tests {
         let clip = AnimationPayload {
             duration: 1.0,
             channels: vec![channel("Armature")],
+            markers: Vec::new(),
         };
         let sk = skeleton(&["hips"], &["hips"]);
         let (r, diags) = retarget("x", &clip, None, &sk);

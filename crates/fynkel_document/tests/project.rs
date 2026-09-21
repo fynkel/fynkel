@@ -39,16 +39,16 @@ fn schemas() -> SchemaSet {
 
 const IMPORTERS: &[(&str, u32)] = &[
     ("fynkel.fbx", 1),
-    ("fynkel.gltf", 4),
+    ("fynkel.gltf", 5),
     ("fynkel.image", 1),
     ("fynkel.audio", 1),
     ("fynkel.file", 1),
 ];
 
 /// What `fynkel_import::expected_lock()` produces; mirrored here because
-/// this crate cannot depend on the importers (cache version 4, container 1).
+/// this crate cannot depend on the importers (cache version 5, container 1).
 fn expected_lock() -> Lock {
-    Lock::expected(IMPORTERS, 4, 1)
+    Lock::expected(IMPORTERS, 5, 1)
 }
 
 /// A temporary copy of the fixture project, removed on drop.
@@ -809,6 +809,8 @@ fn rig_documents_validate_against_the_database() {
         [
             ("FYN-D0100", Some("/clips")),
             ("FYN-D0502", Some("/clips/fast run")),
+            // The fixture's markers name `wave` (M3-19c): orphaned now.
+            ("FYN-D0502", Some("/markers/wave")),
             (
                 "FYN-A0005",
                 Some("/entities/c0000000-0000-4000-8000-0000000004e8/components/c0000000-0000-4000-8000-000000000411/data/clip")
@@ -816,7 +818,8 @@ fn rig_documents_validate_against_the_database() {
         ],
         "{codes:?}"
     );
-    // The scene's Animator naming a clip the rig does not declare: A0005.
+    // The scene's Animator naming a clip the rig does not declare: A0005
+    // (and the markers orphaned with it).
     let codes = edit(&|v| {
         v["clips"].as_object_mut().unwrap().remove("wave");
     });
@@ -825,10 +828,43 @@ fn rig_documents_validate_against_the_database() {
             .iter()
             .map(|(c, p)| (c.as_str(), p.as_deref()))
             .collect::<Vec<_>>(),
-        [(
-            "FYN-A0005",
-            Some("/entities/c0000000-0000-4000-8000-0000000004e8/components/c0000000-0000-4000-8000-000000000411/data/clip")
-        )],
+        [
+            ("FYN-D0502", Some("/markers/wave")),
+            (
+                "FYN-A0005",
+                Some("/entities/c0000000-0000-4000-8000-0000000004e8/components/c0000000-0000-4000-8000-000000000411/data/clip")
+            )
+        ],
         "{codes:?}"
+    );
+    // Markers (M3-19c): a malformed entry, a non-array, a name that is not
+    // a clip; a valid list on `bob` is clean.
+    assert_eq!(
+        edit(&|v| v["markers"]["wave"][1] = serde_json::json!({ "at": -1.0, "name": "x" })),
+        [
+            (
+                "FYN-D0100".to_string(),
+                Some("/markers/wave/1/at".to_string())
+            ),
+            ("FYN-D0502".to_string(), Some("/markers/wave/1".to_string()))
+        ]
+    );
+    assert_eq!(
+        edit(&|v| v["markers"]["wave"][0] = serde_json::json!({ "at": 0.5 })),
+        [("FYN-D0100".to_string(), Some("/markers/wave/0".to_string()))],
+        "the schema requires the name"
+    );
+    assert_eq!(
+        edit(&|v| v["markers"]["bob"] = serde_json::json!({ "at": 0.5, "name": "x" })),
+        [("FYN-D0100".to_string(), Some("/markers/bob".to_string()))],
+        "the schema wants an array"
+    );
+    assert_eq!(
+        edit(&|v| v["markers"]["nope"] = serde_json::json!([])),
+        [("FYN-D0502".to_string(), Some("/markers/nope".to_string()))]
+    );
+    assert_eq!(
+        edit(&|v| v["markers"]["bob"] = serde_json::json!([{ "at": 1.0, "name": "lift" }])),
+        []
     );
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "bca5eecb-c8d8-58fe-825c-5fce41819bf1",
   "name": "Playground",
   "entities": {
@@ -85,7 +85,10 @@
             },
             "speed": 1.0,
             "looping": true,
-            "playing": true
+            "playing": true,
+            "weight": 1.0,
+            "additive": false,
+            "root_motion": false
           }
         }
       }

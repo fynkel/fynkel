@@ -45,6 +45,14 @@ pub struct RigClip {
     pub pointer: String,
 }
 
+/// A clip marker (M3-19c): `markers.<clip>[i]`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RigMarker {
+    /// Seconds into the clip.
+    pub at: f32,
+    pub name: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct Rig {
     pub document: Document,
@@ -52,6 +60,8 @@ pub struct Rig {
     pub skeleton: Option<AssetRef>,
     /// Document order.
     pub clips: Vec<RigClip>,
+    /// Per clip name, in document order; sorted by time.
+    pub markers: Vec<(String, Vec<RigMarker>)>,
     read_diagnostics: Vec<Diagnostic>,
 }
 
@@ -121,12 +131,67 @@ impl Rig {
                 None => diags.push(malformed("clips must be an object".into(), "/clips")),
             },
         }
+        let mut markers: Vec<(String, Vec<RigMarker>)> = Vec::new();
+        if let Some(node) = root.get("markers") {
+            match node.as_object() {
+                Some(members) => {
+                    for m in members {
+                        let pointer = format!("/markers/{}", escape(&m.key));
+                        if !clips.iter().any(|c| c.name == m.key) {
+                            diags.push(malformed(
+                                format!("markers name a clip the rig does not have: {:?}", m.key),
+                                &pointer,
+                            ));
+                            continue;
+                        }
+                        let Some(list) = m.value.as_array() else {
+                            diags.push(malformed("markers must be an array".into(), &pointer));
+                            continue;
+                        };
+                        let mut out = Vec::with_capacity(list.len());
+                        for (i, item) in list.iter().enumerate() {
+                            let pointer = format!("{pointer}/{i}");
+                            let at = item.get("at").and_then(Node::as_f64);
+                            let name = item.get("name").and_then(Node::as_str);
+                            match (at, name) {
+                                (Some(at), Some(name))
+                                    if at.is_finite() && at >= 0.0 && !name.is_empty() =>
+                                {
+                                    out.push(RigMarker {
+                                        at: at as f32,
+                                        name: name.to_string(),
+                                    });
+                                }
+                                _ => diags.push(malformed(
+                                    "a marker needs a finite `at` >= 0 and a non-empty `name`"
+                                        .into(),
+                                    &pointer,
+                                )),
+                            }
+                        }
+                        out.sort_by(|a, b| a.at.total_cmp(&b.at));
+                        markers.push((m.key.clone(), out));
+                    }
+                }
+                None => diags.push(malformed("markers must be an object".into(), "/markers")),
+            }
+        }
         Rig {
             document,
             skeleton,
             clips,
+            markers,
             read_diagnostics: diags,
         }
+    }
+
+    /// The markers authored for `clip`, sorted by time (empty for none).
+    pub fn markers_of(&self, clip: &str) -> &[RigMarker] {
+        self.markers
+            .iter()
+            .find(|(n, _)| n == clip)
+            .map(|(_, m)| m.as_slice())
+            .unwrap_or(&[])
     }
 
     pub fn id(&self) -> Uuid {

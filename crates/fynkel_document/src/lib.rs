@@ -132,10 +132,12 @@ impl DocumentKind {
     /// Newest `formatVersion` this build reads and writes for the kind.
     /// Material 2 (M3-02): the `fynkel.PbrMaterial` fields replaced the
     /// `parameters`/`textures` maps for `fynkel.pbr@1`. Scene and prefab 2
-    /// (M3-04): `fynkel.Camera` carries `exposure_mode`/`exposure`.
+    /// (M3-04): `fynkel.Camera` carries `exposure_mode`/`exposure`; 3
+    /// (M3-19c): `fynkel.Animator` carries `weight`/`additive`/`root_motion`.
     pub const fn supported_format_version(self) -> u32 {
         match self {
-            DocumentKind::Material | DocumentKind::Scene | DocumentKind::Prefab => 2,
+            DocumentKind::Scene | DocumentKind::Prefab => 3,
+            DocumentKind::Material => 2,
             _ => 1,
         }
     }

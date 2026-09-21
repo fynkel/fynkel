@@ -248,18 +248,30 @@ the rigged hierarchy with a `fynkel.Skin` on the skinned node, so
 character ready to animate. A clip keys *named nodes* under the entity
 that carries the `fynkel.Animator` — a bone, a door and a lamp are the
 same thing to it; the joints are ordinary entities (`findChild('head')`
-reads or overrides one). Clips carry no root motion: whatever moves the
-entity (a `CharacterController`, your behaviour) moves it, the animator
-only poses what is under it. From a behaviour:
+reads or overrides one). Clips are authored in place by default:
+whatever moves the entity (a `CharacterController`, your behaviour)
+moves it, the animator only poses what is under it; `rootMotion: true`
+on the `Animator` takes the root's planar travel and yaw out of the pose
+and feeds it to the `CharacterController` on the same entity (or moves
+the transform when there is none). A second `Animator` on a child
+entity is a layer over its ancestors' pose: `weight` (0…1) blends it in,
+`additive: true` adds the clip's change from its first frame — an
+upper-body wave over a walk. Clips carry named markers (a rig
+document's `markers`, or `extras: { markers: [{ at, name }] }` on a glTF
+animation) that reach the behaviour once per crossing. From a behaviour:
 
 ```dart
 animation.crossfade(walk, 0.15);                   // a timed blend; play(clip, looping: false) for a one-shot
 animation.play(jump, looping: false);
 animation.speed = 1.5; animation.pause(); animation.resume(); animation.stop();   // stop rewinds and holds
-final s = animation.state;                         // clip, time, duration, playing, isFading; null without an Animator
+animation.weight = 0.5;                            // this animator's layer weight
+animation.setParameter('speed', 3.2);              // a named parameter (what a blend space reads)
+final s = animation.state;                         // clip, time, duration, playing, isFading, weight, parameter, rootDelta; null without an Animator
 
 @override
 void onAnimationEnded(AnimationEnded e) { … }      // a one-shot passed its end (held on its last frame)
+@override
+void onAnimationMarker(AnimationMarker e) { … }    // e.name, e.clip — a footstep, a hit frame
 ```
 
 Clip references are `AssetRef(asset, sub: 'anim/<n>')` (the asset id from

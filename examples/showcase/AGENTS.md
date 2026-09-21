@@ -260,17 +260,25 @@ own nodes: `Character` → `Body` with `fynkel.Skin { skin, skeleton:
 "hips" }` and the joints `hips` → `spine` → `head`, the arms and the legs
 in their bind pose; the suit is a `setField` override on the body's
 renderer (`node/1/renderer`, `material`). Its animator loops `anim/2`
-(run) in place — clips carry no root motion, whatever moves the entity
-moves it (docs/animation.md). A downloaded character works the same way:
-`fynkel import <file.glb>`, then instance it. From a behaviour:
+(run) in place — clips are authored in place, whatever moves the entity
+moves it, unless the `Animator` opts into `rootMotion` (the root's planar
+travel and yaw taken out of the pose and fed to a `CharacterController`
+or the transform); a second `Animator` on a child entity is a layer
+(`weight`, `additive`) over its ancestors' pose, and clips carry named
+markers that reach `onAnimationMarker` (docs/animation.md). A downloaded
+character works the same way: `fynkel import <file.glb>`, then instance
+it. From a behaviour:
 
 ```dart
 animation.crossfade(clip, 0.15);                   // a timed blend; play(clip, looping: false) for a one-shot
 animation.speed = 1.5; animation.pause(); animation.resume(); animation.stop();
-final s = animation.state;                         // clip, time, duration, playing, isFading; null without an Animator
+animation.weight = 0.5; animation.setParameter('speed', 3.2);
+final s = animation.state;                         // clip, time, duration, playing, isFading, weight, parameter, rootDelta; null without an Animator
 
 @override
 void onAnimationEnded(AnimationEnded e) { … }      // a one-shot passed its end
+@override
+void onAnimationMarker(AnimationMarker e) { … }    // e.name, e.clip — once per crossing, loops included
 
 final head = gameObject.findChild('Character/hips/spine/head')!;   // a joint is an entity
 ```

@@ -1456,6 +1456,7 @@ fn animation_commands_events_and_query() {
             Clip {
                 name: "rise".into(),
                 duration: 0.5,
+                markers: Vec::new(),
                 channels: vec![Channel {
                     target: "arm".into(),
                     property: Property::Translation,
@@ -1473,6 +1474,9 @@ fn animation_commands_events_and_query() {
         speed: 1.0,
         looping: false,
         playing: true,
+        weight: 1.0,
+        additive: false,
+        root_motion: false,
     };
     h.submit(
         Lane::Simulation,
@@ -1547,6 +1551,8 @@ fn animation_commands_events_and_query() {
         speed,
         looping,
         clip: clip.clone(),
+        value: 0.0,
+        name: String::new(),
     };
     let (s, r) = h.submit(
         Lane::Simulation,
@@ -1621,6 +1627,8 @@ fn animation_commands_events_and_query() {
                 speed: 0.0,
                 looping: false,
                 clip: AssetRef::default(),
+                value: 0.0,
+                name: String::new(),
             }
         )],
     );
@@ -1660,6 +1668,8 @@ fn animation_commands_events_and_query() {
                 speed: 1.0,
                 looping: true,
                 clip: AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/7"),
+                value: 0.0,
+                name: String::new(),
             }
         )],
     );
@@ -1672,6 +1682,121 @@ fn animation_commands_events_and_query() {
     );
     h.step();
     assert!(h.diagnostics().is_empty());
+
+    // M3-19c through the wire: a marked clip raises ANIMATION_MARKER (kind
+    // 10, the name in the tail), setWeight / setParameter reach the state
+    // record (the name rides the batch's string table), a weight outside
+    // [0, 1] is rejected.
+    let marked = AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/1");
+    unsafe {
+        (*h.w).core_mut().register_clip(
+            marked.clone(),
+            Clip {
+                name: "step".into(),
+                duration: 0.5,
+                markers: vec![fynkel_core::animation::Marker {
+                    time: 0.25,
+                    name: "footstep".into(),
+                }],
+                channels: vec![Channel {
+                    target: "arm".into(),
+                    property: Property::Translation,
+                    interpolation: Interpolation::Linear,
+                    times: vec![0.0, 0.5],
+                    values: vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                }],
+            },
+        );
+    }
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (
+                9,
+                AnimateCommandRecord {
+                    entity: rig,
+                    op: AnimateOp::Play,
+                    seconds: 0.0,
+                    speed: 1.0,
+                    looping: true,
+                    clip: marked.clone(),
+                    value: 0.0,
+                    name: String::new(),
+                }
+            ),
+            (
+                9,
+                AnimateCommandRecord {
+                    entity: rig,
+                    op: AnimateOp::SetWeight,
+                    seconds: 0.0,
+                    speed: 0.0,
+                    looping: false,
+                    clip: AssetRef::default(),
+                    value: 0.5,
+                    name: String::new(),
+                }
+            ),
+            (
+                9,
+                AnimateCommandRecord {
+                    entity: rig,
+                    op: AnimateOp::SetParameter,
+                    seconds: 0.0,
+                    speed: 0.0,
+                    looping: false,
+                    clip: AssetRef::default(),
+                    value: 4.0,
+                    name: "speed".into(),
+                }
+            ),
+        ],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
+    let mut markers = Vec::new();
+    for _ in 0..60 {
+        h.step();
+        let (events, tail) = h.events_with_tail();
+        markers.extend(
+            events
+                .into_iter()
+                .filter(|(k, _)| *k == EventKind::ANIMATION_MARKER.0)
+                .map(|(_, b)| AnimationMarkerEvent::decode(&b, &tail).unwrap()),
+        );
+    }
+    assert_eq!(markers.len(), 2, "two laps of 0.5 s: {markers:?}");
+    assert_eq!(
+        (
+            markers[0].entity,
+            &markers[0].clip,
+            markers[0].name.as_str()
+        ),
+        (rig, &marked, "footstep")
+    );
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert_eq!((state.weight, state.parameter), (0.5, 4.0), "{state:?}");
+    assert_eq!((state.root_delta, state.root_yaw), (Vec3::ZERO, 0.0));
+    h.submit(
+        Lane::Simulation,
+        &batch![(
+            9,
+            AnimateCommandRecord {
+                entity: rig,
+                op: AnimateOp::SetWeight,
+                seconds: 0.0,
+                speed: 0.0,
+                looping: false,
+                clip: AssetRef::default(),
+                value: 2.0,
+                name: String::new(),
+            }
+        )],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 1);
+    assert_eq!(h.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD.0);
 
     // A Skin component round-trips and an unknown skin is reported once.
     let skin = Skin {

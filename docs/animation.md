@@ -1,25 +1,27 @@
 # Animation: the clip core, skinning and the `Animator`
 
 The animation contract: blueprint §9 ("Animation"), §19.2d item 19
-(M3-19, built 2026-09-21), §5.1 (where in the tick it runs). One clip
-core, built once, with every front door on it: a rigged character's walk,
-a door's swing and a lamp's bob are the same thing to the sampler, and
-the follow-ups (the state machine as data, the timeline/sequencer
-document, clip markers) sit on the same sampler with no second one.
+(M3-19, built 2026-09-21) and item 19c (M3-19c: layers, markers and root
+motion in part 1, 2026-09-21; blend spaces in part 2), §5.1 (where in the
+tick it runs). One clip core, built once, with every front door on it: a
+rigged character's walk, a door's swing and a lamp's bob are the same
+thing to the sampler, and the follow-ups (the state machine as data, the
+timeline/sequencer document) sit on the same sampler with no second one.
 
 | Piece | Where | What |
 | --- | --- | --- |
 | the clip core | `crates/fynkel_core/src/animation.rs` | `Clip` = channels keying one property of one **named** node; `Clip::sample(time)` → `Pose`; `Pose::blend`; `Skin` = named joints with inverse bind matrices |
-| the systems | `crates/fynkel_core/src/world/animation.rs` | `run_animation` in the pre-tick slot: every `fynkel.Animator`'s clock, crossfade and pose write; every `fynkel.Skin`'s joint lookup; `skin_palette` for the extract |
+| the systems | `crates/fynkel_core/src/world/animation.rs` | `run_animation` in the pre-tick slot: every `fynkel.Animator`'s clock, crossfade, markers, root motion and pose write (ancestors first, so a child animator is a layer); every `fynkel.Skin`'s joint lookup; `skin_palette` for the extract |
 | the components | `fynkel.Animator` (id 21), `fynkel.Skin` (22) | ordinary native components (`docs/codegen.md`): authored, validated, generated into every codec, reachable from Dart on the M3-07a path |
-| the import | `crates/fynkel_import/src/gltf.rs` (importer version 4) | glTF skins → `skin/<s>`, animations → `anim/<a>`, `JOINTS_0`/`WEIGHTS_0` → a skinned `mesh/<n>`; the prefab gets the `fynkel.Skin` |
-| the cache | `crates/fynkel_cooked/src/payload.rs` | `SKIN` and `ANIM` chunks; a skinned `MESH` carries a trailing `SkinWeight` section |
+| the import | `crates/fynkel_import/src/gltf.rs` (importer version 5), `fbx.rs`, the rig document (`docs/documents.md`) | glTF skins → `skin/<s>`, animations → `anim/<a>` (with their `extras.markers`), `JOINTS_0`/`WEIGHTS_0` → a skinned `mesh/<n>`; the prefab gets the `fynkel.Skin`; a rig's `markers` join its clips at cook |
+| the cache | `crates/fynkel_cooked/src/payload.rs` | `SKIN` and `ANIM` chunks (an `ANIM` carries its markers after the channels); a skinned `MESH` carries a trailing `SkinWeight` section |
 | the renderer | `crates/fynkel_render` (`docs/renderer.md`) | the skinned vertex path: a joint palette storage buffer and `vs_skinned` in five pipeline variants |
-| the wire | `fynkel.cmd.Animate` (kind 9), `fynkel.ev.AnimationEnded` (9), `fynkel.rec.AnimatorState`, `FYNKEL_QUERY_ANIMATOR` (11) | play/crossfade/stop/pause/resume/speed/time; the one-shot's end; the state read-back |
-| Dart | `packages/fynkel/lib/src/animation.dart`, `world.dart` | `GameObject.animation` → `AnimationControl`; `Behaviour.animation`, `onAnimationEnded`; `AnimatorState`; `LoadReport.animation` |
+| the wire | `fynkel.cmd.Animate` (kind 9), `fynkel.ev.AnimationEnded` (9), `fynkel.ev.AnimationMarker` (10), `fynkel.rec.AnimatorState`, `FYNKEL_QUERY_ANIMATOR` (11) | play/crossfade/stop/pause/resume/speed/time/weight/parameter; the one-shot's end; a marker crossed; the state read-back |
+| Dart | `packages/fynkel/lib/src/animation.dart`, `world.dart` | `GameObject.animation` → `AnimationControl`; `Behaviour.animation`, `onAnimationEnded`, `onAnimationMarker`; `AnimatorState`; `LoadReport.animation` |
 
 Tests: `crates/fynkel_core/tests/animation.rs` (the sampler, blending,
-the animator's clock, the skin's palette), `crates/fynkel_import/tests/gltf.rs`
+the animator's clock, the skin's palette, layers, markers, root motion
+with and without a controller), `crates/fynkel_import/tests/gltf.rs`
 (the rig fixture), `crates/fynkel_render/tests/project.rs`
 `skinned_meshes_follow_their_joint_palette`, `crates/fynkel_native/tests/abi.rs`,
 `packages/fynkel/test/animation_test.dart`, the reference game's
@@ -62,7 +64,7 @@ interpolated world matrices like any other entity's. At most
 
 | Component | id | Fields | Rule |
 | --- | --- | --- | --- |
-| `fynkel.Animator` | 21 | `clip` (an `anim/<a>` asset ref; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing` | plays `clip` over the named nodes under this entity; `speed` non-finite is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
+| `fynkel.Animator` | 21 | `clip` (an `anim/<a>` asset ref; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the named nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
 | `fynkel.Skin` | 22 | `skin` (a `skin/<s>` asset ref), `skeleton` (the name of the joint root entity; empty: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by name under `skeleton`, itself found by name from the entity's tree root |
 
 Both are ordinary native components: authored in a scene or prefab,
@@ -70,8 +72,11 @@ validated, listed in `fynkel.project.json` → `components`, `get<Animator>()`
 / `add(const Skin(…))` / `set` / `remove<Animator>()` from Dart. The
 runtime state each needs lives in companion components that are never
 authored or on the wire: `AnimatorRun { time, targets, fade, fresh, seek,
-reported }` and `SkinRun { root, joints, resolved, reported }`, attached
-on the first tick the component is seen and detached with it.
+reported, reference, parameters, root, root_delta, root_yaw }` and
+`SkinRun { root, joints, resolved, reported }`, attached on the first
+tick the component is seen and detached with it. Scenes and prefabs
+carrying an `Animator` are **formatVersion 3** (`scene/2-3/animator-layers`
+fills the three new fields in; `docs/documents.md` § Migrations).
 
 The importer writes the `fynkel.Skin` into the prefab for a node with a
 skinned mesh, so instantiating an imported character's `prefab` gives a
@@ -95,8 +100,10 @@ World::step
 
 Animators run **first** among the pre-tick systems: a mover or a body on
 a posed joint follows the pose this tick, and a collider on a joint is
-where the pose put it before Rapier sees it. Every animator, in entity
-order:
+where the pose put it before Rapier sees it. Every animator, **ancestors
+first** (sorted by depth in the tree, then entity — so an animator on a
+child entity writes after the one above it and is a layer over it,
+§ Layers):
 
 1. **The clip.** A nil `clip` poses nothing. A clip the world does not
    hold reports `CLIP_UNAVAILABLE` (16) once per clip per animator and
@@ -115,7 +122,14 @@ order:
 3. **The pose.** `clip.sample(time)` over the cached targets; a channel
    whose target did not resolve is skipped silently (the name is the
    clip's contract; a missing node is an authoring gap the importer's
-   prefab never has).
+   prefab never has). A clip written onto the component (`set` from
+   Dart, a scene override) restarts the clock like a `Play`.
+3a. **The markers.** Every marker the clock crossed between the previous
+   time and this one is raised as `ANIMATION_MARKER { entity, clip,
+   name }` — once per crossing, each lap of a loop again, backwards too
+   (§ Markers). A fresh tick (a load, `Play`, `SetTime`) crosses nothing.
+3b. **Root motion.** With `root_motion`, the root's planar travel and
+   yaw are taken out of the pose and handed to the entity (§ Root motion).
 4. **The crossfade.** `Crossfade(clip, seconds)` keeps the outgoing clip
    playing on its own clock (its speed, its looping) for `seconds` and
    blends its pose out linearly: weight `1 − remaining / total` on the
@@ -127,7 +141,10 @@ order:
 5. **The write.** Each pose entry is applied to the target's local
    transform (only the properties the clip keys), through `set_local`, so
    a child of a posed joint is consistent at the tick's propagate; an
-   entry that changes nothing writes nothing.
+   entry that changes nothing writes nothing. At `weight < 1` the entry
+   is blended toward from the target's current value (lerp / slerp /
+   lerp); an `additive` animator adds the clip's *change from its first
+   frame*, scaled by `weight`, onto the current value instead.
 
 Then every `fynkel.Skin`: the skeleton root is found by name from the
 mesh entity's tree root (`skeleton` empty: the tree root itself), the
@@ -141,19 +158,105 @@ resolve (its palette entry is the identity).
 `animation:` line — animators + skins, clips and skins registered,
 skinned meshes with their joint count, one-shots ended, diagnostics.
 
-**Root motion, the V1 policy (item 19 (d)).** Clips extract no root
-motion. A `CharacterController` (or the game) moves the entity; the
-animator only poses nodes *under* it, so clips are authored **in place**
-— the reference game's walk and run cycle the legs while the controller
-carries the player, and a jump's hips dip and rise while the controller's
-own jump lifts the entity. A clip that does key the animator entity
-itself would fight whatever else moves it; nothing stops it, nothing
-compensates for it.
+**Root motion, the default policy (item 19 (d)).** Clips extract no root
+motion unless the animator opts in. A `CharacterController` (or the
+game) moves the entity; the animator only poses nodes *under* it, so
+clips are authored **in place** — the reference game's walk and run cycle
+the legs while the controller carries the player, and a jump's hips dip
+and rise while the controller's own jump lifts the entity. A clip that
+does key the animator entity itself would fight whatever else moves it;
+nothing stops it, nothing compensates for it. `root_motion: true` is the
+opt-in for clips that travel (§ Root motion).
+
+## Layers (M3-19c)
+
+There is no `layers[]` on the component. A **layer is a second
+`fynkel.Animator` on a descendant entity** — the animators of a tree run
+ancestors first, so the child's pose is written over what the parent
+left, and its `weight`/`additive` say how:
+
+| | `additive: false` | `additive: true` |
+| --- | --- | --- |
+| `weight` 1 | the child's clip replaces the parent's pose on the nodes it keys (the classic upper-body override: put the animator on the `spine` and its clip only keys the arms) | the child's clip's change from its first frame is added onto the parent's pose (a wave layered on a walk keeps the walk's spine sway) |
+| `weight` w | lerp/slerp from the parent's value toward the child's, by w | the change scaled by w |
+
+The child's clip keys nodes *under the child*, like any animator — a
+layer on the `spine` cannot pose the hips. The additive reference is
+the clip sampled at t = 0 over the same targets (cached with the
+targets); a clip whose first frame *is* the base pose adds nothing at
+rest. `weight` is authored or set from Dart (`animation.weight = 0.5`,
+`SetWeight`), read back as `AnimatorState.weight`. This deviates from the
+blueprint's `Animator.layers[]` on purpose: the layer is an entity, so
+it has a transform, a name, a stable id, its own `state`, its own
+markers and events, and the editor's tree shows it — nothing new on the
+wire. Two animators on the *same* entity are not a layer (an entity
+holds one component of a type).
+
+## Markers (M3-19c)
+
+A clip carries named times. Authored in the rig document —
+
+```json
+"markers": { "walk": [ { "at": 0.12, "name": "footstep" }, { "at": 0.61, "name": "footstep" } ] }
+```
+
+— or in a glTF animation's `extras`: `{ "markers": [ { "at": 0.12,
+"name": "footstep" } ] }` (a Blender custom property, or a line in the
+exported `.gltf`); the importer (`fynkel.gltf` version 5) keeps them on
+the `anim/<a>` and the cook merges the rig's into the retargeted clip
+(sorted; one past the clip's end is dropped with `FYN-D0502`; a
+malformed entry is `A0104`). `fynkel rig inspect` counts them per clip.
+The `ANIM` payload stores them after the channels (`marker_count`, then
+`f32 at` + name each; an older payload without the section decodes to
+none).
+
+At the tick, every marker whose time lies in the interval the clock
+advanced over is raised as `fynkel.ev.AnimationMarker { entity, clip,
+name }` (event kind 10, general lane) — once per crossing, again on
+every lap of a loop (the interval is unwrapped, so a tick that wraps
+sees the end of one lap and the start of the next), backwards at a
+negative speed, never on a fresh tick and never for the outgoing side of
+a crossfade. A marker exactly at 0 fires when a loop wraps past it, not
+on the tick that starts the clip. From Dart: `Behaviour.onAnimationMarker(
+AnimationMarker { entity, clip, name })` on the animator's object, right
+after the step with the other tick callbacks; the headless host counts
+them (`animation.markers`).
+
+## Root motion (M3-19c)
+
+`root_motion: true` on the animator opts a travelling clip in. The
+**root** is the target of the clip's shallowest translation channel
+under the animator (a Mixamo `mixamorig:Hips`, the Fox's `_rootJoint`);
+its motion is measured in its parent's space, assumed Y-up: the planar
+`x`/`z` of the root's translation relative to the clip's first frame,
+and the **yaw** as the twist about Y of `R(t) · R(0)⁻¹` when the clip
+also rotates the root. Per tick the delta since the previous time
+(laps of a loop add the whole clip's travel) is converted through the
+local matrices from the animator's entity down to the root's parent —
+so a 0.01-scaled character walks in metres — and:
+
+- with a `CharacterController` on the same entity, handed to it as a
+  velocity (`Physics::add_root_motion`, summed into the tick's `Move`),
+  so the controller's collision, slopes and steps apply; the yaw is
+  *reported*, not applied — the controller faces its motion
+  (`docs/physics.md`);
+- without one, the entity's local transform is moved by the rotated
+  delta and turned by the yaw.
+
+The pose itself keeps the root at its first-frame `x`/`z` (its `y`
+stays: a jump still lifts the hips) and its rotation with the yaw
+removed, so the clip plays in place under the moving entity. Forward is
+−z, the controller's convention. `AnimatorState.root_delta` /
+`root_yaw` read back what the last tick took out; both are zero without
+the opt-in or for a clip that keys no root translation. Not in this
+version: root motion from a layer (only the animator that owns the root
+extracts), or from the outgoing clip of a crossfade.
 
 ## Commands, the query and the event
 
-`fynkel.cmd.Animate` (command kind 9, simulation lane, 48 bytes:
-`{ entity, op, seconds, speed, looping, clip }`) carries one `AnimateOp`:
+`fynkel.cmd.Animate` (command kind 9, simulation lane, 64 bytes:
+`{ entity, op, seconds, speed, looping, clip, value, name }`) carries one
+`AnimateOp`:
 
 | `op` | Effect | Rejection |
 | --- | --- | --- |
@@ -163,6 +266,8 @@ compensates for it.
 | `pause` / `resume` | clear / set `playing`, the time kept | |
 | `setSpeed` | `speed` | non-finite → `INVALID_PAYLOAD` |
 | `setTime` | seek to `seconds` (clamped to the clip) on the next tick, without advancing | negative or non-finite → `INVALID_PAYLOAD` |
+| `setWeight` | the layer weight `value` (§ Layers) | outside 0…1 or non-finite → `INVALID_PAYLOAD` |
+| `setParameter` | set the named parameter `name` to `value` on this animator (what a blend space reads; kept on the animator across clips) | empty `name` or non-finite `value` → `INVALID_PAYLOAD` |
 
 An entity without an `Animator` is `MISSING_COMPONENT` (component 21).
 The native layer (`fynkel_native`) registers from the cache, before the
@@ -175,16 +280,19 @@ cannot read stays unregistered and the animator reports
 
 `FYNKEL_QUERY_ANIMATOR` (11) with an entity answers one
 `fynkel.rec.AnimatorState { entity, time, duration, speed, fade_remaining,
-playing, looping, clip }` (56 bytes) as the last step left it, or no
-record for an entity without an animator.
+playing, looping, clip, weight, parameter, root_delta, root_yaw }`
+(80 bytes) as the last step left it, or no record for an entity without
+an animator; `parameter` is the last value `setParameter` set.
 
 `fynkel.ev.AnimationEnded { entity, clip }` (event kind 9, general lane)
 is raised the tick a one-shot passes its end (`playing` is cleared the
 same tick); a looping clip never raises it, and neither does `stop`.
+`fynkel.ev.AnimationMarker { entity, clip, name }` (kind 10) is raised
+once per marker crossed (§ Markers).
 
 ## Import and the cache
 
-The glTF importer (`fynkel.gltf` **version 4**; `docs/documents.md`)
+The glTF importer (`fynkel.gltf` **version 5**; `docs/documents.md`)
 keeps what a rigged source carries:
 
 - a primitive with `JOINTS_0`/`WEIGHTS_0` becomes a **skinned mesh**: one
@@ -208,7 +316,8 @@ keeps what a rigged source carries:
   in-tangent, value, out-tangent triples), and the duration (the last
   key time over all channels). Morph-weight channels are skipped with a
   warning, like morph targets; a channel whose node name is not unique
-  in the file is warned about (`A0105`).
+  in the file is warned about (`A0105`). The animation's `extras.markers`
+  become the clip's markers (§ Markers; a malformed entry is `A0104`).
 - the prefab puts a **`fynkel.Skin`** next to the `fynkel.MeshRenderer`
   of a node that has a skin (`skin/<s>`, `skeleton` = the root's name);
   a skin on a node without a skinned mesh, or a skinned mesh on a node
@@ -218,8 +327,9 @@ Node names are the contract, as above: the prefab's entities are named
 after their nodes (an unnamed node gets `node<i>`), so an instantiated
 prefab resolves its own clips.
 
-The intermediate is `FYNI` version 3 (`skins` and `animations` next to
-`meshes`), the cache version 4; the cooked container is unchanged
+The intermediate is `FYNI` version 4 (`skins` and `animations` next to
+`meshes`, the animations with their markers), the cache version 5; the
+cooked container is unchanged
 (`docs/documents.md` § Cache). The runtime store (`fynkel_assets`)
 converts the payloads into the core's `Clip`/`Skin` on demand
 (`Assets::clip`, `Assets::skin`) and `register_animation(scene, world)`
@@ -284,11 +394,13 @@ class Player extends Behaviour {
 
 `GameObject.animation` is an `AnimationControl`: `play(clip, {looping,
 speed})`, `crossfade(clip, seconds, {looping, speed})`, `stop()`,
-`pause()`, `resume()`, `speed =`, `time =` — each one `fynkel.cmd.Animate`
+`pause()`, `resume()`, `speed =`, `time =`, `weight =`, `setParameter(name,
+value)` — each one `fynkel.cmd.Animate`
 on the simulation lane through the object's `CommandBatch` (a pending
 object is driven through its temp id, so a spawn, its `Animator` and a
 `play` land in one tick) — and `state` (`AnimatorState { clip, time,
-duration, speed, fadeRemaining, playing, looping, isFading, progress }`,
+duration, speed, fadeRemaining, playing, looping, weight, parameter,
+rootDelta, rootYaw, isFading, progress }`,
 one `FYNKEL_QUERY_ANIMATOR`; `null` without an animator or before the
 object is spawned), `isPlaying`. `Behaviour.animation` forwards to its
 object. A rejection (`missingComponent`, `invalidPayload`, component
@@ -296,9 +408,10 @@ object. A rejection (`missingComponent`, `invalidPayload`, component
 command's, never an exception; `DiagnosticCode.clipUnavailable` (16) and
 `skinUnavailable` (17) are the once-only reports above.
 
-`onAnimationEnded(AnimationEnded { entity, clip })` runs on the
+`onAnimationEnded(AnimationEnded { entity, clip })` and
+`onAnimationMarker(AnimationMarker { entity, clip, name })` run on the
 behaviours of the animator's object right after each tick's step, with
-the contact and zone callbacks and before `afterPhysics`; the event is
+the contact and zone callbacks and before `afterPhysics`; the events are
 also in `drainEvents()` for a host that reads the world raw.
 `LoadReport.animation` (`AnimationAssets { clips, skins }`) says what a
 load registered. The joints are objects: `findChild('hips')`,
@@ -311,7 +424,10 @@ keys — write the ones it does not, or a joint it does not key).
 Per animator per tick: one target-validity pass over the cached targets
 (a `Name` read each), one sample per channel (a binary search over the
 key times, then the interpolation), one local-transform write per target
-that changed; a crossfade doubles the sampling and adds one blend. Per
+that changed; a crossfade doubles the sampling and adds one blend, a
+layer at `weight < 1` or `additive` one more blend per entry, markers a
+scan of the clip's (sorted) markers over the tick's interval, root
+motion two samples of the root's channels and the matrix chain. Per
 skin per tick: one validity pass over the joints. Per skinned mesh per
 frame: one palette (`joints` matrix products) in the extract and one
 storage-buffer write for all of them together. No per-tick allocation
@@ -326,10 +442,11 @@ Mac (`fynkel test --headless`'s `systems:` line).
   named parameters, Dart sets parameters only) and the timeline/sequencer
   document (tracks over named objects: transforms, component fields,
   events) — the next items on this core (blueprint §9).
-- Clip markers/events, layers and masks per animator (the core's `Pose`
-  blends per channel; nothing exposes a mask yet), additive blending,
-  IK, retargeting, root-motion extraction, morph targets, a node-graph
-  editor.
+- ~~Clip markers/events, layers, additive blending, root-motion
+  extraction~~ — done as item **19c** part 1 (§ Layers, § Markers, § Root
+  motion); blend spaces follow in part 2. Still out: per-channel masks
+  beyond "the layer keys what it keys", IK, retargeting between
+  skeletons, morph targets, a node-graph editor.
 - Compressed or quantized clips; a clip is cooked as `f32` keys.
 - A skinned mesh collider following the pose (a `Collider` on a joint
   entity is the way).

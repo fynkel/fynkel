@@ -131,7 +131,7 @@ fn test_headless_reports_json() {
 /// asset references.
 const SECOND_SCENE: &str = r#"{
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "Second",
   "entities": {
@@ -653,13 +653,15 @@ fn migrate_dry_runs_then_writes_with_backup() {
     let out = run(&["migrate", "--list", "--json"]);
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["current"]["scene"], 2);
-    assert_eq!(v["current"]["prefab"], 2);
+    assert_eq!(v["current"]["scene"], 3);
+    assert_eq!(v["current"]["prefab"], 3);
     assert_eq!(v["current"]["material"], 2);
     assert_eq!(v["steps"][0]["name"], "material/1-2/pbr-fields");
     assert_eq!(v["steps"][1]["name"], "prefab/1-2/camera-exposure");
-    assert_eq!(v["steps"][2]["name"], "scene/0-1/entities-keyed-by-id");
-    assert_eq!(v["steps"][3]["name"], "scene/1-2/camera-exposure");
+    assert_eq!(v["steps"][2]["name"], "prefab/2-3/animator-layers");
+    assert_eq!(v["steps"][3]["name"], "scene/0-1/entities-keyed-by-id");
+    assert_eq!(v["steps"][4]["name"], "scene/1-2/camera-exposure");
+    assert_eq!(v["steps"][5]["name"], "scene/2-3/animator-layers");
 
     let dir = std::env::temp_dir().join(format!("fynkel-cli-migrate-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -700,16 +702,17 @@ fn migrate_dry_runs_then_writes_with_backup() {
         .unwrap()
         .contains("+  \"base_color_texture\": {"));
     assert_eq!(docs[2]["from"], 0);
-    assert_eq!(docs[2]["to"], 2);
+    assert_eq!(docs[2]["to"], 3);
     assert_eq!(
         docs[2]["applied"][0]["name"],
         "scene/0-1/entities-keyed-by-id"
     );
     assert_eq!(docs[2]["applied"][1]["name"], "scene/1-2/camera-exposure");
+    assert_eq!(docs[2]["applied"][2]["name"], "scene/2-3/animator-layers");
     assert!(docs[2]["diff"]
         .as_str()
         .unwrap()
-        .contains("+  \"formatVersion\": 2,"));
+        .contains("+  \"formatVersion\": 3,"));
     assert_eq!(docs[2]["written"], false);
     assert_eq!(std::fs::read(&scene).unwrap(), original);
     assert!(!dir.join("scenes/room.scene.json.bak").exists());
@@ -1531,7 +1534,7 @@ fn khronos_rigs_instance_from_the_source_alone() {
         let scale = if *model == "Fox" { 0.01 } else { 1.0 };
         let scene = serde_json::json!({
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 2,
+            "formatVersion": 3,
             "id": scene_id,
             "name": model,
             "entities": {
@@ -1546,7 +1549,7 @@ fn khronos_rigs_instance_from_the_source_alone() {
                         },
                         "c0000000-0000-4000-8000-000000000505": {
                             "type": "fynkel.Animator", "version": 1,
-                            "data": { "clip": { "asset": ids[i], "sub": clip }, "speed": 1.0, "looping": true, "playing": true }
+                            "data": { "clip": { "asset": ids[i], "sub": clip }, "speed": 1.0, "looping": true, "playing": true, "weight": 1.0, "additive": false, "root_motion": false }
                         }
                     },
                     "prefab": { "asset": { "asset": ids[i], "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000005f0", "overrides": [] }
@@ -1824,6 +1827,25 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     );
     assert!(String::from_utf8_lossy(&out.stderr).contains("1/1 rig(s) ok"));
 
+    // Markers (M3-19c): two footsteps authored on `run` in the rig
+    // document, one past the clip's end that the cook drops with a
+    // warning; `rig inspect` counts them per clip.
+    let mut doc: serde_json::Value = serde_json::from_str(&written).unwrap();
+    doc["markers"] = serde_json::json!({
+        "run": [
+            { "at": 0.1, "name": "step" },
+            { "at": 0.4, "name": "step" },
+            { "at": 9.0, "name": "late" }
+        ]
+    });
+    std::fs::write(&rig_path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    let out = run(&["rig", "inspect", "assets/models/fox.rig.json", "--json"]);
+    let v = json(&out);
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["clips"][2]["name"], "run");
+    assert_eq!(v["clips"][2]["markers"], 3);
+    assert_eq!(v["clips"][1]["markers"], 0);
+
     // A scene instances `{rig, prefab}` and plays `anim/run`.
     let rig_scene: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("assets/scenes/rig.scene.json")).unwrap(),
@@ -1832,7 +1854,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     let scene_id = "c0000000-0000-4000-8000-000000000038";
     let scene = serde_json::json!({
         "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-        "formatVersion": 2,
+        "formatVersion": 3,
         "id": scene_id,
         "name": "Fox",
         "entities": {
@@ -1847,7 +1869,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
                     },
                     "c0000000-0000-4000-8000-000000000505": {
                         "type": "fynkel.Animator", "version": 1,
-                        "data": { "clip": { "asset": rig_id, "sub": "anim/run" }, "speed": 1.0, "looping": true, "playing": true }
+                        "data": { "clip": { "asset": rig_id, "sub": "anim/run" }, "speed": 1.0, "looping": true, "playing": true, "weight": 1.0, "additive": false, "root_motion": false }
                     }
                 },
                 "prefab": { "asset": { "asset": rig_id, "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000005f0", "overrides": [] }
@@ -1876,6 +1898,15 @@ fn khronos_rigs_assemble_into_a_rig_document() {
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
+    );
+    let cook_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        cook_text.contains("FYN-D0502") && cook_text.contains("\\\"late\\\""),
+        "the marker past the clip's end is a warning: {cook_text}"
     );
     let out = run(&[
         "test",
@@ -1909,6 +1940,9 @@ fn khronos_rigs_assemble_into_a_rig_document() {
         (Some(1), Some(1), Some(24), Some(0)),
         "{anim}"
     );
+    // One second of the 1.16 s run crosses both steps (`ANIMATION_MARKER`
+    // counted headlessly).
+    assert_eq!(anim["markers"], 2, "{anim}");
     let pose = |steps: &str| -> serde_json::Value {
         let out = run(&[
             "state",

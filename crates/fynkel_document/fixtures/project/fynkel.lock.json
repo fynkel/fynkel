@@ -8,25 +8,25 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0x18acc498ae005854",
+  "schemaFingerprint": "0x68267f95a40bac58",
   "documents": {
     "material": 2,
     "meta": 1,
-    "prefab": 2,
+    "prefab": 3,
     "project": 1,
     "rig": 1,
-    "scene": 2,
+    "scene": 3,
     "shader": 1
   },
   "importers": {
     "fynkel.audio": 1,
     "fynkel.fbx": 1,
     "fynkel.file": 1,
-    "fynkel.gltf": 4,
+    "fynkel.gltf": 5,
     "fynkel.image": 1
   },
   "cache": {
-    "version": 4,
+    "version": 5,
     "container": 1
   }
 }

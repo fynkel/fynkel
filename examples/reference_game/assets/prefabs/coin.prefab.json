@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "4f8e7eb0-6298-59ad-9ccb-639ade69c42f",
   "name": "Coin",
   "entities": {

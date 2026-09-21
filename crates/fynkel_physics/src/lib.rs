@@ -371,6 +371,9 @@ pub struct Physics {
     retired: Vec<ColliderHandle>,
     meshes: HashMap<AssetRef, (Vec<Vec3>, Vec<[u32; 3]>)>,
     pending: Vec<(u32, Entity, BodyCommand)>,
+    /// Root motion the animators extracted this tick (M3-19c): a world
+    /// velocity added to the character's `Move` at the step.
+    root_motion: Vec<(Entity, Vec3)>,
     rejections: Vec<Rejection>,
     events: Vec<PhysicsEvent>,
     /// Touching pairs `(a, b)` with `a < b`: sensor pair or not.
@@ -402,6 +405,7 @@ impl Physics {
             retired: Vec::new(),
             meshes: HashMap::new(),
             pending: Vec::new(),
+            root_motion: Vec::new(),
             rejections: Vec::new(),
             events: Vec::new(),
             touching: BTreeMap::new(),
@@ -467,6 +471,21 @@ impl Physics {
     /// sync, so a body set in the same batch receives it).
     pub fn queue(&mut self, index: u32, entity: Entity, command: BodyCommand) {
         self.pending.push((index, entity, command));
+    }
+
+    /// Adds `velocity` (metres per second, world space) to the character's
+    /// movement this tick on top of its `Move` (M3-19c root motion); an
+    /// entity without a character is ignored — the caller moves it itself.
+    pub fn add_root_motion(&mut self, entity: Entity, velocity: Vec3) {
+        if velocity.is_finite() {
+            self.root_motion.push((entity, velocity));
+        }
+    }
+
+    /// Whether `entity` is a character the step will move (its controller
+    /// has been synced).
+    pub fn has_character(&self, entity: Entity) -> bool {
+        self.characters.contains_key(&entity)
     }
 
     pub fn stats(&self) -> PhysicsStats {
@@ -539,6 +558,11 @@ impl Physics {
         self.events.clear();
         self.sync(ecs);
         self.apply_pending(ecs);
+        for (entity, v) in self.root_motion.drain(..) {
+            if let Some(run) = self.characters.get_mut(&entity) {
+                run.pending_move = Some(run.pending_move.unwrap_or(Vec3::ZERO) + v);
+            }
+        }
         if self.entries.is_empty() {
             self.pending.clear();
             self.stats = PhysicsStats::default();

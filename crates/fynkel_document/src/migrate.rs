@@ -77,6 +77,13 @@ impl Migrations {
                 description: "fynkel.Camera gained exposure_mode (auto | manual) and exposure (EV100); every camera gets the defaults auto / 12",
                 apply: camera_exposure_1_to_2,
             });
+            m.add(Migration {
+                kind,
+                from: 2,
+                name: "animator-layers",
+                description: "fynkel.Animator gained weight, additive and root_motion (M3-19c); every animator gets the defaults 1 / false / false",
+                apply: animator_layers_2_to_3,
+            });
         }
         m
     }
@@ -478,12 +485,31 @@ fn material_1_to_2(root: &mut Node) -> Result<(), String> {
     Ok(())
 }
 
-/// Scene/prefab 1 → 2 (M3-04, renderer V1 exposure): every
-/// `fynkel.Camera` component's `data` gains `exposure_mode: "auto"` and
-/// `exposure: 12` (the defaults — nothing about how the scene looked
-/// changes) unless the member is already there. Entities and components
-/// are objects keyed by id (v1); anything else in the document is kept.
-fn camera_exposure_1_to_2(root: &mut Node) -> Result<(), String> {
+/// Scene/prefab 2 → 3 (M3-19c, animation depth): every `fynkel.Animator`
+/// component's `data` gains `weight: 1`, `additive: false` and
+/// `root_motion: false` (the defaults — a plain animator plays as before)
+/// unless the member is already there.
+fn animator_layers_2_to_3(root: &mut Node) -> Result<(), String> {
+    for_each_component_data(root, "fynkel.Animator", &mut |data| {
+        if data.get("weight").is_none() {
+            data.set("weight", Node::float(1.0));
+        }
+        if data.get("additive").is_none() {
+            data.set("additive", Node::synthetic(Value::Bool(false)));
+        }
+        if data.get("root_motion").is_none() {
+            data.set("root_motion", Node::synthetic(Value::Bool(false)));
+        }
+    })
+}
+
+/// The `data` of every component of type `ty` in a v1+ scene or prefab
+/// (entities and components keyed by id); anything else is left alone.
+fn for_each_component_data(
+    root: &mut Node,
+    ty: &str,
+    f: &mut dyn FnMut(&mut Node),
+) -> Result<(), String> {
     // A missing `entities` is the schema's complaint, not this step's.
     let Some(entities) = root.get_mut("entities") else {
         return Ok(());
@@ -499,12 +525,12 @@ fn camera_exposure_1_to_2(root: &mut Node) -> Result<(), String> {
             continue;
         };
         for c in components.iter_mut() {
-            if c.value.get("type").and_then(Node::as_str) != Some("fynkel.Camera") {
+            if c.value.get("type").and_then(Node::as_str) != Some(ty) {
                 continue;
             }
             let data = c.value.get_mut("data").ok_or_else(|| {
                 format!(
-                    "/entities/{}/components/{}: fynkel.Camera has no data",
+                    "/entities/{}/components/{}: {ty} has no data",
                     entity.key, c.key
                 )
             })?;
@@ -514,13 +540,24 @@ fn camera_exposure_1_to_2(root: &mut Node) -> Result<(), String> {
                     entity.key, c.key
                 ));
             }
-            if data.get("exposure_mode").is_none() {
-                data.set("exposure_mode", Node::string("auto"));
-            }
-            if data.get("exposure").is_none() {
-                data.set("exposure", Node::float(12.0));
-            }
+            f(data);
         }
     }
     Ok(())
+}
+
+/// Scene/prefab 1 → 2 (M3-04, renderer V1 exposure): every
+/// `fynkel.Camera` component's `data` gains `exposure_mode: "auto"` and
+/// `exposure: 12` (the defaults — nothing about how the scene looked
+/// changes) unless the member is already there. Entities and components
+/// are objects keyed by id (v1); anything else in the document is kept.
+fn camera_exposure_1_to_2(root: &mut Node) -> Result<(), String> {
+    for_each_component_data(root, "fynkel.Camera", &mut |data| {
+        if data.get("exposure_mode").is_none() {
+            data.set("exposure_mode", Node::string("auto"));
+        }
+        if data.get("exposure").is_none() {
+            data.set("exposure", Node::float(12.0));
+        }
+    })
 }

@@ -185,11 +185,16 @@ pub enum AnimateOp {
     SetSpeed,
     /// `seconds`: seek.
     SetTime,
+    /// `value`: the layer weight, within `[0, 1]` (M3-19c).
+    SetWeight,
+    /// `name`, `value`: a blend-space parameter (M3-19c).
+    SetParameter,
 }
 
 /// Drives a `fynkel.Animator` (M3-19; simulation lane only). Rejected at
 /// the tick with `MISSING_COMPONENT` (no animator) or `INVALID_PAYLOAD`
-/// (non-finite value, negative fade).
+/// (non-finite value, negative fade, a weight outside `[0, 1]`, an empty
+/// parameter name).
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "command", id = 9, name = "fynkel.cmd.Animate")]
 pub struct AnimateCommandRecord {
@@ -203,6 +208,10 @@ pub struct AnimateCommandRecord {
     pub looping: bool,
     /// For `play`/`crossfade`.
     pub clip: AssetRef,
+    /// The weight for `setWeight`, the parameter value for `setParameter`.
+    pub value: f32,
+    /// The parameter name for `setParameter`.
+    pub name: String,
 }
 
 /// A spatial query kind (`fynkel.rec.PhysicsQuery`).
@@ -300,6 +309,16 @@ pub struct AnimatorStateRecord {
     pub looping: bool,
     /// The clip being played.
     pub clip: AssetRef,
+    /// The layer weight (M3-19c).
+    pub weight: f32,
+    /// The value of the parameter a playing blend space reads, `0` for a
+    /// clip (M3-19c).
+    pub parameter: f32,
+    /// Root motion taken out of the pose over the last tick, in the
+    /// entity's parent space (M3-19c); zero without `rootMotion`.
+    pub root_delta: Vec3,
+    /// Root yaw taken out over the last tick, radians (M3-19c).
+    pub root_yaw: f32,
 }
 
 /// A phase of `World::step` whose time is measured (M3-10, blueprint
@@ -482,6 +501,19 @@ pub struct AnimationEndedEvent {
     pub clip: AssetRef,
 }
 
+/// An animator's clock crossed a clip marker (M3-19c): the body of
+/// `ANIMATION_MARKER` (10), general lane, once per crossing — a loop
+/// crosses every marker every lap, a negative speed crosses them
+/// backwards, a fading clip's markers are not raised.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "event", id = 10, name = "fynkel.ev.AnimationMarker")]
+pub struct AnimationMarkerEvent {
+    pub entity: Entity,
+    /// The clip whose marker it is (a blend space's dominant clip).
+    pub clip: AssetRef,
+    pub name: String,
+}
+
 /// Physics-lane events share one body (collision/trigger enter/stay/exit):
 /// `point` and `normal` in world space, the normal pointing from `a`
 /// towards `b`; `impulse` the pair's total impulse over the step (0 for
@@ -653,6 +685,7 @@ pub const ALL: &[&RecordSchema] = &[
     &AnimateCommandRecord::SCHEMA,
     &AnimationEndedEvent::SCHEMA,
     &AnimatorStateRecord::SCHEMA,
+    &AnimationMarkerEvent::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -718,24 +751,29 @@ mod tests {
         assert_eq!(Emitter::SCHEMA.offsets(), vec![0, 24, 28, 32, 36, 48]);
         assert_eq!(Emitter::SCHEMA.wire_size(), 56);
         assert_eq!(SystemTimeRecord::SCHEMA.wire_size(), 16);
-        // M3-19: clip 24 @0, speed @24, looping @28, playing @29 → 32.
-        assert_eq!(Animator::SCHEMA.offsets(), vec![0, 24, 28, 29]);
-        assert_eq!(Animator::SCHEMA.wire_size(), 32);
+        // M3-19: clip 24 @0, speed @24, looping @28, playing @29; M3-19c:
+        // weight @32, additive @36, root_motion @37 → 40.
+        assert_eq!(Animator::SCHEMA.offsets(), vec![0, 24, 28, 29, 32, 36, 37]);
+        assert_eq!(Animator::SCHEMA.wire_size(), 40);
         assert_eq!(Skin::SCHEMA.wire_size(), 32);
-        // entity @0, op @8, seconds @12, speed @16, looping @20, clip @24 → 48.
+        // entity @0, op @8, seconds @12, speed @16, looping @20, clip @24,
+        // value @48, name @52 → 64.
         assert_eq!(
             AnimateCommandRecord::SCHEMA.offsets(),
-            vec![0, 8, 12, 16, 20, 24]
+            vec![0, 8, 12, 16, 20, 24, 48, 52]
         );
-        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 48);
+        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 64);
         assert_eq!(AnimationEndedEvent::SCHEMA.wire_size(), 32);
+        // entity @0, clip @8, name @32 → 40.
+        assert_eq!(AnimationMarkerEvent::SCHEMA.wire_size(), 40);
         // entity @0, time @8, duration @12, speed @16, fade @20, playing
-        // @24, looping @25, clip @32 → 56.
+        // @24, looping @25, clip @32, weight @56, parameter @60, root_delta
+        // @64, root_yaw @76 → 80.
         assert_eq!(
             AnimatorStateRecord::SCHEMA.offsets(),
-            vec![0, 8, 12, 16, 20, 24, 25, 32]
+            vec![0, 8, 12, 16, 20, 24, 25, 32, 56, 60, 64, 76]
         );
-        assert_eq!(AnimatorStateRecord::SCHEMA.wire_size(), 56);
+        assert_eq!(AnimatorStateRecord::SCHEMA.wire_size(), 80);
     }
 
     #[test]

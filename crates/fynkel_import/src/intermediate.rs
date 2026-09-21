@@ -21,7 +21,7 @@ use fynkel_contracts::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 pub const MAGIC: &[u8; 4] = b"FYNI";
-pub const INTERMEDIATE_VERSION: u32 = 3;
+pub const INTERMEDIATE_VERSION: u32 = 4;
 
 /// The one vertex layout every mesh is normalized to (72 bytes); the
 /// cooked `MESH` payload uses the same one, so it is defined next to the

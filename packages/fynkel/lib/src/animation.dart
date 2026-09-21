@@ -6,6 +6,7 @@
 
 import '../generated/schema.g.dart' as gen;
 import 'asset_ref.dart';
+import '../math.dart';
 
 export '../generated/schema.g.dart' show AnimateOp, Animator, Skin;
 
@@ -20,6 +21,10 @@ class AnimatorState {
     required this.fadeRemaining,
     required this.playing,
     required this.looping,
+    this.weight = 1,
+    this.parameter = 0,
+    this.rootDelta = Vec3.zero,
+    this.rootYaw = 0,
   });
 
   factory AnimatorState.fromRecord(gen.AnimatorStateRecord r) => AnimatorState(
@@ -30,6 +35,10 @@ class AnimatorState {
         fadeRemaining: r.fadeRemaining,
         playing: r.playing,
         looping: r.looping,
+        weight: r.weight,
+        parameter: r.parameter,
+        rootDelta: r.rootDelta,
+        rootYaw: r.rootYaw,
       );
 
   /// The clip playing (the crossfade's target while one runs).
@@ -50,6 +59,19 @@ class AnimatorState {
   /// Advancing every tick; false after `pause`, `stop` or a one-shot's end.
   final bool playing;
   final bool looping;
+
+  /// The layer weight (`AnimationControl.weight`), `0…1`.
+  final double weight;
+
+  /// The last value set with `setParameter` (what a blend space reads).
+  final double parameter;
+
+  /// Root motion taken out of the pose over the last tick, in the
+  /// object's parent space; zero without `Animator.rootMotion`.
+  final Vec3 rootDelta;
+
+  /// Root yaw taken out over the last tick, radians.
+  final double rootYaw;
 
   bool get isFading => fadeRemaining > 0;
 

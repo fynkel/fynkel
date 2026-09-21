@@ -394,8 +394,8 @@ fn test_command(args: &[String]) -> ExitCode {
         }
         if let Some(a) = &report.animation {
             println!(
-                "animation: {} animators + skins, {} clips, {} skins, {} skinned meshes ({} joints), {} ended, {} diagnostics",
-                a.entities, a.clips, a.skins, a.skinned_meshes, a.joints, a.ended, a.diagnostics
+                "animation: {} animators + skins, {} clips, {} skins, {} skinned meshes ({} joints), {} ended, {} markers, {} diagnostics",
+                a.entities, a.clips, a.skins, a.skinned_meshes, a.joints, a.ended, a.markers, a.diagnostics
             );
         }
         if !report.systems.is_empty() {

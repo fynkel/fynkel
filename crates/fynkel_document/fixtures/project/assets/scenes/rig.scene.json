@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "c0000000-0000-4000-8000-000000000034",
   "name": "Rig",
   "entities": {
@@ -130,7 +130,10 @@
             },
             "speed": 1.0,
             "looping": true,
-            "playing": true
+            "playing": true,
+            "weight": 1.0,
+            "additive": false,
+            "root_motion": false
           }
         }
       }
@@ -335,7 +338,10 @@
             },
             "speed": 1.0,
             "looping": false,
-            "playing": true
+            "playing": true,
+            "weight": 1.0,
+            "additive": false,
+            "root_motion": false
           }
         }
       }
@@ -377,7 +383,10 @@
             },
             "speed": 1.0,
             "looping": true,
-            "playing": true
+            "playing": true,
+            "weight": 1.0,
+            "additive": false,
+            "root_motion": false
           }
         }
       },

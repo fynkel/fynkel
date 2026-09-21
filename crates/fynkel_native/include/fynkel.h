@@ -163,6 +163,9 @@ typedef enum FynkelEventKind {
   /* M3-19: a non-looping clip reached its end (`fynkel.ev.AnimationEnded`
    * body: entity, clip). */
   FYNKEL_EVENT_ANIMATION_ENDED = 9,
+  /* M3-19c: an animator's clock crossed a clip marker
+   * (`fynkel.ev.AnimationMarker` body: entity, clip, name). */
+  FYNKEL_EVENT_ANIMATION_MARKER = 10,
   FYNKEL_EVENT_COLLISION_ENTER = 0x100,
   FYNKEL_EVENT_COLLISION_STAY = 0x101,
   FYNKEL_EVENT_COLLISION_EXIT = 0x102,

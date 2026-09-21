@@ -193,6 +193,15 @@ fn quat(v: &[f32]) -> Quat {
     Quat::from_xyzw(v[0], v[1], v[2], v[3])
 }
 
+/// A named point in a clip's time (M3-19c): the world raises
+/// `ANIMATION_MARKER` when an animator's clock crosses it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Marker {
+    /// Seconds into the clip, within `[0, duration]`.
+    pub time: f32,
+    pub name: String,
+}
+
 /// A clip: keyed channels over named nodes and the clip's length.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Clip {
@@ -200,6 +209,8 @@ pub struct Clip {
     /// Seconds; the last key of the longest channel.
     pub duration: f32,
     pub channels: Vec<Channel>,
+    /// In time order (ties keep their order).
+    pub markers: Vec<Marker>,
 }
 
 impl Clip {
@@ -217,7 +228,74 @@ impl Clip {
                 ));
             }
         }
+        for (m, marker) in self.markers.iter().enumerate() {
+            if !marker.time.is_finite() || marker.time < 0.0 || marker.time > self.duration {
+                return Err(format!(
+                    "{} marker {m} ({}): time must be within the clip",
+                    self.name, marker.name
+                ));
+            }
+            if marker.name.is_empty() {
+                return Err(format!("{} marker {m}: empty name", self.name));
+            }
+            if m > 0 && self.markers[m - 1].time > marker.time {
+                return Err(format!(
+                    "{} marker {m}: markers must be in time order",
+                    self.name
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// The markers a clock crossed going from `prev` to `next` seconds
+    /// (unwrapped: a looping clock hands in `next` past the end or below
+    /// zero and the crossings wrap), in the order they were met. Forward,
+    /// a marker at `m` fires when `prev < m <= next`; backwards when
+    /// `next <= m < prev` — so a marker on the first frame fires on every
+    /// wrap of a forward loop and one on the last frame on every wrap of
+    /// a backward one, never on the tick that set the clock.
+    pub fn markers_crossed(&self, prev: f32, next: f32, looping: bool, out: &mut Vec<usize>) {
+        let duration = self.duration.max(0.0);
+        if self.markers.is_empty() || prev == next {
+            return;
+        }
+        if !looping || duration <= 0.0 {
+            if next > prev {
+                out.extend(
+                    (0..self.markers.len())
+                        .filter(|&i| self.markers[i].time > prev && self.markers[i].time <= next),
+                );
+            } else {
+                out.extend(
+                    (0..self.markers.len())
+                        .rev()
+                        .filter(|&i| self.markers[i].time >= next && self.markers[i].time < prev),
+                );
+            }
+            return;
+        }
+        // A looping clock: the crossings of `m + k * duration` for every
+        // wrap `k` the interval covers, wrap by wrap so the order holds.
+        if next > prev {
+            let mut base = 0.0;
+            while base < next {
+                out.extend((0..self.markers.len()).filter(|&i| {
+                    let t = self.markers[i].time + base;
+                    t > prev && t <= next
+                }));
+                base += duration;
+            }
+        } else {
+            let mut base = 0.0;
+            while base + duration > next {
+                out.extend((0..self.markers.len()).rev().filter(|&i| {
+                    let t = self.markers[i].time + base;
+                    t >= next && t < prev
+                }));
+                base -= duration;
+            }
+        }
     }
 
     /// Samples every channel whose target resolved (`targets[c]`, one per
@@ -300,6 +378,65 @@ impl Pose {
             e.translation = mix(e.translation, o.translation, w, |a, b| a.lerp(b, w));
             e.rotation = mix(e.rotation, o.rotation, w, |a, b| a.slerp(b, w));
             e.scale = mix(e.scale, o.scale, w, |a, b| a.lerp(b, w));
+        }
+    }
+}
+
+impl Pose {
+    /// The entry for `entity`, if the pose sets anything on it.
+    pub fn get(&self, entity: Entity) -> Option<&PoseEntry> {
+        self.entries.iter().find(|e| e.entity == entity)
+    }
+
+    /// Every entry of `other` that has a counterpart in `reference` added
+    /// to `self` as a **delta** from the reference (M3-19c, additive
+    /// layers): translation `+ (o - r) * w`, rotation `slerp(1, o * r⁻¹,
+    /// w) *`, scale `* lerp(1, o / r, w)`. An entity `self` does not set
+    /// gets the delta over `base(entity)` — its current transform.
+    pub fn add_delta(
+        &mut self,
+        other: &Pose,
+        reference: &Pose,
+        weight: f32,
+        base: &mut dyn FnMut(Entity) -> Option<Transform>,
+    ) {
+        let w = weight.clamp(0.0, 1.0);
+        if w == 0.0 {
+            return;
+        }
+        for o in &other.entries {
+            let Some(r) = reference.get(o.entity) else {
+                continue;
+            };
+            let current = match self.get(o.entity) {
+                Some(e) => Some(*e),
+                None => base(o.entity).map(|t| PoseEntry {
+                    entity: o.entity,
+                    translation: Some(t.position),
+                    rotation: Some(t.rotation),
+                    scale: Some(t.scale),
+                }),
+            };
+            let Some(current) = current else {
+                continue;
+            };
+            let e = self.entry(o.entity);
+            *e = current;
+            if let (Some(ot), Some(rt), Some(t)) = (o.translation, r.translation, e.translation) {
+                e.translation = Some(t + (ot - rt) * w);
+            }
+            if let (Some(oq), Some(rq), Some(q)) = (o.rotation, r.rotation, e.rotation) {
+                let delta = (oq * rq.inverse()).normalize();
+                e.rotation = Some((Quat::IDENTITY.slerp(delta, w) * q).normalize());
+            }
+            if let (Some(os), Some(rs), Some(sc)) = (o.scale, r.scale, e.scale) {
+                let ratio = Vec3::new(
+                    if rs.x != 0.0 { os.x / rs.x } else { 1.0 },
+                    if rs.y != 0.0 { os.y / rs.y } else { 1.0 },
+                    if rs.z != 0.0 { os.z / rs.z } else { 1.0 },
+                );
+                e.scale = Some(sc * Vec3::ONE.lerp(ratio, w));
+            }
         }
     }
 }
@@ -459,6 +596,7 @@ mod tests {
         let clip = Clip {
             name: "c".into(),
             duration: 1.0,
+            markers: Vec::new(),
             channels: vec![
                 channel(
                     Interpolation::Linear,

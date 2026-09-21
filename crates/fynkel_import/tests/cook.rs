@@ -506,7 +506,7 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     let b = "c0000000-0000-4000-8000-0000000000b0";
     let scene = |own: &str, other: &str| {
         format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":2,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":3,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
         )
     };
     p.write("scenes/a.scene.json", &scene(a, b));
@@ -1005,7 +1005,7 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
         "components": {
             "c0000000-0000-4000-8000-0000000000c9": {
                 "type": "fynkel.Animator", "version": 1,
-                "data": { "clip": { "asset": HERO, "sub": "anim/wave" }, "speed": 1.0, "looping": true, "playing": true }
+                "data": { "clip": { "asset": HERO, "sub": "anim/wave" }, "speed": 1.0, "looping": true, "playing": true, "weight": 1.0, "additive": false, "root_motion": false }
             }
         },
         "prefab": { "asset": { "asset": HERO, "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000000f9" }

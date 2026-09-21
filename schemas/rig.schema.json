@@ -16,6 +16,24 @@
       "propertyNames": { "$ref": "#/$defs/clipName" },
       "additionalProperties": { "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef" },
       "default": {}
+    },
+    "markers": {
+      "type": "object",
+      "description": "Clip name (one of `clips`) → the clip's markers (M3-19c): named times the world raises `ANIMATION_MARKER` at when an animator's clock crosses them (`footstep` on the frames a foot lands). Markers a source carries in its own `extras` are kept too.",
+      "propertyNames": { "$ref": "#/$defs/clipName" },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "at": { "type": "number", "minimum": 0, "description": "Seconds into the clip; at most its length." },
+            "name": { "type": "string", "minLength": 1, "description": "The event name a behaviour's `onAnimationMarker` sees." }
+          },
+          "required": ["at", "name"],
+          "additionalProperties": false
+        }
+      },
+      "default": {}
     }
   },
   "required": ["skeleton"],

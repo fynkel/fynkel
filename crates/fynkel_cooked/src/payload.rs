@@ -400,12 +400,24 @@ impl AnimationChannel {
     }
 }
 
+/// A named time in a clip (M3-19c): the world raises `ANIMATION_MARKER`
+/// when an animator's clock crosses it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimationMarker {
+    /// Seconds, within `[0, duration]`.
+    pub time: f32,
+    pub name: String,
+}
+
 /// An `ANIM` payload: one clip.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimationPayload {
     /// Seconds; the largest key time over every channel.
     pub duration: f32,
     pub channels: Vec<AnimationChannel>,
+    /// In time order; after the channels in the bytes (a payload without
+    /// them, cooked before M3-19c, decodes as none).
+    pub markers: Vec<AnimationMarker>,
 }
 
 pub fn encode_animation(anim: &AnimationPayload) -> Vec<u8> {
@@ -422,6 +434,13 @@ pub fn encode_animation(anim: &AnimationPayload) -> Vec<u8> {
         }
         for v in &c.values {
             out.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    if !anim.markers.is_empty() {
+        out.extend_from_slice(&(anim.markers.len() as u32).to_le_bytes());
+        for m in &anim.markers {
+            out.extend_from_slice(&m.time.to_le_bytes());
+            write_str(&mut out, &m.name);
         }
     }
     out
@@ -469,10 +488,36 @@ pub fn decode_animation(bytes: &[u8]) -> Option<AnimationPayload> {
         }
         channels.push(channel);
     }
+    let mut markers = Vec::new();
+    if at < bytes.len() {
+        let count = read_u32(bytes, &mut at)? as usize;
+        if count.checked_mul(12)? > bytes.len() {
+            return None;
+        }
+        for _ in 0..count {
+            let time = read_f32(bytes, &mut at)?;
+            let name = read_str(bytes, &mut at)?;
+            if !time.is_finite()
+                || time < 0.0
+                || time > duration
+                || name.is_empty()
+                || markers
+                    .last()
+                    .is_some_and(|m: &AnimationMarker| m.time > time)
+            {
+                return None;
+            }
+            markers.push(AnimationMarker { time, name });
+        }
+    }
     if at != bytes.len() {
         return None;
     }
-    Some(AnimationPayload { duration, channels })
+    Some(AnimationPayload {
+        duration,
+        channels,
+        markers,
+    })
 }
 
 /// A `TEXR` payload: RGBA8, top row first, every mip level concatenated
@@ -721,6 +766,7 @@ mod tests {
                     values: vec![0.0; 9],
                 },
             ],
+            markers: Vec::new(),
         };
         let bytes = encode_animation(&anim);
         assert_eq!(decode_animation(&bytes).unwrap(), anim);
@@ -728,6 +774,30 @@ mod tests {
         let mut bad = anim.clone();
         bad.channels[0].times = vec![1.0, 0.0];
         assert!(decode_animation(&encode_animation(&bad)).is_none());
+        // Markers (M3-19c) follow the channels; a marker outside the clip,
+        // unnamed or out of order is malformed.
+        let mut marked = anim.clone();
+        marked.markers = vec![
+            AnimationMarker {
+                time: 0.25,
+                name: "footstep".into(),
+            },
+            AnimationMarker {
+                time: 1.0,
+                name: "footstep".into(),
+            },
+        ];
+        let bytes = encode_animation(&marked);
+        assert_eq!(decode_animation(&bytes).unwrap(), marked);
+        assert!(decode_animation(&bytes[..bytes.len() - 1]).is_none());
+        for bad in [(1.5, "x"), (0.5, ""), (0.1, "late")] {
+            let mut m = marked.clone();
+            m.markers.push(AnimationMarker {
+                time: bad.0,
+                name: bad.1.into(),
+            });
+            assert!(decode_animation(&encode_animation(&m)).is_none(), "{bad:?}");
+        }
         let mut bad = anim.clone();
         bad.channels[0].property = 9;
         assert!(decode_animation(&encode_animation(&bad)).is_none());

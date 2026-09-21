@@ -734,7 +734,11 @@ fn import_animations(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<Animation
         animations.push(AnimationData {
             sub_id,
             name,
-            payload: AnimationPayload { duration, channels },
+            payload: AnimationPayload {
+                duration,
+                channels,
+                markers: Vec::new(),
+            },
         });
     }
     Ok(animations)

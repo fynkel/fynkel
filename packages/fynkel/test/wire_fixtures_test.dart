@@ -589,6 +589,9 @@ void main() {
       speed: 1.5,
       looping: false,
       playing: true,
+      weight: 0.75,
+      additive: true,
+      rootMotion: true,
     ),
     Animator.wireSize,
     Animator.decode,
@@ -613,6 +616,8 @@ void main() {
       speed: 1,
       looping: true,
       clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/0'),
+      value: 0.5,
+      name: 'speed',
     ),
     AnimateCommandRecord.wireSize,
     AnimateCommandRecord.decode,
@@ -639,9 +644,25 @@ void main() {
       playing: true,
       looping: false,
       clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/0'),
+      weight: 1,
+      parameter: 3.5,
+      rootDelta: const Vec3(0, 0, -0.05),
+      rootYaw: 0.01,
     ),
     AnimatorStateRecord.wireSize,
     AnimatorStateRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  // M3-19c.
+  check(
+    'AnimationMarkerEvent',
+    AnimationMarkerEvent(
+      entity: entity(4, 2),
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/0'),
+      name: 'footstep',
+    ),
+    AnimationMarkerEvent.wireSize,
+    AnimationMarkerEvent.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
 }

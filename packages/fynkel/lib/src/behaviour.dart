@@ -212,6 +212,11 @@ abstract class Behaviour {
   /// (`event.clip`). A looping clip never ends; `stop` does not fire it.
   void onAnimationEnded(AnimationEnded event) {}
 
+  /// Marker callback (M3-19c): right after the tick's step, once per
+  /// marker this object's `fynkel.Animator` crossed (`event.name`), loops
+  /// and backwards playback included.
+  void onAnimationMarker(AnimationMarker event) {}
+
   /// Presentation-rate gameplay logic, once per host frame.
   void update(UpdateContext context) {}
 
@@ -456,10 +461,12 @@ class _BehaviourSystem {
   /// Right after `step()`: the contact callbacks of the objects involved
   /// (in contact order, side `a` then `b`), then `afterPhysics` for the
   /// behaviours that opted in.
-  void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones, List<AnimationEnded> animations) {
+  void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones, List<AnimationEnded> animations,
+      List<AnimationMarker> markers) {
     if (contacts.isNotEmpty) _dispatchContacts(contacts);
     if (zones.isNotEmpty) _dispatchZones(zones);
     if (animations.isNotEmpty) _dispatchAnimations(animations);
+    if (markers.isNotEmpty) _dispatchMarkers(markers);
     final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
     _run(ctx.context, (b) {
       if (b.wantsAfterPhysics) b.afterPhysics(ctx);
@@ -495,6 +502,20 @@ class _BehaviourSystem {
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
           b.onAnimationEnded(e);
+        }
+      }
+    });
+  }
+
+  void _dispatchMarkers(List<AnimationMarker> markers) {
+    if (_all.isEmpty) return;
+    world.context.run(() {
+      for (final m in markers) {
+        final go = world._byEntity[m.entity];
+        if (go == null || go._behaviours.isEmpty) continue;
+        for (final b in go._behaviours.toList(growable: false)) {
+          if (!b._active || b._destroyRequested) continue;
+          b.onAnimationMarker(m);
         }
       }
     });

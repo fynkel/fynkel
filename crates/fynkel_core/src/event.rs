@@ -53,6 +53,12 @@ pub enum EventPayload {
         entity: Entity,
         clip: AssetRef,
     },
+    /// M3-19c: an `Animator`'s clock crossed a marker of `clip` this tick.
+    AnimationMarker {
+        entity: Entity,
+        clip: AssetRef,
+        name: String,
+    },
     // Physics lane (M3-08): produced by the physics step, drained by
     // `after_physics`.
     CollisionEnter(Contact),
@@ -74,6 +80,7 @@ impl EventPayload {
             EventPayload::ZoneEntered { .. } => EventKind::ZONE_ENTERED,
             EventPayload::ZoneExited { .. } => EventKind::ZONE_EXITED,
             EventPayload::AnimationEnded { .. } => EventKind::ANIMATION_ENDED,
+            EventPayload::AnimationMarker { .. } => EventKind::ANIMATION_MARKER,
             EventPayload::CollisionEnter(_) => EventKind::COLLISION_ENTER,
             EventPayload::CollisionStay(_) => EventKind::COLLISION_STAY,
             EventPayload::CollisionExit(_) => EventKind::COLLISION_EXIT,

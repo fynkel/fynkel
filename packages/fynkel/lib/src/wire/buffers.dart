@@ -209,9 +209,15 @@ class CommandBatch {
   /// `play`/`crossfade` the clip, `looping` and `speed` (and the fade
   /// [seconds] for a crossfade); `setSpeed` [speed]; `setTime` [seconds].
   void animate(int entity, AnimateOp op,
-      {AssetRef clip = AssetRef.none, double seconds = 0, double speed = 1, bool looping = true}) {
+      {AssetRef clip = AssetRef.none,
+      double seconds = 0,
+      double speed = 1,
+      bool looping = true,
+      double value = 0,
+      String name = ''}) {
     final o = _begin(AnimateCommandRecord.commandKind, AnimateCommandRecord.wireSize);
-    AnimateCommandRecord(entity: entity, op: op, seconds: seconds, speed: speed, looping: looping, clip: clip)
+    AnimateCommandRecord(
+            entity: entity, op: op, seconds: seconds, speed: speed, looping: looping, clip: clip, value: value, name: name)
         .encode(_bytes, o, _strings);
   }
 

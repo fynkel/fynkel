@@ -324,7 +324,8 @@ class World {
       final stepped = tick;
       step();
       final events = drainEvents();
-      _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events), _animationEvents(events));
+      _behaviours.afterPhysics(
+          stepped, _contacts(events), _zoneEvents(events), _animationEvents(events), _markerEvents(events));
       _carry(events);
     }
     this.input.refresh(frameEdges: true);
@@ -363,6 +364,11 @@ class World {
   static List<AnimationEnded> _animationEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
     return [for (final e in events) if (e is AnimationEnded) e];
+  }
+
+  static List<AnimationMarker> _markerEvents(List<EngineEvent> events) {
+    if (events.isEmpty) return const [];
+    return [for (final e in events) if (e is AnimationMarker) e];
   }
 
   /// A handle for an entity that already exists (loaded from a scene, or
@@ -898,6 +904,17 @@ class AnimationControl {
   /// there is applied at the next tick without advancing.
   set time(double seconds) => _go._animate(gen.AnimateOp.setTime, seconds: seconds);
 
+  /// Layer weight from the next tick, `0…1` (M3-19c): how far this
+  /// animator's pose replaces (or, `additive`, is added onto) what the
+  /// animators above it left. Outside the range is rejected
+  /// (`INVALID_PAYLOAD`).
+  set weight(double value) => _go._animate(gen.AnimateOp.setWeight, value: value);
+
+  /// Sets a named blend parameter (M3-19c): a playing blend space reads
+  /// the one it names every tick; a plain clip keeps the value for the
+  /// next blend space. [value] must be finite and [name] non-empty.
+  void setParameter(String name, double value) => _go._animate(gen.AnimateOp.setParameter, name: name, value: value);
+
   /// The animator's playback after the last tick (`FYNKEL_QUERY_ANIMATOR`);
   /// `null` without an `Animator` or before the object spawned.
   AnimatorState? get state {
@@ -1249,9 +1266,15 @@ class GameObject {
   AnimationControl? _animation;
 
   void _animate(gen.AnimateOp op,
-      {AssetRef clip = AssetRef.none, double seconds = 0, double speed = 1, bool looping = true}) {
+      {AssetRef clip = AssetRef.none,
+      double seconds = 0,
+      double speed = 1,
+      bool looping = true,
+      double value = 0,
+      String name = ''}) {
     final e = _simulationEntity('animation command');
-    world._simulation.animate(e, op, clip: clip, seconds: seconds, speed: speed, looping: looping);
+    world._simulation
+        .animate(e, op, clip: clip, seconds: seconds, speed: speed, looping: looping, value: value, name: name);
     world._simulationTargets.add(this);
   }
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968330",
   "name": 5
 }

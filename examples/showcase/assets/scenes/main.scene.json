@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "id": "3a56fbbd-b340-41ca-ac2b-b5603d1dc0da",
   "name": "Showcase",
   "entities": {
@@ -1555,7 +1555,10 @@
             },
             "speed": 1.0,
             "looping": true,
-            "playing": true
+            "playing": true,
+            "weight": 1.0,
+            "additive": false,
+            "root_motion": false
           }
         }
       },

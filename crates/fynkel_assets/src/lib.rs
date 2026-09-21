@@ -36,7 +36,7 @@ pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
 use fynkel_cooked::{
     ChunkFile, KIND_ANIMATION, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN, KIND_TEXTURE,
 };
-use fynkel_core::animation::{Channel, Clip, Interpolation, Joint, Property, Skin};
+use fynkel_core::animation::{Channel, Clip, Interpolation, Joint, Marker, Property, Skin};
 use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
 use fynkel_core::SceneDescription;
@@ -765,6 +765,14 @@ impl Assets {
                 })
                 .collect::<Option<Vec<_>>>()
                 .ok_or_else(|| self.malformed(r, "ANIM"))?,
+            markers: payload
+                .markers
+                .into_iter()
+                .map(|m| Marker {
+                    time: m.time,
+                    name: m.name,
+                })
+                .collect(),
         };
         clip.validate().map_err(|why| {
             let mut d = self.malformed(r, "ANIM");

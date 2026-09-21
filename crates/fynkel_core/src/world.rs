@@ -284,6 +284,8 @@ pub struct World {
     emission_scratch: Vec<catalogue::Emission>,
     placement_scratch: Vec<catalogue::Placement>,
     animator_scratch: Vec<animation::AnimatorTick>,
+    /// The animators of a tick, (depth, entity), ancestor-first.
+    animator_order_scratch: Vec<(u32, Entity)>,
     pose_scratch: Pose,
     fade_pose_scratch: Pose,
 }
@@ -347,6 +349,7 @@ impl World {
             emission_scratch: Vec::new(),
             placement_scratch: Vec::new(),
             animator_scratch: Vec::new(),
+            animator_order_scratch: Vec::new(),
             pose_scratch: Pose::default(),
             fade_pose_scratch: Pose::default(),
         }

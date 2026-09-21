@@ -84,6 +84,8 @@ pub struct ClipReport {
     /// `None` when the clip could not be read (reported).
     pub seconds: Option<f32>,
     pub channels: usize,
+    /// Markers the rig authors for the clip plus the source's own (M3-19c).
+    pub markers: usize,
     pub retargeted: Option<Retargeted>,
 }
 
@@ -181,6 +183,7 @@ pub fn inspect_rig(
             source,
             seconds: None,
             channels: 0,
+            markers: rig.markers_of(&clip.name).len(),
             retargeted: None,
         };
         if let Some(im) = sources.get(entry, &mut diagnostics) {
@@ -188,6 +191,7 @@ pub fn inspect_rig(
                 Some(a) => {
                     report.seconds = Some(a.payload.duration);
                     report.channels = a.payload.channels.len();
+                    report.markers += a.payload.markers.len();
                     let (retargeted, mut diags) =
                         retarget(&clip.name, &a.payload, joint_names(im).as_ref(), &skeleton);
                     for d in &mut diags {
@@ -247,6 +251,7 @@ pub fn report_json(r: &RigReport) -> serde_json::Value {
             "source": c.source,
             "seconds": c.seconds,
             "channels": c.channels,
+            "markers": c.markers,
             "matched": c.retargeted.as_ref().map(|t| t.matched),
             "dropped": c.retargeted.as_ref().map(|t| t.dropped.clone()).unwrap_or_default(),
             "missing": c.retargeted.as_ref().map(|t| t.missing.clone()).unwrap_or_default(),
@@ -300,8 +305,16 @@ pub fn report_text(r: &RigReport) -> String {
             _ => ("?".to_string(), "not imported".to_string()),
         };
         s.push_str(&format!(
-            "    {:<width$}  {:<40}  {:>8}  {}\n",
-            c.name, c.source, seconds, matched
+            "    {:<width$}  {:<40}  {:>8}  {}{}\n",
+            c.name,
+            c.source,
+            seconds,
+            matched,
+            if c.markers == 0 {
+                String::new()
+            } else {
+                format!(", {} marker(s)", c.markers)
+            }
         ));
     }
     s

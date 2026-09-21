@@ -151,13 +151,16 @@ with `sub` omitted for the asset itself — never a path. Built-in authored
 components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
 `fynkel.DirectionalLight`, `fynkel.PointLight`, `fynkel.SpotLight`,
 `fynkel.Environment` (`fixtures/valid/training_room.scene.json` uses all of
-them). Scenes and prefabs are **formatVersion 2** since M3-04: `fynkel.Camera`
-gained `exposure_mode` (`auto` | `manual`) and `exposure` (EV100; the
-camera-exposure migration below fills the defaults in), `SpotLight`
-(candela, range, inner/outer cone angles in radians) and `Environment`
-(constant ambient in lux, optional equirectangular `sky` texture reference
-with `sky_intensity` in nits and `sky_rotation`; the first one in the scene
-counts) were added; `docs/renderer.md` says how the renderer uses each.
+them). Scenes and prefabs are **formatVersion 3** since M3-19c:
+`fynkel.Animator` gained `weight`, `additive` and `root_motion` (the
+animator-layers migration below fills the defaults in;
+[animation.md](animation.md)). FormatVersion 2 (M3-04) added
+`fynkel.Camera`'s `exposure_mode` (`auto` | `manual`) and `exposure`
+(EV100; the camera-exposure migration), `SpotLight` (candela, range,
+inner/outer cone angles in radians) and `Environment` (constant ambient
+in lux, optional equirectangular `sky` texture reference with
+`sky_intensity` in nits and `sky_rotation`; the first one in the scene
+counts); `docs/renderer.md` says how the renderer uses each.
 
 A component of any other type is a **behaviour**: a Dart class of the game
 (`@FynkelBehaviour(id: 'game.Spinner')`) whose `@Expose` fields are its
@@ -556,7 +559,8 @@ named by the game, each from whichever file carries it:
   "clips": { "idle": { "asset": "<Idle.fbx>", "sub": "anim/0" },
              "walk": { "asset": "<Walking.fbx>", "sub": "anim/0" },
              "run":  { "asset": "<Fast Run.fbx>", "sub": "anim/0" },
-             "jump": { "asset": "<Jumping.fbx>", "sub": "anim/0" } } }
+             "jump": { "asset": "<Jumping.fbx>", "sub": "anim/0" } },
+  "markers": { "walk": [ { "at": 0.12, "name": "footstep" }, { "at": 0.61, "name": "footstep" } ] } }
 ```
 
 `skeleton.asset` names a source that imports as a model with a node
@@ -599,8 +603,14 @@ when the clip's file has no skin or the target is one of its own joints
 — the clip was made for another skeleton —, else dropped with an
 `A0105` warning (a prop node the clip's file happened to animate);
 extra bones in the skeleton are fine, a clip's own meshes are ignored,
-the clip keeps its duration. The `ANIM` info carries `channels`,
-`seconds`, `source` (`<path>#anim/<n>`) and `dropped`. Runtime
+the clip keeps its duration. The rig's `markers` (M3-19c: `<clip name>`
+→ `[{ at, name }]`, an optional object; a name that is not one of
+`clips`, a non-array, a negative or non-finite `at` or an empty `name`
+is `D0502`) join the source clip's own markers in the cooked `ANIM`,
+sorted by time; one past the clip's end is dropped with a `D0502`
+warning at cook. `fynkel rig inspect` counts them per clip. The `ANIM`
+info carries `channels`, `seconds`, `source` (`<path>#anim/<n>`),
+`dropped` and `markers`. Runtime
 dependencies are the skeleton only (the index and META
 `dependencies`), while the cache key covers every clip source: editing
 a clip file's sidecar recooks the file and the rig, editing the rig
@@ -674,6 +684,14 @@ Built-in steps (`fynkel migrate --list`):
   field, so a document written before the field exists is outdated
   (`D0016`) until migrated.
 
+- **scene 2 → 3** `scene/2-3/animator-layers` and **prefab 2 → 3**
+  `prefab/2-3/animator-layers` (M3-19c;
+  `fixtures/migrate/v2_dancer.scene.json` → `.migrated.json`): every
+  `fynkel.Animator` gets the fields the record gained — `weight: 1.0`,
+  `additive: false`, `root_motion: false` — where it lacks them (a
+  document that already carries some keeps them); other components are
+  untouched.
+
 New steps follow the same shape when a format changes: add the
 `Migration`, bump the kind's version, keep the fixture pair. Until a
 document is migrated every command refuses it with `FYN-D0016`.
@@ -724,7 +742,7 @@ It is development-only, never runs in a shipped game, and serializes to
 bytes deterministically — the same source, settings and sidecar give the
 same bytes on every machine, so it can be hashed, cached and diffed.
 
-### glTF/GLB (`fynkel.gltf`, version 4)
+### glTF/GLB (`fynkel.gltf`, version 5)
 
 The importer reads glTF 2.0 `.gltf`/`.glb` through
 the `gltf` crate (no `import` feature: buffers and images are resolved by
@@ -738,7 +756,7 @@ Fynkel, never by the crate) and produces, per file:
 | `image/<i>/linear` | a linear copy of a **dual-use** image | when one image feeds both a colour and a data slot it is imported twice; the data slots point at the linear copy, so every texture reaches the cache in the colour space its slot needs |
 | `prefab` | the default scene's node hierarchy as a prefab document (the current formatVersion; importer version 3 = prefab formatVersion 2) | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive; a node whose mesh has a skin carries a `fynkel.Skin { skin: skin/<s>, skeleton }` next to the renderer (M3-19). Entities are named after their nodes (`node<i>` when unnamed) — the names are what clips and skins target. Entity and component ids are UUID v5 of the asset id and `node/<i>`, `node/<i>/transform`, `node/<i>/renderer`, `node/<i>/skin`, `node/<i>/primitive/<p>[/transform|/renderer]`. |
 | `skin/<s>` (M3-19, [animation.md](animation.md)) | one per glTF skin | the joints in the skin's order, each by node name with its parent when that is a joint of the same skin, its inverse bind matrix and its rest pose; the skeleton root's name. Two joints sharing a name is `A0104`, more than `max_joints` (256) is `A0101`. A primitive with `JOINTS_0`/`WEIGHTS_0` is a **skinned mesh**: its `mesh/<n>` carries one normalized `SkinWeight` (4 × `u16` joint, 4 × `f32` weight) per vertex, a joint index past the skin is `A0104`. |
-| `anim/<a>` (M3-19) | one per glTF animation | its translation/rotation/scale channels targeting nodes by name, step/linear/cubic-spline as authored, the duration; morph-weight channels skipped (`A0105`), a target name that is not unique in the file warned about (`A0105`). |
+| `anim/<a>` (M3-19) | one per glTF animation | its translation/rotation/scale channels targeting nodes by name, step/linear/cubic-spline as authored, the duration; morph-weight channels skipped (`A0105`), a target name that is not unique in the file warned about (`A0105`). The animation's `extras` may carry `{ "markers": [ { "at": <seconds>, "name": "<name>" } ] }` (M3-19c, importer version 5): kept on the clip, sorted; an entry without a finite `at` in `[0, duration]` or a non-empty `name`, or a `markers` that is not an array, is `A0104`. |
 
 Morph targets and cameras are skipped with `A0105` warnings; a skin on
 a node without a skinned mesh, or a skinned mesh on a node without a
@@ -845,7 +863,7 @@ the source, not skipped over. Limit: `max_audio_frames` (10 minutes at
 
 ### The intermediate's bytes
 
-`.fyni`: `FYNI`, version (3 since M3-19), a JSON header (source, importer,
+`.fyni`: `FYNI`, version (4 since M3-19c), a JSON header (source, importer,
 meshes / materials / images / textures / clips / skins / animations with
 `[offset, length]` into the blob area, the prefab document when there is
 one, the sub-asset ids) and 4-byte-aligned blobs (vertices, `u32`
@@ -924,7 +942,7 @@ per vertex from positions and `uv0` — Lengyel accumulation, Gram-Schmidt
 against the normal, handedness in `w`, `fynkel_import::tangents`; the
 chunk info says `"tangents": "authored" | "generated" | "none"`, the last
 when there are no UVs either and the renderer falls back to the vertex
-normal; a skinned mesh's weights follow its indices in the same chunk; cache version 4 since M3-19), skins → `SKIN` and animations → `ANIM` (M3-19, [animation.md](animation.md)), materials → `JSON` (`documentKind: material`) **plus** a `MATL`
+normal; a skinned mesh's weights follow its indices in the same chunk; cache version 5 since M3-19c), skins → `SKIN` and animations → `ANIM` (M3-19, [animation.md](animation.md); the markers after the channels since M3-19c), materials → `JSON` (`documentKind: material`) **plus** a `MATL`
 chunk of the same name/sub (the decoded `PbrMaterial`, what the renderer
 reads; a material document cooks the same pair), embedded glTF images →
 decoded `TEXR` in the colour space the importer assigned them (dual-use

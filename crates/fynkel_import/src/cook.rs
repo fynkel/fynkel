@@ -1285,8 +1285,37 @@ fn rig_chunks(
                 continue;
             }
         };
-        let (retargeted, mut diags) =
+        let (mut retargeted, mut diags) =
             crate::rig::retarget(&clip.name, &payload, joints.as_ref(), &names);
+        // The rig's own markers join the source's (M3-19c); one past the
+        // clip's end is dropped with a warning.
+        let duration = retargeted.payload.duration;
+        for m in rig.markers_of(&clip.name) {
+            if m.at > duration {
+                diags.push(
+                    Diagnostic::warning(
+                        Code::RIG_MALFORMED_ENTRY,
+                        format!(
+                            "marker {:?} at {} s lies past the end of clip {:?} ({duration} s); dropped",
+                            m.name, m.at, clip.name
+                        ),
+                    )
+                    .with_pointer(format!("/markers/{}", clip.name)),
+                );
+                continue;
+            }
+            retargeted
+                .payload
+                .markers
+                .push(fynkel_cooked::payload::AnimationMarker {
+                    time: m.at,
+                    name: m.name.clone(),
+                });
+        }
+        retargeted
+            .payload
+            .markers
+            .sort_by(|a, b| a.time.total_cmp(&b.time));
         for d in &mut diags {
             d.document = Some(shown.clone());
             d.pointer = Some(clip.pointer.clone());
@@ -1306,6 +1335,7 @@ fn rig_chunks(
                 "seconds": retargeted.payload.duration,
                 "source": format!("{}#{}", source_shown, clip.asset.sub),
                 "dropped": retargeted.dropped,
+                "markers": retargeted.payload.markers.len(),
             }),
             payload: fynkel_cooked::payload::encode_animation(&retargeted.payload),
         });

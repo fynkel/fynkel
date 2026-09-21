@@ -54,7 +54,7 @@ use crate::intermediate::{
 use crate::{read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
-pub const IMPORTER_VERSION: u32 = 4;
+pub const IMPORTER_VERSION: u32 = 5;
 
 /// Extensions the importer understands when a file *requires* them.
 const SUPPORTED_REQUIRED: &[&str] = &["KHR_materials_emissive_strength"];
@@ -812,6 +812,60 @@ fn import_skins(
 /// spline with the spline's tangents kept), targeting nodes by name, and
 /// the clip's duration (its last key). Morph-target weight channels are
 /// skipped with a warning. `Err` on malformed samplers.
+/// Clip markers authored in the animation's `extras` (M3-19c):
+/// `{ "markers": [{ "at": <seconds>, "name": "<event>" }] }` — the same
+/// shape a rig document uses. Sorted by time; one outside the clip or
+/// without a name is invalid data.
+fn read_markers(
+    ctx: &mut Ctx,
+    sub_id: &str,
+    name: &str,
+    extras: &gltf::json::Extras,
+    duration: f32,
+) -> Result<Vec<fynkel_cooked::payload::AnimationMarker>, ()> {
+    let Some(raw) = extras.as_deref() else {
+        return Ok(Vec::new());
+    };
+    let value: serde_json::Value = match serde_json::from_str(raw.get()) {
+        Ok(v) => v,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let Some(list) = value.get("markers") else {
+        return Ok(Vec::new());
+    };
+    let Some(list) = list.as_array() else {
+        ctx.error(
+            Code::IMPORT_INVALID_DATA,
+            format!("{sub_id} ({name}): extras.markers must be an array"),
+        );
+        return Err(());
+    };
+    let mut markers = Vec::with_capacity(list.len());
+    for (i, m) in list.iter().enumerate() {
+        let at = m.get("at").and_then(|v| v.as_f64()).map(|v| v as f32);
+        let marker_name = m.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        match at {
+            Some(t) if t.is_finite() && t >= 0.0 && t <= duration && !marker_name.is_empty() => {
+                markers.push(fynkel_cooked::payload::AnimationMarker {
+                    time: t,
+                    name: marker_name.to_string(),
+                });
+            }
+            _ => {
+                ctx.error(
+                    Code::IMPORT_INVALID_DATA,
+                    format!(
+                        "{sub_id} ({name}): extras.markers[{i}] needs a name and an `at` within [0, {duration}]"
+                    ),
+                );
+                return Err(());
+            }
+        }
+    }
+    markers.sort_by(|a, b| a.time.total_cmp(&b.time));
+    Ok(markers)
+}
+
 fn import_animations(
     ctx: &mut Ctx,
     doc: &gltf::Document,
@@ -889,10 +943,15 @@ fn import_animations(
             animated.note(&mut ctx.report, node.index(), &channel.target);
             channels.push(channel);
         }
+        let markers = read_markers(ctx, &sub_id, &name, animation.extras(), duration)?;
         animations.push(AnimationData {
             sub_id,
             name,
-            payload: AnimationPayload { duration, channels },
+            payload: AnimationPayload {
+                duration,
+                channels,
+                markers,
+            },
         });
     }
     Ok(animations)

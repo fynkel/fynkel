@@ -534,6 +534,9 @@ fn fixtures_match_generated_codecs() {
             speed: 1.5,
             looping: false,
             playing: true,
+            weight: 0.75,
+            additive: true,
+            root_motion: true,
         },
     );
     check(
@@ -552,6 +555,8 @@ fn fixtures_match_generated_codecs() {
             speed: 1.0,
             looping: true,
             clip: AssetRef::with_sub(mesh_id, "anim/0"),
+            value: 0.5,
+            name: "speed".into(),
         },
     );
     check(
@@ -572,6 +577,19 @@ fn fixtures_match_generated_codecs() {
             playing: true,
             looping: false,
             clip: AssetRef::with_sub(mesh_id, "anim/0"),
+            weight: 1.0,
+            parameter: 3.5,
+            root_delta: Vec3::new(0.0, 0.0, -0.05),
+            root_yaw: 0.01,
+        },
+    );
+    // M3-19c.
+    check(
+        "AnimationMarkerEvent",
+        &AnimationMarkerEvent {
+            entity: e(4, 2),
+            clip: AssetRef::with_sub(mesh_id, "anim/0"),
+            name: "footstep".into(),
         },
     );
 }
