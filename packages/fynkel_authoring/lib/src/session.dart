@@ -291,6 +291,16 @@ final class AuthoringSession implements Finalizable {
   /// documents (`migrations` query); nothing is written.
   MigrationPreview migrationPreview() => MigrationPreview.fromJson(query('migrations'));
 
+  /// The `data` a built-in authored component starts with (its Rust
+  /// `Default`); throws (`invalidArgument`, FYN-T0003) for a behaviour or an
+  /// unknown type.
+  Map<String, Object?> componentDefaults(String type) => _mapOf(query('defaults', {'type': type})['data']);
+
+  /// The revision and identity of a document file on disk now — not of any
+  /// open editor. [path] is absolute or relative to the project directory;
+  /// throws the reader's diagnostics when it cannot be read.
+  FileRevision fileRevision(String path) => FileRevision.fromJson(query('revision', {'path': path}));
+
   /// Rescans the asset database; [paths] (absolute, or relative to the
   /// project directory) are the files whose reference-index entries are
   /// refreshed — what a file watcher reports — or empty for everything.
@@ -485,6 +495,29 @@ final class DocumentHandle {
     final r = session.query('document', {'handle': handle, 'root': true});
     _state = DocumentState.fromJson(r);
     return _mapOf(r['root']);
+  }
+
+  /// The named entities only — `null` for one the document no longer has —
+  /// and the ordered root ids: what the Hierarchy re-reads after a
+  /// transaction from its `affectedIds` instead of the whole document.
+  EntityPatch entities(Iterable<String> ids) {
+    _check();
+    final r = session.query('document', {'handle': handle, 'ids': ids.toList()});
+    _state = DocumentState.fromJson(r);
+    return EntityPatch(
+      entities: {
+        for (final e in _mapOf(r['entities']).entries) e.key: e.value is Map<String, Object?> ? e.value as Map<String, Object?> : null,
+      },
+      roots: _strings(r['roots']),
+      state: _state,
+    );
+  }
+
+  /// The ordered root entity ids (a prefab's `roots`; a scene's entities
+  /// with no parent, in document order).
+  List<String> roots() {
+    _check();
+    return _strings(session.query('document', {'handle': handle, 'ids': const <String>[]})['roots']);
   }
 
   /// The typed view `fynkel scene|prefab inspect --json` prints (a material:

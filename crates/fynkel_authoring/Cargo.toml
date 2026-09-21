@@ -12,5 +12,10 @@ fynkel_document.workspace = true
 # `expected_lock()` for the lock check and the imported-prefab provider
 # for project validation. Development-only code, like this crate.
 fynkel_import.workspace = true
+# `Default` of every authored component, for the `defaults` query (what an
+# entity created "with a native component" starts with).
+fynkel_core.workspace = true
+fynkel_physics.workspace = true
+fynkel_scene.workspace = true
 serde_json.workspace = true
 uuid.workspace = true

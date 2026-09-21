@@ -108,6 +108,37 @@ final class Mutation {
 
 /// The record of one `apply`: committed when [ok], otherwise the document
 /// was rolled back to the byte and the diagnostics say why.
+/// The `revision` query: a document file as it is on disk now.
+final class FileRevision {
+  FileRevision.fromJson(this.json)
+      : path = json['path'] as String? ?? '',
+        kind = json['kind'] as String? ?? '',
+        id = json['id'] as String? ?? '',
+        name = json['name'] as String? ?? '',
+        formatVersion = (json['formatVersion'] as num?)?.toInt() ?? 0,
+        revision = json['revision'] as String? ?? '';
+
+  final Map<String, Object?> json;
+  final String path;
+  final String kind;
+  final String id;
+  final String name;
+  final int formatVersion;
+
+  /// blake3 of the canonical text — comparable with `DocumentState.revision`.
+  final String revision;
+}
+
+/// The answer to `DocumentHandle.entities(ids)`: each asked-for entity's JSON
+/// (`null` when the document has no such entity) and the root ids in order.
+final class EntityPatch {
+  const EntityPatch({required this.entities, required this.roots, required this.state});
+
+  final Map<String, Map<String, Object?>?> entities;
+  final List<String> roots;
+  final DocumentState state;
+}
+
 final class Applied {
   Applied.fromJson(this.json)
       : ok = json['ok'] == true,

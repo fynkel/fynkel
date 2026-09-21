@@ -28,6 +28,8 @@ use crate::{AuthoringSession, Handle, COMMANDS};
 /// | `schema` | `type` | one schema |
 /// | `metadata` | | `behaviours.g.json` or null |
 /// | `migrations` | | [`crate::OpenProject::migrations_json`]: the outdated documents and what `fynkel migrate` would do |
+/// | `defaults` | `type` | `{ type, data }`: a native component's `Default` as document data ([`crate::component_default`]) |
+/// | `revision` | `path` | the revision and identity of a document file on disk now ([`AuthoringSession::file_revision`]) |
 /// | `commands` | | the command names |
 pub const KINDS: &[&str] = &[
     "project",
@@ -43,6 +45,8 @@ pub const KINDS: &[&str] = &[
     "schema",
     "metadata",
     "migrations",
+    "defaults",
+    "revision",
     "commands",
 ];
 
@@ -57,7 +61,20 @@ impl AuthoringSession {
             "documents" => Ok(Value::Array(self.documents_json())),
             "document" => {
                 let handle = handle_arg(args)?;
-                if args.get("root").and_then(Value::as_bool).unwrap_or(true) {
+                if let Some(ids) = args.get("ids") {
+                    let ids: Vec<String> = ids
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect()
+                        })
+                        .ok_or_else(|| {
+                            one(invalid("document: \"ids\" must be an array of entity ids"))
+                        })?;
+                    self.entities_json(handle, &ids).map_err(one)
+                } else if args.get("root").and_then(Value::as_bool).unwrap_or(true) {
                     self.document_json(handle).map_err(one)
                 } else {
                     self.state_json(handle).map_err(one)
@@ -132,6 +149,26 @@ impl AuthoringSession {
                 .ok_or_else(no_project)
                 .map_err(one)?
                 .migrations_json()),
+            "defaults" => {
+                let ty = args.get("type").and_then(Value::as_str).ok_or_else(|| {
+                    one(invalid(
+                        "defaults: \"type\" (a component type id) is required",
+                    ))
+                })?;
+                let data = crate::component_default(ty).ok_or_else(|| {
+                    one(invalid(format!(
+                        "defaults: {ty:?} is not a built-in authored component"
+                    ))
+                    .with_suggestion("a behaviour's defaults come from its schema"))
+                })?;
+                Ok(json!({ "type": ty, "data": data.to_serde() }))
+            }
+            "revision" => {
+                let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
+                    one(invalid("revision: \"path\" (a document file) is required"))
+                })?;
+                self.file_revision(path)
+            }
             "commands" => Ok(json!(COMMANDS)),
             other => Err(one(Diagnostic::error(
                 Code::SESSION_UNKNOWN_QUERY,

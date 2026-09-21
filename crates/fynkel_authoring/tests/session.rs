@@ -294,6 +294,33 @@ fn a_scene_edits_undoes_to_its_bytes_saves_and_conflicts() {
         s.document_json(h).unwrap()["root"]["entities"][camera]["name"],
         "Eye"
     );
+    // The `ids` form of the `document` query: the named entities only (null
+    // for one the scene lacks) and the ordered root ids — what the Hierarchy
+    // re-reads from a transaction's `affectedIds`.
+    let part = s
+        .query(
+            "document",
+            &json!({"handle": h, "ids": [camera, "not-here"]}),
+        )
+        .unwrap();
+    assert_eq!(part["entities"][camera]["name"], "Eye");
+    assert_eq!(part["entities"]["not-here"], Value::Null);
+    assert_eq!(part["entities"].as_object().unwrap().len(), 2);
+    assert!(part.get("root").is_none(), "the whole document is not sent");
+    assert_eq!(part["revision"], rev2);
+    let roots = part["roots"].as_array().unwrap();
+    assert_eq!(roots[0], camera, "the camera is the first root in the file");
+    assert_eq!(
+        roots,
+        s.document_json(h).unwrap()["roots"].as_array().unwrap()
+    );
+    assert!(roots.iter().all(|r| {
+        s.document_json(h).unwrap()["root"]["entities"][r.as_str().unwrap()]["parent"].is_null()
+    }));
+    let bad = s
+        .query("document", &json!({"handle": h, "ids": "camera"}))
+        .unwrap_err();
+    assert_eq!(bad[0].code, Code::SESSION_INVALID_REQUEST);
 
     let column = "c0000000-0000-4000-8000-0000000004e2";
     let dup = s
@@ -543,8 +570,46 @@ fn other_kinds_and_bad_paths_are_refused_and_nothing_works_without_a_project() {
         "not a document: unknown kind from the file name"
     );
 
-    // Closing the project closes its documents.
+    // `revision`: the file on disk, whether or not it is open — the same
+    // hash the open editor reports until it is edited.
     let h = s.open_document(RIG_SCENE).unwrap();
+    let on_disk = s.query("revision", &json!({"path": RIG_SCENE})).unwrap();
+    assert_eq!(on_disk["revision"], s.state_json(h).unwrap()["revision"]);
+    assert_eq!(on_disk["kind"], "scene");
+    assert_eq!(on_disk["name"], "Rig");
+    assert_eq!(on_disk["formatVersion"], 3);
+    assert_eq!(
+        on_disk["path"],
+        copy.path(RIG_SCENE)
+            .canonicalize()
+            .unwrap()
+            .display()
+            .to_string()
+    );
+    s.apply_json(
+        h,
+        &json!([{ "command": "renameObject", "id": "c0000000-0000-4000-8000-0000000004e0", "name": "Eye" }]),
+    )
+    .unwrap();
+    assert_eq!(
+        s.query("revision", &json!({"path": RIG_SCENE})).unwrap()["revision"],
+        on_disk["revision"],
+        "an unsaved edit does not move the file"
+    );
+    assert_ne!(s.state_json(h).unwrap()["revision"], on_disk["revision"]);
+    let gone = s
+        .query(
+            "revision",
+            &json!({"path": "assets/scenes/none.scene.json"}),
+        )
+        .unwrap_err();
+    assert_eq!(code_of(&gone), ["FYN-D0900"]);
+    assert_eq!(
+        code_of(&s.query("revision", &json!({})).unwrap_err()),
+        ["FYN-T0003"]
+    );
+
+    // Closing the project closes its documents.
     s.close_project();
     assert_eq!(code_of(&[s.state_json(h).unwrap_err()]), ["FYN-T0001"]);
     assert!(s.project().is_none());
@@ -748,5 +813,40 @@ fn the_migrations_query_previews_outdated_documents_without_writing() {
             .any(|d| d.code.as_str() == "FYN-D0016"),
         "{:?}",
         code_of(&report.diagnostics)
+    );
+}
+
+#[test]
+fn defaults_cover_every_authored_component() {
+    use fynkel_document::generated::{decode_component, AUTHORED_COMPONENTS};
+    let copy = Copy::new("defaults");
+    let s = open(&copy);
+    for ty in AUTHORED_COMPONENTS {
+        let node = fynkel_authoring::component_default(ty)
+            .unwrap_or_else(|| panic!("{ty} has no default — add it to component_default"));
+        // The default reads back through the codec as the same component.
+        decode_component(ty, &node)
+            .expect("a built-in component")
+            .unwrap_or_else(|e| panic!("{ty}: the default does not decode: {e:?}"));
+        let v = s.query("defaults", &json!({"type": ty})).unwrap();
+        assert_eq!(v["type"], *ty);
+        assert_eq!(v["data"], node.to_serde());
+    }
+    let camera = s
+        .query("defaults", &json!({"type": "fynkel.Camera"}))
+        .unwrap();
+    assert_eq!(camera["data"]["projection"], "perspective");
+    assert!(camera["data"]["near"].as_f64().unwrap() > 0.0);
+    let transform = s
+        .query("defaults", &json!({"type": "fynkel.Transform"}))
+        .unwrap();
+    assert_eq!(transform["data"]["scale"], json!([1.0, 1.0, 1.0]));
+    let behaviour = s
+        .query("defaults", &json!({"type": "game.Spinner"}))
+        .unwrap_err();
+    assert_eq!(code_of(&behaviour), ["FYN-T0003"]);
+    assert_eq!(
+        code_of(&s.query("defaults", &json!({})).unwrap_err()),
+        ["FYN-T0003"]
     );
 }

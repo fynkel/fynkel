@@ -138,7 +138,19 @@ void main() {
     expect(unknownField.ok, isFalse);
     expect(unknownField.diagnostics.first.code, 'FYN-E0005');
     expect(main.state.history, 5, reason: 'nothing was committed');
-    ok([Command.renameObject(robot, 'Bot'), Command.reparentObject(lamp, parent: robot, index: 0)]);
+    a = ok([Command.renameObject(robot, 'Bot'), Command.reparentObject(lamp, parent: robot, index: 0)]);
+    // The Hierarchy re-reads the affected entities only: the robot (renamed,
+    // now the lamp's parent) and the lamp; the roots no longer list the lamp.
+    final patch = main.entities(a.affectedIds);
+    expect(patch.entities.keys, containsAll([robot, lamp]));
+    expect(patch.entities[robot]!['name'], 'Bot');
+    expect(patch.entities[robot]!['children'], [lamp]);
+    expect(patch.entities[lamp]!['parent'], robot);
+    expect(patch.state.revision, a.revision);
+    expect(patch.roots, isNot(contains(lamp)));
+    expect(patch.roots, contains(robot));
+    expect(main.roots(), patch.roots);
+    expect(main.entities(['nobody']).entities, {'nobody': null});
     a = ok([Command.duplicateObject(crateB, newId: crateC, name: 'Crate C')]);
     expect(a.affectedIds, contains(crateC));
     ok([
@@ -384,6 +396,24 @@ void main() {
     expect(session.asset(rustedId)['path'], 'materials/rusted.material.json');
     expect(session.schema('fynkel.PointLight')['title'], 'fynkel.PointLight');
     expect((session.schemas()['components'] as List), isNotEmpty);
+    // Defaults of a native component; a behaviour has none here.
+    final camera = session.componentDefaults('fynkel.Camera');
+    expect(camera['projection'], 'perspective');
+    expect(camera['near'], greaterThan(0));
+    expect(session.componentDefaults('fynkel.Transform')['scale'], [1, 1, 1]);
+    expect(() => session.componentDefaults('game.Spinner'),
+        throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')));
+    // The revision of a file on disk equals a freshly opened editor's.
+    final onDisk = session.fileRevision(mainScene);
+    final opened = session.openDocument(mainScene);
+    expect(onDisk.revision, opened.state.revision);
+    expect(onDisk.kind, 'scene');
+    expect(onDisk.name, 'Main');
+    expect(onDisk.path, opened.state.path);
+    opened.apply([Command.renameObject(robot, 'Bot')]);
+    expect(session.fileRevision(mainScene).revision, onDisk.revision, reason: 'unsaved edits do not move the file');
+    expect(() => session.fileRevision('assets/scenes/nope.scene.json'),
+        throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-D0900')));
     expect(session.metadata(), isNull, reason: 'the fixture has no behaviours.g.json');
     expect(session.migrationPreview().isEmpty, isTrue, reason: 'every fixture document is current');
     expect(session.migrationPreview().steps.map((s) => s.id), contains('scene/0-1/entities-keyed-by-id'));

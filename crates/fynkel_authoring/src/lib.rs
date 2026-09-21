@@ -25,7 +25,9 @@ use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{Code, Diagnostic};
 use fynkel_document::authoring::{Applied, Command, Editor, Request, Transaction};
-use fynkel_document::{diagnostic_json, Document, DocumentKind, ProjectReport};
+use fynkel_document::{
+    diagnostic_json, Document, DocumentCodec, DocumentKind, Node, ProjectReport,
+};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -391,7 +393,32 @@ impl AuthoringSession {
     /// as JSON (the panels read it; number lexemes become numbers).
     pub fn document_json(&self, handle: Handle) -> Result<Value, Diagnostic> {
         let mut v = self.state_json(handle)?;
-        v["root"] = self.document(handle)?.editor.document().root.to_serde();
+        let root = &self.document(handle)?.editor.document().root;
+        v["root"] = root.to_serde();
+        v["roots"] = Value::Array(root_ids(root).into_iter().map(Value::String).collect());
+        Ok(v)
+    }
+
+    /// [`AuthoringSession::state_json`] plus `entities`: the named entities
+    /// as JSON (`null` for one the document no longer has) and `roots`, the
+    /// ordered root ids — what the Hierarchy re-reads after a transaction
+    /// from its `affectedIds`, instead of the whole document.
+    pub fn entities_json(&self, handle: Handle, ids: &[String]) -> Result<Value, Diagnostic> {
+        let mut v = self.state_json(handle)?;
+        let root = &self.document(handle)?.editor.document().root;
+        let entities = root.get("entities");
+        v["entities"] = Value::Object(
+            ids.iter()
+                .map(|id| {
+                    let e = entities
+                        .and_then(|n| n.get(id))
+                        .map(Node::to_serde)
+                        .unwrap_or(Value::Null);
+                    (id.clone(), e)
+                })
+                .collect(),
+        );
+        v["roots"] = Value::Array(root_ids(root).into_iter().map(Value::String).collect());
         Ok(v)
     }
 
@@ -431,6 +458,31 @@ impl AuthoringSession {
         Ok(v)
     }
 
+    /// The revision (and identity) of a document **file** as it is on disk
+    /// now — not of any open editor. The conflict dialog names it next to
+    /// the editor's revision and the one the tab was opened from. `path` is
+    /// absolute or relative to the project directory; reading failures are
+    /// the reader's diagnostics.
+    pub fn file_revision(&self, path: &str) -> Result<Value, Vec<Diagnostic>> {
+        let project = self.require_project().map_err(|d| vec![d])?;
+        let p = Path::new(path);
+        let full = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            project.dir.join(p)
+        };
+        let document = Document::read(&full, None)?;
+        let revision = fynkel_document::Revision::of(&document).map_err(|d| vec![d])?;
+        Ok(json!({
+            "path": full.canonicalize().unwrap_or(full).display().to_string(),
+            "kind": document.kind.name(),
+            "id": document.envelope.id.to_string(),
+            "name": live_name(&document),
+            "formatVersion": document.envelope.format_version,
+            "revision": revision.as_str(),
+        }))
+    }
+
     /// Every open document's state.
     pub fn documents_json(&self) -> Vec<Value> {
         self.documents
@@ -438,6 +490,91 @@ impl AuthoringSession {
             .filter_map(|h| self.state_json(*h).ok())
             .collect()
     }
+}
+
+/// The `data` an authored native component starts with: its Rust
+/// `Default` through the document codec — what "Create with component"
+/// and "Add Component" write. `None` for a type that is not a built-in
+/// authored component (a behaviour's defaults come from its schema).
+/// The test `defaults_cover_every_authored_component` keeps this list in
+/// step with `fynkel_document::generated::AUTHORED_COMPONENTS`.
+pub fn component_default(type_id: &str) -> Option<Node> {
+    Some(match type_id {
+        "fynkel.Transform" => <::fynkel_scene::Transform as Default>::default().to_node(),
+        "fynkel.MeshRenderer" => {
+            <::fynkel_core::components::MeshRenderer as Default>::default().to_node()
+        }
+        "fynkel.Camera" => <::fynkel_core::components::Camera as Default>::default().to_node(),
+        "fynkel.DirectionalLight" => {
+            <::fynkel_core::components::DirectionalLight as Default>::default().to_node()
+        }
+        "fynkel.PointLight" => {
+            <::fynkel_core::components::PointLight as Default>::default().to_node()
+        }
+        "fynkel.SpotLight" => {
+            <::fynkel_core::components::SpotLight as Default>::default().to_node()
+        }
+        "fynkel.Environment" => {
+            <::fynkel_core::components::Environment as Default>::default().to_node()
+        }
+        "fynkel.RigidBody" => {
+            <::fynkel_physics::components::RigidBody as Default>::default().to_node()
+        }
+        "fynkel.Collider" => {
+            <::fynkel_physics::components::Collider as Default>::default().to_node()
+        }
+        "fynkel.CharacterController" => {
+            <::fynkel_physics::components::CharacterController as Default>::default().to_node()
+        }
+        "fynkel.ThirdPersonCamera" => {
+            <::fynkel_core::components::ThirdPersonCamera as Default>::default().to_node()
+        }
+        "fynkel.Rotator" => <::fynkel_core::components::Rotator as Default>::default().to_node(),
+        "fynkel.Oscillate" => {
+            <::fynkel_core::components::Oscillate as Default>::default().to_node()
+        }
+        "fynkel.Follow" => <::fynkel_core::components::Follow as Default>::default().to_node(),
+        "fynkel.LookAtCamera" => {
+            <::fynkel_core::components::LookAtCamera as Default>::default().to_node()
+        }
+        "fynkel.LifetimeDespawn" => {
+            <::fynkel_core::components::LifetimeDespawn as Default>::default().to_node()
+        }
+        "fynkel.Emitter" => <::fynkel_core::components::Emitter as Default>::default().to_node(),
+        "fynkel.TriggerZone" => {
+            <::fynkel_core::components::TriggerZone as Default>::default().to_node()
+        }
+        "fynkel.Animator" => <::fynkel_core::components::Animator as Default>::default().to_node(),
+        "fynkel.Skin" => <::fynkel_core::components::Skin as Default>::default().to_node(),
+        _ => return None,
+    })
+}
+
+/// The root entity ids in sibling order: a prefab's `roots` array, or —
+/// for a scene, which has none — the entities with a null `parent` in
+/// document order.
+fn root_ids(root: &Node) -> Vec<String> {
+    if let Some(items) = root.get("roots").and_then(Node::as_array) {
+        return items
+            .iter()
+            .filter_map(|n| n.as_str().map(str::to_string))
+            .collect();
+    }
+    root.get("entities")
+        .and_then(Node::as_object)
+        .map(|members| {
+            members
+                .iter()
+                .filter(|m| {
+                    m.value
+                        .get("parent")
+                        .map(|p| p.as_str().is_none())
+                        .unwrap_or(true)
+                })
+                .map(|m| m.key.clone())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn unknown_handle(handle: Handle) -> Diagnostic {

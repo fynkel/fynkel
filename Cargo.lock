@@ -863,8 +863,11 @@ name = "fynkel_authoring"
 version = "0.0.1"
 dependencies = [
  "fynkel_contracts",
+ "fynkel_core",
  "fynkel_document",
  "fynkel_import",
+ "fynkel_physics",
+ "fynkel_scene",
  "serde_json",
  "uuid",
 ]
