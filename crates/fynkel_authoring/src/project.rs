@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
-use fynkel_document::asset::{asset_refs, entry_json};
+use fynkel_document::asset::{asset_refs, entry_json, sidecar_path, source_path};
 use fynkel_document::migrate::migrated_json;
 use fynkel_document::{
     diagnostics_json, migrate, AssetDatabase, AssetKind, Document, DocumentKind, Lock, Migrations,
@@ -79,6 +79,9 @@ pub struct OpenProject {
     pub diagnostics: Vec<Diagnostic>,
     /// The part of `diagnostics` a rescan keeps.
     base_diagnostics: Vec<Diagnostic>,
+    /// The asset scan's diagnostics, one set per file: an incremental
+    /// rescan replaces the ones anchored at the files it re-read.
+    scan_diagnostics: Vec<Diagnostic>,
 }
 
 impl OpenProject {
@@ -135,6 +138,7 @@ impl OpenProject {
             schema_sources: HashMap::new(),
             diagnostics: Vec::new(),
             base_diagnostics: diagnostics,
+            scan_diagnostics: Vec::new(),
         };
         this.read_metadata();
         this.read_schema_sources();
@@ -160,26 +164,83 @@ impl OpenProject {
         shaders
     }
 
-    /// Rescans the asset root and refreshes the reference index for the
-    /// documents at `paths` (absolute, or relative to the project
-    /// directory; every document when empty). Returns the scan's
-    /// diagnostics, which also replace the scan part of
-    /// [`OpenProject::diagnostics`].
+    /// Refreshes the asset database and the reference index. With `paths`
+    /// empty the whole asset root is scanned again; otherwise only the
+    /// named files are re-read ([`AssetDatabase::update`] — a source or its
+    /// sidecar means the pair, a folder everything under it, a path that is
+    /// gone drops what it held) and only the documents at those paths are
+    /// re-indexed, which is what keeps a change in a project of thousands
+    /// of assets under a few milliseconds. Paths are absolute, or relative
+    /// to the project directory. Returns the diagnostics of what was
+    /// scanned; [`OpenProject::diagnostics`] is rebuilt from the kept
+    /// base, the per-file scan diagnostics and the project's checks
+    /// against the database.
     pub fn rescan(&mut self, paths: &[PathBuf]) -> Vec<Diagnostic> {
         let assets_dir = self.assets_dir();
-        let (assets, scan) = AssetDatabase::scan(&assets_dir, &self.schemas);
-        self.assets = assets;
+        let scan = if paths.is_empty() {
+            let (assets, scan) = AssetDatabase::scan(&assets_dir, &self.schemas);
+            self.assets = assets;
+            self.scan_diagnostics = scan.clone();
+            scan
+        } else {
+            let abs: Vec<PathBuf> = paths
+                .iter()
+                .map(|p| {
+                    canonical_or_parent(&if p.is_absolute() {
+                        p.clone()
+                    } else {
+                        self.dir.join(p)
+                    })
+                })
+                .collect();
+            // The files whose earlier diagnostics no longer stand: each
+            // path, its sidecar or its source, and everything under a folder.
+            let touched: Vec<PathBuf> = abs
+                .iter()
+                .flat_map(|p| match source_path(p) {
+                    Some(source) => vec![p.clone(), source],
+                    None => vec![p.clone(), sidecar_path(p)],
+                })
+                .collect();
+            self.scan_diagnostics.retain(|d| {
+                let Some(doc) = &d.document else { return true };
+                let doc = canonical_or_parent(Path::new(doc));
+                !touched.iter().any(|t| doc.starts_with(t))
+            });
+            let fresh = self.assets.update(&abs, &self.schemas);
+            self.scan_diagnostics.extend(fresh.iter().cloned());
+            fresh
+        };
         let mut all = self.base_diagnostics.clone();
-        all.extend(scan.iter().cloned());
+        all.extend(self.scan_diagnostics.iter().cloned());
         all.extend(self.project.validate_against(&self.assets, &self.schemas));
         self.diagnostics = all;
         if paths.is_empty() {
             self.index_documents(None);
         } else {
-            let rel: Vec<String> = paths
-                .iter()
-                .filter_map(|p| self.relative_to_assets(p))
-                .collect();
+            // Documents that are gone (deleted, moved away) lose their
+            // references; the named paths — and, for a folder, every entry
+            // under it — are indexed afresh.
+            self.references
+                .retain(|r| self.assets.by_path(&r.path).is_some());
+            let mut rel: Vec<String> = Vec::new();
+            for p in paths {
+                let Some(r) = self.relative_to_assets(p) else {
+                    continue;
+                };
+                if r.is_empty() {
+                    continue;
+                }
+                let prefix = format!("{r}/");
+                for e in self.assets.entries() {
+                    if e.path.starts_with(&prefix) {
+                        rel.push(e.path.clone());
+                    }
+                }
+                rel.push(r);
+            }
+            rel.sort();
+            rel.dedup();
             self.index_documents(Some(&rel));
         }
         scan
@@ -193,7 +254,7 @@ impl OpenProject {
         } else {
             self.dir.join(path)
         };
-        let abs = abs.canonicalize().unwrap_or(abs);
+        let abs = canonical_or_parent(&abs);
         let root = self.assets_dir();
         let root = root.canonicalize().unwrap_or(root);
         let rel = abs.strip_prefix(&root).ok()?;
@@ -594,6 +655,19 @@ pub fn version_newer(a: &str, b: &str) -> bool {
         }
     }
     false
+}
+
+/// The canonical path of `path`, or — for a path that is gone — its
+/// canonical parent joined with its name, so a deleted file under a
+/// symlinked root (macOS's temp directories) still compares with the root.
+pub(crate) fn canonical_or_parent(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return c;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => canonical_or_parent(parent).join(name),
+        _ => path.to_path_buf(),
+    }
 }
 
 pub(crate) fn to_contract(id: Uuid) -> fynkel_contracts::Uuid {

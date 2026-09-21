@@ -17,6 +17,7 @@
 
 #![allow(clippy::result_large_err)] // `Diagnostic` is the workspace's error type
 
+pub mod ops;
 pub mod project;
 pub mod query;
 
@@ -31,6 +32,7 @@ use fynkel_document::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+pub use ops::{AssetHistory, AssetOp, Done, OPERATIONS, TRASH_DIR};
 pub use project::{OpenProject, Reference, METADATA_FILE};
 
 /// An open document in a session; never reused within a session.
@@ -70,6 +72,8 @@ pub struct AuthoringSession {
     project: Option<OpenProject>,
     documents: BTreeMap<Handle, OpenDocument>,
     next_handle: Handle,
+    /// The asset operations' own undo/redo (`ops`), per project.
+    assets_history: AssetHistory,
 }
 
 impl AuthoringSession {
@@ -78,6 +82,7 @@ impl AuthoringSession {
             project: None,
             documents: BTreeMap::new(),
             next_handle: 1,
+            assets_history: AssetHistory::default(),
         }
     }
 
@@ -97,6 +102,7 @@ impl AuthoringSession {
     /// — the client asks first).
     pub fn close_project(&mut self) {
         self.documents.clear();
+        self.assets_history = AssetHistory::default();
         self.project = None;
     }
 
@@ -345,6 +351,10 @@ impl AuthoringSession {
         let written = self.documents.get_mut(&handle).unwrap().editor.save(path)?;
         let written = written.canonicalize().unwrap_or(written);
         let doc = self.documents.get_mut(&handle).unwrap();
+        if doc.path != written {
+            // Save As: the editor writes there from now on.
+            doc.editor.relocate(&written);
+        }
         doc.path = written.clone();
         self.project
             .as_mut()

@@ -24,6 +24,8 @@ use crate::{AuthoringSession, Handle, COMMANDS};
 /// | `assets` | `kind?` (`document`/`source`), `document?` (a kind name) | the entries |
 /// | `asset` | `asset` (UUID text), `sub?` | the resolved entry |
 /// | `dependents` | `asset` (UUID text) | the references to it |
+/// | `assetDetail` | `asset` (UUID text) | the entry plus the file's size and time, its sidecar (source) or content summary (document), its dependents ([`AuthoringSession::asset_detail`]) |
+/// | `assetHistory` | | the asset operations' undo/redo state ([`crate::AssetHistory::json`]) |
 /// | `schemas` | | component and behaviour types with schemas |
 /// | `schema` | `type` | one schema |
 /// | `metadata` | | `behaviours.g.json` or null |
@@ -31,6 +33,7 @@ use crate::{AuthoringSession, Handle, COMMANDS};
 /// | `defaults` | `type` | `{ type, data }`: a native component's `Default` as document data ([`crate::component_default`]) |
 /// | `revision` | `path` | the revision and identity of a document file on disk now ([`AuthoringSession::file_revision`]) |
 /// | `commands` | | the command names |
+/// | `operations` | | the asset operation names ([`crate::OPERATIONS`]) |
 pub const KINDS: &[&str] = &[
     "project",
     "documents",
@@ -41,6 +44,8 @@ pub const KINDS: &[&str] = &[
     "assets",
     "asset",
     "dependents",
+    "assetDetail",
+    "assetHistory",
     "schemas",
     "schema",
     "metadata",
@@ -48,6 +53,7 @@ pub const KINDS: &[&str] = &[
     "defaults",
     "revision",
     "commands",
+    "operations",
 ];
 
 impl AuthoringSession {
@@ -116,6 +122,15 @@ impl AuthoringSession {
                     p.dependents(id).iter().map(|r| r.json()).collect(),
                 ))
             }
+            "assetDetail" => {
+                self.project().ok_or_else(no_project).map_err(one)?;
+                let id = uuid_arg(args, "asset")?;
+                self.asset_detail(id)
+            }
+            "assetHistory" => {
+                self.project().ok_or_else(no_project).map_err(one)?;
+                Ok(self.asset_history().json())
+            }
             "schemas" => Ok(self
                 .project()
                 .ok_or_else(no_project)
@@ -170,6 +185,7 @@ impl AuthoringSession {
                 self.file_revision(path)
             }
             "commands" => Ok(json!(COMMANDS)),
+            "operations" => Ok(json!(crate::OPERATIONS)),
             other => Err(one(Diagnostic::error(
                 Code::SESSION_UNKNOWN_QUERY,
                 format!("unknown query {other:?}"),
