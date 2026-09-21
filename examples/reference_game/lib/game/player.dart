@@ -12,12 +12,17 @@ import 'game_state.dart';
 /// the start), restarts the run on `restart`, and keeps the clock.
 ///
 /// Its rigged character (tools/character.py) is posed from the same
-/// state: the `fynkel.Animator` the scene puts on the player starts on
-/// [idleAnim], and every tick this behaviour crossfades to the clip the
-/// controller's state calls for — walk or run on the ground with the stick
-/// moving, jump (one-shot) on the jump press — and back to idle. The clips
-/// are authored in place: the controller moves the entity, the animator
-/// only poses the joints (docs/animation.md).
+/// state (M3-19c): the `fynkel.Animator` the scene puts on the player
+/// plays the locomotion blend space (assets/models/player.blend.json:
+/// idle, walk, run along `speed`) and every tick this behaviour sets
+/// `speed` to the controller's planar velocity — the stride follows the
+/// speed, phase-synced, with no clip switching. The jump press plays
+/// [jumpClip] once over it and the landing crossfades back. The `wave`
+/// action plays the wave layer — a second, additive animator on the
+/// entity named [waveLayer] — once. Footstep markers of the walk and
+/// the run (`step_l`/`step_r`) count into [GameState.footsteps]. The
+/// clips are authored in place: the controller moves the entity, the
+/// animator only poses the joints (docs/animation.md).
 ///
 /// The controller's own `moveAction`/`jumpAction` are left empty in the
 /// scene so this behaviour is the one mover (a behaviour's `move` in the
@@ -47,29 +52,31 @@ class Player extends Behaviour {
   /// Where a death puts the player back: the scene position.
   late Vec3 spawn;
 
-  /// Seconds a clip change blends over.
+  /// Seconds the landing blends back into the locomotion over.
   @Expose(min: 0, step: 0.05)
   double blend = 0.15;
 
-  /// The clips' sub-asset names on the character the scene's animator
-  /// names: `anim/[index]` for a model whose file carries them (the box
-  /// character), `anim/[name]` for a rig document (M3-19b; `--hero
-  /// [name].rig.json` sets these). So the model can be swapped without
-  /// touching the code.
+  /// The jump, played once over the locomotion: `anim/3` of the box
+  /// character, `anim/jump` of a rig document (`--hero` sets it), so the
+  /// model can be swapped without touching the code.
   @Expose()
-  String idleAnim = 'anim/0';
-  @Expose()
-  String walkAnim = 'anim/1';
-  @Expose()
-  String runAnim = 'anim/2';
-  @Expose()
-  String jumpAnim = 'anim/3';
+  AssetRef jumpClip = AssetRef.none;
 
-  /// The clips resolved against the animator's asset.
-  late AssetRef idleClip, walkClip, runClip, jumpClip;
+  /// The entity below the player carrying the wave layer's animator
+  /// (`spine` on the box character, `Rig` on a downloaded one); empty
+  /// when the character has no wave.
+  @Expose()
+  String waveLayer = 'spine';
 
-  /// The clip last chosen (what the animator plays).
-  AssetRef? clip;
+  /// The name of the blend space's parameter (player.blend.json).
+  @Expose()
+  String speedParameter = 'speed';
+
+  /// The locomotion blend space: what the scene's animator started on.
+  late AssetRef locomotion;
+
+  /// Whether the jump one-shot is playing (held until the landing).
+  bool inJump = false;
 
   /// Ticks the player has been in the air (for the HUD's readout and the
   /// tests).
@@ -82,12 +89,7 @@ class Player extends Behaviour {
   @override
   void start() {
     spawn = transform.position;
-    final character = get<Animator>()?.clip.asset ?? AssetRef.none.asset;
-    idleClip = AssetRef(character, sub: idleAnim);
-    walkClip = AssetRef(character, sub: walkAnim);
-    runClip = AssetRef(character, sub: runAnim);
-    jumpClip = AssetRef(character, sub: jumpAnim);
-    clip = idleClip; // the scene's animator starts there
+    locomotion = get<Animator>()?.clip ?? AssetRef.none;
   }
 
   @override
@@ -128,7 +130,8 @@ class Player extends Behaviour {
       jump(jumpSpeed);
       jumps++;
     }
-    pose(jumped: jumped, grounded: me.grounded, moving: stick.length > 0.05, sprinting: Input.held('sprint'));
+    pose(jumped: jumped, grounded: me.grounded, velocity: me.velocity);
+    if (Input.pressed('wave')) wave();
 
     if (!state.won.value) {
       _elapsed += context.dt;
@@ -137,25 +140,41 @@ class Player extends Behaviour {
     }
   }
 
-  /// Picks the clip for this tick's state and crossfades to it when it
-  /// changes. The jump plays once and holds its last frame until the
-  /// player lands (the controller is airborne longer than the clip), so
-  /// in the air nothing is chosen over it.
-  void pose({required bool jumped, required bool grounded, required bool moving, required bool sprinting}) {
+  /// The blend space's parameter is the controller's planar speed as
+  /// the last tick applied it (so a wall stops the stride with the
+  /// player); the jump plays once and holds its last frame until the
+  /// player lands (the controller is airborne longer than the clip), then
+  /// the locomotion blends back in.
+  void pose({required bool jumped, required bool grounded, required Vec3 velocity}) {
+    animation.setParameter(speedParameter, math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z));
     if (jumped) {
-      clip = jumpClip;
+      inJump = true;
       animation.play(jumpClip, looping: false);
       return;
     }
-    if (!grounded && clip == jumpClip) return;
-    final next = !moving
-        ? idleClip
-        : sprinting
-            ? runClip
-            : walkClip;
-    if (next == clip) return;
-    clip = next;
-    animation.crossfade(next, blend);
+    if (!inJump || !grounded) return;
+    inJump = false;
+    animation.crossfade(locomotion, blend);
+  }
+
+  /// Plays the wave layer once (the additive animator on [waveLayer]).
+  void wave() {
+    if (waveLayer.isEmpty) return;
+    final layer = gameObject.findDescendant(waveLayer);
+    final clip = layer?.get<Animator>()?.clip;
+    if (layer == null || clip == null) return;
+    layer.animation.play(clip, looping: false);
+    waves++;
+  }
+
+  /// Waves played (for the HUD's readout and the tests).
+  int waves = 0;
+
+  /// A footstep of the walk or the run (their `step_l`/`step_r` markers,
+  /// from whichever clip dominates the blend at the moment).
+  @override
+  void onAnimationMarker(AnimationMarker event) {
+    if (event.name.startsWith('step')) state.footsteps.value += 1;
   }
 
   /// A hazard's zone (the sweeper's blade, a launched ball) touched us.

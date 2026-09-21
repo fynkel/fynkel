@@ -767,11 +767,16 @@ impl Intermediate {
         }
         for a in &self.animations {
             out.push_str(&format!(
-                "  {:<14} {} ({} channel(s), {:.3} s)\n",
+                "  {:<14} {} ({} channel(s), {:.3} s{})\n",
                 a.sub_id,
                 a.name,
                 a.payload.channels.len(),
-                a.payload.duration
+                a.payload.duration,
+                if a.payload.markers.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {} marker(s)", a.payload.markers.len())
+                }
             ));
         }
         out

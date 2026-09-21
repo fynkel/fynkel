@@ -88,6 +88,15 @@ impl Code {
     /// A field the schema accepts but the rig cannot use (a malformed
     /// assetRef, a clip name that is not an identifier).
     pub const RIG_MALFORMED_ENTRY: Code = Code("FYN-D0502");
+    // Documents (FYN-D): blend spaces (blueprint §19.2d item 19c;
+    // `fynkel_document::blend`).
+    /// The points are not strictly increasing in `at` (or there are none).
+    pub const BLEND_POINTS: Code = Code("FYN-D0600");
+    /// A point's clip is not an animation clip (a rig's or a model's `anim/*`).
+    pub const BLEND_CLIP: Code = Code("FYN-D0601");
+    /// A field the schema accepts but the blend space cannot use (a
+    /// malformed assetRef, a non-finite `at`).
+    pub const BLEND_MALFORMED_ENTRY: Code = Code("FYN-D0602");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 

@@ -21,6 +21,18 @@ git — the generator is the source):
                           a Dart behaviour writing its transform every tick
                           (the 300 ticking behaviours §15.3 names). The bare
                           project has no Dart, so they stand still there
+  200 animated rigs      "Rig NNN": the reference game's box character
+                          (examples/reference_game/assets/models/character.glb,
+                          copied in: a skinned Body over 11 joint entities
+                          authored from tools/character.py's SKELETON), each
+                          with a `fynkel.Animator` — by turns the walk, the
+                          run and the locomotion blend space
+                          (assets/models/locomotion.blend.json: idle, walk,
+                          run by `speed`, phase-synced) at its own speed, and
+                          every fourth one an additive wave layer on its
+                          `spine` playing in a loop (item 19c: the animation
+                          stress — clips, a blend space, layers, markers
+                          crossed every lap, 200 skin palettes)
   Lantern                a PointLight with a `Follow` on "Body 000"
   Fountain               an `Emitter` at the field's centre: 10 Sparks/s
                           (assets/prefabs/spark.prefab.json, a small dynamic
@@ -58,7 +70,7 @@ the 300 pyramids. `fynkel create` needs `flutter` on PATH and
 the CLI at $FYNKEL_CLI or target/debug/fynkel.
 
 Usage: python3 benchmarks/stress/generate.py [--out DIR] [--static 5000]
-       [--bodies 500] [--behaviours 300] [--seed 1] [--app]
+       [--bodies 500] [--behaviours 300] [--rigs 200] [--seed 1] [--app]
        [--no-movers]   (the statics stand still: the item 6/8 baseline)
 """
 import argparse
@@ -74,9 +86,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SHOWCASE = ROOT / "examples/showcase"
+REFERENCE = ROOT / "examples/reference_game"
+sys.path.insert(0, str(REFERENCE / "tools"))
+from character import SKELETON  # noqa: E402  the box character's joints, one table
 PROJECT_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000c0de")
 SCENE_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-0000000005ce")
 SPARK_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000fab1")
+BLEND_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000b1e0")
+CHARACTER = json.loads((REFERENCE / "assets/models/character.glb.meta.json").read_text())["id"]  # the box character
 CUBE_GLB = "f74c43aa-7e0b-4a48-a124-ef002a901e34"   # showcase cube.glb (mesh/0)
 ROBOT_GLB = "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1"  # showcase robot.glb (mesh/0 cube, mesh/1/0 pyramid, mesh/1/1 quad)
 
@@ -95,6 +112,7 @@ MATERIALS = {
     "body": ([0.9, 0.35, 0.1, 1.0], 0.0, 0.5, {}),
     "behaviour": ([0.2, 0.5, 0.95, 1.0], 0.0, 0.4, {}),
     "floor": ([0.45, 0.45, 0.47, 1.0], 0.0, 0.95, {}),
+    "rig": ([0.85, 0.8, 0.3, 1.0], 0.0, 0.6, {}),
 }
 
 STATIC_PAIRS = [(m, mat) for m in ("cube", "pyramid", "quad") for mat in ("concrete", "brick", "steel", "moss")]
@@ -174,9 +192,28 @@ def emitter(prefab, rate, lifetime, max_alive, velocity):
         "velocity": list(velocity), "enabled": True}}
 
 
-def entity(name, components):
-    return uid(f"entity/{name}"), {"name": name, "parent": None, "children": [],
-                                   "components": {uid(f"component/{name}/{c['type']}"): c for c in components}}
+def animator(clip, speed=1.0, looping=True, playing=True, weight=1.0, additive=False):
+    return {"type": "fynkel.Animator", "version": 1, "data": {
+        "clip": clip, "speed": round(speed, 4), "looping": looping, "playing": playing,
+        "weight": weight, "additive": additive, "root_motion": False}}
+
+
+def entity(name, components, key=None):
+    """An entity named `name`; `key` (default the name) is what its id and its
+    components' ids derive from, so a rig's joints can all be called `hips`."""
+    key = key or name
+    return uid(f"entity/{key}"), {"name": name, "parent": None, "children": [],
+                                  "components": {uid(f"component/{key}/{c['type']}"): c for c in components}}
+
+
+def locomotion_blend():
+    """The box character's idle, walk and run along `speed` (item 19c)."""
+    return {"$schema": "https://fynkel.dev/schemas/blend.schema.json", "formatVersion": 1,
+            "id": str(BLEND_ID), "name": "Locomotion", "parameter": "speed",
+            "points": [{"at": 0.0, "clip": {"asset": CHARACTER, "sub": "anim/0"}},
+                       {"at": 4.0, "clip": {"asset": CHARACTER, "sub": "anim/1"}},
+                       {"at": 7.0, "clip": {"asset": CHARACTER, "sub": "anim/2"}}],
+            "sync": "phase"}
 
 
 def spark_prefab():
@@ -199,7 +236,7 @@ def project_doc():
               "fynkel.PointLight", "fynkel.SpotLight", "fynkel.Environment", "fynkel.RigidBody", "fynkel.Collider",
               "fynkel.CharacterController", "fynkel.ThirdPersonCamera", "fynkel.Rotator", "fynkel.Oscillate",
               "fynkel.Follow", "fynkel.LookAtCamera", "fynkel.LifetimeDespawn", "fynkel.Emitter",
-              "fynkel.TriggerZone"]
+              "fynkel.TriggerZone", "fynkel.Animator", "fynkel.Skin"]
     return {
         "$schema": "https://fynkel.dev/schemas/project.schema.json", "formatVersion": 1,
         "id": str(PROJECT_ID), "name": "Fynkel Stress", "startupScene": {"asset": str(SCENE_ID)},
@@ -215,13 +252,17 @@ def project_doc():
     }
 
 
-def scene_doc(n_static, n_bodies, n_behaviours, seed, orbit=False, movers=True):
+def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, movers=True):
     rng = random.Random(seed)
     entities = {}
 
-    def add(name, components):
-        k, v = entity(name, components)
+    def add(name, components, key=None, parent=None):
+        k, v = entity(name, components, key)
+        if parent is not None:
+            v["parent"] = parent
+            entities[parent]["children"].append(k)
         entities[k] = v
+        return k
 
     # Camera above the near edge (+Z), looking across the field and down.
     # With --app the showcase's game.Orbit circles it around the field's
@@ -253,7 +294,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, seed, orbit=False, movers=True):
         add("Fountain", [transform((0, 1.5, 0)), emitter(SPARK_ID, rate=10.0, lifetime=4.0, max_alive=40, velocity=(0.0, 9.0, 0.0))])
 
     # A jittered grid over the field for everything that stands on it.
-    total = n_static + n_bodies + n_behaviours
+    total = n_static + n_bodies + n_behaviours + n_rigs
     cols = int(math.ceil(math.sqrt(total * FIELD_W / FIELD_D)))
     rows = int(math.ceil(total / cols))
     cells = [(c, r) for r in range(rows) for c in range(cols)]
@@ -296,6 +337,25 @@ def scene_doc(n_static, n_bodies, n_behaviours, seed, orbit=False, movers=True):
                 "amplitude": round(rng.uniform(0.2, 0.5), 3), "frequency": round(rng.uniform(0.3, 0.8), 3),
                 "spin": round(rng.uniform(0.5, 2.0), 3), "phase": round(rng.uniform(0, math.tau), 3)}})
         add(f"Behaviour {n:03}", components)
+    for n in range(n_rigs):
+        # The box character: its animator on the walk, the run or the blend
+        # space (which stays on its first point, the idle, with nobody
+        # setting `speed` — the mix itself is the reference game's and the
+        # Fox test's), the skinned Body and the joints from the same table
+        # the model was built from; every fourth rig waves on a loop.
+        x, z = place(i); i += 1
+        clip = [{"asset": CHARACTER, "sub": "anim/1"}, {"asset": CHARACTER, "sub": "anim/2"}, {"asset": str(BLEND_ID)}][n % 3]
+        rig = add(f"Rig {n:03}", [transform((x, 0.0, z), quat_axis_angle((0, 1, 0), rng.uniform(0, math.tau))),
+                                  animator(clip, speed=rng.uniform(0.8, 1.25))])
+        add("Body", [transform((0, 0, 0)), {"type": "fynkel.MeshRenderer", "version": 1, "data": {
+                         "mesh": {"asset": CHARACTER, "sub": "mesh/0"}, "material": {"asset": uid("material/rig")},
+                         "cast_shadows": True, "receive_shadows": True, "visible": True}},
+                     {"type": "fynkel.Skin", "version": 1, "data": {"skin": {"asset": CHARACTER, "sub": "skin/0"}, "skeleton": "hips"}}],
+            key=f"Rig {n:03}/Body", parent=rig)
+        joints = {}
+        for name, parent, local, _, _ in SKELETON:
+            layer = [animator({"asset": CHARACTER, "sub": "anim/4"}, speed=rng.uniform(0.8, 1.25), additive=True)] if name == "spine" and n % 4 == 0 else []
+            joints[name] = add(name, [transform(local)] + layer, key=f"Rig {n:03}/{name}", parent=joints[parent] if parent else rig)
     return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 3,
             "id": str(SCENE_ID), "name": "Stress", "entities": entities}
 
@@ -326,6 +386,7 @@ def main():
     ap.add_argument("--static", type=int, default=5000)
     ap.add_argument("--bodies", type=int, default=500)
     ap.add_argument("--behaviours", type=int, default=300)
+    ap.add_argument("--rigs", type=int, default=200)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--app", action="store_true", help="wrap the project in the `fynkel create` starter app so it runs on a device")
     ap.add_argument("--no-movers", action="store_true", help="no catalogue components: the statics stand still (the item 6/8 baseline)")
@@ -337,6 +398,9 @@ def main():
         (out / d).mkdir(parents=True, exist_ok=True)
     for f in ("cube.glb", "cube.glb.meta.json", "robot.glb", "robot.glb.meta.json"):
         shutil.copyfile(SHOWCASE / "assets/models" / f, out / "assets/models" / f)
+    for f in ("character.glb", "character.glb.meta.json"):
+        shutil.copyfile(REFERENCE / "assets/models" / f, out / "assets/models" / f)
+    (out / "assets/models/locomotion.blend.json").write_text(json.dumps(locomotion_blend(), indent=2) + "\n")
     for name in MATERIALS:
         (out / f"assets/materials/{name}.material.json").write_text(json.dumps(material_doc(name), indent=2) + "\n")
     project = project_doc()
@@ -359,15 +423,15 @@ def main():
         if not (out / ".gitignore").exists():  # an earlier --app run keeps the starter's
             (out / ".gitignore").write_text(".fynkel/\n")
     (out / "fynkel.project.json").write_text(json.dumps(project, indent=2) + "\n")
-    scene = scene_doc(a.static, a.bodies, a.behaviours, a.seed, orbit=a.app, movers=not a.no_movers)
+    scene = scene_doc(a.static, a.bodies, a.behaviours, a.rigs, a.seed, orbit=a.app, movers=not a.no_movers)
     (out / "assets/scenes/stress.scene.json").write_text(json.dumps(scene) + "\n")
     (out / "assets/prefabs/spark.prefab.json").write_text(json.dumps(spark_prefab(), indent=2) + "\n")
     if a.app:
         cli = os.environ.get("FYNKEL_CLI") or str(ROOT / "target/debug/fynkel")
         subprocess.run([cli, "codegen", "--project", str(out), "--root", str(ROOT)], check=True)
-    pairs = len(STATIC_PAIRS) + 2 + 1  # + body, behaviour, floor
+    pairs = len(STATIC_PAIRS) + 2 + 1 + 1  # + body, behaviour, floor, rig
     print(f"{out}: {len(scene['entities'])} entities ({a.static} {'static' if a.no_movers else 'native movers'}, "
-          f"{a.bodies} bodies, {a.behaviours} behaviours{' (game.Wobble)' if a.app else ''}), "
+          f"{a.bodies} bodies, {a.behaviours} behaviours{' (game.Wobble)' if a.app else ''}, {a.rigs} animated rigs), "
           f"{len(MATERIALS)} materials, {pairs} distinct (mesh, material) pairs")
 
 

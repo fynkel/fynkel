@@ -22,6 +22,7 @@ pub mod codec;
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub mod generated;
+pub mod blend;
 pub mod json;
 pub mod material;
 pub mod migrate;
@@ -40,6 +41,7 @@ pub use authoring::{
     Applied, Command, ComponentSpec, Edit, Editor, Mutation, Request, Requested, Revision,
     Transaction,
 };
+pub use blend::Blend;
 pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
@@ -67,10 +69,12 @@ pub enum DocumentKind {
     Meta,
     /// `.rig.json`: a character assembled from imported models (M3-19b).
     Rig,
+    /// `.blend.json`: clips along one parameter (M3-19c).
+    Blend,
 }
 
 impl DocumentKind {
-    pub const ALL: [DocumentKind; 7] = [
+    pub const ALL: [DocumentKind; 8] = [
         DocumentKind::Scene,
         DocumentKind::Prefab,
         DocumentKind::Material,
@@ -78,6 +82,7 @@ impl DocumentKind {
         DocumentKind::Project,
         DocumentKind::Meta,
         DocumentKind::Rig,
+        DocumentKind::Blend,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -89,6 +94,7 @@ impl DocumentKind {
             DocumentKind::Project => "project",
             DocumentKind::Meta => "meta",
             DocumentKind::Rig => "rig",
+            DocumentKind::Blend => "blend",
         }
     }
 
@@ -102,6 +108,7 @@ impl DocumentKind {
             DocumentKind::Project => "fynkel.project.json",
             DocumentKind::Meta => ".meta.json",
             DocumentKind::Rig => ".rig.json",
+            DocumentKind::Blend => ".blend.json",
         }
     }
 
@@ -204,6 +211,23 @@ impl Document {
                     )]),
                 ));
                 members.push(("clips".into(), Node::object(Vec::new())));
+            }
+            DocumentKind::Blend => {
+                members.push(("parameter".into(), Node::string("speed")));
+                members.push((
+                    "points".into(),
+                    Node::synthetic(Value::Array(vec![Node::object(vec![
+                        ("at".into(), Node::integer(0)),
+                        (
+                            "clip".into(),
+                            Node::object(vec![(
+                                "asset".into(),
+                                Node::string(uuid::Uuid::nil().to_string()),
+                            )]),
+                        ),
+                    ])])),
+                ));
+                members.push(("sync".into(), Node::string("phase")));
             }
             _ => {}
         }

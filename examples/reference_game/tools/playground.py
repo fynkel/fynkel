@@ -15,17 +15,19 @@ tools/character.py and `fynkel import assets/models/*.glb`:
 Player in a downloaded character instead: the rig document's skeleton
 hierarchy is instanced as `{ asset: <rig>, sub: "prefab" }` under a
 `Rig` child (so `game.Player` and the tests reach the joints by name
-below the Player as before) and the four clips are the rig's `idle`,
-`walk`, `run` and `jump` (`anim/<name>`), which `game.Player` is told
-by name. Write the rig with `fynkel import Idle.fbx Walking.fbx "Fast
-Run.fbx" Jumping.fbx --rig hero` (the first file is the skeleton; the
-clips are named after the files, so rename the downloads or edit the
-document's `clips` to those four names). `--hero <file.glb>` (M3-19a)
-still takes one glTF carrying the clips as its `anim/0..3` in that
-order — the order docs/animation.md's Blender recipe builds a Mixamo
-set in — imported first with `fynkel import <file.glb>`. Either way the
-character faces +Z as glTF characters do: the Rig turns it to the
-game's -Z. The Visor stays with the box character.
+below the Player as before) and the clips are the rig's `idle`, `walk`,
+`run` and `jump` (`anim/<name>`; a `wave` is optional — the layer is
+authored only when the rig has one): the blend space mixes the first
+three, `game.Player` is told the jump. Write the rig with `fynkel
+import Idle.fbx Walking.fbx "Fast Run.fbx" Jumping.fbx --rig hero` (the
+first file is the skeleton; the clips are named after the files, so
+rename the downloads or edit the document's `clips` to those four
+names; add `markers` for footsteps). `--hero <file.glb>` (M3-19a) still
+takes one glTF carrying the clips as its `anim/0..3` in that order —
+the order docs/animation.md's Blender recipe builds a Mixamo set in —
+imported first with `fynkel import <file.glb>` (an `anim/4` is the
+wave). Either way the character faces +Z as glTF characters do: the
+Rig turns it to the game's -Z. The Visor stays with the box character.
 
 Layout (metres, +Y up, the player spawns at the origin facing -Z; the
 camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
@@ -47,8 +49,14 @@ camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
     character of tools/character.py — the skinned Body, the joint tree
     from that file's SKELETON authored as entities under the Player (so
     a behaviour can reach a joint by name, the Visor hangs off `head`),
-    and a `fynkel.Animator` on idle that `game.Player` crossfades to
-    walk/run/jump (M3-19).
+    and a `fynkel.Animator` playing the locomotion blend space
+    (assets/models/player.blend.json, written here: idle at 0, walk at 4,
+    run at 7 m/s by `speed`, which `game.Player` sets from the controller
+    every tick; M3-19c). The jump is a one-shot `game.Player` plays over
+    it. A second animator on the `spine` joint is the wave layer: the
+    character's `wave` clip, additive, played on the `wave` action.
+    With `--hero`, the layer sits on the `Rig` and needs a `wave` clip
+    on the rig (skipped when there is none).
 """
 
 import json
@@ -225,6 +233,7 @@ if HERO and HERO.name.endswith(".rig.json"):
     missing = [n for n in CLIP_NAMES if n not in rig.get("clips", {})]
     assert not missing, f"{HERO.name} needs clips named {', '.join(CLIP_NAMES)}; missing {missing} (it has {sorted(rig.get('clips', {}))})"
     CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{name}"} for name in CLIP_NAMES}
+    WAVE = {"asset": CHARACTER, "sub": "anim/wave"} if "wave" in rig.get("clips", {}) else None
 else:
     if HERO:
         hero_sidecar = HERO.with_name(HERO.name + ".meta.json")
@@ -235,12 +244,35 @@ else:
         character_meta = json.loads((ASSETS / "models" / "character.glb.meta.json").read_text())
     CHARACTER = character_meta["id"]
     CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{i}"} for i, name in enumerate(CLIP_NAMES)}
-    for sub in (["prefab"] if HERO else ["mesh/0", "skin/0"]) + [c["sub"] for c in CLIPS.values()]:
+    WAVE = {"asset": CHARACTER, "sub": "anim/4"} if "anim/4" in character_meta["subAssets"] else None
+    for sub in (["prefab"] if HERO else ["mesh/0", "skin/0", "anim/4"]) + [c["sub"] for c in CLIPS.values()]:
         assert sub in character_meta["subAssets"], (
             f"{HERO.name} needs anim/0..3 (idle, walk, run, jump) and its prefab; the sidecar lists {sorted(character_meta['subAssets'])}"
             if HERO
             else "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
         )
+
+# The Player's locomotion blend space (M3-19c): one document, its points
+# the character's idle, walk and run at the speeds `game.Player` walks and
+# sprints at (fynkel.CharacterController `speed` 4, sprint x 1.75).
+LOCOMOTION = uid("blend", "player")
+
+
+def locomotion_blend():
+    return {
+        "$schema": "https://fynkel.dev/schemas/blend.schema.json",
+        "formatVersion": 1,
+        "id": LOCOMOTION,
+        "name": "Player locomotion",
+        "description": "Idle, walk and run mixed by the controller's planar speed (game.Player sets `speed` every tick); phase-synced so the feet agree between the walk and the run.",
+        "parameter": "speed",
+        "points": [
+            {"at": 0.0, "clip": CLIPS["idle"]},
+            {"at": 4.0, "clip": CLIPS["walk"]},
+            {"at": 7.0, "clip": CLIPS["run"]},
+        ],
+        "sync": "phase",
+    }
 
 MATERIAL_DOCS = {
     "floor": dict(base_color=[0.55, 0.56, 0.52, 1.0], metallic=0.0, roughness=0.9),
@@ -397,20 +429,29 @@ def playground():
                 jumpSpeed=5.5,
                 cameraName="Camera",
                 fallY=-6.0,
-                # The clips by sub-asset name, as the character carries them.
-                **{f"{name}Anim": CLIPS[name]["sub"] for name in CLIP_NAMES},
+                # The one-shot over the blend space, and the entity carrying
+                # the wave layer's animator ('' when the character has no wave).
+                jumpClip=CLIPS["jump"],
+                waveLayer=("Rig" if HERO else "spine") if WAVE else "",
             ),
-            # Idle from the first tick; game.Player crossfades between the
-            # four clips (all authored in place: the controller moves).
-            ("fynkel.Animator", {"clip": CLIPS["idle"], "speed": 1.0, "looping": True, "playing": True,
+            # The locomotion blend space from the first tick (its parameter
+            # starts at the first point: idle); game.Player sets `speed` from
+            # the controller and plays the jump over it (all clips authored
+            # in place: the controller moves).
+            ("fynkel.Animator", {"clip": {"asset": LOCOMOTION}, "speed": 1.0, "looping": True, "playing": True,
                                  "weight": 1.0, "additive": False, "root_motion": False}),
         ],
     )
+    # The wave layer (M3-19c): a second animator on a descendant, additive,
+    # paused on its first frame (the rest pose, so it adds nothing) until
+    # game.Player plays it once on the `wave` action.
+    wave_layer = ("fynkel.Animator", {"clip": WAVE, "speed": 1.0, "looping": False, "playing": False,
+                                      "weight": 1.0, "additive": True, "root_motion": False})
     if HERO:
         # The downloaded character's own hierarchy (its skinned meshes and
         # joints, as `fynkel import` derived them) instanced under a Rig
         # turned to face -Z; the animator above finds the joints by name.
-        rig = s.add("Rig", [transform((0, 0, 0), quat_axis_angle((0, 1, 0), math.pi))], parent=player)
+        rig = s.add("Rig", [transform((0, 0, 0), quat_axis_angle((0, 1, 0), math.pi))] + ([wave_layer] if WAVE else []), parent=player)
         s.entities[rig]["prefab"] = {"asset": {"asset": CHARACTER, "sub": "prefab"}, "instance": uid(s.key, "Rig", "instance"), "overrides": []}
     else:
         # The skinned body, posed by the joint entities below (the skin's
@@ -424,7 +465,8 @@ def playground():
         )
         joints = {}
         for name, parent, local, _, _ in SKELETON:
-            joints[name] = s.add(name, [transform(local)], parent=joints[parent] if parent else player)
+            layer = [wave_layer] if name == "spine" and WAVE else []
+            joints[name] = s.add(name, [transform(local)] + layer, parent=joints[parent] if parent else player)
         s.add("Visor", [transform((0, 0.13, -0.13), scale=(0.2, 0.07, 0.06)), mesh_renderer("cube", "gate", cast=False)], parent=joints["head"])
 
     # The rig's own pose at yaw 0, pitch 0.35, distance 6 from the pivot
@@ -598,6 +640,7 @@ def main():
     write(ASSETS / "prefabs" / "coin.prefab.json", coin_prefab())
     write(ASSETS / "prefabs" / "ball.prefab.json", ball_prefab())
     write(ASSETS / "prefabs" / "burst.prefab.json", burst_prefab())
+    write(ASSETS / "models" / "player.blend.json", locomotion_blend())
     doc, counts = playground()
     write(ASSETS / "scenes" / "playground.scene.json", doc)
     print(f"Playground: {len(doc['entities'])} entities, {counts['static']} static meshes, {counts['bodies']} bodies, {counts['coins']} coins, {counts['lights']} point lights; scene id {SCENE_ID}")

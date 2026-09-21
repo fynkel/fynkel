@@ -645,8 +645,8 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert!(!r.has_errors(), "{}", r.text());
     assert_eq!(
         r.assets.len(),
-        15,
-        "five scenes, three prefabs, the column rig, robot, rig, material, swatch, normal, metallic-roughness"
+        16,
+        "five scenes, three prefabs, the column rig and its blend space, robot, rig, material, swatch, normal, metallic-roughness"
     );
     let cache = project_cache_dir(&dir);
     assert_eq!(cache, dir.join(".fynkel/cache"));
@@ -1035,4 +1035,147 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
         .any(|d| d.code == fynkel_contracts::Code::IMPORT_SKIPPED
             && d.message.contains("main.scene.json")
             && d.message.contains("hero.rig.json failed")));
+}
+
+/// M3-19c: a blend space cooks as its document once its points are in
+/// order and name clips (of a rig or a model), with the clips' carriers
+/// as its dependencies; one that names a mesh fails, and a scene whose
+/// animator plays it is blocked.
+#[test]
+fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
+    const GLB: &str = "b0000000-0000-4000-8000-000000000012";
+    const HERO: &str = "c0000000-0000-4000-8000-000000000050";
+    const SPACE: &str = "c0000000-0000-4000-8000-000000000051";
+    let p = Project::new("blend-doc");
+    std::fs::copy(
+        fixtures().join("rig.glb"),
+        p.assets().join("models/rig.glb"),
+    )
+    .unwrap();
+    let file = p.assets().join("models/rig.glb");
+    let text = format!(
+        r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{GLB}","name":"rig.glb","importer":"fynkel.gltf","importerVersion":{},"settings":{{}},"subAssets":{{}}}}"#,
+        fynkel_import::gltf::IMPORTER_VERSION
+    );
+    let mut meta = fynkel_document::Meta::from_document(
+        fynkel_document::Document::parse(fynkel_document::DocumentKind::Meta, None, &text).unwrap(),
+    );
+    let imported = fynkel_import::import(&file, &meta, &fynkel_import::Limits::default());
+    assert!(!imported.has_errors(), "{:?}", imported.diagnostics);
+    meta.sub_assets = imported.sub_assets;
+    p.write(
+        "models/rig.glb.meta.json",
+        &meta.to_document().write().unwrap(),
+    );
+    std::fs::create_dir_all(p.assets().join("rigs")).unwrap();
+    p.write(
+        "rigs/hero.rig.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{GLB}"}},"clips":{{"wave":{{"asset":"{GLB}","sub":"anim/0"}},"bob":{{"asset":"{GLB}","sub":"anim/1"}}}}}}"#
+        ),
+    );
+    let blend_doc = |points: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/blend.schema.json","formatVersion":1,"id":"{SPACE}","name":"Energy","parameter":"energy","points":[{points}]}}"#
+        )
+    };
+    // One point on the rig's clip, one on the model's own.
+    p.write(
+        "rigs/energy.blend.json",
+        &blend_doc(&format!(
+            r#"{{"at":0,"clip":{{"asset":"{HERO}","sub":"anim/bob"}}}},{{"at":2.5,"clip":{{"asset":"{GLB}","sub":"anim/1"}}}}"#
+        )),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    let space = r.get(id(SPACE)).unwrap();
+    assert_eq!(space.status, Status::Cooked);
+    assert_eq!(space.kind, "document/blend");
+    let mut deps = space.dependencies.clone();
+    deps.sort();
+    assert_eq!(deps, vec![id(GLB), id(HERO)]);
+    let mut f = ChunkFile::open_path(space.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(&f.meta(1 << 20).unwrap()).unwrap();
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(kinds, ["META", "JSON"]);
+    let info = &meta["chunks"][1];
+    assert_eq!(info["documentKind"], "blend");
+    assert_eq!(info["parameter"], "energy");
+    assert_eq!(info["points"], 2);
+    assert_eq!(info["sync"], "phase");
+    let doc: serde_json::Value = serde_json::from_slice(&f.read(1, 1 << 20).unwrap()).unwrap();
+    assert_eq!(doc["points"][1]["at"], 2.5);
+    // A rig edit recooks the space (its key covers the clips' carriers).
+    let again = p.cook();
+    assert!(all(&again, Status::Cached), "{:?}", statuses(&again));
+    p.write(
+        "rigs/hero.rig.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{GLB}"}},"clips":{{"wave":{{"asset":"{GLB}","sub":"anim/0"}},"bob":{{"asset":"{GLB}","sub":"anim/1"}}}},"markers":{{"bob":[{{"at":0.5,"name":"thud"}}]}}}}"#
+        ),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(status(&r, SPACE), Status::Cooked);
+    assert_eq!(status(&r, GLB), Status::Cached);
+
+    // Out of order: D0600, the space fails; a point on a mesh: D0601; a
+    // scene whose animator plays the failed space is blocked.
+    p.write(
+        "rigs/energy.blend.json",
+        &blend_doc(&format!(
+            r#"{{"at":1,"clip":{{"asset":"{HERO}","sub":"anim/bob"}}}},{{"at":0,"clip":{{"asset":"{HERO}","sub":"anim/wave"}}}}"#
+        )),
+    );
+    let r = p.cook();
+    assert_eq!(status(&r, SPACE), Status::Failed);
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.code == fynkel_contracts::Code::BLEND_POINTS
+                && d.pointer.as_deref() == Some("/points/1/at")),
+        "{:?}",
+        r.diagnostics
+    );
+    p.write(
+        "rigs/energy.blend.json",
+        &blend_doc(&format!(
+            r#"{{"at":0,"clip":{{"asset":"{GLB}","sub":"mesh/0"}}}}"#
+        )),
+    );
+    let mut scene: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(p.assets().join("scenes/main.scene.json")).unwrap(),
+    )
+    .unwrap();
+    scene["entities"]["c0000000-0000-4000-8000-0000000000e9"] = serde_json::json!({
+        "name": "Hero", "parent": null, "children": [],
+        "components": {
+            "c0000000-0000-4000-8000-0000000000c9": {
+                "type": "fynkel.Animator", "version": 1,
+                "data": { "clip": { "asset": SPACE }, "speed": 1.0, "looping": true, "playing": true, "weight": 1.0, "additive": false, "root_motion": false }
+            }
+        }
+    });
+    p.write(
+        "scenes/main.scene.json",
+        &serde_json::to_string_pretty(&scene).unwrap(),
+    );
+    let r = p.cook();
+    assert_eq!(status(&r, SPACE), Status::Failed);
+    assert_eq!(status(&r, MAIN), Status::Failed);
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.code == fynkel_contracts::Code::BLEND_CLIP
+                && d.pointer.as_deref() == Some("/points/0/clip")),
+        "{:?}",
+        r.diagnostics
+    );
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.code == fynkel_contracts::Code::IMPORT_SKIPPED
+            && d.message.contains("main.scene.json")
+            && d.message.contains("energy.blend.json failed")));
 }

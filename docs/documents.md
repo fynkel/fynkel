@@ -638,6 +638,42 @@ same match and exits 1 on any error — the check `fynkel validate` does
 not run (it resolves references, the bones are the cook's or `rig
 validate`'s to compare).
 
+## Blend spaces (M3-19c)
+
+`<name>.blend.json` (`schemas/blend.schema.json`, hand-written; kind
+`blend`, `fynkel_document::Blend`) is a 1D blend space: clips along a
+named parameter, played by a `fynkel.Animator` like one clip
+([animation.md](animation.md) § Blend spaces):
+
+```json
+{ "$schema": "https://fynkel.dev/schemas/blend.schema.json", "formatVersion": 1,
+  "id": "…", "name": "Player locomotion",
+  "parameter": "speed",
+  "points": [ { "at": 0, "clip": { "asset": "<character>", "sub": "anim/0" } },
+              { "at": 4, "clip": { "asset": "<character>", "sub": "anim/1" } },
+              { "at": 7, "clip": { "asset": "<character>", "sub": "anim/2" } } ],
+  "sync": "phase" }
+```
+
+`parameter` is an identifier; `points` holds 1 to 16 entries, each a
+clip — an `anim/*` sub-asset of a rig document or of a model source —
+at a finite `at`, **strictly increasing** (`FYN-D0600` at `/points`
+otherwise, and for no points); a clip that is not one, or nil, is
+`D0601` at `/points/<i>/clip` (an unknown sub is also `A0005`); a
+malformed entry, a non-finite `at` or an unknown `sync` is `D0602`;
+`sync` is `phase` (the only mode). A scene's animator names the
+document with no sub (`clip: { asset: <blend id> }`); the asset
+database lists the document as an asset of kind `document/blend` with
+no sub-assets. The cook validates the document (errors fail the asset;
+a scene naming a failed blend is `IMPORT_SKIPPED`) and writes it through
+the generic document path as a JSON chunk (`documentKind: blend`, the
+info carrying `parameter`, `points` and `sync`) whose dependencies are
+the clips' carriers (the rig or model), so a re-import re-cooks the
+space; the runtime store reads the chunk into a `BlendSpace`
+(`Assets::blend`) and registers it with every point's clip
+(`register_clip` on a blend id counts once). The lock's `documents`
+gains `blend: 1`.
+
 ## Migrations
 
 Each kind has a current `formatVersion` (`DocumentKind::supported_format_version`:
@@ -1298,8 +1334,10 @@ and `fynkel.Animator`/`fynkel.Skin` in the registry; since M3-19b a
 rig document, Column (`assets/rigs/column.rig.json`, id `…0050`: the
 skeleton `rig.glb`, clips `wave` = `anim/0` and `bob` = `anim/1`) that
 the Rig scene's `Imported` entity instances as `{ …0050, sub: "prefab" }`
-under an `Animator` on `anim/wave` — the project validates as 10
-documents, 5 sources, 28 references and cooks 15 assets).
+under an `Animator` on `anim/wave`; since M3-19c a blend space, Column
+energy (`assets/rigs/column.blend.json`, id `…0051`: `energy` 0 = the
+rig's `bob`, 1 = its `wave`) — the project validates as 11 documents, 5
+sources, 30 references and cooks 16 assets).
 `scene/physics_rules.scene.json` gained a `Solid zone` entity (a
 `TriggerZone` with an empty event on a non-sensor collider: `H0008` and
 the `H0009` warning). Every kind added later extends this corpus.

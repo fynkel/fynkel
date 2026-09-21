@@ -1101,9 +1101,9 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["project"]["name"], "Fixture Game");
-    assert_eq!(v["documents"], 10);
+    assert_eq!(v["documents"], 11);
     assert_eq!(v["sources"], 5);
-    assert_eq!(v["references"], 28);
+    assert_eq!(v["references"], 30);
     assert_eq!(v["lock"]["cache"]["container"], 1);
     let out = run(&["validate", "--project", fixture.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
@@ -1198,7 +1198,7 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
-    assert_eq!(v["assetCount"], 15);
+    assert_eq!(v["assetCount"], 16);
     assert_eq!(v["quality"]["default"], "medium");
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     let out = run(&[
@@ -1970,6 +1970,210 @@ fn khronos_rigs_assemble_into_a_rig_document() {
             .clone()
     };
     assert_ne!(pose("1"), pose("60"), "the run did not move the neck");
+
+    // A blend space (M3-19c): survey → walk → run along `speed`. The
+    // scene's animator plays the document; the headless run registers
+    // the space with its three clips; a parameter set from the world
+    // moves along it phase-synced — at 1.5 every bone is halfway between
+    // the walk and the run sampled at the same fraction of their own
+    // length, and the clock keeps its phase across the change.
+    let blend_id = "c0000000-0000-4000-8000-000000000059";
+    std::fs::write(
+        dir.join("assets/models/fox.blend.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "$schema": "https://fynkel.dev/schemas/blend.schema.json",
+            "formatVersion": 1,
+            "id": blend_id,
+            "name": "Fox locomotion",
+            "parameter": "speed",
+            "points": [
+                { "at": 0, "clip": { "asset": rig_id, "sub": "anim/survey" } },
+                { "at": 1, "clip": { "asset": rig_id, "sub": "anim/walk" } },
+                { "at": 2, "clip": { "asset": rig_id, "sub": "anim/run" } }
+            ],
+            "sync": "phase"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let blend_scene_id = "c0000000-0000-4000-8000-000000000039";
+    let mut blend_scene = scene.clone();
+    blend_scene["id"] = serde_json::json!(blend_scene_id);
+    blend_scene["name"] = serde_json::json!("Fox blend");
+    blend_scene["entities"]["c0000000-0000-4000-8000-0000000005e2"]["components"]
+        ["c0000000-0000-4000-8000-000000000505"]["data"]["clip"] =
+        serde_json::json!({ "asset": blend_id });
+    std::fs::write(
+        dir.join("assets/scenes/fox_blend.scene.json"),
+        serde_json::to_string_pretty(&blend_scene).unwrap(),
+    )
+    .unwrap();
+    let out = run(&["validate", "--project", project, "--json"]);
+    let v = json(&out);
+    assert_eq!(
+        (out.status.code(), v["errors"].as_u64()),
+        (Some(0), Some(0)),
+        "{v}"
+    );
+    let out = run(&["cook", "--project", project, "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run(&[
+        "test",
+        "--headless",
+        "--project",
+        project,
+        "--no-cook",
+        "--scene",
+        blend_scene_id,
+        "--steps",
+        "60",
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    assert_eq!(v["diagnostics"], 0, "{v}");
+    assert_eq!(v["animation"]["clips"], 1, "the space, with its clips");
+    assert_eq!(
+        v["animation"]["markers"], 0,
+        "the survey (the first point) carries no markers"
+    );
+    {
+        use fynkel_core::{AnimateOp, Command, Lane};
+        let cache = dir.join(".fynkel/cache");
+        let config = fynkel_host_headless::HeadlessConfig {
+            steps: 1,
+            cache: Some(cache),
+            scene: Some(blend_scene_id.to_string()),
+            ..fynkel_host_headless::HeadlessConfig::default()
+        };
+        let (report, mut world, loaded) = fynkel_host_headless::run_with(&config);
+        let loaded = loaded.expect("the scene loaded");
+        assert_eq!(report.diagnostics, 0, "{}", report.to_json());
+        let character = loaded
+            .entities()
+            .iter()
+            .find(|(id, _)| id.to_string() == "c0000000-0000-4000-8000-0000000005e2")
+            .map(|(_, e)| *e)
+            .unwrap();
+        let rig: fynkel_contracts::Uuid = rig_id.parse().unwrap();
+        let clip_of = |w: &fynkel_core::World, name: &str| {
+            w.clip(&fynkel_contracts::AssetRef::with_sub(
+                rig,
+                format!("anim/{name}"),
+            ))
+            .unwrap_or_else(|| panic!("{name} registered"))
+            .clone()
+        };
+        let (survey, walk, run_clip) = (
+            clip_of(&world, "survey"),
+            clip_of(&world, "walk"),
+            clip_of(&world, "run"),
+        );
+        assert!(world.has_blend(&fynkel_contracts::AssetRef::new(blend_id.parse().unwrap())));
+        let state = world.animator_state(character).unwrap();
+        assert!((state.duration - survey.duration).abs() < 1e-5, "{state:?}");
+        let animate = |w: &mut fynkel_core::World, ops: Vec<AnimateOp>| {
+            w.submit(
+                Lane::Simulation,
+                ops.into_iter()
+                    .map(|op| Command::Animate {
+                        entity: character,
+                        op,
+                    })
+                    .collect(),
+            );
+            let r = w.step();
+            assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
+        };
+        let set_speed = |v: f32| AnimateOp::SetParameter {
+            name: "speed".into(),
+            value: v,
+        };
+        // Onto the walk, then a change of parameter keeps the phase.
+        animate(&mut world, vec![set_speed(1.0)]);
+        let s = world.animator_state(character).unwrap();
+        assert!((s.duration - walk.duration).abs() < 1e-5, "{s:?}");
+        let phase = s.time / s.duration;
+        animate(&mut world, vec![set_speed(1.5)]);
+        let s = world.animator_state(character).unwrap();
+        let mid = (walk.duration + run_clip.duration) / 2.0;
+        assert!((s.duration - mid).abs() < 1e-5, "{s:?}");
+        assert!(
+            ((s.time / s.duration) - (phase + 1.0 / 60.0 / mid)).abs() < 1e-4,
+            "phase kept: {s:?} from {phase}"
+        );
+        // The pose at one phase: walk alone, run alone, and the middle.
+        let phase = 0.3;
+        let bones = |w: &fynkel_core::World| -> Vec<(String, [f32; 3], [f32; 4])> {
+            let dump = fynkel_host_headless::dump_json(w, &loaded);
+            let mut out: Vec<_> = dump["entities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["name"].as_str().unwrap_or("").starts_with("b_"))
+                .map(|e| {
+                    let f = |v: &serde_json::Value| v.as_f64().unwrap() as f32;
+                    let p = &e["local"]["position"];
+                    let q = &e["local"]["rotation"];
+                    (
+                        e["name"].as_str().unwrap().to_string(),
+                        [f(&p[0]), f(&p[1]), f(&p[2])],
+                        [f(&q[0]), f(&q[1]), f(&q[2]), f(&q[3])],
+                    )
+                })
+                .collect();
+            out.sort_by(|a, b| a.0.cmp(&b.0));
+            out
+        };
+        animate(
+            &mut world,
+            vec![set_speed(1.0), AnimateOp::SetTime(phase * walk.duration)],
+        );
+        let a = bones(&world);
+        animate(
+            &mut world,
+            vec![
+                set_speed(2.0),
+                AnimateOp::SetTime(phase * run_clip.duration),
+            ],
+        );
+        let b = bones(&world);
+        animate(
+            &mut world,
+            vec![set_speed(1.5), AnimateOp::SetTime(phase * mid)],
+        );
+        let c = bones(&world);
+        assert_eq!(a.len(), 23, "the Fox's b_ joints");
+        assert_ne!(a, b, "the walk and the run differ");
+        let mut checked = 0;
+        for ((na, pa, qa), ((nb, pb, qb), (nc, pc, qc))) in a.iter().zip(b.iter().zip(c.iter())) {
+            assert_eq!(na, nb);
+            assert_eq!(na, nc);
+            let qa = glam::Quat::from_array(*qa);
+            let qb = glam::Quat::from_array(*qb);
+            let qc = glam::Quat::from_array(*qc);
+            let expect_p = glam::Vec3::from(*pa).lerp(glam::Vec3::from(*pb), 0.5);
+            let expect_q = qa.slerp(qb, 0.5);
+            assert!(
+                (glam::Vec3::from(*pc) - expect_p).length() < 1e-3,
+                "{na}: {pc:?} vs {expect_p}"
+            );
+            assert!(
+                qc.abs_diff_eq(expect_q, 2e-3) || qc.abs_diff_eq(-expect_q, 2e-3),
+                "{na}: {qc:?} vs {expect_q:?}"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 23, "every bone sits between the two clips");
+    }
 
     // Two rigs with different bone names: the CesiumMan clip animates
     // bones the RiggedFigure does not have, so the rig is written with an

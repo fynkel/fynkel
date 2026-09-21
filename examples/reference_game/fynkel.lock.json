@@ -10,6 +10,7 @@
   },
   "schemaFingerprint": "0x68267f95a40bac58",
   "documents": {
+    "blend": 1,
     "material": 2,
     "meta": 1,
     "prefab": 3,

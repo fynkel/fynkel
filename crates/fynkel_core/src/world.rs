@@ -270,6 +270,8 @@ pub struct World {
     prefabs: HashMap<Uuid, Arc<SceneDescription>>,
     /// Clips `Animator`s may play and skins `Skin`s deform with (M3-19).
     clips: animation::ClipTable,
+    /// Blend spaces an `Animator` may play in a clip's place (M3-19c).
+    blends: animation::BlendTable,
     skins: animation::SkinTable,
     /// The scenes this world holds, in load order (M3-12): what a replace
     /// load or `unload_scene` takes down.
@@ -332,6 +334,7 @@ impl World {
             named_targets: HashMap::new(),
             prefabs: HashMap::new(),
             clips: HashMap::new(),
+            blends: HashMap::new(),
             skins: HashMap::new(),
             scenes: Vec::new(),
             system_times: SYSTEMS

@@ -316,6 +316,112 @@ impl Clip {
     }
 }
 
+/// How the clips of a blend space share a clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BlendSync {
+    /// The clips advance by normalized phase: the blend's clock runs over
+    /// a duration interpolated between the two active clips', and each
+    /// clip is sampled at the same fraction of its own length — a walk
+    /// and a run keep their feet together.
+    #[default]
+    Phase,
+}
+
+/// One point of a blend space: the clip that plays alone when the
+/// parameter is exactly `at`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlendPoint {
+    pub at: f32,
+    pub clip: fynkel_contracts::AssetRef,
+}
+
+/// A 1D blend space (M3-19c, `<name>.blend.json`): clips placed along
+/// one named parameter. An `Animator` plays it like a clip; the world
+/// blends the two points around the parameter's value (clamped to the
+/// first and last point) at the fraction between them, phase-synced.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BlendSpace {
+    pub name: String,
+    /// The parameter the space reads (`SetParameter { name, .. }`).
+    pub parameter: String,
+    /// Sorted by `at`, strictly increasing.
+    pub points: Vec<BlendPoint>,
+    pub sync: BlendSync,
+}
+
+impl BlendSpace {
+    /// The most points one blend space may have.
+    pub const MAX_POINTS: usize = 16;
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.parameter.is_empty() {
+            return Err(format!("{}: the parameter needs a name", self.name));
+        }
+        if self.points.is_empty() {
+            return Err(format!(
+                "{}: a blend space needs at least one point",
+                self.name
+            ));
+        }
+        if self.points.len() > Self::MAX_POINTS {
+            return Err(format!(
+                "{}: {} points; at most {} are supported",
+                self.name,
+                self.points.len(),
+                Self::MAX_POINTS
+            ));
+        }
+        for (i, p) in self.points.iter().enumerate() {
+            if !p.at.is_finite() {
+                return Err(format!("{} point {i}: `at` must be finite", self.name));
+            }
+            if p.clip.is_nil() {
+                return Err(format!("{} point {i}: the clip is not set", self.name));
+            }
+            if i > 0 && self.points[i - 1].at >= p.at {
+                return Err(format!(
+                    "{} point {i}: points must be strictly increasing in `at`",
+                    self.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The parameter's value the space plays for `value`: clamped to the
+    /// first and last point.
+    pub fn clamp(&self, value: f32) -> f32 {
+        match (self.points.first(), self.points.last()) {
+            (Some(a), Some(b)) => value.clamp(a.at, b.at),
+            _ => value,
+        }
+    }
+
+    /// The two points around `value` and the fraction from the first to
+    /// the second: `(i, j, t)` with `i == j` and `t == 0` on a point (or
+    /// past the ends, or with one point).
+    pub fn segment(&self, value: f32) -> (usize, usize, f32) {
+        let n = self.points.len();
+        if n == 0 {
+            return (0, 0, 0.0);
+        }
+        let value = self.clamp(value);
+        let j = self.points.partition_point(|p| p.at < value);
+        if j == 0 {
+            return (0, 0, 0.0);
+        }
+        if j >= n {
+            return (n - 1, n - 1, 0.0);
+        }
+        let (a, b) = (self.points[j - 1].at, self.points[j].at);
+        if value == b {
+            return (j, j, 0.0);
+        }
+        let t = ((value - a) / (b - a)).clamp(0.0, 1.0);
+        (j - 1, j, t)
+    }
+}
+
 /// What a sampled clip sets on one entity: each property only when a
 /// channel keyed it (the entity's other properties are left alone).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -645,6 +751,63 @@ mod tests {
         assert!(bad.validate().is_err());
         bad.channels[0].times[1] = 5.0;
         assert!(bad.validate().unwrap_err().contains("past the duration"));
+    }
+
+    #[test]
+    fn a_blend_space_finds_its_segment_and_validates() {
+        let r = |n: u128| {
+            fynkel_contracts::AssetRef::with_sub(
+                fynkel_contracts::Uuid::from_bytes(n.to_be_bytes()),
+                "anim/x",
+            )
+        };
+        let space = BlendSpace {
+            name: "locomotion".into(),
+            parameter: "speed".into(),
+            points: vec![
+                BlendPoint {
+                    at: 0.0,
+                    clip: r(1),
+                },
+                BlendPoint {
+                    at: 1.0,
+                    clip: r(2),
+                },
+                BlendPoint {
+                    at: 3.0,
+                    clip: r(3),
+                },
+            ],
+            sync: BlendSync::Phase,
+        };
+        assert!(space.validate().is_ok());
+        assert_eq!(space.segment(-5.0), (0, 0, 0.0));
+        assert_eq!(space.segment(0.0), (0, 0, 0.0));
+        assert_eq!(space.segment(0.5), (0, 1, 0.5));
+        assert_eq!(space.segment(1.0), (1, 1, 0.0));
+        assert_eq!(space.segment(2.0), (1, 2, 0.5));
+        assert_eq!(space.segment(3.0), (2, 2, 0.0));
+        assert_eq!(space.segment(9.0), (2, 2, 0.0));
+        let one = BlendSpace {
+            points: vec![BlendPoint {
+                at: 2.0,
+                clip: r(1),
+            }],
+            ..space.clone()
+        };
+        assert_eq!(one.segment(7.0), (0, 0, 0.0));
+        let mut bad = space.clone();
+        bad.points[1].at = 0.0;
+        assert!(bad.validate().unwrap_err().contains("strictly increasing"));
+        bad = space.clone();
+        bad.points.clear();
+        assert!(bad.validate().is_err());
+        bad = space.clone();
+        bad.parameter.clear();
+        assert!(bad.validate().is_err());
+        bad = space;
+        bad.points[0].clip = fynkel_contracts::AssetRef::default();
+        assert!(bad.validate().unwrap_err().contains("not set"));
     }
 
     #[test]

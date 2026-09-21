@@ -127,7 +127,7 @@
           "default": 0.15,
           "min": 0,
           "step": 0.05,
-          "description": "Seconds a clip change blends over."
+          "description": "Seconds the landing blends back into the locomotion over."
         },
         {
           "name": "cameraName",
@@ -145,17 +145,13 @@
           "description": "Falling below this height is a death."
         },
         {
-          "name": "idleAnim",
-          "type": "string",
+          "name": "jumpClip",
+          "type": "assetRef",
           "nullable": false,
-          "default": "anim/0",
-          "description": "The clips' sub-asset names on the character the scene's animator names: `anim/[index]` for a model whose file carries them (the box character), `anim/[name]` for a rig document (M3-19b; `--hero [name].rig.json` sets these). So the model can be swapped without touching the code."
-        },
-        {
-          "name": "jumpAnim",
-          "type": "string",
-          "nullable": false,
-          "default": "anim/3"
+          "default": {
+            "asset": "00000000-0000-0000-0000-000000000000"
+          },
+          "description": "The jump, played once over the locomotion: `anim/3` of the box character, `anim/jump` of a rig document (`--hero` sets it), so the model can be swapped without touching the code."
         },
         {
           "name": "jumpSpeed",
@@ -167,10 +163,11 @@
           "description": "Upward speed of a jump."
         },
         {
-          "name": "runAnim",
+          "name": "speedParameter",
           "type": "string",
           "nullable": false,
-          "default": "anim/2"
+          "default": "speed",
+          "description": "The name of the blend space's parameter (player.blend.json)."
         },
         {
           "name": "sprintFactor",
@@ -182,12 +179,6 @@
           "description": "Multiplier while the `sprint` action is held."
         },
         {
-          "name": "walkAnim",
-          "type": "string",
-          "nullable": false,
-          "default": "anim/1"
-        },
-        {
           "name": "walkSpeed",
           "type": "number",
           "nullable": false,
@@ -195,6 +186,13 @@
           "min": 0,
           "step": 0.1,
           "description": "Metres per second on the ground."
+        },
+        {
+          "name": "waveLayer",
+          "type": "string",
+          "nullable": false,
+          "default": "spine",
+          "description": "The entity below the player carrying the wave layer's animator (`spine` on the box character, `Rig` on a downloaded one); empty when the character has no wave."
         }
       ],
       "schema": {
@@ -209,7 +207,7 @@
             "type": "number",
             "minimum": 0,
             "default": 0.15,
-            "description": "Seconds a clip change blends over.",
+            "description": "Seconds the landing blends back into the locomotion over.",
             "x-fynkel": {
               "type": "number",
               "min": 0,
@@ -233,19 +231,14 @@
               "step": 0.5
             }
           },
-          "idleAnim": {
-            "type": "string",
-            "default": "anim/0",
-            "description": "The clips' sub-asset names on the character the scene's animator names: `anim/[index]` for a model whose file carries them (the box character), `anim/[name]` for a rig document (M3-19b; `--hero [name].rig.json` sets these). So the model can be swapped without touching the code.",
+          "jumpClip": {
+            "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
+            "default": {
+              "asset": "00000000-0000-0000-0000-000000000000"
+            },
+            "description": "The jump, played once over the locomotion: `anim/3` of the box character, `anim/jump` of a rig document (`--hero` sets it), so the model can be swapped without touching the code.",
             "x-fynkel": {
-              "type": "string"
-            }
-          },
-          "jumpAnim": {
-            "type": "string",
-            "default": "anim/3",
-            "x-fynkel": {
-              "type": "string"
+              "type": "assetRef"
             }
           },
           "jumpSpeed": {
@@ -259,9 +252,10 @@
               "step": 0.1
             }
           },
-          "runAnim": {
+          "speedParameter": {
             "type": "string",
-            "default": "anim/2",
+            "default": "speed",
+            "description": "The name of the blend space's parameter (player.blend.json).",
             "x-fynkel": {
               "type": "string"
             }
@@ -277,13 +271,6 @@
               "step": 0.1
             }
           },
-          "walkAnim": {
-            "type": "string",
-            "default": "anim/1",
-            "x-fynkel": {
-              "type": "string"
-            }
-          },
           "walkSpeed": {
             "type": "number",
             "minimum": 0,
@@ -293,6 +280,14 @@
               "type": "number",
               "min": 0,
               "step": 0.1
+            }
+          },
+          "waveLayer": {
+            "type": "string",
+            "default": "spine",
+            "description": "The entity below the player carrying the wave layer's animator (`spine` on the box character, `Rig` on a downloaded one); empty when the character has no wave.",
+            "x-fynkel": {
+              "type": "string"
             }
           }
         },

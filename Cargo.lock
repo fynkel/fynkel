@@ -786,6 +786,7 @@ dependencies = [
  "fynkel_host_headless",
  "fynkel_import",
  "fynkel_render",
+ "glam 0.33.7",
  "image",
  "serde",
  "serde_json",

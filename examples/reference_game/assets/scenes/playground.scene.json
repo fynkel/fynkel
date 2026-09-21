@@ -69,10 +69,11 @@
             "jumpSpeed": 5.5,
             "cameraName": "Camera",
             "fallY": -6.0,
-            "idleAnim": "anim/0",
-            "walkAnim": "anim/1",
-            "runAnim": "anim/2",
-            "jumpAnim": "anim/3"
+            "jumpClip": {
+              "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+              "sub": "anim/3"
+            },
+            "waveLayer": "spine"
           }
         },
         "973546b9-5862-5208-a67e-04c0be7073d4": {
@@ -80,8 +81,7 @@
           "version": 1,
           "data": {
             "clip": {
-              "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
-              "sub": "anim/0"
+              "asset": "fe19bb98-79ee-5ad4-aa1d-c147149b490b"
             },
             "speed": 1.0,
             "looping": true,
@@ -211,6 +211,22 @@
               1.0,
               1.0
             ]
+          }
+        },
+        "1e0c91fd-ccd2-5ed6-a5b9-f8e0b127dcb4": {
+          "type": "fynkel.Animator",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+              "sub": "anim/4"
+            },
+            "speed": 1.0,
+            "looping": false,
+            "playing": false,
+            "weight": 1.0,
+            "additive": true,
+            "root_motion": false
           }
         }
       }

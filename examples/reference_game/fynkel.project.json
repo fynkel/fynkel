@@ -52,6 +52,15 @@
         "touch:overlay/interact"
       ]
     },
+    "wave": {
+      "type": "button",
+      "description": "Wave: the upper-body layer plays once over whatever the legs do.",
+      "bindings": [
+        "keyboard:F",
+        "gamepad:east",
+        "touch:overlay/wave"
+      ]
+    },
     "pause": {
       "type": "button",
       "description": "Pause (the app reads it, not a behaviour).",

@@ -192,7 +192,7 @@ fn the_fixture_project_reads_and_validates_clean() {
     );
     assert_eq!(
         (report.documents, report.sources, report.references),
-        (10, 5, 28)
+        (11, 5, 30)
     );
     assert!(report.lock.is_some());
     let json = report.json();
@@ -212,7 +212,7 @@ fn describe_json_lists_everything() {
     assert_eq!(v["name"], "Fixture Game");
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["assets"], "assets");
-    assert_eq!(v["assetCount"], 15);
+    assert_eq!(v["assetCount"], 16);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 4);
     assert_eq!(v["quality"]["default"], "medium");
     assert_eq!(v["components"].as_array().unwrap().len(), 21);
@@ -272,7 +272,7 @@ fn a_missing_lock_is_p0010_and_a_stale_lock_is_p0011_per_field() {
     );
     // A stale lock never stops the rest of the project being checked.
     let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
-    assert_eq!(report.documents, 10);
+    assert_eq!(report.documents, 11);
 }
 
 #[test]
@@ -807,6 +807,8 @@ fn rig_documents_validate_against_the_database() {
             .map(|(c, p)| (c.as_str(), p.as_deref()))
             .collect::<Vec<_>>(),
         [
+            // The fixture's blend space names `anim/wave` (M3-19c).
+            ("FYN-A0005", Some("/points/1/clip")),
             ("FYN-D0100", Some("/clips")),
             ("FYN-D0502", Some("/clips/fast run")),
             // The fixture's markers name `wave` (M3-19c): orphaned now.
@@ -829,6 +831,7 @@ fn rig_documents_validate_against_the_database() {
             .map(|(c, p)| (c.as_str(), p.as_deref()))
             .collect::<Vec<_>>(),
         [
+            ("FYN-A0005", Some("/points/1/clip")),
             ("FYN-D0502", Some("/markers/wave")),
             (
                 "FYN-A0005",
@@ -867,4 +870,122 @@ fn rig_documents_validate_against_the_database() {
         edit(&|v| v["markers"]["bob"] = serde_json::json!([{ "at": 1.0, "name": "lift" }])),
         []
     );
+}
+
+/// Blend spaces (M3-19c, `docs/documents.md` § Blend spaces): the points
+/// strictly increasing (`D0600`), every point an animation clip of a rig
+/// or a model (`D0601`), a malformed entry `D0602`, unknown ids the
+/// database's `A0004`/`A0005`.
+#[test]
+fn blend_documents_validate_against_the_database() {
+    use fynkel_document::{Blend, Document};
+
+    const BLEND_DOC: &str = "assets/rigs/column.blend.json";
+    const BLEND: &str = "c0000000-0000-4000-8000-000000000051";
+    const COLUMN: &str = "c0000000-0000-4000-8000-000000000050";
+    const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+    const SWATCH: &str = "c0000000-0000-4000-8000-000000000003";
+
+    let schemas = schemas();
+    let (db, diags) = AssetDatabase::scan(&fixtures().join("assets"), &schemas);
+    assert!(diags.is_empty(), "{diags:#?}");
+    let id: uuid::Uuid = BLEND.parse().unwrap();
+    let entry = db.get(id).unwrap();
+    assert_eq!(
+        entry.kind,
+        fynkel_document::AssetKind::Document(fynkel_document::DocumentKind::Blend)
+    );
+    assert!(entry.sub_assets.is_empty());
+    let doc = Document::read(&fixtures().join(BLEND_DOC), None).unwrap();
+    assert_eq!(doc.kind, fynkel_document::DocumentKind::Blend);
+    let blend = Blend::from_document(doc);
+    assert_eq!(blend.parameter, "energy");
+    assert_eq!(blend.sync, "phase");
+    assert_eq!(
+        blend
+            .points
+            .iter()
+            .map(|p| (p.at, p.clip.sub.as_str(), p.pointer.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (0.0, "anim/bob", "/points/0"),
+            (1.0, "anim/wave", "/points/1")
+        ]
+    );
+    assert!(blend.validate(&schemas).is_empty());
+    assert!(blend.validate_references(&db).is_empty());
+
+    let t = Temp::new("blend-doc");
+    let original = t.read(BLEND_DOC);
+    let edit = |f: &dyn Fn(&mut serde_json::Value)| {
+        let mut v: serde_json::Value = serde_json::from_str(&original).unwrap();
+        f(&mut v);
+        t.write(BLEND_DOC, &serde_json::to_string_pretty(&v).unwrap());
+        t.codes()
+    };
+    let codes_of = |codes: &[(String, Option<String>)]| {
+        codes
+            .iter()
+            .map(|(c, p)| (c.clone(), p.clone()))
+            .collect::<Vec<_>>()
+    };
+    let d = |code: &str, pointer: &str| (code.to_string(), Some(pointer.to_string()));
+
+    // Out of order, equal, and a single point (fine).
+    let codes = edit(&|v| v["points"][1]["at"] = serde_json::json!(-1));
+    assert_eq!(codes_of(&codes), [d("FYN-D0600", "/points/1/at")]);
+    let codes = edit(&|v| v["points"][1]["at"] = serde_json::json!(0));
+    assert_eq!(codes_of(&codes), [d("FYN-D0600", "/points/1/at")]);
+    let codes = edit(&|v| {
+        v["points"].as_array_mut().unwrap().pop();
+    });
+    assert!(codes.is_empty(), "{codes:?}");
+    let codes = edit(&|v| v["points"] = serde_json::json!([]));
+    assert_eq!(codes_of(&codes), [d("FYN-D0100", "/points")]);
+
+    // A point naming the model's mesh, the whole rig, a texture, the
+    // model's own clip (fine: a model's `anim/<n>` is a clip too), or a
+    // nil id.
+    let codes =
+        edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": RIG, "sub": "mesh/0" }));
+    assert_eq!(codes_of(&codes), [d("FYN-D0601", "/points/1/clip")]);
+    let codes = edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": COLUMN }));
+    assert_eq!(codes_of(&codes), [d("FYN-D0601", "/points/1/clip")]);
+    let codes = edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": SWATCH }));
+    assert_eq!(codes_of(&codes), [d("FYN-D0601", "/points/1/clip")]);
+    let codes =
+        edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": RIG, "sub": "anim/1" }));
+    assert!(codes.is_empty(), "{codes:?}");
+    let codes = edit(&|v| {
+        v["points"][1]["clip"] =
+            serde_json::json!({ "asset": "00000000-0000-0000-0000-000000000000" })
+    });
+    assert_eq!(codes_of(&codes), [d("FYN-D0601", "/points/1/clip/asset")]);
+    // An unknown sub is the database's.
+    let codes = edit(&|v| v["points"][1]["clip"]["sub"] = serde_json::json!("anim/nope"));
+    assert_eq!(codes_of(&codes), [d("FYN-A0005", "/points/1/clip")]);
+
+    // Malformed entries: a non-finite `at` the schema refuses, a clip
+    // that is not an object, a missing parameter, another sync.
+    let codes = edit(&|v| v["points"][0]["clip"] = serde_json::json!("walk"));
+    assert_eq!(codes_of(&codes), [d("FYN-D0100", "/points/0/clip")]);
+    let codes = edit(&|v| {
+        v.as_object_mut().unwrap().remove("parameter");
+    });
+    assert_eq!(codes_of(&codes), [d("FYN-D0100", "")]);
+    let codes = edit(&|v| v["parameter"] = serde_json::json!(""));
+    assert_eq!(codes_of(&codes), [d("FYN-D0100", "/parameter")]);
+    let codes = edit(&|v| v["sync"] = serde_json::json!("time"));
+    assert_eq!(codes_of(&codes), [d("FYN-D0100", "/sync")]);
+    // The read view reports what the schema cannot see: a point that is
+    // not an object (schema) and, on a lenient parse, its own codes.
+    let text = original.replace("\"at\": 1,", "\"at\": 1e999,");
+    let doc = Document::parse(fynkel_document::DocumentKind::Blend, None, &text);
+    if let Ok(doc) = doc {
+        let blend = Blend::from_document(doc);
+        assert!(blend
+            .read_diagnostics()
+            .iter()
+            .any(|d| d.code == fynkel_document::Code::BLEND_MALFORMED_ENTRY));
+    }
 }

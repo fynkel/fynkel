@@ -238,10 +238,10 @@ class _GamePageState extends State<GamePage> {
   }
 }
 
-/// The HUD counter: `Coins n / 10`, the clock and the deaths, one widget per
-/// model field — `collected` rebuilds when a coin is taken, the clock
-/// every tenth, `deaths` on a death, never on a frame where nothing
-/// changed.
+/// The HUD counter: `Coins n / 10`, the clock, the deaths and the
+/// footsteps, one widget per model field — `collected` rebuilds when a
+/// coin is taken, the clock every tenth, `deaths` on a death, `footsteps`
+/// on a marker, never on a frame where nothing changed.
 class Counter extends StatelessWidget {
   const Counter({super.key});
 
@@ -280,6 +280,10 @@ class Counter extends StatelessWidget {
         ModelBuilder<int>(
           value: state.deaths,
           builder: (_, n, _) => Text(n == 0 ? '' : 'deaths $n', style: small),
+        ),
+        ModelBuilder<int>(
+          value: state.footsteps,
+          builder: (_, n, _) => Text(n == 0 ? '' : 'steps $n', style: small),
         ),
       ],
     );

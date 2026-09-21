@@ -964,11 +964,27 @@ fn cook_one(
                     return None;
                 }
             };
+            let mut info = json!({ "documentKind": doc.kind.name() });
+            // A blend space (M3-19c) is written as it is, once its points
+            // are in order and name clips: the runtime reads the document.
+            if doc.kind == DocumentKind::Blend {
+                let blend = fynkel_document::Blend::from_document(doc.clone());
+                let mut checked = blend.validate(schemas);
+                checked.extend(blend.validate_references(db));
+                let bad = has_errors(&checked);
+                diagnostics.extend(checked);
+                if bad {
+                    return None;
+                }
+                info["parameter"] = json!(blend.parameter);
+                info["points"] = json!(blend.points.len());
+                info["sync"] = json!(blend.sync);
+            }
             chunks.push(ChunkPlan {
                 kind: KIND_JSON,
                 name: entry.name.clone(),
                 sub: None,
-                info: json!({ "documentKind": doc.kind.name() }),
+                info,
                 payload: text.into_bytes(),
             });
             if let Some(c) = material_chunk(doc, &entry.name, None) {

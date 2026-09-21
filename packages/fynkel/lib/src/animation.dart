@@ -63,7 +63,8 @@ class AnimatorState {
   /// The layer weight (`AnimationControl.weight`), `0…1`.
   final double weight;
 
-  /// The last value set with `setParameter` (what a blend space reads).
+  /// The parameter a playing blend space reads (else the last value set
+  /// with `setParameter`).
   final double parameter;
 
   /// Root motion taken out of the pose over the last tick, in the

@@ -84,18 +84,11 @@ final BehaviourType gamePlayerType = BehaviourType(
       set: (b, v) => (b as _lib2.Player).fallY = _double(v),
     ),
     BehaviourField(
-      name: 'idleAnim',
-      type: 'string',
-      defaultValue: 'anim/0',
-      get: (b) => (b as _lib2.Player).idleAnim,
-      set: (b, v) => (b as _lib2.Player).idleAnim = v as String,
-    ),
-    BehaviourField(
-      name: 'jumpAnim',
-      type: 'string',
-      defaultValue: 'anim/3',
-      get: (b) => (b as _lib2.Player).jumpAnim,
-      set: (b, v) => (b as _lib2.Player).jumpAnim = v as String,
+      name: 'jumpClip',
+      type: 'assetRef',
+      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
+      get: (b) => _assetRefJson((b as _lib2.Player).jumpClip),
+      set: (b, v) => (b as _lib2.Player).jumpClip = _assetRef(v),
     ),
     BehaviourField(
       name: 'jumpSpeed',
@@ -107,11 +100,11 @@ final BehaviourType gamePlayerType = BehaviourType(
       set: (b, v) => (b as _lib2.Player).jumpSpeed = _double(v),
     ),
     BehaviourField(
-      name: 'runAnim',
+      name: 'speedParameter',
       type: 'string',
-      defaultValue: 'anim/2',
-      get: (b) => (b as _lib2.Player).runAnim,
-      set: (b, v) => (b as _lib2.Player).runAnim = v as String,
+      defaultValue: 'speed',
+      get: (b) => (b as _lib2.Player).speedParameter,
+      set: (b, v) => (b as _lib2.Player).speedParameter = v as String,
     ),
     BehaviourField(
       name: 'sprintFactor',
@@ -123,13 +116,6 @@ final BehaviourType gamePlayerType = BehaviourType(
       set: (b, v) => (b as _lib2.Player).sprintFactor = _double(v),
     ),
     BehaviourField(
-      name: 'walkAnim',
-      type: 'string',
-      defaultValue: 'anim/1',
-      get: (b) => (b as _lib2.Player).walkAnim,
-      set: (b, v) => (b as _lib2.Player).walkAnim = v as String,
-    ),
-    BehaviourField(
       name: 'walkSpeed',
       type: 'number',
       defaultValue: 4.0,
@@ -137,6 +123,13 @@ final BehaviourType gamePlayerType = BehaviourType(
       step: 0.1,
       get: (b) => (b as _lib2.Player).walkSpeed,
       set: (b, v) => (b as _lib2.Player).walkSpeed = _double(v),
+    ),
+    BehaviourField(
+      name: 'waveLayer',
+      type: 'string',
+      defaultValue: 'spine',
+      get: (b) => (b as _lib2.Player).waveLayer,
+      set: (b, v) => (b as _lib2.Player).waveLayer = v as String,
     ),
   ],
 );
@@ -188,3 +181,11 @@ int _int(Object? v) {
   if (d != d.truncateToDouble()) throw FormatException('expected an integer, got $d');
   return d.toInt();
 }
+
+AssetRef _assetRef(Object? v) {
+  final m = v as Map;
+  return AssetRef(m['asset'] as String, sub: m['sub'] as String?);
+}
+
+Map<String, Object?>? _assetRefJson(AssetRef? r) =>
+    r == null ? null : {'asset': r.asset, if (r.sub != null) 'sub': r.sub};

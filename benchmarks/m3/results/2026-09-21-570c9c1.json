@@ -1,0 +1,344 @@
+{
+  "profile": {
+    "profile": "mac-m3max-2026",
+    "frozen": "2026-09-19",
+    "machine": {
+      "model": "MacBook Pro 16-inch, Apple M3 Max",
+      "cpu": "Apple M3 Max, 14 cores",
+      "gpu": "Apple M3 Max, 30 cores, Metal 4",
+      "ram_gib": 36,
+      "display": "built-in 3456x2234 Retina, 120 Hz ProMotion, scale 2.0"
+    },
+    "os": "macOS 26.5.1",
+    "graphics_backend": "Metal (wgpu 30.0.1)",
+    "toolchain": {
+      "rust": "1.93.0 aarch64-apple-darwin",
+      "flutter": "3.47.2 (Impeller)",
+      "dart": "3.13.2",
+      "xcode": "26.5 (17F42)"
+    },
+    "resolution": {
+      "standalone_window_logical": [
+        1280,
+        720
+      ],
+      "flutter_window_logical": [
+        1200,
+        820
+      ],
+      "flutter_viewport_physical_note": "window minus host bar, times dpr 2.0; recorded per run"
+    },
+    "quality": "M0 cube scene, no MSAA, Depth32Float, Bgra8Unorm, Fifo/vsync",
+    "scene_version": "fynkel_m0_scene 0.0.1 (one lit cube)",
+    "warm_up_seconds": 2,
+    "sample_seconds": 10,
+    "capture_command": "python3 benchmarks/m0/capture.py",
+    "power": "capture on mains power, no other GPU-heavy apps; display at native scaling"
+  },
+  "environment": {
+    "captured_at": "2026-09-21T16:19:05+02:00",
+    "commit": "570c9c1",
+    "dirty": true,
+    "os": "26.5.1",
+    "cpu": "Apple M3 Max",
+    "ram_gib": 36,
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "flutter": "Flutter 3.47.2 \u2022 channel stable \u2022 https://github.com/flutter/flutter.git",
+    "dart": "Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on \"macos_arm64\"",
+    "xcode": "Xcode 26.5"
+  },
+  "warmup_seconds": 2,
+  "sample_seconds": 10,
+  "stress": {
+    "generator": "/Users/oumari/Desktop/Code/fynkelengine/benchmarks/stress/project: 8406 entities (5000 native movers, 500 bodies, 300 behaviours, 200 animated rigs), 8 materials, 16 distinct (mesh, material) pairs",
+    "entities": 8406,
+    "meshes": 6001,
+    "instances": 5530,
+    "culled": 471,
+    "draws": 16,
+    "batches": 16,
+    "transparent": 0,
+    "shadow_casters": 5904,
+    "shadow_draws": 15,
+    "shadow_map": 2048,
+    "quality": {
+      "profile": "medium",
+      "shadows": true,
+      "shadowResolution": 2048,
+      "msaa": 4,
+      "renderScale": 1.0,
+      "anisotropy": 8,
+      "renderSize": [
+        1280,
+        720
+      ]
+    }
+  },
+  "physics": {
+    "steps": 600,
+    "step_time_us": {
+      "p50_us": 3893,
+      "p95_us": 4832,
+      "max_us": 10154
+    },
+    "total_ms": 2678.7695,
+    "checksum": "6fb81c2c293fcdbe",
+    "settled_steps": 1800,
+    "settled_step_time_us": {
+      "p50_us": 3537,
+      "p95_us": 4253,
+      "max_us": 9832
+    },
+    "settled_checksum": "52822ab017fcd48a",
+    "live_entities": 8486,
+    "systems": [
+      {
+        "system": "step",
+        "entities": 8486,
+        "total_us": 6467133,
+        "max_us": 9832,
+        "mean_us": 3592.8516
+      },
+      {
+        "system": "commands",
+        "entities": 0,
+        "total_us": 41,
+        "max_us": 22,
+        "mean_us": 0.022777777
+      },
+      {
+        "system": "characters",
+        "entities": 0,
+        "total_us": 94,
+        "max_us": 17,
+        "mean_us": 0.052222222
+      },
+      {
+        "system": "animation",
+        "entities": 450,
+        "total_us": 612670,
+        "max_us": 1020,
+        "mean_us": 340.37222
+      },
+      {
+        "system": "rotator",
+        "entities": 1668,
+        "total_us": 22986,
+        "max_us": 54,
+        "mean_us": 12.77
+      },
+      {
+        "system": "oscillate",
+        "entities": 1668,
+        "total_us": 40908,
+        "max_us": 359,
+        "mean_us": 22.726667
+      },
+      {
+        "system": "lifetimeDespawn",
+        "entities": 39,
+        "total_us": 730,
+        "max_us": 36,
+        "mean_us": 0.40555555
+      },
+      {
+        "system": "emitter",
+        "entities": 1,
+        "total_us": 6451,
+        "max_us": 242,
+        "mean_us": 3.583889
+      },
+      {
+        "system": "physics",
+        "entities": 6081,
+        "total_us": 4389323,
+        "max_us": 5825,
+        "mean_us": 2438.5127
+      },
+      {
+        "system": "cameraRigs",
+        "entities": 0,
+        "total_us": 262,
+        "max_us": 31,
+        "mean_us": 0.14555556
+      },
+      {
+        "system": "follow",
+        "entities": 1,
+        "total_us": 2335,
+        "max_us": 57,
+        "mean_us": 1.2972223
+      },
+      {
+        "system": "lookAtCamera",
+        "entities": 1664,
+        "total_us": 224386,
+        "max_us": 1244,
+        "mean_us": 124.65889
+      },
+      {
+        "system": "transforms",
+        "entities": 5539,
+        "total_us": 1155387,
+        "max_us": 2568,
+        "mean_us": 641.88165
+      },
+      {
+        "system": "publish",
+        "entities": 0,
+        "total_us": 48,
+        "max_us": 11,
+        "mean_us": 0.026666667
+      }
+    ],
+    "animation": {
+      "entities": 450,
+      "clips": 4,
+      "skins": 1,
+      "skinned_meshes": 200,
+      "joints": 2200,
+      "ended": 0,
+      "markers": 10975,
+      "diagnostics": 0
+    },
+    "bodies": 540,
+    "colliders": 5541,
+    "mesh_colliders": 0,
+    "characters": 0,
+    "collision_enter": 3322,
+    "collision_stay": 0,
+    "collision_exit": 2554,
+    "trigger_enter": 0,
+    "trigger_exit": 0,
+    "diagnostics": 0
+  },
+  "standalone": {
+    "windows_total": 13,
+    "frames_per_s": 122.0,
+    "skipped_total": 0.0,
+    "interval_ms": {
+      "p50": 8.33,
+      "p95": 8.73,
+      "p99": 9.1,
+      "windows": 11
+    },
+    "cpu_encode_submit_ms": {
+      "p50": 1.835,
+      "p95": 1.935,
+      "p99": 3.004,
+      "windows": 11
+    },
+    "draws": 16,
+    "instances": 5572,
+    "culled": 468,
+    "batches": 16,
+    "skinned": 183,
+    "shadow_casters": 5942,
+    "shadow_draws": 15
+  },
+  "flutter_path_a": {
+    "windows_total": 14,
+    "instances": 5369,
+    "draws": 16,
+    "culled": 671,
+    "shadow_casters": 5839,
+    "shadow_draws": 15,
+    "viewport_physical": [
+      2400,
+      1480
+    ],
+    "ticks_per_s": 120.0,
+    "dropped_total": 0,
+    "stale_presents_total": 5,
+    "rendered_per_s": 120.0,
+    "tick_interval_ms": {
+      "p50": 8.33,
+      "p95": 8.34,
+      "p99": 8.34,
+      "windows": 12
+    },
+    "render_call_ms": {
+      "p50": 3.95,
+      "p95": 4.095,
+      "p99": 4.29,
+      "windows": 12
+    },
+    "rust_cpu_ms": {
+      "p50": 0.1695,
+      "p95": 0.23,
+      "p99": 0.327,
+      "windows": 12
+    },
+    "gpu_complete_ms": {
+      "p50": 1.41,
+      "p95": 2.86,
+      "p99": 3.78,
+      "windows": 12
+    },
+    "present_lag_frames": {
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0,
+      "windows": 12
+    },
+    "flutter_frames_per_s": 121,
+    "ui_build_ms": {
+      "p50": 7.3,
+      "p95": 8.1,
+      "p99": 8.45,
+      "windows": 11
+    },
+    "raster_ms": {
+      "p50": 1.47,
+      "p95": 2.86,
+      "p99": 3.82,
+      "windows": 11
+    }
+  },
+  "gate": [
+    {
+      "check": "5 000 static meshes cooked and drawn",
+      "passed": true
+    },
+    {
+      "check": "standalone at the display's 120 Hz (\u2265 118 frames/s, p99 interval < 10 ms)",
+      "passed": true
+    },
+    {
+      "check": "draw calls \u2264 distinct (mesh, material) pairs (16 \u2264 16)",
+      "passed": true
+    },
+    {
+      "check": "culling drops off-screen instances (471 culled)",
+      "passed": true
+    },
+    {
+      "check": "\u2265 500 rigid bodies stepped headlessly (540 bodies, 5541 colliders, 3322 contacts)",
+      "passed": true
+    },
+    {
+      "check": "physics at a fixed cost: p50 tick 3.89 ms falling, 3.54 ms settled (< 4 ms)",
+      "passed": true
+    },
+    {
+      "check": "deterministic: the 600-tick checksum repeats (6fb81c2c293fcdbe)",
+      "passed": true
+    },
+    {
+      "check": "5 000 native movers ticked by the catalogue (5000 components, 0.16 ms a tick together, < 1 ms)",
+      "passed": true
+    },
+    {
+      "check": "per-system time in the stats (14 phases; step 3.59 ms \u2265 the phases' 3.59 ms; emitter keeps 39 sparks alive)",
+      "passed": true
+    },
+    {
+      "check": "200 animated rigs posed by the animation system (200 skinned meshes over 2200 joints, 450 animators + skins, 10975 markers crossed; 0.34 ms a tick, < 1 ms; p50 tick 3.54 ms with everything else on, < 4 ms)",
+      "passed": true
+    },
+    {
+      "check": "the rigs drawn skinned by the standalone host at 120 Hz (183 skinned instances in view, 122.0 frames/s)",
+      "passed": true
+    }
+  ]
+}

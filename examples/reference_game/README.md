@@ -21,8 +21,8 @@ fynkel render --out renders/playground.png --size 1280x720 --steps 40    # the s
 
 **Controls** — walk: WASD / left stick / overlay stick · look: mouse (click
 the view to capture it, Escape releases) / right stick · jump: Space / A ·
-sprint: Shift / LB · use: E / X · restart: R / Y · pause: Escape / menu ·
-F1 stats, Q quality profile.
+sprint: Shift / LB · use: E / X · wave: F / B · restart: R / Y · pause:
+Escape / menu · F1 stats, Q quality profile.
 
 ## The world
 
@@ -39,16 +39,19 @@ meshes, all colliders); 22 rigid bodies (a crate pyramid, a pen of balls,
 barrels); 16 PBR materials; a sun with shadows and a cool ambient; the
 player with its skinned `Body` (`fynkel.Skin`), the joint entities
 `hips` → `spine` → `head` … in their bind pose (the visor hangs off
-`head`) and a `fynkel.Animator` on idle — or, opt-in, a downloaded
-character: `fynkel import Idle.fbx Walking.fbx "Fast Run.fbx"
-Jumping.fbx --rig hero` writes `hero.rig.json` (the first file's
-skeleton, every file's clip, matched by bone name; rename its clips to
-`idle`, `walk`, `run`, `jump`) and `python3 tools/playground.py --hero
+`head`), a `fynkel.Animator` playing the locomotion blend space
+(`assets/models/player.blend.json`: idle, walk, run along `speed`,
+phase-synced; M3-19c) and, on the `spine`, the additive wave layer — or,
+opt-in, a downloaded character: `fynkel import Idle.fbx Walking.fbx
+"Fast Run.fbx" Jumping.fbx --rig hero` writes `hero.rig.json` (the first
+file's skeleton, every file's clip, matched by bone name; rename its
+clips to `idle`, `walk`, `run`, `jump`, add `markers` for the footsteps,
+a `wave` is optional) and `python3 tools/playground.py --hero
 assets/models/hero/hero.rig.json` instances the rig's hierarchy under
 the Player (`prefab: { asset: <rig>, sub: "prefab" }`, M3-19b) with the
-clips `anim/idle` … told to `game.Player` by name (`--hero <file.glb>`
-still takes one glTF whose `anim/0..3` are idle, walk, run, jump, the
-order docs/animation.md's Blender recipe builds a Mixamo set in), never
+blend space over the rig's `anim/idle` … (`--hero <file.glb>` still
+takes one glTF whose `anim/0..3` are idle, walk, run, jump, the order
+docs/animation.md's Blender recipe builds a Mixamo set in), never
 committed — rerun without `--hero` first. The route: two
 coins ahead, a ramp onto a platform (coins 3–4), a corridor swept by an
 `Oscillate` blade whose child sensor is a `hazard` zone (coins 5–6), a lane
@@ -66,9 +69,12 @@ the scene (`Rotator`, a `collect` trigger zone, `game.Collectible`).
   jumps on the press while grounded, dies on a `hazard` zone or below
   `fallY` (a transform write teleports the controller back to the start),
   restarts on `restart`, keeps the clock. Poses the character from the
-  same state: `animation.crossfade` to walk/run/idle as the stick and
-  sprint change, `animation.play(jump, looping: false)` on the jump — the
-  clips are authored in place, the controller moves the entity
+  same state: `animation.setParameter('speed', v)` every tick with the
+  controller's planar speed — the blend space mixes idle, walk and run
+  from it —, `animation.play(jump, looping: false)` on the jump and a
+  crossfade back on landing, the wave layer played once on `wave`, the
+  walk's and run's footstep markers counted for the HUD — the clips are
+  authored in place, the controller moves the entity
   (`docs/animation.md`).
 - `lib/game/collectible.dart` — scores on `onZoneEnter('collect')`, spawns the
   `burst` prefab at runtime (`world.instantiate`; six small bodies kicked
@@ -78,7 +84,7 @@ the scene (`Rotator`, a `collect` trigger zone, `game.Collectible`).
   (a `ProjectedAnchor` over the pad) while the player stands on it; `E`
   opens the gate, which slides its static collider up over 1.2 s.
 - `lib/game/game_state.dart` — the `GameModel` the HUD binds: coins, total,
-  won, the clock, deaths, the hint, paused. `lib/main.dart` is the app:
+  won, the clock, deaths, footsteps, the hint, paused. `lib/main.dart` is the app:
   `FynkelGameView`, the counter, the win and pause banners, the touch
   overlay, mouse capture on click.
 

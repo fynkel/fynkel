@@ -648,6 +648,7 @@ pub const EMBEDDED_SCHEMAS: &[(&str, &str)] = &[
     ("project.schema.json", include_str!("../../../schemas/project.schema.json")),
     ("lock.schema.json", include_str!("../../../schemas/lock.schema.json")),
     ("rig.schema.json", include_str!("../../../schemas/rig.schema.json")),
+    ("blend.schema.json", include_str!("../../../schemas/blend.schema.json")),
     ("fynkel.Transform.schema.json", include_str!("../../../schemas/components/fynkel.Transform.schema.json")),
     ("fynkel.Name.schema.json", include_str!("../../../schemas/components/fynkel.Name.schema.json")),
     ("fynkel.MeshRenderer.schema.json", include_str!("../../../schemas/components/fynkel.MeshRenderer.schema.json")),

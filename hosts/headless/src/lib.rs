@@ -201,7 +201,8 @@ pub struct AnimationReport {
     /// `Animator`s and `Skin`s the animation system stepped at the last
     /// tick (its `SystemTimeRecord::entities`).
     pub entities: u32,
-    /// Clips registered from the cooked scene (and its prefabs).
+    /// Clips registered from the cooked scene (and its prefabs); a blend
+    /// space (M3-19c) counts once, with its clips.
     pub clips: u32,
     /// Skins registered from the cooked scene (and its prefabs).
     pub skins: u32,

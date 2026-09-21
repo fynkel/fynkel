@@ -264,10 +264,12 @@ renderer (`node/1/renderer`, `material`). Its animator loops `anim/2`
 moves it, unless the `Animator` opts into `rootMotion` (the root's planar
 travel and yaw taken out of the pose and fed to a `CharacterController`
 or the transform); a second `Animator` on a child entity is a layer
-(`weight`, `additive`) over its ancestors' pose, and clips carry named
-markers that reach `onAnimationMarker` (docs/animation.md). A downloaded
-character works the same way: `fynkel import <file.glb>`, then instance
-it. From a behaviour:
+(`weight`, `additive`) over its ancestors' pose, clips carry named
+markers that reach `onAnimationMarker`, and a blend document
+(`<name>.blend.json`: clips along one parameter) is played like a clip
+and mixed by `setParameter` (docs/animation.md). A downloaded character
+works the same way: `fynkel import <file.glb>`, then instance it. From a
+behaviour:
 
 ```dart
 animation.crossfade(clip, 0.15);                   // a timed blend; play(clip, looping: false) for a one-shot

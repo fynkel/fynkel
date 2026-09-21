@@ -1,0 +1,13 @@
+{
+  "$schema": "https://fynkel.dev/schemas/blend.schema.json",
+  "formatVersion": 1,
+  "id": "c0000000-0000-4000-8000-000000000051",
+  "name": "Column energy",
+  "description": "The Column rig's bob and wave along one parameter (M3-19c): an animator playing this document blends the two by `energy`, phase-synced.",
+  "parameter": "energy",
+  "points": [
+    { "at": 0, "clip": { "asset": "c0000000-0000-4000-8000-000000000050", "sub": "anim/bob" } },
+    { "at": 1, "clip": { "asset": "c0000000-0000-4000-8000-000000000050", "sub": "anim/wave" } }
+  ],
+  "sync": "phase"
+}

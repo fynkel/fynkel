@@ -20,7 +20,11 @@ screen. Gate (item 8): the 500 rigid bodies settle in the headless host
 time under 4 ms while they fall and once they sleep. Gate (item 10): the
 5 000 statics are native movers (Rotator/Oscillate/LookAtCamera) ticked
 in the catalogue's slots for under 1 ms a tick together, the per-system
-times are in the headless report, and the scene still holds 120 Hz. The
+times are in the headless report, and the scene still holds 120 Hz. Gate
+(item 19c): 200 animated rigs (the box character: 200 skins, 2 200 joints,
+their animators on clips, a blend space and 50 additive layers) are posed
+by the animation system for under 1 ms a tick together, their markers are
+counted, and the tick's p50 stays under 4 ms with everything else on. The
 300 ticking Dart behaviours need the `--app` project (generate.py --app,
 `game.Wobble`); their HUD numbers are recorded by hand in the results
 (capture.py drives the bare project). Aggregation as in
@@ -87,6 +91,9 @@ def capture_physics(steps=600):
             # Per-system time (item 10): the settled run's mean/max per
             # `World::step` phase and what the last tick touched.
             "systems": tail.get("systems", []),
+            # The rigs (item 19c): what the animation system stepped and
+            # the markers crossed over the settled run.
+            "animation": tail.get("animation") or {},
             **(r.get("physics") or {})}
 
 
@@ -99,19 +106,19 @@ def capture_standalone(warmup, sample, quality):
     windows = []
     for m in re.finditer(r"\[1s\] frames=(\d+) skipped=(\d+) \| interval ms p50=" + NUM + " p95=" + NUM + " p99=" + NUM +
                          r" \| acquire-wait ms p50=" + NUM + " p95=" + NUM + r" \| cpu ms p50=" + NUM + " p95=" + NUM + " p99=" + NUM +
-                         r" \| draws=(\d+) instances=(\d+) culled=(\d+) batches=(\d+) shadow=(\d+)/(\d+)", out):
+                         r" \| draws=(\d+) instances=(\d+) culled=(\d+) batches=(\d+) skinned=(\d+) shadow=(\d+)/(\d+)", out):
         g = [float(x) for x in m.groups()]
         windows.append({"frames": g[0], "skipped": g[1],
                         "interval_ms": {"p50": g[2], "p95": g[3], "p99": g[4]},
                         "cpu_ms": {"p50": g[7], "p95": g[8], "p99": g[9]},
                         "draws": int(g[10]), "instances": int(g[11]), "culled": int(g[12]), "batches": int(g[13]),
-                        "shadow_casters": int(g[14]), "shadow_draws": int(g[15])})
+                        "skinned": int(g[14]), "shadow_casters": int(g[15]), "shadow_draws": int(g[16])})
     w = windows[warmup:]
     last = w[-1] if w else {}
     return {"windows_total": len(windows), "frames_per_s": statistics.median(x["frames"] for x in w) if w else None,
             "skipped_total": sum(x["skipped"] for x in w),
             "interval_ms": m0.agg(w, "interval_ms"), "cpu_encode_submit_ms": m0.agg(w, "cpu_ms"),
-            **{k: last.get(k) for k in ("draws", "instances", "culled", "batches", "shadow_casters", "shadow_draws")}}
+            **{k: last.get(k) for k in ("draws", "instances", "culled", "batches", "skinned", "shadow_casters", "shadow_draws")}}
 
 
 def capture_flutter(warmup, sample):
@@ -185,7 +192,19 @@ def gate(r):
              moved >= 5000 and cost < 1),
             (f"per-system time in the stats ({len(systems)} phases; step {systems['step']['mean_us'] / 1000:.2f} ms ≥ "
              f"the phases' {parts / 1000:.2f} ms; emitter keeps {systems.get('lifetimeDespawn', {}).get('entities', 0)} sparks alive)",
-             len(systems) == 13 and systems["step"]["mean_us"] >= parts * 0.9 and systems.get("emitter", {}).get("entities", 0) == 1),
+             len(systems) == 14 and systems["step"]["mean_us"] >= parts * 0.9 and systems.get("emitter", {}).get("entities", 0) == 1),
+        ]
+    anim = p.get("animation") or {}
+    if anim and systems:
+        a = systems.get("animation", {"entities": 0, "mean_us": 0.0})
+        settled = p["settled_step_time_us"]["p50_us"] / 1000
+        checks += [
+            (f"200 animated rigs posed by the animation system ({anim['skinned_meshes']} skinned meshes over {anim['joints']} joints, "
+             f"{a['entities']} animators + skins, {anim['markers']} markers crossed; {a['mean_us'] / 1000:.2f} ms a tick, < 1 ms; "
+             f"p50 tick {settled:.2f} ms with everything else on, < 4 ms)",
+             anim["skinned_meshes"] >= 200 and a["entities"] >= 400 and anim["markers"] > 0 and a["mean_us"] < 1000 and settled < 4),
+            (f"the rigs drawn skinned by the standalone host at 120 Hz ({s.get('skinned')} skinned instances in view, "
+             f"{s.get('frames_per_s')} frames/s)", (s.get("skinned") or 0) >= 150 and (s.get("frames_per_s") or 0) >= 118),
         ]
     return [{"check": c, "passed": bool(ok)} for c, ok in checks]
 
@@ -212,6 +231,7 @@ def markdown(r):
         f"| Flutter UI build / raster | — | {m0.fmt(f.get('ui_build_ms'))} / {m0.fmt(f.get('raster_ms'))} |",
         f"| skipped / dropped (sample) | {s.get('skipped_total')} | {f.get('dropped_total')} |",
         f"| instances / draws / culled | {s.get('instances')} / {s.get('draws')} / {s.get('culled')} | {f.get('instances')} / {f.get('draws')} / {f.get('culled')} |",
+        f"| skinned instances | {s.get('skinned')} | — |",
         f"| viewport (physical px) | 2560×1440 | {'×'.join(map(str, f.get('viewport_physical', ['?'])))} |",
     ]
     p = r.get("physics") or {}
@@ -231,7 +251,13 @@ def markdown(r):
                   "wall time per `World::step` phase, mean and worst tick, and what the last tick touched.", "",
                   "| System | mean µs | max µs | entities (last tick) |", "| --- | --- | --- | --- |"]
         lines += [f"| {x['system']} | {x['mean_us']:.0f} | {x['max_us']} | {x['entities']} |" for x in p["systems"]]
-    lines += ["", "## Gate (items 6, 8 and 10)", ""]
+    if p.get("animation"):
+        an = p["animation"]
+        lines += ["", "## Animation (`fynkel test --headless --json` → `animation`, item 19c)", "",
+                  f"{an['skinned_meshes']} skinned meshes over {an['joints']} joints, {an['entities']} animators and skins stepped "
+                  f"({an['clips']} clips and spaces, {an['skins']} skins registered); {an['markers']} markers crossed over the settled "
+                  f"run, {an['ended']} clips ended, {an['diagnostics']} diagnostics."]
+    lines += ["", "## Gate (items 6, 8, 10 and 19c)", ""]
     lines += [f"- {'PASS' if g['passed'] else 'FAIL'} — {g['check']}" for g in r["gate"]]
     return "\n".join(lines) + "\n"
 

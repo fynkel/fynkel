@@ -20,6 +20,7 @@ const RUSTED_NORMAL: &str = "c0000000-0000-4000-8000-000000000003";
 const RUSTED_MR: &str = "c0000000-0000-4000-8000-000000000004";
 const RIG: &str = "c0000000-0000-4000-8000-000000000005";
 const COLUMN: &str = "c0000000-0000-4000-8000-000000000050";
+const ENERGY: &str = "c0000000-0000-4000-8000-000000000051";
 
 fn id(s: &str) -> Uuid {
     s.parse().unwrap()
@@ -59,8 +60,8 @@ fn the_index_opens_and_refuses_other_builds() {
     assert_eq!(index.profile(), "dev");
     assert_eq!(
         index.len(),
-        15,
-        "five scenes, robot, rig, the column rig document, material, three textures, three prefabs"
+        16,
+        "five scenes, robot, rig, the column rig document and its blend space, material, three textures, three prefabs"
     );
     let p = index.project().unwrap();
     assert_eq!(p.name, "Fixture Game");
@@ -293,6 +294,32 @@ fn prefabs_describe_from_their_chunk() {
         "{}",
         d[0]
     );
+
+    // M3-19c: the blend space reads as the core's, and registering it
+    // with a world brings its points' clips along.
+    let energy = AssetRef::new(id(ENERGY));
+    assert!(assets.is_blend(&energy));
+    assert!(!assets.is_blend(&AssetRef::new(id(COLUMN))));
+    let space = assets.blend(&energy).unwrap_or_else(|d| panic!("{d}"));
+    assert_eq!(space.parameter, "energy");
+    assert_eq!(
+        space
+            .points
+            .iter()
+            .map(|p| (p.at, p.clip.sub.as_str()))
+            .collect::<Vec<_>>(),
+        [(0.0, "anim/bob"), (1.0, "anim/wave")]
+    );
+    let mut world = fynkel_core::World::new(fynkel_core::WorldConfig::default());
+    assert!(assets.register_clip(&energy, &mut world).unwrap());
+    assert!(world.has_blend(&energy));
+    assert!(world.has_clip(&AssetRef::with_sub(id(COLUMN), "anim/bob")));
+    assert!(world.has_clip(&AssetRef::with_sub(id(COLUMN), "anim/wave")));
+    assert!(!assets.register_clip(&energy, &mut world).unwrap());
+    let d = assets.blend(&AssetRef::new(id(COLUMN))).unwrap_err();
+    assert_eq!(d.code, Code::RUNTIME_CHUNK_MISSING, "{d}");
+    let d = assets.clip(&energy).unwrap_err();
+    assert_eq!(d.code, Code::RUNTIME_CHUNK_MISSING, "{d}");
 }
 
 #[test]

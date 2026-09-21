@@ -34,7 +34,10 @@ pub mod world;
 
 /// The clip core; `animation::Skin` (the data) is reached through the
 /// module, `Skin` at the root is the component.
-pub use animation::{Channel, Clip, Interpolation, Joint, Pose, PoseEntry, Property};
+pub use animation::{
+    BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Pose, PoseEntry,
+    Property,
+};
 pub use clock::{FrameClock, FramePlan};
 pub use command::{AnimateOp, Command, Lane};
 pub use components::{

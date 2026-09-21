@@ -965,3 +965,221 @@ fn root_motion_walks_a_character_controller() {
         state.velocity
     );
 }
+
+/// "surge": `arm` rises 0 → 2 over the first second and holds for the
+/// second (2 s); a marker `beat` at 1.5 s.
+fn surge() -> Clip {
+    Clip {
+        name: "surge".into(),
+        duration: 2.0,
+        markers: vec![Marker {
+            time: 1.5,
+            name: "beat".into(),
+        }],
+        channels: vec![Channel {
+            target: "arm".into(),
+            property: Property::Translation,
+            interpolation: Interpolation::Linear,
+            times: vec![0.0, 1.0, 2.0],
+            values: vec![0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 2.0, 0.0],
+        }],
+    }
+}
+
+fn blend_ref(n: u128) -> AssetRef {
+    AssetRef::new(uuid(n))
+}
+
+fn space(points: &[(f32, AssetRef)]) -> fynkel_core::BlendSpace {
+    fynkel_core::BlendSpace {
+        name: "space".into(),
+        parameter: "speed".into(),
+        points: points
+            .iter()
+            .map(|(at, clip)| fynkel_core::BlendPoint {
+                at: *at,
+                clip: clip.clone(),
+            })
+            .collect(),
+        sync: fynkel_core::BlendSync::Phase,
+    }
+}
+
+#[test]
+fn a_blend_space_plays_like_a_clip_phase_synced_by_its_parameter() {
+    let mut w = world();
+    let mut rise_marked = rise();
+    rise_marked.markers.push(Marker {
+        time: 0.5,
+        name: "half".into(),
+    });
+    w.register_clip(clip_ref(1), rise_marked);
+    w.register_clip(clip_ref(2), surge());
+    w.register_blend(
+        blend_ref(9),
+        space(&[(0.0, clip_ref(1)), (1.0, clip_ref(2))]),
+    );
+    let root = spawn(&mut w, 1, Vec3::ZERO, None, "Rig");
+    let arm = spawn(&mut w, 2, Vec3::ZERO, Some(root), "arm");
+    // The parameter unset: the first point alone (rise, 1 s).
+    set(&mut w, root, animator(blend_ref(9), true));
+    assert!(w.diagnostics().is_empty(), "{:?}", w.diagnostics());
+    for _ in 0..30 {
+        w.step();
+    }
+    let s = w.animator_state(root).unwrap();
+    assert_eq!(s.clip, blend_ref(9));
+    assert!((s.duration - 1.0).abs() < 1e-6, "{s:?}");
+    assert!((s.time - 0.5).abs() < 1e-5, "{s:?}");
+    assert!((local(&w, arm).position.y - 0.5).abs() < 1e-5);
+    let m = markers(&mut w);
+    assert_eq!(m.len(), 1, "{m:?}");
+    assert_eq!(m[0], (root, clip_ref(1), "half".to_string()));
+
+    // Halfway between the points: the clock keeps its phase over the
+    // blended length (1.5 s), each clip is sampled at that phase of its
+    // own — rise at 0.5 s, surge at 1 s — and the poses mix 50/50.
+    let r = animate(
+        &mut w,
+        root,
+        AnimateOp::SetParameter {
+            name: "speed".into(),
+            value: 0.5,
+        },
+    );
+    assert_eq!(r.status, Status::Ok);
+    let s = w.animator_state(root).unwrap();
+    assert!((s.duration - 1.5).abs() < 1e-6, "{s:?}");
+    assert!((s.parameter - 0.5).abs() < 1e-6, "{s:?}");
+    let phase = s.time / s.duration;
+    assert!((phase - (0.5 + DT / 1.5)).abs() < 1e-4, "{s:?}");
+    let expect = 0.5 * (phase * 1.0) + 0.5 * (2.0 * (2.0 * phase).min(1.0));
+    assert!(
+        (local(&w, arm).position.y - expect).abs() < 1e-4,
+        "{} vs {expect}",
+        local(&w, arm).position.y
+    );
+    // Time-synced sampling would have read surge at the blend clock's
+    // time instead.
+    let unsynced = 0.5 * s.time + 0.5 * 2.0 * s.time.min(1.0);
+    assert!((local(&w, arm).position.y - unsynced).abs() > 1e-3);
+
+    // Past the last point the parameter clamps: surge alone (2 s), and
+    // its marker fires on its own clock — once per lap.
+    let r = animate(
+        &mut w,
+        root,
+        AnimateOp::SetParameter {
+            name: "speed".into(),
+            value: 7.0,
+        },
+    );
+    assert_eq!(r.status, Status::Ok);
+    let s = w.animator_state(root).unwrap();
+    assert!((s.duration - 2.0).abs() < 1e-6, "{s:?}");
+    assert!((s.parameter - 7.0).abs() < 1e-6);
+    let _ = markers(&mut w);
+    let before = s.time;
+    let ticks = ((2.0 - before) / DT).ceil() as usize + 2;
+    for _ in 0..ticks {
+        w.step();
+    }
+    let m = markers(&mut w);
+    assert_eq!(
+        m.iter().filter(|m| m.2 == "beat").count(),
+        1,
+        "{m:?} from {before}"
+    );
+    assert!(m.iter().all(|m| m.1 == clip_ref(2)), "{m:?}");
+
+    // A crossfade out of the space fades its dominant clip; a clip put
+    // on the animator afterwards plays from its start.
+    let r = animate(
+        &mut w,
+        root,
+        AnimateOp::Crossfade {
+            clip: clip_ref(1),
+            looping: true,
+            speed: 1.0,
+            seconds: 0.5,
+        },
+    );
+    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
+    let s = w.animator_state(root).unwrap();
+    assert_eq!(s.clip, clip_ref(1));
+    assert!(s.fade_remaining > 0.0 && s.fade_remaining < 0.5, "{s:?}");
+    for _ in 0..40 {
+        w.step();
+    }
+    assert!(w.diagnostics().is_empty(), "{:?}", w.diagnostics());
+    let s = w.animator_state(root).unwrap();
+    assert_eq!(s.fade_remaining, 0.0);
+    assert!((s.duration - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_blend_space_waits_for_its_clips_and_a_bad_parameter_is_refused() {
+    let mut w = world();
+    w.register_clip(clip_ref(1), rise());
+    w.register_blend(
+        blend_ref(9),
+        space(&[(0.0, clip_ref(1)), (1.0, clip_ref(2))]),
+    );
+    let root = spawn(&mut w, 1, Vec3::ZERO, None, "Rig");
+    let arm = spawn(&mut w, 2, Vec3::ZERO, Some(root), "arm");
+    set(&mut w, root, animator(blend_ref(9), true));
+    // The second point's clip is missing: reported once, naming it.
+    let reports: Vec<_> = w
+        .diagnostics()
+        .iter()
+        .filter(|d| d.code == DiagnosticCode::CLIP_UNAVAILABLE)
+        .cloned()
+        .collect();
+    assert_eq!(reports.len(), 1, "{:?}", w.diagnostics());
+    assert!(reports[0].message.contains(&clip_ref(2).to_string()));
+    for _ in 0..5 {
+        w.step();
+        assert!(w.diagnostics().is_empty());
+    }
+    assert_eq!(local(&w, arm).position, Vec3::ZERO);
+    assert_eq!(w.animator_state(root).unwrap().duration, 0.0);
+    w.register_clip(clip_ref(2), surge());
+    for _ in 0..6 {
+        w.step();
+    }
+    assert!(w.diagnostics().is_empty());
+    assert!(local(&w, arm).position.y > 0.0, "playing now");
+    // A parameter that is not finite, or has no name, is refused.
+    let r = animate(
+        &mut w,
+        root,
+        AnimateOp::SetParameter {
+            name: "speed".into(),
+            value: f32::NAN,
+        },
+    );
+    assert_eq!(r.rejected, 1, "{:?}", w.diagnostics());
+    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD);
+    let r = animate(
+        &mut w,
+        root,
+        AnimateOp::SetParameter {
+            name: String::new(),
+            value: 1.0,
+        },
+    );
+    assert_eq!(r.rejected, 1);
+    // A parameter of another name leaves the space where it is.
+    let r = animate(
+        &mut w,
+        root,
+        AnimateOp::SetParameter {
+            name: "other".into(),
+            value: 1.0,
+        },
+    );
+    assert_eq!(r.rejected, 0);
+    let s = w.animator_state(root).unwrap();
+    assert!((s.duration - 1.0).abs() < 1e-6, "{s:?}");
+    assert_eq!(s.parameter, 0.0, "the space's own parameter is unset");
+}

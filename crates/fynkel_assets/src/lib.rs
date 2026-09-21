@@ -36,7 +36,9 @@ pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
 use fynkel_cooked::{
     ChunkFile, KIND_ANIMATION, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN, KIND_TEXTURE,
 };
-use fynkel_core::animation::{Channel, Clip, Interpolation, Joint, Marker, Property, Skin};
+use fynkel_core::animation::{
+    BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Marker, Property, Skin,
+};
 use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
 use fynkel_core::SceneDescription;
@@ -334,6 +336,7 @@ struct Store {
     textures: HashMap<AssetRef, Arc<TexturePayload>>,
     materials: HashMap<AssetRef, Arc<PbrMaterial>>,
     clips: HashMap<AssetRef, Arc<Clip>>,
+    blends: HashMap<AssetRef, Arc<BlendSpace>>,
     skins: HashMap<AssetRef, Arc<Skin>>,
     /// Residency counts by asset id (`retain` increments, release
     /// decrements; zero evicts).
@@ -402,6 +405,7 @@ impl Assets {
                 textures: HashMap::new(),
                 materials: HashMap::new(),
                 clips: HashMap::new(),
+                blends: HashMap::new(),
                 skins: HashMap::new(),
                 counts: HashMap::new(),
                 evictions: 0,
@@ -615,18 +619,42 @@ impl Assets {
     }
 
     /// Registers the clip `r` with `world` unless it is nil or already
-    /// there; `Ok(true)` when this call registered it.
+    /// there; `Ok(true)` when this call registered it. A blend space
+    /// (M3-19c: `r` names a `.blend.json`) is registered with every
+    /// clip of its points; a point's clip that does not read is the
+    /// error and the space is not registered.
     pub fn register_clip(
         &self,
         r: &AssetRef,
         world: &mut fynkel_core::World,
     ) -> Result<bool, Diagnostic> {
-        if r.asset.is_nil() || world.has_clip(r) {
+        if r.asset.is_nil() || world.has_clip(r) || world.has_blend(r) {
             return Ok(false);
+        }
+        if self.is_blend(r) {
+            let space = self.blend(r)?;
+            for p in &space.points {
+                if !world.has_clip(&p.clip) {
+                    let clip = self.clip(&p.clip)?;
+                    world.register_clip(p.clip.clone(), (*clip).clone());
+                }
+            }
+            world.register_blend(r.clone(), (*space).clone());
+            return Ok(true);
         }
         let clip = self.clip(r)?;
         world.register_clip(r.clone(), (*clip).clone());
         Ok(true)
+    }
+
+    /// Whether `r` names a blend-space document (no sub).
+    pub fn is_blend(&self, r: &AssetRef) -> bool {
+        r.sub.is_empty()
+            && self
+                .lock()
+                .index
+                .get(r.asset)
+                .is_some_and(|e| e.kind == "document/blend")
     }
 
     /// Registers the skin `r` with `world` unless it is nil or already
@@ -679,6 +707,7 @@ impl Assets {
         s.textures.retain(|r, _| !gone.contains(&r.asset));
         s.materials.retain(|r, _| !gone.contains(&r.asset));
         s.clips.retain(|r, _| !gone.contains(&r.asset));
+        s.blends.retain(|r, _| !gone.contains(&r.asset));
         s.skins.retain(|r, _| !gone.contains(&r.asset));
         s.metas.retain(|id, _| !gone.contains(id));
         s.evictions += 1;
@@ -691,6 +720,7 @@ impl Assets {
         s.textures.clear();
         s.materials.clear();
         s.clips.clear();
+        s.blends.clear();
         s.skins.clear();
         s.metas.clear();
         s.evictions += 1;
@@ -782,6 +812,61 @@ impl Assets {
         let clip = Arc::new(clip);
         self.lock().clips.insert(r.clone(), clip.clone());
         Ok(clip)
+    }
+
+    /// The cooked blend space (M3-19c: the document's JSON chunk) as the
+    /// core's `BlendSpace`, validated. The cook checked the document
+    /// against the schema and the database, so this only reads it.
+    pub fn blend(&self, r: &AssetRef) -> Result<Arc<BlendSpace>, Diagnostic> {
+        if let Some(b) = self.lock().blends.get(r) {
+            return Ok(b.clone());
+        }
+        let (entry, meta) = {
+            let mut s = self.lock();
+            let entry = s
+                .index
+                .object(r.asset)
+                .map_err(|d| d.with_pointer(r.sub.clone()))?
+                .clone();
+            let meta = s.meta(&entry)?;
+            (entry, meta)
+        };
+        if entry.kind != "document/blend" || !r.sub.is_empty() {
+            return Err(Diagnostic::error(
+                Code::RUNTIME_CHUNK_MISSING,
+                format!(
+                    "{}: {r} is a {} asset, not a blend space",
+                    entry.path, entry.kind
+                ),
+            )
+            .with_id(r.asset.to_string()));
+        }
+        let bytes = self.read_chunk(&entry, &meta, KIND_JSON, "")?;
+        let text = String::from_utf8(bytes).map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let doc = Document::parse(DocumentKind::Blend, Some(&entry.path), &text)
+            .map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let blend = fynkel_document::Blend::from_document(doc);
+        let space = BlendSpace {
+            name: blend.name().to_string(),
+            parameter: blend.parameter.clone(),
+            points: blend
+                .points
+                .iter()
+                .map(|p| BlendPoint {
+                    at: p.at,
+                    clip: p.clip.clone(),
+                })
+                .collect(),
+            sync: BlendSync::Phase,
+        };
+        space.validate().map_err(|why| {
+            let mut d = self.malformed_entry(&entry, "JSON");
+            d.message = format!("{}: {why}", d.message);
+            d
+        })?;
+        let space = Arc::new(space);
+        self.lock().blends.insert(r.clone(), space.clone());
+        Ok(space)
     }
 
     /// The cooked skin (a `SKIN` chunk, `skin/<s>`) as the core's `Skin`,

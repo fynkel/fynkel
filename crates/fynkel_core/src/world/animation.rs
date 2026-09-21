@@ -26,7 +26,7 @@ use fynkel_scene::{self as scene, Children, Parent, Transform};
 use glam::{Mat4, Quat, Vec3};
 
 use super::{Diagnostic, Name, World};
-use crate::animation::{Clip, Pose, Property, Skin};
+use crate::animation::{BlendSpace, Clip, Pose, Property, Skin};
 use crate::command::{AnimateOp, Lane};
 use crate::components::{Animator, Skin as SkinComponent};
 use crate::event::{Event, EventPayload};
@@ -64,6 +64,15 @@ pub struct AnimatorRun {
     pub root_delta: Vec3,
     /// Root yaw taken out over the last tick, radians.
     pub root_yaw: f32,
+    /// The blend space's clips (M3-19c), one per point, resolved with
+    /// the space; empty while a clip plays.
+    pub blend: Vec<BlendSlot>,
+    /// The blend's duration over the last tick: interpolated between the
+    /// two active clips' (the clock runs over it; the clips are sampled
+    /// at the same phase of their own).
+    pub blend_duration: f32,
+    /// The blend's active segment: the two points and the fraction.
+    pub blend_segment: (usize, usize, f32),
 }
 
 impl Default for AnimatorRun {
@@ -81,8 +90,51 @@ impl Default for AnimatorRun {
             root: None,
             root_delta: Vec3::ZERO,
             root_yaw: 0.0,
+            blend: Vec::new(),
+            blend_duration: 0.0,
+            blend_segment: (0, 0, 0.0),
         }
     }
+}
+
+/// One clip of a blend space as an animator resolved it (M3-19c).
+#[derive(Clone, Debug)]
+pub struct BlendSlot {
+    pub clip_ref: AssetRef,
+    pub clip: Arc<Clip>,
+    /// One entry per channel of the clip: the entity it drives.
+    pub targets: Vec<Option<Entity>>,
+    pub root: Option<RootChannels>,
+}
+
+impl BlendSlot {
+    fn resolve(ecs: &Ecs, animator: Entity, clip_ref: AssetRef, clip: &Arc<Clip>) -> BlendSlot {
+        let names: Vec<&str> = clip.channels.iter().map(|c| c.target.as_str()).collect();
+        let targets = resolve_names(ecs, animator, &names);
+        let root = RootChannels::resolve(ecs, animator, clip, &targets);
+        BlendSlot {
+            clip_ref,
+            clip: clip.clone(),
+            targets,
+            root,
+        }
+    }
+
+    fn valid(&self, ecs: &Ecs) -> bool {
+        let names: Vec<&str> = self
+            .clip
+            .channels
+            .iter()
+            .map(|c| c.target.as_str())
+            .collect();
+        targets_valid(ecs, &self.targets, &names)
+    }
+}
+
+/// What an animator's `clip` resolved to this tick.
+enum Playing {
+    Clip(Arc<Clip>),
+    Blend(Arc<BlendSpace>),
 }
 
 impl AnimatorRun {
@@ -230,6 +282,58 @@ impl RootChannels {
     }
 }
 
+/// Root motion out of a sampled pose (M3-19c): the root keeps its
+/// first-frame place and heading — its height and the rest of its
+/// rotation stay — so the motion reaches the entity as a delta instead.
+fn pin_root(pose: &mut Pose, clip: &Clip, root: &RootChannels, time: f32) {
+    let yaw_now = root.yaw_at(clip, time, false);
+    if let Some(e) = pose.entries.iter_mut().find(|e| e.entity == root.entity) {
+        if let Some(t) = e.translation.as_mut() {
+            t.x = root.start.x;
+            t.z = root.start.z;
+        }
+        if let Some(q) = e.rotation.as_mut() {
+            *q = (Quat::from_rotation_y(-yaw_now) * *q).normalize();
+        }
+    }
+}
+
+/// The root's planar motion and yaw between two unwrapped clocks, in
+/// the animator's parent space (through the locals from the animator
+/// down to the root's parent): `(delta, yaw axis, yaw)`.
+fn root_delta(
+    ecs: &Ecs,
+    animator: Entity,
+    clip: &Clip,
+    root: &RootChannels,
+    prev: f32,
+    next: f32,
+    looping: bool,
+) -> Option<(Vec3, Vec3, f32)> {
+    let mut delta =
+        root.translation_at(clip, next, looping) - root.translation_at(clip, prev, looping);
+    delta.y = 0.0;
+    let yaw = root.yaw_at(clip, next, looping) - root.yaw_at(clip, prev, looping);
+    let mut chain = Vec::new();
+    let mut e = root.entity;
+    while e != animator {
+        let Ok(p) = ecs.get::<Parent>(e) else {
+            break;
+        };
+        e = p.0;
+        chain.push(e);
+    }
+    let mut m = Mat4::IDENTITY;
+    for e in chain.iter().rev() {
+        if let Ok(t) = ecs.copy::<Transform>(*e) {
+            m *= t.matrix();
+        }
+    }
+    let delta = m.transform_vector3(delta);
+    let axis = m.transform_vector3(Vec3::Y).normalize_or_zero();
+    (delta.is_finite() && yaw.is_finite()).then_some((delta, axis, yaw))
+}
+
 /// The outgoing side of a crossfade: it keeps playing on its own clock
 /// while its weight falls to zero.
 #[derive(Clone, Debug)]
@@ -361,6 +465,24 @@ impl World {
 
     pub fn clip(&self, clip: &AssetRef) -> Option<&Arc<Clip>> {
         self.clips.get(clip)
+    }
+
+    /// Makes a blend space available to `Animator`s that name `blend` as
+    /// their clip (M3-19c); its points' clips are registered separately.
+    pub fn register_blend(&mut self, blend: AssetRef, data: BlendSpace) {
+        self.blends.insert(blend, Arc::new(data));
+    }
+
+    pub fn has_blend(&self, blend: &AssetRef) -> bool {
+        self.blends.contains_key(blend)
+    }
+
+    pub fn blend(&self, blend: &AssetRef) -> Option<&Arc<BlendSpace>> {
+        self.blends.get(blend)
+    }
+
+    pub fn registered_blends(&self) -> impl Iterator<Item = &AssetRef> {
+        self.blends.keys()
     }
 
     /// Makes a skin available to `Skin` components that name it.
@@ -501,26 +623,51 @@ impl World {
                 // The clip playing so far becomes the outgoing side, with
                 // the targets it had resolved; nothing to fade from when
                 // it never resolved (or the fade is instant).
-                let outgoing = match (&run.resolved, self.clips.get(&animator.clip)) {
-                    (Some(resolved), Some(data))
-                        if seconds > 0.0 && *resolved == animator.clip && clip != animator.clip =>
-                    {
-                        Some(Fade {
-                            clip: data.clone(),
-                            clip_ref: animator.clip.clone(),
-                            time: run.time,
-                            speed: if animator.playing {
-                                animator.speed
-                            } else {
-                                0.0
-                            },
-                            looping: animator.looping,
-                            targets: std::mem::take(&mut run.targets),
-                            remaining: seconds,
-                            total: seconds,
-                        })
-                    }
-                    _ => None,
+                // A blend space fades out as its dominant clip at that
+                // clip's own time.
+                let fade_speed = if animator.playing {
+                    animator.speed
+                } else {
+                    0.0
+                };
+                let resolved = seconds > 0.0
+                    && run.resolved.as_ref() == Some(&animator.clip)
+                    && clip != animator.clip;
+                let outgoing = if !resolved {
+                    None
+                } else if let Some(data) = self.clips.get(&animator.clip) {
+                    Some(Fade {
+                        clip: data.clone(),
+                        clip_ref: animator.clip.clone(),
+                        time: run.time,
+                        speed: fade_speed,
+                        looping: animator.looping,
+                        targets: std::mem::take(&mut run.targets),
+                        remaining: seconds,
+                        total: seconds,
+                    })
+                } else if !run.blend.is_empty() {
+                    let (i, j, t) = run.blend_segment;
+                    let k = if t < 0.5 { i } else { j };
+                    let scale = if run.blend_duration > 0.0 {
+                        run.blend[k].clip.duration.max(0.0) / run.blend_duration
+                    } else {
+                        0.0
+                    };
+                    let time = run.time * scale;
+                    let slot = &mut run.blend[k];
+                    Some(Fade {
+                        clip: slot.clip.clone(),
+                        clip_ref: slot.clip_ref.clone(),
+                        time,
+                        speed: fade_speed,
+                        looping: animator.looping,
+                        targets: std::mem::take(&mut slot.targets),
+                        remaining: seconds,
+                        total: seconds,
+                    })
+                } else {
+                    None
                 };
                 animator.clip = clip;
                 animator.looping = looping;
@@ -601,43 +748,124 @@ impl World {
             run.root_delta = Vec3::ZERO;
             run.root_yaw = 0.0;
             let clip_ref = animator.clip.clone();
-            let clip = if clip_ref.is_nil() {
+            let playing = if clip_ref.is_nil() {
                 None
+            } else if let Some(c) = self.clips.get(&clip_ref) {
+                Some(Playing::Clip(c.clone()))
+            } else if let Some(b) = self.blends.get(&clip_ref) {
+                Some(Playing::Blend(b.clone()))
             } else {
-                match self.clips.get(&clip_ref) {
-                    Some(c) => Some(c.clone()),
-                    None => {
-                        if run.reported.as_ref() != Some(&clip_ref) {
-                            run.reported = Some(clip_ref.clone());
-                            out.unavailable = Some(clip_ref.clone());
-                        }
-                        None
-                    }
+                if run.reported.as_ref() != Some(&clip_ref) {
+                    run.reported = Some(clip_ref.clone());
+                    out.unavailable = Some(clip_ref.clone());
+                }
+                None
+            };
+            // A clip (or space) written onto the component starts from
+            // its beginning like a `Play` would.
+            let switched = |run: &mut AnimatorRun| {
+                if run.resolved.is_some() && run.resolved.as_ref() != Some(&clip_ref) {
+                    run.fresh = true;
+                    run.seek = None;
                 }
             };
-            if let Some(clip) = &clip {
-                // Targets: cached while every one still lives under its name.
-                let names: Vec<&str> = clip.channels.iter().map(|c| c.target.as_str()).collect();
-                if run.resolved.as_ref() != Some(&clip_ref)
-                    || !targets_valid(&self.ecs, &run.targets, &names)
-                {
-                    // A clip written onto the component starts from its
-                    // beginning like a `Play` would.
-                    if run.resolved.is_some() && run.resolved.as_ref() != Some(&clip_ref) {
-                        run.fresh = true;
-                        run.seek = None;
+            // What plays this tick and over how long a clock.
+            let mut duration = 0.0;
+            let mut ready = false;
+            match &playing {
+                Some(Playing::Clip(clip)) => {
+                    // Targets: cached while every one still lives under its name.
+                    let names: Vec<&str> =
+                        clip.channels.iter().map(|c| c.target.as_str()).collect();
+                    if run.resolved.as_ref() != Some(&clip_ref)
+                        || !targets_valid(&self.ecs, &run.targets, &names)
+                    {
+                        switched(&mut run);
+                        run.blend.clear();
+                        run.targets = resolve_names(&self.ecs, entity, &names);
+                        run.resolved = Some(clip_ref.clone());
+                        let targets = std::mem::take(&mut run.targets);
+                        let mut reference = std::mem::take(&mut run.reference);
+                        reference.clear();
+                        clip.sample(0.0, &targets, &mut reference);
+                        run.reference = reference;
+                        run.root = RootChannels::resolve(&self.ecs, entity, clip, &targets);
+                        run.targets = targets;
                     }
-                    run.targets = resolve_names(&self.ecs, entity, &names);
-                    run.resolved = Some(clip_ref.clone());
-                    let targets = std::mem::take(&mut run.targets);
-                    let mut reference = std::mem::take(&mut run.reference);
-                    reference.clear();
-                    clip.sample(0.0, &targets, &mut reference);
-                    run.reference = reference;
-                    run.root = RootChannels::resolve(&self.ecs, entity, clip, &targets);
-                    run.targets = targets;
+                    duration = clip.duration.max(0.0);
+                    ready = true;
                 }
-                let duration = clip.duration.max(0.0);
+                Some(Playing::Blend(space)) => {
+                    // Every point's clip resolved under the animator; a
+                    // point whose clip is not registered is reported
+                    // like a missing clip and the space waits for it.
+                    if run.resolved.as_ref() != Some(&clip_ref)
+                        || run.blend.len() != space.points.len()
+                        || run.blend.iter().any(|s| !s.valid(&self.ecs))
+                    {
+                        switched(&mut run);
+                        let mut slots = Vec::with_capacity(space.points.len());
+                        let mut missing = None;
+                        for p in &space.points {
+                            match self.clips.get(&p.clip) {
+                                Some(c) => slots.push(BlendSlot::resolve(
+                                    &self.ecs,
+                                    entity,
+                                    p.clip.clone(),
+                                    c,
+                                )),
+                                None => {
+                                    missing = Some(p.clip.clone());
+                                    break;
+                                }
+                            }
+                        }
+                        run.blend.clear();
+                        run.targets.clear();
+                        run.root = None;
+                        run.blend_duration = 0.0;
+                        match missing {
+                            Some(m) => {
+                                run.resolved = None;
+                                if run.reported.as_ref() != Some(&m) {
+                                    run.reported = Some(m.clone());
+                                    out.unavailable = Some(m);
+                                }
+                            }
+                            None => {
+                                let mut reference = std::mem::take(&mut run.reference);
+                                reference.clear();
+                                if let Some(first) = slots.first() {
+                                    first.clip.sample(0.0, &first.targets, &mut reference);
+                                }
+                                run.reference = reference;
+                                run.blend = slots;
+                                run.resolved = Some(clip_ref.clone());
+                            }
+                        }
+                    }
+                    if !run.blend.is_empty() {
+                        let value = run
+                            .parameter(&space.parameter)
+                            .unwrap_or(space.points[0].at);
+                        let (i, j, t) = space.segment(value);
+                        let d = (run.blend[i].clip.duration.max(0.0) * (1.0 - t)
+                            + run.blend[j].clip.duration.max(0.0) * t)
+                            .max(0.0);
+                        // The clock keeps its phase when the parameter
+                        // changes the blend's length.
+                        if !run.fresh && run.blend_duration > 0.0 && d != run.blend_duration {
+                            run.time = run.time * d / run.blend_duration;
+                        }
+                        run.blend_duration = d;
+                        run.blend_segment = (i, j, t);
+                        duration = d;
+                        ready = true;
+                    }
+                }
+                None => {}
+            }
+            if ready {
                 let prev = run.time;
                 let mut advanced = false;
                 let mut next_raw = run.time;
@@ -670,66 +898,137 @@ impl World {
                     }
                     advanced = next_raw != prev;
                 }
-                clip.sample(run.time, &run.targets, &mut pose);
-                if advanced {
-                    // Markers: every crossing between the two clocks.
-                    crossed.clear();
-                    clip.markers_crossed(prev, next_raw, animator.looping, &mut crossed);
-                    for &m in &crossed {
-                        out.markers
-                            .push((clip_ref.clone(), clip.markers[m].name.clone()));
-                    }
-                }
-                if animator.root_motion {
-                    if let Some(root) = &run.root {
-                        // The root's planar motion and yaw leave the pose
-                        // (the root keeps its first-frame place and heading,
-                        // its height and the rest of its rotation stay) and
-                        // reach the entity as a delta.
-                        let yaw_now = root.yaw_at(clip, run.time, false);
-                        if let Some(e) = pose.entries.iter_mut().find(|e| e.entity == root.entity) {
-                            if let Some(t) = e.translation.as_mut() {
-                                t.x = root.start.x;
-                                t.z = root.start.z;
-                            }
-                            if let Some(q) = e.rotation.as_mut() {
-                                *q = (Quat::from_rotation_y(-yaw_now) * *q).normalize();
+                let looping = animator.looping;
+                let root_motion = animator.root_motion;
+                match &playing {
+                    Some(Playing::Clip(clip)) => {
+                        clip.sample(run.time, &run.targets, &mut pose);
+                        if advanced {
+                            // Markers: every crossing between the two clocks.
+                            crossed.clear();
+                            clip.markers_crossed(prev, next_raw, looping, &mut crossed);
+                            for &m in &crossed {
+                                out.markers
+                                    .push((clip_ref.clone(), clip.markers[m].name.clone()));
                             }
                         }
-                        if advanced {
-                            let looping = animator.looping;
-                            let mut delta = root.translation_at(clip, next_raw, looping)
-                                - root.translation_at(clip, prev, looping);
-                            delta.y = 0.0;
-                            let yaw = root.yaw_at(clip, next_raw, looping)
-                                - root.yaw_at(clip, prev, looping);
-                            // Into the animator's parent space through the
-                            // locals from the animator down to the root's
-                            // parent.
-                            let mut chain = Vec::new();
-                            let mut e = root.entity;
-                            while e != entity {
-                                let Ok(p) = self.ecs.get::<Parent>(e) else {
-                                    break;
-                                };
-                                e = p.0;
-                                chain.push(e);
-                            }
-                            let mut m = Mat4::IDENTITY;
-                            for e in chain.iter().rev() {
-                                if let Ok(t) = self.ecs.copy::<Transform>(*e) {
-                                    m *= t.matrix();
+                        if root_motion {
+                            if let Some(root) = &run.root {
+                                pin_root(&mut pose, clip, root, run.time);
+                                if advanced {
+                                    if let Some((delta, axis, yaw)) = root_delta(
+                                        &self.ecs, entity, clip, root, prev, next_raw, looping,
+                                    ) {
+                                        run.root_delta = delta;
+                                        run.root_yaw = yaw;
+                                        out.root = Some((delta, axis, yaw));
+                                    }
                                 }
                             }
-                            let delta = m.transform_vector3(delta);
-                            let axis = m.transform_vector3(Vec3::Y).normalize_or_zero();
-                            if delta.is_finite() && yaw.is_finite() {
-                                run.root_delta = delta;
-                                run.root_yaw = yaw;
-                                out.root = Some((delta, axis, yaw));
+                        }
+                    }
+                    Some(Playing::Blend(_)) => {
+                        // Phase sync: the clock's fraction of the blended
+                        // duration is each clip's fraction of its own.
+                        let (i, j, t) = run.blend_segment;
+                        let d = run.blend_duration;
+                        let phase = if d > 0.0 { run.time / d } else { 0.0 };
+                        let scale = |k: usize| {
+                            if d > 0.0 {
+                                run.blend[k].clip.duration.max(0.0) / d
+                            } else {
+                                0.0
+                            }
+                        };
+                        let (si, sj) = (scale(i), scale(j));
+                        let two = j != i && t > 0.0;
+                        {
+                            let a = &run.blend[i];
+                            a.clip
+                                .sample(phase * a.clip.duration.max(0.0), &a.targets, &mut pose);
+                            if root_motion {
+                                if let Some(root) = &a.root {
+                                    pin_root(&mut pose, &a.clip, root, phase * a.clip.duration);
+                                }
+                            }
+                        }
+                        if two {
+                            let b = &run.blend[j];
+                            fade_pose.clear();
+                            b.clip.sample(
+                                phase * b.clip.duration.max(0.0),
+                                &b.targets,
+                                &mut fade_pose,
+                            );
+                            if root_motion {
+                                if let Some(root) = &b.root {
+                                    pin_root(
+                                        &mut fade_pose,
+                                        &b.clip,
+                                        root,
+                                        phase * b.clip.duration,
+                                    );
+                                }
+                            }
+                            pose.blend(&fade_pose, t);
+                        }
+                        if advanced {
+                            // Markers come from the dominant clip, on its
+                            // own clock.
+                            let k = if t < 0.5 { i } else { j };
+                            let sk = scale(k);
+                            let dominant = &run.blend[k];
+                            crossed.clear();
+                            dominant.clip.markers_crossed(
+                                prev * sk,
+                                next_raw * sk,
+                                looping,
+                                &mut crossed,
+                            );
+                            for &m in &crossed {
+                                out.markers.push((
+                                    dominant.clip_ref.clone(),
+                                    dominant.clip.markers[m].name.clone(),
+                                ));
+                            }
+                            if root_motion {
+                                // The two clips' travel, blended like the pose.
+                                let motion = |k: usize, sk: f32| {
+                                    let s = &run.blend[k];
+                                    s.root.as_ref().and_then(|root| {
+                                        root_delta(
+                                            &self.ecs,
+                                            entity,
+                                            &s.clip,
+                                            root,
+                                            prev * sk,
+                                            next_raw * sk,
+                                            looping,
+                                        )
+                                    })
+                                };
+                                let a = motion(i, si);
+                                let b = if two { motion(j, sj) } else { None };
+                                let blended = match (a, b) {
+                                    (Some((da, axis, ya)), Some((db, _, yb))) => {
+                                        Some((da.lerp(db, t), axis, ya + (yb - ya) * t))
+                                    }
+                                    (Some(a), None) if !two => Some(a),
+                                    (Some((da, axis, ya)), None) => {
+                                        Some((da * (1.0 - t), axis, ya * (1.0 - t)))
+                                    }
+                                    (None, Some((db, axis, yb))) => Some((db * t, axis, yb * t)),
+                                    (None, None) => None,
+                                };
+                                if let Some((delta, axis, yaw)) = blended {
+                                    run.root_delta = delta;
+                                    run.root_yaw = yaw;
+                                    out.root = Some((delta, axis, yaw));
+                                }
                             }
                         }
                     }
+                    None => {}
                 }
             }
             if out.ended.is_some() {
@@ -738,7 +1037,7 @@ impl World {
             // The outgoing clip keeps its clock and fades out.
             if let Some(fade) = &mut run.fade {
                 fade.remaining -= dt;
-                if fade.remaining <= 0.0 || clip.is_none() {
+                if fade.remaining <= 0.0 || playing.is_none() {
                     run.fade = None;
                 } else {
                     let duration = fade.clip.duration.max(0.0);
@@ -975,7 +1274,8 @@ impl World {
     /// without an `Animator`.
     pub fn animator_state(&self, entity: Entity) -> Option<AnimatorStateRecord> {
         let animator = self.ecs.get::<Animator>(entity).ok()?;
-        let (time, fade_remaining, parameter, root_delta, root_yaw) =
+        let blend = self.blends.get(&animator.clip);
+        let (time, fade_remaining, parameter, root_delta, root_yaw, blend_duration) =
             match self.ecs.get::<AnimatorRun>(entity) {
                 Ok(run) => (
                     run.time,
@@ -985,19 +1285,30 @@ impl World {
                         .unwrap_or(0.0),
                     // The parameter the playing blend space reads; the
                     // last one set for a clip.
-                    run.parameters.last().map(|(_, v)| *v).unwrap_or(0.0),
+                    match blend {
+                        Some(space) => run.parameter(&space.parameter).unwrap_or(0.0),
+                        None => run.parameters.last().map(|(_, v)| *v).unwrap_or(0.0),
+                    },
                     run.root_delta,
                     run.root_yaw,
+                    if run.blend.is_empty() {
+                        None
+                    } else {
+                        Some(run.blend_duration)
+                    },
                 ),
-                Err(_) => (0.0, 0.0, 0.0, Vec3::ZERO, 0.0),
+                Err(_) => (0.0, 0.0, 0.0, Vec3::ZERO, 0.0, None),
             };
         Some(AnimatorStateRecord {
             entity,
             time,
+            // A blend space's length is the blended one of its two
+            // active clips.
             duration: self
                 .clips
                 .get(&animator.clip)
                 .map(|c| c.duration)
+                .or(blend_duration)
                 .unwrap_or(0.0),
             speed: animator.speed,
             fade_remaining,
@@ -1033,6 +1344,7 @@ impl World {
     }
 }
 
-/// Registered clips and skins by reference.
+/// Registered clips, blend spaces and skins by reference.
 pub(super) type ClipTable = HashMap<AssetRef, Arc<Clip>>;
+pub(super) type BlendTable = HashMap<AssetRef, Arc<BlendSpace>>;
 pub(super) type SkinTable = HashMap<AssetRef, Arc<Skin>>;

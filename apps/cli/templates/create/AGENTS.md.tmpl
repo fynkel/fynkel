@@ -258,14 +258,20 @@ entity is a layer over its ancestors' pose: `weight` (0…1) blends it in,
 `additive: true` adds the clip's change from its first frame — an
 upper-body wave over a walk. Clips carry named markers (a rig
 document's `markers`, or `extras: { markers: [{ at, name }] }` on a glTF
-animation) that reach the behaviour once per crossing. From a behaviour:
+animation) that reach the behaviour once per crossing. A blend space
+(`<name>.blend.json`: `{ parameter: "speed", points: [{ at: 0, clip:
+idle }, { at: 4, clip: walk }, { at: 7, clip: run }] }`, validated and
+cooked like a material) is played like a clip — `clip: { asset: <blend
+id> }` on the `Animator`, or `animation.play(blend)` — and mixes the two
+clips around `setParameter('speed', v)`, phase-synced, so the stride
+follows the speed without clip switching. From a behaviour:
 
 ```dart
 animation.crossfade(walk, 0.15);                   // a timed blend; play(clip, looping: false) for a one-shot
 animation.play(jump, looping: false);
 animation.speed = 1.5; animation.pause(); animation.resume(); animation.stop();   // stop rewinds and holds
 animation.weight = 0.5;                            // this animator's layer weight
-animation.setParameter('speed', 3.2);              // a named parameter (what a blend space reads)
+animation.setParameter('speed', 3.2);              // the blend space's parameter (clamped to its points)
 final s = animation.state;                         // clip, time, duration, playing, isFading, weight, parameter, rootDelta; null without an Animator
 
 @override
@@ -281,7 +287,9 @@ cache lacks is `clip_unavailable` once and the animator waits. `fynkel
 test --headless` prints the run's animators, clips, skins and skinned
 meshes; `fynkel render --steps <n>` draws the pose after `n` ticks. The
 reference game (`examples/reference_game`, `docs/animation.md`) is the
-worked example: a generated rigged character posed from the controller.
+worked example: a generated rigged character on a blend space driven by
+the controller's speed, a jump over it, an additive wave layer and
+footstep markers counted in the HUD.
 
 ## The native catalogue (movement without a behaviour)
 

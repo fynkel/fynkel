@@ -29,6 +29,16 @@ Clips, authored in place (blueprint item 19 (d): no root motion — the
   anim/1 walk   1.0 s loop   two steps: legs ±30°, arms opposite ±25°, a hip bob
   anim/2 run    0.6 s loop   legs ±50°, bent knees, arms ±45° with bent elbows, a lean
   anim/3 jump   0.8 s once   a crouch, the arms thrown up, the legs tucked, a landing
+  anim/4 wave   1.2 s once   the right arm raised and waved, back to rest (an
+                             additive layer's clip: it keys the arm alone and
+                             starts and ends on the rest pose, so it adds
+                             nothing before and after; M3-19c)
+
+The walk and the run carry footstep markers (the animation's `extras`,
+what `fynkel import` reads; docs/animation.md): `step_l` and `step_r`
+at the two dips of the hips, a quarter and three quarters into the
+cycle. tools/playground.py mixes idle, walk and run in the Player's
+blend space (assets/models/player.blend.json) by the controller's speed.
 
 Limb swing is a rotation about +X (positive swings the foot forward,
 toward -Z); the arms rise sideways about Z. Run from the project
@@ -63,7 +73,7 @@ SKELETON = [
 
 # The clips as `anim/<n>`: name, duration, loop, and channels — joint,
 # path, list of (time, value) with rotations given as (axis, degrees).
-CLIPS = ["idle", "walk", "run", "jump"]
+CLIPS = ["idle", "walk", "run", "jump", "wave"]
 
 
 def deg(axis, degrees):
@@ -118,6 +128,15 @@ def channels_jump():
     ]
 
 
+def channels_wave():
+    # The right arm alone: raised sideways (about Z, negative on the right)
+    # over 0.3 s, the forearm waving three times, lowered again by 1.2 s.
+    return [
+        ("upperarm_r", "rotation", [(0.0, deg("z", -4)), (0.3, deg("z", -160)), (0.9, deg("z", -160)), (1.2, deg("z", -4))]),
+        ("forearm_r", "rotation", [(0.0, deg("z", 0)), (0.3, deg("z", 25)), (0.45, deg("z", -25)), (0.6, deg("z", 25)), (0.75, deg("z", -25)), (0.9, deg("z", 25)), (1.2, deg("z", 0))]),
+    ]
+
+
 def clip_channels(name):
     if name == "idle":
         return channels_idle()
@@ -125,11 +144,21 @@ def clip_channels(name):
         return gait(1.0, leg=30, knee=(5, 40), arm=25, elbow=15, bob=0.03, lean=3)
     if name == "run":
         return gait(0.6, leg=50, knee=(15, 75), arm=45, elbow=70, bob=0.06, lean=12)
-    return channels_jump()
+    if name == "jump":
+        return channels_jump()
+    return channels_wave()
 
 
 def clip_duration(name):
-    return {"idle": 2.0, "walk": 1.0, "run": 0.6, "jump": 0.8}[name]
+    return {"idle": 2.0, "walk": 1.0, "run": 0.6, "jump": 0.8, "wave": 1.2}[name]
+
+
+def clip_markers(name):
+    """Footsteps on the gaits: at the hips' two dips (see `gait`)."""
+    if name not in ("walk", "run"):
+        return None
+    period = clip_duration(name)
+    return [{"at": round(period / 4, 4), "name": "step_l"}, {"at": round(3 * period / 4, 4), "name": "step_r"}]
 
 
 def quat(axis, degrees):
@@ -266,7 +295,10 @@ def pack():
             v = accessor(flat(values), "f", len(values), kind, 5126)
             samplers.append({"input": t, "output": v, "interpolation": "LINEAR"})
             channels.append({"sampler": len(samplers) - 1, "target": {"node": index[joint], "path": path}})
-        animations.append({"name": clip, "samplers": samplers, "channels": channels})
+        animation = {"name": clip, "samplers": samplers, "channels": channels}
+        if clip_markers(clip):
+            animation["extras"] = {"markers": clip_markers(clip)}
+        animations.append(animation)
 
     while len(blob) % 4:
         blob.append(0)
@@ -299,7 +331,8 @@ def main():
     OUT.write_bytes(data)
     print(f"mesh/0 Body: {vertices} vertices, {triangles} triangles, {len(SKELETON)} joints")
     for i, clip in enumerate(CLIPS):
-        print(f"anim/{i} {clip}: {clip_duration(clip)} s, {len(clip_channels(clip))} channels")
+        markers = clip_markers(clip) or []
+        print(f"anim/{i} {clip}: {clip_duration(clip)} s, {len(clip_channels(clip))} channels" + (f", markers {' '.join(m['name'] + '@' + str(m['at']) for m in markers)}" if markers else ""))
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
 
 

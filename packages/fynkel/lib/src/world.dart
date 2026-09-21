@@ -879,7 +879,10 @@ class AnimationControl {
   final GameObject _go;
 
   /// Plays [clip] from its start (or its end, at a negative [speed]),
-  /// replacing what plays, no blend.
+  /// replacing what plays, no blend. [clip] may name a blend space
+  /// (`<name>.blend.json`, M3-19c): its points are then mixed by the
+  /// parameter it names ([setParameter]), phase-synced, and [state]
+  /// reports the blended duration.
   void play(AssetRef clip, {bool looping = true, double speed = 1}) =>
       _go._animate(gen.AnimateOp.play, clip: clip, speed: speed, looping: looping);
 
@@ -911,8 +914,9 @@ class AnimationControl {
   set weight(double value) => _go._animate(gen.AnimateOp.setWeight, value: value);
 
   /// Sets a named blend parameter (M3-19c): a playing blend space reads
-  /// the one it names every tick; a plain clip keeps the value for the
-  /// next blend space. [value] must be finite and [name] non-empty.
+  /// the one it names every tick (clamped to its points; the phase is
+  /// kept across a change); a plain clip keeps the value for the next
+  /// blend space. [value] must be finite and [name] non-empty.
   void setParameter(String name, double value) => _go._animate(gen.AnimateOp.setParameter, name: name, value: value);
 
   /// The animator's playback after the last tick (`FYNKEL_QUERY_ANIMATOR`);

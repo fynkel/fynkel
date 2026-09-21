@@ -1245,6 +1245,11 @@ pub fn validate_project_with(
                 report.diagnostics.extend(rig.validate(schemas));
                 report.diagnostics.extend(rig.validate_references(&db));
             }
+            DocumentKind::Blend => {
+                let blend = crate::blend::Blend::from_document(doc);
+                report.diagnostics.extend(blend.validate(schemas));
+                report.diagnostics.extend(blend.validate_references(&db));
+            }
             DocumentKind::Project | DocumentKind::Meta => {
                 report.diagnostics.extend(doc.validate(schemas));
             }

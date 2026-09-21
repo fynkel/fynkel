@@ -217,6 +217,24 @@ impl App {
         for d in &cooked.diagnostics {
             log::warn!("{d}");
         }
+        // What the headless host registers before the first step (the
+        // same order): the project's gravity and the mesh colliders'
+        // meshes (M3-08), the catalogue's prefabs (M3-10), the animators'
+        // clips and the skins (M3-19) — without them the rigs would draw
+        // unskinned and the emitters spawn nothing.
+        if let Some(p) = assets.project() {
+            self.world
+                .physics_mut()
+                .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
+        }
+        let (_, mesh_diags) =
+            assets.register_mesh_colliders(&cooked.description, self.world.physics_mut());
+        let (_, prefab_diags) = assets.register_prefabs(&cooked.description, &mut self.world);
+        let (clips, skins, anim_diags) =
+            assets.register_animation(&cooked.description, &mut self.world);
+        for d in mesh_diags.iter().chain(&prefab_diags).chain(&anim_diags) {
+            log::warn!("{d}");
+        }
         let loaded = self
             .world
             .load_scene(&cooked.description)
@@ -226,7 +244,7 @@ impl App {
             });
         self.residency = Some(assets.retain(&cooked.closure));
         log::info!(
-            "project {}: scene \"{}\" ({} entities, {} rejected components, {} assets retained)",
+            "project {}: scene \"{}\" ({} entities, {} rejected components, {} assets retained, {clips} clips, {skins} skins)",
             assets
                 .project()
                 .map(|p| p.name)

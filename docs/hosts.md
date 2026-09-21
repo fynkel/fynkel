@@ -114,7 +114,8 @@ printed by the text mode as `systems (mean per tick, last count): commands
 poses, so a physics regression changes it; the fixture project's Crate B
 landing on its Floor and sleeping is a test of the crate. Animation
 (M3-19, [animation.md](animation.md)): the host registers the clips and
-skins the scene's `Animator`s and `Skin`s name (`Assets::register_animation`)
+skins the scene's `Animator`s and `Skin`s name (`Assets::register_animation`;
+a blend space counts as one clip and brings its points' clips, M3-19c)
 and counts the `ANIMATION_ENDED` and `ANIMATION_MARKER` events and the
 animation diagnostics of every tick; when an animator or skin was
 stepped the report gains `animation: { entities, clips, skins,

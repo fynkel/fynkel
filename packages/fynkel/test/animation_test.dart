@@ -18,6 +18,7 @@ const bob = AssetRef(rigAsset, sub: 'anim/1');
 // The Column rig document (M3-19b): rig.glb as the skeleton, `wave` and
 // `bob` named.
 const columnRig = 'c0000000-0000-4000-8000-000000000050';
+const columnBlend = 'c0000000-0000-4000-8000-000000000051';
 
 /// Logs the clips that end on its object and replays the last one once.
 class Listener extends Behaviour {
@@ -420,5 +421,73 @@ void main() {
     expect(statue.animation.state!.rootDelta, Vec3.zero);
     expect(statue.animation.state!.rootYaw, 0);
     expect(statue.findChild('Rig')!.findChild('hips')!.localTransform.position.y, closeTo(0.125, 1e-3));
+  });
+
+  test('a blend space plays like a clip: its parameter mixes the points phase-synced (M3-19c)', () {
+    final w = fresh();
+    w.loadProject(fixture, cacheDir: cache);
+    w.frame(1 / 60);
+    // `rigs/column.blend.json`: `energy` 0 = bob (2 s), 1 = wave (1 s,
+    // markers peak/trough). Playing the document registers it with both.
+    const blend = AssetRef(columnBlend);
+    final statue = w.instantiate(const AssetRef(columnRig, sub: World.importedPrefabSub), name: 'Column');
+    final stepper = statue.addBehaviour(Stepper());
+    statue.add(const Animator(clip: blend, speed: 1, looping: true, playing: true, weight: 1, additive: false, rootMotion: false));
+    w.frame(1 / 60);
+    var state = statue.animation.state!;
+    expect(state.clip, blend);
+    expect(state.duration, closeTo(2, 1e-5), reason: 'the parameter starts at the first point: bob');
+    expect(state.parameter, 0);
+    final hips = statue.findChild('Rig')!.findChild('hips')!;
+    final prop = statue.findChild('Rig')!.findChild('Prop')!;
+
+    // Halfway: a 1.5 s lap, the hips half as high as the wave lifts them
+    // at the same phase; the Prop, which only bob moves, follows bob as
+    // is. The clock keeps its phase across the change.
+    for (var i = 0; i < 29; i++) {
+      w.frame(1 / 60);
+    }
+    final phase = statue.animation.state!.time / 2;
+    statue.animation.setParameter('energy', 0.5);
+    w.frame(1 / 60);
+    state = statue.animation.state!;
+    expect(state.duration, closeTo(1.5, 1e-5));
+    expect(state.parameter, 0.5);
+    expect(state.time / 1.5, closeTo(phase + 1 / 60 / 1.5, 1e-4), reason: 'phase kept');
+    statue.animation.time = 0.75;
+    w.frame(1 / 60);
+    final hipsMid = hips.localTransform.position.y;
+    final propMid = prop.localTransform.position.y;
+    statue.animation.setParameter('energy', 1);
+    statue.animation.time = 0.5;
+    w.frame(1 / 60);
+    expect(statue.animation.state!.duration, closeTo(1, 1e-5));
+    final hipsWave = hips.localTransform.position.y;
+    final propWave = prop.localTransform.position.y;
+    statue.animation.setParameter('energy', 0);
+    statue.animation.time = 1;
+    w.frame(1 / 60);
+    expect(statue.animation.state!.duration, closeTo(2, 1e-5));
+    final hipsBob = hips.localTransform.position.y;
+    final propBob = prop.localTransform.position.y;
+    expect(hipsWave, closeTo(0.125, 1e-3));
+    expect(hipsMid, closeTo((hipsBob + hipsWave) / 2, 1e-3));
+    expect(propMid, closeTo(propBob, 1e-3), reason: 'a property one side sets is taken as is');
+    expect(propWave, closeTo(propBob, 1e-3), reason: 'the wave leaves the Prop where bob put it');
+    expect(propBob, isNot(closeTo(0, 1e-3)), reason: 'bob lifts the Prop');
+
+    // Markers come from the dominant point: a lap at energy 1 is the
+    // wave's peak and trough; a value past the last point clamps.
+    stepper.markers.clear();
+    statue.animation.setParameter('energy', 3);
+    statue.animation.time = 0;
+    w.frame(1 / 60);
+    expect(statue.animation.state!.parameter, 3, reason: 'the state reports the value as set');
+    expect(statue.animation.state!.duration, closeTo(1, 1e-5), reason: 'clamped to the last point');
+    for (var i = 0; i < 60; i++) {
+      w.frame(1 / 60);
+    }
+    expect(stepper.markers, ['peak', 'trough']);
+    expect(statue.animation.state!.playing, isTrue);
   });
 }

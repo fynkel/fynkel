@@ -1,0 +1,32 @@
+{
+  "$schema": "https://fynkel.dev/schemas/blend.schema.json",
+  "formatVersion": 1,
+  "id": "fe19bb98-79ee-5ad4-aa1d-c147149b490b",
+  "name": "Player locomotion",
+  "description": "Idle, walk and run mixed by the controller's planar speed (game.Player sets `speed` every tick); phase-synced so the feet agree between the walk and the run.",
+  "parameter": "speed",
+  "points": [
+    {
+      "at": 0.0,
+      "clip": {
+        "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+        "sub": "anim/0"
+      }
+    },
+    {
+      "at": 4.0,
+      "clip": {
+        "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+        "sub": "anim/1"
+      }
+    },
+    {
+      "at": 7.0,
+      "clip": {
+        "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+        "sub": "anim/2"
+      }
+    }
+  ],
+  "sync": "phase"
+}

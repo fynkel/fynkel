@@ -1,18 +1,30 @@
-# Animation: the clip core, skinning and the `Animator`
+# Animation: the clip core, skinning, the `Animator` — blend spaces, layers, markers, root motion
 
 The animation contract: blueprint §9 ("Animation"), §19.2d item 19
-(M3-19, built 2026-09-21) and item 19c (M3-19c: layers, markers and root
-motion in part 1, 2026-09-21; blend spaces in part 2), §5.1 (where in the
-tick it runs). One clip core, built once, with every front door on it: a
-rigged character's walk, a door's swing and a lamp's bob are the same
-thing to the sampler, and the follow-ups (the state machine as data, the
-timeline/sequencer document) sit on the same sampler with no second one.
+(M3-19, built 2026-09-21) and item 19c (M3-19c, 2026-09-21: **blend
+spaces**, **layers**, **markers** and **root motion** — what a character
+needs beyond a crossfade), §5.1 (where in the tick it runs). One clip
+core, built once, with every front door on it: a rigged character's
+walk, a door's swing and a lamp's bob are the same thing to the sampler;
+a blend space is two samples and one blend of it, a layer is a second
+animator writing after the first, and the follow-ups (the state machine
+as data, the timeline/sequencer document) sit on the same sampler with
+no second one. The four features in one paragraph: an `Animator` plays a
+**clip** or a **blend space** (`<name>.blend.json`: clips along a named
+parameter, mixed phase-synced by `setParameter`); an `Animator` on a
+descendant entity is a **layer** over its ancestors' pose (`weight`,
+`additive`); a clip carries **markers** (a rig document's `markers`, a
+glTF animation's `extras`) raised as `AnimationMarker` events when the
+clock crosses them; **root motion** is opt-in per animator
+(`root_motion`), the root's travel taken out of the pose and handed to
+the character controller or the transform.
 
 | Piece | Where | What |
 | --- | --- | --- |
-| the clip core | `crates/fynkel_core/src/animation.rs` | `Clip` = channels keying one property of one **named** node; `Clip::sample(time)` → `Pose`; `Pose::blend`; `Skin` = named joints with inverse bind matrices |
-| the systems | `crates/fynkel_core/src/world/animation.rs` | `run_animation` in the pre-tick slot: every `fynkel.Animator`'s clock, crossfade, markers, root motion and pose write (ancestors first, so a child animator is a layer); every `fynkel.Skin`'s joint lookup; `skin_palette` for the extract |
+| the clip core | `crates/fynkel_core/src/animation.rs` | `Clip` = channels keying one property of one **named** node, with its `markers`; `Clip::sample(time)` → `Pose`; `Pose::blend`, `Pose::add_delta`; `BlendSpace` = points `(at, clip)` along a `parameter` (`segment(value)` → the two neighbours and the fraction); `Skin` = named joints with inverse bind matrices |
+| the systems | `crates/fynkel_core/src/world/animation.rs` | `run_animation` in the pre-tick slot: every `fynkel.Animator`'s clock, clip or blend space, crossfade, markers, root motion and pose write (ancestors first, so a child animator is a layer); every `fynkel.Skin`'s joint lookup; `skin_palette` for the extract |
 | the components | `fynkel.Animator` (id 21), `fynkel.Skin` (22) | ordinary native components (`docs/codegen.md`): authored, validated, generated into every codec, reachable from Dart on the M3-07a path |
+| the blend document | `<name>.blend.json` — `schemas/blend.schema.json`, `crates/fynkel_document/src/blend.rs`, `DocumentKind::Blend` (`docs/documents.md` § Blend spaces) | `{ parameter, points: [{ at, clip }], sync: "phase" }`; validated (`FYN-D0600`–`D0602`), cooked as a JSON document chunk depending on its clips' carriers, registered by the asset store with its clips (`Assets::blend`, `register_clip`) |
 | the import | `crates/fynkel_import/src/gltf.rs` (importer version 5), `fbx.rs`, the rig document (`docs/documents.md`) | glTF skins → `skin/<s>`, animations → `anim/<a>` (with their `extras.markers`), `JOINTS_0`/`WEIGHTS_0` → a skinned `mesh/<n>`; the prefab gets the `fynkel.Skin`; a rig's `markers` join its clips at cook |
 | the cache | `crates/fynkel_cooked/src/payload.rs` | `SKIN` and `ANIM` chunks (an `ANIM` carries its markers after the channels); a skinned `MESH` carries a trailing `SkinWeight` section |
 | the renderer | `crates/fynkel_render` (`docs/renderer.md`) | the skinned vertex path: a joint palette storage buffer and `vs_skinned` in five pipeline variants |
@@ -21,15 +33,24 @@ timeline/sequencer document) sit on the same sampler with no second one.
 
 Tests: `crates/fynkel_core/tests/animation.rs` (the sampler, blending,
 the animator's clock, the skin's palette, layers, markers, root motion
-with and without a controller), `crates/fynkel_import/tests/gltf.rs`
+with and without a controller, a blend space phase-synced by its
+parameter and waiting for its clips), `crates/fynkel_import/tests/gltf.rs`
 (the rig fixture), `crates/fynkel_render/tests/project.rs`
 `skinned_meshes_follow_their_joint_palette`, `crates/fynkel_native/tests/abi.rs`,
-`packages/fynkel/test/animation_test.dart`, the reference game's
-`test/game_test.dart` (the character posed from the controller). The
-fixture is `crates/fynkel_import/fixtures/rig.glb` (written by `rig.py`):
-a skinned column on three joints under a "wave" clip, a static Prop under
-a one-shot "bob"; the document fixture project's `Rig` scene
-(`c0000000-…-000034`) plays both.
+`crates/fynkel_document/tests/project.rs` and
+`crates/fynkel_import/tests/cook.rs` (the blend document validated and
+cooked), `crates/fynkel_assets/tests/store.rs` (registered with its
+clips), `apps/cli/tests/check.rs` (the Khronos Fox on a blend space —
+survey → walk → run by `speed`: every bone at 1.5 is the midpoint of the
+walk and the run at one phase, the phase kept across a change),
+`packages/fynkel/test/animation_test.dart` (the fixture's `column.blend.json`
+from Dart), the reference game's `test/game_test.dart` (the character
+posed from the controller through the blend space, the jump, the wave
+layer, the footsteps). The fixture is `crates/fynkel_import/fixtures/rig.glb`
+(written by `rig.py`): a skinned column on three joints under a "wave"
+clip, a static Prop under a one-shot "bob"; the document fixture
+project's `Rig` scene (`c0000000-…-000034`) plays both, its
+`rigs/column.blend.json` mixes them by `energy`.
 
 ## The clip core
 
@@ -64,7 +85,7 @@ interpolated world matrices like any other entity's. At most
 
 | Component | id | Fields | Rule |
 | --- | --- | --- | --- |
-| `fynkel.Animator` | 21 | `clip` (an `anim/<a>` asset ref; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the named nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
+| `fynkel.Animator` | 21 | `clip` (an `anim/<a>` asset ref, or a blend document's id with no sub — § Blend spaces; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the named nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
 | `fynkel.Skin` | 22 | `skin` (a `skin/<s>` asset ref), `skeleton` (the name of the joint root entity; empty: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by name under `skeleton`, itself found by name from the entity's tree root |
 
 Both are ordinary native components: authored in a scene or prefab,
@@ -108,7 +129,10 @@ child entity writes after the one above it and is a layer over it,
 1. **The clip.** A nil `clip` poses nothing. A clip the world does not
    hold reports `CLIP_UNAVAILABLE` (16) once per clip per animator and
    the animator waits (`duration` reads 0); the report repeats for the
-   next unknown clip.
+   next unknown clip. A `clip` naming a blend space the world holds plays
+   the space (§ Blend spaces: the two points around the parameter are
+   "the clip" below, their lengths blended into the duration; a point's
+   clip the world lacks is the `CLIP_UNAVAILABLE`, naming that clip).
 2. **The clock.** A *fresh* animator — a new component, a `Play`, a
    `Crossfade`, a `SetTime` — samples its start without advancing: time
    0, the end for a negative speed, or the seek. So the first tick after
@@ -167,6 +191,68 @@ and rise while the controller's own jump lifts the entity. A clip that
 does key the animator entity itself would fight whatever else moves it;
 nothing stops it, nothing compensates for it. `root_motion: true` is the
 opt-in for clips that travel (§ Root motion).
+
+## Blend spaces (M3-19c)
+
+A **blend space** is a document, `<name>.blend.json` (`DocumentKind::Blend`,
+`schemas/blend.schema.json`; `docs/documents.md` § Blend spaces):
+
+```json
+{
+  "$schema": "https://fynkel.dev/schemas/blend.schema.json",
+  "formatVersion": 1,
+  "id": "…", "name": "Player locomotion",
+  "parameter": "speed",
+  "points": [
+    { "at": 0, "clip": { "asset": "<character>", "sub": "anim/0" } },
+    { "at": 4, "clip": { "asset": "<character>", "sub": "anim/1" } },
+    { "at": 7, "clip": { "asset": "<character>", "sub": "anim/2" } }
+  ],
+  "sync": "phase"
+}
+```
+
+One named **parameter**; 1 to 16 **points**, each a clip (an `anim/<a>`
+of a rig document or a model source) at a strictly increasing `at`
+(`FYN-D0600` otherwise, `D0601` for a clip that is not one, `D0602` for
+a malformed entry); `sync` is `phase` (the only mode: 1D and phase-sync
+are V1, a 2D space is M5). The cook writes it as a document chunk that
+depends on its clips' carriers, so a rig or model change re-cooks it;
+the asset store registers a space together with every point's clip
+(`Assets::register_clip` on a blend id), from a scene's animator, a
+behaviour's `play`, or an `Animator` `set` from Dart.
+
+An **animator plays a space like a clip**: `clip: { asset: <blend id> }`
+(no sub), `play(AssetRef(blendId))`, `crossfade(...)` into or out of it.
+Every tick the world reads the animator's parameter of that name
+(`setParameter('speed', v)` — unset, the first point's `at`), clamps it
+to the points, finds the segment `i…j` it falls in and the fraction `t`,
+and:
+
+- **phase sync** — the blended lap is `D = lerp(dᵢ, dⱼ, t)`; the
+  animator's clock runs over `D` (looping, one-shot, `speed`, `setTime`
+  as ever) and each point's clip is sampled at `phase · dₖ`, `phase =
+  time / D`, so the feet of a walk and a run agree at every mix. When
+  `D` changes (the parameter moved) the clock keeps its *phase*: `time
+  ·= D / D_previous`. `AnimatorState.duration` reads `D`, `time` the
+  blended clock, `parameter` the value the space reads.
+- **the pose** — clip *i* sampled, clip *j* sampled, `Pose::blend(t)`
+  (a property only one side keys is taken as is — the Column's Prop
+  follows `bob` at every `energy`); at a point exactly (`t = 0`) one
+  sample.
+- **markers** come from the **dominant** clip (`t < 0.5` → *i*, else
+  *j*) on its own scaled clock, so a walk's footsteps fire at the
+  walk's times while the walk leads and the run's when the run does —
+  never twice for one footfall.
+- **root motion** (opted in) is the lerp of the two clips' root deltas.
+- a **crossfade** out of a space fades its dominant clip at the scaled
+  time; the additive **reference** of a layer playing a space is the
+  first point's clip at 0.
+
+The reference game's Player sets `speed` from the controller's planar
+velocity every tick and never switches locomotion clips
+(`examples/reference_game/lib/game/player.dart`); the Khronos Fox's
+survey → walk → run is the acceptance test (`apps/cli/tests/check.rs`).
 
 ## Layers (M3-19c)
 
@@ -267,22 +353,24 @@ extracts), or from the outgoing clip of a crossfade.
 | `setSpeed` | `speed` | non-finite → `INVALID_PAYLOAD` |
 | `setTime` | seek to `seconds` (clamped to the clip) on the next tick, without advancing | negative or non-finite → `INVALID_PAYLOAD` |
 | `setWeight` | the layer weight `value` (§ Layers) | outside 0…1 or non-finite → `INVALID_PAYLOAD` |
-| `setParameter` | set the named parameter `name` to `value` on this animator (what a blend space reads; kept on the animator across clips) | empty `name` or non-finite `value` → `INVALID_PAYLOAD` |
+| `setParameter` | set the named parameter `name` to `value` on this animator (what a blend space reads every tick, clamped to its points, the phase kept; kept on the animator across clips) | empty `name` or non-finite `value` → `INVALID_PAYLOAD` |
 
 An entity without an `Animator` is `MISSING_COMPONENT` (component 21).
 The native layer (`fynkel_native`) registers from the cache, before the
-batch is applied, any clip a `play`/`crossfade` names that the loaded
-scene never did, and the clip or skin of an `Animator`/`Skin` a behaviour
-`set`s — so a behaviour plays `anim/3` of a character whose scene only
-authored `anim/0` without listing every clip somewhere; a clip the cache
-cannot read stays unregistered and the animator reports
-`CLIP_UNAVAILABLE` at the tick.
+batch is applied, any clip or blend space a `play`/`crossfade` names that
+the loaded scene never did (a space with every point's clip), and the
+clip or skin of an `Animator`/`Skin` a behaviour `set`s — so a behaviour
+plays `anim/3` of a character whose scene only authored `anim/0` without
+listing every clip somewhere; a clip the cache cannot read stays
+unregistered and the animator reports `CLIP_UNAVAILABLE` at the tick.
 
 `FYNKEL_QUERY_ANIMATOR` (11) with an entity answers one
 `fynkel.rec.AnimatorState { entity, time, duration, speed, fade_remaining,
 playing, looping, clip, weight, parameter, root_delta, root_yaw }`
 (80 bytes) as the last step left it, or no record for an entity without
-an animator; `parameter` is the last value `setParameter` set.
+an animator; `parameter` is the value the playing blend space reads
+(else the last value `setParameter` set), `duration` a space's blended
+lap.
 
 `fynkel.ev.AnimationEnded { entity, clip }` (event kind 9, general lane)
 is raised the tick a one-shot passes its end (`playing` is cleared the
@@ -361,41 +449,49 @@ times before drawing so a pose can be captured (the showcase's
 
 ## From Dart
 
+The reference game's Player, cut down (`examples/reference_game/lib/game/player.dart`):
+
 ```dart
 class Player extends Behaviour {
-  late AssetRef idle, walk, jump;                      // AssetRef(character, sub: 'anim/<n>')
+  @Expose() AssetRef jumpClip = AssetRef.none;       // the scene tells it: anim/3, or a rig's anim/jump
+  @Expose() String waveLayer = 'spine';              // the entity carrying the wave layer's animator
+  late AssetRef locomotion;                          // the blend space the scene's animator started on
+  bool inJump = false;
 
   @override
-  void start() {
-    final character = get<Animator>()!.clip.asset;     // the asset the scene's animator names
-    idle = AssetRef(character, sub: 'anim/0');
-    walk = AssetRef(character, sub: 'anim/1');
-    jump = AssetRef(character, sub: 'anim/3');
-  }
+  void start() => locomotion = get<Animator>()!.clip;
 
   @override
   void fixedUpdate(FixedUpdateContext c) {
-    final me = characterState();
-    if (Input.pressed('jump') && me!.grounded) {
+    final me = characterState()!;
+    move(...);                                       // the controller moves the entity
+    final v = me.velocity;
+    animation.setParameter('speed', math.sqrt(v.x * v.x + v.z * v.z));   // idle → walk → run, phase-synced
+    if (Input.pressed('jump') && me.grounded) {
       jump(jumpSpeed);
-      animation.play(jump, looping: false);            // a one-shot
-    } else if (me!.grounded) {
-      final next = Input.action2D('move').length > 0.05 ? walk : idle;
-      if (animation.state?.clip != next) animation.crossfade(next, 0.15);
+      inJump = true;
+      animation.play(jumpClip, looping: false);      // a one-shot over the space
+    } else if (inJump && me.grounded) {
+      inJump = false;
+      animation.crossfade(locomotion, 0.15);         // back into the space on landing
+    }
+    if (Input.pressed('wave')) {
+      final layer = gameObject.findDescendant(waveLayer)!;       // the layer is an entity
+      layer.animation.play(layer.get<Animator>()!.clip, looping: false);   // additive: the arm over the walk
     }
   }
 
   @override
-  void onAnimationEnded(AnimationEnded e) {            // the one-shot passed its end
-    if (e.clip == jump && characterState()!.grounded) animation.crossfade(idle, 0.1);
+  void onAnimationMarker(AnimationMarker e) {        // step_l / step_r from whichever clip leads the blend
+    if (e.name.startsWith('step')) state.footsteps.value += 1;
   }
 }
 ```
 
 `GameObject.animation` is an `AnimationControl`: `play(clip, {looping,
-speed})`, `crossfade(clip, seconds, {looping, speed})`, `stop()`,
-`pause()`, `resume()`, `speed =`, `time =`, `weight =`, `setParameter(name,
-value)` — each one `fynkel.cmd.Animate`
+speed})` (a clip or a blend space), `crossfade(clip, seconds, {looping,
+speed})`, `stop()`, `pause()`, `resume()`, `speed =`, `time =`, `weight =`,
+`setParameter(name, value)` — each one `fynkel.cmd.Animate`
 on the simulation lane through the object's `CommandBatch` (a pending
 object is driven through its temp id, so a spawn, its `Animator` and a
 `play` land in one tick) — and `state` (`AnimatorState { clip, time,
@@ -422,19 +518,28 @@ keys — write the ones it does not, or a joint it does not key).
 ## Cost
 
 Per animator per tick: one target-validity pass over the cached targets
-(a `Name` read each), one sample per channel (a binary search over the
-key times, then the interpolation), one local-transform write per target
-that changed; a crossfade doubles the sampling and adds one blend, a
-layer at `weight < 1` or `additive` one more blend per entry, markers a
-scan of the clip's (sorted) markers over the tick's interval, root
-motion two samples of the root's channels and the matrix chain. Per
-skin per tick: one validity pass over the joints. Per skinned mesh per
-frame: one palette (`joints` matrix products) in the extract and one
-storage-buffer write for all of them together. No per-tick allocation
-once targets are resolved (the pose and tick scratch vectors live on the
-world). The reference game's player — 11 joints, 10 channels in the run
-clip, one skin — costs ≈ 20 µs of `animation` per tick on an M-series
-Mac (`fynkel test --headless`'s `systems:` line).
+(a `Name` read each; a blend space's per point), one sample per channel
+(a binary search over the key times, then the interpolation), one
+local-transform write per target that changed; a blend space between
+two points doubles the sampling and adds one blend, a crossfade the
+same again, a layer at `weight < 1` or `additive` one more blend per
+entry, markers a scan of the clip's (sorted) markers over the tick's
+interval, root motion two samples of the root's channels and the matrix
+chain. Per skin per tick: one validity pass over the joints. Per skinned
+mesh per frame: one palette (`joints` matrix products) in the extract
+and one storage-buffer write for all of them together. No per-tick
+allocation once targets are resolved (the pose and tick scratch vectors
+live on the world). The reference game's player — 11 joints, 10 channels
+in the run clip, one skin — costs ≈ 20 µs of `animation` per tick on an
+M-series Mac (`fynkel test --headless`'s `systems:` line). **The item
+19c gate** is the stress scene's 200 animated rigs (`benchmarks/stress/generate.py`:
+the box character 200 times — 200 skins over 2 200 joints, the animators
+by turns on the walk, the run and the locomotion blend space, every
+fourth with an additive wave layer on its `spine` — with the 5 000
+movers, 500 bodies and 300 behaviours around them): `benchmarks/m3/capture.py`
+checks the animation system under 1 ms a tick for all of them, the
+markers counted, and the tick's p50 under 4 ms with everything else on
+(`benchmarks/m3/results/`).
 
 ## Not in V1
 
@@ -443,10 +548,12 @@ Mac (`fynkel test --headless`'s `systems:` line).
   document (tracks over named objects: transforms, component fields,
   events) — the next items on this core (blueprint §9).
 - ~~Clip markers/events, layers, additive blending, root-motion
-  extraction~~ — done as item **19c** part 1 (§ Layers, § Markers, § Root
-  motion); blend spaces follow in part 2. Still out: per-channel masks
-  beyond "the layer keys what it keys", IK, retargeting between
-  skeletons, morph targets, a node-graph editor.
+  extraction, blend spaces~~ — done as item **19c** (§ Blend spaces,
+  § Layers, § Markers, § Root motion). Still out: 2D blend spaces and
+  other sync modes than phase, per-channel masks beyond "the layer keys
+  what it keys", root motion from a layer or a crossfade's outgoing
+  clip, IK, retargeting between skeletons, morph targets, a node-graph
+  editor.
 - Compressed or quantized clips; a clip is cooked as `f32` keys.
 - A skinned mesh collider following the pose (a `Collider` on a joint
   entity is the way).
@@ -588,3 +695,28 @@ assets/models/hero/hero.rig.json`: the Player's `Rig` child instances
 recorded route replayed (233 entities, 2 skins over 129 joints, 0
 diagnostics), the Dart tests green and the Playground rendered with the
 X Bot in its idle. The box character stays the committed default.
+
+## The character, complete (M3-19c)
+
+With the four features the reference game's Player stops choosing clips.
+`tools/playground.py` writes `assets/models/player.blend.json` — the
+character's idle at 0, walk at 4, run at 7 m/s along `speed` — and puts
+the Player's `Animator` on it; `game.Player` sets `speed` every tick from
+the controller's planar velocity (so a wall stops the stride with the
+player), plays the jump once over the space and crossfades back on
+landing, plays the **wave layer** — a second, additive `Animator` on the
+`spine` joint (the character's `anim/4`, keying the right arm alone,
+paused on its first frame so it adds nothing at rest) — on the `wave`
+action, and counts the walk's and the run's `step_l`/`step_r` markers
+(`tools/character.py` writes them into the glTF's `extras`) into the
+HUD's `steps`. `--hero <name>.rig.json` swaps the character: the space's
+points are the rig's `anim/idle` … , its `markers` give the footsteps,
+a `wave` clip on the rig (optional) gives the layer on the `Rig`.
+Acceptance on content nobody here made: the Khronos Fox's survey →
+walk → run by `speed` (`apps/cli/tests/check.rs`: validated, cooked, run
+headless; at `speed` 1.5 every `b_*` joint's local transform is the
+midpoint — lerp/slerp — of the walk's and the run's at the same phase,
+and a change of parameter keeps the phase), and the user's Mixamo hero
+in the Playground on the blend space with footstep markers from its rig
+document (the Dart tests green with `--hero`; no wave clip in that
+set, so no layer there). The 200-rig stress gate is under § Cost.

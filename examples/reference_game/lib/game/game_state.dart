@@ -27,6 +27,10 @@ class GameState extends GameModel {
   /// Times the player hit a hazard or fell out of the arena.
   late final deaths = field(ModelValue(0));
 
+  /// Footsteps taken: the walk's and the run's `step_l`/`step_r` markers
+  /// as they reach `game.Player` (M3-19c).
+  late final footsteps = field(ModelValue(0));
+
   /// A one-line prompt (`E — open the gate`), empty when there is none.
   late final hint = field(ModelValue(''));
 
@@ -40,6 +44,7 @@ class GameState extends GameModel {
     won.value = false;
     elapsedTenths.value = 0;
     deaths.value = 0;
+    footsteps.value = 0;
     hint.value = '';
   }
 
