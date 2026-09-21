@@ -15,6 +15,13 @@ import 'hud_model.dart';
 /// on exactly one tick per press, however many ticks a frame runs.
 /// `test/game_test.dart` replays `test/walk.input.json` through this class.
 ///
+/// Sound (docs/audio.md): a take-off plays the object's own
+/// `fynkel.AudioSource` — the scene puts `assets/audio/jump.ogg` on the
+/// cube — through [audio]; a landing plays the [land] clip once through
+/// `world.audio.play`, a one-shot that needs no component. Both are
+/// simulation-lane commands: they apply at the next tick, and the null
+/// backend of a headless run or a test counts them like a device would.
+///
 /// After the frame's ticks, [update] writes what the HUD shows into the
 /// [HudModel] the game installed (docs/hud.md): the widgets bound to those
 /// fields rebuild when a value changed, and only then.
@@ -25,6 +32,9 @@ class Mover extends Behaviour {
 
   @Expose(min: 0, step: 0.1, tooltip: 'How high a jump lifts the object, in metres')
   double jumpHeight = 1.0;
+
+  @Expose(tooltip: 'Played once on landing (an audio asset, or none)')
+  AssetRef land = AssetRef.none;
 
   /// Seconds a jump lasts, take-off to landing.
   static const jumpDuration = 0.5;
@@ -55,12 +65,14 @@ class Mover extends Behaviour {
     if (takeOff) {
       jumps++;
       airTime = 0;
+      if (has<AudioSource>()) audio.play();
     }
     var y = ground;
     if (airTime case final t?) {
       final next = t + context.dt;
       if (next >= jumpDuration) {
         airTime = null;
+        if (!land.isNone) world.audio.play(land);
       } else {
         airTime = next;
         y = ground + jumpHeight * math.sin(math.pi * next / jumpDuration);

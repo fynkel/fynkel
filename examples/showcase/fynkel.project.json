@@ -108,6 +108,12 @@
     "fynkel.Skin": {
       "kind": "native"
     },
+    "fynkel.AudioSource": {
+      "kind": "native"
+    },
+    "fynkel.AudioListener": {
+      "kind": "native"
+    },
     "game.Spinner": {
       "kind": "behaviour",
       "version": 1,

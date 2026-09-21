@@ -26,7 +26,7 @@ assets/prefabs/         *.prefab.json     reusable entity trees, instantiated fr
 assets/materials/       *.material.json   PBR fields (base_color, metallic, roughness, <slot>_texture, …) for fynkel.pbr@1, or parameters/textures for a custom shader
 assets/models/          glTF/GLB sources + <file>.meta.json sidecars (asset id, importer, sub-asset ids)
 assets/textures/        PNG/JPEG sources + sidecars
-assets/audio/           WAV/Ogg sources + sidecars
+assets/audio/           WAV/Ogg sources + sidecars (jump.ogg, land.ogg: Kenney, CC0 — see its README.md)
 test/                   `flutter test`: headless simulation, no window or GPU; walk.input.json is a recorded input stream the test replays
 .fynkel/cache/          cooked assets (`fynkel cook`); ignored by git — the only thing the running game reads
 fynkel_cache/           the cache staged for the app bundle (`fynkel cook`; pubspec.yaml `assets:`); ignored by git but its README
@@ -290,6 +290,34 @@ reference game (`examples/reference_game`, `docs/animation.md`) is the
 worked example: a generated rigged character on a blend space driven by
 the controller's speed, a jump over it, an additive wave layer and
 footstep markers counted in the HUD.
+
+## Audio (cooked clips, three buses, a voice limit; docs/audio.md)
+
+`assets/audio/*.wav|*.ogg` are imported by the cook like models
+(`fynkel.audio`, a sidecar with the asset id) and decoded to PCM in the
+cache. A `fynkel.AudioSource` component names a clip (`clip`), a bus
+(`master`, `music`, `sfx`), `volume`, `pitch`, `looping`, `playing` and
+`priority`; the one `fynkel.AudioListener` (on the camera here) scales
+everything. The mixer runs on the audio thread with 32 voices: a new
+sound past the limit steals the lowest-priority voice or is refused
+(`fynkel test --headless` prints started / stolen / refused). From a
+behaviour:
+
+```dart
+audio.play();                                       // the object's own source (also stop, pause, resume, volume =, pitch =)
+world.audio.play(land, volume: 0.8);                // a one-shot by asset id: no component, no event
+@override
+void onPlaybackEnded(PlaybackEnded e) { … }         // the object's source reached its end (not stopped, not stolen)
+world.audio.setBus(AudioBus.music, 0.5);            // the settings store applies its volumes here
+final s = world.audio.stats;                        // voices, started, ended, device
+```
+
+The Mover plays the cube's source on take-off and the exposed `land`
+clip on landing; `test/game_test.dart` counts both. `lib/main.dart`
+passes `audio: true` to the view, which opens the output device, suspends
+it while the app is hidden and closes it on dispose; without a device
+(CI) everything still runs on a null backend that counts voices. A
+missing clip is `sound_unavailable` (once per source, every `play`).
 
 ## The native catalogue (movement without a behaviour)
 

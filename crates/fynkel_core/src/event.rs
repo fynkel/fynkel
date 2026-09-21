@@ -59,6 +59,12 @@ pub enum EventPayload {
         clip: AssetRef,
         name: String,
     },
+    /// M3-11: an `AudioSource`'s non-looping clip reached its end this
+    /// tick (`playing` is cleared with it).
+    PlaybackEnded {
+        entity: Entity,
+        clip: AssetRef,
+    },
     // Physics lane (M3-08): produced by the physics step, drained by
     // `after_physics`.
     CollisionEnter(Contact),
@@ -81,6 +87,7 @@ impl EventPayload {
             EventPayload::ZoneExited { .. } => EventKind::ZONE_EXITED,
             EventPayload::AnimationEnded { .. } => EventKind::ANIMATION_ENDED,
             EventPayload::AnimationMarker { .. } => EventKind::ANIMATION_MARKER,
+            EventPayload::PlaybackEnded { .. } => EventKind::PLAYBACK_ENDED,
             EventPayload::CollisionEnter(_) => EventKind::COLLISION_ENTER,
             EventPayload::CollisionStay(_) => EventKind::COLLISION_STAY,
             EventPayload::CollisionExit(_) => EventKind::COLLISION_EXIT,

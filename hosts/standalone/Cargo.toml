@@ -8,6 +8,8 @@ license.workspace = true
 
 [dependencies]
 fynkel_core.workspace = true
+# The `device` feature: `--audio` opens the output device (M3-11).
+fynkel_audio = { workspace = true, features = ["device"] }
 fynkel_assets.workspace = true
 fynkel_contracts.workspace = true
 fynkel_document.workspace = true

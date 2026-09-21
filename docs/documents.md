@@ -139,6 +139,7 @@ semantic rules on top of the schema pass:
 | `FYN-H0005` … `H0007` | character rules (M3-09): a `fynkel.CharacterController` value the runtime would reject (capsule, slope, negative limits), a `fynkel.RigidBody`/`fynkel.Collider` next to a `fynkel.CharacterController` (its own capsule replaces them; one diagnostic per ignored component), a `fynkel.ThirdPersonCamera` value (distance, pitch range, sensitivity). The corpus fixture `scene/physics_rules.scene.json` lists `H0001`–`H0008` |
 | `FYN-H0009` | (warning, M3-12, [scenes.md](scenes.md)) a `fynkel.TriggerZone` on an entity without a `fynkel.Collider` whose `is_sensor` is true: it never fires. A blank `event` is a value error (`H0008`, the zone's own `validate()`) |
 | `FYN-H0008` | catalogue rules (M3-10): a `fynkel.Rotator`/`Oscillate`/`Follow`/`LifetimeDespawn`/`Emitter` value the runtime would reject (a zero or non-finite axis, a negative amplitude, frequency, smoothing, seconds, rate or lifetime, a non-finite offset or velocity; since M3-19 a `fynkel.Animator` with a non-finite speed, `docs/animation.md`) — the same `validate()` the tick runs (`docs/catalogue.md`) |
+| `FYN-H0010` | audio rules (M3-11, [audio.md](audio.md)): a `fynkel.AudioSource` or `fynkel.AudioListener` value the runtime would reject with `INVALID_PAYLOAD` — a `volume` outside `0..=1`, a `pitch` outside `0.05..=8` (the components' own `validate()`) |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule
@@ -987,7 +988,8 @@ texture has no sub-assets: an `assetRef` to it is `{ asset }` alone.
 interleaved `f32` samples in `[-1, 1]` (lossy overshoot clamped), the
 sample rate and channel count as the file had them, and the source codec
 (`pcm`, `vorbis`). No resampling, no channel mixing, no normalization,
-no tags — the runtime's mixer (a later milestone) decides. Decoding is
+no tags — the runtime's mixer decides (M3-11, [audio.md](audio.md): the
+cooked `CLIP` chunk is registered whole; mono and stereo only). Decoding is
 `symphonia` with only `wav`/`pcm`/`ogg`/`vorbis` compiled in and no SIMD
 features, so a Vorbis decode is bit-identical across machines; anything
 else (FLAC, MP3, AAC, ...) is `A0103`. A stream that ends early or has a
@@ -1434,8 +1436,13 @@ skeleton `rig.glb`, clips `wave` = `anim/0` and `bob` = `anim/1`) that
 the Rig scene's `Imported` entity instances as `{ …0050, sub: "prefab" }`
 under an `Animator` on `anim/wave`; since M3-19c a blend space, Column
 energy (`assets/rigs/column.blend.json`, id `…0051`: `energy` 0 = the
-rig's `bob`, 1 = its `wave`) — the project validates as 11 documents, 5
-sources, 30 references and cooks 16 assets).
+rig's `bob`, 1 = its `wave`); since M3-11 a sound, `assets/audio/tone.wav`
+(id `…0006`, a copy of `crates/fynkel_import/fixtures/audio/tone.wav`),
+on the main scene's Robot as a `fynkel.AudioSource` (`sfx`, volume 0.8,
+`playing: true` — one voice that starts at the load and ends at tick 59)
+with a `fynkel.AudioListener` on its Camera, both in the registry — the
+project validates as 11 documents, 6 sources, 31 references and cooks 17
+assets).
 `scene/physics_rules.scene.json` gained a `Solid zone` entity (a
 `TriggerZone` with an empty event on a non-sensor collider: `H0008` and
 the `H0009` warning). Every kind added later extends this corpus.

@@ -132,6 +132,36 @@ void main() {
     expect(sun.has<DirectionalLight>(), isFalse);
   });
 
+  test('a jump plays the cube\'s sound and a landing the land clip', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    final world = game.world;
+    // assets/audio/*.ogg, imported by the cook; no output device in a test
+    // — the null backend mixes nothing but counts every voice like a
+    // device would (docs/audio.md).
+    expect(game.report.audio.sounds, 1, reason: 'jump.ogg, named by the scene; land.ogg loads on its first play');
+    expect(game.report.audio.device, isFalse);
+    final mover = world.behaviours.whereType<Mover>().single;
+    game.frame(1 / 60);
+    final cube = mover.gameObject;
+    expect(cube.get<AudioSource>()!.clip.isNone, isFalse, reason: 'the scene puts the jump clip on the cube');
+    expect(mover.land.isNone, isFalse, reason: 'the land clip is an exposed field, authored in the scene');
+    final heard = cube.addBehaviour(_Heard());
+
+    final before = world.audio.stats;
+    loadInputRecording('$projectDir/test/walk.input.json').replay(world);
+    for (var i = 0; i < 30; i++) {
+      game.frame(1 / 60); // both clips are shorter than 0.2 s
+    }
+    final after = world.audio.stats;
+    expect(after.started - before.started, 4, reason: 'two take-offs, two landings');
+    expect(after.ended - before.ended, 4);
+    expect(after.clips - before.clips, 1, reason: 'land.ogg, registered from the cache by the first play');
+    expect(after.voices, 0, reason: 'nothing playing any more');
+    expect(heard.ended, 2, reason: "the cube's own source raises PlaybackEnded; a one-shot does not");
+    expect(cube.audio.isPlaying, isFalse);
+  });
+
   test('the crate falls onto the floor and the cube pushes it', () {
     final game = Game.load(projectDir);
     addTearDown(game.dispose);
@@ -170,6 +200,14 @@ void main() {
     ]).replay(world);
     expect(crate.transform.position.z, lessThan(before - 0.3), reason: 'pushed');
   });
+}
+
+/// Counts the sounds its object's source finished.
+class _Heard extends Behaviour {
+  int ended = 0;
+
+  @override
+  void onPlaybackEnded(PlaybackEnded event) => ended++;
 }
 
 /// Counts the crate's landings on the floor.

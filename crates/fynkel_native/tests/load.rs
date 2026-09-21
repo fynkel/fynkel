@@ -179,9 +179,10 @@ fn project_and_scene_load_through_the_abi() {
     // Crate B (M3-08).
     assert_eq!(r["scene"]["entities"], 7);
     assert_eq!(r["scene"]["rejectedComponents"], 0);
-    // The scene, its prefab, the robot, the material and its three maps.
-    assert_eq!(r["scene"]["assets"], 7);
-    assert_eq!(r["residency"]["retained"], 7);
+    // The scene, its prefab, the robot, the material and its three maps,
+    // the Robot's tone (M3-11).
+    assert_eq!(r["scene"]["assets"], 8);
+    assert_eq!(r["residency"]["retained"], 8);
     assert_eq!(r["residency"]["meshes"], 0, "nothing loaded until drawn");
     assert_eq!(host.live(), 7);
     // The Robot's `game.Spinner` is a Dart behaviour: known through the
@@ -206,7 +207,7 @@ fn project_and_scene_load_through_the_abi() {
     assert_eq!(host.live(), 7);
     let r = host.report();
     assert_eq!(r["mode"], "replace");
-    assert_eq!(r["residency"]["retained"], 7);
+    assert_eq!(r["residency"]["retained"], 8);
     assert_eq!(r["scenes"].as_array().unwrap().len(), 1);
     assert_eq!(r["scenes"][0]["name"], "Main");
     assert_eq!(r["scenes"][0]["entities"], 7);

@@ -215,8 +215,8 @@ void main() {
     expect(r.sceneKey, hasLength(64));
     expect(r.entityCount, 7, reason: 'the crate prefab was expanded by the cook; Floor and Crate B are physics-only');
     expect(r.rejectedComponents, 0);
-    expect(r.assetCount, 7);
-    expect(r.residency.retained, 7);
+    expect(r.assetCount, 8, reason: "the Robot's tone (M3-11) too");
+    expect(r.residency.retained, 8);
     expect(r.residency.meshes, 0, reason: 'payloads load on first draw');
     expect(w.allEntities(), hasLength(7));
     w.frame(1 / 60);

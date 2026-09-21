@@ -3,6 +3,7 @@
 
 import '../generated/schema.g.dart' as gen;
 import 'animation.dart';
+import 'audio.dart';
 import 'physics.dart';
 
 /// True in debug mode (asserts enabled), false in profile/release.
@@ -31,7 +32,9 @@ enum DiagnosticCode {
   prefabUnavailable(14),
   tooManyAnchors(15),
   clipUnavailable(16),
-  skinUnavailable(17);
+  skinUnavailable(17),
+  soundUnavailable(18),
+  audioDevice(19);
 
   const DiagnosticCode(this.value);
   final int value;
@@ -398,6 +401,7 @@ class LoadReport {
     this.inputActions = const [],
     this.physics = const PhysicsSettings(),
     this.animation = const AnimationAssets(),
+    this.audio = const AudioAssets(),
     this.mode,
     this.scenes = const [],
   });
@@ -409,6 +413,7 @@ class LoadReport {
     final input = j['input'] as Map<String, Object?>?;
     final physics = j['physics'] as Map<String, Object?>?;
     final animation = j['animation'] as Map<String, Object?>?;
+    final audio = j['audio'] as Map<String, Object?>?;
     return LoadReport(
       ok: j['ok'] == true,
       diagnostics: [
@@ -435,6 +440,7 @@ class LoadReport {
       ],
       physics: physics == null ? const PhysicsSettings() : PhysicsSettings.fromJson(physics),
       animation: animation == null ? const AnimationAssets() : AnimationAssets.fromJson(animation),
+      audio: audio == null ? const AudioAssets() : AudioAssets.fromJson(audio),
       mode: j['mode'] as String?,
       scenes: [
         for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
@@ -504,6 +510,10 @@ class LoadReport {
   /// `Animator`s and `Skin`s (M3-19).
   final AnimationAssets animation;
 
+  /// The sounds registered from the cache for the scene's `AudioSource`s
+  /// and the engine's state after the load (M3-11).
+  final AudioAssets audio;
+
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
@@ -528,6 +538,7 @@ class LoadReport {
         inputActions: inputActions,
         physics: physics,
         animation: animation,
+        audio: audio,
         mode: mode,
         scenes: scenes,
       );

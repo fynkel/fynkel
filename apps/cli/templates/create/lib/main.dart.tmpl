@@ -161,6 +161,10 @@ class _GamePageState extends State<GamePage> {
         world: game.world,
         controller: _viewport,
         input: _input,
+        // Opens the output device (docs/audio.md); the view suspends it
+        // while the app is hidden and closes it when disposed. Without a
+        // device (CI, a headless box) the game still runs, silently.
+        audio: true,
         onKeyEvent: _onKey,
         onFrame: _onFrame,
         onStats: (s) => setState(() => _stats = s),

@@ -665,4 +665,101 @@ void main() {
     AnimationMarkerEvent.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
+  // M3-11.
+  check(
+    'AudioSource',
+    AudioSource(
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330'),
+      bus: AudioBus.music,
+      volume: 0.8,
+      pitch: 1.25,
+      looping: true,
+      playing: true,
+      priority: -2,
+    ),
+    AudioSource.wireSize,
+    AudioSource.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AudioListener',
+    const AudioListener(volume: 0.5),
+    AudioListener.wireSize,
+    AudioListener.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AudioCommandRecord',
+    AudioCommandRecord(entity: entity(4, 2), op: AudioOp.setPitch, value: 0.75),
+    AudioCommandRecord.wireSize,
+    AudioCommandRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'PlaySoundCommandRecord',
+    PlaySoundCommandRecord(
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330'),
+      bus: AudioBus.sfx,
+      volume: 0.9,
+      pitch: 1.1,
+      priority: 3,
+    ),
+    PlaySoundCommandRecord.wireSize,
+    PlaySoundCommandRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AudioBusCommandRecord',
+    const AudioBusCommandRecord(bus: AudioBus.master, volume: 0.6, muted: true),
+    AudioBusCommandRecord.wireSize,
+    AudioBusCommandRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'PlaybackEndedEvent',
+    PlaybackEndedEvent(entity: entity(4, 2), clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330')),
+    PlaybackEndedEvent.wireSize,
+    PlaybackEndedEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AudioStateRecord',
+    AudioStateRecord(
+      entity: entity(4, 2),
+      playing: true,
+      paused: false,
+      time: 0.5,
+      duration: 2.0,
+      volume: 0.8,
+      pitch: 1.0,
+      looping: false,
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330'),
+      bus: AudioBus.sfx,
+      voice: 0x105,
+    ),
+    AudioStateRecord.wireSize,
+    AudioStateRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AudioStatsRecord',
+    const AudioStatsRecord(
+      device: true,
+      sampleRate: 48000,
+      channels: 2,
+      voices: 3,
+      maxVoices: 32,
+      started: 10,
+      stolen: 1,
+      refused: 2,
+      ended: 7,
+      clips: 4,
+      callbacks: 1000,
+      underruns: 0,
+      suspended: false,
+    ),
+    AudioStatsRecord.wireSize,
+    AudioStatsRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
 }

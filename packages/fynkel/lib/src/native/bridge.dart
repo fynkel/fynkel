@@ -16,7 +16,21 @@ export 'fynkel_bindings.g.dart' show FynkelStatus;
 
 enum CommandLane { simulation, presentation }
 
-enum QueryKind { transform, children, parent, name, allEntities, components, body, entities, character, systems, animator }
+enum QueryKind {
+  transform,
+  children,
+  parent,
+  name,
+  allEntities,
+  components,
+  body,
+  entities,
+  character,
+  systems,
+  animator,
+  audio,
+  audioStats
+}
 
 class FramePlan {
   const FramePlan(this.steps, this.droppedSeconds, this.clamped, this.alpha);
@@ -447,6 +461,30 @@ class NativeWorld {
     dartBytesCopied += v.length;
     final report = jsonDecode(utf8.decode(v.data.asTypedList(v.length))) as Map<String, Object?>;
     return (s, report);
+  }
+
+  /// Opens the output device (M3-11, `fynkel_world_audio_open`): false
+  /// when the platform has none or the build carries no device backend
+  /// (`UNSUPPORTED`; the world keeps the null backend and reports
+  /// `audio_device` in its diagnostics).
+  bool audioOpen() {
+    ffiCalls++;
+    final s = fynkel_world_audio_open(_w);
+    if (s == FynkelStatus.FYNKEL_STATUS_UNSUPPORTED) return false;
+    _check(s, 'audio_open');
+    return true;
+  }
+
+  /// Pauses or resumes the output device (M3-11); a no-op without one.
+  void audioSuspend(bool suspended) {
+    ffiCalls++;
+    _check(fynkel_world_audio_suspend(_w, suspended ? 1 : 0), 'audio_suspend');
+  }
+
+  /// Closes the output device (M3-11); a no-op without one.
+  void audioClose() {
+    ffiCalls++;
+    _check(fynkel_world_audio_close(_w), 'audio_close');
   }
 
   BridgeStats stats() {

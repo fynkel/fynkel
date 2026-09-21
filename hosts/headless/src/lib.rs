@@ -171,10 +171,33 @@ pub struct HeadlessReport {
     /// ran (M3-19).
     #[serde(default)]
     pub animation: Option<AnimationReport>,
+    /// Present when the scene registered a sound or a source played
+    /// (M3-11).
+    #[serde(default)]
+    pub audio: Option<AudioReport>,
     /// Per-system time (M3-10), `World::system_times` accumulated over
     /// the run, in tick order (`step` first).
     #[serde(default)]
     pub systems: Vec<SystemReport>,
+}
+
+/// The audio of a run (`HeadlessReport::audio`, M3-11): the null backend
+/// mixes nothing headless, the engine's clock still ends every clip on
+/// its tick.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct AudioReport {
+    /// `AudioSource`s the audio system reconciled at the last tick.
+    pub sources: u32,
+    /// Sounds registered from the cooked scene (and its prefabs).
+    pub sounds: u32,
+    /// Voices started, stolen and refused over the run (`AudioStats`).
+    pub started: u32,
+    pub stolen: u32,
+    pub refused: u32,
+    /// `PLAYBACK_ENDED` events over the run.
+    pub ended: u64,
+    /// `SOUND_UNAVAILABLE` and other audio diagnostics from the steps.
+    pub diagnostics: u64,
 }
 
 /// The physics of a run (`HeadlessReport::physics`).
@@ -229,6 +252,13 @@ fn count_ended(events: &[fynkel_core::Event]) -> u64 {
     events
         .iter()
         .filter(|e| matches!(e.payload, EventPayload::AnimationEnded { .. }))
+        .count() as u64
+}
+
+fn count_playback_ended(events: &[fynkel_core::Event]) -> u64 {
+    events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::PlaybackEnded { .. }))
         .count() as u64
 }
 
@@ -302,6 +332,7 @@ pub fn run_retaining(
         extract_records: 0,
         checksum: String::new(),
         physics: None,
+        audio: None,
         animation: None,
         systems: Vec::new(),
         step_time: Timing::default(),
@@ -324,6 +355,9 @@ pub fn run_retaining(
     let mut animation_ended = 0u64;
     let mut animation_markers = 0u64;
     let mut animation_diagnostics = 0u64;
+    let mut registered_sounds = 0u32;
+    let mut playback_ended = 0u64;
+    let mut audio_diagnostics = 0u64;
     let mut contact_counts = [0u64; 5];
     // The recording is read before the scene so a bad file fails fast.
     let recording = match &config.input {
@@ -385,6 +419,12 @@ pub fn run_retaining(
         animation_diagnostics += anim_diags.len() as u64;
         sr.document_diagnostics
             .extend(document::diagnostics_json(&anim_diags));
+        // The sources' sounds (M3-11).
+        let (sounds, sound_diags) = assets.register_audio(&cooked.description, &mut world);
+        registered_sounds = sounds as u32;
+        audio_diagnostics += sound_diags.len() as u64;
+        sr.document_diagnostics
+            .extend(document::diagnostics_json(&sound_diags));
         match world.load_scene(&cooked.description) {
             Ok(l) => {
                 let residency = assets.retain(&cooked.closure);
@@ -474,6 +514,7 @@ pub fn run_retaining(
             report.events += events.len() as u64;
             animation_ended += count_ended(&events);
             animation_markers += count_markers(&events);
+            playback_ended += count_playback_ended(&events);
             scene.on_events(&events);
             let tick = world.tick();
             scene.fixed_update(&mut world, tick);
@@ -529,6 +570,15 @@ pub fn run_retaining(
                         || d.component == fynkel_contracts::ComponentId::SKIN
                 })
                 .count() as u64;
+            audio_diagnostics += world
+                .diagnostics()
+                .iter()
+                .filter(|d| {
+                    d.component == fynkel_contracts::ComponentId::AUDIO_SOURCE
+                        || d.code == fynkel_contracts::DiagnosticCode::SOUND_UNAVAILABLE
+                        || d.code == fynkel_contracts::DiagnosticCode::AUDIO_DEVICE
+                })
+                .count() as u64;
         }
         if plan.steps == 0 && config.frame_dt <= 0.0 && recording.is_none() {
             break; // nothing will ever advance
@@ -564,6 +614,7 @@ pub fn run_retaining(
     report.events += events.len() as u64;
     animation_ended += count_ended(&events);
     animation_markers += count_markers(&events);
+    playback_ended += count_playback_ended(&events);
     scene.on_events(&events);
 
     let extract = world.extract();
@@ -584,6 +635,24 @@ pub fn run_retaining(
             ended: animation_ended,
             markers: animation_markers,
             diagnostics: animation_diagnostics,
+        });
+    }
+    let sources = world
+        .system_times()
+        .iter()
+        .find(|t| t.system == fynkel_core::schema::SystemKind::Audio)
+        .map(|t| t.entities)
+        .unwrap_or(0);
+    let audio_stats = world.audio_stats();
+    if sources > 0 || registered_sounds > 0 || audio_stats.started > 0 || audio_diagnostics > 0 {
+        report.audio = Some(AudioReport {
+            sources,
+            sounds: registered_sounds,
+            started: audio_stats.started,
+            stolen: audio_stats.stolen,
+            refused: audio_stats.refused,
+            ended: playback_ended,
+            diagnostics: audio_diagnostics,
         });
     }
     report.tick = world.tick();
@@ -725,10 +794,27 @@ mod tests {
         assert_eq!(scene.name, "Main");
         assert_eq!(scene.path, "scenes/main.scene.json");
         assert_eq!(scene.key.len(), 64);
-        assert_eq!(scene.retained, 7);
+        assert_eq!(scene.retained, 8, "the Robot's tone (M3-11) too");
         assert!(report.scene_ready);
         assert_eq!(report.tick, 5);
         assert_eq!(report.live_entities, 7);
+        // The Robot's `AudioSource` plays the (very short) tone from the
+        // load and it ends within the run; the camera is the listener
+        // (M3-11).
+        let audio = report.audio.as_ref().expect("audio ran");
+        assert_eq!(
+            (
+                audio.sources,
+                audio.sounds,
+                audio.started,
+                audio.ended,
+                audio.diagnostics
+            ),
+            (1, 1, 1, 1, 0),
+            "{audio:#?}"
+        );
+        assert_eq!(world.audio().voice_count(), 0);
+        assert_eq!(world.audio().listener_gain(), 1.0);
         assert_eq!(
             (
                 report.commands_applied,
@@ -941,7 +1027,7 @@ mod catalogue_tests {
 
         let by_name = |n: &str| report.systems.iter().find(|s| s.system == n).unwrap();
         assert_eq!(report.systems[0].system, "step");
-        assert_eq!(report.systems.len(), 14);
+        assert_eq!(report.systems.len(), 15);
         assert_eq!(by_name("rotator").entities, 1);
         assert_eq!(by_name("oscillate").entities, 1);
         assert_eq!(by_name("emitter").entities, 1);

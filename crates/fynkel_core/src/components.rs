@@ -6,6 +6,7 @@
 //! RGB; illuminance in lux (directional, ambient), luminous intensity in
 //! candela (point, spot), luminance in nits (sky); exposure in EV100.
 
+use fynkel_audio::{AudioListener, AudioSource};
 use fynkel_contracts::{AssetRef, ComponentId};
 use fynkel_physics::{CharacterController, Collider, RigidBody};
 use fynkel_scene::Transform;
@@ -801,6 +802,9 @@ pub enum ComponentValue {
     /// Animation (M3-19).
     Animator(Animator),
     Skin(Skin),
+    /// `fynkel_audio` (M3-11).
+    AudioSource(AudioSource),
+    AudioListener(AudioListener),
 }
 
 impl ComponentValue {
@@ -826,6 +830,8 @@ impl ComponentValue {
             ComponentValue::TriggerZone(_) => ComponentId::TRIGGER_ZONE,
             ComponentValue::Animator(_) => ComponentId::ANIMATOR,
             ComponentValue::Skin(_) => ComponentId::SKIN,
+            ComponentValue::AudioSource(_) => ComponentId::AUDIO_SOURCE,
+            ComponentValue::AudioListener(_) => ComponentId::AUDIO_LISTENER,
         }
     }
 
@@ -941,6 +947,8 @@ impl ComponentValue {
             ComponentValue::TriggerZone(c) => c.validate()?,
             ComponentValue::Animator(c) => c.validate()?,
             ComponentValue::Skin(_) => {}
+            ComponentValue::AudioSource(c) => c.validate()?,
+            ComponentValue::AudioListener(c) => c.validate()?,
         }
         Ok(())
     }

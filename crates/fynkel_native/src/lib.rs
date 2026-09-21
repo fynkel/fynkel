@@ -212,11 +212,12 @@ impl FynkelWorld {
         self.assets.as_ref()
     }
 
-    /// Registers from the cache the clip or skin a command names before
-    /// the batch is applied (M3-19): a `Play`/`Crossfade` of a clip a
-    /// loaded scene never named, or an `Animator`/`Skin` set from a
-    /// behaviour. A clip the cache cannot read stays unregistered and the
-    /// animator reports `CLIP_UNAVAILABLE` at the tick.
+    /// Registers from the cache the clip, skin or sound a command names
+    /// before the batch is applied (M3-19, M3-11): a `Play`/`Crossfade` of
+    /// a clip a loaded scene never named, an `Animator`/`Skin`/`AudioSource`
+    /// set from a behaviour, a `PlaySound`. A clip the cache cannot read
+    /// stays unregistered and the component reports `CLIP_UNAVAILABLE` /
+    /// `SOUND_UNAVAILABLE` at the tick.
     fn register_animation_assets(&mut self, commands: &[bridge::IndexedCommand]) {
         use fynkel_core::components::ComponentValue;
         use fynkel_core::{AnimateOp, Command};
@@ -226,6 +227,15 @@ impl FynkelWorld {
         for (_, c) in commands {
             let Ok(c) = c else { continue };
             match c {
+                Command::PlaySound { clip, .. } => {
+                    let _ = assets.register_sound(clip, &mut self.inner);
+                }
+                Command::SetComponent {
+                    value: ComponentValue::AudioSource(a),
+                    ..
+                } => {
+                    let _ = assets.register_sound(&a.clip, &mut self.inner);
+                }
                 Command::Animate {
                     op: AnimateOp::Play { clip, .. } | AnimateOp::Crossfade { clip, .. },
                     ..
@@ -631,6 +641,57 @@ pub unsafe extern "C" fn fynkel_world_project(
         };
     }
     status
+}
+
+/// Opens the default output device and moves the mixer into its callback
+/// (M3-11): what a host that plays calls once after the world is created.
+/// `Status::Unsupported` when the library was built without the `device`
+/// feature or no device could be opened — the world reports
+/// `AUDIO_DEVICE` in its diagnostics and keeps playing silently on the
+/// null backend, so a game runs the same without sound.
+///
+/// # Safety
+/// `world` must be live.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_audio_open(world: *mut FynkelWorld) -> Status {
+    guarded(world, |w| {
+        if w.inner.open_audio_device() {
+            Status::Ok
+        } else {
+            w.rebuild_diagnostics();
+            Status::Unsupported
+        }
+    })
+}
+
+/// Pauses (`suspended != 0`) or resumes the output device (M3-11): the
+/// host calls it from its lifecycle (the app going to the background).
+/// A no-op without a device.
+///
+/// # Safety
+/// `world` must be live.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_audio_suspend(
+    world: *mut FynkelWorld,
+    suspended: u32,
+) -> Status {
+    guarded(world, |w| {
+        w.inner.audio_mut().suspend(suspended != 0);
+        Status::Ok
+    })
+}
+
+/// Closes the output device (M3-11); the world continues on the null
+/// backend. A no-op without a device.
+///
+/// # Safety
+/// `world` must be live.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_audio_close(world: *mut FynkelWorld) -> Status {
+    guarded(world, |w| {
+        w.inner.audio_mut().close_device();
+        Status::Ok
+    })
 }
 
 /// # Safety

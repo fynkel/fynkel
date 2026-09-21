@@ -11,6 +11,7 @@ fynkel_contracts.workspace = true
 fynkel_core.workspace = true
 fynkel_scene.workspace = true
 fynkel_physics.workspace = true
+fynkel_audio.workspace = true
 glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true

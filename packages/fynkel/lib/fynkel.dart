@@ -12,6 +12,14 @@ export 'generated/schema.g.dart'
         AnimationMarkerEvent,
         Animator,
         AnimatorStateRecord,
+        AudioBus,
+        AudioBusCommandRecord,
+        AudioCommandRecord,
+        AudioListener,
+        AudioOp,
+        AudioSource,
+        AudioStateRecord,
+        AudioStatsRecord,
         BodyCommandRecord,
         BodyOp,
         BodyStateRecord,
@@ -38,6 +46,8 @@ export 'generated/schema.g.dart'
         PhysicsHitRecord,
         PhysicsQueryKind,
         PhysicsQueryRecord,
+        PlaySoundCommandRecord,
+        PlaybackEndedEvent,
         PointLight,
         RigidBody,
         Rotator,
@@ -55,6 +65,7 @@ export 'generated/schema.g.dart'
         componentCodecs,
         componentIds;
 export 'src/animation.dart' show AnimationAssets, AnimatorState;
+export 'src/audio.dart' show AudioAssets, AudioState, AudioStats;
 export 'src/asset_ref.dart';
 export 'src/context.dart';
 export 'math.dart';

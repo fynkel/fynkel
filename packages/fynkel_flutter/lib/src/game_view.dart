@@ -91,6 +91,7 @@ class FynkelGameView extends StatefulWidget {
     this.statsInterval = const Duration(seconds: 1),
     this.overlay,
     this.pauseWhenHidden = true,
+    this.audio = false,
     this.maxFrameDt = 0.25,
     this.autofocus = true,
     this.focusNode,
@@ -130,6 +131,13 @@ class FynkelGameView extends StatefulWidget {
   /// Mute the ticker while the app is hidden/paused (the clock restarts on
   /// resume so no catch-up burst of fixed ticks follows).
   final bool pauseWhenHidden;
+
+  /// Open the world's output device (`world.audio.open()`, M3-11) when
+  /// the view starts, suspend it while the app is hidden/paused and close
+  /// it when the view goes; false leaves the world on its null backend
+  /// (tests, a view that only draws). A platform without a device is an
+  /// `audio_device` diagnostic, not an error.
+  final bool audio;
 
   /// Clamp for one frame's dt (a debugger pause must not become a burst).
   final double maxFrameDt;
@@ -193,7 +201,10 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _applyMute();
   }
 
+  bool _openedAudio = false;
+
   void _applyMute() {
+    if (widget.audio) widget.world.audio.suspend(_hidden);
     final mute = _pausedByUser || (widget.pauseWhenHidden && _hidden);
     if (_ticker.muted == mute) return;
     _ticker.muted = mute;
@@ -244,6 +255,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     WidgetsBinding.instance.addObserver(this);
     controller.addListener(_onViewportChanged);
     FynkelInputChannel.attach(input);
+    if (widget.audio && !widget.world.audio.isOpen) _openedAudio = widget.world.audio.open();
     _ticker = createTicker(_onTick)..start();
     if (widget.onStats != null) {
       _statsTimer = Timer.periodic(widget.statsInterval, (_) => _report());
@@ -284,6 +296,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_openedAudio) widget.world.audio.close();
     _ticker.dispose();
     _statsTimer?.cancel();
     FynkelInputChannel.detach(input);

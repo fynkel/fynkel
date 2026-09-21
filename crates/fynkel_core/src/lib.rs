@@ -39,13 +39,17 @@ pub use animation::{
     Property,
 };
 pub use clock::{FrameClock, FramePlan};
-pub use command::{AnimateOp, Command, Lane};
+pub use command::{AnimateOp, AudioOp, Command, Lane};
 pub use components::{
     Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment, ExposureMode, Follow,
     LifetimeDespawn, LookAtCamera, MeshRenderer, MotionSpace, Oscillate, PointLight, Projection,
     Rotator, Skin, SpotLight, ThirdPersonCamera, TriggerZone,
 };
 pub use event::{Event, EventPayload};
+pub use fynkel_audio::{
+    self as audio, Audio, AudioBus, AudioClip, AudioListener, AudioSource, AudioStats, PlayError,
+    PlayParams, VoiceId, VoiceState,
+};
 pub use fynkel_contracts::{
     AssetId, AssetRef, ComponentId, DiagnosticCode, Entity, EventKind, Status, Tick, Uuid, WorldId,
 };

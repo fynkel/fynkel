@@ -23,6 +23,7 @@ authoring = ["dep:fynkel_authoring"]
 fynkel_authoring = { workspace = true, optional = true }
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true
+fynkel_audio = { workspace = true, features = ["device"] }
 fynkel_assets.workspace = true
 fynkel_document.workspace = true
 fynkel_scene.workspace = true

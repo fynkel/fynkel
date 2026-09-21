@@ -239,7 +239,7 @@ fn a_session_over_the_fixture_project() {
     let r = h.result();
     assert_eq!(r["ok"], true);
     assert_eq!(r["project"]["name"], "Fixture Game");
-    assert_eq!(r["project"]["assetCount"], 15);
+    assert_eq!(r["project"]["assetCount"], 17);
     assert_eq!(r["project"]["readOnly"], Value::Null);
 
     // Queries: with and without arguments; bad ones.
@@ -247,7 +247,7 @@ fn a_session_over_the_fixture_project() {
         h.query("assets", Some(&json!({"kind": "source"}))),
         Status::Ok
     );
-    assert_eq!(h.result()["result"].as_array().unwrap().len(), 5);
+    assert_eq!(h.result()["result"].as_array().unwrap().len(), 6);
     assert_eq!(
         h.query("assets", Some(&json!([1]))),
         Status::InvalidArgument
@@ -369,14 +369,14 @@ fn a_session_over_the_fixture_project() {
     // reports the duplicate, as `fynkel validate` would.
     assert_eq!(h.query("project", None), Status::Ok);
     let p = h.result()["result"].clone();
-    assert_eq!(p["assetCount"], 15);
+    assert_eq!(p["assetCount"], 17);
     assert!(codes(&p).contains(&"FYN-A0003"), "{p}");
     // Rescan: everything, a list, a bad list.
     assert_eq!(
         unsafe { fynkel_authoring_rescan(h.0, ptr::null(), 0) },
         Status::Ok
     );
-    assert_eq!(h.result()["assetCount"], 15);
+    assert_eq!(h.result()["assetCount"], 17);
     assert!(codes(&h.result()).contains(&"FYN-A0003"));
     let list = json!([RIG_SCENE]).to_string();
     assert_eq!(

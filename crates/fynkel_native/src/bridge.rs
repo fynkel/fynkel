@@ -5,8 +5,8 @@ use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::physics::{Hit, QueryKind, QuerySpec};
 use fynkel_core::schema::*;
 use fynkel_core::{
-    AnimateOp as CoreAnimateOp, BodyCommand, Command, Diagnostic, Event, EventPayload,
-    ProjectionInfo, Rejected, SnapshotRecord, World,
+    AnimateOp as CoreAnimateOp, AudioOp as CoreAudioOp, BodyCommand, Command, Diagnostic, Event,
+    EventPayload, ProjectionInfo, Rejected, SnapshotRecord, World,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{decode_component_value, get_u32, WireRecord};
@@ -170,6 +170,39 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                     op,
                 }
             }
+            CommandKind::Audio => {
+                let c = AudioCommandRecord::decode(body, tail).map_err(bad)?;
+                let op = match c.op {
+                    AudioOp::Play => CoreAudioOp::Play,
+                    AudioOp::Stop => CoreAudioOp::Stop,
+                    AudioOp::Pause => CoreAudioOp::Pause,
+                    AudioOp::Resume => CoreAudioOp::Resume,
+                    AudioOp::SetVolume => CoreAudioOp::SetVolume(c.value),
+                    AudioOp::SetPitch => CoreAudioOp::SetPitch(c.value),
+                };
+                Command::Audio {
+                    entity: c.entity,
+                    op,
+                }
+            }
+            CommandKind::PlaySound => {
+                let c = PlaySoundCommandRecord::decode(body, tail).map_err(bad)?;
+                Command::PlaySound {
+                    clip: c.clip,
+                    bus: c.bus,
+                    volume: c.volume,
+                    pitch: c.pitch,
+                    priority: c.priority,
+                }
+            }
+            CommandKind::AudioBus => {
+                let c = AudioBusCommandRecord::decode(body, tail).map_err(bad)?;
+                Command::AudioBus {
+                    bus: c.bus,
+                    volume: c.volume,
+                    muted: c.muted,
+                }
+            }
         },
     )
 }
@@ -300,6 +333,14 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
             },
             strings,
         ),
+        EventPayload::PlaybackEnded { entity, clip } => push(
+            out,
+            &PlaybackEndedEvent {
+                entity: *entity,
+                clip: clip.clone(),
+            },
+            strings,
+        ),
         EventPayload::CollisionEnter(c)
         | EventPayload::CollisionStay(c)
         | EventPayload::CollisionExit(c)
@@ -331,6 +372,7 @@ pub fn event_body_size(kind: EventKind) -> Option<usize> {
         EventKind::ZONE_ENTERED | EventKind::ZONE_EXITED => ZoneEvent::SIZE,
         EventKind::ANIMATION_ENDED => AnimationEndedEvent::SIZE,
         EventKind::ANIMATION_MARKER => AnimationMarkerEvent::SIZE,
+        EventKind::PLAYBACK_ENDED => PlaybackEndedEvent::SIZE,
         k if k.is_physics() => ContactEvent::SIZE,
         _ => return None,
     })
@@ -349,6 +391,8 @@ pub const QUERY_ENTITIES: u32 = 8;
 pub const QUERY_CHARACTER: u32 = 9;
 pub const QUERY_SYSTEMS: u32 = 10;
 pub const QUERY_ANIMATOR: u32 = 11;
+pub const QUERY_AUDIO: u32 = 12;
+pub const QUERY_AUDIO_STATS: u32 = 13;
 
 pub fn query(
     world: &World,
@@ -464,6 +508,23 @@ pub fn query(
             if let Ok(v) = ecs.get::<fynkel_core::Skin>(entity) {
                 w.component(ComponentId::SKIN.0, &*v);
             }
+            if let Ok(v) = ecs.get::<fynkel_core::AudioSource>(entity) {
+                w.component(ComponentId::AUDIO_SOURCE.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::AudioListener>(entity) {
+                w.component(ComponentId::AUDIO_LISTENER.0, &*v);
+            }
+        }
+        // A source's playback state (M3-11); no source is an empty
+        // response.
+        QUERY_AUDIO => {
+            if let Some(s) = world.audio_state(entity) {
+                w.record(&s);
+            }
+        }
+        // The audio engine's counters (M3-11); the entity is ignored.
+        QUERY_AUDIO_STATS => {
+            w.record(&world.audio_stats());
         }
         // An animator's playback state (M3-19); no animator is an empty
         // response.

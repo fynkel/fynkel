@@ -91,8 +91,8 @@ fn a_project_opens_with_its_lock_assets_schemas_and_references() {
     let p = s.project().unwrap();
     assert!(p.read_only.is_none(), "{:?}", p.read_only);
     assert!(p.lock.is_some());
-    // 11 documents (5 scenes, 3 prefabs, 1 material, 1 rig, 1 blend space) + 5 sources.
-    assert_eq!(p.assets.len(), 16);
+    // 11 documents (5 scenes, 3 prefabs, 1 material, 1 rig, 1 blend space) + 6 sources.
+    assert_eq!(p.assets.len(), 17);
     assert!(p.metadata.is_none(), "the fixture has no lib/generated");
     // Declared behaviour, no metadata → a warning saying to run codegen.
     let codes = code_of(&p.diagnostics);
@@ -114,7 +114,7 @@ fn a_project_opens_with_its_lock_assets_schemas_and_references() {
     assert_eq!(v["name"], "Fixture Game");
     assert_eq!(v["dir"], copy.dir.display().to_string());
     assert_eq!(v["readOnly"], Value::Null);
-    assert_eq!(v["assetCount"], 16);
+    assert_eq!(v["assetCount"], 17);
     assert!(v["componentTypes"]
         .as_array()
         .unwrap()
@@ -153,11 +153,11 @@ fn a_project_opens_with_its_lock_assets_schemas_and_references() {
     assert_eq!(s.query("commands", &json!({})).unwrap(), json!(COMMANDS));
 
     let all = s.query("assets", &json!({})).unwrap();
-    assert_eq!(all.as_array().unwrap().len(), 16);
+    assert_eq!(all.as_array().unwrap().len(), 17);
     let scenes = s.query("assets", &json!({"document": "scene"})).unwrap();
     assert_eq!(scenes.as_array().unwrap().len(), 5);
     let sources = s.query("assets", &json!({"kind": "source"})).unwrap();
-    assert_eq!(sources.as_array().unwrap().len(), 5);
+    assert_eq!(sources.as_array().unwrap().len(), 6);
     let bad = s.query("assets", &json!({"kind": "thing"})).unwrap_err();
     assert_eq!(code_of(&bad), ["FYN-T0003"]);
 
@@ -228,7 +228,7 @@ fn project_validation_is_the_cli_report() {
     let report = s.validate_project().unwrap();
     assert!(!report.has_errors(), "{:?}", report.diagnostics);
     assert_eq!(report.documents, 11);
-    assert_eq!(report.sources, 5);
+    assert_eq!(report.sources, 6);
     let v = s.query("validateProject", &json!({})).unwrap();
     assert_eq!(v["ok"], true);
     assert_eq!(v["documents"], 11);
@@ -373,9 +373,9 @@ fn a_scene_edits_undoes_to_its_bytes_saves_and_conflicts() {
         .len();
     assert!(in_memory > 9, "{in_memory}");
     assert_eq!(scene.entities.len(), in_memory);
-    assert_eq!(s.project().unwrap().assets.len(), 16);
+    assert_eq!(s.project().unwrap().assets.len(), 17);
 
-    // Save-as: a new file the database picks up (16 assets) with the same id
+    // Save-as: a new file the database picks up (17 assets) with the same id
     // is a duplicate — the scan says so and keeps the first path.
     let other = copy.path("assets/scenes/rig_copy.scene.json");
     let written = s.save(h, Some(&other)).unwrap();
@@ -385,7 +385,7 @@ fn a_scene_edits_undoes_to_its_bytes_saves_and_conflicts() {
         other.display().to_string()
     );
     let p = s.project().unwrap();
-    assert_eq!(p.assets.len(), 16, "a duplicate id is not a second asset");
+    assert_eq!(p.assets.len(), 17, "a duplicate id is not a second asset");
     assert!(
         code_of(&p.diagnostics).contains(&"FYN-A0003"),
         "{:?}",
@@ -627,7 +627,7 @@ fn rescan_reads_new_documents_and_drops_removed_ones() {
     let scan = s.rescan(std::slice::from_ref(&new_path)).unwrap();
     assert!(!scan.iter().any(|d| d.is_error()), "{scan:?}");
     let p = s.project().unwrap();
-    assert_eq!(p.assets.len(), 17);
+    assert_eq!(p.assets.len(), 18);
     assert_eq!(
         p.dependents(uuid::Uuid::parse_str(swatch).unwrap()).len(),
         before + 1
@@ -637,7 +637,7 @@ fn rescan_reads_new_documents_and_drops_removed_ones() {
     s.rescan(&[PathBuf::from("assets/materials/second.material.json")])
         .unwrap();
     let p = s.project().unwrap();
-    assert_eq!(p.assets.len(), 16);
+    assert_eq!(p.assets.len(), 17);
     assert_eq!(
         p.dependents(uuid::Uuid::parse_str(swatch).unwrap()).len(),
         before

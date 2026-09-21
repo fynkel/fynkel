@@ -19,6 +19,8 @@ const RUSTED: &str = "c0000000-0000-4000-8000-000000000020";
 const RUSTED_NORMAL: &str = "c0000000-0000-4000-8000-000000000003";
 const RUSTED_MR: &str = "c0000000-0000-4000-8000-000000000004";
 const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+/// The Robot's tone (M3-11).
+const TONE: &str = "c0000000-0000-4000-8000-000000000006";
 const COLUMN: &str = "c0000000-0000-4000-8000-000000000050";
 const ENERGY: &str = "c0000000-0000-4000-8000-000000000051";
 
@@ -60,8 +62,8 @@ fn the_index_opens_and_refuses_other_builds() {
     assert_eq!(index.profile(), "dev");
     assert_eq!(
         index.len(),
-        16,
-        "five scenes, robot, rig, the column rig document and its blend space, material, three textures, three prefabs"
+        17,
+        "five scenes, robot, rig, the column rig document and its blend space, material, three textures, three prefabs, the tone"
     );
     let p = index.project().unwrap();
     assert_eq!(p.name, "Fixture Game");
@@ -73,9 +75,9 @@ fn the_index_opens_and_refuses_other_builds() {
     assert_eq!(main.kind, "document/scene");
     assert_eq!(main.status, "cooked");
     assert!(main.file.as_ref().unwrap().is_file());
-    // The scene depends on the prefab, the robot and the material; the
-    // closure adds the material's texture.
-    assert_eq!(main.dependencies.len(), 3);
+    // The scene depends on the prefab, the robot, the material and the
+    // Robot's tone (M3-11); the closure adds the material's textures.
+    assert_eq!(main.dependencies.len(), 4);
     let mut closure = index.closure(id(MAIN));
     closure.sort();
     let mut expect = vec![
@@ -86,6 +88,7 @@ fn the_index_opens_and_refuses_other_builds() {
         id(SWATCH),
         id(RUSTED_NORMAL),
         id(RUSTED_MR),
+        id(TONE),
     ];
     expect.sort();
     assert_eq!(closure, expect);
@@ -155,7 +158,7 @@ fn scenes_describe_from_the_expanded_chunk() {
     // Camera, Robot, Sun, Crate A and the crate the prefab expands to,
     // the physics Floor and Crate B.
     assert_eq!(scene.description.entities.len(), 7);
-    assert_eq!(scene.closure.len(), 7);
+    assert_eq!(scene.closure.len(), 8, "the Robot's tone too (M3-11)");
     assert_eq!(scene.behaviours.len(), 1);
     assert_eq!(scene.behaviours[0].type_id, "game.Spinner");
     assert!(scene.behaviours[0].known);
@@ -349,10 +352,10 @@ fn payloads_load_by_reference_and_residency_evicts() {
     let a = assets.retain(&closure);
     let b = assets.retain(&closure);
     assert!(assets.is_resident(id(ROBOT)));
-    assert_eq!(assets.stats().retained, 7);
+    assert_eq!(assets.stats().retained, 8);
     let before = assets.evictions();
     a.release();
-    assert_eq!(assets.stats().retained, 7);
+    assert_eq!(assets.stats().retained, 8);
     assert_eq!(assets.stats().meshes, 1);
     assert_eq!(assets.evictions(), before);
     drop(b);

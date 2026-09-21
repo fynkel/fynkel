@@ -218,7 +218,7 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     assert_eq!(v["scene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["scene"]["cache"], cache.to_str().unwrap());
     assert_eq!(v["scene"]["entities"], 7);
-    assert_eq!(v["scene"]["retained"], 7);
+    assert_eq!(v["scene"]["retained"], 8);
     assert_eq!(v["scene"]["document_diagnostics"], serde_json::json!([]));
     assert_eq!(v["live_entities"], 7);
     assert!(cache.join("index.json").is_file());
@@ -1102,8 +1102,8 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     assert_eq!(v["ok"], true);
     assert_eq!(v["project"]["name"], "Fixture Game");
     assert_eq!(v["documents"], 11);
-    assert_eq!(v["sources"], 5);
-    assert_eq!(v["references"], 30);
+    assert_eq!(v["sources"], 6);
+    assert_eq!(v["references"], 31);
     assert_eq!(v["lock"]["cache"]["container"], 1);
     let out = run(&["validate", "--project", fixture.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
@@ -1198,7 +1198,7 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let v = json(&out);
     assert_eq!(v["ok"], true);
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
-    assert_eq!(v["assetCount"], 16);
+    assert_eq!(v["assetCount"], 17);
     assert_eq!(v["quality"]["default"], "medium");
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     let out = run(&[

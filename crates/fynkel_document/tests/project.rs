@@ -162,7 +162,7 @@ fn the_fixture_project_reads_and_validates_clean() {
         .unwrap();
     assert_eq!((medium.shadow_resolution, medium.msaa), (1024, 4));
     assert!(medium.shadows, "shadows default to on");
-    assert_eq!(project.components.as_ref().unwrap().len(), 21);
+    assert_eq!(project.components.as_ref().unwrap().len(), 23);
     assert_eq!(project.physics.gravity, [0.0, -9.81, 0.0]);
     assert_eq!(project.physics.layers, ["default", "props"]);
     assert_eq!(project.physics.mask(&["props"]), Some(2));
@@ -192,7 +192,7 @@ fn the_fixture_project_reads_and_validates_clean() {
     );
     assert_eq!(
         (report.documents, report.sources, report.references),
-        (11, 5, 30)
+        (11, 6, 31)
     );
     assert!(report.lock.is_some());
     let json = report.json();
@@ -212,10 +212,10 @@ fn describe_json_lists_everything() {
     assert_eq!(v["name"], "Fixture Game");
     assert_eq!(v["startupScene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["assets"], "assets");
-    assert_eq!(v["assetCount"], 16);
+    assert_eq!(v["assetCount"], 17);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 4);
     assert_eq!(v["quality"]["default"], "medium");
-    assert_eq!(v["components"].as_array().unwrap().len(), 21);
+    assert_eq!(v["components"].as_array().unwrap().len(), 23);
     assert_eq!(
         v["physics"]["layers"],
         serde_json::json!(["default", "props"])

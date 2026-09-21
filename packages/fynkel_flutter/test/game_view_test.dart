@@ -89,6 +89,43 @@ void main() {
     expect(controller.state, ViewportState.detached);
   });
 
+  testWidgets('audio: true opens the device (or reports none), suspends with the lifecycle and closes', (tester) async {
+    final world = World.create();
+    addTearDown(world.dispose);
+    world.throwOnDiagnostics = false;
+    final seen = <FynkelDiagnostic>[];
+    world.onDiagnostics = seen.addAll;
+    final controller = FynkelViewportController(placeholders: false);
+    addTearDown(controller.dispose);
+    expect(world.audio.isOpen, isFalse);
+
+    await tester.pumpWidget(
+      MaterialApp(home: FynkelGameView(world: world, controller: controller, audio: true)),
+    );
+    await tester.pump();
+    // A machine with an output device opens it; one without reports
+    // `audio_device` and stays on the null backend. Either way the world
+    // keeps ticking.
+    final opened = world.audio.isOpen;
+    expect(world.audio.stats.device, opened);
+    if (!opened) expect(seen.map((d) => d.code), contains(DiagnosticCode.audioDevice));
+    await tester.pump(const Duration(microseconds: 16667));
+    await tester.pump(const Duration(microseconds: 16667));
+    expect(world.tick, greaterThan(0));
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(world.audio.stats.suspended, opened);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(world.audio.stats.suspended, isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(world.audio.isOpen, isFalse, reason: 'the view closed what it opened');
+    expect(world.audio.stats.device, isFalse);
+  });
+
   testWidgets('shows the placeholder until attached and the error on failure', (tester) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
       throw PlatformException(code: 'texture', message: 'nope');

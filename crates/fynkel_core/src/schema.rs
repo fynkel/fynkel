@@ -8,6 +8,7 @@
 //! Ids: commands use [`CommandKind`] values, events use `EventKind` values,
 //! components use `ComponentId` values. Append only; never renumber.
 
+use fynkel_audio::{AudioBus, AudioListener, AudioSource};
 use fynkel_contracts::schema::{fingerprint, RecordSchema};
 use fynkel_contracts::{AssetRef, Entity, HasSchema};
 use fynkel_physics::{CharacterController, Collider, ColliderShape, RigidBody};
@@ -37,6 +38,9 @@ pub enum CommandKind {
     RemoveComponent = 7,
     Body = 8,
     Animate = 9,
+    Audio = 10,
+    PlaySound = 11,
+    AudioBus = 12,
 }
 
 impl CommandKind {
@@ -51,6 +55,9 @@ impl CommandKind {
             7 => Self::RemoveComponent,
             8 => Self::Body,
             9 => Self::Animate,
+            10 => Self::Audio,
+            11 => Self::PlaySound,
+            12 => Self::AudioBus,
             _ => return None,
         })
     }
@@ -214,6 +221,111 @@ pub struct AnimateCommandRecord {
     pub name: String,
 }
 
+/// What a `fynkel.cmd.Audio` does (`fynkel_core::command::AudioOp`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
+#[schema(name = "fynkel.AudioOp")]
+pub enum AudioOp {
+    /// Start the source's clip from the beginning; sets `playing`.
+    Play,
+    /// Stop the voice; clears `playing` (no `PLAYBACK_ENDED`).
+    Stop,
+    /// Hold the voice where it is.
+    Pause,
+    Resume,
+    /// `value`: the source's `volume`, within `[0, 1]`.
+    SetVolume,
+    /// `value`: the source's `pitch`, within `[0.05, 8]`.
+    SetPitch,
+}
+
+/// Drives a `fynkel.AudioSource` (M3-11; simulation lane only). Rejected
+/// at the tick with `MISSING_COMPONENT` (no source) or `INVALID_PAYLOAD`
+/// (a value outside its rule).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 10, name = "fynkel.cmd.Audio")]
+pub struct AudioCommandRecord {
+    pub entity: Entity,
+    pub op: AudioOp,
+    /// The volume for `setVolume`, the pitch for `setPitch`.
+    pub value: f32,
+}
+
+/// Plays a clip once on no entity (M3-11; either lane): a fire-and-forget
+/// sound — no `PLAYBACK_ENDED`, no handle. `SOUND_UNAVAILABLE` at the tick
+/// for a clip the world has not been given; refused silently under the
+/// voice limit (`fynkel.rec.AudioStats.refused` counts).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 11, name = "fynkel.cmd.PlaySound")]
+pub struct PlaySoundCommandRecord {
+    pub clip: AssetRef,
+    pub bus: AudioBus,
+    /// `0..=1`.
+    pub volume: f32,
+    /// `0.05..=8`.
+    pub pitch: f32,
+    pub priority: i32,
+}
+
+/// Sets a bus gain and the mute (M3-11; either lane): what the
+/// `fynkel.Settings` volumes are applied through. `master` scales the
+/// other two; `muted` silences everything.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 12, name = "fynkel.cmd.AudioBus")]
+pub struct AudioBusCommandRecord {
+    pub bus: AudioBus,
+    /// `0..=1`.
+    pub volume: f32,
+    pub muted: bool,
+}
+
+/// `FYNKEL_QUERY_AUDIO` (M3-11): a `fynkel.AudioSource`'s playback state as
+/// the last step left it (no record without one).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.AudioState")]
+pub struct AudioStateRecord {
+    pub entity: Entity,
+    /// The source has a voice (paused or not).
+    pub playing: bool,
+    pub paused: bool,
+    /// Seconds into the clip.
+    pub time: f32,
+    /// The clip's length; `0` while the clip is unknown to the world.
+    pub duration: f32,
+    pub volume: f32,
+    pub pitch: f32,
+    pub looping: bool,
+    pub clip: AssetRef,
+    pub bus: AudioBus,
+    /// The voice handle (`generation << 8 | slot`), `0` without one.
+    pub voice: u32,
+}
+
+/// `FYNKEL_QUERY_AUDIO_STATS` (M3-11): the world's audio engine at a
+/// glance — the device (or the null backend), the voices in use and the
+/// counters since the world was created.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.AudioStats")]
+pub struct AudioStatsRecord {
+    /// A real output device is open (else the null backend).
+    pub device: bool,
+    pub sample_rate: u32,
+    pub channels: u32,
+    /// Voices playing now.
+    pub voices: u32,
+    pub max_voices: u32,
+    pub started: u32,
+    pub stolen: u32,
+    pub refused: u32,
+    pub ended: u32,
+    /// Clips registered.
+    pub clips: u32,
+    /// Device callbacks (or null renders) so far.
+    pub callbacks: u32,
+    /// Device underruns reported by the backend.
+    pub underruns: u32,
+    pub suspended: bool,
+}
+
 /// A spatial query kind (`fynkel.rec.PhysicsQuery`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
 #[schema(name = "fynkel.PhysicsQueryKind")]
@@ -352,6 +464,9 @@ pub enum SystemKind {
     /// Propagation, deferred destroys and the interpolation bookkeeping;
     /// `entities` is the number of world matrices recomputed.
     Transforms,
+    /// The audio sources reconciled with their voices and the voice clock
+    /// advanced (M3-11); `entities` is the number of sources.
+    Audio,
     /// Snapshot and event publication; `entities` is the snapshot's
     /// records.
     Publish,
@@ -374,6 +489,7 @@ impl SystemKind {
             SystemKind::Follow => "follow",
             SystemKind::LookAtCamera => "lookAtCamera",
             SystemKind::Transforms => "transforms",
+            SystemKind::Audio => "audio",
             SystemKind::Publish => "publish",
         }
     }
@@ -512,6 +628,17 @@ pub struct AnimationMarkerEvent {
     /// The clip whose marker it is (a blend space's dominant clip).
     pub clip: AssetRef,
     pub name: String,
+}
+
+/// A `fynkel.AudioSource`'s non-looping clip reached its end (M3-11): the
+/// body of `PLAYBACK_ENDED` (11), general lane, the tick it happened;
+/// `playing` is cleared the same tick. A stopped or stolen voice raises
+/// nothing.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "event", id = 11, name = "fynkel.ev.PlaybackEnded")]
+pub struct PlaybackEndedEvent {
+    pub entity: Entity,
+    pub clip: AssetRef,
 }
 
 /// Physics-lane events share one body (collision/trigger enter/stay/exit):
@@ -686,6 +813,14 @@ pub const ALL: &[&RecordSchema] = &[
     &AnimationEndedEvent::SCHEMA,
     &AnimatorStateRecord::SCHEMA,
     &AnimationMarkerEvent::SCHEMA,
+    &AudioSource::SCHEMA,
+    &AudioListener::SCHEMA,
+    &AudioCommandRecord::SCHEMA,
+    &PlaySoundCommandRecord::SCHEMA,
+    &AudioBusCommandRecord::SCHEMA,
+    &PlaybackEndedEvent::SCHEMA,
+    &AudioStateRecord::SCHEMA,
+    &AudioStatsRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

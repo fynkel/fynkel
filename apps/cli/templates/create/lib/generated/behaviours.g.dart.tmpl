@@ -24,6 +24,14 @@ final BehaviourType gameMoverType = BehaviourType(
       set: (b, v) => (b as _lib0.Mover).jumpHeight = _double(v),
     ),
     BehaviourField(
+      name: 'land',
+      type: 'assetRef',
+      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
+      tooltip: 'Played once on landing (an audio asset, or none)',
+      get: (b) => _assetRefJson((b as _lib0.Mover).land),
+      set: (b, v) => (b as _lib0.Mover).land = _assetRef(v),
+    ),
+    BehaviourField(
       name: 'speed',
       type: 'number',
       defaultValue: 2.0,
@@ -82,3 +90,11 @@ Vec3 _vec3(Object? v) {
 }
 
 List<double>? _vec3Json(Vec3? v) => v == null ? null : [v.x, v.y, v.z];
+
+AssetRef _assetRef(Object? v) {
+  final m = v as Map;
+  return AssetRef(m['asset'] as String, sub: m['sub'] as String?);
+}
+
+Map<String, Object?>? _assetRefJson(AssetRef? r) =>
+    r == null ? null : {'asset': r.asset, if (r.sub != null) 'sub': r.sub};

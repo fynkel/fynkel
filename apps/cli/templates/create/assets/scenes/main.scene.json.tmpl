@@ -31,6 +31,13 @@
             "exposure_mode": "auto",
             "exposure": 12.0
           }
+        },
+        "{{c_camera_listener}}": {
+          "type": "fynkel.AudioListener",
+          "version": 1,
+          "data": {
+            "volume": 1.0
+          }
         }
       }
     },
@@ -116,6 +123,21 @@
             "mask": 4294967295
           }
         },
+        "{{c_cube_audio}}": {
+          "type": "fynkel.AudioSource",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "{{jump_id}}"
+            },
+            "bus": "sfx",
+            "volume": 1.0,
+            "pitch": 1.0,
+            "looping": false,
+            "playing": false,
+            "priority": 0
+          }
+        },
         "{{c_cube_spinner}}": {
           "type": "game.Spinner",
           "version": 1,
@@ -129,7 +151,10 @@
           "version": 1,
           "data": {
             "speed": 2.0,
-            "jumpHeight": 1.0
+            "jumpHeight": 1.0,
+            "land": {
+              "asset": "{{land_id}}"
+            }
           }
         }
       }

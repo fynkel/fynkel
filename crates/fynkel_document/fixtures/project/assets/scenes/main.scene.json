@@ -31,6 +31,13 @@
             ]
           }
         },
+        "c0000000-0000-4000-8000-0000000000cb": {
+          "type": "fynkel.AudioListener",
+          "version": 1,
+          "data": {
+            "volume": 1.0
+          }
+        },
         "c0000000-0000-4000-8000-0000000000c9": {
           "type": "fynkel.Camera",
           "version": 1,
@@ -78,6 +85,21 @@
               1,
               0
             ]
+          }
+        },
+        "c0000000-0000-4000-8000-0000000000c7": {
+          "type": "fynkel.AudioSource",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "c0000000-0000-4000-8000-000000000006"
+            },
+            "bus": "sfx",
+            "volume": 0.8,
+            "pitch": 1.0,
+            "looping": false,
+            "playing": true,
+            "priority": 0
           }
         }
       }

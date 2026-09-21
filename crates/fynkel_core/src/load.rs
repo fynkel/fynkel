@@ -549,6 +549,12 @@ impl ComponentValue {
         if let Ok(v) = ecs.get::<Skin>(entity) {
             out.push(ComponentValue::Skin(v.clone()));
         }
+        if let Ok(v) = ecs.get::<fynkel_audio::AudioSource>(entity) {
+            out.push(ComponentValue::AudioSource(v.clone()));
+        }
+        if let Ok(v) = ecs.copy::<fynkel_audio::AudioListener>(entity) {
+            out.push(ComponentValue::AudioListener(v));
+        }
         out
     }
 }

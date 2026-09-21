@@ -86,6 +86,19 @@ class AnimationEnded extends EngineEvent {
   String toString() => 'AnimationEnded(${entity.toRadixString(16)} $clip)';
 }
 
+/// A `fynkel.AudioSource`'s non-looping clip reached its end (M3-11):
+/// [entity] is the source's, [clip] the clip. General lane, once per
+/// play; `stop`, a stolen voice and a looping clip never raise it;
+/// behaviours see it in `onPlaybackEnded`.
+class PlaybackEnded extends EngineEvent {
+  const PlaybackEnded(super.tickLo, this.entity, this.clip);
+  final int entity;
+  final AssetRef clip;
+
+  @override
+  String toString() => 'PlaybackEnded(${entity.toRadixString(16)} $clip)';
+}
+
 /// A `fynkel.Animator`'s clip crossed a marker (M3-19c): [entity] is the
 /// animator's, [clip] the clip carrying the marker, [name] the marker's.
 /// Once per crossing, loops and backwards playback included; behaviours
@@ -166,6 +179,7 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
       _zoneExitedKind => _zone(d, body, tail, h.tickLo, entered: false),
       gen.AnimationEndedEvent.eventKind => _animationEnded(d, body, tail, h.tickLo),
       gen.AnimationMarkerEvent.eventKind => _animationMarker(d, body, tail, h.tickLo),
+      gen.PlaybackEndedEvent.eventKind => _playbackEnded(d, body, tail, h.tickLo),
       >= _physicsFirst && < _physicsFirst + 5 => _contact(d, body, tail, h),
       _ => UnknownEvent(h.tickLo, h.kind),
     };
@@ -195,6 +209,11 @@ AnimationEnded _animationEnded(ByteData d, int o, Uint8List tail, int tickLo) {
 AnimationMarker _animationMarker(ByteData d, int o, Uint8List tail, int tickLo) {
   final e = gen.AnimationMarkerEvent.decode(d, o, tail);
   return AnimationMarker(tickLo, e.entity, e.clip, e.name);
+}
+
+PlaybackEnded _playbackEnded(ByteData d, int o, Uint8List tail, int tickLo) {
+  final e = gen.PlaybackEndedEvent.decode(d, o, tail);
+  return PlaybackEnded(tickLo, e.entity, e.clip);
 }
 
 ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {

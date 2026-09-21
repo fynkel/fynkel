@@ -191,6 +191,10 @@ impl Code {
     /// A `fynkel.TriggerZone` on an entity without a sensor `Collider`
     /// (`is_sensor: true`): it never fires (M3-12).
     pub const TRIGGER_ZONE_WITHOUT_SENSOR: Code = Code("FYN-H0009");
+    /// A `fynkel.AudioSource`/`fynkel.AudioListener` value the runtime
+    /// would reject (a volume outside `0..=1`, a pitch outside
+    /// `0.05..=8`; M3-11).
+    pub const AUDIO_VALUE: Code = Code("FYN-H0010");
 
     // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
     /// The transaction's base revision is not the document's current one.

@@ -221,6 +221,27 @@ class CommandBatch {
         .encode(_bytes, o, _strings);
   }
 
+  /// An audio source command (M3-11, kind 10): [op] on [entity]'s
+  /// `fynkel.AudioSource`; `setVolume`/`setPitch` read [value].
+  void audio(int entity, AudioOp op, {double value = 0}) {
+    final o = _begin(AudioCommandRecord.commandKind, AudioCommandRecord.wireSize);
+    AudioCommandRecord(entity: entity, op: op, value: value).encode(_bytes, o, _strings);
+  }
+
+  /// A fire-and-forget sound (M3-11, kind 11; either lane).
+  void playSound(AssetRef clip,
+      {AudioBus bus = AudioBus.sfx, double volume = 1, double pitch = 1, int priority = 0}) {
+    final o = _begin(PlaySoundCommandRecord.commandKind, PlaySoundCommandRecord.wireSize);
+    PlaySoundCommandRecord(clip: clip, bus: bus, volume: volume, pitch: pitch, priority: priority)
+        .encode(_bytes, o, _strings);
+  }
+
+  /// A bus gain and the mute switch (M3-11, kind 12; either lane).
+  void audioBus(AudioBus bus, double volume, {bool muted = false}) {
+    final o = _begin(AudioBusCommandRecord.commandKind, AudioBusCommandRecord.wireSize);
+    AudioBusCommandRecord(bus: bus, volume: volume, muted: muted).encode(_bytes, o, _strings);
+  }
+
   void removeComponent(int entity, int componentId) {
     final o = _begin(RemoveComponentCommand.commandKind, RemoveComponentCommand.wireSize);
     _bytes.setUint64(o, entity, Endian.little);

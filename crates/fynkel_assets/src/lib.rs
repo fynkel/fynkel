@@ -28,19 +28,21 @@ use std::sync::{Arc, Mutex};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Uuid};
 use fynkel_cooked::payload::{
-    decode_animation, decode_mesh, decode_skin, decode_texture, ANIM_INTERPOLATION_CUBIC_SPLINE,
-    ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP, ANIM_PROPERTY_ROTATION,
-    ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
+    decode_animation, decode_clip, decode_mesh, decode_skin, decode_texture,
+    ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP,
+    ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
 };
 pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
 use fynkel_cooked::{
-    ChunkFile, KIND_ANIMATION, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN, KIND_TEXTURE,
+    ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN,
+    KIND_TEXTURE,
 };
 use fynkel_core::animation::{
     BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Marker, Property, Skin,
 };
 use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
+use fynkel_core::AudioClip;
 use fynkel_core::SceneDescription;
 pub use fynkel_document::project::{PhysicsSettings, Quality, QualityProfile};
 pub use fynkel_document::AuthoredBehaviour;
@@ -338,6 +340,7 @@ struct Store {
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
     skins: HashMap<AssetRef, Arc<Skin>>,
+    sounds: HashMap<AssetRef, Arc<AudioClip>>,
     /// Residency counts by asset id (`retain` increments, release
     /// decrements; zero evicts).
     counts: HashMap<Uuid, u32>,
@@ -407,6 +410,7 @@ impl Assets {
                 clips: HashMap::new(),
                 blends: HashMap::new(),
                 skins: HashMap::new(),
+                sounds: HashMap::new(),
                 counts: HashMap::new(),
                 evictions: 0,
             })),
@@ -618,6 +622,50 @@ impl Assets {
         (clips, skins, diags)
     }
 
+    /// Registers with `world` every sound an `AudioSource` in `scene`
+    /// names (M3-11), so the audio system finds them at the first tick.
+    /// An unreadable sound is a diagnostic (the store's) and the source
+    /// reports `SOUND_UNAVAILABLE` at its first tick. Returns the number
+    /// registered by this call.
+    pub fn register_audio(
+        &self,
+        scene: &SceneDescription,
+        world: &mut fynkel_core::World,
+    ) -> (usize, Vec<Diagnostic>) {
+        use fynkel_core::components::ComponentValue;
+        let mut sounds = 0;
+        let mut diags = Vec::new();
+        for e in &scene.entities {
+            for c in &e.components {
+                if let ComponentValue::AudioSource(a) = c {
+                    match self.register_sound(&a.clip, world) {
+                        Ok(true) => sounds += 1,
+                        Ok(false) => {}
+                        Err(d) => diags.push(d),
+                    }
+                }
+            }
+        }
+        (sounds, diags)
+    }
+
+    /// Registers the sound `r` with `world` unless it is nil or already
+    /// there; `Ok(true)` when this call registered it.
+    pub fn register_sound(
+        &self,
+        r: &AssetRef,
+        world: &mut fynkel_core::World,
+    ) -> Result<bool, Diagnostic> {
+        if r.asset.is_nil() || world.has_sound(r) {
+            return Ok(false);
+        }
+        let sound = self.sound(r)?;
+        world
+            .register_sound(r.clone(), sound)
+            .map_err(|msg| self.malformed(r, "CLIP").with_suggestion(msg))?;
+        Ok(true)
+    }
+
     /// Registers the clip `r` with `world` unless it is nil or already
     /// there; `Ok(true)` when this call registered it. A blend space
     /// (M3-19c: `r` names a `.blend.json`) is registered with every
@@ -709,6 +757,7 @@ impl Assets {
         s.clips.retain(|r, _| !gone.contains(&r.asset));
         s.blends.retain(|r, _| !gone.contains(&r.asset));
         s.skins.retain(|r, _| !gone.contains(&r.asset));
+        s.sounds.retain(|r, _| !gone.contains(&r.asset));
         s.metas.retain(|id, _| !gone.contains(id));
         s.evictions += 1;
     }
@@ -758,6 +807,20 @@ impl Assets {
         let m = decode_material(&bytes).ok_or_else(|| self.malformed(r, "MATL"))?;
         self.lock().materials.insert(r.clone(), Arc::new(m.clone()));
         Ok(m)
+    }
+
+    /// The cooked sound (a `CLIP` chunk) as the audio engine's clip
+    /// (M3-11): interleaved `f32` frames, mono or stereo.
+    pub fn sound(&self, r: &AssetRef) -> Result<Arc<AudioClip>, Diagnostic> {
+        if let Some(c) = self.lock().sounds.get(r) {
+            return Ok(c.clone());
+        }
+        let bytes = self.chunk(r, KIND_CLIP)?;
+        let payload = decode_clip(&bytes).ok_or_else(|| self.malformed(r, "CLIP"))?;
+        let clip = AudioClip::new(payload.sample_rate, payload.channels, payload.samples)
+            .map_err(|msg| self.malformed(r, "CLIP").with_suggestion(msg))?;
+        self.lock().sounds.insert(r.clone(), clip.clone());
+        Ok(clip)
     }
 
     /// The cooked animation clip (an `ANIM` chunk, `anim/<a>`) as the

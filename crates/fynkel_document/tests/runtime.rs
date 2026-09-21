@@ -81,7 +81,7 @@ fn component_values_round_trip_through_nodes() {
         }
     }
     assert_eq!(seen, 11);
-    assert_eq!(AUTHORED_COMPONENTS.len(), 20);
+    assert_eq!(AUTHORED_COMPONENTS.len(), 22);
     assert!(!AUTHORED_COMPONENTS.contains(&"fynkel.Name"));
     // Encoded numbers are the shortest f32 text, so files stay readable.
     let node = Camera::default().to_node();

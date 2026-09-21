@@ -17,9 +17,9 @@ use fynkel_core::components::{
 use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
 use fynkel_core::{
-    Animator, BodyType, CharacterController, Collider, ColliderShape, Emitter, Follow,
-    LifetimeDespawn, LookAtCamera, MotionSpace, Name, Oscillate, RigidBody, Rotator, Settings,
-    Skin, ThirdPersonCamera, TriggerZone,
+    Animator, AudioBus, AudioListener, AudioSource, BodyType, CharacterController, Collider,
+    ColliderShape, Emitter, Follow, LifetimeDespawn, LookAtCamera, MotionSpace, Name, Oscillate,
+    RigidBody, Rotator, Settings, Skin, ThirdPersonCamera, TriggerZone,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
@@ -590,6 +590,87 @@ fn fixtures_match_generated_codecs() {
             entity: e(4, 2),
             clip: AssetRef::with_sub(mesh_id, "anim/0"),
             name: "footstep".into(),
+        },
+    );
+    // M3-11.
+    check(
+        "AudioSource",
+        &AudioSource {
+            clip: AssetRef::new(mesh_id),
+            bus: AudioBus::Music,
+            volume: 0.8,
+            pitch: 1.25,
+            looping: true,
+            playing: true,
+            priority: -2,
+        },
+    );
+    check("AudioListener", &AudioListener { volume: 0.5 });
+    check(
+        "AudioCommandRecord",
+        &AudioCommandRecord {
+            entity: e(4, 2),
+            op: AudioOp::SetPitch,
+            value: 0.75,
+        },
+    );
+    check(
+        "PlaySoundCommandRecord",
+        &PlaySoundCommandRecord {
+            clip: AssetRef::new(mesh_id),
+            bus: AudioBus::Sfx,
+            volume: 0.9,
+            pitch: 1.1,
+            priority: 3,
+        },
+    );
+    check(
+        "AudioBusCommandRecord",
+        &AudioBusCommandRecord {
+            bus: AudioBus::Master,
+            volume: 0.6,
+            muted: true,
+        },
+    );
+    check(
+        "PlaybackEndedEvent",
+        &PlaybackEndedEvent {
+            entity: e(4, 2),
+            clip: AssetRef::new(mesh_id),
+        },
+    );
+    check(
+        "AudioStateRecord",
+        &AudioStateRecord {
+            entity: e(4, 2),
+            playing: true,
+            paused: false,
+            time: 0.5,
+            duration: 2.0,
+            volume: 0.8,
+            pitch: 1.0,
+            looping: false,
+            clip: AssetRef::new(mesh_id),
+            bus: AudioBus::Sfx,
+            voice: 0x105,
+        },
+    );
+    check(
+        "AudioStatsRecord",
+        &AudioStatsRecord {
+            device: true,
+            sample_rate: 48_000,
+            channels: 2,
+            voices: 3,
+            max_voices: 32,
+            started: 10,
+            stolen: 1,
+            refused: 2,
+            ended: 7,
+            clips: 4,
+            callbacks: 1000,
+            underruns: 0,
+            suspended: false,
         },
     );
 }

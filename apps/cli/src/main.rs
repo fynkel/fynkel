@@ -398,6 +398,12 @@ fn test_command(args: &[String]) -> ExitCode {
                 a.entities, a.clips, a.skins, a.skinned_meshes, a.joints, a.ended, a.markers, a.diagnostics
             );
         }
+        if let Some(a) = &report.audio {
+            println!(
+                "audio: {} sources, {} sounds, {} voices started ({} stolen, {} refused), {} ended, {} diagnostics",
+                a.sources, a.sounds, a.started, a.stolen, a.refused, a.ended, a.diagnostics
+            );
+        }
         if !report.systems.is_empty() {
             let parts: Vec<String> = report
                 .systems

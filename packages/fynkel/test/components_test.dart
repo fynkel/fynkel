@@ -72,7 +72,7 @@ void main() {
     expect(robot.get<Name>()!.value, 'Robot');
     expect(robot.get<Transform>(), robot.localTransform);
     expect(robot.has<Transform>(), isTrue);
-    expect(robot.components.map((c) => c.runtimeType), [Transform, Name, MeshRenderer]);
+    expect(robot.components.map((c) => c.runtimeType), [Transform, Name, MeshRenderer, AudioSource]);
     expect(w.stats().queryCalls - q0, 1, reason: 'every read this tick came from one query');
     w.frame(1 / 60);
     robot.get<MeshRenderer>();

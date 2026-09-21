@@ -141,7 +141,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
     let cache = cache_json(&assets);
     // Physics (M3-08): the project's gravity, and every mesh collider's
     // mesh registered before the first step builds the colliders.
-    let (physics, animation) = {
+    let (physics, animation, audio) = {
         let core = w.core_mut();
         if let Some(p) = assets.project() {
             core.physics_mut()
@@ -155,7 +155,11 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
         // Animation (M3-19): every clip an animator plays and every skin.
         let (clips, skins, anim_diags) = assets.register_animation(&scene.description, core);
         diags.extend(anim_diags);
+        // Audio (M3-11): every sound a source names.
+        let (sounds, audio_diags) = assets.register_audio(&scene.description, core);
+        diags.extend(audio_diags);
         let gravity = core.physics().gravity();
+        let stats = core.audio_stats();
         (
             json!({
                 "gravity": [gravity.x, gravity.y, gravity.z],
@@ -165,6 +169,14 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
                 "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
             }),
             json!({ "clips": clips, "skins": skins }),
+            json!({
+                "sounds": sounds,
+                "clips": stats.clips,
+                "device": stats.device,
+                "sampleRate": stats.sample_rate,
+                "channels": stats.channels,
+                "maxVoices": stats.max_voices,
+            }),
         )
     };
     match w.core_mut().load_scene_with(&scene.description, mode) {
@@ -195,6 +207,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
                     "input": input,
                     "physics": physics,
                     "animation": animation,
+                    "audio": audio,
                 }),
             }
         }
@@ -351,6 +364,8 @@ fn instantiate_prefab(
     mesh_diags.extend(prefab_diags);
     let (_, _, anim_diags) = assets.register_animation(&prefab.description, w.core_mut());
     mesh_diags.extend(anim_diags);
+    let (_, audio_diags) = assets.register_audio(&prefab.description, w.core_mut());
+    mesh_diags.extend(audio_diags);
     let name = name.unwrap_or(&prefab.name);
     match w
         .core_mut()

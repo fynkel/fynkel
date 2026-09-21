@@ -645,8 +645,8 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert!(!r.has_errors(), "{}", r.text());
     assert_eq!(
         r.assets.len(),
-        16,
-        "five scenes, three prefabs, the column rig and its blend space, robot, rig, material, swatch, normal, metallic-roughness"
+        17,
+        "five scenes, three prefabs, the column rig and its blend space, robot, rig, material, swatch, normal, metallic-roughness, the tone"
     );
     let cache = project_cache_dir(&dir);
     assert_eq!(cache, dir.join(".fynkel/cache"));

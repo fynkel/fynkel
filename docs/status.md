@@ -14,6 +14,7 @@ changes. Numbers come from the gate reports (`m0-architecture-report.md`,
 | `fynkel_ecs` + `fynkel_scene` | `hecs` behind a thin facade (ADR-0003); transforms, hierarchy, propagation | **Solid** | unit tests; deterministic checksum in the headless host; `hecs` provably hidden |
 | `fynkel_core` | The world: command batches in, snapshot/events/diagnostics out, fixed §5.1 step order, `load_scene` from a typed description; the input contract (`input.rs`, `docs/input.md`): the binding grammar, actions compiled from `inputActions`, raw events captured per frame, held state every tick and edges consumed by exactly one; the physics slot (`fynkel_physics` stepped, rejections → diagnostics, contacts on the physics lane); the native catalogue (`world/catalogue.rs`, `docs/catalogue.md`): `Rotator` (14), `Oscillate` (15), `LifetimeDespawn` (18), `Emitter` (19) before physics, `Follow` (16) and `LookAtCamera` (17) after it, `Behaviour`-free, with every phase of the step timed (`SystemTime` per `SystemKind`, `FYNKEL_QUERY_SYSTEMS`) (M3-10); runtime scenes (`load.rs`, `docs/scenes.md`): `load_scene_with(scene, LoadMode::{Replace, Additive})` / `unload_scene` / `loaded_scenes` / `scene_of` over a scene registry — replace unloads everything and destroys the rest (runtime spawns included), additive stacks, unload takes a scene's still-alive entities only — `SceneReady { scene }` / `SceneUnloaded { scene, entities }`, and `TriggerZone` (20) turning a sensor's trigger contacts into the general-lane `ZoneEntered`/`ZoneExited { zone, other, event }` (`once` removes itself) (M3-12); world labels (`world/projection.rs`, `docs/hud.md`): `project(width, height, anchors, out)` from the frame's camera and interpolated poses through the renderer's own `view_matrix`/`projection_matrix`, `PROJECTED_*` flags, opt-in occlusion by collider mask (a raycast), `MAX_PROJECTION_ANCHORS` 64 with `TOO_MANY_ANCHORS` (`FYN-R0012`) beyond (M3-13); animation (`animation.rs`, `world/animation.rs`, `docs/animation.md`): the one clip core — channels over named nodes, step/linear/cubic-spline sampling into poses, pose blending, skins with inverse bind matrices —, `Animator` (21) ticked first among the pre-tick systems (fresh-tick sampling, looping or one-shot with `ANIMATION_ENDED`, crossfades with the outgoing clip on its own clock, `CLIP_UNAVAILABLE` once), `Skin` (22) resolving its joints by name under its skeleton root (`SKIN_UNAVAILABLE` once) and the frame's matrix palettes from the joints' interpolated poses in the extract, the `Animate` command, the `AnimatorState` query, the root-motion policy (none by default; clips in place) (M3-19); animation depth (M3-19c): a blend space played like a clip — the two points around the parameter blended by the fraction between them, phase-synced (the shared phase times each clip's duration, the clock rescaled on a parameter change), the dominant clip's markers, `parameter` reported as set —, animators run ancestors first so a second `Animator` on a child entity is a layer (`weight` blends, `additive` adds the clip's delta from its first frame), clip markers crossed on the unwrapped clock (loops, backwards) as `ANIMATION_MARKER`, opt-in root motion (`root_motion`: the root's planar delta and yaw taken out of the pose and handed to a `CharacterController` or the transform), `SetWeight`/`SetParameter` (the parameter drives the animator's blend space) | **Solid** | 3 000-tick deterministic checksum (step p50 2 µs at 25 entities), 25 tests + the input tests (a press across three catch-up ticks, the zero-tick frame, composition, reset), `tests/catalogue.rs` (8: spaces under a tilted parent, moved rest, snap/smooth/look-at, billboard priority, subtree despawn, rate/max_alive/velocity/`PREFAB_UNAVAILABLE` once), `tests/scenes.rs` (5: replace/additive/unload/zone/validation), `tests/animation.rs` (the sampler, blending, the clock, one-shots, crossfades, skins and palettes on the rig fixture; layers, markers, root motion with and without a controller), headless host; 5 000 stress movers at 0.15 ms a tick together |
 | `fynkel_physics` | `RigidBody` (10) / `Collider` (11) / `CharacterController` (12) and the Rapier adapter (`docs/physics.md`): stepped by `World::step` at the §5.1 slot only while something has a body, collider or character, sync of changed entries only, dynamic poses written back (`PhysicsOwned`), body commands (`fynkel.cmd.Body`, `Move`/`Jump` for characters), contacts with point/normal/impulse (stay for subscribed pairs), raycast/shape-cast/overlap queries, project gravity and named layers, bounded mesh colliders from the cache; characters over Rapier's kinematic controller (capsule, slopes, steps, gravity, own grounded probe, `FYNKEL_QUERY_CHARACTER` → grounded/sliding/velocity) driven either by `Move`/`Jump` or by the actions named on the component, and `ThirdPersonCamera` (13, in `fynkel_core`) placed after the step behind its named target with a sphere-cast pull-in (M3-09); `add_root_motion` summing an animator's extracted travel into the tick's `Move` (M3-19c) | **Solid** | 10 crate tests + core/native/headless physics tests; the fixture's Crate B lands and sleeps under the checksum, the Playground's Player walks, jumps and lands on the Platform from `test/platform.input.json` under the checksum; 500 stress bodies at p50 0.64 ms/tick, checksum repeated |
+| `fynkel_audio` | `AudioSource` (23) / `AudioListener` (24), the voice engine and the mixer (`docs/audio.md`, M3-11 part 1): the engine on the world's thread — clip registry over cooked `CLIP` chunks, 32 voices with priority (steal the lowest at or below, oldest among equals; refuse otherwise), the tick clock that decides every position and end, bus/mute/listener gains — and the mixer inside the device callback (fixed tables, resampling × pitch, gain smoothing, nothing allocated or freed there; two `rtrb` rings between them); backends: null (the headless host, every test) and `cpal` 0.18.2 behind the `device` feature (`fynkel_native`, `hosts/standalone`). The audio phase runs last in the tick (`SystemKind::Audio`): sources reconciled with their voices, `PLAYBACK_ENDED` (11) for the non-looping ends; commands `Audio` (10) / `PlaySound` (11) / `AudioBus` (12), queries `AUDIO` (12) / `AUDIO_STATS` (13), `fynkel_world_audio_open/suspend/close`. Part 2 (streamed music, the reference game's footsteps) next. | **Solid (2D)** | `crates/fynkel_audio` unit tests + `tests/allocation.rs` (zero allocations in a render); `crates/fynkel_core/tests/audio.rs` (start/end tick, loop/pause/volume/pitch/stop, validation, both lanes, the listener, the voice limit); the ABI test; the fixture's Robot tone headlessly; the device opened by the ABI test, the standalone host and the Flutter test on this Mac |
 | `fynkel_wire` + `fynkel_schema_derive` + `fynkel codegen` (a) | Components and document records written once in Rust → JSON Schema (components, `material.schema.json`), Dart codecs (with `copyWith` and the `componentCodecs`/`componentIds` table), Rust codecs (with the `ComponentValue` wire dispatch), fingerprint `0x97fd26db36af3421` | **Solid** — the strongest piece | `codegen --check` in CI; wire fixtures shared by Rust and Dart |
 | `fynkel_native` + `package:fynkel` | C ABI v1, `ffigen` bindings, the Dart SDK: `World`, `GameObject`, allocation-free `TransformWriter`, `loadProject(dir)`/`loadScene(sceneId, {cacheDir, mode})` from the cooked cache only → `LoadReport` (scene key, residency, `mode`, `scenes`), `package:fynkel/testing.dart` (`cookProject`), `Behaviour` with the §3.2 lifecycle driven by `World.frame` at the §5.1 points, `GameContext` services with installable test contexts (`Input` over `TestInput`), `BehaviourRegistry`, `World.frame(dt, input:)` with `WorldInput` read in place, recordings (`InputRecording`, `loadInputRecording`); typed native component access — `GameObject.get<T>()`/`has`/`set`/`add`/`setPresentation`/`remove`/`components` (and on `Behaviour`) over `fynkel.cmd.SetComponent`/`RemoveComponent` and `FYNKEL_QUERY_COMPONENTS`, one query per object per tick, read-your-writes, no mirror (M3-07a); physics — body commands, `bodyState()`, contact callbacks on `Behaviour`, `World.raycast`/`shapeCast`/`overlap`, `layerMask` (M3-08); `World.find`/`findAll`, `GameObject.findChild`/`findDescendant` over one `FYNKEL_QUERY_ENTITIES` per tick, spawn-then-configure in one tick through temp references, `World.instantiate(prefab)` over `fynkel_world_instantiate` → `InstantiateReport` (M3-08b; an imported model by `AssetRef(source, sub: World.importedPrefabSub)` since M3-19a — no ABI change, the world keys the prefab by the source); runtime scenes — `world.scenes` (`SceneManager`: `state`/`current`/`loaded`, `load`/`unload`/`transition(to, {mode})` performed at the start of the next frame, `cancel`, listeners) over `fynkel_world_load_scene_with`/`unload_scene`, `unloadScene` → `UnloadReport`, `bindActions` → rebinds re-applied after every load, `Behaviour.onZoneEnter/onZoneExit` + `world.zones`, `SettingsDocument`/`SettingsStore` (memory or a file with tmp+rename saves) behind `GameContext.settings` (M3-12); HUD models and world labels — `GameModel`/`ModelValue<T>` (notify on `!=`) and `World.projection` (`ProjectionView`/`ScreenAnchor`: one `fynkel_world_project` call per frame for every anchor, viewport in the caller's pixels, `visible`/`occluded`/`missing`/`dropped`, the `FYN-R0012` diagnostic once per overflow, informational), a `GameObject` attached this tick reads its transform through the component query until its first snapshot (M3-13); animation — `GameObject.animation` (`play`/`crossfade`/`stop`/`pause`/`resume`/`speed`/`time`, `state` → `AnimatorState`) over `fynkel.cmd.Animate` and `FYNKEL_QUERY_ANIMATOR`, `Behaviour.onAnimationEnded`, `AnimationEnded` events, `LoadReport.animation`, clips a behaviour names registered from the cache on demand in `fynkel_native` (M3-19); native-assets build hook | **Solid** | 1 000 entities/tick: 191 µs encode+submit, 169 µs step, 47 µs read; 5.1 KB/frame Dart allocation on the 25-entity scene (0.7–1.2 KB of it SDK), 2 GCs in 3 000 frames; leak tests at the ABI and viewport |
 | `package:fynkel_generator` + `fynkel codegen` (b) | `build_runner` aggregate builder: `@FynkelBehaviour`/`@Expose` classes → `behaviours.g.dart` (factories, field get/set, `registerBehaviours`), `behaviours.g.json` (Inspector metadata) and `schemas/behaviours/<id>.schema.json`; `fynkel codegen --project [--check]` runs it and splits the schemas | **Solid** | authored `game.Spinner { speed: 2.5 }` → validated → instantiated → rotates (M2 gate); emit tests; `--check` in CI for the example and the starter project; 1 s warm |
@@ -251,6 +252,16 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
   on the spine, the footsteps in the HUD), the user's Mixamo hero on the
   same one locally; 200 rigs pose in 0.34 ms a tick and draw skinned at
   122 frames/s in the standalone host. (M3-19c part 2.)
+- **A game is heard, and a test hears the same.** The starter's cube
+  plays Kenney's `jump.ogg` from its own `fynkel.AudioSource` on take-off
+  and `land.ogg` through `world.audio.play` on landing, the camera
+  carries the listener, `FynkelGameView(audio: true)` opens the Mac's
+  output device; the same scene on the null backend (`flutter test`,
+  `fynkel test --headless`) counts the same voices started and ended and
+  the same `PlaybackEnded` ticks, because the world's tick — not the
+  device — decides every voice's clock. 32 voices with priorities, three
+  buses fed by the saved settings, and a render that allocates nothing
+  (counted). (M3-11 part 1.)
 
 ## 3. What is *not* proven yet (honest list)
 
@@ -258,7 +269,7 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
 | --- | --- | --- |
 | **SDK packages come from the checkout.** `package:fynkel` and `package:fynkel_flutter` are path dependencies into the repo; the hook's `fynkel.lock.json` is a different shape from the project lock. | A game cannot be built without a Fynkel checkout and a Rust toolchain. | M3 item 17 / C6 (published artifacts) |
 | **The renderer has no IBL and no light culling.** Environment lighting is a constant ambient term, so metals read dark (the showcase's gold and chrome blocks); every draw sees the 8 nearest lights to the camera, whatever it draws; one shadow cascade to 60 m; culling is per instance on the CPU (1.4 ms of prepare at 5 800 records — fine at 120 Hz, not free). | Metallic materials cannot look right; a scene with many small lights lights the wrong things. | IBL and per-object light lists after M3 |
-| **No audio; `targets` unread.** `CLIP` chunks have no consumer; `targets` is validated and unused (`fynkel run -d` picks the device by hand). | Games cannot be heard yet. | M3 (D4; D3's last field) |
+| **Audio is 2D, in memory, three buses; `targets` unread.** No panning or distance attenuation (the listener is a gain; M5), every clip held whole (streamed music is M3-11 part 2), no effects or sends, no one-shot handle, the Android device path untested; `targets` is validated and unused (`fynkel run -d` picks the device by hand). | Enough for the reference game's footsteps and pickups (part 2); a long music track would sit in memory until streaming lands. | M3-11 part 2; M5 (spatial); D3's last field |
 | **Animation V1 is clips, crossfades, 1D blend spaces, entity layers, markers, opt-in root motion and skins.** No state machine, no timeline, no 2D blend spaces, no per-bone masks (a layer masks by the entity it sits on), no IK or retargeting, no morph targets. | Enough for the reference game's character; the state machine and the sequencer are the next items on the same core (blueprint §9). | after M3 |
 | **Physics V1 is bodies, a character and queries.** One collider per entity, no joints, mesh colliders static only, collider outlines (`Physics::debug_lines`) not drawn by any host yet; the character does not push dynamic bodies or ride moving platforms (M3-14 decided the relative look delta: consumed by one tick as a rate, `docs/input.md` rule 5; and no camera smoothing — the rig snaps). | Enough for the reference game's player, crates and hazards; ragdolls, vehicles, hinged doors and platform riding are post-1.0. | after M3 |
 | **Input has no Android or web path and no rebinding UI.** `FynkelInputPlugin` is Apple-only (GameController); the touch overlay is fixed to bottom corners; rebinds persist in the settings file (M3-12) but nothing edits them on screen. | Fine for the Apple targets M3 ships; a settings screen needs a runtime rebind API. | after M3 |
@@ -829,6 +840,50 @@ Outside content: the Fox's blend (CLI test), the user's hero on the
 reference game's blend space (local); the Column's and the box
 character's spaces are mine.
 
+M3-11 part 1 (2026-09-21): fmt/clippy clean, `cargo test --workspace`
+green (381 tests: `fynkel_audio` the engine — register/replace/unregister,
+play/steal/refuse by priority, pause/resume/volume/pitch/loop, the clock's
+ends, bus × master × listener × mute gains, device open/close on the null
+build —, the mixer — resampling, smoothing, a full ring — and
+`tests/allocation.rs` counting zero allocations across a render;
+`fynkel_core/tests/audio.rs` eight tests — a 1 s clip starts at its set
+tick and ends at tick 59 with `PLAYBACK_ENDED`, loop/pause/resume/
+`SetVolume`/`SetPitch`/`Stop`, `MISSING_COMPONENT` and four
+`INVALID_PAYLOAD`s, `PlaySound` on both lanes and `AudioBus`, an unknown
+clip once per source and on every `PlaySound`, the lowest listener wins
+and a destroyed one falls back to 1, 32 voices then a priority-5 thief
+stealing voices[0] and a −1 newcomer refused, a clip change restarting;
+the native ABI `audio_commands_events_and_queries` — components 23/24
+through `QUERY_COMPONENTS`, `QUERY_AUDIO`/`QUERY_AUDIO_STATS`,
+`PLAYBACK_ENDED` within 60 steps, the presentation batch rejected 5 of
+5 with `WRONG_LANE` last, `fynkel_world_audio_open` opening the Mac's
+device (48 kHz, 2 channels) and suspend/close leaving the voices; the
+headless fixture — `audio: 1 sources, 1 sounds, 1 voices started (0
+stolen, 0 refused), 1 ended, 0 diagnostics` under the same checksum; the
+fixture counts everywhere (17 assets, 6 sources, 31 references, 23
+components, 8 retained) and the two tests the M3-19c rebase had left
+red — the synthetic 10 000-entity scene at formatVersion 3, the native
+authoring session's asset count —, both `codegen --check` pipelines up
+to date (fingerprint `0xb223170a5c7bdaec`, fixtures rolled, four locks
+refreshed), Dart suites green (`packages/fynkel` 146 with
+`audio_test.dart` — the fixture's tone registered and played to its
+end with a behaviour replaying it once, object control and
+component-driven play, `world.audio.play` on both lanes, the settings
+store's volumes reaching the buses, every rejection code, the ghost
+source once, 32 voices stolen and refused through the SDK, suspend/close
+as no-ops —, `fynkel_flutter` 24 with the view opening, suspending and
+closing the device on the lifecycle, `fynkel_generator` 5, `spinner_game`
+4, `hosts/flutter_apple` analyze clean), the iOS `fynkel_platform_apple`
+release build with `cpal` linked, a fresh starter through validate,
+headless (`audio: 1 sources, 1 sounds` — the Dart Mover plays them, so
+headlessly nothing starts), the walk replay, `codegen --check`, analyze
+and its 6 tests (the new one: 4 voices started and ended, `land.ogg`
+registered by its first one-shot, 2 `PlaybackEnded` on the cube), the
+showcase and the reference game unchanged (checksums `8c186fe3e17251df`,
+`aa675a1b9fc65ee1`; both registries list the two components). Outside
+content: the starter's two clips are Kenney's (CC0); the acceptance on
+the reference game is part 2's.
+
 ## 6. Verdict and next steps
 
 M2 is closed with a GO (`m2-gate-report.md`). The data layer is the shape the
@@ -927,8 +982,13 @@ in its own app, play it, or hear it. That is M3, in this order:
    with the wave layer and footsteps in the HUD). From 19a on an item
    passes only on content its implementer did not make (Khronos sample
    rigs committed under CC-BY, a Mixamo download checked locally —
-   blueprint scope rule). **Next: audio** (11, footsteps and the pickup
-   sound from 19c's markers), then the reference game's
+   blueprint scope rule). **11 audio, part 1 done** (M3-11 part 1:
+   `fynkel_audio` on `cpal` + Fynkel's own mixer, the components, the
+   tick's audio phase, the commands/queries/event, the device lifecycle
+   through the ABI, the Flutter view and the standalone host, the Dart
+   surface, the starter's jump and landing sounds). **Next: audio part
+   2** (streamed music, the reference game's footsteps from 19c's
+   markers and its pickup/hazard sounds), then the reference game's
    menus/settings/results (15), instrumentation (16), public readiness
    (17), the gate report (18) — measured with both captures at every
    step.

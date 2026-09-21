@@ -1230,7 +1230,7 @@ fn catalogue_components_and_the_systems_query() {
     );
 
     let (s, n, body, tail) = h.query(bridge::QUERY_SYSTEMS, Entity::NULL);
-    assert_eq!((s, n), (Status::Ok, 14));
+    assert_eq!((s, n), (Status::Ok, 15));
     let times: Vec<SystemTimeRecord> = (0..n as usize)
         .map(|i| SystemTimeRecord::decode(&body[i * SystemTimeRecord::SIZE..], &tail).unwrap())
         .collect();
@@ -1828,5 +1828,295 @@ fn animation_commands_events_and_query() {
             .unwrap()
             .unwrap(),
         ComponentValue::Skin(skin)
+    );
+}
+
+#[test]
+fn audio_commands_events_and_queries() {
+    use fynkel_audio::{AudioClip, NULL_SAMPLE_RATE};
+    use fynkel_contracts::{AssetId, AssetRef};
+    use fynkel_core::components::ComponentValue;
+    use fynkel_core::{AudioBus, AudioListener, AudioSource};
+    let h = Host::new();
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (1, spawn(1, 0.0, None, "Speaker")),
+            (1, spawn(2, 0.0, None, "Ear"))
+        ],
+    );
+    h.step();
+    let ids = h.spawned();
+    let (speaker, ear) = (ids[0], ids[1]);
+
+    // The clip a loaded project would have registered from its cache:
+    // half a second.
+    let clip = AssetRef::new(AssetId::from_bytes([7; 16]));
+    let frames = NULL_SAMPLE_RATE as usize / 2;
+    unsafe {
+        (*h.w)
+            .core_mut()
+            .register_sound(
+                clip.clone(),
+                AudioClip::new(NULL_SAMPLE_RATE, 1, vec![0.25; frames]).unwrap(),
+            )
+            .unwrap();
+    }
+
+    // The source and the listener as components (kind 6); both query
+    // back through QUERY_COMPONENTS.
+    let source = AudioSource {
+        clip: clip.clone(),
+        bus: AudioBus::Sfx,
+        volume: 0.8,
+        pitch: 1.0,
+        looping: false,
+        playing: true,
+        priority: 1,
+    };
+    h.submit(
+        Lane::Simulation,
+        &set_component(speaker, &ComponentValue::AudioSource(source.clone())),
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            ear,
+            &ComponentValue::AudioListener(AudioListener { volume: 0.5 }),
+        ),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
+    let (s, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, speaker);
+    assert_eq!((s, n), (Status::Ok, 3), "Transform, Name, AudioSource");
+    let mut at = 0;
+    for _ in 0..n - 1 {
+        let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+        at += ComponentHeader::SIZE + hd.size as usize;
+    }
+    let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+    assert_eq!((hd.component, hd.size), (23, AudioSource::SIZE as u32));
+    at += ComponentHeader::SIZE;
+    assert_eq!(
+        fynkel_wire::decode_component_value(23, &body[at..], &tail)
+            .unwrap()
+            .unwrap(),
+        ComponentValue::AudioSource(source)
+    );
+    let (_, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, ear);
+    assert_eq!(n, 3);
+    let mut at = 0;
+    for _ in 0..n - 1 {
+        let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+        at += ComponentHeader::SIZE + hd.size as usize;
+    }
+    let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+    assert_eq!((hd.component, hd.size), (24, AudioListener::SIZE as u32));
+
+    // Playing since the set tick; the state and the stats queries.
+    let (s, n, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
+    assert_eq!((s, n), (Status::Ok, 1));
+    let state = AudioStateRecord::decode(&body, &tail).unwrap();
+    assert!(state.playing && !state.paused, "{state:?}");
+    assert_eq!(
+        (state.duration, state.volume, state.bus),
+        (0.5, 0.8, AudioBus::Sfx)
+    );
+    assert_eq!(state.clip, clip);
+    assert_ne!(state.voice, 0);
+    let (s, n, _, _) = h.query(bridge::QUERY_AUDIO, ear);
+    assert_eq!((s, n), (Status::Ok, 0), "no source, empty");
+    let (s, n, body, tail) = h.query(bridge::QUERY_AUDIO_STATS, Entity::NULL);
+    assert_eq!((s, n), (Status::Ok, 1));
+    let stats = AudioStatsRecord::decode(&body, &tail).unwrap();
+    assert!(!stats.device && !stats.suspended);
+    assert_eq!(
+        (
+            stats.sample_rate,
+            stats.channels,
+            stats.voices,
+            stats.clips,
+            stats.started
+        ),
+        (NULL_SAMPLE_RATE, 2, 1, 1, 1)
+    );
+    assert_eq!(stats.max_voices, fynkel_audio::MAX_VOICES as u32);
+
+    // Runs to its end within a second: one PLAYBACK_ENDED, playing false.
+    let mut ended = Vec::new();
+    for _ in 0..60 {
+        h.step();
+        let (events, tail) = h.events_with_tail();
+        ended.extend(
+            events
+                .into_iter()
+                .filter(|(k, _)| *k == EventKind::PLAYBACK_ENDED.0)
+                .map(|(_, b)| PlaybackEndedEvent::decode(&b, &tail).unwrap()),
+        );
+    }
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    assert_eq!((ended[0].entity, &ended[0].clip), (speaker, &clip));
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
+    let state = AudioStateRecord::decode(&body, &tail).unwrap();
+    assert!(!state.playing && state.voice == 0, "{state:?}");
+
+    // The audio command (kind 10): play, set volume/pitch, pause, resume,
+    // stop; each visible in the state.
+    let cmd = |op: AudioOp, value: f32| AudioCommandRecord {
+        entity: speaker,
+        op,
+        value,
+    };
+    let (s, r) = h.submit(
+        Lane::Simulation,
+        &batch![
+            (10, cmd(AudioOp::Play, 0.0)),
+            (10, cmd(AudioOp::SetVolume, 0.4)),
+            (10, cmd(AudioOp::SetPitch, 2.0)),
+        ],
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0, "{:?}", h.diagnostics());
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
+    let state = AudioStateRecord::decode(&body, &tail).unwrap();
+    assert!(state.playing && !state.paused, "{state:?}");
+    assert_eq!((state.volume, state.pitch), (0.4, 2.0));
+    h.submit(Lane::Simulation, &batch![(10, cmd(AudioOp::Pause, 0.0))]);
+    h.step();
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
+    let paused = AudioStateRecord::decode(&body, &tail).unwrap();
+    assert!(paused.playing && paused.paused, "{paused:?}");
+    h.step();
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
+    assert_eq!(
+        AudioStateRecord::decode(&body, &tail).unwrap().time,
+        paused.time,
+        "held"
+    );
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (10, cmd(AudioOp::Resume, 0.0)),
+            (10, cmd(AudioOp::Stop, 0.0))
+        ],
+    );
+    h.step();
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO, speaker);
+    assert!(!AudioStateRecord::decode(&body, &tail).unwrap().playing);
+
+    // Fire-and-forget (kind 11) on the presentation lane and the bus
+    // command (kind 12); rejections: a bad volume on either kind, a bad
+    // pitch, an unknown clip, an audio command on the wrong lane, an
+    // entity without a source.
+    let sound = |clip: &AssetRef, volume: f32, pitch: f32| PlaySoundCommandRecord {
+        clip: clip.clone(),
+        bus: AudioBus::Sfx,
+        volume,
+        pitch,
+        priority: 0,
+    };
+    let (s, r) = h.submit(
+        Lane::Presentation,
+        &batch![
+            (11, sound(&clip, 1.0, 1.0)),
+            (
+                12,
+                AudioBusCommandRecord {
+                    bus: AudioBus::Music,
+                    volume: 0.3,
+                    muted: false,
+                }
+            ),
+            (11, sound(&clip, 1.5, 1.0)),
+            (11, sound(&clip, 1.0, 100.0)),
+            (
+                11,
+                sound(&AssetRef::new(AssetId::from_bytes([8; 16])), 1.0, 1.0)
+            ),
+            (
+                12,
+                AudioBusCommandRecord {
+                    bus: AudioBus::Master,
+                    volume: -0.1,
+                    muted: false,
+                }
+            ),
+            (10, cmd(AudioOp::Play, 0.0)),
+        ],
+    );
+    // The presentation lane applies at submit: its rejections are
+    // reported there.
+    assert_eq!((s, r.rejected), (Status::CommandsRejected, 5));
+    let d = h.diagnostics();
+    let codes: Vec<u32> = d.iter().map(|d| d.code).collect();
+    assert_eq!(
+        codes,
+        vec![
+            DiagnosticCode::INVALID_PAYLOAD.0,
+            DiagnosticCode::INVALID_PAYLOAD.0,
+            DiagnosticCode::SOUND_UNAVAILABLE.0,
+            DiagnosticCode::INVALID_PAYLOAD.0,
+            DiagnosticCode::WRONG_LANE.0,
+        ],
+        "{d:?}"
+    );
+    h.submit(
+        Lane::Simulation,
+        &batch![(
+            10,
+            AudioCommandRecord {
+                entity: ear,
+                op: AudioOp::Play,
+                value: 0.0,
+            }
+        )],
+    );
+    let (_, r) = h.step();
+    let d = h.diagnostics();
+    assert_eq!(r.commands_rejected, 1, "{d:?}");
+    assert_eq!(d[0].code, DiagnosticCode::MISSING_COMPONENT.0);
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO_STATS, Entity::NULL);
+    let stats = AudioStatsRecord::decode(&body, &tail).unwrap();
+    assert_eq!(stats.voices, 1, "the fire-and-forget voice");
+    unsafe {
+        assert_eq!((*h.w).core().audio().bus(AudioBus::Music), 0.3);
+        assert_eq!((*h.w).core().audio().bus(AudioBus::Master), 1.0);
+    }
+
+    // The device ABI: opening either works (a machine with an output
+    // device) or is Unsupported with an `audio_device` diagnostic; the
+    // world keeps stepping either way, suspend/close are always Ok.
+    let s = unsafe { fynkel_world_audio_open(h.w) };
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO_STATS, Entity::NULL);
+    let stats = AudioStatsRecord::decode(&body, &tail).unwrap();
+    match s {
+        Status::Ok => assert!(stats.device),
+        Status::Unsupported => {
+            assert!(!stats.device);
+            assert_eq!(
+                h.diagnostics().last().unwrap().code,
+                DiagnosticCode::AUDIO_DEVICE.0
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(unsafe { fynkel_world_audio_suspend(h.w, 1) }, Status::Ok);
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO_STATS, Entity::NULL);
+    assert_eq!(
+        AudioStatsRecord::decode(&body, &tail).unwrap().suspended,
+        s == Status::Ok
+    );
+    assert_eq!(unsafe { fynkel_world_audio_suspend(h.w, 0) }, Status::Ok);
+    let (st, _) = h.step();
+    assert_eq!(st, Status::Ok);
+    assert_eq!(unsafe { fynkel_world_audio_close(h.w) }, Status::Ok);
+    let (_, _, body, tail) = h.query(bridge::QUERY_AUDIO_STATS, Entity::NULL);
+    let stats = AudioStatsRecord::decode(&body, &tail).unwrap();
+    assert!(!stats.device);
+    assert_eq!(stats.voices, 1, "the voices survive the device");
+    assert_eq!(
+        unsafe { fynkel_world_audio_open(ptr::null_mut()) },
+        Status::InvalidArgument
     );
 }

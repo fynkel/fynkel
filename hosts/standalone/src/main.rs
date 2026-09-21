@@ -173,6 +173,9 @@ struct App {
     residency: Option<Residency>,
     /// Auto-exit after this many seconds (`--seconds N`), for scripted captures.
     run_for: Option<f32>,
+    /// Open the output device (`--audio`, M3-11); the null backend
+    /// otherwise, so captures never touch a device.
+    audio: bool,
 }
 
 impl App {
@@ -187,6 +190,7 @@ impl App {
             project,
             residency: None,
             run_for: None,
+            audio: false,
         }
     }
 
@@ -232,7 +236,13 @@ impl App {
         let (_, prefab_diags) = assets.register_prefabs(&cooked.description, &mut self.world);
         let (clips, skins, anim_diags) =
             assets.register_animation(&cooked.description, &mut self.world);
-        for d in mesh_diags.iter().chain(&prefab_diags).chain(&anim_diags) {
+        let (sounds, sound_diags) = assets.register_audio(&cooked.description, &mut self.world);
+        for d in mesh_diags
+            .iter()
+            .chain(&prefab_diags)
+            .chain(&anim_diags)
+            .chain(&sound_diags)
+        {
             log::warn!("{d}");
         }
         let loaded = self
@@ -244,7 +254,7 @@ impl App {
             });
         self.residency = Some(assets.retain(&cooked.closure));
         log::info!(
-            "project {}: scene \"{}\" ({} entities, {} rejected components, {} assets retained, {clips} clips, {skins} skins)",
+            "project {}: scene \"{}\" ({} entities, {} rejected components, {} assets retained, {clips} clips, {skins} skins, {sounds} sounds)",
             assets
                 .project()
                 .map(|p| p.name)
@@ -291,6 +301,20 @@ impl ApplicationHandler for App {
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 720.0));
         let window = Arc::new(event_loop.create_window(attrs).expect("create window"));
         let assets = self.project.take().map(|p| self.load_project(&p));
+        // The output device (M3-11), after the load so the voices the
+        // scene starts reach it; the null backend otherwise.
+        if self.audio {
+            if self.world.open_audio_device() {
+                let info = self.world.audio().device_info();
+                log::info!(
+                    "audio: output device open at {} Hz, {} channels",
+                    info.sample_rate,
+                    info.channels
+                );
+            } else if let Some(d) = self.world.diagnostics().last() {
+                log::warn!("{}", d.message);
+            }
+        }
         self.gpu = Some(Gpu::new(window, assets));
         self.start = Some(Instant::now());
     }
@@ -302,7 +326,13 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => {
                 self.stats.report_final();
+                self.world.audio_mut().close_device();
                 event_loop.exit();
+            }
+            // The host's lifecycle pauses the device (M3-11): nothing
+            // plays from a hidden window.
+            WindowEvent::Occluded(occluded) => {
+                self.world.audio_mut().suspend(occluded);
             }
             WindowEvent::Resized(size) => {
                 self.gpu.as_mut().unwrap().resize(size.width, size.height)
@@ -346,6 +376,7 @@ fn main() {
     let mut cache = None;
     let mut scene = None;
     let mut quality = None;
+    let mut audio = false;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -360,6 +391,7 @@ fn main() {
                 })
             }
             "--quality" => quality = args.next(),
+            "--audio" => audio = true,
             "--satellites" => {
                 satellites = args
                     .next()
@@ -369,7 +401,7 @@ fn main() {
             "--seed" => seed = args.next().and_then(|v| v.parse().ok()).unwrap_or(seed),
             _ => {
                 eprintln!(
-                    "usage: fynkel_host_standalone [--seconds N] [--satellites N] [--seed N] [--cache <dir> [--scene <id>] [--quality <profile>]]"
+                    "usage: fynkel_host_standalone [--seconds N] [--satellites N] [--seed N] [--audio] [--cache <dir> [--scene <id>] [--quality <profile>]]"
                 );
                 std::process::exit(2);
             }
@@ -386,5 +418,6 @@ fn main() {
     });
     let mut app = App::new(satellites, seed, project);
     app.run_for = run_for;
+    app.audio = audio;
     event_loop.run_app(&mut app).expect("run");
 }

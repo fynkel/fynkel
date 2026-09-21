@@ -172,6 +172,12 @@
     "fynkel.Skin": {
       "kind": "native"
     },
+    "fynkel.AudioSource": {
+      "kind": "native"
+    },
+    "fynkel.AudioListener": {
+      "kind": "native"
+    },
     "game.Player": {
       "kind": "behaviour",
       "version": 1,

@@ -125,7 +125,20 @@ meshes (11 joints), 0 ended, 0 markers, 0 diagnostics`;
 the fixture project's fourth scene, Rig (`--scene
 c0000000-0000-4000-8000-000000000034`), poses its skinned column and its
 Prop — a headless test with a stable checksum (the joints' poses are in
-it). Read-side:
+it). Audio (M3-11, [audio.md](audio.md)): the host registers the clips
+the scene's `AudioSource`s name (`Assets::register_audio`), never opens a
+device (the null backend runs the same clock), counts the
+`PLAYBACK_ENDED` events and the audio diagnostics (`SOUND_UNAVAILABLE`,
+`AUDIO_DEVICE`, anything on an `AudioSource`) of every tick; when the
+scene has a source or sound the report gains `audio: { sources, sounds,
+started, stolen, refused, ended, diagnostics }` and the text mode prints
+`audio: 1 sources, 1 sounds, 1 voices started (0 stolen, 0 refused), 1
+ended, 0 diagnostics` — the fixture project's Robot plays its tone once
+at the load and it ends at tick 59 (test). The standalone host takes
+`--audio` to open the output device after the load (`audio: output
+device open at 48000 Hz, 2 channels`, or the `AUDIO_DEVICE` diagnostic),
+suspends it while the window is occluded and closes it with the window.
+Read-side:
 
 ```sh
 cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json
@@ -343,6 +356,33 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   the skin a set `Skin` names, so a behaviour is not limited to what the
   scene authored. The load report gains a top-level `animation: { clips,
   skins }` (`LoadReport.animation`).
+  Audio (M3-11, [audio.md](audio.md)): `GameObject.audio`
+  `play`/`stop`/`pause`/`resume`/`volume =`/`pitch =` are
+  `FYNKEL_COMMAND_AUDIO` (10: `AudioCommandRecord { entity, op, value }`,
+  simulation lane), `world.audio.play` is `FYNKEL_COMMAND_PLAY_SOUND` (11:
+  `PlaySoundCommandRecord { clip, bus, volume, pitch, priority }`, either
+  lane, no entity, no event) and `world.audio.setBus`/`applySettings`
+  `FYNKEL_COMMAND_AUDIO_BUS` (12: `AudioBusCommandRecord { bus, volume,
+  muted }`, either lane; on the presentation lane both apply at submit);
+  `audio.state` is `FYNKEL_QUERY_AUDIO` (12: one `AudioStateRecord {
+  entity, playing, paused, time, duration, volume, pitch, looping, clip,
+  bus, voice }`, none without an `AudioSource`), `world.audio.stats`
+  `FYNKEL_QUERY_AUDIO_STATS` (13: one `AudioStatsRecord { device,
+  sample_rate, channels, voices, max_voices, started, stolen, refused,
+  ended, clips, callbacks, underruns, suspended }`), a source's end
+  `FYNKEL_EVENT_PLAYBACK_ENDED` (11: `PlaybackEndedEvent { entity, clip }`,
+  general lane), and the components are ids 23 `AudioSource` and 24
+  `AudioListener`; a `PlaySound` or a set `AudioSource` registers its clip
+  from the cache before the batch like an `Animator`'s. The device is
+  `fynkel_world_audio_open(world)` (`FYNKEL_STATUS_OK`, or
+  `FYNKEL_STATUS_UNSUPPORTED` (9) with an `AUDIO_DEVICE` diagnostic when
+  the platform or the build has none — the null backend stays),
+  `fynkel_world_audio_suspend(world, bool)` and
+  `fynkel_world_audio_close(world)`; `FynkelGameView(audio: true)` calls
+  them after the load, on the app lifecycle and on dispose
+  (`World.audio.open/suspend/close`). The load report gains a top-level
+  `audio: { sounds, clips, device, sampleRate, channels, maxVoices }`
+  (`LoadReport.audio`).
   Developer ergonomics (M3-08b): `World.find(name)`/`findAll(name)`,
   `GameObject.findChild('Arm/Hand')`/`findDescendant(name)` read the
   hierarchy as the last tick left it from **one** `FYNKEL_QUERY_ENTITIES`

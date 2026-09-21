@@ -8,7 +8,7 @@ Fynkel CLI. Created by `fynkel create`.
 fynkel validate                  # the whole project: documents, references, lock
 fynkel test --headless           # the startup scene on the Rust headless host
 fynkel test --headless --input test/walk.input.json   # the same with a recorded input stream against the project's actions
-flutter test                     # test/game_test.dart: the scene loads, the cube spins, the recording walks it, the crate lands, the HUD model updates
+flutter test                     # test/game_test.dart: the scene loads, the cube spins, the recording walks it and plays its sounds, the crate lands, the HUD model updates
 fynkel run                       # validate, cook, then flutter run with FYNKEL_PROJECT set to this directory
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/, bundled)
 fynkel cook && fynkel render --out render.png   # the scene as a picture, no window
@@ -27,7 +27,12 @@ two more of those components: the Crate has a `fynkel.RigidBody` and a
 `fynkel.Collider` and falls onto the Floor (a collider alone); the Cube is
 a kinematic body, so walking it pushes the crate. A behaviour applies
 forces (`applyImpulse`), reads `bodyState()`, gets `onCollisionEnter` and
-casts rays (`world.raycast`). Motion that needs no rules at all —
+casts rays (`world.raycast`). Sound is one more: the Cube's
+`fynkel.AudioSource` holds `assets/audio/jump.ogg` (Kenney, CC0) and the
+Mover plays it on take-off (`audio.play()`), and `land.ogg` on landing
+through `world.audio.play(land)` — an `@Expose`d `AssetRef` the scene
+sets; the view opens the output device (`audio: true`) and a test hears
+the same on a null backend. Motion that needs no rules at all —
 turning, bobbing, following, billboards, timed despawns, spawning at a
 rate — is the native catalogue (`fynkel.Rotator`, `Oscillate`, `Follow`,
 `LookAtCamera`, `LifetimeDespawn`, `Emitter`): components the runtime
@@ -58,3 +63,8 @@ renderer reads the cooked cache, so `fynkel run` cooks before it runs (plain
 directory does not exist, so the app opens the copy of the cache it bundles
 (`fynkel_cache/`, staged by every cook). `fynkel render` draws the same
 scene to a PNG without a window.
+
+`assets/audio/jump.ogg` and `land.ogg` are from Kenney's *Interface
+Sounds* and *Impact Sounds* packs (www.kenney.nl), Creative Commons Zero:
+free to use, credit optional. Replace them with your own `.wav`/`.ogg`
+files; `fynkel cook` imports whatever is in `assets/audio/`.

@@ -11,6 +11,7 @@ import '../generated/schema.g.dart' as gen;
 import '../math.dart';
 import 'animation.dart';
 import 'asset_ref.dart';
+import 'audio.dart';
 import 'context.dart';
 import 'diagnostics.dart';
 import 'events.dart';
@@ -111,6 +112,12 @@ class World {
   /// The physics settings of the last `loadProject` (gravity, layer names);
   /// the defaults before a load. [layerMask] reads the names.
   PhysicsSettings physics = const PhysicsSettings();
+
+  /// The audio engine (M3-11): `audio.open()` for the device, `audio.play`
+  /// for a fire-and-forget sound, `audio.setBus` / `applySettings` for the
+  /// gains, `audio.stats`. A source on an object plays through
+  /// [GameObject.audio].
+  late final AudioSystem audio = AudioSystem._(this);
 
   final RecordBatch _physicsQueries = RecordBatch(BufferKind.physicsQueries, gen.PhysicsQueryRecord.wireSize);
   int _nextQueryId = 1;
@@ -324,8 +331,8 @@ class World {
       final stepped = tick;
       step();
       final events = drainEvents();
-      _behaviours.afterPhysics(
-          stepped, _contacts(events), _zoneEvents(events), _animationEvents(events), _markerEvents(events));
+      _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events), _animationEvents(events),
+          _markerEvents(events), _playbackEvents(events));
       _carry(events);
     }
     this.input.refresh(frameEdges: true);
@@ -369,6 +376,11 @@ class World {
   static List<AnimationMarker> _markerEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
     return [for (final e in events) if (e is AnimationMarker) e];
+  }
+
+  static List<PlaybackEnded> _playbackEvents(List<EngineEvent> events) {
+    if (events.isEmpty) return const [];
+    return [for (final e in events) if (e is PlaybackEnded) e];
   }
 
   /// A handle for an entity that already exists (loaded from a scene, or
@@ -871,6 +883,99 @@ class World {
   }
 }
 
+/// The audio engine of a [World] ([World.audio], M3-11, docs/audio.md).
+/// Everything a game hears goes through the world: a source on an object
+/// ([GameObject.audio]) or a fire-and-forget [play]; the buses
+/// `master`/`music`/`sfx` scale it, the settings document drives them
+/// ([applySettings]). Without [open] the null backend runs the same
+/// clock — every test hears nothing and sees everything.
+class AudioSystem {
+  AudioSystem._(this._world);
+  final World _world;
+  bool _open = false;
+
+  /// Opens the platform's output device: from then on the voices the
+  /// ticks decided are rendered. False (and an `audio_device`
+  /// diagnostic) when the platform has none or the build carries no
+  /// device backend; the world keeps the null backend. Idempotent.
+  /// `FynkelGameView(audio: true)` calls it after the load; a test never
+  /// does.
+  bool open() {
+    if (_open) return true;
+    _open = _world._native.audioOpen();
+    if (!_open) _world._collectDiagnostics('audio');
+    return _open;
+  }
+
+  /// The device is open.
+  bool get isOpen => _open;
+
+  /// Closes the device (the voices continue on the null backend).
+  void close() {
+    if (!_open) return;
+    _world._native.audioClose();
+    _open = false;
+  }
+
+  /// Pauses (or resumes) the device: the host's lifecycle calls it when
+  /// the app leaves the foreground. A no-op without a device.
+  void suspend(bool suspended) => _world._native.audioSuspend(suspended);
+
+  /// Plays [clip] once, fire and forget (`fynkel.cmd.PlaySound`): no
+  /// object, no event, no handle; the sound is what the tick decided
+  /// (simulation lane, applied at the next tick) — or, [presentation],
+  /// applied at once through the presentation lane, for UI sounds
+  /// outside the ticks (a test replay does not carry those). A clip the
+  /// world does not hold is `SOUND_UNAVAILABLE`; [volume] outside `0…1`
+  /// or [pitch] outside `0.05…8` is `INVALID_PAYLOAD`. Under the voice
+  /// limit the sound steals a voice of a lower or equal [priority] or is
+  /// not heard (`stats.refused`).
+  void play(AssetRef clip,
+      {gen.AudioBus bus = gen.AudioBus.sfx,
+      double volume = 1,
+      double pitch = 1,
+      int priority = 0,
+      bool presentation = false}) {
+    if (presentation) {
+      _world._presentation.playSound(clip, bus: bus, volume: volume, pitch: pitch, priority: priority);
+      _world._presentationTargets.add(null);
+      _world.flushPresentation();
+      return;
+    }
+    _world._simulation.playSound(clip, bus: bus, volume: volume, pitch: pitch, priority: priority);
+    _world._simulationTargets.add(null);
+  }
+
+  /// Sets a bus gain (`0…1`) and the mute switch at once
+  /// (`fynkel.cmd.AudioBus` on the presentation lane). The `master` bus
+  /// scales every other one; [muted] silences everything and is the same
+  /// switch for every bus.
+  void setBus(gen.AudioBus bus, double volume, {bool muted = false}) {
+    _stageBus(bus, volume, muted);
+    _world.flushPresentation();
+  }
+
+  void _stageBus(gen.AudioBus bus, double volume, bool muted) {
+    _world._presentation.audioBus(bus, volume, muted: muted);
+    _world._presentationTargets.add(null);
+  }
+
+  /// Applies a settings document's gains and mute switch to the buses,
+  /// at once (`SettingsStore.attach` does it on every change).
+  void applySettings(SettingsDocument settings) {
+    _stageBus(gen.AudioBus.master, settings.masterVolume, settings.muted);
+    _stageBus(gen.AudioBus.music, settings.musicVolume, settings.muted);
+    _stageBus(gen.AudioBus.sfx, settings.sfxVolume, settings.muted);
+    _world.flushPresentation();
+  }
+
+  /// The engine's counters now (`FYNKEL_QUERY_AUDIO_STATS`).
+  AudioStats get stats {
+    final b = _world._native.query(QueryKind.audioStats);
+    return AudioStats.fromRecord(gen.AudioStatsRecord.decode(b.records, 0, b.tail));
+  }
+}
+
 /// Stable handle to an entity. Owns no native memory.
 /// Playback of one object's `fynkel.Animator` ([GameObject.animation]).
 /// Every method is a command for the next tick; [state] reads the last.
@@ -930,6 +1035,48 @@ class AnimationControl {
   }
 
   /// True while a clip advances ([AnimatorState.playing]).
+  bool get isPlaying => state?.playing ?? false;
+}
+
+/// Playback of one object's `fynkel.AudioSource` ([GameObject.audio],
+/// M3-11). Every method is a command for the next tick (simulation
+/// lane; `MISSING_COMPONENT` on an object without a source); [state]
+/// reads the last tick's.
+class AudioControl {
+  AudioControl._(this._go);
+  final GameObject _go;
+
+  /// Plays the source's clip from its start, restarting one that plays.
+  /// A non-looping clip ends with `onPlaybackEnded`; the source's
+  /// `playing` clears then, after [stop], and when the engine stole or
+  /// refused the voice.
+  void play() => _go._audio(gen.AudioOp.play);
+
+  /// Stops the voice (no event).
+  void stop() => _go._audio(gen.AudioOp.stop);
+
+  /// Holds the voice; [resume] continues from where it was.
+  void pause() => _go._audio(gen.AudioOp.pause);
+  void resume() => _go._audio(gen.AudioOp.resume);
+
+  /// The source's gain, `0…1`, written to the component and the voice.
+  set volume(double value) => _go._audio(gen.AudioOp.setVolume, value: value);
+
+  /// The source's playback rate, `0.05…8`, written to the component and
+  /// the voice.
+  set pitch(double value) => _go._audio(gen.AudioOp.setPitch, value: value);
+
+  /// The source's playback after the last tick (`FYNKEL_QUERY_AUDIO`);
+  /// `null` without an `AudioSource` or before the object spawned.
+  AudioState? get state {
+    final e = _go._entity;
+    if (e == null || !_go._alive) return null;
+    final b = _go.world._native.query(QueryKind.audio, entity: e);
+    if (b.recordCount == 0) return null;
+    return AudioState.fromRecord(gen.AudioStateRecord.decode(b.records, 0, b.tail));
+  }
+
+  /// True while the source holds a voice ([AudioState.playing]).
   bool get isPlaying => state?.playing ?? false;
 }
 
@@ -1279,6 +1426,22 @@ class GameObject {
     final e = _simulationEntity('animation command');
     world._simulation
         .animate(e, op, clip: clip, seconds: seconds, speed: speed, looping: looping, value: value, name: name);
+    world._simulationTargets.add(this);
+  }
+
+  // ------------------------------------------------- audio (M3-11)
+
+  /// The object's `fynkel.AudioSource` (M3-11): `audio.play()`, `stop`,
+  /// `pause`, `resume`, `volume`, `pitch` are commands for the next tick
+  /// (simulation lane; rejected there with `MISSING_COMPONENT` on an
+  /// object without a source), `state` the last tick's playback. Allowed
+  /// on a pending object whose source was `add`ed in the same batch.
+  AudioControl get audio => _audioControl ??= AudioControl._(this);
+  AudioControl? _audioControl;
+
+  void _audio(gen.AudioOp op, {double value = 0}) {
+    final e = _simulationEntity('audio command');
+    world._simulation.audio(e, op, value: value);
     world._simulationTargets.add(this);
   }
 

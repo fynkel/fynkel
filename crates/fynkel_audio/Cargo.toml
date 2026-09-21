@@ -1,0 +1,22 @@
+[package]
+name = "fynkel_audio"
+description = "Fynkel audio: the AudioSource/AudioListener components, the voice engine the world steps deterministically, the mixer that renders voices over buses in a real-time callback (no allocation there), and the backends — null for tests and the headless host, `cpal` behind the `device` feature for the hosts that play (blueprint §9, §19.2d item 11)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# The real output device through `cpal` (CoreAudio on macOS and iOS); the
+# hosts that play opt in, the CLI and the headless host never link it.
+device = ["dep:cpal"]
+
+[dependencies]
+fynkel_contracts.workspace = true
+fynkel_schema_derive.workspace = true
+rtrb.workspace = true
+cpal = { workspace = true, optional = true }
+
+[dev-dependencies]
+fynkel_contracts.workspace = true

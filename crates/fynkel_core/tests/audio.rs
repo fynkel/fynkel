@@ -1,0 +1,511 @@
+//! Audio (blueprint §19.2d item 11, docs/audio.md): a `fynkel.AudioSource`
+//! with `playing: true` starts its clip in the audio phase, `playing:
+//! false` stops it, a non-looping clip raises `PLAYBACK_ENDED` when the
+//! deterministic clock reaches its end, the lowest `AudioListener` sets
+//! the gain, an unregistered clip is `SOUND_UNAVAILABLE` once,
+//! `PlaySound` works on either lane, `AudioBus` validates, a stolen voice
+//! clears `playing`, a destroyed entity's voice stops. All on the null
+//! backend.
+
+use std::sync::Arc;
+
+use fynkel_audio::{AudioClip, MAX_VOICES, NULL_SAMPLE_RATE};
+use fynkel_contracts::{AssetRef, DiagnosticCode, Uuid, DEFAULT_FIXED_DT};
+use fynkel_core::components::ComponentValue;
+use fynkel_core::*;
+use glam::Vec3;
+
+fn world() -> World {
+    World::new(WorldConfig::default())
+}
+
+fn clip_ref(n: u8) -> AssetRef {
+    AssetRef::new(Uuid::from_bytes([n; 16]))
+}
+
+/// A one-second mono clip at the null rate.
+fn one_second() -> Arc<AudioClip> {
+    AudioClip::new(NULL_SAMPLE_RATE, 1, vec![0.5; NULL_SAMPLE_RATE as usize]).unwrap()
+}
+
+fn spawn(w: &mut World, temp_id: u64, name: &str) -> Entity {
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Spawn {
+            temp_id,
+            transform: Transform::from_position(Vec3::ZERO),
+            parent: None,
+            name: Some(name.to_owned()),
+        }],
+    );
+    let r = w.step();
+    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
+    w.drain_events()
+        .into_iter()
+        .find_map(|e| match e.payload {
+            EventPayload::Spawned { temp_id: t, entity } if t == temp_id => Some(entity),
+            _ => None,
+        })
+        .unwrap()
+}
+
+fn set(w: &mut World, entity: Entity, value: ComponentValue) {
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetComponent { entity, value }],
+    );
+    let r = w.step();
+    assert_eq!(r.status, Status::Ok, "{:?}", w.diagnostics());
+}
+
+fn source(clip: AssetRef, playing: bool, looping: bool) -> AudioSource {
+    AudioSource {
+        clip,
+        bus: AudioBus::Sfx,
+        volume: 1.0,
+        pitch: 1.0,
+        looping,
+        playing,
+        priority: 0,
+    }
+}
+
+fn source_of(w: &World, e: Entity) -> AudioSource {
+    w.ecs().get::<AudioSource>(e).unwrap().clone()
+}
+
+fn ended_events(w: &mut World) -> Vec<(Entity, AssetRef)> {
+    w.drain_events()
+        .into_iter()
+        .filter_map(|e| match e.payload {
+            EventPayload::PlaybackEnded { entity, clip } => Some((entity, clip)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_playing_source_starts_and_ends_with_the_event() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(clip.clone(), one_second()).unwrap();
+    let e = spawn(&mut w, 1, "Speaker");
+    // The set tick runs the audio phase: the voice starts in that tick.
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(clip.clone(), true, false)),
+    );
+    let state = w.audio_state(e).unwrap();
+    assert!(state.playing && !state.paused);
+    assert_eq!(state.duration, 1.0);
+    assert_eq!(w.audio().voice_count(), 1);
+    assert!(ended_events(&mut w).is_empty());
+
+    // One second of ticks minus the one already run: the clip ends on
+    // the tick whose clock reaches 1 s.
+    let ticks = (1.0 / DEFAULT_FIXED_DT).round() as usize;
+    let mut ended_at = None;
+    for i in 1..ticks + 5 {
+        w.step();
+        let ended = ended_events(&mut w);
+        if !ended.is_empty() {
+            assert_eq!(ended, vec![(e, clip.clone())]);
+            ended_at = Some(i);
+            break;
+        }
+    }
+    assert_eq!(ended_at, Some(ticks - 1), "ends on the tick reaching 1 s");
+    assert!(!source_of(&w, e).playing, "playing clears at the end");
+    assert!(!w.audio_state(e).unwrap().playing);
+    assert_eq!(w.audio().voice_count(), 0);
+    let stats = w.audio_stats();
+    assert_eq!((stats.started, stats.ended, stats.clips), (1, 1, 1));
+    assert!(!stats.device);
+}
+
+#[test]
+fn playing_false_stops_and_a_looping_clip_never_ends() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(clip.clone(), one_second()).unwrap();
+    let e = spawn(&mut w, 1, "Loop");
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(clip.clone(), true, true)),
+    );
+    for _ in 0..150 {
+        w.step();
+    }
+    assert!(ended_events(&mut w).is_empty());
+    let state = w.audio_state(e).unwrap();
+    assert!(state.playing);
+    assert!(state.time < 1.0, "wrapped: {}", state.time);
+
+    // Written playing=false: the phase stops the voice, no event.
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(clip.clone(), false, true)),
+    );
+    assert!(!w.audio_state(e).unwrap().playing);
+    assert_eq!(w.audio().voice_count(), 0);
+    assert!(ended_events(&mut w).is_empty());
+
+    // Command::Audio drives the same voice.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Audio {
+            entity: e,
+            op: AudioOp::Play,
+        }],
+    );
+    w.step();
+    assert!(w.audio_state(e).unwrap().playing);
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Audio {
+            entity: e,
+            op: AudioOp::Pause,
+        }],
+    );
+    w.step();
+    let paused = w.audio_state(e).unwrap();
+    assert!(paused.playing && paused.paused);
+    w.step();
+    assert_eq!(
+        w.audio_state(e).unwrap().time,
+        paused.time,
+        "a paused voice holds"
+    );
+    w.submit(
+        Lane::Simulation,
+        vec![
+            Command::Audio {
+                entity: e,
+                op: AudioOp::Resume,
+            },
+            Command::Audio {
+                entity: e,
+                op: AudioOp::SetVolume(0.25),
+            },
+            Command::Audio {
+                entity: e,
+                op: AudioOp::SetPitch(2.0),
+            },
+        ],
+    );
+    w.step();
+    let s = w.audio_state(e).unwrap();
+    assert!(!s.paused);
+    assert_eq!((s.volume, s.pitch), (0.25, 2.0));
+    assert_eq!(
+        source_of(&w, e).pitch,
+        2.0,
+        "the command wrote the component"
+    );
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Audio {
+            entity: e,
+            op: AudioOp::Stop,
+        }],
+    );
+    w.step();
+    assert!(!w.audio_state(e).unwrap().playing);
+    assert!(!source_of(&w, e).playing);
+}
+
+#[test]
+fn audio_commands_are_validated() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(clip.clone(), one_second()).unwrap();
+    let e = spawn(&mut w, 1, "Mute");
+    // No source yet.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Audio {
+            entity: e,
+            op: AudioOp::Play,
+        }],
+    );
+    let r = w.step();
+    assert_eq!(r.rejected, 1);
+    assert_eq!(w.diagnostics()[0].code, DiagnosticCode::MISSING_COMPONENT);
+
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(clip.clone(), false, false)),
+    );
+    w.submit(
+        Lane::Simulation,
+        vec![
+            Command::Audio {
+                entity: e,
+                op: AudioOp::SetVolume(1.5),
+            },
+            Command::Audio {
+                entity: e,
+                op: AudioOp::SetPitch(0.0),
+            },
+            Command::PlaySound {
+                clip: clip.clone(),
+                bus: AudioBus::Sfx,
+                volume: -1.0,
+                pitch: 1.0,
+                priority: 0,
+            },
+            Command::AudioBus {
+                bus: AudioBus::Music,
+                volume: 2.0,
+                muted: false,
+            },
+        ],
+    );
+    let r = w.step();
+    assert_eq!(r.rejected, 4, "{:?}", w.diagnostics());
+    assert!(w
+        .diagnostics()
+        .iter()
+        .all(|d| d.code == DiagnosticCode::INVALID_PAYLOAD));
+    assert_eq!(w.audio().voice_count(), 0);
+    assert_eq!(
+        source_of(&w, e).volume,
+        1.0,
+        "rejected writes leave the component"
+    );
+}
+
+#[test]
+fn play_sound_on_either_lane_and_the_buses() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(clip.clone(), one_second()).unwrap();
+    w.submit(
+        Lane::Simulation,
+        vec![Command::PlaySound {
+            clip: clip.clone(),
+            bus: AudioBus::Sfx,
+            volume: 0.5,
+            pitch: 1.0,
+            priority: 0,
+        }],
+    );
+    w.submit(
+        Lane::Presentation,
+        vec![
+            Command::PlaySound {
+                clip: clip.clone(),
+                bus: AudioBus::Music,
+                volume: 1.0,
+                pitch: 0.5,
+                priority: 1,
+            },
+            Command::AudioBus {
+                bus: AudioBus::Music,
+                volume: 0.3,
+                muted: false,
+            },
+            Command::AudioBus {
+                bus: AudioBus::Master,
+                volume: 0.9,
+                muted: true,
+            },
+        ],
+    );
+    let r = w.step();
+    assert_eq!(r.rejected, 0, "{:?}", w.diagnostics());
+    assert_eq!(w.audio().voice_count(), 2);
+    assert_eq!(w.audio().bus(AudioBus::Music), 0.3);
+    assert_eq!(w.audio().bus(AudioBus::Master), 0.9);
+    assert!(w.audio().muted());
+    // Fire-and-forget voices have no entity: no event when they end.
+    for _ in 0..70 {
+        w.step();
+    }
+    assert!(ended_events(&mut w).is_empty());
+    assert_eq!(
+        w.audio().voice_count(),
+        1,
+        "the half-speed one is still going"
+    );
+    assert_eq!(w.audio_stats().ended, 1);
+}
+
+#[test]
+fn an_unregistered_clip_is_reported_once() {
+    let mut w = world();
+    let missing = clip_ref(9);
+    let e = spawn(&mut w, 1, "Ghost");
+    // Diagnostics are per step: collect them across the ticks.
+    let unavailable = |w: &World| -> Vec<(Entity, u32)> {
+        w.diagnostics()
+            .iter()
+            .filter(|d| d.code == DiagnosticCode::SOUND_UNAVAILABLE)
+            .map(|d| (d.entity, d.command_index))
+            .collect()
+    };
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(missing.clone(), true, false)),
+    );
+    let mut seen = unavailable(&w);
+    for _ in 0..5 {
+        w.step();
+        seen.extend(unavailable(&w));
+    }
+    assert_eq!(seen, vec![(e, u32::MAX)], "once, against the entity");
+    assert!(source_of(&w, e).playing, "stays wanting to play");
+
+    // PlaySound: every such command is rejected with the diagnostic.
+    let mut rejected = 0;
+    for _ in 0..3 {
+        w.submit(
+            Lane::Simulation,
+            vec![Command::PlaySound {
+                clip: missing.clone(),
+                bus: AudioBus::Sfx,
+                volume: 1.0,
+                pitch: 1.0,
+                priority: 0,
+            }],
+        );
+        rejected += w.step().rejected;
+        seen.extend(unavailable(&w));
+    }
+    assert_eq!(rejected, 3);
+    assert_eq!(seen.len(), 4);
+    assert_eq!(seen[1], (Entity::NULL, 0));
+
+    // A late registration starts the waiting source.
+    w.register_sound(missing.clone(), one_second()).unwrap();
+    w.step();
+    assert!(w.audio_state(e).unwrap().playing);
+}
+
+#[test]
+fn the_lowest_listener_sets_the_gain() {
+    let mut w = world();
+    assert_eq!(w.audio().listener_gain(), 1.0);
+    let a = spawn(&mut w, 1, "A");
+    let b = spawn(&mut w, 2, "B");
+    set(
+        &mut w,
+        b,
+        ComponentValue::AudioListener(AudioListener { volume: 0.25 }),
+    );
+    assert_eq!(w.audio().listener_gain(), 0.25);
+    set(
+        &mut w,
+        a,
+        ComponentValue::AudioListener(AudioListener { volume: 0.5 }),
+    );
+    assert_eq!(w.audio().listener_gain(), 0.5, "the lower entity wins");
+    w.submit(
+        Lane::Simulation,
+        vec![Command::RemoveComponent {
+            entity: a,
+            component: fynkel_contracts::ComponentId::AUDIO_LISTENER,
+        }],
+    );
+    w.step();
+    assert_eq!(w.audio().listener_gain(), 0.25);
+    w.submit(Lane::Simulation, vec![Command::Destroy(b)]);
+    w.step();
+    assert_eq!(w.audio().listener_gain(), 1.0);
+}
+
+#[test]
+fn a_stolen_voice_clears_playing_and_a_destroyed_entity_stops_its_voice() {
+    let mut w = world();
+    let clip = clip_ref(1);
+    w.register_sound(clip.clone(), one_second()).unwrap();
+    // Fill every voice with looping priority-0 sources.
+    let mut entities = Vec::new();
+    for i in 0..MAX_VOICES as u64 {
+        let e = spawn(&mut w, 10 + i, "Voice");
+        entities.push(e);
+    }
+    let cmds: Vec<Command> = entities
+        .iter()
+        .map(|&e| Command::SetComponent {
+            entity: e,
+            value: ComponentValue::AudioSource(source(clip.clone(), true, true)),
+        })
+        .collect();
+    w.submit(Lane::Simulation, cmds);
+    w.step();
+    assert_eq!(w.audio().voice_count(), MAX_VOICES);
+
+    // A higher-priority source steals the oldest equal-or-lower voice.
+    let thief = spawn(&mut w, 99, "Thief");
+    let mut s = source(clip.clone(), true, true);
+    s.priority = 5;
+    set(&mut w, thief, ComponentValue::AudioSource(s));
+    assert_eq!(w.audio().voice_count(), MAX_VOICES);
+    assert!(w.audio_state(thief).unwrap().playing);
+    let victim = entities[0];
+    assert!(!w.audio_state(victim).unwrap().playing);
+    assert!(
+        !source_of(&w, victim).playing,
+        "the stolen source's playing clears"
+    );
+    assert_eq!(w.audio_stats().stolen, 1);
+
+    // A lower-priority newcomer is refused: playing clears, nothing else moves.
+    let meek = spawn(&mut w, 100, "Meek");
+    let mut s = source(clip.clone(), true, true);
+    s.priority = -1;
+    set(&mut w, meek, ComponentValue::AudioSource(s));
+    assert!(!source_of(&w, meek).playing);
+    assert_eq!(w.audio_stats().refused, 1);
+
+    // Destroying the thief frees its voice on the next phase.
+    w.submit(Lane::Simulation, vec![Command::Destroy(thief)]);
+    w.step();
+    assert_eq!(w.audio().voice_count(), MAX_VOICES - 1);
+    // And removing a source stops its voice too.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::RemoveComponent {
+            entity: entities[1],
+            component: fynkel_contracts::ComponentId::AUDIO_SOURCE,
+        }],
+    );
+    w.step();
+    assert_eq!(w.audio().voice_count(), MAX_VOICES - 2);
+}
+
+#[test]
+fn a_changed_clip_restarts_and_the_scene_load_registers_nothing_by_itself() {
+    let mut w = world();
+    let a = clip_ref(1);
+    let b = clip_ref(2);
+    w.register_sound(a.clone(), one_second()).unwrap();
+    w.register_sound(b.clone(), one_second()).unwrap();
+    let e = spawn(&mut w, 1, "Switch");
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(a.clone(), true, true)),
+    );
+    for _ in 0..10 {
+        w.step();
+    }
+    let before = w.audio_state(e).unwrap();
+    assert!(before.time > 0.1);
+    set(
+        &mut w,
+        e,
+        ComponentValue::AudioSource(source(b.clone(), true, true)),
+    );
+    let after = w.audio_state(e).unwrap();
+    assert_eq!(after.clip, b);
+    assert!(after.time < before.time, "restarted from the beginning");
+    assert_eq!(w.audio_stats().started, 2);
+    assert!(w.has_sound(&a) && !w.has_sound(&clip_ref(3)));
+}

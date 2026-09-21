@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// `SystemKind` in declaration order — the index into `system_times`.
-const SYSTEMS: [SystemKind; 14] = [
+const SYSTEMS: [SystemKind; 15] = [
     SystemKind::Step,
     SystemKind::Commands,
     SystemKind::Characters,
@@ -20,9 +20,11 @@ const SYSTEMS: [SystemKind; 14] = [
     SystemKind::Follow,
     SystemKind::LookAtCamera,
     SystemKind::Transforms,
+    SystemKind::Audio,
     SystemKind::Publish,
 ];
 
+use fynkel_audio::{AudioBus, AudioListener, AudioSource, PlayParams};
 use fynkel_contracts::{
     AssetRef, ComponentId, DiagnosticCode, Entity, Status, Tick, Uuid, WorldId, DEFAULT_FIXED_DT,
     DEFAULT_MAX_STEPS_PER_FRAME, MAX_FRAME_DT,
@@ -52,8 +54,10 @@ use crate::load::{LoadedScene, SceneDescription};
 use crate::schema::{SystemKind, SystemTimeRecord};
 
 mod animation;
+mod audio;
 mod catalogue;
 pub use animation::{AnimatorRun, Fade, SkinRun};
+pub use audio::AudioRun;
 pub use catalogue::{EmitterRun, Oscillation};
 mod projection;
 pub use projection::{
@@ -273,6 +277,9 @@ pub struct World {
     /// Blend spaces an `Animator` may play in a clip's place (M3-19c).
     blends: animation::BlendTable,
     skins: animation::SkinTable,
+    /// The audio engine (M3-11): clips, voices, buses; the device the host
+    /// opened.
+    audio: fynkel_audio::Audio,
     /// The scenes this world holds, in load order (M3-12): what a replace
     /// load or `unload_scene` takes down.
     pub(crate) scenes: Vec<LoadedScene>,
@@ -336,6 +343,7 @@ impl World {
             clips: HashMap::new(),
             blends: HashMap::new(),
             skins: HashMap::new(),
+            audio: fynkel_audio::Audio::new(),
             scenes: Vec::new(),
             system_times: SYSTEMS
                 .iter()
@@ -669,6 +677,27 @@ impl World {
             Command::SetComponent { entity, value } => {
                 self.set_component(index, lane, entity, value)
             }
+            Command::PlaySound {
+                clip,
+                bus,
+                volume,
+                pitch,
+                priority,
+            } => self.apply_play_sound(
+                index,
+                lane,
+                clip,
+                PlayParams {
+                    bus,
+                    volume,
+                    pitch,
+                    looping: false,
+                    priority,
+                },
+            ),
+            Command::AudioBus { bus, volume, muted } => {
+                self.apply_audio_bus(index, lane, bus, volume, muted)
+            }
             _ => unreachable!("allowed_on_presentation"),
         }
     }
@@ -698,13 +727,15 @@ impl World {
             | Command::SetComponent { entity, .. }
             | Command::RemoveComponent { entity, .. }
             | Command::Body { entity, .. }
-            | Command::Animate { entity, .. } => resolve(entity),
+            | Command::Animate { entity, .. }
+            | Command::Audio { entity, .. } => resolve(entity),
             Command::SetParent { child, parent, .. } => {
                 resolve(child);
                 if let Some(p) = parent {
                     resolve(p);
                 }
             }
+            Command::PlaySound { .. } | Command::AudioBus { .. } => {}
         }
         match failed {
             None => Some(cmd),
@@ -875,6 +906,12 @@ impl World {
                     ComponentId::TRIGGER_ZONE => self.ecs.remove::<TriggerZone>(entity).is_ok(),
                     ComponentId::ANIMATOR => self.ecs.remove::<Animator>(entity).is_ok(),
                     ComponentId::SKIN => self.ecs.remove::<Skin>(entity).is_ok(),
+                    ComponentId::AUDIO_SOURCE => {
+                        // The voice stops at the phase (its source is gone).
+                        let _ = self.ecs.remove::<AudioRun>(entity);
+                        self.ecs.remove::<AudioSource>(entity).is_ok()
+                    }
+                    ComponentId::AUDIO_LISTENER => self.ecs.remove::<AudioListener>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -922,7 +959,53 @@ impl World {
                 true
             }
             Command::Animate { entity, op } => self.apply_animate(index, entity, op),
+            Command::Audio { entity, op } => self.apply_audio(index, entity, op),
+            Command::PlaySound {
+                clip,
+                bus,
+                volume,
+                pitch,
+                priority,
+            } => self.apply_play_sound(
+                index,
+                lane,
+                clip,
+                PlayParams {
+                    bus,
+                    volume,
+                    pitch,
+                    looping: false,
+                    priority,
+                },
+            ),
+            Command::AudioBus { bus, volume, muted } => {
+                self.apply_audio_bus(index, lane, bus, volume, muted)
+            }
         }
+    }
+
+    /// `Command::AudioBus` (either lane): a bus gain and the mute.
+    fn apply_audio_bus(
+        &mut self,
+        index: u32,
+        lane: Lane,
+        bus: AudioBus,
+        volume: f32,
+        muted: bool,
+    ) -> bool {
+        if !volume.is_finite() || !(0.0..=1.0).contains(&volume) {
+            return self.reject(
+                index,
+                lane,
+                DiagnosticCode::INVALID_PAYLOAD,
+                Entity::NULL,
+                ComponentId::NONE,
+                format!("audioBus: volume must be within [0, 1], got {volume}"),
+            );
+        }
+        self.audio.set_bus(bus, volume);
+        self.audio.set_muted(muted);
+        true
     }
 
     /// Destroys `entity` and its subtree with the bookkeeping and the
@@ -990,6 +1073,8 @@ impl World {
             ComponentValue::TriggerZone(v) => self.ecs.insert(entity, v),
             ComponentValue::Animator(v) => self.ecs.insert(entity, v),
             ComponentValue::Skin(v) => self.ecs.insert(entity, v),
+            ComponentValue::AudioSource(v) => self.ecs.insert(entity, v),
+            ComponentValue::AudioListener(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -1177,6 +1262,13 @@ impl World {
         self.apply_teleports();
         transforms_us += micros(t0);
         self.set_time(SystemKind::Transforms, propagated, transforms_us);
+
+        // The audio sources reconciled with their voices and the voice
+        // clock advanced (M3-11); after the destroys of the tick, so a
+        // dead source's voice stops this tick.
+        let t0 = Instant::now();
+        let n = self.run_audio(next_tick);
+        self.set_time(SystemKind::Audio, n, micros(t0));
 
         // Every native system of the tick has read the same view the game
         // did (the rigs above read `look` last); this tick consumed the

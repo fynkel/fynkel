@@ -100,7 +100,8 @@ const FILES: &[TemplateFile] = &[
     bin!("assets/models/cube.glb", "assets/models/cube.glb"),
     bin!("assets/textures/swatch.png", "assets/textures/swatch.png"),
     text!("assets/prefabs/.gitkeep", "assets/prefabs/.gitkeep"),
-    text!("assets/audio/.gitkeep", "assets/audio/.gitkeep"),
+    bin!("assets/audio/jump.ogg", "assets/audio/jump.ogg"),
+    bin!("assets/audio/land.ogg", "assets/audio/land.ogg"),
     text!("test/game_test.dart", "test/game_test.dart.tmpl"),
     text!("test/walk.input.json", "test/walk.input.json"),
 ];
@@ -109,6 +110,8 @@ const FILES: &[TemplateFile] = &[
 const SOURCES: &[(&str, &str)] = &[
     ("assets/models/cube.glb", "cube_id"),
     ("assets/textures/swatch.png", "swatch_id"),
+    ("assets/audio/jump.ogg", "jump_id"),
+    ("assets/audio/land.ogg", "land_id"),
 ];
 
 struct Opts {
@@ -308,9 +311,12 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         "material_id",
         "cube_id",
         "swatch_id",
+        "jump_id",
+        "land_id",
         "e_camera",
         "c_camera_transform",
         "c_camera",
+        "c_camera_listener",
         "e_sun",
         "c_sun_transform",
         "c_sun",
@@ -319,6 +325,7 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         "c_cube_mesh",
         "c_cube_spinner",
         "c_cube_mover",
+        "c_cube_audio",
         "c_cube_body",
         "c_cube_collider",
         "e_floor",

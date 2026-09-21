@@ -63,6 +63,10 @@ fn a_fresh_project_validates_and_runs_headlessly() {
         "assets/models/cube.glb.meta.json",
         "assets/textures/swatch.png",
         "assets/textures/swatch.png.meta.json",
+        "assets/audio/jump.ogg",
+        "assets/audio/jump.ogg.meta.json",
+        "assets/audio/land.ogg",
+        "assets/audio/land.ogg.meta.json",
         "test/game_test.dart",
     ] {
         assert!(
@@ -113,6 +117,11 @@ fn a_fresh_project_validates_and_runs_headlessly() {
         t["physics"]["collision_enter"].as_u64().unwrap() >= 1,
         "{stdout}"
     );
+    // The cube's AudioSource names jump.ogg (M3-11); the Dart Mover plays
+    // it, so headlessly no voice starts.
+    assert_eq!(t["audio"]["sources"], 1, "{stdout}");
+    assert_eq!(t["audio"]["sounds"], 1, "{stdout}");
+    assert_eq!(t["audio"]["diagnostics"], 0, "{stdout}");
     assert_eq!(t["scene"]["name"], "Main");
     assert_eq!(t["tick"], 120);
     assert_eq!(t["diagnostics"], 0);

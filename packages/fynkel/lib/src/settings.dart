@@ -292,7 +292,8 @@ class SettingsStore implements SettingsService {
   /// The world the rebinds apply to (null: none yet).
   World? get world => _world;
 
-  /// Applies the rebinds to [world] now and after every [update].
+  /// Applies the bus gains and the mute switch (M3-11) and the rebinds
+  /// to [world] now and after every [update].
   void attach(World world) {
     _world = world;
     apply();
@@ -359,7 +360,9 @@ class SettingsStore implements SettingsService {
   /// without a world or before its project is loaded).
   void apply() {
     final w = _world;
-    if (w == null || w.cacheDir == null) return;
+    if (w == null) return;
+    w.audio.applySettings(_current);
+    if (w.cacheDir == null) return;
     w.bindActions(_current.rebinds);
   }
 

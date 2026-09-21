@@ -63,7 +63,10 @@ typedef enum FynkelStatus {
   FYNKEL_STATUS_INCOMPATIBLE = 7,
   /* A scene or project document could not be loaded; see
    * fynkel_world_load_report. */
-  FYNKEL_STATUS_LOAD_FAILED = 8
+  FYNKEL_STATUS_LOAD_FAILED = 8,
+  /* The build or the platform lacks what the call needs (an output device
+   * for fynkel_world_audio_open); the world stays usable. */
+  FYNKEL_STATUS_UNSUPPORTED = 9
 } FynkelStatus;
 
 typedef enum FynkelBufferKind {
@@ -114,7 +117,17 @@ typedef enum FynkelCommandKind {
   /* body: AnimateCommandRecord { entity, op, seconds, speed, looping,
    * clip }; addresses a fynkel.Animator (M3-19): play, crossfade, stop,
    * pause, resume, set_speed, set_time. */
-  FYNKEL_COMMAND_ANIMATE = 9
+  FYNKEL_COMMAND_ANIMATE = 9,
+  /* body: AudioCommandRecord { entity, op, value }; addresses a
+   * fynkel.AudioSource (M3-11): play, stop, pause, resume, set_volume,
+   * set_pitch. Simulation lane only. */
+  FYNKEL_COMMAND_AUDIO = 10,
+  /* body: PlaySoundCommandRecord { clip, bus, volume, pitch, priority };
+   * a fire-and-forget voice on no entity (M3-11). Either lane. */
+  FYNKEL_COMMAND_PLAY_SOUND = 11,
+  /* body: AudioBusCommandRecord { bus, volume, muted }; a bus gain and the
+   * mute (M3-11). Either lane. */
+  FYNKEL_COMMAND_AUDIO_BUS = 12
 } FynkelCommandKind;
 
 typedef enum FynkelComponent {
@@ -143,7 +156,10 @@ typedef enum FynkelComponent {
   /* Animation (M3-19): a clip player over the named nodes below it, and
    * the skin a skinned mesh deforms with. */
   FYNKEL_COMPONENT_ANIMATOR = 21,
-  FYNKEL_COMPONENT_SKIN = 22
+  FYNKEL_COMPONENT_SKIN = 22,
+  /* Audio (M3-11): a clip with its playback settings, and the ears. */
+  FYNKEL_COMPONENT_AUDIO_SOURCE = 23,
+  FYNKEL_COMPONENT_AUDIO_LISTENER = 24
 } FynkelComponent;
 
 /* Event kinds in fynkel_world_drain_events (the schema's `fynkel.ev.*`
@@ -166,6 +182,9 @@ typedef enum FynkelEventKind {
   /* M3-19c: an animator's clock crossed a clip marker
    * (`fynkel.ev.AnimationMarker` body: entity, clip, name). */
   FYNKEL_EVENT_ANIMATION_MARKER = 10,
+  /* An AudioSource's non-looping clip reached its end (M3-11)
+   * (`fynkel.ev.PlaybackEnded` body: entity, clip). */
+  FYNKEL_EVENT_PLAYBACK_ENDED = 11,
   FYNKEL_EVENT_COLLISION_ENTER = 0x100,
   FYNKEL_EVENT_COLLISION_STAY = 0x101,
   FYNKEL_EVENT_COLLISION_EXIT = 0x102,
@@ -202,7 +221,14 @@ typedef enum FynkelQueryKind {
   /* entity -> one AnimatorStateRecord { entity, time, duration, speed,
    * fade_remaining, playing, looping, clip } (0 records without an
    * Animator) (M3-19). */
-  FYNKEL_QUERY_ANIMATOR = 11
+  FYNKEL_QUERY_ANIMATOR = 11,
+  /* entity -> one AudioStateRecord { entity, playing, paused, time,
+   * duration, volume, pitch, looping, clip, bus, voice } (0 records
+   * without an AudioSource) (M3-11). */
+  FYNKEL_QUERY_AUDIO = 12,
+  /* (no entity) -> one AudioStatsRecord: the audio engine's device,
+   * voices and counters (M3-11). */
+  FYNKEL_QUERY_AUDIO_STATS = 13
 } FynkelQueryKind;
 
 /* ---- Buffer header ------------------------------------------------------ */
@@ -391,6 +417,26 @@ FynkelStatus fynkel_world_project(FynkelWorld* world,
                                   uint32_t length,
                                   FynkelProjectionInfo* out_info,
                                   FynkelBufferView* out_view);
+
+/* ---- Audio (M3-11) ------------------------------------------------------ */
+
+/* Opens the default output device and moves the world's mixer into its
+ * callback: what a host that plays calls once after the world is created
+ * (a scene may be loaded before or after). FYNKEL_STATUS_UNSUPPORTED when
+ * the library was built without a device backend or no device could be
+ * opened; the world reports `audio_device` in its diagnostics and keeps
+ * playing silently on its null backend, so a game runs the same without
+ * sound. Calling it again with a device open is a no-op. */
+FynkelStatus fynkel_world_audio_open(FynkelWorld* world);
+
+/* Pauses (suspended != 0) or resumes the output device: the host calls it
+ * from its lifecycle (the app going to the background). A no-op without a
+ * device. */
+FynkelStatus fynkel_world_audio_suspend(FynkelWorld* world, uint32_t suspended);
+
+/* Closes the output device; the world continues on the null backend. A
+ * no-op without a device. */
+FynkelStatus fynkel_world_audio_close(FynkelWorld* world);
 
 FynkelStatus fynkel_world_stats(const FynkelWorld* world, FynkelWorldStats* out_stats);
 

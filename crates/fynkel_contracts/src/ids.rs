@@ -35,6 +35,9 @@ impl ComponentId {
     /// Animation (M3-19): a clip player and a skinned mesh's joints.
     pub const ANIMATOR: ComponentId = ComponentId(21);
     pub const SKIN: ComponentId = ComponentId(22);
+    /// Audio (M3-11): a clip with its playback settings, and the ears.
+    pub const AUDIO_SOURCE: ComponentId = ComponentId(23);
+    pub const AUDIO_LISTENER: ComponentId = ComponentId(24);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -60,6 +63,8 @@ impl ComponentId {
             20 => Some("fynkel.TriggerZone"),
             21 => Some("fynkel.Animator"),
             22 => Some("fynkel.Skin"),
+            23 => Some("fynkel.AudioSource"),
+            24 => Some("fynkel.AudioListener"),
             _ => None,
         }
     }
@@ -87,6 +92,8 @@ impl EventKind {
     pub const ANIMATION_ENDED: EventKind = EventKind(9);
     /// An animator's clock crossed a clip marker (M3-19c).
     pub const ANIMATION_MARKER: EventKind = EventKind(10);
+    /// A `fynkel.AudioSource`'s non-looping clip reached its end (M3-11).
+    pub const PLAYBACK_ENDED: EventKind = EventKind(11);
 
     pub const PHYSICS_FIRST: u32 = 0x100;
     pub const COLLISION_ENTER: EventKind = EventKind(0x100);

@@ -1,5 +1,6 @@
 //! Commands are the only way gameplay mutates the world (§5.4).
 
+use fynkel_audio::AudioBus;
 use fynkel_contracts::{AssetRef, ComponentId, Entity};
 use fynkel_physics::BodyCommand;
 use fynkel_scene::Transform;
@@ -81,6 +82,52 @@ pub enum Command {
         entity: Entity,
         op: AnimateOp,
     },
+    /// Drives a `fynkel.AudioSource` (M3-11): play, stop, pause, resume,
+    /// re-volume or re-pitch its voice. Applied at the tick boundary in
+    /// batch order (a source set in the same batch receives it); the audio
+    /// system then reconciles the component this tick. Simulation lane
+    /// only; `MISSING_COMPONENT` without a source.
+    Audio {
+        entity: Entity,
+        op: AudioOp,
+    },
+    /// Plays a clip once, on no entity (M3-11): a fire-and-forget sound
+    /// with no `PLAYBACK_ENDED`. `SOUND_UNAVAILABLE` for a clip the world
+    /// has not been given; refused silently under the voice limit. Either
+    /// lane.
+    PlaySound {
+        clip: AssetRef,
+        bus: AudioBus,
+        volume: f32,
+        pitch: f32,
+        priority: i32,
+    },
+    /// Sets a bus gain and the mute (M3-11); `master` scales the other
+    /// two. What the `fynkel.Settings` volumes are applied through. Either
+    /// lane.
+    AudioBus {
+        bus: AudioBus,
+        volume: f32,
+        muted: bool,
+    },
+}
+
+/// What `Command::Audio` does to a source's voice.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AudioOp {
+    /// Start the source's clip from the beginning (restarting a playing
+    /// voice); sets `playing`.
+    Play,
+    /// Stop the voice; clears `playing`. No `PLAYBACK_ENDED`.
+    Stop,
+    /// Hold the voice where it is (`playing` stays set).
+    Pause,
+    Resume,
+    /// Set the component's `volume` (`0..=1`) and the voice's.
+    SetVolume(f32),
+    /// Set the component's `pitch` (`MIN_PITCH..=MAX_PITCH`) and the
+    /// voice's.
+    SetPitch(f32),
 }
 
 /// What `Command::Animate` does to an animator.
@@ -125,7 +172,11 @@ impl Command {
     pub fn allowed_on_presentation(&self) -> bool {
         matches!(
             self,
-            Command::SetTransform { .. } | Command::SetName { .. } | Command::SetComponent { .. }
+            Command::SetTransform { .. }
+                | Command::SetName { .. }
+                | Command::SetComponent { .. }
+                | Command::PlaySound { .. }
+                | Command::AudioBus { .. }
         )
     }
 
@@ -138,8 +189,10 @@ impl Command {
             | Command::SetComponent { entity, .. }
             | Command::RemoveComponent { entity, .. }
             | Command::Body { entity, .. }
-            | Command::Animate { entity, .. } => Some(*entity),
+            | Command::Animate { entity, .. }
+            | Command::Audio { entity, .. } => Some(*entity),
             Command::SetParent { child, .. } => Some(*child),
+            Command::PlaySound { .. } | Command::AudioBus { .. } => None,
         }
     }
 }

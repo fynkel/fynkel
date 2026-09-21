@@ -133,6 +133,11 @@ abstract class Behaviour {
   /// `animation.crossfade(clip, 0.2)`, `animation.state`.
   AnimationControl get animation => gameObject.animation;
 
+  /// The object's audio source (M3-11): `audio.play()`, `audio.stop()`,
+  /// `audio.volume = 0.5`, `audio.state`. A sound without a source is
+  /// `world.audio.play(clip)`.
+  AudioControl get audio => gameObject.audio;
+
   /// Desired state. Setting it queues `onEnable`/`onDisable` for the next
   /// safe boundary; [isActive] says what the driver has applied.
   bool get enabled => _enabled;
@@ -216,6 +221,12 @@ abstract class Behaviour {
   /// marker this object's `fynkel.Animator` crossed (`event.name`), loops
   /// and backwards playback included.
   void onAnimationMarker(AnimationMarker event) {}
+
+  /// Audio callback (M3-11): right after the tick's step, when this
+  /// object's `fynkel.AudioSource` finished a non-looping clip
+  /// (`event.clip`). A looping clip never ends; `stop` and a stolen voice
+  /// do not fire it.
+  void onPlaybackEnded(PlaybackEnded event) {}
 
   /// Presentation-rate gameplay logic, once per host frame.
   void update(UpdateContext context) {}
@@ -462,11 +473,12 @@ class _BehaviourSystem {
   /// (in contact order, side `a` then `b`), then `afterPhysics` for the
   /// behaviours that opted in.
   void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones, List<AnimationEnded> animations,
-      List<AnimationMarker> markers) {
+      List<AnimationMarker> markers, List<PlaybackEnded> playback) {
     if (contacts.isNotEmpty) _dispatchContacts(contacts);
     if (zones.isNotEmpty) _dispatchZones(zones);
     if (animations.isNotEmpty) _dispatchAnimations(animations);
     if (markers.isNotEmpty) _dispatchMarkers(markers);
+    if (playback.isNotEmpty) _dispatchPlayback(playback);
     final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
     _run(ctx.context, (b) {
       if (b.wantsAfterPhysics) b.afterPhysics(ctx);
@@ -516,6 +528,20 @@ class _BehaviourSystem {
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
           b.onAnimationMarker(m);
+        }
+      }
+    });
+  }
+
+  void _dispatchPlayback(List<PlaybackEnded> ended) {
+    if (_all.isEmpty) return;
+    world.context.run(() {
+      for (final e in ended) {
+        final go = world._byEntity[e.entity];
+        if (go == null || go._behaviours.isEmpty) continue;
+        for (final b in go._behaviours.toList(growable: false)) {
+          if (!b._active || b._destroyRequested) continue;
+          b.onPlaybackEnded(e);
         }
       }
     });

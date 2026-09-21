@@ -1393,7 +1393,7 @@ fn duplicate_object_in_prefabs_and_of_prefab_instances() {
 fn large_documents_with_many_diagnostics_validate_in_linear_time() {
     fn synthetic(n: usize) -> String {
         let mut s = String::with_capacity(n * 400);
-        s.push_str("{\n  \"$schema\": \"https://fynkel.dev/schemas/scene.schema.json\",\n  \"formatVersion\": 2,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"Big\",\n  \"entities\": {\n");
+        s.push_str("{\n  \"$schema\": \"https://fynkel.dev/schemas/scene.schema.json\",\n  \"formatVersion\": 3,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"Big\",\n  \"entities\": {\n");
         for i in 0..n {
             let id = format!("aaaaaaaa-0000-4000-8000-{:012x}", i + 1);
             let comp = format!("11111111-0000-4000-8000-{:012x}", i + 1);

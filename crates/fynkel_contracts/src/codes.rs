@@ -21,6 +21,10 @@ pub enum Status {
     Incompatible = 7,
     /// A scene or project could not be loaded; the load report says why.
     LoadFailed = 8,
+    /// The build or the platform lacks what the call needs (an audio
+    /// device with the library built without one, no output device); the
+    /// world stays usable (M3-11).
+    Unsupported = 9,
 }
 
 impl Status {
@@ -35,6 +39,7 @@ impl Status {
             6 => Status::OutOfResources,
             7 => Status::Incompatible,
             8 => Status::LoadFailed,
+            9 => Status::Unsupported,
             _ => return None,
         })
     }
@@ -84,6 +89,15 @@ impl DiagnosticCode {
     /// (`World::register_skin`); reported once, the mesh draws in its bind
     /// pose (M3-19).
     pub const SKIN_UNAVAILABLE: DiagnosticCode = DiagnosticCode(17);
+    /// A `fynkel.AudioSource` (or a `PlaySound`) naming a clip the world
+    /// has not been given (`World::register_sound` — the loaders register
+    /// every clip a loaded scene's sources name and every one a
+    /// `PlaySound`/`play` asks for); reported once per clip, nothing
+    /// plays (M3-11).
+    pub const SOUND_UNAVAILABLE: DiagnosticCode = DiagnosticCode(18);
+    /// The output device could not be opened (`fynkel_world_audio_open`);
+    /// the world keeps playing on the null backend, silently (M3-11).
+    pub const AUDIO_DEVICE: DiagnosticCode = DiagnosticCode(19);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -104,6 +118,8 @@ impl DiagnosticCode {
             15 => "too_many_anchors",
             16 => "clip_unavailable",
             17 => "skin_unavailable",
+            18 => "sound_unavailable",
+            19 => "audio_device",
             _ => "unknown",
         }
     }

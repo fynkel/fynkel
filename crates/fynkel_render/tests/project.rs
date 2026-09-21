@@ -170,7 +170,7 @@ fn fixture_project_renders_its_cooked_meshes_from_the_scene_camera() {
         (1, 3, 1),
         "swatch, normal and metallic-roughness maps"
     );
-    assert_eq!(before.retained, 7);
+    assert_eq!(before.retained, 8);
     drop(residency);
     let after = assets.stats();
     assert_eq!((after.meshes, after.textures, after.materials), (0, 0, 0));
