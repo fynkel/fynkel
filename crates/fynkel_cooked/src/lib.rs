@@ -19,7 +19,7 @@
 //!     40     8  reserved (0)
 //!  chunk payloads, each 8-byte aligned
 //!  chunk table: chunk_count × 32 bytes
-//!      0     4  kind ("META", "JSON", "MESH", "TEXR", "CLIP", "BLOB", …)
+//!      0     4  kind ("META", "JSON", "MESH", "TEXR", "CLIP", "MATL", "SKIN", "ANIM", "BLOB", …)
 //!      4     4  u32 flags (0)
 //!      8     8  u64 offset            absolute
 //!     16     8  u64 length
@@ -59,6 +59,11 @@ pub const KIND_CLIP: [u8; 4] = *b"CLIP";
 /// A cooked `fynkel.PbrMaterial` (`fynkel_wire::material`), next to the
 /// material document's `JSON` chunk.
 pub const KIND_MATERIAL: [u8; 4] = *b"MATL";
+/// A cooked skin (`payload::SkinPayload`, M3-19; sub-asset `skin/<s>`).
+pub const KIND_SKIN: [u8; 4] = *b"SKIN";
+/// A cooked animation clip (`payload::AnimationPayload`, M3-19; sub-asset
+/// `anim/<a>`).
+pub const KIND_ANIMATION: [u8; 4] = *b"ANIM";
 pub const KIND_BLOB: [u8; 4] = *b"BLOB";
 
 #[derive(Debug)]

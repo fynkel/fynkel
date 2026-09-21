@@ -1,0 +1,344 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 2,
+  "id": "c0000000-0000-4000-8000-000000000034",
+  "name": "Rig",
+  "entities": {
+    "c0000000-0000-4000-8000-0000000004e0": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-000000000401": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              1,
+              4
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-000000000402": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 1.0,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 100.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000004e1": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-000000000403": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              5,
+              0
+            ],
+            "rotation": [
+              -0.3826834,
+              0,
+              0,
+              0.9238795
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-000000000404": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1,
+              1,
+              1
+            ],
+            "intensity": 3.0,
+            "cast_shadows": false
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000004e2": {
+      "name": "Rig",
+      "parent": null,
+      "children": [
+        "c0000000-0000-4000-8000-0000000004e3",
+        "c0000000-0000-4000-8000-0000000004e4",
+        "c0000000-0000-4000-8000-0000000004e7"
+      ],
+      "components": {
+        "c0000000-0000-4000-8000-000000000405": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-000000000406": {
+          "type": "fynkel.Animator",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "c0000000-0000-4000-8000-000000000005",
+              "sub": "anim/0"
+            },
+            "speed": 1.0,
+            "looping": true,
+            "playing": true
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000004e3": {
+      "name": "Body",
+      "parent": "c0000000-0000-4000-8000-0000000004e2",
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-000000000407": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-000000000408": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "c0000000-0000-4000-8000-000000000005",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "c0000000-0000-4000-8000-000000000020"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "c0000000-0000-4000-8000-000000000409": {
+          "type": "fynkel.Skin",
+          "version": 1,
+          "data": {
+            "skin": {
+              "asset": "c0000000-0000-4000-8000-000000000005",
+              "sub": "skin/0"
+            },
+            "skeleton": "hips"
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000004e4": {
+      "name": "hips",
+      "parent": "c0000000-0000-4000-8000-0000000004e2",
+      "children": [
+        "c0000000-0000-4000-8000-0000000004e5"
+      ],
+      "components": {
+        "c0000000-0000-4000-8000-00000000040a": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000004e5": {
+      "name": "spine",
+      "parent": "c0000000-0000-4000-8000-0000000004e4",
+      "children": [
+        "c0000000-0000-4000-8000-0000000004e6"
+      ],
+      "components": {
+        "c0000000-0000-4000-8000-00000000040b": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0.5,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000004e6": {
+      "name": "head",
+      "parent": "c0000000-0000-4000-8000-0000000004e5",
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-00000000040c": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0.5,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        }
+      }
+    },
+    "c0000000-0000-4000-8000-0000000004e7": {
+      "name": "Prop",
+      "parent": "c0000000-0000-4000-8000-0000000004e2",
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-00000000040d": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              1,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-00000000040e": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "c0000000-0000-4000-8000-000000000005",
+              "sub": "mesh/1"
+            },
+            "material": {
+              "asset": "c0000000-0000-4000-8000-000000000020"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        },
+        "c0000000-0000-4000-8000-00000000040f": {
+          "type": "fynkel.Animator",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "c0000000-0000-4000-8000-000000000005",
+              "sub": "anim/1"
+            },
+            "speed": 1.0,
+            "looping": false,
+            "playing": true
+          }
+        }
+      }
+    }
+  }
+}

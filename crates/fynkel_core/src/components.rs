@@ -673,6 +673,65 @@ impl TriggerZone {
     }
 }
 
+/// Plays one clip over the entity's subtree (M3-19, `docs/animation.md`):
+/// every channel of `clip` drives the first descendant (the entity itself
+/// included) named like the channel's target, in the pre-tick slot, so
+/// physics and the catalogue see the posed transforms this tick. `speed`
+/// scales time (negative plays backwards); a `looping` clip wraps, one
+/// that is not stops at its last key with `playing` cleared and an
+/// `ANIMATION_ENDED` event. `Command::Animate` plays, crossfades, stops,
+/// pauses, resumes, re-speeds and seeks it from Dart; the world must know
+/// the clip (`World::register_clip`; the loaders register every clip a
+/// loaded scene's animators name, `CLIP_UNAVAILABLE` once otherwise).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 21, name = "fynkel.Animator")]
+pub struct Animator {
+    /// The clip (an imported glTF `anim/<a>` sub-asset); nil plays nothing.
+    pub clip: AssetRef,
+    /// Playback rate, `1` is authored speed; finite.
+    pub speed: f32,
+    pub looping: bool,
+    pub playing: bool,
+}
+
+impl Default for Animator {
+    fn default() -> Self {
+        Self {
+            clip: AssetRef::default(),
+            speed: 1.0,
+            looping: true,
+            playing: true,
+        }
+    }
+}
+
+impl Animator {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.speed.is_finite() {
+            return Err(format!("speed must be finite, got {}", self.speed));
+        }
+        Ok(())
+    }
+}
+
+/// Makes the entity's `MeshRenderer` a skinned draw (M3-19): the mesh's
+/// vertices carry joint weights into `skin` (an imported glTF `skin/<s>`),
+/// whose joints are resolved by name to entities under the one named
+/// `skeleton` — searched from the mesh entity's tree root, the root itself
+/// when `skeleton` is empty. Every frame the renderer gets one matrix per
+/// joint from those entities' (interpolated) world matrices; a joint that
+/// does not resolve stays in its bind pose. The importer writes this next
+/// to the renderer of every skinned node; the world must know the skin
+/// (`World::register_skin`; loaders do, `SKIN_UNAVAILABLE` once otherwise).
+#[derive(Clone, Debug, Default, PartialEq, Schema)]
+#[schema(kind = "component", id = 22, name = "fynkel.Skin")]
+pub struct Skin {
+    /// The skin sub-asset.
+    pub skin: AssetRef,
+    /// Name of the skeleton root entity; empty for the tree root.
+    pub skeleton: String,
+}
+
 fn finite_axis(what: &str, v: Vec3) -> Result<(), String> {
     if !v.is_finite() || v.length_squared() < 1e-12 {
         return Err(format!("{what} must be finite and non-zero, got {v:?}"));
@@ -714,6 +773,9 @@ pub enum ComponentValue {
     Emitter(Emitter),
     /// M3-12.
     TriggerZone(TriggerZone),
+    /// Animation (M3-19).
+    Animator(Animator),
+    Skin(Skin),
 }
 
 impl ComponentValue {
@@ -737,6 +799,8 @@ impl ComponentValue {
             ComponentValue::LifetimeDespawn(_) => ComponentId::LIFETIME_DESPAWN,
             ComponentValue::Emitter(_) => ComponentId::EMITTER,
             ComponentValue::TriggerZone(_) => ComponentId::TRIGGER_ZONE,
+            ComponentValue::Animator(_) => ComponentId::ANIMATOR,
+            ComponentValue::Skin(_) => ComponentId::SKIN,
         }
     }
 
@@ -850,6 +914,8 @@ impl ComponentValue {
             ComponentValue::LifetimeDespawn(c) => c.validate()?,
             ComponentValue::Emitter(c) => c.validate()?,
             ComponentValue::TriggerZone(c) => c.validate()?,
+            ComponentValue::Animator(c) => c.validate()?,
+            ComponentValue::Skin(_) => {}
         }
         Ok(())
     }

@@ -1,8 +1,10 @@
 //! `fynkel render`: a project's startup scene through the real runtime and
 //! renderer to a PNG, headless. The proof that a scene reaches pixels
 //! without a window — and from the cache alone: `cook::prepare` (cook the
-//! project) → `Assets::scene` → `World::load_scene` → one step → extract →
-//! `ExtractRenderer` over the same asset store → readback. Exit 0 when the
+//! project) → `Assets::scene` → `World::load_scene` (prefabs, clips and
+//! skins registered from the cache) → one step, or `--steps` of them, so
+//! an animated scene is drawn posed → extract → `ExtractRenderer` over the
+//! same asset store → readback. Exit 0 when the
 //! image was written, 1 when the project, the scene or an asset failed, 2
 //! on usage or when no GPU adapter is available.
 
@@ -15,7 +17,7 @@ use fynkel_render::{headless_device, render_offscreen, Assets, ExtractRenderer};
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--quality <profile>] [--cache <dir>] [--no-cook] [--placeholders] [--json]\n                                               cook the project, then render its startup scene (or --scene) headlessly from the cache to a PNG (--quality: one of the project's profiles; its default otherwise)"
+        "usage:\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--quality <profile>] [--cache <dir>] [--no-cook] [--placeholders] [--steps <n>] [--json]\n                                               cook the project, then render its startup scene (or --scene) headlessly from the cache to a PNG after n ticks (default 1; --quality: one of the project's profiles; its default otherwise)"
     );
     ExitCode::from(2)
 }
@@ -27,6 +29,7 @@ struct Opts {
     height: u32,
     placeholders: bool,
     quality: Option<String>,
+    steps: u32,
     json: bool,
 }
 
@@ -38,6 +41,7 @@ fn parse(args: &[String]) -> Option<Opts> {
         height: 720,
         placeholders: false,
         quality: None,
+        steps: 1,
         json: false,
     };
     let mut i = 0;
@@ -57,6 +61,10 @@ fn parse(args: &[String]) -> Option<Opts> {
             "--out" => {
                 i += 1;
                 o.out = PathBuf::from(args.get(i)?);
+            }
+            "--steps" => {
+                i += 1;
+                o.steps = args.get(i)?.parse().ok().filter(|n| *n >= 1)?;
             }
             "--cache" => {
                 i += 1;
@@ -134,8 +142,17 @@ pub fn run(args: &[String]) -> ExitCode {
         }
     };
     let _residency = assets.retain(&cooked.closure);
-    world.begin_frame(1.0 / 60.0);
-    world.step();
+    // What the scene's components reference from the cache: prefabs
+    // (Emitter), clips and skins (Animator, Skin — M3-19).
+    let (_, prefab_diags) = assets.register_prefabs(&cooked.description, &mut world);
+    let (_, _, anim_diags) = assets.register_animation(&cooked.description, &mut world);
+    for d in prefab_diags.iter().chain(&anim_diags) {
+        eprintln!("{d}");
+    }
+    for _ in 0..opts.steps {
+        world.begin_frame(1.0 / 60.0);
+        world.step();
+    }
     let extract = world.extract();
 
     let Some((device, queue)) = headless_device() else {
@@ -189,9 +206,12 @@ pub fn run(args: &[String]) -> ExitCode {
                 "project": project_name,
                 "scene": { "id": scene.id.to_string(), "name": scene.name, "key": cooked.key, "entities": scene.entities().len(), "rejectedComponents": scene.rejected_components },
                 "cache": cache.display().to_string(),
+                "steps": opts.steps,
                 "instances": stats.instances,
                 "culled": stats.culled,
                 "draws": stats.draws,
+                "skinned": stats.skinned,
+                "joints": stats.joints,
                 "shadowDraws": stats.shadow_draws,
                 "meshes": stats.meshes,
                 "placeholders": stats.placeholders,
@@ -221,7 +241,7 @@ pub fn run(args: &[String]) -> ExitCode {
         );
     } else {
         println!(
-            "{}: {}x{} — {} \"{}\": {} entities, {} instances in {} draw(s) ({} meshes, {} placeholders, {} missing, {} transparent, {} culled), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}, quality {} (msaa {}, {}, {}x{})",
+            "{}: {}x{} — {} \"{}\": {} entities, {} instances in {} draw(s) ({} meshes, {} placeholders, {} missing, {} transparent, {} skinned over {} joints, {} culled), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}, quality {} (msaa {}, {}, {}x{})",
             opts.out.display(),
             opts.width,
             opts.height,
@@ -234,6 +254,8 @@ pub fn run(args: &[String]) -> ExitCode {
             stats.placeholders,
             stats.missing,
             stats.transparent,
+            stats.skinned,
+            stats.joints,
             stats.culled,
             if stats.scene_camera { "scene" } else { "default" },
             if stats.scene_light { "scene" } else { "default" },

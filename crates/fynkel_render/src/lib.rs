@@ -43,7 +43,7 @@
 use std::collections::HashMap;
 
 use fynkel_contracts::AssetRef;
-use fynkel_cooked::payload::{Vertex, TEXTURE_FORMAT_RGBA8_SRGB};
+use fynkel_cooked::payload::{SkinWeight, Vertex, TEXTURE_FORMAT_RGBA8_SRGB};
 use fynkel_core::material::AlphaMode;
 use fynkel_core::{Environment, Extract, Projection};
 use glam::{Mat4, Vec3};
@@ -99,7 +99,8 @@ struct Instance {
     model: [[f32; 4]; 4],
     /// Base colour factor.
     tint: [f32; 4],
-    /// Emissive × strength (relative to the exposure's white), w unused.
+    /// Emissive × strength (relative to the exposure's white); w is the
+    /// skinned draw's first joint in the palette buffer (M3-19).
     emissive: [f32; 4],
     /// metallic, roughness, normal_scale, occlusion_strength
     params: [f32; 4],
@@ -198,6 +199,9 @@ struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    /// A skinned mesh's joints and weights (`SkinWeight` per vertex),
+    /// vertex slot 2 of the skinned pipelines (M3-19).
+    skin_buffer: Option<wgpu::Buffer>,
     /// The cooked bounds as a sphere, in mesh space (culling).
     bounds: Sphere,
 }
@@ -223,6 +227,9 @@ struct BatchKey {
     mesh: Option<AssetRef>,
     /// `None`: the default material (every map at its fallback).
     material: Option<AssetRef>,
+    /// Drawn through the skinned pipelines: the mesh carries skin weights
+    /// and every instance a joint palette (M3-19).
+    skinned: bool,
 }
 
 /// Where an opaque instance is drawn; the order is the batch layout.
@@ -276,6 +283,10 @@ pub struct FrameStats {
     /// Mesh draw calls in the scene pass: opaque batches with something
     /// in view, plus one per transparent instance.
     pub draws: u32,
+    /// Instances drawn skinned (a joint palette applied per vertex), and
+    /// the joint matrices uploaded for them this frame.
+    pub skinned: u32,
+    pub joints: u32,
     /// `blend` instances drawn back-to-front (one draw each).
     pub transparent: u32,
     /// Instances drawn into the shadow map (0 when no shadow was drawn).
@@ -312,9 +323,16 @@ struct Pipelines {
     /// `blend` meshes: alpha blended, depth read only.
     transparent: wgpu::RenderPipeline,
     transparent_double_sided: wgpu::RenderPipeline,
+    /// The four above with the vertex skinned by its joint palette
+    /// (`vs_skinned`; M3-19).
+    mesh_skinned: wgpu::RenderPipeline,
+    mesh_skinned_double_sided: wgpu::RenderPipeline,
+    transparent_skinned: wgpu::RenderPipeline,
+    transparent_skinned_double_sided: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
     /// Depth only, from the sun.
     shadow: wgpu::RenderPipeline,
+    shadow_skinned: wgpu::RenderPipeline,
     /// Debug lines.
     debug: wgpu::RenderPipeline,
     post: wgpu::RenderPipeline,
@@ -368,6 +386,7 @@ pub struct ExtractRenderer {
     material_layout: wgpu::BindGroupLayout,
     single_layout: wgpu::BindGroupLayout,
     shadow_layout: wgpu::BindGroupLayout,
+    skin_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     shadow_sampler: wgpu::Sampler,
     present_sampler: wgpu::Sampler,
@@ -381,6 +400,11 @@ pub struct ExtractRenderer {
     instance_buffer: wgpu::Buffer,
     instance_capacity: u32,
     instances: Vec<Instance>,
+    /// The frame's joint palettes (`Extract::joints`), read by the skinned
+    /// vertex stages through `joint_bind_group` (group 2).
+    joint_buffer: wgpu::Buffer,
+    joint_capacity: u32,
+    joint_bind_group: wgpu::BindGroup,
     batches: Vec<Batch>,
     transparent: Vec<TransparentDraw>,
     batch_index: HashMap<BatchKey, usize>,
@@ -514,6 +538,22 @@ impl ExtractRenderer {
             label: Some("fynkel shadow bgl"),
             entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
         });
+        let skin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fynkel skin bgl"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let joint_capacity = 64;
+        let joint_buffer = create_joint_buffer(device, joint_capacity);
+        let joint_bind_group = create_joint_bind_group(device, &skin_layout, &joint_buffer);
         let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fynkel shadow bg"),
             layout: &shadow_layout,
@@ -568,10 +608,13 @@ impl ExtractRenderer {
             device,
             format,
             quality.msaa,
-            &frame_layout,
-            &material_layout,
-            &single_layout,
-            &shadow_layout,
+            Layouts {
+                frame: &frame_layout,
+                material: &material_layout,
+                single: &single_layout,
+                shadow: &shadow_layout,
+                skin: &skin_layout,
+            },
         );
 
         let (vertices, indices) = cube_mesh();
@@ -580,6 +623,7 @@ impl ExtractRenderer {
             "fynkel cube",
             &vertices,
             &indices,
+            &[],
             Sphere::from_bounds([-0.5; 3], [0.5; 3]),
         );
         let (width, height) = (width.max(1), height.max(1));
@@ -616,6 +660,7 @@ impl ExtractRenderer {
             material_layout,
             single_layout,
             shadow_layout,
+            skin_layout,
             sampler,
             shadow_sampler,
             present_sampler,
@@ -629,6 +674,9 @@ impl ExtractRenderer {
             instance_buffer,
             instance_capacity,
             instances: Vec::with_capacity(instance_capacity as usize),
+            joint_buffer,
+            joint_capacity,
+            joint_bind_group,
             batches: Vec::new(),
             transparent: Vec::new(),
             batch_index: HashMap::new(),
@@ -801,10 +849,13 @@ impl ExtractRenderer {
                 device,
                 self.format,
                 wanted.msaa,
-                &self.frame_layout,
-                &self.material_layout,
-                &self.single_layout,
-                &self.shadow_layout,
+                Layouts {
+                    frame: &self.frame_layout,
+                    material: &self.material_layout,
+                    single: &self.single_layout,
+                    shadow: &self.shadow_layout,
+                    skin: &self.skin_layout,
+                },
             );
         }
         let internal = wanted.internal_size(self.width, self.height);
@@ -1100,6 +1151,7 @@ impl ExtractRenderer {
         let cube_key = || BatchKey {
             mesh: None,
             material: None,
+            skinned: false,
         };
         let cube_bounds = self.cube.bounds;
         for (ri, r) in extract.records.iter().enumerate() {
@@ -1112,18 +1164,27 @@ impl ExtractRenderer {
                         if have_mesh {
                             stats.meshes += 1;
                             let blend = material.alpha_mode == AlphaMode::Blend;
-                            let bounds = self
-                                .meshes
-                                .get(&m.mesh)
-                                .and_then(Option::as_ref)
-                                .map_or(cube_bounds, |g| g.bounds);
+                            let gpu = self.meshes.get(&m.mesh).and_then(Option::as_ref);
+                            let bounds = gpu.map_or(cube_bounds, |g| g.bounds);
+                            // Skinned when the mesh carries weights and
+                            // the extract a palette for this instance; a
+                            // skinned mesh without a `Skin` draws as
+                            // cooked (its bind pose).
+                            let palette = m
+                                .skin
+                                .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
+                            let mut instance = instance_for(&material, r.world, m.receive_shadows);
+                            if let Some(p) = palette {
+                                instance.emissive[3] = p.first_joint as f32;
+                            }
                             (
                                 BatchKey {
                                     mesh: Some(m.mesh.clone()),
                                     material: material_key,
+                                    skinned: palette.is_some(),
                                 },
                                 material.double_sided,
-                                instance_for(&material, r.world, m.receive_shadows),
+                                instance,
                                 m.cast_shadows && !blend,
                                 blend,
                                 bounds,
@@ -1280,6 +1341,28 @@ impl ExtractRenderer {
         stats.transparent = self.transparent.len() as u32;
         stats.instances += stats.transparent;
         stats.draws += stats.transparent;
+        stats.skinned = self
+            .batches
+            .iter()
+            .filter(|b| b.key.skinned)
+            .map(|b| b.count)
+            .sum::<u32>()
+            + self.transparent.iter().filter(|t| t.key.skinned).count() as u32;
+
+        // The joint palettes, as the extract laid them out (an instance's
+        // `emissive.w` is its first joint). The buffer never shrinks and
+        // is never empty: the skinned stages bind it unconditionally.
+        let n_joints = extract.joints.len() as u32;
+        if n_joints > self.joint_capacity {
+            self.joint_capacity = n_joints.next_power_of_two().max(self.joint_capacity * 2);
+            self.joint_buffer = create_joint_buffer(device, self.joint_capacity);
+            self.joint_bind_group =
+                create_joint_bind_group(device, &self.skin_layout, &self.joint_buffer);
+        }
+        if stats.skinned > 0 && n_joints > 0 {
+            queue.write_buffer(&self.joint_buffer, 0, bytemuck::cast_slice(&extract.joints));
+            stats.joints = n_joints;
+        }
 
         // The sun's shadow: drawn when the profile draws shadows, the sun
         // casts and something is there to cast.
@@ -1411,21 +1494,36 @@ impl ExtractRenderer {
         let Some(fallbacks) = self.fallbacks.as_ref() else {
             return;
         };
-        pass.set_pipeline(&self.pipelines.shadow);
         pass.set_bind_group(0, &self.shadow_bind_group, &[]);
+        pass.set_bind_group(2, &self.joint_bind_group, &[]);
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        for b in self.batches.iter().filter(|b| b.shadow_count > 0) {
-            let Some(mesh) = self.mesh_for(&b.key) else {
-                continue;
-            };
-            pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
-            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(
-                0..mesh.index_count,
-                0,
-                b.shadow_first..b.shadow_first + b.shadow_count,
-            );
+        // Static casters, then the skinned ones: one pipeline switch.
+        for skinned in [false, true] {
+            let mut bound = false;
+            for b in self
+                .batches
+                .iter()
+                .filter(|b| b.key.skinned == skinned && b.shadow_count > 0)
+            {
+                let Some(mesh) = self.mesh_for(&b.key) else {
+                    continue;
+                };
+                if !bound {
+                    pass.set_pipeline(if skinned {
+                        &self.pipelines.shadow_skinned
+                    } else {
+                        &self.pipelines.shadow
+                    });
+                    bound = true;
+                }
+                pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
+                bind_mesh(&mut pass, mesh, skinned);
+                pass.draw_indexed(
+                    0..mesh.index_count,
+                    0,
+                    b.shadow_first..b.shadow_first + b.shadow_count,
+                );
+            }
         }
     }
 
@@ -1463,34 +1561,30 @@ impl ExtractRenderer {
             ..Default::default()
         });
         pass.set_bind_group(0, &self.frame_bind_group, &[]);
+        pass.set_bind_group(2, &self.joint_bind_group, &[]);
         let Some(fallbacks) = self.fallbacks.as_ref() else {
             return;
         };
         if !self.instances.is_empty() {
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            // Culled batches first, then the double-sided ones: one
-            // pipeline switch per frame.
-            for double_sided in [false, true] {
+            // Culled batches first, then the double-sided ones, static
+            // before skinned: at most one pipeline switch per variant.
+            for (skinned, double_sided) in
+                [(false, false), (false, true), (true, false), (true, true)]
+            {
                 let mut bound = false;
-                for b in self
-                    .batches
-                    .iter()
-                    .filter(|b| b.double_sided == double_sided && b.count > 0)
-                {
+                for b in self.batches.iter().filter(|b| {
+                    b.key.skinned == skinned && b.double_sided == double_sided && b.count > 0
+                }) {
                     let Some(mesh) = self.mesh_for(&b.key) else {
                         continue;
                     };
                     if !bound {
-                        pass.set_pipeline(if double_sided {
-                            &self.pipelines.mesh_double_sided
-                        } else {
-                            &self.pipelines.mesh
-                        });
+                        pass.set_pipeline(self.pipelines.opaque(skinned, double_sided));
                         bound = true;
                     }
                     pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
-                    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                    bind_mesh(&mut pass, mesh, skinned);
                     pass.draw_indexed(0..mesh.index_count, 0, b.first..b.first + b.count);
                 }
             }
@@ -1502,22 +1596,18 @@ impl ExtractRenderer {
         }
         if !self.transparent.is_empty() {
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            let mut bound: Option<bool> = None;
+            let mut bound: Option<(bool, bool)> = None;
             for t in &self.transparent {
                 let Some(mesh) = self.mesh_for(&t.key) else {
                     continue;
                 };
-                if bound != Some(t.double_sided) {
-                    pass.set_pipeline(if t.double_sided {
-                        &self.pipelines.transparent_double_sided
-                    } else {
-                        &self.pipelines.transparent
-                    });
-                    bound = Some(t.double_sided);
+                let variant = (t.key.skinned, t.double_sided);
+                if bound != Some(variant) {
+                    pass.set_pipeline(self.pipelines.transparent(t.key.skinned, t.double_sided));
+                    bound = Some(variant);
                 }
                 pass.set_bind_group(1, self.material_for(&t.key, fallbacks), &[]);
-                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                bind_mesh(&mut pass, mesh, t.key.skinned);
                 pass.draw_indexed(0..mesh.index_count, 0, t.index..t.index + 1);
             }
         }
@@ -1618,6 +1708,7 @@ impl ExtractRenderer {
                 &format!("fynkel mesh {r}"),
                 &payload.vertices,
                 &payload.indices,
+                &payload.skin,
                 Sphere::from_bounds(payload.bounds_min, payload.bounds_max),
             )),
             Some(Err(e)) => {
@@ -1769,6 +1860,18 @@ fn instance_for(m: &PbrMaterial, world: Mat4, receive_shadows: bool) -> Instance
     }
 }
 
+/// Binds `mesh`'s vertex and index buffers — and, for a skinned draw,
+/// its weights on slot 2.
+fn bind_mesh(pass: &mut wgpu::RenderPass<'_>, mesh: &GpuMesh, skinned: bool) {
+    pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+    if skinned {
+        if let Some(skin) = &mesh.skin_buffer {
+            pass.set_vertex_buffer(2, skin.slice(..));
+        }
+    }
+    pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+}
+
 /// Deterministic per-entity tint so neighbouring placeholder cubes are
 /// distinguishable.
 fn tint_for(slot: u32) -> [f32; 4] {
@@ -1785,25 +1888,58 @@ fn tint_for(slot: u32) -> [f32; 4] {
 }
 
 impl Pipelines {
+    fn opaque(&self, skinned: bool, double_sided: bool) -> &wgpu::RenderPipeline {
+        match (skinned, double_sided) {
+            (false, false) => &self.mesh,
+            (false, true) => &self.mesh_double_sided,
+            (true, false) => &self.mesh_skinned,
+            (true, true) => &self.mesh_skinned_double_sided,
+        }
+    }
+
+    fn transparent(&self, skinned: bool, double_sided: bool) -> &wgpu::RenderPipeline {
+        match (skinned, double_sided) {
+            (false, false) => &self.transparent,
+            (false, true) => &self.transparent_double_sided,
+            (true, false) => &self.transparent_skinned,
+            (true, true) => &self.transparent_skinned_double_sided,
+        }
+    }
+
     const fn count() -> usize {
-        9
+        14
     }
 }
 
-/// The nine pipeline variants (`docs/renderer.md`) for one sample count:
-/// mesh (cull back), mesh double-sided (cull none), transparent (blend,
-/// cull back), transparent double-sided, sky, shadow, debug lines, post,
-/// present. Nothing else is ever created; a quality switch to another
-/// sample count rebuilds this set.
+/// The bind group layouts the pipelines are built over.
+struct Layouts<'a> {
+    frame: &'a wgpu::BindGroupLayout,
+    material: &'a wgpu::BindGroupLayout,
+    single: &'a wgpu::BindGroupLayout,
+    shadow: &'a wgpu::BindGroupLayout,
+    skin: &'a wgpu::BindGroupLayout,
+}
+
+/// The fourteen pipeline variants (`docs/renderer.md`) for one sample
+/// count: mesh (cull back), mesh double-sided (cull none), transparent
+/// (blend, cull back), transparent double-sided, the same four skinned
+/// (`vs_skinned`, a third vertex buffer of joint weights and the palette
+/// storage buffer at group 2), sky, shadow, shadow skinned, debug lines,
+/// post, present. Nothing else is ever created; a quality switch to
+/// another sample count rebuilds this set.
 fn create_pipelines(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
     sample_count: u32,
-    frame_layout: &wgpu::BindGroupLayout,
-    material_layout: &wgpu::BindGroupLayout,
-    single_layout: &wgpu::BindGroupLayout,
-    shadow_layout: &wgpu::BindGroupLayout,
+    layouts: Layouts<'_>,
 ) -> Pipelines {
+    let Layouts {
+        frame: frame_layout,
+        material: material_layout,
+        single: single_layout,
+        shadow: shadow_layout,
+        skin: skin_layout,
+    } = layouts;
     let module = |label, body: &str| {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(label),
@@ -1825,14 +1961,20 @@ fn create_pipelines(
         source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shadow.wgsl").into()),
     });
 
+    // Group 2 (the joint palettes) is part of every mesh layout so the
+    // passes bind it once; the static stages simply never read it.
     let mesh_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("fynkel mesh pl"),
-        bind_group_layouts: &[Some(frame_layout), Some(material_layout)],
+        bind_group_layouts: &[Some(frame_layout), Some(material_layout), Some(skin_layout)],
         ..Default::default()
     });
     let shadow_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("fynkel shadow pl"),
-        bind_group_layouts: &[Some(shadow_layout), Some(material_layout)],
+        bind_group_layouts: &[
+            Some(shadow_layout),
+            Some(material_layout),
+            Some(skin_layout),
+        ],
         ..Default::default()
     });
     let single_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1890,15 +2032,34 @@ fn create_pipelines(
             ],
         }),
     ];
-    let mesh = |label, cull_mode, targets: &[Option<wgpu::ColorTargetState>], depth_write| {
+    // The skinned stages add slot 2: the cooked `SkinWeight` (four u16
+    // joints, four f32 weights).
+    let skinned_buffers = [
+        mesh_buffers[0].clone(),
+        mesh_buffers[1].clone(),
+        Some(wgpu::VertexBufferLayout {
+            array_stride: SkinWeight::STRIDE as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &wgpu::vertex_attr_array![14 => Uint16x4, 15 => Float32x4],
+        }),
+    ];
+    let mesh = |label,
+                skinned: bool,
+                cull_mode,
+                targets: &[Option<wgpu::ColorTargetState>],
+                depth_write| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(&mesh_layout),
             vertex: wgpu::VertexState {
                 module: &mesh_shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
                 compilation_options: Default::default(),
-                buffers: &mesh_buffers,
+                buffers: if skinned {
+                    &skinned_buffers
+                } else {
+                    &mesh_buffers
+                },
             },
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
@@ -1924,42 +2085,50 @@ fn create_pipelines(
             cache: None,
         })
     };
-    let shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("fynkel shadow pipeline"),
-        layout: Some(&shadow_pl),
-        vertex: wgpu::VertexState {
-            module: &shadow_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: Default::default(),
-            buffers: &mesh_buffers,
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shadow_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: Default::default(),
-            targets: &[],
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            ..Default::default()
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: SHADOW_FORMAT,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
-            stencil: Default::default(),
-            bias: wgpu::DepthBiasState {
-                constant: 2,
-                slope_scale: 2.0,
-                clamp: 0.0,
+    let shadow_pipeline = |label, skinned: bool| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&shadow_pl),
+            vertex: wgpu::VertexState {
+                module: &shadow_shader,
+                entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
+                compilation_options: Default::default(),
+                buffers: if skinned {
+                    &skinned_buffers
+                } else {
+                    &mesh_buffers
+                },
             },
-        }),
-        multisample: Default::default(),
-        multiview_mask: None,
-        cache: None,
-    });
+            fragment: Some(wgpu::FragmentState {
+                module: &shadow_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: SHADOW_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    let shadow = shadow_pipeline("fynkel shadow pipeline", false);
+    let shadow_skinned = shadow_pipeline("fynkel shadow skinned pipeline", true);
     let debug = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("fynkel debug pipeline"),
         layout: Some(&debug_pl),
@@ -2058,33 +2227,61 @@ fn create_pipelines(
         None,
         Default::default(),
     );
+    let back = Some(wgpu::Face::Back);
     Pipelines {
-        mesh: mesh(
-            "fynkel mesh pipeline",
-            Some(wgpu::Face::Back),
-            &hdr_target,
-            true,
-        ),
+        mesh: mesh("fynkel mesh pipeline", false, back, &hdr_target, true),
         mesh_double_sided: mesh(
             "fynkel mesh pipeline (double-sided)",
+            false,
             None,
             &hdr_target,
             true,
         ),
         transparent: mesh(
             "fynkel transparent pipeline",
-            Some(wgpu::Face::Back),
+            false,
+            back,
             &hdr_blend_target,
             false,
         ),
         transparent_double_sided: mesh(
             "fynkel transparent pipeline (double-sided)",
+            false,
+            None,
+            &hdr_blend_target,
+            false,
+        ),
+        mesh_skinned: mesh(
+            "fynkel mesh skinned pipeline",
+            true,
+            back,
+            &hdr_target,
+            true,
+        ),
+        mesh_skinned_double_sided: mesh(
+            "fynkel mesh skinned pipeline (double-sided)",
+            true,
+            None,
+            &hdr_target,
+            true,
+        ),
+        transparent_skinned: mesh(
+            "fynkel transparent skinned pipeline",
+            true,
+            back,
+            &hdr_blend_target,
+            false,
+        ),
+        transparent_skinned_double_sided: mesh(
+            "fynkel transparent skinned pipeline (double-sided)",
+            true,
             None,
             &hdr_blend_target,
             false,
         ),
         sky,
         shadow,
+        shadow_skinned,
         debug,
         post,
         present,
@@ -2245,6 +2442,30 @@ fn create_frame_bind_group(
     })
 }
 
+fn create_joint_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("fynkel joint palettes"),
+        size: capacity as u64 * std::mem::size_of::<Mat4>() as u64,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+fn create_joint_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    buffer: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("fynkel skin bg"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        }],
+    })
+}
+
 fn create_instance_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("fynkel instances"),
@@ -2337,6 +2558,7 @@ fn upload_mesh(
     label: &str,
     vertices: &[Vertex],
     indices: &[u32],
+    skin: &[SkinWeight],
     bounds: Sphere,
 ) -> GpuMesh {
     // The cooked layout is the GPU layout: 18 little-endian f32 per vertex.
@@ -2354,10 +2576,24 @@ fn upload_mesh(
         contents: bytemuck::cast_slice(indices),
         usage: wgpu::BufferUsages::INDEX,
     });
+    // A skinned mesh's weights as cooked: four u16 joints, four f32
+    // weights per vertex (24 bytes).
+    let skin_buffer = (!skin.is_empty()).then(|| {
+        let mut bytes = Vec::with_capacity(skin.len() * SkinWeight::STRIDE);
+        for w in skin {
+            w.write(&mut bytes);
+        }
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: &bytes,
+            usage: wgpu::BufferUsages::VERTEX,
+        })
+    });
     GpuMesh {
         vertex_buffer,
         index_buffer,
         index_count: indices.len() as u32,
+        skin_buffer,
         bounds,
     }
 }

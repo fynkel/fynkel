@@ -121,6 +121,15 @@
       "description": "The player: walks its `fynkel.CharacterController` from the `move` action in the frame of the `fynkel.ThirdPersonCamera` named [cameraName], sprints while `sprint` is held, jumps on the `jump` press while grounded, dies on a `hazard` zone or below [fallY] (respawns at the start), restarts the run on `restart`, and keeps the clock.",
       "fields": [
         {
+          "name": "blend",
+          "type": "number",
+          "nullable": false,
+          "default": 0.15,
+          "min": 0,
+          "step": 0.05,
+          "description": "Seconds a clip change blends over."
+        },
+        {
           "name": "cameraName",
           "type": "string",
           "nullable": false,
@@ -171,6 +180,17 @@
         "description": "The player: walks its `fynkel.CharacterController` from the `move` action in the frame of the `fynkel.ThirdPersonCamera` named [cameraName], sprints while `sprint` is held, jumps on the `jump` press while grounded, dies on a `hazard` zone or below [fallY] (respawns at the start), restarts the run on `restart`, and keeps the clock.",
         "type": "object",
         "properties": {
+          "blend": {
+            "type": "number",
+            "minimum": 0,
+            "default": 0.15,
+            "description": "Seconds a clip change blends over.",
+            "x-fynkel": {
+              "type": "number",
+              "min": 0,
+              "step": 0.05
+            }
+          },
           "cameraName": {
             "type": "string",
             "default": "Camera",

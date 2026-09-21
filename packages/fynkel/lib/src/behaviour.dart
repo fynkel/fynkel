@@ -129,6 +129,10 @@ abstract class Behaviour {
   void jump([double speed = 0]) => gameObject.jump(speed);
   CharacterState? characterState() => gameObject.characterState();
 
+  /// The object's animator (M3-19): `animation.play(clip)`,
+  /// `animation.crossfade(clip, 0.2)`, `animation.state`.
+  AnimationControl get animation => gameObject.animation;
+
   /// Desired state. Setting it queues `onEnable`/`onDisable` for the next
   /// safe boundary; [isActive] says what the driver has applied.
   bool get enabled => _enabled;
@@ -202,6 +206,11 @@ abstract class Behaviour {
   /// name (`"collect"`); `world.byEntity` finds the other side.
   void onZoneEnter(ZoneEvent event) {}
   void onZoneExit(ZoneEvent event) {}
+
+  /// Animation callback (M3-19): right after the tick's step, when this
+  /// object's `fynkel.Animator` finished a non-looping clip
+  /// (`event.clip`). A looping clip never ends; `stop` does not fire it.
+  void onAnimationEnded(AnimationEnded event) {}
 
   /// Presentation-rate gameplay logic, once per host frame.
   void update(UpdateContext context) {}
@@ -447,9 +456,10 @@ class _BehaviourSystem {
   /// Right after `step()`: the contact callbacks of the objects involved
   /// (in contact order, side `a` then `b`), then `afterPhysics` for the
   /// behaviours that opted in.
-  void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones) {
+  void afterPhysics(int tick, List<Contact> contacts, List<ZoneEvent> zones, List<AnimationEnded> animations) {
     if (contacts.isNotEmpty) _dispatchContacts(contacts);
     if (zones.isNotEmpty) _dispatchZones(zones);
+    if (animations.isNotEmpty) _dispatchAnimations(animations);
     final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
     _run(ctx.context, (b) {
       if (b.wantsAfterPhysics) b.afterPhysics(ctx);
@@ -472,6 +482,20 @@ class _BehaviourSystem {
         _zoneTo(world._byEntity[z.zone], z);
         if (z.other != z.zone) _zoneTo(world._byEntity[z.other], z);
         world.zones._dispatch(z);
+      }
+    });
+  }
+
+  void _dispatchAnimations(List<AnimationEnded> ended) {
+    if (_all.isEmpty) return;
+    world.context.run(() {
+      for (final e in ended) {
+        final go = world._byEntity[e.entity];
+        if (go == null || go._behaviours.isEmpty) continue;
+        for (final b in go._behaviours.toList(growable: false)) {
+          if (!b._active || b._destroyRequested) continue;
+          b.onAnimationEnded(e);
+        }
       }
     });
   }

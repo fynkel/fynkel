@@ -27,9 +27,16 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Uuid};
-use fynkel_cooked::payload::{decode_mesh, decode_texture};
+use fynkel_cooked::payload::{
+    decode_animation, decode_mesh, decode_skin, decode_texture, ANIM_INTERPOLATION_CUBIC_SPLINE,
+    ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP, ANIM_PROPERTY_ROTATION,
+    ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
+};
 pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
-use fynkel_cooked::{ChunkFile, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE};
+use fynkel_cooked::{
+    ChunkFile, KIND_ANIMATION, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN, KIND_TEXTURE,
+};
+use fynkel_core::animation::{Channel, Clip, Interpolation, Joint, Property, Skin};
 use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
 use fynkel_core::SceneDescription;
@@ -322,6 +329,8 @@ struct Store {
     meshes: HashMap<AssetRef, Arc<MeshPayload>>,
     textures: HashMap<AssetRef, Arc<TexturePayload>>,
     materials: HashMap<AssetRef, Arc<PbrMaterial>>,
+    clips: HashMap<AssetRef, Arc<Clip>>,
+    skins: HashMap<AssetRef, Arc<Skin>>,
     /// Residency counts by asset id (`retain` increments, release
     /// decrements; zero evicts).
     counts: HashMap<Uuid, u32>,
@@ -388,6 +397,8 @@ impl Assets {
                 meshes: HashMap::new(),
                 textures: HashMap::new(),
                 materials: HashMap::new(),
+                clips: HashMap::new(),
+                skins: HashMap::new(),
                 counts: HashMap::new(),
                 evictions: 0,
             })),
@@ -552,6 +563,8 @@ impl Assets {
                     let (_, mesh_diags) =
                         self.register_mesh_colliders(&p.description, world.physics_mut());
                     diags.extend(mesh_diags);
+                    let (_, _, anim_diags) = self.register_animation(&p.description, world);
+                    diags.extend(anim_diags);
                     collect(&p.description, &mut pending);
                     world.register_prefab(id, p.description);
                     registered += 1;
@@ -560,6 +573,71 @@ impl Assets {
             }
         }
         (registered, diags)
+    }
+
+    /// Registers with `world` every clip an `Animator` in `scene` names and
+    /// every skin a `Skin` component names (M3-19), so the animation
+    /// system finds them at the first tick. An unreadable clip or skin is
+    /// a diagnostic (the store's) and the component reports
+    /// `CLIP_UNAVAILABLE` / `SKIN_UNAVAILABLE` at its first tick. Returns
+    /// `(clips, skins)` registered by this call.
+    pub fn register_animation(
+        &self,
+        scene: &SceneDescription,
+        world: &mut fynkel_core::World,
+    ) -> (usize, usize, Vec<Diagnostic>) {
+        use fynkel_core::components::ComponentValue;
+        let mut clips = 0;
+        let mut skins = 0;
+        let mut diags = Vec::new();
+        for e in &scene.entities {
+            for c in &e.components {
+                match c {
+                    ComponentValue::Animator(a) => match self.register_clip(&a.clip, world) {
+                        Ok(true) => clips += 1,
+                        Ok(false) => {}
+                        Err(d) => diags.push(d),
+                    },
+                    ComponentValue::Skin(k) => match self.register_skin(&k.skin, world) {
+                        Ok(true) => skins += 1,
+                        Ok(false) => {}
+                        Err(d) => diags.push(d),
+                    },
+                    _ => {}
+                }
+            }
+        }
+        (clips, skins, diags)
+    }
+
+    /// Registers the clip `r` with `world` unless it is nil or already
+    /// there; `Ok(true)` when this call registered it.
+    pub fn register_clip(
+        &self,
+        r: &AssetRef,
+        world: &mut fynkel_core::World,
+    ) -> Result<bool, Diagnostic> {
+        if r.asset.is_nil() || world.has_clip(r) {
+            return Ok(false);
+        }
+        let clip = self.clip(r)?;
+        world.register_clip(r.clone(), (*clip).clone());
+        Ok(true)
+    }
+
+    /// Registers the skin `r` with `world` unless it is nil or already
+    /// there; `Ok(true)` when this call registered it.
+    pub fn register_skin(
+        &self,
+        r: &AssetRef,
+        world: &mut fynkel_core::World,
+    ) -> Result<bool, Diagnostic> {
+        if r.asset.is_nil() || world.has_skin(r) {
+            return Ok(false);
+        }
+        let skin = self.skin(r)?;
+        world.register_skin(r.clone(), (*skin).clone());
+        Ok(true)
     }
 
     /// Keeps `ids` (a scene's closure) resident until the returned token is
@@ -596,6 +674,8 @@ impl Assets {
         s.meshes.retain(|r, _| !gone.contains(&r.asset));
         s.textures.retain(|r, _| !gone.contains(&r.asset));
         s.materials.retain(|r, _| !gone.contains(&r.asset));
+        s.clips.retain(|r, _| !gone.contains(&r.asset));
+        s.skins.retain(|r, _| !gone.contains(&r.asset));
         s.metas.retain(|id, _| !gone.contains(id));
         s.evictions += 1;
     }
@@ -606,6 +686,8 @@ impl Assets {
         s.meshes.clear();
         s.textures.clear();
         s.materials.clear();
+        s.clips.clear();
+        s.skins.clear();
         s.metas.clear();
         s.evictions += 1;
     }
@@ -642,6 +724,87 @@ impl Assets {
         let m = decode_material(&bytes).ok_or_else(|| self.malformed(r, "MATL"))?;
         self.lock().materials.insert(r.clone(), Arc::new(m.clone()));
         Ok(m)
+    }
+
+    /// The cooked animation clip (an `ANIM` chunk, `anim/<a>`) as the
+    /// core's `Clip`, validated (M3-19).
+    pub fn clip(&self, r: &AssetRef) -> Result<Arc<Clip>, Diagnostic> {
+        if let Some(c) = self.lock().clips.get(r) {
+            return Ok(c.clone());
+        }
+        let bytes = self.chunk(r, KIND_ANIMATION)?;
+        let payload = decode_animation(&bytes).ok_or_else(|| self.malformed(r, "ANIM"))?;
+        let clip = Clip {
+            name: r.to_string(),
+            duration: payload.duration,
+            channels: payload
+                .channels
+                .into_iter()
+                .map(|c| {
+                    Some(Channel {
+                        target: c.target,
+                        property: match c.property {
+                            ANIM_PROPERTY_TRANSLATION => Property::Translation,
+                            ANIM_PROPERTY_ROTATION => Property::Rotation,
+                            ANIM_PROPERTY_SCALE => Property::Scale,
+                            _ => return None,
+                        },
+                        interpolation: match c.interpolation {
+                            ANIM_INTERPOLATION_STEP => Interpolation::Step,
+                            ANIM_INTERPOLATION_LINEAR => Interpolation::Linear,
+                            ANIM_INTERPOLATION_CUBIC_SPLINE => Interpolation::CubicSpline,
+                            _ => return None,
+                        },
+                        times: c.times,
+                        values: c.values,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| self.malformed(r, "ANIM"))?,
+        };
+        clip.validate().map_err(|why| {
+            let mut d = self.malformed(r, "ANIM");
+            d.message = format!("{}: {why}", d.message);
+            d
+        })?;
+        let clip = Arc::new(clip);
+        self.lock().clips.insert(r.clone(), clip.clone());
+        Ok(clip)
+    }
+
+    /// The cooked skin (a `SKIN` chunk, `skin/<s>`) as the core's `Skin`,
+    /// validated (M3-19).
+    pub fn skin(&self, r: &AssetRef) -> Result<Arc<Skin>, Diagnostic> {
+        if let Some(k) = self.lock().skins.get(r) {
+            return Ok(k.clone());
+        }
+        let bytes = self.chunk(r, KIND_SKIN)?;
+        let payload = decode_skin(&bytes).ok_or_else(|| self.malformed(r, "SKIN"))?;
+        let skin = Skin {
+            skeleton: payload.skeleton,
+            joints: payload
+                .joints
+                .into_iter()
+                .map(|j| Joint {
+                    name: j.name,
+                    parent: j.parent,
+                    inverse_bind: glam::Mat4::from_cols_array(&j.inverse_bind),
+                    rest: fynkel_core::Transform {
+                        position: glam::Vec3::from_array(j.rest_translation),
+                        rotation: glam::Quat::from_array(j.rest_rotation),
+                        scale: glam::Vec3::from_array(j.rest_scale),
+                    },
+                })
+                .collect(),
+        };
+        skin.validate().map_err(|why| {
+            let mut d = self.malformed(r, "SKIN");
+            d.message = format!("{}: {why}", d.message);
+            d
+        })?;
+        let skin = Arc::new(skin);
+        self.lock().skins.insert(r.clone(), skin.clone());
+        Ok(skin)
     }
 
     /// Describes the cooked scene `id`: the expanded scene chunk becomes a

@@ -112,7 +112,18 @@ entities, total_us, max_us, mean_us }]` (tick order, `step` first),
 printed by the text mode as `systems (mean per tick, last count): commands
 0 µs (0), … physics 2017 µs (6081), …`. The checksum covers the bodies' final
 poses, so a physics regression changes it; the fixture project's Crate B
-landing on its Floor and sleeping is a test of the crate. Read-side:
+landing on its Floor and sleeping is a test of the crate. Animation
+(M3-19, [animation.md](animation.md)): the host registers the clips and
+skins the scene's `Animator`s and `Skin`s name (`Assets::register_animation`)
+and counts the `ANIMATION_ENDED` events and the animation diagnostics of
+every tick; when an animator or skin was stepped the report gains
+`animation: { entities, clips, skins, skinned_meshes, joints, ended,
+diagnostics }` and the text mode prints `animation: 2 animators + skins,
+1 clips, 1 skins, 1 skinned meshes (11 joints), 0 ended, 0 diagnostics`;
+the fixture project's fourth scene, Rig (`--scene
+c0000000-0000-4000-8000-000000000034`), poses its skinned column and its
+Prop — a headless test with a stable checksum (the joints' poses are in
+it). Read-side:
 
 ```sh
 cargo run -p fynkel_cli -- state dump --scene assets/scenes/main.scene.json --steps 60 --json
@@ -305,6 +316,20 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   how many prefabs the scene's (or an instantiated prefab's) `Emitter`s
   name and the host registered with the world
   (`Assets::register_prefabs`, M3-10).
+  Animation (M3-19, [animation.md](animation.md)): `GameObject.animation`
+  `play`/`crossfade`/`stop`/`pause`/`resume`/`speed =`/`time =` are
+  `FYNKEL_COMMAND_ANIMATE` (9: `AnimateCommandRecord { entity, op,
+  seconds, speed, looping, clip }`, simulation lane), `animation.state` is
+  `FYNKEL_QUERY_ANIMATOR` (11: one `AnimatorStateRecord { entity, time,
+  duration, speed, fade_remaining, playing, looping, clip }`, none without
+  an `Animator`), a one-shot's end is `FYNKEL_EVENT_ANIMATION_ENDED` (9:
+  `AnimationEndedEvent { entity, clip }`) on the general lane, and the
+  components are ids 21 `Animator` and 22 `Skin` in the header on the
+  M3-07a path; the native layer registers from the cache, before a batch
+  is applied, a clip a `play`/`crossfade` or a set `Animator` names and
+  the skin a set `Skin` names, so a behaviour is not limited to what the
+  scene authored. The load report gains a top-level `animation: { clips,
+  skins }` (`LoadReport.animation`).
   Developer ergonomics (M3-08b): `World.find(name)`/`findAll(name)`,
   `GameObject.findChild('Arm/Hand')`/`findDescendant(name)` read the
   hierarchy as the last tick left it from **one** `FYNKEL_QUERY_ENTITIES`

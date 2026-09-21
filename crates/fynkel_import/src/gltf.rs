@@ -10,13 +10,24 @@
 //! Every id is derived from the asset id (UUID v5), so the output is the
 //! same on every machine.
 //!
+//! Rigged sources (M3-19, `docs/animation.md`): a primitive with
+//! `JOINTS_0`/`WEIGHTS_0` keeps one normalized [`SkinWeight`] per vertex;
+//! every skin becomes a [`SkinData`] (`skin/<s>`: joints by node name with
+//! their inverse bind matrices, parents inside the skin and rest pose) and
+//! every animation an [`AnimationData`] (`anim/<a>`: translation, rotation
+//! and scale channels that target nodes by name). The prefab puts a
+//! `fynkel.Skin` next to the `fynkel.MeshRenderer` of a node that has a
+//! skin, naming the skin sub-asset and the skeleton root node. Names are
+//! the contract because prefab instances get fresh entity ids: joint
+//! names must be unique within a skin (an error), animated node names
+//! should be unique in the file (a warning).
+//!
 //! What it refuses: buffers or images outside the file unless the
 //! sidecar's settings say `"allowExternalFiles": true` (and then only
 //! plain relative paths inside the source's directory), required
 //! extensions it does not implement (Draco, meshopt, ...), and anything
-//! past the [`Limits`]. Non-triangle primitives, skins, morph targets,
-//! animations and cameras are skipped with a warning — this is the static
-//! mesh path of M2.
+//! past the [`Limits`]. Non-triangle primitives, morph targets (and their
+//! weight animations) and cameras are skipped with a warning.
 
 use std::path::Path;
 
@@ -28,11 +39,19 @@ use gltf::mesh::Mode;
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
-use crate::intermediate::{ColorSpace, ImageData, Intermediate, MaterialData, MeshData, Vertex};
+use fynkel_cooked::payload::{
+    AnimationChannel, AnimationPayload, SkinJoint, SkinPayload, SkinWeight,
+    ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP,
+    ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
+};
+
+use crate::intermediate::{
+    AnimationData, ColorSpace, ImageData, Intermediate, MaterialData, MeshData, SkinData, Vertex,
+};
 use crate::{derive_sub_id, read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
-pub const IMPORTER_VERSION: u32 = 3;
+pub const IMPORTER_VERSION: u32 = 4;
 
 /// Extensions the importer understands when a file *requires* them.
 const SUPPORTED_REQUIRED: &[&str] = &["KHR_materials_emissive_strength"];
@@ -407,25 +426,15 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         }
     }
 
+    // Skins and animations.
+    let Ok(skins) = import_skins(&mut ctx, doc, &buffers) else {
+        return fail(ctx);
+    };
+    let Ok(animations) = import_animations(&mut ctx, doc, &buffers) else {
+        return fail(ctx);
+    };
+
     // Skipped features, once each.
-    if doc.skins().len() > 0 {
-        ctx.warn(
-            Code::IMPORT_SKIPPED,
-            format!(
-                "{} skin(s) skipped (skinning is not imported yet)",
-                doc.skins().len()
-            ),
-        );
-    }
-    if doc.animations().len() > 0 {
-        ctx.warn(
-            Code::IMPORT_SKIPPED,
-            format!(
-                "{} animation(s) skipped (animation import is not part of M2)",
-                doc.animations().len()
-            ),
-        );
-    }
     if doc.cameras().len() > 0 {
         ctx.warn(
             Code::IMPORT_SKIPPED,
@@ -438,7 +447,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "model".to_string());
-    let prefab = match prefab_document(&mut ctx, doc, &mesh_subs, &stem, meta) {
+    let prefab = match prefab_document(&mut ctx, doc, &mesh_subs, &meshes, &skins, &stem, meta) {
         Some(p) => p,
         None => return fail(ctx),
     };
@@ -453,6 +462,8 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         .map(|m| m.sub_id.as_str())
         .chain(materials.iter().map(|m| m.sub_id.as_str()))
         .chain(images.iter().map(|i| i.sub_id.as_str()))
+        .chain(skins.iter().map(|s| s.sub_id.as_str()))
+        .chain(animations.iter().map(|a| a.sub_id.as_str()))
         .chain(std::iter::once("prefab"))
     {
         let id = meta
@@ -505,6 +516,8 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             images,
             textures: Vec::new(),
             clips: Vec::new(),
+            skins,
+            animations,
             prefab: Some(prefab),
             sub_assets: sub_assets.clone(),
         }),
@@ -555,6 +568,8 @@ fn primitive_mesh(
     let uv0: Option<Vec<[f32; 2]>> = reader.read_tex_coords(0).map(|t| t.into_f32().collect());
     let uv1: Option<Vec<[f32; 2]>> = reader.read_tex_coords(1).map(|t| t.into_f32().collect());
     let colors: Option<Vec<[f32; 4]>> = reader.read_colors(0).map(|c| c.into_rgba_f32().collect());
+    let joints: Option<Vec<[u16; 4]>> = reader.read_joints(0).map(|j| j.into_u16().collect());
+    let weights: Option<Vec<[f32; 4]>> = reader.read_weights(0).map(|w| w.into_f32().collect());
     let n = positions.len();
     for (attr, len) in [
         ("NORMAL", normals.as_ref().map(Vec::len)),
@@ -562,6 +577,8 @@ fn primitive_mesh(
         ("TEXCOORD_0", uv0.as_ref().map(Vec::len)),
         ("TEXCOORD_1", uv1.as_ref().map(Vec::len)),
         ("COLOR_0", colors.as_ref().map(Vec::len)),
+        ("JOINTS_0", joints.as_ref().map(Vec::len)),
+        ("WEIGHTS_0", weights.as_ref().map(Vec::len)),
     ] {
         if let Some(len) = len {
             if len != n {
@@ -594,6 +611,43 @@ fn primitive_mesh(
         );
         return Err(());
     }
+    // Skinning: both attributes or neither; weights normalized so the
+    // shader can trust them (a vertex bound to nothing follows joint 0).
+    let skin: Option<Vec<SkinWeight>> = match (joints, weights) {
+        (Some(joints), Some(weights)) => Some(
+            joints
+                .iter()
+                .zip(&weights)
+                .map(|(j, w)| {
+                    let sum: f32 = w.iter().sum();
+                    if sum > 0.0 {
+                        SkinWeight {
+                            joints: *j,
+                            weights: w.map(|x| x / sum),
+                        }
+                    } else {
+                        SkinWeight {
+                            joints: [0; 4],
+                            weights: [1.0, 0.0, 0.0, 0.0],
+                        }
+                    }
+                })
+                .collect(),
+        ),
+        (None, None) => None,
+        (joints, _) => {
+            let (has, missing) = if joints.is_some() {
+                ("JOINTS_0", "WEIGHTS_0")
+            } else {
+                ("WEIGHTS_0", "JOINTS_0")
+            };
+            ctx.error(
+                Code::IMPORT_INVALID_DATA,
+                format!("{sub_id} ({name}): {has} without {missing}"),
+            );
+            return Err(());
+        }
+    };
 
     let vertex = |i: usize| Vertex {
         position: positions[i],
@@ -603,12 +657,13 @@ fn primitive_mesh(
         uv1: uv1.as_ref().map(|v| v[i]).unwrap_or([0.0; 2]),
         color: colors.as_ref().map(|v| v[i]).unwrap_or([1.0; 4]),
     };
-    let (vertices, indices) = if normals.is_some() {
-        ((0..n).map(vertex).collect::<Vec<_>>(), indices)
+    let (vertices, indices, skin) = if normals.is_some() {
+        ((0..n).map(vertex).collect::<Vec<_>>(), indices, skin)
     } else {
         // No normals: the spec asks for flat shading, which needs one vertex
         // per corner. Unweld and give each triangle its face normal.
         let mut out = Vec::with_capacity(indices.len());
+        let mut out_skin = skin.as_ref().map(|_| Vec::with_capacity(indices.len()));
         for tri in indices.chunks_exact(3) {
             let (a, b, c) = (
                 glam::Vec3::from(positions[tri[0] as usize]),
@@ -625,10 +680,13 @@ fn primitive_mesh(
                 let mut v = vertex(*i as usize);
                 v.normal = normal;
                 out.push(v);
+                if let (Some(skin), Some(out_skin)) = (&skin, &mut out_skin) {
+                    out_skin.push(skin[*i as usize]);
+                }
             }
         }
         let count = out.len() as u32;
-        (out, (0..count).collect())
+        (out, (0..count).collect(), out_skin)
     };
     if vertices.len() > ctx.limits.max_vertices {
         ctx.error(
@@ -664,7 +722,261 @@ fn primitive_mesh(
         indices,
         bounds_min,
         bounds_max,
+        skin: skin.unwrap_or_default(),
     }))
+}
+
+/// A node's name as the prefab and the skins/animations use it: the glTF
+/// name, or `node<n>` for an unnamed node.
+fn node_name(node: &gltf::Node) -> String {
+    node.name()
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("node{}", node.index()))
+}
+
+/// One [`SkinData`] per glTF skin (`skin/<s>`): the joints in the skin's
+/// order (what `JOINTS_0` indexes), each with its name, its parent's index
+/// when the parent is a joint of the same skin, its inverse bind matrix
+/// (identity when the file has none) and its rest pose from the node.
+/// `Err` when a skin has two joints with the same name (targets resolve
+/// by name at runtime) or more joints than the renderer's palette holds.
+fn import_skins(
+    ctx: &mut Ctx,
+    doc: &gltf::Document,
+    buffers: &[Vec<u8>],
+) -> Result<Vec<SkinData>, ()> {
+    let mut parent_of: Vec<Option<usize>> = vec![None; doc.nodes().len()];
+    for node in doc.nodes() {
+        for child in node.children() {
+            parent_of[child.index()] = Some(node.index());
+        }
+    }
+    let mut skins = Vec::new();
+    for skin in doc.skins() {
+        let sub_id = format!("skin/{}", skin.index());
+        let name = skin
+            .name()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("skin{}", skin.index()));
+        let joint_nodes: Vec<gltf::Node> = skin.joints().collect();
+        if joint_nodes.is_empty() {
+            ctx.error(
+                Code::IMPORT_INVALID_DATA,
+                format!("{sub_id} ({name}): a skin needs at least one joint"),
+            );
+            return Err(());
+        }
+        if joint_nodes.len() > ctx.limits.max_joints {
+            ctx.error(
+                Code::IMPORT_LIMIT,
+                format!(
+                    "{sub_id} ({name}): {} joints; the limit is {}",
+                    joint_nodes.len(),
+                    ctx.limits.max_joints
+                ),
+            );
+            return Err(());
+        }
+        let reader = skin.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
+        let inverse_bind: Vec<[[f32; 4]; 4]> = match reader.read_inverse_bind_matrices() {
+            Some(m) => m.collect(),
+            None => vec![glam::Mat4::IDENTITY.to_cols_array_2d(); joint_nodes.len()],
+        };
+        if inverse_bind.len() != joint_nodes.len() {
+            ctx.error(
+                Code::IMPORT_INVALID_DATA,
+                format!(
+                    "{sub_id} ({name}): {} inverse bind matrices for {} joints",
+                    inverse_bind.len(),
+                    joint_nodes.len()
+                ),
+            );
+            return Err(());
+        }
+        let mut joints = Vec::with_capacity(joint_nodes.len());
+        for (j, node) in joint_nodes.iter().enumerate() {
+            let joint_name = node_name(node);
+            if let Some(dup) = joints.iter().position(|x: &SkinJoint| x.name == joint_name) {
+                ctx.error(
+                    Code::IMPORT_INVALID_DATA,
+                    format!(
+                        "{sub_id} ({name}): joints {dup} and {j} are both named {joint_name:?}; joint names must be unique within a skin (animation targets resolve by name)"
+                    ),
+                );
+                return Err(());
+            }
+            let parent = parent_of[node.index()]
+                .and_then(|p| joint_nodes.iter().position(|n| n.index() == p))
+                .map(|p| p as u32);
+            let (t, r, s) = node.transform().decomposed();
+            let mut ibm = [0.0f32; 16];
+            for (c, column) in inverse_bind[j].iter().enumerate() {
+                ibm[c * 4..c * 4 + 4].copy_from_slice(column);
+            }
+            joints.push(SkinJoint {
+                name: joint_name,
+                parent,
+                inverse_bind: ibm,
+                rest_translation: t,
+                rest_rotation: r,
+                rest_scale: s,
+            });
+        }
+        skins.push(SkinData {
+            sub_id,
+            name,
+            payload: SkinPayload {
+                skeleton: skin.skeleton().map(|n| node_name(&n)).unwrap_or_default(),
+                joints,
+            },
+        });
+    }
+    Ok(skins)
+}
+
+/// One [`AnimationData`] per glTF animation (`anim/<a>`): its translation,
+/// rotation and scale channels keyed as authored (step, linear or cubic
+/// spline with the spline's tangents kept), targeting nodes by name, and
+/// the clip's duration (its last key). Morph-target weight channels are
+/// skipped with a warning. `Err` on malformed samplers.
+fn import_animations(
+    ctx: &mut Ctx,
+    doc: &gltf::Document,
+    buffers: &[Vec<u8>],
+) -> Result<Vec<AnimationData>, ()> {
+    // Animated node names must be unique for the channels to land where
+    // the author meant; say so once per name.
+    let mut animated: Vec<(usize, String)> = Vec::new();
+    let mut warned: Vec<String> = Vec::new();
+    let mut animations = Vec::new();
+    for animation in doc.animations() {
+        let sub_id = format!("anim/{}", animation.index());
+        let name = animation
+            .name()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("anim{}", animation.index()));
+        let mut channels = Vec::new();
+        let mut duration = 0.0f32;
+        for (c, channel) in animation.channels().enumerate() {
+            let target = channel.target();
+            let node = target.node();
+            let property = match target.property() {
+                gltf::animation::Property::Translation => ANIM_PROPERTY_TRANSLATION,
+                gltf::animation::Property::Rotation => ANIM_PROPERTY_ROTATION,
+                gltf::animation::Property::Scale => ANIM_PROPERTY_SCALE,
+                gltf::animation::Property::MorphTargetWeights => {
+                    ctx.warn(
+                        Code::IMPORT_SKIPPED,
+                        format!(
+                            "{sub_id} ({name}): channel {c} animates morph target weights; skipped (morph targets are not imported)"
+                        ),
+                    );
+                    continue;
+                }
+            };
+            let interpolation = match channel.sampler().interpolation() {
+                gltf::animation::Interpolation::Step => ANIM_INTERPOLATION_STEP,
+                gltf::animation::Interpolation::Linear => ANIM_INTERPOLATION_LINEAR,
+                gltf::animation::Interpolation::CubicSpline => ANIM_INTERPOLATION_CUBIC_SPLINE,
+            };
+            let reader = channel.reader(|b| buffers.get(b.index()).map(Vec::as_slice));
+            let (Some(inputs), Some(outputs)) = (reader.read_inputs(), reader.read_outputs())
+            else {
+                ctx.error(
+                    Code::IMPORT_INVALID_DATA,
+                    format!("{sub_id} ({name}): channel {c} has an unreadable sampler"),
+                );
+                return Err(());
+            };
+            let times: Vec<f32> = inputs.collect();
+            let values: Vec<f32> = match outputs {
+                gltf::animation::util::ReadOutputs::Translations(t) => t.flatten().collect(),
+                gltf::animation::util::ReadOutputs::Rotations(r) => {
+                    r.into_f32().flatten().collect()
+                }
+                gltf::animation::util::ReadOutputs::Scales(s) => s.flatten().collect(),
+                gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                    ctx.error(
+                        Code::IMPORT_INVALID_DATA,
+                        format!(
+                            "{sub_id} ({name}): channel {c} targets a transform but samples weights"
+                        ),
+                    );
+                    return Err(());
+                }
+            };
+            let channel = AnimationChannel {
+                target: node_name(&node),
+                property,
+                interpolation,
+                times,
+                values,
+            };
+            if channel.times.is_empty() {
+                ctx.error(
+                    Code::IMPORT_INVALID_DATA,
+                    format!("{sub_id} ({name}): channel {c} has no keys"),
+                );
+                return Err(());
+            }
+            if channel.values.len() != channel.times.len() * channel.key_floats() {
+                ctx.error(
+                    Code::IMPORT_INVALID_DATA,
+                    format!(
+                        "{sub_id} ({name}): channel {c} has {} values for {} keys",
+                        channel.values.len(),
+                        channel.times.len()
+                    ),
+                );
+                return Err(());
+            }
+            if channel
+                .times
+                .windows(2)
+                .any(|w| w[1] <= w[0] || !w[1].is_finite())
+                || !channel.times[0].is_finite()
+                || channel.times[0] < 0.0
+            {
+                ctx.error(
+                    Code::IMPORT_INVALID_DATA,
+                    format!(
+                        "{sub_id} ({name}): channel {c} key times must be finite, non-negative and strictly increasing"
+                    ),
+                );
+                return Err(());
+            }
+            if channel.values.iter().any(|v| !v.is_finite()) {
+                ctx.error(
+                    Code::IMPORT_INVALID_DATA,
+                    format!("{sub_id} ({name}): channel {c} has a non-finite value"),
+                );
+                return Err(());
+            }
+            duration = duration.max(*channel.times.last().unwrap());
+            match animated.iter().find(|(_, n)| *n == channel.target) {
+                Some((other, _)) if *other != node.index() && !warned.contains(&channel.target) => {
+                    warned.push(channel.target.clone());
+                    ctx.warn(
+                        Code::IMPORT_SKIPPED,
+                        format!(
+                            "nodes {other} and {} are both named {:?} and both animated; only one entity named that way will be driven",
+                            node.index(),
+                            channel.target
+                        ),
+                    );
+                }
+                Some(_) => {}
+                None => animated.push((node.index(), channel.target.clone())),
+            }
+            channels.push(channel);
+        }
+        animations.push(AnimationData {
+            sub_id,
+            name,
+            payload: AnimationPayload { duration, channels },
+        });
+    }
+    Ok(animations)
 }
 
 /// A number as the document should show it: the shortest text that
@@ -879,6 +1191,8 @@ fn prefab_document(
     ctx: &mut Ctx,
     doc: &gltf::Document,
     mesh_subs: &[Vec<(String, String)>],
+    meshes: &[MeshData],
+    skins: &[SkinData],
     stem: &str,
     meta: &Meta,
 ) -> Option<Value> {
@@ -952,11 +1266,12 @@ fn prefab_document(
         }
         visited[node.index()] = true;
         let id = entity_id(node.index());
-        let name = node
-            .name()
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("node{}", node.index()));
+        let name = node_name(&node);
         let (translation, rotation, scale) = node.transform().decomposed();
+        let skin = match node_skin(ctx, &node, mesh_subs, meshes, skins) {
+            Ok(skin) => skin,
+            Err(()) => return None,
+        };
 
         let mut components: Vec<(String, Value)> = vec![(
             derive_sub_id(asset, &format!("node/{}/transform", node.index())).to_string(),
@@ -971,13 +1286,19 @@ fn prefab_document(
                     derive_sub_id(asset, &format!("node/{}/renderer", node.index())).to_string(),
                     renderer_component(meta, &subs[0].0, mesh_material(doc, mesh.index(), 0)),
                 ));
+                if let Some(skin) = &skin {
+                    components.push((
+                        derive_sub_id(asset, &format!("node/{}/skin", node.index())).to_string(),
+                        skin_component(meta, skin),
+                    ));
+                }
             } else {
                 for (p, (sub, sub_name)) in subs.iter().enumerate() {
                     let child_id =
                         derive_sub_id(asset, &format!("node/{}/primitive/{p}", node.index()))
                             .to_string();
                     children.push(child_id.clone());
-                    let prim_components: Vec<(String, Value)> = vec![
+                    let mut prim_components: Vec<(String, Value)> = vec![
                         (
                             derive_sub_id(
                                 asset,
@@ -999,6 +1320,18 @@ fn prefab_document(
                             ),
                         ),
                     ];
+                    if let Some(skin) = &skin {
+                        if meshes.iter().any(|m| &m.sub_id == sub && m.is_skinned()) {
+                            prim_components.push((
+                                derive_sub_id(
+                                    asset,
+                                    &format!("node/{}/primitive/{p}/skin", node.index()),
+                                )
+                                .to_string(),
+                                skin_component(meta, skin),
+                            ));
+                        }
+                    }
                     primitive_entities.push((
                         child_id.clone(),
                         entity_value(sub_name, Some(&id), Vec::new(), prim_components),
@@ -1041,6 +1374,73 @@ fn prefab_document(
     Some(Value::Object(prefab))
 }
 
+/// The skin a node's mesh deforms with, checked against the mesh: `None`
+/// (with a warning) for a skin on a node without a skinned mesh or a
+/// skinned mesh on a node without a skin (it draws in its bind pose),
+/// `Err` when a joint index points past the skin.
+fn node_skin<'a>(
+    ctx: &mut Ctx,
+    node: &gltf::Node,
+    mesh_subs: &[Vec<(String, String)>],
+    meshes: &[MeshData],
+    skins: &'a [SkinData],
+) -> Result<Option<&'a SkinData>, ()> {
+    let subs: &[(String, String)] = node
+        .mesh()
+        .map(|m| mesh_subs[m.index()].as_slice())
+        .unwrap_or(&[]);
+    let skinned: Vec<&MeshData> = meshes
+        .iter()
+        .filter(|m| m.is_skinned() && subs.iter().any(|(s, _)| *s == m.sub_id))
+        .collect();
+    let Some(skin) = node.skin() else {
+        if let Some(m) = skinned.first() {
+            ctx.warn(
+                Code::IMPORT_SKIPPED,
+                format!(
+                    "node {} ({}) has the skinned mesh {} but no skin; it will draw in its bind pose",
+                    node.index(),
+                    node_name(node),
+                    m.sub_id
+                ),
+            );
+        }
+        return Ok(None);
+    };
+    let skin = &skins[skin.index()];
+    if skinned.is_empty() {
+        ctx.warn(
+            Code::IMPORT_SKIPPED,
+            format!(
+                "node {} ({}) has {} but no skinned mesh; the skin is not applied",
+                node.index(),
+                node_name(node),
+                skin.sub_id
+            ),
+        );
+        return Ok(None);
+    }
+    let joints = skin.payload.joints.len();
+    for m in skinned {
+        if let Some(bad) = m
+            .skin
+            .iter()
+            .flat_map(|w| w.joints.iter().zip(w.weights))
+            .find(|(j, w)| **j as usize >= joints && *w > 0.0)
+        {
+            ctx.error(
+                Code::IMPORT_INVALID_DATA,
+                format!(
+                    "{} ({}): joint index {} out of range ({} has {joints} joints)",
+                    m.sub_id, m.name, bad.0, skin.sub_id
+                ),
+            );
+            return Err(());
+        }
+    }
+    Ok(Some(skin))
+}
+
 fn mesh_material(doc: &gltf::Document, mesh: usize, primitive: usize) -> Option<String> {
     doc.meshes()
         .nth(mesh)
@@ -1080,6 +1480,20 @@ fn transform_component(t: [f32; 3], r: [f32; 4], s: [f32; 3]) -> Value {
         "type": "fynkel.Transform",
         "version": 1,
         "data": { "position": nums(&t), "rotation": nums(&r), "scale": nums(&s) },
+    })
+}
+
+/// `fynkel.Skin`: the skin sub-asset and the name of the skeleton root
+/// node (empty when the file names none: the runtime then searches the
+/// prefab's whole tree).
+fn skin_component(meta: &Meta, skin: &SkinData) -> Value {
+    json!({
+        "type": "fynkel.Skin",
+        "version": 1,
+        "data": {
+            "skin": { "asset": meta.id().to_string(), "sub": skin.sub_id },
+            "skeleton": skin.payload.skeleton,
+        },
     })
 }
 

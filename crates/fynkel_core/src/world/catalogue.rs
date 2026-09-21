@@ -460,7 +460,7 @@ impl World {
 
     /// Gives every entity with a `C` a default `S` (its runtime state) and
     /// takes it away from those that lost their `C`.
-    fn attach_state<C: hecs::Component, S: hecs::Component + Default>(&mut self) {
+    pub(super) fn attach_state<C: hecs::Component, S: hecs::Component + Default>(&mut self) {
         let mut pending = std::mem::take(&mut self.entity_scratch);
         pending.clear();
         {

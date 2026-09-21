@@ -68,6 +68,22 @@ impl Host {
         out
     }
 
+    /// `events` with the batch's string tail (for records with strings).
+    fn events_with_tail(&self) -> (Vec<(u32, Vec<u8>)>, Vec<u8>) {
+        let b = Self::view(unsafe { fynkel_world_drain_events(self.w) });
+        let (h, records, tail) = buffer::validate(b, BufferKind::Events).unwrap();
+        let mut out = Vec::new();
+        let mut off = 0;
+        for _ in 0..h.record_count {
+            let kind = get_u32(records, off);
+            let size = get_u32(records, off + 4) as usize;
+            off += EventHeader::SIZE;
+            out.push((kind, records[off..off + size].to_vec()));
+            off += size;
+        }
+        (out, tail.to_vec())
+    }
+
     fn spawned(&self) -> Vec<Entity> {
         self.events()
             .iter()
@@ -1214,7 +1230,7 @@ fn catalogue_components_and_the_systems_query() {
     );
 
     let (s, n, body, tail) = h.query(bridge::QUERY_SYSTEMS, Entity::NULL);
-    assert_eq!((s, n), (Status::Ok, 13));
+    assert_eq!((s, n), (Status::Ok, 14));
     let times: Vec<SystemTimeRecord> = (0..n as usize)
         .map(|i| SystemTimeRecord::decode(&body[i * SystemTimeRecord::SIZE..], &tail).unwrap())
         .collect();
@@ -1403,4 +1419,289 @@ fn projection_of_world_anchors() {
     assert_eq!(unsafe { fynkel_world_is_poisoned(h.w) }, 0);
     let (s, _) = h.step();
     assert_eq!(s, Status::Ok);
+}
+
+/// Animation (M3-19): `fynkel.Animator`/`fynkel.Skin` through
+/// SetComponent, `AnimateCommandRecord` (kind 9) for every op, the
+/// `AnimationEnded` event, `QUERY_ANIMATOR` and the rejections.
+#[test]
+fn animation_commands_events_and_query() {
+    use fynkel_contracts::{AssetId, AssetRef};
+    use fynkel_core::animation::{Channel, Clip, Interpolation, Property};
+    use fynkel_core::components::ComponentValue;
+    use fynkel_core::{Animator, Skin};
+    let h = Host::new();
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (1, spawn(1, 0.0, None, "Rig")),
+            (1, spawn(2, 0.0, None, "Bare"))
+        ],
+    );
+    h.step();
+    let ids = h.spawned();
+    let (rig, bare) = (ids[0], ids[1]);
+    h.submit(
+        Lane::Simulation,
+        &batch![(1, spawn(3, 0.0, Some(rig), "arm"))],
+    );
+    h.step();
+    let arm = h.spawned()[0];
+
+    // The clip a loaded project would have registered from its cache.
+    let clip = AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/0");
+    unsafe {
+        (*h.w).core_mut().register_clip(
+            clip.clone(),
+            Clip {
+                name: "rise".into(),
+                duration: 0.5,
+                channels: vec![Channel {
+                    target: "arm".into(),
+                    property: Property::Translation,
+                    interpolation: Interpolation::Linear,
+                    times: vec![0.0, 0.5],
+                    values: vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                }],
+            },
+        );
+    }
+
+    // The animator as a component (kind 6), one-shot; it queries back.
+    let animator = Animator {
+        clip: clip.clone(),
+        speed: 1.0,
+        looping: false,
+        playing: true,
+    };
+    h.submit(
+        Lane::Simulation,
+        &set_component(rig, &ComponentValue::Animator(animator.clone())),
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let (s, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, rig);
+    assert_eq!((s, n), (Status::Ok, 3), "Transform, Name, Animator");
+    let mut at = 0;
+    for _ in 0..n - 1 {
+        let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+        at += ComponentHeader::SIZE + hd.size as usize;
+    }
+    let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+    assert_eq!((hd.component, hd.size), (21, Animator::SIZE as u32));
+    at += ComponentHeader::SIZE;
+    assert_eq!(
+        fynkel_wire::decode_component_value(21, &body[at..], &tail)
+            .unwrap()
+            .unwrap(),
+        ComponentValue::Animator(animator)
+    );
+
+    // Runs to its end: the arm at y = 1, one ANIMATION_ENDED, the state
+    // query says so; nothing for an entity without an animator.
+    let mut ended = Vec::new();
+    for _ in 0..40 {
+        h.step();
+        let (events, tail) = h.events_with_tail();
+        ended.extend(
+            events
+                .into_iter()
+                .filter(|(k, _)| *k == EventKind::ANIMATION_ENDED.0)
+                .map(|(_, b)| AnimationEndedEvent::decode(&b, &tail).unwrap()),
+        );
+    }
+    let ended_tail: Vec<_> = h
+        .events()
+        .into_iter()
+        .filter(|(k, _)| *k == EventKind::ANIMATION_ENDED.0)
+        .collect();
+    assert!(ended_tail.is_empty());
+    assert_eq!(ended.len(), 1, "{ended:?}");
+    assert_eq!(
+        (ended[0].entity, &ended[0].clip.sub),
+        (rig, &"anim/0".to_string())
+    );
+    let (_, _, body, _) = h.query(bridge::QUERY_TRANSFORM, arm);
+    let arm_pose = SnapshotTransformRecord::decode(&body, &[]).unwrap();
+    assert!(
+        (arm_pose.local.position.y - 1.0).abs() < 1e-5,
+        "{arm_pose:?}"
+    );
+    let (s, n, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    assert_eq!((s, n), (Status::Ok, 1));
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert_eq!(state.entity, rig);
+    assert!(!state.playing && !state.looping, "{state:?}");
+    assert!((state.time - 0.5).abs() < 1e-5 && (state.duration - 0.5).abs() < 1e-5);
+    assert_eq!(state.clip, clip);
+    let (s, n, _, _) = h.query(bridge::QUERY_ANIMATOR, bare);
+    assert_eq!((s, n), (Status::Ok, 0));
+
+    // Every op through the wire (kind 9): play looping at half speed,
+    // set_time, pause, set_speed, resume, crossfade to the same clip
+    // (no fade), stop.
+    let cmd = |op: AnimateOp, seconds: f32, speed: f32, looping: bool| AnimateCommandRecord {
+        entity: rig,
+        op,
+        seconds,
+        speed,
+        looping,
+        clip: clip.clone(),
+    };
+    let (s, r) = h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::Play, 0.0, 0.5, true))],
+    );
+    assert_eq!((s, r.rejected), (Status::Ok, 0));
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert!(state.playing && state.looping && state.time == 0.0 && state.speed == 0.5);
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::SetTime, 0.25, 0.0, false))],
+    );
+    h.step();
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert!((state.time - 0.25).abs() < 1e-5, "{state:?}");
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::Pause, 0.0, 0.0, false))],
+    );
+    h.step();
+    h.step();
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert!(
+        !state.playing && (state.time - 0.25).abs() < 1e-5,
+        "{state:?}"
+    );
+    h.submit(
+        Lane::Simulation,
+        &batch![
+            (9, cmd(AnimateOp::SetSpeed, 0.0, 2.0, false)),
+            (9, cmd(AnimateOp::Resume, 0.0, 0.0, false)),
+        ],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 0);
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert!(state.playing && state.speed == 2.0, "{state:?}");
+    assert!((state.time - (0.25 + 2.0 / 60.0)).abs() < 1e-4, "{state:?}");
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::Crossfade, 0.2, 1.0, true))],
+    );
+    h.step();
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert_eq!(state.fade_remaining, 0.0, "same clip: nothing to fade");
+    assert!(state.time == 0.0 && state.speed == 1.0);
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::Stop, 0.0, 0.0, false))],
+    );
+    h.step();
+    let (_, _, body, tail) = h.query(bridge::QUERY_ANIMATOR, rig);
+    let state = AnimatorStateRecord::decode(&body, &tail).unwrap();
+    assert!(!state.playing && state.time == 0.0);
+
+    // Rejections: no animator (at the tick), a NaN speed, the wrong lane.
+    h.submit(
+        Lane::Simulation,
+        &batch![(
+            9,
+            AnimateCommandRecord {
+                entity: bare,
+                op: AnimateOp::Pause,
+                seconds: 0.0,
+                speed: 0.0,
+                looping: false,
+                clip: AssetRef::default(),
+            }
+        )],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 1);
+    let d = h.diagnostics();
+    assert_eq!(
+        (d[0].code, d[0].component),
+        (DiagnosticCode::MISSING_COMPONENT.0, 21)
+    );
+    h.submit(
+        Lane::Simulation,
+        &batch![(9, cmd(AnimateOp::SetSpeed, 0.0, f32::NAN, false))],
+    );
+    let (_, r) = h.step();
+    assert_eq!(r.commands_rejected, 1);
+    assert_eq!(h.diagnostics()[0].code, DiagnosticCode::INVALID_PAYLOAD.0);
+    let (s, r) = h.submit(
+        Lane::Presentation,
+        &batch![(9, cmd(AnimateOp::Resume, 0.0, 0.0, false))],
+    );
+    assert_eq!((s, r.rejected), (Status::CommandsRejected, 1));
+    assert_eq!(
+        h.diagnostics().last().unwrap().code,
+        DiagnosticCode::WRONG_LANE.0
+    );
+
+    // A clip nothing registered: CLIP_UNAVAILABLE once, at the tick.
+    h.submit(
+        Lane::Simulation,
+        &batch![(
+            9,
+            AnimateCommandRecord {
+                entity: rig,
+                op: AnimateOp::Play,
+                seconds: 0.0,
+                speed: 1.0,
+                looping: true,
+                clip: AssetRef::with_sub(AssetId::from_bytes([9; 16]), "anim/7"),
+            }
+        )],
+    );
+    h.step();
+    let d = h.diagnostics();
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(
+        (d[0].code, d[0].component),
+        (DiagnosticCode::CLIP_UNAVAILABLE.0, 21)
+    );
+    h.step();
+    assert!(h.diagnostics().is_empty());
+
+    // A Skin component round-trips and an unknown skin is reported once.
+    let skin = Skin {
+        skin: AssetRef::with_sub(AssetId::from_bytes([9; 16]), "skin/0"),
+        skeleton: "hips".into(),
+    };
+    h.submit(
+        Lane::Simulation,
+        &set_component(arm, &ComponentValue::Skin(skin.clone())),
+    );
+    h.step();
+    let d = h.diagnostics();
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(
+        (d[0].code, d[0].component),
+        (DiagnosticCode::SKIN_UNAVAILABLE.0, 22)
+    );
+    let (_, n, body, tail) = h.query(bridge::QUERY_COMPONENTS, arm);
+    let mut at = 0;
+    for _ in 0..n - 1 {
+        let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+        at += ComponentHeader::SIZE + hd.size as usize;
+    }
+    let hd = ComponentHeader::decode(&body[at..], &tail).unwrap();
+    assert_eq!((hd.component, hd.size), (22, Skin::SIZE as u32));
+    at += ComponentHeader::SIZE;
+    assert_eq!(
+        fynkel_wire::decode_component_value(22, &body[at..], &tail)
+            .unwrap()
+            .unwrap(),
+        ComponentValue::Skin(skin)
+    );
 }

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
+import 'asset_ref.dart';
 import 'wire/buffers.dart';
 
 sealed class EngineEvent {
@@ -73,6 +74,18 @@ class ZoneExited extends ZoneEvent {
   String toString() => 'ZoneExited($event zone=${zone.toRadixString(16)} other=${other.toRadixString(16)})';
 }
 
+/// A `fynkel.Animator`'s non-looping clip reached its end (M3-19):
+/// [entity] is the animator's, [clip] the clip. General lane, once per
+/// play; behaviours see it in `onAnimationEnded`.
+class AnimationEnded extends EngineEvent {
+  const AnimationEnded(super.tickLo, this.entity, this.clip);
+  final int entity;
+  final AssetRef clip;
+
+  @override
+  String toString() => 'AnimationEnded(${entity.toRadixString(16)} $clip)';
+}
+
 enum ContactKind { collisionEnter, collisionStay, collisionExit, triggerEnter, triggerExit }
 
 /// A collision or trigger event between two colliders (M3-08). For
@@ -137,6 +150,7 @@ Iterable<EngineEvent> decodeEvents(WireBuffer b) sync* {
       gen.SceneUnloadedEvent.eventKind => _unloaded(d, body, tail, h.tickLo),
       gen.ZoneEvent.eventKind => _zone(d, body, tail, h.tickLo, entered: true),
       _zoneExitedKind => _zone(d, body, tail, h.tickLo, entered: false),
+      gen.AnimationEndedEvent.eventKind => _animationEnded(d, body, tail, h.tickLo),
       >= _physicsFirst && < _physicsFirst + 5 => _contact(d, body, tail, h),
       _ => UnknownEvent(h.tickLo, h.kind),
     };
@@ -156,6 +170,11 @@ SceneUnloaded _unloaded(ByteData d, int o, Uint8List tail, int tickLo) {
 ZoneEvent _zone(ByteData d, int o, Uint8List tail, int tickLo, {required bool entered}) {
   final e = gen.ZoneEvent.decode(d, o, tail);
   return entered ? ZoneEntered(tickLo, e.zone, e.other, e.event) : ZoneExited(tickLo, e.zone, e.other, e.event);
+}
+
+AnimationEnded _animationEnded(ByteData d, int o, Uint8List tail, int tickLo) {
+  final e = gen.AnimationEndedEvent.decode(d, o, tail);
+  return AnimationEnded(tickLo, e.entity, e.clip);
 }
 
 ParentChanged _parent(ByteData d, int o, Uint8List tail, int tickLo) {

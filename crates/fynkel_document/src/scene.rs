@@ -492,7 +492,7 @@ pub(crate) fn validate_entities<'a>(
 }
 
 /// The physics value rules (`FYN-H0001`/`H0002`, M3-08; `H0005`/`H0007`,
-/// M3-09; the catalogue's `H0008`, M3-10): what the runtime rejects with
+/// M3-09; the catalogue's `H0008`, M3-10, the animator's too, M3-19): what the runtime rejects with
 /// `INVALID_PAYLOAD`, reported at authoring time through the same
 /// `validate()`.
 fn physics_value_rules(
@@ -511,7 +511,8 @@ fn physics_value_rules(
         | "fynkel.Follow"
         | "fynkel.LifetimeDespawn"
         | "fynkel.Emitter"
-        | "fynkel.TriggerZone" => Code::CATALOGUE_VALUE,
+        | "fynkel.TriggerZone"
+        | "fynkel.Animator" => Code::CATALOGUE_VALUE,
         _ => return,
     };
     let Some(Ok(value)) = crate::generated::decode_component(&c.type_id, &c.data) else {
@@ -528,6 +529,7 @@ fn physics_value_rules(
         ComponentValue::LifetimeDespawn(k) => k.validate(),
         ComponentValue::Emitter(k) => k.validate(),
         ComponentValue::TriggerZone(k) => k.validate(),
+        ComponentValue::Animator(k) => k.validate(),
         _ => Ok(()),
     };
     if let Err(msg) = result {

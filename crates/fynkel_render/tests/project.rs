@@ -237,3 +237,108 @@ fn placeholders_off_hides_entities_without_meshes() {
         (2, 0, 0, 2)
     );
 }
+
+/// The rig scene (M3-19): the skinned column is drawn through the joint
+/// palette — at the bind pose it is the cooked column, half a second into
+/// "wave" the spine bends it 45° so it covers pixels the straight column
+/// does not, and the same extract without palettes draws the bind pose.
+#[test]
+fn skinned_meshes_follow_their_joint_palette() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let project = TempProject::new("rig");
+    let assets = Assets::open(&project.cook()).unwrap_or_else(|d| panic!("{d}"));
+    let id: fynkel_contracts::AssetId = "c0000000-0000-4000-8000-000000000034".parse().unwrap();
+    let cooked = assets.scene(id).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(cooked.name, "Rig");
+    let mut world = World::new(WorldConfig::default());
+    world.load_scene(&cooked.description).unwrap();
+    let (clips, skins, diags) = assets.register_animation(&cooked.description, &mut world);
+    assert_eq!((clips, skins, diags.len()), (2, 1, 0));
+    let _residency = assets.retain(&cooked.closure);
+
+    let (w, h) = (320, 240);
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, w, h);
+    renderer.placeholders = false;
+    renderer.set_assets(Some(assets.clone()));
+    let coverage =
+        |px: &[[u8; 4]]| -> Vec<bool> { px.iter().map(|p| !is_background(*p)).collect() };
+
+    // Tick 1: the clip is at its start, the pose is the bind pose.
+    world.begin_frame(1.0 / 60.0);
+    world.step();
+    let bind = world.extract();
+    assert_eq!(bind.joints.len(), 3, "hips, spine, head");
+    let px_bind = render_offscreen(&device, &queue, &mut renderer, &bind);
+    assert_eq!(renderer.asset_errors(), &[] as &[String]);
+    let s = renderer.stats();
+    assert_eq!((s.instances, s.skinned, s.joints, s.draws), (2, 1, 3, 2));
+    let straight = coverage(&px_bind);
+
+    // The palette is identity at bind: the cooked column and the skinned
+    // one are the same picture.
+    let mut cooked_only = bind.clone();
+    for m in &mut cooked_only.meshes {
+        m.skin = None;
+    }
+    let px_cooked = render_offscreen(&device, &queue, &mut renderer, &cooked_only);
+    assert_eq!(renderer.stats().skinned, 0);
+    assert_eq!(px_cooked, px_bind);
+
+    // Half a second in: the spine is 45° over, the hips lifted.
+    for _ in 0..29 {
+        world.begin_frame(1.0 / 60.0);
+        world.step();
+    }
+    let posed = world.extract();
+    let px_posed = render_offscreen(&device, &queue, &mut renderer, &posed);
+    assert_eq!(renderer.stats().skinned, 1);
+    let bent = coverage(&px_posed);
+    let only_bent = bent
+        .iter()
+        .zip(&straight)
+        .filter(|(b, s)| **b && !**s)
+        .count();
+    let only_straight = straight
+        .iter()
+        .zip(&bent)
+        .filter(|(s, b)| **s && !**b)
+        .count();
+    assert!(
+        only_bent > 200 && only_straight > 200,
+        "the bent column covers {only_bent} new pixels and frees {only_straight}"
+    );
+    // The bend goes toward -X (45° about +Z): the column's upper half
+    // leans left on screen, so the new pixels lie left of the centre.
+    let left_new = bent
+        .iter()
+        .zip(&straight)
+        .enumerate()
+        .filter(|(i, (b, s))| **b && !**s && (*i as u32 % w) < w / 2)
+        .count();
+    assert!(
+        left_new * 10 > only_bent * 8,
+        "{left_new} of {only_bent} on the left"
+    );
+
+    // Without palettes the posed extract draws the bind pose again.
+    let mut unposed = posed.clone();
+    for m in &mut unposed.meshes {
+        m.skin = None;
+    }
+    let px_unposed = render_offscreen(&device, &queue, &mut renderer, &unposed);
+    let unposed_cov = coverage(&px_unposed);
+    let body_diff = unposed_cov
+        .iter()
+        .zip(&straight)
+        .filter(|(a, b)| a != b)
+        .count();
+    // Only the Prop moved (its "bob" clip animates the transform, not a
+    // skin): a small box, a couple of hundred pixels at most.
+    assert!(
+        body_diff < 400,
+        "{body_diff} pixels differ from the bind pose"
+    );
+}

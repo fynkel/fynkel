@@ -35,8 +35,8 @@ pub use cook::{
     Status,
 };
 pub use intermediate::{
-    AudioData, ColorSpace, ImageData, Intermediate, MaterialData, MeshData, TextureData, Vertex,
-    INTERMEDIATE_VERSION,
+    AnimationData, AnimationPayload, AudioData, ColorSpace, ImageData, Intermediate, MaterialData,
+    MeshData, SkinData, SkinPayload, SkinWeight, TextureData, Vertex, INTERMEDIATE_VERSION,
 };
 
 use std::path::Path;
@@ -80,6 +80,8 @@ pub struct Limits {
     pub max_node_depth: usize,
     /// Per primitive, after unwelding.
     pub max_vertices: usize,
+    /// Joints of one skin (the renderer's palette; `docs/animation.md`).
+    pub max_joints: usize,
     pub max_images: usize,
     /// Bytes of one embedded image.
     pub max_image_bytes: u64,
@@ -97,6 +99,7 @@ impl Default for Limits {
             max_nodes: 100_000,
             max_node_depth: 64,
             max_vertices: 1 << 24,
+            max_joints: 256,
             max_images: 256,
             max_image_bytes: 64 << 20,
             max_texture_dimension: 16_384,

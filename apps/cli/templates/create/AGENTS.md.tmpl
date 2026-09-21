@@ -106,6 +106,7 @@ Component types:
 - `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `layer`/`mask`.
 - `fynkel.ThirdPersonCamera` — on the camera entity: `target` (the followed entity's name), `pivot` (offset from the target's origin), `distance`, `min_distance`, `yaw`/`pitch` (radians, written back each tick), `min_pitch`/`max_pitch`, `look_action` (axis2d turning it at `sensitivity` rad/s per unit), `collision_radius` (a sphere cast from the pivot pulls the camera in before walls; 0 disables), `mask`. Placed after the tick's transforms; its own `Transform` is overwritten.
 - `fynkel.Rotator` / `fynkel.Oscillate` / `fynkel.Follow` / `fynkel.LookAtCamera` / `fynkel.LifetimeDespawn` / `fynkel.Emitter` — the native catalogue (below): motion, following, billboards, timed despawn and spawning at a rate with no Dart code.
+- `fynkel.Animator` — `clip: { asset, sub: "anim/<n>" }`, `speed`, `looping`, `playing`: plays the clip over the named entities under this one (see "Animation"). `fynkel.Skin` — next to a skinned `MeshRenderer`: `skin: { asset, sub: "skin/<s>" }`, `skeleton` (the name of the joint root entity, found under the tree's root; empty: the root itself).
 - `game.*` — this project's behaviours (Dart classes in `lib/game/`); `data` holds the `@Expose` fields, validated by `schemas/behaviours/<id>.schema.json`.
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for
@@ -237,6 +238,38 @@ move((right * stick.x + forward * stick.y) * speed);            // metres per se
 
 The pattern with sprint and a double jump is
 `packages/fynkel/example/player_controller.dart`.
+
+## Animation (clips over named entities; a skinned character)
+
+`fynkel import` keeps a glTF's animations (`anim/<n>`), skins (`skin/<s>`)
+and skinned meshes (`JOINTS_0`/`WEIGHTS_0`); its `prefab` sub-asset is
+the rigged hierarchy with a `fynkel.Skin` on the skinned node, so
+`world.instantiate(character.prefab)` or a scene instance of it is a
+character ready to animate. A clip keys *named nodes* under the entity
+that carries the `fynkel.Animator` — a bone, a door and a lamp are the
+same thing to it; the joints are ordinary entities (`findChild('head')`
+reads or overrides one). Clips carry no root motion: whatever moves the
+entity (a `CharacterController`, your behaviour) moves it, the animator
+only poses what is under it. From a behaviour:
+
+```dart
+animation.crossfade(walk, 0.15);                   // a timed blend; play(clip, looping: false) for a one-shot
+animation.play(jump, looping: false);
+animation.speed = 1.5; animation.pause(); animation.resume(); animation.stop();   // stop rewinds and holds
+final s = animation.state;                         // clip, time, duration, playing, isFading; null without an Animator
+
+@override
+void onAnimationEnded(AnimationEnded e) { … }      // a one-shot passed its end (held on its last frame)
+```
+
+Clip references are `AssetRef(asset, sub: 'anim/<n>')` (the asset id from
+the model's `.meta.json`, or `get<Animator>()!.clip.asset`). A clip the
+scene did not name is loaded from the cache when first played; one the
+cache lacks is `clip_unavailable` once and the animator waits. `fynkel
+test --headless` prints the run's animators, clips, skins and skinned
+meshes; `fynkel render --steps <n>` draws the pose after `n` ticks. The
+reference game (`examples/reference_game`, `docs/animation.md`) is the
+worked example: a generated rigged character posed from the controller.
 
 ## The native catalogue (movement without a behaviour)
 

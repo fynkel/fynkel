@@ -6,8 +6,8 @@ derived (UUID v5) so a rerun rewrites the same documents byte for byte.
 
 The documents it writes are ordinary Fynkel documents: `fynkel validate`
 checks them, `fynkel scene apply` edits them, and the editor (M4) will
-open them. Run from the project directory after tools/kit.py and
-`fynkel import assets/models/kit.glb`:
+open them. Run from the project directory after tools/kit.py,
+tools/character.py and `fynkel import assets/models/*.glb`:
 
     python3 tools/playground.py && fynkel document format assets/**/*.json && fynkel validate
 
@@ -26,13 +26,23 @@ camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
     chute; C9 on a block only a jump reaches; C10 behind the Gate, which
     the Switch in front of it opens on `interact`;
   - 22 dynamic bodies out of the route's way: a crate pyramid, a pen of
-    balls and a row of barrels — pushable, for the physics to be seen.
+    balls and a row of barrels — pushable, for the physics to be seen;
+  - the player: a `fynkel.CharacterController` wearing the rigged
+    character of tools/character.py — the skinned Body, the joint tree
+    from that file's SKELETON authored as entities under the Player (so
+    a behaviour can reach a joint by name, the Visor hangs off `head`),
+    and a `fynkel.Animator` on idle that `game.Player` crossfades to
+    walk/run/jump (M3-19).
 """
 
 import json
 import math
+import sys
 import uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from character import SKELETON  # noqa: E402  the player's joints, one table
 
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
@@ -78,10 +88,11 @@ def transform(position, rotation=IDENTITY, scale=(1, 1, 1)):
 
 
 def mesh_renderer(mesh, material, cast=True, receive=True, visible=True):
+    mesh_ref = {"asset": CHARACTER, "sub": "mesh/0"} if mesh == "character" else {"asset": KIT, "sub": f"mesh/{MESHES[mesh]}"}
     return (
         "fynkel.MeshRenderer",
         {
-            "mesh": {"asset": KIT, "sub": f"mesh/{MESHES[mesh]}"},
+            "mesh": mesh_ref,
             "material": {"asset": MATERIALS[material]},
             "cast_shadows": cast,
             "receive_shadows": receive,
@@ -183,6 +194,12 @@ KIT = meta["id"]
 MESHES = {"cube": 0, "capsule": 1, "sphere": 2, "coin": 3, "ramp": 4, "cylinder": 5, "cone": 6}
 for m in MESHES.values():
     assert f"mesh/{m}" in meta["subAssets"], "run `fynkel import assets/models/kit.glb` first"
+
+character_meta = json.loads((ASSETS / "models" / "character.glb.meta.json").read_text())
+CHARACTER = character_meta["id"]
+CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{i}"} for i, name in enumerate(("idle", "walk", "run", "jump"))}
+for sub in ["mesh/0", "skin/0"] + [c["sub"] for c in CLIPS.values()]:
+    assert sub in character_meta["subAssets"], "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
 
 MATERIAL_DOCS = {
     "floor": dict(base_color=[0.55, 0.56, 0.52, 1.0], metallic=0.0, roughness=0.9),
@@ -333,10 +350,24 @@ def playground():
                 },
             ),
             behaviour("game.Player", walkSpeed=4.0, sprintFactor=1.75, jumpSpeed=5.5, cameraName="Camera", fallY=-6.0),
+            # Idle from the first tick; game.Player crossfades between the
+            # four clips (all authored in place: the controller moves).
+            ("fynkel.Animator", {"clip": CLIPS["idle"], "speed": 1.0, "looping": True, "playing": True}),
         ],
     )
-    s.add("Body", [transform((0, 0.9, 0)), mesh_renderer("capsule", "player")], parent=player)
-    s.add("Visor", [transform((0, 1.45, -0.32), scale=(0.36, 0.12, 0.16)), mesh_renderer("cube", "gate", cast=False)], parent=player)
+    # The skinned body, posed by the joint entities below (the skin's
+    # skeleton root is found by name under the Player), and the joints in
+    # their bind pose — local translations from the same table that built
+    # the model, so the entity tree and the skin's joint order agree.
+    s.add(
+        "Body",
+        [transform((0, 0, 0)), mesh_renderer("character", "player"), ("fynkel.Skin", {"skin": {"asset": CHARACTER, "sub": "skin/0"}, "skeleton": "hips"})],
+        parent=player,
+    )
+    joints = {}
+    for name, parent, local, _, _ in SKELETON:
+        joints[name] = s.add(name, [transform(local)], parent=joints[parent] if parent else player)
+    s.add("Visor", [transform((0, 0.13, -0.13), scale=(0.2, 0.07, 0.06)), mesh_renderer("cube", "gate", cast=False)], parent=joints["head"])
 
     # The rig's own pose at yaw 0, pitch 0.35, distance 6 from the pivot
     # (0, 1.5, 0): what `fynkel render` shows before a tick runs.

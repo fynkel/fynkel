@@ -16,8 +16,8 @@ use fynkel_scene::{self as scene, Transform};
 
 use crate::command::Command;
 use crate::components::{
-    ComponentValue, Emitter, Follow, LifetimeDespawn, LookAtCamera, Oscillate, Rotator,
-    ThirdPersonCamera, TriggerZone,
+    Animator, ComponentValue, Emitter, Follow, LifetimeDespawn, LookAtCamera, Oscillate, Rotator,
+    Skin, ThirdPersonCamera, TriggerZone,
 };
 use crate::event::EventPayload;
 use crate::world::{Name, World};
@@ -542,6 +542,12 @@ impl ComponentValue {
         }
         if let Ok(v) = ecs.get::<TriggerZone>(entity) {
             out.push(ComponentValue::TriggerZone(v.clone()));
+        }
+        if let Ok(v) = ecs.get::<Animator>(entity) {
+            out.push(ComponentValue::Animator(v.clone()));
+        }
+        if let Ok(v) = ecs.get::<Skin>(entity) {
+            out.push(ComponentValue::Skin(v.clone()));
         }
         out
     }

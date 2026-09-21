@@ -12,6 +12,7 @@ fynkel_cooked.workspace = true
 fynkel_core.workspace = true
 fynkel_wire.workspace = true
 fynkel_document.workspace = true
+glam.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]

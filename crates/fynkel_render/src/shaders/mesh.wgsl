@@ -51,9 +51,41 @@ struct VsOut {
     @location(7) flags: vec4<f32>,
 };
 
+// The frame's joint palettes (M3-19): every skinned instance's matrices
+// back to back, mesh space → posed joint → mesh space; an instance's
+// first joint is `emissive.w`.
+@group(2) @binding(0) var<storage, read> joints: array<mat4x4<f32>>;
+
+// A skinned mesh's third vertex buffer: the cooked SkinWeight (four
+// joint indices into the instance's palette, four weights summing to 1).
+struct VsSkin {
+    @location(14) joints: vec4<u32>,
+    @location(15) weights: vec4<f32>,
+};
+
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     let model = mat4x4<f32>(in.m0, in.m1, in.m2, in.m3);
+    return vertex(in, model);
+}
+
+// The skinned stage: the vertex is posed in mesh space by its weighted
+// joint matrices, then placed like any other. An index past the palette
+// (a mesh cooked against another skin) reads the last matrix instead of
+// out of bounds.
+@vertex
+fn vs_skinned(in: VsIn, skin: VsSkin) -> VsOut {
+    let base = u32(in.emissive.w);
+    let last = arrayLength(&joints) - 1u;
+    let pose = skin.weights.x * joints[min(base + skin.joints.x, last)]
+        + skin.weights.y * joints[min(base + skin.joints.y, last)]
+        + skin.weights.z * joints[min(base + skin.joints.z, last)]
+        + skin.weights.w * joints[min(base + skin.joints.w, last)];
+    let model = mat4x4<f32>(in.m0, in.m1, in.m2, in.m3) * pose;
+    return vertex(in, model);
+}
+
+fn vertex(in: VsIn, model: mat4x4<f32>) -> VsOut {
     var out: VsOut;
     let world = model * vec4<f32>(in.position, 1.0);
     out.clip = frame.view_proj * world;

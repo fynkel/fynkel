@@ -395,7 +395,7 @@ fn a_lifetime_despawns_the_subtree_with_events() {
         })
         .collect();
     assert_eq!(destroyed, vec![root, child]);
-    assert_eq!(w.system_times().len(), 13);
+    assert_eq!(w.system_times().len(), 14);
 }
 
 fn prefab(id: Uuid, dynamic: bool) -> SceneDescription {
@@ -560,6 +560,7 @@ fn system_times_cover_every_slot_in_order() {
             SystemKind::Step,
             SystemKind::Commands,
             SystemKind::Characters,
+            SystemKind::Animation,
             SystemKind::Rotator,
             SystemKind::Oscillate,
             SystemKind::LifetimeDespawn,

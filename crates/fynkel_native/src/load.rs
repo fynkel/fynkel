@@ -141,7 +141,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
     let cache = cache_json(&assets);
     // Physics (M3-08): the project's gravity, and every mesh collider's
     // mesh registered before the first step builds the colliders.
-    let physics = {
+    let (physics, animation) = {
         let core = w.core_mut();
         if let Some(p) = assets.project() {
             core.physics_mut()
@@ -152,14 +152,20 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
         // The catalogue (M3-10): every prefab an emitter names.
         let (prefabs, prefab_diags) = assets.register_prefabs(&scene.description, core);
         diags.extend(prefab_diags);
+        // Animation (M3-19): every clip an animator plays and every skin.
+        let (clips, skins, anim_diags) = assets.register_animation(&scene.description, core);
+        diags.extend(anim_diags);
         let gravity = core.physics().gravity();
-        json!({
-            "gravity": [gravity.x, gravity.y, gravity.z],
-            "layers": assets.project().map(|p| p.physics.layers.clone()).unwrap_or_default(),
-            "meshColliders": meshes,
-            "prefabs": prefabs,
-            "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
-        })
+        (
+            json!({
+                "gravity": [gravity.x, gravity.y, gravity.z],
+                "layers": assets.project().map(|p| p.physics.layers.clone()).unwrap_or_default(),
+                "meshColliders": meshes,
+                "prefabs": prefabs,
+                "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
+            }),
+            json!({ "clips": clips, "skins": skins }),
+        )
     };
     match w.core_mut().load_scene_with(&scene.description, mode) {
         Ok(loaded) => {
@@ -188,6 +194,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
                     "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
                     "input": input,
                     "physics": physics,
+                    "animation": animation,
                 }),
             }
         }
@@ -342,6 +349,8 @@ fn instantiate_prefab(
         assets.register_mesh_colliders(&prefab.description, w.core_mut().physics_mut());
     let (prefabs, prefab_diags) = assets.register_prefabs(&prefab.description, w.core_mut());
     mesh_diags.extend(prefab_diags);
+    let (_, _, anim_diags) = assets.register_animation(&prefab.description, w.core_mut());
+    mesh_diags.extend(anim_diags);
     let name = name.unwrap_or(&prefab.name);
     match w
         .core_mut()

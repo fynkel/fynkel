@@ -1,6 +1,6 @@
 //! Pull-only events in two lanes (ADR-0008).
 
-use fynkel_contracts::{Entity, EventKind, Tick, Uuid};
+use fynkel_contracts::{AssetRef, Entity, EventKind, Tick, Uuid};
 pub use fynkel_physics::Contact;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,6 +47,12 @@ pub enum EventPayload {
         other: Entity,
         event: String,
     },
+    /// M3-19: an `Animator`'s non-looping clip reached its end this tick
+    /// (`playing` is cleared with it).
+    AnimationEnded {
+        entity: Entity,
+        clip: AssetRef,
+    },
     // Physics lane (M3-08): produced by the physics step, drained by
     // `after_physics`.
     CollisionEnter(Contact),
@@ -67,6 +73,7 @@ impl EventPayload {
             EventPayload::SceneUnloaded { .. } => EventKind::SCENE_UNLOADED,
             EventPayload::ZoneEntered { .. } => EventKind::ZONE_ENTERED,
             EventPayload::ZoneExited { .. } => EventKind::ZONE_EXITED,
+            EventPayload::AnimationEnded { .. } => EventKind::ANIMATION_ENDED,
             EventPayload::CollisionEnter(_) => EventKind::COLLISION_ENTER,
             EventPayload::CollisionStay(_) => EventKind::COLLISION_STAY,
             EventPayload::CollisionExit(_) => EventKind::COLLISION_EXIT,

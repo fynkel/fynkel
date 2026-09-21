@@ -2,6 +2,7 @@
 // diagnostic records. Debug builds throw FynkelError; release builds log.
 
 import '../generated/schema.g.dart' as gen;
+import 'animation.dart';
 import 'physics.dart';
 
 /// True in debug mode (asserts enabled), false in profile/release.
@@ -28,7 +29,9 @@ enum DiagnosticCode {
   wrongLane(12),
   meshUnavailable(13),
   prefabUnavailable(14),
-  tooManyAnchors(15);
+  tooManyAnchors(15),
+  clipUnavailable(16),
+  skinUnavailable(17);
 
   const DiagnosticCode(this.value);
   final int value;
@@ -394,6 +397,7 @@ class LoadReport {
     this.residency = const ResidencyStats(),
     this.inputActions = const [],
     this.physics = const PhysicsSettings(),
+    this.animation = const AnimationAssets(),
     this.mode,
     this.scenes = const [],
   });
@@ -404,6 +408,7 @@ class LoadReport {
     final residency = j['residency'] as Map<String, Object?>?;
     final input = j['input'] as Map<String, Object?>?;
     final physics = j['physics'] as Map<String, Object?>?;
+    final animation = j['animation'] as Map<String, Object?>?;
     return LoadReport(
       ok: j['ok'] == true,
       diagnostics: [
@@ -429,6 +434,7 @@ class LoadReport {
         for (final a in (input?['actions'] as List?) ?? const []) BoundAction.fromJson((a as Map).cast<String, Object?>()),
       ],
       physics: physics == null ? const PhysicsSettings() : PhysicsSettings.fromJson(physics),
+      animation: animation == null ? const AnimationAssets() : AnimationAssets.fromJson(animation),
       mode: j['mode'] as String?,
       scenes: [
         for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
@@ -494,6 +500,10 @@ class LoadReport {
   /// colliders registered); defaults for a `loadScene`.
   final PhysicsSettings physics;
 
+  /// The clips and skins registered from the cache for the scene's
+  /// `Animator`s and `Skin`s (M3-19).
+  final AnimationAssets animation;
+
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
@@ -517,6 +527,7 @@ class LoadReport {
         residency: residency,
         inputActions: inputActions,
         physics: physics,
+        animation: animation,
         mode: mode,
         scenes: scenes,
       );

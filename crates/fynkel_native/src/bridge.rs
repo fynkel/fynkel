@@ -5,8 +5,8 @@ use fynkel_core::input::{ActionState, Control, Device, InputEvent, Phase};
 use fynkel_core::physics::{Hit, QueryKind, QuerySpec};
 use fynkel_core::schema::*;
 use fynkel_core::{
-    BodyCommand, Command, Diagnostic, Event, EventPayload, ProjectionInfo, Rejected,
-    SnapshotRecord, World,
+    AnimateOp as CoreAnimateOp, BodyCommand, Command, Diagnostic, Event, EventPayload,
+    ProjectionInfo, Rejected, SnapshotRecord, World,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{decode_component_value, get_u32, WireRecord};
@@ -140,6 +140,31 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                     op,
                 }
             }
+            CommandKind::Animate => {
+                let c = AnimateCommandRecord::decode(body, tail).map_err(bad)?;
+                let op = match c.op {
+                    AnimateOp::Play => CoreAnimateOp::Play {
+                        clip: c.clip,
+                        looping: c.looping,
+                        speed: c.speed,
+                    },
+                    AnimateOp::Crossfade => CoreAnimateOp::Crossfade {
+                        clip: c.clip,
+                        looping: c.looping,
+                        speed: c.speed,
+                        seconds: c.seconds,
+                    },
+                    AnimateOp::Stop => CoreAnimateOp::Stop,
+                    AnimateOp::Pause => CoreAnimateOp::Pause,
+                    AnimateOp::Resume => CoreAnimateOp::Resume,
+                    AnimateOp::SetSpeed => CoreAnimateOp::SetSpeed(c.speed),
+                    AnimateOp::SetTime => CoreAnimateOp::SetTime(c.seconds),
+                };
+                Command::Animate {
+                    entity: c.entity,
+                    op,
+                }
+            }
         },
     )
 }
@@ -253,6 +278,14 @@ fn encode_event_body(p: &EventPayload, out: &mut Vec<u8>, strings: &mut fynkel_w
             },
             strings,
         ),
+        EventPayload::AnimationEnded { entity, clip } => push(
+            out,
+            &AnimationEndedEvent {
+                entity: *entity,
+                clip: clip.clone(),
+            },
+            strings,
+        ),
         EventPayload::CollisionEnter(c)
         | EventPayload::CollisionStay(c)
         | EventPayload::CollisionExit(c)
@@ -282,6 +315,7 @@ pub fn event_body_size(kind: EventKind) -> Option<usize> {
         EventKind::SCENE_READY => SceneReadyEvent::SIZE,
         EventKind::SCENE_UNLOADED => SceneUnloadedEvent::SIZE,
         EventKind::ZONE_ENTERED | EventKind::ZONE_EXITED => ZoneEvent::SIZE,
+        EventKind::ANIMATION_ENDED => AnimationEndedEvent::SIZE,
         k if k.is_physics() => ContactEvent::SIZE,
         _ => return None,
     })
@@ -299,6 +333,7 @@ pub const QUERY_BODY: u32 = 7;
 pub const QUERY_ENTITIES: u32 = 8;
 pub const QUERY_CHARACTER: u32 = 9;
 pub const QUERY_SYSTEMS: u32 = 10;
+pub const QUERY_ANIMATOR: u32 = 11;
 
 pub fn query(
     world: &World,
@@ -407,6 +442,19 @@ pub fn query(
             }
             if let Ok(v) = ecs.get::<fynkel_core::TriggerZone>(entity) {
                 w.component(ComponentId::TRIGGER_ZONE.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::Animator>(entity) {
+                w.component(ComponentId::ANIMATOR.0, &*v);
+            }
+            if let Ok(v) = ecs.get::<fynkel_core::Skin>(entity) {
+                w.component(ComponentId::SKIN.0, &*v);
+            }
+        }
+        // An animator's playback state (M3-19); no animator is an empty
+        // response.
+        QUERY_ANIMATOR => {
+            if let Some(s) = world.animator_state(entity) {
+                w.record(&s);
             }
         }
         // The last step's per-phase wall time (M3-10), one record per

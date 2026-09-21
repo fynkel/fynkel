@@ -344,6 +344,38 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "fynkel.Animator"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.Animator.schema.json"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "fynkel.Skin"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "data": {
+                "$ref": "https://fynkel.dev/schemas/components/fynkel.Skin.schema.json"
+              }
+            }
+          }
         }
       ]
     },

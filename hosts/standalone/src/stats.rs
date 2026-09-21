@@ -111,7 +111,7 @@ fn print(label: &str, s: &Series) {
     }
     let r = s.render.unwrap_or_default();
     log::info!(
-        "[{label}] frames={} skipped={} | interval ms p50={:.2} p95={:.2} p99={:.2} | acquire-wait ms p50={:.2} p95={:.2} | cpu ms p50={:.3} p95={:.3} p99={:.3} | draws={} instances={} culled={} batches={} shadow={}/{}",
+        "[{label}] frames={} skipped={} | interval ms p50={:.2} p95={:.2} p99={:.2} | acquire-wait ms p50={:.2} p95={:.2} | cpu ms p50={:.3} p95={:.3} p99={:.3} | draws={} instances={} culled={} batches={} skinned={} shadow={}/{}",
         s.interval_us.len() + 1,
         s.skipped,
         pct(&s.interval_us, 0.50),
@@ -126,6 +126,7 @@ fn print(label: &str, s: &Series) {
         r.instances,
         r.culled,
         r.batches,
+        r.skinned,
         r.shadow_casters,
         r.shadow_draws,
     );

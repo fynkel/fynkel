@@ -110,9 +110,10 @@ jobs:
       - name: showcase validate + headless + render + codegen
         working-directory: examples/showcase
         run: |
+          cmp assets/models/character.glb ../reference_game/assets/models/character.glb   # the runner is the reference game's character (tools/character.py)
           "$GITHUB_WORKSPACE/target/debug/fynkel" validate
           "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless
-          "$GITHUB_WORKSPACE/target/debug/fynkel" render --out "${{ runner.temp }}/showcase.png"
+          "$GITHUB_WORKSPACE/target/debug/fynkel" render --out "${{ runner.temp }}/showcase.png" --steps 10
           "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project .
       - name: showcase flutter analyze + test
         working-directory: examples/showcase
@@ -127,12 +128,12 @@ jobs:
       - name: reference game generate + validate + headless + render + codegen
         working-directory: examples/reference_game
         run: |
-          python3 tools/kit.py && python3 tools/playground.py && python3 tools/route.py
+          python3 tools/kit.py && python3 tools/character.py && python3 tools/playground.py && python3 tools/route.py
           git diff --exit-code -- assets test/collect_all.input.json
           "$GITHUB_WORKSPACE/target/debug/fynkel" validate
           "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless
           "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless --input test/collect_all.input.json --steps 1400
-          "$GITHUB_WORKSPACE/target/debug/fynkel" render --out "${{ runner.temp }}/reference_game.png"
+          "$GITHUB_WORKSPACE/target/debug/fynkel" render --out "${{ runner.temp }}/reference_game.png" --steps 40
           "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project .
       - name: reference game flutter analyze + test
         working-directory: examples/reference_game

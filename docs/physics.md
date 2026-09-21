@@ -205,6 +205,17 @@ test/platform.input.json`) walks its Player onto a 0.8 m platform from a
 recorded stream — the item 9 gate, a headless test with a stable
 checksum.
 
+**The character's animation (M3-19, [animation.md](animation.md)).** A
+rigged character on a controller is the skinned mesh and the joint
+entities under the controller's entity, and the controller stays the one
+thing that moves the entity: clips carry no root motion (the V1 policy),
+so a walk cycles the legs in place while `move` carries the body, and a
+jump clip's hips dip while `jump()` lifts the entity. The behaviour reads
+`characterState()` and picks the clip (the reference game's
+`game.Player.pose`); nothing in the physics step reads the animator, and
+a collider on a joint entity follows the pose because animators run
+before the physics slot.
+
 ## Third-person camera (M3-09)
 
 `fynkel.ThirdPersonCamera` (id 13, in `fynkel_core`) turns the entity it

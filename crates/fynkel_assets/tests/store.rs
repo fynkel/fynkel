@@ -57,8 +57,8 @@ fn the_index_opens_and_refuses_other_builds() {
     assert_eq!(index.profile(), "dev");
     assert_eq!(
         index.len(),
-        12,
-        "four scenes, robot, material, three textures, three prefabs"
+        14,
+        "five scenes, robot, rig, material, three textures, three prefabs"
     );
     let p = index.project().unwrap();
     assert_eq!(p.name, "Fixture Game");

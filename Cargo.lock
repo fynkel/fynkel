@@ -771,6 +771,7 @@ dependencies = [
  "fynkel_document",
  "fynkel_import",
  "fynkel_wire",
+ "glam 0.33.7",
  "serde_json",
 ]
 

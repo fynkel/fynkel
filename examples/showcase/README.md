@@ -6,7 +6,7 @@ at and compare. It is a normal Fynkel game (created by `fynkel create`,
 then authored): a Flutter app plus `fynkel.project.json`, an `assets/`
 tree of strict JSON documents and the Fynkel CLI.
 
-![The showcase after M3-06](renders/m3-06.png)
+![The showcase after M3-19](renders/m3-19.png)
 
 What is in the scene (`assets/scenes/main.scene.json`):
 
@@ -26,6 +26,14 @@ What is in the scene (`assets/scenes/main.scene.json`):
 - the **robot** from the fixture glTF, re-authored as a hierarchy (body
   in the glTF's own textured material, rusted head, the antenna pyramid)
   spinning under the spot (`game.Spinner`)
+- the **runner**: the reference game's rigged character
+  (`assets/models/character.glb`, a byte copy of what
+  `examples/reference_game/tools/character.py` generates — CI compares
+  them), a skinned body of eleven boxes over an eleven-joint skeleton
+  authored as entities under `Runner` (`hips` → `spine` → `head`, the
+  limbs) with a `fynkel.Skin` on `Runner Body` and a `fynkel.Animator`
+  looping the `run` clip in place — the skinned pipeline variants, the
+  joint palette and a skinned caster in the shadow map (M3-19)
 - a **camera** that orbits the scene (`game.Orbit`, `lib/game/orbit.dart`)
   so shadows and the transparent sort are seen moving; its authored
   transform is the orbit's start pose, so `fynkel render` (which runs no
@@ -37,10 +45,10 @@ What is in the scene (`assets/scenes/main.scene.json`):
 ```sh
 fynkel run                       # validate, cook, then the app: Q cycles quality, Space pauses the orbit, A/D (or a stick) scrub it
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/) as assets
-fynkel render --out render.png   # the same view as a PNG; --quality low|medium|high
+fynkel render --out render.png --steps 10   # the same view as a PNG after 10 ticks (the runner mid-stride); --quality low|medium|high
 fynkel validate                  # documents, references, lock
 fynkel test --headless           # the scene on the Rust headless host (no Dart, no GPU)
-flutter test                     # test/game_test.dart: the scene loads, the robot spins, the camera orbits
+flutter test                     # test/game_test.dart: the scene loads, the robot spins, the camera orbits, the runner's joints move
 ```
 
 The HUD (`lib/main.dart`) prints the frame rate (`fps`, with the frame
@@ -62,8 +70,10 @@ renderer item so the history is a before/after:
 | --- | --- |
 | `m3-05.png` | M3-05 — Renderer V1 (b): shadows, transparency, MSAA, quality |
 | `m3-06.png` | M3-06 — Renderer V1 (c): instancing and frustum culling (byte-identical to `m3-05.png` — culling changes counts, never pixels: 27 instances in 16 draws, 0 culled from the start pose) |
+| `m3-08b.png` | M3-08b — the character controller and the camera rig (no visible change here; the before/after of the physics work) |
+| `m3-19.png` | M3-19 — Animation: the runner (a skinned mesh on a joint palette, `--steps 10` = 0.15 s into the `run` clip: mid-stride, arms swinging, a skinned caster in the shadow map); 28 instances in 17 draws, 1 skinned over 11 joints |
 
-To regenerate: `fynkel render --project examples/showcase --out examples/showcase/renders/<item>.png`.
+To regenerate: `fynkel render --project examples/showcase --out examples/showcase/renders/<item>.png` (`--steps 10` from M3-19, so the runner is posed).
 
 Gameplay is Dart: `lib/game/*.dart` are `Behaviour` classes with `@Expose`
 fields that the scene sets. After changing an exposed field, an id or

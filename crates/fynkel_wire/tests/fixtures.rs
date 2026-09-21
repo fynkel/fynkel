@@ -17,9 +17,9 @@ use fynkel_core::components::{
 use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
 use fynkel_core::{
-    BodyType, CharacterController, Collider, ColliderShape, Emitter, Follow, LifetimeDespawn,
-    LookAtCamera, MotionSpace, Name, Oscillate, RigidBody, Rotator, Settings, ThirdPersonCamera,
-    TriggerZone,
+    Animator, BodyType, CharacterController, Collider, ColliderShape, Emitter, Follow,
+    LifetimeDespawn, LookAtCamera, MotionSpace, Name, Oscillate, RigidBody, Rotator, Settings,
+    Skin, ThirdPersonCamera, TriggerZone,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
@@ -524,6 +524,54 @@ fn fixtures_match_generated_codecs() {
             y: 300.25,
             depth: 7.5,
             flags: 3,
+        },
+    );
+    // M3-19.
+    check(
+        "Animator",
+        &Animator {
+            clip: AssetRef::with_sub(mesh_id, "anim/1"),
+            speed: 1.5,
+            looping: false,
+            playing: true,
+        },
+    );
+    check(
+        "Skin",
+        &Skin {
+            skin: AssetRef::with_sub(mesh_id, "skin/0"),
+            skeleton: "skeleton".into(),
+        },
+    );
+    check(
+        "AnimateCommandRecord",
+        &AnimateCommandRecord {
+            entity: e(4, 2),
+            op: AnimateOp::Crossfade,
+            seconds: 0.25,
+            speed: 1.0,
+            looping: true,
+            clip: AssetRef::with_sub(mesh_id, "anim/0"),
+        },
+    );
+    check(
+        "AnimationEndedEvent",
+        &AnimationEndedEvent {
+            entity: e(4, 2),
+            clip: AssetRef::with_sub(mesh_id, "anim/0"),
+        },
+    );
+    check(
+        "AnimatorStateRecord",
+        &AnimatorStateRecord {
+            entity: e(4, 2),
+            time: 0.5,
+            duration: 2.0,
+            speed: 1.0,
+            fade_remaining: 0.125,
+            playing: true,
+            looping: false,
+            clip: AssetRef::with_sub(mesh_id, "anim/0"),
         },
     );
 }

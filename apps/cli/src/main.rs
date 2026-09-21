@@ -389,6 +389,12 @@ fn test_command(args: &[String]) -> ExitCode {
                 p.trigger_exit
             );
         }
+        if let Some(a) = &report.animation {
+            println!(
+                "animation: {} animators + skins, {} clips, {} skins, {} skinned meshes ({} joints), {} ended, {} diagnostics",
+                a.entities, a.clips, a.skins, a.skinned_meshes, a.joints, a.ended, a.diagnostics
+            );
+        }
         if !report.systems.is_empty() {
             let parts: Vec<String> = report
                 .systems

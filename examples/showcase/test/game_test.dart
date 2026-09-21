@@ -9,6 +9,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:showcase/game/game.dart';
 import 'package:showcase/game/orbit.dart';
@@ -18,13 +19,14 @@ void main() {
   final projectDir = Directory.current.path;
   setUpAll(() => cookProject(projectDir));
 
-  test('the showcase loads, the robot spins and the camera orbits', () {
+  test('the showcase loads, the robot spins, the camera orbits and the runner runs', () {
     final game = Game.load(projectDir);
     addTearDown(game.dispose);
 
     expect(game.report.ok, isTrue);
     expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
-    expect(game.report.entityCount, 34);
+    expect(game.report.entityCount, 47);
+    expect((game.report.animation.clips, game.report.animation.skins), (1, 1), reason: 'the runner: run, one skin');
     expect(game.report.behavioursAttached, 2);
     final spinner = game.world.behaviours.whereType<Spinner>().single;
     final orbit = game.world.behaviours.whereType<Orbit>().single;
@@ -42,5 +44,15 @@ void main() {
     final eye = orbit.transform.position - orbit.target;
     expect(math.sqrt(eye.x * eye.x + eye.z * eye.z), closeTo(orbit.radius, 1e-4));
     expect(eye.y, closeTo(orbit.height, 1e-4));
+
+    // The runner's joints follow the run clip (in place: the Runner stays).
+    final runner = game.world.find('Runner')!;
+    final thigh = runner.findChild('hips')!.findChild('thigh_l')!;
+    final s = runner.animation.state!;
+    expect(s.clip.sub, 'anim/2');
+    expect(s.duration, closeTo(0.6, 1e-6));
+    expect(s.time, closeTo((game.world.tick - 1) / 60 % 0.6, 1e-4));
+    expect(thigh.localTransform.rotation.x.abs(), greaterThan(0.05), reason: 'a leg swings');
+    expect(runner.transform.position.z, closeTo(2.6, 1e-5), reason: 'in place');
   });
 }

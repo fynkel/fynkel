@@ -348,7 +348,7 @@ fn orthographic_camera_has_no_perspective() {
 
 #[test]
 fn a_fixed_set_of_pipelines() {
-    assert_eq!(PIPELINE_VARIANTS, 9);
+    assert_eq!(PIPELINE_VARIANTS, 14);
 }
 
 // ------------------------------------------------------------ materials

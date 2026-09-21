@@ -644,7 +644,12 @@ enum FynkelCommandKind {
   /// body: BodyCommandRecord { entity, op, vector, rotation }; simulation
   /// lane only; applied by the tick's physics step (M3-08); ops `move` and
   /// `jump` address a CharacterController (M3-09).
-  FYNKEL_COMMAND_BODY(8);
+  FYNKEL_COMMAND_BODY(8),
+
+  /// body: AnimateCommandRecord { entity, op, seconds, speed, looping,
+  /// clip }; addresses a fynkel.Animator (M3-19): play, crossfade, stop,
+  /// pause, resume, set_speed, set_time.
+  FYNKEL_COMMAND_ANIMATE(9);
 
   final int value;
   const FynkelCommandKind(this.value);
@@ -658,6 +663,7 @@ enum FynkelCommandKind {
     6 => FYNKEL_COMMAND_SET_COMPONENT,
     7 => FYNKEL_COMMAND_REMOVE_COMPONENT,
     8 => FYNKEL_COMMAND_BODY,
+    9 => FYNKEL_COMMAND_ANIMATE,
     _ => throw ArgumentError('Unknown value for FynkelCommandKind: $value'),
   };
 }
@@ -686,7 +692,12 @@ enum FynkelComponent {
   FYNKEL_COMPONENT_EMITTER(19),
 
   /// A sensor collider that names an event for Dart (M3-12).
-  FYNKEL_COMPONENT_TRIGGER_ZONE(20);
+  FYNKEL_COMPONENT_TRIGGER_ZONE(20),
+
+  /// Animation (M3-19): a clip player over the named nodes below it, and
+  /// the skin a skinned mesh deforms with.
+  FYNKEL_COMPONENT_ANIMATOR(21),
+  FYNKEL_COMPONENT_SKIN(22);
 
   final int value;
   const FynkelComponent(this.value);
@@ -712,6 +723,8 @@ enum FynkelComponent {
     18 => FYNKEL_COMPONENT_LIFETIME_DESPAWN,
     19 => FYNKEL_COMPONENT_EMITTER,
     20 => FYNKEL_COMPONENT_TRIGGER_ZONE,
+    21 => FYNKEL_COMPONENT_ANIMATOR,
+    22 => FYNKEL_COMPONENT_SKIN,
     _ => throw ArgumentError('Unknown value for FynkelComponent: $value'),
   };
 }
@@ -732,6 +745,10 @@ enum FynkelEventKind {
   /// (`fynkel.ev.Zone` body: zone, other, event name).
   FYNKEL_EVENT_ZONE_ENTERED(7),
   FYNKEL_EVENT_ZONE_EXITED(8),
+
+  /// M3-19: a non-looping clip reached its end (`fynkel.ev.AnimationEnded`
+  /// body: entity, clip).
+  FYNKEL_EVENT_ANIMATION_ENDED(9),
   FYNKEL_EVENT_COLLISION_ENTER(256),
   FYNKEL_EVENT_COLLISION_STAY(257),
   FYNKEL_EVENT_COLLISION_EXIT(258),
@@ -750,6 +767,7 @@ enum FynkelEventKind {
     6 => FYNKEL_EVENT_SCENE_UNLOADED,
     7 => FYNKEL_EVENT_ZONE_ENTERED,
     8 => FYNKEL_EVENT_ZONE_EXITED,
+    9 => FYNKEL_EVENT_ANIMATION_ENDED,
     256 => FYNKEL_EVENT_COLLISION_ENTER,
     257 => FYNKEL_EVENT_COLLISION_STAY,
     258 => FYNKEL_EVENT_COLLISION_EXIT,
@@ -793,7 +811,12 @@ enum FynkelQueryKind {
 
   /// (no entity) -> one SystemTimeRecord { system, entities, micros } per
   /// SystemKind: the last step's per-phase wall time (M3-10).
-  FYNKEL_QUERY_SYSTEMS(10);
+  FYNKEL_QUERY_SYSTEMS(10),
+
+  /// entity -> one AnimatorStateRecord { entity, time, duration, speed,
+  /// fade_remaining, playing, looping, clip } (0 records without an
+  /// Animator) (M3-19).
+  FYNKEL_QUERY_ANIMATOR(11);
 
   final int value;
   const FynkelQueryKind(this.value);
@@ -809,6 +832,7 @@ enum FynkelQueryKind {
     8 => FYNKEL_QUERY_ENTITIES,
     9 => FYNKEL_QUERY_CHARACTER,
     10 => FYNKEL_QUERY_SYSTEMS,
+    11 => FYNKEL_QUERY_ANIMATOR,
     _ => throw ArgumentError('Unknown value for FynkelQueryKind: $value'),
   };
 }

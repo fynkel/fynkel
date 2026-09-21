@@ -1,6 +1,6 @@
 //! Commands are the only way gameplay mutates the world (§5.4).
 
-use fynkel_contracts::{ComponentId, Entity};
+use fynkel_contracts::{AssetRef, ComponentId, Entity};
 use fynkel_physics::BodyCommand;
 use fynkel_scene::Transform;
 
@@ -72,6 +72,44 @@ pub enum Command {
         entity: Entity,
         op: BodyCommand,
     },
+    /// Drives a `fynkel.Animator` (M3-19): play, crossfade, stop, pause,
+    /// resume, re-speed or seek. Applied at the tick boundary in batch
+    /// order (an animator set in the same batch receives it); the
+    /// animator system then samples the result this tick. Simulation lane
+    /// only; `MISSING_COMPONENT` without an animator.
+    Animate {
+        entity: Entity,
+        op: AnimateOp,
+    },
+}
+
+/// What `Command::Animate` does to an animator.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AnimateOp {
+    /// Switch to `clip` from its start (or its end when `speed < 0`) and
+    /// play.
+    Play {
+        clip: AssetRef,
+        looping: bool,
+        speed: f32,
+    },
+    /// Like `Play`, but the clip playing so far keeps advancing and its
+    /// pose is blended out over `seconds` (`0` is a plain `Play`).
+    Crossfade {
+        clip: AssetRef,
+        looping: bool,
+        speed: f32,
+        seconds: f32,
+    },
+    /// Rewind and clear `playing`; the entities keep their last pose.
+    Stop,
+    /// Clear `playing`, keeping the time.
+    Pause,
+    /// Set `playing`.
+    Resume,
+    SetSpeed(f32),
+    /// Seek to `seconds` (clamped to the clip).
+    SetTime(f32),
 }
 
 impl Command {
@@ -91,7 +129,8 @@ impl Command {
             | Command::SetName { entity, .. }
             | Command::SetComponent { entity, .. }
             | Command::RemoveComponent { entity, .. }
-            | Command::Body { entity, .. } => Some(*entity),
+            | Command::Body { entity, .. }
+            | Command::Animate { entity, .. } => Some(*entity),
             Command::SetParent { child, .. } => Some(*child),
         }
     }

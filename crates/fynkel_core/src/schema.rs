@@ -16,8 +16,9 @@ use fynkel_schema_derive::Schema;
 use glam::{Quat, Vec3};
 
 use crate::components::{
-    Camera, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn, LookAtCamera,
-    MeshRenderer, Oscillate, PointLight, Rotator, SpotLight, ThirdPersonCamera, TriggerZone,
+    Animator, Camera, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn,
+    LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, Skin, SpotLight, ThirdPersonCamera,
+    TriggerZone,
 };
 use crate::material::PbrMaterial;
 use crate::settings::Settings;
@@ -35,6 +36,7 @@ pub enum CommandKind {
     SetComponent = 6,
     RemoveComponent = 7,
     Body = 8,
+    Animate = 9,
 }
 
 impl CommandKind {
@@ -48,6 +50,7 @@ impl CommandKind {
             6 => Self::SetComponent,
             7 => Self::RemoveComponent,
             8 => Self::Body,
+            9 => Self::Animate,
             _ => return None,
         })
     }
@@ -163,6 +166,45 @@ pub struct BodyCommandRecord {
     pub rotation: Quat,
 }
 
+/// What a `fynkel.cmd.Animate` does (`fynkel_core::command::AnimateOp`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
+#[schema(name = "fynkel.AnimateOp")]
+pub enum AnimateOp {
+    /// `clip`, `looping`, `speed`: switch to the clip from its start and
+    /// play.
+    Play,
+    /// `clip`, `looping`, `speed`, `seconds`: like `play`, blending the
+    /// previous clip out over `seconds`.
+    Crossfade,
+    /// Rewind and stop.
+    Stop,
+    /// Stop, keeping the time.
+    Pause,
+    Resume,
+    /// `speed`.
+    SetSpeed,
+    /// `seconds`: seek.
+    SetTime,
+}
+
+/// Drives a `fynkel.Animator` (M3-19; simulation lane only). Rejected at
+/// the tick with `MISSING_COMPONENT` (no animator) or `INVALID_PAYLOAD`
+/// (non-finite value, negative fade).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 9, name = "fynkel.cmd.Animate")]
+pub struct AnimateCommandRecord {
+    pub entity: Entity,
+    pub op: AnimateOp,
+    /// Fade length for `crossfade`, the target time for `setTime`.
+    pub seconds: f32,
+    /// Playback rate for `play`/`crossfade`/`setSpeed`.
+    pub speed: f32,
+    /// For `play`/`crossfade`.
+    pub looping: bool,
+    /// For `play`/`crossfade`.
+    pub clip: AssetRef,
+}
+
 /// A spatial query kind (`fynkel.rec.PhysicsQuery`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Schema)]
 #[schema(name = "fynkel.PhysicsQueryKind")]
@@ -241,6 +283,25 @@ pub struct CharacterStateRecord {
     pub velocity: Vec3,
 }
 
+/// `FYNKEL_QUERY_ANIMATOR` (M3-19): a `fynkel.Animator`'s playback state
+/// as the last step left it (no record without one).
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "record", name = "fynkel.rec.AnimatorState")]
+pub struct AnimatorStateRecord {
+    pub entity: Entity,
+    /// Seconds into the clip.
+    pub time: f32,
+    /// The clip's length; `0` while the clip is unknown to the world.
+    pub duration: f32,
+    pub speed: f32,
+    /// Seconds left of a crossfade, `0` when none is running.
+    pub fade_remaining: f32,
+    pub playing: bool,
+    pub looping: bool,
+    /// The clip being played.
+    pub clip: AssetRef,
+}
+
 /// A phase of `World::step` whose time is measured (M3-10, blueprint
 /// §15.4): the whole step, then its phases in tick order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Schema)]
@@ -253,6 +314,9 @@ pub enum SystemKind {
     Commands,
     /// The characters' action driver (M3-09).
     Characters,
+    /// Clip playback onto the animators' subtrees and the skins' joint
+    /// lookups (M3-19); `entities` is animators + skins.
+    Animation,
     /// Catalogue movers in the pre-tick slot.
     Rotator,
     Oscillate,
@@ -281,6 +345,7 @@ impl SystemKind {
             SystemKind::Step => "step",
             SystemKind::Commands => "commands",
             SystemKind::Characters => "characters",
+            SystemKind::Animation => "animation",
             SystemKind::Rotator => "rotator",
             SystemKind::Oscillate => "oscillate",
             SystemKind::LifetimeDespawn => "lifetimeDespawn",
@@ -405,6 +470,16 @@ pub struct ZoneEvent {
     pub other: Entity,
     /// The zone's `event` name.
     pub event: String,
+}
+
+/// A `fynkel.Animator`'s non-looping clip reached its end (M3-19): the
+/// body of `ANIMATION_ENDED` (9), general lane, the tick it happened;
+/// `playing` is cleared the same tick.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "event", id = 9, name = "fynkel.ev.AnimationEnded")]
+pub struct AnimationEndedEvent {
+    pub entity: Entity,
+    pub clip: AssetRef,
 }
 
 /// Physics-lane events share one body (collision/trigger enter/stay/exit):
@@ -573,6 +648,11 @@ pub const ALL: &[&RecordSchema] = &[
     &Settings::SCHEMA,
     &ProjectionAnchorRecord::SCHEMA,
     &ProjectedPointRecord::SCHEMA,
+    &Animator::SCHEMA,
+    &Skin::SCHEMA,
+    &AnimateCommandRecord::SCHEMA,
+    &AnimationEndedEvent::SCHEMA,
+    &AnimatorStateRecord::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this
@@ -638,6 +718,24 @@ mod tests {
         assert_eq!(Emitter::SCHEMA.offsets(), vec![0, 24, 28, 32, 36, 48]);
         assert_eq!(Emitter::SCHEMA.wire_size(), 56);
         assert_eq!(SystemTimeRecord::SCHEMA.wire_size(), 16);
+        // M3-19: clip 24 @0, speed @24, looping @28, playing @29 → 32.
+        assert_eq!(Animator::SCHEMA.offsets(), vec![0, 24, 28, 29]);
+        assert_eq!(Animator::SCHEMA.wire_size(), 32);
+        assert_eq!(Skin::SCHEMA.wire_size(), 32);
+        // entity @0, op @8, seconds @12, speed @16, looping @20, clip @24 → 48.
+        assert_eq!(
+            AnimateCommandRecord::SCHEMA.offsets(),
+            vec![0, 8, 12, 16, 20, 24]
+        );
+        assert_eq!(AnimateCommandRecord::SCHEMA.wire_size(), 48);
+        assert_eq!(AnimationEndedEvent::SCHEMA.wire_size(), 32);
+        // entity @0, time @8, duration @12, speed @16, fade @20, playing
+        // @24, looping @25, clip @32 → 56.
+        assert_eq!(
+            AnimatorStateRecord::SCHEMA.offsets(),
+            vec![0, 8, 12, 16, 20, 24, 25, 32]
+        );
+        assert_eq!(AnimatorStateRecord::SCHEMA.wire_size(), 56);
     }
 
     #[test]

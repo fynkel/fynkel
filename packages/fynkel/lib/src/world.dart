@@ -9,6 +9,7 @@ import 'dart:typed_data';
 
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
+import 'animation.dart';
 import 'asset_ref.dart';
 import 'context.dart';
 import 'diagnostics.dart';
@@ -323,7 +324,7 @@ class World {
       final stepped = tick;
       step();
       final events = drainEvents();
-      _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events));
+      _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events), _animationEvents(events));
       _carry(events);
     }
     this.input.refresh(frameEdges: true);
@@ -357,6 +358,11 @@ class World {
   static List<ZoneEvent> _zoneEvents(List<EngineEvent> events) {
     if (events.isEmpty) return const [];
     return [for (final e in events) if (e is ZoneEvent) e];
+  }
+
+  static List<AnimationEnded> _animationEvents(List<EngineEvent> events) {
+    if (events.isEmpty) return const [];
+    return [for (final e in events) if (e is AnimationEnded) e];
   }
 
   /// A handle for an entity that already exists (loaded from a scene, or
@@ -848,6 +854,52 @@ class World {
 }
 
 /// Stable handle to an entity. Owns no native memory.
+/// Playback of one object's `fynkel.Animator` ([GameObject.animation]).
+/// Every method is a command for the next tick; [state] reads the last.
+class AnimationControl {
+  AnimationControl._(this._go);
+  final GameObject _go;
+
+  /// Plays [clip] from its start (or its end, at a negative [speed]),
+  /// replacing what plays, no blend.
+  void play(AssetRef clip, {bool looping = true, double speed = 1}) =>
+      _go._animate(gen.AnimateOp.play, clip: clip, speed: speed, looping: looping);
+
+  /// Blends from the current pose into [clip] over [seconds]: the old clip
+  /// keeps advancing underneath until the fade ends. A fade of 0 is a
+  /// [play]; a negative fade is rejected (`INVALID_PAYLOAD`).
+  void crossfade(AssetRef clip, double seconds, {bool looping = true, double speed = 1}) =>
+      _go._animate(gen.AnimateOp.crossfade, clip: clip, seconds: seconds, speed: speed, looping: looping);
+
+  /// Stops and rewinds: the nodes keep the pose of the last tick until
+  /// another clip plays.
+  void stop() => _go._animate(gen.AnimateOp.stop);
+
+  /// Holds the current time; [resume] continues from it.
+  void pause() => _go._animate(gen.AnimateOp.pause);
+  void resume() => _go._animate(gen.AnimateOp.resume);
+
+  /// Playback rate from the next tick; negative plays backwards, 0 holds.
+  set speed(double value) => _go._animate(gen.AnimateOp.setSpeed, speed: value);
+
+  /// Seeks to [seconds] into the clip (clamped to its length); the pose
+  /// there is applied at the next tick without advancing.
+  set time(double seconds) => _go._animate(gen.AnimateOp.setTime, seconds: seconds);
+
+  /// The animator's playback after the last tick (`FYNKEL_QUERY_ANIMATOR`);
+  /// `null` without an `Animator` or before the object spawned.
+  AnimatorState? get state {
+    final e = _go._entity;
+    if (e == null || !_go._alive) return null;
+    final b = _go.world._native.query(QueryKind.animator, entity: e);
+    if (b.recordCount == 0) return null;
+    return AnimatorState.fromRecord(gen.AnimatorStateRecord.decode(b.records, 0, b.tail));
+  }
+
+  /// True while a clip advances ([AnimatorState.playing]).
+  bool get isPlaying => state?.playing ?? false;
+}
+
 class GameObject {
   GameObject._(this.world, this._tempId, this._initial, this.name) {
     transform = TransformRef._(this);
@@ -1171,6 +1223,24 @@ class GameObject {
     final b = world._native.query(QueryKind.character, entity: e);
     if (b.recordCount == 0) return null;
     return CharacterState.fromRecord(gen.CharacterStateRecord.decode(b.records, 0, b.tail));
+  }
+
+  // ------------------------------------------------- animation (M3-19)
+
+  /// The object's `fynkel.Animator` (M3-19): `animation.play(clip)`,
+  /// `crossfade`, `stop`, `pause`, `resume`, `speed`, `time` are commands
+  /// for the next tick (simulation lane; rejected there with
+  /// `MISSING_COMPONENT` on an object without an animator), `state` the
+  /// last tick's playback. Allowed on a pending object whose animator was
+  /// `add`ed in the same batch.
+  AnimationControl get animation => _animation ??= AnimationControl._(this);
+  AnimationControl? _animation;
+
+  void _animate(gen.AnimateOp op,
+      {AssetRef clip = AssetRef.none, double seconds = 0, double speed = 1, bool looping = true}) {
+    final e = _simulationEntity('animation command');
+    world._simulation.animate(e, op, clip: clip, seconds: seconds, speed: speed, looping: looping);
+    world._simulationTargets.add(this);
   }
 
   /// Current local transform: staged overlay, else last snapshot, else

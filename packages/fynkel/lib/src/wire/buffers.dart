@@ -5,6 +5,7 @@
 import 'dart:typed_data';
 
 import '../../generated/schema.g.dart';
+import '../asset_ref.dart';
 import '../transform_writer.dart';
 import 'support.dart';
 
@@ -202,6 +203,16 @@ class CommandBatch {
     _bytes.setFloat32(o + 28, qy, Endian.little);
     _bytes.setFloat32(o + 32, qz, Endian.little);
     _bytes.setFloat32(o + 36, qw, Endian.little);
+  }
+
+  /// An animator command (M3-19, kind 9): [op] with the fields it reads —
+  /// `play`/`crossfade` the clip, `looping` and `speed` (and the fade
+  /// [seconds] for a crossfade); `setSpeed` [speed]; `setTime` [seconds].
+  void animate(int entity, AnimateOp op,
+      {AssetRef clip = AssetRef.none, double seconds = 0, double speed = 1, bool looping = true}) {
+    final o = _begin(AnimateCommandRecord.commandKind, AnimateCommandRecord.wireSize);
+    AnimateCommandRecord(entity: entity, op: op, seconds: seconds, speed: speed, looping: looping, clip: clip)
+        .encode(_bytes, o, _strings);
   }
 
   void removeComponent(int entity, int componentId) {

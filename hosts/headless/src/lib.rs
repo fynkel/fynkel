@@ -167,6 +167,10 @@ pub struct HeadlessReport {
     pub input: Option<InputReport>,
     /// Present when the world stepped any physics (M3-08).
     pub physics: Option<PhysicsReport>,
+    /// Present when the scene registered a clip or a skin, or an animator
+    /// ran (M3-19).
+    #[serde(default)]
+    pub animation: Option<AnimationReport>,
     /// Per-system time (M3-10), `World::system_times` accumulated over
     /// the run, in tick order (`step` first).
     #[serde(default)]
@@ -191,10 +195,38 @@ pub struct PhysicsReport {
     pub diagnostics: u64,
 }
 
+/// The animation of a run (`HeadlessReport::animation`, M3-19).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct AnimationReport {
+    /// `Animator`s and `Skin`s the animation system stepped at the last
+    /// tick (its `SystemTimeRecord::entities`).
+    pub entities: u32,
+    /// Clips registered from the cooked scene (and its prefabs).
+    pub clips: u32,
+    /// Skins registered from the cooked scene (and its prefabs).
+    pub skins: u32,
+    /// Skinned meshes in the final extract, and the joint matrices they
+    /// reference.
+    pub skinned_meshes: u32,
+    pub joints: u32,
+    /// `ANIMATION_ENDED` events over the run.
+    pub ended: u64,
+    /// `CLIP_UNAVAILABLE` / `SKIN_UNAVAILABLE` and other animation
+    /// diagnostics from the steps.
+    pub diagnostics: u64,
+}
+
 impl HeadlessReport {
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).expect("report is serialisable")
     }
+}
+
+fn count_ended(events: &[fynkel_core::Event]) -> u64 {
+    events
+        .iter()
+        .filter(|e| matches!(e.payload, EventPayload::AnimationEnded { .. }))
+        .count() as u64
 }
 
 /// Opens the cache and reads the requested (or startup) scene.
@@ -260,6 +292,7 @@ pub fn run_retaining(
         extract_records: 0,
         checksum: String::new(),
         physics: None,
+        animation: None,
         systems: Vec::new(),
         step_time: Timing::default(),
         total_ms: 0.0,
@@ -276,6 +309,10 @@ pub fn run_retaining(
     let mut binding_errors: Vec<[String; 3]> = Vec::new();
     let mut mesh_colliders = 0u32;
     let mut physics_diagnostics = 0u64;
+    let mut registered_clips = 0u32;
+    let mut registered_skins = 0u32;
+    let mut animation_ended = 0u64;
+    let mut animation_diagnostics = 0u64;
     let mut contact_counts = [0u64; 5];
     // The recording is read before the scene so a bad file fails fast.
     let recording = match &config.input {
@@ -330,6 +367,13 @@ pub fn run_retaining(
         sr.prefabs = prefabs as u32;
         sr.document_diagnostics
             .extend(document::diagnostics_json(&prefab_diags));
+        // The animators' clips and the skins (M3-19).
+        let (clips, skins, anim_diags) = assets.register_animation(&cooked.description, &mut world);
+        registered_clips = clips as u32;
+        registered_skins = skins as u32;
+        animation_diagnostics += anim_diags.len() as u64;
+        sr.document_diagnostics
+            .extend(document::diagnostics_json(&anim_diags));
         match world.load_scene(&cooked.description) {
             Ok(l) => {
                 let residency = assets.retain(&cooked.closure);
@@ -417,6 +461,7 @@ pub fn run_retaining(
             }
             let events = world.drain_events();
             report.events += events.len() as u64;
+            animation_ended += count_ended(&events);
             scene.on_events(&events);
             let tick = world.tick();
             scene.fixed_update(&mut world, tick);
@@ -464,6 +509,14 @@ pub fn run_retaining(
                         || d.component == fynkel_contracts::ComponentId::COLLIDER
                 })
                 .count() as u64;
+            animation_diagnostics += world
+                .diagnostics()
+                .iter()
+                .filter(|d| {
+                    d.component == fynkel_contracts::ComponentId::ANIMATOR
+                        || d.component == fynkel_contracts::ComponentId::SKIN
+                })
+                .count() as u64;
         }
         if plan.steps == 0 && config.frame_dt <= 0.0 && recording.is_none() {
             break; // nothing will ever advance
@@ -497,9 +550,28 @@ pub fn run_retaining(
     }
     let events = world.drain_events();
     report.events += events.len() as u64;
+    animation_ended += count_ended(&events);
     scene.on_events(&events);
 
     let extract = world.extract();
+    let animated = world
+        .system_times()
+        .iter()
+        .find(|t| t.system == fynkel_core::schema::SystemKind::Animation)
+        .map(|t| t.entities)
+        .unwrap_or(0);
+    let skinned_meshes = extract.meshes.iter().filter(|m| m.skin.is_some()).count() as u32;
+    if animated > 0 || registered_clips > 0 || registered_skins > 0 || skinned_meshes > 0 {
+        report.animation = Some(AnimationReport {
+            entities: animated,
+            clips: registered_clips,
+            skins: registered_skins,
+            skinned_meshes,
+            joints: extract.joints.len() as u32,
+            ended: animation_ended,
+            diagnostics: animation_diagnostics,
+        });
+    }
     report.tick = world.tick();
     report.live_entities = world.live_entities();
     report.extract_records = extract.records.len() as u32;
@@ -855,7 +927,7 @@ mod catalogue_tests {
 
         let by_name = |n: &str| report.systems.iter().find(|s| s.system == n).unwrap();
         assert_eq!(report.systems[0].system, "step");
-        assert_eq!(report.systems.len(), 13);
+        assert_eq!(report.systems.len(), 14);
         assert_eq!(by_name("rotator").entities, 1);
         assert_eq!(by_name("oscillate").entities, 1);
         assert_eq!(by_name("emitter").entities, 1);
@@ -1028,5 +1100,103 @@ mod replay_tests {
         assert!(input.binding_errors[0][2].contains("formatVersion 2 is not 1"));
         assert_eq!(r.steps, 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod animation_tests {
+    use super::*;
+
+    /// Blueprint §19.2d item 19: the fixture's Rig scene animates without
+    /// a behaviour — the `Animator` on Rig plays `wave` over the joints
+    /// found by name below it, the Prop's non-looping `bob` ends once, the
+    /// Body's skin resolves and the extract carries its palette — with a
+    /// stable checksum.
+    #[test]
+    fn the_rig_scene_animates_and_skins_without_a_behaviour() {
+        let cooked = tests::Cooked::new("rig");
+        let cfg = HeadlessConfig {
+            // The first tick samples t = 0; thirty more reach 0.5 s.
+            steps: 31,
+            cache: Some(cooked.0.clone()),
+            scene: Some("c0000000-0000-4000-8000-000000000034".into()),
+            ..HeadlessConfig::default()
+        };
+        let (report, world, loaded) = run_with(&cfg);
+        let scene = report.scene.as_ref().expect("scene report");
+        assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
+        assert_eq!((scene.entities, scene.rejected_components), (8, 0));
+        assert_eq!(report.diagnostics, 0);
+        let anim = report.animation.as_ref().expect("animation report");
+        assert_eq!(
+            (
+                anim.entities,
+                anim.clips,
+                anim.skins,
+                anim.skinned_meshes,
+                anim.joints
+            ),
+            (3, 2, 1, 1, 3),
+            "{anim:#?}"
+        );
+        assert_eq!(anim.ended, 0, "bob (2 s) has not ended at 0.5 s");
+        assert_eq!(anim.diagnostics, 0);
+
+        // Half a second in (31 ticks at 1/60): hips' cubic 0 → 0.25 with
+        // zero tangents is at its midpoint, spine is at its 45° key, head
+        // (step) has reached its 90° key, the Prop's linear bob at 0.15.
+        let loaded = loaded.unwrap();
+        let local = |id: &str| {
+            let e = loaded.handle_of(id.parse().unwrap()).unwrap();
+            fynkel_scene::local(world.ecs(), e).unwrap()
+        };
+        let hips = local("c0000000-0000-4000-8000-0000000004e4");
+        assert!((hips.position.y - 0.125).abs() < 1e-3, "{hips:?}");
+        let spine = local("c0000000-0000-4000-8000-0000000004e5");
+        let (axis, angle) = spine.rotation.to_axis_angle();
+        assert!(
+            (angle - std::f32::consts::FRAC_PI_4).abs() < 1e-3 && axis.z > 0.99,
+            "{spine:?}"
+        );
+        let head = local("c0000000-0000-4000-8000-0000000004e6");
+        let (axis, angle) = head.rotation.to_axis_angle();
+        assert!(
+            (angle - std::f32::consts::FRAC_PI_2).abs() < 1e-3 && axis.y > 0.99,
+            "{head:?}"
+        );
+        let prop = local("c0000000-0000-4000-8000-0000000004e7");
+        assert!((prop.position.y - 0.15).abs() < 1e-3, "{prop:?}");
+
+        // The palette: joint world × inverse bind, in mesh space. The hips
+        // joint has moved up from its bind pose (0.119 at tick 29, 0.125 at
+        // tick 30 — the extract interpolates between the two), so its
+        // matrix is that translation; the animator's own state reads back.
+        let extract = world.extract();
+        let skinned: Vec<_> = extract.meshes.iter().filter(|m| m.skin.is_some()).collect();
+        assert_eq!(skinned.len(), 1);
+        let skin = skinned[0].skin.unwrap();
+        assert_eq!((skin.first_joint, skin.joint_count), (0, 3));
+        let hips_palette = extract.joints[0].transform_point3(glam::Vec3::ZERO);
+        assert!(
+            hips_palette.x.abs() < 1e-5
+                && hips_palette.z.abs() < 1e-5
+                && (0.118..=0.1251).contains(&hips_palette.y),
+            "{hips_palette:?}"
+        );
+        let rig = loaded
+            .handle_of("c0000000-0000-4000-8000-0000000004e2".parse().unwrap())
+            .unwrap();
+        let state = world.animator_state(rig).unwrap();
+        assert!((state.time - 0.5).abs() < 1e-4 && state.playing && state.looping);
+        assert!((state.duration - 1.0).abs() < 1e-5);
+
+        // The Prop's bob ends at 2 s: one ANIMATION_ENDED, then it holds.
+        let long = run(&HeadlessConfig {
+            steps: 150,
+            ..cfg.clone()
+        });
+        let anim = long.animation.as_ref().unwrap();
+        assert_eq!(anim.ended, 1, "{anim:#?}");
+        assert_eq!(run(&cfg).checksum, report.checksum, "deterministic");
     }
 }

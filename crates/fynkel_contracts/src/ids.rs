@@ -32,6 +32,9 @@ impl ComponentId {
     pub const EMITTER: ComponentId = ComponentId(19);
     /// A sensor collider that names an event for Dart (M3-12).
     pub const TRIGGER_ZONE: ComponentId = ComponentId(20);
+    /// Animation (M3-19): a clip player and a skinned mesh's joints.
+    pub const ANIMATOR: ComponentId = ComponentId(21);
+    pub const SKIN: ComponentId = ComponentId(22);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -55,6 +58,8 @@ impl ComponentId {
             18 => Some("fynkel.LifetimeDespawn"),
             19 => Some("fynkel.Emitter"),
             20 => Some("fynkel.TriggerZone"),
+            21 => Some("fynkel.Animator"),
+            22 => Some("fynkel.Skin"),
             _ => None,
         }
     }
@@ -78,6 +83,8 @@ impl EventKind {
     /// general lane, next to the physics lane's `TRIGGER_ENTER`/`EXIT`).
     pub const ZONE_ENTERED: EventKind = EventKind(7);
     pub const ZONE_EXITED: EventKind = EventKind(8);
+    /// A `fynkel.Animator`'s non-looping clip reached its end (M3-19).
+    pub const ANIMATION_ENDED: EventKind = EventKind(9);
 
     pub const PHYSICS_FIRST: u32 = 0x100;
     pub const COLLISION_ENTER: EventKind = EventKind(0x100);

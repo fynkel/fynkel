@@ -22,7 +22,8 @@ use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{has_errors, Code, Diagnostic};
 use fynkel_cooked::{
-    Writer, KIND_BLOB, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_TEXTURE,
+    Writer, KIND_ANIMATION, KIND_BLOB, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN,
+    KIND_TEXTURE,
 };
 use fynkel_document::asset::{asset_refs, AssetDatabase, AssetEntry, AssetKind, Meta};
 use fynkel_document::prefab::{expand, Prefab, PrefabLibrary};
@@ -1020,7 +1021,7 @@ struct ChunkPlan {
 
 /// Lays an intermediate out as chunks: meshes, then materials, then
 /// textures (decoded embedded images first, then the asset's own), then
-/// clips, then the prefab.
+/// clips, skins, animations, then the prefab.
 fn plan_intermediate(
     im: &Intermediate,
     asset_name: &str,
@@ -1043,12 +1044,14 @@ fn plan_intermediate(
                 "indices": mesh.indices.len(),
                 "material": mesh.material,
                 "tangents": tangents.name(),
+                "skinned": mesh.is_skinned(),
             }),
-            payload: fynkel_cooked::payload::encode_mesh(
+            payload: fynkel_cooked::payload::encode_skinned_mesh(
                 &vertices,
                 &mesh.indices,
                 mesh.bounds_min,
                 mesh.bounds_max,
+                &mesh.skin,
             ),
         });
     }
@@ -1110,6 +1113,30 @@ fn plan_intermediate(
                 "codec": clip.codec,
             }),
             payload: encode_clip(clip),
+        });
+    }
+    for skin in &im.skins {
+        chunks.push(ChunkPlan {
+            kind: KIND_SKIN,
+            name: skin.name.clone(),
+            sub: Some(skin.sub_id.clone()),
+            info: json!({
+                "joints": skin.payload.joints.len(),
+                "skeleton": skin.payload.skeleton,
+            }),
+            payload: fynkel_cooked::payload::encode_skin(&skin.payload),
+        });
+    }
+    for animation in &im.animations {
+        chunks.push(ChunkPlan {
+            kind: KIND_ANIMATION,
+            name: animation.name.clone(),
+            sub: Some(animation.sub_id.clone()),
+            info: json!({
+                "channels": animation.payload.channels.len(),
+                "seconds": animation.payload.duration,
+            }),
+            payload: fynkel_cooked::payload::encode_animation(&animation.payload),
         });
     }
     if let Some(prefab) = &im.prefab {
@@ -1241,13 +1268,15 @@ fn texture_chunk(t: &TextureData, sub: Option<String>) -> ChunkPlan {
     }
 }
 
-/// `MESH` (see `fynkel_cooked::payload`).
+/// `MESH` (see `fynkel_cooked::payload`), with the skin weights of a
+/// skinned mesh as the trailing section.
 pub fn encode_mesh(mesh: &MeshData) -> Vec<u8> {
-    fynkel_cooked::payload::encode_mesh(
+    fynkel_cooked::payload::encode_skinned_mesh(
         &mesh.vertices,
         &mesh.indices,
         mesh.bounds_min,
         mesh.bounds_max,
+        &mesh.skin,
     )
 }
 

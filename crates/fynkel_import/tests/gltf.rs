@@ -576,3 +576,150 @@ fn sidecar_ids_that_the_file_no_longer_produces_are_reported() {
         .any(|d| d.code == Code::IMPORT_SKIPPED && d.message.contains("mesh/9")));
     assert!(!r.sub_assets.iter().any(|(k, _)| k == "mesh/9"));
 }
+
+const RIG_ID: &str = "b0000000-0000-4000-8000-000000000012";
+
+/// `rig.glb` (`fixtures/rig.py`): a skinned column over a three-joint
+/// chain, a static prop, two clips (M3-19).
+#[test]
+fn rig_imports_skin_weights_skins_and_animations() {
+    use fynkel_cooked::payload::{
+        ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP,
+        ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_TRANSLATION,
+    };
+    let (r, _) = import_fixture("rig.glb");
+    assert!(!r.has_errors(), "{:#?}", r.diagnostics);
+    assert!(
+        r.diagnostics.is_empty(),
+        "a clean rig imports silently: {:#?}",
+        r.diagnostics
+    );
+    let i = r.intermediate.as_ref().unwrap();
+
+    // Skin weights: one per vertex, normalized, u8 joints widened.
+    let body = &i.meshes[0];
+    assert_eq!(body.sub_id, "mesh/0");
+    assert!(body.is_skinned());
+    assert_eq!(body.skin.len(), body.vertices.len());
+    assert_eq!(body.skin[0].joints, [0, 0, 0, 0]);
+    assert_eq!(body.skin[0].weights, [1.0, 0.0, 0.0, 0.0]);
+    assert_eq!(body.skin[4].joints, [0, 1, 0, 0]);
+    assert_eq!(body.skin[4].weights, [0.5, 0.5, 0.0, 0.0]);
+    assert_eq!(body.skin[12].joints, [2, 2, 0, 0]);
+    assert!(!i.meshes[1].is_skinned());
+
+    // The skin: joints in the file's order, parents inside the skin,
+    // inverse bind matrices, rest pose.
+    assert_eq!(i.skins.len(), 1);
+    let skin = &i.skins[0];
+    assert_eq!(skin.sub_id, "skin/0");
+    assert_eq!(skin.name, "Skin");
+    assert_eq!(skin.payload.skeleton, "hips");
+    let names: Vec<&str> = skin
+        .payload
+        .joints
+        .iter()
+        .map(|j| j.name.as_str())
+        .collect();
+    assert_eq!(names, ["hips", "spine", "head"]);
+    let parents: Vec<Option<u32>> = skin.payload.joints.iter().map(|j| j.parent).collect();
+    assert_eq!(parents, [None, Some(0), Some(1)]);
+    assert_eq!(skin.payload.joints[2].inverse_bind[13], -1.0);
+    assert_eq!(skin.payload.joints[1].rest_translation, [0.0, 0.5, 0.0]);
+    assert_eq!(skin.payload.joints[1].rest_rotation, [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(skin.payload.joints[1].rest_scale, [1.0; 3]);
+
+    // The clips: channels by node name, interpolation kept, duration.
+    assert_eq!(i.animations.len(), 2);
+    let wave = &i.animations[0];
+    assert_eq!(wave.sub_id, "anim/0");
+    assert_eq!(wave.name, "wave");
+    assert_eq!(wave.payload.duration, 1.0);
+    assert_eq!(wave.payload.channels.len(), 3);
+    let spine = &wave.payload.channels[0];
+    assert_eq!(spine.target, "spine");
+    assert_eq!(spine.property, ANIM_PROPERTY_ROTATION);
+    assert_eq!(spine.interpolation, ANIM_INTERPOLATION_LINEAR);
+    assert_eq!(spine.times, [0.0, 0.5, 1.0]);
+    assert_eq!(spine.values.len(), 12);
+    assert!((spine.values[6] - (std::f32::consts::FRAC_PI_8).sin()).abs() < 1e-6);
+    let head = &wave.payload.channels[1];
+    assert_eq!(head.target, "head");
+    assert_eq!(head.interpolation, ANIM_INTERPOLATION_STEP);
+    let hips = &wave.payload.channels[2];
+    assert_eq!(hips.target, "hips");
+    assert_eq!(hips.property, ANIM_PROPERTY_TRANSLATION);
+    assert_eq!(hips.interpolation, ANIM_INTERPOLATION_CUBIC_SPLINE);
+    assert_eq!(hips.values.len(), 2 * 3 * 3);
+    assert_eq!(hips.values[12..15], [0.0, 0.25, 0.0]);
+    let bob = &i.animations[1];
+    assert_eq!(bob.name, "bob");
+    assert_eq!(bob.payload.duration, 2.0);
+    assert_eq!(bob.payload.channels[0].target, "Prop");
+
+    // Sub-assets and derived ids.
+    let subs: Vec<&str> = i.sub_assets.iter().map(|(k, _)| k.as_str()).collect();
+    assert_eq!(
+        subs,
+        ["mesh/0", "mesh/1", "skin/0", "anim/0", "anim/1", "prefab"]
+    );
+    let asset = Uuid::parse_str(RIG_ID).unwrap();
+    assert_eq!(i.sub_assets[2].1, derive_sub_id(asset, "skin/0"));
+
+    // The prefab: `fynkel.Skin` next to the Body's renderer, none on the prop.
+    let p = i.prefab.as_ref().unwrap();
+    let entities = p["entities"].as_object().unwrap();
+    assert_eq!(entities.len(), 6);
+    let node = |n: usize| derive_sub_id(asset, &format!("node/{n}")).to_string();
+    let body = &entities[&node(1)];
+    let components: Vec<&serde_json::Value> =
+        body["components"].as_object().unwrap().values().collect();
+    assert_eq!(components.len(), 3);
+    assert_eq!(components[1]["type"], "fynkel.MeshRenderer");
+    assert_eq!(components[2]["type"], "fynkel.Skin");
+    assert_eq!(components[2]["data"]["skin"]["asset"], RIG_ID);
+    assert_eq!(components[2]["data"]["skin"]["sub"], "skin/0");
+    assert_eq!(components[2]["data"]["skeleton"], "hips");
+    assert!(body["components"]
+        .as_object()
+        .unwrap()
+        .contains_key(&derive_sub_id(asset, "node/1/skin").to_string()));
+    let prop = &entities[&node(5)];
+    assert_eq!(prop["components"].as_object().unwrap().len(), 2);
+    let names: Vec<&str> = entities
+        .values()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Rig", "Body", "hips", "spine", "head", "Prop"]);
+
+    let schemas = SchemaSet::embedded();
+    let text = serde_json::to_string_pretty(p).unwrap();
+    let doc = Document::parse(DocumentKind::Prefab, Some("prefab"), &text)
+        .unwrap_or_else(|d| panic!("{d:#?}"));
+    let diags = Prefab::from_document(doc).validate(&schemas);
+    assert!(!has_errors(&diags), "{diags:#?}");
+
+    // The intermediate's bytes carry all of it.
+    let again = Intermediate::from_bytes(&i.to_bytes()).unwrap();
+    assert_eq!(&again, i);
+}
+
+#[test]
+fn duplicate_joint_names_in_a_skin_are_an_error() {
+    let (r, _) = import_fixture("rig_dupe_joints.glb");
+    assert_eq!(codes(&r), [Code::IMPORT_INVALID_DATA]);
+    assert!(r.diagnostics[0].message.contains("\"spine\""));
+    assert!(r.intermediate.is_none());
+}
+
+#[test]
+fn skin_joint_limit_is_enforced() {
+    let path = fixture("rig.glb");
+    let meta = meta_for(&path);
+    let two = Limits {
+        max_joints: 2,
+        ..Limits::default()
+    };
+    let r = import(&path, &meta, &two);
+    assert_eq!(codes(&r), [Code::IMPORT_LIMIT]);
+}

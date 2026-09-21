@@ -31,6 +31,7 @@ reference test `crates/fynkel_core/tests/catalogue.rs`.
 World::step
   drive_characters              the characters' action driver (M3-09)
   apply C[n]                    the tick's commands
+  run_animation                 animators pose their subtrees, skins resolve joints (M3-19)
   run_rotators, run_oscillators pre-tick movers: local transforms change
   run_lifetimes                 expired subtrees destroyed (Destroyed events)
   run_emitters                  prefabs instantiated, LifetimeDespawn added
@@ -109,6 +110,7 @@ with it).
 clock: one `fynkel.rec.SystemTime { system: SystemKind, entities, micros }`
 per `SystemKind`, in tick order — `step` (the whole thing; `entities` is
 the live count), `commands` (applied), `characters` (driven),
+`animation` (animators + skins, M3-19, [animation.md](animation.md)),
 `rotator`/`oscillate`/`lifetimeDespawn`/`emitter` (components ticked;
 the emitter's instances count in their own components), `physics`
 (bodies + colliders + characters), `cameraRigs`, `follow`,

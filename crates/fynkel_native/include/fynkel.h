@@ -110,7 +110,11 @@ typedef enum FynkelCommandKind {
   /* body: BodyCommandRecord { entity, op, vector, rotation }; simulation
    * lane only; applied by the tick's physics step (M3-08); ops `move` and
    * `jump` address a CharacterController (M3-09). */
-  FYNKEL_COMMAND_BODY = 8
+  FYNKEL_COMMAND_BODY = 8,
+  /* body: AnimateCommandRecord { entity, op, seconds, speed, looping,
+   * clip }; addresses a fynkel.Animator (M3-19): play, crossfade, stop,
+   * pause, resume, set_speed, set_time. */
+  FYNKEL_COMMAND_ANIMATE = 9
 } FynkelCommandKind;
 
 typedef enum FynkelComponent {
@@ -135,7 +139,11 @@ typedef enum FynkelComponent {
   FYNKEL_COMPONENT_LIFETIME_DESPAWN = 18,
   FYNKEL_COMPONENT_EMITTER = 19,
   /* A sensor collider that names an event for Dart (M3-12). */
-  FYNKEL_COMPONENT_TRIGGER_ZONE = 20
+  FYNKEL_COMPONENT_TRIGGER_ZONE = 20,
+  /* Animation (M3-19): a clip player over the named nodes below it, and
+   * the skin a skinned mesh deforms with. */
+  FYNKEL_COMPONENT_ANIMATOR = 21,
+  FYNKEL_COMPONENT_SKIN = 22
 } FynkelComponent;
 
 /* Event kinds in fynkel_world_drain_events (the schema's `fynkel.ev.*`
@@ -152,6 +160,9 @@ typedef enum FynkelEventKind {
    * (`fynkel.ev.Zone` body: zone, other, event name). */
   FYNKEL_EVENT_ZONE_ENTERED = 7,
   FYNKEL_EVENT_ZONE_EXITED = 8,
+  /* M3-19: a non-looping clip reached its end (`fynkel.ev.AnimationEnded`
+   * body: entity, clip). */
+  FYNKEL_EVENT_ANIMATION_ENDED = 9,
   FYNKEL_EVENT_COLLISION_ENTER = 0x100,
   FYNKEL_EVENT_COLLISION_STAY = 0x101,
   FYNKEL_EVENT_COLLISION_EXIT = 0x102,
@@ -184,7 +195,11 @@ typedef enum FynkelQueryKind {
   FYNKEL_QUERY_CHARACTER = 9,
   /* (no entity) -> one SystemTimeRecord { system, entities, micros } per
    * SystemKind: the last step's per-phase wall time (M3-10). */
-  FYNKEL_QUERY_SYSTEMS = 10
+  FYNKEL_QUERY_SYSTEMS = 10,
+  /* entity -> one AnimatorStateRecord { entity, time, duration, speed,
+   * fade_remaining, playing, looping, clip } (0 records without an
+   * Animator) (M3-19). */
+  FYNKEL_QUERY_ANIMATOR = 11
 } FynkelQueryKind;
 
 /* ---- Buffer header ------------------------------------------------------ */

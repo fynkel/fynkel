@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 /// `SystemKind` in declaration order — the index into `system_times`.
-const SYSTEMS: [SystemKind; 13] = [
+const SYSTEMS: [SystemKind; 14] = [
     SystemKind::Step,
     SystemKind::Commands,
     SystemKind::Characters,
+    SystemKind::Animation,
     SystemKind::Rotator,
     SystemKind::Oscillate,
     SystemKind::LifetimeDespawn,
@@ -37,19 +38,22 @@ use fynkel_scene::{self as scene, Parent, SceneError, Transform, WorldTransform}
 use fynkel_schema_derive::Schema;
 use glam::{Mat4, Quat, Vec3};
 
+use crate::animation::Pose;
 use crate::clock::{FrameClock, FramePlan};
 use crate::command::{Command, Lane};
 use crate::components::{
-    Camera, ComponentValue, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn,
-    LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, SpotLight, ThirdPersonCamera,
-    TriggerZone,
+    Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment, Follow,
+    LifetimeDespawn, LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, Skin, SpotLight,
+    ThirdPersonCamera, TriggerZone,
 };
 use crate::event::{Event, EventPayload, EventQueue};
 use crate::input::{ActionSpec, ActionState, BindingError, Input, InputEvent};
 use crate::load::{LoadedScene, SceneDescription};
 use crate::schema::{SystemKind, SystemTimeRecord};
 
+mod animation;
 mod catalogue;
+pub use animation::{AnimatorRun, Fade, SkinRun};
 pub use catalogue::{EmitterRun, Oscillation};
 mod projection;
 pub use projection::{
@@ -158,6 +162,18 @@ pub struct ExtractMesh {
     pub material: AssetRef,
     pub cast_shadows: bool,
     pub receive_shadows: bool,
+    /// The joint palette of a skinned draw (M3-19): a range of
+    /// [`Extract::joints`]. `None` draws the mesh as it was cooked.
+    pub skin: Option<ExtractSkin>,
+}
+
+/// One skinned mesh's matrices in [`Extract::joints`], in the skin's
+/// joint order: mesh space → posed joint → mesh space, from the joints'
+/// interpolated world matrices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExtractSkin {
+    pub first_joint: u32,
+    pub joint_count: u32,
 }
 
 /// The camera the frame is rendered from: the enabled `Camera` with the
@@ -209,6 +225,8 @@ pub struct Extract {
     pub alpha: f32,
     pub records: Vec<ExtractRecord>,
     pub meshes: Vec<ExtractMesh>,
+    /// Every skinned mesh's palette, back to back (`ExtractMesh::skin`).
+    pub joints: Vec<Mat4>,
     pub camera: Option<ExtractCamera>,
     pub directional_lights: Vec<ExtractDirectionalLight>,
     pub point_lights: Vec<ExtractPointLight>,
@@ -250,6 +268,9 @@ pub struct World {
     named_targets: HashMap<Entity, Entity>,
     /// Prefab descriptions `Emitter`s may instantiate (M3-10).
     prefabs: HashMap<Uuid, Arc<SceneDescription>>,
+    /// Clips `Animator`s may play and skins `Skin`s deform with (M3-19).
+    clips: animation::ClipTable,
+    skins: animation::SkinTable,
     /// The scenes this world holds, in load order (M3-12): what a replace
     /// load or `unload_scene` takes down.
     pub(crate) scenes: Vec<LoadedScene>,
@@ -262,6 +283,9 @@ pub struct World {
     entity_scratch: Vec<Entity>,
     emission_scratch: Vec<catalogue::Emission>,
     placement_scratch: Vec<catalogue::Placement>,
+    animator_scratch: Vec<animation::AnimatorTick>,
+    pose_scratch: Pose,
+    fade_pose_scratch: Pose,
 }
 
 fn micros(since: Instant) -> u64 {
@@ -305,6 +329,8 @@ impl World {
             physics: Physics::new(),
             named_targets: HashMap::new(),
             prefabs: HashMap::new(),
+            clips: HashMap::new(),
+            skins: HashMap::new(),
             scenes: Vec::new(),
             system_times: SYSTEMS
                 .iter()
@@ -320,6 +346,9 @@ impl World {
             entity_scratch: Vec::new(),
             emission_scratch: Vec::new(),
             placement_scratch: Vec::new(),
+            animator_scratch: Vec::new(),
+            pose_scratch: Pose::default(),
+            fade_pose_scratch: Pose::default(),
         }
     }
 
@@ -662,7 +691,8 @@ impl World {
             | Command::SetName { entity, .. }
             | Command::SetComponent { entity, .. }
             | Command::RemoveComponent { entity, .. }
-            | Command::Body { entity, .. } => resolve(entity),
+            | Command::Body { entity, .. }
+            | Command::Animate { entity, .. } => resolve(entity),
             Command::SetParent { child, parent, .. } => {
                 resolve(child);
                 if let Some(p) = parent {
@@ -837,6 +867,8 @@ impl World {
                     }
                     ComponentId::EMITTER => self.ecs.remove::<Emitter>(entity).is_ok(),
                     ComponentId::TRIGGER_ZONE => self.ecs.remove::<TriggerZone>(entity).is_ok(),
+                    ComponentId::ANIMATOR => self.ecs.remove::<Animator>(entity).is_ok(),
+                    ComponentId::SKIN => self.ecs.remove::<Skin>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -883,6 +915,7 @@ impl World {
                 self.physics.queue(index, entity, op);
                 true
             }
+            Command::Animate { entity, op } => self.apply_animate(index, entity, op),
         }
     }
 
@@ -949,6 +982,8 @@ impl World {
             ComponentValue::LifetimeDespawn(v) => self.ecs.insert(entity, v),
             ComponentValue::Emitter(v) => self.ecs.insert(entity, v),
             ComponentValue::TriggerZone(v) => self.ecs.insert(entity, v),
+            ComponentValue::Animator(v) => self.ecs.insert(entity, v),
+            ComponentValue::Skin(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -1057,6 +1092,12 @@ impl World {
             }
         }
         self.set_time(SystemKind::Commands, applied, micros(t0));
+
+        // Animators pose their subtrees first among the pre-tick systems
+        // (M3-19): a mover or a body on a posed joint follows the pose.
+        let t0 = Instant::now();
+        let n = self.run_animation(next_tick);
+        self.set_time(SystemKind::Animation, n, micros(t0));
 
         // The catalogue's pre-tick movers (§3.5, M3-10): they see the
         // batch's writes and physics sees theirs.
@@ -1564,12 +1605,28 @@ impl World {
             });
             if let Ok(m) = self.ecs.get::<MeshRenderer>(e) {
                 if m.visible {
+                    // A skinned draw's palette from the joints' own
+                    // interpolated matrices (M3-19).
+                    let skin = self.skin_joints(e).map(|(skin, joints)| {
+                        let first_joint = out.joints.len() as u32;
+                        let mut world_of = |j: Entity| {
+                            self.ecs
+                                .has::<WorldTransform>(j)
+                                .then(|| self.resolve_extract(j, alpha, &mut memo).0)
+                        };
+                        World::skin_palette(world, &skin, &joints, &mut world_of, &mut out.joints);
+                        ExtractSkin {
+                            first_joint,
+                            joint_count: skin.joints.len() as u32,
+                        }
+                    });
                     out.meshes.push(ExtractMesh {
                         record,
                         mesh: m.mesh.clone(),
                         material: m.material.clone(),
                         cast_shadows: m.cast_shadows,
                         receive_shadows: m.receive_shadows,
+                        skin,
                     });
                 }
             }

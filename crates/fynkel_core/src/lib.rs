@@ -20,6 +20,7 @@
 //! Everything Dart-facing is typed Rust here; the wire encoding lives in
 //! `fynkel_native` (M1-06) and is generated from these types (ADR-0012).
 
+pub mod animation;
 pub mod clock;
 pub mod command;
 pub mod components;
@@ -31,12 +32,15 @@ pub mod schema;
 pub mod settings;
 pub mod world;
 
+/// The clip core; `animation::Skin` (the data) is reached through the
+/// module, `Skin` at the root is the component.
+pub use animation::{Channel, Clip, Interpolation, Joint, Pose, PoseEntry, Property};
 pub use clock::{FrameClock, FramePlan};
-pub use command::{Command, Lane};
+pub use command::{AnimateOp, Command, Lane};
 pub use components::{
-    Camera, ComponentValue, DirectionalLight, Emitter, Environment, ExposureMode, Follow,
+    Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment, ExposureMode, Follow,
     LifetimeDespawn, LookAtCamera, MeshRenderer, MotionSpace, Oscillate, PointLight, Projection,
-    Rotator, SpotLight, ThirdPersonCamera, TriggerZone,
+    Rotator, Skin, SpotLight, ThirdPersonCamera, TriggerZone,
 };
 pub use event::{Event, EventPayload};
 pub use fynkel_contracts::{

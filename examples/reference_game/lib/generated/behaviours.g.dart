@@ -60,6 +60,15 @@ final BehaviourType gamePlayerType = BehaviourType(
   create: _lib2.Player.new,
   fields: [
     BehaviourField(
+      name: 'blend',
+      type: 'number',
+      defaultValue: 0.15,
+      min: 0,
+      step: 0.05,
+      get: (b) => (b as _lib2.Player).blend,
+      set: (b, v) => (b as _lib2.Player).blend = _double(v),
+    ),
+    BehaviourField(
       name: 'cameraName',
       type: 'string',
       defaultValue: 'Camera',

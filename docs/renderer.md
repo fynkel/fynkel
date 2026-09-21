@@ -284,31 +284,75 @@ shadows are off) and its comparison sampler (binding 2). The shadow pass
 binds its own 64-byte `view_proj` uniform at group 0.
 
 Per instance (vertex buffer 1, 128 bytes, locations 6–13): model matrix,
-`tint` (base colour factor), `emissive` (rgb × strength), `params`
+`tint` (base colour factor), `emissive` (rgb × strength; `w` = the
+instance's first joint in the palette, § Skinning), `params`
 (metallic, roughness, normal_scale, occlusion_strength), `flags` (alpha
 cutoff, −1 opaque or −2 blend; unlit; double-sided; receives shadows).
 
+Bind group 2 (`skin_layout`, vertex stage, part of the mesh and shadow
+pipeline layouts and always bound): one read-only storage buffer of
+`array<mat4x4<f32>>`, the frame's joint palettes (§ Skinning; 64 matrices
+before the first growth, `next_power_of_two` beyond).
+
+### Skinning (M3-19, [animation.md](animation.md))
+
+A skinned mesh (`MeshPayload::is_skinned`: a `SkinWeight` per vertex
+after the indices) uploads a second vertex buffer, `GpuMesh.skin_buffer`,
+bound at slot 2 as `VsSkin { joints: vec4<u32> @14 (Uint16x4), weights:
+vec4<f32> @15 }`. The extract hands the renderer `Extract.joints` — the
+concatenated palettes of every skinned mesh whose `fynkel.Skin` resolved
+this frame, each `inverse(mesh_world) · joint_world · inverse_bind` from
+the joints' *interpolated* world matrices — and per mesh an
+`ExtractMesh.skin: Option<ExtractSkin { first_joint, joint_count }>`.
+`prepare` writes the palettes to the group 2 storage buffer once per
+frame (grown and its bind group recreated when the count outgrows it),
+carries `first_joint` in `Instance.emissive.w`, and keys batches by
+`(mesh, material, skinned)` so skinned instances of one mesh still
+instance in one draw. `vs_skinned` computes `pose = Σᵢ wᵢ ·
+joints[min(base + jᵢ, arrayLength − 1)]` and `model = instance_model ·
+pose`, then calls the static path's `vertex(in, model)` — one shading
+path, one shadow path (`shadow.wgsl` has the same entry, so a posed
+character casts its posed shadow). A skinned mesh whose entity has no
+`Skin` component, or whose skin the world does not hold, draws through
+the static pipeline as cooked: its bind pose. `FrameStats.skinned` and
+`.joints` count the frame's skinned instances and palette size (the
+standalone's stats line, `fynkel render`'s summary); `fynkel render
+--steps <n>` ticks the world `n` times before drawing so a pose can be
+captured, and registers the scene's prefabs, clips and skins first.
+Test: `tests/project.rs` `skinned_meshes_follow_their_joint_palette` —
+the fixture's Rig scene at tick 1 matches the same extract with the skin
+dropped (bind pose), and after 30 ticks the bent column has moved
+hundreds of pixels to the left while the unposed extract has not.
+
 ## Pipelines and caches — the variant cap
 
-Exactly **nine** render pipelines exist, all created in `new`
+Exactly **fourteen** render pipelines exist, all created in `new`
 (`PIPELINE_VARIANTS`) and rebuilt as a set only when the sample count
 changes; nothing is compiled at draw time:
 
-| Pipeline | Target | Samples | Culling | Depth | Blend |
-| --- | --- | --- | --- | --- | --- |
-| `mesh` | HDR | msaa | back | write, `Less` | — |
-| `mesh_double_sided` | HDR | msaa | none | write, `Less` | — |
-| `transparent` | HDR | msaa | back | read, `Less` | src-alpha |
-| `transparent_double_sided` | HDR | msaa | none | read, `Less` | src-alpha |
-| `sky` | HDR | msaa | none | read, `LessEqual` | — |
-| `shadow` | shadow map (depth only) | 1 | none | write, `Less`, biased | — |
-| `debug` | HDR | msaa | none | read, `LessEqual` | — |
-| `post` | host format | 1 | none | none | — |
-| `present` | host format | 1 | none | none | — |
+| Pipeline | Target | Samples | Culling | Depth | Blend | Vertex entry |
+| --- | --- | --- | --- | --- | --- | --- |
+| `mesh` | HDR | msaa | back | write, `Less` | — | `vs_main` |
+| `mesh_double_sided` | HDR | msaa | none | write, `Less` | — | `vs_main` |
+| `transparent` | HDR | msaa | back | read, `Less` | src-alpha | `vs_main` |
+| `transparent_double_sided` | HDR | msaa | none | read, `Less` | src-alpha | `vs_main` |
+| `mesh_skinned`, `mesh_skinned_double_sided`, `transparent_skinned`, `transparent_skinned_double_sided` | the same four | | | | | `vs_skinned` (M3-19, § Skinning) |
+| `sky` | HDR | msaa | none | read, `LessEqual` | — | |
+| `shadow` | shadow map (depth only) | 1 | none | write, `Less`, biased | — | `vs_main` |
+| `shadow_skinned` | the same | | | | | `vs_skinned` |
+| `debug` | HDR | msaa | none | read, `LessEqual` | — | |
+| `post` | host format | 1 | none | none | — | |
+| `present` | host format | 1 | none | none | — | |
 
 Material features (maps present or not, mask, blend, unlit) are data —
 instance flags and fallback textures — not variants. A new variant needs
-a row in this table. Bind groups are cached per material `AssetRef`
+a row in this table. The item 19 rework of the cap: skinning is a
+different vertex input layout (a third vertex buffer) and a different
+vertex entry, which wgpu cannot make data, so it doubles the mesh and
+shadow rows — the 9 of M3-05 became 14, still all created up front and
+never at draw time; nothing else about a skinned draw (material, lights,
+shadow, blend) differs, and `Pipelines::opaque(skinned, double_sided)` /
+`transparent(…)` pick the variant. Bind groups are cached per material `AssetRef`
 (five texture views + the sampler, the fallback view for every unbound
 slot) and per texture; the post and present bind groups are rebuilt with
 the attachments (`resize`, a quality change), the frame bind group with
@@ -341,10 +385,12 @@ procedural or custom sky later.
 `examples/showcase` (README there) is the scene to look at: an evening
 sun with long shadows, a spot and two point lights, the sky, textured
 PBR, metals, overlapping blend panels, a mask card, an orbiting camera,
-three quality profiles. `fynkel render --project examples/showcase` draws
-the view the app opens on; `renders/<item>.png` is committed at the end of
-every renderer item, so a change is a before/after in the history and a
-number in the app's HUD.
+three quality profiles, and (M3-19) the reference game's rigged runner —
+a skinned mesh looping its run clip in place, the skinned caster in the
+shadow map. `fynkel render --project examples/showcase --steps 10` draws
+the view the app opens on with the runner mid-stride; `renders/<item>.png`
+is committed at the end of every renderer item, so a change is a
+before/after in the history and a number in the app's HUD.
 
 ## Tests
 

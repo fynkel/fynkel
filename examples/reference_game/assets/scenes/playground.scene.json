@@ -9,7 +9,7 @@
       "parent": null,
       "children": [
         "f405eaab-e8b2-5c12-8e03-57e673929b2a",
-        "436e22c5-ee8a-5682-afe4-d4e011dd341b"
+        "6185ea96-bbe9-572f-a526-4eacab5f0312"
       ],
       "components": {
         "c46ac8f8-5750-5470-9f76-2a81999c1a90": {
@@ -70,6 +70,19 @@
             "cameraName": "Camera",
             "fallY": -6.0
           }
+        },
+        "973546b9-5862-5208-a67e-04c0be7073d4": {
+          "type": "fynkel.Animator",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+              "sub": "anim/0"
+            },
+            "speed": 1.0,
+            "looping": true,
+            "playing": true
+          }
         }
       }
     },
@@ -84,7 +97,7 @@
           "data": {
             "position": [
               0.0,
-              0.9,
+              0.0,
               0.0
             ],
             "rotation": [
@@ -105,8 +118,8 @@
           "version": 1,
           "data": {
             "mesh": {
-              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/1"
+              "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+              "sub": "mesh/0"
             },
             "material": {
               "asset": "31ed29ac-c21f-50ba-8dec-de6e7d6f0b18"
@@ -115,22 +128,37 @@
             "receive_shadows": true,
             "visible": true
           }
+        },
+        "6c3bd89d-e40d-5f3c-976f-f3cace954077": {
+          "type": "fynkel.Skin",
+          "version": 1,
+          "data": {
+            "skin": {
+              "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
+              "sub": "skin/0"
+            },
+            "skeleton": "hips"
+          }
         }
       }
     },
-    "436e22c5-ee8a-5682-afe4-d4e011dd341b": {
-      "name": "Visor",
+    "6185ea96-bbe9-572f-a526-4eacab5f0312": {
+      "name": "hips",
       "parent": "2fd40fbe-11e2-5290-8efd-f4f22176300e",
-      "children": [],
+      "children": [
+        "b99b7026-066d-54fd-a208-61b46ddbf0e3",
+        "a0bc0253-7b9b-5e2f-9c4b-9510401efcdc",
+        "0a613c4d-531d-50db-bad9-d8447052d3f7"
+      ],
       "components": {
-        "6d3a4c34-9f5d-5f4a-88ac-abe2ec974c12": {
+        "ea166320-3825-5cc3-b6ca-cd3145616ee0": {
           "type": "fynkel.Transform",
           "version": 1,
           "data": {
             "position": [
               0.0,
-              1.45,
-              -0.32
+              0.95,
+              0.0
             ],
             "rotation": [
               0.0,
@@ -139,9 +167,342 @@
               1.0
             ],
             "scale": [
-              0.36,
-              0.12,
-              0.16
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "b99b7026-066d-54fd-a208-61b46ddbf0e3": {
+      "name": "spine",
+      "parent": "6185ea96-bbe9-572f-a526-4eacab5f0312",
+      "children": [
+        "fee062a3-d044-5abf-a249-56e2996dfa4c",
+        "f5dbff20-e3ad-594b-a7ea-8a8e6a09415e",
+        "6dff1b93-4c14-503c-98fd-a335576a196a"
+      ],
+      "components": {
+        "c1e8ac80-f2c7-53b6-8f9e-6f0220f1c74a": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.2,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "fee062a3-d044-5abf-a249-56e2996dfa4c": {
+      "name": "head",
+      "parent": "b99b7026-066d-54fd-a208-61b46ddbf0e3",
+      "children": [
+        "436e22c5-ee8a-5682-afe4-d4e011dd341b"
+      ],
+      "components": {
+        "dafcdb6b-6fc4-53fc-8fe2-7c55cb3e1a81": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.42,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "f5dbff20-e3ad-594b-a7ea-8a8e6a09415e": {
+      "name": "upperarm_l",
+      "parent": "b99b7026-066d-54fd-a208-61b46ddbf0e3",
+      "children": [
+        "468bb6e8-d1f7-59e7-a2d0-e9ac0ff32e64"
+      ],
+      "components": {
+        "75ca2641-4a4b-5467-8cfd-cee1b5fad2a4": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.29,
+              0.3,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "468bb6e8-d1f7-59e7-a2d0-e9ac0ff32e64": {
+      "name": "forearm_l",
+      "parent": "f5dbff20-e3ad-594b-a7ea-8a8e6a09415e",
+      "children": [],
+      "components": {
+        "67f7778a-61c0-5920-a18a-06f042e59741": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.3,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "6dff1b93-4c14-503c-98fd-a335576a196a": {
+      "name": "upperarm_r",
+      "parent": "b99b7026-066d-54fd-a208-61b46ddbf0e3",
+      "children": [
+        "591c108c-fb76-58c8-82ae-13ebc33c3a34"
+      ],
+      "components": {
+        "ce03bd05-6020-5f9a-ad4e-5e96399a579c": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -0.29,
+              0.3,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "591c108c-fb76-58c8-82ae-13ebc33c3a34": {
+      "name": "forearm_r",
+      "parent": "6dff1b93-4c14-503c-98fd-a335576a196a",
+      "children": [],
+      "components": {
+        "bf0951c4-5aab-579a-a335-04951445fe26": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.3,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "a0bc0253-7b9b-5e2f-9c4b-9510401efcdc": {
+      "name": "thigh_l",
+      "parent": "6185ea96-bbe9-572f-a526-4eacab5f0312",
+      "children": [
+        "c8d50718-24e6-55c2-a3b8-2688f3b70e3c"
+      ],
+      "components": {
+        "1d2dbf1e-d039-5876-b3eb-9e81741e5201": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.11,
+              -0.03,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "c8d50718-24e6-55c2-a3b8-2688f3b70e3c": {
+      "name": "shin_l",
+      "parent": "a0bc0253-7b9b-5e2f-9c4b-9510401efcdc",
+      "children": [],
+      "components": {
+        "b0724dc5-bb38-5455-8d25-e2e3881d1c0f": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.46,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "0a613c4d-531d-50db-bad9-d8447052d3f7": {
+      "name": "thigh_r",
+      "parent": "6185ea96-bbe9-572f-a526-4eacab5f0312",
+      "children": [
+        "ad417575-fb56-5958-a594-e22e5726becf"
+      ],
+      "components": {
+        "ba371d5e-1ede-52ea-b365-a82bb86c9e8b": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -0.11,
+              -0.03,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "ad417575-fb56-5958-a594-e22e5726becf": {
+      "name": "shin_r",
+      "parent": "0a613c4d-531d-50db-bad9-d8447052d3f7",
+      "children": [],
+      "components": {
+        "bfba3467-a153-5e55-a5ab-b7b97d50f439": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.46,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
+    "436e22c5-ee8a-5682-afe4-d4e011dd341b": {
+      "name": "Visor",
+      "parent": "fee062a3-d044-5abf-a249-56e2996dfa4c",
+      "children": [],
+      "components": {
+        "6d3a4c34-9f5d-5f4a-88ac-abe2ec974c12": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.13,
+              -0.13
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.2,
+              0.07,
+              0.06
             ]
           }
         },

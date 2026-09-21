@@ -581,4 +581,67 @@ void main() {
     ProjectedPointRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
+  // M3-19.
+  check(
+    'Animator',
+    Animator(
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/1'),
+      speed: 1.5,
+      looping: false,
+      playing: true,
+    ),
+    Animator.wireSize,
+    Animator.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'Skin',
+    Skin(
+      skin: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'skin/0'),
+      skeleton: 'skeleton',
+    ),
+    Skin.wireSize,
+    Skin.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AnimateCommandRecord',
+    AnimateCommandRecord(
+      entity: entity(4, 2),
+      op: AnimateOp.crossfade,
+      seconds: 0.25,
+      speed: 1,
+      looping: true,
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/0'),
+    ),
+    AnimateCommandRecord.wireSize,
+    AnimateCommandRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AnimationEndedEvent',
+    AnimationEndedEvent(
+      entity: entity(4, 2),
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/0'),
+    ),
+    AnimationEndedEvent.wireSize,
+    AnimationEndedEvent.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  check(
+    'AnimatorStateRecord',
+    AnimatorStateRecord(
+      entity: entity(4, 2),
+      time: 0.5,
+      duration: 2,
+      speed: 1,
+      fadeRemaining: 0.125,
+      playing: true,
+      looping: false,
+      clip: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'anim/0'),
+    ),
+    AnimatorStateRecord.wireSize,
+    AnimatorStateRecord.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
 }

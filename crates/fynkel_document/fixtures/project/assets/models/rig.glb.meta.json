@@ -1,0 +1,17 @@
+{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 1,
+  "id": "c0000000-0000-4000-8000-000000000005",
+  "name": "rig.glb",
+  "importer": "fynkel.gltf",
+  "importerVersion": 4,
+  "settings": {},
+  "subAssets": {
+    "mesh/0": "d9420b01-be9b-5c18-8fb6-5ed7acc42bdb",
+    "mesh/1": "52c5b2bb-cfcf-54be-835d-be70fcaeafd3",
+    "skin/0": "ea41c3ed-d60e-5fc6-917b-78f4b56b56ab",
+    "anim/0": "2dae27b2-954d-5323-8b90-f56a8fb082d1",
+    "anim/1": "8dce333f-f047-5071-aa1a-31fd856f0b69",
+    "prefab": "2e3e7f4f-a79e-57d3-9478-272473bf1296"
+  }
+}

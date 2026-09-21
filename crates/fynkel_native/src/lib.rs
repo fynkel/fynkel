@@ -206,6 +206,43 @@ impl FynkelWorld {
         self.assets.as_ref()
     }
 
+    /// Registers from the cache the clip or skin a command names before
+    /// the batch is applied (M3-19): a `Play`/`Crossfade` of a clip a
+    /// loaded scene never named, or an `Animator`/`Skin` set from a
+    /// behaviour. A clip the cache cannot read stays unregistered and the
+    /// animator reports `CLIP_UNAVAILABLE` at the tick.
+    fn register_animation_assets(&mut self, commands: &[bridge::IndexedCommand]) {
+        use fynkel_core::components::ComponentValue;
+        use fynkel_core::{AnimateOp, Command};
+        let Some(assets) = self.assets.clone() else {
+            return;
+        };
+        for (_, c) in commands {
+            let Ok(c) = c else { continue };
+            match c {
+                Command::Animate {
+                    op: AnimateOp::Play { clip, .. } | AnimateOp::Crossfade { clip, .. },
+                    ..
+                } => {
+                    let _ = assets.register_clip(clip, &mut self.inner);
+                }
+                Command::SetComponent {
+                    value: ComponentValue::Animator(a),
+                    ..
+                } => {
+                    let _ = assets.register_clip(&a.clip, &mut self.inner);
+                }
+                Command::SetComponent {
+                    value: ComponentValue::Skin(k),
+                    ..
+                } => {
+                    let _ = assets.register_skin(&k.skin, &mut self.inner);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn rebuild_diagnostics(&mut self) {
         let buf = std::mem::take(&mut self.diagnostics_buf);
         self.diagnostics_buf = bridge::encode_diagnostics(buf, self.inner.diagnostics());
@@ -337,6 +374,7 @@ pub unsafe extern "C" fn fynkel_world_submit_commands(
                 return Status::Protocol;
             }
         };
+        w.register_animation_assets(&commands);
         let report = w.inner.submit_indexed(lane, commands);
         if lane == Lane::Presentation {
             w.rebuild_diagnostics();

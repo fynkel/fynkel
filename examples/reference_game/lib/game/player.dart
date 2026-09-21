@@ -11,6 +11,14 @@ import 'game_state.dart';
 /// while grounded, dies on a `hazard` zone or below [fallY] (respawns at
 /// the start), restarts the run on `restart`, and keeps the clock.
 ///
+/// Its rigged character (tools/character.py) is posed from the same
+/// state: the `fynkel.Animator` the scene puts on the player starts on
+/// `anim/0` idle, and every tick this behaviour crossfades to the clip the
+/// controller's state calls for — walk or run on the ground with the stick
+/// moving, jump (one-shot) on the jump press — and back to idle. The clips
+/// are authored in place: the controller moves the entity, the animator
+/// only poses the joints (docs/animation.md).
+///
 /// The controller's own `moveAction`/`jumpAction` are left empty in the
 /// scene so this behaviour is the one mover (a behaviour's `move` in the
 /// same tick would win anyway; docs/physics.md).
@@ -39,6 +47,17 @@ class Player extends Behaviour {
   /// Where a death puts the player back: the scene position.
   late Vec3 spawn;
 
+  /// Seconds a clip change blends over.
+  @Expose(min: 0, step: 0.05)
+  double blend = 0.15;
+
+  /// The clips: the character asset the scene's animator names, so the
+  /// model can be swapped without touching the code.
+  late AssetRef idleClip, walkClip, runClip, jumpClip;
+
+  /// The clip last chosen (what the animator plays).
+  AssetRef? clip;
+
   /// Ticks the player has been in the air (for the HUD's readout and the
   /// tests).
   int jumps = 0;
@@ -50,6 +69,12 @@ class Player extends Behaviour {
   @override
   void start() {
     spawn = transform.position;
+    final character = get<Animator>()?.clip.asset ?? AssetRef.none.asset;
+    idleClip = AssetRef(character, sub: 'anim/0');
+    walkClip = AssetRef(character, sub: 'anim/1');
+    runClip = AssetRef(character, sub: 'anim/2');
+    jumpClip = AssetRef(character, sub: 'anim/3');
+    clip = idleClip; // the scene's animator starts there
   }
 
   @override
@@ -85,16 +110,39 @@ class Player extends Behaviour {
     move((right * stick.x + forward * stick.y) * speed);
 
     // The press edge reaches exactly one tick (§5.1).
-    if (Input.pressed('jump') && me.grounded) {
+    final jumped = Input.pressed('jump') && me.grounded;
+    if (jumped) {
       jump(jumpSpeed);
       jumps++;
     }
+    pose(jumped: jumped, grounded: me.grounded, moving: stick.length > 0.05, sprinting: Input.held('sprint'));
 
     if (!state.won.value) {
       _elapsed += context.dt;
       final tenths = (_elapsed * 10).floor();
       if (tenths != state.elapsedTenths.value) state.elapsedTenths.value = tenths;
     }
+  }
+
+  /// Picks the clip for this tick's state and crossfades to it when it
+  /// changes. The jump plays once and holds its last frame until the
+  /// player lands (the controller is airborne longer than the clip), so
+  /// in the air nothing is chosen over it.
+  void pose({required bool jumped, required bool grounded, required bool moving, required bool sprinting}) {
+    if (jumped) {
+      clip = jumpClip;
+      animation.play(jumpClip, looping: false);
+      return;
+    }
+    if (!grounded && clip == jumpClip) return;
+    final next = !moving
+        ? idleClip
+        : sprinting
+            ? runClip
+            : walkClip;
+    if (next == clip) return;
+    clip = next;
+    animation.crossfade(next, blend);
   }
 
   /// A hazard's zone (the sweeper's blade, a launched ball) touched us.

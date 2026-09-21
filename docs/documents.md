@@ -138,7 +138,7 @@ semantic rules on top of the schema pass:
 | `FYN-H0001` … `H0004` | physics rules (M3-08, [physics.md](physics.md)): a `fynkel.RigidBody` value the runtime would reject, a `fynkel.Collider` value (size per shape, friction, restitution, `mesh` missing), a `shape: mesh` collider on a dynamic or kinematic body, a dynamic body without a collider (warning) |
 | `FYN-H0005` … `H0007` | character rules (M3-09): a `fynkel.CharacterController` value the runtime would reject (capsule, slope, negative limits), a `fynkel.RigidBody`/`fynkel.Collider` next to a `fynkel.CharacterController` (its own capsule replaces them; one diagnostic per ignored component), a `fynkel.ThirdPersonCamera` value (distance, pitch range, sensitivity). The corpus fixture `scene/physics_rules.scene.json` lists `H0001`–`H0008` |
 | `FYN-H0009` | (warning, M3-12, [scenes.md](scenes.md)) a `fynkel.TriggerZone` on an entity without a `fynkel.Collider` whose `is_sensor` is true: it never fires. A blank `event` is a value error (`H0008`, the zone's own `validate()`) |
-| `FYN-H0008` | catalogue rules (M3-10): a `fynkel.Rotator`/`Oscillate`/`Follow`/`LifetimeDespawn`/`Emitter` value the runtime would reject (a zero or non-finite axis, a negative amplitude, frequency, smoothing, seconds, rate or lifetime, a non-finite offset or velocity) — the same `validate()` the tick runs (`docs/catalogue.md`) |
+| `FYN-H0008` | catalogue rules (M3-10): a `fynkel.Rotator`/`Oscillate`/`Follow`/`LifetimeDespawn`/`Emitter` value the runtime would reject (a zero or non-finite axis, a negative amplitude, frequency, smoothing, seconds, rate or lifetime, a non-finite offset or velocity; since M3-19 a `fynkel.Animator` with a non-finite speed, `docs/animation.md`) — the same `validate()` the tick runs (`docs/catalogue.md`) |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule
@@ -603,7 +603,7 @@ It is development-only, never runs in a shipped game, and serializes to
 bytes deterministically — the same source, settings and sidecar give the
 same bytes on every machine, so it can be hashed, cached and diffed.
 
-### glTF/GLB (`fynkel.gltf`, version 3)
+### glTF/GLB (`fynkel.gltf`, version 4)
 
 The importer reads glTF 2.0 `.gltf`/`.glb` through
 the `gltf` crate (no `import` feature: buffers and images are resolved by
@@ -615,11 +615,14 @@ Fynkel, never by the crate) and produces, per file:
 | `material/<m>` | a `fynkel.pbr@1` material document (the current formatVersion) | `base_color`, `metallic`, `roughness`, `emissive`, `emissive_strength` (`KHR_materials_emissive_strength`), `normal_scale`, `occlusion_strength`, `alpha_mode`/`alpha_cutoff`, `double_sided`; the five `<slot>_texture` references bound to `{ asset: <this asset>, sub: "image/<i>" }` (or `image/<i>/linear`, below). A slot that samples `TEXCOORD_1` or a non-default sampler (nearest filtering, clamp/mirror wrap) is imported without that setting and warned about once (`FYN-A0105`): the PBR model has one UV set and one sampler. Validates like a hand-written one. |
 | `image/<i>` | the encoded bytes (PNG/JPEG) with their MIME type and **colour space** | sRGB when a colour slot (`base_color`, `emissive`) uses it, linear when only data slots (`normal`, `metallic_roughness`, `occlusion`) do, sRGB when unused |
 | `image/<i>/linear` | a linear copy of a **dual-use** image | when one image feeds both a colour and a data slot it is imported twice; the data slots point at the linear copy, so every texture reaches the cache in the colour space its slot needs |
-| `prefab` | the default scene's node hierarchy as a prefab document (the current formatVersion; importer version 3 = prefab formatVersion 2) | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive. Entity and component ids are UUID v5 of the asset id and `node/<i>`, `node/<i>/transform`, `node/<i>/renderer`, `node/<i>/primitive/<p>[/transform|/renderer]`. |
+| `prefab` | the default scene's node hierarchy as a prefab document (the current formatVersion; importer version 3 = prefab formatVersion 2) | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive; a node whose mesh has a skin carries a `fynkel.Skin { skin: skin/<s>, skeleton }` next to the renderer (M3-19). Entities are named after their nodes (`node<i>` when unnamed) — the names are what clips and skins target. Entity and component ids are UUID v5 of the asset id and `node/<i>`, `node/<i>/transform`, `node/<i>/renderer`, `node/<i>/skin`, `node/<i>/primitive/<p>[/transform|/renderer]`. |
+| `skin/<s>` (M3-19, [animation.md](animation.md)) | one per glTF skin | the joints in the skin's order, each by node name with its parent when that is a joint of the same skin, its inverse bind matrix and its rest pose; the skeleton root's name. Two joints sharing a name is `A0104`, more than `max_joints` (256) is `A0101`. A primitive with `JOINTS_0`/`WEIGHTS_0` is a **skinned mesh**: its `mesh/<n>` carries one normalized `SkinWeight` (4 × `u16` joint, 4 × `f32` weight) per vertex, a joint index past the skin is `A0104`. |
+| `anim/<a>` (M3-19) | one per glTF animation | its translation/rotation/scale channels targeting nodes by name, step/linear/cubic-spline as authored, the duration; morph-weight channels skipped (`A0105`), a target name that is not unique in the file warned about (`A0105`). |
 
-Skins, morph targets, animations and cameras are skipped with `A0105`
-warnings (static meshes are M2's scope; animation import is a later
-milestone). Every sub-asset's uuid comes from the sidecar's `subAssets`
+Morph targets and cameras are skipped with `A0105` warnings; a skin on
+a node without a skinned mesh, or a skinned mesh on a node without a
+skin, is a warning and the mesh draws in its bind pose. Every sub-asset's
+uuid comes from the sidecar's `subAssets`
 when present, else UUID v5 of the asset id and the sub-asset id — so a
 fresh checkout and a re-import derive the same ids, and ids assigned once
 survive re-imports; the sidecar is rewritten with any new ones (`fynkel
@@ -675,12 +678,13 @@ the source, not skipped over. Limit: `max_audio_frames` (10 minutes at
 
 ### The intermediate's bytes
 
-`.fyni`: `FYNI`, version, a JSON header (source, importer, meshes /
-materials / images / textures / clips with `[offset, length]` into the
-blob area, the prefab document when there is one, the sub-asset ids) and
-4-byte-aligned blobs (vertices, `u32` indices, encoded image bytes, RGBA8
-texels, `f32` samples). `Intermediate::to_bytes`/`from_bytes` round-trip;
-the committed `fixtures/robot.expected.fyni`,
+`.fyni`: `FYNI`, version (3 since M3-19), a JSON header (source, importer,
+meshes / materials / images / textures / clips / skins / animations with
+`[offset, length]` into the blob area, the prefab document when there is
+one, the sub-asset ids) and 4-byte-aligned blobs (vertices, `u32`
+indices, skin weights, encoded image bytes, RGBA8 texels, `f32` samples,
+joint tables and key data). `Intermediate::to_bytes`/`from_bytes`
+round-trip; the committed `fixtures/robot.expected.fyni`,
 `fixtures/textures/swatch.expected.fyni` and
 `fixtures/audio/tone.expected.fyni` pin the format, the normalization and
 every id derivation (`FYNKEL_UPDATE_FIXTURES=1 cargo test -p fynkel_import`
@@ -752,7 +756,7 @@ per vertex from positions and `uv0` — Lengyel accumulation, Gram-Schmidt
 against the normal, handedness in `w`, `fynkel_import::tangents`; the
 chunk info says `"tangents": "authored" | "generated" | "none"`, the last
 when there are no UVs either and the renderer falls back to the vertex
-normal; cache version 3), materials → `JSON` (`documentKind: material`) **plus** a `MATL`
+normal; a skinned mesh's weights follow its indices in the same chunk; cache version 4 since M3-19), skins → `SKIN` and animations → `ANIM` (M3-19, [animation.md](animation.md)), materials → `JSON` (`documentKind: material`) **plus** a `MATL`
 chunk of the same name/sub (the decoded `PbrMaterial`, what the renderer
 reads; a material document cooks the same pair), embedded glTF images →
 decoded `TEXR` in the colour space the importer assigned them (dual-use
@@ -1090,8 +1094,15 @@ Catalogue (`…0032`); since M3-12 a fourth, Results
 Trophy, Sun — the scene the Dart gate transitions to) and a third prefab,
 Coin (`assets/prefabs/coin.prefab.json`, id `…0042`: a half-size mesh, a
 sensor sphere `fynkel.Collider` and `fynkel.TriggerZone { event:
-"collect", once: true }`), instantiated at runtime by the tests — the
-project validates as 8 documents, 4 sources, 15 references, 12 assets).
+"collect", once: true }`), instantiated at runtime by the tests; since
+M3-19 a fifth scene, Rig (`assets/scenes/rig.scene.json`, id `…0034`: the
+rig fixture's skinned column under a looping "wave" `fynkel.Animator`
+with its joints `hips` → `spine` → `head` as entities and a `fynkel.Skin`
+on the Body, a Prop under a one-shot "bob", a Camera, Sun) over
+`assets/models/rig.glb` (a copy of `crates/fynkel_import/fixtures/rig.glb`,
+written by `rig.py`) — the headless, render and Dart gates of item 19 —
+and `fynkel.Animator`/`fynkel.Skin` in the registry — the project
+validates as 9 documents, 5 sources, 22 references).
 `scene/physics_rules.scene.json` gained a `Solid zone` entity (a
 `TriggerZone` with an empty event on a non-sensor collider: `H0008` and
 the `H0009` warning). Every kind added later extends this corpus.

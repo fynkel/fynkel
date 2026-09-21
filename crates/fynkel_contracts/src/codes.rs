@@ -75,6 +75,15 @@ impl DiagnosticCode {
     /// `MAX_PROJECTION_ANCHORS` anchors: the first 64 are projected, the
     /// rest come back `PROJECTED_DROPPED`.
     pub const TOO_MANY_ANCHORS: DiagnosticCode = DiagnosticCode(15);
+    /// A `fynkel.Animator` whose clip the world has not been given
+    /// (`World::register_clip` — the loaders register every clip a loaded
+    /// scene's animators name and every one a `Play`/`Crossfade` asks
+    /// for); reported once per clip, nothing is animated (M3-19).
+    pub const CLIP_UNAVAILABLE: DiagnosticCode = DiagnosticCode(16);
+    /// A `fynkel.Skin` whose skin the world has not been given
+    /// (`World::register_skin`); reported once, the mesh draws in its bind
+    /// pose (M3-19).
+    pub const SKIN_UNAVAILABLE: DiagnosticCode = DiagnosticCode(17);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -93,6 +102,8 @@ impl DiagnosticCode {
             13 => "mesh_unavailable",
             14 => "prefab_unavailable",
             15 => "too_many_anchors",
+            16 => "clip_unavailable",
+            17 => "skin_unavailable",
             _ => "unknown",
         }
     }

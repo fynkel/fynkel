@@ -88,6 +88,69 @@ void main() {
     expect(game.world.isPoisoned, isFalse);
   });
 
+  test('the character is posed from the controller: idle, walk, run, jump', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    expect((game.report.animation.clips, game.report.animation.skins), (1, 1), reason: 'idle from the scene; one skin');
+    game.frame(1 / 60);
+    final player = game.world.behaviours.whereType<Player>().single;
+    final me = player.gameObject;
+    final character = me.get<Animator>()!.clip.asset;
+    final thigh = me.findChild('hips')!.findChild('thigh_l')!;
+    final head = me.findChild('hips')!.findChild('spine')!.findChild('head')!;
+    expect(me.findChild('Body')!.get<Skin>()!.skeleton, 'hips');
+    expect(head.findChild('Visor'), isNotNull, reason: 'the visor rides the head joint');
+
+    // Standing: idle, the legs straight.
+    var s = me.animation.state!;
+    expect(s.clip, AssetRef(character, sub: 'anim/0'));
+    expect((s.playing, s.looping), (true, true));
+    expect(s.duration, closeTo(2, 1e-6));
+    expect(thigh.localTransform.rotation.x, closeTo(0, 1e-6));
+
+    // Walking: the clip switches with a blend and the legs swing (the
+    // walk's thigh peaks at ±30° = sin 15° about X).
+    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
+    s = me.animation.state!;
+    expect(s.clip, AssetRef(character, sub: 'anim/1'));
+    expect(s.isFading, isTrue);
+    for (var i = 0; i < 30; i++) {
+      game.frame(1 / 60);
+    }
+    expect(me.animation.state!.isFading, isFalse);
+    expect(thigh.localTransform.rotation.x.abs(), greaterThan(0.1), reason: 'mid-stride');
+    expect(player.transform.position.z, lessThan(-1), reason: 'the controller moved, not the clip');
+
+    // Sprinting: run.
+    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'ShiftLeft')]);
+    expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/2'));
+    expect(me.animation.state!.duration, closeTo(0.6, 1e-6));
+    game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'ShiftLeft'), InputEvent.up(InputDevice.keyboard, 'W')]);
+    expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/0'), reason: 'released: back to idle');
+
+    // A jump: the one-shot plays through, is held in the air, and idle
+    // returns on landing.
+    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
+    game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
+    s = me.animation.state!;
+    expect(s.clip, AssetRef(character, sub: 'anim/3'));
+    expect(s.looping, isFalse);
+    expect(player.jumps, 1);
+    var ended = false;
+    for (var i = 0; i < 90 && !ended; i++) {
+      game.frame(1 / 60);
+      ended = !me.animation.state!.playing;
+    }
+    expect(ended, isTrue, reason: 'the 0.8 s clip ended before the landing');
+    expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/3'), reason: 'held until grounded');
+    for (var i = 0; i < 60; i++) {
+      game.frame(1 / 60);
+    }
+    expect(player.characterState()!.grounded, isTrue);
+    expect(me.animation.state!.clip, AssetRef(character, sub: 'anim/0'));
+    expect(game.world.isPoisoned, isFalse);
+  });
+
   test('the sweeper is a hazard: a hit respawns the player at the start', () {
     final game = Game.load(projectDir);
     addTearDown(game.dispose);

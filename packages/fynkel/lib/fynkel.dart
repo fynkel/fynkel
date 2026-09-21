@@ -6,6 +6,11 @@ library;
 export 'generated/schema.g.dart'
     show
         AlphaMode,
+        AnimateCommandRecord,
+        AnimateOp,
+        AnimationEndedEvent,
+        Animator,
+        AnimatorStateRecord,
         BodyCommandRecord,
         BodyOp,
         BodyStateRecord,
@@ -39,6 +44,7 @@ export 'generated/schema.g.dart'
         ProjectedPointRecord,
         ProjectionAnchorRecord,
         Settings,
+        Skin,
         SnapshotTransformRecord,
         SpotLight,
         SystemKind,
@@ -47,6 +53,7 @@ export 'generated/schema.g.dart'
         TriggerZone,
         componentCodecs,
         componentIds;
+export 'src/animation.dart' show AnimationAssets, AnimatorState;
 export 'src/asset_ref.dart';
 export 'src/context.dart';
 export 'math.dart';

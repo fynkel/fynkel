@@ -7,10 +7,13 @@
 //! ```
 //!
 //! The header is a JSON object listing meshes, materials, images,
-//! textures, audio clips, the generated prefab and the sub-asset ids, with
-//! every blob given as `[offset, length]` into the blob section (offsets
-//! count from the end of the header). Vertices are [`Vertex::STRIDE`]
-//! bytes each, indices `u32`, texels RGBA8, samples `f32` interleaved.
+//! textures, audio clips, skins, animations, the generated prefab and the
+//! sub-asset ids, with every blob given as `[offset, length]` into the blob
+//! section (offsets count from the end of the header). Vertices are
+//! [`Vertex::STRIDE`] bytes each, indices `u32`, skin weights
+//! [`SkinWeight::STRIDE`] bytes each (one per vertex, or none), texels
+//! RGBA8, samples `f32` interleaved; skins and animations are stored in
+//! their cooked payload form (`fynkel_cooked::payload`).
 //! Serialization is deterministic: field order is fixed, there are no
 //! maps with unstable order, floats are written as IEEE bits.
 
@@ -18,12 +21,17 @@ use fynkel_contracts::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 pub const MAGIC: &[u8; 4] = b"FYNI";
-pub const INTERMEDIATE_VERSION: u32 = 2;
+pub const INTERMEDIATE_VERSION: u32 = 3;
 
 /// The one vertex layout every mesh is normalized to (72 bytes); the
 /// cooked `MESH` payload uses the same one, so it is defined next to the
 /// container (`fynkel_cooked::payload::Vertex`).
 pub use fynkel_cooked::payload::Vertex;
+/// Skinning data shares the cooked layouts too: one [`SkinWeight`] per
+/// vertex of a skinned mesh, a [`SkinPayload`] per skin (joint names, bind
+/// matrices, rest pose) and an [`AnimationPayload`] per clip (channels of
+/// keyed translation/rotation/scale targeting nodes by name).
+pub use fynkel_cooked::payload::{AnimationPayload, SkinPayload, SkinWeight};
 
 /// One drawable: a triangle list with one material.
 #[derive(Clone, Debug, PartialEq)]
@@ -37,12 +45,38 @@ pub struct MeshData {
     pub indices: Vec<u32>,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
+    /// One entry per vertex for a skinned mesh (joint indices into the
+    /// mesh's skin, weights normalized), empty for a static one.
+    pub skin: Vec<SkinWeight>,
 }
 
 impl MeshData {
     pub fn triangle_count(&self) -> usize {
         self.indices.len() / 3
     }
+
+    pub fn is_skinned(&self) -> bool {
+        !self.skin.is_empty()
+    }
+}
+
+/// A skin: the joints a skinned mesh deforms with, in the source's joint
+/// order (the order the mesh's [`SkinWeight`] indices use).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkinData {
+    /// Sub-asset id (`skin/<s>`).
+    pub sub_id: String,
+    pub name: String,
+    pub payload: SkinPayload,
+}
+
+/// An animation clip: keyed channels that target nodes by name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimationData {
+    /// Sub-asset id (`anim/<a>`).
+    pub sub_id: String,
+    pub name: String,
+    pub payload: AnimationPayload,
 }
 
 /// A material mapped onto `fynkel.pbr@1`, as a `.material.json` body.
@@ -154,6 +188,8 @@ pub struct Intermediate {
     pub images: Vec<ImageData>,
     pub textures: Vec<TextureData>,
     pub clips: Vec<AudioData>,
+    pub skins: Vec<SkinData>,
+    pub animations: Vec<AnimationData>,
     /// The node hierarchy as a `.prefab.json` body (sub-asset `prefab`),
     /// when the source has one.
     pub prefab: Option<serde_json::Value>,
@@ -173,6 +209,8 @@ impl Intermediate {
             images: Vec::new(),
             textures: Vec::new(),
             clips: Vec::new(),
+            skins: Vec::new(),
+            animations: Vec::new(),
             prefab: None,
             sub_assets: Vec::new(),
         }
@@ -199,6 +237,8 @@ struct Header {
     images: Vec<ImageHeader>,
     textures: Vec<TextureHeader>,
     clips: Vec<AudioHeader>,
+    skins: Vec<BlobHeader>,
+    animations: Vec<BlobHeader>,
     prefab: Option<serde_json::Value>,
     #[serde(rename = "subAssets")]
     sub_assets: Vec<(String, String)>,
@@ -247,6 +287,17 @@ struct MeshHeader {
     bounds_min: [f32; 3],
     #[serde(rename = "boundsMax")]
     bounds_max: [f32; 3],
+    /// `[0, 0]` for a static mesh.
+    skin: [u64; 2],
+}
+
+/// A skin or an animation: its cooked payload as one blob.
+#[derive(Serialize, Deserialize)]
+struct BlobHeader {
+    #[serde(rename = "subId")]
+    sub_id: String,
+    name: String,
+    payload: [u64; 2],
 }
 
 #[derive(Serialize, Deserialize)]
@@ -293,6 +344,10 @@ impl Intermediate {
                 for index in &m.indices {
                     i.extend_from_slice(&index.to_le_bytes());
                 }
+                let mut s = Vec::with_capacity(m.skin.len() * SkinWeight::STRIDE);
+                for weight in &m.skin {
+                    weight.write(&mut s);
+                }
                 MeshHeader {
                     sub_id: m.sub_id.clone(),
                     name: m.name.clone(),
@@ -303,7 +358,26 @@ impl Intermediate {
                     indices: push(&i),
                     bounds_min: m.bounds_min,
                     bounds_max: m.bounds_max,
+                    skin: push(&s),
                 }
+            })
+            .collect();
+        let skins = self
+            .skins
+            .iter()
+            .map(|sk| BlobHeader {
+                sub_id: sk.sub_id.clone(),
+                name: sk.name.clone(),
+                payload: push(&fynkel_cooked::payload::encode_skin(&sk.payload)),
+            })
+            .collect();
+        let animations = self
+            .animations
+            .iter()
+            .map(|a| BlobHeader {
+                sub_id: a.sub_id.clone(),
+                name: a.name.clone(),
+                payload: push(&fynkel_cooked::payload::encode_animation(&a.payload)),
             })
             .collect();
         let images = self
@@ -366,6 +440,8 @@ impl Intermediate {
             images,
             textures,
             clips,
+            skins,
+            animations,
             prefab: self.prefab.clone(),
             sub_assets: self
                 .sub_assets
@@ -433,6 +509,14 @@ impl Intermediate {
                 .chunks_exact(4)
                 .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
                 .collect();
+            let s = slice(m.skin, &m.sub_id)?;
+            if !s.is_empty() && s.len() != m.vertex_count as usize * SkinWeight::STRIDE {
+                return Err(bad(&format!("{}: skin blob size", m.sub_id)));
+            }
+            let skin = s
+                .chunks_exact(SkinWeight::STRIDE)
+                .map(|c| SkinWeight::read(c).unwrap())
+                .collect();
             meshes.push(MeshData {
                 sub_id: m.sub_id,
                 name: m.name,
@@ -441,6 +525,27 @@ impl Intermediate {
                 indices,
                 bounds_min: m.bounds_min,
                 bounds_max: m.bounds_max,
+                skin,
+            });
+        }
+        let mut skins = Vec::with_capacity(header.skins.len());
+        for sk in header.skins {
+            let payload = fynkel_cooked::payload::decode_skin(slice(sk.payload, &sk.sub_id)?)
+                .ok_or_else(|| bad(&format!("{}: skin payload", sk.sub_id)))?;
+            skins.push(SkinData {
+                sub_id: sk.sub_id,
+                name: sk.name,
+                payload,
+            });
+        }
+        let mut animations = Vec::with_capacity(header.animations.len());
+        for a in header.animations {
+            let payload = fynkel_cooked::payload::decode_animation(slice(a.payload, &a.sub_id)?)
+                .ok_or_else(|| bad(&format!("{}: animation payload", a.sub_id)))?;
+            animations.push(AnimationData {
+                sub_id: a.sub_id,
+                name: a.name,
+                payload,
             });
         }
         let mut images = Vec::with_capacity(header.images.len());
@@ -514,6 +619,8 @@ impl Intermediate {
             images,
             textures,
             clips,
+            skins,
+            animations,
             prefab: header.prefab,
             sub_assets,
         })
@@ -529,6 +636,7 @@ impl Intermediate {
                 "subId": m.sub_id, "name": m.name, "material": m.material,
                 "vertices": m.vertices.len(), "triangles": m.triangle_count(),
                 "boundsMin": m.bounds_min, "boundsMax": m.bounds_max,
+                "skinned": m.is_skinned(),
             })).collect::<Vec<_>>(),
             "materials": self.materials.iter().map(|m| serde_json::json!({
                 "subId": m.sub_id, "name": m.name,
@@ -543,6 +651,14 @@ impl Intermediate {
             "clips": self.clips.iter().map(|c| serde_json::json!({
                 "subId": c.sub_id, "name": c.name, "codec": c.codec, "sampleRate": c.sample_rate,
                 "channels": c.channels, "frames": c.frames(), "seconds": c.duration_seconds(),
+            })).collect::<Vec<_>>(),
+            "skins": self.skins.iter().map(|sk| serde_json::json!({
+                "subId": sk.sub_id, "name": sk.name, "joints": sk.payload.joints.len(),
+                "skeleton": sk.payload.skeleton,
+            })).collect::<Vec<_>>(),
+            "animations": self.animations.iter().map(|a| serde_json::json!({
+                "subId": a.sub_id, "name": a.name, "channels": a.payload.channels.len(),
+                "seconds": a.payload.duration,
             })).collect::<Vec<_>>(),
             "prefab": self.prefab.is_some(),
             "prefabEntities": self.prefab_entity_count(),
@@ -567,6 +683,12 @@ impl Intermediate {
         if !self.clips.is_empty() {
             parts.push(format!("{} clip(s)", self.clips.len()));
         }
+        if !self.skins.is_empty() {
+            parts.push(format!("{} skin(s)", self.skins.len()));
+        }
+        if !self.animations.is_empty() {
+            parts.push(format!("{} animation(s)", self.animations.len()));
+        }
         if self.prefab.is_some() {
             parts.push(format!(
                 "prefab with {} entities",
@@ -586,12 +708,13 @@ impl Intermediate {
         );
         for m in &self.meshes {
             out.push_str(&format!(
-                "  {:<14} {:<20} {:>7} vertices {:>7} triangles  material {}\n",
+                "  {:<14} {:<20} {:>7} vertices {:>7} triangles  material {}{}\n",
                 m.sub_id,
                 m.name,
                 m.vertices.len(),
                 m.triangle_count(),
-                m.material.as_deref().unwrap_or("(default)")
+                m.material.as_deref().unwrap_or("(default)"),
+                if m.is_skinned() { "  skinned" } else { "" }
             ));
         }
         for m in &self.materials {
@@ -627,6 +750,28 @@ impl Intermediate {
                 c.channels,
                 c.frames(),
                 c.duration_seconds()
+            ));
+        }
+        for sk in &self.skins {
+            out.push_str(&format!(
+                "  {:<14} {} ({} joint(s), skeleton {})\n",
+                sk.sub_id,
+                sk.name,
+                sk.payload.joints.len(),
+                if sk.payload.skeleton.is_empty() {
+                    "(root)"
+                } else {
+                    &sk.payload.skeleton
+                }
+            ));
+        }
+        for a in &self.animations {
+            out.push_str(&format!(
+                "  {:<14} {} ({} channel(s), {:.3} s)\n",
+                a.sub_id,
+                a.name,
+                a.payload.channels.len(),
+                a.payload.duration
             ));
         }
         out

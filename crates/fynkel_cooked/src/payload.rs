@@ -1,14 +1,28 @@
-//! The typed chunk payloads (`MESH`, `TEXR`, `CLIP`): the layouts the
-//! cooker writes and the runtime reads. They live here, next to the
-//! container, so a loader needs nothing from the importers. Everything is
-//! little-endian; a malformed payload decodes to `None`, never panics.
+//! The typed chunk payloads (`MESH`, `TEXR`, `CLIP`, `SKIN`, `ANIM`): the
+//! layouts the cooker writes and the runtime reads. They live here, next
+//! to the container, so a loader needs nothing from the importers.
+//! Everything is little-endian; a malformed payload decodes to `None`,
+//! never panics.
 //!
 //! ```text
 //! MESH  u32 vertex count, u32 index count, [f32; 3] bounds min,
-//!       [f32; 3] bounds max, vertices (72 bytes each), u32 indices
+//!       [f32; 3] bounds max, vertices (72 bytes each), u32 indices,
+//!       then — a skinned mesh only (M3-19) — one `SkinWeight` per vertex
+//!       (u16 × 4 joint indices, f32 × 4 weights: 24 bytes)
 //! TEXR  u32 width, u32 height, u32 format, u32 mip levels (1),
 //!       width × height × 4 texels, top row first
 //! CLIP  u32 sample rate, u32 channels, u64 frames, interleaved f32 samples
+//! SKIN  u32 joint count, str skeleton, then per joint: str name,
+//!       u32 parent (joint index, `u32::MAX` for none), [f32; 16] inverse
+//!       bind matrix (column-major), rest pose [f32; 3] translation,
+//!       [f32; 4] rotation (x y z w), [f32; 3] scale
+//! ANIM  u32 channel count, f32 duration (seconds), then per channel: str
+//!       target (a node name), u32 property (0 translation, 1 rotation,
+//!       2 scale), u32 interpolation (0 step, 1 linear, 2 cubic spline),
+//!       u32 key count, f32 times, f32 values — `width` floats per key
+//!       (3, or 4 for a rotation), three per key for a cubic spline
+//!       (in-tangent, value, out-tangent)
+//! str   u32 byte length, the UTF-8 bytes, zero padding to 4
 //! ```
 
 pub const TEXTURE_FORMAT_RGBA8_SRGB: u32 = 1;
@@ -78,13 +92,59 @@ impl Vertex {
     }
 }
 
-/// A `MESH` payload.
+/// One vertex's skinning: up to four joints (indices into the skin's
+/// joint list) and their weights, which the cooker normalizes to sum to 1
+/// (unused slots weigh 0).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[repr(C)]
+pub struct SkinWeight {
+    pub joints: [u16; 4],
+    pub weights: [f32; 4],
+}
+
+impl SkinWeight {
+    pub const STRIDE: usize = 24;
+
+    pub fn write(&self, out: &mut Vec<u8>) {
+        for j in self.joints {
+            out.extend_from_slice(&j.to_le_bytes());
+        }
+        for w in self.weights {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+    }
+
+    pub fn read(bytes: &[u8]) -> Option<SkinWeight> {
+        if bytes.len() < Self::STRIDE {
+            return None;
+        }
+        let mut joints = [0u16; 4];
+        for (i, j) in joints.iter_mut().enumerate() {
+            *j = u16::from_le_bytes(bytes[i * 2..i * 2 + 2].try_into().unwrap());
+        }
+        let mut weights = [0f32; 4];
+        for (i, w) in weights.iter_mut().enumerate() {
+            *w = f32::from_le_bytes(bytes[8 + i * 4..12 + i * 4].try_into().unwrap());
+        }
+        Some(SkinWeight { joints, weights })
+    }
+}
+
+/// A `MESH` payload. `skin` is empty for a static mesh and one entry per
+/// vertex for a skinned one.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshPayload {
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
+    pub skin: Vec<SkinWeight>,
+}
+
+impl MeshPayload {
+    pub fn is_skinned(&self) -> bool {
+        !self.skin.is_empty()
+    }
 }
 
 pub fn encode_mesh(
@@ -93,7 +153,21 @@ pub fn encode_mesh(
     bounds_min: [f32; 3],
     bounds_max: [f32; 3],
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(32 + vertices.len() * Vertex::STRIDE + indices.len() * 4);
+    encode_skinned_mesh(vertices, indices, bounds_min, bounds_max, &[])
+}
+
+/// `skin` is empty (a static mesh) or exactly one entry per vertex.
+pub fn encode_skinned_mesh(
+    vertices: &[Vertex],
+    indices: &[u32],
+    bounds_min: [f32; 3],
+    bounds_max: [f32; 3],
+    skin: &[SkinWeight],
+) -> Vec<u8> {
+    debug_assert!(skin.is_empty() || skin.len() == vertices.len());
+    let mut out = Vec::with_capacity(
+        32 + vertices.len() * Vertex::STRIDE + indices.len() * 4 + skin.len() * SkinWeight::STRIDE,
+    );
     out.extend_from_slice(&(vertices.len() as u32).to_le_bytes());
     out.extend_from_slice(&(indices.len() as u32).to_le_bytes());
     for v in bounds_min.iter().chain(bounds_max.iter()) {
@@ -104,6 +178,9 @@ pub fn encode_mesh(
     }
     for i in indices {
         out.extend_from_slice(&i.to_le_bytes());
+    }
+    for w in skin {
+        w.write(&mut out);
     }
     out
 }
@@ -119,13 +196,17 @@ pub fn decode_mesh(bytes: &[u8]) -> Option<MeshPayload> {
     let bounds_max = [f32_at(20), f32_at(24), f32_at(28)];
     let vertices_len = vertex_count.checked_mul(Vertex::STRIDE)?;
     let indices_len = index_count.checked_mul(4)?;
-    if bytes.len()
-        != 32usize
-            .checked_add(vertices_len)?
-            .checked_add(indices_len)?
-    {
+    let static_len = 32usize
+        .checked_add(vertices_len)?
+        .checked_add(indices_len)?;
+    let skin_len = vertex_count.checked_mul(SkinWeight::STRIDE)?;
+    let skinned = if bytes.len() == static_len {
+        false
+    } else if bytes.len() == static_len.checked_add(skin_len)? && vertex_count > 0 {
+        true
+    } else {
         return None;
-    }
+    };
     let mut vertices = Vec::with_capacity(vertex_count);
     for i in 0..vertex_count {
         let at = 32 + i * Vertex::STRIDE;
@@ -139,12 +220,259 @@ pub fn decode_mesh(bytes: &[u8]) -> Option<MeshPayload> {
     if indices.iter().any(|&i| i as usize >= vertex_count) {
         return None;
     }
+    let mut skin = Vec::new();
+    if skinned {
+        skin.reserve(vertex_count);
+        for i in 0..vertex_count {
+            let at = static_len + i * SkinWeight::STRIDE;
+            skin.push(SkinWeight::read(&bytes[at..at + SkinWeight::STRIDE])?);
+        }
+    }
     Some(MeshPayload {
         bounds_min,
         bounds_max,
         vertices,
         indices,
+        skin,
     })
+}
+
+fn write_str(out: &mut Vec<u8>, s: &str) {
+    out.extend_from_slice(&(s.len() as u32).to_le_bytes());
+    out.extend_from_slice(s.as_bytes());
+    while !out.len().is_multiple_of(4) {
+        out.push(0);
+    }
+}
+
+/// Reads a `str` at `*at`, advancing past its padding.
+fn read_str(bytes: &[u8], at: &mut usize) -> Option<String> {
+    let len = read_u32(bytes, at)? as usize;
+    let end = at.checked_add(len)?;
+    let s = std::str::from_utf8(bytes.get(*at..end)?).ok()?.to_string();
+    *at = end.checked_add(3)? & !3;
+    Some(s)
+}
+
+fn read_u32(bytes: &[u8], at: &mut usize) -> Option<u32> {
+    let v = u32::from_le_bytes(bytes.get(*at..*at + 4)?.try_into().unwrap());
+    *at += 4;
+    Some(v)
+}
+
+fn read_f32(bytes: &[u8], at: &mut usize) -> Option<f32> {
+    let v = f32::from_le_bytes(bytes.get(*at..*at + 4)?.try_into().unwrap());
+    *at += 4;
+    Some(v)
+}
+
+fn read_f32s<const N: usize>(bytes: &[u8], at: &mut usize) -> Option<[f32; N]> {
+    let mut out = [0f32; N];
+    for v in out.iter_mut() {
+        *v = read_f32(bytes, at)?;
+    }
+    Some(out)
+}
+
+/// One joint of a `SKIN` payload: named after its glTF node (the runtime
+/// finds the entity by name under the skin's skeleton), with its parent
+/// in the joint list and its rest pose.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkinJoint {
+    pub name: String,
+    /// Index into the joint list, `None` for a joint whose parent is not
+    /// a joint of this skin.
+    pub parent: Option<u32>,
+    /// Column-major, mesh space → joint space at the bind pose.
+    pub inverse_bind: [f32; 16],
+    pub rest_translation: [f32; 3],
+    /// x, y, z, w.
+    pub rest_rotation: [f32; 4],
+    pub rest_scale: [f32; 3],
+}
+
+/// A `SKIN` payload: the joint list a skinned mesh's `SkinWeight`s index,
+/// and the name of the node whose subtree holds every joint (`skeleton`;
+/// empty when the skin names none — the runtime then searches from the
+/// tree's root).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkinPayload {
+    pub skeleton: String,
+    pub joints: Vec<SkinJoint>,
+}
+
+pub fn encode_skin(skin: &SkinPayload) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(skin.joints.len() as u32).to_le_bytes());
+    write_str(&mut out, &skin.skeleton);
+    for j in &skin.joints {
+        write_str(&mut out, &j.name);
+        out.extend_from_slice(&j.parent.unwrap_or(u32::MAX).to_le_bytes());
+        for f in j
+            .inverse_bind
+            .iter()
+            .chain(&j.rest_translation)
+            .chain(&j.rest_rotation)
+            .chain(&j.rest_scale)
+        {
+            out.extend_from_slice(&f.to_le_bytes());
+        }
+    }
+    out
+}
+
+pub fn decode_skin(bytes: &[u8]) -> Option<SkinPayload> {
+    let mut at = 0usize;
+    let count = read_u32(bytes, &mut at)? as usize;
+    let skeleton = read_str(bytes, &mut at)?;
+    // A joint is at least 4 + 4 + 26 × 4 bytes; refuse counts the bytes
+    // cannot hold before reserving.
+    if count.checked_mul(112)? > bytes.len() {
+        return None;
+    }
+    let mut joints = Vec::with_capacity(count);
+    for _ in 0..count {
+        let name = read_str(bytes, &mut at)?;
+        let parent = read_u32(bytes, &mut at)?;
+        let parent = if parent == u32::MAX {
+            None
+        } else if (parent as usize) < count {
+            Some(parent)
+        } else {
+            return None;
+        };
+        joints.push(SkinJoint {
+            name,
+            parent,
+            inverse_bind: read_f32s::<16>(bytes, &mut at)?,
+            rest_translation: read_f32s::<3>(bytes, &mut at)?,
+            rest_rotation: read_f32s::<4>(bytes, &mut at)?,
+            rest_scale: read_f32s::<3>(bytes, &mut at)?,
+        });
+    }
+    if at != bytes.len() {
+        return None;
+    }
+    Some(SkinPayload { skeleton, joints })
+}
+
+pub const ANIM_PROPERTY_TRANSLATION: u32 = 0;
+pub const ANIM_PROPERTY_ROTATION: u32 = 1;
+pub const ANIM_PROPERTY_SCALE: u32 = 2;
+pub const ANIM_INTERPOLATION_STEP: u32 = 0;
+pub const ANIM_INTERPOLATION_LINEAR: u32 = 1;
+pub const ANIM_INTERPOLATION_CUBIC_SPLINE: u32 = 2;
+
+/// One channel of an `ANIM` payload: keyframes of one property of one
+/// named node.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimationChannel {
+    /// The node's name (the runtime finds the entity by name under the
+    /// animator).
+    pub target: String,
+    /// `ANIM_PROPERTY_*`.
+    pub property: u32,
+    /// `ANIM_INTERPOLATION_*`.
+    pub interpolation: u32,
+    /// Seconds, non-decreasing.
+    pub times: Vec<f32>,
+    /// `times.len() × width` floats (`× 3` for a cubic spline: in-tangent,
+    /// value, out-tangent per key); `width` is 4 for a rotation, 3 else.
+    pub values: Vec<f32>,
+}
+
+impl AnimationChannel {
+    pub fn width(&self) -> usize {
+        if self.property == ANIM_PROPERTY_ROTATION {
+            4
+        } else {
+            3
+        }
+    }
+
+    /// Floats per key.
+    pub fn key_floats(&self) -> usize {
+        if self.interpolation == ANIM_INTERPOLATION_CUBIC_SPLINE {
+            self.width() * 3
+        } else {
+            self.width()
+        }
+    }
+}
+
+/// An `ANIM` payload: one clip.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnimationPayload {
+    /// Seconds; the largest key time over every channel.
+    pub duration: f32,
+    pub channels: Vec<AnimationChannel>,
+}
+
+pub fn encode_animation(anim: &AnimationPayload) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(&(anim.channels.len() as u32).to_le_bytes());
+    out.extend_from_slice(&anim.duration.to_le_bytes());
+    for c in &anim.channels {
+        write_str(&mut out, &c.target);
+        out.extend_from_slice(&c.property.to_le_bytes());
+        out.extend_from_slice(&c.interpolation.to_le_bytes());
+        out.extend_from_slice(&(c.times.len() as u32).to_le_bytes());
+        for t in &c.times {
+            out.extend_from_slice(&t.to_le_bytes());
+        }
+        for v in &c.values {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+    }
+    out
+}
+
+pub fn decode_animation(bytes: &[u8]) -> Option<AnimationPayload> {
+    let mut at = 0usize;
+    let count = read_u32(bytes, &mut at)? as usize;
+    let duration = read_f32(bytes, &mut at)?;
+    if !duration.is_finite() || duration < 0.0 || count.checked_mul(20)? > bytes.len() {
+        return None;
+    }
+    let mut channels = Vec::with_capacity(count);
+    for _ in 0..count {
+        let target = read_str(bytes, &mut at)?;
+        let property = read_u32(bytes, &mut at)?;
+        let interpolation = read_u32(bytes, &mut at)?;
+        if property > ANIM_PROPERTY_SCALE || interpolation > ANIM_INTERPOLATION_CUBIC_SPLINE {
+            return None;
+        }
+        let keys = read_u32(bytes, &mut at)? as usize;
+        let mut channel = AnimationChannel {
+            target,
+            property,
+            interpolation,
+            times: Vec::new(),
+            values: Vec::new(),
+        };
+        let floats = keys.checked_mul(1 + channel.key_floats())?.checked_mul(4)?;
+        if floats > bytes.len().saturating_sub(at) {
+            return None;
+        }
+        channel.times.reserve(keys);
+        for _ in 0..keys {
+            let t = read_f32(bytes, &mut at)?;
+            if !t.is_finite() || channel.times.last().is_some_and(|last| t < *last) {
+                return None;
+            }
+            channel.times.push(t);
+        }
+        let n = keys * channel.key_floats();
+        channel.values.reserve(n);
+        for _ in 0..n {
+            channel.values.push(read_f32(bytes, &mut at)?);
+        }
+        channels.push(channel);
+    }
+    if at != bytes.len() {
+        return None;
+    }
+    Some(AnimationPayload { duration, channels })
 }
 
 /// A `TEXR` payload: RGBA8, top row first, every mip level concatenated
@@ -325,6 +653,84 @@ mod tests {
         assert_eq!(m.indices, [0, 1, 0]);
         assert!(decode_mesh(&bytes[..bytes.len() - 1]).is_none());
         assert!(decode_mesh(&encode_mesh(&v, &[0, 2, 0], [0.0; 3], [1.0; 3])).is_none());
+        assert!(!m.is_skinned());
+        // A skinned mesh carries one weight per vertex after the indices;
+        // a partial trailer is malformed.
+        let skin = [
+            SkinWeight {
+                joints: [1, 0, 0, 0],
+                weights: [1.0, 0.0, 0.0, 0.0],
+            },
+            SkinWeight {
+                joints: [0, 1, 2, 3],
+                weights: [0.25; 4],
+            },
+        ];
+        let bytes = encode_skinned_mesh(&v, &[0, 1, 0], [0.0; 3], [1.0; 3], &skin);
+        let m = decode_mesh(&bytes).unwrap();
+        assert!(m.is_skinned());
+        assert_eq!(m.skin, skin);
+        assert!(decode_mesh(&bytes[..bytes.len() - SkinWeight::STRIDE]).is_none());
+    }
+
+    #[test]
+    fn skin_and_animation_round_trip() {
+        let skin = SkinPayload {
+            skeleton: "Armature".into(),
+            joints: vec![
+                SkinJoint {
+                    name: "Root".into(),
+                    parent: None,
+                    inverse_bind: [1.0; 16],
+                    rest_translation: [0.0, 1.0, 0.0],
+                    rest_rotation: [0.0, 0.0, 0.0, 1.0],
+                    rest_scale: [1.0; 3],
+                },
+                SkinJoint {
+                    name: "Tip".into(),
+                    parent: Some(0),
+                    inverse_bind: [0.5; 16],
+                    rest_translation: [0.0, 2.0, 0.0],
+                    rest_rotation: [0.0, 0.0, 0.0, 1.0],
+                    rest_scale: [1.0; 3],
+                },
+            ],
+        };
+        let bytes = encode_skin(&skin);
+        assert_eq!(decode_skin(&bytes).unwrap(), skin);
+        assert!(decode_skin(&bytes[..bytes.len() - 1]).is_none());
+        let mut bad = skin.clone();
+        bad.joints[1].parent = Some(7);
+        assert!(decode_skin(&encode_skin(&bad)).is_none());
+
+        let anim = AnimationPayload {
+            duration: 1.0,
+            channels: vec![
+                AnimationChannel {
+                    target: "Tip".into(),
+                    property: ANIM_PROPERTY_ROTATION,
+                    interpolation: ANIM_INTERPOLATION_LINEAR,
+                    times: vec![0.0, 1.0],
+                    values: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.7, 0.0, 0.7],
+                },
+                AnimationChannel {
+                    target: "Root".into(),
+                    property: ANIM_PROPERTY_TRANSLATION,
+                    interpolation: ANIM_INTERPOLATION_CUBIC_SPLINE,
+                    times: vec![0.5],
+                    values: vec![0.0; 9],
+                },
+            ],
+        };
+        let bytes = encode_animation(&anim);
+        assert_eq!(decode_animation(&bytes).unwrap(), anim);
+        assert!(decode_animation(&bytes[..bytes.len() - 4]).is_none());
+        let mut bad = anim.clone();
+        bad.channels[0].times = vec![1.0, 0.0];
+        assert!(decode_animation(&encode_animation(&bad)).is_none());
+        let mut bad = anim.clone();
+        bad.channels[0].property = 9;
+        assert!(decode_animation(&encode_animation(&bad)).is_none());
     }
 
     #[test]

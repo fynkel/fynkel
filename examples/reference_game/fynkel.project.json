@@ -157,6 +157,12 @@
     "fynkel.TriggerZone": {
       "kind": "native"
     },
+    "fynkel.Animator": {
+      "kind": "native"
+    },
+    "fynkel.Skin": {
+      "kind": "native"
+    },
     "game.Player": {
       "kind": "behaviour",
       "version": 1,
