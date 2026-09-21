@@ -70,6 +70,15 @@ class _FynkelViewportState extends State<FynkelViewport> {
     widget.onPointerEvent?.call(e, e.localPosition * dpr);
   }
 
+  /// A click on the viewport claims the keyboard, like any game window:
+  /// whatever took focus away (another widget, a window switch) hands it
+  /// back on the next click instead of leaving every key unhandled — on
+  /// macOS an unhandled key is the system beep.
+  void _pointerDown(PointerDownEvent e, double dpr) {
+    if (!_focus.hasFocus) _focus.requestFocus();
+    _pointer(e, dpr);
+  }
+
   @override
   Widget build(BuildContext context) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -89,7 +98,7 @@ class _FynkelViewportState extends State<FynkelViewport> {
           onFocusChange: widget.onFocusChange,
           child: Listener(
             behavior: HitTestBehavior.opaque,
-            onPointerDown: (e) => _pointer(e, dpr),
+            onPointerDown: (e) => _pointerDown(e, dpr),
             onPointerMove: (e) => _pointer(e, dpr),
             onPointerUp: (e) => _pointer(e, dpr),
             onPointerCancel: (e) => _pointer(e, dpr),

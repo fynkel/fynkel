@@ -197,7 +197,9 @@ frames imply, deterministic run to run.
   touch pointers are the overlay's.
 - **Focus and pause rules.** Flutter consumes its own interactions first —
   a focused text field keeps its keys; the viewport must have focus to
-  receive them (`autofocus` by default, `FynkelGameViewState.hasFocus`).
+  receive them (`autofocus` by default, `FynkelGameViewState.hasFocus`;
+  a click on the viewport claims it back whenever something else took it
+  — on macOS a key nobody handles is the system beep).
   Losing focus, `setPaused(true)`, the app going hidden: the capture
   `reset()`s (everything up with edges on the next tick) and the pointer
   is released. While paused no frame runs, so the loop cannot read a

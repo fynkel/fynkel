@@ -235,6 +235,26 @@ void main() {
     expect(capture.pointerCaptured, isFalse);
     key.currentState!.setPaused(false);
 
+    // Focus taken by something else: keys no longer reach the capture; a
+    // click on the viewport claims it back (the macOS beep otherwise).
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    expect(key.currentState!.hasFocus, isFalse);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW, physicalKey: PhysicalKeyboardKey.keyW);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW, physicalKey: PhysicalKeyboardKey.keyW);
+    expect(capture.pending, isEmpty, reason: 'unfocused: the key went nowhere');
+    final click = await tester.startGesture(
+      tester.getCenter(find.byType(FynkelViewport)),
+      kind: PointerDeviceKind.mouse,
+    );
+    await click.up();
+    await tester.pump();
+    expect(key.currentState!.hasFocus, isTrue, reason: 'the click took the keyboard back');
+    capture.take(1 / 60); // the mouse button's own events
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW, physicalKey: PhysicalKeyboardKey.keyW);
+    expect(capture.pending, const [InputEvent.down(InputDevice.keyboard, 'W')]);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW, physicalKey: PhysicalKeyboardKey.keyW);
+
     await tester.pumpWidget(const SizedBox());
     expect(frames, greaterThan(3));
     expect(world.isPoisoned, isFalse);
