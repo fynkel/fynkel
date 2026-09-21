@@ -13,6 +13,7 @@ library;
 
 export 'src/bundled_cache.dart';
 export 'src/game_view.dart';
+export 'src/heap_probe.dart';
 export 'src/input_capture.dart';
 export 'src/model_binding.dart';
 export 'src/projection_layer.dart';

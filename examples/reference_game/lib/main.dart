@@ -52,6 +52,11 @@ import 'ui/settings.dart';
 
 void main() => runApp(const GameApp());
 
+/// `FYNKEL_CAPTURE=1` in the environment: a benchmark run — the game skips
+/// the Menu for the Playground and prints its stats window to stdout
+/// (`benchmarks/m3/capture.py` records the reference game this way).
+final bool capturing = (Platform.environment['FYNKEL_CAPTURE'] ?? '').isNotEmpty;
+
 class GameApp extends StatelessWidget {
   const GameApp({super.key});
 
@@ -169,6 +174,13 @@ class _GamePageState extends State<GamePage> {
     if (s == SceneState.ready && _game!.state.screen.value != Screen.playing) _view.currentState?.capturePointer(false);
   }
 
+  /// Once a second: the HUD's stats block; under `FYNKEL_CAPTURE` also one
+  /// `[stats]` line on stdout for benchmarks/m3/capture.py.
+  void _onStats(FynkelFrameStats s) {
+    setState(() => _stats = s);
+    if (capturing) debugPrint('[stats] ${s.summary()}');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -196,6 +208,9 @@ class _GamePageState extends State<GamePage> {
         _game = Game.load(dir ?? '(bundled)', cacheDir: cache, settingsPath: settings);
       }
       _game!.scenes.addListener(_onScene);
+      // A capture run skips the Menu: the Playground loads at the first
+      // frame, as Play would.
+      if (capturing) _game!.play();
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.
@@ -238,7 +253,8 @@ class _GamePageState extends State<GamePage> {
         audio: true,
         onKeyEvent: _onKey,
         onFrame: _onFrame,
-        onStats: (s) => setState(() => _stats = s),
+        onStats: _onStats,
+        profileDartHeap: true,
         // The buttons never take the keyboard focus from the viewport, so
         // Escape, F1, Q and a rebind's key keep reaching `_onKey`.
         overlay: ExcludeFocus(

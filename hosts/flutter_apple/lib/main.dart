@@ -377,6 +377,12 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
           'present lag (frames behind newest submit) p50=${s.presentLagP50} p95=${s.presentLagP95} max=${s.presentLagMax}  raster acquire wait ms p50=${s.acquireWaitP50Ms.toStringAsFixed(2)} p95=${s.acquireWaitP95Ms.toStringAsFixed(2)} max=${s.acquireWaitMaxMs.toStringAsFixed(2)}',
           'resizes=${s.resizes} rust resize ms p50=${s.resizeP50Ms.toStringAsFixed(2)} max=${s.resizeMaxMs.toStringAsFixed(2)}',
         ],
+        if (f.dartHeap case final h?)
+          'dart heap KB           used=${h.heapUsage ~/ 1024} capacity=${h.heapCapacity ~/ 1024} external=${h.externalUsage ~/ 1024}  '
+              'allocated KB/frame=${f.frames == 0 ? 0 : (h.allocatedBytes / 1024 / f.frames).toStringAsFixed(1)}  '
+              'gc n=${h.gcCollections} (new ${h.newSpaceCollections}, old ${h.oldSpaceCollections}) pause ms=${h.gcPauseMs.toStringAsFixed(2)}'
+        else
+          'dart heap              no VM service (release build) — C3 numbers need a debug or profile build',
         if (f.systems.isNotEmpty)
           'systems µs (last tick) ${f.systems.where((t) => t.micros > 0).map((t) => '${t.system.name}=${t.micros}').join(' ')}',
         if (swift != null)
@@ -388,7 +394,15 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
     });
     _pointerEventsThisWindow = 0;
     // Also print for scripted captures (benchmarks/).
-    debugPrint('[host] ${_statsText.split('\n').take(17).join(' | ')}');
+    debugPrint('[host] ${_statsText.split('\n').take(18).join(' | ')}');
+    // The same window as one parseable line (benchmarks/m3/capture.py).
+    debugPrint('[stats] ${f.summary()}');
+    if (f.dartHeap case final h?) {
+      // One line per window for benchmarks/m0/capture.py's AOT capture.
+      debugPrint('[alloc] frames=${f.frames} heap=${h.heapUsage} capacity=${h.heapCapacity} external=${h.externalUsage} '
+          'allocated=${h.allocatedBytes} gc=${h.gcCollections} new=${h.newSpaceCollections} old=${h.oldSpaceCollections} '
+          'pause_ms=${h.gcPauseMs.toStringAsFixed(3)}');
+    }
   }
 
   @override
@@ -402,6 +416,7 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
       controller: _controller,
       fixedUpdate: _fixedUpdate,
       onStats: _onStats,
+      profileDartHeap: true,
       focusNode: _viewportFocus,
       autofocus: false,
       onKeyEvent: _onViewportKey,

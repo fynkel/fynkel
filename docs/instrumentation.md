@@ -18,7 +18,7 @@ stopwatches around the calls the SDK actually makes.
 | GPU pass timings | `wgpu::QuerySet` timestamps at the boundaries of the shadow, scene, post and present passes (Metal stage timestamps) | `FrameStats::gpu_*_us`; `ViewportStatsSnapshot.gpuShadow/gpuScene/gpuPost/gpuFrame`; the standalone `[1s]` line's `gpu ms` |
 | draw/dispatch counts, visible/culled | the renderer's `FrameStats` (M3-06) | `ViewportStatsSnapshot.draws/instances/culled/shadowDraws` |
 | bridge calls/bytes/copies | `Bridge` counters + `FynkelWorldStats` | `BridgeStats.ffiCalls/bytesIn/bytesOut/dartCopies` |
-| Dart allocations | the VM service (`tool/alloc_bench.dart`, JIT; the C3 probe and the AOT capture, part 2) | `benchmarks/m0/capture.py` |
+| Dart allocations and GC (C3) | `DartHeapProbe` (`package:fynkel_flutter`): the VM's `GC` timeline events and `getMemoryUsage` over the app's own service, once per stats window | `FynkelFrameStats.dartHeap` (`profileDartHeap: true`); `[alloc]`/`[stats]` lines; `benchmarks/m0/capture.py` `alloc_aot`, `benchmarks/m3/capture.py` |
 | native memory | `fynkel_core::memory::CountingAllocator` (the `#[global_allocator]` of every final binary: the dylib, the CLI, the hosts) and `task_info` for the resident set | `FynkelWorldStats.native_bytes/resident_bytes`; `BridgeStats.nativeBytes/residentBytes`; headless `memory`; standalone `mem MB` |
 | asset residency | `fynkel_assets::ResidencyStats::bytes` (CPU bytes of resident payloads) | `FynkelWorldStats.residency_bytes`; `BridgeStats.residencyBytes`; headless `memory.residency_bytes` |
 | estimated GPU memory | `Renderer::gpu_bytes()`: resident meshes (vertex + index + skin buffers), textures (their mip bytes), the cube map, the attachments (depth, MSAA HDR, HDR, LDR per texel × samples), the shadow map, the instance/joint/debug/uniform/post buffers | `FrameStats::gpu_bytes`; `ViewportStatsSnapshot.gpuBytes`; standalone `gpu=` |
@@ -52,8 +52,8 @@ flutterBuild / flutterRaster       Flutter's own UI-thread build and raster-thre
 
 `FynkelFrameStats.totalWork` is `simulate + renderCall` per percentile —
 an upper bound on the sum's percentile — and the number the blueprint's
-**12 ms p95 total-work** target is about (§15.1; the capture checks it,
-part 2).
+**12 ms p95 total-work** target is about (§15.2; `benchmarks/m3/capture.py`
+checks it on both scenes, below).
 
 The per-frame Dart side is allocation free: `world.frameTimes` is one
 `FrameTimes` object with four `Stopwatch`es, overwritten every frame;
@@ -83,7 +83,14 @@ passes because of the overlap. A frame whose stamps could not be taken
 `gpu_timed` counts the read-backs, so a consumer that samples per frame
 (the ring stats, the standalone host) pushes a GPU sample only when the
 count changed. A device without the feature reports
-`gpu_timestamps: false` and zeros.
+`gpu_timestamps: false` and zeros. The stamps are wall-clock: in a
+Flutter host the GPU is shared with Flutter's raster thread (Impeller's
+command buffers run concurrently on the same hardware), so a pass's
+span there includes whatever ran beside it — the stress scene's post
+pass reads 1.5 ms p95 in one capture and 6 ms in the next while the
+standalone host, alone on the GPU, reads a steady 2.5–2.8 ms frame span.
+Compare a renderer change on the standalone host's numbers; read the
+Flutter host's as the frame's real GPU occupancy.
 
 The timestamp period is 1 ns on Apple GPUs; the pass times below are
 from the M3 Max at 3024×1964 on the fixture project (the M3-16 renderer
@@ -113,6 +120,44 @@ resident on first use by a renderer or a mesh collider, so a headless
 run reports 0) and the snapshot fields below; the renderer's
 `gpu_bytes` is the estimate of what it holds on the GPU.
 
+## The Dart heap (C3)
+
+`DartHeapProbe` (`package:fynkel_flutter/src/heap_probe.dart`) connects
+to the VM service the running app itself exposes (`dart:developer`
+`Service.getInfo()`; a debug or **profile** build has one, a release
+build has none — `connect()` returns null there and the stats stay
+absent, which a HUD should say rather than show zeros) and, once per
+stats window, reads two small things: `getMemoryUsage` (heap in use,
+capacity, external) and the window's `GC` **timeline events** — one
+per collection, carrying the heap before and after it to the kilobyte,
+its reason, and the mutator pause from its begin/end stamps. From those
+the window's **bytes allocated** is exact: the heap's growth between
+the points where it is known (the previous sample, before and after
+each collection, this sample) — every allocation counts, inlined or not,
+new and old space. The probe sets the VM to record only the `GC` stream
+while it is open (a window's `getVMTimeline` answer is ~20 KB instead of
+the frame timeline) and restores the streams on `close()`.
+
+Why not `getAllocationProfile`: its answer lists every class the isolate
+knows (5–6 MB of JSON per call in a Flutter app); decoding it allocated
+~200 KB per frame in the app it was measuring, and its counters are kept
+by the allocation stubs, so an inlined allocation is not in them. The
+first version of the probe used it and read 242 KB/frame in the Flutter
+host; the timeline version reads 43 KB/frame in the same host, and a
+window that allocates nothing reads under a megabyte with the probe's
+own traffic in it.
+
+`FynkelGameView(profileDartHeap: true)` opens a probe when `onStats` is
+set and puts `DartHeapStats` (`heapUsage`, `heapCapacity`,
+`externalUsage`, `allocatedBytes`, `gcCollections`, `gcPauseMs`,
+`newSpaceCollections`, `oldSpaceCollections`, `gcReasons`) on every
+`FynkelFrameStats.dartHeap`; `hosts/flutter_apple` and the reference
+game turn it on and show a `dart heap` line (or "no VM service"). The
+**AOT numbers** come from the `--profile` bundle (AOT like release, with
+the service): `benchmarks/m0/capture.py` builds it, runs it and parses
+the host's `[alloc]` lines into `alloc_aot` (`benchmarks/m0/results`),
+next to the JIT `tool/alloc_bench.dart` numbers it always had.
+
 ## The subscription budget (C5)
 
 Blueprint §5.4 says a snapshot is bounded by what the host subscribed;
@@ -139,20 +184,75 @@ chosen from a measurement: eight subscribed transforms are 728 bytes
   32.4 MB, assets 0.0 MB`.
 - **The standalone host's `[1s]` line** gains `sim ms` (ticks + extract),
   `prepare ms`, `gpu ms … n= untimed=` (the frame span, samples read back
-  this window) and `mem MB native= resident= gpu=`;
-  `benchmarks/m3/capture.py` parses them (part 2).
+  this window; `untimed` is the renderer's running total) and `mem MB
+  native= resident= gpu=`; `benchmarks/m3/capture.py` parses them.
+- **`FynkelFrameStats.summary()`**: the window as one line of stable
+  `key=value` pairs (counts; every timer as `p50/p95/p99` ms — `interval`,
+  `simulate`, `render`, `behaviours`, `native`, `work`, `build`, `raster`,
+  `extract`, `prepare`, `encode`, `cpu`, `gpu_complete`, `gpu_frame`,
+  `gpu_shadow`/`gpu_scene`/`gpu_post`; `gpu_n`, `gpu_untimed`; the memory
+  in bytes; `heap`, `heap_alloc`, `gc`, `gc_pause` when the probe is on).
+  `hosts/flutter_apple` prints it as `[stats] …` every window, the
+  reference game does under `FYNKEL_CAPTURE=1`; the M3 capture parses
+  one format for both scenes.
 - **`hosts/flutter_apple`**'s stats block: `dart behaviours ms … native
   step ms … total work ms`, `rust extract ms … prepare ms … encode ms`,
   `gpu pass ms shadow/scene/post/frame`, `memory MB native/resident/
-  assets/gpu snapshot B (peak, budget)`, `systems µs (last tick)`; the
-  `[host]` line carries them for `benchmarks/m0/capture.py`.
+  assets/gpu snapshot B (peak, budget)`, `dart heap KB … allocated
+  KB/frame … gc n= pause ms=`, `systems µs (last tick)`; the `[host]`
+  line carries them and `[alloc]` the heap for `benchmarks/m0/capture.py`.
 - **The starter, the reference game (F1) and the showcase** HUDs: a
   `work` line (behaviours / native / render / total at p95), a `gpu`
-  line (frame and passes at p95, the memory estimate), a `memory` line.
+  line (frame and passes at p95, the memory estimate), a `memory` line;
+  the reference game a `dart heap` line.
 - **`ViewportStatsSnapshot`** (viewport ABI v3): `extract`, `prepare`,
   `encode`, `gpuTimestamps`, `gpuFramesUntimed`, `gpuShadow`, `gpuScene`,
   `gpuPost`, `gpuFrame` (each `MsPercentiles` over the window; the GPU
   ones counted by read-backs), `gpuBytes`.
+
+## The captures
+
+`benchmarks/m0/capture.py` keeps its M0/M1 tables and adds `alloc_aot`
+(above). `benchmarks/m3/capture.py` (`--skip-build` after `cargo build
+--release --workspace`, `flutter build macos --profile` in
+`hosts/flutter_apple` and `examples/reference_game`; run it **alone**)
+records both scenes against the manifest (`benchmarks/profiles`):
+
+- **the stress scene** — cooked, rendered for the counts, its physics and
+  systems headlessly (items 8, 10, 19c), the standalone host's `[1s]`
+  lines and the Flutter host's `[stats]` lines (the profile bundle, so
+  the Dart heap is in them);
+- **the reference game** — cooked, the Playground rendered for the
+  counts, the route (`test/collect_all.input.json`) replayed headlessly
+  for the tick-side timers (`step_time`, `extract_time`, `frame_time`,
+  `memory`, `systems`, physics, animation, audio) under its checksum,
+  the Playground in the standalone host (`--scene <id>`), and **the game
+  itself**: its profile bundle with `FYNKEL_CAPTURE=1`, which loads the
+  Playground at the first frame instead of the Menu and prints
+  `[stats]` — the player idle at the spawn, every behaviour ticking.
+
+The gate adds four checks to the earlier items': **12 ms p95 total
+work** on the stress scene in the Flutter host and on the reference game
+in its own app (`work` p95 < 12, from the windows after the warm-up),
+the GPU pass timestamps read back in both apps, and the headless report
+carrying the timers on the route (with the Dart heap recorded, not
+gated). `benchmarks/m3/results/<date>-<commit>.{json,md}` is the
+record; the first with these numbers is `2026-09-22-0427213`: the
+stress scene's total work **7.59 ms p95** in the Flutter host (simulate
+3.50 — native ticks with 540 bodies, 200 rigs and 5 000 movers —, the
+render call 4.08 of which extract 2.13 and prepare 1.74; the GPU frame
+2.75 ms p95 on the standalone host), the reference game's **1.62 ms
+p95** (behaviours 0.19, native step 0.32, render() 1.09); the Dart heap
+39 KB/frame allocated in the host and 56 KB/frame in the game (the
+Flutter framework's own per-frame work is in that number; the SDK path
+alone is 1.5 KB/frame, `tool/alloc_bench.dart`), 3–4 scavenges a
+second of 0.15–0.25 ms each. What varied between three runs on the
+same build was the tail, not the medians: the headless physics run's
+p95/max (3.9/8.8, 3.7/8.5, 13.3/48.8 ms — one run in three has a burst
+of slow ticks; the p50 is 3.2–3.5 ms every time) and the GPU spans in
+the Flutter host (above). Every check passed on the third run; the
+second failed the standalone's `p99 interval < 10 ms` on one 11.4 ms
+window, the first the stale `14 phases` count (audio made it 15).
 
 ## Tests
 
@@ -174,4 +274,9 @@ chosen from a measurement: eight subscribed transforms are 728 bytes
   the fixture.
 - `packages/fynkel_flutter/test`: the viewport's stages and GPU memory
   after a render, ABI v3; the game view's window stats carry the split,
-  the systems, the viewport's stages.
+  the systems, the viewport's stages, and `summary()` every key once;
+  `heap_probe_test.dart` under `flutter test --enable-vmservice`
+  connects, allocates ≈ 40 MB and reads it back within a few percent
+  with the scavenges it forced, then a quiet window under a megabyte
+  (the plain runner has no service: the probe is null and the test
+  returns).

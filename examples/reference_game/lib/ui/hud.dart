@@ -176,6 +176,12 @@ class StatsBlock extends StatelessWidget {
               'assets ${(s.world.residencyBytes / 1048576).toStringAsFixed(1)} MB  snapshot ${s.world.snapshotBytes} B',
         ],
         'systems    ${s.systems.where((t) => t.micros > 0).map((t) => '${t.system.name} ${t.micros}').join(', ')} µs',
+        if (s.dartHeap case final h?)
+          'dart heap  ${(h.heapUsage / 1048576).toStringAsFixed(1)} MB  '
+              '${s.frames == 0 ? 0 : (h.allocatedBytes / 1024 / s.frames).toStringAsFixed(1)} KB/frame allocated  '
+              '${h.gcCollections} gc (${h.gcPauseMs.toStringAsFixed(1)} ms)'
+        else
+          'dart heap  no VM service (release build)',
         if (game.world.audio.stats case final a)
           'audio      ${a.voices} voices, ${a.streams} streams, ${a.underruns} underruns, ${a.starved} starved',
       ],

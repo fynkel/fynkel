@@ -427,9 +427,19 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   (`frames` and `fps` — ticker callbacks over the window's wall time, the
   rate the game actually runs at; tick interval / simulate / render-call
   percentiles, fixed ticks, missed deadlines, dropped frames, world +
-  viewport + platform counters), and `overlay` is the HUD composited over
-  the texture. The showcase and starter HUDs open with `fps N  frame p50
-  ms (p99)  render ms`.
+  viewport + platform counters; with `profileDartHeap: true` also
+  `dartHeap`, the C3 `DartHeapStats` from the app's own VM service —
+  debug/profile builds, null in release; `summary()` is the window as
+  one `key=value` line for a capture — instrumentation.md), and
+  `overlay` is the HUD composited over the texture. The showcase and
+  starter HUDs open with `fps N  frame p50 ms (p99)  render ms`.
+- `DartHeapProbe` — the C3 probe on its own: `connect()` (null without
+  a service), `sample()` per window (heap in use/capacity/external, the
+  bytes allocated since the last sample from the VM's `GC` timeline
+  events, collections and pauses), `close()` (restores the timeline
+  streams the app recorded before). `hosts/flutter_apple` prints one
+  `[alloc]` line per window from it; `benchmarks/m0/capture.py` runs the
+  host's `--profile` bundle for the AOT numbers.
 - `unpackBundledCache({into, bundle})` — the cooked cache on a device: the
   cook stages `<project>/fynkel_cache/` (`index.json` + the `.fyna` objects
   flat) and the app bundles it as Flutter assets (documents.md § `fynkel

@@ -23,7 +23,7 @@ changes. Numbers come from the gate reports (`m0-architecture-report.md`,
 | `fynkel_import::cache` + `::cook` + `fynkel_cooked` | Content-addressed cache (blake3 over source, settings, importer/format versions, dependency keys, profile; `objects/<key>.fyna`, `index.json` with the project's name, startup scene and the build's fingerprint, `--prune`) and the cooker (`cook_project`: every scene validated and expanded — prefabs applied, ids derived — into its object's `JSON` chunk, a cooked chunk per prefab; sources cooked first so a scene instancing `<source>#prefab` reads the hierarchy from the source's own `prefab` chunk — M3-19a); `FYNC` v1 container with CRC-checked header and chunk table, bounded reads, dependency-free reader (`MESH`/`TEXR`/`CLIP`/`JSON`/`MATL`/`BLOB`; `MATL` is the `PbrMaterial` wire record the renderer consumes) | **Solid for what is imported** — no mipmaps, compression or per-profile transforms; `CLIP` has no consumer; no GC beyond `--prune` | editing a texture re-cooks exactly its dependents (4 of 6 on the fixture); cook miss 20 ms / hit 12 ms / partial 13 ms; flipped byte caught on read-back |
 | `fynkel_assets` | The runtime store over the cache: `Assets::open` refuses a cache from another build, `scene(id)` → the expanded description + behaviours + asset closure, `prefab(id)` → an authored prefab's chunk or an imported source's `prefab` chunk (M3-19a; `FYN-R0006` for a source without a hierarchy), meshes/textures/materials by `AssetRef`, `register_animation` putting a scene's clips, blend spaces (a space once, its points' clips with it; M3-19c) and skins into the world, `retain(closure)` → `Residency` token, drop evicts what no scene holds; `FYN-R0001`–`R0009` name the asset id, never fall back to source | **Solid** | 5 store tests; the render gate renders from a cache whose source tree was deleted; ABI tests load a copied cache and refuse a tampered one |
 | `fynkel_render` | wgpu renderer over the extract (`docs/renderer.md`): Cook-Torrance (GGX, Smith, Schlick) in physical units — every `fynkel.pbr@1` factor and map (base colour, normal via cook-generated tangents, metallic-roughness, occlusion, emissive), `alpha_mode: mask`, double-sided — into a linear HDR `Rgba16Float` target exposed by the camera's EV100 (`Camera.exposure`, or metered from the sun) and ACES tone mapped; one sun, constant ambient + optional equirectangular sky (`fynkel.Environment`), the 8 nearest point/spot lights (`fynkel.SpotLight`), perspective or orthographic camera; the `shadow → opaque → transparent → post → presentation` chain: the sun's 3×3 PCF shadow from one texel-snapped 2048² map (`cast_shadows`/`receive_shadows` per mesh), `blend` materials back to front in the transparent stage, MSAA 1/4 resolved through the post pass's coverage, render scale with a presentation pass, the project's `quality` profiles read from the cache and switched at runtime (renderer, Apple ABI, `FynkelViewportController.quality`, `fynkel render --quality`), debug lines/AABBs; one instance buffer per frame with one draw per distinct `(mesh, material)` pair, every instance frustum-culled against the camera (and, for casters, the sun's box) on its cooked bounding sphere before upload, `draws`/`instances`/`culled` counted; the skinned path (M3-19): a second vertex buffer of joint indices and weights, the frame's joint palettes in a storage buffer at bind group 2, `vs_skinned` in the mesh and shadow shaders (`model = instance · Σ wᵢ · palette[jᵢ]`), skinned instances batched with the rest, a skinned mesh without a resolved skin drawn in its bind pose, `skinned`/`joints` in the stats, `fynkel render --steps`; fourteen fixed pipelines, bind groups cached per material/texture, evicted with the store; placeholder cubes, magenta for a missing mesh | **V1 (c) + skinning** — one cascade to 60 m, no IBL beyond constant ambient, no light culling, no mipmaps (anisotropy sharpens the base level only); normals skew under non-uniform scale | 20 per-feature pixel tests (shadow, per-mesh opt-outs, blend order, MSAA edges, render scale, profile switching, debug lines, culling, the Rig scene's posed column against its bind pose among them) + the fixture project (rusted robot with swatch, normal and metallic-roughness maps under its `Sun`, `low`/`medium`/`high` profiles) rendered from its own camera from the cache alone; exposure, shadow fit, quality clamp, culling and debug unit tests; `fynkel render` writes a PNG with `ev100`/light/shadow/draw/culled counts; runs in every host; M0 capture `2026-09-20-12859e1` unchanged at MSAA 4 + shadow pass (122/120 fps, engine CPU ≈ 0.1 ms); stress capture `benchmarks/m3/results/2026-09-20-cf2b3eb`: 5 804 entities, 5 343 instances in 15 draws, 458 culled, 122 fps standalone / 120 Flutter |
-| `platform/apple` + `package:fynkel_flutter` + `hosts/flutter_apple` | IOSurface ring → Flutter `Texture` (Path A), 0 copies, GPU-completion hand-off; macOS + iOS. `package:fynkel_flutter` is the Flutter plugin a game depends on: Swift `FynkelFlutterPlugin` (texture registration, multi-viewport by `textureId`, ordered teardown), `FynkelViewportController` (create/resize/rebind, adopts the world's asset store, placeholders, camera, stats), `FynkelViewport` widget (layout × DPR, focus, pointer in physical px), `FynkelGameView` (Ticker loop: `World.frame` then render, lifecycle mute, per-second `FynkelFrameStats`, overlay), `FynkelInputCapture` (keys, mouse, pointer capture; reset on focus loss/pause), Swift `FynkelInputPlugin` (gamepads via `GCController` on both targets, captured-mouse deltas on macOS) and `TouchOverlay` (sticks and buttons for `touch:overlay/*`); HUD bindings `ModelBinding`/`ModelBuilder`/`ModelValue.listenable` and world labels `ProjectionLayer` (owns its children's anchors, viewport from layout, a `Flow` repainting on the view's listener — no rebuilds per frame, unpainted and unhittable when not visible) with `ProjectedAnchor`/`WorldLabel`, the view updated by `FynkelGameView` after every frame (M3-13, `docs/hud.md`). `hosts/flutter_apple` is the measurement harness as a thin app on it; `FYNKEL_PROJECT=<dir>` shows a project's startup scene from its cooked cache | **Solid** | 120 Hz, lag 0, raster p95 0.96 ms after the port (M0 capture `2026-09-19-b35f603`); iOS simulator 60 Hz, 0 drops; package tests create → render → resize → detach against the real Rust viewport under `flutter test`; 60-lifetime leak test |
+| `platform/apple` + `package:fynkel_flutter` + `hosts/flutter_apple` | IOSurface ring → Flutter `Texture` (Path A), 0 copies, GPU-completion hand-off; macOS + iOS. `package:fynkel_flutter` is the Flutter plugin a game depends on: Swift `FynkelFlutterPlugin` (texture registration, multi-viewport by `textureId`, ordered teardown), `FynkelViewportController` (create/resize/rebind, adopts the world's asset store, placeholders, camera, stats), `FynkelViewport` widget (layout × DPR, focus, pointer in physical px), `FynkelGameView` (Ticker loop: `World.frame` then render, lifecycle mute, per-second `FynkelFrameStats`, overlay), `FynkelInputCapture` (keys, mouse, pointer capture; reset on focus loss/pause), Swift `FynkelInputPlugin` (gamepads via `GCController` on both targets, captured-mouse deltas on macOS) and `TouchOverlay` (sticks and buttons for `touch:overlay/*`); HUD bindings `ModelBinding`/`ModelBuilder`/`ModelValue.listenable` and world labels `ProjectionLayer` (owns its children's anchors, viewport from layout, a `Flow` repainting on the view's listener — no rebuilds per frame, unpainted and unhittable when not visible) with `ProjectedAnchor`/`WorldLabel`, the view updated by `FynkelGameView` after every frame (M3-13, `docs/hud.md`). ``DartHeapProbe` (M3-16, C3: the Dart heap, bytes allocated and GC per window from the app's own VM service; `FynkelGameView(profileDartHeap:)`) and `FynkelFrameStats.summary()` (the `[stats]` capture line). `hosts/flutter_apple` is the measurement harness as a thin app on it; `FYNKEL_PROJECT=<dir>` shows a project's startup scene from its cooked cache | **Solid** | 120 Hz, lag 0, raster p95 0.96 ms after the port (M0 capture `2026-09-19-b35f603`); iOS simulator 60 Hz, 0 drops; package tests create → render → resize → detach against the real Rust viewport under `flutter test`; 60-lifetime leak test |
 | `fynkel_authoring` + `fynkel_native` feature `authoring` + `package:fynkel_authoring` (M4-01, branch `editor`) | The editor's session over `fynkel_document` (ADR-0016): one open project (file, lock → read-only when newer, embedded + behaviour schemas, asset database with every reference indexed, committed behaviour metadata) and one authoring `Editor` per open scene, prefab or material behind an integer handle; `apply`/`undo`/`redo`/`save`/`reload`/`rescan` and fourteen read-only queries (`document`, `inspect`, `validate`, `validateProject`, `assets`, `asset`, `dependents`, `schemas`, `schema`, `metadata`, `migrations`, …), all JSON; the `fynkel_authoring_*` C ABI (`include/fynkel_authoring.h`, NULL-safe, panics caught and the session poisoned, one result buffer per call) compiled only with the cargo feature `authoring` — `package:fynkel`'s hook builds every runtime `--no-default-features` and adds the feature only for a pubspec that asks (`hooks.user_defines.fynkel.features`), so a game's runtime has no editor code; `package:fynkel_authoring` is the typed Dart surface (ffigen bindings, `AuthoringSession`/`DocumentHandle`/`Command`, a `Stream` of events). D5 and D7 closed (`docs/editor.md`, `docs/documents.md` § The authoring session) | **Solid** | 9 session tests + 4 ABI tests (Rust) and 5 Dart tests driving a complete session over the ABI on a copy of the fixture project (all seventeen commands, undo to the original bytes, save and save-as, the stale-revision conflict, a material's `base_color`, `duplicateObject` of the rig); CI builds the runtime without the feature and fails on any `fynkel_authoring_*` symbol; 16 000 entities / 8 000 warnings read + validate in 99 ms release (was 726 ms) |
 | `apps/editor` — the editor shell (M4-02, branch `editor`) | The Flutter macOS app on `package:docking` (spike: seven criteria, ADR-0016): launcher (New over `fynkel create --json`, Open, Recent, doctor checks for CLI/checkout/Flutter/ABI/IDE), the §22.2 workspace saved per user with Reset layout, a native menu bar + command registry + palette (23 commands with stable ids, each reachable by menu, shortcut and palette), the Console over the session's diagnostics (exact `file:line:column`, filters, collapse, copy, open in the IDE), read-only banner with the lock's reason (+ `FYN-P0011`), a migration preview over the session's new `migrations` query (steps, diff, the command; writes nothing), preferences (`~/Library/Application Support/Fynkel Editor/`). The editor runs no game code and shells out only to `fynkel create` so far (`docs/editor.md` § The shell) | **Built; the gate is the user's to drive** | 45 tests in `apps/editor` (docking spike 7, commands 6, palette 3, console 4, launcher 11, workspace 7, real session 7: the fixture project and the reference game open and validate, a misspelt field is listed at `main.scene.json:75:13`, a lock naming runtime 9.0.0 opens read-only with that reason, a v0 scene previews as `0 → 2`, the watcher revalidates); `fynkel_authoring` 10 Rust + 6 Dart tests cover `migrations`; `flutter build macos --debug` succeeds |
 | `apps/editor` — document tabs and the Hierarchy (M4-03, branch `editor`) | Tabs over the session's documents: Open Document (⇧⌘O) and Console → tab, dirty dot, ⌘S / Save As (never over an existing file) / Save All / Revert / Close with the save prompt, undo and redo per tab with a counted label (text fields keep their own), a file watcher that reloads a clean tab silently and turns an external write under a dirty tab into a conflict dialog with three revisions and a unified diff (Reload / Save As / Keep editing — the `FYN-E0001` path, never an overwrite); the Hierarchy as a virtualised tree built once and patched from `affectedIds` through the `document` query's `ids` form, with select / multi / range, rename in place, Duplicate, Delete, Create empty / with a native component (defaults from the new `defaults` query), drag-and-drop reparent with an explicit index and keep-world-transform `setField`s in the same transaction, search over name / id / component type, filters for component, prefab state and has-error, prefab and error badges. Three read-only queries added to `fynkel_authoring` (`document` with `ids`, `defaults`, `revision`); no shared crate touched (`docs/editor.md` § Document tabs and the Hierarchy) | **Solid** (driven by the user on a copy of the fixture project and the reference game; the gate found and fixed a Save As path bug, the tab label after Save As and a placeholder overflow) | 86 tests in `apps/editor` (+41: documents 18, hierarchy 16, line diff 4, real session 3 — every Hierarchy operation one transaction on the fixture's Main scene, saved and inspected and reopened; the conflict path through the real watcher with save-as and the rig scene's silent reload; a generated 10 000-entity scene opens in 262 ms and edits in 307 ms without a rebuild); `fynkel_authoring` 11 Rust + 6 Dart tests (`defaults_cover_every_authored_component`) |
@@ -310,9 +310,25 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
   line); every load report carries its wall time; and the subscription
   budget (C5) is a check — `world.snapshotBudget` raises
   `SNAPSHOT_BUDGET` (20, `FYN-R0013`) once per crossing with the
-  snapshot still whole. Viewport ABI 3. (M3-16 part 1; the C3 Dart
-  heap probe, the AOT capture and `benchmarks/m3/capture.py` with the
-  results are part 2.)
+  snapshot still whole. Viewport ABI 3. (M3-16 part 1.) **Part 2:**
+  the C3 Dart heap probe (`DartHeapProbe`: the app's own VM service,
+  the `GC` timeline events' before/after heap per collection and
+  `getMemoryUsage` — exact bytes allocated per window at ~20 KB of
+  traffic, where `getAllocationProfile` cost 5.7 MB a call and
+  allocated more than it measured; `FynkelGameView(profileDartHeap:)`,
+  `FynkelFrameStats.dartHeap`, the host's and the reference game's
+  `dart heap` lines, `benchmarks/m0/capture.py`'s `alloc_aot` from the
+  host's `--profile` bundle), `FynkelFrameStats.summary()` (one
+  `[stats]` line per window; the reference game prints it under
+  `FYNKEL_CAPTURE=1` and starts in the Playground), and
+  `benchmarks/m3/capture.py` recording **both scenes against the
+  manifest** — the stress scene in the standalone and Flutter hosts,
+  the reference game rendered, replayed headlessly on its route, in the
+  standalone host and in its own app — with the **12 ms p95 total-work
+  target checked**: `benchmarks/m3/results/2026-09-22-0427213`, stress
+  **7.59 ms p95** (8 406 entities, 5 530 drawn, 540 bodies, 200 rigs),
+  reference game **1.62 ms p95**; GPU timestamps read back in both
+  apps; the headless route report with step/extract/frame/memory.
 
 ## 3. What is *not* proven yet (honest list)
 
@@ -325,6 +341,7 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
 | **Physics V1 is bodies, a character and queries.** One collider per entity, no joints, mesh colliders static only, collider outlines (`Physics::debug_lines`) not drawn by any host yet; the character does not push dynamic bodies or ride moving platforms (M3-14 decided the relative look delta: consumed by one tick as a rate, `docs/input.md` rule 5; and no camera smoothing — the rig snaps). | Enough for the reference game's player, crates and hazards; ragdolls, vehicles, hinged doors and platform riding are post-1.0. | after M3 |
 | **Input has no Android or web path and no rebinding UI.** `FynkelInputPlugin` is Apple-only (GameController); the touch overlay is fixed to bottom corners; rebinds persist in the settings file (M3-12) but nothing edits them on screen. | Fine for the Apple targets M3 ships; a settings screen needs a runtime rebind API. | after M3 |
 | **Native components' Inspector hints live in an editor table, not in Rust attributes.** ADR-0018 asks for `#[fynkel(...)]` field attributes on the component structs; M4-04 shipped the behaviour half (`@Expose` hints through the generator) and a table in `apps/editor/lib/src/inspector/native_hints.dart` for the 23 built-ins (audio included), read underneath the schema's `x-fynkel`. | Editing a native component's hint means editing the editor, not the component; one code path either way. | M3 stream, when `fynkel_schema_derive` is next touched |
+| **A Flutter app allocates 40–60 KB per frame on the Dart heap** (the host 39–43, the reference game 56 KB/frame; 3–4 scavenges a second of 0.15–0.25 ms). The SDK's own path is 1.5 KB/frame (`tool/alloc_bench.dart`); the rest is the framework's per-frame work in these apps (the ticker, the game view's stats, the HUD's projection layer, Impeller) and has not been attributed. | Fine at 120 Hz on the M3 Max (no old-space collection during play); on a phone the scavenges are where a p99 stutter would come from. | after M3 — attribute with the probe per widget, then decide |
 | **Everything runs on the Flutter UI thread** (step, extract, render). | Fine at current sizes; ADR-0007 allows a render thread later, so extraction must stay cheap. | M5 |
 | **Single machine, single profile.** Every number is from one M3 Max and one iPhone; no second display / DPI change exercised. | Regressions elsewhere would not be seen. | first release |
 
@@ -402,8 +419,11 @@ cd examples/showcase && fynkel validate && fynkel test --headless && fynkel rend
 Dart SDK is on `PATH`, and a `--no-flutter` create through validate and the
 headless host always.) Timings: `python3 benchmarks/m0/capture.py` (frame
 loop, bridge, allocation, leaks), `python3 benchmarks/m2/capture.py`
-(tools) and `python3 benchmarks/m3/capture.py` (the stress scene, with
-the item 6 gate); results land under
+(tools) and `python3 benchmarks/m3/capture.py` (the stress scene and
+the reference game with the item 6/8/10/19c/16 gates; **run it alone**,
+after `cargo build --release --workspace` and `flutter build macos
+--profile` in `hosts/flutter_apple` and `examples/reference_game`, or
+without `--skip-build`); results land under
 `benchmarks/*/results/<date>-<commit>.md`.
 
 Last clean-clone run: **2026-09-19, commit `68e9a72` + the M2-18 changes**
@@ -1033,6 +1053,28 @@ p50=0.07 | prepare ms p50=0.29 | gpu ms p50=0.42 p95=3.9 n=121 untimed=5 |
 mem MB native=1.4 resident=130 gpu=201` (the 4× MSAA attachments and
 the 4096² shadow map are most of the estimate).
 
+M3-16 part 2 (2026-09-22): fmt/clippy clean, `cargo test --workspace`
+green, the four `codegen --check`s up to date, Dart suites green
+(`packages/fynkel` 149, `fynkel_flutter` 25 — `heap_probe_test` reads
+≈ 41.4 MB back for 41.3 MB allocated under `flutter test
+--enable-vmservice`, `summary()` asserted in the game view test —,
+`fynkel_generator` 6, `spinner_game` 4, `hosts/flutter_apple` analyze
+clean), a fresh starter through every step, the showcase and the
+reference game unchanged in checksum; `benchmarks/m0/capture.py`'s
+`alloc_aot` on the host's profile bundle: 43 KB/frame, heap 10 MB, 19
+scavenges + 2 old-space phases in 6 s (4 ms); **`benchmarks/m3/
+capture.py` → `results/2026-09-22-0427213`**, fifteen checks green on
+the third run (the earlier two: one 11.4 ms standalone window, the
+stale phase count): stress total work 7.59 ms p95 (simulate 3.50,
+render() 4.08: extract 2.13, prepare 1.74, encode 0.02), 120 frames/s,
+GPU frame 2.75 ms p95 standalone; reference game total work 1.62 ms
+p95 (behaviours 0.19, native 0.32, render() 1.09), the route's step
+p95 64 µs / extract 42 / frame 106, native 6 MB; Dart heap 39 KB/frame
+(host) and 56 KB/frame (game), 3–4 scavenges a second. The tail varied
+between runs (physics p95/max 3.9/8.8 → 13.3/48.8 ms once; the Flutter
+host's GPU spans with Flutter's raster beside them) — recorded in
+`docs/instrumentation.md`, medians stable.
+
 ## 6. Verdict and next steps
 
 M2 is closed with a GO (`m2-gate-report.md`). The data layer is the shape the
@@ -1152,12 +1194,14 @@ in its own app, play it, or hear it. That is M3, in this order:
    timestamps, the counting allocator and resident set, residency and
    the GPU memory estimate, Flutter timings, load time, the C5 budget
    diagnostic — on every surface: viewport ABI 3, `FynkelWorldStats`,
-   the headless JSON, the standalone line, the hosts' HUDs). **Next:
-   part 2** (the C3 Dart heap probe and the AOT capture,
-   `benchmarks/m3/capture.py` over the reference game and the stress
-   scene with the 12 ms p95 check, `benchmarks/m3/results/`), then public
-   readiness (17), the gate report (18) — measured with both captures at
-   every step.
+   the headless JSON, the standalone line, the hosts' HUDs). **Part 2
+   done** (M3-16 part 2: the C3 `DartHeapProbe` on the VM's GC timeline,
+   the AOT capture in `benchmarks/m0/capture.py`, `FynkelFrameStats.
+   summary()`, `benchmarks/m3/capture.py` over both scenes with the
+   12 ms p95 total-work check — `results/2026-09-22-0427213`: stress
+   7.59 ms p95, reference game 1.62 ms p95, every check green). **Next:
+   public readiness (17)**, then the gate report (18) — measured with
+   both captures at every step.
 16. **M4 — the editor — has started in parallel** (2026-09-21, the user's
    call): branch `editor` in its own worktree, the backlog in blueprint
    §19.2e (ten items: the authoring ABI D5 + D7 first, then the shell,

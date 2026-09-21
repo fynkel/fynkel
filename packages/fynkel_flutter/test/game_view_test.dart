@@ -102,6 +102,17 @@ void main() {
     // empty; the GPU stamps trail the draw and may not have landed yet.
     expect(s.flutterBuild.count, greaterThanOrEqualTo(0));
     expect(s.viewport!.gpuFrame.count, lessThanOrEqualTo(s.viewport!.framesRendered));
+    // The capture line: every key once, the timers as p50/p95/p99, the
+    // viewport's counts, no Dart heap (the test runner has no probe).
+    final line = s.summary();
+    final keys = line.split(' ').map((kv) => kv.split('=').first).toList();
+    expect(keys.toSet().length, keys.length);
+    expect(line, contains('frames=${s.frames} '));
+    expect(line, contains('entities=${world.stats().liveEntities} '));
+    expect(line, contains('work=${s.totalWork.p50.toStringAsFixed(3)}/'));
+    expect(line, contains('instances=${s.viewport!.instances} '));
+    expect(line, contains('mem_gpu=${s.viewport!.gpuBytes}'));
+    expect(line, isNot(contains('heap=')));
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();

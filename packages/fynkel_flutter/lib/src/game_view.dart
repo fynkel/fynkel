@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fynkel/fynkel.dart';
 
+import 'heap_probe.dart';
 import 'input_capture.dart';
 import 'percentiles.dart';
 import 'viewport.dart';
@@ -40,6 +41,7 @@ class FynkelFrameStats {
     required this.physicalWidth,
     required this.physicalHeight,
     required this.muted,
+    this.dartHeap,
   });
 
   /// Ticker callbacks (frames simulated and rendered) this window, and
@@ -82,6 +84,11 @@ class FynkelFrameStats {
   final int physicalWidth, physicalHeight;
   final bool muted;
 
+  /// The Dart heap this window (blueprint C3): present when the view was
+  /// given `profileDartHeap: true` and the app carries a VM service (debug
+  /// and profile builds; a release build has none, so this stays null).
+  final DartHeapStats? dartHeap;
+
   /// The frame's total CPU work on the game path — [simulate] plus
   /// [renderCall] at the same percentile (an upper bound on the sum's
   /// percentile) — the number the blueprint's 12 ms p95 target is about.
@@ -91,6 +98,67 @@ class FynkelFrameStats {
         simulate.p99 + renderCall.p99,
         frames,
       );
+
+  /// The window on one line of `key=value` pairs for a capture to parse
+  /// (`benchmarks/m3/capture.py` reads `[stats] …` lines from an app's
+  /// stdout): counts, every timer as `p50/p95/p99` ms, the memory in
+  /// bytes, the Dart heap when [dartHeap] is present. Keys are stable.
+  String summary() {
+    String pct(MsPercentiles p) =>
+        '${p.p50.toStringAsFixed(3)}/${p.p95.toStringAsFixed(3)}/${p.p99.toStringAsFixed(3)}';
+    final v = viewport;
+    final h = dartHeap;
+    return [
+      'frames=$frames',
+      'ticks=$fixedTicks',
+      'missed=$missedDeadlines',
+      'dropped=$dropped',
+      'entities=${world.liveEntities}',
+      'interval=${pct(tickInterval)}',
+      'simulate=${pct(simulate)}',
+      'render=${pct(renderCall)}',
+      'behaviours=${pct(behaviours)}',
+      'native=${pct(nativeStep)}',
+      'work=${pct(totalWork)}',
+      'build=${pct(flutterBuild)}',
+      'raster=${pct(flutterRaster)}',
+      'snapshot=${world.snapshotBytes}',
+      'snapshot_peak=${world.snapshotPeakBytes}',
+      'mem_native=${world.nativeBytes}',
+      'mem_resident=${world.residentBytes}',
+      'mem_assets=${world.residencyBytes}',
+      if (v != null) ...[
+        'instances=${v.instances}',
+        'draws=${v.draws}',
+        'culled=${v.culled}',
+        'shadow=${v.shadowCasters}/${v.shadowDraws}',
+        'rendered=${v.framesRendered}',
+        'extract=${pct(v.extract)}',
+        'prepare=${pct(v.prepare)}',
+        'encode=${pct(v.encode)}',
+        'cpu=${v.cpuP50Ms.toStringAsFixed(3)}/${v.cpuP95Ms.toStringAsFixed(3)}/${v.cpuP99Ms.toStringAsFixed(3)}',
+        'gpu_complete=${v.gpuP50Ms.toStringAsFixed(3)}/${v.gpuP95Ms.toStringAsFixed(3)}/${v.gpuP99Ms.toStringAsFixed(3)}',
+        'gpu_frame=${pct(v.gpuFrame)}',
+        'gpu_shadow=${pct(v.gpuShadow)}',
+        'gpu_scene=${pct(v.gpuScene)}',
+        'gpu_post=${pct(v.gpuPost)}',
+        'gpu_n=${v.gpuFrame.count}',
+        'gpu_untimed=${v.gpuFramesUntimed}',
+        'gpu_timestamps=${v.gpuTimestamps}',
+        'mem_gpu=${v.gpuBytes}',
+      ],
+      if (h != null) ...[
+        'heap=${h.heapUsage}',
+        'heap_capacity=${h.heapCapacity}',
+        'heap_external=${h.externalUsage}',
+        'heap_alloc=${h.allocatedBytes}',
+        'gc=${h.gcCollections}',
+        'gc_new=${h.newSpaceCollections}',
+        'gc_old=${h.oldSpaceCollections}',
+        'gc_pause=${h.gcPauseMs.toStringAsFixed(3)}',
+      ],
+    ].join(' ');
+  }
 }
 
 class FynkelGameView extends StatefulWidget {
@@ -112,6 +180,7 @@ class FynkelGameView extends StatefulWidget {
     this.onKeyEvent,
     this.onPointerEvent,
     this.placeholder,
+    this.profileDartHeap = false,
   });
 
   /// The world this view simulates and draws. The view does not own it.
@@ -138,6 +207,13 @@ class FynkelGameView extends StatefulWidget {
   /// Per-window loop statistics (HUD, benchmark captures).
   final void Function(FynkelFrameStats stats)? onStats;
   final Duration statsInterval;
+
+  /// Sample the Dart heap (usage, allocation, GC) for [onStats] through
+  /// the app's VM service (blueprint C3; `DartHeapProbe`). Debug and
+  /// profile builds only — a release build has no service and the stats
+  /// stay null. The sample is a few JSON-RPC round trips per window,
+  /// never on the frame.
+  final bool profileDartHeap;
 
   /// Widgets drawn over the viewport (the HUD).
   final Widget? overlay;
@@ -279,10 +355,24 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       _statsTimer = Timer.periodic(widget.statsInterval, (_) => _report());
       SchedulerBinding.instance.addTimingsCallback(_onTimings);
       _timingsInstalled = true;
+      if (widget.profileDartHeap) unawaited(_connectHeapProbe());
     }
   }
 
   bool _timingsInstalled = false;
+  DartHeapProbe? _heapProbe;
+  bool _heapProbeRequested = false;
+
+  Future<void> _connectHeapProbe() async {
+    if (_heapProbeRequested) return;
+    _heapProbeRequested = true;
+    final probe = await DartHeapProbe.connect();
+    if (!mounted) {
+      await probe?.close();
+      return;
+    }
+    _heapProbe = probe;
+  }
 
   void _onTimings(List<FrameTiming> timings) {
     for (final t in timings) {
@@ -340,6 +430,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _ticker.dispose();
     _statsTimer?.cancel();
     _installTimings(false);
+    unawaited(_heapProbe?.close());
     FynkelInputChannel.detach(input);
     if (_pointerCaptured) unawaited(FynkelInputChannel.capturePointer(false));
     controller.removeListener(_onViewportChanged);
@@ -403,6 +494,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     final c = controller;
     final viewport = c.takeStats();
     final platform = await c.platformStats();
+    final dartHeap = await _heapProbe?.sample();
     if (!mounted) return;
     final seconds = _window.elapsedMicroseconds / 1e6;
     final stats = FynkelFrameStats(
@@ -426,6 +518,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       physicalWidth: c.physicalWidth,
       physicalHeight: c.physicalHeight,
       muted: _ticker.muted,
+      dartHeap: dartHeap,
     );
     _intervalsMs.clear();
     _simMs.clear();

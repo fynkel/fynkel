@@ -36,6 +36,14 @@ sprint: Shift / LB · use: E / X · wave: F / B · restart: R / Y · pause:
 Escape / menu · F1 stats, Q quality profile. The keys are the defaults:
 the settings panel rebinds them.
 
+**Benchmarking** — `FYNKEL_CAPTURE=1` in the environment makes a run
+load the Playground at the first frame instead of the Menu and print its
+stats window once a second as a `[stats] key=value …` line
+(`FynkelFrameStats.summary()`); `benchmarks/m3/capture.py` runs the
+`flutter build macos --profile` bundle that way (AOT, with the VM service
+the Dart heap line needs — the release build has none and the stats say
+so).
+
 ## The world
 
 The three scenes — `assets/scenes/menu.scene.json` (the startup scene: a

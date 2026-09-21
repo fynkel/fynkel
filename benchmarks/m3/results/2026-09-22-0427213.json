@@ -1,0 +1,992 @@
+{
+  "profile": {
+    "profile": "mac-m3max-2026",
+    "frozen": "2026-09-19",
+    "machine": {
+      "model": "MacBook Pro 16-inch, Apple M3 Max",
+      "cpu": "Apple M3 Max, 14 cores",
+      "gpu": "Apple M3 Max, 30 cores, Metal 4",
+      "ram_gib": 36,
+      "display": "built-in 3456x2234 Retina, 120 Hz ProMotion, scale 2.0"
+    },
+    "os": "macOS 26.5.1",
+    "graphics_backend": "Metal (wgpu 30.0.1)",
+    "toolchain": {
+      "rust": "1.93.0 aarch64-apple-darwin",
+      "flutter": "3.47.2 (Impeller)",
+      "dart": "3.13.2",
+      "xcode": "26.5 (17F42)"
+    },
+    "resolution": {
+      "standalone_window_logical": [
+        1280,
+        720
+      ],
+      "flutter_window_logical": [
+        1200,
+        820
+      ],
+      "flutter_viewport_physical_note": "window minus host bar, times dpr 2.0; recorded per run"
+    },
+    "quality": "M0 cube scene, no MSAA, Depth32Float, Bgra8Unorm, Fifo/vsync",
+    "scene_version": "fynkel_m0_scene 0.0.1 (one lit cube)",
+    "warm_up_seconds": 2,
+    "sample_seconds": 10,
+    "capture_command": "python3 benchmarks/m0/capture.py",
+    "power": "capture on mains power, no other GPU-heavy apps; display at native scaling"
+  },
+  "environment": {
+    "captured_at": "2026-09-22T00:24:52+02:00",
+    "commit": "0427213",
+    "dirty": true,
+    "os": "26.5.1",
+    "cpu": "Apple M3 Max",
+    "ram_gib": 36,
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "flutter": "Flutter 3.47.2 \u2022 channel stable \u2022 https://github.com/flutter/flutter.git",
+    "dart": "Dart SDK version: 3.13.2 (stable) (Tue Aug 25 01:01:12 2026 -0700) on \"macos_arm64\"",
+    "xcode": "Xcode 26.5"
+  },
+  "warmup_seconds": 2,
+  "sample_seconds": 10,
+  "stress": {
+    "generator": "/Users/oumari/Desktop/Code/fynkelengine/benchmarks/stress/project: 8406 entities (5000 native movers, 500 bodies, 300 behaviours, 200 animated rigs), 8 materials, 16 distinct (mesh, material) pairs",
+    "entities": 8406,
+    "meshes": 6001,
+    "instances": 5530,
+    "culled": 471,
+    "draws": 16,
+    "batches": 16,
+    "transparent": 0,
+    "shadow_casters": 5904,
+    "shadow_draws": 15,
+    "shadow_map": 2048,
+    "quality": {
+      "profile": "medium",
+      "shadows": true,
+      "shadowResolution": 2048,
+      "msaa": 4,
+      "renderScale": 1.0,
+      "anisotropy": 8,
+      "renderSize": [
+        1280,
+        720
+      ]
+    }
+  },
+  "physics": {
+    "steps": 600,
+    "step_time_us": {
+      "p50_us": 3501,
+      "p95_us": 13331,
+      "max_us": 48841
+    },
+    "total_ms": 5020.361,
+    "checksum": "6fb81c2c293fcdbe",
+    "settled_steps": 1800,
+    "settled_step_time_us": {
+      "p50_us": 3157,
+      "p95_us": 3762,
+      "max_us": 8632
+    },
+    "settled_checksum": "52822ab017fcd48a",
+    "live_entities": 8486,
+    "systems": [
+      {
+        "system": "step",
+        "entities": 8486,
+        "total_us": 5737477,
+        "max_us": 8632,
+        "mean_us": 3187.4873
+      },
+      {
+        "system": "commands",
+        "entities": 0,
+        "total_us": 0,
+        "max_us": 0,
+        "mean_us": 0.0
+      },
+      {
+        "system": "characters",
+        "entities": 0,
+        "total_us": 53,
+        "max_us": 5,
+        "mean_us": 0.029444445
+      },
+      {
+        "system": "animation",
+        "entities": 450,
+        "total_us": 515609,
+        "max_us": 727,
+        "mean_us": 286.44943
+      },
+      {
+        "system": "rotator",
+        "entities": 1668,
+        "total_us": 21401,
+        "max_us": 39,
+        "mean_us": 11.889444
+      },
+      {
+        "system": "oscillate",
+        "entities": 1668,
+        "total_us": 36510,
+        "max_us": 286,
+        "mean_us": 20.283333
+      },
+      {
+        "system": "lifetimeDespawn",
+        "entities": 39,
+        "total_us": 630,
+        "max_us": 16,
+        "mean_us": 0.35
+      },
+      {
+        "system": "emitter",
+        "entities": 1,
+        "total_us": 5310,
+        "max_us": 63,
+        "mean_us": 2.95
+      },
+      {
+        "system": "physics",
+        "entities": 6081,
+        "total_us": 3953306,
+        "max_us": 4959,
+        "mean_us": 2196.281
+      },
+      {
+        "system": "cameraRigs",
+        "entities": 0,
+        "total_us": 132,
+        "max_us": 5,
+        "mean_us": 0.07333333
+      },
+      {
+        "system": "follow",
+        "entities": 1,
+        "total_us": 1842,
+        "max_us": 17,
+        "mean_us": 1.0233333
+      },
+      {
+        "system": "lookAtCamera",
+        "entities": 1664,
+        "total_us": 190482,
+        "max_us": 240,
+        "mean_us": 105.82333
+      },
+      {
+        "system": "transforms",
+        "entities": 5539,
+        "total_us": 999499,
+        "max_us": 2439,
+        "mean_us": 555.2772
+      },
+      {
+        "system": "audio",
+        "entities": 0,
+        "total_us": 778,
+        "max_us": 7,
+        "mean_us": 0.43222222
+      },
+      {
+        "system": "publish",
+        "entities": 0,
+        "total_us": 16,
+        "max_us": 5,
+        "mean_us": 0.008888889
+      }
+    ],
+    "animation": {
+      "entities": 450,
+      "clips": 4,
+      "skins": 1,
+      "skinned_meshes": 200,
+      "joints": 2200,
+      "ended": 0,
+      "markers": 10975,
+      "diagnostics": 0
+    },
+    "bodies": 540,
+    "colliders": 5541,
+    "mesh_colliders": 0,
+    "characters": 0,
+    "collision_enter": 3322,
+    "collision_stay": 0,
+    "collision_exit": 2554,
+    "trigger_enter": 0,
+    "trigger_exit": 0,
+    "diagnostics": 0
+  },
+  "standalone": {
+    "windows_total": 13,
+    "frames_per_s": 121.0,
+    "skipped_total": 0.0,
+    "interval_ms": {
+      "p50": 8.34,
+      "p95": 8.65,
+      "p99": 8.93,
+      "windows": 11
+    },
+    "cpu_encode_submit_ms": {
+      "p50": 1.777,
+      "p95": 1.911,
+      "p99": 2.04,
+      "windows": 11
+    },
+    "sim_ms": {
+      "p50": 5.084,
+      "p95": 5.587,
+      "windows": 11
+    },
+    "prepare_ms": {
+      "p50": 1.591,
+      "p95": 1.699,
+      "windows": 11
+    },
+    "gpu_frame_ms": {
+      "p50": 1.541,
+      "p95": 2.753,
+      "windows": 11
+    },
+    "gpu_timed_per_s": 120,
+    "gpu_untimed_total": 0,
+    "draws": 16,
+    "instances": 5571,
+    "culled": 469,
+    "batches": 16,
+    "skinned": 183,
+    "shadow_casters": 5942,
+    "shadow_draws": 15,
+    "mem_native_mb": 28.1,
+    "mem_resident_mb": 296.6,
+    "mem_gpu_mb": 214.2
+  },
+  "flutter_path_a": {
+    "windows_total": 14,
+    "instances": 5369,
+    "draws": 16,
+    "culled": 671,
+    "shadow_casters": 5839,
+    "shadow_draws": 15,
+    "viewport_physical": [
+      2400,
+      1480
+    ],
+    "ticks_per_s": 120.0,
+    "dropped_total": 237,
+    "stale_presents_total": 56,
+    "rendered_per_s": 91.0,
+    "tick_interval_ms": {
+      "p50": 8.33,
+      "p95": 8.34,
+      "p99": 8.34,
+      "windows": 12
+    },
+    "render_call_ms": {
+      "p50": 3.83,
+      "p95": 4.08,
+      "p99": 4.41,
+      "windows": 12
+    },
+    "rust_cpu_ms": {
+      "p50": 0.1605,
+      "p95": 0.2165,
+      "p99": 0.346,
+      "windows": 12
+    },
+    "gpu_complete_ms": {
+      "p50": 4.72,
+      "p95": 7.04,
+      "p99": 7.58,
+      "windows": 12
+    },
+    "present_lag_frames": {
+      "p50": 0.0,
+      "p95": 1.0,
+      "p99": 1,
+      "windows": 12
+    },
+    "flutter_frames_per_s": 117.0,
+    "ui_build_ms": {
+      "p50": 7.035,
+      "p95": 7.824999999999999,
+      "p99": 8.75,
+      "windows": 12
+    },
+    "raster_ms": {
+      "p50": 0.43,
+      "p95": 3.835,
+      "p99": 4.06,
+      "windows": 12
+    },
+    "stats": {
+      "windows_total": 14,
+      "frames_total": 1438,
+      "frames_per_s": 120.0,
+      "ticks_per_s": 60.0,
+      "dropped_total": 237,
+      "missed_total": 0,
+      "interval_ms": {
+        "p50": 8.333,
+        "p95": 8.335,
+        "p99": 8.342,
+        "windows": 12
+      },
+      "simulate_ms": {
+        "p50": 3.1944999999999997,
+        "p95": 3.503,
+        "p99": 4.478,
+        "windows": 12
+      },
+      "render_ms": {
+        "p50": 3.8305,
+        "p95": 4.0809999999999995,
+        "p99": 4.405,
+        "windows": 12
+      },
+      "behaviours_ms": {
+        "p50": 0.002,
+        "p95": 0.005,
+        "p99": 0.012,
+        "windows": 12
+      },
+      "native_ms": {
+        "p50": 3.188,
+        "p95": 3.4925,
+        "p99": 4.469,
+        "windows": 12
+      },
+      "work_ms": {
+        "p50": 7.011,
+        "p95": 7.593,
+        "p99": 8.883,
+        "windows": 12
+      },
+      "build_ms": {
+        "p50": 6.9975000000000005,
+        "p95": 7.782,
+        "p99": 8.958,
+        "windows": 12
+      },
+      "raster_ms": {
+        "p50": 0.434,
+        "p95": 3.846,
+        "p99": 3.988,
+        "windows": 12
+      },
+      "extract_ms": {
+        "p50": 2.0295,
+        "p95": 2.1334999999999997,
+        "p99": 2.298,
+        "windows": 12
+      },
+      "prepare_ms": {
+        "p50": 1.6225,
+        "p95": 1.7440000000000002,
+        "p99": 1.876,
+        "windows": 12
+      },
+      "encode_ms": {
+        "p50": 0.012,
+        "p95": 0.017,
+        "p99": 0.044,
+        "windows": 12
+      },
+      "cpu_ms": {
+        "p50": 0.1605,
+        "p95": 0.2165,
+        "p99": 0.346,
+        "windows": 12
+      },
+      "gpu_complete_ms": {
+        "p50": 4.7170000000000005,
+        "p95": 7.0415,
+        "p99": 7.585,
+        "windows": 12
+      },
+      "gpu_frame_ms": {
+        "p50": 3.0595,
+        "p95": 6.6515,
+        "p99": 7.206,
+        "windows": 12
+      },
+      "gpu_shadow_ms": {
+        "p50": 0.4005,
+        "p95": 2.6895,
+        "p99": 3.407,
+        "windows": 12
+      },
+      "gpu_scene_ms": {
+        "p50": 2.5755,
+        "p95": 5.421,
+        "p99": 6.514,
+        "windows": 12
+      },
+      "gpu_post_ms": {
+        "p50": 2.564,
+        "p95": 6.0145,
+        "p99": 6.806,
+        "windows": 12
+      },
+      "entities": 8484,
+      "instances": 5369,
+      "draws": 16,
+      "culled": 671,
+      "shadow": "5839/15",
+      "snapshot": 24,
+      "snapshot_peak": 24,
+      "mem_native": 27607906,
+      "mem_resident": 396689408,
+      "mem_assets": 23832,
+      "mem_gpu": 217040040,
+      "gpu_timestamps": true,
+      "gpu_timed_per_s": 91.0,
+      "gpu_untimed_total": 0,
+      "dart_heap": {
+        "windows": 12,
+        "runtime": "flutter profile bundle (AOT)",
+        "heap_bytes": {
+          "p50": 9859736.0,
+          "max": 11788448
+        },
+        "capacity_bytes_max": 12517376,
+        "allocated_bytes_per_frame": 40282.31432545202,
+        "gc_count": 38,
+        "gc_new": 34,
+        "gc_old": 4,
+        "gc_total_ms": 6.088
+      }
+    },
+    "bundle": "profile"
+  },
+  "reference": {
+    "scene": "bca5eecb-c8d8-58fe-825c-5fce41819bf1",
+    "entities": 179,
+    "meshes": 147,
+    "instances": 53,
+    "culled": 94,
+    "draws": 13,
+    "batches": 19,
+    "skinned": 1,
+    "shadow_casters": 140,
+    "shadow_draws": 16,
+    "quality": {
+      "profile": "medium",
+      "shadows": true,
+      "shadowResolution": 1024,
+      "msaa": 4,
+      "renderScale": 1.0,
+      "anisotropy": 8,
+      "renderSize": [
+        1280,
+        720
+      ]
+    },
+    "route": {
+      "steps": 1398,
+      "live_entities": 182,
+      "checksum": "8ec23e8df14397a2",
+      "total_ms": 142.81258,
+      "step_time": {
+        "p50_us": 47,
+        "p95_us": 64,
+        "max_us": 460
+      },
+      "extract_time": {
+        "p50_us": 37,
+        "p95_us": 42,
+        "max_us": 87
+      },
+      "frame_time": {
+        "p50_us": 85,
+        "p95_us": 106,
+        "max_us": 516
+      },
+      "memory": {
+        "native_bytes": 6262679,
+        "native_peak_bytes": 6294052,
+        "resident_bytes": 29622272,
+        "residency_bytes": 1392
+      },
+      "systems": [
+        {
+          "system": "step",
+          "entities": 182,
+          "total_us": 69958,
+          "max_us": 459,
+          "mean_us": 50.04149
+        },
+        {
+          "system": "commands",
+          "entities": 0,
+          "total_us": 0,
+          "max_us": 0,
+          "mean_us": 0.0
+        },
+        {
+          "system": "characters",
+          "entities": 1,
+          "total_us": 49,
+          "max_us": 9,
+          "mean_us": 0.03505007
+        },
+        {
+          "system": "animation",
+          "entities": 3,
+          "total_us": 2993,
+          "max_us": 35,
+          "mean_us": 2.1409156
+        },
+        {
+          "system": "rotator",
+          "entities": 10,
+          "total_us": 41,
+          "max_us": 9,
+          "mean_us": 0.02932761
+        },
+        {
+          "system": "oscillate",
+          "entities": 1,
+          "total_us": 36,
+          "max_us": 10,
+          "mean_us": 0.025751073
+        },
+        {
+          "system": "lifetimeDespawn",
+          "entities": 1,
+          "total_us": 13,
+          "max_us": 2,
+          "mean_us": 0.009298999
+        },
+        {
+          "system": "emitter",
+          "entities": 1,
+          "total_us": 208,
+          "max_us": 80,
+          "mean_us": 0.14878398
+        },
+        {
+          "system": "physics",
+          "entities": 137,
+          "total_us": 34268,
+          "max_us": 248,
+          "mean_us": 24.51216
+        },
+        {
+          "system": "cameraRigs",
+          "entities": 1,
+          "total_us": 72,
+          "max_us": 8,
+          "mean_us": 0.051502146
+        },
+        {
+          "system": "follow",
+          "entities": 0,
+          "total_us": 6,
+          "max_us": 3,
+          "mean_us": 0.0042918455
+        },
+        {
+          "system": "lookAtCamera",
+          "entities": 0,
+          "total_us": 12,
+          "max_us": 3,
+          "mean_us": 0.008583691
+        },
+        {
+          "system": "transforms",
+          "entities": 21,
+          "total_us": 26049,
+          "max_us": 104,
+          "mean_us": 18.633047
+        },
+        {
+          "system": "audio",
+          "entities": 1,
+          "total_us": 54,
+          "max_us": 30,
+          "mean_us": 0.03862661
+        },
+        {
+          "system": "publish",
+          "entities": 0,
+          "total_us": 0,
+          "max_us": 0,
+          "mean_us": 0.0
+        }
+      ],
+      "physics": {
+        "bodies": 24,
+        "colliders": 112,
+        "mesh_colliders": 1,
+        "characters": 1,
+        "collision_enter": 54,
+        "collision_stay": 0,
+        "collision_exit": 22,
+        "trigger_enter": 10,
+        "trigger_exit": 10,
+        "diagnostics": 0
+      },
+      "animation": {
+        "entities": 3,
+        "clips": 2,
+        "skins": 1,
+        "skinned_meshes": 1,
+        "joints": 11,
+        "ended": 0,
+        "markers": 0,
+        "diagnostics": 0
+      },
+      "audio": {
+        "sources": 1,
+        "sounds": 1,
+        "streams": 1,
+        "started": 1,
+        "stolen": 0,
+        "refused": 0,
+        "ended": 0,
+        "diagnostics": 0
+      },
+      "input": {
+        "recording": "/Users/oumari/Desktop/Code/fynkelengine/examples/reference_game/test/collect_all.input.json",
+        "frames": 1398,
+        "events": 14,
+        "actions": [
+          {
+            "name": "move",
+            "kind": "axis2d",
+            "pressed": 0,
+            "released": 0,
+            "held_ticks": 1158,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "name": "look",
+            "kind": "axis2d",
+            "pressed": 0,
+            "released": 0,
+            "held_ticks": 0,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "name": "jump",
+            "kind": "button",
+            "pressed": 1,
+            "released": 1,
+            "held_ticks": 1,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "name": "sprint",
+            "kind": "button",
+            "pressed": 0,
+            "released": 0,
+            "held_ticks": 0,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "name": "interact",
+            "kind": "button",
+            "pressed": 1,
+            "released": 1,
+            "held_ticks": 1,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "name": "wave",
+            "kind": "button",
+            "pressed": 0,
+            "released": 0,
+            "held_ticks": 0,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "name": "pause",
+            "kind": "button",
+            "pressed": 0,
+            "released": 0,
+            "held_ticks": 0,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          },
+          {
+            "name": "restart",
+            "kind": "button",
+            "pressed": 0,
+            "released": 0,
+            "held_ticks": 0,
+            "held": false,
+            "x": 0.0,
+            "y": 0.0
+          }
+        ],
+        "binding_errors": []
+      },
+      "diagnostics": 0,
+      "missed_deadlines": 0
+    }
+  },
+  "reference_standalone": {
+    "windows_total": 13,
+    "frames_per_s": 122.0,
+    "skipped_total": 0.0,
+    "interval_ms": {
+      "p50": 8.34,
+      "p95": 8.86,
+      "p99": 9.22,
+      "windows": 11
+    },
+    "cpu_encode_submit_ms": {
+      "p50": 0.469,
+      "p95": 1.275,
+      "p99": 1.773,
+      "windows": 11
+    },
+    "sim_ms": {
+      "p50": 0.188,
+      "p95": 0.613,
+      "windows": 11
+    },
+    "prepare_ms": {
+      "p50": 0.199,
+      "p95": 0.583,
+      "windows": 11
+    },
+    "gpu_frame_ms": {
+      "p50": 3.11,
+      "p95": 4.351,
+      "windows": 11
+    },
+    "gpu_timed_per_s": 121,
+    "gpu_untimed_total": 8,
+    "draws": 14,
+    "instances": 55,
+    "culled": 94,
+    "batches": 19,
+    "skinned": 1,
+    "shadow_casters": 142,
+    "shadow_draws": 16,
+    "mem_native_mb": 6.6,
+    "mem_resident_mb": 133.5,
+    "mem_gpu_mb": 201.0
+  },
+  "reference_app": {
+    "windows_total": 14,
+    "frames_total": 1436,
+    "frames_per_s": 120.0,
+    "ticks_per_s": 60.0,
+    "dropped_total": 4,
+    "missed_total": 0,
+    "interval_ms": {
+      "p50": 8.333,
+      "p95": 8.335,
+      "p99": 25.0,
+      "windows": 12
+    },
+    "simulate_ms": {
+      "p50": 0.1605,
+      "p95": 0.517,
+      "p99": 0.868,
+      "windows": 12
+    },
+    "render_ms": {
+      "p50": 0.771,
+      "p95": 1.092,
+      "p99": 1.516,
+      "windows": 12
+    },
+    "behaviours_ms": {
+      "p50": 0.038,
+      "p95": 0.1875,
+      "p99": 0.341,
+      "windows": 12
+    },
+    "native_ms": {
+      "p50": 0.10250000000000001,
+      "p95": 0.317,
+      "p99": 0.495,
+      "windows": 12
+    },
+    "work_ms": {
+      "p50": 0.8845000000000001,
+      "p95": 1.625,
+      "p99": 2.384,
+      "windows": 12
+    },
+    "build_ms": {
+      "p50": 0.9099999999999999,
+      "p95": 1.8050000000000002,
+      "p99": 2.419,
+      "windows": 12
+    },
+    "raster_ms": {
+      "p50": 3.8625,
+      "p95": 4.6025,
+      "p99": 6.218,
+      "windows": 12
+    },
+    "extract_ms": {
+      "p50": 0.1195,
+      "p95": 0.1575,
+      "p99": 0.326,
+      "windows": 12
+    },
+    "prepare_ms": {
+      "p50": 0.308,
+      "p95": 0.469,
+      "p99": 0.777,
+      "windows": 12
+    },
+    "encode_ms": {
+      "p50": 0.0225,
+      "p95": 0.0305,
+      "p99": 0.098,
+      "windows": 12
+    },
+    "cpu_ms": {
+      "p50": 0.3255,
+      "p95": 0.4485,
+      "p99": 0.821,
+      "windows": 12
+    },
+    "gpu_complete_ms": {
+      "p50": 4.561,
+      "p95": 6.917,
+      "p99": 8.893,
+      "windows": 12
+    },
+    "gpu_frame_ms": {
+      "p50": 3.704,
+      "p95": 6.4254999999999995,
+      "p99": 7.801,
+      "windows": 12
+    },
+    "gpu_shadow_ms": {
+      "p50": 0.326,
+      "p95": 2.359,
+      "p99": 4.493,
+      "windows": 12
+    },
+    "gpu_scene_ms": {
+      "p50": 3.268,
+      "p95": 5.729,
+      "p99": 7.268,
+      "windows": 12
+    },
+    "gpu_post_ms": {
+      "p50": 3.5645,
+      "p95": 6.2059999999999995,
+      "p99": 7.449,
+      "windows": 12
+    },
+    "entities": 185,
+    "instances": 49,
+    "draws": 13,
+    "culled": 100,
+    "shadow": "142/16",
+    "snapshot": 1256,
+    "snapshot_peak": 1256,
+    "mem_native": 6853361,
+    "mem_resident": 208846848,
+    "mem_assets": 86640,
+    "mem_gpu": 279063040,
+    "gpu_timestamps": true,
+    "gpu_timed_per_s": 120.0,
+    "gpu_untimed_total": 0,
+    "dart_heap": {
+      "windows": 12,
+      "runtime": "flutter profile bundle (AOT)",
+      "heap_bytes": {
+        "p50": 9564368.0,
+        "max": 10904032
+      },
+      "capacity_bytes_max": 11943936,
+      "allocated_bytes_per_frame": 57607.79944289693,
+      "gc_count": 51,
+      "gc_new": 49,
+      "gc_old": 2,
+      "gc_total_ms": 11.247
+    }
+  },
+  "gate": [
+    {
+      "check": "5 000 static meshes cooked and drawn",
+      "passed": true
+    },
+    {
+      "check": "standalone at the display's 120 Hz (\u2265 118 frames/s, p99 interval < 10 ms)",
+      "passed": true
+    },
+    {
+      "check": "draw calls \u2264 distinct (mesh, material) pairs (16 \u2264 16)",
+      "passed": true
+    },
+    {
+      "check": "culling drops off-screen instances (471 culled)",
+      "passed": true
+    },
+    {
+      "check": "\u2265 500 rigid bodies stepped headlessly (540 bodies, 5541 colliders, 3322 contacts)",
+      "passed": true
+    },
+    {
+      "check": "physics at a fixed cost: p50 tick 3.50 ms falling, 3.16 ms settled (< 4 ms)",
+      "passed": true
+    },
+    {
+      "check": "deterministic: the 600-tick checksum repeats (6fb81c2c293fcdbe)",
+      "passed": true
+    },
+    {
+      "check": "5 000 native movers ticked by the catalogue (5000 components, 0.14 ms a tick together, < 1 ms)",
+      "passed": true
+    },
+    {
+      "check": "per-system time in the stats (15 phases; step 3.19 ms \u2265 the phases' 3.18 ms; emitter keeps 39 sparks alive)",
+      "passed": true
+    },
+    {
+      "check": "200 animated rigs posed by the animation system (200 skinned meshes over 2200 joints, 450 animators + skins, 10975 markers crossed; 0.29 ms a tick, < 1 ms; p50 tick 3.16 ms with everything else on, < 4 ms)",
+      "passed": true
+    },
+    {
+      "check": "the rigs drawn skinned by the standalone host at 120 Hz (183 skinned instances in view, 121.0 frames/s)",
+      "passed": true
+    },
+    {
+      "check": "12 ms p95 total work, stress scene in the Flutter host: simulate + render() p95 7.59 ms (120 frames/s, profile bundle)",
+      "passed": true
+    },
+    {
+      "check": "12 ms p95 total work, reference game Playground in its own app: simulate + render() p95 1.62 ms (behaviours p95 0.19, native step 0.32, render() 1.09; 120 frames/s)",
+      "passed": true
+    },
+    {
+      "check": "GPU pass timestamps read back in both apps (stress 91.0 frames/s timed, frame p95 6.65 ms; reference 120.0 timed, frame p95 6.43 ms)",
+      "passed": true
+    },
+    {
+      "check": "the headless report carries the same timers on the route (step p95 64 \u00b5s, extract p95 42 \u00b5s, frame p95 106 \u00b5s, native 6.0 MB; checksum 8ec23e8df14397a2)",
+      "passed": true
+    },
+    {
+      "check": "reference game Dart heap recorded (C3): 56.3 KB/frame allocated, 51 collections in 12 s (11.25 ms), heap p50 9.1 MB",
+      "passed": true
+    }
+  ]
+}

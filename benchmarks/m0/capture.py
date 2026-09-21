@@ -34,6 +34,8 @@ FLUTTER_BIN = Path.home() / "Documents/flutter/flutter/bin"
 DART = FLUTTER_BIN / "dart"
 FLUTTER = FLUTTER_BIN / "flutter"
 FLUTTER_APP = FLUTTER_DIR / "build/macos/Build/Products/Release/fynkel_host_flutter.app/Contents/MacOS/fynkel_host_flutter"
+# The profile bundle is AOT like release but keeps the VM service the C3 heap probe (M3-16) reads.
+FLUTTER_PROFILE_APP = FLUTTER_DIR / "build/macos/Build/Products/Profile/fynkel_host_flutter.app/Contents/MacOS/fynkel_host_flutter"
 
 
 def sh(cmd, cwd=ROOT, check=True):
@@ -61,6 +63,7 @@ def build():
     # One build serves all host modes; FYNKEL_HOST_MODE (viewport | none) is read at runtime.
     # package:fynkel's build hook (ADR-0015) builds and bundles the native runtime.
     sh([str(FLUTTER), "build", "macos", "--release"], cwd=FLUTTER_DIR)
+    sh([str(FLUTTER), "build", "macos", "--profile"], cwd=FLUTTER_DIR)
 
 
 def run_for(cmd, seconds, cwd=ROOT, env=None):
@@ -224,6 +227,47 @@ def capture_alloc():
     return {**json.loads(line), "runtime": "dart run (JIT)"}
 
 
+def capture_alloc_aot(warmup, sample):
+    """C3 (M3-16): the Flutter host's `[alloc]` lines — Dart heap, bytes allocated and GC per one-second window
+    (`DartHeapProbe`: the VM's GC timeline events + `getMemoryUsage`), in an AOT (profile) build of the real host
+    rather than `dart run`."""
+    print("dart allocations (AOT profile build)…", flush=True)
+    if not FLUTTER_PROFILE_APP.exists():
+        return {"error": f"no profile bundle at {FLUTTER_PROFILE_APP} (flutter build macos --profile)"}
+    p = subprocess.Popen([str(FLUTTER_PROFILE_APP)], cwd=FLUTTER_DIR,
+                         env={**os.environ, "RUST_LOG": "info", "FYNKEL_HOST_MODE": "viewport"},
+                         text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    time.sleep(2.5)
+    place_window(FLUTTER_PROFILE_APP.name)
+    time.sleep(0.5 + warmup + sample)
+    p.send_signal(signal.SIGTERM)
+    try:
+        out, _ = p.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        p.kill(); out, _ = p.communicate()
+    windows = []
+    for line in out.splitlines():
+        m = re.search(r"\[alloc\] frames=(\d+) heap=(\d+) capacity=(\d+) external=(\d+) allocated=(\d+) gc=(\d+) new=(\d+) old=(\d+) pause_ms=" + NUM, line)
+        if m:
+            windows.append({"frames": int(m.group(1)), "heap": int(m.group(2)), "capacity": int(m.group(3)),
+                            "external": int(m.group(4)), "allocated": int(m.group(5)), "gc": int(m.group(6)),
+                            "new": int(m.group(7)), "old": int(m.group(8)), "pause_ms": float(m.group(9))})
+    if not windows:
+        return {"error": "no [alloc] lines (no VM service in this build?)", "tail": out[-500:]}
+    w = windows[warmup:] or windows
+    frames = sum(x["frames"] for x in w)
+    return {
+        "runtime": "flutter profile bundle (AOT)", "windows": len(w), "frames": frames,
+        "heap_bytes": {"p50": statistics.median(x["heap"] for x in w), "max": max(x["heap"] for x in w)},
+        "capacity_bytes_max": max(x["capacity"] for x in w),
+        "external_bytes_max": max(x["external"] for x in w),
+        "allocated_bytes_per_frame": (sum(x["allocated"] for x in w) / frames) if frames else None,
+        "method": "heap growth between the known points (sample, before/after each GC from the GC timeline stream)",
+        "gc_count": sum(x["gc"] for x in w), "gc_new": sum(x["new"] for x in w), "gc_old": sum(x["old"] for x in w),
+        "gc_total_ms": sum(x["pause_ms"] for x in w),
+    }
+
+
 def capture_headless():
     """`fynkel test --headless --json`: the Rust host loop, determinism checksum, step timing."""
     print("headless host…", flush=True)
@@ -270,11 +314,18 @@ def markdown(r):
         "", f"Bridge @ {b.get('entities')} entities: encode+submit {b.get('encode_submit_us')} µs, step {b.get('step_us')} µs, "
         f"read {b.get('read_us')} µs per tick; {b.get('in_kib')} KiB in / {b.get('out_kib')} KiB out ({b.get('runtime')}).",
     ]
-    al, hl, lk = r.get("alloc", {}), r.get("headless", {}), r.get("leaks", {})
+    al, aot, hl, lk = r.get("alloc", {}), r.get("alloc_aot", {}), r.get("headless", {}), r.get("leaks", {})
     if "heap_bytes_per_frame" in al:
         gcs = ", ".join(f"{k}×{v}" for k, v in al.get("gc_reasons", {}).items()) or "none"
         lines += ["", f"Dart allocation on the M1 scene ({al['entities']} entities, {al['frames']} frames, {al['runtime']}): "
                   f"{al['heap_bytes_per_frame']:.0f} B/frame; GC in window: {al['gc_count']} ({gcs}), {al['gc_total_ms']:.2f} ms total."]
+    if "allocated_bytes_per_frame" in aot:
+        lines += ["", f"Dart allocation in the Flutter host ({aot['runtime']}, {aot['frames']} frames over {aot['windows']} s): "
+                  f"{aot['allocated_bytes_per_frame']:.0f} B/frame, heap p50 {aot['heap_bytes']['p50'] / 2**20:.1f} MB "
+                  f"(max {aot['heap_bytes']['max'] / 2**20:.1f} MB, capacity {aot['capacity_bytes_max'] / 2**20:.1f} MB); "
+                  f"GC in window: {aot['gc_count']} ({aot['gc_new']} new, {aot['gc_old']} old), {aot['gc_total_ms']:.2f} ms total."]
+    elif aot:
+        lines += ["", f"Dart allocation in the Flutter host: {aot.get('error')}"]
     if "step_time" in hl:
         st = hl["step_time"]
         lines += ["", f"Headless host: {hl['steps']} steps, {hl['live_entities']} entities, step p50/p95/max {st['p50_us']}/{st['p95_us']}/{st['max_us']} µs, "
@@ -305,6 +356,8 @@ def main():
         "bridge": capture_bridge(),
         # M1 additions (blueprint §19.2b item 10).
         "alloc": capture_alloc(),
+        # M3-16 (C3): the same counters from the AOT profile bundle of the real host.
+        "alloc_aot": capture_alloc_aot(warmup, sample),
         "headless": capture_headless(),
         "leaks": capture_leaks(),
     }
