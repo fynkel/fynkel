@@ -746,6 +746,8 @@ fn prepare(
             let source = hash_bytes(&bytes);
             let extra_inputs = if is_gltf_json(&file) {
                 gltf_extra_inputs(&file, &bytes)
+            } else if has_extension(&file, "fbx") {
+                fbx_extra_inputs(&file, &bytes)
             } else {
                 Vec::new()
             };
@@ -781,9 +783,20 @@ pub fn schema_fingerprint_hex() -> String {
 }
 
 fn is_gltf_json(path: &Path) -> bool {
+    has_extension(path, "gltf")
+}
+
+fn has_extension(path: &Path, ext: &str) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("gltf"))
+        .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+}
+
+/// The files an `.fbx` may read besides itself: every file texture that
+/// is not embedded, by its relative path (`fbx::external_files`), hashed
+/// the way `gltf_extra_inputs` hashes URIs.
+fn fbx_extra_inputs(path: &Path, bytes: &[u8]) -> Vec<(String, CacheKey)> {
+    hash_extra_inputs(path, crate::fbx::external_files(bytes))
 }
 
 /// The files a `.gltf` may read besides itself: every non-`data:`
@@ -807,6 +820,14 @@ fn gltf_extra_inputs(path: &Path, bytes: &[u8]) -> Vec<(String, CacheKey)> {
             }
         }
     }
+    hash_extra_inputs(path, names.into_iter().collect())
+}
+
+/// Each relative file next to `path`, hashed: its bytes when it is a
+/// plain relative path that exists, "missing" when it does not (so its
+/// appearance later changes the key too), "denied" when the importer
+/// would refuse the path anyway.
+fn hash_extra_inputs(path: &Path, names: Vec<String>) -> Vec<(String, CacheKey)> {
     let dir = path.parent().unwrap_or(Path::new("."));
     names
         .into_iter()

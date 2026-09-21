@@ -21,6 +21,7 @@ use crate::{Document, DocumentKind, SchemaSet};
 /// Importer for files no specialised importer claims: copied verbatim.
 pub const FILE_IMPORTER: &str = "fynkel.file";
 pub const GLTF_IMPORTER: &str = "fynkel.gltf";
+pub const FBX_IMPORTER: &str = "fynkel.fbx";
 pub const IMAGE_IMPORTER: &str = "fynkel.image";
 pub const AUDIO_IMPORTER: &str = "fynkel.audio";
 
@@ -34,6 +35,7 @@ pub fn importer_for(path: &Path) -> &'static str {
         .unwrap_or_default();
     match ext.as_str() {
         "gltf" | "glb" => GLTF_IMPORTER,
+        "fbx" => FBX_IMPORTER,
         "png" | "jpg" | "jpeg" => IMAGE_IMPORTER,
         "wav" | "ogg" => AUDIO_IMPORTER,
         _ => FILE_IMPORTER,

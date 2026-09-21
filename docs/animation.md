@@ -387,5 +387,35 @@ each) under `crates/fynkel_import/fixtures/khronos/` import, validate,
 cook, run headless and render posed from a scene that names only the
 source (`apps/cli/tests/check.rs::khronos_rigs_instance_from_the_source_alone`,
 `crates/fynkel_import/tests/gltf.rs::khronos_sample_rigs_import_clean`).
-What is still by hand is the FBX → GLB conversion and the "which file is
-idle" bookkeeping: item 19b (an FBX importer and the rig document).
+What was still by hand — the FBX → GLB conversion and the "which file is
+idle" bookkeeping — is item 19b: the FBX importer (below) and the rig
+document (its second part).
+
+## FBX straight in (M3-19b, part 1)
+
+`fynkel.fbx` (documents.md § Import › FBX) reads the Mixamo download as
+it is: `fynkel asset init Walking.fbx` and the file imports with no
+diagnostics — `ufbx` converts the centimetres and axes, so the prefab's
+root is plain (no 0.01 scale, no Z-up turn); two skinned meshes welded
+to 15 901 and 12 473 vertices, skins of 64/65 `mixamorig:` clusters with
+`mixamorig:Hips` as the skeleton, one clip `anim/0` named `"mixamo.com"`
+of 0.967 s (52 moving nodes; the empty `Take 001` stack gives no clip),
+the red default material. The four downloads (Idle, Walking, Fast Run,
+Jumping) each validate, cook, run headless (74 entities, 2 skins over
+129 joints, 0 diagnostics) and render posed and upright from a scene
+whose `Hero` carries an `Animator` on `anim/0` and instances
+`{ asset: <fbx id>, sub: "prefab" }` on a `Rig` child turned to face
+−Z — the same scene shape as the glTF path. The Blender recipe above is
+no longer needed for import; what a game still wants is one name per
+clip across files, which is the rig document (part 2).
+
+The importer is the glTF importer's twin, not a general FBX tool: the
+same intermediate through the same code (`crates/fynkel_import/src/
+graph.rs`), checked against the glTF path on the same content
+(`fixtures/rig.fbx` and `robot.fbx` are `rig.glb`/`robot.glb` exported
+from Blender by `fixtures/blender_fbx.py` with `bake_space_transform`,
+so the vertex data is Y-up like Mixamo's and Maya's). Joints keep their
+cluster order, `inverse_bind` is the cluster's bind matrix, clips are
+baked per frame at the file's rate and named after their stacks, and
+anything outside mesh + skin + clips + embedded textures + hierarchy is
+a named `FYN-A0105` skip or an `A010x` refusal.

@@ -892,6 +892,7 @@ dependencies = [
  "serde",
  "serde_json",
  "symphonia",
+ "ufbx",
  "uuid",
 ]
 
@@ -3099,6 +3100,15 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "ufbx"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40e2ed9a04df77d43de59675bcc4e667702589df0fd77c80a99061049142397a"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "unicode-general-category"

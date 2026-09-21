@@ -757,3 +757,66 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert_eq!(err[0].code, Code::PROJECT_MISSING);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// M3-19b: an FBX source cooks through the same path as a glTF one —
+/// its meshes, skin, clips and prefab land as the same chunk kinds
+/// `rig.glb` gives, under `fynkel.fbx`, and cook again from the cache.
+#[test]
+fn an_fbx_source_cooks_like_a_gltf_one() {
+    const RIG: &str = "c0000000-0000-4000-8000-0000000000fb";
+    let p = Project::new("fbx");
+    std::fs::copy(
+        fixtures().join("rig.fbx"),
+        p.assets().join("models/rig.fbx"),
+    )
+    .unwrap();
+    p.write(
+        "models/rig.fbx.meta.json",
+        &format!(
+            r#"{{
+  "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+  "formatVersion": 1,
+  "id": "{RIG}",
+  "name": "rig.fbx",
+  "importer": "fynkel.fbx",
+  "importerVersion": 1,
+  "settings": {{}},
+  "subAssets": {{}}
+}}
+"#
+        ),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(r.assets.len(), 7);
+    let rig = r.get(id(RIG)).unwrap();
+    assert_eq!(rig.status, Status::Cooked);
+    let mut f = ChunkFile::open_path(rig.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let meta: serde_json::Value = serde_json::from_slice(&f.meta(1 << 20).unwrap()).unwrap();
+    assert_eq!(meta["kind"], "fynkel.fbx");
+    assert_eq!(meta["importer"], "fynkel.fbx");
+    assert_eq!(meta["importerVersion"], 1);
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(
+        kinds,
+        ["META", "MESH", "MESH", "SKIN", "ANIM", "ANIM", "JSON"]
+    );
+    let subs: Vec<&str> = meta["chunks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["sub"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(
+        subs,
+        ["", "mesh/0", "mesh/1", "skin/0", "anim/0", "anim/1", "prefab"]
+    );
+    assert_eq!(meta["chunks"][3]["joints"], 3);
+    assert_eq!(meta["chunks"][4]["name"], "bob");
+    assert_eq!(meta["chunks"][5]["name"], "wave");
+    assert_eq!(meta["chunks"][6]["documentKind"], "prefab");
+    assert_eq!(meta["chunks"][6]["entities"], 6);
+    let again = p.cook();
+    assert_eq!(status(&again, RIG), Status::Cached);
+}

@@ -55,6 +55,7 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 | `uuid` | 1.26.1 | `v4` for fresh document ids, `v5` for prefab-instance derived ids; parsing is canonical-text only |
 | `similar` | 2.7.0 | unified diffs for `fynkel migrate --dry-run` and `fynkel scene apply --dry-run` |
 | `gltf` | 1.4.1 | glTF 2.0 / GLB parsing in `fynkel_import`; `default-features = false` with `utils` (accessor readers), `names`, `KHR_materials_emissive_strength` — no `import` feature, so the crate never touches the file system or decodes images; Fynkel resolves every buffer and image itself (external files denied by default) |
+| `ufbx` | 0.11.4 | FBX parsing in `fynkel_import` (M3-19b, `fynkel.fbx`): the single-file C library `ufbx` with its Rust bindings, compiled by `cc` into the crate (builds for the iOS targets too); does unit/axis conversion and animation baking; reads memory only — `load_external_files` off, Fynkel reads an allowed external texture itself |
 | `base64` | 0.23.1 | `data:` URIs in `.gltf` files |
 | `image` | 0.25.10 | PNG/JPEG decoding in `fynkel_import`; `default-features = false`, features `png`, `jpeg` only (no other formats compiled in) |
 | `symphonia` | 0.6.1 | WAV (PCM) and Ogg Vorbis decoding in `fynkel_import`; `default-features = false`, features `wav`, `pcm`, `ogg`, `vorbis` — no SIMD features, so decoding is bit-identical across machines. Chosen over `hound` + `lewton` (the blueprint's candidates): one maintained pure-Rust decoder covers both formats and bounds its own allocations |

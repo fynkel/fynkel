@@ -658,7 +658,7 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                         inst.asset.sub
                     )
                 } else if !inst.asset.sub.is_empty() {
-                    "the source must import as a model with a node hierarchy (fynkel.gltf); prefab documents need no sub".to_string()
+                    "the source must import as a model with a node hierarchy (fynkel.gltf, fynkel.fbx); prefab documents need no sub".to_string()
                 } else if library.is_empty() {
                     "pass the prefab directory (--prefabs <dir>)".to_string()
                 } else {

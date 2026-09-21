@@ -22,7 +22,7 @@ use fynkel_import::{Imported, Limits};
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel import <file>... [--out <dir>] [--prefab] [--dry-run] [--json] [--schemas <dir>]\n                                               import source files (glTF/GLB) to their normalized intermediate;\n                                               sidecars are created or updated with the sub-asset ids;\n                                               --prefab also writes the hierarchy as <stem>.prefab.json next to the source"
+        "usage:\n  fynkel import <file>... [--out <dir>] [--prefab] [--dry-run] [--json] [--schemas <dir>]\n                                               import source files (glTF/GLB, FBX) to their normalized intermediate;\n                                               sidecars are created or updated with the sub-asset ids;\n                                               --prefab also writes the hierarchy as <stem>.prefab.json next to the source"
     );
     ExitCode::from(2)
 }

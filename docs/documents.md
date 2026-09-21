@@ -598,7 +598,8 @@ envelope of its own, so its identity lives in a sidecar next to it:
 `<file>.meta.json` (`schemas/meta.schema.json`, hand-written; ADR-0006).
 Besides the envelope (`name` defaults to the file name) it holds
 `importer` (namespaced id chosen from the extension: `fynkel.gltf`,
-`fynkel.image`, `fynkel.audio`, `fynkel.file` for anything else),
+`fynkel.fbx`, `fynkel.image`, `fynkel.audio`, `fynkel.file` for anything
+else),
 `importerVersion`, importer-defined `settings`, and `subAssets` — sub-asset
 id (`mesh/Body`, `material/0`; the `sub` of an `assetRef`) → that
 sub-asset's own stable uuid, written on first import and kept across
@@ -673,6 +674,52 @@ parents) is `A0104`; the `Limits` — file 256 MiB, buffers 256 MiB total,
 are `A0101`; a file that is not glTF at all is `A0100`. Any error means no
 intermediate is produced.
 
+### FBX (`fynkel.fbx`, version 1)
+
+M3-19b. The importer reads binary and ASCII FBX (`.fbx`, 6100–7700)
+through `ufbx` (a single C file compiled into `fynkel_import`; nothing
+of it reaches a shipped game) and produces the **same intermediate the
+glTF importer does** — the same `MeshData`/`SkinData`/`AnimationData`,
+material documents, images and `prefab`, through the same
+`crates/fynkel_import/src/graph.rs` code — so everything downstream
+(cache, cook, `fynkel.Skin`, `fynkel.Animator`, prefab instancing, the
+renderer) is unchanged, and a rig exported to FBX and to glTF gives the
+same joints, weights, bind matrices, keys, UVs and hierarchy
+(`crates/fynkel_import/tests/fbx.rs` checks `rig.fbx`/`robot.fbx`
+against `rig.glb`/`robot.glb`, the same content round-tripped through
+Blender by `fixtures/blender_fbx.py`; the acceptance rig is a Mixamo
+character, see [animation.md](animation.md)). This is **not** a general
+FBX importer: what is listed here is imported, everything else is skipped
+with a named `A0105` warning or refused with an error.
+
+**Conversion.** `ufbx` converts the file's unit and axes to Fynkel's
+(metres, right-handed Y-up, `space_conversion: modify geometry`: vertex
+data is transformed, node transforms stay plain TRS — a Mixamo file in
+centimetres comes out at metres, a Maya or Blender file keeps its
+authored poses), geometry transforms and non-standard inherit modes become
+helper nodes, missing normals are generated, skin weights are cleaned.
+FBX UVs have their origin at the bottom-left; the importer flips `v` so a
+texture reads the same as through the glTF path. Corners sharing a
+vertex, normal, UVs, tangent and colour are welded back into one vertex
+(a cube exported from 8 vertices is 24 again, as in glTF).
+
+| Sub-asset id | What | Notes |
+| --- | --- | --- |
+| `mesh/<id>` (one material) or `mesh/<id>/<p>` (one per material part) | one mesh per polygon mesh, triangulated by `ufbx`, per material | `<id>` is the mesh's typed id in the file (stable across re-exports that do not add meshes). Same 72-byte vertex as glTF; the mesh's own `material/<m>`; point and line faces skipped (`A0105`), a mesh without polygons skipped (`A0105`). A mesh with a skin deformer is a **skinned mesh**: the four heaviest weights per vertex, normalized, joint = the cluster's index in the skin; a vertex no cluster touches is bound to joint 0 with weight 1. Blend-shape deformers are skipped (`A0105`), a second skin deformer on a mesh is ignored (`A0105`). |
+| `material/<m>` | a `fynkel.pbr@1` material document | from `ufbx`'s PBR view of the material — a classic Phong/Lambert material maps diffuse → `base_color`, shininess → `roughness`, emissive; a real PBR material (Maya Standard Surface, 3ds Max Physical, Blender Principled) keeps its own values. Emission colour × factor; anything past 1 becomes `emissive_strength` (white at 3 → `[1, 1, 1]` at 3, like `KHR_materials_emissive_strength`). Opacity below 1 (or an opacity texture) → `alpha_mode: blend`; double-sided from the material's feature flag. Textures are bound for `base_color`, `normal`, `occlusion` and `emissive` slots only; a roughness, metalness or opacity texture is reported (`A0105`) and left unbound — the PBR model reads roughness and metallic from one packed `metallic_roughness_texture` and opacity from the base colour's alpha, both set on the material document afterwards. Clamped wrap or a UV transform on a texture is warned about once per texture (`A0105`, the sampler is the default); layered and procedural textures are skipped. Validates like a hand-written material. |
+| `image/<t>` | the **embedded** bytes of a file texture bound by a slot, colour space by use as in glTF (`image/<t>/linear` for a dual-use image) | `<t>` is the texture's typed id. PNG and JPEG only (sniffed, `A0103` otherwise; `max_image_bytes` → `A0101`). A texture that is not embedded is refused with `A0102` unless the sidecar says `"allowExternalFiles": true`, and then it is read from the plain relative path the file names (`\` → `/`; a drive, scheme, absolute path or `..` is `A0102`) next to the source — the same boundary as glTF. Textures no slot binds are not imported. |
+| `skin/<s>` | one per skin deformer | the joints in **cluster order**, each named after its bone node with its parent when that bone is in the same skin, `inverse_bind` = the cluster's `geometry_to_bone` (checked against the bind pose on Mixamo and Blender files), rest pose = the bone's local TRS; the skeleton root = the one joint whose parent is not in the skin (`""` when there are several). A cluster bound to no bone or two joints sharing a name is `A0104`; more than `max_joints` is `A0101`. |
+| `anim/<n>` | one per **animation stack**, in file order, named after the stack (`"mixamo.com"`, `"Take 001"`, Blender's action/NLA-track name) | baked by `ufbx` at the file's frame rate (`trim_start_time`: the clip starts at 0; key reduction on) into translation/rotation/scale channels targeting nodes by name, linear interpolation, duration = the last key; channels that do not move keep one key. A stack that animates nothing (Mixamo's empty `Take 001`) produces no clip and no warning. A target name that is not unique in the file is `A0105`. Clip names are what the file says — the rig document (19b part 2) is where a game names its clips (`walk`, `idle`, …) and matches them across files by bone name. |
+| `prefab` | the node hierarchy under the scene root as a prefab document, the glTF layout | entity ids from `node/<typed id>`; the file's root node is not an entity, its children are the prefab's roots; a mesh node carries `fynkel.MeshRenderer` (a multi-material mesh gets one child per part, `<name>[<p>]`) and, when skinned, `fynkel.Skin { skin, skeleton }`; the prefab is named after the file stem. Blender's FBX exporter writes its armature convention as a −90° X turn on the armature node and +90° X on the root bone: world poses are what was authored, the local numbers differ from the glTF export of the same rig. |
+
+Cameras, lights, NURBS/procedural surfaces and curves are skipped
+(`A0105`, counted). A file that is not FBX at all (or a version `ufbx`
+does not read) is `A0100` with `ufbx`'s reason; the node graph limits
+(`max_nodes`, `max_node_depth`), vertex and image limits are `A0101`. The
+sidecar's `settings` are `allowExternalFiles` only. Sub-asset ids and
+their uuids follow the glTF rules above (`subAssets` in the sidecar,
+UUID v5 otherwise, dropped ids reported).
+
 ### Textures (`fynkel.image`, version 1)
 
 `.png` / `.jpg` / `.jpeg` → one `TextureData`: RGBA8, row-major, top row
@@ -741,8 +788,9 @@ length-prefixed fields: the cache format version, the intermediate and
 container versions, the asset id, the kind (`fynkel.gltf`, `fynkel.image`,
 …, or `document/<kind>`), its version (importer version or
 `formatVersion`), the BLAKE3 of the source bytes, extra input files (a
-`.gltf`'s non-`data:` `buffers[].uri` / `images[].uri`, hashed, sorted; a
-missing file hashes as "missing"), the sidecar's `settings` as canonical
+`.gltf`'s non-`data:` `buffers[].uri` / `images[].uri`, an `.fbx`'s
+non-embedded file textures by relative path, hashed, sorted; a missing
+file hashes as "missing"), the sidecar's `settings` as canonical
 JSON, every dependency as `(id, key)` sorted by id, and the target profile.
 Same inputs → same key → the object is already there ("cached"); anything
 else is a new key ("cooked"). Objects are never edited in place; an old

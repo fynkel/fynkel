@@ -15,6 +15,7 @@ fynkel_core.workspace = true
 blake3.workspace = true
 glam.workspace = true
 gltf.workspace = true
+ufbx.workspace = true
 base64.workspace = true
 image.workspace = true
 symphonia.workspace = true

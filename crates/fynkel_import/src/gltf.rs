@@ -32,12 +32,10 @@
 use std::path::Path;
 
 use base64::Engine;
-use fynkel_contracts::{Code, Diagnostic};
+use fynkel_contracts::Code;
 use fynkel_document::asset::Meta;
-use fynkel_document::DocumentKind;
 use gltf::mesh::Mode;
-use serde_json::{json, Map, Value};
-use uuid::Uuid;
+use serde_json::{json, Value};
 
 use fynkel_cooked::payload::{
     AnimationChannel, AnimationPayload, SkinJoint, SkinPayload, SkinWeight,
@@ -45,10 +43,15 @@ use fynkel_cooked::payload::{
     ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
 };
 
-use crate::intermediate::{
-    AnimationData, ColorSpace, ImageData, Intermediate, MaterialData, MeshData, SkinData, Vertex,
+use crate::graph::{
+    check_channel, file_stem, image_ref, material_header, num, nums, prefab_document, shown_file,
+    sniff_mime, split_dual_use_images, AnimatedNames, MeshSubs, Produced, Report, SourceGraph,
+    SourceNode,
 };
-use crate::{derive_sub_id, read_source, Imported, Limits};
+use crate::intermediate::{
+    AnimationData, ColorSpace, ImageData, MaterialData, MeshData, SkinData, Vertex,
+};
+use crate::{read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
 pub const IMPORTER_VERSION: u32 = 4;
@@ -76,11 +79,9 @@ impl Settings {
 
 struct Ctx<'a> {
     path: &'a Path,
-    shown: String,
-    asset: Uuid,
+    report: Report,
     limits: &'a Limits,
     settings: Settings,
-    diagnostics: Vec<Diagnostic>,
     buffer_bytes: u64,
     /// Textures already warned about (one warning per texture, not per use).
     warned_textures: Vec<usize>,
@@ -88,17 +89,15 @@ struct Ctx<'a> {
 
 impl Ctx<'_> {
     fn error(&mut self, code: Code, msg: impl Into<String>) {
-        self.diagnostics
-            .push(Diagnostic::error(code, msg).with_document(self.shown.clone()));
+        self.report.error(code, msg);
     }
 
     fn warn(&mut self, code: Code, msg: impl Into<String>) {
-        self.diagnostics
-            .push(Diagnostic::warning(code, msg).with_document(self.shown.clone()));
+        self.report.warn(code, msg);
     }
 
     fn has_errors(&self) -> bool {
-        fynkel_contracts::has_errors(&self.diagnostics)
+        self.report.has_errors()
     }
 
     /// Resolves a buffer or image URI: `data:` URIs inline, plain relative
@@ -124,15 +123,10 @@ impl Ctx<'_> {
             };
         }
         if !self.settings.allow_external_files {
-            self.diagnostics.push(
-                Diagnostic::error(
-                    Code::IMPORT_EXTERNAL_URI,
-                    format!("{what} lives outside the file ({uri}); external files are not read"),
-                )
-                .with_document(self.shown.clone())
-                .with_suggestion(
-                    "export a self-contained .glb, or set \"allowExternalFiles\": true in the sidecar's settings for plain relative paths",
-                ),
+            self.report.error_with(
+                Code::IMPORT_EXTERNAL_URI,
+                format!("{what} lives outside the file ({uri}); external files are not read"),
+                "export a self-contained .glb, or set \"allowExternalFiles\": true in the sidecar's settings for plain relative paths",
             );
             return None;
         }
@@ -154,8 +148,8 @@ impl Ctx<'_> {
         match crate::read_source(&file, self.limits) {
             Ok(bytes) => Some(bytes),
             Err(d) => {
-                self.diagnostics.push(
-                    d.with_document(self.shown.clone())
+                self.report.diagnostics.push(
+                    d.with_document(self.report.shown.clone())
                         .with_suggestion(format!("{what} → {}", file.display())),
                 );
                 None
@@ -200,24 +194,18 @@ fn percent_decode(s: &str) -> String {
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     let mut ctx = Ctx {
         path,
-        shown: path.display().to_string(),
-        asset: meta.id(),
+        report: Report::new(path),
         limits,
         settings: Settings::from_meta(meta),
-        diagnostics: Vec::new(),
         buffer_bytes: 0,
         warned_textures: Vec::new(),
     };
-    let fail = |ctx: Ctx| Imported {
-        intermediate: None,
-        sub_assets: meta.sub_assets.clone(),
-        diagnostics: ctx.diagnostics,
-    };
+    let fail = |ctx: Ctx| ctx.report.fail(meta);
 
     let bytes = match read_source(path, limits) {
         Ok(b) => b,
         Err(d) => {
-            ctx.diagnostics.push(d);
+            ctx.report.diagnostics.push(d);
             return fail(ctx);
         }
     };
@@ -235,16 +223,13 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
                 .filter(|(_, e)| matches!(e, gltf::json::validation::Error::Unsupported))
                 .map(|(p, _)| p.to_string())
                 .collect();
-            ctx.diagnostics.push(
-                Diagnostic::error(
-                    Code::IMPORT_UNSUPPORTED,
-                    format!(
-                        "the file requires an extension this importer does not support ({})",
-                        which.join(", ")
-                    ),
-                )
-                .with_document(ctx.shown.clone())
-                .with_suggestion("re-export without mesh compression or other required extensions"),
+            ctx.report.error_with(
+                Code::IMPORT_UNSUPPORTED,
+                format!(
+                    "the file requires an extension this importer does not support ({})",
+                    which.join(", ")
+                ),
+                "re-export without mesh compression or other required extensions",
             );
             return fail(ctx);
         }
@@ -258,13 +243,10 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     // The crate lets through the extensions it parses; we implement fewer.
     for ext in doc.extensions_required() {
         if !SUPPORTED_REQUIRED.contains(&ext) {
-            ctx.diagnostics.push(
-                Diagnostic::error(
-                    Code::IMPORT_UNSUPPORTED,
-                    format!("required extension {ext} is not supported"),
-                )
-                .with_document(ctx.shown.clone())
-                .with_suggestion("re-export without mesh compression or other required extensions"),
+            ctx.report.error_with(
+                Code::IMPORT_UNSUPPORTED,
+                format!("required extension {ext} is not supported"),
+                "re-export without mesh compression or other required extensions",
             );
         }
     }
@@ -397,7 +379,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     // Meshes → one MeshData per triangle primitive.
     let mut meshes = Vec::new();
     // glTF mesh index → the sub ids of its imported primitives (prefab needs them).
-    let mut mesh_subs: Vec<Vec<(String, String)>> = vec![Vec::new(); doc.meshes().len()];
+    let mut mesh_subs: Vec<MeshSubs> = vec![Vec::new(); doc.meshes().len()];
     for mesh in doc.meshes() {
         let mesh_name = mesh
             .name()
@@ -443,97 +425,88 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     }
 
     // Nodes → prefab.
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "model".to_string());
-    let prefab = match prefab_document(&mut ctx, doc, &mesh_subs, &meshes, &skins, &stem, meta) {
-        Some(p) => p,
-        None => return fail(ctx),
+    let graph = source_graph(doc, &file_stem(path), &mesh_subs);
+    let prefab = prefab_document(
+        &mut ctx.report,
+        limits,
+        &graph,
+        &mesh_subs,
+        &meshes,
+        &skins,
+        meta,
+    );
+    let Some(prefab) = prefab else {
+        return fail(ctx);
     };
     if ctx.has_errors() {
         return fail(ctx);
     }
 
-    // Sub-asset ids: sidecar first, derived otherwise.
-    let mut sub_assets = Vec::new();
-    for sub in meshes
-        .iter()
-        .map(|m| m.sub_id.as_str())
-        .chain(materials.iter().map(|m| m.sub_id.as_str()))
-        .chain(images.iter().map(|i| i.sub_id.as_str()))
-        .chain(skins.iter().map(|s| s.sub_id.as_str()))
-        .chain(animations.iter().map(|a| a.sub_id.as_str()))
-        .chain(std::iter::once("prefab"))
-    {
-        let id = meta
-            .sub_assets
-            .iter()
-            .find(|(k, _)| k == sub)
-            .map(|(_, v)| *v)
-            .unwrap_or_else(|| derive_sub_id(ctx.asset, sub));
-        sub_assets.push((sub.to_string(), id));
-    }
-    let dropped: Vec<&str> = meta
-        .sub_assets
-        .iter()
-        .filter(|(k, _)| !sub_assets.iter().any(|(s, _)| s == k))
-        .map(|(k, _)| k.as_str())
-        .collect();
-    if !dropped.is_empty() {
-        ctx.warn(
-            Code::IMPORT_SKIPPED,
-            format!(
-                "sidecar sub-asset(s) no longer produced by the file: {} (references to them will not resolve)",
-                dropped.join(", ")
-            ),
-        );
-    }
-    // Patch the ids the sub-assets were given into the documents that carry them.
-    let lookup = |sub: &str| -> Uuid {
-        sub_assets
-            .iter()
-            .find(|(k, _)| k == sub)
-            .map(|(_, v)| *v)
-            .unwrap()
-    };
-    for m in &mut materials {
-        m.document["id"] = Value::String(lookup(&m.sub_id).to_string());
-    }
-    let mut prefab = prefab;
-    prefab["id"] = Value::String(lookup("prefab").to_string());
-
-    Imported {
-        intermediate: Some(Intermediate {
-            importer: IMPORTER.to_string(),
-            importer_version: IMPORTER_VERSION,
-            source: path
-                .file_name()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+    crate::graph::finish(
+        ctx.report,
+        meta,
+        path,
+        IMPORTER,
+        IMPORTER_VERSION,
+        Produced {
             meshes,
             materials,
             images,
-            textures: Vec::new(),
-            clips: Vec::new(),
             skins,
             animations,
-            prefab: Some(prefab),
-            sub_assets: sub_assets.clone(),
-        }),
-        sub_assets,
-        diagnostics: ctx.diagnostics,
-    }
+            prefab,
+        },
+    )
 }
 
-fn sniff_mime(bytes: &[u8]) -> &'static str {
-    if bytes.starts_with(b"\x89PNG") {
-        "image/png"
-    } else if bytes.starts_with(&[0xff, 0xd8]) {
-        "image/jpeg"
-    } else {
-        "application/octet-stream"
-    }
+/// The default scene as a [`SourceGraph`]: every node with its name,
+/// TRS, children, imported mesh and skin; the scene's roots (or, with no
+/// scene, every node nobody points at).
+fn source_graph(doc: &gltf::Document, stem: &str, mesh_subs: &[MeshSubs]) -> SourceGraph {
+    let scene = doc.default_scene().or_else(|| doc.scenes().next());
+    let (name, roots): (String, Vec<usize>) = match &scene {
+        Some(s) => (
+            s.name()
+                .map(str::to_string)
+                .unwrap_or_else(|| stem.to_string()),
+            s.nodes().map(|n| n.index()).collect(),
+        ),
+        None => {
+            let mut has_parent = vec![false; doc.nodes().len()];
+            for n in doc.nodes() {
+                for c in n.children() {
+                    has_parent[c.index()] = true;
+                }
+            }
+            (
+                stem.to_string(),
+                doc.nodes()
+                    .filter(|n| !has_parent[n.index()])
+                    .map(|n| n.index())
+                    .collect(),
+            )
+        }
+    };
+    let nodes = doc
+        .nodes()
+        .map(|node| {
+            let (translation, rotation, scale) = node.transform().decomposed();
+            SourceNode {
+                index: node.index(),
+                name: node_name(&node),
+                translation,
+                rotation,
+                scale,
+                children: node.children().map(|c| c.index()).collect(),
+                mesh: node
+                    .mesh()
+                    .map(|m| m.index())
+                    .filter(|m| !mesh_subs[*m].is_empty()),
+                skin: node.skin().map(|s| s.index()),
+            }
+        })
+        .collect();
+    SourceGraph { name, nodes, roots }
 }
 
 /// `Ok(None)` = skipped with a warning; `Err` = an error was recorded.
@@ -846,8 +819,7 @@ fn import_animations(
 ) -> Result<Vec<AnimationData>, ()> {
     // Animated node names must be unique for the channels to land where
     // the author meant; say so once per name.
-    let mut animated: Vec<(usize, String)> = Vec::new();
-    let mut warned: Vec<String> = Vec::new();
+    let mut animated = AnimatedNames::default();
     let mut animations = Vec::new();
     for animation in doc.animations() {
         let sub_id = format!("anim/{}", animation.index());
@@ -912,62 +884,9 @@ fn import_animations(
                 times,
                 values,
             };
-            if channel.times.is_empty() {
-                ctx.error(
-                    Code::IMPORT_INVALID_DATA,
-                    format!("{sub_id} ({name}): channel {c} has no keys"),
-                );
-                return Err(());
-            }
-            if channel.values.len() != channel.times.len() * channel.key_floats() {
-                ctx.error(
-                    Code::IMPORT_INVALID_DATA,
-                    format!(
-                        "{sub_id} ({name}): channel {c} has {} values for {} keys",
-                        channel.values.len(),
-                        channel.times.len()
-                    ),
-                );
-                return Err(());
-            }
-            if channel
-                .times
-                .windows(2)
-                .any(|w| w[1] <= w[0] || !w[1].is_finite())
-                || !channel.times[0].is_finite()
-                || channel.times[0] < 0.0
-            {
-                ctx.error(
-                    Code::IMPORT_INVALID_DATA,
-                    format!(
-                        "{sub_id} ({name}): channel {c} key times must be finite, non-negative and strictly increasing"
-                    ),
-                );
-                return Err(());
-            }
-            if channel.values.iter().any(|v| !v.is_finite()) {
-                ctx.error(
-                    Code::IMPORT_INVALID_DATA,
-                    format!("{sub_id} ({name}): channel {c} has a non-finite value"),
-                );
-                return Err(());
-            }
+            check_channel(&mut ctx.report, &sub_id, &name, c, &channel)?;
             duration = duration.max(*channel.times.last().unwrap());
-            match animated.iter().find(|(_, n)| *n == channel.target) {
-                Some((other, _)) if *other != node.index() && !warned.contains(&channel.target) => {
-                    warned.push(channel.target.clone());
-                    ctx.warn(
-                        Code::IMPORT_SKIPPED,
-                        format!(
-                            "nodes {other} and {} are both named {:?} and both animated; only one entity named that way will be driven",
-                            node.index(),
-                            channel.target
-                        ),
-                    );
-                }
-                Some(_) => {}
-                None => animated.push((node.index(), channel.target.clone())),
-            }
+            animated.note(&mut ctx.report, node.index(), &channel.target);
             channels.push(channel);
         }
         animations.push(AnimationData {
@@ -977,23 +896,6 @@ fn import_animations(
         });
     }
     Ok(animations)
-}
-
-/// A number as the document should show it: the shortest text that
-/// round-trips the `f32`, so `0.8f32` is `0.8`, not `0.800000011920929`.
-fn num(x: f32) -> Value {
-    let text = if x.fract() == 0.0 && x.abs() < 1e15 {
-        format!("{x:.1}")
-    } else {
-        x.to_string()
-    };
-    serde_json::Number::from_f64(text.parse::<f64>().unwrap_or(x as f64))
-        .map(Value::Number)
-        .unwrap_or(Value::Null)
-}
-
-fn nums(v: &[f32]) -> Value {
-    Value::Array(v.iter().map(|x| num(*x)).collect())
 }
 
 /// `fynkel.PbrMaterial`'s document form (formatVersion 2): factors as
@@ -1011,19 +913,7 @@ fn material_document(
     meta: &Meta,
 ) -> Value {
     let pbr = material.pbr_metallic_roughness();
-    let mut doc = Map::new();
-    doc.insert("$schema".into(), json!(DocumentKind::Material.schema_id()));
-    doc.insert(
-        "formatVersion".into(),
-        json!(DocumentKind::Material.supported_format_version()),
-    );
-    doc.insert("id".into(), json!(Uuid::nil().to_string())); // patched by the caller
-    doc.insert("name".into(), json!(name));
-    doc.insert(
-        "description".into(),
-        json!(format!("Imported from {} ({sub_id}).", ctx.shown_file())),
-    );
-    doc.insert("shader".into(), json!("fynkel.pbr@1"));
+    let mut doc = material_header(name, sub_id, &shown_file(ctx.path));
     doc.insert("base_color".into(), nums(&pbr.base_color_factor()));
     doc.insert("metallic".into(), num(pbr.metallic_factor()));
     doc.insert("roughness".into(), num(pbr.roughness_factor()));
@@ -1059,7 +949,7 @@ fn material_document(
         let image = texture.source();
         doc.insert(
             field.into(),
-            json!({ "asset": meta.id().to_string(), "sub": format!("image/{}", image.index()) }),
+            image_ref(meta, &format!("image/{}", image.index())),
         );
         if tex_coord != 0 {
             ctx.warn(
@@ -1117,400 +1007,4 @@ fn material_document(
         bind(ctx, "emissive_texture", &t.texture(), t.tex_coord());
     }
     Value::Object(doc)
-}
-
-/// Colour slots of the PBR model (sRGB); the others carry linear data.
-const COLOR_SLOTS: [&str; 2] = ["base_color_texture", "emissive_texture"];
-const DATA_SLOTS: [&str; 3] = [
-    "normal_texture",
-    "metallic_roughness_texture",
-    "occlusion_texture",
-];
-
-/// Gives every image its colour space from the slots that bind it. An
-/// image bound both as a colour and as data is cooked twice: `image/<i>`
-/// stays sRGB and a linear copy `image/<i>/linear` is added, with the
-/// materials' data slots re-pointed at it. Unbound images are sRGB.
-fn split_dual_use_images(materials: &mut [MaterialData], images: &mut Vec<ImageData>) {
-    let sub_of = |m: &MaterialData, slot: &str| -> Option<String> {
-        m.document
-            .get(slot)?
-            .get("sub")?
-            .as_str()
-            .map(str::to_string)
-    };
-    let mut extra = Vec::new();
-    for image in images.iter_mut() {
-        let colour = materials.iter().any(|m| {
-            COLOR_SLOTS
-                .iter()
-                .any(|s| sub_of(m, s).as_deref() == Some(&image.sub_id))
-        });
-        let data = materials.iter().any(|m| {
-            DATA_SLOTS
-                .iter()
-                .any(|s| sub_of(m, s).as_deref() == Some(&image.sub_id))
-        });
-        image.color_space = if data && !colour {
-            ColorSpace::Linear
-        } else {
-            ColorSpace::Srgb
-        };
-        if colour && data {
-            let linear_sub = format!("{}/linear", image.sub_id);
-            for m in materials.iter_mut() {
-                for slot in DATA_SLOTS {
-                    if sub_of(m, slot).as_deref() == Some(&image.sub_id) {
-                        m.document[slot]["sub"] = json!(linear_sub);
-                    }
-                }
-            }
-            extra.push(ImageData {
-                sub_id: linear_sub,
-                name: format!("{} (linear)", image.name),
-                mime_type: image.mime_type.clone(),
-                bytes: image.bytes.clone(),
-                color_space: ColorSpace::Linear,
-            });
-        }
-    }
-    images.extend(extra);
-}
-
-impl Ctx<'_> {
-    fn shown_file(&self) -> String {
-        self.path
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    }
-}
-
-/// The default scene as a prefab document body (`id` patched by the caller).
-fn prefab_document(
-    ctx: &mut Ctx,
-    doc: &gltf::Document,
-    mesh_subs: &[Vec<(String, String)>],
-    meshes: &[MeshData],
-    skins: &[SkinData],
-    stem: &str,
-    meta: &Meta,
-) -> Option<Value> {
-    let scene = doc.default_scene().or_else(|| doc.scenes().next());
-    let (scene_name, roots): (String, Vec<gltf::Node>) = match &scene {
-        Some(s) => (
-            s.name()
-                .map(str::to_string)
-                .unwrap_or_else(|| stem.to_string()),
-            s.nodes().collect(),
-        ),
-        None => {
-            // No scenes: every node nobody points at is a root.
-            let mut has_parent = vec![false; doc.nodes().len()];
-            for n in doc.nodes() {
-                for c in n.children() {
-                    has_parent[c.index()] = true;
-                }
-            }
-            (
-                stem.to_string(),
-                doc.nodes().filter(|n| !has_parent[n.index()]).collect(),
-            )
-        }
-    };
-    if doc.nodes().len() > ctx.limits.max_nodes {
-        ctx.error(
-            Code::IMPORT_LIMIT,
-            format!(
-                "{} nodes; the limit is {}",
-                doc.nodes().len(),
-                ctx.limits.max_nodes
-            ),
-        );
-        return None;
-    }
-
-    let asset = ctx.asset;
-    let entity_id = |node: usize| derive_sub_id(asset, &format!("node/{node}")).to_string();
-    let mut entities: Vec<(String, Value)> = Vec::new();
-    let mut visited = vec![false; doc.nodes().len()];
-    let root_ids: Vec<String> = roots.iter().map(|r| entity_id(r.index())).collect();
-
-    // Explicit stack: (node, parent entity id, depth); children pushed in
-    // reverse so document order is depth-first, first child first.
-    let mut stack: Vec<(gltf::Node, Option<String>, usize)> =
-        roots.iter().rev().map(|r| (r.clone(), None, 1)).collect();
-
-    while let Some((node, parent, depth)) = stack.pop() {
-        if depth > ctx.limits.max_node_depth {
-            ctx.error(
-                Code::IMPORT_LIMIT,
-                format!(
-                    "node {} is nested deeper than {} levels",
-                    node.index(),
-                    ctx.limits.max_node_depth
-                ),
-            );
-            return None;
-        }
-        if visited[node.index()] {
-            ctx.error(
-                Code::IMPORT_INVALID_DATA,
-                format!(
-                    "node {} ({}) is reached twice: the node graph has a cycle or a node with two parents",
-                    node.index(),
-                    node.name().unwrap_or("")
-                ),
-            );
-            return None;
-        }
-        visited[node.index()] = true;
-        let id = entity_id(node.index());
-        let name = node_name(&node);
-        let (translation, rotation, scale) = node.transform().decomposed();
-        let skin = match node_skin(ctx, &node, mesh_subs, meshes, skins) {
-            Ok(skin) => skin,
-            Err(()) => return None,
-        };
-
-        let mut components: Vec<(String, Value)> = vec![(
-            derive_sub_id(asset, &format!("node/{}/transform", node.index())).to_string(),
-            transform_component(translation, rotation, scale),
-        )];
-        let mut children: Vec<String> = Vec::new();
-        let mut primitive_entities: Vec<(String, Value)> = Vec::new();
-        if let Some(mesh) = node.mesh() {
-            let subs = &mesh_subs[mesh.index()];
-            if subs.len() == 1 {
-                components.push((
-                    derive_sub_id(asset, &format!("node/{}/renderer", node.index())).to_string(),
-                    renderer_component(meta, &subs[0].0, mesh_material(doc, mesh.index(), 0)),
-                ));
-                if let Some(skin) = &skin {
-                    components.push((
-                        derive_sub_id(asset, &format!("node/{}/skin", node.index())).to_string(),
-                        skin_component(meta, skin),
-                    ));
-                }
-            } else {
-                for (p, (sub, sub_name)) in subs.iter().enumerate() {
-                    let child_id =
-                        derive_sub_id(asset, &format!("node/{}/primitive/{p}", node.index()))
-                            .to_string();
-                    children.push(child_id.clone());
-                    let mut prim_components: Vec<(String, Value)> = vec![
-                        (
-                            derive_sub_id(
-                                asset,
-                                &format!("node/{}/primitive/{p}/transform", node.index()),
-                            )
-                            .to_string(),
-                            transform_component([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]),
-                        ),
-                        (
-                            derive_sub_id(
-                                asset,
-                                &format!("node/{}/primitive/{p}/renderer", node.index()),
-                            )
-                            .to_string(),
-                            renderer_component(
-                                meta,
-                                sub,
-                                mesh_material_by_sub(doc, mesh.index(), sub),
-                            ),
-                        ),
-                    ];
-                    if let Some(skin) = &skin {
-                        if meshes.iter().any(|m| &m.sub_id == sub && m.is_skinned()) {
-                            prim_components.push((
-                                derive_sub_id(
-                                    asset,
-                                    &format!("node/{}/primitive/{p}/skin", node.index()),
-                                )
-                                .to_string(),
-                                skin_component(meta, skin),
-                            ));
-                        }
-                    }
-                    primitive_entities.push((
-                        child_id.clone(),
-                        entity_value(sub_name, Some(&id), Vec::new(), prim_components),
-                    ));
-                }
-            }
-        }
-        let node_children: Vec<gltf::Node> = node.children().collect();
-        for c in &node_children {
-            children.push(entity_id(c.index()));
-        }
-        entities.push((
-            id.clone(),
-            entity_value(&name, parent.as_deref(), children, components),
-        ));
-        entities.extend(primitive_entities);
-        for c in node_children.into_iter().rev() {
-            stack.push((c, Some(id.clone()), depth + 1));
-        }
-    }
-
-    let mut prefab = Map::new();
-    prefab.insert("$schema".into(), json!(DocumentKind::Prefab.schema_id()));
-    prefab.insert(
-        "formatVersion".into(),
-        json!(DocumentKind::Prefab.supported_format_version()),
-    );
-    prefab.insert("id".into(), json!(Uuid::nil().to_string()));
-    prefab.insert("name".into(), json!(scene_name));
-    prefab.insert(
-        "description".into(),
-        json!(format!("Imported from {}.", ctx.shown_file())),
-    );
-    let mut ents = Map::new();
-    for (k, v) in entities {
-        ents.insert(k, v);
-    }
-    prefab.insert("entities".into(), Value::Object(ents));
-    prefab.insert("roots".into(), json!(root_ids));
-    Some(Value::Object(prefab))
-}
-
-/// The skin a node's mesh deforms with, checked against the mesh: `None`
-/// (with a warning) for a skin on a node without a skinned mesh or a
-/// skinned mesh on a node without a skin (it draws in its bind pose),
-/// `Err` when a joint index points past the skin.
-fn node_skin<'a>(
-    ctx: &mut Ctx,
-    node: &gltf::Node,
-    mesh_subs: &[Vec<(String, String)>],
-    meshes: &[MeshData],
-    skins: &'a [SkinData],
-) -> Result<Option<&'a SkinData>, ()> {
-    let subs: &[(String, String)] = node
-        .mesh()
-        .map(|m| mesh_subs[m.index()].as_slice())
-        .unwrap_or(&[]);
-    let skinned: Vec<&MeshData> = meshes
-        .iter()
-        .filter(|m| m.is_skinned() && subs.iter().any(|(s, _)| *s == m.sub_id))
-        .collect();
-    let Some(skin) = node.skin() else {
-        if let Some(m) = skinned.first() {
-            ctx.warn(
-                Code::IMPORT_SKIPPED,
-                format!(
-                    "node {} ({}) has the skinned mesh {} but no skin; it will draw in its bind pose",
-                    node.index(),
-                    node_name(node),
-                    m.sub_id
-                ),
-            );
-        }
-        return Ok(None);
-    };
-    let skin = &skins[skin.index()];
-    if skinned.is_empty() {
-        ctx.warn(
-            Code::IMPORT_SKIPPED,
-            format!(
-                "node {} ({}) has {} but no skinned mesh; the skin is not applied",
-                node.index(),
-                node_name(node),
-                skin.sub_id
-            ),
-        );
-        return Ok(None);
-    }
-    let joints = skin.payload.joints.len();
-    for m in skinned {
-        if let Some(bad) = m
-            .skin
-            .iter()
-            .flat_map(|w| w.joints.iter().zip(w.weights))
-            .find(|(j, w)| **j as usize >= joints && *w > 0.0)
-        {
-            ctx.error(
-                Code::IMPORT_INVALID_DATA,
-                format!(
-                    "{} ({}): joint index {} out of range ({} has {joints} joints)",
-                    m.sub_id, m.name, bad.0, skin.sub_id
-                ),
-            );
-            return Err(());
-        }
-    }
-    Ok(Some(skin))
-}
-
-fn mesh_material(doc: &gltf::Document, mesh: usize, primitive: usize) -> Option<String> {
-    doc.meshes()
-        .nth(mesh)
-        .and_then(|m| m.primitives().nth(primitive))
-        .and_then(|p| p.material().index())
-        .map(|m| format!("material/{m}"))
-}
-
-fn mesh_material_by_sub(doc: &gltf::Document, mesh: usize, sub: &str) -> Option<String> {
-    let p: usize = sub.rsplit('/').next()?.parse().ok()?;
-    mesh_material(doc, mesh, p)
-}
-
-fn entity_value(
-    name: &str,
-    parent: Option<&str>,
-    children: Vec<String>,
-    components: Vec<(String, Value)>,
-) -> Value {
-    let mut e = Map::new();
-    e.insert("name".into(), json!(name));
-    e.insert(
-        "parent".into(),
-        parent.map(|p| json!(p)).unwrap_or(Value::Null),
-    );
-    e.insert("children".into(), json!(children));
-    let mut c = Map::new();
-    for (k, v) in components {
-        c.insert(k, v);
-    }
-    e.insert("components".into(), Value::Object(c));
-    Value::Object(e)
-}
-
-fn transform_component(t: [f32; 3], r: [f32; 4], s: [f32; 3]) -> Value {
-    json!({
-        "type": "fynkel.Transform",
-        "version": 1,
-        "data": { "position": nums(&t), "rotation": nums(&r), "scale": nums(&s) },
-    })
-}
-
-/// `fynkel.Skin`: the skin sub-asset and the name of the skeleton root
-/// node (empty when the file names none: the runtime then searches the
-/// prefab's whole tree).
-fn skin_component(meta: &Meta, skin: &SkinData) -> Value {
-    json!({
-        "type": "fynkel.Skin",
-        "version": 1,
-        "data": {
-            "skin": { "asset": meta.id().to_string(), "sub": skin.sub_id },
-            "skeleton": skin.payload.skeleton,
-        },
-    })
-}
-
-fn renderer_component(meta: &Meta, mesh_sub: &str, material_sub: Option<String>) -> Value {
-    let material = match material_sub {
-        Some(sub) => json!({ "asset": meta.id().to_string(), "sub": sub }),
-        None => json!({ "asset": Uuid::nil().to_string() }),
-    };
-    json!({
-        "type": "fynkel.MeshRenderer",
-        "version": 1,
-        "data": {
-            "mesh": { "asset": meta.id().to_string(), "sub": mesh_sub },
-            "material": material,
-            "cast_shadows": true,
-            "receive_shadows": true,
-            "visible": true,
-        },
-    })
 }

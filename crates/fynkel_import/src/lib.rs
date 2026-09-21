@@ -24,7 +24,9 @@
 pub mod audio;
 pub mod cache;
 pub mod cook;
+pub mod fbx;
 pub mod gltf;
+pub(crate) mod graph;
 pub mod image;
 pub mod intermediate;
 pub mod tangents;
@@ -52,6 +54,7 @@ pub const IMPORTERS: &[(&str, u32)] = &[
         fynkel_document::asset::GLTF_IMPORTER,
         gltf::IMPORTER_VERSION,
     ),
+    (fynkel_document::asset::FBX_IMPORTER, fbx::IMPORTER_VERSION),
     (
         fynkel_document::asset::IMAGE_IMPORTER,
         image::IMPORTER_VERSION,
@@ -136,6 +139,7 @@ impl Imported {
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     match meta.importer.as_str() {
         fynkel_document::asset::GLTF_IMPORTER => gltf::import(path, meta, limits),
+        fynkel_document::asset::FBX_IMPORTER => fbx::import(path, meta, limits),
         fynkel_document::asset::IMAGE_IMPORTER => image::import(path, meta, limits),
         fynkel_document::asset::AUDIO_IMPORTER => audio::import(path, meta, limits),
         other => Imported {
@@ -147,7 +151,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             )
             .with_document(path.display().to_string())
             .with_suggestion(
-                "importers: fynkel.gltf (.gltf/.glb), fynkel.image (.png/.jpg), fynkel.audio (.wav/.ogg); fynkel.file has none (`fynkel cook` carries such files as they are)",
+                "importers: fynkel.gltf (.gltf/.glb), fynkel.fbx (.fbx), fynkel.image (.png/.jpg), fynkel.audio (.wav/.ogg); fynkel.file has none (`fynkel cook` carries such files as they are)",
             )],
         },
     }

@@ -19,6 +19,7 @@
   },
   "importers": {
     "fynkel.audio": 1,
+    "fynkel.fbx": 1,
     "fynkel.file": 1,
     "fynkel.gltf": 4,
     "fynkel.image": 1
