@@ -242,6 +242,9 @@ fn placeholders_off_hides_entities_without_meshes() {
 /// palette — at the bind pose it is the cooked column, half a second into
 /// "wave" the spine bends it 45° so it covers pixels the straight column
 /// does not, and the same extract without palettes draws the bind pose.
+/// Since M3-19a the scene holds the rig twice — hand-authored and
+/// instanced from `rig.glb#prefab` — so every count is doubled and both
+/// columns bend together.
 #[test]
 fn skinned_meshes_follow_their_joint_palette() {
     let Some((device, queue)) = headless_device() else {
@@ -270,11 +273,15 @@ fn skinned_meshes_follow_their_joint_palette() {
     world.begin_frame(1.0 / 60.0);
     world.step();
     let bind = world.extract();
-    assert_eq!(bind.joints.len(), 3, "hips, spine, head");
+    assert_eq!(
+        bind.joints.len(),
+        6,
+        "hips, spine, head — authored and imported (M3-19a: `rig.glb#prefab` at x = −2)"
+    );
     let px_bind = render_offscreen(&device, &queue, &mut renderer, &bind);
     assert_eq!(renderer.asset_errors(), &[] as &[String]);
     let s = renderer.stats();
-    assert_eq!((s.instances, s.skinned, s.joints, s.draws), (2, 1, 3, 2));
+    assert_eq!((s.instances, s.skinned, s.joints), (4, 2, 6));
     let straight = coverage(&px_bind);
 
     // The palette is identity at bind: the cooked column and the skinned
@@ -294,7 +301,7 @@ fn skinned_meshes_follow_their_joint_palette() {
     }
     let posed = world.extract();
     let px_posed = render_offscreen(&device, &queue, &mut renderer, &posed);
-    assert_eq!(renderer.stats().skinned, 1);
+    assert_eq!(renderer.stats().skinned, 2);
     let bent = coverage(&px_posed);
     let only_bent = bent
         .iter()

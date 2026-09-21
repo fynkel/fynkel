@@ -29,11 +29,14 @@ What is in the scene (`assets/scenes/main.scene.json`):
 - the **runner**: the reference game's rigged character
   (`assets/models/character.glb`, a byte copy of what
   `examples/reference_game/tools/character.py` generates — CI compares
-  them), a skinned body of eleven boxes over an eleven-joint skeleton
-  authored as entities under `Runner` (`hips` → `spine` → `head`, the
-  limbs) with a `fynkel.Skin` on `Runner Body` and a `fynkel.Animator`
-  looping the `run` clip in place — the skinned pipeline variants, the
-  joint palette and a skinned caster in the shadow map (M3-19)
+  them), a skinned body of eleven boxes over an eleven-joint skeleton:
+  `Runner` instances the file's own hierarchy — `prefab: { asset,
+  sub: "prefab" }`, so `Character` → `Body` (with the `fynkel.Skin`) and
+  `hips` → `spine` → `head`, the limbs, are the glTF's nodes — with the
+  suit as a material override on the body's renderer and a
+  `fynkel.Animator` looping the `run` clip in place (M3-19a; before it
+  the same tree was authored by hand) — the skinned pipeline variants,
+  the joint palette and a skinned caster in the shadow map (M3-19)
 - a **camera** that orbits the scene (`game.Orbit`, `lib/game/orbit.dart`)
   so shadows and the transparent sort are seen moving; its authored
   transform is the orbit's start pose, so `fynkel render` (which runs no

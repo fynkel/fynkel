@@ -68,9 +68,20 @@ pub struct PrefabInstance {
 }
 
 impl PrefabInstance {
-    /// The prefab document id.
+    /// The asset the reference names: the prefab document's id, or — with
+    /// a `sub` (`"prefab"`, M3-19a) — the imported source whose hierarchy
+    /// is the prefab (`PrefabLibrary::resolve` maps it to the prefab's id).
     pub fn prefab_id(&self) -> Uuid {
         Uuid::from_bytes(self.asset.asset.0)
+    }
+
+    /// `<asset>` or `<asset>#<sub>`, for messages and inspect output.
+    pub fn describe(&self) -> String {
+        if self.asset.sub.is_empty() {
+            self.prefab_id().to_string()
+        } else {
+            format!("{}#{}", self.prefab_id(), self.asset.sub)
+        }
     }
 }
 
@@ -970,7 +981,7 @@ pub fn inspect_json(scene: &Scene) -> serde_json::Value {
         });
         if let Some(p) = &e.prefab {
             v["prefab"] = serde_json::json!({
-                "asset": p.prefab_id().to_string(),
+                "asset": p.describe(),
                 "instance": p.instance.to_string(),
                 "overrides": p.overrides.len(),
             });
@@ -1021,7 +1032,7 @@ pub fn inspect_text(scene: &Scene) -> String {
             match &e.prefab {
                 Some(p) => format!(
                     "  <prefab {} instance {}, {} override(s)>",
-                    p.prefab_id(),
+                    p.describe(),
                     p.instance,
                     p.overrides.len()
                 ),

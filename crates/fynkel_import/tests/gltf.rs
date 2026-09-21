@@ -723,3 +723,99 @@ fn skin_joint_limit_is_enforced() {
     let r = import(&path, &meta, &two);
     assert_eq!(codes(&r), [Code::IMPORT_LIMIT]);
 }
+
+/// The Khronos sample rigs (`fixtures/khronos/ATTRIBUTION.md`) — content
+/// from outside this repo, the blueprint's acceptance rule since item
+/// 19a: each imports clean, its skin covers every joint the file
+/// declares, its clips keep their names and lengths, its hierarchy is a
+/// prefab whose skinned node carries the `Skin`, and the bytes are
+/// deterministic.
+#[test]
+fn khronos_sample_rigs_import_clean() {
+    // (file, joints, clips as (name, seconds), prefab entities, skinned node)
+    type Rig = (
+        &'static str,
+        usize,
+        &'static [(&'static str, f32)],
+        usize,
+        &'static str,
+    );
+    let rigs: [Rig; 3] = [
+        (
+            "khronos/Fox.glb",
+            24,
+            &[("Survey", 3.42), ("Walk", 0.71), ("Run", 1.16)],
+            26,
+            "fox",
+        ),
+        (
+            "khronos/CesiumMan.glb",
+            19,
+            &[("anim0", 2.0)],
+            22,
+            "Cesium_Man",
+        ),
+        (
+            "khronos/RiggedFigure.glb",
+            19,
+            &[("anim0", 1.25)],
+            22,
+            "Proxy",
+        ),
+    ];
+    for (file, joints, clips, entities, skinned) in rigs {
+        let (r, meta) = import_fixture(file);
+        assert!(!r.has_errors(), "{file}: {:#?}", r.diagnostics);
+        let i = r.intermediate.as_ref().unwrap();
+        assert_eq!(i.skins.len(), 1, "{file}");
+        assert_eq!(i.skins[0].payload.joints.len(), joints, "{file}");
+        assert_eq!(i.meshes.len(), 1, "{file}");
+        assert_eq!(
+            i.meshes[0].skin.len(),
+            i.meshes[0].vertices.len(),
+            "{file}: every vertex is skinned"
+        );
+        assert!(
+            i.meshes[0]
+                .skin
+                .iter()
+                .all(|w| w.weights.iter().sum::<f32>() > 0.99),
+            "{file}: weights normalized"
+        );
+        let got: Vec<(&str, f32)> = i
+            .animations
+            .iter()
+            .map(|a| {
+                (
+                    a.name.as_str(),
+                    (a.payload.duration * 100.0).round() / 100.0,
+                )
+            })
+            .collect();
+        assert_eq!(got, clips, "{file}");
+        assert_eq!(i.prefab_entity_count(), entities, "{file}");
+        let prefab = i.prefab.as_ref().unwrap();
+        let node = prefab["entities"]
+            .as_object()
+            .unwrap()
+            .values()
+            .find(|e| e["name"] == skinned)
+            .unwrap_or_else(|| panic!("{file}: no node {skinned}"));
+        let types: Vec<&str> = node["components"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|c| c["type"].as_str().unwrap())
+            .collect();
+        assert!(
+            types.contains(&"fynkel.Skin") && types.contains(&"fynkel.MeshRenderer"),
+            "{file}: {types:?}"
+        );
+        // No committed sidecar: the same (fresh) meta again gives the same bytes.
+        let again = import(&fixture(file), &meta, &Limits::default());
+        assert!(
+            again.intermediate.unwrap().to_bytes() == i.to_bytes(),
+            "{file}: deterministic"
+        );
+    }
+}

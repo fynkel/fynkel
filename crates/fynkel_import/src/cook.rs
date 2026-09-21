@@ -284,15 +284,131 @@ pub fn cook(
             }
         }
     }
+    // 3. Cook in that order; keys need the dependencies' keys. Sources
+    // go first (they depend on nothing, so the order stays topological):
+    // a source's cooked `prefab` chunk — its node hierarchy — joins the
+    // library before any scene or prefab that instantiates it
+    // (`{ asset: <source>, sub: "prefab" }`, M3-19a), whether the source
+    // was cooked now or read back from the cache.
+    let (sources, documents): (Vec<usize>, Vec<usize>) = order
+        .into_iter()
+        .partition(|i| matches!(entries[*i].kind, AssetKind::Source { .. }));
+    let mut keys: HashMap<Uuid, CacheKey> = HashMap::new();
+    let mut results: Vec<Option<CookedAsset>> = (0..entries.len()).map(|_| None).collect();
+    for i in sources {
+        cook_index(
+            i,
+            db,
+            schemas,
+            &library,
+            entries,
+            &prepared,
+            &in_cycle,
+            &by_id,
+            cache,
+            opts,
+            &mut keys,
+            &mut results,
+            &mut diagnostics,
+        );
+        let entry = &entries[i];
+        if let Some(file) = results[i].as_ref().and_then(|r| r.file.as_ref()) {
+            match imported_prefab(file) {
+                Ok(Some(doc)) => library.add_imported(Prefab::from_document(doc), entry.id, "prefab"),
+                Ok(None) => {}
+                Err(msg) => diagnostics.push(
+                    Diagnostic::warning(
+                        Code::IMPORT_INVALID_DATA,
+                        format!("{}: its cooked prefab does not read back ({msg}); scenes instancing it will not expand", entry.path),
+                    )
+                    .with_document(entry.file(db.root()).display().to_string())
+                    .with_id(entry.id.to_string()),
+                ),
+            }
+        }
+    }
     // Nested prefabs expand once; a prefab that cannot (a cycle, a bad
     // inner override) stays as it is and fails its own cook below, where
     // the diagnostics are re-derived against its cooked object.
     let (library, _) = library.flattened(schemas);
+    for i in documents {
+        cook_index(
+            i,
+            db,
+            schemas,
+            &library,
+            entries,
+            &prepared,
+            &in_cycle,
+            &by_id,
+            cache,
+            opts,
+            &mut keys,
+            &mut results,
+            &mut diagnostics,
+        );
+    }
 
-    // 3. Cook in that order; keys need the dependencies' keys.
-    let mut keys: HashMap<Uuid, CacheKey> = HashMap::new();
-    let mut results: Vec<Option<CookedAsset>> = (0..entries.len()).map(|_| None).collect();
-    for i in order {
+    let report = CookReport {
+        profile: opts.profile.clone(),
+        assets: results
+            .into_iter()
+            .map(|r| r.expect("every asset visited"))
+            .collect(),
+        diagnostics,
+    };
+    let mut report = report;
+    if let Err(d) = write_index(cache, &report, opts.project.as_ref(), db) {
+        report.diagnostics.push(d);
+    }
+    report
+}
+
+/// The `prefab` JSON chunk of a cooked source (`Ok(None)` when it has
+/// none: a texture, a sound, a file), parsed as a prefab document.
+fn imported_prefab(file: &Path) -> Result<Option<Document>, String> {
+    let mut cf = fynkel_cooked::ChunkFile::open_path(file).map_err(|e| e.to_string())?;
+    let meta = cf.meta(1 << 20).map_err(|e| e.to_string())?;
+    let meta: Value = serde_json::from_slice(&meta).map_err(|e| e.to_string())?;
+    let index = meta["chunks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["kind"] == "JSON" && c["sub"] == "prefab")
+        .and_then(|c| c["index"].as_u64());
+    let Some(index) = index else {
+        return Ok(None);
+    };
+    let bytes = cf
+        .read(index as usize, 64 << 20)
+        .map_err(|e| e.to_string())?;
+    let text = String::from_utf8(bytes).map_err(|e| e.to_string())?;
+    let path = file.display().to_string();
+    Document::parse(DocumentKind::Prefab, Some(&path), &text)
+        .map(Some)
+        .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())
+}
+
+/// One asset of `cook_project`'s order: its key from the dependencies'
+/// keys, the cached object when the key is in the cache, `cook_one`
+/// otherwise; the result lands in `results[i]` and its key in `keys`.
+#[allow(clippy::too_many_arguments)]
+fn cook_index(
+    i: usize,
+    db: &AssetDatabase,
+    schemas: &SchemaSet,
+    library: &PrefabLibrary,
+    entries: &[AssetEntry],
+    prepared: &[Prepared],
+    in_cycle: &[bool],
+    by_id: &HashMap<Uuid, usize>,
+    cache: &Cache,
+    opts: &CookOptions,
+    keys: &mut HashMap<Uuid, CacheKey>,
+    results: &mut [Option<CookedAsset>],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    'cook: {
         let entry = &entries[i];
         let p = &prepared[i];
         let base = CookedAsset {
@@ -308,7 +424,7 @@ pub fn cook(
         };
         if p.failed || in_cycle[i] {
             results[i] = Some(base);
-            continue;
+            break 'cook;
         }
         let mut dep_keys = Vec::with_capacity(p.dependencies.len());
         let mut blocked = false;
@@ -335,7 +451,7 @@ pub fn cook(
         }
         if blocked {
             results[i] = Some(base);
-            continue;
+            break 'cook;
         }
         let inputs = KeyInputs {
             asset: entry.id,
@@ -361,7 +477,7 @@ pub fn cook(
                     result.bytes = m.bytes;
                     keys.insert(entry.id, key);
                     results[i] = Some(result);
-                    continue;
+                    break 'cook;
                 }
                 // An unreadable manifest is a damaged cache entry: recook it.
                 Err(d) => diagnostics.push(
@@ -375,13 +491,13 @@ pub fn cook(
         match cook_one(
             db,
             schemas,
-            &library,
+            library,
             entry,
             p,
             &inputs,
             &key,
             opts,
-            &mut diagnostics,
+            diagnostics,
         ) {
             Some((bytes, manifest)) => match cache.write(&key, &bytes, &manifest) {
                 Ok(()) => {
@@ -399,20 +515,6 @@ pub fn cook(
         }
         results[i] = Some(result);
     }
-
-    let report = CookReport {
-        profile: opts.profile.clone(),
-        assets: results
-            .into_iter()
-            .map(|r| r.expect("every asset visited"))
-            .collect(),
-        diagnostics,
-    };
-    let mut report = report;
-    if let Err(d) = write_index(cache, &report, opts.project.as_ref(), db) {
-        report.diagnostics.push(d);
-    }
-    report
 }
 
 /// Where a project's cache lives: `<dir>/.fynkel/cache`.

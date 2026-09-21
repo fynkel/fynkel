@@ -45,6 +45,10 @@ pub use fynkel_document::AuthoredBehaviour;
 use fynkel_document::{describe, Document, DocumentKind, Scene, SchemaSet};
 use fynkel_wire::material::decode_material;
 
+/// The sub-asset a cooked source's node hierarchy is stored under (the
+/// glTF importer's `prefab`; M3-19a instantiates it like a prefab document).
+pub const IMPORTED_PREFAB_SUB: &str = "prefab";
+
 /// Largest payload the store will read (per chunk).
 pub const MAX_CHUNK_BYTES: u64 = 256 << 20;
 const MAX_META_BYTES: u64 = 16 << 20;
@@ -883,18 +887,33 @@ impl Assets {
             let meta = s.meta(&entry).map_err(|d| vec![d])?;
             (entry, meta)
         };
-        if entry.kind != "document/prefab" {
+        // A prefab document, or an imported source whose cooked object
+        // carries its node hierarchy as the `prefab` sub-asset (M3-19a:
+        // `{ asset: <source>, sub: "prefab" }` in a document, the source's
+        // id from `World.instantiate`).
+        let sub = if entry.kind == "document/prefab" {
+            ""
+        } else if meta
+            .chunks
+            .iter()
+            .any(|(k, s, _)| *k == KIND_JSON && s == IMPORTED_PREFAB_SUB)
+        {
+            IMPORTED_PREFAB_SUB
+        } else {
             return Err(vec![Diagnostic::error(
                 Code::RUNTIME_CHUNK_MISSING,
                 format!(
-                    "{}: {id} is a {} asset, not a prefab",
+                    "{}: {id} is a {} asset without a node hierarchy, not a prefab",
                     entry.path, entry.kind
                 ),
             )
-            .with_id(id.to_string())]);
-        }
+            .with_id(id.to_string())
+            .with_suggestion(
+                "instantiate a prefab document or an imported model (glTF) whose sidecar lists the `prefab` sub-asset",
+            )]);
+        };
         let bytes = self
-            .read_chunk(&entry, &meta, KIND_JSON, "")
+            .read_chunk(&entry, &meta, KIND_JSON, sub)
             .map_err(|d| vec![d])?;
         let text =
             String::from_utf8(bytes).map_err(|_| vec![self.malformed_entry(&entry, "JSON")])?;

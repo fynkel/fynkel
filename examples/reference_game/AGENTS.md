@@ -252,7 +252,13 @@ children of the Player in their bind pose, the skinned `Body` next to
 them with a `fynkel.Skin { skin, skeleton: "hips" }`, and the `Visor`
 under `head`. The clips are authored in place (no root motion): the
 `CharacterController` moves the entity, the animator only poses the
-joints. A behaviour drives it:
+joints. `tools/playground.py --hero <file.glb>` (M3-19a, opt-in, never
+committed) dresses the Player in a downloaded character instead: a `Rig`
+child instances the file's own hierarchy (`prefab: { asset, sub:
+"prefab" }`, turned to face -Z) and the clips are its `anim/0..3` as
+idle, walk, run, jump — `fynkel import <file.glb>` first; `test/game_test.dart`'s
+posed test is rig-agnostic (it watches every joint under the Player).
+A behaviour drives it:
 
 ```dart
 animation.crossfade(walk, 0.15);                   // a timed blend; play(clip, looping: false) for a one-shot

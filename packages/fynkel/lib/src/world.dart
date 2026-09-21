@@ -788,8 +788,15 @@ class World {
 
   // ---------------------------------------------------------------- prefabs (M3-08b)
 
+  /// The sub-asset an imported model's node hierarchy is stored under
+  /// (`{ asset: <glb>, sub: 'prefab' }` in a scene, [instantiate] at runtime).
+  static const importedPrefabSub = 'prefab';
+
   /// Instantiates the cooked prefab [prefab] (its asset id as UUID text, or
-  /// an [AssetRef]) **now**: an anchor object named [name] (the prefab's
+  /// an [AssetRef] — a prefab document, or an imported model with its
+  /// `prefab` sub-asset, `AssetRef(glb, sub: 'prefab')`, whose node
+  /// hierarchy then spawns with its meshes and `Skin`s; M3-19a) **now**:
+  /// an anchor object named [name] (the prefab's
   /// name by default) at [transform] under [parent], whose children are
   /// the prefab's entities — the shape a scene instance expands to — with
   /// the prefab's authored behaviours attached from [registry]. Returns
@@ -806,7 +813,9 @@ class World {
     String? name,
   }) {
     final id = switch (prefab) {
-      AssetRef r => r.asset,
+      AssetRef r when (r.sub ?? '').isEmpty || r.sub == importedPrefabSub => r.asset,
+      AssetRef r => throw ArgumentError.value(
+          prefab, 'prefab', 'sub "${r.sub}" is not a prefab (a prefab document has none; an imported model\'s is "$importedPrefabSub")'),
       String s => s,
       _ => throw ArgumentError.value(prefab, 'prefab', 'a prefab asset id (UUID text) or an AssetRef'),
     };

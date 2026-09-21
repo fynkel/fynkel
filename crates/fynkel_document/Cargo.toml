@@ -18,3 +18,10 @@ jsonschema.workspace = true
 uuid.workspace = true
 similar.workspace = true
 blake3.workspace = true
+
+[dev-dependencies]
+# The fixture project instances `rig.glb#prefab` (M3-19a); the integration
+# tests validate it with the importer's provider. A dev-dependency cycle
+# (fynkel_import depends on this crate) is allowed by cargo and links the
+# same lib artifact, so the types agree.
+fynkel_import.workspace = true

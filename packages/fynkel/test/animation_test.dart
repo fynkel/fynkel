@@ -59,7 +59,7 @@ void main() {
     final report = w.loadScene(rigScene, cacheDir: cache);
     expect(report.ok, isTrue);
     expect(report.sceneName, 'Rig');
-    expect(report.entityCount, 8);
+    expect(report.entityCount, 15, reason: 'the authored rig and, since M3-19a, its import instanced beside it');
     expect((report.animation.clips, report.animation.skins), (2, 1), reason: 'wave, bob; one skin');
     expect(w.systemTimes().map((s) => s.system), contains(SystemKind.animation));
 
@@ -119,6 +119,62 @@ void main() {
     expect(propState.time, closeTo(2, 1e-4));
     expect(prop.localTransform.position.y, closeTo(0, 1e-3));
     expect(rig.animation.isPlaying, isTrue, reason: 'the loop goes on');
+  });
+
+  test('an imported model instantiates from its prefab sub-asset and plays a clip (M3-19a)', () {
+    final w = fresh();
+    w.loadProject(fixture, cacheDir: cache);
+    w.frame(1 / 60);
+    final before = w.allEntities().length;
+
+    // `rig.glb#prefab`: the anchor is the glTF's own hierarchy — Rig >
+    // Body (skinned), hips > spine > head, Prop — spawned like a prefab
+    // document's entities, with the source's closure retained.
+    const rigPrefab = AssetRef(rigAsset, sub: World.importedPrefabSub);
+    final statue = w.instantiate(
+      rigPrefab,
+      name: 'Statue',
+      transform: const Transform(position: Vec3(3, 0, 0), rotation: Quat.identity, scale: Vec3.one),
+    );
+    final report = w.lastInstantiate!;
+    expect(report.ok, isTrue, reason: report.diagnostics.join('\n'));
+    expect(report.prefabId, rigAsset);
+    expect(report.prefabPath, 'models/rig.glb');
+    expect(report.entityCount, 6);
+    expect(report.rejectedComponents, 0);
+    expect(w.allEntities().length, before + 7, reason: 'anchor + six nodes');
+    expect(statue.name, 'Statue');
+    final root = statue.findChild('Rig')!;
+    final body = root.findChild('Body')!;
+    final hips = root.findChild('hips')!;
+    final spine = hips.findChild('spine')!;
+    final head = spine.findChild('head')!;
+    w.frame(1 / 60);
+    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/0'), skeleton: 'hips'));
+    expect(body.get<MeshRenderer>()!.mesh, const AssetRef(rigAsset, sub: 'mesh/0'));
+    expect(head.worldTransform!.position, const Vec3(3, 1, 0), reason: 'bind pose under the anchor');
+
+    // The instance has no animator of its own (a glTF names clips, not
+    // players): one added to the anchor finds its targets by name below
+    // it — half a second in the statue waves like the scene's rig.
+    expect(statue.animation.state, isNull);
+    statue.add(const Animator(clip: wave, speed: 1, looping: true, playing: true));
+    for (var i = 0; i < 31; i++) {
+      w.frame(1 / 60);
+    }
+    expect(statue.animation.state!.time, closeTo(0.5, 1e-4));
+    expect(hips.localTransform.position.y, closeTo(0.125, 1e-3));
+    expect(spine.localTransform.rotation.z, closeTo(0.3827, 1e-3), reason: 'sin(22.5°)');
+    expect(head.worldTransform!.position.y, closeTo(0.125 + 0.5 + 0.5 * 0.7071, 1e-3));
+    expect(head.worldTransform!.position.x, lessThan(3 - 0.3), reason: 'the column leans toward −X, from the anchor at x = 3');
+
+    // Not a prefab: a wrong sub is an ArgumentError before the call, a
+    // texture has no hierarchy (FynkelInstantiateError).
+    expect(() => w.instantiate(const AssetRef(rigAsset, sub: 'mesh/0')), throwsArgumentError);
+    expect(
+      () => w.instantiate(const AssetRef('c0000000-0000-4000-8000-000000000010', sub: World.importedPrefabSub)),
+      throwsA(isA<FynkelInstantiateError>()),
+    );
   });
 
   test('play, crossfade, pause, speed, time and stop from a behaviour; the end event reaches it', () {

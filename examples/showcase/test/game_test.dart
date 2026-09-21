@@ -25,7 +25,7 @@ void main() {
 
     expect(game.report.ok, isTrue);
     expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
-    expect(game.report.entityCount, 47);
+    expect(game.report.entityCount, 48, reason: 'the Runner instance adds the glTF scene root (Character) above the joints');
     expect((game.report.animation.clips, game.report.animation.skins), (1, 1), reason: 'the runner: run, one skin');
     expect(game.report.behavioursAttached, 2);
     final spinner = game.world.behaviours.whereType<Spinner>().single;
@@ -46,8 +46,15 @@ void main() {
     expect(eye.y, closeTo(orbit.height, 1e-4));
 
     // The runner's joints follow the run clip (in place: the Runner stays).
+    // Since M3-19a the Runner instances `character.glb#prefab`: the glTF's
+    // own hierarchy (its scene root `Character`, then `Body` and the
+    // joints) under the anchor, the suit as a material override.
     final runner = game.world.find('Runner')!;
-    final thigh = runner.findChild('hips')!.findChild('thigh_l')!;
+    final character = runner.findChild('Character')!;
+    final thigh = character.findChild('hips/thigh_l')!;
+    expect(character.findChild('Body')!.get<MeshRenderer>()!.material.asset, '0605f86c-548f-5a17-83a4-d07f21f52896',
+        reason: 'the suit, set by the instance\'s override on node/1/renderer');
+    expect(character.findChild('Body')!.get<Skin>()!.skeleton, 'hips');
     final s = runner.animation.state!;
     expect(s.clip.sub, 'anim/2');
     expect(s.duration, closeTo(0.6, 1e-6));

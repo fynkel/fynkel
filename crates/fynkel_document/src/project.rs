@@ -1042,6 +1042,48 @@ pub fn validate_project(
     schemas: &SchemaSet,
     expected_lock: Option<&Lock>,
 ) -> ProjectReport {
+    validate_project_with(dir, schemas, expected_lock, &NoSourcePrefabs)
+}
+
+/// Where `validate_project` gets an imported source's hierarchy when a
+/// scene or prefab instantiates it (`prefab: { asset: <source>, sub:
+/// "prefab" }`, M3-19a): this crate reads documents, the importer lives
+/// above it, so the CLI and the cook pass `fynkel_import`'s provider and
+/// a bare `validate_project` reports such instances as `D0401`.
+pub trait SourcePrefabs {
+    /// The prefab document the importer derives for `entry` (a source
+    /// whose sidecar lists `sub`), `Ok(None)` when the source has no
+    /// hierarchy, `Err` with the importer's diagnostics when it does not
+    /// import. Called once per (source, sub) a document references.
+    fn prefab(
+        &self,
+        root: &Path,
+        entry: &crate::asset::AssetEntry,
+        sub: &str,
+    ) -> Result<Option<Document>, Vec<Diagnostic>>;
+}
+
+/// No importer: every imported-prefab instance is `D0401`.
+pub struct NoSourcePrefabs;
+
+impl SourcePrefabs for NoSourcePrefabs {
+    fn prefab(
+        &self,
+        _root: &Path,
+        _entry: &crate::asset::AssetEntry,
+        _sub: &str,
+    ) -> Result<Option<Document>, Vec<Diagnostic>> {
+        Ok(None)
+    }
+}
+
+/// [`validate_project`] with a [`SourcePrefabs`] provider.
+pub fn validate_project_with(
+    dir: &Path,
+    schemas: &SchemaSet,
+    expected_lock: Option<&Lock>,
+    sources: &dyn SourcePrefabs,
+) -> ProjectReport {
     let mut report = ProjectReport {
         dir: dir.to_path_buf(),
         project: None,
@@ -1115,6 +1157,23 @@ pub fn validate_project(
             AssetKind::Source { .. } => report.sources += 1,
         }
     }
+    // Imported hierarchies the scenes and prefabs instantiate (M3-19a):
+    // derived once per (source, sub) through the provider; a source that
+    // does not import is reported here, once, and the instance is D0401.
+    let mut wanted: Vec<(Uuid, String)> = Vec::new();
+    for (kind, doc) in &docs {
+        if !matches!(kind, DocumentKind::Scene | DocumentKind::Prefab) {
+            continue;
+        }
+        for key in PrefabLibrary::wanted_sources(&Scene::from_document(doc.clone())) {
+            if !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
+    }
+    report
+        .diagnostics
+        .extend(prefabs.add_sources(&db, &wanted, sources));
     for (kind, doc) in &docs {
         match kind {
             DocumentKind::Prefab => prefabs.add(Prefab::from_document(doc.clone())),

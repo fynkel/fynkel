@@ -1111,7 +1111,9 @@ mod animation_tests {
     /// a behaviour — the `Animator` on Rig plays `wave` over the joints
     /// found by name below it, the Prop's non-looping `bob` ends once, the
     /// Body's skin resolves and the extract carries its palette — with a
-    /// stable checksum.
+    /// stable checksum. Item 19a: the scene's `Imported` entity instances
+    /// `rig.glb#prefab`, the same rig from the source's own hierarchy,
+    /// waving beside the hand-authored one over its own six joints.
     #[test]
     fn the_rig_scene_animates_and_skins_without_a_behaviour() {
         let cooked = tests::Cooked::new("rig");
@@ -1125,7 +1127,7 @@ mod animation_tests {
         let (report, world, loaded) = run_with(&cfg);
         let scene = report.scene.as_ref().expect("scene report");
         assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
-        assert_eq!((scene.entities, scene.rejected_components), (8, 0));
+        assert_eq!((scene.entities, scene.rejected_components), (15, 0));
         assert_eq!(report.diagnostics, 0);
         let anim = report.animation.as_ref().expect("animation report");
         assert_eq!(
@@ -1136,7 +1138,7 @@ mod animation_tests {
                 anim.skinned_meshes,
                 anim.joints
             ),
-            (3, 2, 1, 1, 3),
+            (5, 2, 1, 2, 6),
             "{anim:#?}"
         );
         assert_eq!(anim.ended, 0, "bob (2 s) has not ended at 0.5 s");
@@ -1173,7 +1175,7 @@ mod animation_tests {
         // matrix is that translation; the animator's own state reads back.
         let extract = world.extract();
         let skinned: Vec<_> = extract.meshes.iter().filter(|m| m.skin.is_some()).collect();
-        assert_eq!(skinned.len(), 1);
+        assert_eq!(skinned.len(), 2, "the authored Body and the imported one");
         let skin = skinned[0].skin.unwrap();
         assert_eq!((skin.first_joint, skin.joint_count), (0, 3));
         let hips_palette = extract.joints[0].transform_point3(glam::Vec3::ZERO);
@@ -1182,6 +1184,16 @@ mod animation_tests {
                 && hips_palette.z.abs() < 1e-5
                 && (0.118..=0.1251).contains(&hips_palette.y),
             "{hips_palette:?}"
+        );
+        // The imported rig's palette is the same pose (its own animator,
+        // its own joints found by name under the instance); the palette is
+        // in mesh space, so the instance's x = −2 does not appear in it.
+        let skin = skinned[1].skin.unwrap();
+        assert_eq!((skin.first_joint, skin.joint_count), (3, 3));
+        let imported_hips = extract.joints[3].transform_point3(glam::Vec3::ZERO);
+        assert!(
+            (imported_hips - hips_palette).length() < 1e-5,
+            "{imported_hips:?} vs {hips_palette:?}"
         );
         let rig = loaded
             .handle_of("c0000000-0000-4000-8000-0000000004e2".parse().unwrap())

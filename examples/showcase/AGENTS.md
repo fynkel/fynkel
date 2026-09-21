@@ -254,11 +254,15 @@ and skinned meshes (`JOINTS_0`/`WEIGHTS_0`). A clip keys *named nodes*
 under the entity that carries the `fynkel.Animator` — a bone, a door and
 a lamp are the same thing to it — so a skeleton is ordinary entities: the
 `Runner` (`assets/models/character.glb`, the reference game's generated
-character) has its joints `hips` → `spine` → `head`, the arms and the
-legs as children in their bind pose, and `Runner Body` next to them with
-`fynkel.Skin { skin, skeleton: "hips" }`; its animator loops `anim/2`
+character) instances the file's node hierarchy — `prefab: { asset:
+<character.glb>, sub: "prefab" }` (M3-19a) — so under it sit the glTF's
+own nodes: `Character` → `Body` with `fynkel.Skin { skin, skeleton:
+"hips" }` and the joints `hips` → `spine` → `head`, the arms and the legs
+in their bind pose; the suit is a `setField` override on the body's
+renderer (`node/1/renderer`, `material`). Its animator loops `anim/2`
 (run) in place — clips carry no root motion, whatever moves the entity
-moves it (docs/animation.md). From a behaviour:
+moves it (docs/animation.md). A downloaded character works the same way:
+`fynkel import <file.glb>`, then instance it. From a behaviour:
 
 ```dart
 animation.crossfade(clip, 0.15);                   // a timed blend; play(clip, looping: false) for a one-shot
@@ -268,7 +272,7 @@ final s = animation.state;                         // clip, time, duration, play
 @override
 void onAnimationEnded(AnimationEnded e) { … }      // a one-shot passed its end
 
-final head = gameObject.findChild('hips')!.findChild('spine')!.findChild('head')!;   // a joint is an entity
+final head = gameObject.findChild('Character/hips/spine/head')!;   // a joint is an entity
 ```
 
 A clip the scene did not name is loaded from the cache when first played;

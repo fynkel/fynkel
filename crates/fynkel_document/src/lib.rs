@@ -45,7 +45,10 @@ pub use json::{Node, Value};
 pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
 pub use migrate::{migrate, Migrated, Migration, Migrations};
 pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
-pub use project::{validate_project, Lock, Project, ProjectReport};
+pub use project::{
+    validate_project, validate_project_with, Lock, NoSourcePrefabs, Project, ProjectReport,
+    SourcePrefabs,
+};
 pub use runtime::{describe, AuthoredBehaviour, DescribedScene};
 pub use scene::Scene;
 pub use schema::{BehaviourInfo, ComponentInfo, SchemaSet};

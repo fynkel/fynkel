@@ -12,7 +12,22 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use fynkel_document::project::{describe_json, LOCK_FILE, PROJECT_FILE};
-use fynkel_document::{validate_project, AssetDatabase, Lock, Project, SchemaSet};
+use fynkel_document::{
+    validate_project_with, AssetDatabase, Lock, NoSourcePrefabs, Project, ProjectReport, SchemaSet,
+};
+
+/// The fixture's Rig scene instances `rig.glb#prefab` (M3-19a), so the
+/// project validates with the importer's provider — as `fynkel validate`
+/// does; the bare `validate_project` has no importer and reports the
+/// instance as `D0401` (a test below).
+fn validate_project(dir: &Path, schemas: &SchemaSet, lock: Option<&Lock>) -> ProjectReport {
+    validate_project_with(
+        dir,
+        schemas,
+        lock,
+        &fynkel_import::ImportedPrefabs::default(),
+    )
+}
 
 fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/project")
@@ -176,7 +191,7 @@ fn the_fixture_project_reads_and_validates_clean() {
     );
     assert_eq!(
         (report.documents, report.sources, report.references),
-        (9, 5, 22)
+        (9, 5, 25)
     );
     assert!(report.lock.is_some());
     let json = report.json();
@@ -525,4 +540,130 @@ fn broken_references_and_documents_under_the_asset_root_fail_validate() {
     let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
     assert!(report.has_errors());
     assert_eq!(report.json()["ok"], false);
+}
+
+/// M3-19a: the Rig scene's `Imported` entity instances `rig.glb#prefab`.
+/// Without a provider the instance is `D0401` (the source's hierarchy is
+/// not a document); with one the import expands like a prefab document,
+/// its override on the Prop node applies, a wrong sub or a source without
+/// a hierarchy is `D0401` with the hint, and a nested prefab may instance
+/// an import too.
+#[test]
+fn imported_hierarchies_instantiate_like_prefabs() {
+    use fynkel_document::prefab::expand;
+    use fynkel_document::{Document, DocumentKind, PrefabLibrary, Scene};
+
+    const RIG_SCENE: &str = "assets/scenes/rig.scene.json";
+    const RIG: &str = "c0000000-0000-4000-8000-000000000005";
+    const SWATCH: &str = "c0000000-0000-4000-8000-000000000010";
+    let at = "/entities/c0000000-0000-4000-8000-0000000004e8/prefab/asset";
+
+    // Bare: no importer, D0401 naming the instance.
+    let bare = validate_project_with(
+        &fixtures(),
+        &schemas(),
+        Some(&expected_lock()),
+        &NoSourcePrefabs,
+    );
+    let codes: Vec<_> = bare
+        .diagnostics
+        .iter()
+        .map(|d| (d.code.as_str(), d.pointer.as_deref()))
+        .collect();
+    assert_eq!(codes, [("FYN-D0401", Some(at))], "{:#?}", bare.diagnostics);
+    assert!(bare.diagnostics[0]
+        .message
+        .contains(&format!("prefab {RIG}#prefab is not available")));
+
+    // With the importer: clean, and the expansion has the six nodes under
+    // the anchor with the Prop's material overridden to `rusted`.
+    let t = Temp::new("imported");
+    assert_eq!(t.codes(), []);
+    let scene = Scene::from_document(
+        Document::read(&t.dir.join(RIG_SCENE), Some(DocumentKind::Scene)).unwrap(),
+    );
+    let (db, _) = AssetDatabase::scan(&t.dir.join("assets"), &schemas());
+    let mut lib = PrefabLibrary::empty();
+    let diags = lib.add_sources(
+        &db,
+        &PrefabLibrary::wanted_sources(&scene),
+        &fynkel_import::ImportedPrefabs::default(),
+    );
+    assert!(diags.is_empty(), "{diags:#?}");
+    let expanded = expand(&scene, &lib, &schemas());
+    assert!(!expanded.has_errors(), "{:#?}", expanded.diagnostics);
+    let out = Scene::from_document(expanded.document);
+    let names: Vec<&str> = out.entities.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Camera", "Sun", "Rig", "Body", "hips", "spine", "head", "Prop", "Imported", "Rig",
+            "Body", "hips", "spine", "head", "Prop"
+        ]
+    );
+    let prop = out.entities.last().unwrap();
+    let renderer = prop
+        .components
+        .iter()
+        .find(|c| c.type_id == "fynkel.MeshRenderer")
+        .unwrap();
+    assert_eq!(
+        renderer
+            .data
+            .get("material")
+            .unwrap()
+            .get("asset")
+            .unwrap()
+            .as_str(),
+        Some("c0000000-0000-4000-8000-000000000020"),
+        "the setField override on node/5/renderer applied"
+    );
+
+    // A wrong sub: D0401 with the hint. A source without a hierarchy (the
+    // swatch texture): its sidecar has no `prefab`, so the reference is
+    // `A0004` and the instance `D0401`; the importer is not consulted.
+    let mut v: serde_json::Value = serde_json::from_str(&t.read(RIG_SCENE)).unwrap();
+    v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["asset"]["sub"] =
+        "mesh/0".into();
+    t.write(RIG_SCENE, &serde_json::to_string_pretty(&v).unwrap());
+    assert_eq!(t.codes(), [("FYN-D0401".to_string(), Some(at.to_string()))]);
+    v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["asset"] =
+        serde_json::json!({ "asset": SWATCH, "sub": "prefab" });
+    v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["overrides"] =
+        serde_json::json!([]);
+    t.write(RIG_SCENE, &serde_json::to_string_pretty(&v).unwrap());
+    assert_eq!(
+        t.codes(),
+        [
+            ("FYN-A0004".to_string(), Some(at.to_string())),
+            ("FYN-D0401".to_string(), Some(at.to_string()))
+        ]
+    );
+
+    // A prefab document instancing the import: nested, flattened, clean.
+    let t = Temp::new("imported-nested");
+    let mut crate_doc: serde_json::Value =
+        serde_json::from_str(&t.read("assets/prefabs/crate.prefab.json")).unwrap();
+    let root = crate_doc["roots"][0].as_str().unwrap().to_string();
+    crate_doc["entities"]["c0000000-0000-4000-8000-0000000004ee"] = serde_json::json!({
+        "name": "Statue",
+        "parent": root,
+        "children": [],
+        "components": {
+            "c0000000-0000-4000-8000-0000000004ef": {
+                "type": "fynkel.Transform", "version": 1,
+                "data": { "position": [0, 1, 0], "rotation": [0, 0, 0, 1], "scale": [0.25, 0.25, 0.25] }
+            }
+        },
+        "prefab": { "asset": { "asset": RIG, "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000004f1" }
+    });
+    crate_doc["entities"][&root]["children"]
+        .as_array_mut()
+        .unwrap()
+        .push("c0000000-0000-4000-8000-0000000004ee".into());
+    t.write(
+        "assets/prefabs/crate.prefab.json",
+        &serde_json::to_string_pretty(&crate_doc).unwrap(),
+    );
+    assert_eq!(t.codes(), []);
 }

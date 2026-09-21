@@ -1,7 +1,8 @@
 //! `fynkel scene …` and `fynkel prefab …` (§14.1): `inspect`, `validate`
 //! and `apply` for scene and prefab documents. Scenes with prefab instances
 //! are checked (and, with `--expand`, shown) against the prefabs found under
-//! `--prefabs <dir>` (default: the scene's own directory). `apply` runs one
+//! `--prefabs <dir>` (default: the scene's own directory; imported models
+//! with their sidecars under it serve `{ asset, sub: "prefab" }` instances). `apply` runs one
 //! authoring transaction (§11.1) from a patch file and writes the document
 //! back unless `--dry-run`. Same exit codes and `--json` shape as
 //! `fynkel document`.
@@ -9,6 +10,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use fynkel_document::asset::AssetDatabase;
 use fynkel_document::prefab;
 use fynkel_document::scene::{inspect_json, inspect_text};
 use fynkel_document::{
@@ -122,6 +124,7 @@ fn library_for(
     scene: &Scene,
     opts: &Opts,
     path: &Path,
+    schemas: &SchemaSet,
     diags: &mut Vec<Diagnostic>,
 ) -> PrefabLibrary {
     if scene.instances().next().is_none() {
@@ -132,8 +135,17 @@ fn library_for(
         .clone()
         .or_else(|| path.parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."));
-    let (lib, scan) = PrefabLibrary::scan(&dir);
+    let (mut lib, scan) = PrefabLibrary::scan(&dir);
     diags.extend(scan);
+    // Instances of imported hierarchies (`{ asset: <source>, sub: "prefab" }`,
+    // M3-19a): the sources with their sidecars under the same directory,
+    // imported through the provider `fynkel validate` uses.
+    let wanted = PrefabLibrary::wanted_sources(scene);
+    if !wanted.is_empty() {
+        let (db, scan) = AssetDatabase::scan(&dir, schemas);
+        diags.extend(scan);
+        diags.extend(lib.add_sources(&db, &wanted, &fynkel_import::ImportedPrefabs::default()));
+    }
     lib
 }
 
@@ -149,7 +161,7 @@ fn check_scene(
     if scene.instances().next().is_none() {
         return (diags, None);
     }
-    let lib = library_for(scene, opts, path, &mut diags);
+    let lib = library_for(scene, opts, path, schemas, &mut diags);
     let expanded = expand(scene, &lib, schemas);
     diags.extend(expanded.diagnostics.iter().cloned());
     (diags, Some(expanded.scene()))

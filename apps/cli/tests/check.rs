@@ -922,6 +922,69 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
     assert!(assets.join("tone.ogg.meta.json").exists());
     assert_eq!(std::fs::read_dir(&out_dir).unwrap().count(), 3);
 
+    // `--prefab` (M3-19a) writes the hierarchy as an editable prefab
+    // document next to the source: a fresh id, the importer's entity ids,
+    // valid as a document; a second run refuses to overwrite it; a source
+    // without a hierarchy is an error.
+    let out = run(&[
+        "import",
+        "--json",
+        "--prefab",
+        "--out",
+        out_dir.to_str().unwrap(),
+        glb.to_str().unwrap(),
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let prefab = assets.join("models/robot.prefab.json");
+    assert_eq!(v["files"][0]["prefab"], prefab.display().to_string());
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&prefab).unwrap()).unwrap();
+    assert_ne!(doc["id"], subs["prefab"], "a fresh id, not the sub-asset's");
+    assert_eq!(
+        doc["entities"].as_object().unwrap().len(),
+        9,
+        "the robot's nodes and primitive entities"
+    );
+    let out = run(&["prefab", "validate", prefab.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = run(&[
+        "import",
+        "--json",
+        "--prefab",
+        "--out",
+        out_dir.to_str().unwrap(),
+        glb.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["severity"] == "error"
+            && d["message"].as_str().unwrap().contains("already exists")));
+    let out = run(&[
+        "import",
+        "--json",
+        "--prefab",
+        "--out",
+        out_dir.to_str().unwrap(),
+        assets.join("swatch.png").to_str().unwrap(),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-A0105");
+    assert_eq!(v["diagnostics"][0]["severity"], "error");
+
     // Usage.
     let out = run(&["import"]);
     assert_eq!(out.status.code(), Some(2));
@@ -1037,7 +1100,7 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     assert_eq!(v["project"]["name"], "Fixture Game");
     assert_eq!(v["documents"], 9);
     assert_eq!(v["sources"], 5);
-    assert_eq!(v["references"], 22);
+    assert_eq!(v["references"], 25);
     assert_eq!(v["lock"]["cache"]["container"], 1);
     let out = run(&["validate", "--project", fixture.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0));
@@ -1386,4 +1449,203 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
             std::fs::copy(entry.path(), target).unwrap();
         }
     }
+}
+
+/// M3-19a on content nobody here made: the Khronos sample rigs (`Fox`,
+/// `CesiumMan`, `RiggedFigure` under `crates/fynkel_import/fixtures/khronos/`)
+/// dropped into a copy of the fixture project, each instanced by a scene
+/// that names only the source — `fynkel import` (sidecars), `validate`
+/// (the importer's provider), `cook` (the `prefab` chunk), `test
+/// --headless` (the skinned mesh over every joint, the clip playing) and
+/// `state dump` (a named joint of the import has moved after a second).
+#[test]
+fn khronos_rigs_instance_from_the_source_alone() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-khronos-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&root.join("crates/fynkel_document/fixtures/project"), &dir);
+    let _ = std::fs::remove_dir_all(dir.join(".fynkel"));
+    let project = dir.to_str().unwrap();
+
+    // (model, clip to play, a joint the clip moves, joints, prefab entities)
+    let rigs = [
+        ("Fox", "anim/2", "b_Neck_04", 24, 26),
+        ("CesiumMan", "anim/0", "Skeleton_arm_joint_L__3_", 19, 22),
+        ("RiggedFigure", "anim/0", "arm_joint_L_3", 19, 22),
+    ];
+    let mut files = Vec::new();
+    for (model, ..) in &rigs {
+        let glb = dir.join(format!("assets/models/{model}.glb"));
+        std::fs::copy(
+            root.join(format!("crates/fynkel_import/fixtures/khronos/{model}.glb")),
+            &glb,
+        )
+        .unwrap();
+        files.push(glb);
+    }
+    let mut args = vec!["import", "--json", "--out", ".fynkel/cache/import"];
+    let shown: Vec<String> = files.iter().map(|f| f.display().to_string()).collect();
+    args.extend(shown.iter().map(String::as_str));
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(&args)
+        .arg("--root")
+        .arg(&root)
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let ids: Vec<String> = v["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["id"].as_str().unwrap().to_string())
+        .collect();
+    for (i, (_, _, _, _, entities)) in rigs.iter().enumerate() {
+        assert_eq!(v["files"][i]["summary"]["prefabEntities"], *entities);
+    }
+
+    // One scene per rig: camera, sun, a `Character` instancing
+    // `<source>#prefab` with an animator on the clip.
+    let rig_scene: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("assets/scenes/rig.scene.json")).unwrap(),
+    )
+    .unwrap();
+    let camera = &rig_scene["entities"]["c0000000-0000-4000-8000-0000000004e0"];
+    let sun = &rig_scene["entities"]["c0000000-0000-4000-8000-0000000004e1"];
+    let mut scene_ids = Vec::new();
+    for (i, (model, clip, ..)) in rigs.iter().enumerate() {
+        let scene_id = format!("c0000000-0000-4000-8000-0000000000{}", 0x35 + i);
+        let scale = if *model == "Fox" { 0.01 } else { 1.0 };
+        let scene = serde_json::json!({
+            "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+            "formatVersion": 2,
+            "id": scene_id,
+            "name": model,
+            "entities": {
+                "c0000000-0000-4000-8000-0000000005e0": camera,
+                "c0000000-0000-4000-8000-0000000005e1": sun,
+                "c0000000-0000-4000-8000-0000000005e2": {
+                    "name": "Character", "parent": null, "children": [],
+                    "components": {
+                        "c0000000-0000-4000-8000-000000000504": {
+                            "type": "fynkel.Transform", "version": 1,
+                            "data": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [scale, scale, scale] }
+                        },
+                        "c0000000-0000-4000-8000-000000000505": {
+                            "type": "fynkel.Animator", "version": 1,
+                            "data": { "clip": { "asset": ids[i], "sub": clip }, "speed": 1.0, "looping": true, "playing": true }
+                        }
+                    },
+                    "prefab": { "asset": { "asset": ids[i], "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000005f0", "overrides": [] }
+                }
+            }
+        });
+        std::fs::write(
+            dir.join(format!("assets/scenes/{}.scene.json", model.to_lowercase())),
+            serde_json::to_string_pretty(&scene).unwrap(),
+        )
+        .unwrap();
+        scene_ids.push(scene_id);
+    }
+
+    let out = run(&["validate", "--project", project, "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        (
+            out.status.code(),
+            v["errors"].as_u64(),
+            v["warnings"].as_u64()
+        ),
+        (Some(0), Some(0), Some(0)),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let out = run(&["cook", "--project", project]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    for (i, (model, _, joint, joints, entities)) in rigs.iter().enumerate() {
+        let out = run(&[
+            "test",
+            "--headless",
+            "--project",
+            project,
+            "--no-cook",
+            "--scene",
+            &scene_ids[i],
+            "--steps",
+            "60",
+            "--json",
+        ]);
+        assert!(
+            out.status.success(),
+            "{model}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(v["scene"]["entities"], entities + 3, "{model}");
+        assert_eq!(v["diagnostics"], 0, "{model}");
+        let anim = &v["animation"];
+        assert_eq!(
+            (
+                anim["entities"].as_u64(),
+                anim["clips"].as_u64(),
+                anim["skins"].as_u64(),
+                anim["skinned_meshes"].as_u64(),
+                anim["joints"].as_u64(),
+                anim["diagnostics"].as_u64()
+            ),
+            (Some(2), Some(1), Some(1), Some(1), Some(*joints), Some(0)),
+            "{model}: {anim}"
+        );
+
+        // The named joint moves between the first tick and one second in.
+        let pose = |steps: &str| -> serde_json::Value {
+            let out = run(&[
+                "state",
+                "dump",
+                "--project",
+                project,
+                "--no-cook",
+                "--scene",
+                &scene_ids[i],
+                "--steps",
+                steps,
+                "--json",
+            ]);
+            assert!(
+                out.status.success(),
+                "{model}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+            v["entities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|e| e["name"] == *joint)
+                .unwrap_or_else(|| panic!("{model}: no entity named {joint}"))["world"]
+                .clone()
+        };
+        let (start, later) = (pose("1"), pose("60"));
+        assert_ne!(start, later, "{model}: {joint} did not move");
+    }
+
+    std::fs::remove_dir_all(&dir).unwrap();
 }

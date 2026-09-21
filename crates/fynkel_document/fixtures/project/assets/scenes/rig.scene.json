@@ -339,6 +339,66 @@
           }
         }
       }
+    },
+    "c0000000-0000-4000-8000-0000000004e8": {
+      "name": "Imported",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c0000000-0000-4000-8000-000000000410": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -2,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "c0000000-0000-4000-8000-000000000411": {
+          "type": "fynkel.Animator",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "c0000000-0000-4000-8000-000000000005",
+              "sub": "anim/0"
+            },
+            "speed": 1.0,
+            "looping": true,
+            "playing": true
+          }
+        }
+      },
+      "prefab": {
+        "asset": {
+          "asset": "c0000000-0000-4000-8000-000000000005",
+          "sub": "prefab"
+        },
+        "instance": "c0000000-0000-4000-8000-0000000004f0",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "5bf482c0-2ff4-59a3-8a67-7f3921943558",
+            "component": "503fb3de-206e-58d8-9917-5cb01341af98",
+            "field": "material",
+            "value": {
+              "asset": "c0000000-0000-4000-8000-000000000020"
+            }
+          }
+        ]
+      }
     }
   }
 }

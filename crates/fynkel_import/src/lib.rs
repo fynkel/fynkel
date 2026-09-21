@@ -184,3 +184,49 @@ pub(crate) fn read_source(path: &Path, limits: &Limits) -> Result<Vec<u8>, Diagn
             .with_document(shown)
     })
 }
+
+/// `fynkel_document`'s [`SourcePrefabs`](fynkel_document::SourcePrefabs)
+/// provider over the importers: a scene or prefab instantiating
+/// `{ asset: <source>, sub: "prefab" }` gets the hierarchy the source's
+/// importer derives, imported in memory from the file and its sidecar
+/// (`fynkel validate` and `fynkel run` pass this; the cook reads the same
+/// document back from the cooked container instead).
+#[derive(Debug, Default)]
+pub struct ImportedPrefabs {
+    pub limits: Limits,
+}
+
+impl fynkel_document::SourcePrefabs for ImportedPrefabs {
+    fn prefab(
+        &self,
+        root: &Path,
+        entry: &fynkel_document::asset::AssetEntry,
+        sub: &str,
+    ) -> Result<Option<fynkel_document::Document>, Vec<Diagnostic>> {
+        use fynkel_document::{Document, DocumentKind};
+        if sub != "prefab" {
+            return Ok(None);
+        }
+        let Some(sidecar) = entry.sidecar(root) else {
+            return Ok(None);
+        };
+        let meta = Meta::from_document(Document::read(&sidecar, Some(DocumentKind::Meta))?);
+        let file = entry.file(root);
+        let imported = import(&file, &meta, &self.limits);
+        if imported.has_errors() {
+            return Err(imported.diagnostics);
+        }
+        let Some(prefab) = imported.intermediate.and_then(|i| i.prefab) else {
+            return Ok(None);
+        };
+        let shown = format!("{}#prefab", entry.path);
+        let text = serde_json::to_string(&prefab).map_err(|e| {
+            vec![Diagnostic::error(
+                fynkel_contracts::Code::IO,
+                format!("cannot serialize the imported prefab: {e}"),
+            )
+            .with_document(shown.clone())]
+        })?;
+        Document::parse(DocumentKind::Prefab, Some(&shown), &text).map(Some)
+    }
+}

@@ -39,7 +39,12 @@ meshes, all colliders); 22 rigid bodies (a crate pyramid, a pen of balls,
 barrels); 16 PBR materials; a sun with shadows and a cool ambient; the
 player with its skinned `Body` (`fynkel.Skin`), the joint entities
 `hips` → `spine` → `head` … in their bind pose (the visor hangs off
-`head`) and a `fynkel.Animator` on idle. The route: two
+`head`) and a `fynkel.Animator` on idle — or, opt-in, a downloaded
+character: `python3 tools/playground.py --hero assets/models/hero.glb`
+instances the file's own hierarchy under the Player (`prefab: { asset,
+sub: "prefab" }`, M3-19a; the clips are its `anim/0..3` as idle, walk,
+run, jump, the order docs/animation.md's Blender recipe builds a Mixamo
+set in), never committed — rerun without `--hero` first. The route: two
 coins ahead, a ramp onto a platform (coins 3–4), a corridor swept by an
 `Oscillate` blade whose child sensor is a `hazard` zone (coins 5–6), a lane
 where an `Emitter` launches a dynamic ball prefab every 4 s (its sensor is

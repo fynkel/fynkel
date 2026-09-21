@@ -150,7 +150,14 @@ through the same command path a scene load uses (`rejectedComponents`),
 its mesh colliders registered and its asset closure retained on the
 world. The prefab comes from the loaded project's cache only
 (`Assets::prefab(id)` reads the flat `document/prefab` chunk the cook
-wrote): no project loaded is `FYN-R0001`, an id that is not a prefab
+wrote — or, since M3-19a, the `prefab` chunk of a cooked **source**: an
+imported model's node hierarchy, keyed by the source's own id, so
+`World.instantiate(AssetRef(glb, sub: 'prefab'))` spawns the rig with its
+meshes and `Skin`s and an `Animator` added to the anchor finds the joints
+by name; no new ABI, the Dart side checks the sub — empty or `prefab`,
+anything else is an `ArgumentError` — and passes the id; the closure
+retained is the source's own): no project loaded is `FYN-R0001`, an id
+that is neither a prefab document nor a source with a hierarchy
 `FYN-R0006`, one not in the cache `FYN-R0003`, a dead or foreign `parent`
 or a non-finite transform is a load error; every refusal returns
 `FYNKEL_STATUS_LOAD_FAILED` with nothing spawned, a malformed id or

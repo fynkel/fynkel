@@ -11,6 +11,16 @@ tools/character.py and `fynkel import assets/models/*.glb`:
 
     python3 tools/playground.py && fynkel document format assets/**/*.json && fynkel validate
 
+`--hero <file.glb>` (M3-19a, opt-in, never committed) dresses the Player
+in a downloaded character instead: the file's own node hierarchy is
+instanced as `{ asset: <glb>, sub: "prefab" }` under a `Rig` child (so
+`game.Player` and the tests reach the joints by name below the Player as
+before) and the four clips come from its `anim/0..3` in the order idle,
+walk, run, jump — the order docs/animation.md's Blender recipe builds a
+Mixamo set in. The GLB must be imported first (`fynkel import <file.glb>`
+writes the sidecar) and face +Z as glTF characters do: the Rig turns it
+to the game's -Z. The Visor stays with the box character.
+
 Layout (metres, +Y up, the player spawns at the origin facing -Z; the
 camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
 +X, which test/collect_all.input.json relies on):
@@ -195,11 +205,26 @@ MESHES = {"cube": 0, "capsule": 1, "sphere": 2, "coin": 3, "ramp": 4, "cylinder"
 for m in MESHES.values():
     assert f"mesh/{m}" in meta["subAssets"], "run `fynkel import assets/models/kit.glb` first"
 
-character_meta = json.loads((ASSETS / "models" / "character.glb.meta.json").read_text())
+# `--hero <file.glb>`: the Player wears that file's hierarchy (see the module doc).
+HERO = None
+if "--hero" in sys.argv:
+    HERO = Path(sys.argv[sys.argv.index("--hero") + 1])
+    if not HERO.is_absolute():
+        HERO = ROOT / HERO
+    hero_sidecar = HERO.with_name(HERO.name + ".meta.json")
+    assert hero_sidecar.exists(), f"run `fynkel import {HERO}` first (no sidecar at {hero_sidecar})"
+    character_meta = json.loads(hero_sidecar.read_text())
+    assert "prefab" in character_meta["subAssets"], f"{HERO.name} has no node hierarchy (`prefab` sub-asset)"
+else:
+    character_meta = json.loads((ASSETS / "models" / "character.glb.meta.json").read_text())
 CHARACTER = character_meta["id"]
 CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{i}"} for i, name in enumerate(("idle", "walk", "run", "jump"))}
-for sub in ["mesh/0", "skin/0"] + [c["sub"] for c in CLIPS.values()]:
-    assert sub in character_meta["subAssets"], "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
+for sub in (["prefab"] if HERO else ["mesh/0", "skin/0"]) + [c["sub"] for c in CLIPS.values()]:
+    assert sub in character_meta["subAssets"], (
+        f"{HERO.name} needs anim/0..3 (idle, walk, run, jump) and its prefab; the sidecar lists {sorted(character_meta['subAssets'])}"
+        if HERO
+        else "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
+    )
 
 MATERIAL_DOCS = {
     "floor": dict(base_color=[0.55, 0.56, 0.52, 1.0], metallic=0.0, roughness=0.9),
@@ -355,19 +380,26 @@ def playground():
             ("fynkel.Animator", {"clip": CLIPS["idle"], "speed": 1.0, "looping": True, "playing": True}),
         ],
     )
-    # The skinned body, posed by the joint entities below (the skin's
-    # skeleton root is found by name under the Player), and the joints in
-    # their bind pose — local translations from the same table that built
-    # the model, so the entity tree and the skin's joint order agree.
-    s.add(
-        "Body",
-        [transform((0, 0, 0)), mesh_renderer("character", "player"), ("fynkel.Skin", {"skin": {"asset": CHARACTER, "sub": "skin/0"}, "skeleton": "hips"})],
-        parent=player,
-    )
-    joints = {}
-    for name, parent, local, _, _ in SKELETON:
-        joints[name] = s.add(name, [transform(local)], parent=joints[parent] if parent else player)
-    s.add("Visor", [transform((0, 0.13, -0.13), scale=(0.2, 0.07, 0.06)), mesh_renderer("cube", "gate", cast=False)], parent=joints["head"])
+    if HERO:
+        # The downloaded character's own hierarchy (its skinned meshes and
+        # joints, as `fynkel import` derived them) instanced under a Rig
+        # turned to face -Z; the animator above finds the joints by name.
+        rig = s.add("Rig", [transform((0, 0, 0), quat_axis_angle((0, 1, 0), math.pi))], parent=player)
+        s.entities[rig]["prefab"] = {"asset": {"asset": CHARACTER, "sub": "prefab"}, "instance": uid(s.key, "Rig", "instance"), "overrides": []}
+    else:
+        # The skinned body, posed by the joint entities below (the skin's
+        # skeleton root is found by name under the Player), and the joints in
+        # their bind pose — local translations from the same table that built
+        # the model, so the entity tree and the skin's joint order agree.
+        s.add(
+            "Body",
+            [transform((0, 0, 0)), mesh_renderer("character", "player"), ("fynkel.Skin", {"skin": {"asset": CHARACTER, "sub": "skin/0"}, "skeleton": "hips"})],
+            parent=player,
+        )
+        joints = {}
+        for name, parent, local, _, _ in SKELETON:
+            joints[name] = s.add(name, [transform(local)], parent=joints[parent] if parent else player)
+        s.add("Visor", [transform((0, 0.13, -0.13), scale=(0.2, 0.07, 0.06)), mesh_renderer("cube", "gate", cast=False)], parent=joints["head"])
 
     # The rig's own pose at yaw 0, pitch 0.35, distance 6 from the pivot
     # (0, 1.5, 0): what `fynkel render` shows before a tick runs.
@@ -543,6 +575,8 @@ def main():
     doc, counts = playground()
     write(ASSETS / "scenes" / "playground.scene.json", doc)
     print(f"Playground: {len(doc['entities'])} entities, {counts['static']} static meshes, {counts['bodies']} bodies, {counts['coins']} coins, {counts['lights']} point lights; scene id {SCENE_ID}")
+    if HERO:
+        print(f"the Player wears {HERO.relative_to(ROOT) if HERO.is_relative_to(ROOT) else HERO} ({CHARACTER}#prefab); rerun without --hero to restore the box character before committing")
 
 
 if __name__ == "__main__":

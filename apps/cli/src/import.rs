@@ -5,8 +5,13 @@
 //! ignores). A file without a sidecar gets one first (as `fynkel asset
 //! init` would); a sidecar whose `subAssets` fall behind what the file
 //! produces is rewritten with the new ids, existing ids kept. `--dry-run`
-//! imports and prints the summary but writes nothing. Exit 0 when every
-//! file imported (warnings allowed), 1 on any error, 2 on usage.
+//! imports and prints the summary but writes nothing. `--prefab` (M3-19a)
+//! also writes the source's node hierarchy — the `prefab` sub-asset the
+//! cook carries and a scene instances as `{ asset: <source>, sub:
+//! "prefab" }` — as an editable `<stem>.prefab.json` next to the source
+//! with a fresh document id, for the cases that want authored, stable ids
+//! (never over an existing file). Exit 0 when every file imported
+//! (warnings allowed), 1 on any error, 2 on usage.
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -17,7 +22,7 @@ use fynkel_import::{Imported, Limits};
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel import <file>... [--out <dir>] [--dry-run] [--json] [--schemas <dir>]\n                                               import source files (glTF/GLB) to their normalized intermediate;\n                                               sidecars are created or updated with the sub-asset ids"
+        "usage:\n  fynkel import <file>... [--out <dir>] [--prefab] [--dry-run] [--json] [--schemas <dir>]\n                                               import source files (glTF/GLB) to their normalized intermediate;\n                                               sidecars are created or updated with the sub-asset ids;\n                                               --prefab also writes the hierarchy as <stem>.prefab.json next to the source"
     );
     ExitCode::from(2)
 }
@@ -26,6 +31,7 @@ struct Opts {
     files: Vec<PathBuf>,
     out: PathBuf,
     dry_run: bool,
+    prefab: bool,
     json: bool,
     schemas_dir: Option<PathBuf>,
 }
@@ -35,6 +41,7 @@ fn parse(args: &[String]) -> Option<Opts> {
         files: Vec::new(),
         out: PathBuf::from(".fynkel/cache/import"),
         dry_run: false,
+        prefab: false,
         json: false,
         schemas_dir: None,
     };
@@ -43,6 +50,7 @@ fn parse(args: &[String]) -> Option<Opts> {
         match args[i].as_str() {
             "--json" => o.json = true,
             "--dry-run" => o.dry_run = true,
+            "--prefab" => o.prefab = true,
             "--out" => {
                 i += 1;
                 o.out = PathBuf::from(args.get(i)?);
@@ -136,6 +144,37 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         if !opts.json {
             print!("{}", intermediate.summary_text());
         }
+        let prefab_file = opts.prefab.then(|| {
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "model".to_string());
+            path.with_file_name(format!("{stem}.prefab.json"))
+        });
+        if let Some(out) = &prefab_file {
+            report["prefab"] = out.display().to_string().into();
+            if intermediate.prefab.is_none() {
+                diags.push(
+                    Diagnostic::error(
+                        fynkel_document::Code::IMPORT_SKIPPED,
+                        "the source has no node hierarchy to write as a prefab".to_string(),
+                    )
+                    .with_document(shown.clone()),
+                );
+                report["ok"] = false.into();
+                reports.push(report);
+                continue;
+            }
+            if out.exists() {
+                diags.push(io(
+                    "already exists; remove it to write the imported hierarchy again".to_string(),
+                    out,
+                ));
+                report["ok"] = false.into();
+                reports.push(report);
+                continue;
+            }
+        }
         if opts.dry_run {
             if !opts.json {
                 eprintln!(
@@ -168,6 +207,30 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                     sidecar.display(),
                     if created { "created" } else { "updated" }
                 );
+            }
+        }
+        if let Some(out) = &prefab_file {
+            let text = intermediate
+                .prefab
+                .as_ref()
+                .map(|p| authored_prefab(p, &shown))
+                .unwrap_or_default();
+            match std::fs::write(out, text) {
+                Ok(()) => {
+                    if !opts.json {
+                        eprintln!(
+                            "{shown}: {} entities -> {}",
+                            intermediate.prefab_entity_count(),
+                            out.display()
+                        );
+                    }
+                }
+                Err(e) => {
+                    diags.push(io(format!("cannot write: {e}"), out));
+                    report["ok"] = false.into();
+                    reports.push(report);
+                    continue;
+                }
             }
         }
         let bytes = intermediate.to_bytes();
@@ -209,6 +272,26 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         if opts.dry_run { " (dry run)" } else { "" }
     );
     exit(&diags)
+}
+
+/// The imported hierarchy as an authored document: a fresh id (the
+/// `prefab` sub-asset keeps its own), the entity ids unchanged (they are
+/// the prefab's template ids; instances get fresh ones), a description
+/// that says where it came from.
+fn authored_prefab(prefab: &serde_json::Value, source: &str) -> String {
+    let mut doc = prefab.clone();
+    doc["id"] = uuid::Uuid::new_v4().to_string().into();
+    doc["description"] = format!(
+        "Written by `fynkel import --prefab` from {source}; edit freely, re-run to start over."
+    )
+    .into();
+    // Through the document writer, so the file reads like every other
+    // authored document.
+    let raw = serde_json::to_string(&doc).unwrap_or_default();
+    Document::parse(fynkel_document::DocumentKind::Prefab, None, &raw)
+        .ok()
+        .and_then(|d| d.write().ok())
+        .unwrap_or(raw)
 }
 
 fn finish(diags: &[Diagnostic], json: bool) -> ExitCode {

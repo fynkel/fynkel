@@ -823,6 +823,7 @@ dependencies = [
  "blake3",
  "fynkel_contracts",
  "fynkel_core",
+ "fynkel_import",
  "fynkel_physics",
  "fynkel_scene",
  "glam 0.33.7",

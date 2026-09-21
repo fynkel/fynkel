@@ -18,6 +18,7 @@ const SWATCH: &str = "c0000000-0000-4000-8000-000000000002";
 const RUSTED: &str = "c0000000-0000-4000-8000-000000000020";
 const RUSTED_NORMAL: &str = "c0000000-0000-4000-8000-000000000003";
 const RUSTED_MR: &str = "c0000000-0000-4000-8000-000000000004";
+const RIG: &str = "c0000000-0000-4000-8000-000000000005";
 
 fn id(s: &str) -> Uuid {
     s.parse().unwrap()
@@ -194,6 +195,39 @@ fn prefabs_describe_from_their_chunk() {
         .prefab(id("c0000000-0000-4000-8000-0000000000ff"))
         .unwrap_err();
     assert_eq!(d[0].code, Code::RUNTIME_ASSET_MISSING);
+
+    // M3-19a: an imported model's hierarchy is a prefab too — the `prefab`
+    // chunk of the cooked source, keyed by the source's id: the fixture
+    // rig's six nodes with the Body's Skin, the closure the source's own
+    // (meshes, skin, clips); a texture has no hierarchy.
+    let rig = assets.prefab(id(RIG)).unwrap_or_else(|d| panic!("{d:#?}"));
+    assert_eq!(rig.id, id(RIG));
+    assert_eq!(
+        (rig.name.as_str(), rig.path.as_str()),
+        ("rig", "models/rig.glb"),
+        "named after the file (the glTF scene has no name)"
+    );
+    assert_eq!(rig.diagnostics, vec![]);
+    let names: Vec<&str> = rig
+        .description
+        .entities
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect();
+    assert_eq!(names, ["Rig", "Body", "hips", "spine", "head", "Prop"]);
+    assert_eq!(rig.roots, vec![rig.description.entities[0].id]);
+    assert!(rig.description.entities[1]
+        .components
+        .iter()
+        .any(|c| matches!(c, fynkel_core::components::ComponentValue::Skin(_))));
+    assert_eq!(rig.closure, vec![id(RIG)]);
+    let d = assets.prefab(id(SWATCH)).unwrap_err();
+    assert_eq!(d[0].code, Code::RUNTIME_CHUNK_MISSING);
+    assert!(
+        d[0].message.contains("without a node hierarchy"),
+        "{}",
+        d[0]
+    );
 }
 
 #[test]

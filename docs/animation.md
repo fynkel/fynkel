@@ -333,13 +333,9 @@ Mac (`fynkel test --headless`'s `systems:` line).
 - Compressed or quantized clips; a clip is cooked as `f32` keys.
 - A skinned mesh collider following the pose (a `Collider` on a joint
   entity is the way).
-- Instancing a source's `prefab` sub-asset from a scene or
-  `World.instantiate` — blueprint item **19a** (after audio, before the
-  reference game's second half). Until then the hierarchy is authored
-  by hand (`playground.py`) or the `prefab` body is copied out of the
-  intermediate (`.fynkel/cache/import/<id>.fyni`: `FYNI` magic, `u32`
-  version, `u32` header length, JSON header with `prefab`) into a
-  `.prefab.json` with a fresh id.
+- ~~Instancing a source's `prefab` sub-asset from a scene or
+  `World.instantiate`~~ — done as item **19a** (below, § Instancing an
+  imported character).
 
 ## A downloaded character (Mixamo, 2026-09-21)
 
@@ -363,5 +359,33 @@ Z-up rotation — cooked, ran headless (74 entities, 2 skinned meshes over
 the starter's cubes, and played from Dart (`play(walk)`, a 0.2 s
 crossfade to `run`, `play(jump, looping: false)` ending at frame 117).
 Keys are baked per frame at 30 fps, so a clip is a few hundred KB of
-`f32`; fine for a handful. The one step done by hand was the prefab
-document above (item 19a).
+`f32`; fine for a handful. The one step done by hand that day was the
+prefab document; item 19a removed it the same day (next section).
+
+## Instancing an imported character (M3-19a)
+
+A scene names the source and nothing else: `prefab: { asset: <glb id>,
+sub: "prefab" }` on an entity instances the glTF's own node hierarchy —
+its skinned meshes, its joints, its `Skin`s, as `fynkel import` derived
+them (documents.md § Prefab documents › Imported hierarchies) — and an
+`Animator` on that entity finds the joints by name below it. `fynkel
+validate` imports the file in memory to check the instance and its
+overrides (a material swap on `node/<i>/renderer`, a turn on the root's
+transform), the cook expands the scene against the cooked source's
+`prefab` chunk, the runtime spawns the same hierarchy from
+`World.instantiate(AssetRef(glb, sub: 'prefab'))` (hosts.md § Prefabs at
+runtime). `fynkel import --prefab <file.glb>` writes the hierarchy as an
+editable `.prefab.json` for the cases that want hand-edited ids. Four
+downloads with the Blender recipe above become a playable character
+with `examples/reference_game/tools/playground.py --hero
+assets/models/hero.glb` (the Player's `Rig` child instances the file,
+turned to face -Z; the clips are its `anim/0..3` as idle, walk, run,
+jump; opt-in, never committed — rerun without `--hero` before a commit).
+The same path was proven on rigs nobody here made: the Khronos `Fox`
+(24 joints, Survey/Walk/Run), `CesiumMan` and `RiggedFigure` (19 joints
+each) under `crates/fynkel_import/fixtures/khronos/` import, validate,
+cook, run headless and render posed from a scene that names only the
+source (`apps/cli/tests/check.rs::khronos_rigs_instance_from_the_source_alone`,
+`crates/fynkel_import/tests/gltf.rs::khronos_sample_rigs_import_clean`).
+What is still by hand is the FBX → GLB conversion and the "which file is
+idle" bookkeeping: item 19b (an FBX importer and the rig document).

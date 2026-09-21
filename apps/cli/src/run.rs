@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use fynkel_document::{has_errors, validate_project};
+use fynkel_document::{has_errors, validate_project_with};
 
 pub fn usage() -> ExitCode {
     eprintln!(
@@ -53,7 +53,8 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         }
     };
     let expected = fynkel_import::expected_lock();
-    let report = validate_project(&project, &schemas, Some(&expected));
+    let sources = fynkel_import::ImportedPrefabs::default();
+    let report = validate_project_with(&project, &schemas, Some(&expected), &sources);
     for d in &report.diagnostics {
         eprintln!("{d}");
     }

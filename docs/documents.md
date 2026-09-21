@@ -297,8 +297,10 @@ document model as the scene schema) is a scene body plus `roots[]`: the
 parentless entities, in order — validation checks both directions
 (`FYN-D0400`). A scene entity becomes an **instance anchor** by carrying
 `prefab: { asset, instance, overrides[] }`: `asset` is the prefab document's
-`id` as an `AssetRef`, `instance` a UUID v4 that is stable for the anchor's
-lifetime, `overrides` an ordered op list addressed by **prefab-local** ids:
+`id` as an `AssetRef` — or, since M3-19a, an imported model's node
+hierarchy as `{ asset: <source>, sub: "prefab" }` (below) — `instance` a
+UUID v4 that is stable for the anchor's lifetime, `overrides` an ordered
+op list addressed by **prefab-local** ids:
 
 | op | fields | note |
 | --- | --- | --- |
@@ -347,6 +349,35 @@ anchor kept. `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
 under a directory (a later path with the same id wins, with a warning).
 The headless host expands before `describe`, so derived ids reach the
 runtime and `fynkel state dump` prints them.
+
+**Imported hierarchies** (M3-19a): a source the glTF importer read has its
+node tree as the `prefab` sub-asset (§ Import › glTF/GLB: one entity per
+node with `Transform`, `MeshRenderer` and `Skin`, ids UUID v5 of the asset
+id and `node/<i>`, components `node/<i>/transform|renderer|skin`), and
+`prefab: { asset: <source id>, sub: "prefab" }` instances it like a prefab
+document — the same expansion, derivation, overrides (`setField` on
+`node/<i>/renderer` swaps a material, on the root's transform turns the
+model), nesting (a prefab document may instance an import), `D040x`
+diagnostics and `fynkel scene inspect --expand`. The library keys such
+prefabs by `(source, "prefab")` (`PrefabLibrary::add_imported`,
+`resolve(&AssetRef)`); the sub is required — a `.glb` without one is
+`D0401` with the hint, as is a sub that is not `prefab` or a source
+without a hierarchy (a texture: its sidecar lists no `prefab`, so the
+reference is also `A0004`). Where the hierarchy comes from: `fynkel
+validate`, `fynkel run` and `fynkel scene` import the source in memory
+through `fynkel_import::ImportedPrefabs` (the `SourcePrefabs` provider
+`validate_project_with` takes; a bare `validate_project` has none and
+reports `D0401`) — the importer's own code path, so the ids are the ones
+the cook writes; the cook takes the `prefab` chunk of the cooked source
+(sources cook first, cached or not) and expands the scenes against it;
+`fynkel scene inspect|validate --prefabs <dir>` scans that directory for
+sources with sidecars as well as `.prefab.json` files. `fynkel import
+--prefab <file.glb>` writes the same hierarchy as an editable
+`<stem>.prefab.json` next to the source with a fresh document id (never
+over an existing file; a source without a hierarchy is `A0105`) for the
+cases that want authored, stable, hand-edited ids. The fixture project's
+Rig scene holds both forms: the hand-authored column and `Imported`, an
+instance of `rig.glb#prefab` with its Prop's material overridden.
 
 ## Authoring commands and transactions
 
@@ -967,7 +998,7 @@ fynkel asset resolve <uuid>[#<sub>]... [--assets <dir>] [--json] [--schemas <dir
 fynkel asset init <file>... [--json]
 fynkel migrate <path|dir>... [--dry-run] [--json] [--schemas <dir>]
 fynkel migrate --list [--json]
-fynkel import <file>... [--out <dir>] [--dry-run] [--json] [--schemas <dir>]
+fynkel import <file>... [--out <dir>] [--prefab] [--dry-run] [--json] [--schemas <dir>]
 fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune] [--json]
 fynkel cook --assets <dir> [--cache <dir>] [--schemas <dir>] ...
 fynkel cooked inspect <file.fyna>... [--json]
@@ -989,8 +1020,9 @@ revision, entityCount, instanceCount, componentCount, componentTypes,
 roots[], expanded }` with `--json`) followed by the diagnostics; anchors show their
 prefab, instance id and override count, `--expand` shows the expanded scene
 instead. Scenes with instances resolve prefabs from `--prefabs <dir>`
-(default: the scene's own directory) and report override problems in
-`validate`. `prefab inspect` prints roots and the tree. `scene apply` and
+(default: the scene's own directory; imported models with their sidecars
+under it serve `{ asset, sub: "prefab" }` instances, M3-19a) and report
+override problems in `validate`. `prefab inspect` prints roots and the tree. `scene apply` and
 `prefab apply` run one authoring transaction from a patch file (see
 [Authoring commands and transactions](#authoring-commands-and-transactions)). `material inspect` prints the resolved material (every
 manifest parameter with its value, `(default)` where the material did not set
@@ -1011,9 +1043,12 @@ current versions and known steps. `import` runs each file through its
 sidecar's importer and writes `<out>/<asset id>.fyni` (`--out` defaults to
 `.fynkel/cache/import`, ignored by version control); a file without a
 sidecar gets one, a sidecar missing sub-asset ids is updated (existing ids
-kept); `--dry-run` prints the summary and writes nothing (`--json`: `{ ok,
-dryRun, files: [{ file, ok, id, importer, sidecar, sidecarCreated,
-sidecarWritten, summary, intermediate, bytes }], diagnostics }`). `cook`
+kept); `--prefab` also writes the hierarchy as `<stem>.prefab.json` next
+to the source (§ Prefab documents › Imported hierarchies; `prefab` in the
+file's report); `--dry-run` prints the summary and writes nothing
+(`--json`: `{ ok, dryRun, files: [{ file, ok, id, importer, sidecar,
+sidecarCreated, sidecarWritten, summary, intermediate, bytes, prefab? }],
+diagnostics }`). `cook`
 reads the project (`--project`, default the current directory), scans its
 asset root with its behaviour schemas and cooks every asset into the cache
 (`--cache`, default `<project>/.fynkel/cache`) for `--profile` (default

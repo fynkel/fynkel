@@ -12,8 +12,8 @@ use std::process::ExitCode;
 use fynkel_document::asset::AssetDatabase;
 use fynkel_document::project::{describe_json, describe_text, LOCK_FILE, PROJECT_FILE};
 use fynkel_document::{
-    diagnostics_json, has_errors, validate_project, Code, Diagnostic, DocumentKind, Lock, Project,
-    SchemaSet,
+    diagnostics_json, has_errors, validate_project_with, Code, Diagnostic, DocumentKind, Lock,
+    Project, SchemaSet,
 };
 
 pub fn usage_project() -> ExitCode {
@@ -229,7 +229,8 @@ pub fn run_validate(root: Option<&Path>, args: &[String]) -> ExitCode {
         );
     }
     let expected = fynkel_import::expected_lock();
-    let report = validate_project(&opts.project, &schemas, Some(&expected));
+    let sources = fynkel_import::ImportedPrefabs::default();
+    let report = validate_project_with(&opts.project, &schemas, Some(&expected), &sources);
     if opts.json {
         println!("{}", report.json());
         return exit(&report.diagnostics);

@@ -37,7 +37,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use fynkel_contracts::{Code, Diagnostic};
+use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use uuid::Uuid;
 
 use crate::json::{Member, Node, Span, Value};
@@ -236,10 +236,16 @@ impl Prefab {
     }
 }
 
-/// The prefabs a scene may instantiate, keyed by document id.
+/// The prefabs a scene may instantiate, keyed by document id. An
+/// imported source's hierarchy (`hero.glb` → its `prefab` sub-asset,
+/// M3-19a) is a prefab too: added with its source and sub so a reference
+/// `{ asset: <source>, sub: "prefab" }` resolves to it.
 #[derive(Clone, Debug, Default)]
 pub struct PrefabLibrary {
     prefabs: HashMap<Uuid, Prefab>,
+    /// `(source asset, sub)` → the imported prefab's own id (the sidecar's
+    /// sub-asset id, which is also the document's `id`).
+    imported: HashMap<(Uuid, String), Uuid>,
     /// Prefabs whose own instances could not be expanded (reported by the
     /// `flattened` call that found out); kept as they are, not retried.
     unresolved: HashSet<Uuid>,
@@ -255,8 +261,33 @@ impl PrefabLibrary {
         self.prefabs.insert(prefab.id(), prefab);
     }
 
+    /// Adds an imported source's hierarchy: the prefab document the
+    /// importer derived (its `id` is the `sub` sub-asset's id), reachable
+    /// by its own id and by `{ asset: source, sub }`.
+    pub fn add_imported(&mut self, prefab: Prefab, source: Uuid, sub: &str) {
+        self.imported.insert((source, sub.to_string()), prefab.id());
+        self.add(prefab);
+    }
+
     pub fn get(&self, id: Uuid) -> Option<&Prefab> {
         self.prefabs.get(&id)
+    }
+
+    /// The prefab id a scene's `prefab.asset` names: the asset itself
+    /// without a `sub`, the imported prefab registered under
+    /// `(asset, sub)` with one (`None` when no such import was added).
+    pub fn resolve(&self, r: &AssetRef) -> Option<Uuid> {
+        let asset = Uuid::from_bytes(r.asset.0);
+        if r.sub.is_empty() {
+            Some(asset)
+        } else {
+            self.imported.get(&(asset, r.sub.clone())).copied()
+        }
+    }
+
+    /// [`resolve`](Self::resolve) then [`get`](Self::get).
+    pub fn get_ref(&self, r: &AssetRef) -> Option<&Prefab> {
+        self.resolve(r).and_then(|id| self.get(id))
     }
 
     pub fn len(&self) -> usize {
@@ -280,6 +311,7 @@ impl PrefabLibrary {
     /// diagnostics are anchored in the prefab documents.
     pub fn flattened(&self, schemas: &SchemaSet) -> (PrefabLibrary, Vec<Diagnostic>) {
         let mut out = PrefabLibrary::empty();
+        out.imported = self.imported.clone();
         let mut diagnostics = Vec::new();
         let mut ids: Vec<Uuid> = self.prefabs.keys().copied().collect();
         ids.sort();
@@ -317,7 +349,9 @@ impl PrefabLibrary {
         let mut cycle = None;
         for e in prefab.entities.iter().filter(|e| e.prefab.is_some()) {
             let inner = e.prefab.as_ref().unwrap();
-            let target = inner.prefab_id();
+            let Some(target) = self.resolve(&inner.asset) else {
+                continue; // unknown: expand reports D0401
+            };
             if visiting.contains(&target) {
                 cycle = Some((e, target));
                 break;
@@ -374,8 +408,8 @@ impl PrefabLibrary {
                 continue;
             }
             for e in prefab.entities.iter() {
-                if let Some(inst) = &e.prefab {
-                    stack.push(inst.prefab_id());
+                if let Some(id) = e.prefab.as_ref().and_then(|inst| self.resolve(&inst.asset)) {
+                    stack.push(id);
                 }
             }
         }
@@ -429,6 +463,58 @@ impl PrefabLibrary {
             }
         }
         (lib, diags)
+    }
+}
+
+impl PrefabLibrary {
+    /// Adds the imported hierarchies `wanted` names — `(source id, sub)`
+    /// pairs from instances with a `sub` — through `sources` (M3-19a):
+    /// a `wanted` entry that is not a source of `db`, or whose sidecar
+    /// lacks the sub-asset, is skipped (expansion reports it as `D0401`
+    /// with the hint); a source that does not import is reported here,
+    /// once. Returns the provider's diagnostics.
+    pub fn add_sources(
+        &mut self,
+        db: &crate::asset::AssetDatabase,
+        wanted: &[(Uuid, String)],
+        sources: &dyn crate::project::SourcePrefabs,
+    ) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        for (source, sub) in wanted {
+            if self.imported.contains_key(&(*source, sub.clone())) {
+                continue;
+            }
+            let Some(entry) = db.get(*source) else {
+                continue;
+            };
+            if !matches!(entry.kind, crate::asset::AssetKind::Source { .. })
+                || !entry.sub_assets.contains_key(sub)
+            {
+                continue;
+            }
+            match sources.prefab(db.root(), entry, sub) {
+                Ok(Some(doc)) => self.add_imported(Prefab::from_document(doc), *source, sub),
+                Ok(None) => {}
+                Err(d) => diags.extend(d),
+            }
+        }
+        diags
+    }
+
+    /// The `(source id, sub)` pairs the instances of `scene` name — the
+    /// input to [`PrefabLibrary::add_sources`].
+    pub fn wanted_sources(scene: &Scene) -> Vec<(Uuid, String)> {
+        let mut wanted = Vec::new();
+        for e in scene.instances() {
+            let inst = e.prefab.as_ref().unwrap();
+            if !inst.asset.sub.is_empty() {
+                let key = (inst.prefab_id(), inst.asset.sub.clone());
+                if !wanted.contains(&key) {
+                    wanted.push(key);
+                }
+            }
+        }
+        wanted
     }
 }
 
@@ -558,15 +644,22 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             // Reported by Scene::validate (D0405); do not expand twice.
             continue;
         }
-        let Some(prefab) = library.get(inst.prefab_id()) else {
+        let Some(prefab) = library.get_ref(&inst.asset) else {
             diagnostics.push(anchor(
                 src,
                 Diagnostic::error(
                     Code::PREFAB_UNKNOWN,
-                    format!("prefab {} is not available", inst.prefab_id()),
+                    format!("prefab {} is not available", inst.describe()),
                 )
                 .with_id(e.id.to_string())
-                .with_suggestion(if library.is_empty() {
+                .with_suggestion(if !inst.asset.sub.is_empty() && inst.asset.sub != "prefab" {
+                    format!(
+                        "an imported source's hierarchy is its \"prefab\" sub-asset, not \"{}\"",
+                        inst.asset.sub
+                    )
+                } else if !inst.asset.sub.is_empty() {
+                    "the source must import as a model with a node hierarchy (fynkel.gltf); prefab documents need no sub".to_string()
+                } else if library.is_empty() {
                     "pass the prefab directory (--prefabs <dir>)".to_string()
                 } else {
                     format!("{} prefab(s) loaded; check the asset id", library.len())
