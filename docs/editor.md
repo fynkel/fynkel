@@ -219,7 +219,7 @@ job; the editor previews and shows the command).
 | Item | Done | What |
 | --- | --- | --- |
 | 1 | 2026-09-21 | `crates/fynkel_authoring`, the `authoring` feature and `fynkel_authoring_*` ABI in `fynkel_native`, `packages/fynkel_authoring`; D5 and D7 closed; the game runtime carries no editor code (CI check). |
-| 2 | — | The shell: launcher, docking workspace, menu bar + command registry + palette, Console, preferences. |
+| 2 | 2026-09-21 | `apps/editor`: launcher, docking workspace saved per user, native menu bar + command registry + palette, Console with open-in-IDE, read-only banner, migration preview, preferences (§ The shell). |
 | 3 | — | Document tabs and the Hierarchy. |
 | 4 | — | The Inspector (ADR-0018 display hints). |
 | 5 | — | The Project browser. |
