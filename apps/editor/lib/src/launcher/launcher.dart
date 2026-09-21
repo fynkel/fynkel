@@ -97,7 +97,9 @@ class _LauncherScreenState extends State<LauncherScreen> {
                       Text('Fynkel Editor', style: theme.textTheme.headlineMedium),
                       Text('version ${widget.version}', style: theme.textTheme.bodySmall),
                       const SizedBox(height: 24),
-                      Row(
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
                         children: [
                           FilledButton.icon(
                             key: const Key('launcher.new'),
@@ -105,14 +107,12 @@ class _LauncherScreenState extends State<LauncherScreen> {
                             icon: const Icon(Icons.add),
                             label: const Text('New Project…'),
                           ),
-                          const SizedBox(width: 12),
                           OutlinedButton.icon(
                             key: const Key('launcher.open'),
                             onPressed: _open,
                             icon: const Icon(Icons.folder_open),
                             label: const Text('Open Project…'),
                           ),
-                          const SizedBox(width: 12),
                           TextButton.icon(
                             key: const Key('launcher.preferences'),
                             onPressed: widget.onPreferences,
@@ -180,7 +180,12 @@ class _RecentTile extends StatelessWidget {
       enabled: exists,
       leading: Icon(exists ? Icons.videogame_asset : Icons.link_off),
       title: Text(recent.name.isEmpty ? p.basename(recent.dir) : recent.name),
-      subtitle: Text(exists ? recent.dir : '${recent.dir} — missing', style: theme.textTheme.bodySmall),
+      subtitle: Text(
+        exists ? recent.dir : '${recent.dir} — missing',
+        style: theme.textTheme.bodySmall,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis, // a dense tile has one subtitle line; long paths must not overflow it
+      ),
       trailing: IconButton(
         key: Key('launcher.recent.remove.${recent.dir}'),
         tooltip: 'Remove from recent projects',
@@ -232,28 +237,47 @@ class _ChecksPanel extends StatelessWidget {
             Expanded(
               child: ListView(
                 children: [
+                  // Not a ListTile: a tile's height is fixed by isThreeLine, and a
+                  // path plus its fix wraps to more lines than that in a narrow window.
                   for (final c in tc.checks)
-                    ListTile(
+                    Padding(
                       key: Key('launcher.check.${c.title}'),
-                      dense: true,
-                      leading: Icon(
-                        c.ok
-                            ? Icons.check_circle
-                            : c.warning
-                            ? Icons.warning_amber
-                            : Icons.cancel,
-                        color: c.ok
-                            ? Colors.green
-                            : c.warning
-                            ? Colors.orange
-                            : theme.colorScheme.error,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            c.ok
+                                ? Icons.check_circle
+                                : c.warning
+                                ? Icons.warning_amber
+                                : Icons.cancel,
+                            size: 20,
+                            color: c.ok
+                                ? Colors.green
+                                : c.warning
+                                ? Colors.orange
+                                : theme.colorScheme.error,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(c.title, style: theme.textTheme.bodyMedium),
+                                Text(c.detail, style: theme.textTheme.bodySmall),
+                                if (c.fix != null)
+                                  Text(
+                                    c.fix!,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      title: Text(c.title),
-                      subtitle: Text(
-                        c.fix == null ? c.detail : '${c.detail}\n${c.fix}',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                      isThreeLine: c.fix != null,
                     ),
                 ],
               ),

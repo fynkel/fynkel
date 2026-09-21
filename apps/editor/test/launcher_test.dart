@@ -57,6 +57,25 @@ void main() {
     expect(find.byKey(Key('launcher.recent.${dir.path}')), findsOneWidget);
   });
 
+  testWidgets('the launcher fits a small window with long paths and failing checks', (tester) async {
+    // The first live run overflowed: the button row in a narrow window, and the
+    // check tiles whose path + fix wrap to more lines than a ListTile allows.
+    // Any RenderFlex overflow is an exception, which fails the test.
+    final long = '/Users/someone/Documents/Projects/Games/${'deep/' * 12}my_game';
+    prefs.addRecent(long, 'A game with a rather long title that keeps going');
+    tester.view.physicalSize = const Size(800, 500);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(shellApp(prefs: prefs, toolchain: fakeToolchain(cli: null, root: null, flutter: null)));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('launcher.new')), findsOneWidget);
+    expect(find.byKey(const Key('launcher.check.Fynkel CLI')), findsOneWidget);
+    expect(find.textContaining('cargo build -p fynkel'), findsOneWidget); // the fix is shown in full
+    expect(find.byKey(Key('launcher.recent.$long')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a directory without fynkel.project.json is refused with a message', (tester) async {
     final other = Directory.systemTemp.createTempSync('not_a_project');
     addTearDown(() => other.deleteSync(recursive: true));
