@@ -102,12 +102,17 @@ final class AssetEntry {
 
   bool get isSource => kind == 'source';
 
+  /// The kind a source is referenced as **whole** (no sub-asset): an audio
+  /// source is a `sound` (`fynkel.AudioSource.clip`). Null for the others,
+  /// which are only referenced through their sub-assets.
+  String? get wholeKind => isSource && importer == 'fynkel.audio' ? 'sound' : null;
+
   /// The Inspector's asset kinds this entry (or one of its subs) offers:
   /// a document's kind; a source's `mesh`, `clip` (anim), `skin`, `prefab`,
-  /// `texture` (image), `material`.
+  /// `texture` (image), `material`, and its [wholeKind].
   Set<String> get offeredKinds {
     if (!isSource) return {?document};
-    final out = <String>{};
+    final out = <String>{?wholeKind};
     for (final sub in subAssets.keys) {
       out.add(subKind(sub));
     }

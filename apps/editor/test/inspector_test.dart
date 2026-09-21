@@ -137,6 +137,7 @@ Map<String, Object?> spinnerMetadata() => {
 
 const meshId = 'a0000000-0000-4000-8000-000000000001';
 const materialId = 'a0000000-0000-4000-8000-000000000020';
+const toneId = 'a0000000-0000-4000-8000-000000000006';
 
 FakeProject inspectorProject(Directory dir) {
   final project = FakeProject(dir: dir.path);
@@ -169,6 +170,8 @@ FakeProject inspectorProject(Directory dir) {
       kind: 'document',
       document: 'material',
     ),
+    // An audio source is referenced whole (no sub-asset): the `sound` kind.
+    const AssetEntry(id: toneId, path: 'assets/audio/tone.wav', name: 'tone', kind: 'source', importer: 'fynkel.audio'),
   ];
   project.defaults = {
     ...project.defaults,
@@ -342,6 +345,46 @@ void main() {
       expect(camera.fields.map((f) => f.name).take(3), ['projection', 'fov_y', 'ortho_height']);
       expect(camera.groups, ['Lens', 'Clipping', 'Output', 'Exposure']);
     });
+
+    test(
+      'the audio components: the clip is a whole-source `sound` asset, volume a slider, the picker offers the source',
+      () {
+        final specs = {
+          for (final s in nativeSchemas()) s.type: parseComponentSpec(s.type, s.schema, authored: s.authored),
+        };
+        final source = specs['fynkel.AudioSource']!;
+        expect(source.field('clip')!.kind, FieldKind.assetRef);
+        expect(source.field('clip')!.assetKind, 'sound');
+        expect(source.field('volume')!.kind, FieldKind.number);
+        expect(source.field('volume')!.slider, isTrue);
+        expect(source.field('volume')!.max, 1);
+        expect(source.field('pitch')!.min, 0.05);
+        expect(source.field('bus')!.kind, FieldKind.enumeration);
+        expect(source.field('bus')!.enumValues, ['master', 'music', 'sfx']);
+        expect(source.field('priority')!.kind, FieldKind.integer);
+        expect(source.field('looping')!.group, 'Playback');
+        expect(specs['fynkel.AudioListener']!.field('volume')!.slider, isTrue);
+        const tone = AssetEntry(
+          id: toneId,
+          path: 'assets/audio/tone.wav',
+          name: 'tone',
+          kind: 'source',
+          importer: 'fynkel.audio',
+        );
+        expect(tone.wholeKind, 'sound');
+        expect(tone.offeredKinds, {'sound'});
+        const glb = AssetEntry(
+          id: meshId,
+          path: 'a.glb',
+          name: 'a',
+          kind: 'source',
+          importer: 'fynkel.gltf',
+          subAssets: {'mesh/0': 'x'},
+        );
+        expect(glb.wholeKind, isNull);
+        expect(glb.offeredKinds, {'mesh'});
+      },
+    );
 
     test('a behaviour schema with metadata yields the hints, the library, defaults and show-if', () {
       final spec = parseComponentSpec(
@@ -670,7 +713,9 @@ void main() {
       expect(r.model.assetsFor('mesh').map((a) => a.name), ['robot']);
       expect(r.model.assetsFor('clip').map((a) => a.name), ['robot']);
       expect(r.model.assetsFor('material').map((a) => a.name), ['steel']);
+      expect(r.model.assetsFor('sound').map((a) => a.name), ['tone'], reason: 'an audio source, whole');
       expect(r.model.assetsFor('texture'), isEmpty);
+      expect(r.model.describeAsset({'asset': toneId}), 'tone');
       expect(r.model.describeAsset({'asset': meshId, 'sub': 'mesh/0'}), 'robot › mesh/0');
       expect(r.model.describeAsset({'asset': materialId}), 'steel');
       expect(r.model.describeAsset({'asset': 'sub-anim-0'}), 'robot › anim/0');
@@ -1023,6 +1068,21 @@ void main() {
         'asset': meshId,
         'sub': 'mesh/0',
       });
+
+      // A sound picker lists the whole audio source as one row, and nothing else.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AssetPickerDialog(entries: r.project.assets(), kind: 'sound'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Choose a sound'), findsOneWidget);
+      expect(find.byKey(const ValueKey('assetPicker.row.0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('assetPicker.row.1')), findsNothing);
+      expect(find.text('tone'), findsOneWidget);
+      await pumpPanel(tester, r.model);
 
       // The Spinner's nullable showcase: None → set through the picker → Clear.
       expect(inField('game.Spinner#0', 'showcase', find.text('None')), findsOneWidget);

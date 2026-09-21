@@ -546,6 +546,12 @@ pub fn component_default(type_id: &str) -> Option<Node> {
         }
         "fynkel.Animator" => <::fynkel_core::components::Animator as Default>::default().to_node(),
         "fynkel.Skin" => <::fynkel_core::components::Skin as Default>::default().to_node(),
+        "fynkel.AudioSource" => {
+            <::fynkel_audio::components::AudioSource as Default>::default().to_node()
+        }
+        "fynkel.AudioListener" => {
+            <::fynkel_audio::components::AudioListener as Default>::default().to_node()
+        }
         _ => return None,
     })
 }

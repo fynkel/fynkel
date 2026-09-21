@@ -367,7 +367,7 @@ then overridden by the ADR-0018 display hints, read in this order — the
 last one wins:
 
 1. **The editor's native table** (`native_hints.dart`): `type → field →
-   hints` for the 21 built-in components, in the same `x-fynkel`
+   hints` for the 23 built-in components (the audio pair included), in the same `x-fynkel`
    vocabulary the generator writes (Camera `fov_y` is an `angle` in the
    `Lens` group, lights' `color` is a `color`, `MeshRenderer.mesh` an
    `asset(mesh)`, `Collider.layer` a `layerMask`, `Skin.skeleton` an
@@ -430,7 +430,7 @@ reports an edit **once per gesture**:
 | `vec2` / `vec3` / `vec4` | X Y Z W numbers, each a pointer write on its own; the per-axis fields carry no unit suffix (too narrow for `20 m`) — the row's label shows it once |
 | quaternion | **Euler degrees** (X, Y, Z, `q = qz·qy·qx`) over the stored `[x, y, z, w]`; each axis commits the whole quaternion; the shown triple is kept across a commit so dragging Y never snaps X |
 | `color` | a swatch (linear → sRGB for display) with the hex next to it; the picker is HSV + hex + alpha for four components; values are written linear |
-| `assetRef` | the asset's name, `…` opens a **searchable picker** filtered by `asset(<kind>)` (a source offers its matching sub-assets), Clear when nullable, and a `DragTarget<AssetDragPayload>` for the Project browser's rows (item 5) |
+| `assetRef` | the asset's name, `…` opens a **searchable picker** filtered by `asset(<kind>)` (a source offers its matching sub-assets; an audio source is offered whole as a `sound` — `AudioSource.clip` takes no sub), Clear when nullable, and a `DragTarget<AssetDragPayload>` for the Project browser's rows (item 5) |
 | `entity` | a name field with a menu of the document's entity names |
 | `layerMask` | a check-list of the project's `physics.layers` (Everything / Nothing), the number beside it |
 | array, object | rows per item / per child, add and remove; `any` and keys the schema does not list fall back to JSON text |
@@ -508,7 +508,7 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
-cd apps/editor && flutter analyze --fatal-infos && flutter test   # 115 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 116 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically
 cargo run -q -p fynkel_cli --bin fynkel -- codegen --check --project packages/fynkel_generator/example/spinner_game --json   # what the Inspector banner runs
 ```
 

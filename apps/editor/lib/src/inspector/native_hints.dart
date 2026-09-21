@@ -58,6 +58,23 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'inner_angle': {'kind': 'angle', 'unit': 'deg', 'min': 0, 'max': 1.5707963, 'group': 'Cone', 'order': 3},
     'outer_angle': {'kind': 'angle', 'unit': 'deg', 'min': 0, 'max': 1.5707963, 'group': 'Cone', 'order': 4},
   },
+  // Audio (M3-11): the clip is the whole source (a `.wav`/`.ogg`, no sub-asset).
+  'fynkel.AudioSource': {
+    'clip': {'kind': 'asset(sound)', 'order': 0},
+    'bus': {'order': 1, 'tooltip': 'The bus this source plays through: master, music or sfx.'},
+    'volume': {'kind': 'slider', 'min': 0, 'max': 1, 'step': 0.01, 'order': 2},
+    'pitch': {'min': 0.05, 'max': 8, 'step': 0.01, 'order': 3, 'tooltip': 'Playback rate; 1 is the clip\'s own rate.'},
+    'looping': {'group': 'Playback', 'order': 4},
+    'playing': {'group': 'Playback', 'order': 5},
+    'priority': {
+      'group': 'Playback',
+      'order': 6,
+      'tooltip': 'Past the voice limit a new sound steals the lowest-priority voice at or below its own.',
+    },
+  },
+  'fynkel.AudioListener': {
+    'volume': {'kind': 'slider', 'min': 0, 'max': 1, 'step': 0.01},
+  },
   'fynkel.Environment': {
     'ambient_color': {'kind': 'color', 'group': 'Ambient', 'order': 0},
     'ambient_intensity': {'unit': 'lux', 'min': 0, 'group': 'Ambient', 'order': 1},

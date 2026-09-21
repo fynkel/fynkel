@@ -1079,7 +1079,7 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'texture' => Icons.image_outlined,
   'prefab' => Icons.widgets_outlined,
   'scene' => Icons.landscape_outlined,
-  'audio' => Icons.audiotrack,
+  'audio' || 'sound' => Icons.audiotrack,
   'clip' => Icons.animation,
   'skin' || 'rig' => Icons.accessibility_new,
   _ => Icons.insert_drive_file_outlined,
@@ -1109,6 +1109,10 @@ class _AssetPickerDialogState extends State<AssetPickerDialog> {
       if (!a.isSource) {
         if (widget.kind == null || a.document == widget.kind) out.add((a.name, a.path, {'asset': a.id}));
         continue;
+      }
+      // A source referenced whole (an audio clip): one row without a sub.
+      if (a.wholeKind != null && (widget.kind == null || a.wholeKind == widget.kind)) {
+        out.add((a.name, a.path, {'asset': a.id}));
       }
       for (final sub in a.subAssets.keys) {
         if (widget.kind != null && AssetEntry.subKind(sub) != widget.kind) continue;

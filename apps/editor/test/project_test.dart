@@ -58,7 +58,7 @@ void main() {
     expect(project.isReadOnly, isFalse);
   });
 
-  testWidgets('a misspelt field is listed in the Console at scenes/main.scene.json:75:13', (tester) async {
+  testWidgets('a misspelt field is listed in the Console at scenes/main.scene.json:82:13', (tester) async {
     final dir = copyFixture('broken');
     addTearDown(() => dir.deleteSync(recursive: true));
     final scene = File('${dir.path}/assets/scenes/main.scene.json');
@@ -68,7 +68,8 @@ void main() {
     addTearDown(project.close);
 
     final d = project.diagnostics.singleWhere((d) => d.code == 'FYN-D0206');
-    expect(d.line, 75);
+    // M3-11 put an AudioSource on the Robot ahead of the Spinner: line 75 → 82.
+    expect(d.line, 82);
     expect(d.column, 13);
     expect(d.pointer, endsWith('/data/speeed'));
     expect(project.relative(d.document!), 'assets/scenes/main.scene.json');
@@ -87,14 +88,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('assets/scenes/main.scene.json:75:13'), findsOneWidget);
+    expect(find.text('assets/scenes/main.scene.json:82:13'), findsOneWidget);
     expect(find.text('FYN-D0206'), findsOneWidget);
     expect(find.textContaining('1 errors, 1 warnings'), findsOneWidget);
     await tester.tap(find.text('FYN-D0206'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.open')));
     await tester.pumpAndSettle();
-    expect(opened.single, (d.document, 75, 13));
+    expect(opened.single, (d.document, 82, 13));
   });
 
   test('a lock from a newer Fynkel opens read-only with the reason', () async {
