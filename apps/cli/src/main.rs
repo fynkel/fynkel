@@ -34,9 +34,89 @@ use std::process::ExitCode;
 
 use fynkel_document::project::PROJECT_FILE;
 
+/// `fynkel codegen [--check] [--project <dir>] --json`: the same two
+/// pipelines, reported as one JSON object on stdout —
+/// `{ ok, check, native: { status, files?, types?, stale?[] }, project?:
+/// { dir, status, files?, types?, stale?[], error? } }` where `status` is
+/// `written`, `upToDate`, `stale` or `error`. Exit codes as without
+/// `--json`: 0 ok, 2 stale, 1 a pipeline failed. The editor runs
+/// `--check --project <game> --json` for its "run `fynkel codegen`" banner
+/// (blueprint §19.2e item 4) and never regenerates anything itself.
+fn codegen_json(
+    root: &std::path::Path,
+    project: Option<&std::path::Path>,
+    check: bool,
+) -> ExitCode {
+    use serde_json::json;
+    fn stale(paths: &[PathBuf]) -> serde_json::Value {
+        json!(paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>())
+    }
+    let (native, native_exit) = match codegen::run(root, check) {
+        Ok(codegen::Outcome::Written(n)) => (
+            json!({
+                "status": "written",
+                "files": n,
+                "fingerprint": format!("{:#018x}", fynkel_core::schema::schema_fingerprint())
+            }),
+            ExitCode::SUCCESS,
+        ),
+        Ok(codegen::Outcome::UpToDate) => (json!({ "status": "upToDate" }), ExitCode::SUCCESS),
+        Ok(codegen::Outcome::Drift(paths)) => (
+            json!({ "status": "stale", "stale": stale(&paths) }),
+            ExitCode::from(2),
+        ),
+        Err(e) => (json!({ "status": "error", "error": e }), ExitCode::from(1)),
+    };
+    let (project_json, project_exit) = match project {
+        None => (None, ExitCode::SUCCESS),
+        Some(dir) => {
+            let dir_text = dir.display().to_string();
+            let command = format!("fynkel codegen --project {dir_text}");
+            match behaviours::run(dir, check) {
+                Ok(behaviours::Outcome::Written { files, types }) => (
+                    Some(
+                        json!({ "dir": dir_text, "status": "written", "files": files, "types": types }),
+                    ),
+                    ExitCode::SUCCESS,
+                ),
+                Ok(behaviours::Outcome::UpToDate { types }) => (
+                    Some(json!({ "dir": dir_text, "status": "upToDate", "types": types })),
+                    ExitCode::SUCCESS,
+                ),
+                Ok(behaviours::Outcome::Drift(paths)) => (
+                    Some(
+                        json!({ "dir": dir_text, "status": "stale", "stale": stale(&paths), "command": command }),
+                    ),
+                    ExitCode::from(2),
+                ),
+                Err(e) => (
+                    Some(
+                        json!({ "dir": dir_text, "status": "error", "error": e, "command": command }),
+                    ),
+                    ExitCode::from(1),
+                ),
+            }
+        }
+    };
+    let ok = native_exit == ExitCode::SUCCESS && project_exit == ExitCode::SUCCESS;
+    let mut out = json!({ "ok": ok, "check": check, "native": native });
+    if let Some(p) = project_json {
+        out["project"] = p;
+    }
+    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+    if native_exit != ExitCode::SUCCESS {
+        native_exit
+    } else {
+        project_exit
+    }
+}
+
 fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel codegen [--check] [--root <repo>] [--project <dart package>]\n                                               regenerate schemas/, Dart and Rust codecs (a); with --project also the\n                                               package's behaviours.g.dart/.g.json and schemas/behaviours/ (b, build_runner)\n  fynkel schema [list|describe <type>] [--json] the schema registry: document kinds, component types, fingerprint\n  fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--input <file.input.json>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               cook the project, run its startup scene (or --scene) in the Rust headless host from the cache and report;\n                                               --input replays a recorded input stream against the project's actions; outside a project: the procedural demo scene\n  fynkel state dump [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--json]\n                                               cook, load a scene headlessly from the cache and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate|apply ...      scene documents (--prefabs <dir>, --expand; apply --patch <ops.json> [--dry-run])\n  fynkel prefab inspect|validate|apply ...     prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>] [--rig <name>]\n                                               import glTF/GLB/FBX sources to their normalized intermediate (sidecars updated);\n                                               --rig writes <name>.rig.json: the first file's skeleton with every file's clips\n  fynkel rig inspect|validate <path.rig.json>  a rig document: its skeleton and clips matched by bone name\n  fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune]\n                                               cook the project's assets into its content-addressed cache (.fynkel/cache); --assets <dir> for a bare root\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table\n  fynkel project describe|lock [--project <dir>] [--json]\n                                               the project file (fynkel.project.json) and its lock (fynkel.lock.json)\n  fynkel validate [--project <dir>] [--json]   validate the whole project: exit 0 ok, 1 errors, 2 usage/IO\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <png>] [--size WxH] [--no-cook]\n                                               cook, then render the project's startup scene (or --scene) headlessly from the cache to a PNG\n  fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter]\n                                               a new game project: Flutter app, fynkel.project.json, assets, one behaviour, AGENTS.md\n  fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]\n                                               validate and cook, then `flutter run` with FYNKEL_PROJECT set to the project"
+        "usage:\n  fynkel codegen [--check] [--root <repo>] [--project <dart package>] [--json]\n                                               regenerate schemas/, Dart and Rust codecs (a); with --project also the\n                                               package's behaviours.g.dart/.g.json and schemas/behaviours/ (b, build_runner);\n                                               --json prints one report object instead (the editor's staleness banner)\n  fynkel schema [list|describe <type>] [--json] the schema registry: document kinds, component types, fingerprint\n  fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--input <file.input.json>] [--steps N] [--seed S] [--satellites K] [--frame-dt SECS] [--json]\n                                               cook the project, run its startup scene (or --scene) in the Rust headless host from the cache and report;\n                                               --input replays a recorded input stream against the project's actions; outside a project: the procedural demo scene\n  fynkel state dump [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--steps N] [--json]\n                                               cook, load a scene headlessly from the cache and print the runtime state by authoring id\n  fynkel document validate|format|new ...      strict JSON documents (see `fynkel document`)\n  fynkel scene inspect|validate|apply ...      scene documents (--prefabs <dir>, --expand; apply --patch <ops.json> [--dry-run])\n  fynkel prefab inspect|validate|apply ...     prefab documents\n  fynkel material inspect|validate ...         material documents, checked against the shader manifest\n  fynkel shader inspect|validate ...           shader interface manifests\n  fynkel asset list|resolve|init ...           the asset database: ids from .meta.json sidecars and documents\n  fynkel migrate <path|dir>... [--dry-run]     bring documents to the current formatVersion (originals kept as .bak)\n  fynkel import <file>... [--out <dir>] [--rig <name>]\n                                               import glTF/GLB/FBX sources to their normalized intermediate (sidecars updated);\n                                               --rig writes <name>.rig.json: the first file's skeleton with every file's clips\n  fynkel rig inspect|validate <path.rig.json>  a rig document: its skeleton and clips matched by bone name\n  fynkel cook [--project <dir>] [--cache <dir>] [--profile <name>] [--force] [--prune]\n                                               cook the project's assets into its content-addressed cache (.fynkel/cache); --assets <dir> for a bare root\n  fynkel cooked inspect <file.fyna>...         print a cooked container's META and chunk table\n  fynkel project describe|lock [--project <dir>] [--json]\n                                               the project file (fynkel.project.json) and its lock (fynkel.lock.json)\n  fynkel validate [--project <dir>] [--json]   validate the whole project: exit 0 ok, 1 errors, 2 usage/IO\n  fynkel render [--project <dir>] [--scene <path|id>] [--out <png>] [--size WxH] [--no-cook]\n                                               cook, then render the project's startup scene (or --scene) headlessly from the cache to a PNG\n  fynkel create <dir> [--name <package>] [--title <text>] [--org <domain>] [--no-flutter]\n                                               a new game project: Flutter app, fynkel.project.json, assets, one behaviour, AGENTS.md\n  fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]\n                                               validate and cook, then `flutter run` with FYNKEL_PROJECT set to the project"
     );
     ExitCode::from(1)
 }
@@ -107,12 +187,14 @@ fn main() -> ExitCode {
         };
     }
     let mut check = false;
+    let mut json = false;
     let mut root = None;
     let mut project: Option<PathBuf> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "--check" => check = true,
+            "--json" => json = true,
             "--root" => {
                 i += 1;
                 root = args.get(i).map(PathBuf::from);
@@ -130,6 +212,7 @@ fn main() -> ExitCode {
     }
     let root = require_repo_root(root);
     match cmd.as_str() {
+        "codegen" if json => codegen_json(&root, project.as_deref(), check),
         "codegen" => {
             let native = match codegen::run(&root, check) {
                 Ok(codegen::Outcome::Written(n)) => {

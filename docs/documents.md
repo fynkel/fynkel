@@ -166,7 +166,10 @@ counts); `docs/renderer.md` says how the renderer uses each.
 A component of any other type is a **behaviour**: a Dart class of the game
 (`@FynkelBehaviour(id: 'game.Spinner')`) whose `@Expose` fields are its
 `data`. `fynkel codegen --project` generates `schemas/behaviours/<id>.schema.json`
-for each (`docs/codegen.md` § Behaviour generator); a project's `schemas/`
+for each (`docs/codegen.md` § Behaviour generator; `codegen --check --json`
+answers `{ok, check, native: {status}, project: {status, stale?, error?}}`
+with `status` one of `written | upToDate | stale | error` — what the editor's
+Inspector banner reads, exit code 2 on drift); a project's `schemas/`
 directory is loaded on top of the embedded schemas (`SchemaSet::embedded_with`,
 `Project::schemas`), and every `components` registry entry of kind
 `behaviour` declares its type known even without a schema. The runtime never
