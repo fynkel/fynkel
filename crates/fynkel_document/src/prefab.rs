@@ -40,7 +40,7 @@ use std::path::{Path, PathBuf};
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use uuid::Uuid;
 
-use crate::json::{Member, Node, Span, Value};
+use crate::json::{Locator, Member, Node, Span, Value};
 use crate::scene::{
     read_entities, validate_entities, Component, Entity, OverrideOp, PrefabInstance, Scene,
 };
@@ -145,7 +145,8 @@ impl Prefab {
     /// expansion (`PrefabLibrary::flattened`), as a scene's are.
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
-        let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();
+        let schema_pointers: HashSet<String> =
+            out.iter().filter_map(|d| d.pointer.clone()).collect();
         out.extend(self.read_diagnostics.iter().cloned());
         for mut d in self.validate_semantics(schemas) {
             if (d.code == Code::SCENE_COMPONENT_DATA || d.code == Code::PREFAB_NESTED)
@@ -166,8 +167,14 @@ impl Prefab {
     /// The semantic rules only (no schema pass).
     pub fn validate_semantics(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let root = &self.document.root;
-        let mut out = validate_entities(root, &self.entities, &|id| self.entity(id), schemas);
-        // roots ⇔ parentless entities, each once.
+        let mut out = validate_entities(
+            &Locator::new(root),
+            &self.entities,
+            &|id| self.entity(id),
+            schemas,
+        );
+        // roots ⇔ parentless entities, each once (`/roots/<i>` lookups
+        // never cross the entity map, so the plain anchor is fine here).
         let parentless: Vec<Uuid> = self
             .entities
             .iter()
@@ -1147,12 +1154,10 @@ fn remap_strings(node: &mut Node, local_ids: &HashSet<Uuid>, map: &dyn Fn(Uuid) 
     }
 }
 
+/// Pointer + position for the cold paths (a handful of lookups per
+/// document); passes with a lookup per entity go through a [`Locator`].
 fn anchor(root: &Node, d: Diagnostic, pointer: &str) -> Diagnostic {
-    let d = d.with_pointer(pointer);
-    match root.pointer_span(pointer) {
-        Some(s) => d.at(s.start.line, s.start.column),
-        None => d,
-    }
+    Locator::new(root).anchor(d, pointer)
 }
 
 /// `inspect --json` payload for a prefab.

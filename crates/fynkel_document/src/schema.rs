@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use fynkel_contracts::{Code, Diagnostic, Severity};
 use jsonschema::{Draft, Registry, Resource, ValidationError, Validator};
 
-use crate::json::Node;
+use crate::json::{Locator, Node};
 use crate::DocumentKind;
 
 /// The shared envelope schema, embedded so validation works before any
@@ -320,7 +320,7 @@ impl SchemaSet {
         let instance = data.to_serde();
         let mut out = Vec::new();
         for err in validator.iter_errors(&instance) {
-            out.extend(to_diagnostics(&err, data));
+            out.extend(to_diagnostics(&err, &Locator::new(data)));
         }
         sort_by_position(&mut out);
         out
@@ -333,8 +333,9 @@ impl SchemaSet {
         let validator = self.others.get(schema_id)?;
         let instance = root.to_serde();
         let mut out = Vec::new();
+        let at = Locator::new(root);
         for err in validator.iter_errors(&instance) {
-            out.extend(to_diagnostics(&err, root));
+            out.extend(to_diagnostics(&err, &at));
         }
         sort_by_position(&mut out);
         Some(out)
@@ -367,8 +368,9 @@ impl SchemaSet {
                 &self.envelope
             }
         };
+        let at = Locator::new(root);
         for err in validator.iter_errors(&instance) {
-            out.extend(to_diagnostics(&err, root));
+            out.extend(to_diagnostics(&err, &at));
         }
         sort_by_position(&mut out);
         out
@@ -419,15 +421,9 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
-fn to_diagnostics(err: &ValidationError<'_>, root: &Node) -> Vec<Diagnostic> {
+fn to_diagnostics(err: &ValidationError<'_>, at: &Locator<'_>) -> Vec<Diagnostic> {
     let base = err.instance_path().as_str().to_string();
-    let anchor = |pointer: &str, d: Diagnostic| -> Diagnostic {
-        let d = d.with_pointer(pointer);
-        match root.pointer_span(pointer) {
-            Some(s) => d.at(s.start.line, s.start.column),
-            None => d,
-        }
-    };
+    let anchor = |pointer: &str, d: Diagnostic| -> Diagnostic { at.anchor(d, pointer) };
     match err.kind() {
         // One diagnostic per unexpected property, anchored at its key.
         jsonschema::error::ValidationErrorKind::AdditionalProperties { unexpected }

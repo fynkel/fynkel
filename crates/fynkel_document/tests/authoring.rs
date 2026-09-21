@@ -74,13 +74,19 @@ fn revision_is_the_hash_of_the_canonical_text() {
 }
 
 #[test]
-fn only_scenes_and_prefabs_open() {
+fn only_scenes_prefabs_and_materials_open() {
     let s = schemas();
-    let doc = Document::read(&fixtures().join("material/rusted.material.json"), None)
-        .or_else(|_| Ok::<_, ()>(Document::new(DocumentKind::Material, "m")))
-        .unwrap();
+    let doc = Document::read(&fixtures().join("project/fynkel.project.json"), None).unwrap();
     let err = Editor::open(doc, &s).err().unwrap();
     assert_eq!(err[0].code.0, "FYN-E0007");
+    assert!(err[0].message.contains("materials are"));
+    // A material opens (M4-01) and is edited through document fields.
+    let doc = Document::read(
+        &fixtures().join("project/assets/materials/rusted.material.json"),
+        None,
+    )
+    .unwrap();
+    assert!(Editor::open(doc, &s).is_ok());
 
     let mut outdated = Document::new(DocumentKind::Scene, "old");
     outdated.envelope.format_version = 0;
@@ -892,6 +898,19 @@ fn commands_round_trip_through_json() {
             entity: u(ROOT),
             index: Some(1),
         },
+        Command::DuplicateObject {
+            id: u(ROOT),
+            new_id: Some(u(KID2)),
+            name: Some("Root copy".into()),
+            index: Some(0),
+        },
+        Command::SetDocumentField {
+            pointer: "/base_color".into(),
+            value: Node::from_serde(&json!([1, 0.5, 0.25, 1])),
+        },
+        Command::UnsetDocumentField {
+            pointer: "/metallic".into(),
+        },
         Command::CreateMaterial {
             id: None,
             name: "m".into(),
@@ -924,6 +943,9 @@ fn commands_round_trip_through_json() {
             "instantiatePrefab",
             "setPrefabOverride",
             "revertPrefabOverride",
+            "duplicateObject",
+            "setDocumentField",
+            "unsetDocumentField",
             "createMaterial",
             "saveDocument"
         ]
@@ -1000,6 +1022,462 @@ fn inspect_json_carries_the_revision() {
     let (p, original) = open("valid/turret.prefab.json");
     let v = fynkel_document::prefab::inspect_json(&Prefab::from_document(p.into_document()));
     assert_eq!(v["revision"], json!(Revision::of_text(&original).as_str()));
+}
+
+// --------------------------------------------------------------- M4-01
+
+#[test]
+fn materials_edit_through_document_fields() {
+    let (mut editor, original) = open("project/assets/materials/rusted.material.json");
+    let s = schemas();
+    // A colour change: replace in place, byte-exact undo.
+    let r = apply(
+        &mut editor,
+        vec![Command::SetDocumentField {
+            pointer: "/base_color".into(),
+            value: Node::from_serde(&json!([0.1, 0.2, 0.3, 1.0])),
+        }],
+    );
+    assert!(r.mutations[0].affected_ids.is_empty());
+    assert_eq!(
+        editor
+            .document()
+            .root
+            .pointer("/base_color/1")
+            .and_then(Node::as_f64),
+        Some(0.2)
+    );
+    assert!(editor.is_dirty());
+    // Unset + set a scalar; a new member appends.
+    apply(
+        &mut editor,
+        vec![
+            Command::UnsetDocumentField {
+                pointer: "/metallic".into(),
+            },
+            Command::SetDocumentField {
+                pointer: "/roughness".into(),
+                value: Node::from_serde(&json!(0.9)),
+            },
+            Command::SetDocumentField {
+                pointer: "/double_sided".into(),
+                value: Node::from_serde(&json!(true)),
+            },
+        ],
+    );
+    assert!(editor.document().root.pointer("/metallic").is_none());
+    assert_eq!(
+        editor
+            .document()
+            .root
+            .pointer("/double_sided")
+            .and_then(Node::as_bool),
+        Some(true)
+    );
+    editor.undo().unwrap();
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+    assert!(!editor.is_dirty());
+    editor.redo().unwrap();
+    assert_eq!(
+        editor
+            .document()
+            .root
+            .pointer("/base_color/1")
+            .and_then(Node::as_f64),
+        Some(0.2)
+    );
+
+    // The envelope's identity and the entity tree are not fields.
+    for pointer in ["/id", "/formatVersion", "/$schema", "", "base_color"] {
+        let r = editor.apply(
+            Request::new(vec![Command::SetDocumentField {
+                pointer: pointer.into(),
+                value: Node::from_serde(&json!(1)),
+            }]),
+            &s,
+        );
+        assert!(!r.ok, "{pointer}");
+        assert_eq!(
+            r.mutations[0].diagnostics[0].code.0, "FYN-E0012",
+            "{pointer}"
+        );
+    }
+    let r = editor.apply(
+        Request::new(vec![Command::UnsetDocumentField {
+            pointer: "/name".into(),
+        }]),
+        &s,
+    );
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0012");
+    let r = editor.apply(
+        Request::new(vec![Command::UnsetDocumentField {
+            pointer: "/nothing_here".into(),
+        }]),
+        &s,
+    );
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0012");
+    // Entity commands do not apply to a material.
+    let r = editor.apply(
+        Request::new(vec![Command::RenameObject {
+            id: u(ROOT),
+            name: "x".into(),
+        }]),
+        &s,
+    );
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0007");
+    // A value the material schema refuses rejects the transaction whole.
+    let before = text(&editor);
+    let r = editor.apply(
+        Request::new(vec![Command::SetDocumentField {
+            pointer: "/base_color".into(),
+            value: Node::from_serde(&json!("red")),
+        }]),
+        &s,
+    );
+    assert!(!r.ok);
+    assert_eq!(r.diagnostics[0].code.0, "FYN-E0005");
+    assert_eq!(text(&editor), before);
+    // The JSON form the ABI carries.
+    let r = editor.apply(
+        Request::from_json(
+            &json!([{ "command": "setDocumentField", "pointer": "/name", "value": "Rusty" }]),
+        )
+        .unwrap(),
+        &s,
+    );
+    assert!(r.ok, "{:#?}", r.all_diagnostics());
+    assert_eq!(
+        editor.document().root.get("name").and_then(Node::as_str),
+        Some("Rusty")
+    );
+}
+
+#[test]
+fn document_fields_on_scenes_leave_the_entity_tree_to_entity_commands() {
+    let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
+    let s = schemas();
+    apply(
+        &mut editor,
+        vec![Command::SetDocumentField {
+            pointer: "/name".into(),
+            value: Node::from_serde(&json!("Renamed scene")),
+        }],
+    );
+    assert_eq!(
+        editor.document().root.get("name").and_then(Node::as_str),
+        Some("Renamed scene")
+    );
+    for pointer in ["/entities", &format!("/entities/{ROOT}/name"), "/roots"] {
+        let r = editor.apply(
+            Request::new(vec![Command::SetDocumentField {
+                pointer: pointer.to_string(),
+                value: Node::from_serde(&json!({})),
+            }]),
+            &s,
+        );
+        assert_eq!(
+            r.mutations[0].diagnostics[0].code.0, "FYN-E0012",
+            "{pointer}"
+        );
+    }
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+}
+
+#[test]
+fn duplicate_object_copies_the_subtree_with_fresh_ids() {
+    let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
+    let copy_id = u("eeeeeeee-0000-4000-8000-000000000005");
+    // The whole root: two children come along, every id is new, references
+    // inside the copy point at the copy.
+    let r = apply(
+        &mut editor,
+        vec![Command::DuplicateObject {
+            id: u(ROOT),
+            new_id: Some(copy_id),
+            name: Some("Root (1)".into()),
+            index: None,
+        }],
+    );
+    let m = &r.mutations[0];
+    assert_eq!(m.affected_ids[0], copy_id);
+    let sc = scene(&editor);
+    assert_eq!(sc.entities.len(), 6);
+    let copy = sc.entity(copy_id).unwrap();
+    assert_eq!(copy.name, "Root (1)");
+    assert_eq!(copy.parent, None);
+    assert_eq!(copy.children.len(), 2);
+    for c in &copy.children {
+        let child = sc.entity(*c).unwrap();
+        assert_eq!(child.parent, Some(copy_id));
+        assert!(child.id != u(KID1) && child.id != u(KID2));
+        assert!(m.affected_ids.contains(c));
+    }
+    let names: Vec<&str> = copy
+        .children
+        .iter()
+        .map(|c| sc.entity(*c).unwrap().name.as_str())
+        .collect();
+    assert_eq!(names, ["Kid1", "Kid2"]);
+    // Component ids are fresh too, the data identical.
+    let copy_comp = copy
+        .components
+        .iter()
+        .find(|c| c.type_id == "fynkel.Transform")
+        .unwrap();
+    assert_ne!(copy_comp.id, u(TRANSFORM));
+    assert!(m.affected_ids.contains(&copy_comp.id));
+    assert_eq!(
+        editor
+            .document()
+            .root
+            .pointer(&format!(
+                "/entities/{copy_id}/components/{}/data/scale",
+                copy_comp.id
+            ))
+            .map(Node::to_serde),
+        editor
+            .document()
+            .root
+            .pointer(&format!(
+                "/entities/{ROOT}/components/{TRANSFORM}/data/scale"
+            ))
+            .map(Node::to_serde),
+    );
+    // The original is untouched and still named Root.
+    assert_eq!(sc.entity(u(ROOT)).unwrap().children, [u(KID1), u(KID2)]);
+    assert!(editor.validate(&schemas()).iter().all(|d| !d.is_error()));
+    // The copy has no spans; the canonical text still writes and re-reads.
+    let again = Document::parse(DocumentKind::Scene, None, &text(&editor)).unwrap();
+    assert_eq!(Scene::from_document(again).entities.len(), 6);
+
+    // A child: the copy lands right after the original in the parent's list.
+    let r = apply(
+        &mut editor,
+        vec![Command::DuplicateObject {
+            id: u(KID1),
+            new_id: None,
+            name: None,
+            index: None,
+        }],
+    );
+    let kid_copy = r.mutations[0].affected_ids[0];
+    let sc = scene(&editor);
+    assert_eq!(
+        sc.entity(u(ROOT)).unwrap().children,
+        [u(KID1), kid_copy, u(KID2)]
+    );
+    assert_eq!(sc.entity(kid_copy).unwrap().name, "Kid1");
+    assert!(r.mutations[0].affected_ids.contains(&u(ROOT)));
+    // An explicit index wins.
+    let r = apply(
+        &mut editor,
+        vec![Command::DuplicateObject {
+            id: u(KID2),
+            new_id: None,
+            name: Some("First".into()),
+            index: Some(0),
+        }],
+    );
+    let first = r.mutations[0].affected_ids[0];
+    assert_eq!(scene(&editor).entity(u(ROOT)).unwrap().children[0], first);
+    // A taken id is refused; nothing changes.
+    let before = text(&editor);
+    let r = editor.apply(
+        Request::new(vec![Command::DuplicateObject {
+            id: u(KID2),
+            new_id: Some(u(ROOT)),
+            name: None,
+            index: None,
+        }]),
+        &schemas(),
+    );
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0010");
+    assert_eq!(text(&editor), before);
+    let r = editor.apply(
+        Request::new(vec![Command::DuplicateObject {
+            id: u("99999999-0000-4000-8000-000000000009"),
+            new_id: None,
+            name: None,
+            index: None,
+        }]),
+        &schemas(),
+    );
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0002");
+    // Three undos: the original bytes.
+    editor.undo().unwrap();
+    editor.undo().unwrap();
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+}
+
+#[test]
+fn duplicate_object_in_prefabs_and_of_prefab_instances() {
+    // A prefab root: the copy joins `roots` after the original.
+    let (mut editor, original) = open("valid/turret.prefab.json");
+    let prefab = Prefab::from_document(editor.document().clone());
+    let root = prefab.roots[0];
+    let r = apply(
+        &mut editor,
+        vec![Command::DuplicateObject {
+            id: root,
+            new_id: None,
+            name: None,
+            index: None,
+        }],
+    );
+    let copy = r.mutations[0].affected_ids[0];
+    let after = Prefab::from_document(editor.document().clone());
+    assert_eq!(after.roots[0], root);
+    assert_eq!(after.roots[1], copy);
+    assert_eq!(after.entities.len(), prefab.entities.len() * 2);
+    assert!(
+        editor.validate(&schemas()).iter().all(|d| !d.is_error()),
+        "{:#?}",
+        editor.validate(&schemas())
+    );
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+
+    // A prefab instance: a fresh instance id, the overrides kept (they
+    // address prefab-local ids), the expansion still valid.
+    let (mut editor, original) = open("prefab/instances_ok.scene.json");
+    let sc = scene(&editor);
+    let a = sc.entities.iter().find(|e| e.name == "Turret A").unwrap();
+    let a_instance = a.prefab.as_ref().unwrap().instance;
+    let a_overrides = editor
+        .document()
+        .root
+        .pointer(&format!("/entities/{}/prefab/overrides", a.id))
+        .map(Node::to_serde)
+        .unwrap();
+    let r = apply(
+        &mut editor,
+        vec![Command::DuplicateObject {
+            id: a.id,
+            new_id: None,
+            name: Some("Turret C".into()),
+            index: None,
+        }],
+    );
+    let copy = r.mutations[0].affected_ids[0];
+    let sc = scene(&editor);
+    let c = sc.entity(copy).unwrap();
+    let c_instance = c.prefab.as_ref().unwrap().instance;
+    assert_ne!(c_instance, a_instance);
+    assert!(r.mutations[0].affected_ids.contains(&c_instance));
+    assert_eq!(
+        editor
+            .document()
+            .root
+            .pointer(&format!("/entities/{copy}/prefab/overrides"))
+            .map(Node::to_serde)
+            .unwrap(),
+        a_overrides
+    );
+    assert!(
+        editor.validate(&schemas()).iter().all(|d| !d.is_error()),
+        "{:#?}",
+        editor.validate(&schemas())
+    );
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+}
+
+/// D7 (blueprint §19.2c, closed by M4-01): validation anchors one
+/// diagnostic per entity through a `Locator`, so a document with
+/// thousands of diagnostics costs O(n), not O(n²). 16 000 entities with
+/// 8 000 unknown-component warnings took 726 ms at the M2 gate.
+#[test]
+fn large_documents_with_many_diagnostics_validate_in_linear_time() {
+    fn synthetic(n: usize) -> String {
+        let mut s = String::with_capacity(n * 400);
+        s.push_str("{\n  \"$schema\": \"https://fynkel.dev/schemas/scene.schema.json\",\n  \"formatVersion\": 2,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"Big\",\n  \"entities\": {\n");
+        for i in 0..n {
+            let id = format!("aaaaaaaa-0000-4000-8000-{:012x}", i + 1);
+            let comp = format!("11111111-0000-4000-8000-{:012x}", i + 1);
+            let ty = if i % 2 == 0 {
+                "fynkel.Transform"
+            } else {
+                "game.Unknown"
+            };
+            let data = if i % 2 == 0 {
+                "{ \"position\": [0, 0, 0], \"rotation\": [0, 0, 0, 1], \"scale\": [1, 1, 1] }"
+            } else {
+                "{ \"x\": 1 }"
+            };
+            s.push_str(&format!(
+                "    \"{id}\": {{ \"name\": \"E{i}\", \"parent\": null, \"children\": [], \"components\": {{ \"{comp}\": {{ \"type\": \"{ty}\", \"version\": 1, \"data\": {data} }} }} }}{}\n",
+                if i + 1 < n { "," } else { "" }
+            ));
+        }
+        s.push_str("  }\n}\n");
+        s
+    }
+    let s = schemas();
+    let time = |n: usize| {
+        let text = synthetic(n);
+        let start = std::time::Instant::now();
+        let doc = Document::parse(DocumentKind::Scene, None, &text).unwrap();
+        let read = start.elapsed();
+        let start = std::time::Instant::now();
+        let diags = Scene::from_document(doc).validate(&s);
+        let validate = start.elapsed();
+        let warnings = diags.iter().filter(|d| d.code.0 == "FYN-D0205").count();
+        assert_eq!(warnings, n / 2);
+        assert!(
+            diags.iter().all(|d| d.line.is_some()),
+            "every warning is anchored"
+        );
+        (read, validate)
+    };
+    // The best of three: the first run pays for page faults and the
+    // allocator's growth, which is not what the bound is about.
+    let best = |n: usize| {
+        (0..3)
+            .map(|_| time(n))
+            .min_by_key(|(r, v)| *r + *v)
+            .unwrap()
+    };
+    let (read_small, validate_small) = best(4_000);
+    let (read, validate) = best(16_000);
+    eprintln!(
+        "16 000 entities / 8 000 warnings: read {read:?}, validate {validate:?} (4 000: read {read_small:?}, validate {validate_small:?})"
+    );
+    // Linear: 4× the entities cost at most ~6× (allocator noise), not 16×.
+    assert!(
+        validate < validate_small * 6,
+        "validate {validate:?} vs {validate_small:?}"
+    );
+    assert!(read < read_small * 6, "read {read:?} vs {read_small:?}");
+    if !cfg!(debug_assertions) {
+        assert!(
+            read + validate < std::time::Duration::from_millis(100),
+            "{:?}",
+            read + validate
+        );
+    }
+
+    // apply + validate on a 10 000-entity scene stays linear as well.
+    let apply_time = |n: usize| {
+        let doc = Document::parse(DocumentKind::Scene, None, &synthetic(n)).unwrap();
+        let mut editor = Editor::open(doc, &s).unwrap();
+        let start = std::time::Instant::now();
+        let r = editor.apply(
+            Request::new(vec![Command::RenameObject {
+                id: u(&format!("aaaaaaaa-0000-4000-8000-{:012x}", n)),
+                name: "Last".into(),
+            }]),
+            &s,
+        );
+        assert!(r.ok, "{:#?}", r.all_diagnostics());
+        start.elapsed()
+    };
+    let small = apply_time(2_500);
+    let big = apply_time(10_000);
+    eprintln!("apply+validate: 10 000 entities {big:?} (2 500: {small:?})");
+    assert!(big < small * 6, "apply {big:?} vs {small:?}");
 }
 
 fn tempdir() -> PathBuf {

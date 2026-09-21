@@ -30,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Severity};
 use uuid::Uuid;
 
-use crate::json::{Node, Value};
+use crate::json::{Locator, Node, Value};
 use crate::schema::SchemaSet;
 use crate::{parse_uuid, Document, DocumentKind};
 
@@ -221,7 +221,8 @@ impl Scene {
         out.extend(self.read_diagnostics.iter().cloned());
         // The scene schema already binds `data` of built-in types to their
         // component schemas; do not say the same thing twice.
-        let schema_pointers: Vec<String> = out.iter().filter_map(|d| d.pointer.clone()).collect();
+        let schema_pointers: HashSet<String> =
+            out.iter().filter_map(|d| d.pointer.clone()).collect();
         for mut d in self.validate_semantics(schemas) {
             if d.code == Code::SCENE_COMPONENT_DATA
                 && d.pointer
@@ -240,8 +241,9 @@ impl Scene {
 
     /// The semantic rules only (no schema pass).
     pub fn validate_semantics(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
-        let root = &self.document.root;
-        let mut out = validate_entities(root, &self.entities, &|id| self.entity(id), schemas);
+        let at = Locator::new(&self.document.root);
+        let root = &at;
+        let mut out = validate_entities(&at, &self.entities, &|id| self.entity(id), schemas);
         // Instance ids must be unique: derived ids would collide otherwise.
         let mut seen: HashMap<Uuid, &Entity> = HashMap::new();
         for e in self.entities.iter().filter(|e| e.prefab.is_some()) {
@@ -273,22 +275,20 @@ impl Scene {
     }
 }
 
-fn anchor(root: &Node, d: Diagnostic, pointer: &str) -> Diagnostic {
-    let d = d.with_pointer(pointer);
-    match root.pointer_span(pointer) {
-        Some(s) => d.at(s.start.line, s.start.column),
-        None => d,
-    }
+/// Pointer + line/column through a [`Locator`] (one per pass: a lookup per
+/// diagnostic on a 16 000-entity scene must not scan 16 000 keys each).
+fn anchor(at: &Locator<'_>, d: Diagnostic, pointer: &str) -> Diagnostic {
+    at.anchor(d, pointer)
 }
 
 /// The hierarchy and component rules shared by scenes and prefabs.
 pub(crate) fn validate_entities<'a>(
-    root: &Node,
+    at: &Locator<'_>,
     entities: &'a [Entity],
     lookup: &dyn Fn(Uuid) -> Option<&'a Entity>,
     schemas: &SchemaSet,
 ) -> Vec<Diagnostic> {
-    let anchor = |d: Diagnostic, pointer: &str| anchor(root, d, pointer);
+    let anchor = |d: Diagnostic, pointer: &str| anchor(at, d, pointer);
     let mut out = Vec::new();
 
     // Parent/child references and agreement.
@@ -640,7 +640,8 @@ pub(crate) fn read_entities(
 ) -> (Vec<Entity>, HashMap<Uuid, usize>) {
     let mut entities = Vec::new();
     let mut index = HashMap::new();
-    let anchor = |d: Diagnostic, pointer: &str| anchor(root, d, pointer);
+    let at = Locator::new(root);
+    let anchor = |d: Diagnostic, pointer: &str| anchor(&at, d, pointer);
     match root.get("entities").map(|n| &n.value) {
         Some(Value::Object(members)) => {
             for m in members {

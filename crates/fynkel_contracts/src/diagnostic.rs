@@ -2,8 +2,10 @@
 //! assets, projects and codegen so the `--json` CLI, the editor and agents
 //! read the same thing. Codes are stable strings in five namespaces:
 //! `FYN-D####` documents, `FYN-A####` assets, `FYN-P####` project,
-//! `FYN-E####` editing (authoring commands), `FYN-G####` codegen. Append
-//! only; never renumber.
+//! `FYN-E####` editing (authoring commands), `FYN-G####` codegen, and
+//! later `FYN-R` (runtime loading), `FYN-I` (input), `FYN-S` (schema),
+//! `FYN-H` (physics/components), `FYN-T` (the authoring session and its
+//! ABI). Append only; never renumber.
 
 /// A stable diagnostic code such as `FYN-D0002`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -215,6 +217,28 @@ impl Code {
     pub const EDIT_DUPLICATE_ID: Code = Code("FYN-E0010");
     /// A save or file creation failed.
     pub const EDIT_IO: Code = Code("FYN-E0011");
+    /// A document-level pointer a command may not touch (the envelope's
+    /// `kind`/`formatVersion`/`id`) or that does not resolve.
+    pub const EDIT_INVALID_POINTER: Code = Code("FYN-E0012");
+
+    // Authoring session and ABI (`FYN-T`, blueprint §19.2e item 1): the
+    // editor's stateful service over the commands above. Never document
+    // content — those stay `FYN-D`/`FYN-E`.
+    /// No project is open in the session, or the project could not be
+    /// opened (the `FYN-P` reasons are `related`).
+    pub const SESSION_NO_PROJECT: Code = Code("FYN-T0001");
+    /// A document handle the session does not have (closed, or never opened).
+    pub const SESSION_UNKNOWN_DOCUMENT: Code = Code("FYN-T0002");
+    /// A request to the session is malformed (not UTF-8, not JSON, an
+    /// argument of the wrong shape).
+    pub const SESSION_INVALID_REQUEST: Code = Code("FYN-T0003");
+    /// A query kind the session does not know.
+    pub const SESSION_UNKNOWN_QUERY: Code = Code("FYN-T0004");
+    /// A call panicked; the session is poisoned and must be destroyed.
+    pub const SESSION_PANIC: Code = Code("FYN-T0005");
+    /// A document could not be read or written by the session (the path
+    /// does not exist, is not a document, or the file system refused).
+    pub const SESSION_IO: Code = Code("FYN-T0006");
 
     // Runtime loading and residency (`FYN-R`, blueprint §19.2d item 3): a
     // host reads the cooked cache only, and every miss is an error that

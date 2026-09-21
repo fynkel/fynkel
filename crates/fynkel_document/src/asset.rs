@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use uuid::Uuid;
 
-use crate::json::{Member, Node};
+use crate::json::{Locator, Member, Node};
 use crate::{Document, DocumentKind, SchemaSet};
 
 /// Importer for files no specialised importer claims: copied verbatim.
@@ -568,12 +568,13 @@ impl AssetDatabase {
         let mut refs = Vec::new();
         collect_refs(&doc.root, String::new(), &mut refs);
         let mut out = Vec::new();
+        let at = Locator::new(&doc.root);
         for (pointer, r) in refs {
             if r.is_nil() {
                 continue;
             }
             if let Err(d) = self.resolve(&r) {
-                let d = anchor(&doc.root, d, &pointer);
+                let d = at.anchor(d, &pointer);
                 out.push(match &doc.path {
                     Some(p) => d.with_document(p.clone()),
                     None => d,

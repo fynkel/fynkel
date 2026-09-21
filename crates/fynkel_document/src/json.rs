@@ -12,6 +12,9 @@
 //! BOM, non-object roots, nesting deeper than [`MAX_DEPTH`], integers beyond
 //! 2^53 (they would not survive a Dart `double` or a JS reader).
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use fynkel_contracts::{Code, Diagnostic};
 
 /// Maximum nesting (§7 import limits apply to documents too).
@@ -236,7 +239,108 @@ impl Node {
             _ => self.pointer(pointer).map(|n| n.span),
         }
     }
+}
 
+/// Objects with at least this many members get a key index the first time
+/// a [`Locator`] crosses them; smaller ones are scanned (cheaper than
+/// hashing).
+const INDEX_FROM: usize = 16;
+
+/// Repeated RFC 6901 lookups on one tree at O(depth) each (M4-01, D7).
+///
+/// [`Node::pointer`] scans an object's members linearly, so a pass that
+/// anchors one diagnostic per entity of a 16 000-entity scene pays
+/// O(entities) per lookup and O(entities²) overall. A `Locator` borrows the
+/// tree (so it cannot change underneath) and, on first contact with a
+/// large object, builds a key → index map for it; every later lookup
+/// through that object is a hash probe. Build one per validation pass and
+/// route every `pointer`/`pointer_span` of the pass through it.
+pub struct Locator<'a> {
+    root: &'a Node,
+    /// Keyed by the object's address: the borrow keeps every node in place.
+    indexes: RefCell<HashMap<*const Node, HashMap<String, usize>>>,
+}
+
+impl<'a> Locator<'a> {
+    pub fn new(root: &'a Node) -> Locator<'a> {
+        Locator {
+            root,
+            indexes: RefCell::new(HashMap::new()),
+        }
+    }
+
+    pub fn root(&self) -> &'a Node {
+        self.root
+    }
+
+    /// [`Node::pointer`] through the index.
+    pub fn pointer(&self, pointer: &str) -> Option<&'a Node> {
+        if pointer.is_empty() {
+            return Some(self.root);
+        }
+        let mut cur = self.root;
+        for raw in pointer.strip_prefix('/')?.split('/') {
+            let token = raw.replace("~1", "/").replace("~0", "~");
+            cur = match &cur.value {
+                Value::Object(members) => &members[self.member(cur, members, &token)?].value,
+                Value::Array(items) => {
+                    if token != "0" && token.starts_with('0') {
+                        return None;
+                    }
+                    items.get(token.parse::<usize>().ok()?)?
+                }
+                _ => return None,
+            };
+        }
+        Some(cur)
+    }
+
+    /// [`Node::pointer_span`] through the index.
+    pub fn pointer_span(&self, pointer: &str) -> Option<Span> {
+        if pointer.is_empty() {
+            return Some(self.root.span);
+        }
+        let (parent, last) = pointer.rsplit_once('/')?;
+        let parent = self.pointer(parent)?;
+        let token = last.replace("~1", "/").replace("~0", "~");
+        match &parent.value {
+            Value::Object(members) => self
+                .member(parent, members, &token)
+                .map(|i| members[i].key_span),
+            _ => self.pointer(pointer).map(|n| n.span),
+        }
+    }
+
+    /// The diagnostic with `pointer` and, when the tree has it, its
+    /// line/column — the anchor every validation pass uses.
+    pub fn anchor(&self, d: Diagnostic, pointer: &str) -> Diagnostic {
+        let d = d.with_pointer(pointer);
+        match self.pointer_span(pointer) {
+            Some(s) => d.at(s.start.line, s.start.column),
+            None => d,
+        }
+    }
+
+    fn member(&self, object: &Node, members: &[Member], key: &str) -> Option<usize> {
+        if members.len() < INDEX_FROM {
+            return members.iter().position(|m| m.key == key);
+        }
+        let mut indexes = self.indexes.borrow_mut();
+        let index = indexes.entry(object as *const Node).or_insert_with(|| {
+            // Strict parsing rejects duplicate keys; a synthetic tree with
+            // one keeps the first, as the linear scan does.
+            let mut map = HashMap::with_capacity(members.len());
+            for (i, m) in members.iter().enumerate() {
+                map.entry(m.key.clone()).or_insert(i);
+            }
+            map
+        });
+        index.get(key).copied()
+    }
+}
+
+/// The `serde_json` bridge.
+impl Node {
     /// Bridge to `serde_json` (for JSON Schema validation). Integral
     /// lexemes become integers so `"type": "integer"` holds.
     pub fn to_serde(&self) -> serde_json::Value {
@@ -456,6 +560,9 @@ impl Parser<'_> {
         self.enter()?;
         self.bump(); // {
         let mut members: Vec<Member> = Vec::new();
+        // Duplicate keys: a scan while the object is small, a set once it
+        // grows (an entity map with 16 000 members must not cost O(n²)).
+        let mut keys: Option<std::collections::HashSet<String>> = None;
         self.ws();
         if self.peek() == Some(b'}') {
             self.bump();
@@ -473,7 +580,14 @@ impl Parser<'_> {
                 start: key_start,
                 end: self.pos(),
             };
-            if members.iter().any(|m| m.key == key) {
+            if keys.is_none() && members.len() >= INDEX_FROM {
+                keys = Some(members.iter().map(|m| m.key.clone()).collect());
+            }
+            let duplicate = match &mut keys {
+                Some(set) => !set.insert(key.clone()),
+                None => members.iter().any(|m| m.key == key),
+            };
+            if duplicate {
                 return Err(Diagnostic::error(
                     Code::DUPLICATE_KEY,
                     format!("duplicate key {key:?}"),

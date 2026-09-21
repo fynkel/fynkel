@@ -2,7 +2,7 @@
 //! item 14): the one implementation of document mutation the editor, the
 //! CLI and agents share.
 //!
-//! An [`Editor`] holds one scene or prefab document. A [`Request`] — a
+//! An [`Editor`] holds one scene, prefab or material document. A [`Request`] — a
 //! transaction of [`Command`]s against a **base revision** — is applied
 //! atomically: every command compiles to primitive [`Edit`]s on the JSON
 //! tree (each recording its exact inverse), the result is validated, and a
@@ -149,6 +149,32 @@ pub enum Command {
         entity: Uuid,
         index: Option<usize>,
     },
+    /// Copies an entity and its subtree next to the original (M4-01):
+    /// fresh entity, component and prefab-instance ids, every reference
+    /// to a copied id inside the copy remapped, the copy named `name` (or
+    /// the original's name) and placed at `index` of the same parent (or
+    /// right after the original). The first affected id is the copy's
+    /// root; `id` picks it when given.
+    DuplicateObject {
+        id: Uuid,
+        new_id: Option<Uuid>,
+        name: Option<String>,
+        index: Option<usize>,
+    },
+    /// Sets the node at a document-level JSON pointer (a material's
+    /// `/base_color`, a scene's `/settings/...`; M4-01). An existing node
+    /// is replaced, a missing last token is inserted as a member of its
+    /// object parent or appended to its array parent. The envelope's
+    /// `kind`, `formatVersion` and `id`, and the entity tree, are refused
+    /// (`FYN-E0012`): entities have their own commands.
+    SetDocumentField {
+        pointer: String,
+        value: Node,
+    },
+    /// Removes the node at a document-level JSON pointer (same rules).
+    UnsetDocumentField {
+        pointer: String,
+    },
     /// Writes a new material document to `path` (refuses to overwrite).
     CreateMaterial {
         id: Option<Uuid>,
@@ -177,6 +203,9 @@ impl Command {
             Command::InstantiatePrefab { .. } => "instantiatePrefab",
             Command::SetPrefabOverride { .. } => "setPrefabOverride",
             Command::RevertPrefabOverride { .. } => "revertPrefabOverride",
+            Command::DuplicateObject { .. } => "duplicateObject",
+            Command::SetDocumentField { .. } => "setDocumentField",
+            Command::UnsetDocumentField { .. } => "unsetDocumentField",
             Command::CreateMaterial { .. } => "createMaterial",
             Command::SaveDocument { .. } => "saveDocument",
         }
@@ -317,6 +346,22 @@ impl Command {
                 entity: uuid("entity")?,
                 index: index()?,
             },
+            "duplicateObject" => Command::DuplicateObject {
+                id: uuid("id")?,
+                new_id: opt_uuid("newId")?,
+                name: opt_string("name"),
+                index: index()?,
+            },
+            "setDocumentField" => Command::SetDocumentField {
+                pointer: string("pointer")?,
+                value: Node::from_serde(
+                    v.get("value")
+                        .ok_or_else(|| invalid(format!("{name}: \"value\" is required")))?,
+                ),
+            },
+            "unsetDocumentField" => Command::UnsetDocumentField {
+                pointer: string("pointer")?,
+            },
             "createMaterial" => Command::CreateMaterial {
                 id: opt_uuid("id")?,
                 name: string("name")?,
@@ -394,6 +439,18 @@ impl Command {
             Command::RevertPrefabOverride { entity, index } => {
                 json!({ "entity": entity.to_string(), "index": index })
             }
+            Command::DuplicateObject {
+                id,
+                new_id,
+                name,
+                index,
+            } => {
+                json!({ "id": id.to_string(), "newId": id_or_null(new_id), "name": name, "index": index })
+            }
+            Command::SetDocumentField { pointer, value } => {
+                json!({ "pointer": pointer, "value": value.to_serde() })
+            }
+            Command::UnsetDocumentField { pointer } => json!({ "pointer": pointer }),
             Command::CreateMaterial {
                 id,
                 name,
@@ -871,11 +928,15 @@ impl Request {
 
 // ------------------------------------------------------------------ editor
 
-/// One open scene or prefab document with its revision and history.
+/// One open scene, prefab or material document with its revision and
+/// history.
 #[derive(Clone, Debug)]
 pub struct Editor {
     document: Document,
     revision: Revision,
+    /// The shaders a material document may name (built-ins unless the
+    /// caller added the project's manifests with [`Editor::with_shaders`]).
+    shaders: ShaderLibrary,
     /// Errors the document had when opened (tolerated: a transaction is
     /// rejected only for errors it introduces).
     baseline: HashSet<ErrorKey>,
@@ -896,11 +957,22 @@ fn error_keys(diags: &[Diagnostic]) -> HashSet<ErrorKey> {
 }
 
 impl Editor {
-    /// Opens a scene or prefab document. Read-only (newer) and outdated
-    /// documents and other kinds are refused (`FYN-E0007`); the document's
-    /// current errors, if any, are returned as warnings-to-know and
-    /// tolerated afterwards.
+    /// Opens a scene, prefab or material document. Read-only (newer) and
+    /// outdated documents and other kinds are refused (`FYN-E0007`); the
+    /// document's current errors, if any, are tolerated afterwards (a
+    /// transaction is rejected only for errors it introduces). Materials
+    /// are validated against the built-in shaders until
+    /// [`Editor::with_shaders`] adds a project's manifests.
     pub fn open(document: Document, schemas: &SchemaSet) -> Result<Editor, Vec<Diagnostic>> {
+        Editor::open_with(document, schemas, ShaderLibrary::builtin())
+    }
+
+    /// [`Editor::open`] with the shaders a material may name.
+    pub fn open_with(
+        document: Document,
+        schemas: &SchemaSet,
+        shaders: ShaderLibrary,
+    ) -> Result<Editor, Vec<Diagnostic>> {
         let not_editable = |msg: String| {
             let mut d = Diagnostic::error(Code::EDIT_NOT_EDITABLE, msg);
             if let Some(p) = &document.path {
@@ -908,9 +980,12 @@ impl Editor {
             }
             vec![d]
         };
-        if !matches!(document.kind, DocumentKind::Scene | DocumentKind::Prefab) {
+        if !matches!(
+            document.kind,
+            DocumentKind::Scene | DocumentKind::Prefab | DocumentKind::Material
+        ) {
             return Err(not_editable(format!(
-                "{} documents have no entities to edit",
+                "{} documents are not edited by commands (scenes, prefabs and materials are)",
                 document.kind.name()
             )));
         }
@@ -929,15 +1004,24 @@ impl Editor {
             )));
         }
         let revision = Revision::of(&document).map_err(|d| vec![d])?;
-        let baseline = error_keys(&validate(&document, schemas));
+        let baseline = error_keys(&validate(&document, schemas, &shaders));
         Ok(Editor {
             document,
             saved_revision: revision.clone(),
             revision,
+            shaders,
             baseline,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         })
+    }
+
+    /// Replaces the shaders a material document is validated against
+    /// (the baseline of tolerated errors is recomputed).
+    pub fn with_shaders(mut self, shaders: ShaderLibrary, schemas: &SchemaSet) -> Editor {
+        self.shaders = shaders;
+        self.baseline = error_keys(&validate(&self.document, schemas, &self.shaders));
+        self
     }
 
     pub fn document(&self) -> &Document {
@@ -969,14 +1053,15 @@ impl Editor {
         !self.redo_stack.is_empty()
     }
 
-    /// A fresh typed view (scene documents; a prefab reads as a scene too).
+    /// A fresh typed view (scene documents; a prefab reads as a scene too;
+    /// a material has no entities and reads as an empty scene).
     pub fn scene(&self) -> Scene {
         Scene::from_document(self.document.clone())
     }
 
     /// The document's validation now (baseline errors included).
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
-        validate(&self.document, schemas)
+        validate(&self.document, schemas, &self.shaders)
     }
 
     /// Applies one transaction atomically. See the module docs.
@@ -1064,7 +1149,7 @@ impl Editor {
         }
 
         // Validation: errors this transaction introduces reject it whole.
-        let diags = validate(&self.document, schemas);
+        let diags = validate(&self.document, schemas, &self.shaders);
         let new_errors: Vec<Diagnostic> = diags
             .iter()
             .filter(|d| d.is_error())
@@ -1181,9 +1266,12 @@ fn short(r: &Revision) -> String {
     r.as_str()[..12].to_string()
 }
 
-fn validate(document: &Document, schemas: &SchemaSet) -> Vec<Diagnostic> {
+fn validate(document: &Document, schemas: &SchemaSet, shaders: &ShaderLibrary) -> Vec<Diagnostic> {
     match document.kind {
         DocumentKind::Prefab => Prefab::from_document(document.clone()).validate(schemas),
+        DocumentKind::Material => {
+            Material::from_document(document.clone()).validate(schemas, shaders)
+        }
         _ => Scene::from_document(document.clone()).validate(schemas),
     }
 }
@@ -1262,6 +1350,22 @@ struct Cx<'a> {
 impl Cx<'_> {
     fn run(&mut self, command: &Command) -> Result<Planned, Diagnostic> {
         let effect = None;
+        let entity_command = !matches!(
+            command,
+            Command::SetDocumentField { .. }
+                | Command::UnsetDocumentField { .. }
+                | Command::CreateMaterial { .. }
+                | Command::SaveDocument { .. }
+        );
+        if entity_command && self.kind == DocumentKind::Material {
+            return Err(Diagnostic::error(
+                Code::EDIT_NOT_EDITABLE,
+                format!(
+                    "{}: material documents have no entities; use setDocumentField",
+                    command.name()
+                ),
+            ));
+        }
         let affected = match command {
             Command::CreateObject {
                 id,
@@ -1406,6 +1510,20 @@ impl Cx<'_> {
                     }
                 }
                 vec![*entity]
+            }
+            Command::DuplicateObject {
+                id,
+                new_id,
+                name,
+                index,
+            } => self.duplicate(*id, *new_id, name.as_deref(), *index)?,
+            Command::SetDocumentField { pointer, value } => {
+                self.set_document_field(pointer, value.clone())?;
+                Vec::new()
+            }
+            Command::UnsetDocumentField { pointer } => {
+                self.unset_document_field(pointer)?;
+                Vec::new()
             }
             Command::CreateMaterial {
                 id,
@@ -1865,6 +1983,236 @@ impl Cx<'_> {
         Ok(affected)
     }
 
+    // ---- document-level fields (M4-01)
+
+    /// A document pointer a command may change: not the envelope's
+    /// identity, not the entity tree (which has its own commands), and
+    /// with a parent that exists.
+    fn document_pointer(&self, pointer: &str, what: &str) -> Result<(String, String), Diagnostic> {
+        let refuse = |why: &str| {
+            Err(Diagnostic::error(
+                Code::EDIT_INVALID_POINTER,
+                format!("{what}: {pointer:?} {why}"),
+            )
+            .with_pointer(pointer.to_string()))
+        };
+        if pointer.is_empty() || !pointer.starts_with('/') {
+            return refuse("is not a JSON pointer to a member of the document");
+        }
+        let (parent, key) = split_pointer(pointer);
+        let first = pointer[1..].split('/').next().unwrap_or("");
+        if parent.is_empty() && matches!(first, "$schema" | "kind" | "formatVersion" | "id") {
+            return refuse("is the document's identity; migrations own it");
+        }
+        if matches!(first, "entities" | "roots") && self.kind != DocumentKind::Material {
+            return refuse("is the entity tree; use the entity commands");
+        }
+        if self.root.pointer(&parent).is_none() {
+            return refuse("has no parent node");
+        }
+        Ok((parent, key))
+    }
+
+    fn set_document_field(&mut self, pointer: &str, value: Node) -> Result<(), Diagnostic> {
+        let (parent, key) = self.document_pointer(pointer, "setDocumentField")?;
+        if self.root.pointer(pointer).is_some() {
+            self.edits.push(Edit::Replace {
+                pointer: pointer.to_string(),
+                value,
+            });
+            return Ok(());
+        }
+        match self.root.pointer(&parent).map(|n| &n.value) {
+            Some(Value::Object(_)) => self.edits.push(Edit::InsertMember {
+                parent,
+                index: usize::MAX,
+                key,
+                value,
+            }),
+            Some(Value::Array(items)) if key.parse::<usize>().ok() == Some(items.len()) => {
+                self.edits.push(Edit::InsertItem {
+                    parent,
+                    index: items.len(),
+                    value,
+                })
+            }
+            _ => {
+                return Err(Diagnostic::error(
+                    Code::EDIT_INVALID_POINTER,
+                    format!(
+                        "setDocumentField: cannot set {pointer:?}: {parent:?} is not an object or an array end"
+                    ),
+                )
+                .with_pointer(pointer.to_string()))
+            }
+        }
+        Ok(())
+    }
+
+    fn unset_document_field(&mut self, pointer: &str) -> Result<(), Diagnostic> {
+        let (parent, key) = self.document_pointer(pointer, "unsetDocumentField")?;
+        if self.root.pointer(pointer).is_none() {
+            return Err(Diagnostic::error(
+                Code::EDIT_INVALID_POINTER,
+                format!("unsetDocumentField: {pointer:?} is not set"),
+            )
+            .with_pointer(pointer.to_string()));
+        }
+        if parent.is_empty() && key == "name" {
+            return Err(Diagnostic::error(
+                Code::EDIT_INVALID_POINTER,
+                "unsetDocumentField: every document has a name; set it instead",
+            )
+            .with_pointer(pointer.to_string()));
+        }
+        match self.root.pointer(&parent).map(|n| &n.value) {
+            Some(Value::Object(_)) => self.edits.push(Edit::RemoveMember { parent, key }),
+            Some(Value::Array(_)) => self.edits.push(Edit::RemoveItem {
+                parent,
+                index: key.parse().unwrap_or(usize::MAX),
+            }),
+            _ => unreachable!("target exists under a container"),
+        }
+        Ok(())
+    }
+
+    // ---- duplication (M4-01)
+
+    /// Copies `id`'s subtree with fresh ids. The subtree is gathered like
+    /// `delete_object`'s (children whose parent agrees); every entity,
+    /// component and prefab-instance id in it gets a new UUID and every
+    /// string equal to a remapped id inside the copy follows, so
+    /// references between copied entities stay internal to the copy.
+    fn duplicate(
+        &mut self,
+        id: Uuid,
+        new_id: Option<Uuid>,
+        name: Option<&str>,
+        index: Option<usize>,
+    ) -> Result<Vec<Uuid>, Diagnostic> {
+        self.entity_pointer(id)?;
+        let mut order = Vec::new();
+        let mut seen = HashSet::new();
+        let mut stack = vec![id];
+        while let Some(e) = stack.pop() {
+            if !seen.insert(e) {
+                continue;
+            }
+            order.push(e);
+            for c in self.children_of(e) {
+                if self.parent_of(c) == Some(e)
+                    && self.root.pointer(&format!("/entities/{c}")).is_some()
+                {
+                    stack.push(c);
+                }
+            }
+        }
+        // Old id → new id for entities, components and instances.
+        let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let root_copy = new_id.unwrap_or_else(Uuid::new_v4);
+        if self
+            .root
+            .pointer(&format!("/entities/{root_copy}"))
+            .is_some()
+        {
+            return Err(Diagnostic::error(
+                Code::EDIT_DUPLICATE_ID,
+                format!("duplicateObject: entity {root_copy} already exists"),
+            )
+            .with_pointer("/entities")
+            .with_id(root_copy.to_string()));
+        }
+        map.insert(id.to_string(), root_copy.to_string());
+        for e in &order[1..] {
+            map.insert(e.to_string(), Uuid::new_v4().to_string());
+        }
+        for e in &order {
+            let node = self
+                .root
+                .pointer(&format!("/entities/{e}"))
+                .expect("gathered");
+            if let Some(components) = node.get("components").and_then(Node::as_object) {
+                for m in components {
+                    map.entry(m.key.clone())
+                        .or_insert_with(|| Uuid::new_v4().to_string());
+                }
+            }
+            if let Some(inst) = node.pointer("/prefab/instance").and_then(Node::as_str) {
+                map.entry(inst.to_string())
+                    .or_insert_with(|| Uuid::new_v4().to_string());
+            }
+        }
+        let mut affected = Vec::with_capacity(order.len() * 2);
+        let mut copies = Vec::with_capacity(order.len());
+        for (i, e) in order.iter().enumerate() {
+            let node = self
+                .root
+                .pointer(&format!("/entities/{e}"))
+                .expect("gathered");
+            let mut copy = remap(node, &map);
+            if i == 0 {
+                if let Some(n) = name {
+                    copy.set("name", Node::string(n));
+                }
+                // The root copy keeps the original's parent (already not
+                // in the map) and is listed by `attach` below.
+            }
+            let new_key = map[&e.to_string()].clone();
+            affected.push(parse_uuid(&new_key).expect("fresh uuid"));
+            if let Some(components) = copy.get("components").and_then(Node::as_object) {
+                for m in components {
+                    if let Ok(c) = parse_uuid(&m.key) {
+                        affected.push(c);
+                    }
+                }
+            }
+            if let Some(inst) = copy
+                .pointer("/prefab/instance")
+                .and_then(Node::as_str)
+                .and_then(|s| parse_uuid(s).ok())
+            {
+                affected.push(inst);
+            }
+            copies.push((new_key, copy));
+        }
+        for (key, copy) in copies {
+            self.edits.push(Edit::InsertMember {
+                parent: "/entities".into(),
+                index: usize::MAX,
+                key,
+                value: copy,
+            });
+        }
+        // Next to the original in its parent's list (or the roots).
+        let parent = self.parent_of(id);
+        let parent_pointer = parent.map(|p| format!("/entities/{p}"));
+        let list = match parent {
+            Some(p) => Some(format!("/entities/{p}/children")),
+            None if self.kind == DocumentKind::Prefab => Some("/roots".to_string()),
+            None => None,
+        };
+        let after_original = list.and_then(|l| {
+            self.root
+                .pointer(&l)
+                .and_then(Node::as_array)
+                .and_then(|items| {
+                    items
+                        .iter()
+                        .position(|n| n.as_str() == Some(&id.to_string()))
+                })
+                .map(|i| i + 1)
+        });
+        self.attach(
+            root_copy,
+            parent_pointer.as_deref(),
+            index.or(after_original),
+        );
+        if let Some(p) = parent {
+            affected.push(p);
+        }
+        Ok(affected)
+    }
+
     fn set_override(&mut self, entity: Uuid, op: &Node) -> Result<Vec<Uuid>, Diagnostic> {
         let list = self.overrides_pointer(entity)?;
         // The op must read as one of the prefab model's ops.
@@ -1911,6 +2259,27 @@ impl Cx<'_> {
         }
         Ok(vec![entity, parsed.entity()])
     }
+}
+
+/// A deep copy of `node` with every object key and string value that is a
+/// remapped id replaced (spans dropped: the copy is new text).
+fn remap(node: &Node, map: &std::collections::HashMap<String, String>) -> Node {
+    let value = match &node.value {
+        Value::String(s) => Value::String(map.get(s).cloned().unwrap_or_else(|| s.clone())),
+        Value::Array(items) => Value::Array(items.iter().map(|n| remap(n, map)).collect()),
+        Value::Object(members) => Value::Object(
+            members
+                .iter()
+                .map(|m| Member {
+                    key: map.get(&m.key).cloned().unwrap_or_else(|| m.key.clone()),
+                    key_span: Span::default(),
+                    value: remap(&m.value, map),
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    };
+    Node::synthetic(value)
 }
 
 /// Two overrides with the same target replace each other.
