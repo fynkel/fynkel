@@ -132,10 +132,11 @@ void main() {
     for (final title in ['Hierarchy', 'Scene', 'Inspector', 'Project', 'Console', 'Profiler', 'Animation', 'Import']) {
       expect(find.text(title, skipOffstage: false), findsWidgets, reason: '$title tab');
     }
+    expect(find.byKey(const Key('hierarchy.openDocument'), skipOffstage: false), findsOneWidget); // Hierarchy, no tab
     expect(
-      find.textContaining('Arrives with editor item 3.', skipOffstage: false),
+      find.textContaining('Arrives with editor item 4.', skipOffstage: false),
       findsOneWidget,
-    ); // Hierarchy placeholder
+    ); // Inspector placeholder
     expect(find.byKey(const Key('console.search'), skipOffstage: false), findsOneWidget); // Console alive while hidden
 
     final shell = tester.state<EditorShellState>(find.byType(EditorShell));

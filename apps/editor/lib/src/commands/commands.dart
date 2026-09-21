@@ -29,6 +29,7 @@ final class EditorCommand {
     this.description,
     this.generated = false,
     this.labelBuilder,
+    this.textIntent,
   });
 
   /// Stable, dotted, never renamed: `project.open`, `window.panel.console`.
@@ -55,7 +56,41 @@ final class EditorCommand {
   final bool generated;
   final VoidCallback run;
 
+  /// What the shortcut means inside a focused text field (⌘Z there is the
+  /// field's own undo, not the document's). The native menu bar takes its
+  /// key equivalents before Flutter sees them, so the registry forwards
+  /// this intent to the field instead of running the command.
+  final Intent? textIntent;
+
   bool get isEnabled => enabled?.call() ?? true;
+}
+
+/// "Run the command with this id" — what the window's `Shortcuts` map to.
+final class CommandIntent extends Intent {
+  const CommandIntent(this.id);
+
+  final String id;
+}
+
+/// Runs a [CommandIntent]; disabled commands leave the key to whoever is
+/// below (a text field's own bindings).
+final class CommandAction extends Action<CommandIntent> {
+  CommandAction(this.registry);
+
+  final CommandRegistry registry;
+
+  @override
+  bool isEnabled(CommandIntent intent) {
+    final c = registry.byId(intent.id);
+    if (c == null) return false;
+    return c.isEnabled || (c.textIntent != null && CommandRegistry.focusIsTextField);
+  }
+
+  @override
+  Object? invoke(CommandIntent intent) {
+    registry.execute(intent.id);
+    return null;
+  }
 }
 
 final class CommandRegistry extends ChangeNotifier {
@@ -100,14 +135,35 @@ final class CommandRegistry extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Runs the command when it exists and is enabled; false otherwise.
+  /// Runs the command when it exists and is enabled; false otherwise. A
+  /// command with a [EditorCommand.textIntent] forwards that intent to the
+  /// focused text field instead, when there is one.
   bool execute(String id) {
     final c = _commands[id];
-    if (c == null || !c.isEnabled) return false;
+    if (c == null) return false;
+    if (c.textIntent != null && focusIsTextField) {
+      final ctx = primaryFocus!.context!;
+      Actions.maybeInvoke(ctx, c.textIntent!);
+      return true;
+    }
+    if (!c.isEnabled) return false;
     _executed.add(id);
     c.run();
     return true;
   }
+
+  /// Whether keyboard focus is inside an editable text field right now.
+  static bool get focusIsTextField {
+    final ctx = primaryFocus?.context;
+    if (ctx == null) return false;
+    return ctx.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  /// The `Shortcuts` map for the window: every shortcut → its command intent.
+  Map<ShortcutActivator, Intent> get shortcutIntents => {
+    for (final c in _commands.values)
+      if (c.shortcut != null) c.shortcut!: CommandIntent(c.id),
+  };
 
   /// Something a command depends on changed (a project opened, a panel hidden).
   void refresh() => notifyListeners();

@@ -11,6 +11,7 @@ class MainWindow extends StatelessWidget {
     super.key,
     required this.project,
     required this.workspace,
+    this.tabBar,
     required this.onShowConsole,
     required this.onClose,
     required this.onRevalidate,
@@ -21,6 +22,9 @@ class MainWindow extends StatelessWidget {
 
   final EditorProject project;
   final Workspace workspace;
+
+  /// The document tabs, above the docking area.
+  final Widget? tabBar;
   final VoidCallback onShowConsole;
   final VoidCallback onClose;
   final VoidCallback onRevalidate;
@@ -66,6 +70,7 @@ class MainWindow extends StatelessWidget {
               content: Text(layoutNotice!),
               actions: [TextButton(onPressed: onDismissNotice, child: const Text('OK'))],
             ),
+          ?tabBar,
           Expanded(
             child: TabbedViewTheme(
               data: dark ? TabbedViewThemeData.dark() : TabbedViewThemeData.classic(),

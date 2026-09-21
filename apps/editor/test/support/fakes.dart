@@ -1,15 +1,21 @@
 // Fakes for the shell tests: a project without the native runtime, a
 // toolchain, a process runner, a directory chooser.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
+import 'package:fynkel_editor/src/documents/editor_document.dart';
 import 'package:fynkel_editor/src/env/tools.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
+
+import 'fake_document.dart';
+
+export 'fake_document.dart';
 
 final class FakeProject extends EditorProject {
   FakeProject({required this.dir, this.name = 'Fake Game', this.readOnly, List<Diagnostic> diagnostics = const []})
@@ -43,10 +49,78 @@ final class FakeProject extends EditorProject {
   int revalidations = 0;
   bool closed = false;
 
+  /// Documents by id and by path; `openDocument` looks both up.
+  final fakeDocuments = <FakeDocument>[];
+
+  /// Component types the project "knows" (schemas).
+  List<ComponentType> types = const [
+    ComponentType(type: 'fynkel.Transform', authored: true, allowed: true),
+    ComponentType(type: 'fynkel.Camera', authored: true, allowed: true),
+    ComponentType(type: 'fynkel.Light', authored: true, allowed: true),
+    ComponentType(type: 'fynkel.MeshRenderer', authored: true, allowed: true),
+    ComponentType(type: 'fynkel.Skin', authored: false, allowed: true),
+    ComponentType(type: 'fynkel.AudioSource', authored: true, allowed: false),
+  ];
+
+  /// Defaults per native type (null = not authorable).
+  Map<String, Map<String, Object?>> defaults = {
+    'fynkel.Transform': {
+      'position': [0, 0, 0],
+      'rotation': [0, 0, 0, 1],
+      'scale': [1, 1, 1],
+    },
+    'fynkel.Camera': {'projection': 'perspective', 'fov': 60, 'near': 0.1, 'far': 1000},
+    'fynkel.Light': {
+      'kind': 'point',
+      'color': [1, 1, 1],
+      'intensity': 1,
+    },
+    'fynkel.MeshRenderer': {'mesh': null, 'material': null},
+  };
+
+  final fileChangesController = StreamController<List<String>>.broadcast();
+  final opened = <String>[];
+
   set diagnostics(List<Diagnostic> d) {
     _diagnostics = List.of(d);
     notifyListeners();
   }
+
+  FakeDocument addDocument(FakeDocument d) {
+    fakeDocuments.add(d);
+    return d;
+  }
+
+  @override
+  EditorDocument openDocument(String pathOrId) {
+    opened.add(pathOrId);
+    for (final d in fakeDocuments) {
+      if (d.id == pathOrId || d.path == pathOrId || d.relativePath == pathOrId) return d;
+    }
+    throw AuthoringException('openDocument', AuthoringStatus.loadFailed, [
+      Diagnostic(code: 'FYN-D0900', severity: Severity.error, message: 'no document $pathOrId'),
+    ]);
+  }
+
+  @override
+  List<DocumentAsset> documentAssets() => [
+    for (final d in fakeDocuments) DocumentAsset(id: d.id, path: d.relativePath ?? d.path, name: d.name, kind: d.kind),
+  ];
+
+  @override
+  List<ComponentType> componentTypes() => types;
+
+  @override
+  Map<String, Object?>? componentDefaults(String type) => defaults[type];
+
+  @override
+  String? fileRevision(String path) => File(path).existsSync() ? 'disk-${File(path).lengthSync()}' : null;
+
+  @override
+  Stream<List<String>> get fileChanges => fileChangesController.stream;
+
+  /// The watcher saw these paths.
+  void filesChanged(List<String> paths) => fileChangesController.add(paths);
 
   @override
   Future<void> revalidate() async {

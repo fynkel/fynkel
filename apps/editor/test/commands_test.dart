@@ -36,7 +36,7 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 23);
+    expect(commands.length, 43);
     for (final c in commands) {
       expect(c.shortcut, isNotNull, reason: '${c.id} has no shortcut');
       expect(c.id, matches(RegExp(r'^[a-z]+(\.[a-zA-Z]+)+$')), reason: '${c.id} is not a dotted id');
@@ -62,12 +62,35 @@ void main() {
         'console.focusSearch',
         'console.copy',
         'console.openInIde',
+        'console.openInEditor',
+        'document.open',
+        'document.save',
+        'document.saveAs',
+        'document.saveAll',
+        'document.revert',
+        'document.close',
+        'document.next',
+        'document.previous',
+        'document.undo',
+        'document.redo',
+        'hierarchy.rename',
+        'hierarchy.duplicate',
+        'hierarchy.delete',
+        'hierarchy.createEmpty',
+        'hierarchy.createWith',
+        'hierarchy.keepWorldTransform',
+        'hierarchy.search',
+        'hierarchy.expandAll',
+        'hierarchy.collapseAll',
         'help.about',
         'help.documentation',
       ]),
     );
     expect(CommandRegistry.shortcutLabel(registry.byId('window.commandPalette')!.shortcut!), '⇧⌘P');
     expect(CommandRegistry.shortcutLabel(registry.byId('window.panel.console')!.shortcut!), '⌥⌘5');
+    expect(CommandRegistry.shortcutLabel(registry.byId('document.save')!.shortcut!), '⌘S');
+    expect(CommandRegistry.shortcutLabel(registry.byId('document.redo')!.shortcut!), '⇧⌘Z');
+    expect(CommandRegistry.shortcutLabel(registry.byId('hierarchy.delete')!.shortcut!), '⌘⌫');
   });
 
   testWidgets('menus show every command of their menu, in groups, with the shortcut label', (tester) async {
@@ -126,7 +149,8 @@ void main() {
   testWidgets('the native macOS menus serialise with and without a project', (tester) async {
     // The in-window MenuBar covers the other tests; the native path moves About,
     // Preferences and Quit into the app menu, which once left the Edit menu with
-    // an empty group — an assertion at startup on macOS.
+    // an empty group — an assertion at startup on macOS. Since item 3 the Edit
+    // menu has Undo/Redo and the Hierarchy commands, so it stays.
     for (final withProject in [false, true]) {
       await pumpLarge(
         tester,
@@ -141,8 +165,7 @@ void main() {
       final shell = tester.state<EditorShellState>(find.byType(EditorShell));
       final menus = EditorMenuBar(registry: shell.registry, child: const SizedBox()).platformMenus();
       expect(menus.first.label, 'Fynkel Editor');
-      expect(menus.map((m) => m.label), containsAll(['Project', 'Window', 'Help']));
-      expect(menus.map((m) => m.label), isNot(contains('Edit'))); // Preferences moved to the app menu
+      expect(menus.map((m) => m.label), containsAll(['Project', 'Edit', 'Window', 'Help']));
       // Serialising is what asserts on an empty group; the wire form names every item.
       final wire = [
         for (final menu in menus) ...[
@@ -150,7 +173,14 @@ void main() {
           ...menu.toChannelRepresentation(DefaultPlatformMenuDelegate(), getId: (_) => 1).map(jsonEncode),
         ],
       ].join();
-      for (final label in ['Open Project…', 'Preferences…', 'Command Palette…', 'About Fynkel Editor']) {
+      for (final label in [
+        'Open Project…',
+        'Preferences…',
+        'Command Palette…',
+        'About Fynkel Editor',
+        'Undo',
+        'Save Document',
+      ]) {
         expect(wire, contains(label));
       }
     }

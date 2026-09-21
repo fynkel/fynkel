@@ -13,7 +13,12 @@ import 'package:path/path.dart' as p;
 import 'commands/commands.dart';
 import 'commands/palette.dart';
 import 'console/console_panel.dart';
+import 'documents/document_tab_bar.dart';
+import 'documents/document_tabs.dart';
+import 'documents/open_document.dart';
 import 'env/tools.dart';
+import 'hierarchy/hierarchy_model.dart';
+import 'hierarchy/hierarchy_panel.dart';
 import 'launcher/launcher.dart';
 import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
@@ -134,7 +139,10 @@ class EditorShellState extends State<EditorShell> {
   EditorProject? project;
   Workspace? workspace;
   ConsoleModel? console;
+  DocumentTabs? tabs;
+  HierarchyModel? hierarchy;
   final consoleSearchFocus = FocusNode(debugLabel: 'console.search');
+  final hierarchySearchFocus = FocusNode(debugLabel: 'hierarchy.search');
   late IdeLauncher ide;
   String? _layoutNotice;
   String? _openError;
@@ -156,9 +164,12 @@ class EditorShellState extends State<EditorShell> {
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
     workspace?.dispose();
+    hierarchy?.dispose();
+    tabs?.dispose();
     project?.removeListener(_onProjectChanged);
     project?.close();
     consoleSearchFocus.dispose();
+    hierarchySearchFocus.dispose();
     registry.dispose();
     super.dispose();
   }
@@ -181,12 +192,11 @@ class EditorShellState extends State<EditorShell> {
       title: 'Hierarchy',
       icon: Icons.account_tree_outlined,
       home: PanelHome.left,
-      builder: (_) => const ComingPanel(
-        title: 'Hierarchy',
-        item: 3,
-        what: 'The scene tree of the focused document.',
-        icon: Icons.account_tree_outlined,
-      ),
+      builder: (_) {
+        final h = hierarchy;
+        if (h == null) return const SizedBox.shrink();
+        return HierarchyPanel(model: h, onOpenDocument: openDocumentDialog, searchFocus: hierarchySearchFocus);
+      },
     ),
     PanelSpec(
       id: PanelRegistry.scene,
@@ -272,11 +282,218 @@ class EditorShellState extends State<EditorShell> {
   // ── Commands ────────────────────────────────────────────────────────────
 
   bool get _hasProject => project != null;
+  OpenDocument? get _focusedTab => tabs?.focused;
+  bool get _hasTab => _focusedTab != null;
+  bool get _canEdit => hierarchy?.canEdit ?? false;
+  bool get _hasSelection => hierarchy?.hasSelection ?? false;
 
   void _registerCommands() {
     SingleActivator k(LogicalKeyboardKey key, {bool shift = false, bool alt = false}) =>
         SingleActivator(key, meta: true, shift: shift, alt: alt);
     registry.registerAll([
+      // ── Documents (Project menu, group 1) ──
+      EditorCommand(
+        id: 'document.open',
+        baseLabel: 'Open Document…',
+        description: 'A scene or prefab of the project, into a tab',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyO, shift: true),
+        group: 1,
+        order: 0,
+        enabled: () => _hasProject,
+        run: openDocumentDialog,
+      ),
+      EditorCommand(
+        id: 'document.save',
+        baseLabel: 'Save Document',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyS),
+        group: 1,
+        order: 1,
+        enabled: () => _focusedTab?.dirty ?? false,
+        run: () => saveTab(_focusedTab!),
+      ),
+      EditorCommand(
+        id: 'document.saveAs',
+        baseLabel: 'Save Document As…',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyS, shift: true),
+        group: 1,
+        order: 2,
+        enabled: () => _hasTab,
+        run: () => saveTabAs(_focusedTab!),
+      ),
+      EditorCommand(
+        id: 'document.saveAll',
+        baseLabel: 'Save All Documents',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyS, alt: true),
+        group: 1,
+        order: 3,
+        enabled: () => tabs?.anyDirty ?? false,
+        run: saveAllTabs,
+      ),
+      EditorCommand(
+        id: 'document.revert',
+        baseLabel: 'Revert Document to Saved',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyR, alt: true),
+        group: 1,
+        order: 4,
+        enabled: () => _focusedTab?.dirty ?? false,
+        run: () => revertTab(_focusedTab!),
+      ),
+      EditorCommand(
+        id: 'document.close',
+        baseLabel: 'Close Document',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyW),
+        group: 1,
+        order: 5,
+        enabled: () => _hasTab,
+        run: () => closeTab(_focusedTab!),
+      ),
+      EditorCommand(
+        id: 'document.next',
+        baseLabel: 'Next Document',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.arrowRight, alt: true),
+        group: 1,
+        order: 6,
+        enabled: () => (tabs?.open.length ?? 0) > 1,
+        run: () => tabs?.focusNext(),
+      ),
+      EditorCommand(
+        id: 'document.previous',
+        baseLabel: 'Previous Document',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.arrowLeft, alt: true),
+        group: 1,
+        order: 7,
+        enabled: () => (tabs?.open.length ?? 0) > 1,
+        run: () => tabs?.focusPrevious(),
+      ),
+      // ── Edit menu: undo/redo (group 0), the Hierarchy (groups 1–2) ──
+      EditorCommand(
+        id: 'document.undo',
+        baseLabel: 'Undo',
+        labelBuilder: () => _focusedTab?.canUndoLabel ?? 'Undo',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyZ),
+        group: 0,
+        order: 0,
+        enabled: () => _focusedTab?.document.canUndo ?? false,
+        textIntent: const UndoTextIntent(SelectionChangedCause.keyboard),
+        run: () => _focusedTab?.undo(),
+      ),
+      EditorCommand(
+        id: 'document.redo',
+        baseLabel: 'Redo',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyZ, shift: true),
+        group: 0,
+        order: 1,
+        enabled: () => _focusedTab?.document.canRedo ?? false,
+        textIntent: const RedoTextIntent(SelectionChangedCause.keyboard),
+        run: () => _focusedTab?.redo(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.rename',
+        baseLabel: 'Rename Entity',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyR),
+        group: 1,
+        order: 0,
+        enabled: () => _canEdit && (hierarchy?.selection.length ?? 0) == 1,
+        run: () => hierarchy?.beginRename(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.duplicate',
+        baseLabel: 'Duplicate',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyD),
+        group: 1,
+        order: 1,
+        enabled: () => _canEdit && _hasSelection,
+        run: () => hierarchy?.duplicate(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.delete',
+        baseLabel: 'Delete',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.backspace),
+        group: 1,
+        order: 2,
+        enabled: () => _canEdit && _hasSelection,
+        textIntent: const DeleteToLineBreakIntent(forward: false),
+        run: () => hierarchy?.delete(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.createEmpty',
+        baseLabel: 'Create Empty Entity',
+        description: 'Under the selected entity, or at the root',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyN, alt: true),
+        group: 1,
+        order: 3,
+        enabled: () => _canEdit,
+        run: () => hierarchy?.createEmpty(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.createWith',
+        baseLabel: 'Create Entity with Component…',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyN, shift: true, alt: true),
+        group: 1,
+        order: 4,
+        enabled: () => _canEdit,
+        run: createWithDialog,
+      ),
+      EditorCommand(
+        id: 'hierarchy.keepWorldTransform',
+        baseLabel: 'Keep World Transform when Reparenting',
+        labelBuilder: () =>
+            '${(hierarchy?.keepWorldTransform ?? true) ? '✓ ' : ''}Keep World Transform when Reparenting',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyK, alt: true),
+        group: 1,
+        order: 5,
+        enabled: () => _hasProject,
+        run: () => hierarchy?.toggleKeepWorldTransform(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.search',
+        baseLabel: 'Search Hierarchy',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyH, alt: true),
+        group: 2,
+        order: 0,
+        enabled: () => _hasTab,
+        run: () {
+          workspace?.show(PanelRegistry.hierarchy);
+          hierarchy?.requestSearchFocus();
+        },
+      ),
+      EditorCommand(
+        id: 'hierarchy.expandAll',
+        baseLabel: 'Expand All',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.bracketRight, alt: true),
+        group: 2,
+        order: 1,
+        enabled: () => _hasTab,
+        run: () => hierarchy?.expandAll(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.collapseAll',
+        baseLabel: 'Collapse All',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.bracketLeft, alt: true),
+        group: 2,
+        order: 2,
+        enabled: () => _hasTab,
+        run: () => hierarchy?.collapseAll(),
+      ),
       EditorCommand(
         id: 'project.new',
         baseLabel: 'New Project…',
@@ -300,7 +517,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Close Project',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyW, shift: true),
-        group: 1,
+        group: 2,
         order: 0,
         enabled: () => _hasProject,
         run: closeProject,
@@ -310,7 +527,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Validate Project',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyV, alt: true),
-        group: 1,
+        group: 2,
         order: 1,
         enabled: () => _hasProject && !(project?.validating ?? true),
         run: () => project?.revalidate(),
@@ -320,7 +537,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Migration Preview…',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyM, alt: true),
-        group: 1,
+        group: 2,
         order: 3,
         enabled: () => _hasProject,
         run: () => showMigrationPreview(context, project!),
@@ -330,7 +547,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Reveal in Finder',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyR, shift: true),
-        group: 1,
+        group: 2,
         order: 2,
         enabled: () => _hasProject,
         run: () => revealInFileBrowser(p.join(project!.dir, 'fynkel.project.json'), run: widget.run),
@@ -348,6 +565,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Preferences…',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.comma),
+        group: 9,
         run: showPreferences,
       ),
       EditorCommand(
@@ -411,6 +629,17 @@ class EditorShellState extends State<EditorShell> {
         order: 2,
         enabled: () => console?.canOpenSelected ?? false,
         run: () => console?.openSelected(),
+      ),
+      EditorCommand(
+        id: 'console.openInEditor',
+        baseLabel: 'Open Console Row in Editor',
+        description: 'The diagnostic\'s scene or prefab into a tab, its entity selected',
+        menu: EditorMenu.window,
+        shortcut: k(LogicalKeyboardKey.keyE, alt: true),
+        group: 3,
+        order: 3,
+        enabled: () => console?.canOpenSelectedInEditor ?? false,
+        run: () => console?.openSelectedInEditor(),
       ),
       EditorCommand(
         id: 'help.documentation',
@@ -499,13 +728,21 @@ class EditorShellState extends State<EditorShell> {
       await project?.close();
       project?.removeListener(_onProjectChanged);
       workspace?.dispose();
+      hierarchy?.dispose();
+      tabs?.dispose();
       final ws = Workspace(registry: _panels, store: widget.layoutStore);
-      final c = ConsoleModel(project: opened, openInIde: ide.open);
+      final t = DocumentTabs(project: opened);
+      final h = HierarchyModel(tabs: t, project: opened);
+      final c = ConsoleModel(project: opened, openInIde: ide.open, openInEditor: openDiagnosticInEditor);
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
+      t.addListener(registry.refresh);
+      h.addListener(registry.refresh);
       setState(() {
         project = opened;
         workspace = ws;
+        tabs = t;
+        hierarchy = h;
         console = c;
         _layoutNotice = ws.restoreProblem == null
             ? null
@@ -526,19 +763,157 @@ class EditorShellState extends State<EditorShell> {
 
   void _onProjectChanged() => registry.refresh();
 
+  /// Closes the project; every dirty tab gets its save prompt first, and a
+  /// Cancel there keeps the project open.
   Future<void> closeProject() async {
     final closing = project;
     if (closing == null) return;
+    for (final tab in List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[])) {
+      if (!await closeTab(tab)) return;
+    }
     workspace?.save();
     closing.removeListener(_onProjectChanged);
+    final h = hierarchy;
+    final t = tabs;
     setState(() {
       project = null;
       console = null;
+      hierarchy = null;
+      tabs = null;
       workspace?.dispose();
       workspace = null;
     });
+    h?.dispose();
+    t?.dispose();
     await closing.close();
     registry.refresh();
+  }
+
+  // ── Documents ───────────────────────────────────────────────────────────
+
+  Future<void> openDocumentDialog() async {
+    final pr = project;
+    if (pr == null) return;
+    final asset = await showOpenDocumentDialog(context, pr);
+    if (asset == null) return;
+    openDocument(asset.id);
+  }
+
+  /// Opens (or focuses) a document by path or id; shows the refusal if any.
+  OpenDocument? openDocument(String pathOrId) {
+    final t = tabs;
+    if (t == null) return null;
+    final tab = t.openDocument(pathOrId);
+    if (tab == null && t.openError != null) _showError(t.openError!);
+    registry.refresh();
+    return tab;
+  }
+
+  /// A Console row's document into a tab, its entity revealed and selected.
+  void openDiagnosticInEditor(Diagnostic d) {
+    final doc = d.document;
+    if (doc == null) return;
+    final tab = openDocument(doc);
+    if (tab == null) return;
+    workspace?.show(PanelRegistry.hierarchy);
+    final id = d.id ?? RegExp(r'^/entities/([^/]+)').firstMatch(d.pointer ?? '')?.group(1);
+    if (id != null) hierarchy?.revealAndSelect(id);
+  }
+
+  /// Saves; a conflict (the file changed on disk) opens the conflict dialog
+  /// instead — the editor never overwrites. True when saved.
+  Future<bool> saveTab(OpenDocument tab) async {
+    if (tab.save()) return true;
+    if (tab.hasConflict) return resolveConflict(tab);
+    if (tab.lastError != null) _showError(tab.lastError!);
+    return false;
+  }
+
+  Future<void> saveAllTabs() async {
+    final t = tabs;
+    if (t == null) return;
+    for (final tab in t.saveAll()) {
+      if (!await saveTab(tab)) break;
+    }
+  }
+
+  Future<bool> saveTabAs(OpenDocument tab) async {
+    final path = await showSaveAsDialog(context, tab);
+    if (path == null) return false;
+    // A new sub-folder is fine: the session writes files, not directories.
+    try {
+      Directory(p.dirname(path)).createSync(recursive: true);
+    } on FileSystemException catch (e) {
+      _showError('Cannot create ${p.dirname(path)}: ${e.osError?.message ?? e.message}');
+      return false;
+    }
+    if (tab.saveAs(path)) return true;
+    if (tab.lastError != null) _showError(tab.lastError!);
+    return false;
+  }
+
+  Future<void> revertTab(OpenDocument tab) async {
+    if (!tab.dirty) return;
+    if (!await showRevertPrompt(context, tab)) return;
+    if (!tab.reload() && tab.lastError != null) _showError(tab.lastError!);
+  }
+
+  /// Closes with the save prompt when dirty. False when the user cancelled.
+  Future<bool> closeTab(OpenDocument tab) async {
+    final t = tabs;
+    if (t == null || !mounted) return false;
+    if (tab.dirty) {
+      final choice = await showClosePrompt(context, tab);
+      switch (choice) {
+        case ClosePromptChoice.cancel:
+          return false;
+        case ClosePromptChoice.save:
+          if (!await saveTab(tab)) return false;
+        case ClosePromptChoice.discard:
+          break;
+      }
+    }
+    if (!mounted) return false;
+    if (!t.open.contains(tab)) return true;
+    t.closeDiscarding(tab);
+    registry.refresh();
+    return true;
+  }
+
+  /// The conflict dialog and its outcome. True when the tab is clean afterwards.
+  Future<bool> resolveConflict(OpenDocument tab) async {
+    switch (await showConflictDialog(context, tab)) {
+      case ConflictChoice.reload:
+        if (!tab.reload() && tab.lastError != null) _showError(tab.lastError!);
+        return !tab.dirty;
+      case ConflictChoice.saveAs:
+        return saveTabAs(tab);
+      case ConflictChoice.keep:
+        tab.keepEditing();
+        return false;
+    }
+  }
+
+  Future<void> createWithDialog() async {
+    final h = hierarchy;
+    if (h == null || !h.canEdit) return;
+    final types = h.nativeComponentTypes.where((c) => c.type != 'fynkel.Transform').toList();
+    final type = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        key: const Key('dialog.createWith'),
+        title: const Text('Create Entity with…'),
+        children: [
+          for (final c in types)
+            SimpleDialogOption(
+              key: Key('createWith.${c.type}'),
+              onPressed: () => Navigator.pop(context, c.type),
+              child: Text(c.type),
+            ),
+        ],
+      ),
+    );
+    if (type != null) h.createWith(type);
   }
 
   void togglePanel(String id) {
@@ -602,6 +977,14 @@ class EditorShellState extends State<EditorShell> {
       body = MainWindow(
         project: p0,
         workspace: workspace!,
+        tabBar: DocumentTabBar(
+          tabs: tabs!,
+          onOpen: openDocumentDialog,
+          onClose: closeTab,
+          onSaveAs: saveTabAs,
+          onShowConflict: resolveConflict,
+          onRevert: revertTab,
+        ),
         onShowConsole: () => workspace!.show(PanelRegistry.console),
         onClose: closeProject,
         onRevalidate: p0.revalidate,
@@ -612,30 +995,33 @@ class EditorShellState extends State<EditorShell> {
     }
     return ListenableBuilder(
       listenable: registry,
-      builder: (context, _) => CallbackShortcuts(
-        bindings: registry.shortcutBindings,
-        child: FocusScope(
-          autofocus: true,
-          child: EditorMenuBar(
-            registry: registry,
-            native: widget.nativeMenuBar,
-            child: Stack(
-              children: [
-                Positioned.fill(child: body),
-                if (_openError != null && p0 == null)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: MaterialBanner(
-                      key: const Key('shell.error'),
-                      content: Text(_openError!),
-                      actions: [
-                        TextButton(onPressed: () => setState(() => _openError = null), child: const Text('Dismiss')),
-                      ],
+      builder: (context, _) => Shortcuts(
+        shortcuts: registry.shortcutIntents,
+        child: Actions(
+          actions: {CommandIntent: CommandAction(registry)},
+          child: FocusScope(
+            autofocus: true,
+            child: EditorMenuBar(
+              registry: registry,
+              native: widget.nativeMenuBar,
+              child: Stack(
+                children: [
+                  Positioned.fill(child: body),
+                  if (_openError != null && p0 == null)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: MaterialBanner(
+                        key: const Key('shell.error'),
+                        content: Text(_openError!),
+                        actions: [
+                          TextButton(onPressed: () => setState(() => _openError = null), child: const Text('Dismiss')),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

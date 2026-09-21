@@ -1,7 +1,8 @@
 // The Console: the project's diagnostics (ADR-0014 records) with severity,
 // code, file, line:column or pointer, message; search, severity filter,
-// collapsed repeats, copy, and a double-click (or Enter, or the button) that
-// opens the file's line in the configured IDE.
+// collapsed repeats, copy, and a double-click (or Enter) that opens a scene
+// or prefab diagnostic in the editor (its entity selected) and any other
+// file's line in the configured IDE; both also have a button and a command.
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -25,12 +26,15 @@ final class ConsoleEntry {
 
 /// Filters and selection; shared between the panel and the `console.*` commands.
 final class ConsoleModel extends ChangeNotifier {
-  ConsoleModel({required this.project, required this.openInIde});
+  ConsoleModel({required this.project, required this.openInIde, this.openInEditor});
 
   final EditorProject project;
 
   /// Opens a file at a position; returns a problem or null.
   final Future<String?> Function(String file, {int? line, int? column}) openInIde;
+
+  /// Opens a scene or prefab diagnostic into a document tab (item 3).
+  final void Function(Diagnostic d)? openInEditor;
 
   String query = '';
   final severities = {Severity.error, Severity.warning, Severity.info};
@@ -128,6 +132,31 @@ final class ConsoleModel extends ChangeNotifier {
 
   bool get canOpenSelected => selected?.diagnostic.document != null;
 
+  /// Whether a diagnostic names a document the editor opens in a tab.
+  static bool isEditable(Diagnostic d) {
+    final doc = d.document;
+    return doc != null && (doc.endsWith('.scene.json') || doc.endsWith('.prefab.json'));
+  }
+
+  bool get canOpenSelectedInEditor {
+    final d = selected?.diagnostic;
+    return openInEditor != null && d != null && isEditable(d);
+  }
+
+  void openSelectedInEditor() {
+    final d = selected?.diagnostic;
+    if (d != null && isEditable(d)) openInEditor?.call(d);
+  }
+
+  /// Double-click / ↩: the editor for a scene or prefab, the IDE otherwise.
+  Future<void> activate(Diagnostic d) async {
+    if (openInEditor != null && isEditable(d)) {
+      openInEditor!(d);
+    } else {
+      await open(d);
+    }
+  }
+
   Future<void> openSelected() async {
     final d = selected?.diagnostic;
     if (d?.document == null) return;
@@ -212,7 +241,10 @@ class _ConsolePanelState extends State<ConsolePanel> {
                       bindings: {
                         const SingleActivator(LogicalKeyboardKey.arrowDown): () => _moveSelection(1),
                         const SingleActivator(LogicalKeyboardKey.arrowUp): () => _moveSelection(-1),
-                        const SingleActivator(LogicalKeyboardKey.enter): model.openSelected,
+                        const SingleActivator(LogicalKeyboardKey.enter): () {
+                          final d = model.selected?.diagnostic;
+                          if (d != null) model.activate(d);
+                        },
                         const SingleActivator(LogicalKeyboardKey.keyC, meta: true): model.copy,
                       },
                       child: Focus(
@@ -292,8 +324,14 @@ class _ConsolePanelState extends State<ConsolePanel> {
             onPressed: model.entries.isEmpty ? null : model.copy,
           ),
           IconButton(
+            key: const Key('console.openInEditor'),
+            tooltip: 'Open in Editor — the scene or prefab into a tab, its entity selected (⌥⌘E)',
+            icon: const Icon(Icons.account_tree_outlined, size: 18),
+            onPressed: model.canOpenSelectedInEditor ? model.openSelectedInEditor : null,
+          ),
+          IconButton(
             key: const Key('console.open'),
-            tooltip: 'Open in IDE (also: double-click or ↩)',
+            tooltip: 'Open in IDE (⌥⌘O)',
             icon: const Icon(Icons.open_in_new, size: 18),
             onPressed: model.canOpenSelected ? model.openSelected : null,
           ),
@@ -326,7 +364,7 @@ class _ConsolePanelState extends State<ConsolePanel> {
         _lastTapKey = key;
         model.select(key);
         _listFocus.requestFocus();
-        if (isDouble && d.document != null) model.open(d);
+        if (isDouble && d.document != null) model.activate(d);
       },
       child: Container(
         color: selected ? theme.colorScheme.primaryContainer : null,

@@ -177,6 +177,23 @@ run, Escape closes.
 | `project.migrations` | Project | ⌥⌘M | the migration preview |
 | `project.reveal` | Project | ⇧⌘R | reveal the project in Finder |
 | `app.quit` | Project | ⌘Q | quit |
+| `document.open` | Project | ⇧⌘O | the Open Document dialog (scenes and prefabs of the project, searchable) |
+| `document.save` | Project | ⌘S | save the focused tab through the session (refused while it has a disk conflict — the conflict dialog opens instead) |
+| `document.saveAs` | Project | ⇧⌘S | save the focused tab under a new relative path (never over an existing file) |
+| `document.saveAll` | Project | ⌥⌘S | save every dirty tab |
+| `document.revert` | Project | ⌥⌘R | revert the focused tab to the saved file (asks; history dropped) |
+| `document.close` | Project | ⌘W | close the focused tab (a dirty one asks Save / Don't Save / Cancel) |
+| `document.next` / `document.previous` | Project | ⌥⌘→ / ⌥⌘← | cycle the tabs |
+| `document.undo` | Edit | ⌘Z | undo the focused tab's last transaction — the label counts what is left, "Undo (3)"; inside a text field the field's own undo runs |
+| `document.redo` | Edit | ⇧⌘Z | redo (same rule for text fields) |
+| `hierarchy.rename` | Edit | ⌘R | rename the selected entity in place |
+| `hierarchy.duplicate` | Edit | ⌘D | duplicate the topmost selected entities with their subtrees; the copies are selected |
+| `hierarchy.delete` | Edit | ⌘⌫ | delete the topmost selected entities with their subtrees; the nearest row is selected (in a text field: delete to the line start) |
+| `hierarchy.createEmpty` | Edit | ⌥⌘N | a new entity with a Transform, under the single selected entity or at the root |
+| `hierarchy.createWith` | Edit | ⇧⌥⌘N | pick a native component type; the new entity has a Transform plus that component with its defaults, and is renamed at once |
+| `hierarchy.keepWorldTransform` | Edit | ⌥⌘K | toggle the drop policy (✓ when on) |
+| `hierarchy.search` | Edit | ⌥⌘H | focus the Hierarchy's search field |
+| `hierarchy.expandAll` / `hierarchy.collapseAll` | Edit | ⌥⌘] / ⌥⌘[ | expand or collapse every node |
 | `app.preferences` | Edit | ⌘, | Preferences |
 | `window.commandPalette` | Window | ⇧⌘P | the palette |
 | `window.resetLayout` | Window | ⌥⌘0 | the §22.2 default layout |
@@ -184,6 +201,7 @@ run, Escape closes.
 | `console.focusSearch` | Window | ⌥⌘F | focus the Console's filter |
 | `console.copy` | Window | ⌥⌘C | copy the selected or all visible Console lines |
 | `console.openInIde` | Window | ⌥⌘O | open the selected diagnostic in the IDE |
+| `console.openInEditor` | Window | ⌥⌘E | open the selected diagnostic's scene or prefab in a tab and select its entity (double-click and Enter do the same for those documents) |
 | `help.documentation` | Help | ⌥⌘D | reveal the checkout's `docs/editor.md` |
 | `help.about` | Help | ⌥⌘A | editor version and authoring ABI version |
 
@@ -210,9 +228,123 @@ enough, Recent (with Clear), Reset layout. Saved on change; the launcher's
 checks re-run when a tool path changes.
 
 What the shell does **not** do, by design: run game code (ADR-0016/0018 —
-Play is a separate process, item 8), edit documents (item 3 brings the
-document tabs and the first commands), or migrate documents (the CLI's
-job; the editor previews and shows the command).
+Play is a separate process, item 8) or migrate documents (the CLI's job;
+the editor previews and shows the command). Editing arrives with item 3
+below.
+
+## Document tabs and the Hierarchy (M4-03)
+
+Explained simply: a **tab** is one open scene or prefab. The **Hierarchy**
+is the list of everything inside the focused tab, drawn as a tree. Every
+change you make is one **transaction** the authoring session applies,
+records for undo, and can save — the editor never edits JSON by hand.
+
+### Tabs (`lib/src/documents/`)
+
+- **Opening.** ⇧⌘O lists the project's scenes and prefabs (search, ↑↓,
+  Enter); the Console opens a diagnostic's document into a tab and selects
+  the entity it points at (⌥⌘E, double-click, Enter). Opening the same
+  document twice focuses the existing tab. A tab strip sits above the
+  docking area (`DocumentTabBar`): the kind's icon, the title, a **dirty
+  dot** that turns into × on hover, an error count badge from the
+  document's diagnostics, and a warning badge while the tab has a disk
+  conflict. Middle-click closes; right-click: Close, Close Others, Save,
+  Save As…, Revert, Copy Path.
+- **`OpenDocument`** is one tab: the `EditorDocument` (the session's
+  `DocumentHandle` behind an abstract class so widget tests run on an
+  in-memory fake), the tree, the selection (a `LinkedHashSet` with an
+  anchor and a lead for ⇧-ranges), the **baseline** — the file's bytes as
+  read at open, save or reload — and the conflict, if any. `transaction`
+  names the current revision as the base of every `apply`, so a change the
+  editor did not see is refused by the `Editor` (`FYN-E0001`) and the tree
+  is rebuilt from the truth instead of guessed.
+- **Save** (⌘S) writes through the session and re-reads the baseline;
+  **Save As** (⇧⌘S) takes a path relative to the **project directory**
+  (prefilled with the document's own, e.g. `assets/scenes/main copy.scene.json`;
+  a new sub-folder is created), requires the kind's extension and refuses
+  to overwrite — the gate caught the first version resolving an
+  `assets/`-relative path against the project root, so
+  `test/documents_test.dart` now saves into a new folder; **Save All** (⌥⌘S);
+  **Revert** (⌥⌘R) asks, then reloads (history gone); **Close** (⌘W) on a
+  dirty tab asks Save / Don't Save / Cancel; closing the project asks for
+  each dirty tab and Cancel aborts the close. Undo/redo (⌘Z / ⇧⌘Z) are
+  **per tab** and the Edit menu's label counts the transactions left
+  ("Undo (3)"); inside a text field the same keys run the field's own
+  undo, because the command forwards a text `Intent` when the focus is in
+  an `EditableText`.
+- **The file watcher** (`DocumentTabs` listens to the project's
+  `fileChanges`). An external write to an open document is compared with
+  the baseline bytes: identical → nothing (the editor's own save);
+  different and the tab has **no local edits** → the tab **reloads
+  silently** and the tree is rebuilt; different and the tab **is dirty** →
+  a **conflict**: the tab shows the badge, ⌘S refuses with "changed on
+  disk" and opens the conflict dialog instead, which names the three
+  revisions (the one the tab was opened from, the editor's, the disk's —
+  the `revision` query), counts the changed lines and shows a coloured
+  unified diff of baseline → disk (`lib/src/documents/line_diff.dart`,
+  an LCS over the differing middle, a whole-file replacement past 4 000
+  lines). Choices: **Reload from disk** (your edits go), **Save As…** (your
+  version beside theirs; the original is untouched), **Keep editing**
+  (the badge stays; nothing is written). No path overwrites the other
+  writer's file without one of those choices — the `FYN-E0001` rule made
+  visible.
+
+### The Hierarchy (`lib/src/hierarchy/`)
+
+- **The tree** (`HierarchyTree`) is built **once** per open from the
+  document (`id`, `name`, `parent`, `children`, the Transform, the
+  component types, the prefab block) and then **patched** from
+  `Applied.affectedIds` / `Replayed.affectedIds` through the session's
+  `document` query in its `ids` form (the named entities and the ordered
+  roots, not the whole document); a parent the patch did not name but
+  whose children changed is re-read in a second pass. `builds` and
+  `patches` are counted so the tests prove a rename of one entity in a
+  10 000-entity scene never rebuilds (`test/hierarchy_test.dart`,
+  `test/documents_session_test.dart`). The visible rows are a flat list
+  the `ListView.builder` draws at a fixed 24 px, so a 10 000-row scene
+  builds only what is on screen. World matrices are composed from the
+  Transform chain for the drop policy.
+- **Selection**: click, ⌘-click toggles, ⇧-click ranges over the visible
+  rows, ⌘A, ↑↓ step (⇧ extends), → expands / ← collapses (or goes to the
+  parent), Esc clears (then clears the filter). Rows show a **prefab
+  badge** for instances (with the override count) and an **error badge**
+  with the entity's diagnostics (from `validate` plus the project report,
+  by id or by `/entities/<id>` pointer).
+- **Operations — one transaction each** (`HierarchyModel`): rename in
+  place (double-click, ⌘R, Enter; Enter or focus loss commits, Esc
+  cancels, an unchanged or empty name is not a transaction), Duplicate
+  (⌘D; the topmost selected with their subtrees; a child's copy lands
+  right after its original, a scene root's copy at the end — a scene's
+  roots follow the entity key order), Delete (⌘⌫; the nearest remaining
+  row is selected), Create empty (⌥⌘N) and Create with a native component
+  (⇧⌥⌘N or the + menu; the Transform's and the component's **defaults
+  come from the session** — the `defaults` query is the component's Rust
+  `Default` through the document codec, so what the editor writes is what
+  the runtime would assume). Drag-and-drop **reparents** with an explicit
+  index: the row's middle drops *into* (appended), the top quarter *above*
+  it, the bottom quarter *below* it (or as the first child when the row is
+  expanded); a drop onto itself or a descendant is refused; several moved
+  entities keep their visible order, and an index counts the slots they
+  vacate. Between two **roots of a scene** there is no insertion line
+  (roots follow entity key order; only a prefab's `roots` list is
+  orderable) — the top and bottom quarters of a scene root mean *into*.
+  **Keep world transform** (on by default, ⌥⌘K) rewrites the moved
+  entity's Transform in the **same transaction** — `newLocal =
+  inverse(world(newParent)) × world(entity)`, only the fields that
+  changed — so nothing moves on screen; off, the local values are kept.
+- **Search and filter**: the search field (⌥⌘H) matches every word
+  against the name, the id and the component types; the filter menu adds
+  component types (of the project's authored, allowed set), prefab state
+  (instances only / no instances) and **has error**. A match is shown
+  with its ancestors dimmed and its path open whether or not it is
+  expanded; the status line reads "N entities · M match · K selected".
+- The editor never runs game code here either: the tree reads documents,
+  and every write is a command the session validates.
+
+What item 3 does **not** do: show a component's fields (item 4, the
+Inspector), draw the scene (item 6), or open prefab mode from a badge
+(item 7). Materials open as tabs but have no Hierarchy (a material has no
+entities) — the tab shows the document's diagnostics and saves.
 
 ## What exists after each item
 
@@ -220,7 +352,7 @@ job; the editor previews and shows the command).
 | --- | --- | --- |
 | 1 | 2026-09-21 | `crates/fynkel_authoring`, the `authoring` feature and `fynkel_authoring_*` ABI in `fynkel_native`, `packages/fynkel_authoring`; D5 and D7 closed; the game runtime carries no editor code (CI check). |
 | 2 | 2026-09-21 | `apps/editor`: launcher, docking workspace saved per user, native menu bar + command registry + palette, Console with open-in-IDE, read-only banner, migration preview, preferences (§ The shell). |
-| 3 | — | Document tabs and the Hierarchy. |
+| 3 | 2026-09-21 | Document tabs with save / save-as / revert / close prompts, per-tab undo, the conflict dialog with a diff; the Hierarchy over the session (patched from `affectedIds`, one transaction per operation, keep-world-transform drops), Console → tab (§ Document tabs and the Hierarchy). |
 | 4 | — | The Inspector (ADR-0018 display hints). |
 | 5 | — | The Project browser. |
 | 6 | — | The Scene view (edit-preview world, camera, picking, gizmos). |
@@ -237,4 +369,15 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 85 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher)
 ```
+
+The item 3 gate, driven by the user: open the editor on a **copy** of the
+fixture project (`crates/fynkel_document/fixtures/project` is a committed
+fixture — the test suites expect its bytes) and on the reference game;
+rename, create, duplicate, reparent and delete, ⌘S, then
+`cargo run -q -p fynkel_cli --bin fynkel -- scene inspect <copy>/assets/scenes/main.scene.json --json`
+shows every change; with a tab dirty, edit the same file from a terminal and see the
+conflict dialog — never an overwrite; open a 10 000-entity scene and
+scroll and select without a rebuild; close the Playground session that is
+open on the reference game before its scene is edited.

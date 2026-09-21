@@ -507,8 +507,18 @@ window, never running game code and never reading a cooked cache
   save-as keeps the id, so the database reports `FYN-A0003` until one copy
   goes).
 - **Queries** (`query(kind, args)`, all read-only): `project`, `documents`,
-  `document` (state + the whole document as JSON — what the Hierarchy
-  reads), `inspect` (the `fynkel scene|prefab inspect --json` view; a
+  `document` (state + the whole document as JSON; with `ids: [...]` the
+  named entities — `null` for one the document no longer has — plus
+  `roots`, the root ids in sibling order: a prefab's `roots`, a scene's
+  null-parent entities in key order — what the Hierarchy re-reads from a
+  transaction's `affectedIds` instead of the whole document, M4-03),
+  `defaults` (`type` → `{ type, data }`, a built-in authored component's
+  Rust `Default` through the document codec — what "Create with
+  component" writes; a behaviour's defaults come from its schema; the
+  test `defaults_cover_every_authored_component` keeps it in step with
+  `AUTHORED_COMPONENTS`, M4-03), `revision` (`path` → the revision and
+  identity of a document **file** on disk now, not of any open editor —
+  the conflict dialog's third revision, M4-03), `inspect` (the `fynkel scene|prefab inspect --json` view; a
   material's shader, alpha mode, cutoff, double-sided and fields; plus the
   document's diagnostics now), `validate`, `validateProject` (the
   `fynkel validate --json` report), `assets` (`kind` document|source,
