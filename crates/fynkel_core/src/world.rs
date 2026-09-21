@@ -1,7 +1,7 @@
 //! The runtime world: lifecycle, command lanes, `step()`, snapshots,
 //! events, diagnostics, render extraction.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -72,6 +72,18 @@ pub struct WorldConfig {
     pub fixed_dt: f32,
     pub max_steps_per_frame: u32,
     pub max_frame_dt: f32,
+    /// The editor's edit-preview world (ADR-0016, blueprint §19.2e): a
+    /// `step()` applies the staged commands, propagates transforms and
+    /// publishes the snapshot — and runs **no** system (no characters,
+    /// animation, catalogue movers, physics, camera rigs, followers,
+    /// billboards, audio, input). Nothing moves unless a command moved
+    /// it, so 60 s open on a scene leave every body where the document put
+    /// it. In edit mode `extract()` also honours [`World::set_edit_camera`]
+    /// (the editor's own camera in the scene camera's place) and
+    /// [`World::set_edit_hidden`] (entities left out of the picture), and
+    /// interpolation is off — the picture is always the current
+    /// transforms. A game never sets this.
+    pub edit_mode: bool,
 }
 
 impl Default for WorldConfig {
@@ -81,6 +93,7 @@ impl Default for WorldConfig {
             fixed_dt: DEFAULT_FIXED_DT as f32,
             max_steps_per_frame: DEFAULT_MAX_STEPS_PER_FRAME,
             max_frame_dt: MAX_FRAME_DT as f32,
+            edit_mode: false,
         }
     }
 }
@@ -283,6 +296,13 @@ pub struct World {
     /// The scenes this world holds, in load order (M3-12): what a replace
     /// load or `unload_scene` takes down.
     pub(crate) scenes: Vec<LoadedScene>,
+    /// Edit mode only (M4-06): the editor camera `extract()` reports in
+    /// the scene camera's place — its world matrix and the camera
+    /// component it renders with.
+    edit_camera: Option<(Mat4, Camera)>,
+    /// Edit mode only: entities `extract()` leaves out (their meshes,
+    /// lights and camera) — the editor's hidden flag, never the document's.
+    edit_hidden: HashSet<Entity>,
     /// The last step's per-phase wall time, one entry per `SystemKind`.
     system_times: Vec<SystemTimeRecord>,
     /// Scratch of the native systems, kept for its capacity.
@@ -345,6 +365,8 @@ impl World {
             skins: HashMap::new(),
             audio: fynkel_audio::Audio::new(),
             scenes: Vec::new(),
+            edit_camera: None,
+            edit_hidden: HashSet::new(),
             system_times: SYSTEMS
                 .iter()
                 .map(|&system| SystemTimeRecord {
@@ -387,6 +409,43 @@ impl World {
 
     pub fn config(&self) -> &WorldConfig {
         &self.config
+    }
+    /// `WorldConfig::edit_mode`: the editor's edit-preview world.
+    pub fn is_edit_mode(&self) -> bool {
+        self.config.edit_mode
+    }
+    /// Edit mode only: the camera `extract()` reports instead of the
+    /// scene's — the editor's own, at `world` with `camera`'s projection
+    /// (perspective or orthographic, exposure included). `None` hands the
+    /// picture back to the scene camera. Returns `false`, and changes
+    /// nothing, in a game world.
+    pub fn set_edit_camera(&mut self, camera: Option<(Mat4, Camera)>) -> bool {
+        if !self.config.edit_mode {
+            return false;
+        }
+        self.edit_camera = camera;
+        true
+    }
+    pub fn edit_camera(&self) -> Option<&(Mat4, Camera)> {
+        self.edit_camera.as_ref()
+    }
+    /// Edit mode only: the entities `extract()` leaves out — exactly this
+    /// set (the caller passes the subtree it wants hidden), replacing the
+    /// previous one. Dead entities are dropped. Returns `false` in a game
+    /// world.
+    pub fn set_edit_hidden(&mut self, entities: &[Entity]) -> bool {
+        if !self.config.edit_mode {
+            return false;
+        }
+        self.edit_hidden = entities
+            .iter()
+            .copied()
+            .filter(|e| self.ecs.contains(*e))
+            .collect();
+        true
+    }
+    pub fn edit_hidden(&self) -> impl Iterator<Item = Entity> + '_ {
+        self.edit_hidden.iter().copied()
     }
     pub fn id(&self) -> WorldId {
         self.config.id
@@ -1137,8 +1196,9 @@ impl World {
         // characters' action driver, M3-09): its commands are queued ahead
         // of the batch's, so an explicit `Move`/`Jump` from the game in the
         // same tick wins.
+        let edit = self.config.edit_mode;
         let t0 = Instant::now();
-        let characters = self.drive_characters();
+        let characters = if edit { 0 } else { self.drive_characters() };
         self.set_time(SystemKind::Characters, characters, micros(t0));
 
         // S[n] becomes the interpolation source.
@@ -1186,23 +1246,37 @@ impl World {
 
         // Animators pose their subtrees first among the pre-tick systems
         // (M3-19): a mover or a body on a posed joint follows the pose.
+        // In edit mode (M4-06) every system below is skipped: commands,
+        // propagation and the snapshot are the whole tick.
         let t0 = Instant::now();
-        let n = self.run_animation(next_tick);
+        let n = if edit {
+            0
+        } else {
+            self.run_animation(next_tick)
+        };
         self.set_time(SystemKind::Animation, n, micros(t0));
 
         // The catalogue's pre-tick movers (§3.5, M3-10): they see the
         // batch's writes and physics sees theirs.
         let t0 = Instant::now();
-        let n = self.run_rotators();
+        let n = if edit { 0 } else { self.run_rotators() };
         self.set_time(SystemKind::Rotator, n, micros(t0));
         let t0 = Instant::now();
-        let n = self.run_oscillators();
+        let n = if edit { 0 } else { self.run_oscillators() };
         self.set_time(SystemKind::Oscillate, n, micros(t0));
         let t0 = Instant::now();
-        let n = self.run_lifetimes(next_tick);
+        let n = if edit {
+            0
+        } else {
+            self.run_lifetimes(next_tick)
+        };
         self.set_time(SystemKind::LifetimeDespawn, n, micros(t0));
         let t0 = Instant::now();
-        let n = self.run_emitters(next_tick);
+        let n = if edit {
+            0
+        } else {
+            self.run_emitters(next_tick)
+        };
         self.set_time(SystemKind::Emitter, n, micros(t0));
 
         // Physics at the §5.1 slot: bodies see the batch's transforms,
@@ -1210,7 +1284,7 @@ impl World {
         // propagate.
         let t0 = Instant::now();
         let mut physics_entities = 0;
-        if self.physics.has_work(&self.ecs) {
+        if !edit && self.physics.has_work(&self.ecs) {
             propagated += scene::propagate(&mut self.ecs) as u32;
             self.physics
                 .step(&mut self.ecs, self.config.fixed_dt, &self.subscriptions);
@@ -1238,7 +1312,11 @@ impl World {
         // Camera rigs follow the tick's final poses (a rig's own subtree
         // is the only thing left dirty, so the second propagate is cheap).
         let t0 = Instant::now();
-        let (rigs, moved) = self.place_camera_rigs();
+        let (rigs, moved) = if edit {
+            (0, false)
+        } else {
+            self.place_camera_rigs()
+        };
         self.set_time(SystemKind::CameraRigs, rigs, micros(t0));
         if moved {
             let t0 = Instant::now();
@@ -1248,10 +1326,18 @@ impl World {
         // Followers and billboards read the propagated poses, the camera's
         // included (M3-10).
         let t0 = Instant::now();
-        let (followers, moved_followers) = self.run_followers();
+        let (followers, moved_followers) = if edit {
+            (0, false)
+        } else {
+            self.run_followers()
+        };
         self.set_time(SystemKind::Follow, followers, micros(t0));
         let t0 = Instant::now();
-        let (billboards, moved_billboards) = self.run_billboards();
+        let (billboards, moved_billboards) = if edit {
+            (0, false)
+        } else {
+            self.run_billboards()
+        };
         self.set_time(SystemKind::LookAtCamera, billboards, micros(t0));
         let t0 = Instant::now();
         if moved_followers || moved_billboards {
@@ -1260,6 +1346,11 @@ impl World {
         self.physics.record(&self.ecs);
         self.seed_prev_world();
         self.apply_teleports();
+        if edit {
+            // No interpolation in the editor: the picture is the tick's
+            // own transforms whatever `alpha` the clock holds.
+            self.record_prev_world();
+        }
         transforms_us += micros(t0);
         self.set_time(SystemKind::Transforms, propagated, transforms_us);
 
@@ -1267,14 +1358,16 @@ impl World {
         // clock advanced (M3-11); after the destroys of the tick, so a
         // dead source's voice stops this tick.
         let t0 = Instant::now();
-        let n = self.run_audio(next_tick);
+        let n = if edit { 0 } else { self.run_audio(next_tick) };
         self.set_time(SystemKind::Audio, n, micros(t0));
 
         // Every native system of the tick has read the same view the game
         // did (the rigs above read `look` last); this tick consumed the
         // pending edges and relative motion (§5.1), so catch-up ticks in the
         // same frame see held state only.
-        self.input.end_tick();
+        if !edit {
+            self.input.end_tick();
+        }
 
         let tick = self.clock.consume_step();
         debug_assert_eq!(tick, next_tick);
@@ -1694,6 +1787,11 @@ impl World {
             if !self.ecs.has::<WorldTransform>(e) {
                 continue;
             }
+            if self.config.edit_mode && self.edit_hidden.contains(&e) {
+                // The editor's hidden flag: no record at all — nothing to
+                // draw, light with or look through.
+                continue;
+            }
             let (world, overridden) = self.resolve_extract(e, alpha, &mut memo);
             let record = out.records.len() as u32;
             out.records.push(ExtractRecord {
@@ -1771,6 +1869,17 @@ impl World {
                         environment: env.clone(),
                     });
                 }
+            }
+        }
+        if self.config.edit_mode {
+            if let Some((world, camera)) = &self.edit_camera {
+                // The editor looks through its own camera: no record backs
+                // it (`u32::MAX`), the renderer reads `world` and `camera`.
+                out.camera = Some(ExtractCamera {
+                    record: u32::MAX,
+                    world: *world,
+                    camera: *camera,
+                });
             }
         }
         out
