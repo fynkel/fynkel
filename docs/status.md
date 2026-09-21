@@ -1,4 +1,4 @@
-# Engine status — 2026-09-21 (M2 gate: GO; M3 in progress, items 1–10, 12–14 and 19 done)
+# Engine status — 2026-09-21 (M2 gate: GO; M3 in progress, items 1–10, 12–14 and 19 done; M4 started in parallel, §6 item 16)
 
 The one-page, plain-words answer to "what do we have, is it solid, what is
 missing". Rewritten at every milestone gate and updated whenever a row below
@@ -928,3 +928,14 @@ in its own app, play it, or hear it. That is M3, in this order:
    menus/settings/results (15), instrumentation (16), public readiness
    (17), the gate report (18) — measured with both captures at every
    step.
+16. **M4 — the editor — has started in parallel** (2026-09-21, the user's
+   call): branch `editor` in its own worktree, the backlog in blueprint
+   §19.2e (ten items: the authoring ABI D5 + D7 first, then the shell,
+   Hierarchy, Inspector, Project browser, Scene view, prefab mode,
+   Play/Stop over a stdout channel, profiler/IDE/`fynkel editor`, the
+   gate), the resolutions in ADR-0016 and the extension model in
+   ADR-0018 (Proposed). The two streams touch shared crates only through
+   separate small commits merged to `main` first (`fynkel_document`,
+   `fynkel_core`, `fynkel_native`, `package:fynkel`, the generator, the
+   CLI — the closed list is in §19.2e). The §3 rows "Authoring commands
+   have no ABI" and "Pointer lookup is linear" are M4 item 1.

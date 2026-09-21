@@ -43,10 +43,12 @@
 | 0015 | Native runtime distribution | Accepted |
 | 0016 | Editor architecture | Accepted |
 | 0017 | AI and automation interface | Accepted |
+| 0018 | Editor extension model: declarative Inspector hints, no game code in the editor | **Proposed** — accepted with M4 item 4 |
 
 ## Still open
 
 - ADR-0005 license (decide before going public at M3).
 - Whether Windows is 1.1 or later.
 - MCP server on top of the CLI (post-1.0, cheap).
-- Runtime-inspection channel between editor and the separate Play process (design in M4).
+- ~~Runtime-inspection channel between editor and the separate Play process (design in M4).~~ Resolved 2026-09-21 (ADR-0016 resolutions): JSON lines on the game's stdout under `FYNKEL_EDITOR_CHANNEL=stdio`; inspection itself is built after Editor V0.
+- The docking package for Editor V0 (spike in M4 item 2; ADR-0016 resolutions).

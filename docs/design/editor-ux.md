@@ -1,5 +1,7 @@
 > **Living design draft** — extracted from blueprint v0.3 §22. Revisit at the start of M4. Where this conflicts with an ADR, the ADR wins. Known v0.4 impacts: authoring service is `fynkel_document` (Rust); Scene view is a real edit-mode world; Play is a separate process; docking via a pub.dev package; Inspector from committed codegen metadata (ADR-0016). §22.17 (browser parity) is non-binding.
 
+> **Revisited 2026-09-21 at the start of M4.** The backlog that implements this spec is `docs/blueprint.md` §19.2e; the resolutions it needed are in ADR-0016 (authoring ABI location, edit-preview sync, Play channel, docking spike) and ADR-0018 (custom inspectors are declarative hints in 1.0 — §22.6's "extension point" means that, not project code in the editor). §22.2's "full arbitrary docking may arrive later" is superseded: docking comes from a package from item 2 on. §22.7's thumbnails for meshes and §22.9's live material preview wait for the Scene view's world (M5). §22.16 (multi-scene) is M5.
+
 ## 22. Fynkel Editor UX and tooling specification
 
 The **Fynkel Editor** should feel familiar to developers coming from Unity while remaining simpler, faster, and tightly aligned with Fynkel's code-first model. It is a visual client over the same documents, commands, schemas, runtime APIs, and validation used by the CLI and AI tooling.
