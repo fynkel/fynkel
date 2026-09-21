@@ -107,6 +107,90 @@ void main() {
     expect(schemaFor(blinker)['properties'], isEmpty);
   });
 
+  test('the ADR-0018 hints reach x-fynkel and the metadata, only when given; kinds are checked', () {
+    const turret = BehaviourClass(
+      id: 'game.Turret',
+      version: 1,
+      className: 'Turret',
+      libraryUri: 'package:demo/turret.dart',
+      doc: 'Shoots.',
+      icon: 'gps_fixed',
+      category: 'Gameplay',
+      fields: [
+        ExposedField(name: 'armed', kind: FieldKind.boolean, defaultValue: true, hasDefault: true, group: 'Firing', order: 0),
+        ExposedField(
+          name: 'yaw',
+          kind: FieldKind.number,
+          defaultValue: 0.0,
+          hasDefault: true,
+          label: 'Yaw',
+          tooltip: 'Where it points',
+          min: -3.14,
+          max: 3.14,
+          step: 0.01,
+          group: 'Aim',
+          order: 2,
+          header: 'Aiming',
+          unit: 'deg',
+          displayKind: 'angle',
+          showIf: 'armed',
+        ),
+        ExposedField(name: 'tint', kind: FieldKind.vec3, displayKind: 'color', readOnly: true),
+        ExposedField(name: 'shell', kind: FieldKind.assetRef, displayKind: 'asset(prefab)', hidden: true),
+      ],
+    );
+    final s = schemaFor(turret);
+    expect((s['x-fynkel'] as Map)['icon'], 'gps_fixed');
+    expect((s['x-fynkel'] as Map)['category'], 'Gameplay');
+    final p = s['properties'] as Map<String, Object?>;
+    expect((p['yaw'] as Map)['x-fynkel'], {
+      'type': 'number',
+      'label': 'Yaw',
+      'tooltip': 'Where it points',
+      'min': -3.14,
+      'max': 3.14,
+      'step': 0.01,
+      'group': 'Aim',
+      'order': 2,
+      'header': 'Aiming',
+      'unit': 'deg',
+      'kind': 'angle',
+      'showIf': 'armed',
+    });
+    expect((p['yaw'] as Map)['minimum'], -3.14);
+    expect((p['armed'] as Map)['x-fynkel'], {'type': 'boolean', 'group': 'Firing', 'order': 0});
+    expect((p['tint'] as Map)['x-fynkel'], {'type': 'vec3', 'kind': 'color', 'readOnly': true});
+    expect((p['shell'] as Map)['x-fynkel'], {'type': 'assetRef', 'kind': 'asset(prefab)', 'hidden': true});
+    // A class without hints emits exactly what it did before ADR-0018.
+    final plain = (schemaFor(spinner)['properties'] as Map)['speed'] as Map;
+    expect(plain['x-fynkel'], {'type': 'number', 'min': 0, 'step': 0.1});
+    expect((schemaFor(spinner)['x-fynkel'] as Map).containsKey('icon'), isFalse);
+
+    final doc = jsonDecode(emitJson('demo', [turret])) as Map<String, Object?>;
+    final t = (doc['behaviours'] as List).single as Map;
+    expect(t['icon'], 'gps_fixed');
+    expect(t['category'], 'Gameplay');
+    final yaw = (t['fields'] as List)[1] as Map;
+    expect(yaw['kind'], 'angle');
+    expect(yaw['unit'], 'deg');
+    expect(yaw['showIf'], 'armed');
+    expect(yaw['group'], 'Aim');
+    expect(((t['fields'] as List)[2] as Map)['readOnly'], true);
+    expect(((t['fields'] as List)[0] as Map).containsKey('readOnly'), isFalse);
+
+    expect(exposeKindProblem('color', FieldKind.vec3), isNull);
+    expect(exposeKindProblem('color', FieldKind.number), contains('Vec3'));
+    expect(exposeKindProblem('asset(mesh)', FieldKind.assetRef), isNull);
+    expect(exposeKindProblem('asset(font)', FieldKind.assetRef), contains('unknown asset kind'));
+    expect(exposeKindProblem('asset(mesh)', FieldKind.string), contains('AssetRef'));
+    expect(exposeKindProblem('entity', FieldKind.string), isNull);
+    expect(exposeKindProblem('multiline', FieldKind.integer), contains('String'));
+    expect(exposeKindProblem('angle', FieldKind.number), isNull);
+    expect(exposeKindProblem('slider', FieldKind.integer), isNull);
+    expect(exposeKindProblem('layerMask', FieldKind.number), contains('int'));
+    expect(exposeKindProblem('button', FieldKind.number), contains('unknown kind'));
+  });
+
   test('emitJson: metadata plus schema per type, sorted, JSON-parseable', () {
     final text = emitJson('demo', [spinner, blinker]);
     final doc = jsonDecode(text) as Map<String, Object?>;

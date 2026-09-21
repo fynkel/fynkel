@@ -65,6 +65,14 @@ class ExposedField {
     this.min,
     this.max,
     this.step,
+    this.group,
+    this.order,
+    this.header,
+    this.unit,
+    this.displayKind,
+    this.readOnly = false,
+    this.hidden = false,
+    this.showIf,
     this.doc,
   });
 
@@ -86,8 +94,62 @@ class ExposedField {
   final num? max;
   final num? step;
 
+  /// The ADR-0018 display hints, as written in the annotation (`kind` is
+  /// `color`, `asset(<kind>)`, `entity`, `multiline`, `angle`, `slider` or
+  /// `layerMask`; `showIf` a sibling boolean's name, `!`-prefixed to invert).
+  final String? group;
+  final int? order;
+  final String? header;
+  final String? unit;
+  final String? displayKind;
+  final bool readOnly;
+  final bool hidden;
+  final String? showIf;
+
   /// The field's doc comment, first paragraph, without `///`.
   final String? doc;
+
+  /// The `x-fynkel` hints beyond the type, in a fixed key order (what the
+  /// schema and the metadata both carry).
+  Map<String, Object?> get hints => {
+        if (label != null) 'label': label,
+        if (tooltip != null) 'tooltip': tooltip,
+        if (min != null) 'min': min,
+        if (max != null) 'max': max,
+        if (step != null) 'step': step,
+        if (group != null) 'group': group,
+        if (order != null) 'order': order,
+        if (header != null) 'header': header,
+        if (unit != null) 'unit': unit,
+        if (displayKind != null) 'kind': displayKind,
+        if (readOnly) 'readOnly': true,
+        if (hidden) 'hidden': true,
+        if (showIf != null) 'showIf': showIf,
+      };
+}
+
+/// The asset kinds `@Expose(kind: 'asset(<kind>)')` accepts.
+const exposeAssetKinds = ['texture', 'material', 'mesh', 'prefab', 'scene', 'audio', 'clip', 'skin', 'rig'];
+
+/// Checks an `@Expose(kind:)` value against the field's type; returns the
+/// problem, or null when it fits. Pure, so the builder and its tests share it.
+String? exposeKindProblem(String kind, FieldKind type) {
+  final asset = RegExp(r'^asset\(([a-z]+)\)$').firstMatch(kind);
+  if (asset != null) {
+    if (type != FieldKind.assetRef) return "kind '$kind' needs an AssetRef field";
+    if (!exposeAssetKinds.contains(asset.group(1))) {
+      return "unknown asset kind '${asset.group(1)}'; one of ${exposeAssetKinds.join(', ')}";
+    }
+    return null;
+  }
+  return switch (kind) {
+    'color' => type == FieldKind.vec3 ? null : "kind 'color' needs a Vec3 field (linear RGB)",
+    'entity' || 'multiline' => type == FieldKind.string ? null : "kind '$kind' needs a String field",
+    'angle' => type == FieldKind.number ? null : "kind 'angle' needs a double field (radians)",
+    'slider' => type == FieldKind.number || type == FieldKind.integer ? null : "kind 'slider' needs a double or int field",
+    'layerMask' => type == FieldKind.integer ? null : "kind 'layerMask' needs an int field",
+    _ => "unknown kind '$kind'; one of color, asset(<kind>), entity, multiline, angle, slider, layerMask",
+  };
 }
 
 /// One `@FynkelBehaviour` class.
@@ -99,6 +161,8 @@ class BehaviourClass {
     required this.libraryUri,
     required this.fields,
     this.doc,
+    this.icon,
+    this.category,
   });
 
   /// The stable, namespaced type id scene components use (`game.Spinner`).
@@ -110,8 +174,12 @@ class BehaviourClass {
   final String libraryUri;
   final List<ExposedField> fields;
 
-  /// The class's doc comment, first paragraph.
+  /// The class's doc comment, first paragraph — or `@FynkelBehaviour(description:)` when given.
   final String? doc;
+
+  /// `@FynkelBehaviour(icon:, category:)` for Add Component and the Hierarchy.
+  final String? icon;
+  final String? category;
 }
 
 /// A generator error: the offending declaration and why.

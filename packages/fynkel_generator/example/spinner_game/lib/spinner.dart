@@ -7,22 +7,26 @@ library;
 import 'package:fynkel/fynkel.dart';
 
 /// Rotates its object about [axis] at [speed] radians per second.
-@FynkelBehaviour(id: 'game.Spinner')
+///
+/// The `@Expose` hints here are the ADR-0018 set the editor's Inspector
+/// reads (docs/codegen.md § Behaviour generator): a group, an order, a unit,
+/// a widget kind, a visibility condition.
+@FynkelBehaviour(id: 'game.Spinner', icon: 'rotate_right', category: 'Motion')
 class Spinner extends Behaviour {
   /// Radians per second.
-  @Expose(min: 0, step: 0.1, tooltip: 'Angular speed in radians per second')
+  @Expose(min: 0, step: 0.1, tooltip: 'Angular speed in radians per second', group: 'Motion', order: 1, unit: 'rad/s', showIf: 'spinning')
   double speed = 1.0;
 
   /// Unit axis of rotation (local space).
-  @Expose()
+  @Expose(group: 'Motion', order: 2)
   Vec3 axis = Vec3.up;
 
   /// Spins only while set; a paused spinner keeps its angle.
-  @Expose(label: 'Spinning')
+  @Expose(label: 'Spinning', group: 'Motion', order: 0)
   bool spinning = true;
 
   /// The mesh this spinner shows off, if any (for the Inspector; unused).
-  @Expose()
+  @Expose(kind: 'asset(mesh)', header: 'Presentation')
   AssetRef? showcase;
 
   /// Accumulated angle in radians (not authored).

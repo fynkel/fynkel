@@ -20,7 +20,9 @@
       ],
       "description": "Unit axis of rotation (local space).",
       "x-fynkel": {
-        "type": "vec3"
+        "type": "vec3",
+        "group": "Motion",
+        "order": 2
       }
     },
     "showcase": {
@@ -35,7 +37,9 @@
       "description": "The mesh this spinner shows off, if any (for the Inspector; unused).",
       "x-fynkel": {
         "type": "assetRef",
-        "nullable": true
+        "nullable": true,
+        "header": "Presentation",
+        "kind": "asset(mesh)"
       }
     },
     "speed": {
@@ -47,7 +51,11 @@
         "type": "number",
         "tooltip": "Angular speed in radians per second",
         "min": 0,
-        "step": 0.1
+        "step": 0.1,
+        "group": "Motion",
+        "order": 1,
+        "unit": "rad/s",
+        "showIf": "spinning"
       }
     },
     "spinning": {
@@ -56,7 +64,9 @@
       "description": "Spins only while set; a paused spinner keeps its angle.",
       "x-fynkel": {
         "type": "boolean",
-        "label": "Spinning"
+        "label": "Spinning",
+        "group": "Motion",
+        "order": 0
       }
     }
   },
@@ -65,6 +75,8 @@
     "kind": "behaviour",
     "id": "game.Spinner",
     "version": 1,
-    "dart": "package:spinner_game/spinner.dart#Spinner"
+    "dart": "package:spinner_game/spinner.dart#Spinner",
+    "icon": "rotate_right",
+    "category": "Motion"
   }
 }

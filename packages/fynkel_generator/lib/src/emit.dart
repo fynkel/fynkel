@@ -247,6 +247,8 @@ Map<String, Object?> schemaFor(BehaviourClass c) {
       'id': c.id,
       'version': c.version,
       'dart': '${c.libraryUri}#${c.className}',
+      if (c.icon != null) 'icon': c.icon,
+      if (c.category != null) 'category': c.category,
     },
   };
 }
@@ -283,16 +285,11 @@ Map<String, Object?> _propertySchema(ExposedField f) {
   }
   if (f.hasDefault) s['default'] = f.defaultValue;
   if (f.doc != null) s['description'] = f.doc;
-  final x = <String, Object?>{
+  s['x-fynkel'] = {
     'type': f.kind.typeName,
     if (f.nullable) 'nullable': true,
-    if (f.label != null) 'label': f.label,
-    if (f.tooltip != null) 'tooltip': f.tooltip,
-    if (f.min != null) 'min': f.min,
-    if (f.max != null) 'max': f.max,
-    if (f.step != null) 'step': f.step,
+    ...f.hints,
   };
-  s['x-fynkel'] = x;
   return s;
 }
 
@@ -312,6 +309,8 @@ String emitJson(String package, List<BehaviourClass> classes) {
           'class': c.className,
           'library': c.libraryUri,
           if (c.doc != null) 'description': c.doc,
+          if (c.icon != null) 'icon': c.icon,
+          if (c.category != null) 'category': c.category,
           'fields': [
             for (final f in c.fields)
               {
@@ -319,11 +318,7 @@ String emitJson(String package, List<BehaviourClass> classes) {
                 'type': f.kind.typeName,
                 'nullable': f.nullable,
                 if (f.hasDefault) 'default': f.defaultValue,
-                if (f.label != null) 'label': f.label,
-                if (f.tooltip != null) 'tooltip': f.tooltip,
-                if (f.min != null) 'min': f.min,
-                if (f.max != null) 'max': f.max,
-                if (f.step != null) 'step': f.step,
+                ...f.hints,
                 if (f.doc != null) 'description': f.doc,
               },
           ],

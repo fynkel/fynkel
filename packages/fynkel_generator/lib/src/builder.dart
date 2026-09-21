@@ -135,13 +135,32 @@ Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, Ann
     }
   }
   fields.sort((a, b) => a.name.compareTo(b.name));
+  for (final f in fields) {
+    final showIf = f.showIf;
+    if (showIf == null) continue;
+    final target = showIf.startsWith('!') ? showIf.substring(1) : showIf;
+    ExposedField? sibling;
+    for (final o in fields) {
+      if (o.name == target) sibling = o;
+    }
+    if (sibling == null || sibling.kind != FieldKind.boolean || sibling.name == f.name) {
+      throw BehaviourGenerationError(
+        "showIf '$showIf' must name another @Expose bool field of the class",
+        library: libraryUri,
+        member: '$name.${f.name}',
+      );
+    }
+  }
+  final description = annotated.annotation.peek('description')?.stringValue;
   return BehaviourClass(
     id: id,
     version: version,
     className: name,
     libraryUri: libraryUri,
     fields: fields,
-    doc: _doc(element.documentationComment),
+    doc: description ?? _doc(element.documentationComment),
+    icon: annotated.annotation.peek('icon')?.stringValue,
+    category: annotated.annotation.peek('category')?.stringValue,
   );
 }
 
@@ -190,6 +209,12 @@ Future<ExposedField> _readField(
     }
   }
   if (hasDefault && defaultValue == null && !nullable) hasDefault = false;
+  final hintKind = expose.peek('kind')?.stringValue;
+  if (hintKind != null) {
+    final problem = exposeKindProblem(hintKind, kind);
+    if (problem != null) throw BehaviourGenerationError('@Expose: $problem', library: libraryUri, member: member);
+  }
+  final order = expose.peek('order');
   return ExposedField(
     name: fieldName,
     kind: kind,
@@ -201,6 +226,14 @@ Future<ExposedField> _readField(
     min: _num(expose.peek('min')),
     max: _num(expose.peek('max')),
     step: _num(expose.peek('step')),
+    group: expose.peek('group')?.stringValue,
+    order: order == null || order.isNull ? null : order.intValue,
+    header: expose.peek('header')?.stringValue,
+    unit: expose.peek('unit')?.stringValue,
+    displayKind: hintKind,
+    readOnly: expose.peek('readOnly')?.boolValue ?? false,
+    hidden: expose.peek('hidden')?.boolValue ?? false,
+    showIf: expose.peek('showIf')?.stringValue,
     doc: _doc(f.documentationComment),
   );
 }

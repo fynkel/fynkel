@@ -20,22 +20,71 @@ part of 'world.dart';
 /// and emits the [BehaviourType]); `id` is the stable, namespaced type id
 /// scene components use (`game.PlayerController`).
 class FynkelBehaviour {
-  const FynkelBehaviour({required this.id, this.version = 1});
+  const FynkelBehaviour({required this.id, this.version = 1, this.icon, this.category, this.description});
 
   final String id;
   final int version;
+
+  /// Editor hints (ADR-0018): a Material icon name for Add Component and the
+  /// Hierarchy (`'directions_run'`), a category the Add Component menu
+  /// groups the type under (`'Gameplay'`), and a description shown there —
+  /// the class doc comment when absent. Metadata only.
+  final String? icon;
+  final String? category;
+  final String? description;
 }
 
 /// Marks a field as authored data: serialized, shown in the Inspector, set
-/// from scene components. Metadata only; the generator reads it.
+/// from scene components. Metadata only; the generator reads it and writes
+/// every hint into `behaviours.g.json` and the field's schema `x-fynkel`
+/// (ADR-0018); the editor never runs this code.
+///
+/// Display hints beyond the basics: [group] puts the field in a collapsible
+/// section, [order] sorts it (lower first; unhinted fields keep declaration
+/// order after the hinted ones), [header] is a caption drawn above it,
+/// [unit] is shown after the value (`'m'`, `'deg'`, `'s'`, `'m/s'`).
+/// [kind] picks the widget when the type alone cannot: `'color'` (a `Vec3`
+/// as linear RGB with a picker), `'asset(<kind>)'` (an `AssetRef` whose
+/// picker lists only `texture`, `material`, `mesh`, `prefab`, `scene`,
+/// `audio`, `clip`, `skin` or `rig` assets), `'entity'` (a `String` holding
+/// an entity's name, picked from the scene), `'multiline'` (a `String` as a
+/// text area), `'angle'` (a `double` stored in radians, edited in degrees),
+/// `'slider'` (a `double`/`int` with [min] and [max] as a slider),
+/// `'layerMask'` (an `int` of physics-layer bits). [readOnly] shows the
+/// value without editing, [hidden] leaves it out, [showIf] names a sibling
+/// exposed `bool` field (`'spinning'`, or `'!spinning'`) the field is shown
+/// only when set (unset). Anything else is a generator error naming the
+/// field.
 class Expose {
-  const Expose({this.label, this.tooltip, this.min, this.max, this.step});
+  const Expose({
+    this.label,
+    this.tooltip,
+    this.min,
+    this.max,
+    this.step,
+    this.group,
+    this.order,
+    this.header,
+    this.unit,
+    this.kind,
+    this.readOnly = false,
+    this.hidden = false,
+    this.showIf,
+  });
 
   final String? label;
   final String? tooltip;
   final num? min;
   final num? max;
   final num? step;
+  final String? group;
+  final int? order;
+  final String? header;
+  final String? unit;
+  final String? kind;
+  final bool readOnly;
+  final bool hidden;
+  final String? showIf;
 }
 
 /// What a fixed tick hands to [Behaviour.fixedUpdate].
