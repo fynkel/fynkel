@@ -194,6 +194,9 @@ run, Escape closes.
 | `hierarchy.keepWorldTransform` | Edit | ⌥⌘K | toggle the drop policy (✓ when on) |
 | `hierarchy.search` | Edit | ⌥⌘H | focus the Hierarchy's search field |
 | `hierarchy.expandAll` / `hierarchy.collapseAll` | Edit | ⌥⌘] / ⌥⌘[ | expand or collapse every node |
+| `inspector.addComponent` | Edit | ⇧⌘A | the searchable Add Component popup; adds to every selected entity in one transaction |
+| `inspector.openScript` | Edit | ⌥⌘↩ | the selected entity's first behaviour's source in the IDE |
+| `inspector.checkCodegen` | Project | ⇧⌘G | run `fynkel codegen --check --project <dir> --json` in the background; the Inspector banner shows the result |
 | `app.preferences` | Edit | ⌘, | Preferences |
 | `window.commandPalette` | Window | ⇧⌘P | the palette |
 | `window.resetLayout` | Window | ⌥⌘0 | the §22.2 default layout |
@@ -346,6 +349,142 @@ Inspector), draw the scene (item 6), or open prefab mode from a badge
 (item 7). Materials open as tabs but have no Hierarchy (a material has no
 entities) — the tab shows the document's diagnostics and saves.
 
+## The Inspector (M4-04)
+
+`lib/src/inspector/`. The Inspector shows the focused tab's selection as
+one card per component and edits every field through the session; it
+never runs game code (ADR-0016/0018) — a behaviour's fields come from the
+committed metadata and its schema, a native component's from the
+generated schema.
+
+### Where a field's look comes from (`field_spec.dart`, `native_hints.dart`)
+
+One parser, `parseComponentSpec`, turns a component's JSON Schema into a
+`ComponentSpec` of `FieldSpec`s. The widget kind is inferred from the
+structure (a three-number array is a `vec3`, a `$ref` to `assetRef` an
+asset, `enum` a menu, a description that says "quaternion" a rotation) and
+then overridden by the ADR-0018 display hints, read in this order — the
+last one wins:
+
+1. **The editor's native table** (`native_hints.dart`): `type → field →
+   hints` for the 21 built-in components, in the same `x-fynkel`
+   vocabulary the generator writes (Camera `fov_y` is an `angle` in the
+   `Lens` group, lights' `color` is a `color`, `MeshRenderer.mesh` an
+   `asset(mesh)`, `Collider.layer` a `layerMask`, `Skin.skeleton` an
+   `entity`, units `m` / `lux` / `cd` / `kg` / `s`…). It stands in until
+   the Rust `#[fynkel(...)]` field attributes exist (ADR-0018 names them;
+   `fynkel_schema_derive` and the component structs are the M3 stream's
+   territory, not on the editor's closed shared-touch list), and it only
+   ever shrinks: `inspector_test.dart` fails when an entry names a type or
+   a field no schema has.
+2. **The behaviour metadata** (`lib/generated/behaviours.g.json`,
+   `behaviours[].fields[]` and `icon` / `category` / `library`).
+3. **The schema's own `x-fynkel`** on each property and on the root.
+
+The hint set is ADR-0018's: `label`, `tooltip`, `min`, `max`, `step`,
+`group`, `order`, `header`, `unit`, `kind` (`color`, `asset(<kind>)`,
+`entity`, `multiline`, `angle`, `slider`, `layerMask`), `readOnly`,
+`hidden`, `showIf: "<bool field>"` / `"!<bool field>"`; a behaviour adds
+`icon` and `category` (`@FynkelBehaviour`). Fields are ordered by `order`,
+then declaration; `group` starts a captioned run, `header` a caption above
+one field; `showIf` hides a row while its sibling boolean disagrees.
+
+### The model (`inspector_model.dart`)
+
+`InspectorModel` listens to `DocumentTabs` and the focused `OpenDocument`,
+reads the selected entities with the `document` query's `ids` form and
+pairs their components **by type and position**: a slot is shown when every
+selected entity has that component (a second `Spinner` is slot
+`game.Spinner#1`). A field whose values differ across the slot is
+**mixed** and drawn as `—`; setting it writes one `setField` per instance
+inside a single transaction, so one ⌘Z undoes it everywhere (§22.6).
+Every edit is one transaction: `setField` (a name, or a JSON pointer such
+as `/position/1` for one vector component), `setFields` (a whole vector,
+Euler angles → one quaternion), `unsetField`, `addComponent` (a native
+type takes its Rust `Default` from the `defaults` query, a behaviour its
+schema defaults), `removeComponent`, `resetToDefaults`, `renameObject`,
+`revertPrefabOverride` (one override by index, or all).
+
+**Validation** happens twice, and the document is never touched by a bad
+value. Before a command is sent the model **prechecks** against the spec:
+a `min`/`max` violation, a non-integer for an integer, an enum value not
+in the list, a wrong vector length, and — because `apply` does not resolve
+assets — an **unknown asset** (`FYN-A0004`, checked against the asset
+database, sub-asset included). What passes goes to the session, whose
+validation may still reject the transaction (the schema's `minimum`, a
+stale revision); the model then shows `code: message` from
+`Applied.diagnostics`. Either way the field shows the last committed value
+again and keeps the message under it until its next accepted edit.
+
+### The widgets (`field_widgets.dart`)
+
+One widget per kind; each shows the committed value it is given and
+reports an edit **once per gesture**:
+
+| Kind | Widget |
+| --- | --- |
+| `number`, `integer` | text (plain numbers or `1 + 2 * 3`), a horizontal **drag on the label** (`step` per pixel, ⇧ ×10, ⌥ ×0.1, clamped to `min`/`max`) that previews locally and commits **once on release** — one transaction, one undo step; `unit` as a suffix; `angle` shown in degrees (rounded to three decimals — a float32 radian would otherwise read `45.000002`; the stored value is untouched until an edit) and stored in radians; `slider` adds a slider |
+| `boolean` | a checkbox; tristate when mixed |
+| `string`, `multiline` | a text field committing on ↩ / focus loss, ⎋ restores |
+| enum | a menu of the `enum` values |
+| `vec2` / `vec3` / `vec4` | X Y Z W numbers, each a pointer write on its own; the per-axis fields carry no unit suffix (too narrow for `20 m`) — the row's label shows it once |
+| quaternion | **Euler degrees** (X, Y, Z, `q = qz·qy·qx`) over the stored `[x, y, z, w]`; each axis commits the whole quaternion; the shown triple is kept across a commit so dragging Y never snaps X |
+| `color` | a swatch (linear → sRGB for display) with the hex next to it; the picker is HSV + hex + alpha for four components; values are written linear |
+| `assetRef` | the asset's name, `…` opens a **searchable picker** filtered by `asset(<kind>)` (a source offers its matching sub-assets), Clear when nullable, and a `DragTarget<AssetDragPayload>` for the Project browser's rows (item 5) |
+| `entity` | a name field with a menu of the document's entity names |
+| `layerMask` | a check-list of the project's `physics.layers` (Everything / Nothing), the number beside it |
+| array, object | rows per item / per child, add and remove; `any` and keys the schema does not list fall back to JSON text |
+
+Numbers round-trip **byte-exactly**: a field that held `1` stays an `int`,
+one that held `1.0` stays a `double` (`jsonNumber`), so setting every
+field of the fixture's scenes and the reference game's playground to its
+own value and saving changes no bytes (`inspector_session_test.dart`).
+
+### The panel (`inspector_panel.dart`)
+
+Header with the name (editable) and id (copy), or "N entities — …" for a
+multi-selection (above 200 entities a count only). One collapsible card per
+slot with the type's icon (the `icon` hint or a per-type default), its
+description as a tooltip, the field rows in groups, and a menu: **Reset to
+Defaults**, **Open Script** (a behaviour: `package:<pkg>/<path>` from the
+metadata resolved to `<project>/lib/<path>` when `<pkg>` is the project's
+package, then the configured IDE command), **Copy Type Name**, **Remove
+Component**. A prefab instance's anchor shows a **Prefab instance** section
+listing the override ops in bold with a Revert arrow each and **Revert
+all** (per-field bold inside the expanded instance is item 7's). **Add
+Component** (⇧⌘A) is a searchable popup over the project's authored,
+allowed native components and every behaviour, grouped by category with
+descriptions; a type an entity already holds is greyed out with "already on
+Robot" (the document holds **one component per type per entity**,
+`FYN-D0204`; the model refuses before asking the crate). A refusal that is
+not one field's shows under the cards **with the reasons, not the summary**:
+the crate answers `FYN-E0005` "it would leave the document with N
+error(s)" and carries the real errors as `related` diagnostics —
+`describeRejection` in `open_document.dart` prints those (code, message,
+suggestion) and skips the summary, for the tabs' `lastError` and the
+Inspector alike. That message goes away with the selection, with the next
+accepted transaction from anywhere (a Hierarchy rename counts), or with its
+×. The gate found all three: a second Transform was offered, refused with
+the bare summary, and the summary never cleared.
+
+**The codegen banner.** Two signals, cheapest first: *committed drift* —
+the metadata's inline schemas compared with the `schemas/behaviours/`
+files the session loaded (instant, no process; `committedDrift`) — and the
+CLI check, `fynkel codegen --check --project <dir> --root <repo> --json`
+(one of the editor's three commands; the CLI runs `build_runner` in the
+game package and restores the committed files, so a check never writes),
+run **once in the background when a project with behaviour metadata
+opens** and on **Check Generated Behaviour Files** (never on a timer).
+Stale or failed, the banner names the reason, shows `fynkel codegen
+--project <dir>` with a Copy button and **Check again**; the Inspector
+keeps showing the last committed fields underneath. A project without
+`behaviours.g.json` (the fixture) has nothing to check and no banner.
+
+What item 4 does **not** do: per-field override marks inside an expanded
+prefab instance (item 7), drag-in from the Project browser (the target
+exists; item 5 supplies the drag), the runtime view of a behaviour during
+Play (after V0).
+
 ## What exists after each item
 
 | Item | Done | What |
@@ -353,7 +492,7 @@ entities) — the tab shows the document's diagnostics and saves.
 | 1 | 2026-09-21 | `crates/fynkel_authoring`, the `authoring` feature and `fynkel_authoring_*` ABI in `fynkel_native`, `packages/fynkel_authoring`; D5 and D7 closed; the game runtime carries no editor code (CI check). |
 | 2 | 2026-09-21 | `apps/editor`: launcher, docking workspace saved per user, native menu bar + command registry + palette, Console with open-in-IDE, read-only banner, migration preview, preferences (§ The shell). |
 | 3 | 2026-09-21 | Document tabs with save / save-as / revert / close prompts, per-tab undo, the conflict dialog with a diff; the Hierarchy over the session (patched from `affectedIds`, one transaction per operation, keep-world-transform drops), Console → tab (§ Document tabs and the Hierarchy). |
-| 4 | — | The Inspector (ADR-0018 display hints). |
+| 4 | 2026-09-21 | The Inspector: one parser over schema + metadata + the editor's native-hint table (ADR-0018 accepted), one widget per field kind, multi-object editing with mixed values and one transaction per gesture, precheck + session validation with the message kept, Add / Remove Component, prefab override revert, Open script, the codegen banner over `codegen --check --json` (§ The Inspector). |
 | 5 | — | The Project browser. |
 | 6 | — | The Scene view (edit-preview world, camera, picking, gizmos). |
 | 7 | — | Prefab mode. |
@@ -369,7 +508,8 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
-cd apps/editor && flutter analyze --fatal-infos && flutter test   # 85 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher)
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 115 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically
+cargo run -q -p fynkel_cli --bin fynkel -- codegen --check --project packages/fynkel_generator/example/spinner_game --json   # what the Inspector banner runs
 ```
 
 The item 3 gate, driven by the user: open the editor on a **copy** of the

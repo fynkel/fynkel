@@ -1,6 +1,6 @@
 # ADR-0018: Editor extension model for 1.0 — declarative Inspector hints, no game code in the editor
 
-**Status:** Proposed (2026-09-21, at the start of M4; to be accepted with M4 item 4)  
+**Status:** Accepted (2026-09-21, with M4 item 4 — the Inspector; proposed the same day at the start of M4)  
 **Date:** 2026-09-21  
 **Related:** ADR-0012 (committed codegen metadata), ADR-0016 (the editor never executes game code), `docs/blueprint.md` §11.2, §19.2e; `docs/design/editor-ux.md` §22.6; `docs/ideas.md` §23.6
 
@@ -29,6 +29,28 @@ The question is what "custom inspector" means in 1.0 without breaking the no-gam
 - **Per-project editor builds now.** Technically the Unity answer, but it makes every project carry an editor build target, its build times and its breakages, before a single real extension pattern exists.
 - **A scripting language for inspectors** (an expression language in the hints, or a mini-UI DSL). Powerful, and a whole language to design, document and secure. `showIf` on a sibling boolean is the deliberate ceiling.
 - **Nothing beyond `label`/`min`/`max`.** Cheapest, and it would make every real behaviour's Inspector a flat list of numbers — not the Unity-like editor the product principle asks for.
+
+## Acceptance note (M4 item 4, 2026-09-21)
+
+The hint set landed as decided for behaviours: `@Expose(group, order,
+header, unit, kind, readOnly, hidden, showIf)` and
+`@FynkelBehaviour(icon, category, description)` in `package:fynkel`,
+emitted by `package:fynkel_generator` into `x-fynkel` and
+`behaviours.g.json` (an unhinted class emits exactly what it did before;
+`kind` is checked against the field's type, `showIf` against a sibling
+boolean). One deviation, recorded here: **the native components' hints are
+not Rust `#[fynkel(...)]` attributes yet.** `fynkel_schema_derive` and the
+component structs in `fynkel_core`/`fynkel_physics`/`fynkel_scene` are the
+M3 stream's territory and not on the editor's closed shared-touch list, so
+the editor carries a table (`apps/editor/lib/src/inspector/native_hints.dart`,
+`type → field → hints` in the same `x-fynkel` vocabulary) that is read
+*underneath* whatever a schema's `x-fynkel` says. The Inspector still has
+one code path for `fynkel.Camera` and `game.Player`; when the Rust
+attributes land, the generated schemas carry the hints, they win, and the
+table shrinks to nothing (`inspector_test.dart` fails when the table names
+a field no schema has). The `asset(<kind>)` kinds grew `clip`, `skin` and
+`rig` (the sub-asset kinds the importers produce) beyond the six listed
+above.
 
 ## Consequences
 

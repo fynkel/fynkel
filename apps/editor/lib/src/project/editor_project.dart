@@ -3,6 +3,7 @@
 // over `AuthoringSession`; the abstract class lets widget tests run the
 // shell without the native runtime.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -37,6 +38,91 @@ final class ComponentType {
 
   /// The project's component allow-list admits it.
   final bool allowed;
+}
+
+/// One component or behaviour schema from the `schemas` query, with what
+/// the Inspector needs around it.
+final class TypeSchema {
+  const TypeSchema({
+    required this.type,
+    required this.isBehaviour,
+    required this.authored,
+    required this.allowed,
+    this.schema,
+    this.version,
+    this.dart,
+  });
+
+  final String type;
+  final bool isBehaviour;
+
+  /// `x-fynkel.authored` (native); a behaviour is always authorable.
+  final bool authored;
+
+  /// The project's component allow-list admits it.
+  final bool allowed;
+
+  /// The JSON Schema, or null for a behaviour declared without a schema file.
+  final Map<String, Object?>? schema;
+  final int? version;
+
+  /// A behaviour's `package:…#Class`.
+  final String? dart;
+}
+
+/// One entry of the asset database (`fynkel asset list --json`).
+final class AssetEntry {
+  const AssetEntry({
+    required this.id,
+    required this.path,
+    required this.name,
+    required this.kind,
+    this.document,
+    this.importer,
+    this.subAssets = const {},
+  });
+
+  final String id;
+
+  /// Relative to the project's assets directory.
+  final String path;
+  final String name;
+
+  /// `document` or `source`.
+  final String kind;
+
+  /// A document's kind (`scene`, `prefab`, `material`, `rig`, `blend`).
+  final String? document;
+
+  /// A source's importer (`fynkel.gltf`, `fynkel.fbx`).
+  final String? importer;
+
+  /// A source's sub-assets: `mesh/0`, `anim/1`, `skin/0`, `prefab`, `image/0` → uuid.
+  final Map<String, String> subAssets;
+
+  bool get isSource => kind == 'source';
+
+  /// The Inspector's asset kinds this entry (or one of its subs) offers:
+  /// a document's kind; a source's `mesh`, `clip` (anim), `skin`, `prefab`,
+  /// `texture` (image), `material`.
+  Set<String> get offeredKinds {
+    if (!isSource) return {?document};
+    final out = <String>{};
+    for (final sub in subAssets.keys) {
+      out.add(subKind(sub));
+    }
+    return out;
+  }
+
+  /// `mesh/1/0` → `mesh`, `anim/0` → `clip`, `image/0/linear` → `texture`.
+  static String subKind(String sub) {
+    final head = sub.split('/').first;
+    return switch (head) {
+      'anim' => 'clip',
+      'image' => 'texture',
+      _ => head,
+    };
+  }
 }
 
 abstract class EditorProject extends ChangeNotifier {
@@ -84,6 +170,40 @@ abstract class EditorProject extends ChangeNotifier {
   /// The `data` a native component starts with (its Rust `Default`); null
   /// for a behaviour or an unknown type.
   Map<String, Object?>? componentDefaults(String type);
+
+  /// Every component and behaviour schema the project knows (the `schemas`
+  /// query), components first, each in schema order.
+  List<TypeSchema> typeSchemas();
+
+  /// The committed behaviour metadata (`lib/generated/behaviours.g.json`)
+  /// as read at open, or null when the project has none.
+  Map<String, Object?>? behaviourMetadata();
+
+  /// The asset database now.
+  List<AssetEntry> assets();
+
+  /// Whether [id] (and [sub], when given) resolves in the asset database.
+  bool assetExists(String id, {String? sub}) {
+    for (final a in assets()) {
+      if (a.id == id) return sub == null || sub.isEmpty || a.subAssets.containsKey(sub);
+      if (a.subAssets.containsValue(id)) return sub == null || sub.isEmpty;
+    }
+    return false;
+  }
+
+  /// The project file's `physics.layers` (bit `i` = layer `i`), or the
+  /// default `["default"]`.
+  List<String> physicsLayers() {
+    try {
+      final decoded = jsonDecode(File(p.join(dir, 'fynkel.project.json')).readAsStringSync());
+      final physics = decoded is Map ? decoded['physics'] : null;
+      final layers = physics is Map ? physics['layers'] : null;
+      if (layers is List && layers.isNotEmpty) return [for (final l in layers) l.toString()];
+    } catch (_) {
+      // A missing or malformed project file: the validation reports it; the mask shows bit numbers.
+    }
+    return const ['default'];
+  }
 
   /// The revision of a document file on disk now, or null when it cannot be read.
   String? fileRevision(String path);
@@ -191,6 +311,61 @@ final class SessionProject extends EditorProject {
           authored: c['authored'] == true,
           allowed: c['allowed'] != false,
         ),
+  ];
+
+  @override
+  List<TypeSchema> typeSchemas() {
+    final all = session.schemas();
+    Map<String, Object?>? schemaOf(Object? v) =>
+        v is Map ? {for (final e in v.entries) e.key as String: e.value} : null;
+    return [
+      for (final c in all['components'] as List? ?? const [])
+        if (c is Map<String, Object?>)
+          TypeSchema(
+            type: c['type'] as String? ?? '',
+            isBehaviour: false,
+            authored: c['authored'] == true,
+            allowed: c['allowed'] != false,
+            schema: schemaOf(c['schema']),
+          ),
+      for (final b in all['behaviours'] as List? ?? const [])
+        if (b is Map<String, Object?>)
+          TypeSchema(
+            type: b['type'] as String? ?? '',
+            isBehaviour: true,
+            authored: true,
+            allowed: b['allowed'] != false,
+            schema: b['hasSchema'] == false ? null : schemaOf(b['schema']),
+            version: (b['version'] as num?)?.toInt(),
+            dart: b['dart'] as String?,
+          ),
+    ];
+  }
+
+  @override
+  Map<String, Object?>? behaviourMetadata() {
+    try {
+      return session.metadata();
+    } on AuthoringException {
+      return null;
+    }
+  }
+
+  @override
+  List<AssetEntry> assets() => [
+    for (final a in session.assets())
+      AssetEntry(
+        id: a['id'] as String? ?? '',
+        path: a['path'] as String? ?? '',
+        name: a['name'] as String? ?? '',
+        kind: a['kind'] as String? ?? '',
+        document: a['document'] as String?,
+        importer: a['importer'] as String?,
+        subAssets: {
+          if (a['subAssets'] is Map)
+            for (final e in (a['subAssets'] as Map).entries) e.key as String: e.value.toString(),
+        },
+      ),
   ];
 
   @override

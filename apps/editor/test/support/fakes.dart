@@ -113,6 +113,20 @@ final class FakeProject extends EditorProject {
   @override
   Map<String, Object?>? componentDefaults(String type) => defaults[type];
 
+  /// Schemas by type; tests fill them (`fakeSchemas()` gives a usable set).
+  List<TypeSchema> schemas = [];
+  Map<String, Object?>? metadata;
+  List<AssetEntry> assetEntries = [];
+
+  @override
+  List<TypeSchema> typeSchemas() => schemas;
+
+  @override
+  Map<String, Object?>? behaviourMetadata() => metadata;
+
+  @override
+  List<AssetEntry> assets() => assetEntries;
+
   @override
   String? fileRevision(String path) => File(path).existsSync() ? 'disk-${File(path).lengthSync()}' : null;
 

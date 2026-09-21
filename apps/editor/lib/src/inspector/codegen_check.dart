@@ -1,0 +1,191 @@
+// The "run `fynkel codegen`" banner's source of truth (blueprint §11.2,
+// §19.2e item 4): whether the project's committed behaviour metadata
+// (`lib/generated/behaviours.g.json` and `schemas/behaviours/`) is what the
+// game's Dart source would generate now. Two signals, cheapest first:
+//
+//  1. **Committed drift** — the metadata's inline schemas and the schema
+//     files disagree, or one names a type the other lacks. Computed from
+//     what the session already read; instant; no process.
+//  2. **The CLI check** — `fynkel codegen --check --project <dir> --json`,
+//     one of the three commands the editor is allowed to run (ADR-0016
+//     keeps game code and codegen out of the editor process; the CLI runs
+//     `build_runner` in the game package and restores the committed files,
+//     so a check never writes). It takes seconds; it runs in the background
+//     at open and on request, never on a timer.
+//
+// The editor never regenerates anything: the banner shows the command to
+// run and a button to copy it.
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
+
+import '../env/tools.dart';
+
+enum CodegenStatus {
+  /// Not checked yet.
+  unknown,
+  running,
+  upToDate,
+
+  /// Generated files differ from what the source would produce.
+  stale,
+
+  /// The check itself could not run (no CLI, no Dart SDK, build error).
+  failed,
+
+  /// The project is not a Dart package (no `pubspec.yaml`): nothing to check.
+  notADartPackage,
+}
+
+/// One behaviour type whose committed metadata and schema file disagree.
+final class CommittedDrift {
+  const CommittedDrift(this.type, this.reason);
+
+  final String type;
+
+  /// `no schema file`, `not in behaviours.g.json`, `schema differs`.
+  final String reason;
+
+  @override
+  String toString() => '$type: $reason';
+}
+
+/// Compares the metadata's `behaviours[].schema` with the schema files the
+/// session loaded (`typeSchemas`): the instant staleness signal.
+List<CommittedDrift> committedDrift(Map<String, Object?>? metadata, Map<String, Map<String, Object?>?> fileSchemas) {
+  if (metadata == null) return const [];
+  final out = <CommittedDrift>[];
+  final inMetadata = <String>{};
+  for (final b in metadata['behaviours'] as List? ?? const []) {
+    if (b is! Map) continue;
+    final type = b['id'] as String? ?? '';
+    inMetadata.add(type);
+    if (!fileSchemas.containsKey(type)) {
+      out.add(CommittedDrift(type, 'no schema file'));
+      continue;
+    }
+    final file = fileSchemas[type];
+    if (file == null) {
+      out.add(CommittedDrift(type, 'declared without a schema file'));
+    } else if (jsonEncode(_normalize(b['schema'])) != jsonEncode(_normalize(file))) {
+      out.add(CommittedDrift(type, 'schema differs'));
+    }
+  }
+  for (final type in fileSchemas.keys) {
+    if (!inMetadata.contains(type)) out.add(CommittedDrift(type, 'not in behaviours.g.json'));
+  }
+  out.sort((a, b) => a.type.compareTo(b.type));
+  return out;
+}
+
+Object? _normalize(Object? v) => switch (v) {
+  Map() => {for (final k in (v.keys.map((k) => k.toString()).toList()..sort())) k: _normalize(v[k])},
+  List() => [for (final e in v) _normalize(e)],
+  num() => v == v.roundToDouble() && v.abs() < 1e15 ? v.round() : v,
+  _ => v,
+};
+
+final class CodegenCheck extends ChangeNotifier {
+  CodegenCheck({required this.projectDir, required this.run, required this.cli, required this.repoRoot});
+
+  /// The game project (the Dart package with `pubspec.yaml`).
+  final String projectDir;
+  final RunProcess run;
+
+  /// The `fynkel` executable, or null when none is configured.
+  final String? Function() cli;
+
+  /// The Fynkel checkout the CLI's native pipeline needs (`--root`), or null.
+  final String? Function() repoRoot;
+
+  CodegenStatus status = CodegenStatus.unknown;
+  List<String> stalePaths = const [];
+  String? error;
+  DateTime? checkedAt;
+  int runs = 0;
+
+  bool get isDartPackage => File(p.join(projectDir, 'pubspec.yaml')).existsSync();
+
+  /// What to run to fix it (shown, copied; never run by the editor).
+  String get command => 'fynkel codegen --project ${_quote(projectDir)}';
+
+  /// The command line the check runs, for the log and the tests.
+  List<String> arguments() => [
+    'codegen',
+    '--check',
+    '--project',
+    projectDir,
+    if (repoRoot() != null) ...['--root', repoRoot()!],
+    '--json',
+  ];
+
+  Future<void> check() async {
+    if (!isDartPackage) {
+      status = CodegenStatus.notADartPackage;
+      notifyListeners();
+      return;
+    }
+    final exe = cli();
+    if (exe == null) {
+      status = CodegenStatus.failed;
+      error = 'no `fynkel` CLI is configured (Preferences → Fynkel CLI)';
+      notifyListeners();
+      return;
+    }
+    status = CodegenStatus.running;
+    error = null;
+    notifyListeners();
+    runs++;
+    try {
+      final r = await run(exe, arguments(), workingDirectory: projectDir);
+      _read(r);
+    } catch (e) {
+      status = CodegenStatus.failed;
+      error = 'could not run `fynkel codegen --check`: $e';
+    }
+    checkedAt = DateTime.now();
+    notifyListeners();
+  }
+
+  void _read(ProcessResult r) {
+    final text = r.stdout.toString();
+    Map<String, Object?>? report;
+    try {
+      final decoded = jsonDecode(text.trim().isEmpty ? '{}' : text);
+      if (decoded is Map<String, Object?>) report = decoded;
+    } catch (_) {
+      report = null;
+    }
+    final project = report?['project'];
+    if (project is Map) {
+      switch (project['status']) {
+        case 'upToDate':
+        case 'written':
+          status = CodegenStatus.upToDate;
+          stalePaths = const [];
+          return;
+        case 'stale':
+          status = CodegenStatus.stale;
+          stalePaths = [for (final s in project['stale'] as List? ?? const []) s.toString()];
+          return;
+        case 'error':
+          status = CodegenStatus.failed;
+          error = project['error']?.toString() ?? 'the check failed';
+          return;
+      }
+    }
+    final native = report?['native'];
+    if (native is Map && native['status'] == 'error') {
+      status = CodegenStatus.failed;
+      error = native['error']?.toString() ?? 'the native pipeline failed';
+      return;
+    }
+    status = CodegenStatus.failed;
+    final err = r.stderr.toString().trim();
+    error = err.isNotEmpty ? err.split('\n').first : 'fynkel codegen exited with ${r.exitCode} and no report';
+  }
+
+  static String _quote(String s) => s.contains(' ') ? '"$s"' : s;
+}

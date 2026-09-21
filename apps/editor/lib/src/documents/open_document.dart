@@ -49,6 +49,31 @@ final class DiskConflict {
   bool get fileMissing => diskText == null;
 }
 
+/// The lines a rejected transaction shows: every error, the transaction's
+/// and each command's. A summary that carries the real reasons as `related`
+/// diagnostics (`FYN-E0005`, "it would leave the document with N error(s)")
+/// is replaced by those reasons — "entity already has a fynkel.Transform
+/// component" is what the user needs to read, with the crate's suggestion.
+String describeRejection(Applied a) {
+  if (a.isConflict) return 'The document changed under this edit (FYN-E0001); nothing was written. Try again.';
+  final lines = <String>[];
+  void add(Diagnostic d) {
+    if (d.severity != Severity.error) return;
+    final reasons = d.related.where((r) => r.severity == Severity.error).toList();
+    if (reasons.isNotEmpty) {
+      reasons.forEach(add);
+      return;
+    }
+    lines.add('${d.code}: ${d.message}${d.suggestion == null ? '' : ' — ${d.suggestion}'}');
+  }
+
+  a.diagnostics.forEach(add);
+  for (final m in a.mutations) {
+    m.diagnostics.forEach(add);
+  }
+  return lines.isEmpty ? 'rejected' : lines.join('\n');
+}
+
 final class OpenDocument extends ChangeNotifier {
   OpenDocument(this.document, {required this.project}) {
     _baseRevision = document.revision;
@@ -257,12 +282,7 @@ final class OpenDocument extends ChangeNotifier {
         lastError = 'The document changed under this edit (FYN-E0001); nothing was written. Try again.';
         if (_tree != null) _buildTree();
       } else {
-        lastError = [
-          for (final d in a.diagnostics) '${d.code}: ${d.message}',
-          for (final m in a.mutations)
-            for (final d in m.diagnostics)
-              if (d.severity == Severity.error) '${d.code}: ${d.message}',
-        ].join('\n');
+        lastError = describeRejection(a);
       }
       notifyListeners();
       return a;

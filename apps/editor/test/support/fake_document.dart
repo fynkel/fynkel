@@ -1,7 +1,10 @@
 // An in-memory document for the tabs and Hierarchy tests: a small
 // interpreter for the commands the Hierarchy uses (createObject,
 // deleteObject, renameObject, reparentObject, duplicateObject, setField,
-// addComponent) with snapshots for undo/redo, content-hash revisions, the
+// addComponent) and the Inspector uses (setField by JSON pointer,
+// unsetField, assignAsset, removeComponent, setPrefabOverride,
+// revertPrefabOverride; `reject` stands in for the crate's validation)
+// with snapshots for undo/redo, content-hash revisions, the
 // FYN-E0001 refusal on a stale base, and — when `path` points at a real
 // file — save/reload through the disk so the conflict path can be driven.
 import 'dart:convert';
@@ -134,6 +137,16 @@ final class FakeDocument extends EditorDocument {
   int _fresh = 0;
   bool _closed = false;
   DocumentEdit? _lastEdit;
+
+  /// The crate's validation, faked: returns a message to refuse a command
+  /// (the whole transaction rolls back with `FYN-E0002`), null to accept.
+  String? Function(Map<String, Object?> command)? reject;
+
+  /// The crate's validation of the whole document after the commands ran:
+  /// the errors it would be left with (JSON diagnostics), or empty. Any →
+  /// rollback and one `FYN-E0005` carrying them as `related`, as the crate
+  /// does. Tests set it.
+  List<Map<String, Object?>> Function(List<Map<String, Object?>> commands)? validateAfter;
 
   /// What `validate()` answers; tests set it.
   List<Diagnostic> validation = const [];
@@ -288,7 +301,8 @@ final class FakeDocument extends EditorDocument {
         break;
       }
     }
-    if (!ok) {
+    final left = ok ? (validateAfter?.call(commands) ?? const []) : const <Map<String, Object?>>[];
+    if (!ok || left.isNotEmpty) {
       _entities = snapshot.entities;
       _roots = snapshot.roots;
       _name = snapshot.name;
@@ -298,7 +312,17 @@ final class FakeDocument extends EditorDocument {
         'baseRevision': base,
         'revision': base,
         'mutations': mutations,
-        'diagnostics': const [],
+        'diagnostics': left.isEmpty
+            ? const []
+            : [
+                {
+                  'code': 'FYN-E0005',
+                  'severity': 'error',
+                  'message':
+                      'transaction rejected: it would leave the document with ${left.length} error(s); nothing was applied',
+                  'related': left,
+                },
+              ],
         'state': _state().json,
       });
     }
@@ -379,26 +403,129 @@ final class FakeDocument extends EditorDocument {
         final index = c['index'] as int? ?? siblings.indexOf(id) + 1;
         _insert(parent, copy, index);
         return _Result([...ids, ?parent]);
-      case 'setField':
+      case 'setField' || 'assignAsset':
         final id = c['entity'] as String;
         final e = _entities[id];
         if (e == null) return _Result.error('no entity $id');
         final comp = (e['components'] as Map)[c['component']] as Map?;
         if (comp == null) return _Result.error('no component ${c['component']} on $id');
-        (comp['data'] as Map)[c['field']] = c['value'];
+        final refusal = reject?.call(c);
+        if (refusal != null) return _Result.error(refusal);
+        final value = c['command'] == 'assignAsset' ? c['asset'] : c['value'];
+        final err = _setPointer(comp['data'] as Map, c['field'] as String, _deepCopyValue(value));
+        if (err != null) return _Result.error(err);
+        return _Result([id, c['component'] as String]);
+      case 'unsetField':
+        final id = c['entity'] as String;
+        final e = _entities[id];
+        if (e == null) return _Result.error('no entity $id');
+        final comp = (e['components'] as Map)[c['component']] as Map?;
+        if (comp == null) return _Result.error('no component ${c['component']} on $id');
+        final refusal = reject?.call(c);
+        if (refusal != null) return _Result.error(refusal);
+        (comp['data'] as Map).remove(c['field']);
         return _Result([id, c['component'] as String]);
       case 'addComponent':
         final id = c['entity'] as String;
         final e = _entities[id];
         if (e == null) return _Result.error('no entity $id');
+        final refusal = reject?.call(c);
+        if (refusal != null) return _Result.error(refusal);
         final m = c['component'] as Map<String, Object?>;
         final cid = m['id'] as String? ?? 'k${++_fresh}';
-        (e['components'] as Map)[cid] = {'type': m['type'], 'version': m['version'] ?? 1, 'data': m['data'] ?? {}};
+        if ((e['components'] as Map).containsKey(cid)) return _Result.error('FYN-E0010 component $cid exists');
+        (e['components'] as Map)[cid] = {
+          'type': m['type'],
+          'version': m['version'] ?? 1,
+          'data': _deepCopyValue(m['data'] ?? <String, Object?>{}),
+        };
         return _Result([id, cid]);
+      case 'removeComponent':
+        final id = c['entity'] as String;
+        final e = _entities[id];
+        if (e == null) return _Result.error('no entity $id');
+        final removed = (e['components'] as Map).remove(c['component']);
+        if (removed == null) return _Result.error('no component ${c['component']} on $id');
+        return _Result([id, c['component'] as String]);
+      case 'setPrefabOverride':
+        final id = c['entity'] as String;
+        final e = _entities[id];
+        if (e == null) return _Result.error('no entity $id');
+        final prefab = e['prefab'] as Map?;
+        if (prefab == null) return _Result.error('$id is not a prefab instance');
+        final list = (prefab['overrides'] as List?) ?? (prefab['overrides'] = <Object?>[]);
+        final op = _deepCopyValue(c['override']) as Map;
+        final i = list.indexWhere(
+          (o) =>
+              o is Map &&
+              o['op'] == op['op'] &&
+              o['entity'] == op['entity'] &&
+              o['component'] == op['component'] &&
+              o['field'] == op['field'],
+        );
+        if (i >= 0) {
+          list[i] = op;
+        } else {
+          list.add(op);
+        }
+        return _Result([id]);
+      case 'revertPrefabOverride':
+        final id = c['entity'] as String;
+        final e = _entities[id];
+        if (e == null) return _Result.error('no entity $id');
+        final prefab = e['prefab'] as Map?;
+        if (prefab == null) return _Result.error('$id is not a prefab instance');
+        final list = prefab['overrides'] as List? ?? [];
+        final index = c['index'] as int?;
+        if (index == null) {
+          list.clear();
+        } else if (index < 0 || index >= list.length) {
+          return _Result.error('no override $index');
+        } else {
+          list.removeAt(index);
+        }
+        return _Result([id]);
       default:
         return _Result.error('unknown command ${c['command']}');
     }
   }
+
+  /// `field` is a key of `data` or a JSON pointer into it (`/position/1`);
+  /// a missing key is added, an array end appended to — like the crate.
+  String? _setPointer(Map data, String field, Object? value) {
+    if (!field.startsWith('/')) {
+      data[field] = value;
+      return null;
+    }
+    final parts = field.substring(1).split('/');
+    Object? node = data;
+    for (var i = 0; i < parts.length - 1; i++) {
+      final key = parts[i];
+      node = node is Map ? node[key] : (node is List ? node[int.parse(key)] : null);
+      if (node == null) return 'setField: cannot set $field: no $key';
+    }
+    final last = parts.last;
+    if (node is Map) {
+      node[last] = value;
+    } else if (node is List) {
+      final i = int.tryParse(last);
+      if (i == null || i > node.length) return 'setField: cannot set $field: $last is not an array end';
+      if (i == node.length) {
+        node.add(value);
+      } else {
+        node[i] = value;
+      }
+    } else {
+      return 'setField: cannot set $field: not an object or array';
+    }
+    return null;
+  }
+
+  static Object? _deepCopyValue(Object? v) => switch (v) {
+    Map() => <String, Object?>{for (final e in v.entries) e.key as String: _deepCopyValue(e.value)},
+    List() => <Object?>[for (final e in v) _deepCopyValue(e)],
+    _ => v,
+  };
 
   bool _isDescendant(String id, String ancestor) {
     var p = _entities[id]?['parent'] as String?;

@@ -19,6 +19,9 @@ import 'documents/open_document.dart';
 import 'env/tools.dart';
 import 'hierarchy/hierarchy_model.dart';
 import 'hierarchy/hierarchy_panel.dart';
+import 'inspector/codegen_check.dart';
+import 'inspector/inspector_model.dart';
+import 'inspector/inspector_panel.dart';
 import 'launcher/launcher.dart';
 import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
@@ -141,6 +144,8 @@ class EditorShellState extends State<EditorShell> {
   ConsoleModel? console;
   DocumentTabs? tabs;
   HierarchyModel? hierarchy;
+  InspectorModel? inspector;
+  CodegenCheck? codegen;
   final consoleSearchFocus = FocusNode(debugLabel: 'console.search');
   final hierarchySearchFocus = FocusNode(debugLabel: 'hierarchy.search');
   late IdeLauncher ide;
@@ -164,6 +169,8 @@ class EditorShellState extends State<EditorShell> {
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
     workspace?.dispose();
+    inspector?.dispose();
+    codegen?.dispose();
     hierarchy?.dispose();
     tabs?.dispose();
     project?.removeListener(_onProjectChanged);
@@ -215,12 +222,11 @@ class EditorShellState extends State<EditorShell> {
       title: 'Inspector',
       icon: Icons.tune,
       home: PanelHome.right,
-      builder: (_) => const ComingPanel(
-        title: 'Inspector',
-        item: 4,
-        what: 'Components and fields of the selection.',
-        icon: Icons.tune,
-      ),
+      builder: (_) {
+        final i = inspector;
+        if (i == null) return const SizedBox.shrink();
+        return InspectorPanel(model: i);
+      },
     ),
     PanelSpec(
       id: PanelRegistry.project,
@@ -494,6 +500,52 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _hasTab,
         run: () => hierarchy?.collapseAll(),
       ),
+      // ── Inspector (Edit menu, group 3) ──
+      EditorCommand(
+        id: 'inspector.addComponent',
+        baseLabel: 'Add Component…',
+        description: 'A native component or a behaviour, on every selected entity',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyA, shift: true),
+        group: 3,
+        order: 0,
+        enabled: () => _canEdit && _hasSelection && !(inspector?.tooMany ?? true),
+        run: () {
+          final i = inspector;
+          if (i != null) showAddComponent(context, i);
+        },
+      ),
+      EditorCommand(
+        id: 'inspector.openScript',
+        baseLabel: 'Open Script',
+        description: "The selected entity's first behaviour, in the IDE",
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.enter, alt: true),
+        group: 3,
+        order: 1,
+        enabled: () => inspector?.slots.any((s) => s.spec.isBehaviour) ?? false,
+        run: () async {
+          final i = inspector;
+          if (i == null) return;
+          for (final s in i.slots) {
+            if (!s.spec.isBehaviour) continue;
+            final err = await i.openScript(s);
+            if (err != null) _showError(err);
+            return;
+          }
+        },
+      ),
+      EditorCommand(
+        id: 'inspector.checkCodegen',
+        baseLabel: 'Check Generated Behaviour Files',
+        description: 'Runs `fynkel codegen --check` on the project (never writes)',
+        menu: EditorMenu.project,
+        group: 3,
+        order: 5,
+        shortcut: k(LogicalKeyboardKey.keyG, shift: true),
+        enabled: () => codegen != null && codegen!.status != CodegenStatus.running,
+        run: () => codegen?.check(),
+      ),
       EditorCommand(
         id: 'project.new',
         baseLabel: 'New Project…',
@@ -728,21 +780,33 @@ class EditorShellState extends State<EditorShell> {
       await project?.close();
       project?.removeListener(_onProjectChanged);
       workspace?.dispose();
+      inspector?.dispose();
+      codegen?.dispose();
       hierarchy?.dispose();
       tabs?.dispose();
       final ws = Workspace(registry: _panels, store: widget.layoutStore);
       final t = DocumentTabs(project: opened);
       final h = HierarchyModel(tabs: t, project: opened);
       final c = ConsoleModel(project: opened, openInIde: ide.open, openInEditor: openDiagnosticInEditor);
+      final cg = CodegenCheck(
+        projectDir: opened.dir,
+        run: widget.run,
+        cli: () => toolchain?.fynkelCli,
+        repoRoot: () => toolchain?.fynkelRoot,
+      );
+      final ins = InspectorModel(tabs: t, project: opened, codegen: cg, openInIde: ide.open);
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
       t.addListener(registry.refresh);
       h.addListener(registry.refresh);
+      ins.addListener(registry.refresh);
       setState(() {
         project = opened;
         workspace = ws;
         tabs = t;
         hierarchy = h;
+        inspector = ins;
+        codegen = cg;
         console = c;
         _layoutNotice = ws.restoreProblem == null
             ? null
@@ -751,6 +815,8 @@ class EditorShellState extends State<EditorShell> {
       });
       widget.prefs.addRecent(opened.dir, opened.name);
       registry.refresh();
+      // A project with Dart behaviours gets its codegen check once at open, in the background.
+      if (opened.behaviourMetadata() != null && cg.isDartPackage) unawaited(cg.check());
     } on AuthoringException catch (e) {
       final reasons = e.diagnostics.map((d) => '${d.code}: ${d.message}').join('\n');
       _showError('Could not open $dir.\n${reasons.isEmpty ? e : reasons}');
@@ -775,14 +841,20 @@ class EditorShellState extends State<EditorShell> {
     closing.removeListener(_onProjectChanged);
     final h = hierarchy;
     final t = tabs;
+    final ins = inspector;
+    final cg = codegen;
     setState(() {
       project = null;
       console = null;
       hierarchy = null;
+      inspector = null;
+      codegen = null;
       tabs = null;
       workspace?.dispose();
       workspace = null;
     });
+    ins?.dispose();
+    cg?.dispose();
     h?.dispose();
     t?.dispose();
     await closing.close();
