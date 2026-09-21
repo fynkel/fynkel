@@ -107,6 +107,15 @@ impl Host {
         unsafe { fynkel_authoring_query(self.0, kind.as_ptr(), kind.len() as u32, ptr, len) }
     }
 
+    fn operate(&self, kind: &str, args: Option<&Value>) -> Status {
+        let text = args.map(|a| a.to_string());
+        let (ptr, len) = match &text {
+            Some(t) => (t.as_ptr(), t.len() as u32),
+            None => (ptr::null(), 0),
+        };
+        unsafe { fynkel_authoring_operate(self.0, kind.as_ptr(), kind.len() as u32, ptr, len) }
+    }
+
     fn save(&self, handle: u32, path: Option<&Path>) -> Status {
         let text = path.map(|p| p.to_string_lossy().into_owned());
         let (ptr, len) = match &text {
@@ -465,4 +474,127 @@ fn a_newer_lock_opens_read_only_and_refuses_edits() {
     assert_eq!(codes(&h.result()), ["FYN-E0007"]);
     assert_eq!(h.save(handle, None), Status::CommandsRejected);
     assert_eq!(codes(&h.result()), ["FYN-E0007"]);
+}
+
+#[test]
+fn asset_operations_cross_the_edge_with_their_statuses() {
+    let copy = Copy::new("operate");
+    let h = Host::new();
+    // No project: invalid argument, like a query.
+    assert_eq!(
+        h.operate(
+            "newDocument",
+            Some(&json!({"kind": "scene", "path": "scenes/x"}))
+        ),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&h.result()), ["FYN-T0001"]);
+    assert_eq!(h.open_project(&copy.dir), Status::Ok);
+    let before = h.result()["project"]["assetCount"].as_u64().unwrap();
+
+    // The listing and the empty history.
+    assert_eq!(h.query("operations", None), Status::Ok);
+    let ops = h.result()["result"].clone();
+    assert!(
+        ops.as_array().unwrap().iter().any(|o| o == "renameAsset"),
+        "{ops}"
+    );
+    assert_eq!(h.query("assetHistory", None), Status::Ok);
+    assert_eq!(h.result()["result"]["canUndo"], false);
+
+    // A new material, then a rename that keeps its id; the entry and the
+    // history come back in the result.
+    assert_eq!(
+        h.operate(
+            "newDocument",
+            Some(&json!({"kind": "material", "path": "materials/gold"}))
+        ),
+        Status::Ok
+    );
+    let r = h.result();
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["entry"]["name"], "gold");
+    assert_eq!(r["assetCount"].as_u64().unwrap(), before + 1);
+    assert_eq!(r["canUndo"], true);
+    let id = r["id"].as_str().unwrap().to_string();
+    assert!(copy
+        .dir
+        .join("assets/materials/gold.material.json")
+        .is_file());
+    assert_eq!(
+        h.operate(
+            "renameAsset",
+            Some(&json!({"asset": id, "path": "materials/aurum.material.json"}))
+        ),
+        Status::Ok
+    );
+    let r = h.result();
+    assert_eq!(r["entry"]["id"], id);
+    assert_eq!(r["entry"]["path"], "materials/aurum.material.json");
+    assert_eq!(
+        h.query("assetDetail", Some(&json!({"asset": id}))),
+        Status::Ok
+    );
+    assert_eq!(h.result()["result"]["material"]["shader"], "fynkel.pbr@1");
+
+    // Refusals: a referenced asset's delete lists its dependents (T0003),
+    // an unknown asset is A0004, an unknown operation T0004, bad input
+    // never reaches the session.
+    assert_eq!(
+        h.operate(
+            "deleteAsset",
+            Some(&json!({"asset": "c0000000-0000-4000-8000-000000000020"}))
+        ),
+        Status::InvalidArgument
+    );
+    let r = h.result();
+    assert_eq!(codes(&r), ["FYN-T0003"]);
+    assert!(
+        !r["diagnostics"][0]["related"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "{r}"
+    );
+    assert_eq!(
+        h.operate(
+            "deleteAsset",
+            Some(&json!({"asset": "00000000-0000-0000-0000-000000000000"}))
+        ),
+        Status::LoadFailed
+    );
+    assert_eq!(codes(&h.result()), ["FYN-A0004"]);
+    assert_eq!(h.operate("explode", None), Status::InvalidArgument);
+    assert_eq!(codes(&h.result()), ["FYN-T0004"]);
+    assert_eq!(
+        h.operate("newDocument", Some(&json!([1]))),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&h.result()), ["FYN-T0003"]);
+    assert_eq!(
+        unsafe { fynkel_authoring_operate(h.0, ptr::null(), 0, ptr::null(), 0) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_authoring_operate(ptr::null_mut(), ptr::null(), 0, ptr::null(), 0) },
+        Status::InvalidArgument
+    );
+
+    // Undo twice walks the material back out; a third is E0009.
+    assert_eq!(h.operate("undoAsset", None), Status::Ok);
+    assert_eq!(h.result()["entry"]["path"], "materials/gold.material.json");
+    assert_eq!(h.operate("undoAsset", None), Status::Ok);
+    assert!(!copy
+        .dir
+        .join("assets/materials/gold.material.json")
+        .exists());
+    assert_eq!(h.result()["assetCount"].as_u64().unwrap(), before);
+    assert_eq!(h.operate("undoAsset", None), Status::CommandsRejected);
+    assert_eq!(codes(&h.result()), ["FYN-E0009"]);
+    assert_eq!(h.operate("redoAsset", None), Status::Ok);
+    assert_eq!(h.query("assetHistory", None), Status::Ok);
+    assert_eq!(
+        h.result()["result"]["redoLabel"],
+        "Rename gold.material.json → aurum.material.json"
+    );
 }

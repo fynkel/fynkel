@@ -1,6 +1,7 @@
 /*
- * Fynkel authoring ABI — version 1 (M4-01, blueprint §19.2e item 1,
- * ADR-0016).
+ * Fynkel authoring ABI — version 2 (M4-01, blueprint §19.2e item 1,
+ * ADR-0016; version 2 added fynkel_authoring_operate and the assetDetail,
+ * assetHistory and operations queries for item 5, the Project browser).
  *
  * The editor's entry points over the authoring session
  * (crates/fynkel_authoring): one open project — its file, lock, schemas,
@@ -55,7 +56,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_AUTHORING_ABI_VERSION 1u
+#define FYNKEL_AUTHORING_ABI_VERSION 2u
 
 typedef struct FynkelAuthoringSession FynkelAuthoringSession;
 
@@ -152,11 +153,13 @@ FynkelStatus fynkel_authoring_save(FynkelAuthoringSession* session,
                                    uint32_t path_len);
 
 /* Rescans the project's asset root. `paths_json_utf8` is a JSON array of
- * paths (absolute, or relative to the project directory) whose reference
- * index entries are refreshed — what a file watcher reports — or NULL
- * with 0 (or `[]`) to refresh everything. The database itself is always
- * re-scanned whole (milliseconds for thousands of assets). Result:
- * { "ok", "assetCount", "scanned": [...], "diagnostics": [the scan's] }. */
+ * paths (absolute, or relative to the project directory) — what a file
+ * watcher reports: only those files are re-read (a source or its sidecar
+ * means the pair, a folder everything under it, a path that is gone drops
+ * what it held) and only the documents at them re-indexed, about a
+ * millisecond in a project of thousands of assets. NULL with 0 (or `[]`)
+ * re-reads everything (tens of milliseconds). Result:
+ * { "ok", "assetCount", "scanned": [...], "diagnostics": [of what was read] }. */
 FynkelStatus fynkel_authoring_rescan(FynkelAuthoringSession* session,
                                      const uint8_t* paths_json_utf8,
                                      uint32_t len);
@@ -182,8 +185,20 @@ FynkelStatus fynkel_authoring_rescan(FynkelAuthoringSession* session,
  *                                        version, dart, hasSchema, allowed, schema }] }
  *   schema          type                 one component or behaviour schema (with its
  *                                        x-fynkel display hints)
+ *   assetDetail     asset                the entry + "file": { size, modified },
+ *                                        "dependents": [as dependents], and for a
+ *                                        source "sidecar": { path, importer,
+ *                                        importerVersion, settings, subAssets }, for a
+ *                                        material "material": { shader, alphaMode,
+ *                                        alphaCutoff, doubleSided, fields }, for a
+ *                                        scene or prefab "entities": <count>, for a
+ *                                        rig or blend "fields"
+ *   assetHistory                         the asset operations' undo/redo state:
+ *                                        { canUndo, canRedo, undoLabel, redoLabel,
+ *                                        undo: [labels], redo: [labels] }
  *   metadata                             lib/generated/behaviours.g.json, or null
  *   commands                             the command names apply accepts
+ *   operations                           the operation names operate accepts
  * FYNKEL_STATUS_INVALID_ARGUMENT for an unknown kind (FYN-T0004, the
  * suggestion lists them), a missing or malformed argument (FYN-T0003), no
  * project (FYN-T0001) or an unknown handle (FYN-T0002). */
@@ -192,6 +207,48 @@ FynkelStatus fynkel_authoring_query(FynkelAuthoringSession* session,
                                     uint32_t kind_len,
                                     const uint8_t* args_json_utf8,
                                     uint32_t args_len);
+
+/* An asset operation by name — the session's own mutations of the asset
+ * tree, next to a document's transactions (blueprint §19.2e item 5). Every
+ * one re-reads only the paths it touched; the ones that change the tree go
+ * on the session's asset history, an undo/redo stack of its own (a
+ * document's undo never moves a file). Paths are relative to the asset
+ * root (or absolute inside it). `args_json_utf8` is a JSON object.
+ *   newDocument        kind, path, name?, shader?   a scene, prefab or material as
+ *                                                  `Document::new` (kind's suffix added
+ *                                                  when missing; name defaults to the
+ *                                                  file's stem; a material's shader
+ *                                                  validated against the project's)
+ *   renameAsset        asset, path                 moves the file — and a source's
+ *                                                  sidecar — so the id survives; `path`
+ *                                                  ending in `/` or naming a folder keeps
+ *                                                  the name; the kind (suffix, extension)
+ *                                                  is kept; an open document follows
+ *   deleteAsset        asset, force?               refused with every referencing field
+ *                                                  in `related` while a document names
+ *                                                  the asset (or a sub-asset) unless
+ *                                                  force; refused while open; file and
+ *                                                  sidecar move to .fynkel/trash/<id>/
+ *   setImportSettings  asset, settings             replaces the sidecar's settings object
+ *   reimport           asset                       runs the importer with the sidecar's
+ *                                                  settings; updates subAssets when they
+ *                                                  changed; { ok: false, diagnostics }
+ *                                                  when the importer refused; not undoable
+ *   undoAsset / redoAsset                          the asset history
+ * Result: { "ok", "op", "label", "entry", "assetCount", "canUndo", "canRedo",
+ * "undoLabel", "redoLabel", ...per operation }. FYNKEL_STATUS_INVALID_ARGUMENT
+ * with FYN-T0003 for a refused operation (nothing was touched) or FYN-T0004
+ * for an unknown kind; FYNKEL_STATUS_LOAD_FAILED with FYN-A0004 for an
+ * unknown asset or FYN-T0006 for an I/O failure; FYNKEL_STATUS_COMMANDS_REJECTED
+ * with FYN-E0009 when there is nothing to undo or redo or FYN-E0007 when the
+ * project is read-only. A reimport the importer refused answers
+ * COMMANDS_REJECTED with { ok: false, diagnostics } and leaves the sidecar
+ * alone. */
+FynkelStatus fynkel_authoring_operate(FynkelAuthoringSession* session,
+                                      const uint8_t* kind_utf8,
+                                      uint32_t kind_len,
+                                      const uint8_t* args_json_utf8,
+                                      uint32_t args_len);
 
 /* UTF-8 JSON of the last call on this session (empty before any, or for
  * NULL). Valid until the next call on the session. */

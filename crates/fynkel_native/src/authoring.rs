@@ -34,7 +34,7 @@ use crate::FynkelBufferView;
 
 /// Version of `fynkel_authoring.h`. Bumped on any incompatible change;
 /// independent of `FYNKEL_ABI_VERSION`.
-pub const AUTHORING_ABI_VERSION: u32 = 1;
+pub const AUTHORING_ABI_VERSION: u32 = 2;
 
 /// One editor session: the open project, its documents, and the last
 /// result. Opaque to the host.
@@ -403,27 +403,62 @@ pub unsafe extern "C" fn fynkel_authoring_query(
     args_json_utf8: *const u8,
     args_len: u32,
 ) -> Status {
+    let (kind, args) = match kind_and_args("query", kind_utf8, kind_len, args_json_utf8, args_len) {
+        Ok(pair) => pair,
+        Err(diagnostics) => return refused(session, diagnostics),
+    };
+    guarded(session, move |s| {
+        let result = s.query(&kind, &args)?;
+        Ok(json!({ "ok": true, "kind": kind, "result": result }))
+    })
+}
+
+/// Parses the `(kind, args)` pair `query` and `operate` share.
+unsafe fn kind_and_args(
+    what: &str,
+    kind_utf8: *const u8,
+    kind_len: u32,
+    args_json_utf8: *const u8,
+    args_len: u32,
+) -> Result<(String, Value), Vec<Diagnostic>> {
     let Some(kind) = utf8(kind_utf8, kind_len) else {
-        return refused(session, invalid("query: kind must be UTF-8 text"));
+        return Err(invalid(format!("{what}: kind must be UTF-8 text")));
     };
     let kind = kind.to_string();
     let args: Value = if args_json_utf8.is_null() && args_len == 0 {
         json!({})
     } else {
         let Some(text) = utf8(args_json_utf8, args_len) else {
-            return refused(session, invalid("query: args must be UTF-8 JSON or NULL"));
+            return Err(invalid(format!("{what}: args must be UTF-8 JSON or NULL")));
         };
         match serde_json::from_str::<Value>(text) {
             Ok(v @ Value::Object(_)) => v,
             Ok(Value::Null) => json!({}),
-            Ok(_) => return refused(session, invalid("query: args must be a JSON object")),
-            Err(e) => return refused(session, invalid(format!("query: args are not JSON: {e}"))),
+            Ok(_) => return Err(invalid(format!("{what}: args must be a JSON object"))),
+            Err(e) => return Err(invalid(format!("{what}: args are not JSON: {e}"))),
         }
     };
-    guarded(session, move |s| {
-        let result = s.query(&kind, &args)?;
-        Ok(json!({ "ok": true, "kind": kind, "result": result }))
-    })
+    Ok((kind, args))
+}
+
+/// # Safety
+/// `session` live or NULL; `kind_utf8` readable for `kind_len` bytes;
+/// `args_json_utf8` readable for `args_len` bytes, or NULL with `args_len`
+/// 0 for no arguments.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_authoring_operate(
+    session: *mut FynkelAuthoringSession,
+    kind_utf8: *const u8,
+    kind_len: u32,
+    args_json_utf8: *const u8,
+    args_len: u32,
+) -> Status {
+    let (kind, args) = match kind_and_args("operate", kind_utf8, kind_len, args_json_utf8, args_len)
+    {
+        Ok(pair) => pair,
+        Err(diagnostics) => return refused(session, diagnostics),
+    };
+    guarded(session, move |s| s.operate(&kind, &args))
 }
 
 /// # Safety
