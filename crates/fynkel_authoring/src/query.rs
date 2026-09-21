@@ -27,6 +27,7 @@ use crate::{AuthoringSession, Handle, COMMANDS};
 /// | `schemas` | | component and behaviour types with schemas |
 /// | `schema` | `type` | one schema |
 /// | `metadata` | | `behaviours.g.json` or null |
+/// | `migrations` | | [`crate::OpenProject::migrations_json`]: the outdated documents and what `fynkel migrate` would do |
 /// | `commands` | | the command names |
 pub const KINDS: &[&str] = &[
     "project",
@@ -41,6 +42,7 @@ pub const KINDS: &[&str] = &[
     "schemas",
     "schema",
     "metadata",
+    "migrations",
     "commands",
 ];
 
@@ -125,6 +127,11 @@ impl AuthoringSession {
                 .metadata
                 .clone()
                 .unwrap_or(Value::Null)),
+            "migrations" => Ok(self
+                .project()
+                .ok_or_else(no_project)
+                .map_err(one)?
+                .migrations_json()),
             "commands" => Ok(json!(COMMANDS)),
             other => Err(one(Diagnostic::error(
                 Code::SESSION_UNKNOWN_QUERY,

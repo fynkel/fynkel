@@ -385,6 +385,8 @@ void main() {
     expect(session.schema('fynkel.PointLight')['title'], 'fynkel.PointLight');
     expect((session.schemas()['components'] as List), isNotEmpty);
     expect(session.metadata(), isNull, reason: 'the fixture has no behaviours.g.json');
+    expect(session.migrationPreview().isEmpty, isTrue, reason: 'every fixture document is current');
+    expect(session.migrationPreview().steps.map((s) => s.id), contains('scene/0-1/entities-keyed-by-id'));
     expect(session.isPoisoned, isFalse);
     final e = AuthoringException('x', AuthoringStatus.commandsRejected, [
       Diagnostic.fromJson({'code': 'FYN-E0001', 'severity': 'error', 'message': 'stale', 'document': 'a', 'line': 3}),
@@ -392,6 +394,31 @@ void main() {
     expect(e.isConflict, isTrue);
     expect(e.toString(), contains('FYN-E0001'));
     expect(e.diagnostics.single.toString(), 'error FYN-E0001: stale (a:3)');
+  });
+
+  test('the migration preview names an outdated scene, its steps and the diff, and writes nothing', () {
+    final dir = copyFixture('migrations');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final v0 = File('${fixture.parent.path}/migrate/v0_training.scene.json');
+    final target = File('${dir.path}/assets/scenes/training.scene.json');
+    v0.copySync(target.path);
+    final before = target.readAsStringSync();
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    session.openProject(dir.path);
+    final preview = session.migrationPreview();
+    expect(preview.outdated, 1);
+    final doc = preview.documents.single;
+    expect(doc.kind, 'scene');
+    expect(doc.from, 0);
+    expect(doc.to, 2, reason: 'scenes are at formatVersion 2: two steps');
+    expect(doc.ok, isTrue);
+    expect(doc.path, target.path);
+    expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
+    expect(doc.applied.map((a) => a.from), [0, 1]);
+    expect(doc.diff, contains('formatVersion'));
+    expect(target.readAsStringSync(), before, reason: 'a preview writes nothing');
+    expect(session.validateProject().diagnostics.map((d) => d.code), contains('FYN-D0016'));
   });
 }
 

@@ -11,9 +11,10 @@ use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use fynkel_document::asset::{asset_refs, entry_json};
+use fynkel_document::migrate::migrated_json;
 use fynkel_document::{
-    AssetDatabase, AssetKind, Document, DocumentKind, Lock, Project, SchemaSet, ShaderLibrary,
-    ShaderManifest,
+    diagnostics_json, migrate, AssetDatabase, AssetKind, Document, DocumentKind, Lock, Migrations,
+    Project, SchemaSet, ShaderLibrary, ShaderManifest,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -246,6 +247,47 @@ impl OpenProject {
             })
             .map(entry_json)
             .collect()
+    }
+
+    /// `fynkel migrate --dry-run --json` over every document of the asset
+    /// database, without writing anything: the documents behind their
+    /// kind's `formatVersion`, the steps each would take, the unified diff
+    /// and the diagnostics of a step that cannot run. Documents that fail
+    /// to read are validation's business and are skipped here.
+    pub fn migrations_json(&self) -> Value {
+        let migrations = Migrations::builtin();
+        let root = self.assets_dir();
+        let mut documents = Vec::new();
+        for e in self.assets.entries() {
+            let AssetKind::Document(kind) = e.kind else {
+                continue;
+            };
+            let path = e.file(&root);
+            let Ok(doc) = Document::read(&path, Some(kind)) else {
+                continue;
+            };
+            if !doc.is_outdated() {
+                continue;
+            }
+            let m = migrate(&doc, &migrations, &self.schemas);
+            let mut v = migrated_json(&m);
+            v["path"] = path.display().to_string().into();
+            v["name"] = e.name.clone().into();
+            v["ok"] = (!m.has_errors()).into();
+            v["diagnostics"] = diagnostics_json(&m.diagnostics);
+            documents.push(v);
+        }
+        json!({
+            "outdated": documents.len(),
+            "steps": migrations.steps().iter().map(|step| json!({
+                "id": step.id(),
+                "kind": step.kind.name(),
+                "from": step.from,
+                "to": step.to(),
+                "description": step.description,
+            })).collect::<Vec<_>>(),
+            "documents": documents,
+        })
     }
 
     /// The `fynkel project describe --json` shape plus what the session

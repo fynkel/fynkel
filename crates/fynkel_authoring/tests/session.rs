@@ -696,3 +696,57 @@ fn a_transaction_that_writes_resolves_paths_against_the_project_and_rescans() {
         "Bot"
     );
 }
+
+#[test]
+fn the_migrations_query_previews_outdated_documents_without_writing() {
+    let copy = Copy::new("migrations");
+    {
+        let s = open(&copy);
+        let none = s.query("migrations", &json!({})).unwrap();
+        assert_eq!(none["outdated"], 0);
+        assert!(none["documents"].as_array().unwrap().is_empty());
+        assert!(
+            none["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|st| st["id"] == "scene/0-1/entities-keyed-by-id"),
+            "{}",
+            none["steps"]
+        );
+    }
+    // A v0 scene lands in the project: the preview names it, the steps and
+    // the diff; the file itself is untouched.
+    let v0 = fixture()
+        .parent()
+        .unwrap()
+        .join("migrate/v0_training.scene.json");
+    let target = copy.path("assets/scenes/training.scene.json");
+    std::fs::copy(&v0, &target).unwrap();
+    let before = std::fs::read_to_string(&target).unwrap();
+    let s = open(&copy);
+    let preview = s.query("migrations", &json!({})).unwrap();
+    assert_eq!(preview["outdated"], 1, "{preview}");
+    let doc = &preview["documents"][0];
+    assert_eq!(doc["kind"], "scene");
+    assert_eq!(doc["from"], 0);
+    // Scenes are at formatVersion 2: two steps, the v0 one first.
+    assert_eq!(doc["to"], 2);
+    assert_eq!(doc["ok"], true);
+    assert_eq!(doc["path"], target.display().to_string());
+    assert_eq!(doc["applied"].as_array().unwrap().len(), 2);
+    assert_eq!(doc["applied"][0]["name"], "scene/0-1/entities-keyed-by-id");
+    assert_eq!(doc["applied"][1]["from"], 1);
+    assert!(doc["diff"].as_str().unwrap().contains("formatVersion"));
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), before);
+    // Validation reports the same document as outdated (FYN-D0016).
+    let report = s.validate_project().unwrap();
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code.as_str() == "FYN-D0016"),
+        "{:?}",
+        code_of(&report.diagnostics)
+    );
+}

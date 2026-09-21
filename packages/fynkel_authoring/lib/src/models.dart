@@ -167,6 +167,80 @@ final class Replayed {
   final DocumentState state;
 }
 
+/// One step `fynkel migrate` knows: `kind` documents at `from` become `to`.
+/// The registry lists it under `id`; a document's `applied[]` under `name`
+/// (the same text, `scene/0-1/entities-keyed-by-id`).
+final class MigrationStep {
+  MigrationStep.fromJson(Map<String, Object?> json)
+      : id = json['id'] as String? ?? json['name'] as String? ?? '',
+        kind = json['kind'] as String? ?? '',
+        from = (json['from'] as num?)?.toInt() ?? 0,
+        to = (json['to'] as num?)?.toInt() ?? 0,
+        description = json['description'] as String? ?? '';
+
+  final String id;
+  final String kind;
+  final int from;
+  final int to;
+  final String description;
+}
+
+/// What `fynkel migrate --dry-run` would do to one outdated document.
+final class DocumentMigration {
+  DocumentMigration.fromJson(Map<String, Object?> json)
+      : path = json['path'] as String? ?? '',
+        name = json['name'] as String? ?? '',
+        kind = json['kind'] as String? ?? '',
+        from = (json['from'] as num?)?.toInt() ?? 0,
+        to = (json['to'] as num?)?.toInt() ?? 0,
+        ok = json['ok'] == true,
+        applied = [
+          for (final a in json['applied'] as List? ?? const [])
+            if (a is Map) MigrationStep.fromJson(a.cast<String, Object?>()),
+        ],
+        diff = json['diff'] as String? ?? '',
+        diagnostics = Diagnostic.listOf(json['diagnostics']);
+
+  /// Absolute path of the document.
+  final String path;
+  final String name;
+  final String kind;
+  final int from;
+  final int to;
+
+  /// False when a step failed or the result does not validate; [diagnostics] say why.
+  final bool ok;
+
+  /// The steps, in order (`applied[i].id` like `scene/0-1/entities-keyed-by-id`).
+  final List<MigrationStep> applied;
+
+  /// Unified diff of the canonical text, empty when nothing would change.
+  final String diff;
+  final List<Diagnostic> diagnostics;
+}
+
+/// The `migrations` query: the documents behind their kind's `formatVersion`
+/// and the steps this build knows. Nothing is written; `fynkel migrate`
+/// does that, keeping `<file>.bak`.
+final class MigrationPreview {
+  MigrationPreview.fromJson(Map<String, Object?> json)
+      : outdated = (json['outdated'] as num?)?.toInt() ?? 0,
+        steps = [
+          for (final s in json['steps'] as List? ?? const [])
+            if (s is Map) MigrationStep.fromJson(s.cast<String, Object?>()),
+        ],
+        documents = [
+          for (final d in json['documents'] as List? ?? const [])
+            if (d is Map) DocumentMigration.fromJson(d.cast<String, Object?>()),
+        ];
+
+  final int outdated;
+  final List<MigrationStep> steps;
+  final List<DocumentMigration> documents;
+
+  bool get isEmpty => documents.isEmpty;
+}
+
 /// A rescan of the asset database.
 final class RescanReport {
   RescanReport.fromJson(this.json)

@@ -287,6 +287,10 @@ final class AuthoringSession implements Finalizable {
     return v == null ? null : _mapOf(v);
   }
 
+  /// What `fynkel migrate --dry-run` would do to the project's outdated
+  /// documents (`migrations` query); nothing is written.
+  MigrationPreview migrationPreview() => MigrationPreview.fromJson(query('migrations'));
+
   /// Rescans the asset database; [paths] (absolute, or relative to the
   /// project directory) are the files whose reference-index entries are
   /// refreshed — what a file watcher reports — or empty for everything.
