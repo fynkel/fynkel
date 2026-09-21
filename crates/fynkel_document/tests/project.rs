@@ -41,7 +41,7 @@ const IMPORTERS: &[(&str, u32)] = &[
     ("fynkel.fbx", 1),
     ("fynkel.gltf", 5),
     ("fynkel.image", 1),
-    ("fynkel.audio", 1),
+    ("fynkel.audio", 2),
     ("fynkel.file", 1),
 ];
 

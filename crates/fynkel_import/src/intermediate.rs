@@ -21,7 +21,7 @@ use fynkel_contracts::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 pub const MAGIC: &[u8; 4] = b"FYNI";
-pub const INTERMEDIATE_VERSION: u32 = 4;
+pub const INTERMEDIATE_VERSION: u32 = 5;
 
 /// The one vertex layout every mesh is normalized to (72 bytes); the
 /// cooked `MESH` payload uses the same one, so it is defined next to the
@@ -145,7 +145,9 @@ pub struct TextureData {
     pub rgba8: Vec<u8>,
 }
 
-/// A decoded audio clip: interleaved `f32` PCM in `[-1, 1]`.
+/// A decoded audio clip: interleaved `f32` PCM in `[-1, 1]` — or, for a
+/// sound the sidecar marks `stream: true` (M3-11 part 2), the source's
+/// encoded bytes with the format the decode found, and no samples.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioData {
     /// Sub-asset id, `None` when the asset itself is the clip (a `.wav`).
@@ -155,17 +157,19 @@ pub struct AudioData {
     pub codec: String,
     pub sample_rate: u32,
     pub channels: u16,
-    /// `frames * channels` samples.
+    /// Frames in the sound (`samples.len() / channels` for a decoded
+    /// clip; counted by the validating decode for a streamed one).
+    pub frames: u64,
+    /// `frames * channels` samples; empty for a streamed sound.
     pub samples: Vec<f32>,
+    /// The source file's bytes, kept for a streamed sound (the cook
+    /// writes a `STRM` chunk instead of `CLIP`).
+    pub stream: Option<Vec<u8>>,
 }
 
 impl AudioData {
     pub fn frames(&self) -> u64 {
-        if self.channels == 0 {
-            0
-        } else {
-            (self.samples.len() / self.channels as usize) as u64
-        }
+        self.frames
     }
 
     pub fn duration_seconds(&self) -> f64 {
@@ -269,6 +273,8 @@ struct AudioHeader {
     channels: u16,
     frames: u64,
     samples: [u64; 2],
+    /// The encoded source, for a streamed sound.
+    stream: Option<[u64; 2]>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -420,6 +426,7 @@ impl Intermediate {
                     channels: c.channels,
                     frames: c.frames(),
                     samples: push(&bytes),
+                    stream: c.stream.as_deref().map(&mut push),
                 }
             })
             .collect();
@@ -580,7 +587,16 @@ impl Intermediate {
         for c in header.clips {
             let label = c.sub_id.clone().unwrap_or_else(|| c.name.clone());
             let data = slice(c.samples, &label)?;
-            if data.len() as u64 != c.frames * c.channels as u64 * 4 {
+            let stream = match c.stream {
+                Some(range) => Some(slice(range, &label)?.to_vec()),
+                None => None,
+            };
+            let expected = if stream.is_some() {
+                0
+            } else {
+                c.frames * c.channels as u64 * 4
+            };
+            if data.len() as u64 != expected {
                 return Err(bad(&format!("{label}: sample blob size")));
             }
             clips.push(AudioData {
@@ -589,10 +605,12 @@ impl Intermediate {
                 codec: c.codec,
                 sample_rate: c.sample_rate,
                 channels: c.channels,
+                frames: c.frames,
                 samples: data
                     .chunks_exact(4)
                     .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
                     .collect(),
+                stream,
             });
         }
         let mut sub_assets = Vec::with_capacity(header.sub_assets.len());
@@ -651,6 +669,7 @@ impl Intermediate {
             "clips": self.clips.iter().map(|c| serde_json::json!({
                 "subId": c.sub_id, "name": c.name, "codec": c.codec, "sampleRate": c.sample_rate,
                 "channels": c.channels, "frames": c.frames(), "seconds": c.duration_seconds(),
+                "streamed": c.stream.is_some(),
             })).collect::<Vec<_>>(),
             "skins": self.skins.iter().map(|sk| serde_json::json!({
                 "subId": sk.sub_id, "name": sk.name, "joints": sk.payload.joints.len(),

@@ -20,7 +20,10 @@ import 'game_state.dart';
 /// [jumpClip] once over it and the landing crossfades back. The `wave`
 /// action plays the wave layer — a second, additive animator on the
 /// entity named [waveLayer] — once. Footstep markers of the walk and
-/// the run (`step_l`/`step_r`) count into [GameState.footsteps]. The
+/// the run (`step_l`/`step_r`) count into [GameState.footsteps] and play
+/// [stepLeft]/[stepRight] as one-shots (M3-11: `world.audio.play`, no
+/// source on the entity; the pitch wanders a little with the count so a
+/// run does not sound like a metronome); a death plays [hit]. The
 /// clips are authored in place: the controller moves the entity, the
 /// animator only poses the joints (docs/animation.md).
 ///
@@ -71,6 +74,21 @@ class Player extends Behaviour {
   /// The name of the blend space's parameter (player.blend.json).
   @Expose()
   String speedParameter = 'speed';
+
+  /// The footstep sounds, one per `step_l`/`step_r` marker (assets/audio;
+  /// none when unset: the markers still count).
+  @Expose()
+  AssetRef stepLeft = AssetRef.none;
+  @Expose()
+  AssetRef stepRight = AssetRef.none;
+
+  /// The sound of a death (a hazard or the fall).
+  @Expose()
+  AssetRef hit = AssetRef.none;
+
+  /// Gain of a footstep (`0…1`).
+  @Expose(min: 0, max: 1, step: 0.05)
+  double stepVolume = 0.6;
 
   /// The locomotion blend space: what the scene's animator started on.
   late AssetRef locomotion;
@@ -171,11 +189,22 @@ class Player extends Behaviour {
   int waves = 0;
 
   /// A footstep of the walk or the run (their `step_l`/`step_r` markers,
-  /// from whichever clip dominates the blend at the moment).
+  /// from whichever clip dominates the blend at the moment): counted,
+  /// and its sound played once — the left or the right file by the
+  /// marker's name, a hair sharper every third step.
   @override
   void onAnimationMarker(AnimationMarker event) {
-    if (event.name.startsWith('step')) state.footsteps.value += 1;
+    if (!event.name.startsWith('step')) return;
+    final n = state.footsteps.value;
+    state.footsteps.value = n + 1;
+    final clip = event.name == 'step_r' ? stepRight : stepLeft;
+    if (clip == AssetRef.none) return;
+    world.audio.play(clip, volume: stepVolume, pitch: 0.95 + 0.05 * (n % 3));
+    sounds++;
   }
+
+  /// One-shots this behaviour played (for the tests).
+  int sounds = 0;
 
   /// A hazard's zone (the sweeper's blade, a launched ball) touched us.
   @override
@@ -190,5 +219,9 @@ class Player extends Behaviour {
     _dead = true;
     state.deaths.value += 1;
     transform.position = spawn;
+    if (hit != AssetRef.none) {
+      world.audio.play(hit, volume: 0.8, priority: 1);
+      sounds++;
+    }
   }
 }

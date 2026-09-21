@@ -94,7 +94,11 @@
         "838e54d7-ce8d-553b-a728-aa64de17f3eb": {
           "type": "game.Collectible",
           "version": 1,
-          "data": {}
+          "data": {
+            "pickup": {
+              "asset": "12be2075-102a-4ace-ac56-ad55c13d3e01"
+            }
+          }
         }
       }
     }

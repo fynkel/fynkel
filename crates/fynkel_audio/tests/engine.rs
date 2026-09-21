@@ -278,3 +278,142 @@ fn clips_are_registered_replaced_and_released() {
     audio.register_clip(r(2), a.clone()).unwrap();
     assert!(audio.play(None, &r(2), PlayParams::default()).is_ok());
 }
+
+/// A PCM16 WAV of `frames` mono/stereo frames whose left sample is the
+/// frame index / 32768 (so a read tells where it came from).
+fn ramp_wav(rate: u32, channels: u16, frames: u32) -> Vec<u8> {
+    let data_len = frames * channels as u32 * 2;
+    let mut w = Vec::with_capacity(44 + data_len as usize);
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + data_len).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&channels.to_le_bytes());
+    w.extend_from_slice(&rate.to_le_bytes());
+    w.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+    w.extend_from_slice(&(channels * 2).to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&data_len.to_le_bytes());
+    for i in 0..frames {
+        let s = (i % 32_768) as i16;
+        w.extend_from_slice(&s.to_le_bytes());
+        for _ in 1..channels {
+            w.extend_from_slice(&(-s).to_le_bytes());
+        }
+    }
+    w
+}
+
+/// Renders until the stream delivers (its decoder runs on its own
+/// thread) or a second passes; the output of the delivering render.
+fn render_until_sound(audio: &mut Audio, out: &mut [f32]) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        audio.render(out);
+        if out.iter().any(|s| *s != 0.0) {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    false
+}
+
+#[test]
+fn a_streamed_clip_is_decoded_as_it_plays_loops_by_seek_and_ends_by_the_clock() {
+    let mut audio = Audio::new();
+    // A quarter second at the null rate, stereo, so the mixer reads it
+    // one to one and the ramp shows through.
+    let frames = NULL_SAMPLE_RATE / 4;
+    let bytes = ramp_wav(NULL_SAMPLE_RATE, 2, frames);
+    let clip = AudioClip::streamed(NULL_SAMPLE_RATE, 2, frames as u64, "pcm", bytes).unwrap();
+    assert!(clip.is_stream());
+    assert_eq!(clip.frames(), frames as u64);
+    audio.register_clip(r(1), clip).unwrap();
+    assert!(audio.is_stream(&r(1)));
+    assert_eq!(audio.stats().streams, 1);
+
+    // Not looping: plays through, the clock ends it at a quarter second.
+    let e = Entity::from_bits(3);
+    let once = audio.play(Some(e), &r(1), PlayParams::default()).unwrap();
+    let mut out = vec![0.0f32; 256 * NULL_CHANNELS];
+    assert!(render_until_sound(&mut audio, &mut out), "no sound came");
+    // The first non-silent render: the ramp from its start, after the
+    // 5 ms gain ramp, and the right channel the negative of the left.
+    let last = out.len() - 2;
+    assert!(out[last] > 0.0, "left {}", out[last]);
+    assert!(
+        (out[last + 1] + out[last]).abs() < 1e-3,
+        "right {}",
+        out[last + 1]
+    );
+    let mut ended = Vec::new();
+    for _ in 0..30 {
+        ended.extend(audio.advance(1.0 / 60.0));
+    }
+    assert_eq!(ended.len(), 1);
+    assert_eq!(ended[0].voice, once);
+    assert!(!audio.is_playing(once));
+    // The mixer side reaches the end as well (its slot freed) and never
+    // starved: the decoder is a second ahead.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while std::time::Instant::now() < deadline {
+        audio.render(&mut out);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert_eq!(audio.stats().starved, 0);
+
+    // Looping: still sounding well past the clip's length, the clock
+    // wrapped, and a stop ends the decoder.
+    let looped = audio
+        .play(
+            None,
+            &r(1),
+            PlayParams {
+                looping: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(render_until_sound(&mut audio, &mut out));
+    for _ in 0..40 {
+        audio.advance(1.0 / 60.0);
+    }
+    // Drain a second of frames (four clip lengths) and check the last
+    // render is still sound.
+    for _ in 0..(NULL_SAMPLE_RATE as usize / 256) {
+        audio.render(&mut out);
+        while out.iter().all(|s| *s == 0.0) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            audio.render(&mut out);
+        }
+    }
+    assert!(out.iter().any(|s| *s != 0.0));
+    let s = audio.state(looped).unwrap();
+    assert!(s.time < 0.25, "wrapped time {}", s.time);
+    assert!(audio.stop(looped));
+    assert!(!audio.is_playing(looped));
+    for _ in 0..20 {
+        audio.render(&mut out); // the fade, then the freed slot
+    }
+    assert!(out.iter().all(|s| *s == 0.0), "silent after the stop");
+    let stats = audio.stats();
+    assert_eq!(stats.started, 2);
+    assert_eq!(stats.ended, 1);
+    assert_eq!(stats.streams, 1);
+
+    // A voice resumed at a position (what a device open does) starts
+    // there: the ramp reads the position.
+    let late = audio.play(None, &r(1), PlayParams::default()).unwrap();
+    assert!(render_until_sound(&mut audio, &mut out));
+    for _ in 0..6 {
+        audio.advance(1.0 / 60.0); // 0.1 s in = frame 4 800
+    }
+    audio.close_device(); // a no-op without one: the mixer stays
+    assert!((audio.state(late).unwrap().time - 0.1).abs() < 1e-3);
+    // Unregistering stops the voice and drops the stream's clip.
+    assert!(audio.unregister_clip(&r(1)));
+    assert!(!audio.is_playing(late));
+    assert_eq!(audio.stats().streams, 0);
+}

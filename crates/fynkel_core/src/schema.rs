@@ -324,6 +324,10 @@ pub struct AudioStatsRecord {
     /// Device underruns reported by the backend.
     pub underruns: u32,
     pub suspended: bool,
+    /// Streamed clips registered (M3-11 part 2: decoded as they play).
+    pub streams: u32,
+    /// Callbacks in which a streamed voice's decoder had fallen behind.
+    pub starved: u32,
 }
 
 /// A spatial query kind (`fynkel.rec.PhysicsQuery`).

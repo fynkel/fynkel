@@ -131,13 +131,18 @@ device (the null backend runs the same clock), counts the
 `PLAYBACK_ENDED` events and the audio diagnostics (`SOUND_UNAVAILABLE`,
 `AUDIO_DEVICE`, anything on an `AudioSource`) of every tick; when the
 scene has a source or sound the report gains `audio: { sources, sounds,
-started, stolen, refused, ended, diagnostics }` and the text mode prints
-`audio: 1 sources, 1 sounds, 1 voices started (0 stolen, 0 refused), 1
-ended, 0 diagnostics` — the fixture project's Robot plays its tone once
-at the load and it ends at tick 59 (test). The standalone host takes
+streams, started, stolen, refused, ended, diagnostics }` and the text
+mode prints `audio: 1 sources, 1 sounds (0 streamed), 1 voices started
+(0 stolen, 0 refused), 1 ended, 0 diagnostics` — the fixture project's
+Robot plays its tone once at the load and it ends at tick 59 (test);
+the reference game's `Music` is `1 sounds (1 streamed)`, its decoder
+thread running under the headless ticks like under the app's. The standalone host takes
 `--audio` to open the output device after the load (`audio: output
 device open at 48000 Hz, 2 channels`, or the `AUDIO_DEVICE` diagnostic),
-suspends it while the window is occluded and closes it with the window.
+suspends it while the window is occluded, closes it with the window and
+prints the engine's counters at the end (`audio: 1 voices (1 started, 0
+ended), 1 clips (1 streamed), 1131 callbacks, 0 underruns, 0 starved` —
+the reference game's music streamed to the Mac's device for 12 s).
 Read-side:
 
 ```sh
@@ -369,7 +374,7 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   bus, voice }`, none without an `AudioSource`), `world.audio.stats`
   `FYNKEL_QUERY_AUDIO_STATS` (13: one `AudioStatsRecord { device,
   sample_rate, channels, voices, max_voices, started, stolen, refused,
-  ended, clips, callbacks, underruns, suspended }`), a source's end
+  ended, clips, callbacks, underruns, suspended, streams, starved }`), a source's end
   `FYNKEL_EVENT_PLAYBACK_ENDED` (11: `PlaybackEndedEvent { entity, clip }`,
   general lane), and the components are ids 23 `AudioSource` and 24
   `AudioListener`; a `PlaySound` or a set `AudioSource` registers its clip

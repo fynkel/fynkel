@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use fynkel_contracts::{has_errors, Code, Diagnostic};
 use fynkel_cooked::{
     Writer, KIND_ANIMATION, KIND_BLOB, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN,
-    KIND_TEXTURE,
+    KIND_STREAM, KIND_TEXTURE,
 };
 use fynkel_document::asset::{asset_refs, AssetDatabase, AssetEntry, AssetKind, Meta};
 use fynkel_document::prefab::{expand, Prefab, PrefabLibrary};
@@ -43,8 +43,9 @@ pub const DEFAULT_PROFILE: &str = "dev";
 
 /// Texture chunk formats (`TEXR` payload, `format` field).
 pub use fynkel_cooked::payload::{
-    decode_clip, decode_mesh, decode_texture, ClipPayload as ClipChunk, MeshPayload as MeshChunk,
-    TexturePayload as TextureChunk, TEXTURE_FORMAT_RGBA8_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
+    decode_clip, decode_mesh, decode_stream, decode_texture, ClipPayload as ClipChunk,
+    MeshPayload as MeshChunk, StreamPayload as StreamChunk, TexturePayload as TextureChunk,
+    TEXTURE_FORMAT_RGBA8_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
 };
 
 #[derive(Clone, Debug)]
@@ -1517,22 +1518,45 @@ fn plan_intermediate(
         chunks.push(c);
     }
     for clip in &im.clips {
-        chunks.push(ChunkPlan {
-            kind: KIND_CLIP,
-            name: if clip.sub_id.is_none() {
-                asset_name.to_string()
-            } else {
-                clip.name.clone()
-            },
-            sub: clip.sub_id.clone(),
-            info: json!({
-                "sampleRate": clip.sample_rate,
-                "channels": clip.channels,
-                "frames": clip.frames(),
-                "codec": clip.codec,
-            }),
-            payload: encode_clip(clip),
+        let name = if clip.sub_id.is_none() {
+            asset_name.to_string()
+        } else {
+            clip.name.clone()
+        };
+        let mut info = json!({
+            "sampleRate": clip.sample_rate,
+            "channels": clip.channels,
+            "frames": clip.frames(),
+            "codec": clip.codec,
         });
+        match &clip.stream {
+            // A streamed sound (M3-11 part 2): the source bytes, decoded
+            // at play time; the info says so and how much is in there.
+            Some(source) => {
+                info["streamed"] = json!(true);
+                info["bytes"] = json!(source.len());
+                chunks.push(ChunkPlan {
+                    kind: KIND_STREAM,
+                    name,
+                    sub: clip.sub_id.clone(),
+                    info,
+                    payload: fynkel_cooked::payload::encode_stream(
+                        clip.sample_rate,
+                        clip.channels as u32,
+                        clip.frames(),
+                        &clip.codec,
+                        source,
+                    ),
+                });
+            }
+            None => chunks.push(ChunkPlan {
+                kind: KIND_CLIP,
+                name,
+                sub: clip.sub_id.clone(),
+                info,
+                payload: encode_clip(clip),
+            }),
+        }
     }
     for skin in &im.skins {
         chunks.push(ChunkPlan {

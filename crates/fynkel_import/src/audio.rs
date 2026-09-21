@@ -6,7 +6,12 @@
 //! normalization: the clip is stored as the file had it, and the runtime's
 //! mixer (a later milestone) decides. Metadata tags are not carried over.
 //!
-//! The importer has no settings yet.
+//! One setting: `settings.stream` (a boolean, default `false`). A
+//! streamed sound is decoded the same way — so a bad file is the same
+//! diagnostic and the frame count is known — but the intermediate keeps
+//! the source's bytes instead of the samples and the cook writes a
+//! `STRM` chunk the runtime decodes at play time (`docs/audio.md`
+//! § Streamed music).
 
 use std::io::Cursor;
 use std::path::Path;
@@ -25,7 +30,33 @@ use crate::intermediate::{AudioData, Intermediate};
 use crate::{read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::AUDIO_IMPORTER;
-pub const IMPORTER_VERSION: u32 = 1;
+pub const IMPORTER_VERSION: u32 = 2;
+
+/// Import settings read from the sidecar's `settings`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Settings {
+    /// Keep the sound encoded and decode it while it plays (music).
+    pub stream: bool,
+}
+
+impl Settings {
+    pub fn from_meta(meta: &Meta) -> Result<Settings, Diagnostic> {
+        let stream = match meta.settings.get("stream") {
+            None => false,
+            Some(n) => match n.as_bool() {
+                Some(b) => b,
+                None => {
+                    return Err(Diagnostic::error(
+                        Code::IMPORT_INVALID_DATA,
+                        "settings.stream must be true or false",
+                    )
+                    .with_pointer("/settings/stream"))
+                }
+            },
+        };
+        Ok(Settings { stream })
+    }
+}
 
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     let shown = path.display().to_string();
@@ -34,10 +65,15 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         sub_assets: meta.sub_assets.clone(),
         diagnostics: vec![d.with_document(shown.clone())],
     };
+    let settings = match Settings::from_meta(meta) {
+        Ok(s) => s,
+        Err(d) => return fail(d),
+    };
     let bytes = match read_source(path, limits) {
         Ok(b) => b,
         Err(d) => return fail(d),
     };
+    let source = settings.stream.then(|| bytes.clone());
     let name = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -46,10 +82,15 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
-    let clip = match decode(bytes, &name, extension.as_deref(), limits) {
+    let mut clip = match decode(bytes, &name, extension.as_deref(), limits) {
         Ok(c) => c,
         Err(d) => return fail(d),
     };
+    if let Some(source) = source {
+        // Validated and counted; the runtime decodes it again, as it plays.
+        clip.samples = Vec::new();
+        clip.stream = Some(source);
+    }
     let mut intermediate = Intermediate::empty(
         IMPORTER,
         IMPORTER_VERSION,
@@ -223,6 +264,8 @@ pub fn decode(
         codec,
         sample_rate,
         channels,
+        frames: samples.len() as u64 / channels as u64,
         samples,
+        stream: None,
     })
 }

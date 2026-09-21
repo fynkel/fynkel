@@ -5,15 +5,18 @@
 //! into the device buffer — linear interpolation at the voice's rate ratio
 //! times its pitch, a one-pole gain smoother that also declicks starts,
 //! stops and pauses — and hands what it is done with back over a second
-//! ring (a released clip's `Arc`, a voice that ended) so that nothing is
-//! freed on the audio thread. `tests/allocation.rs` counts allocations
-//! across a render to keep it that way.
+//! ring (a released clip's `Arc`, a voice that ended, a stream's tap) so
+//! that nothing is freed on the audio thread. A streamed voice reads its
+//! frames from a decoder's ring through a `StreamTap` instead of a clip's
+//! samples, everything else the same. `tests/allocation.rs` counts
+//! allocations across a render to keep it that way.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::clip::AudioClip;
 use crate::components::AudioBus;
+use crate::stream::{StreamTap, TapRead};
 
 /// Voices the mixer renders at once; the engine steals or refuses beyond.
 pub const MAX_VOICES: usize = 32;
@@ -55,6 +58,11 @@ pub enum Command {
         slot: u16,
     },
     Start(Start),
+    /// A streamed voice: the start plus the decoder's tap.
+    StartStream {
+        start: Start,
+        tap: Box<StreamTap>,
+    },
     Stop {
         voice: u8,
         generation: u32,
@@ -99,6 +107,9 @@ pub enum Return {
     /// The voice reached its clip's end (non-looping) or finished its
     /// stop fade; the slot is free on the mixer side.
     VoiceEnded { voice: u8, generation: u32 },
+    /// A streamed voice's tap, done with (its ring is freed on the
+    /// world's thread).
+    StreamReleased(Box<StreamTap>),
 }
 
 /// Counters the callback bumps and the world reads.
@@ -111,9 +122,12 @@ pub struct MixerStats {
     pub returns_dropped: AtomicU64,
     /// Voices rendered by the last callback.
     pub active_voices: AtomicU64,
+    /// Callbacks in which a streamed voice found its ring empty after
+    /// its first frames had come (the decoder fell behind).
+    pub starved: AtomicU64,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct Voice {
     active: bool,
     generation: u32,
@@ -127,21 +141,28 @@ struct Voice {
     gain: f32,
     stopping: bool,
     paused: bool,
+    /// The decoder's ring, for a streamed voice.
+    stream: Option<Box<StreamTap>>,
 }
 
-const IDLE: Voice = Voice {
-    active: false,
-    generation: 0,
-    clip: 0,
-    bus: AudioBus::Sfx,
-    volume: 0.0,
-    pitch: 1.0,
-    looping: false,
-    position: 0.0,
-    gain: 0.0,
-    stopping: false,
-    paused: false,
-};
+impl Voice {
+    const fn idle() -> Voice {
+        Voice {
+            active: false,
+            generation: 0,
+            clip: 0,
+            bus: AudioBus::Sfx,
+            volume: 0.0,
+            pitch: 1.0,
+            looping: false,
+            position: 0.0,
+            gain: 0.0,
+            stopping: false,
+            paused: false,
+            stream: None,
+        }
+    }
+}
 
 pub struct Mixer {
     sample_rate: u32,
@@ -174,7 +195,7 @@ impl Mixer {
             channels: channels.max(1),
             smoothing: 1.0 - (-1.0 / (GAIN_SMOOTHING_SECONDS * rate)).exp(),
             clips: (0..MAX_CLIPS).map(|_| None).collect(),
-            voices: vec![IDLE; MAX_VOICES],
+            voices: (0..MAX_VOICES).map(|_| Voice::idle()).collect(),
             bus_gain: [1.0; AudioBus::COUNT],
             muted: false,
             listener: 1.0,
@@ -198,20 +219,65 @@ impl Mixer {
             Err(rtrb::PushError::Full(r)) => {
                 self.stats.returns_dropped.fetch_add(1, Ordering::Relaxed);
                 // Never free on this thread: a released clip goes back
-                // into its slot (the world unloads it again later).
-                if let Return::ClipReleased(clip) = r {
-                    if let Some(free) = self.clips.iter().position(|c| c.is_none()) {
-                        self.clips[free] = Some(clip);
-                    } else {
-                        // Every slot full and the ring full: keep the
-                        // reference alive by leaking it rather than
-                        // freeing here (unreachable in practice: the
-                        // world unloads one clip at a time).
-                        std::mem::forget(clip);
+                // into its slot (the world unloads it again later); a
+                // stream's tap is leaked rather than freed here (its
+                // decoder exits on its own once the consumer is gone —
+                // it is not, so the engine's stop flag ends it; the
+                // ring's memory is the price of a full return ring,
+                // unreachable in practice since the world drains it
+                // every tick).
+                match r {
+                    Return::ClipReleased(clip) => {
+                        if let Some(free) = self.clips.iter().position(|c| c.is_none()) {
+                            self.clips[free] = Some(clip);
+                        } else {
+                            // Every slot full and the ring full: keep the
+                            // reference alive by leaking it rather than
+                            // freeing here (unreachable in practice: the
+                            // world unloads one clip at a time).
+                            std::mem::forget(clip);
+                        }
                     }
+                    Return::StreamReleased(tap) => std::mem::forget(tap),
+                    Return::VoiceEnded { .. } => {}
                 }
             }
         }
+    }
+
+    /// Deactivates a voice, handing its tap back if it streams.
+    fn release_voice(&mut self, i: usize) {
+        self.voices[i].active = false;
+        if let Some(tap) = self.voices[i].stream.take() {
+            self.push_return(Return::StreamReleased(tap));
+        }
+    }
+
+    fn start_voice(&mut self, s: Start, tap: Option<Box<StreamTap>>) {
+        let i = s.voice as usize;
+        if i >= MAX_VOICES {
+            if let Some(tap) = tap {
+                self.push_return(Return::StreamReleased(tap));
+            }
+            return;
+        }
+        if let Some(old) = self.voices[i].stream.take() {
+            self.push_return(Return::StreamReleased(old));
+        }
+        self.voices[i] = Voice {
+            active: true,
+            generation: s.generation,
+            clip: s.clip,
+            bus: s.bus,
+            volume: s.volume,
+            pitch: s.pitch,
+            looping: s.looping,
+            position: s.position.max(0.0),
+            gain: 0.0,
+            stopping: false,
+            paused: false,
+            stream: tap,
+        };
     }
 
     /// Applies every queued command. Called at the top of `render`; a
@@ -233,9 +299,9 @@ impl Mixer {
                 Command::UnloadClip { slot } => {
                     let slot = slot as usize;
                     if slot < MAX_CLIPS {
-                        for v in self.voices.iter_mut() {
-                            if v.active && v.clip as usize == slot {
-                                v.active = false;
+                        for i in 0..MAX_VOICES {
+                            if self.voices[i].active && self.voices[i].clip as usize == slot {
+                                self.release_voice(i);
                             }
                         }
                         if let Some(old) = self.clips[slot].take() {
@@ -243,24 +309,8 @@ impl Mixer {
                         }
                     }
                 }
-                Command::Start(s) => {
-                    let i = s.voice as usize;
-                    if i < MAX_VOICES {
-                        self.voices[i] = Voice {
-                            active: true,
-                            generation: s.generation,
-                            clip: s.clip,
-                            bus: s.bus,
-                            volume: s.volume,
-                            pitch: s.pitch,
-                            looping: s.looping,
-                            position: s.position.max(0.0),
-                            gain: 0.0,
-                            stopping: false,
-                            paused: false,
-                        };
-                    }
-                }
+                Command::Start(s) => self.start_voice(s, None),
+                Command::StartStream { start, tap } => self.start_voice(start, Some(tap)),
                 Command::Stop { voice, generation } => {
                     if let Some(v) = self.voice_mut(voice, generation) {
                         v.stopping = true;
@@ -330,15 +380,19 @@ impl Mixer {
         };
         let k = self.smoothing;
         let mut active = 0u64;
+        let mut starved = 0u64;
         for vi in 0..MAX_VOICES {
             let v = &mut self.voices[vi];
             if !v.active {
                 continue;
             }
             let Some(clip) = self.clips[v.clip as usize].as_ref() else {
-                v.active = false;
-                let (voice, generation) = (vi as u8, v.generation);
-                self.push_return(Return::VoiceEnded { voice, generation });
+                self.release_voice(vi);
+                let generation = self.voices[vi].generation;
+                self.push_return(Return::VoiceEnded {
+                    voice: vi as u8,
+                    generation,
+                });
                 continue;
             };
             if v.paused && !v.stopping && v.gain < SILENCE {
@@ -355,60 +409,96 @@ impl Mixer {
             } else {
                 v.volume * bus * global
             };
-            let clip_frames = clip.frames() as usize;
             let step = clip.sample_rate as f64 / self.sample_rate as f64 * v.pitch as f64;
-            let mut position = v.position;
             let mut gain = v.gain;
             let mut ended = false;
             let advance = !v.paused;
-            for f in 0..frames {
-                gain += (target - gain) * k;
-                if clip_frames == 0 {
-                    ended = true;
-                    break;
+            if let Some(tap) = v.stream.as_mut() {
+                // A streamed voice: frames from the decoder's ring. The
+                // engine's clock tracks the position; here only the
+                // samples matter.
+                for f in 0..frames {
+                    gain += (target - gain) * k;
+                    let (read, (l, r)) = tap.read(step, advance);
+                    match read {
+                        TapRead::Frame => {
+                            let o = f * channels;
+                            if channels == 1 {
+                                out[o] += (l + r) * 0.5 * gain;
+                            } else {
+                                out[o] += l * gain;
+                                out[o + 1] += r * gain;
+                            }
+                        }
+                        TapRead::Waiting => {}
+                        TapRead::Starved => break,
+                        TapRead::Ended => {
+                            ended = true;
+                            break;
+                        }
+                    }
                 }
-                let i = position as usize;
-                let (i, frac) = if i >= clip_frames {
-                    if v.looping {
-                        position %= clip_frames as f64;
-                        let i = position as usize;
-                        (i, (position - i as f64) as f32)
-                    } else {
+                if tap.take_starved() {
+                    starved += 1;
+                }
+            } else {
+                let clip_frames = clip.frames() as usize;
+                let mut position = v.position;
+                for f in 0..frames {
+                    gain += (target - gain) * k;
+                    if clip_frames == 0 {
                         ended = true;
                         break;
                     }
-                } else {
-                    (i, (position - i as f64) as f32)
-                };
-                let (l0, r0) = clip.frame(i);
-                let next = if i + 1 < clip_frames {
-                    i + 1
-                } else if v.looping {
-                    0
-                } else {
-                    i
-                };
-                let (l1, r1) = clip.frame(next);
-                let l = (l0 + (l1 - l0) * frac) * gain;
-                let r = (r0 + (r1 - r0) * frac) * gain;
-                let o = f * channels;
-                if channels == 1 {
-                    out[o] += (l + r) * 0.5;
-                } else {
-                    out[o] += l;
-                    out[o + 1] += r;
+                    let i = position as usize;
+                    let (i, frac) = if i >= clip_frames {
+                        if v.looping {
+                            position %= clip_frames as f64;
+                            let i = position as usize;
+                            (i, (position - i as f64) as f32)
+                        } else {
+                            ended = true;
+                            break;
+                        }
+                    } else {
+                        (i, (position - i as f64) as f32)
+                    };
+                    let (l0, r0) = clip.frame(i);
+                    let next = if i + 1 < clip_frames {
+                        i + 1
+                    } else if v.looping {
+                        0
+                    } else {
+                        i
+                    };
+                    let (l1, r1) = clip.frame(next);
+                    let l = (l0 + (l1 - l0) * frac) * gain;
+                    let r = (r0 + (r1 - r0) * frac) * gain;
+                    let o = f * channels;
+                    if channels == 1 {
+                        out[o] += (l + r) * 0.5;
+                    } else {
+                        out[o] += l;
+                        out[o + 1] += r;
+                    }
+                    if advance {
+                        position += step;
+                    }
                 }
-                if advance {
-                    position += step;
-                }
+                v.position = position;
             }
-            v.position = position;
             v.gain = gain;
             if ended || (v.stopping && gain < SILENCE) {
-                v.active = false;
-                let (voice, generation) = (vi as u8, v.generation);
-                self.push_return(Return::VoiceEnded { voice, generation });
+                let generation = v.generation;
+                self.release_voice(vi);
+                self.push_return(Return::VoiceEnded {
+                    voice: vi as u8,
+                    generation,
+                });
             }
+        }
+        if starved > 0 {
+            self.stats.starved.fetch_add(starved, Ordering::Relaxed);
         }
         for s in out.iter_mut() {
             *s = s.clamp(-1.0, 1.0);

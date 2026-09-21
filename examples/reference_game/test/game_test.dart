@@ -232,6 +232,63 @@ void main() {
     expect(game.world.isPoisoned, isFalse);
   });
 
+  test('the sounds: the streamed music from the load, a footstep per marker, the pickup, the hit', () {
+    final game = Game.load(projectDir);
+    addTearDown(game.dispose);
+    // The scene names one clip through a source — the music, streamed
+    // (its sidecar's `stream: true`, cooked to a STRM chunk); the
+    // behaviours' one-shots register as they are first played.
+    expect(game.report.audio.sounds, 1);
+    expect(game.report.audio.streams, 1);
+    expect(game.report.audio.device, isFalse, reason: 'no device in a test: the null backend keeps the clock');
+    expect(game.report.audio.maxVoices, greaterThanOrEqualTo(32));
+
+    game.frame(1 / 60);
+    final music = game.world.find('Music')!;
+    final source = music.get<AudioSource>()!;
+    expect(source.bus, AudioBus.music);
+    expect(source.looping, isTrue);
+    expect(source.playing, isTrue);
+    final state = music.audio.state!;
+    expect(state.playing, isTrue, reason: 'playing from the load');
+    expect(state.duration, closeTo(74.25, 0.01), reason: 'the frame count of the streamed track');
+    var stats = game.world.audio.stats;
+    expect(stats.streams, 1);
+    expect(stats.started, 1);
+    expect(stats.voices, 1);
+
+    // Walking straight ahead: every step marker plays its footstep
+    // (left/right by name) and the first coin, 5 m out, its pickup.
+    final player = game.world.behaviours.whereType<Player>().single;
+    expect(player.stepLeft.isNone, isFalse);
+    expect(player.stepRight.isNone, isFalse);
+    expect(player.hit.isNone, isFalse);
+    expect(game.world.behaviours.whereType<Collectible>().first.pickup.isNone, isFalse);
+    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
+    for (var i = 0; i < 100; i++) {
+      game.frame(1 / 60);
+    }
+    expect(game.state.footsteps.value, greaterThan(2));
+    expect(player.sounds, game.state.footsteps.value, reason: 'one one-shot per marker');
+    expect(game.state.collected.value, 1);
+    stats = game.world.audio.stats;
+    expect(stats.started, 1 + player.sounds + 1, reason: 'the music, the footsteps, the pickup');
+    expect(stats.refused, 0);
+    expect(stats.starved, 0, reason: 'the decoder keeps a second ahead of the clock');
+    expect(music.audio.state!.time, greaterThan(1.5), reason: 'the music went on under the effects');
+
+    // A death plays the hit, on top of the music.
+    final before = player.sounds;
+    player.transform.position = const Vec3(0, -20, 0);
+    game.frame(1 / 60);
+    game.frame(1 / 60);
+    expect(game.state.deaths.value, 1);
+    expect(player.sounds, before + 1);
+    expect(game.world.audio.stats.started, stats.started + 1);
+    expect(music.audio.isPlaying, isTrue);
+    expect(game.world.isPoisoned, isFalse);
+  });
+
   test('the sweeper is a hazard: a hit respawns the player at the start', () {
     final game = Game.load(projectDir);
     addTearDown(game.dispose);

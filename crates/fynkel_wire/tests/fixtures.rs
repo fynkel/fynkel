@@ -671,6 +671,8 @@ fn fixtures_match_generated_codecs() {
             callbacks: 1000,
             underruns: 0,
             suspended: false,
+            streams: 1,
+            starved: 5,
         },
     );
 }

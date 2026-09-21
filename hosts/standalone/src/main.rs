@@ -291,6 +291,28 @@ impl App {
     }
 }
 
+impl App {
+    /// The engine's counters at the end of a run with `--audio`: what the
+    /// device rendered and whether a streamed voice ever ran dry.
+    fn report_audio(&self) {
+        if !self.audio {
+            return;
+        }
+        let s = self.world.audio_stats();
+        log::info!(
+            "audio: {} voices ({} started, {} ended), {} clips ({} streamed), {} callbacks, {} underruns, {} starved",
+            s.voices,
+            s.started,
+            s.ended,
+            s.clips,
+            s.streams,
+            s.callbacks,
+            s.underruns,
+            s.starved
+        );
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.gpu.is_some() {
@@ -326,6 +348,7 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => {
                 self.stats.report_final();
+                self.report_audio();
                 self.world.audio_mut().close_device();
                 event_loop.exit();
             }
@@ -341,6 +364,7 @@ impl ApplicationHandler for App {
                 let elapsed = self.start.map(|s| s.elapsed().as_secs_f32()).unwrap_or(0.0);
                 if self.run_for.is_some_and(|limit| elapsed >= limit) {
                     self.stats.report_final();
+                    self.report_audio();
                     event_loop.exit();
                     return;
                 }

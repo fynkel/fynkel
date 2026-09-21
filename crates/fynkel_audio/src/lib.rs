@@ -6,7 +6,9 @@
 //!   end is decided by (deterministic, so a headless run reports the same
 //!   `PLAYBACK_ENDED` ticks as a device run), the bus/mute/listener gains;
 //! - the [`Mixer`] on the callback's thread — fixed tables, linear-interp
-//!   resampling, gain smoothing, no allocation (`tests/allocation.rs`).
+//!   resampling, gain smoothing, no allocation (`tests/allocation.rs`);
+//! - and, for a streamed sound ([`stream`]), a decoder thread per voice
+//!   feeding the mixer through a third ring.
 //!
 //! The backend is null by default (a test or the headless host calls
 //! `Audio::render`); the `device` feature adds the real output device
@@ -17,6 +19,7 @@ pub mod clip;
 pub mod components;
 pub mod engine;
 pub mod mixer;
+pub mod stream;
 
 pub use backend::DeviceInfo;
 pub use clip::{AudioClip, MAX_CLIP_CHANNELS};
@@ -26,3 +29,4 @@ pub use engine::{
     NULL_SAMPLE_RATE,
 };
 pub use mixer::{Mixer, MixerStats, GAIN_SMOOTHING_SECONDS, MAX_CLIPS, MAX_VOICES};
+pub use stream::{StreamSource, STREAM_RING_SECONDS};

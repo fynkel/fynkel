@@ -56,6 +56,11 @@ pub const KIND_JSON: [u8; 4] = *b"JSON";
 pub const KIND_MESH: [u8; 4] = *b"MESH";
 pub const KIND_TEXTURE: [u8; 4] = *b"TEXR";
 pub const KIND_CLIP: [u8; 4] = *b"CLIP";
+/// A streamed sound (M3-11 part 2; `payload::StreamPayload`): the source's
+/// encoded bytes with their format, decoded at play time on a thread of
+/// its own instead of held as PCM. Written instead of `CLIP` when the
+/// sidecar says `settings.stream: true`.
+pub const KIND_STREAM: [u8; 4] = *b"STRM";
 /// A cooked `fynkel.PbrMaterial` (`fynkel_wire::material`), next to the
 /// material document's `JSON` chunk.
 pub const KIND_MATERIAL: [u8; 4] = *b"MATL";

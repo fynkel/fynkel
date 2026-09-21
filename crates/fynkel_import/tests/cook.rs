@@ -14,7 +14,7 @@ use fynkel_core::material::AlphaMode;
 use fynkel_document::asset::AssetDatabase;
 use fynkel_document::SchemaSet;
 use fynkel_import::cook::{
-    decode_clip, decode_mesh, decode_texture, TEXTURE_FORMAT_RGBA8_LINEAR,
+    decode_clip, decode_mesh, decode_stream, decode_texture, TEXTURE_FORMAT_RGBA8_LINEAR,
     TEXTURE_FORMAT_RGBA8_SRGB,
 };
 use fynkel_import::{cook, Cache, CookOptions, CookReport, Status};
@@ -252,6 +252,43 @@ fn editing_import_settings_invalidates_the_same_set() {
         texture.format,
         fynkel_import::cook::TEXTURE_FORMAT_RGBA8_LINEAR
     );
+}
+
+#[test]
+fn a_streamed_sound_cooks_to_a_strm_chunk() {
+    let p = Project::new("streamed");
+    let first = p.cook();
+    assert!(all(&first, Status::Cooked));
+    p.write(
+        "audio/tone.wav.meta.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{TONE}","name":"tone.wav","importer":"fynkel.audio","importerVersion":2,"settings":{{"stream":true}},"subAssets":{{}}}}"#
+        ),
+    );
+    let second = p.cook();
+    assert!(!second.has_errors(), "{:?}", second.diagnostics);
+    assert_eq!(status(&second, TONE), Status::Cooked);
+    assert_eq!(status(&second, SWATCH), Status::Cached);
+    let tone = second.get(id(TONE)).unwrap();
+    let bytes = std::fs::read(tone.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    assert_eq!(c.chunks()[1].kind_str(), "STRM");
+    let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
+    let info = &meta["chunks"][1];
+    assert_eq!(info["streamed"], true);
+    assert_eq!(info["codec"], "pcm");
+    assert_eq!(info["frames"], 400);
+    let stream = decode_stream(c.read(1, 1 << 24).unwrap()).unwrap();
+    assert_eq!(
+        (stream.sample_rate, stream.channels, stream.frames),
+        (8000, 2, 400)
+    );
+    assert_eq!(stream.codec, "pcm");
+    assert_eq!(
+        stream.bytes,
+        std::fs::read(p.assets().join("audio/tone.wav")).unwrap()
+    );
+    assert_eq!(info["bytes"], stream.bytes.len());
 }
 
 #[test]

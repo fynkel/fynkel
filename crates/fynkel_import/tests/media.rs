@@ -313,6 +313,51 @@ fn ogg_vorbis_decodes_close_to_the_wav_it_came_from() {
 }
 
 #[test]
+fn a_streamed_sound_keeps_its_source_instead_of_samples() {
+    let path = fixture("audio/tone.ogg");
+    let meta = meta_with_settings(&path, r#"{"stream":true}"#);
+    let r = import(&path, &meta, &Limits::default());
+    assert!(!r.has_errors(), "{:#?}", r.diagnostics);
+    let i = r.intermediate.unwrap();
+    let c = &i.clips[0];
+    let plain = import_fixture("audio/tone.ogg").intermediate.unwrap();
+    // The validating decode ran: the format and the length are the
+    // decoded clip's; the samples are not kept, the file is.
+    assert_eq!(
+        (c.codec.as_str(), c.sample_rate, c.channels, c.frames()),
+        ("vorbis", 8000, 2, plain.clips[0].frames())
+    );
+    assert!(c.samples.is_empty());
+    assert_eq!(
+        c.stream.as_deref(),
+        Some(std::fs::read(&path).unwrap().as_slice())
+    );
+    assert!((c.duration_seconds() - 0.05).abs() < 1e-9);
+    assert_eq!(i.summary_json()["clips"][0]["streamed"], true);
+    assert_eq!(plain.summary_json()["clips"][0]["streamed"], false);
+    // Round-trips through the intermediate's bytes.
+    let back = Intermediate::from_bytes(&i.to_bytes()).unwrap();
+    assert_eq!(back, i);
+
+    // A truncated file is refused even when streamed: the runtime never
+    // meets a hole.
+    let cut = fixture("audio/truncated.wav");
+    let meta = meta_with_settings(&cut, r#"{"stream":true}"#);
+    let r = import(&cut, &meta, &Limits::default());
+    assert_eq!(codes(&r), [Code::IMPORT_INVALID_DATA]);
+    assert!(r.intermediate.is_none());
+
+    // The setting is a boolean.
+    let meta = meta_with_settings(&path, r#"{"stream":"yes"}"#);
+    let r = import(&path, &meta, &Limits::default());
+    assert_eq!(codes(&r), [Code::IMPORT_INVALID_DATA]);
+    assert_eq!(
+        r.diagnostics[0].pointer.as_deref(),
+        Some("/settings/stream")
+    );
+}
+
+#[test]
 fn only_wav_and_ogg_vorbis_are_audio() {
     let path = fixture("audio/tone.flac");
     let mut meta = Meta::new(&path);

@@ -400,8 +400,8 @@ fn test_command(args: &[String]) -> ExitCode {
         }
         if let Some(a) = &report.audio {
             println!(
-                "audio: {} sources, {} sounds, {} voices started ({} stolen, {} refused), {} ended, {} diagnostics",
-                a.sources, a.sounds, a.started, a.stolen, a.refused, a.ended, a.diagnostics
+                "audio: {} sources, {} sounds ({} streamed), {} voices started ({} stolen, {} refused), {} ended, {} diagnostics",
+                a.sources, a.sounds, a.streams, a.started, a.stolen, a.refused, a.ended, a.diagnostics
             );
         }
         if !report.systems.is_empty() {

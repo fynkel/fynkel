@@ -173,6 +173,10 @@ class _GamePageState extends State<GamePage> {
         world: game.world,
         controller: _viewport,
         input: _input,
+        // Opens the output device (docs/audio.md): the music from the load,
+        // the footsteps, pickups and hits from the behaviours. The view
+        // suspends it while the app is hidden.
+        audio: true,
         onKeyEvent: _onKey,
         onFrame: _onFrame,
         onStats: (s) => setState(() => _stats = s),

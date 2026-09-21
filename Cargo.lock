@@ -855,6 +855,7 @@ dependencies = [
  "fynkel_contracts",
  "fynkel_schema_derive",
  "rtrb",
+ "symphonia",
 ]
 
 [[package]]

@@ -295,7 +295,10 @@ footstep markers counted in the HUD.
 
 `assets/audio/*.wav|*.ogg` are imported by the cook like models
 (`fynkel.audio`, a sidecar with the asset id) and decoded to PCM in the
-cache. A `fynkel.AudioSource` component names a clip (`clip`), a bus
+cache — or, for music, kept as the source bytes and decoded as they
+play: put `"settings": { "stream": true }` in the file's sidecar (a
+`STRM` chunk, a decoder thread per playing voice, `stats.streams` /
+`stats.starved`). A `fynkel.AudioSource` component names a clip (`clip`), a bus
 (`master`, `music`, `sfx`), `volume`, `pitch`, `looping`, `playing` and
 `priority`; the one `fynkel.AudioListener` (on the camera here) scales
 everything. The mixer runs on the audio thread with 32 voices: a new

@@ -16,6 +16,7 @@ device = ["dep:cpal"]
 fynkel_contracts.workspace = true
 fynkel_schema_derive.workspace = true
 rtrb.workspace = true
+symphonia.workspace = true
 cpal = { workspace = true, optional = true }
 
 [dev-dependencies]

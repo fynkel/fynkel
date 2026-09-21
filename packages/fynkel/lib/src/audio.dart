@@ -86,6 +86,8 @@ class AudioStats {
     required this.callbacks,
     required this.underruns,
     required this.suspended,
+    required this.streams,
+    required this.starved,
   });
 
   factory AudioStats.fromRecord(gen.AudioStatsRecord r) => AudioStats(
@@ -102,6 +104,8 @@ class AudioStats {
         callbacks: r.callbacks,
         underruns: r.underruns,
         suspended: r.suspended,
+        streams: r.streams,
+        starved: r.starved,
       );
 
   /// A real output device is open (`World.audio.open`); the null backend
@@ -133,10 +137,20 @@ class AudioStats {
   /// The device is paused (`World.audio.suspend`).
   final bool suspended;
 
+  /// Of the clips, the streamed ones (a sidecar's `stream: true`: music
+  /// decoded as it plays, not held in memory).
+  final int streams;
+
+  /// Device callbacks in which a streamed voice's decoder had fallen
+  /// behind and the voice held silent for the rest of it. A steady
+  /// count means the machine is too busy for the stream's one second of
+  /// lead.
+  final int starved;
+
   @override
   String toString() => 'AudioStats(${device ? '$sampleRate Hz × $channels' : 'null backend'}, '
       '$voices/$maxVoices voices, $started started, $stolen stolen, $refused refused, $ended ended, '
-      '$clips clips${suspended ? ', suspended' : ''})';
+      '$clips clips${streams > 0 ? ' ($streams streamed, $starved starved)' : ''}${suspended ? ', suspended' : ''})';
 }
 
 /// What a load registered for the scene's audio sources and what the
@@ -145,6 +159,7 @@ class AudioAssets {
   const AudioAssets({
     this.sounds = 0,
     this.clips = 0,
+    this.streams = 0,
     this.device = false,
     this.sampleRate = 0,
     this.channels = 0,
@@ -154,6 +169,7 @@ class AudioAssets {
   factory AudioAssets.fromJson(Map<String, Object?> j) => AudioAssets(
         sounds: (j['sounds'] as num?)?.toInt() ?? 0,
         clips: (j['clips'] as num?)?.toInt() ?? 0,
+        streams: (j['streams'] as num?)?.toInt() ?? 0,
         device: j['device'] == true,
         sampleRate: (j['sampleRate'] as num?)?.toInt() ?? 0,
         channels: (j['channels'] as num?)?.toInt() ?? 0,
@@ -163,8 +179,10 @@ class AudioAssets {
   /// Sounds this load registered for the scene's `AudioSource`s.
   final int sounds;
 
-  /// Clips the world holds after the load.
+  /// Clips the world holds after the load, and how many of them stream
+  /// (a sidecar's `stream: true`).
   final int clips;
+  final int streams;
 
   /// The output device state after the load ([sampleRate] and [channels]
   /// are the null backend's 48 kHz stereo without one).
@@ -174,5 +192,6 @@ class AudioAssets {
   final int maxVoices;
 
   @override
-  String toString() => 'audio($sounds sounds, $clips clips, ${device ? '$sampleRate Hz × $channels' : 'no device'})';
+  String toString() =>
+      'audio($sounds sounds, $clips clips${streams > 0 ? ' ($streams streamed)' : ''}, ${device ? '$sampleRate Hz × $channels' : 'no device'})';
 }

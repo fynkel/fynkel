@@ -1,13 +1,15 @@
 //! The gate's "no allocation in the audio callback": a counting global
 //! allocator around `Mixer::render` with clips loaded, voices starting,
-//! stopping, looping, resampling and being stolen, plus a full ring of
-//! commands pumped inside the render.
+//! stopping, looping, resampling and being stolen, a streamed voice read
+//! from its decoder's ring to its end, plus a full ring of commands
+//! pumped inside the render.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use fynkel_audio::mixer::{Command, Mixer, MixerStats, Return, Start};
+use fynkel_audio::stream::{self, StreamShared};
 use fynkel_audio::{AudioBus, AudioClip, MAX_VOICES};
 
 struct Counting;
@@ -44,6 +46,31 @@ fn tone(rate: u32, channels: u32, seconds: f32, hz: f32) -> Arc<AudioClip> {
         }
     }
     AudioClip::new(rate, channels, samples).unwrap()
+}
+
+/// A PCM16 stereo WAV of a tone, for a streamed clip.
+fn tone_wav(rate: u32, seconds: f32, hz: f32) -> Vec<u8> {
+    let frames = (rate as f32 * seconds) as u32;
+    let data_len = frames * 4;
+    let mut w = Vec::with_capacity(44 + data_len as usize);
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + data_len).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&rate.to_le_bytes());
+    w.extend_from_slice(&(rate * 4).to_le_bytes());
+    w.extend_from_slice(&4u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&data_len.to_le_bytes());
+    for i in 0..frames {
+        let s = ((i as f32 / rate as f32 * hz * std::f32::consts::TAU).sin() * 16_000.0) as i16;
+        w.extend_from_slice(&s.to_le_bytes());
+        w.extend_from_slice(&s.to_le_bytes());
+    }
+    w
 }
 
 #[test]
@@ -151,6 +178,44 @@ fn render_never_allocates() {
         .unwrap();
     cmd_tx.push(Command::SetMuted(false)).unwrap();
 
+    // A streamed voice: a quarter second decoded whole into its ring
+    // before the render is armed (the decoder thread allocates, on its
+    // own thread and time; the counting allocator is global, so it must
+    // be done before the count starts). The render reads it out to the
+    // end and hands the tap back.
+    let streamed =
+        AudioClip::streamed(48_000, 2, 12_000, "pcm", tone_wav(48_000, 0.25, 330.0)).unwrap();
+    cmd_tx
+        .push(Command::LoadClip {
+            slot: 2,
+            clip: streamed.clone(),
+        })
+        .unwrap();
+    let shared = StreamShared::new(false);
+    let (source, _) = streamed.stream.as_ref().unwrap();
+    let tap = stream::spawn(source.clone(), 48_000, 2, 0, shared.clone());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !shared.finished() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(shared.finished(), "the decoder delivered the whole file");
+    assert_eq!(shared.produced(), 12_000);
+    cmd_tx
+        .push(Command::StartStream {
+            start: Start {
+                voice: 9,
+                generation: 2,
+                clip: 2,
+                bus: AudioBus::Music,
+                volume: 0.6,
+                pitch: 1.1,
+                looping: false,
+                position: 0.0,
+            },
+            tap: Box::new(tap),
+        })
+        .unwrap();
+
     COUNT.store(0, Ordering::Relaxed);
     ARMED.store(true, Ordering::Relaxed);
     // Enough renders for every non-looping voice to end (0.5 s at 48 kHz
@@ -165,15 +230,21 @@ fn render_never_allocates() {
     // released clips and the ended voices.
     let mut released = 0;
     let mut ended = 0;
+    let mut taps = 0;
     while let Ok(r) = ret_rx.pop() {
         match r {
             Return::ClipReleased(_) => released += 1,
             Return::VoiceEnded { .. } => ended += 1,
+            Return::StreamReleased(_) => taps += 1,
         }
     }
     assert_eq!(released, 2);
     // The unload killed every voice on clip 1 silently (the engine had
-    // already forgotten them); clip 0's eight non-looping voices ended.
-    assert_eq!(ended, 8);
+    // already forgotten them); clip 0's eight non-looping voices ended,
+    // and the streamed voice (voice 9 restarted as a stream, which
+    // ended at its quarter second and returned its tap).
+    assert_eq!(ended, 9);
+    assert_eq!(taps, 1);
+    assert_eq!(stats.starved.load(Ordering::Relaxed), 0);
     assert_eq!(stats.callbacks.load(Ordering::Relaxed), 121);
 }

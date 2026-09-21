@@ -5,7 +5,8 @@ types; nothing blocking in the callback), §19.2d item 11 (M3-11) and the
 scope rule that decided the backend. `fynkel_audio` is the
 `AudioSource`/`AudioListener` components, a voice engine the core steps
 inside the fixed tick, a mixer that renders those voices over three buses
-inside a real-time callback, and two backends: **null** (the mixer is
+inside a real-time callback, a decoder thread per streamed voice (music
+decoded as it plays), and two backends: **null** (the mixer is
 rendered on demand — a test, the headless host — or not at all) and
 **device** (`cpal`, behind the crate's `device` feature). Tier 1 is 2D:
 nothing is panned or attenuated by distance (spatial audio is M5).
@@ -28,8 +29,11 @@ fynkel_audio::Audio                          fynkel_audio::Mixer
   voices [MAX_VOICES = 32]:         ──Start/Stop/──▶ voice table: position, gain
     priority, seq, position (frames)  Pause/SetGain     smoother, rate ratio × pitch
   the clock: advance(dt) per tick    ◀──Return────   (a released clip's Arc,
-  bus / mute / listener gains                          a voice that ended)
-  started / stolen / refused / ended
+  bus / mute / listener gains                          a voice that ended,
+  started / stolen / refused / ended                    a stream's tap)
+                                                            ▲ rtrb ring, 1 s
+                                              decoder thread per streamed voice
+                                              (symphonia over the STRM bytes)
 ```
 
 Two lock-free rings (`rtrb`) join them: commands go world → mixer, and
@@ -147,7 +151,9 @@ duration, volume, pitch, looping, clip, bus, voice }` (`voice` is
 unknown); no record without a source. **`FYNKEL_QUERY_AUDIO_STATS`** (13)
 answers `fynkel.rec.AudioStats { device, sample_rate, channels, voices,
 max_voices, started, stolen, refused, ended, clips, callbacks, underruns,
-suspended }` — the engine at a glance.
+suspended, streams, starved }` (64 B) — the engine at a glance; `streams`
+is how many of the clips are streamed, `starved` the callbacks a
+streamed voice's decoder fell behind in (§ Streamed music).
 
 ## The device and the host lifecycle
 
@@ -171,9 +177,11 @@ opens the device once the project is loaded:
   never does.
 - **`hosts/standalone`** — `--audio` opens the device (`audio: output
   device open at 48000 Hz, 2 channels` or the diagnostic), suspends on
-  `WindowEvent::Occluded`, closes on close.
+  `WindowEvent::Occluded`, closes on close and prints the engine's
+  counters at the end (voices, clips and streams, callbacks, underruns,
+  starved) — the way to hear a cooked scene without a Flutter app.
 - **`hosts/headless`** never opens one; its report carries `audio:
-  { sources, sounds, started, stolen, refused, ended, diagnostics }` and
+  { sources, sounds, streams, started, stolen, refused, ended, diagnostics }` and
   `fynkel test --headless` prints the line when the scene has any.
 
 The Apple hosts need nothing new: `cpal` uses CoreAudio, and
@@ -196,7 +204,7 @@ world.audio.play(clip, bus: AudioBus.sfx, volume: 0.8, pitch: 1.1, priority: 2);
 world.audio.play(click, presentation: true);   // now — a menu sound outside the tick
 world.audio.setBus(AudioBus.music, 0.4, muted: false);    // at once (presentation lane)
 world.audio.applySettings(settings);           // master/music/sfx volumes + mute from a SettingsDocument
-world.audio.stats;                             // AudioStats: device, voices, started, stolen, refused, ended, clips, …
+world.audio.stats;                             // AudioStats: device, voices, started, stolen, refused, ended, clips, streams, starved, …
 world.audio.open();                            // what FynkelGameView(audio: true) does; false + `audio_device` diagnostic without one
 world.audio.suspend(true); world.audio.close();
 
@@ -211,9 +219,9 @@ staged outside a frame would otherwise be dropped). `SettingsStore.apply`
 calls `applySettings` before it rebinds input, so the saved
 `master_volume`/`music_volume`/`sfx_volume`/`muted` reach the buses at
 launch and after every change. `LoadReport.audio` has `sounds` (registered
-from the scene), `clips` (registered in all), `device`, `sampleRate`,
-`channels`, `maxVoices`. `DiagnosticCode.soundUnavailable` /
-`audioDevice`.
+from the scene), `clips` (registered in all), `streams` (of those, the
+streamed), `device`, `sampleRate`, `channels`, `maxVoices`.
+`DiagnosticCode.soundUnavailable` / `audioDevice`.
 
 The starter (`fynkel create`) is the worked example: the Cube's
 `fynkel.AudioSource` holds `assets/audio/jump.ogg` and the Mover plays it
@@ -224,18 +232,88 @@ scene — plays on landing through `world.audio.play(land)`;
 started and ended and 2 `PlaybackEnded` on the cube, on the null backend.
 Both clips are Kenney's (CC0, www.kenney.nl).
 
+The reference game (`examples/reference_game`, its README § Credits) is
+the acceptance: content the implementer did not make — Kenney's
+footsteps, pickup and hit, Juhani Junkala's "Level 1" as the streamed
+music (CC0 all) — a listener on the Camera, a looping `Music` source on
+the music bus from the load (on the Rust host too), `game.Player`
+playing a footstep per `step_l`/`step_r` marker (the file by the
+marker's name, a little pitch drift) and the hit on a death,
+`game.Collectible` its pickup; `test/game_test.dart` counts the voices
+against the markers and checks `starved` stays 0.
+
 ## Import and the cache
 
 `assets/audio/*.wav|*.ogg` with a `.meta.json` sidecar (`fynkel asset
-init`, importer `fynkel.audio`): WAV (PCM 8/16/24/32-bit and float) and
-Ogg Vorbis through `symphonia`, nothing else (`FYN-A0103`). The cook
+init`, importer `fynkel.audio` v2): WAV (PCM 8/16/24/32-bit and float)
+and Ogg Vorbis through `symphonia`, nothing else (`FYN-A0103`). The cook
 writes a `CLIP` chunk — the decoded PCM as the file had it: no
 resampling, no channel mixing, no normalisation — which the runtime
 registers whole. Mono and stereo only; a clip with more channels is
 refused at registration. `max_audio_frames` is 10 minutes at 48 kHz.
 
-Streamed music — a long clip decoded on its own thread into a ring
-instead of held in memory — is part 2 of this item.
+## Streamed music
+
+A sidecar with `"settings": { "stream": true }` (the one importer
+setting; anything but a boolean is `IMPORT_INVALID_DATA` at
+`/settings/stream`) makes the cook keep the **source bytes** instead of
+the PCM: the import still decodes the whole file — the validation and
+the frame count are the same as a clip's — then drops the samples, and
+the cook writes a **`STRM`** chunk (`fynkel_cooked::KIND_STREAM`:
+`sample_rate`, `channels`, `frames`, the `codec` name, the file) where
+a `CLIP` would go; the `META` chunk info gains `streamed: true` and
+`bytes`. A 74 s stereo Vorbis track is 1.4 MB in the cache and in memory
+instead of 26 MB of floats. `Assets::sound` registers whichever chunk
+the object has; the world tells them apart only by `AudioClip::is_stream`.
+
+Playing one is the same contract as a clip — the source's `play`,
+`stop`, `pause`, `looping`, `pitch`, the clock, `PLAYBACK_ENDED` by the
+tick, the stats — with the decoding moved off both threads:
+
+- **Start.** When a streamed voice starts, the engine spawns a decoder
+  thread (`fynkel-audio-stream`, `fynkel_audio::stream::spawn`) for that
+  voice with the clip's bytes (an `Arc<[u8]>`, shared, never copied), the
+  start frame and a `StreamShared` of atomics (stop, looping, finished,
+  failed, frames produced), and hands the mixer a `StreamTap`: the
+  consumer end of an `rtrb` ring holding `STREAM_RING_SECONDS` (1 s) of
+  interleaved frames at the clip's rate. The decoder seeks to the start
+  frame (`SeekMode::Accurate`, the odd frames before the requested one
+  skipped), fills the ring, and sleeps 5 ms whenever it is full.
+- **Render.** The mixer pulls frames from the tap instead of the clip
+  table, through the same resampler, gain smoother and buses; the voice
+  is otherwise an ordinary voice (stealing, priorities, pause). Nothing
+  is allocated or locked in the callback (`tests/allocation.rs` renders
+  a streamed voice too: 121 callbacks, zero allocations).
+- **Loop, end, stop.** `looping` is mirrored into the shared flags: at
+  the end of the file the decoder reopens from frame 0 and goes on, so a
+  loop has no gap. A stop, the clip running out or a decode error ends
+  the decoder, which marks the stream `finished`; the tap plays out
+  what is left in the ring and then reports the voice ended (its last
+  frame included). The **tick's clock** still decides when a non-looping
+  streamed voice is over, from the frame count the cook wrote — so the
+  headless run and the device run agree, as for a clip; the decoder's
+  end only stops the mixer from waiting.
+- **Starvation.** A ring found empty after it was first primed, while
+  the decoder has not finished, means the machine could not keep one
+  second ahead: the voice holds silent for the rest of that callback and
+  `MixerStats::starved` counts one per voice per callback, surfaced as
+  `AudioStats.starved` (the count survives a device reopen). A steady
+  count is the signal the lead is too short for the platform; 0 on a
+  healthy machine.
+- **Device open / close.** The tap lives with the mixer, so opening or
+  closing the device (`resend_state`) respawns each streamed voice's
+  decoder at the voice's clock position; the freed tap comes back on the
+  return ring and is dropped on the world thread (`Return::StreamReleased`;
+  a full return ring leaks it rather than freeing on the audio thread).
+- **Clips.** `AudioStats.streams` counts the streamed clips registered.
+  A stream costs a thread and 1 s of ring while it plays (nothing while
+  it does not); the clip table holds the bytes only.
+
+`crates/fynkel_audio/src/stream.rs` has the decoder and the tap with
+their unit tests (start position, loop wrap, stop, a bad source);
+`tests/engine.rs` plays a streamed clip through the engine: ended by the
+clock with `starved == 0`, looped past four lengths, stopped to silence,
+respawned across a device close.
 
 ## Cost
 
@@ -252,4 +330,6 @@ Spatial audio (panning, distance attenuation, the listener's transform),
 effects and sends, per-bus limiters, more than three buses, a voice
 handle for one-shots, clip pooling beyond the 256 slots, Android's
 `oboe`/AAudio path (cpal's Android backend is untested here), sample-
-accurate scheduling against the device clock.
+accurate scheduling against the device clock, a streamed clip's decoder
+shared between voices (each streamed voice decodes on its own), a
+configurable ring length.

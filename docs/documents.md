@@ -982,12 +982,12 @@ compiled in (`image` with `default-features = false`); anything else is
 (16 384 per side, enforced before decoding) → `A0101`. A standalone
 texture has no sub-assets: an `assetRef` to it is `{ asset }` alone.
 
-### Audio (`fynkel.audio`, version 1)
+### Audio (`fynkel.audio`, version 2)
 
 `.wav` (PCM 8/16/24/32-bit and float) / `.ogg` (Vorbis) → one `AudioData`:
 interleaved `f32` samples in `[-1, 1]` (lossy overshoot clamped), the
-sample rate and channel count as the file had them, and the source codec
-(`pcm`, `vorbis`). No resampling, no channel mixing, no normalization,
+sample rate and channel count as the file had them, the frame count and
+the source codec (`pcm`, `vorbis`). No resampling, no channel mixing, no normalization,
 no tags — the runtime's mixer decides (M3-11, [audio.md](audio.md): the
 cooked `CLIP` chunk is registered whole; mono and stereo only). Decoding is
 `symphonia` with only `wav`/`pcm`/`ogg`/`vorbis` compiled in and no SIMD
@@ -995,15 +995,23 @@ features, so a Vorbis decode is bit-identical across machines; anything
 else (FLAC, MP3, AAC, ...) is `A0103`. A stream that ends early or has a
 corrupt packet is `A0104` — a game asset with a hole in it is fixed at
 the source, not skipped over. Limit: `max_audio_frames` (10 minutes at
-48 kHz) → `A0101`. No settings yet; no sub-assets.
+48 kHz) → `A0101`. One setting, `stream` (a boolean, default `false`;
+anything else is `IMPORT_INVALID_DATA` at `/settings/stream`; version 2,
+M3-11 part 2): a streamed sound is decoded and checked exactly the
+same, then the samples are dropped and the `AudioData` keeps the
+**source bytes** (`stream: Some(bytes)`, `frames` from the decode) for
+the runtime to decode as it plays ([audio.md](audio.md) § Streamed
+music — music, not effects). No sub-assets.
 
 ### The intermediate's bytes
 
-`.fyni`: `FYNI`, version (4 since M3-19c), a JSON header (source, importer,
-meshes / materials / images / textures / clips / skins / animations with
-`[offset, length]` into the blob area, the prefab document when there is
-one, the sub-asset ids) and 4-byte-aligned blobs (vertices, `u32`
-indices, skin weights, encoded image bytes, RGBA8 texels, `f32` samples,
+`.fyni`: `FYNI`, version (5 since M3-11 part 2: a clip header carries
+`frames` and, streamed, the source blob's `[offset, length]` with no
+samples), a JSON header (source, importer, meshes / materials / images /
+textures / clips / skins / animations with `[offset, length]` into the
+blob area, the prefab document when there is one, the sub-asset ids) and
+4-byte-aligned blobs (vertices, `u32` indices, skin weights, encoded image
+bytes, RGBA8 texels, `f32` samples or a streamed sound's source bytes,
 joint tables and key data). `Intermediate::to_bytes`/`from_bytes`
 round-trip; the committed `fixtures/robot.expected.fyni`,
 `fixtures/textures/swatch.expected.fyni` and
@@ -1083,7 +1091,7 @@ chunk of the same name/sub (the decoded `PbrMaterial`, what the renderer
 reads; a material document cooks the same pair), embedded glTF images →
 decoded `TEXR` in the colour space the importer assigned them (dual-use
 images arrive as two sub-assets, one per colour space), the asset's own
-texture → `TEXR`, clips → `CLIP`, the prefab → `JSON`. A `fynkel.file` source: its bytes in one
+texture → `TEXR`, clips → `CLIP` (or `STRM` for a sidecar's `stream: true`: the source bytes, M3-11 part 2), the prefab → `JSON`. A `fynkel.file` source: its bytes in one
 `BLOB` chunk. A sidecar whose `subAssets` fall behind the import cooks with
 a warning (the container carries the derived ids) — `fynkel import`
 updates the sidecar; the cooker never writes outside the cache.
@@ -1111,15 +1119,16 @@ Chunk kinds and payloads:
 
 | Kind | Payload |
 | --- | --- |
-| `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `mipLevels`; `sampleRate`, `channels`, `frames`, `codec`; `entities`; `extension` |
+| `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `mipLevels`; `sampleRate`, `channels`, `frames`, `codec` (+ `streamed: true`, `bytes` for a `STRM`); `entities`; `extension` |
 | `JSON` | A document's canonical text (scene, prefab, material, …) |
 | `MATL` | `u32` payload version (1), `u32` record size (`PbrMaterial::SIZE`, 184), `u32` string-tail length, `u32` reserved, then the `fynkel.PbrMaterial` wire record (ADR-0012 layout: `Vec4` 16 bytes, optional asset refs as a nil id when unbound) and its string tail (the `sub` ids). `fynkel_wire::material::{encode_material, decode_material}`. META extras: `shader`, `alphaMode`, `textures` (the bound slot names). |
 | `MESH` | `u32` vertex count, `u32` index count, `[f32; 3]` bounds min, `[f32; 3]` bounds max, vertices (72 bytes each, the intermediate's layout), `u32` indices |
 | `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear), `u32` mip levels (the full chain, `full_mip_count(w, h)`), then every level's `w × h × 4` texels concatenated, level 0 first, top row first (`TexturePayload::level(i)` / `base()`) |
 | `CLIP` | `u32` sample rate, `u32` channels, `u64` frames, interleaved `f32` samples |
+| `STRM` | `u32` sample rate, `u32` channels, `u64` frames, `u32` codec length, `u32` data length, the codec name (`pcm`, `vorbis`), the source file's bytes — a streamed sound (the sidecar's `stream: true`), decoded by the runtime as it plays |
 | `BLOB` | The source file's bytes |
 
-`fynkel_cooked::payload::{decode_mesh, decode_texture, decode_clip}` (and
+`fynkel_cooked::payload::{decode_mesh, decode_texture, decode_clip, decode_stream}` (and
 the `encode_*` counterparts, `Vertex`, `MeshPayload`, `TexturePayload`,
 `ClipPayload`) read the typed payloads back (length-checked, indices
 bounds-checked; `None` on a malformed payload); `fynkel_import::cook`

@@ -1,17 +1,23 @@
-//! A decoded sound: interleaved `f32` PCM as the cooked `CLIP` chunk
-//! stores it (`fynkel_cooked::payload::ClipPayload`), shared between the
-//! world and the mixer through an `Arc` that only the world side ever
-//! drops (the mixer hands its references back; see `mixer::Return`).
+//! A sound: interleaved `f32` PCM as the cooked `CLIP` chunk stores it
+//! (`fynkel_cooked::payload::ClipPayload`), shared between the world and
+//! the mixer through an `Arc` that only the world side ever drops (the
+//! mixer hands its references back; see `mixer::Return`) — or, for a
+//! streamed sound (`STRM`, M3-11 part 2), the encoded source and its
+//! format, decoded per voice while it plays (`stream`).
 
 use std::sync::Arc;
+
+use crate::stream::StreamSource;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AudioClip {
     pub sample_rate: u32,
     /// 1 or 2; a clip with more channels is refused at registration.
     pub channels: u32,
-    /// `frames * channels` samples in `[-1, 1]`.
+    /// `frames * channels` samples in `[-1, 1]`; empty for a stream.
     pub samples: Vec<f32>,
+    /// The encoded source of a streamed sound, with its frame count.
+    pub stream: Option<(Arc<StreamSource>, u64)>,
 }
 
 /// Channels a clip may have (mono, stereo).
@@ -44,11 +50,55 @@ impl AudioClip {
             sample_rate,
             channels,
             samples,
+            stream: None,
         }))
     }
 
+    /// A streamed sound from a cooked `STRM` chunk: `bytes` is the source
+    /// file (WAV or Ogg Vorbis) and `frames` what the importer counted.
+    /// The same rules as `new` on the format.
+    pub fn streamed(
+        sample_rate: u32,
+        channels: u32,
+        frames: u64,
+        codec: &str,
+        bytes: Vec<u8>,
+    ) -> Result<Arc<AudioClip>, String> {
+        if sample_rate == 0 {
+            return Err("a clip needs a sample rate".into());
+        }
+        if channels == 0 || channels > MAX_CLIP_CHANNELS {
+            return Err(format!(
+                "a clip has 1 or {MAX_CLIP_CHANNELS} channels, got {channels}"
+            ));
+        }
+        if bytes.is_empty() {
+            return Err("a streamed clip needs its source bytes".into());
+        }
+        Ok(Arc::new(AudioClip {
+            sample_rate,
+            channels,
+            samples: Vec::new(),
+            stream: Some((
+                Arc::new(StreamSource {
+                    codec: codec.to_string(),
+                    bytes: bytes.into(),
+                }),
+                frames,
+            )),
+        }))
+    }
+
+    /// Whether the sound is decoded as it plays.
+    pub fn is_stream(&self) -> bool {
+        self.stream.is_some()
+    }
+
     pub fn frames(&self) -> u64 {
-        (self.samples.len() / self.channels as usize) as u64
+        match &self.stream {
+            Some((_, frames)) => *frames,
+            None => (self.samples.len() / self.channels as usize) as u64,
+        }
     }
 
     /// Length in seconds at pitch 1.

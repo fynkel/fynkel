@@ -7,7 +7,8 @@ derived (UUID v5) so a rerun rewrites the same documents byte for byte.
 The documents it writes are ordinary Fynkel documents: `fynkel validate`
 checks them, `fynkel scene apply` edits them, and the editor (M4) will
 open them. Run from the project directory after tools/kit.py,
-tools/character.py and `fynkel import assets/models/*.glb`:
+tools/character.py, `fynkel import assets/models/*.glb` and `fynkel import
+assets/audio/*.ogg`:
 
     python3 tools/playground.py && fynkel document format assets/**/*.json && fynkel validate
 
@@ -56,7 +57,13 @@ camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
     it. A second animator on the `spine` joint is the wave layer: the
     character's `wave` clip, additive, played on the `wave` action.
     With `--hero`, the layer sits on the `Rig` and needs a `wave` clip
-    on the rig (skipped when there is none).
+    on the rig (skipped when there is none);
+  - the sound (M3-11): a `fynkel.AudioListener` on the Camera, the
+    `Music` entity's looping, streamed `fynkel.AudioSource` on the music
+    bus, and the clips `game.Player` (footsteps on the step markers, the
+    hit on a death) and `game.Collectible` (the pickup) play as
+    one-shots — CC0 files in assets/audio (see README.md § Credits),
+    imported with `fynkel import assets/audio/*.ogg`.
 """
 
 import json
@@ -252,6 +259,23 @@ else:
             else "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
         )
 
+# The sounds (M3-11): CC0 clips the implementer did not make — Kenney's
+# Impact and Interface packs (kenney.nl) and Juhani Junkala's "5 Action
+# Chiptunes" Level 1 (opengameart.org) — imported with `fynkel import
+# assets/audio/*.ogg`. The music's sidecar sets `settings.stream: true`,
+# so it cooks to a STRM chunk and is decoded as it plays; the effects
+# are CLIPs in memory.
+SOUND_NAMES = ("step_left", "step_right", "coin", "hit", "music")
+
+
+def sound(name):
+    sidecar = ASSETS / "audio" / f"{name}.ogg.meta.json"
+    assert sidecar.exists(), f"run `fynkel import assets/audio/{name}.ogg` first (no sidecar at {sidecar})"
+    return {"asset": json.loads(sidecar.read_text())["id"]}
+
+
+SOUNDS = {name: sound(name) for name in SOUND_NAMES}
+
 # The Player's locomotion blend space (M3-19c): one document, its points
 # the character's idle, walk and run at the speeds `game.Player` walks and
 # sprints at (fynkel.CharacterController `speed` 4, sprint x 1.75).
@@ -311,7 +335,8 @@ def coin_prefab():
             # The pickup volume: a sensor only the player's layer meets.
             collider("sphere", size=(1.1, 1.1, 1.1), sensor=True, layer=TRIGGER, mask=PLAYER),
             trigger_zone("collect", once=True),
-            behaviour("game.Collectible"),
+            # The pickup sound (M3-11), played fire-and-forget on the collect.
+            behaviour("game.Collectible", pickup=SOUNDS["coin"]),
         ],
     )
     return p.document("prefab", PREFABS["coin"], {"roots": [root]})
@@ -433,6 +458,11 @@ def playground():
                 # the wave layer's animator ('' when the character has no wave).
                 jumpClip=CLIPS["jump"],
                 waveLayer=("Rig" if HERO else "spine") if WAVE else "",
+                # The one-shots (M3-11): a footstep per `step_l`/`step_r`
+                # marker, the hit on a death.
+                stepLeft=SOUNDS["step_left"],
+                stepRight=SOUNDS["step_right"],
+                hit=SOUNDS["hit"],
             ),
             # The locomotion blend space from the first tick (its parameter
             # starts at the first point: idle); game.Player sets `speed` from
@@ -494,6 +524,19 @@ def playground():
                     "mask": DEFAULT,
                 },
             ),
+            # The ears (M3-11): tier 1 plays everything as 2D, so the
+            # listener is the gain over the world's voices.
+            ("fynkel.AudioListener", {"volume": 1.0}),
+        ],
+    )
+    # The music (M3-11): a looping source on the music bus, playing from
+    # the load; streamed (its sidecar's `stream: true`), so the 74 s track
+    # is decoded as it plays instead of held decoded in memory.
+    s.add(
+        "Music",
+        [
+            transform((0, 0, 0)),
+            ("fynkel.AudioSource", {"clip": SOUNDS["music"], "bus": "music", "volume": 0.5, "pitch": 1.0, "looping": True, "playing": True, "priority": 10}),
         ],
     )
     sun = quat_mul(quat_axis_angle((0, 1, 0), math.radians(35)), quat_axis_angle((1, 0, 0), math.radians(-52)))

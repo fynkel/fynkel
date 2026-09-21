@@ -73,7 +73,16 @@
               "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
               "sub": "anim/3"
             },
-            "waveLayer": "spine"
+            "waveLayer": "spine",
+            "stepLeft": {
+              "asset": "008a0fd4-9de7-4134-bc58-b30348388418"
+            },
+            "stepRight": {
+              "asset": "079ad721-2be3-4ace-928a-066a6f07401e"
+            },
+            "hit": {
+              "asset": "8bb56b89-1cef-4ee9-9d27-1ef74b0d4a20"
+            }
           }
         },
         "973546b9-5862-5208-a67e-04c0be7073d4": {
@@ -608,6 +617,57 @@
             "sensitivity": 2.5,
             "collision_radius": 0.25,
             "mask": 1
+          }
+        },
+        "ebba346d-e4bb-58d5-9e0e-f5ce2c518968": {
+          "type": "fynkel.AudioListener",
+          "version": 1,
+          "data": {
+            "volume": 1.0
+          }
+        }
+      }
+    },
+    "a540c720-c1f6-532c-a047-a4bb976d5e87": {
+      "name": "Music",
+      "parent": null,
+      "children": [],
+      "components": {
+        "e46586a8-dd11-5240-a3af-5fadaa5d6c2d": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "aaa54d5c-d63a-55b7-ba9c-77260f40d81b": {
+          "type": "fynkel.AudioSource",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "e48d5eb5-8081-434d-9ef1-350ebfe11bb8"
+            },
+            "bus": "music",
+            "volume": 0.5,
+            "pitch": 1.0,
+            "looping": true,
+            "playing": true,
+            "priority": 10
           }
         }
       }

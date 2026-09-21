@@ -19,6 +19,7 @@ use crate::mixer::{
     Command, Mixer, MixerStats, Return, Start, COMMAND_CAPACITY, MAX_CLIPS, MAX_VOICES,
     RETURN_CAPACITY,
 };
+use crate::stream::{self, StreamShared};
 
 /// Sample rate the null backend renders at (what a headless run reports).
 pub const NULL_SAMPLE_RATE: u32 = 48_000;
@@ -112,6 +113,8 @@ struct Voice {
     position: f64,
     /// Start order, for the oldest-wins tie-break.
     seq: u64,
+    /// The decoder's flags, for a streamed voice.
+    stream: Option<Arc<StreamShared>>,
 }
 
 #[derive(Clone, Debug)]
@@ -136,6 +139,11 @@ pub struct AudioStats {
     pub callbacks: u64,
     pub underruns: u64,
     pub suspended: bool,
+    /// Streamed clips registered (decoded as they play, not held).
+    pub streams: u32,
+    /// Callbacks in which a streamed voice's decoder had fallen behind
+    /// (the voice held silent for the rest of that callback).
+    pub starved: u64,
 }
 
 pub struct Audio {
@@ -159,6 +167,9 @@ pub struct Audio {
     stolen: u64,
     refused: u64,
     ended: u64,
+    /// Starvations counted by mixers since replaced (a device opened or
+    /// closed); the current mixer's count adds to it.
+    starved_before: u64,
 }
 
 impl Default for Audio {
@@ -200,6 +211,7 @@ impl Audio {
             stolen: 0,
             refused: 0,
             ended: 0,
+            starved_before: 0,
         }
     }
 
@@ -251,9 +263,43 @@ impl Audio {
     fn stop_voices_of_slot(&mut self, slot: u16) {
         for i in 0..MAX_VOICES {
             if self.voices[i].as_ref().is_some_and(|v| v.clip_slot == slot) {
-                self.voices[i] = None;
+                self.forget_voice(i);
             }
         }
+    }
+
+    /// Drops the engine's record of a voice; a streamed voice's decoder
+    /// is told to exit.
+    fn forget_voice(&mut self, i: usize) {
+        if let Some(v) = self.voices[i].take() {
+            if let Some(shared) = v.stream {
+                shared.stop();
+            }
+        }
+    }
+
+    /// Whether `clip` is registered as a stream.
+    pub fn is_stream(&self, r: &AssetRef) -> bool {
+        self.clips.get(r).is_some_and(|e| e.clip.is_stream())
+    }
+
+    /// Starts a decoder for a streamed voice at `position` and sends the
+    /// mixer its start with the tap.
+    fn start_stream(&mut self, start: Start, clip: &Arc<AudioClip>, shared: Arc<StreamShared>) {
+        let Some((source, _)) = &clip.stream else {
+            return;
+        };
+        let tap = stream::spawn(
+            source.clone(),
+            clip.sample_rate,
+            clip.channels,
+            start.position.max(0.0) as u64,
+            shared,
+        );
+        self.send(Command::StartStream {
+            start,
+            tap: Box::new(tap),
+        });
     }
 
     // ---- voices ----------------------------------------------------------
@@ -266,9 +312,9 @@ impl Audio {
         clip: &AssetRef,
         params: PlayParams,
     ) -> Result<VoiceId, PlayError> {
-        let (clip_slot, frames) = {
+        let (clip_slot, frames, data) = {
             let entry = self.clips.get(clip).ok_or(PlayError::UnknownClip)?;
-            (entry.slot, entry.clip.frames())
+            (entry.slot, entry.clip.frames(), entry.clip.clone())
         };
         let slot = match self.allocate(params.priority) {
             Some(slot) => slot,
@@ -287,6 +333,7 @@ impl Audio {
         };
         let seq = self.next_seq;
         self.next_seq += 1;
+        let shared = data.is_stream().then(|| StreamShared::new(params.looping));
         self.voices[slot] = Some(Voice {
             generation,
             source,
@@ -300,10 +347,11 @@ impl Audio {
             paused: false,
             position: 0.0,
             seq,
+            stream: shared.clone(),
         });
         self.started += 1;
         if frames > 0 {
-            self.send(Command::Start(Start {
+            let start = Start {
                 voice: slot as u8,
                 generation,
                 clip: clip_slot,
@@ -312,7 +360,11 @@ impl Audio {
                 pitch,
                 looping: params.looping,
                 position: 0.0,
-            }));
+            };
+            match shared {
+                Some(shared) => self.start_stream(start, &data, shared),
+                None => self.send(Command::Start(start)),
+            }
         }
         Ok(VoiceId {
             slot: slot as u8,
@@ -343,7 +395,7 @@ impl Audio {
         self.stolen += 1;
         // The mixer replaces the voice on Start; the old generation's
         // end is never reported (the sound was stolen, not ended).
-        self.voices[i] = None;
+        self.forget_voice(i);
         Some(i)
     }
 
@@ -366,7 +418,7 @@ impl Audio {
         if self.voice_mut(id).is_none() {
             return false;
         }
-        self.voices[id.slot as usize] = None;
+        self.forget_voice(id.slot as usize);
         self.send(Command::Stop {
             voice: id.slot,
             generation: id.generation,
@@ -440,6 +492,9 @@ impl Audio {
         };
         if v.looping != looping {
             v.looping = looping;
+            if let Some(shared) = &v.stream {
+                shared.set_looping(looping);
+            }
             self.send(Command::SetLooping {
                 voice: id.slot,
                 generation: id.generation,
@@ -570,7 +625,7 @@ impl Audio {
                 continue;
             };
             let Some(entry) = self.clips.get(&v.clip) else {
-                self.voices[i] = None;
+                self.forget_voice(i);
                 continue;
             };
             let frames = entry.clip.frames() as f64;
@@ -584,7 +639,7 @@ impl Audio {
                     source: v.source,
                     clip: v.clip.clone(),
                 });
-                self.voices[i] = None;
+                self.forget_voice(i);
                 continue;
             }
             if v.paused {
@@ -604,7 +659,7 @@ impl Audio {
                         source: v.source,
                         clip: v.clip.clone(),
                     });
-                    self.voices[i] = None;
+                    self.forget_voice(i);
                 }
             }
         }
@@ -620,6 +675,9 @@ impl Audio {
                 // The engine's own clock decides when a voice ends; the
                 // mixer's report only confirms the slot is free there.
                 Return::VoiceEnded { .. } => {}
+                // The ring dies here, on this thread; its decoder sees
+                // the consumer gone and exits.
+                Return::StreamReleased(tap) => drop(tap),
             }
         }
     }
@@ -683,6 +741,7 @@ impl Audio {
             let device = crate::backend::cpal::open(cmd_rx, ret_tx, stats.clone())?;
             let old_commands = std::mem::replace(&mut self.commands, cmd_tx);
             let old_returns = std::mem::replace(&mut self.returns, ret_rx);
+            self.starved_before += self.mixer_stats.starved.load(Ordering::Relaxed);
             self.mixer_stats = stats;
             let old = std::mem::replace(&mut self.backend, Backend::Device(device));
             // The old mixer's tables die with it, here on this thread.
@@ -715,6 +774,7 @@ impl Audio {
         );
         let old_commands = std::mem::replace(&mut self.commands, cmd_tx);
         let old_returns = std::mem::replace(&mut self.returns, ret_rx);
+        self.starved_before += self.mixer_stats.starved.load(Ordering::Relaxed);
         self.mixer_stats = stats;
         let old = std::mem::replace(&mut self.backend, Backend::Null(Box::new(mixer)));
         drop(old);
@@ -740,12 +800,21 @@ impl Audio {
         let (muted, listener) = (self.muted, self.listener);
         self.send(Command::SetMuted(muted));
         self.send(Command::SetListener(listener));
-        let starts: Vec<(Start, bool)> = self
+        // A streamed voice gets a fresh decoder at its position: the old
+        // one's consumer died with the old mixer, so it exits on its own
+        // (and is told to, in case it is mid-sleep).
+        let starts: Vec<(Start, bool, Option<Arc<AudioClip>>)> = self
             .voices
-            .iter()
+            .iter_mut()
             .enumerate()
             .filter_map(|(i, v)| {
-                let v = v.as_ref()?;
+                let v = v.as_mut()?;
+                let stream = v.stream.take().map(|old| {
+                    old.stop();
+                    let fresh = StreamShared::new(v.looping);
+                    v.stream = Some(fresh);
+                    self.clips[&v.clip].clip.clone()
+                });
                 Some((
                     Start {
                         voice: i as u8,
@@ -758,12 +827,22 @@ impl Audio {
                         position: v.position,
                     },
                     v.paused,
+                    stream,
                 ))
             })
             .collect();
-        for (start, paused) in starts {
+        for (start, paused, stream) in starts {
             let (voice, generation) = (start.voice, start.generation);
-            self.send(Command::Start(start));
+            match stream {
+                Some(clip) => {
+                    let shared = self.voices[voice as usize]
+                        .as_ref()
+                        .and_then(|v| v.stream.clone())
+                        .expect("a streamed voice keeps its flags");
+                    self.start_stream(start, &clip, shared);
+                }
+                None => self.send(Command::Start(start)),
+            }
             if paused {
                 self.send(Command::Pause { voice, generation });
             }
@@ -798,6 +877,8 @@ impl Audio {
             callbacks: self.mixer_stats.callbacks.load(Ordering::Relaxed),
             underruns: self.backend.underruns(),
             suspended: self.suspended,
+            streams: self.clips.values().filter(|e| e.clip.is_stream()).count() as u32,
+            starved: self.starved_before + self.mixer_stats.starved.load(Ordering::Relaxed),
         }
     }
 }

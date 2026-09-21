@@ -519,6 +519,8 @@ impl World {
             callbacks: clamp(s.callbacks),
             underruns: clamp(s.underruns),
             suspended: s.suspended,
+            streams: s.streams,
+            starved: clamp(s.starved),
         }
     }
 }

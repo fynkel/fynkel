@@ -172,6 +172,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
             json!({
                 "sounds": sounds,
                 "clips": stats.clips,
+                "streams": stats.streams,
                 "device": stats.device,
                 "sampleRate": stats.sample_rate,
                 "channels": stats.channels,

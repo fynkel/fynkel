@@ -28,14 +28,14 @@ use std::sync::{Arc, Mutex};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Uuid};
 use fynkel_cooked::payload::{
-    decode_animation, decode_clip, decode_mesh, decode_skin, decode_texture,
+    decode_animation, decode_clip, decode_mesh, decode_skin, decode_stream, decode_texture,
     ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP,
     ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
 };
 pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
 use fynkel_cooked::{
     ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN,
-    KIND_TEXTURE,
+    KIND_STREAM, KIND_TEXTURE,
 };
 use fynkel_core::animation::{
     BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Marker, Property, Skin,
@@ -809,18 +809,43 @@ impl Assets {
         Ok(m)
     }
 
-    /// The cooked sound (a `CLIP` chunk) as the audio engine's clip
-    /// (M3-11): interleaved `f32` frames, mono or stereo.
+    /// The cooked sound as the audio engine's clip (M3-11): a `CLIP`
+    /// chunk's interleaved `f32` frames, mono or stereo — or, for a sound
+    /// the sidecar marked `stream: true`, the `STRM` chunk's encoded
+    /// source, decoded by the engine as it plays.
     pub fn sound(&self, r: &AssetRef) -> Result<Arc<AudioClip>, Diagnostic> {
         if let Some(c) = self.lock().sounds.get(r) {
             return Ok(c.clone());
         }
-        let bytes = self.chunk(r, KIND_CLIP)?;
-        let payload = decode_clip(&bytes).ok_or_else(|| self.malformed(r, "CLIP"))?;
-        let clip = AudioClip::new(payload.sample_rate, payload.channels, payload.samples)
-            .map_err(|msg| self.malformed(r, "CLIP").with_suggestion(msg))?;
+        let clip = if self.has_chunk(r, KIND_STREAM)? {
+            let bytes = self.chunk(r, KIND_STREAM)?;
+            let p = decode_stream(&bytes).ok_or_else(|| self.malformed(r, "STRM"))?;
+            AudioClip::streamed(p.sample_rate, p.channels, p.frames, &p.codec, p.bytes)
+                .map_err(|msg| self.malformed(r, "STRM").with_suggestion(msg))?
+        } else {
+            let bytes = self.chunk(r, KIND_CLIP)?;
+            let payload = decode_clip(&bytes).ok_or_else(|| self.malformed(r, "CLIP"))?;
+            AudioClip::new(payload.sample_rate, payload.channels, payload.samples)
+                .map_err(|msg| self.malformed(r, "CLIP").with_suggestion(msg))?
+        };
         self.lock().sounds.insert(r.clone(), clip.clone());
         Ok(clip)
+    }
+
+    /// Whether the object has a chunk of `kind` for `r`'s sub-asset
+    /// (`Err` when the object itself is missing or unreadable).
+    fn has_chunk(&self, r: &AssetRef, kind: [u8; 4]) -> Result<bool, Diagnostic> {
+        let mut s = self.lock();
+        let entry = s
+            .index
+            .object(r.asset)
+            .map_err(|d| d.with_pointer(r.sub.clone()))?
+            .clone();
+        let meta = s.meta(&entry)?;
+        Ok(meta
+            .chunks
+            .iter()
+            .any(|(k, sub, _)| *k == kind && *sub == r.sub))
     }
 
     /// The cooked animation clip (an `ANIM` chunk, `anim/<a>`) as the

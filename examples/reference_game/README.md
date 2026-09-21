@@ -13,7 +13,7 @@ point at.
 ```sh
 fynkel run                       # validate, cook, then flutter run on macOS (WASD/mouse or a gamepad)
 fynkel run -d <iphone>           # the same on a device: the app carries the cooked cache (fynkel_cache/, bundled)
-flutter test                     # test/game_test.dart: the world loads, the recorded route collects all ten coins, the character is posed from the controller, hazards kill, restart resets
+flutter test                     # test/game_test.dart: the world loads, the recorded route collects all ten coins, the character is posed from the controller, the sounds play, hazards kill, restart resets
 fynkel validate                  # documents, references, lock
 fynkel test --headless --input test/collect_all.input.json --steps 1400   # the route on the Rust host (no Dart behaviours: the runtime walks the controller)
 fynkel render --out renders/playground.png --size 1280x720 --steps 40    # the scene as a picture, no window (40 ticks in: the character idles)
@@ -33,7 +33,7 @@ import` splits into `mesh/0..6`, and the player's rigged character
 `tools/character.py` writes as `assets/models/character.glb` (a skinned
 body of eleven boxes on an eleven-joint skeleton with idle, walk, run and
 jump clips → `mesh/0`, `skin/0`, `anim/0..3`) — the repository carries no
-binary of unknown origin. 168 entities: a 60 m arena of walls, pillars
+binary of unknown origin. 169 entities: a 60 m arena of walls, pillars
 with point lights, benches, planters, trees and a fountain (113 static
 meshes, all colliders); 22 rigid bodies (a crate pyramid, a pen of balls,
 barrels); 16 PBR materials; a sun with shadows and a cool ambient; the
@@ -60,6 +60,26 @@ a hazard too; coins 7–8), a block to jump onto (coin 9), a switch pad and
 the gate it opens (coin 10). Coins are a prefab instantiated ten times in
 the scene (`Rotator`, a `collect` trigger zone, `game.Collectible`).
 
+The sound (M3-11, `docs/audio.md`): `assets/audio/` holds five CC0 Ogg
+files — content the engine's implementer did not make, the acceptance
+rule of blueprint §19.2d from item 19a on — with their sidecars:
+`step_left.ogg` / `step_right.ogg` (Kenney Impact Sounds
+`footstep_concrete_000/001`), `coin.ogg` (Kenney Interface Sounds
+`pluck_001`), `hit.ogg` (Kenney Impact Sounds `impactMetal_heavy_000`)
+and `music.ogg` (Juhani Junkala, *5 Action Chiptunes*, "Level 1", 74 s,
+re-encoded to Vorbis q4). The music's sidecar sets `settings: { stream:
+true }`, so `fynkel cook` writes it as a `STRM` chunk (the source bytes)
+instead of decoded PCM and the runtime decodes it on its own thread as
+it plays, one second ahead of the mixer; the effects are `CLIP`s in
+memory. The scene puts a `fynkel.AudioListener` on the Camera and a
+`Music` entity with a looping `fynkel.AudioSource` on the `music` bus
+(`playing: true`: it starts at the load, on the Rust host too — `fynkel
+test --headless` prints `1 sounds (1 streamed)`); the footsteps, the
+pickup and the hit are one-shots the behaviours play by asset id.
+`lib/main.dart` passes `audio: true` to the view, which opens the output
+device; `flutter test` runs on the null backend (the clock runs, nothing
+is heard, the voices count).
+
 ## The game (Dart)
 
 - `lib/game/player.dart` — `game.Player`: walks the `fynkel.CharacterController`
@@ -73,11 +93,14 @@ the scene (`Rotator`, a `collect` trigger zone, `game.Collectible`).
   controller's planar speed — the blend space mixes idle, walk and run
   from it —, `animation.play(jump, looping: false)` on the jump and a
   crossfade back on landing, the wave layer played once on `wave`, the
-  walk's and run's footstep markers counted for the HUD — the clips are
-  authored in place, the controller moves the entity
-  (`docs/animation.md`).
-- `lib/game/collectible.dart` — scores on `onZoneEnter('collect')`, spawns the
-  `burst` prefab at runtime (`world.instantiate`; six small bodies kicked
+  walk's and run's footstep markers counted for the HUD and each played
+  as a footstep (`world.audio.play(stepLeft | stepRight, volume:
+  stepVolume, pitch: …)`, the file by the marker's name), the `hit` on a
+  death — the clips are authored in place, the controller moves the
+  entity (`docs/animation.md`).
+- `lib/game/collectible.dart` — scores on `onZoneEnter('collect')`, plays the
+  exposed `pickup` clip once (fire and forget: the coin is gone a tick
+  later), spawns the `burst` prefab at runtime (`world.instantiate`; six small bodies kicked
   apart with `applyImpulse`, gone by their `LifetimeDespawn`), destroys its
   own prefab instance (the anchor entity: `world.byEntity(gameObject.parent)`).
 - `lib/game/switch.dart` + `gate.dart` — the pad's `switch` zone shows a hint
@@ -93,3 +116,15 @@ stream `test/game_test.dart` replays: all ten coins, no deaths, the gate
 open, the sparks seen, 23.3 s of game time in well under a second.
 `AGENTS.md` describes the layout, every command and the validate → codegen →
 build → test loop for tools and AI agents (and is a good tour for people).
+
+## Credits
+
+- `assets/audio/step_left.ogg`, `step_right.ogg`, `hit.ogg` — [Kenney
+  Impact Sounds](https://kenney.nl/assets/impact-sounds) (CC0 1.0).
+- `assets/audio/coin.ogg` — [Kenney Interface
+  Sounds](https://kenney.nl/assets/interface-sounds) (CC0 1.0).
+- `assets/audio/music.ogg` — Juhani Junkala, "Level 1" from [5 Action
+  Chiptunes](https://opengameart.org/content/5-chiptunes-action) (CC0
+  1.0), re-encoded to Ogg Vorbis.
+
+Everything else in this project is generated by the tools in `tools/`.

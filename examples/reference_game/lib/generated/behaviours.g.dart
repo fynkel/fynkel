@@ -16,6 +16,13 @@ final BehaviourType gameCollectibleType = BehaviourType(
   create: _lib0.Collectible.new,
   fields: [
     BehaviourField(
+      name: 'pickup',
+      type: 'assetRef',
+      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
+      get: (b) => _assetRefJson((b as _lib0.Collectible).pickup),
+      set: (b, v) => (b as _lib0.Collectible).pickup = _assetRef(v),
+    ),
+    BehaviourField(
       name: 'value',
       type: 'integer',
       defaultValue: 1,
@@ -84,6 +91,13 @@ final BehaviourType gamePlayerType = BehaviourType(
       set: (b, v) => (b as _lib2.Player).fallY = _double(v),
     ),
     BehaviourField(
+      name: 'hit',
+      type: 'assetRef',
+      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
+      get: (b) => _assetRefJson((b as _lib2.Player).hit),
+      set: (b, v) => (b as _lib2.Player).hit = _assetRef(v),
+    ),
+    BehaviourField(
       name: 'jumpClip',
       type: 'assetRef',
       defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
@@ -114,6 +128,30 @@ final BehaviourType gamePlayerType = BehaviourType(
       step: 0.1,
       get: (b) => (b as _lib2.Player).sprintFactor,
       set: (b, v) => (b as _lib2.Player).sprintFactor = _double(v),
+    ),
+    BehaviourField(
+      name: 'stepLeft',
+      type: 'assetRef',
+      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
+      get: (b) => _assetRefJson((b as _lib2.Player).stepLeft),
+      set: (b, v) => (b as _lib2.Player).stepLeft = _assetRef(v),
+    ),
+    BehaviourField(
+      name: 'stepRight',
+      type: 'assetRef',
+      defaultValue: const {'asset': '00000000-0000-0000-0000-000000000000'},
+      get: (b) => _assetRefJson((b as _lib2.Player).stepRight),
+      set: (b, v) => (b as _lib2.Player).stepRight = _assetRef(v),
+    ),
+    BehaviourField(
+      name: 'stepVolume',
+      type: 'number',
+      defaultValue: 0.6,
+      min: 0,
+      max: 1,
+      step: 0.05,
+      get: (b) => (b as _lib2.Player).stepVolume,
+      set: (b, v) => (b as _lib2.Player).stepVolume = _double(v),
     ),
     BehaviourField(
       name: 'walkSpeed',

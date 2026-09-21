@@ -190,6 +190,8 @@ pub struct AudioReport {
     pub sources: u32,
     /// Sounds registered from the cooked scene (and its prefabs).
     pub sounds: u32,
+    /// Of those, streamed (`STRM`; decoded as they play).
+    pub streams: u32,
     /// Voices started, stolen and refused over the run (`AudioStats`).
     pub started: u32,
     pub stolen: u32,
@@ -648,6 +650,7 @@ pub fn run_retaining(
         report.audio = Some(AudioReport {
             sources,
             sounds: registered_sounds,
+            streams: audio_stats.streams,
             started: audio_stats.started,
             stolen: audio_stats.stolen,
             refused: audio_stats.refused,

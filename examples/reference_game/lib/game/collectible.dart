@@ -7,7 +7,9 @@ import 'game_state.dart';
 
 /// A coin (assets/prefabs/coin.prefab.json): counts itself into the
 /// [GameState] at `start`, and when the player enters its `collect` zone
-/// (a `fynkel.TriggerZone` with `once`) it scores, leaves a burst of sparks
+/// (a `fynkel.TriggerZone` with `once`) it scores, plays [pickup] once
+/// (M3-11: a fire-and-forget `world.audio.play` — the coin is gone a tick
+/// later, so no source on it could finish), leaves a burst of sparks
 /// (the `burst` prefab instantiated at runtime, its pieces kicked apart
 /// and despawned by their `LifetimeDespawn`) and destroys its prefab
 /// instance — the anchor entity the scene spawned it under, so nothing of
@@ -18,6 +20,10 @@ class Collectible extends Behaviour {
   /// the schema's sake and a future scoreboard).
   @Expose(min: 1)
   int value = 1;
+
+  /// The pickup sound (assets/audio/coin.ogg; silent when unset).
+  @Expose()
+  AssetRef pickup = AssetRef.none;
 
   bool collected = false;
 
@@ -33,6 +39,7 @@ class Collectible extends Behaviour {
     if (event.event != 'collect' || collected) return;
     collected = true;
     state.collect();
+    if (pickup != AssetRef.none) world.audio.play(pickup, volume: 0.7);
 
     // The sparks start where the coin is (its world pose as the last tick
     // left it) and fly apart.

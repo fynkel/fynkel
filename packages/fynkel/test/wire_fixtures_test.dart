@@ -757,6 +757,8 @@ void main() {
       callbacks: 1000,
       underruns: 0,
       suspended: false,
+      streams: 1,
+      starved: 5,
     ),
     AudioStatsRecord.wireSize,
     AudioStatsRecord.decode,

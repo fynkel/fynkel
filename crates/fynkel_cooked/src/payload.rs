@@ -679,9 +679,81 @@ pub fn decode_clip(bytes: &[u8]) -> Option<ClipPayload> {
     })
 }
 
+/// A `STRM` payload (M3-11 part 2): a sound kept encoded — the source
+/// file's bytes as imported (WAV or Ogg Vorbis) with the format the
+/// importer decoded from them, so the runtime knows the length and the
+/// rate without opening the stream. `codec` is `pcm` or `vorbis`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StreamPayload {
+    pub sample_rate: u32,
+    pub channels: u32,
+    pub frames: u64,
+    pub codec: String,
+    pub bytes: Vec<u8>,
+}
+
+pub fn encode_stream(
+    sample_rate: u32,
+    channels: u32,
+    frames: u64,
+    codec: &str,
+    bytes: &[u8],
+) -> Vec<u8> {
+    let codec = codec.as_bytes();
+    let mut out = Vec::with_capacity(24 + codec.len() + bytes.len());
+    out.extend_from_slice(&sample_rate.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&frames.to_le_bytes());
+    out.extend_from_slice(&(codec.len() as u32).to_le_bytes());
+    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(codec);
+    out.extend_from_slice(bytes);
+    out
+}
+
+pub fn decode_stream(bytes: &[u8]) -> Option<StreamPayload> {
+    if bytes.len() < 24 {
+        return None;
+    }
+    let sample_rate = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    let channels = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
+    let frames = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
+    let codec_len = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+    let data_len = u32::from_le_bytes(bytes[20..24].try_into().unwrap()) as usize;
+    if bytes.len() != 24usize.checked_add(codec_len)?.checked_add(data_len)? {
+        return None;
+    }
+    let codec = std::str::from_utf8(&bytes[24..24 + codec_len]).ok()?;
+    Some(StreamPayload {
+        sample_rate,
+        channels,
+        frames,
+        codec: codec.to_string(),
+        bytes: bytes[24 + codec_len..].to_vec(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_round_trips_and_rejects_a_short_blob() {
+        let bytes = encode_stream(44_100, 2, 1234, "vorbis", &[1, 2, 3, 4, 5]);
+        let p = decode_stream(&bytes).unwrap();
+        assert_eq!(
+            p,
+            StreamPayload {
+                sample_rate: 44_100,
+                channels: 2,
+                frames: 1234,
+                codec: "vorbis".into(),
+                bytes: vec![1, 2, 3, 4, 5],
+            }
+        );
+        assert!(decode_stream(&bytes[..bytes.len() - 1]).is_none());
+        assert!(decode_stream(&bytes[..10]).is_none());
+    }
 
     #[test]
     fn mesh_round_trips_and_rejects_bad_indices() {
