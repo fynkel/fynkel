@@ -62,7 +62,7 @@ M2 additions (`fynkel_document`, authoring tools; none on the runtime path — `
 | `blake3` | 1 | Cache keys in `fynkel_import::cache` (content addressing, §6) and document revisions in `fynkel_document::authoring`; pure Rust, no SIMD-dependent output — the same inputs hash the same on every machine |
 | `crc32fast` | 1 | Per-chunk and header checksums in `fynkel_cooked`; the crate's only dependency, so a runtime can read cooked containers without the importers |
 
-Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`.
+Dart side: `ffi` 2.1.x; `ffigen` 20.x (dev, `packages/fynkel`) generating from `crates/fynkel_native/include/fynkel.h`; the same `ffigen` in `packages/fynkel_authoring` (M4-01) generating `lib/src/native/fynkel_authoring_bindings.g.dart` from `include/fynkel_authoring.h` (`dart run ffigen --config ffigen.yaml`; only `fynkel_authoring_*`, `FynkelBufferView`, `FynkelStatus` and the ABI-version macro) onto the same code asset — that package's pubspec opts into the runtime's `authoring` cargo feature through `hooks.user_defines.fynkel.features`, so its hook build is `cargo build --release -p <crate> --no-default-features --features authoring`.
 
 Behaviour generator (`packages/fynkel_generator`, ADR-0012 pipeline (b), M2-16):
 

@@ -386,11 +386,14 @@ instance of the Column rig document's `prefab` (the same hierarchy as
 ## Authoring commands and transactions
 
 `fynkel_document::authoring` (§11.1, ADR-0016) is the one implementation of
-document mutation the editor, the CLI and agents share; the C ABI for it
-waits for M4. An `Editor` holds one scene or prefab document (`Editor::open`
-refuses other kinds, read-only newer documents and outdated ones with
-`FYN-E0007`; a document that already has errors opens, and those baseline
-errors are tolerated). Its `Revision` is the blake3 hash of the canonical
+document mutation the editor, the CLI and agents share; the editor reaches
+it through the authoring session and its C ABI (below, M4-01). An `Editor`
+holds one scene, prefab or **material** document (`Editor::open` refuses
+other kinds, read-only newer documents and outdated ones with `FYN-E0007`; a
+document that already has errors opens, and those baseline errors are
+tolerated; a material is validated against the shader library —
+`Editor::open_with(document, schemas, shaders)` — and an entity command on
+it is `FYN-E0007` pointing at `setDocumentField`). Its `Revision` is the blake3 hash of the canonical
 text (`Document::write`), so two tools that read the same bytes agree on it
 without shared state — `fynkel scene inspect --json` and `fynkel prefab
 inspect --json` print it as `revision`.
@@ -408,8 +411,8 @@ inspect --json` print it as `revision`.
    its exact inverse; the command's `undo` is those inverses in reverse. A
    command that cannot run (unknown entity `E0002`, unknown component
    `E0003`, malformed `E0004`, cycle `E0006`, not an instance `E0008`,
-   duplicate id `E0010`) stops the transaction and everything already applied
-   is rolled back.
+   duplicate id `E0010`, a protected document field `E0012`) stops the
+   transaction and everything already applied is rolled back.
 3. The document is validated (`Scene::validate` / `Prefab::validate`). Any
    error the transaction *introduces* (not in the baseline) rejects it whole
    with `FYN-E0005`, the errors in `related`, and the document back to the
@@ -451,6 +454,9 @@ pointer into it such as `/position/1`):
 | `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]` | `createObject` plus `prefab: { asset, instance, overrides: [] }`; scene documents only |
 | `setPrefabOverride` | `entity`, `override` (a prefab-model op object) | replaces the override with the same target (field for `setField`/`unsetField`, component for `addComponent`/`removeComponent`, object for `addObject`/`removeObject`), else appends |
 | `revertPrefabOverride` | `entity`, `index?` | removes one override, or all of them |
+| `duplicateObject` | `id`, `newId?`, `name?`, `index?` | deep-copies the subtree with fresh entity, component and prefab-instance ids (every reference inside the copy remapped), placed right after the original or at `index`; the copy's root is the first affected id; a taken `newId` is `FYN-E0010`; one undo step (M4-01) |
+| `setDocumentField` | `pointer`, `value` | sets a field of the document itself by RFC 6901 pointer — a material's `/base_color`, a scene's `/name`; the envelope's identity (`/$schema`, `/kind`, `/formatVersion`, `/id`) and a scene's `/entities` / `/roots` are refused with `FYN-E0012` (M4-01) |
+| `unsetDocumentField` | `pointer` | removes a document field (`/name` cannot be unset, `FYN-E0012`) (M4-01) |
 | `createMaterial` | `id?`, `name`, `shader?`, `path` | writes a new `.material.json` (default shader `fynkel.pbr@1`); no undo |
 | `saveDocument` | `path?` | writes the document; no undo |
 
@@ -467,6 +473,94 @@ prints the unified diff of the canonical text instead (with `--json`, as
 (and, unless `--dry-run`, the file was written), 1 when it was refused
 (conflict, invalid command, rejected by validation), 2 when the document,
 the patch or the arguments cannot be read.
+
+### The authoring session and its ABI (M4-01)
+
+`crates/fynkel_authoring` (`AuthoringSession`, blueprint §19.2e item 1) is
+the layer the editor holds a project through — one session per editor
+window, never running game code and never reading a cooked cache
+(ADR-0016/0018):
+
+- **`open_project(dir)`** reads `fynkel.project.json` with its diagnostics,
+  the embedded schemas plus the project's `schemas/behaviours/*.json`,
+  `fynkel.lock.json` — a lock written by a **newer** Fynkel opens the project
+  **read-only** (`OpenProject::read_only` carries the reason; every edit,
+  undo and save is then `FYN-E0007`), an older one is a warning — the asset
+  database (a full scan, every asset reference indexed for `dependents`)
+  and `lib/generated/behaviours.g.json` when present (its absence is a
+  `FYN-T0006` warning that says to run `fynkel codegen`).
+- **`open_document(path | id)`** opens a scene, prefab or material by path
+  (absolute or relative to the project) or by asset id into an `Editor`
+  behind a small integer **handle** (idempotent; handles are never reused
+  in a session). `apply`, `undo`, `redo`, `save(path?)`, `reload`,
+  `close_document` act on a handle; `state_json` is what a tab strip shows
+  (`path`, `relativePath`, `kind`, `id`, `name`, `formatVersion`,
+  `revision`, `dirty`, `canUndo`, `canRedo`, `history` — the transactions
+  left to undo — and `readOnly`). The name is read live from the root, so
+  `setDocumentField /name` shows at once.
+- **Writes inside a transaction** (`createMaterial`, `saveDocument`) take a
+  relative path from the **project directory**, not the process's working
+  directory, and the paths a committed transaction wrote are rescanned so
+  the asset database sees the new material or the saved document without a
+  second call. `save` and a save-as rescan the written path the same way (a
+  save-as keeps the id, so the database reports `FYN-A0003` until one copy
+  goes).
+- **Queries** (`query(kind, args)`, all read-only): `project`, `documents`,
+  `document` (state + the whole document as JSON — what the Hierarchy
+  reads), `inspect` (the `fynkel scene|prefab inspect --json` view; a
+  material's shader, alpha mode, cutoff, double-sided and fields; plus the
+  document's diagnostics now), `validate`, `validateProject` (the
+  `fynkel validate --json` report), `assets` (`kind` document|source,
+  `document` a kind name), `asset`, `dependents`, `schemas`, `schema`
+  (with the `x-fynkel` display hints), `metadata`, `commands`.
+- **`rescan(paths)`** refreshes the reference index of the paths a file
+  watcher reports (or everything); the database itself is always re-scanned
+  whole — milliseconds for thousands of assets.
+- Diagnostics of the session itself are `FYN-T####`: `T0001` no project,
+  `T0002` unknown handle, `T0003` invalid request, `T0004` unknown query,
+  `T0005` a caught panic, `T0006` I/O.
+
+**The C ABI** (`crates/fynkel_native/include/fynkel_authoring.h`,
+`fynkel_authoring_*`, `FYNKEL_AUTHORING_ABI_VERSION` 1) is the session
+one call per method: text in as UTF-8 with a length, one JSON result out
+(`fynkel_authoring_result`, `{ "ok": true, ... }` or `{ "ok": false,
+"diagnostics": [...] }`, valid until the next call on the session) and a
+`FynkelStatus` that says which without parsing — `OK`;
+`COMMANDS_REJECTED` for an edit the editor's rules refused (`FYN-E####`);
+`LOAD_FAILED` for a project or document that could not be read or written;
+`INVALID_ARGUMENT` for NULL, bad UTF-8, non-JSON, no project, an unknown
+handle or query (`FYN-T0001..T0004`); `PANIC` once (the session is
+**poisoned** and answers `POISONED` from then on — destroy it and open a
+new one). Every function is NULL-safe and every panic is caught
+(ADR-0014); a session is driven from one thread. The entry points are
+compiled into `libfynkel_native` / `libfynkel_platform_apple` **only with
+the cargo feature `authoring`** (on by default in the workspace so the
+editor and the tests get it; `package:fynkel`'s build hook passes
+`--no-default-features` and adds `--features authoring` only when the
+app's pubspec lists it under `hooks.user_defines.fynkel.features`) — a
+game's runtime has none of these symbols, and CI checks that
+`cargo build --no-default-features` exports no `fynkel_authoring_*`.
+
+**The Dart side** is `packages/fynkel_authoring` (ffigen bindings over the
+header onto the same code asset as `package:fynkel`; games never depend on
+it): `AuthoringSession` (`openProject`, `openDocument`, the queries typed,
+`rescan`, a broadcast `Stream<AuthoringEvent>`), `DocumentHandle`
+(`state`, `apply(commands, baseRevision:)` → `Applied`, `undo`/`redo` →
+`Replayed`, `save`, `reload`, `close`, `root()`, `inspect()`,
+`validate()`, `changes`), `Command` builders for every command above,
+the ADR-0014 `Diagnostic` record and `AuthoringException` (`isConflict`,
+`isReadOnly`, `isNothingToReplay`, `isPoisoned`). Its test drives a
+complete session over the ABI on a copy of the fixture project.
+
+**Big documents (D7).** RFC 6901 lookups go through `json::Locator`, which
+caches paths and builds a per-object key index lazily for objects of 16+
+members; the parser's duplicate-key check switches to a set past the same
+size. Scene, prefab, schema and asset-reference validation anchor their
+diagnostics through a Locator, so a document with thousands of
+diagnostics validates in linear time (release, 16 000 entities with 8 000
+warnings: read 31 ms + validate 68 ms, was 726 ms at M2; apply+validate
+on 10 000 entities 58 ms; the test asserts a 4× size costs under 6× the
+time).
 
 ## Material and shader documents
 
