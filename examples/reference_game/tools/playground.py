@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Authors the Playground: assets/scenes/playground.scene.json, the three
-prefabs and the materials, from the layout below — the level's source of
-truth, kept in code so a change is one edit and a diff, with every id
-derived (UUID v5) so a rerun rewrites the same documents byte for byte.
+"""Authors the game's three scenes — assets/scenes/menu.scene.json (the
+startup scene: the title's backdrop), playground.scene.json (the level)
+and results.scene.json (the end of a run) —, the three prefabs and the
+materials, from the layout below — the level's source of truth, kept in
+code so a change is one edit and a diff, with every id derived (UUID v5)
+so a rerun rewrites the same documents byte for byte.
 
 The documents it writes are ordinary Fynkel documents: `fynkel validate`
 checks them, `fynkel scene apply` edits them, and the editor (M4) will
@@ -64,6 +66,16 @@ camera's yaw starts at 0 so "forward" on the keyboard is -Z and "right"
     hit on a death) and `game.Collectible` (the pickup) play as
     one-shots — CC0 files in assets/audio (see README.md § Credits),
     imported with `fynkel import assets/audio/*.ogg`.
+
+The Menu (M3-15) is a backdrop for lib/ui/menu.dart's title and buttons:
+a floor, a podium with a big coin and a ring of eight small ones on
+`fynkel.Rotator`, a camera on a slowly turning pivot, the music at a
+lower volume. The Results scene is the same podium seen closer, still
+camera, and a `Jingle` source that plays the win sting once from the
+load (`playing: true, looping: false`) — the scene plays it, no Dart
+needed. Neither carries a behaviour or a body; `game.*` lives in the
+Playground only. lib/game/game.dart moves between the three
+(`Game.play/finish/toMenu` → `scenes.transition`).
 """
 
 import json
@@ -259,13 +271,16 @@ else:
             else "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
         )
 
-# The sounds (M3-11): CC0 clips the implementer did not make — Kenney's
-# Impact and Interface packs (kenney.nl) and Juhani Junkala's "5 Action
-# Chiptunes" Level 1 (opengameart.org) — imported with `fynkel import
-# assets/audio/*.ogg`. The music's sidecar sets `settings.stream: true`,
-# so it cooks to a STRM chunk and is decoded as it plays; the effects
-# are CLIPs in memory.
-SOUND_NAMES = ("step_left", "step_right", "coin", "hit", "music")
+# The sounds (M3-11, M3-15): CC0 clips the implementer did not make —
+# Kenney's Impact, Interface and Music Jingles packs (kenney.nl) and
+# Juhani Junkala's "5 Action Chiptunes" Level 1 (opengameart.org) —
+# imported with `fynkel import assets/audio/*.ogg`. The music's sidecar
+# sets `settings.stream: true`, so it cooks to a STRM chunk and is decoded
+# as it plays; the effects are CLIPs in memory. `win` is the Results
+# scene's jingle; `click` the menus' button sound, played from Dart
+# (lib/ui/menu.dart) on the presentation lane — the id is repeated in
+# lib/game/game.dart.
+SOUND_NAMES = ("step_left", "step_right", "coin", "hit", "music", "win", "click")
 
 
 def sound(name):
@@ -320,6 +335,8 @@ MATERIALS = {name: uid("material", name) for name in MATERIAL_DOCS}
 
 PREFABS = {name: uid("prefab", name) for name in ("coin", "ball", "burst")}
 SCENE_ID = uid("scene", "playground")
+MENU_ID = uid("scene", "menu")  # fynkel.project.json's startupScene
+RESULTS_ID = uid("scene", "results")
 
 # ------------------------------------------------------------------ prefabs
 
@@ -671,6 +688,102 @@ def playground():
     return s.document("scene", SCENE_ID), counts
 
 
+# ------------------------------------------------------------------ the menu and the results (M3-15)
+
+
+def music(s, volume):
+    s.add(
+        "Music",
+        [
+            transform((0, 0, 0)),
+            ("fynkel.AudioSource", {"clip": SOUNDS["music"], "bus": "music", "volume": volume, "pitch": 1.0, "looping": True, "playing": True, "priority": 10}),
+        ],
+    )
+
+
+def sun_and_sky(s):
+    sun = quat_mul(quat_axis_angle((0, 1, 0), math.radians(35)), quat_axis_angle((1, 0, 0), math.radians(-52)))
+    s.add("Sun", [transform((0, 20, 0), sun), ("fynkel.DirectionalLight", {"color": [1.0, 0.95, 0.85], "intensity": 9000.0, "cast_shadows": True})])
+    s.add("Environment", [("fynkel.Environment", {"ambient_color": [0.55, 0.65, 0.9], "ambient_intensity": 1600.0, "sky": None, "sky_intensity": 0.0, "sky_rotation": 0.0})])
+
+
+def camera(s, pivot, pitch, dist, parent=None):
+    """A perspective camera `dist` from `pivot`, tilted down by `pitch`
+    (the playground's rig pose without the rig), with the listener."""
+    s.add(
+        "Camera",
+        [
+            transform((pivot[0], pivot[1] + dist * math.sin(pitch), pivot[2] + dist * math.cos(pitch)), quat_axis_angle((1, 0, 0), -pitch)),
+            ("fynkel.Camera", {"projection": "perspective", "fov_y": 0.95, "ortho_height": 10.0, "near": 0.1, "far": 120.0, "priority": 0, "exposure_mode": "auto", "exposure": 12.0}),
+            ("fynkel.AudioListener", {"volume": 1.0}),
+        ],
+        parent=parent,
+    )
+
+
+def podium(s, big_coin_speed):
+    s.add("Floor", [transform((0, -0.5, 0), scale=(40, 1, 40)), mesh_renderer("cube", "floor", cast=False)])
+    s.add("Podium", [transform((0, 0.3, 0), scale=(3.0, 0.6, 3.0)), mesh_renderer("cylinder", "pillar")])
+    s.add("Podium step", [transform((0, 0.15, 0), scale=(4.5, 0.3, 4.5)), mesh_renderer("cylinder", "platform")])
+    s.add(
+        "Big coin",
+        [
+            transform((0, 2.0, 0), scale=(2.2, 2.2, 2.2)),
+            mesh_renderer("coin", "gold", cast=True, receive=False),
+            ("fynkel.Rotator", {"axis": [0, 1, 0], "speed": big_coin_speed, "space": "world"}),
+        ],
+    )
+
+
+def menu():
+    s = Scene("Menu", "scene/menu")
+    podium(s, 0.8)
+    # Eight coins in a ring, each spinning like the level's.
+    for i in range(8):
+        a = 2 * math.pi * i / 8
+        s.add(
+            f"Ring coin {i + 1}",
+            [
+                transform((6.0 * math.cos(a), 0.7, 6.0 * math.sin(a)), scale=(0.7, 0.7, 0.7)),
+                mesh_renderer("coin", "gold", cast=True, receive=False),
+                ("fynkel.Rotator", {"axis": [0, 1, 0], "speed": 2.5, "space": "world"}),
+            ],
+        )
+    for i in range(4):
+        a = 2 * math.pi * i / 4 + math.pi / 4
+        x, z = 11.0 * math.cos(a), 11.0 * math.sin(a)
+        s.add(f"Pillar {i + 1}", [transform((x, 2.0, z), scale=(0.8, 4.0, 0.8)), mesh_renderer("cylinder", "pillar")])
+        s.add(f"Lamp {i + 1}", [transform((x, 4.4, z), scale=(0.5, 0.5, 0.5)), mesh_renderer("sphere", "lamp", cast=False, receive=False)])
+        s.add(f"Lamp {i + 1} light", [transform((x, 4.7, z)), point_light((1.0, 0.65, 0.35), 1800.0, 14.0)])
+    # The camera circles the podium once every ~50 s on its pivot.
+    pivot = s.add("Camera pivot", [transform((0, 0, 0)), ("fynkel.Rotator", {"axis": [0, 1, 0], "speed": 0.125, "space": "world"})])
+    camera(s, (0, 1.2, 0), 0.32, 13.0, parent=pivot)
+    sun_and_sky(s)
+    music(s, 0.35)
+    return s.document("scene", MENU_ID)
+
+
+def results():
+    s = Scene("Results", "scene/results")
+    podium(s, 1.6)
+    for i in range(3):
+        x = -3.0 + 3.0 * i
+        s.add(f"Cone {i + 1}", [transform((x, 0.5, -4.5), scale=(0.8, 1.0, 0.8)), mesh_renderer("cone", "platform")])
+    s.add("Lamp light", [transform((0, 5.0, 3.0)), point_light((1.0, 0.8, 0.5), 2400.0, 16.0)])
+    camera(s, (0, 1.6, 0), 0.28, 9.0)
+    sun_and_sky(s)
+    music(s, 0.35)
+    # The win sting (Kenney's jingles), once, from the load.
+    s.add(
+        "Jingle",
+        [
+            transform((0, 0, 0)),
+            ("fynkel.AudioSource", {"clip": SOUNDS["win"], "bus": "sfx", "volume": 0.8, "pitch": 1.0, "looping": False, "playing": True, "priority": 5}),
+        ],
+    )
+    return s.document("scene", RESULTS_ID)
+
+
 def material_docs():
     for name, fields in MATERIAL_DOCS.items():
         doc = {"$schema": "https://fynkel.dev/schemas/material.schema.json", "formatVersion": 2, "id": MATERIALS[name], "name": name.capitalize(), "shader": "fynkel.pbr@1"}
@@ -687,6 +800,11 @@ def main():
     doc, counts = playground()
     write(ASSETS / "scenes" / "playground.scene.json", doc)
     print(f"Playground: {len(doc['entities'])} entities, {counts['static']} static meshes, {counts['bodies']} bodies, {counts['coins']} coins, {counts['lights']} point lights; scene id {SCENE_ID}")
+    menu_doc = menu()
+    write(ASSETS / "scenes" / "menu.scene.json", menu_doc)
+    results_doc = results()
+    write(ASSETS / "scenes" / "results.scene.json", results_doc)
+    print(f"Menu: {len(menu_doc['entities'])} entities, scene id {MENU_ID} (the startup scene); Results: {len(results_doc['entities'])} entities, scene id {RESULTS_ID}")
     if HERO:
         print(f"the Player wears {HERO.relative_to(ROOT) if HERO.is_relative_to(ROOT) else HERO} ({CHARACTER}#prefab); rerun without --hero to restore the box character before committing")
 

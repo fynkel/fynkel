@@ -1,9 +1,12 @@
-// The Playground plays headlessly: no window, no GPU. `flutter test` runs
-// this; `fynkel test --headless --input test/collect_all.input.json` replays
-// the same recording on the Rust host without the Dart behaviours (the
-// runtime walks the controller from its named actions). The world reads the
-// cooked cache only, so the test cooks the project first (`cookProject` runs
-// the `fynkel` CLI; a warm cache costs milliseconds).
+// The game plays headlessly: no window, no GPU. `flutter test` runs this;
+// `fynkel test --headless --scene assets/scenes/playground.scene.json
+// --input test/collect_all.input.json` replays the same recording on the
+// Rust host without the Dart behaviours (the runtime walks the controller
+// from its named actions). The world reads the cooked cache only, so the
+// test cooks the project first (`cookProject` runs the `fynkel` CLI; a
+// warm cache costs milliseconds). The project starts in the Menu
+// (M3-15); [playing] takes a fresh game into the Playground the way the
+// Menu's Play button does.
 
 import 'dart:io';
 
@@ -12,31 +15,52 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:reference_game/game/collectible.dart';
 import 'package:reference_game/game/game.dart';
+import 'package:reference_game/game/game_state.dart';
 import 'package:reference_game/game/gate.dart';
 import 'package:reference_game/game/player.dart';
 import 'package:reference_game/game/switch.dart';
+
+/// A game in the Playground, one frame in (the transition the Menu's Play
+/// requests lands at the start of that frame and the level's behaviours
+/// start on its first tick).
+Game playing(String projectDir) {
+  final game = Game.load(projectDir);
+  game.play();
+  game.frame(1 / 60);
+  return game;
+}
 
 void main() {
   final projectDir = Directory.current.path;
   setUpAll(() => cookProject(projectDir));
 
-  test('the Playground loads with its world and behaviours', () {
+  test('the project starts in the Menu; Play loads the Playground with its world and behaviours', () {
     final game = Game.load(projectDir);
     addTearDown(game.dispose);
 
     expect(game.report.ok, isTrue);
     expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
-    expect(game.report.sceneName, 'Playground');
-    expect(game.report.entityCount, greaterThanOrEqualTo(150));
-    // The player, ten coins, the switch and the gate.
-    expect(game.report.behavioursAttached, 13);
+    expect(game.report.sceneName, 'Menu');
+    expect(game.report.behavioursAttached, 0, reason: 'the backdrop has no game logic');
+    expect(game.state.screen.value, Screen.menu);
     expect(game.report.physics.layers, ['default', 'props', 'player', 'trigger']);
     expect(
       game.report.inputActions.map((a) => a.name),
       containsAll(['move', 'look', 'jump', 'sprint', 'interact', 'restart']),
     );
+    game.frame(1 / 60);
+    expect(game.world.find('Big coin')?.get<Rotator>()?.speed, closeTo(0.8, 1e-6), reason: 'the menu turns on native systems only');
+    expect(game.world.find('Camera')?.parent, isNotNull, reason: 'the camera rides its rotating pivot');
 
-    game.frame(1 / 60); // the behaviours start on the first frame
+    game.play();
+    expect(game.scenes.state, SceneState.pending);
+    game.frame(1 / 60); // the Playground loads and its behaviours start on the first tick
+    expect(game.state.screen.value, Screen.playing);
+    final report = game.scenes.lastReport!;
+    expect(report.sceneName, 'Playground');
+    expect(report.entityCount, greaterThanOrEqualTo(150));
+    // The player, ten coins, the switch and the gate.
+    expect(report.behavioursAttached, 13);
     expect(game.world.behaviours.whereType<Player>().single.walkSpeed, 4, reason: 'authored in the scene');
     expect(game.world.behaviours.whereType<Collectible>(), hasLength(10));
     expect(game.world.behaviours.whereType<Switch>().single.target, 'Gate');
@@ -47,9 +71,8 @@ void main() {
   });
 
   test('the recorded route collects all ten coins', () {
-    final game = Game.load(projectDir);
+    final game = playing(projectDir);
     addTearDown(game.dispose);
-    game.frame(1 / 60);
     final player = game.world.behaviours.whereType<Player>().single;
     final gate = game.world.behaviours.whereType<Gate>().single;
 
@@ -88,162 +111,177 @@ void main() {
     expect(game.world.isPoisoned, isFalse);
   });
 
-  test('the character is posed from the controller: the locomotion blend space, the jump, the wave layer, footsteps', () {
-    final game = Game.load(projectDir);
-    addTearDown(game.dispose);
-    expect(game.report.animation.skins, greaterThanOrEqualTo(1));
-    game.frame(1 / 60);
-    final player = game.world.behaviours.whereType<Player>().single;
-    final me = player.gameObject;
+  test(
+    'the character is posed from the controller: the locomotion blend space, the jump, the wave layer, footsteps',
+    () {
+      final game = playing(projectDir);
+      addTearDown(game.dispose);
+      expect(game.scenes.lastReport!.animation.skins, greaterThanOrEqualTo(1));
+      final player = game.world.behaviours.whereType<Player>().single;
+      final me = player.gameObject;
 
-    // Rig-agnostic (M3-19a/b): the committed box character authors its
-    // joints under the Player; `tools/playground.py --hero <rig.json>`
-    // instances a downloaded one under a `Rig` child instead — the scene
-    // tells the Player its jump clip and wave layer. Either way a skinned
-    // body sits somewhere below the Player and the clips pose the joints
-    // — every entity under the Player is watched, not a named thigh.
-    Iterable<GameObject> descendants(GameObject o) sync* {
-      for (final c in o.children) {
-        final child = game.world.attach(c);
-        yield child;
-        yield* descendants(child);
+      // Rig-agnostic (M3-19a/b): the committed box character authors its
+      // joints under the Player; `tools/playground.py --hero <rig.json>`
+      // instances a downloaded one under a `Rig` child instead — the scene
+      // tells the Player its jump clip and wave layer. Either way a skinned
+      // body sits somewhere below the Player and the clips pose the joints
+      // — every entity under the Player is watched, not a named thigh.
+      Iterable<GameObject> descendants(GameObject o) sync* {
+        for (final c in o.children) {
+          final child = game.world.attach(c);
+          yield child;
+          yield* descendants(child);
+        }
       }
-    }
 
-    final joints = descendants(me).toList();
-    final bodies = joints.where((o) => o.has<Skin>()).toList();
-    expect(bodies, isNotEmpty, reason: 'a skinned body under the Player');
-    final boxRig = me.findChild('Rig') == null;
-    if (boxRig) {
-      expect(me.findChild('Body')!.get<Skin>()!.skeleton, 'hips');
-      expect(me.findChild('hips/spine/head/Visor'), isNotNull, reason: 'the visor rides the head joint');
-      expect(game.report.animation.clips, 2, reason: 'the locomotion blend space and the wave layer from the scene');
-    }
-    List<Quat> pose() => [for (final j in joints) j.localTransform.rotation];
-    double maxChange(List<Quat> a, List<Quat> b) {
-      var m = 0.0;
-      for (var i = 0; i < a.length; i++) {
-        final d = (a[i].x - b[i].x).abs() + (a[i].y - b[i].y).abs() + (a[i].z - b[i].z).abs() + (a[i].w - b[i].w).abs();
-        if (d > m) m = d;
+      final joints = descendants(me).toList();
+      final bodies = joints.where((o) => o.has<Skin>()).toList();
+      expect(bodies, isNotEmpty, reason: 'a skinned body under the Player');
+      final boxRig = me.findChild('Rig') == null;
+      if (boxRig) {
+        expect(me.findChild('Body')!.get<Skin>()!.skeleton, 'hips');
+        expect(me.findChild('hips/spine/head/Visor'), isNotNull, reason: 'the visor rides the head joint');
+        expect(
+          game.scenes.lastReport!.animation.clips,
+          2,
+          reason: 'the locomotion blend space and the wave layer from the scene',
+        );
       }
-      return m;
-    }
+      List<Quat> pose() => [for (final j in joints) j.localTransform.rotation];
+      double maxChange(List<Quat> a, List<Quat> b) {
+        var m = 0.0;
+        for (var i = 0; i < a.length; i++) {
+          final d =
+              (a[i].x - b[i].x).abs() + (a[i].y - b[i].y).abs() + (a[i].z - b[i].z).abs() + (a[i].w - b[i].w).abs();
+          if (d > m) m = d;
+        }
+        return m;
+      }
 
-    // Standing: the blend space at speed 0 is the idle (the box
-    // character's legs straight, a 2 s lap).
-    var s = me.animation.state!;
-    expect(s.clip, player.locomotion);
-    expect((s.playing, s.looping), (true, true));
-    expect(s.parameter, 0);
-    expect(s.duration, greaterThan(0));
-    final idle = pose();
-    if (boxRig) {
-      expect(s.duration, closeTo(2, 1e-6));
-      expect(me.findChild('hips/thigh_l')!.localTransform.rotation.x, closeTo(0, 1e-6));
-    }
+      // Standing: the blend space at speed 0 is the idle (the box
+      // character's legs straight, a 2 s lap).
+      var s = me.animation.state!;
+      expect(s.clip, player.locomotion);
+      expect((s.playing, s.looping), (true, true));
+      expect(s.parameter, 0);
+      expect(s.duration, greaterThan(0));
+      final idle = pose();
+      if (boxRig) {
+        expect(s.duration, closeTo(2, 1e-6));
+        expect(me.findChild('hips/thigh_l')!.localTransform.rotation.x, closeTo(0, 1e-6));
+      }
 
-    // Walking: the controller reaches 4 m/s, the parameter follows it a
-    // tick later and the space sits on the walk (a 1 s lap for the box
-    // character, whose thigh peaks at ±30° = sin 15° about X); the
-    // footsteps arrive as markers.
-    final steps = game.state.footsteps.value;
-    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
-    for (var i = 0; i < 30; i++) {
-      game.frame(1 / 60);
-    }
-    s = me.animation.state!;
-    expect(s.clip, player.locomotion, reason: 'no clip switch: the blend space plays on');
-    expect(s.parameter, closeTo(4, 1e-3));
-    if (boxRig) expect(s.duration, closeTo(1, 1e-5));
-    expect(maxChange(idle, pose()), greaterThan(0.1), reason: 'mid-stride: some joint left its idle pose');
-    if (boxRig) {
-      expect(me.findChild('hips/thigh_l')!.localTransform.rotation.x.abs(), greaterThan(0.1), reason: 'mid-stride');
-    }
-    expect(player.transform.position.z, lessThan(-1), reason: 'the controller moved, not the clip');
-    for (var i = 0; i < 60; i++) {
-      game.frame(1 / 60);
-    }
-    expect(game.state.footsteps.value, greaterThan(steps), reason: 'the walk\'s step markers counted');
-
-    // Sprinting: 7 m/s is the run; between the two the lap length is
-    // between the two, phase-synced.
-    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'ShiftLeft')]);
-    game.frame(1 / 60);
-    s = me.animation.state!;
-    expect(s.parameter, closeTo(7, 1e-3));
-    if (boxRig) expect(s.duration, closeTo(0.6, 1e-5));
-    game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'ShiftLeft'), InputEvent.up(InputDevice.keyboard, 'W')]);
-    game.frame(1 / 60);
-    s = me.animation.state!;
-    expect(s.parameter, 0, reason: 'released: the stride stops with the player');
-    if (boxRig) expect(s.duration, closeTo(2, 1e-5));
-
-    // A jump: the one-shot is held in the air (the box character's 0.8 s
-    // clip ends before the landing and holds its last frame; a longer
-    // downloaded jump is still playing when the feet touch), and the
-    // locomotion blends back in on landing.
-    game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
-    game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
-    s = me.animation.state!;
-    expect(s.clip, player.jumpClip);
-    expect(s.looping, isFalse);
-    expect(player.jumps, 1);
-    var airborne = 0;
-    while (!player.characterState()!.grounded && airborne < 180) {
-      expect(me.animation.state!.clip, player.jumpClip, reason: 'held until grounded');
-      game.frame(1 / 60);
-      airborne++;
-    }
-    expect(airborne, inInclusiveRange(30, 179), reason: 'a 5.5 m/s jump is in the air about a second');
-    if (boxRig) {
-      expect(me.animation.state!.playing, isFalse, reason: 'the 0.8 s clip ended before the landing');
-    }
-    for (var i = 0; i < 5; i++) {
-      game.frame(1 / 60);
-    }
-    expect(player.characterState()!.grounded, isTrue);
-    s = me.animation.state!;
-    expect(s.clip, player.locomotion);
-    expect(s.isFading, isTrue, reason: 'blending back from the jump');
-
-    // The wave: the layer's animator on the spine plays its clip once,
-    // additively — the right arm rises while the legs keep the idle.
-    if (boxRig) {
-      final layer = me.findChild('hips/spine')!;
-      final arm = me.findChild('hips/spine/upperarm_r')!;
-      expect(layer.animation.state!.playing, isFalse);
-      expect(arm.localTransform.rotation.z, inInclusiveRange(-0.07, -0.03), reason: 'at rest: the idle\'s breathing');
-      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'F')]);
-      game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'F')]);
-      expect(player.waves, 1);
-      expect(layer.animation.state!.playing, isTrue);
-      for (var i = 0; i < 18; i++) {
+      // Walking: the controller reaches 4 m/s, the parameter follows it a
+      // tick later and the space sits on the walk (a 1 s lap for the box
+      // character, whose thigh peaks at ±30° = sin 15° about X); the
+      // footsteps arrive as markers.
+      final steps = game.state.footsteps.value;
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
+      for (var i = 0; i < 30; i++) {
         game.frame(1 / 60);
       }
-      expect(arm.localTransform.rotation.z, lessThan(-0.5), reason: 'the arm is raised (about Z, -160° at most)');
-      expect(me.animation.state!.clip, player.locomotion, reason: 'the base animator plays on underneath');
+      s = me.animation.state!;
+      expect(s.clip, player.locomotion, reason: 'no clip switch: the blend space plays on');
+      expect(s.parameter, closeTo(4, 1e-3));
+      if (boxRig) expect(s.duration, closeTo(1, 1e-5));
+      expect(maxChange(idle, pose()), greaterThan(0.1), reason: 'mid-stride: some joint left its idle pose');
+      if (boxRig) {
+        expect(me.findChild('hips/thigh_l')!.localTransform.rotation.x.abs(), greaterThan(0.1), reason: 'mid-stride');
+      }
+      expect(player.transform.position.z, lessThan(-1), reason: 'the controller moved, not the clip');
       for (var i = 0; i < 60; i++) {
         game.frame(1 / 60);
       }
-      expect(layer.animation.state!.playing, isFalse, reason: 'the 1.2 s wave ended');
-      expect(arm.localTransform.rotation.z, inInclusiveRange(-0.07, -0.03),
-          reason: 'back to what the idle leaves: its -4°…-7° breathing (z = sin of half)');
-    }
-    expect(game.world.isPoisoned, isFalse);
-  });
+      expect(game.state.footsteps.value, greaterThan(steps), reason: 'the walk\'s step markers counted');
+
+      // Sprinting: 7 m/s is the run; between the two the lap length is
+      // between the two, phase-synced.
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'ShiftLeft')]);
+      game.frame(1 / 60);
+      s = me.animation.state!;
+      expect(s.parameter, closeTo(7, 1e-3));
+      if (boxRig) expect(s.duration, closeTo(0.6, 1e-5));
+      game.frame(
+        1 / 60,
+        input: const [InputEvent.up(InputDevice.keyboard, 'ShiftLeft'), InputEvent.up(InputDevice.keyboard, 'W')],
+      );
+      game.frame(1 / 60);
+      s = me.animation.state!;
+      expect(s.parameter, 0, reason: 'released: the stride stops with the player');
+      if (boxRig) expect(s.duration, closeTo(2, 1e-5));
+
+      // A jump: the one-shot is held in the air (the box character's 0.8 s
+      // clip ends before the landing and holds its last frame; a longer
+      // downloaded jump is still playing when the feet touch), and the
+      // locomotion blends back in on landing.
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
+      game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
+      s = me.animation.state!;
+      expect(s.clip, player.jumpClip);
+      expect(s.looping, isFalse);
+      expect(player.jumps, 1);
+      var airborne = 0;
+      while (!player.characterState()!.grounded && airborne < 180) {
+        expect(me.animation.state!.clip, player.jumpClip, reason: 'held until grounded');
+        game.frame(1 / 60);
+        airborne++;
+      }
+      expect(airborne, inInclusiveRange(30, 179), reason: 'a 5.5 m/s jump is in the air about a second');
+      if (boxRig) {
+        expect(me.animation.state!.playing, isFalse, reason: 'the 0.8 s clip ended before the landing');
+      }
+      for (var i = 0; i < 5; i++) {
+        game.frame(1 / 60);
+      }
+      expect(player.characterState()!.grounded, isTrue);
+      s = me.animation.state!;
+      expect(s.clip, player.locomotion);
+      expect(s.isFading, isTrue, reason: 'blending back from the jump');
+
+      // The wave: the layer's animator on the spine plays its clip once,
+      // additively — the right arm rises while the legs keep the idle.
+      if (boxRig) {
+        final layer = me.findChild('hips/spine')!;
+        final arm = me.findChild('hips/spine/upperarm_r')!;
+        expect(layer.animation.state!.playing, isFalse);
+        expect(arm.localTransform.rotation.z, inInclusiveRange(-0.07, -0.03), reason: 'at rest: the idle\'s breathing');
+        game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'F')]);
+        game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'F')]);
+        expect(player.waves, 1);
+        expect(layer.animation.state!.playing, isTrue);
+        for (var i = 0; i < 18; i++) {
+          game.frame(1 / 60);
+        }
+        expect(arm.localTransform.rotation.z, lessThan(-0.5), reason: 'the arm is raised (about Z, -160° at most)');
+        expect(me.animation.state!.clip, player.locomotion, reason: 'the base animator plays on underneath');
+        for (var i = 0; i < 60; i++) {
+          game.frame(1 / 60);
+        }
+        expect(layer.animation.state!.playing, isFalse, reason: 'the 1.2 s wave ended');
+        expect(
+          arm.localTransform.rotation.z,
+          inInclusiveRange(-0.07, -0.03),
+          reason: 'back to what the idle leaves: its -4°…-7° breathing (z = sin of half)',
+        );
+      }
+      expect(game.world.isPoisoned, isFalse);
+    },
+  );
 
   test('the sounds: the streamed music from the load, a footstep per marker, the pickup, the hit', () {
-    final game = Game.load(projectDir);
+    final game = playing(projectDir);
     addTearDown(game.dispose);
-    // The scene names one clip through a source — the music, streamed
-    // (its sidecar's `stream: true`, cooked to a STRM chunk); the
+    // Each scene names one clip through a source — the music, streamed
+    // (its sidecar's `stream: true`, cooked to a STRM chunk): the Menu's
+    // load registered it, the Playground's found it registered; the
     // behaviours' one-shots register as they are first played.
     expect(game.report.audio.sounds, 1);
-    expect(game.report.audio.streams, 1);
-    expect(game.report.audio.device, isFalse, reason: 'no device in a test: the null backend keeps the clock');
-    expect(game.report.audio.maxVoices, greaterThanOrEqualTo(32));
+    final report = game.scenes.lastReport!;
+    expect(report.audio.sounds, 0, reason: 'the same music, still registered');
+    expect(report.audio.streams, 1);
+    expect(report.audio.device, isFalse, reason: 'no device in a test: the null backend keeps the clock');
+    expect(report.audio.maxVoices, greaterThanOrEqualTo(32));
 
-    game.frame(1 / 60);
     final music = game.world.find('Music')!;
     final source = music.get<AudioSource>()!;
     expect(source.bus, AudioBus.music);
@@ -290,9 +328,8 @@ void main() {
   });
 
   test('the sweeper is a hazard: a hit respawns the player at the start', () {
-    final game = Game.load(projectDir);
+    final game = playing(projectDir);
     addTearDown(game.dispose);
-    game.frame(1 / 60);
     final player = game.world.behaviours.whereType<Player>().single;
 
     // Straight into the blade's path (a transform write teleports the
@@ -318,9 +355,8 @@ void main() {
   });
 
   test('restart reloads the Playground and resets the state', () async {
-    final game = Game.load(projectDir);
+    final game = playing(projectDir);
     addTearDown(game.dispose);
-    game.frame(1 / 60);
 
     // Walk to the first two coins, then R.
     game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'W')]);
@@ -346,9 +382,140 @@ void main() {
     final player = game.world.behaviours.whereType<Player>().single;
     expect(player.transform.position.z, greaterThan(-0.1), reason: 'back at the start');
 
-    // The app's button does the same through `Game.restart`.
-    final report = game.restart();
+    // The app's button does the same through `Game.play`.
+    final report = game.play();
     game.frame(1 / 60);
     expect((await report).ok, isTrue);
   });
+
+  test(
+    'the flow (M3-15): Menu → Playground → the win → Results, with the run\'s numbers → Playground again → Menu',
+    () {
+      final game = playing(projectDir);
+      addTearDown(game.dispose);
+      expect(game.state.screen.value, Screen.playing);
+      expect(game.state.lastRun.value, isNull);
+
+      // The route wins; the flash stays `winDelay` (1.5 s = 90 ticks), then
+      // the Player ends the run: the Results scene replaces the level.
+      final recording = loadInputRecording('$projectDir/test/collect_all.input.json');
+      var wonAt = -1;
+      var frames = 0;
+      recording.replay(
+        game.world,
+        update: () {
+          frames++;
+          if (wonAt < 0 && game.state.won.value) wonAt = frames;
+        },
+      );
+      expect(game.state.won.value, isTrue);
+      expect(wonAt, greaterThan(0));
+      var after = frames - wonAt;
+      while (game.state.screen.value == Screen.playing && after < 120) {
+        game.frame(1 / 60);
+        after++;
+      }
+      expect(game.state.screen.value, Screen.results);
+      expect(after, inInclusiveRange(89, 92), reason: 'the results 1.5 s after the last coin, counted in ticks');
+      expect(game.scenes.lastReport!.sceneName, 'Results');
+      expect(game.world.behaviours, isEmpty, reason: 'the level and its behaviours are gone');
+      final run = game.state.lastRun.value!;
+      expect(run.won, isTrue);
+      expect((run.collected, run.total, run.deaths), (10, 10, 0));
+      expect(run.elapsedTenths, greaterThan(200));
+      expect(run.footsteps, greaterThan(10));
+      expect(run.clock, matches(RegExp(r'^\d\d:\d\d\.\d$')));
+      // The scene plays the jingle once from its load, over the music.
+      game.frame(1 / 60);
+      final jingle = game.world.find('Jingle')!;
+      expect(jingle.get<AudioSource>()!.looping, isFalse);
+      expect(jingle.audio.state!.playing, isTrue);
+      expect(game.world.audio.stats.streams, 1, reason: 'the music again');
+      // The menus' click is a clip the cache holds, played outside the ticks.
+      final started = game.world.audio.stats.started;
+      game.world.audio.play(clickSound, presentation: true);
+      expect(game.world.audio.stats.started, started + 1);
+      expect(game.world.audio.stats.refused, 0);
+
+      // Play again: a fresh level, the counters back to zero.
+      game.play();
+      game.frame(1 / 60);
+      expect(game.state.screen.value, Screen.playing);
+      expect((game.state.collected.value, game.state.total.value, game.state.won.value), (0, 10, false));
+      expect(game.world.behaviours.whereType<Collectible>(), hasLength(10));
+
+      // Giving up ends the run with what was collected (nothing).
+      game.finish();
+      game.frame(1 / 60);
+      expect(game.state.screen.value, Screen.results);
+      expect(game.state.lastRun.value!.won, isFalse);
+      expect(game.state.lastRun.value!.collected, 0);
+
+      // And the Menu again.
+      game.toMenu();
+      game.frame(1 / 60);
+      expect(game.state.screen.value, Screen.menu);
+      expect(game.scenes.lastReport!.sceneName, 'Menu');
+      expect(game.world.find('Ring coin 8'), isNotNull);
+      expect(game.world.isPoisoned, isFalse);
+    },
+  );
+
+  test(
+    'settings (M3-15): volumes, quality and a rebind go to settings.json, bind the actions and survive a relaunch',
+    () {
+      final dir = Directory.systemTemp.createTempSync('fynkel_reference_game_settings');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final path = '${dir.path}/settings.json';
+
+      final game = Game.load(projectDir, settingsPath: path);
+      expect(game.settings.current, SettingsDocument.defaults, reason: 'no file yet');
+      expect(game.bindingsOf('jump'), [
+        'keyboard:Space',
+        'gamepad:south',
+        'touch:overlay/jump',
+      ], reason: 'the project\'s');
+      // What the panel's controls do: sliders, the quality, a rebind of the
+      // keyboard key with the other devices kept (lib/main.dart `_rebind`).
+      game.settings.update(
+        game.settings.current.copyWith(musicVolume: 0.3, muted: false, quality: 'high').rebind('jump', [
+          'keyboard:J',
+          'gamepad:south',
+          'touch:overlay/jump',
+        ]),
+      );
+      expect(File(path).existsSync(), isTrue);
+      expect(game.bindingsOf('jump').first, 'keyboard:J');
+      expect(game.bindingsOf('sprint').first, 'keyboard:ShiftLeft', reason: 'untouched');
+
+      // In force in the level: J jumps, Space no longer does.
+      game.play();
+      game.frame(1 / 60);
+      final jump = game.scenes.lastReport!.inputActions.singleWhere((a) => a.name == 'jump');
+      expect(jump.rebound, isTrue);
+      expect(jump.bindings, ['keyboard:J', 'gamepad:south', 'touch:overlay/jump']);
+      final player = game.world.behaviours.whereType<Player>().single;
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'Space')]);
+      game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'Space')]);
+      expect(player.jumps, 0);
+      game.frame(1 / 60, input: const [InputEvent.down(InputDevice.keyboard, 'J')]);
+      game.frame(1 / 60, input: const [InputEvent.up(InputDevice.keyboard, 'J')]);
+      expect(player.jumps, 1);
+      // Reset: the project's key again.
+      game.settings.update(game.settings.current.rebind('jump', const []));
+      expect(game.bindingsOf('jump').first, 'keyboard:Space');
+      game.settings.update(game.settings.current.rebind('jump', ['keyboard:J', 'gamepad:south', 'touch:overlay/jump']));
+      game.dispose();
+
+      // The next launch reads the file.
+      final again = Game.load(projectDir, settingsPath: path);
+      addTearDown(again.dispose);
+      expect(again.settings.current.musicVolume, 0.3);
+      expect(again.settings.current.quality, 'high');
+      expect(again.settings.current.rebinds, {
+        'jump': ['keyboard:J', 'gamepad:south', 'touch:overlay/jump'],
+      });
+      expect(again.bindingsOf('jump').first, 'keyboard:J');
+    },
+  );
 }

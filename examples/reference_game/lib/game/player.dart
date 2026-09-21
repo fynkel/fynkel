@@ -9,7 +9,8 @@ import 'game_state.dart';
 /// action in the frame of the `fynkel.ThirdPersonCamera` named
 /// [cameraName], sprints while `sprint` is held, jumps on the `jump` press
 /// while grounded, dies on a `hazard` zone or below [fallY] (respawns at
-/// the start), restarts the run on `restart`, and keeps the clock.
+/// the start), restarts the run on `restart`, keeps the clock and, [winDelay]
+/// after the last coin, ends the run (`finishRun`: the Results scene).
 ///
 /// Its rigged character (tools/character.py) is posed from the same
 /// state (M3-19c): the `fynkel.Animator` the scene puts on the player
@@ -100,6 +101,7 @@ class Player extends Behaviour {
   /// tests).
   int jumps = 0;
   double _elapsed = 0;
+  double _sinceWin = 0;
   bool _dead = false;
 
   GameState get state => context.service<GameState>();
@@ -155,6 +157,11 @@ class Player extends Behaviour {
       _elapsed += context.dt;
       final tenths = (_elapsed * 10).floor();
       if (tenths != state.elapsedTenths.value) state.elapsedTenths.value = tenths;
+    } else {
+      // The win banner's moment, then the Results scene (M3-15): counted
+      // in ticks, so a replay ends the run on the same tick every time.
+      _sinceWin += context.dt;
+      if (_sinceWin >= winDelay && world.scenes.state != SceneState.pending) finishRun(world);
     }
   }
 

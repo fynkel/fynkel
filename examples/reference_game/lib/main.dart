@@ -4,12 +4,20 @@
 // per Flutter frame it hands the frame time to the world, which runs every
 // behaviour's fixedUpdate for the planned ticks, steps the native runtime and
 // runs update/lateUpdate; then it renders the world into the viewport
-// texture. Flutter widgets drawn over it are the HUD. The scene is
-// fynkel.project.json's startupScene (the Playground); meshes come from the
-// project's cooked cache (`fynkel cook`, which `fynkel run` does for you):
-// by path when this process can see the project directory, else from the
-// copy the app bundles (fynkel_cache/, unpacked at start-up) — which is
-// how the same build runs on an iPhone.
+// texture. Flutter widgets drawn over it are the screens and the HUD. The
+// first scene is fynkel.project.json's startupScene (the Menu); meshes come
+// from the project's cooked cache (`fynkel cook`, which `fynkel run` does
+// for you): by path when this process can see the project directory, else
+// from the copy the app bundles (fynkel_cache/, unpacked at start-up) —
+// which is how the same build runs on an iPhone.
+//
+// The flow (M3-15): the Menu's Play loads the Playground, the last coin
+// (or the pause menu's Give up) the Results, and from there Play again or
+// Menu — every step a `scenes.transition` the next frame performs;
+// `GameState.screen` follows the loads and the overlay below switches on
+// it (lib/ui: menu.dart, hud.dart, settings.dart). The pause menu and the
+// settings panel are the page's own state: pausing mutes the view's loop,
+// the settings edit the user's settings.json through `Game.settings`.
 //
 // Input: the view captures keys, the mouse and gamepads into a
 // `FynkelInputCapture` and hands each frame's events to the world, which
@@ -17,24 +25,30 @@
 // `Input.action2D('move')` and friends; the camera rig reads `look`). A
 // click captures the mouse for looking around (the pointer hides and stops
 // at the edges); Escape (the `pause` action) pauses and releases it. On a
-// phone a `TouchOverlay` puts the same actions on screen.
+// phone a `TouchOverlay` puts the same actions on screen while playing.
+// Rebinding takes the next key through the view's `onKeyEvent` and writes
+// it to the settings (`SettingsDocument.rebind`), which lay it over the
+// project's bindings for every later load.
 //
-// HUD: the coin counter, the clock, the deaths, the switch's hint, the win
-// and pause banners are bound to the game's `GameState` fields
-// (`ModelBuilder`; docs/hud.md) — behaviours write them, the bound widgets
-// rebuild on change only. A `ProjectionLayer` pins a `WorldLabel` to the
-// Switch (`ProjectedAnchor`). The stats block refreshes once a second from `onStats`; F1 toggles
-// it, Q cycles the quality profiles.
+// HUD: the coin counter, the clock, the deaths, the switch's hint and the
+// win flash are bound to the game's `GameState` fields (`ModelBuilder`;
+// docs/hud.md) — behaviours write them, the bound widgets rebuild on
+// change only. A `ProjectionLayer` pins a `WorldLabel` to the Switch
+// (`ProjectedAnchor`). The stats block refreshes once a second from
+// `onStats`; F1 toggles it, Q cycles the quality profiles.
 
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SettingsStore, Vec3;
+import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SceneState, SettingsStore, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game/game.dart';
 import 'game/game_state.dart';
+import 'ui/hud.dart';
+import 'ui/menu.dart';
+import 'ui/settings.dart';
 
 void main() => runApp(const GameApp());
 
@@ -59,9 +73,6 @@ class GamePage extends StatefulWidget {
 }
 
 class _GamePageState extends State<GamePage> {
-  /// The project's quality profiles, in the order Q cycles them.
-  static const profiles = ['low', 'medium', 'high'];
-
   Game? _game;
   String? _error;
   FynkelViewportController? _viewport;
@@ -70,45 +81,92 @@ class _GamePageState extends State<GamePage> {
   final _view = GlobalKey<FynkelGameViewState>();
   bool _paused = false;
   bool _showStats = false;
+  bool _settingsOpen = false;
 
-  /// Escape while paused: resume (the loop does not run while paused, so
-  /// the `pause` action cannot be read then). F1: the stats block. Q: the
-  /// next quality profile (the project default, `medium`, first). Every
-  /// other key goes to the input capture (WASD, Space, E, R, …).
+  /// The action whose key the settings panel waits for.
+  String? _rebinding;
+
+  /// Keys the app owns, before the input capture sees them: a rebind takes
+  /// the next key; Escape closes the settings, resumes a pause (the loop
+  /// does not run while paused, so the `pause` action cannot be read then)
+  /// and otherwise reaches the world as the `pause` action; F1 the stats
+  /// block; Q the next quality profile. Everything else goes to the input
+  /// capture (WASD, Space, E, R, …).
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (_paused && event.logicalKey == LogicalKeyboardKey.escape) {
-      _setPaused(false);
+    final escape = event.logicalKey == LogicalKeyboardKey.escape;
+    if (_rebinding case final action?) {
+      if (escape) {
+        setState(() => _rebinding = null);
+        return KeyEventResult.handled;
+      }
+      final name = FynkelInputCapture.keyName(event.physicalKey);
+      if (name != null) _rebind(action, name);
       return KeyEventResult.handled;
+    }
+    if (escape) {
+      if (_settingsOpen) {
+        setState(() => _settingsOpen = false);
+        return KeyEventResult.handled;
+      }
+      if (_paused) {
+        _setPaused(false);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
     }
     if (event.logicalKey == LogicalKeyboardKey.f1) {
       setState(() => _showStats = !_showStats);
       return KeyEventResult.handled;
     }
     if (event.logicalKey != LogicalKeyboardKey.keyQ) return KeyEventResult.ignored;
-    final viewport = _viewport!;
-    final current = profiles.indexOf(viewport.quality ?? 'medium');
-    final next = profiles[(current + 1) % profiles.length];
-    setState(() => viewport.quality = next);
-    // Remembered in the user's settings.json for the next launch.
-    _game!.settings.update(_game!.settings.current.copyWith(quality: next));
+    final current = qualityProfiles.indexOf(_viewport!.quality ?? 'medium');
+    _setQuality(qualityProfiles[(current + 1) % qualityProfiles.length]);
     return KeyEventResult.handled;
   }
 
+  /// The profile to the viewport (the renderer reads it there) and to the
+  /// user's settings.json for the next launch.
+  void _setQuality(String profile) {
+    setState(() => _viewport!.quality = profile);
+    _game!.settings.update(_game!.settings.current.copyWith(quality: profile));
+  }
+
+  /// [action] on the keyboard key [name] for this user: the project's
+  /// other devices stay (gamepad, touch), the settings store lays the new
+  /// list over the project's actions at once (`SettingsStore.apply`).
+  void _rebind(String action, String name) {
+    final game = _game!;
+    final project = game.report.inputActions.where((a) => a.name == action).firstOrNull?.bindings ?? const <String>[];
+    final others = project.where((b) => !b.startsWith('keyboard:'));
+    game.settings.update(game.settings.current.rebind(action, ['keyboard:$name', ...others]));
+    setState(() => _rebinding = null);
+  }
+
   /// The `pause` action (Escape, the gamepad's menu button), read after
-  /// each frame: the app owns pausing, so it reads the action here rather
-  /// than in a behaviour.
+  /// each frame while playing: the app owns pausing, so it reads the
+  /// action here rather than in a behaviour.
   void _onFrame(double dt, FramePlan plan) {
-    if (_game!.world.input.pressed('pause')) _setPaused(true);
+    final game = _game!;
+    if (!_paused && game.state.screen.value == Screen.playing && game.world.input.pressed('pause')) _setPaused(true);
   }
 
   void _setPaused(bool v) {
-    setState(() => _paused = v);
+    setState(() {
+      _paused = v;
+      _settingsOpen = false;
+      _rebinding = null;
+    });
     _game!.state.paused.value = v;
     final view = _view.currentState;
     view?.setPaused(v);
     // The pointer is free while paused; a click takes it back.
     if (v) view?.capturePointer(false);
+  }
+
+  /// A scene landed: outside the level the pointer is free for the menus.
+  void _onScene(SceneState s) {
+    if (s == SceneState.ready && _game!.state.screen.value != Screen.playing) _view.currentState?.capturePointer(false);
   }
 
   @override
@@ -137,13 +195,14 @@ class _GamePageState extends State<GamePage> {
         }
         _game = Game.load(dir ?? '(bundled)', cacheDir: cache, settingsPath: settings);
       }
+      _game!.scenes.addListener(_onScene);
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.
       _viewport = FynkelViewportController(placeholders: false);
       // The profile the user picked last time (empty: the project's default).
       final quality = _game!.settings.current.quality;
-      if (profiles.contains(quality)) _viewport!.quality = quality;
+      if (qualityProfiles.contains(quality)) _viewport!.quality = quality;
     } on FynkelLoadError catch (e) {
       _error = '$e\nrun `fynkel cook` in the project (or `fynkel run`, which cooks first)';
     } catch (e) {
@@ -174,260 +233,125 @@ class _GamePageState extends State<GamePage> {
         controller: _viewport,
         input: _input,
         // Opens the output device (docs/audio.md): the music from the load,
-        // the footsteps, pickups and hits from the behaviours. The view
-        // suspends it while the app is hidden.
+        // the footsteps, pickups and hits from the behaviours, the menus'
+        // clicks. The view suspends it while the app is hidden.
         audio: true,
         onKeyEvent: _onKey,
         onFrame: _onFrame,
         onStats: (s) => setState(() => _stats = s),
-        overlay: ModelBinding<GameState>(
-          model: game.state,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // A click takes the mouse for the `look` action (desktop);
-              // Escape gives it back.
-              Listener(
-                behavior: HitTestBehavior.translucent,
-                onPointerDown: (_) {
-                  if (!_paused && !(_view.currentState?.pointerCaptured ?? false)) {
-                    _view.currentState?.capturePointer(true);
-                  }
-                },
-              ),
-              // The switch's prompt, pinned to the pad through the world's
-              // bounded projection view (one call per frame, no rebuilds).
-              ProjectionLayer(
-                world: game.world,
-                children: [
-                  if (game.world.find('Switch') case final pad?)
-                    ProjectedAnchor(target: pad, offset: const Vec3(0, 1.2, 0), child: const SwitchPrompt()),
-                ],
-              ),
-              // The project's `touch:overlay/*` bindings as a stick and
-              // buttons, on touch platforms only (`visible:` to force it).
-              TouchOverlay.fromActions(game.report.inputActions, input: _input),
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Align(alignment: Alignment.topLeft, child: Counter()),
-              ),
-              if (_showStats)
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Align(
-                    alignment: Alignment.topRight,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.55),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: StatsBlock(game: game, stats: _stats, viewport: _viewport!),
-                      ),
-                    ),
-                  ),
-                ),
-              const Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(padding: EdgeInsets.all(24), child: Hint()),
-              ),
-              WinBanner(onRestart: game.restart),
-              const PauseBanner(),
-            ],
+        // The buttons never take the keyboard focus from the viewport, so
+        // Escape, F1, Q and a rebind's key keep reaching `_onKey`.
+        overlay: ExcludeFocus(
+          child: ModelBinding<GameState>(
+            model: game.state,
+            child: ModelBuilder<Screen>(
+              value: game.state.screen,
+              builder: (_, screen, _) => switch (screen) {
+                Screen.menu =>
+                  _settingsOpen
+                      ? _settings(game)
+                      : MenuScreen(game: game, onSettings: () => setState(() => _settingsOpen = true)),
+                Screen.results => ResultsScreen(game: game),
+                Screen.playing => _playing(game),
+              },
+            ),
           ),
         ),
       ),
     );
   }
-}
 
-/// The HUD counter: `Coins n / 10`, the clock, the deaths and the
-/// footsteps, one widget per model field — `collected` rebuilds when a
-/// coin is taken, the clock every tenth, `deaths` on a death, `footsteps`
-/// on a marker, never on a frame where nothing changed.
-class Counter extends StatelessWidget {
-  const Counter({super.key});
+  Widget _settings(Game game) => SettingsPanel(
+    game: game,
+    viewport: _viewport!,
+    rebinding: _rebinding,
+    onRebind: (action) => setState(() => _rebinding = action),
+    onBack: () => setState(() {
+      _settingsOpen = false;
+      _rebinding = null;
+    }),
+  );
 
-  @override
-  Widget build(BuildContext context) {
-    final state = ModelBinding.of<GameState>(context);
-    final theme = Theme.of(context).textTheme;
-    final big = theme.headlineSmall?.copyWith(fontWeight: FontWeight.bold, shadows: const [Shadow(blurRadius: 6)]);
-    final small = theme.bodyLarge?.copyWith(shadows: const [Shadow(blurRadius: 6)]);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
+  /// The level: the HUD, the touch overlay, the pause menu over it all.
+  Widget _playing(Game game) {
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
+        // A click takes the mouse for the `look` action (desktop); Escape
+        // gives it back.
+        Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: (_) {
+            if (!_paused && !(_view.currentState?.pointerCaptured ?? false)) {
+              _view.currentState?.capturePointer(true);
+            }
+          },
+        ),
+        // The switch's prompt, pinned to the pad through the world's
+        // bounded projection view (one call per frame, no rebuilds).
+        ProjectionLayer(
+          world: game.world,
           children: [
-            Text('Coins ', style: big),
-            ModelBuilder<int>(
-              value: state.collected,
-              builder: (_, n, _) => Text('$n', style: big),
-            ),
-            Text(' / ', style: big),
-            ModelBuilder<int>(
-              value: state.total,
-              builder: (_, n, _) => Text('$n', style: big),
-            ),
+            if (game.world.find('Switch') case final pad?)
+              ProjectedAnchor(target: pad, offset: const Vec3(0, 1.2, 0), child: const SwitchPrompt()),
           ],
         ),
-        ModelBuilder<int>(
-          value: state.elapsedTenths,
-          builder: (_, t, _) => Text(
-            '${(t ~/ 600).toString().padLeft(2, '0')}:${((t ~/ 10) % 60).toString().padLeft(2, '0')}.${t % 10}',
-            style: small,
+        // The project's `touch:overlay/*` bindings as a stick and
+        // buttons, on touch platforms only (`visible:` to force it).
+        if (!_paused) TouchOverlay.fromActions(game.report.inputActions, input: _input),
+        SafeArea(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Align(alignment: Alignment.topLeft, child: Counter()),
+              ),
+              // The pause button: the `pause` action has no overlay
+              // control (Escape, the gamepad's menu button), so a phone
+              // pauses here.
+              if (!_paused)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: IconButton.filledTonal(
+                      onPressed: () => _setPaused(true),
+                      icon: const Icon(Icons.pause),
+                      tooltip: 'Pause (Esc)',
+                    ),
+                  ),
+                ),
+              if (_showStats)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 64, 16, 16),
+                  child: Align(
+                    alignment: Alignment.topRight,
+                    child: StatsBlock(game: game, stats: _stats, viewport: _viewport!),
+                  ),
+                ),
+              // The keyboard's controls; the overlay's buttons say their own.
+              if (!TouchOverlay.isTouchPlatform)
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Hint(game: game),
+                  ),
+                ),
+            ],
           ),
         ),
-        ModelBuilder<int>(
-          value: state.deaths,
-          builder: (_, n, _) => Text(n == 0 ? '' : 'deaths $n', style: small),
-        ),
-        ModelBuilder<int>(
-          value: state.footsteps,
-          builder: (_, n, _) => Text(n == 0 ? '' : 'steps $n', style: small),
-        ),
-      ],
-    );
-  }
-}
-
-/// The prompt over the switch (`E — open the gate`), visible while the
-/// player stands on it.
-class SwitchPrompt extends StatelessWidget {
-  const SwitchPrompt({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final state = ModelBinding.of<GameState>(context);
-    return ModelBuilder<String>(
-      value: state.hint,
-      builder: (context, hint, _) => hint.isEmpty
-          ? const SizedBox.shrink()
-          : DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.cyan.withValues(alpha: 0.8),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Text(hint, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.black)),
-              ),
-            ),
-    );
-  }
-}
-
-/// The bottom line: the controls until the first coin, then nothing.
-class Hint extends StatelessWidget {
-  const Hint({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final state = ModelBinding.of<GameState>(context);
-    return ModelBuilder<int>(
-      value: state.collected,
-      builder: (context, n, _) => n > 0
-          ? const SizedBox.shrink()
-          : Text(
-              'WASD / left stick: walk   mouse / right stick: look   Space / A: jump   Shift / LB: sprint   E / X: use   R / Y: restart',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(shadows: const [Shadow(blurRadius: 6)]),
-              textAlign: TextAlign.center,
-            ),
-    );
-  }
-}
-
-/// The win screen: shown while `GameState.won` is set.
-class WinBanner extends StatelessWidget {
-  const WinBanner({super.key, required this.onRestart});
-
-  final VoidCallback onRestart;
-
-  @override
-  Widget build(BuildContext context) {
-    final state = ModelBinding.of<GameState>(context);
-    return ModelBuilder<bool>(
-      value: state.won,
-      builder: (context, won, _) => won
-          ? ColoredBox(
-              color: Colors.black.withValues(alpha: 0.5),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('All coins collected!', style: Theme.of(context).textTheme.headlineMedium),
-                    const SizedBox(height: 8),
-                    ModelBuilder<int>(
-                      value: state.elapsedTenths,
-                      builder: (_, t, _) =>
-                          Text('${(t / 10).toStringAsFixed(1)} s', style: Theme.of(context).textTheme.titleLarge),
-                    ),
-                    const SizedBox(height: 16),
-                    FilledButton(onPressed: onRestart, child: const Text('Play again (R)')),
-                  ],
+        const WinFlash(),
+        if (_paused)
+          _settingsOpen
+              ? _settings(game)
+              : PauseMenu(
+                  game: game,
+                  onResume: () => _setPaused(false),
+                  onSettings: () => setState(() => _settingsOpen = true),
                 ),
-              ),
-            )
-          : const SizedBox.shrink(),
-    );
-  }
-}
-
-/// The pause screen: shown while `GameState.paused` is set (the pattern for
-/// any screen — menu, settings, results — is a model field the widgets
-/// switch on; docs/hud.md).
-class PauseBanner extends StatelessWidget {
-  const PauseBanner({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final state = ModelBinding.of<GameState>(context);
-    return ModelBuilder<bool>(
-      value: state.paused,
-      builder: (context, paused, _) => paused
-          ? ColoredBox(
-              color: Colors.black.withValues(alpha: 0.5),
-              child: Center(child: Text('PAUSED — Esc resumes', style: Theme.of(context).textTheme.headlineMedium)),
-            )
-          : const SizedBox.shrink(),
-    );
-  }
-}
-
-/// The engine's numbers (F1): once a second from `onStats`.
-class StatsBlock extends StatelessWidget {
-  const StatsBlock({super.key, required this.game, required this.stats, required this.viewport});
-
-  final Game game;
-  final FynkelFrameStats? stats;
-  final FynkelViewportController viewport;
-
-  @override
-  Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodyMedium?.copyWith(fontFamily: 'monospace');
-    final s = stats;
-    final lines = <String>[
-      'scene      ${game.report.sceneName} (${game.report.entityCount} entities)',
-      'tick       ${game.world.tick}',
-      'behaviours ${game.world.behaviours.length} attached',
-      'quality    ${viewport.quality ?? 'medium (project default)'}  [Q cycles]',
-      if (s != null) ...[
-        'fps        ${s.fps.toStringAsFixed(0)}  frame ${s.tickInterval.p50.toStringAsFixed(2)} ms '
-            '(p99 ${s.tickInterval.p99.toStringAsFixed(2)})  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
-        'simulate   ${s.simulate.p50.toStringAsFixed(2)} ms (p99 ${s.simulate.p99.toStringAsFixed(2)})  '
-            '${s.fixedTicks} ticks/s  ${s.missedDeadlines} missed, ${s.dropped} dropped',
-        if (s.viewport case final v?)
-          'meshes     ${v.instances} drawn in ${v.draws} draws, ${v.culled} culled, ${v.missing} missing',
       ],
-      for (final d in game.report.diagnostics) '$d',
-    ];
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [for (final l in lines) Text(l, style: style)],
     );
   }
 }

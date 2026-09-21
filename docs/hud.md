@@ -99,6 +99,16 @@ switching on model fields, the game's own state left in the world:
 Never: rebuild the widget under `FynkelGameView` per frame, `setState` from
 a behaviour every tick, or read entity transforms in `build`.
 
+The reference game (`examples/reference_game/lib/main.dart`, `lib/ui/`) is
+the pattern built (M3-15): `GameState.screen` is one `ModelValue<Screen>`
+set from a `SceneManager` listener (the scene decides the screen, not the
+button), the app's `ModelBuilder<Screen>` switches menu / playing /
+results, `GameState.lastRun` is written by `Game.finish()` before the
+transition, the settings panel edits `SettingsDocument` and captures a
+rebind's key in `FynkelGameView.onKeyEvent`, and the whole overlay sits
+in `ExcludeFocus` so a button never takes the viewport's focus. Each
+button plays its click on the presentation lane.
+
 ## Projected world labels (`ProjectionView`, `ProjectionLayer`)
 
 A world label is a Flutter widget placed where a point attached to an

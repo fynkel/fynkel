@@ -1,0 +1,1395 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 3,
+  "id": "65905281-dc97-58ac-8d21-f5fbbac251a9",
+  "name": "Menu",
+  "entities": {
+    "4c1e7278-80e3-574e-9b71-c1cb8e3393db": {
+      "name": "Floor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "27f2f2b5-07d0-512c-bd23-9f13e0f1252b": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              -0.5,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              40.0,
+              1.0,
+              40.0
+            ]
+          }
+        },
+        "d340b6ec-351a-519d-9775-0b8dc39a973b": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/0"
+            },
+            "material": {
+              "asset": "ce4f5e65-36b6-5085-b991-52d4a7bc3f7a"
+            },
+            "cast_shadows": false,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "9c4eefb9-be37-5a95-9d25-1012fc57c2a8": {
+      "name": "Podium",
+      "parent": null,
+      "children": [],
+      "components": {
+        "d3c0c0fc-4a7f-5872-93c4-c75089367d33": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.3,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              3.0,
+              0.6,
+              3.0
+            ]
+          }
+        },
+        "8b022b17-8d2f-5093-93dc-63f4df47dd8e": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/5"
+            },
+            "material": {
+              "asset": "0fce05eb-d23b-5b44-9b55-a6ba453beefc"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "4fb9265b-858a-569d-8fb1-38f90d99b2d6": {
+      "name": "Podium step",
+      "parent": null,
+      "children": [],
+      "components": {
+        "d37ffa8e-4a0c-5d5c-8614-6f76e7996960": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.15,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              4.5,
+              0.3,
+              4.5
+            ]
+          }
+        },
+        "c55cf5de-ac25-5f68-b084-badab1ee21f9": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/5"
+            },
+            "material": {
+              "asset": "431b9ba6-3030-58ea-a5b1-bec5818fffe0"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "4ed28262-d780-5141-b2a0-541048dd75a6": {
+      "name": "Big coin",
+      "parent": null,
+      "children": [],
+      "components": {
+        "6a9e21f3-2a6d-55c6-98e1-bc27fab6e9b5": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              2.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              2.2,
+              2.2,
+              2.2
+            ]
+          }
+        },
+        "202e279e-15c5-590a-a251-c1f490825303": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "e2453dd8-05f4-56b4-bf19-e4728cdb94ea": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 0.8,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "3223c555-1185-5de7-8dec-57204c6ed8e4": {
+      "name": "Ring coin 1",
+      "parent": null,
+      "children": [],
+      "components": {
+        "9a75f769-3b07-5b76-8edb-8f37e1fbfa09": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              6.0,
+              0.7,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "f43f5c5b-0014-5e75-b327-897f5160109a": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "6f1efb09-927e-5fec-b757-d006fa24fe4f": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "d64fb455-9580-57f7-80c8-744625abd72c": {
+      "name": "Ring coin 2",
+      "parent": null,
+      "children": [],
+      "components": {
+        "6e00a0fc-9ad9-5185-9be9-0243cbdf5c19": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              4.242641,
+              0.7,
+              4.242641
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "56bc4551-ecde-57f5-8741-e32ea0e43d96": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "4daafa39-8426-5073-880a-b1c4139ae5c5": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "a1fd5d23-1d17-51f9-ba8b-ccac7d36b309": {
+      "name": "Ring coin 3",
+      "parent": null,
+      "children": [],
+      "components": {
+        "634fe219-286b-5961-bd80-acfb11602c36": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.7,
+              6.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "ae08fde9-445f-5e4a-be38-6eceea534c26": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "5fbace0d-0ddb-5a70-b941-d95333f0c1ef": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "a60cd1b3-ef60-5b49-ae16-7a7dbf1540c0": {
+      "name": "Ring coin 4",
+      "parent": null,
+      "children": [],
+      "components": {
+        "7ddf1d05-f618-504b-b9f1-ec114caa87f9": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -4.242641,
+              0.7,
+              4.242641
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "acdac59a-e0ba-5948-97bc-af479efea755": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "fd853c08-0a74-567c-bf59-2227f8b8f43c": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "a1acea3f-6191-5ad2-9d2b-75832b227d6a": {
+      "name": "Ring coin 5",
+      "parent": null,
+      "children": [],
+      "components": {
+        "5cd84681-d56c-5b42-bfa3-212904013f43": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -6.0,
+              0.7,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "3cc5a802-8672-5ea2-ba35-4bfed7794e58": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "66988689-98b5-5d53-9ba0-a4c5742e7aee": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "16ad2612-db7a-5d44-af19-1496e169a08c": {
+      "name": "Ring coin 6",
+      "parent": null,
+      "children": [],
+      "components": {
+        "24555d63-2c5e-5349-be38-7fcf53d2de6e": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -4.242641,
+              0.7,
+              -4.242641
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "10e95dc5-9620-5960-8eba-7f1939264ee4": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "5110c23f-6779-54d3-a120-6693c3d1a664": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "236579b9-7086-57bb-8e5a-e777934c9ab3": {
+      "name": "Ring coin 7",
+      "parent": null,
+      "children": [],
+      "components": {
+        "f2d03a7a-9d6c-53f3-963b-079f36aaae8b": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.7,
+              -6.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "e543663e-614a-5147-93fc-722f0ead121e": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "1d17cf57-8ed8-57d9-8c24-3493cc57d038": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "553b7e1b-164d-5e72-8df5-89e884045db9": {
+      "name": "Ring coin 8",
+      "parent": null,
+      "children": [],
+      "components": {
+        "d395fa56-fff5-5243-aefe-89834aec6e20": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              4.242641,
+              0.7,
+              -4.242641
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.7,
+              0.7,
+              0.7
+            ]
+          }
+        },
+        "572c989c-f0a0-5dd2-968d-37da15004501": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/3"
+            },
+            "material": {
+              "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
+            },
+            "cast_shadows": true,
+            "receive_shadows": false,
+            "visible": true
+          }
+        },
+        "7bde3459-819e-594e-a455-6a6fe16577bc": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 2.5,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "71666317-4951-5f6a-a11a-f56d284fdf21": {
+      "name": "Pillar 1",
+      "parent": null,
+      "children": [],
+      "components": {
+        "5ad3b7a8-b012-5a36-90d2-df3fce6c3ad6": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              7.778175,
+              2.0,
+              7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              4.0,
+              0.8
+            ]
+          }
+        },
+        "251c11fe-9764-5af5-badf-9eb120b6d599": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/5"
+            },
+            "material": {
+              "asset": "0fce05eb-d23b-5b44-9b55-a6ba453beefc"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "f329d41e-47cd-55dd-b90e-d00300b8519e": {
+      "name": "Lamp 1",
+      "parent": null,
+      "children": [],
+      "components": {
+        "53258a62-cc89-5883-bd07-cf04e5999a4f": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              7.778175,
+              4.4,
+              7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          }
+        },
+        "bf97426d-3eef-59cb-9525-250a815d8124": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/2"
+            },
+            "material": {
+              "asset": "44033302-caf3-5acf-b82f-e3fc6e01dd7f"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        }
+      }
+    },
+    "243a87f1-06cf-5b65-bc34-5c9f4e6828a1": {
+      "name": "Lamp 1 light",
+      "parent": null,
+      "children": [],
+      "components": {
+        "c5c16636-ebd5-58ab-8bd7-a532b05279a9": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              7.778175,
+              4.7,
+              7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "89014264-51c9-50ba-8440-e6b19a2486f8": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.65,
+              0.35
+            ],
+            "intensity": 1800.0,
+            "range": 14.0
+          }
+        }
+      }
+    },
+    "44cf4c44-cd88-541b-8a8c-c8ed9fe1f040": {
+      "name": "Pillar 2",
+      "parent": null,
+      "children": [],
+      "components": {
+        "0dff653a-d6ce-5d61-9cd7-dac7d5284ad3": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -7.778175,
+              2.0,
+              7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              4.0,
+              0.8
+            ]
+          }
+        },
+        "35a667e6-2c58-5c7e-b133-a756a4eb0553": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/5"
+            },
+            "material": {
+              "asset": "0fce05eb-d23b-5b44-9b55-a6ba453beefc"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "7485cd5b-3b26-5337-8e83-c075925087e6": {
+      "name": "Lamp 2",
+      "parent": null,
+      "children": [],
+      "components": {
+        "e138d8a1-a9f5-59d4-a904-e22e3e7bc445": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -7.778175,
+              4.4,
+              7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          }
+        },
+        "e33cfcda-a274-5bfd-8ffc-d81944498b08": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/2"
+            },
+            "material": {
+              "asset": "44033302-caf3-5acf-b82f-e3fc6e01dd7f"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        }
+      }
+    },
+    "b04e3e42-12a1-5d57-abb0-df53562239ca": {
+      "name": "Lamp 2 light",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b7eafae4-3bfa-59e7-9fcd-a3247492c617": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -7.778175,
+              4.7,
+              7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "92193a68-a40f-53c5-8296-50a4ff62e53a": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.65,
+              0.35
+            ],
+            "intensity": 1800.0,
+            "range": 14.0
+          }
+        }
+      }
+    },
+    "2e916ed2-9dfc-5730-a81b-2ab5e5da3506": {
+      "name": "Pillar 3",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b3b32f5a-9037-5acb-a0d8-ccb9835591e7": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -7.778175,
+              2.0,
+              -7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              4.0,
+              0.8
+            ]
+          }
+        },
+        "66148f28-edaa-520e-ba65-d910d99939b1": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/5"
+            },
+            "material": {
+              "asset": "0fce05eb-d23b-5b44-9b55-a6ba453beefc"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "695eb368-adee-57de-a6db-a17d6632fa71": {
+      "name": "Lamp 3",
+      "parent": null,
+      "children": [],
+      "components": {
+        "f43fa7b1-eb77-5b63-b7a8-c2d64d9205ce": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -7.778175,
+              4.4,
+              -7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          }
+        },
+        "c022e319-2cc9-5fc6-bea3-de50d1e80d82": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/2"
+            },
+            "material": {
+              "asset": "44033302-caf3-5acf-b82f-e3fc6e01dd7f"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        }
+      }
+    },
+    "4dcb2f30-481b-52f0-868f-0f02e92c7ea4": {
+      "name": "Lamp 3 light",
+      "parent": null,
+      "children": [],
+      "components": {
+        "cb87e175-7636-5a59-b1f1-e5f5107412ef": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              -7.778175,
+              4.7,
+              -7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "c4141798-a98c-5d38-9d8a-80717e8be97d": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.65,
+              0.35
+            ],
+            "intensity": 1800.0,
+            "range": 14.0
+          }
+        }
+      }
+    },
+    "433d6eff-b49c-5dc9-b8f4-7bec5af26daf": {
+      "name": "Pillar 4",
+      "parent": null,
+      "children": [],
+      "components": {
+        "0be1ee1c-8eed-50ea-a5b9-76d7130a550c": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              7.778175,
+              2.0,
+              -7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.8,
+              4.0,
+              0.8
+            ]
+          }
+        },
+        "d669eb46-fbf1-5ab0-97fb-7d3a69284350": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/5"
+            },
+            "material": {
+              "asset": "0fce05eb-d23b-5b44-9b55-a6ba453beefc"
+            },
+            "cast_shadows": true,
+            "receive_shadows": true,
+            "visible": true
+          }
+        }
+      }
+    },
+    "4f15ba34-b81d-5804-89a3-31e495e5e04d": {
+      "name": "Lamp 4",
+      "parent": null,
+      "children": [],
+      "components": {
+        "e3d363b5-c8a4-5821-a65a-7026e80f287e": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              7.778175,
+              4.4,
+              -7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              0.5,
+              0.5,
+              0.5
+            ]
+          }
+        },
+        "f3b2c042-83ab-511c-8ff4-50acb39024c0": {
+          "type": "fynkel.MeshRenderer",
+          "version": 1,
+          "data": {
+            "mesh": {
+              "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
+              "sub": "mesh/2"
+            },
+            "material": {
+              "asset": "44033302-caf3-5acf-b82f-e3fc6e01dd7f"
+            },
+            "cast_shadows": false,
+            "receive_shadows": false,
+            "visible": true
+          }
+        }
+      }
+    },
+    "43f77da1-6e55-5103-9003-9160cccacf04": {
+      "name": "Lamp 4 light",
+      "parent": null,
+      "children": [],
+      "components": {
+        "92eac77a-ce93-5014-9a41-b5d44c1a3d71": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              7.778175,
+              4.7,
+              -7.778175
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "5c584eeb-5f22-5a55-9636-8139adce7b5c": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.65,
+              0.35
+            ],
+            "intensity": 1800.0,
+            "range": 14.0
+          }
+        }
+      }
+    },
+    "7057e481-9409-57f6-91b0-38c6d7143f0c": {
+      "name": "Camera pivot",
+      "parent": null,
+      "children": [
+        "315cef33-f692-58fc-ad3d-87909df10b18"
+      ],
+      "components": {
+        "0c5dd81f-3653-5ef3-bf8a-0e8c01b7ba5e": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "e809efc6-46ac-5382-9b08-98113e3ee016": {
+          "type": "fynkel.Rotator",
+          "version": 1,
+          "data": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "speed": 0.125,
+            "space": "world"
+          }
+        }
+      }
+    },
+    "315cef33-f692-58fc-ad3d-87909df10b18": {
+      "name": "Camera",
+      "parent": "7057e481-9409-57f6-91b0-38c6d7143f0c",
+      "children": [],
+      "components": {
+        "3d5ebe0a-f150-5555-9461-700ee1964214": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              5.289365,
+              12.34006
+            ],
+            "rotation": [
+              -0.159318,
+              0.0,
+              0.0,
+              0.987227
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "956d00ba-4cfc-54c5-88e7-f7b29d0cd438": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 0.95,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 120.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0
+          }
+        },
+        "69446ff2-6086-5625-aea2-219d76e65a84": {
+          "type": "fynkel.AudioListener",
+          "version": 1,
+          "data": {
+            "volume": 1.0
+          }
+        }
+      }
+    },
+    "507c0b45-33b3-5469-ad4a-9fcb6605da69": {
+      "name": "Sun",
+      "parent": null,
+      "children": [],
+      "components": {
+        "669b2fdc-c4ce-5712-b567-ed8f3326b801": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              20.0,
+              0.0
+            ],
+            "rotation": [
+              -0.418082,
+              0.270273,
+              0.131821,
+              0.857195
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "597f6475-8422-5183-86e7-4793d41ca8b3": {
+          "type": "fynkel.DirectionalLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1.0,
+              0.95,
+              0.85
+            ],
+            "intensity": 9000.0,
+            "cast_shadows": true
+          }
+        }
+      }
+    },
+    "deec670c-b995-54b9-b618-575f6cfa4286": {
+      "name": "Environment",
+      "parent": null,
+      "children": [],
+      "components": {
+        "ca0bd0ee-9942-5bb6-a184-b4ae3f2d36b2": {
+          "type": "fynkel.Environment",
+          "version": 1,
+          "data": {
+            "ambient_color": [
+              0.55,
+              0.65,
+              0.9
+            ],
+            "ambient_intensity": 1600.0,
+            "sky": null,
+            "sky_intensity": 0.0,
+            "sky_rotation": 0.0
+          }
+        }
+      }
+    },
+    "1f1e24d8-ef8a-5a56-86b4-4a7508f8fae8": {
+      "name": "Music",
+      "parent": null,
+      "children": [],
+      "components": {
+        "29a52541-5ad6-5318-b71a-ac0f1498279f": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "33c2dd83-a59b-5829-8bc7-18be20d2bce0": {
+          "type": "fynkel.AudioSource",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "e48d5eb5-8081-434d-9ef1-350ebfe11bb8"
+            },
+            "bus": "music",
+            "volume": 0.35,
+            "pitch": 1.0,
+            "looping": true,
+            "playing": true,
+            "priority": 10
+          }
+        }
+      }
+    }
+  }
+}
