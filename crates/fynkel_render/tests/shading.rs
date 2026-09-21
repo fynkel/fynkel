@@ -1223,3 +1223,38 @@ fn debug_lines_draw_on_top_and_are_depth_tested() {
     assert_eq!(r.stats().debug_lines, 12);
     assert!(red(&boxed) > 30, "{}", red(&boxed));
 }
+
+/// M3-16: the instrumentation. Pass timestamps come back two or three
+/// frames after the draw (never blocking), the CPU stages are timed, and
+/// the GPU memory estimate counts what the renderer holds.
+#[test]
+fn pass_timestamps_and_the_memory_estimate() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    let e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    // Each offscreen render prepares, draws, submits and waits for the
+    // GPU: frame n's stamps are resolved by frame n + 1's draw, mapped by
+    // frame n + 2's prepare and read by frame n + 3's.
+    for _ in 0..5 {
+        render_offscreen(&device, &queue, &mut r, &e);
+    }
+    let s = r.stats();
+    eprintln!("{s:?}");
+    assert!(s.prepare_us > 0 || s.encode_us > 0, "{s:?}");
+    // Attachments at 128² (depth ×4 samples, HDR ×4 + resolve) and the
+    // shadow map alone are megabytes.
+    assert!(s.gpu_bytes > 1 << 20, "{s:?}");
+    if device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+        assert!(s.gpu_timestamps, "{s:?}");
+        assert!(
+            s.gpu_scene_us > 0 && s.gpu_frame_us >= s.gpu_scene_us,
+            "{s:?}"
+        );
+        assert_eq!(s.gpu_untimed, 0, "{s:?}");
+    } else {
+        eprintln!("no timestamp queries on this adapter");
+        assert!(!s.gpu_timestamps);
+    }
+}

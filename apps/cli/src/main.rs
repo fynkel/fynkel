@@ -34,6 +34,11 @@ use std::process::ExitCode;
 
 use fynkel_document::project::PROJECT_FILE;
 
+/// The counting allocator (`fynkel_core::memory`, M3-16) so `fynkel test
+/// --headless` reports the heap.
+#[global_allocator]
+static ALLOCATOR: fynkel_core::memory::CountingAllocator = fynkel_core::memory::CountingAllocator;
+
 /// `fynkel codegen [--check] [--project <dir>] --json`: the same two
 /// pipelines, reported as one JSON object on stdout —
 /// `{ ok, check, native: { status, files?, types?, stale?[] }, project?:
@@ -496,6 +501,23 @@ fn test_command(args: &[String]) -> ExitCode {
                 .collect();
             println!("systems (mean per tick, last count): {}", parts.join(", "));
         }
+        let t = |t: &fynkel_host_headless::Timing| {
+            format!("p50 {} / p95 {} / max {} µs", t.p50_us, t.p95_us, t.max_us)
+        };
+        println!(
+            "timing: step {}; extract {}; frame {}",
+            t(&report.step_time),
+            t(&report.extract_time),
+            t(&report.frame_time)
+        );
+        let m = &report.memory;
+        println!(
+            "memory: native {:.1} MB (peak {:.1}), resident {:.1} MB, assets {:.1} MB",
+            m.native_bytes as f64 / 1048576.0,
+            m.native_peak_bytes as f64 / 1048576.0,
+            m.resident_bytes as f64 / 1048576.0,
+            m.residency_bytes as f64 / 1048576.0
+        );
         println!(
             "fynkel test --headless: {} ticks in {:.1} ms, {} entities, {} commands applied, {} rejected, {} diagnostics, checksum {} — {}",
             report.tick,

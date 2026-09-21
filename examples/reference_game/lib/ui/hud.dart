@@ -162,8 +162,20 @@ class StatsBlock extends StatelessWidget {
             '(p99 ${s.tickInterval.p99.toStringAsFixed(2)})  render ${s.renderCall.p50.toStringAsFixed(2)} ms',
         'simulate   ${s.simulate.p50.toStringAsFixed(2)} ms (p99 ${s.simulate.p99.toStringAsFixed(2)})  '
             '${s.fixedTicks} ticks/s  ${s.missedDeadlines} missed, ${s.dropped} dropped',
-        if (s.viewport case final v?)
+        // M3-16: the frame's split and the GPU's own pass times; the p95
+        // of the total work is what the blueprint's 12 ms target is about.
+        'work p95   behaviours ${s.behaviours.p95.toStringAsFixed(2)}  native ${s.nativeStep.p95.toStringAsFixed(2)}  '
+            'render ${s.renderCall.p95.toStringAsFixed(2)}  total ${s.totalWork.p95.toStringAsFixed(2)} ms',
+        if (s.viewport case final v?) ...[
           'meshes     ${v.instances} drawn in ${v.draws} draws, ${v.culled} culled, ${v.missing} missing',
+          'gpu p95    frame ${v.gpuFrame.p95.toStringAsFixed(2)} ms  (shadow ${v.gpuShadow.p95.toStringAsFixed(2)}, '
+              'scene ${v.gpuScene.p95.toStringAsFixed(2)}, post ${v.gpuPost.p95.toStringAsFixed(2)})  '
+              '${(v.gpuBytes / 1048576).toStringAsFixed(0)} MB',
+          'memory     native ${(s.world.nativeBytes / 1048576).toStringAsFixed(1)} MB  '
+              'resident ${(s.world.residentBytes / 1048576).toStringAsFixed(0)} MB  '
+              'assets ${(s.world.residencyBytes / 1048576).toStringAsFixed(1)} MB  snapshot ${s.world.snapshotBytes} B',
+        ],
+        'systems    ${s.systems.where((t) => t.micros > 0).map((t) => '${t.system.name} ${t.micros}').join(', ')} µs',
         if (game.world.audio.stats case final a)
           'audio      ${a.voices} voices, ${a.streams} streams, ${a.underruns} underruns, ${a.starved} starved',
       ],

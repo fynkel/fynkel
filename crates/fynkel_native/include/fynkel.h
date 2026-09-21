@@ -300,6 +300,14 @@ typedef struct FynkelWorldStats {
   uint32_t subscriptions;
   uint32_t staged_commands;
   uint32_t poisoned;
+  /* Memory and the subscription budget (M3-16, blueprint §15.4 / C5). */
+  uint64_t snapshot_bytes;            /* the last step's snapshot */
+  uint64_t snapshot_peak_bytes;       /* the largest snapshot so far */
+  uint32_t snapshot_budget;           /* fynkel_world_set_snapshot_budget; 0 = none */
+  uint32_t reserved;
+  uint64_t native_bytes;              /* Rust heap in use, the whole engine's */
+  uint64_t resident_bytes;            /* process resident set; 0 where not reported */
+  uint64_t residency_bytes;           /* CPU bytes of the resident assets */
 } FynkelWorldStats;
 
 /* ---- Functions ---------------------------------------------------------- */
@@ -439,6 +447,13 @@ FynkelStatus fynkel_world_audio_suspend(FynkelWorld* world, uint32_t suspended);
 FynkelStatus fynkel_world_audio_close(FynkelWorld* world);
 
 FynkelStatus fynkel_world_stats(const FynkelWorld* world, FynkelWorldStats* out_stats);
+
+/* The subscription budget (M3-16, blueprint C5): a ceiling in bytes on a
+ * tick's snapshot. The first step whose snapshot exceeds it reports
+ * `snapshot_budget` (diagnostic code 20, FYN-R0013) once — again only after
+ * the snapshot came back under; the snapshot is still delivered whole.
+ * 0 removes the ceiling. */
+FynkelStatus fynkel_world_set_snapshot_budget(FynkelWorld* world, uint32_t bytes);
 
 uint64_t fynkel_world_tick(const FynkelWorld* world);
 float fynkel_world_alpha(const FynkelWorld* world);

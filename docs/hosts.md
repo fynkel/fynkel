@@ -110,7 +110,12 @@ the host registers the prefabs the scene's `Emitter`s name
 accumulates `World::system_times` over the run into `systems: [{ system,
 entities, total_us, max_us, mean_us }]` (tick order, `step` first),
 printed by the text mode as `systems (mean per tick, last count): commands
-0 µs (0), … physics 2017 µs (6081), …`. The checksum covers the bodies' final
+0 µs (0), … physics 2017 µs (6081), …`. M3-16
+([instrumentation.md](instrumentation.md)): the host extracts once per
+frame as a renderer would and reports `extract_time` and `frame_time`
+(begin_frame → extract) next to `step_time`, and `memory { native_bytes,
+native_peak_bytes, resident_bytes, residency_bytes }` at the end of the
+run; the text mode prints a `timing:` and a `memory:` line. The checksum covers the bodies' final
 poses, so a physics regression changes it; the fixture project's Crate B
 landing on its Floor and sleeping is a test of the crate. Animation
 (M3-19, [animation.md](animation.md)): the host registers the clips and
@@ -247,6 +252,11 @@ counts — M3-05a: `transparent_last_frame`, `lights`, `lights_dropped`,
 what the scene passes drew, the culled are not in it) — which
 `ViewportStatsSnapshot` carries to Dart (the showcase HUD prints them;
 the Flutter host's stats line has `draws=… culled=… shadow=…`).
+M3-16 (ABI 3, [instrumentation.md](instrumentation.md)): `extract_*`,
+`prepare_*`, `encode_*` percentiles of the render call's stages,
+`gpu_timestamps`, `gpu_frames_timed`/`gpu_frames_untimed`, the
+`gpu_shadow_*`/`gpu_scene_*`/`gpu_post_*`/`gpu_frame_*` percentiles from
+Metal timestamps and `gpu_bytes`, the renderer's GPU memory estimate.
 `fynkel_apple_viewport_set_quality(viewport, name, len)` (M3-05, additive
 to ABI 2) selects a quality profile of the loaded project by name (an
 empty name: the project default); `-1` and a logged warning naming the
@@ -264,7 +274,7 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   installs the Rust→Swift frame-ready callback), `rebindTexture`, `stats`,
   `unregisterTexture` — every call after registration names its
   `textureId`, so an editor can show several viewports.
-- `lib/src/viewport_native.dart` — the viewport ABI v2 as `@Native` externals
+- `lib/src/viewport_native.dart` — the viewport ABI v3 as `@Native` externals
   on the same code asset as `package:fynkel`.
 - `FynkelViewportController` — one native viewport: `requestSize(w, h)` in
   physical pixels creates the ring and registers the texture, later calls
@@ -322,6 +332,13 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `FYNKEL_QUERY_SYSTEMS` (10: one `SystemTimeRecord { system, entities,
   micros }` per `SystemKind` in tick order, the last step's wall time —
   the starter HUD's `systems` line; M3-10, [catalogue.md](catalogue.md)),
+  `FynkelWorldStats` (M3-16, [instrumentation.md](instrumentation.md))
+  ends with `snapshot_bytes`, `snapshot_peak_bytes`, `snapshot_budget`,
+  `native_bytes`, `resident_bytes`, `residency_bytes`, and
+  `fynkel_world_set_snapshot_budget(world, bytes)` is the subscription
+  budget (C5): the first tick over it reports `SNAPSHOT_BUDGET` (20,
+  `FYN-R0013`) once per crossing; every load report carries
+  `"timing": { "ms" }`,
   `raycast`/`raycastAll`/`shapeCast`/`overlap`/`physicsQuery` send a
   `FYNKEL_BUFFER_PHYSICS_QUERIES` (8) batch of `PhysicsQueryRecord`s to
   `fynkel_world_physics_query(world, buffer, len, &view)` and read the

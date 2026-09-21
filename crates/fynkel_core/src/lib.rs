@@ -28,6 +28,7 @@ pub mod event;
 pub mod input;
 pub mod load;
 pub mod material;
+pub mod memory;
 pub mod schema;
 pub mod settings;
 pub mod world;

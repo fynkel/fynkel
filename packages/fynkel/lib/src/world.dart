@@ -320,27 +320,62 @@ class World {
   /// frame's raw edges.
   FramePlan frame(double dtSeconds,
       {List<InputEvent> input = const [], void Function(int tick)? fixedUpdate, void Function()? update}) {
+    final t = frameTimes.._begin();
     scenes._perform();
+    t._native.start();
     final plan = beginFrame(dtSeconds);
     captureInput(input);
     _carry(drainEvents());
+    t._native.stop();
     for (var i = 0; i < plan.steps; i++) {
       this.input.refresh();
+      t._behaviours.start();
       fixedUpdate?.call(tick);
       _behaviours.fixedUpdate(tick, _takeCarried());
+      t._behaviours.stop();
       final stepped = tick;
+      t._native.start();
       step();
       final events = drainEvents();
+      t._native.stop();
+      t._behaviours.start();
       _behaviours.afterPhysics(stepped, _contacts(events), _zoneEvents(events), _animationEvents(events),
           _markerEvents(events), _playbackEvents(events));
+      t._behaviours.stop();
       _carry(events);
     }
     this.input.refresh(frameEdges: true);
+    t._behaviours.start();
     _behaviours.update(dtSeconds);
     update?.call();
+    t._behaviours.stop();
+    t._presentation.start();
     flushPresentation();
+    t._presentation.stop();
+    t._end(plan.steps);
     return plan;
   }
+
+  /// Where the last [frame] spent its time (M3-16, blueprint §15.4). One
+  /// object, overwritten every frame — read it after [frame], allocation
+  /// free.
+  final FrameTimes frameTimes = FrameTimes();
+
+  /// The subscription budget (blueprint C5): a ceiling in bytes on a
+  /// tick's snapshot. The first tick over it reports
+  /// [DiagnosticCode.snapshotBudget] (`FYN-R0013`) — once, until the
+  /// snapshot is back under; the snapshot is still delivered whole, so a
+  /// host learns it subscribed more than it meant to pay for. 0 (the
+  /// default) means no ceiling. `stats().snapshotBytes` is what the
+  /// budget is measured against.
+  int get snapshotBudget => _snapshotBudget;
+  set snapshotBudget(int bytes) {
+    if (bytes < 0) throw ArgumentError.value(bytes, 'bytes', 'must be >= 0');
+    _snapshotBudget = bytes;
+    _native.setSnapshotBudget(bytes);
+  }
+
+  int _snapshotBudget = 0;
 
   /// Non-physics events waiting for the next `fixedUpdate`.
   List<EngineEvent> _carried = [];
@@ -1628,4 +1663,40 @@ class _EntityTable {
   String? nameOf(int entity) => _names[entity];
   int? parentOf(int entity) => _parents[entity];
   List<int> childrenOf(int parent) => _children[parent] ?? const [];
+}
+
+/// Where one [World.frame] spent its time (M3-16, blueprint §15.4), in
+/// microseconds: [behavioursUs] is the Dart side — every `fixedUpdate`,
+/// `afterPhysics`, `update`/`lateUpdate` and the host's own callbacks;
+/// [nativeUs] the engine — `beginFrame`, the input capture, every `step`
+/// (the staged commands flushed, the tick, the snapshot indexed, the
+/// diagnostics read) and the event drains; [presentationUs] the
+/// presentation-lane flush; [totalUs] the whole call (the rest is the
+/// SDK's own event decoding). [ticks] is the frame's fixed ticks.
+class FrameTimes {
+  int behavioursUs = 0, nativeUs = 0, presentationUs = 0, totalUs = 0, ticks = 0;
+
+  final Stopwatch _behaviours = Stopwatch(), _native = Stopwatch(), _presentation = Stopwatch(), _total = Stopwatch();
+
+  void _begin() {
+    _behaviours.reset();
+    _native.reset();
+    _presentation.reset();
+    _total
+      ..reset()
+      ..start();
+  }
+
+  void _end(int steps) {
+    _total.stop();
+    behavioursUs = _behaviours.elapsedMicroseconds;
+    nativeUs = _native.elapsedMicroseconds;
+    presentationUs = _presentation.elapsedMicroseconds;
+    totalUs = _total.elapsedMicroseconds;
+    ticks = steps;
+  }
+
+  @override
+  String toString() =>
+      'FrameTimes(total=$totalUs µs behaviours=$behavioursUs µs native=$nativeUs µs presentation=$presentationUs µs ticks=$ticks)';
 }

@@ -1,4 +1,4 @@
-/* Fynkel macOS viewport ABI v1 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v3 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract. */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
@@ -64,6 +64,24 @@ typedef struct FynkelAppleViewportStats {
   /* Last frame (M3-06): instances outside the camera frustum (not drawn),
    * mesh draw calls in the scene pass, draw calls in the shadow pass. */
   uint32_t culled_last_frame, draws_last_frame, shadow_draws_last_frame;
+  /* Instrumentation (M3-16, blueprint §15.4), over the window: the world's
+   * extract, the renderer's prepare (upload + cull) and encode (pass
+   * recording) on the render call — cpu_* above is encode + submit —; the
+   * GPU's pass times from Metal timestamps when the device samples them
+   * (gpu_timestamps; the values trail the draw by three or four frames and
+   * count only the frames read back, gpu_frames_timed): shadow, scene, post
+   * (+ present), and the frame's span from the first pass's begin to the
+   * last pass's end (the passes overlap on a tile-based GPU, so the sum
+   * exceeds it); the renderer's GPU memory estimate. */
+  uint32_t extract_p50_us, extract_p95_us, extract_p99_us;
+  uint32_t prepare_p50_us, prepare_p95_us, prepare_p99_us;
+  uint32_t encode_p50_us, encode_p95_us, encode_p99_us;
+  uint32_t gpu_timestamps, gpu_frames_timed, gpu_frames_untimed;
+  uint32_t gpu_shadow_p50_us, gpu_shadow_p95_us, gpu_shadow_p99_us;
+  uint32_t gpu_scene_p50_us, gpu_scene_p95_us, gpu_scene_p99_us;
+  uint32_t gpu_post_p50_us, gpu_post_p95_us, gpu_post_p99_us;
+  uint32_t gpu_frame_p50_us, gpu_frame_p95_us, gpu_frame_p99_us;
+  uint64_t gpu_bytes;
 } FynkelAppleViewportStats;
 
 typedef void (*FynkelAppleFrameReadyFn)(void *userdata);

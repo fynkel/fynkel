@@ -11,27 +11,11 @@ import 'package:flutter/scheduler.dart';
 import 'package:fynkel/fynkel.dart';
 
 import 'input_capture.dart';
+import 'percentiles.dart';
 import 'viewport.dart';
 import 'viewport_controller.dart';
 
-/// Percentiles of a sample window, in milliseconds.
-class MsPercentiles {
-  const MsPercentiles(this.p50, this.p95, this.p99, this.count);
-  final double p50, p95, p99;
-  final int count;
-
-  static const empty = MsPercentiles(0, 0, 0, 0);
-
-  factory MsPercentiles.of(List<double> samples) {
-    if (samples.isEmpty) return empty;
-    final s = List<double>.from(samples)..sort();
-    double at(double q) => s[((s.length - 1) * q).round()];
-    return MsPercentiles(at(.5), at(.95), at(.99), s.length);
-  }
-
-  String format([int digits = 2]) =>
-      'p50=${p50.toStringAsFixed(digits)} p95=${p95.toStringAsFixed(digits)} p99=${p99.toStringAsFixed(digits)}';
-}
+export 'percentiles.dart' show MsPercentiles;
 
 /// One reporting window (about a second) of the game view's loop.
 class FynkelFrameStats {
@@ -41,6 +25,11 @@ class FynkelFrameStats {
     required this.tickInterval,
     required this.simulate,
     required this.renderCall,
+    this.behaviours = MsPercentiles.empty,
+    this.nativeStep = MsPercentiles.empty,
+    this.flutterBuild = MsPercentiles.empty,
+    this.flutterRaster = MsPercentiles.empty,
+    this.systems = const [],
     required this.fixedTicks,
     required this.missedDeadlines,
     required this.dropped,
@@ -67,6 +56,21 @@ class FynkelFrameStats {
 
   /// `render()` wall time (extract + encode + submit).
   final MsPercentiles renderCall;
+
+  /// The split of [simulate] (M3-16, `World.frameTimes`): the Dart
+  /// behaviours (every `fixedUpdate`/`afterPhysics`/`update`/`lateUpdate`
+  /// and the host's `fixedUpdate` callback) and the native engine (the
+  /// ticks with their command flush, snapshot and event drains).
+  final MsPercentiles behaviours, nativeStep;
+
+  /// Flutter's own frame timings this window (`SchedulerBinding
+  /// .addTimingsCallback`): the UI thread's build and the raster thread's
+  /// work per Flutter frame — the compositor cost around the game loop.
+  final MsPercentiles flutterBuild, flutterRaster;
+
+  /// The engine's per-system times of the window's last tick
+  /// (`World.systemTimes`; one query per window).
+  final List<SystemTime> systems;
   final int fixedTicks, missedDeadlines;
 
   /// Frames the ring could not take (full) this window.
@@ -77,6 +81,16 @@ class FynkelFrameStats {
   final ViewportPlatformStats? platform;
   final int physicalWidth, physicalHeight;
   final bool muted;
+
+  /// The frame's total CPU work on the game path — [simulate] plus
+  /// [renderCall] at the same percentile (an upper bound on the sum's
+  /// percentile) — the number the blueprint's 12 ms p95 target is about.
+  MsPercentiles get totalWork => MsPercentiles(
+        simulate.p50 + renderCall.p50,
+        simulate.p95 + renderCall.p95,
+        simulate.p99 + renderCall.p99,
+        frames,
+      );
 }
 
 class FynkelGameView extends StatefulWidget {
@@ -186,7 +200,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
 
   final _intervalsMs = <double>[];
   final _simMs = <double>[];
+  final _behavioursMs = <double>[];
+  final _nativeMs = <double>[];
   final _renderCallMs = <double>[];
+  final _buildMs = <double>[];
+  final _rasterMs = <double>[];
   int _ticks = 0, _missed = 0, _dropped = 0, _skipped = 0, _frames = 0;
   final _window = Stopwatch()..start();
 
@@ -259,7 +277,28 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _ticker = createTicker(_onTick)..start();
     if (widget.onStats != null) {
       _statsTimer = Timer.periodic(widget.statsInterval, (_) => _report());
+      SchedulerBinding.instance.addTimingsCallback(_onTimings);
+      _timingsInstalled = true;
     }
+  }
+
+  bool _timingsInstalled = false;
+
+  void _onTimings(List<FrameTiming> timings) {
+    for (final t in timings) {
+      _buildMs.add(t.buildDuration.inMicroseconds / 1000);
+      _rasterMs.add(t.rasterDuration.inMicroseconds / 1000);
+    }
+  }
+
+  void _installTimings(bool wanted) {
+    if (wanted == _timingsInstalled) return;
+    if (wanted) {
+      SchedulerBinding.instance.addTimingsCallback(_onTimings);
+    } else {
+      SchedulerBinding.instance.removeTimingsCallback(_onTimings);
+    }
+    _timingsInstalled = wanted;
   }
 
   @override
@@ -281,6 +320,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     if ((oldWidget.onStats == null) != (widget.onStats == null) || oldWidget.statsInterval != widget.statsInterval) {
       _statsTimer?.cancel();
       _statsTimer = widget.onStats == null ? null : Timer.periodic(widget.statsInterval, (_) => _report());
+      _installTimings(widget.onStats != null);
     }
   }
 
@@ -299,6 +339,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     if (_openedAudio) widget.world.audio.close();
     _ticker.dispose();
     _statsTimer?.cancel();
+    _installTimings(false);
     FynkelInputChannel.detach(input);
     if (_pointerCaptured) unawaited(FynkelInputChannel.capturePointer(false));
     controller.removeListener(_onViewportChanged);
@@ -326,6 +367,9 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     final plan = world.frame(dt, input: input.take(dt), fixedUpdate: widget.fixedUpdate);
     sim.stop();
     _simMs.add(sim.elapsedMicroseconds / 1000);
+    final ft = world.frameTimes;
+    _behavioursMs.add(ft.behavioursUs / 1000);
+    _nativeMs.add(ft.nativeUs / 1000);
     _ticks += plan.steps;
     if (plan.missedDeadline) {
       _missed++;
@@ -367,6 +411,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       tickInterval: MsPercentiles.of(_intervalsMs),
       simulate: MsPercentiles.of(_simMs),
       renderCall: MsPercentiles.of(_renderCallMs),
+      behaviours: MsPercentiles.of(_behavioursMs),
+      nativeStep: MsPercentiles.of(_nativeMs),
+      flutterBuild: MsPercentiles.of(_buildMs),
+      flutterRaster: MsPercentiles.of(_rasterMs),
+      systems: _ticks > 0 ? widget.world.systemTimes() : const [],
       fixedTicks: _ticks,
       missedDeadlines: _missed,
       dropped: _dropped,
@@ -380,7 +429,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     );
     _intervalsMs.clear();
     _simMs.clear();
+    _behavioursMs.clear();
+    _nativeMs.clear();
     _renderCallMs.clear();
+    _buildMs.clear();
+    _rasterMs.clear();
     _ticks = _missed = _dropped = _skipped = _frames = 0;
     _window.reset();
     widget.onStats?.call(stats);

@@ -244,9 +244,23 @@ class Hud extends StatelessWidget {
         'simulate   ${s.simulate.p50.toStringAsFixed(2)} ms (p99 ${s.simulate.p99.toStringAsFixed(2)})  '
             'viewport ${s.physicalWidth}x${s.physicalHeight}  ${s.fixedTicks} ticks/s  '
             '${s.missedDeadlines} missed, ${s.dropped} dropped',
+        // Where the frame goes (M3-16): the Dart behaviours, the native
+        // ticks, the render call's extract/prepare/encode, the GPU's own
+        // pass times (Metal timestamps; they trail the draw by a few
+        // frames) — the p95 of the total work is the blueprint's 12 ms.
+        'work       behaviours ${s.behaviours.p95.toStringAsFixed(2)}  native ${s.nativeStep.p95.toStringAsFixed(2)}  '
+            'render ${s.renderCall.p95.toStringAsFixed(2)}  total ${s.totalWork.p95.toStringAsFixed(2)} ms (p95)',
+        if (s.viewport case final v?) ...[
+          'gpu        ${v.gpuFrame.p95.toStringAsFixed(2)} ms frame (p95; shadow ${v.gpuShadow.p95.toStringAsFixed(2)}, '
+              'scene ${v.gpuScene.p95.toStringAsFixed(2)}, post ${v.gpuPost.p95.toStringAsFixed(2)})  '
+              '${(v.gpuBytes / 1048576).toStringAsFixed(0)} MB',
+          'memory     native ${(s.world.nativeBytes / 1048576).toStringAsFixed(1)} MB  '
+              'resident ${(s.world.residentBytes / 1048576).toStringAsFixed(0)} MB  '
+              'snapshot ${s.world.snapshotBytes} B',
+        ],
         // The last tick's phases (`World.systemTimes`, M3-10): where a
         // slow tick goes — physics, the native movers, the transforms.
-        'systems    ${_systems(game.world.systemTimes())}',
+        'systems    ${_systems(s.systems)}',
         if (s.viewport case final v?) 'meshes     ${v.instances} drawn in ${v.draws} draws, ${v.culled} culled, ${v.missing} missing, ${v.assetErrors} errors',
       ],
       for (final d in game.report.diagnostics) '$d',

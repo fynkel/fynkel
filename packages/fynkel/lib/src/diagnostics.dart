@@ -34,7 +34,8 @@ enum DiagnosticCode {
   clipUnavailable(16),
   skinUnavailable(17),
   soundUnavailable(18),
-  audioDevice(19);
+  audioDevice(19),
+  snapshotBudget(20);
 
   const DiagnosticCode(this.value);
   final int value;
@@ -404,6 +405,7 @@ class LoadReport {
     this.audio = const AudioAssets(),
     this.mode,
     this.scenes = const [],
+    this.loadMs = 0,
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
@@ -445,6 +447,7 @@ class LoadReport {
       scenes: [
         for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
       ],
+      loadMs: ((j['timing'] as Map?)?['ms'] as num?)?.toDouble() ?? 0,
     );
   }
 
@@ -514,6 +517,11 @@ class LoadReport {
   /// and the engine's state after the load (M3-11).
   final AudioAssets audio;
 
+  /// The native call's wall time in milliseconds — reading the cache,
+  /// spawning the scene, registering its assets (M3-16, blueprint §15.4
+  /// loading time). The behaviours' `start` is not in it.
+  final double loadMs;
+
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
   Iterable<LoadDiagnostic> get warnings => diagnostics.where((d) => !d.isError);
 
@@ -541,6 +549,7 @@ class LoadReport {
         audio: audio,
         mode: mode,
         scenes: scenes,
+        loadMs: loadMs,
       );
 
   /// This report after the SDK attached [attached] behaviours and found

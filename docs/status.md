@@ -292,6 +292,27 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
   HUD sits under `SafeArea` with the keyboard hint hidden on touch
   platforms. Played end to end on macOS and on the iPhone simulator.
   (M3-15.)
+- **Every §15.4 number is measured on its real path**
+  (`docs/instrumentation.md`, M3-16 part 1): `World.frame` splits itself
+  into the Dart behaviours, the native ticks and the presentation flush
+  (`world.frameTimes`, allocation free), the game view's window stats
+  carry that split, the engine's per-system times, Flutter's build and
+  raster timings and a `totalWork` (simulate + render call) for the
+  12 ms p95 target; the render call is timed as extract / prepare /
+  encode / submit and the GPU's own pass times come from Metal
+  timestamps (two alternating query sets, the previous frame's set
+  resolved at the next draw because Apple's passes overlap, mapped
+  without a wait, three or four frames late) with the renderer's GPU
+  memory estimate next to them; a counting allocator is the global
+  allocator of every final binary (`native_bytes`, its peak, the
+  process's resident set from `task_info`, the resident assets' bytes
+  in `FynkelWorldStats`, the headless report and the standalone `[1s]`
+  line); every load report carries its wall time; and the subscription
+  budget (C5) is a check — `world.snapshotBudget` raises
+  `SNAPSHOT_BUDGET` (20, `FYN-R0013`) once per crossing with the
+  snapshot still whole. Viewport ABI 3. (M3-16 part 1; the C3 Dart
+  heap probe, the AOT capture and `benchmarks/m3/capture.py` with the
+  results are part 2.)
 
 ## 3. What is *not* proven yet (honest list)
 
@@ -995,6 +1016,23 @@ under `SafeArea`, the keyboard hint hidden). The real-iPhone
 qualification stays M6. Outside content: `win.ogg` and `click.ogg` are
 Kenney's (CC0, credited).
 
+M3-16 part 1 (2026-09-21): fmt/clippy clean, `cargo test --workspace`
+green (the renderer's `pass_timestamps_and_the_memory_estimate` on the
+M3 Max: shadow ≈85 µs, scene ≈65, post ≈37, frame span ≈0.7 ms; the
+native `memory_stats_and_the_snapshot_budget`; the leak test now reads
+the crate's own counting allocator — a second `#[global_allocator]` in a
+test binary is a link error), the four `codegen --check`s up to date,
+Dart suites green (`packages/fynkel` 149 with `instrumentation_test`,
+`fynkel_flutter` 24 with the ABI 3 fields asserted, `fynkel_generator`
+6, `spinner_game` 4, `hosts/flutter_apple` analyze clean), a fresh
+starter through validate, headless (the new `timing:`/`memory:` lines),
+the walk replay, `codegen --check`, analyze and its tests, the showcase
+and the reference game unchanged in checksum with their HUD `work`/`gpu`/
+`memory` lines; the standalone host on the fixture at 3024×1964: `sim ms
+p50=0.07 | prepare ms p50=0.29 | gpu ms p50=0.42 p95=3.9 n=121 untimed=5 |
+mem MB native=1.4 resident=130 gpu=201` (the 4× MSAA attachments and
+the 4096² shadow map are most of the estimate).
+
 ## 6. Verdict and next steps
 
 M2 is closed with a GO (`m2-gate-report.md`). The data layer is the shape the
@@ -1108,9 +1146,18 @@ in its own app, play it, or hear it. That is M3, in this order:
    `tools/playground.py`, `Game.play/finish/toMenu`, `GameState.screen`
    and `lastRun`, `lib/ui/` — menu, pause menu, results, the settings
    panel with rebinding through `onKeyEvent` —, `win.ogg`/`click.ogg`,
-   played end to end on macOS and the iPhone simulator). **Next:
-   instrumentation (16)**, then public readiness (17), the gate report
-   (18) — measured with both captures at every step.
+   played end to end on macOS and the iPhone simulator). **Instrumentation
+   part 1 done** (M3-16 part 1: the timers of `docs/instrumentation.md`
+   — the frame's split in Dart, extract/prepare/encode, Metal pass
+   timestamps, the counting allocator and resident set, residency and
+   the GPU memory estimate, Flutter timings, load time, the C5 budget
+   diagnostic — on every surface: viewport ABI 3, `FynkelWorldStats`,
+   the headless JSON, the standalone line, the hosts' HUDs). **Next:
+   part 2** (the C3 Dart heap probe and the AOT capture,
+   `benchmarks/m3/capture.py` over the reference game and the stress
+   scene with the 12 ms p95 check, `benchmarks/m3/results/`), then public
+   readiness (17), the gate report (18) — measured with both captures at
+   every step.
 16. **M4 — the editor — has started in parallel** (2026-09-21, the user's
    call): branch `editor` in its own worktree, the backlog in blueprint
    §19.2e (ten items: the authoring ABI D5 + D7 first, then the shell,

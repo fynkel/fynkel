@@ -209,6 +209,8 @@ struct GpuMesh {
 /// A texture ready for sampling.
 struct GpuTexture {
     view: wgpu::TextureView,
+    /// Bytes uploaded (every mip), for the GPU memory estimate.
+    bytes: u64,
 }
 
 /// A material's five maps bound together, with the factors the instance
@@ -311,6 +313,225 @@ pub struct FrameStats {
     pub scene_light: bool,
     /// The `Environment` sky is drawn behind the meshes.
     pub sky: bool,
+    /// Instrumentation (blueprint §15.4, M3-16). Wall time of `prepare`
+    /// (upload + cull + the timestamp read-back) and of the last `draw`
+    /// (pass recording; the submit is the host's), in microseconds.
+    pub prepare_us: u32,
+    pub encode_us: u32,
+    /// Estimated GPU memory held: resident meshes and textures, the
+    /// attachments at the internal size, the shadow map, the instance,
+    /// joint and debug buffers.
+    pub gpu_bytes: u64,
+    /// The device samples timestamps at pass boundaries
+    /// (`wgpu::Features::TIMESTAMP_QUERY`; Metal on Apple GPUs). Without
+    /// it the four GPU times stay 0.
+    pub gpu_timestamps: bool,
+    /// GPU time of the most recently read-back frame's passes (the
+    /// read-back trails the draw by three or four frames): the shadow
+    /// pass, the scene pass (opaque + sky + transparent, resolved), post
+    /// (+ present), and the frame's span from the first pass's begin to
+    /// the last pass's end — less than the sum on a tile-based GPU, whose
+    /// passes overlap.
+    pub gpu_shadow_us: u32,
+    pub gpu_scene_us: u32,
+    pub gpu_post_us: u32,
+    pub gpu_frame_us: u32,
+    /// Frames drawn whose timestamps could not be taken because every
+    /// read-back slot was still in flight (the GPU more than three frames
+    /// behind); cumulative.
+    pub gpu_untimed: u32,
+    /// Frames whose timestamps have been read back; cumulative, so a host
+    /// sampling per frame knows when the four times are new.
+    pub gpu_timed: u32,
+}
+
+/// The sun's shadow, the scene, post (+ present): begin/end query pairs
+/// (`GpuTimer`).
+const TIMESTAMP_QUERIES: u32 = 8;
+const TIMESTAMP_SLOTS: usize = 3;
+
+/// A read-back slot of the [`GpuTimer`]: `state` 0 free, 1 copied into by
+/// a `draw` (the host submits it), 2 mapping requested, 3 mapped.
+struct TimestampSlot {
+    buffer: wgpu::Buffer,
+    state: std::sync::Arc<std::sync::atomic::AtomicU8>,
+    /// Which pass pairs the frame wrote (a skipped shadow or present pass
+    /// leaves stale values in its queries).
+    shadow: bool,
+    present: bool,
+}
+
+/// Pass timestamps (`wgpu::Features::TIMESTAMP_QUERY`, M3-16): a frame's
+/// passes write begin/end timestamps into one of two query sets; the next
+/// frame's `draw` resolves the previous set before its own passes (on a
+/// tile-based GPU a resolve in the same command buffer can run before the
+/// last pass's fragment stage has written its end stamp) and copies it
+/// into a free read-back slot; `prepare` maps the slots the host has
+/// submitted and reads the ones that came back — never blocking, so the
+/// numbers describe a frame three or four behind the one being prepared.
+struct GpuTimer {
+    query_sets: [wgpu::QuerySet; 2],
+    /// The set this frame's passes write; the other holds the previous
+    /// frame's stamps until `draw` resolves it.
+    writing: usize,
+    /// The previous frame's pass flags, resolved with its set.
+    pending: Option<(bool, bool)>,
+    resolve: wgpu::Buffer,
+    slots: Vec<TimestampSlot>,
+    next: usize,
+    untimed: u32,
+}
+
+impl GpuTimer {
+    fn new(device: &wgpu::Device) -> Self {
+        let query_sets = std::array::from_fn(|i| {
+            device.create_query_set(&wgpu::QuerySetDescriptor {
+                label: Some(&format!("fynkel pass timestamps {i}")),
+                ty: wgpu::QueryType::Timestamp,
+                count: TIMESTAMP_QUERIES,
+            })
+        });
+        let size = u64::from(TIMESTAMP_QUERIES) * 8;
+        let resolve = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fynkel timestamp resolve"),
+            size,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let slots = (0..TIMESTAMP_SLOTS)
+            .map(|i| TimestampSlot {
+                buffer: device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("fynkel timestamp read-back {i}")),
+                    size,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+                state: Default::default(),
+                shadow: false,
+                present: false,
+            })
+            .collect();
+        Self {
+            query_sets,
+            writing: 0,
+            pending: None,
+            resolve,
+            slots,
+            next: 0,
+            untimed: 0,
+        }
+    }
+
+    /// The pass's timestamp writes for query pair `pair`.
+    fn writes(&self, pair: u32) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        Some(wgpu::RenderPassTimestampWrites {
+            query_set: &self.query_sets[self.writing],
+            beginning_of_pass_write_index: Some(pair * 2),
+            end_of_pass_write_index: Some(pair * 2 + 1),
+        })
+    }
+
+    /// Before a frame's passes: resolves the previous frame's set into the
+    /// next free slot (the frame goes untimed when every slot is still in
+    /// flight) and swaps the sets; `shadow`/`present` are this frame's
+    /// pass flags, kept for its own resolve next time.
+    fn begin_frame(&mut self, encoder: &mut wgpu::CommandEncoder, shadow: bool, present: bool) {
+        use std::sync::atomic::Ordering;
+        if let Some((shadow, present)) = self.pending.take() {
+            let previous = 1 - self.writing;
+            let i = self.next;
+            let slot = &mut self.slots[i];
+            if slot.state.load(Ordering::Acquire) != 0 {
+                self.untimed += 1;
+            } else {
+                encoder.resolve_query_set(
+                    &self.query_sets[previous],
+                    0..TIMESTAMP_QUERIES,
+                    &self.resolve,
+                    0,
+                );
+                encoder.copy_buffer_to_buffer(
+                    &self.resolve,
+                    0,
+                    &slot.buffer,
+                    0,
+                    u64::from(TIMESTAMP_QUERIES) * 8,
+                );
+                slot.shadow = shadow;
+                slot.present = present;
+                slot.state.store(1, Ordering::Release);
+                self.next = (i + 1) % TIMESTAMP_SLOTS;
+            }
+        }
+        self.writing = 1 - self.writing;
+        self.pending = Some((shadow, present));
+    }
+
+    /// Reads back what has arrived and asks for what has been submitted:
+    /// the pass times of the most recently mapped slot, in microseconds
+    /// (shadow, scene, post, whole frame).
+    fn collect(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Option<(u32, u32, u32, u32)> {
+        use std::sync::atomic::Ordering;
+        // Map callbacks fire from the poll.
+        let _ = device.poll(wgpu::PollType::Poll);
+        let period = queue.get_timestamp_period();
+        let mut latest = None;
+        // Oldest first, so the newest mapped slot wins.
+        for k in 0..TIMESTAMP_SLOTS {
+            let slot = &self.slots[(self.next + k) % TIMESTAMP_SLOTS];
+            match slot.state.load(Ordering::Acquire) {
+                3 => {
+                    let ticks: Vec<u64> = match slot.buffer.slice(..).get_mapped_range() {
+                        Ok(view) => bytemuck::cast_slice::<u8, u64>(&view).to_vec(),
+                        Err(_) => Vec::new(),
+                    };
+                    slot.buffer.unmap();
+                    slot.state.store(0, Ordering::Release);
+                    if ticks.len() < TIMESTAMP_QUERIES as usize {
+                        continue;
+                    }
+                    let us = |ticks: u64| -> u32 {
+                        (ticks as f64 * f64::from(period) / 1000.0).round() as u32
+                    };
+                    let span = |b: usize, e: usize| us(ticks[e].saturating_sub(ticks[b]));
+                    let shadow = if slot.shadow { span(0, 1) } else { 0 };
+                    let scene = span(2, 3);
+                    let post = span(4, 5) + if slot.present { span(6, 7) } else { 0 };
+                    // A tile-based GPU starts a pass's vertex stage before
+                    // the previous pass's fragment stage ends, so the
+                    // passes overlap: the frame is the span from the first
+                    // begin to the last end, not their sum.
+                    let mut pairs = vec![1, 2];
+                    if slot.shadow {
+                        pairs.push(0);
+                    }
+                    if slot.present {
+                        pairs.push(3);
+                    }
+                    let first = pairs.iter().map(|p| ticks[p * 2]).min().unwrap_or(0);
+                    let last = pairs.iter().map(|p| ticks[p * 2 + 1]).max().unwrap_or(0);
+                    latest = Some((shadow, scene, post, us(last.saturating_sub(first))));
+                }
+                1 => {
+                    let state = slot.state.clone();
+                    slot.state.store(2, Ordering::Release);
+                    slot.buffer
+                        .slice(..)
+                        .map_async(wgpu::MapMode::Read, move |r| {
+                            // A failed map (device lost) frees the slot; the
+                            // frame stays untimed.
+                            state.store(if r.is_ok() { 3 } else { 0 }, Ordering::Release);
+                        });
+                }
+                _ => {}
+            }
+        }
+        latest
+    }
 }
 
 /// The fixed pipeline set for one sample count (`docs/renderer.md` lists
@@ -369,6 +590,8 @@ struct Attachments {
     ldr_view: Option<wgpu::TextureView>,
     post_bind_group: wgpu::BindGroup,
     present_bind_group: Option<wgpu::BindGroup>,
+    /// Texture memory of the attachments (the GPU memory estimate).
+    bytes: u64,
 }
 
 /// The sun's shadow map: `resolution` 1 is the placeholder bound while the
@@ -376,6 +599,12 @@ struct Attachments {
 struct ShadowMap {
     view: wgpu::TextureView,
     resolution: u32,
+}
+
+impl ShadowMap {
+    fn bytes(&self) -> u64 {
+        u64::from(self.resolution) * u64::from(self.resolution) * 4
+    }
 }
 
 /// What a frame draws: filled from an [`Extract`] by [`ExtractRenderer::prepare`].
@@ -433,6 +662,12 @@ pub struct ExtractRenderer {
     materials: HashMap<AssetRef, Option<GpuMaterial>>,
     asset_errors: Vec<String>,
     stats: FrameStats,
+    /// Pass timestamps when the device supports them (M3-16).
+    gpu_timer: Option<GpuTimer>,
+    /// The last timestamps read back (shadow, scene, post, frame; µs)
+    /// and how many frames have been read back.
+    gpu_times: (u32, u32, u32, u32),
+    gpu_timed: u32,
     ev100: f32,
     /// Fallback camera when the extract has none.
     pub camera: Camera,
@@ -702,6 +937,12 @@ impl ExtractRenderer {
             materials: HashMap::new(),
             asset_errors: Vec::new(),
             stats: FrameStats::default(),
+            gpu_timer: device
+                .features()
+                .contains(wgpu::Features::TIMESTAMP_QUERY)
+                .then(|| GpuTimer::new(device)),
+            gpu_times: (0, 0, 0, 0),
+            gpu_timed: 0,
             ev100: exposure::ev100_from_lux(exposure::FALLBACK_SUN_LUX),
             camera: Camera::default(),
             light_dir: Vec3::new(0.4, 1.0, 0.6).normalize(),
@@ -964,13 +1205,28 @@ impl ExtractRenderer {
         queue: &wgpu::Queue,
         extract: &Extract,
     ) -> u32 {
+        let prepare_start = std::time::Instant::now();
         self.reconcile_evictions();
         self.resolve_quality(device);
         self.ensure_fallbacks(device, queue);
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            if let Some(times) = timer.collect(device, queue) {
+                self.gpu_times = times;
+                self.gpu_timed += 1;
+            }
+        }
         let mut stats = FrameStats {
             msaa: self.quality.msaa,
             render_width: self.attachments.width,
             render_height: self.attachments.height,
+            encode_us: self.stats.encode_us,
+            gpu_timestamps: self.gpu_timer.is_some(),
+            gpu_shadow_us: self.gpu_times.0,
+            gpu_scene_us: self.gpu_times.1,
+            gpu_post_us: self.gpu_times.2,
+            gpu_frame_us: self.gpu_times.3,
+            gpu_untimed: self.gpu_timer.as_ref().map_or(0, |t| t.untimed),
+            gpu_timed: self.gpu_timed,
             ..FrameStats::default()
         };
 
@@ -1430,8 +1686,39 @@ impl ExtractRenderer {
         stats.debug_lines = self.debug_vertices / 2;
         self.debug.clear();
 
+        stats.gpu_bytes = self.gpu_bytes();
+        stats.prepare_us = prepare_start.elapsed().as_micros() as u32;
         self.stats = stats;
         stats.instances
+    }
+
+    /// The GPU memory estimate (`FrameStats::gpu_bytes`): what this
+    /// renderer created and still holds. Driver-side copies, pipeline
+    /// state and the swapchain are not counted.
+    fn gpu_bytes(&self) -> u64 {
+        let meshes: u64 = self
+            .meshes
+            .values()
+            .flatten()
+            .map(|m| {
+                m.vertex_buffer.size()
+                    + m.index_buffer.size()
+                    + m.skin_buffer.as_ref().map_or(0, wgpu::Buffer::size)
+            })
+            .sum();
+        let textures: u64 = self.textures.values().flatten().map(|t| t.bytes).sum();
+        meshes
+            + textures
+            + self.cube.vertex_buffer.size()
+            + self.cube.index_buffer.size()
+            + self.attachments.bytes
+            + self.shadow_map.bytes()
+            + self.instance_buffer.size()
+            + self.joint_buffer.size()
+            + self.debug_buffer.size()
+            + self.uniform_buffer.size()
+            + self.shadow_uniform_buffer.size()
+            + self.post_buffer.size()
     }
 
     // -------------------------------------------------------------- draw
@@ -1450,7 +1737,14 @@ impl ExtractRenderer {
     ///
     /// The three scene stages are one GPU render pass (the attachments
     /// stay on-tile), resolved at its end.
-    pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+    pub fn draw(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+        let encode_start = std::time::Instant::now();
+        let present =
+            self.attachments.ldr_view.is_some() && self.attachments.present_bind_group.is_some();
+        let shadow = self.shadow_active;
+        if let Some(timer) = self.gpu_timer.as_mut() {
+            timer.begin_frame(encoder, shadow, present);
+        }
         if self.shadow_active {
             self.shadow_pass(encoder);
         }
@@ -1463,6 +1757,7 @@ impl ExtractRenderer {
             post_target,
             &self.pipelines.post,
             &a.post_bind_group,
+            2,
         );
         if let (Some(_), Some(present)) = (&a.ldr_view, &a.present_bind_group) {
             self.fullscreen_pass(
@@ -1471,8 +1766,16 @@ impl ExtractRenderer {
                 target,
                 &self.pipelines.present,
                 present,
+                3,
             );
         }
+        self.stats.encode_us = encode_start.elapsed().as_micros() as u32;
+    }
+
+    /// The pass's timestamp writes (`GpuTimer`), when the device samples
+    /// them.
+    fn timestamps(&self, pair: u32) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        self.gpu_timer.as_ref().and_then(|t| t.writes(pair))
     }
 
     /// Depth only, from the sun, every caster inside its box (each
@@ -1480,6 +1783,7 @@ impl ExtractRenderer {
     fn shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("fynkel shadow"),
+            timestamp_writes: self.timestamps(0),
             color_attachments: &[],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.shadow_map.view,
@@ -1537,6 +1841,7 @@ impl ExtractRenderer {
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("fynkel scene"),
+            timestamp_writes: self.timestamps(1),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view,
                 depth_slice: None,
@@ -1627,9 +1932,11 @@ impl ExtractRenderer {
         target: &wgpu::TextureView,
         pipeline: &wgpu::RenderPipeline,
         bind_group: &wgpu::BindGroup,
+        timestamp_pair: u32,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(label),
+            timestamp_writes: self.timestamps(timestamp_pair),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 depth_slice: None,
@@ -2387,6 +2694,17 @@ fn create_attachments(
             "fynkel present bg",
         )
     });
+    // Depth32 × samples, HDR rgba16f × samples when resolved, the HDR
+    // resolve, the LDR at render scale (4 bytes a texel).
+    let texels = u64::from(w.max(1)) * u64::from(h.max(1));
+    let bytes = texels * 4 * u64::from(samples)
+        + if samples > 1 {
+            texels * 8 * u64::from(samples)
+        } else {
+            0
+        }
+        + texels * 8
+        + if ldr_view.is_some() { texels * 4 } else { 0 };
     Attachments {
         width: w,
         height: h,
@@ -2397,6 +2715,7 @@ fn create_attachments(
         ldr_view,
         post_bind_group,
         present_bind_group,
+        bytes,
     }
 }
 
@@ -2679,6 +2998,7 @@ fn upload_rgba8(
     }
     GpuTexture {
         view: texture.create_view(&Default::default()),
+        bytes: at as u64,
     }
 }
 
@@ -2730,10 +3050,18 @@ pub fn headless_device() -> Option<(wgpu::Device, wgpu::Queue)> {
     .ok()?;
     block_on(adapter.request_device(&wgpu::DeviceDescriptor {
         label: Some("fynkel headless device"),
+        required_features: device_features(&adapter),
         required_limits: device_limits(&adapter),
         ..Default::default()
     }))
     .ok()
+}
+
+/// Features to request for [`ExtractRenderer`]: pass timestamps when the
+/// adapter samples them (`FrameStats::gpu_*`, M3-16); nothing the renderer
+/// cannot do without.
+pub fn device_features(adapter: &wgpu::Adapter) -> wgpu::Features {
+    adapter.features() & wgpu::Features::TIMESTAMP_QUERY
 }
 
 /// Limits to request for [`ExtractRenderer`]: WebGPU defaults, lowered to

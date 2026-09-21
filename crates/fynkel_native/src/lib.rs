@@ -24,6 +24,13 @@ use fynkel_core::{Lane, World, WorldConfig};
 
 use buffer::BufferKind;
 
+/// The counting allocator (`fynkel_core::memory`, M3-16): this crate is a
+/// final artifact (the dylib the Flutter host loads, on its own or inside
+/// `fynkel_platform_apple`), so the Rust heap it reports in
+/// `FynkelWorldStats::native_bytes` is the whole engine's.
+#[global_allocator]
+static ALLOCATOR: fynkel_core::memory::CountingAllocator = fynkel_core::memory::CountingAllocator;
+
 pub struct FynkelRuntime {
     worlds_created: u64,
 }
@@ -61,6 +68,13 @@ struct Counters {
     query_calls: u64,
     bytes_in: u64,
     bytes_out: u64,
+    /// The largest snapshot a step published (M3-16).
+    snapshot_peak_bytes: u64,
+    /// `fynkel_world_set_snapshot_budget`; 0 = no ceiling (C5).
+    snapshot_budget: u32,
+    /// The last step's snapshot was over the budget (one diagnostic per
+    /// crossing, not per tick).
+    over_budget: bool,
 }
 
 #[repr(C)]
@@ -155,6 +169,18 @@ pub struct FynkelWorldStats {
     pub subscriptions: u32,
     pub staged_commands: u32,
     pub poisoned: u32,
+    /// Memory and the subscription budget (M3-16, blueprint §15.4 / C5):
+    /// the last snapshot's bytes, the largest so far, the host's ceiling
+    /// (0 = none), the Rust heap in use (the whole engine's — the counting
+    /// allocator is this crate's), the process's resident set (0 where not
+    /// reported) and the resident assets' bytes.
+    pub snapshot_bytes: u64,
+    pub snapshot_peak_bytes: u64,
+    pub snapshot_budget: u32,
+    pub reserved: u32,
+    pub native_bytes: u64,
+    pub resident_bytes: u64,
+    pub residency_bytes: u64,
 }
 
 /// Runs `f` on a live, non-poisoned world inside the panic boundary.
@@ -257,6 +283,29 @@ impl FynkelWorld {
                 _ => {}
             }
         }
+    }
+
+    /// The subscription budget diagnostic (C5): `SNAPSHOT_BUDGET` once
+    /// when a tick's snapshot crosses the host's ceiling, again only after
+    /// it came back under.
+    fn check_snapshot_budget(&mut self, snapshot_bytes: u64) {
+        let budget = self.stats.snapshot_budget as u64;
+        let over = budget > 0 && snapshot_bytes > budget;
+        if over && !self.stats.over_budget {
+            let subscriptions = self.inner.subscription_count();
+            self.inner.push_diagnostic(
+                u32::MAX,
+                Lane::Simulation,
+                fynkel_contracts::DiagnosticCode::SNAPSHOT_BUDGET,
+                Entity::NULL,
+                ComponentId::NONE,
+                format!(
+                    "{}: snapshot of {snapshot_bytes} bytes over the {budget}-byte budget ({subscriptions} subscriptions)",
+                    fynkel_contracts::Code::RUNTIME_SNAPSHOT_BUDGET.0
+                ),
+            );
+        }
+        self.stats.over_budget = over;
     }
 
     fn rebuild_diagnostics(&mut self) {
@@ -417,7 +466,10 @@ pub unsafe extern "C" fn fynkel_world_step(
         let r = w.inner.step();
         let buf = std::mem::take(&mut w.snapshot_buf);
         w.snapshot_buf = bridge::encode_snapshot(buf, w.inner.snapshot());
-        w.stats.bytes_out += w.snapshot_buf.len() as u64;
+        let snapshot_bytes = w.snapshot_buf.len() as u64;
+        w.stats.bytes_out += snapshot_bytes;
+        w.stats.snapshot_peak_bytes = w.stats.snapshot_peak_bytes.max(snapshot_bytes);
+        w.check_snapshot_budget(snapshot_bytes);
         let buf = std::mem::take(&mut w.after_physics_buf);
         w.after_physics_buf = bridge::encode_events(buf, w.inner.after_physics_events());
         w.rebuild_diagnostics();
@@ -835,7 +887,34 @@ pub unsafe extern "C" fn fynkel_world_stats(
         subscriptions: w.inner.subscription_count() as u32,
         staged_commands: w.inner.staged_count() as u32,
         poisoned: w.inner.is_poisoned() as u32,
+        snapshot_bytes: w.snapshot_buf.len() as u64,
+        snapshot_peak_bytes: w.stats.snapshot_peak_bytes,
+        snapshot_budget: w.stats.snapshot_budget,
+        reserved: 0,
+        native_bytes: fynkel_core::memory::heap_bytes(),
+        resident_bytes: fynkel_core::memory::resident_bytes(),
+        residency_bytes: w.assets.as_ref().map(|a| a.stats().bytes).unwrap_or(0),
     };
+    Status::Ok
+}
+
+/// The subscription budget (M3-16, blueprint C5): a ceiling in bytes on a
+/// tick's snapshot. The first step whose snapshot exceeds it reports
+/// `FYNKEL_DIAGNOSTIC_SNAPSHOT_BUDGET` (once, until the snapshot is back
+/// under); the snapshot is still delivered whole. 0 removes the ceiling.
+///
+/// # Safety
+/// `world` live or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_set_snapshot_budget(
+    world: *mut FynkelWorld,
+    bytes: u32,
+) -> Status {
+    let Some(w) = world.as_mut() else {
+        return Status::InvalidArgument;
+    };
+    w.stats.snapshot_budget = bytes;
+    w.stats.over_budget = false;
     Status::Ok
 }
 

@@ -366,13 +366,19 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
         'dart tick interval ms  ${f.tickInterval.format()}  (n=${f.tickInterval.count}, skipped while resizing=${f.skippedWhileResizing})',
         'dart simulate ms       ${f.simulate.format()}  (gameplay + submit + step + snapshot)',
         'ffi render() call ms   ${f.renderCall.format()}  (extract + encode + submit)',
+        'dart behaviours ms     ${f.behaviours.format(3)}  native step ms ${f.nativeStep.format(3)}  total work ms ${f.totalWork.format()}',
         if (s != null) ...[
+          'rust extract ms        ${s.extract.format(3)}  prepare ms ${s.prepare.format(3)}  encode ms ${s.encode.format(3)}',
+          'gpu pass ms            shadow p95=${s.gpuShadow.p95.toStringAsFixed(3)} scene p95=${s.gpuScene.p95.toStringAsFixed(3)} post p95=${s.gpuPost.p95.toStringAsFixed(3)}  frame ${s.gpuFrame.format(3)}  (n=${s.gpuFrame.count}, untimed=${s.gpuFramesUntimed}, timestamps=${s.gpuTimestamps})',
+          'memory MB              native=${(b.nativeBytes / 1048576).toStringAsFixed(1)} resident=${(b.residentBytes / 1048576).toStringAsFixed(1)} assets=${(b.residencyBytes / 1048576).toStringAsFixed(1)} gpu=${(s.gpuBytes / 1048576).toStringAsFixed(1)}  snapshot B=${b.snapshotBytes} (peak ${b.snapshotPeakBytes}, budget ${b.snapshotBudget})',
           'rust cpu encode+submit p50=${s.cpuP50Ms.toStringAsFixed(3)} p95=${s.cpuP95Ms.toStringAsFixed(3)} p99=${s.cpuP99Ms.toStringAsFixed(3)}',
           'submit→gpu complete    p50=${s.gpuP50Ms.toStringAsFixed(2)} p95=${s.gpuP95Ms.toStringAsFixed(2)} p99=${s.gpuP99Ms.toStringAsFixed(2)}',
           'rendered=${s.framesRendered} dropped(ring full)=${s.framesDropped}/${f.dropped} presented=${s.framesPresented} stalePresent=${s.presentsWithoutNewFrame}',
           'present lag (frames behind newest submit) p50=${s.presentLagP50} p95=${s.presentLagP95} max=${s.presentLagMax}  raster acquire wait ms p50=${s.acquireWaitP50Ms.toStringAsFixed(2)} p95=${s.acquireWaitP95Ms.toStringAsFixed(2)} max=${s.acquireWaitMaxMs.toStringAsFixed(2)}',
           'resizes=${s.resizes} rust resize ms p50=${s.resizeP50Ms.toStringAsFixed(2)} max=${s.resizeMaxMs.toStringAsFixed(2)}',
         ],
+        if (f.systems.isNotEmpty)
+          'systems µs (last tick) ${f.systems.where((t) => t.micros > 0).map((t) => '${t.system.name}=${t.micros}').join(' ')}',
         if (swift != null)
           'swift copyPixelBuffer=${swift.copyCalls} newFrame=${swift.copyWithNewFrame} noFrame=${swift.copyNoFrame} readySignals=${swift.frameReadySignals} rebinds=${swift.rebinds}',
         'input: pointer=$_pointer events/s=$_pointerEventsThisWindow clicks=$_viewportClicks  keysDown=${_keysDown.toList()} keyEvents=$_keyEventsToViewport  focus=${FocusManager.instance.primaryFocus?.debugLabel ?? "?"}',
@@ -382,7 +388,7 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
     });
     _pointerEventsThisWindow = 0;
     // Also print for scripted captures (benchmarks/).
-    debugPrint('[host] ${_statsText.split('\n').take(12).join(' | ')}');
+    debugPrint('[host] ${_statsText.split('\n').take(17).join(' | ')}');
   }
 
   @override

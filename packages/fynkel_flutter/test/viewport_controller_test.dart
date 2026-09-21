@@ -50,7 +50,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 2);
+    expect(viewportAbiVersion, 3);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -118,6 +118,15 @@ void main() {
     expect(stats.shadowMap, 0);
     expect(stats.transparent, 0);
     expect(stats.lightsDropped, 0);
+    // M3-16: the render call's stages and the GPU memory estimate; the
+    // pass timestamps are read back a few frames late, so after a couple
+    // of renders only the mechanism is checked.
+    expect(stats.prepare.count, stats.framesRendered);
+    expect(stats.encode.count, stats.framesRendered);
+    expect(stats.encode.p50, greaterThan(0));
+    expect(stats.gpuBytes, greaterThan(64 * 48 * 4));
+    expect(stats.gpuTimestamps, isTrue, reason: 'Metal reports stage timestamps on every supported Mac');
+    expect(stats.gpuFrame.count, lessThanOrEqualTo(stats.framesRendered));
     // The demo world spawns nothing: no draws, nothing culled.
     expect(stats.draws, 0);
     expect(stats.culled, 0);

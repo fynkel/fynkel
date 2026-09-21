@@ -159,6 +159,13 @@ pub struct HeadlessReport {
     /// (same config) must produce equal checksums (§5.6 determinism).
     pub checksum: String,
     pub step_time: Timing,
+    /// `World::extract` once per frame, as a host does before it renders
+    /// (M3-16); and the whole frame — `begin_frame`, the ticks with the
+    /// scene's behaviour, the extract.
+    #[serde(default)]
+    pub extract_time: Timing,
+    #[serde(default)]
+    pub frame_time: Timing,
     pub total_ms: f32,
     pub scene_ready: bool,
     /// Present when `HeadlessConfig::cache` was set.
@@ -179,6 +186,21 @@ pub struct HeadlessReport {
     /// the run, in tick order (`step` first).
     #[serde(default)]
     pub systems: Vec<SystemReport>,
+    /// Memory at the end of the run (M3-16, blueprint §15.4).
+    #[serde(default)]
+    pub memory: MemoryReport,
+}
+
+/// Memory at the end of a run (`HeadlessReport::memory`): the Rust heap
+/// in use and its peak (the counting allocator — zeros in a binary that
+/// does not install it), the process's resident set (0 where not
+/// reported) and the CPU bytes of the resident assets.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MemoryReport {
+    pub native_bytes: u64,
+    pub native_peak_bytes: u64,
+    pub resident_bytes: u64,
+    pub residency_bytes: u64,
 }
 
 /// The audio of a run (`HeadlessReport::audio`, M3-11): the null backend
@@ -338,12 +360,17 @@ pub fn run_retaining(
         animation: None,
         systems: Vec::new(),
         step_time: Timing::default(),
+        extract_time: Timing::default(),
+        frame_time: Timing::default(),
+        memory: MemoryReport::default(),
         total_ms: 0.0,
         scene_ready: false,
         scene: None,
         input: None,
     };
     let mut step_us: Vec<u32> = Vec::with_capacity(config.steps as usize);
+    let mut extract_us: Vec<u32> = Vec::new();
+    let mut frame_us: Vec<u32> = Vec::new();
 
     // A cooked scene replaces the demo driver: loaded before tick 0, then
     // the world just ticks.
@@ -490,6 +517,7 @@ pub fn run_retaining(
             }
             None => config.frame_dt,
         };
+        let frame_start = Instant::now();
         let plan = world.begin_frame(frame_dt);
         report.frames += 1;
         if let Some((_, r)) = &recording {
@@ -582,6 +610,13 @@ pub fn run_retaining(
                 })
                 .count() as u64;
         }
+        // The frame's extract, as a host renders it (its records are what
+        // the final checksum covers).
+        let t0 = Instant::now();
+        let extract = world.extract();
+        extract_us.push(t0.elapsed().as_micros() as u32);
+        std::hint::black_box(extract.records.len());
+        frame_us.push(frame_start.elapsed().as_micros() as u32);
         if plan.steps == 0 && config.frame_dt <= 0.0 && recording.is_none() {
             break; // nothing will ever advance
         }
@@ -667,6 +702,14 @@ pub fn run_retaining(
         None => scene.is_ready(),
     };
     report.step_time = timing(&mut step_us);
+    report.extract_time = timing(&mut extract_us);
+    report.frame_time = timing(&mut frame_us);
+    report.memory = MemoryReport {
+        native_bytes: fynkel_core::memory::heap_bytes(),
+        native_peak_bytes: fynkel_core::memory::heap_peak_bytes(),
+        resident_bytes: fynkel_core::memory::resident_bytes(),
+        residency_bytes: retained.as_ref().map(|(a, _)| a.stats().bytes).unwrap_or(0),
+    };
     report.total_ms = start.elapsed().as_secs_f32() * 1e3;
     (report, world, loaded, retained)
 }

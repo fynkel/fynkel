@@ -14,11 +14,16 @@
 mod stats;
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+
+/// The counting allocator (`fynkel_core::memory`, M3-16) behind the
+/// per-second memory line.
+#[global_allocator]
+static ALLOCATOR: fynkel_core::memory::CountingAllocator = fynkel_core::memory::CountingAllocator;
 use winit::window::{Window, WindowId};
 
 use fynkel_assets::{Assets, Residency};
@@ -69,6 +74,7 @@ impl Gpu {
 
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("fynkel standalone device"),
+            required_features: fynkel_render::device_features(&adapter),
             required_limits: fynkel_render::device_limits(&adapter),
             ..Default::default()
         }))
@@ -151,6 +157,7 @@ impl Gpu {
         self.window.pre_present_notify();
         self.queue.present(frame);
         Some(FrameTiming {
+            simulate: Duration::ZERO,
             acquire_wait: t_cpu.duration_since(t_acquire),
             cpu: t_cpu.elapsed(),
             presented: true,
@@ -375,9 +382,10 @@ impl ApplicationHandler for App {
                     .unwrap_or(0.0);
                 self.last_frame = Some(now);
                 let extract = self.simulate(dt);
+                let simulate = now.elapsed();
                 let gpu = self.gpu.as_mut().unwrap();
                 match gpu.render(&extract) {
-                    Some(t) => self.stats.record(t),
+                    Some(t) => self.stats.record(FrameTiming { simulate, ..t }),
                     None => {
                         let size = gpu.window.inner_size();
                         gpu.resize(size.width, size.height);

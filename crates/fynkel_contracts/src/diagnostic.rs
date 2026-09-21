@@ -281,6 +281,11 @@ impl Code {
     /// it as `DiagnosticCode::TOO_MANY_ANCHORS`; the SDK reports the same
     /// under this code when it caps what it sends.
     pub const RUNTIME_TOO_MANY_ANCHORS: Code = Code("FYN-R0012");
+    /// A tick's snapshot exceeded the host's subscription budget (M3-16,
+    /// blueprint C5): the host subscribed more than it meant to pay for.
+    /// The world reports it as `DiagnosticCode::SNAPSHOT_BUDGET`, once per
+    /// crossing; the snapshot is still delivered whole.
+    pub const RUNTIME_SNAPSHOT_BUDGET: Code = Code("FYN-R0013");
 
     // User settings (`FYN-U`, blueprint §19.2d item 12): `settings.json`.
     /// The settings file is not a settings document (wrong `fynkel` kind

@@ -2,6 +2,11 @@
 
 use fynkel_host_headless::{run, HeadlessConfig};
 
+/// The counting allocator (`fynkel_core::memory`, M3-16) behind the
+/// report's memory numbers.
+#[global_allocator]
+static ALLOCATOR: fynkel_core::memory::CountingAllocator = fynkel_core::memory::CountingAllocator;
+
 fn main() {
     let mut cfg = HeadlessConfig::default();
     let mut json = false;

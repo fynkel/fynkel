@@ -9,7 +9,9 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-const viewportAbiVersion = 2;
+import 'percentiles.dart';
+
+const viewportAbiVersion = 3;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -90,6 +92,56 @@ final class ViewportStats extends Struct {
   external int drawsLastFrame;
   @Uint32()
   external int shadowDrawsLastFrame;
+  @Uint32()
+  external int extractP50Us;
+  @Uint32()
+  external int extractP95Us;
+  @Uint32()
+  external int extractP99Us;
+  @Uint32()
+  external int prepareP50Us;
+  @Uint32()
+  external int prepareP95Us;
+  @Uint32()
+  external int prepareP99Us;
+  @Uint32()
+  external int encodeP50Us;
+  @Uint32()
+  external int encodeP95Us;
+  @Uint32()
+  external int encodeP99Us;
+  @Uint32()
+  external int gpuTimestamps;
+  @Uint32()
+  external int gpuFramesTimed;
+  @Uint32()
+  external int gpuFramesUntimed;
+  @Uint32()
+  external int gpuShadowP50Us;
+  @Uint32()
+  external int gpuShadowP95Us;
+  @Uint32()
+  external int gpuShadowP99Us;
+  @Uint32()
+  external int gpuSceneP50Us;
+  @Uint32()
+  external int gpuSceneP95Us;
+  @Uint32()
+  external int gpuSceneP99Us;
+  @Uint32()
+  external int gpuPostP50Us;
+  @Uint32()
+  external int gpuPostP95Us;
+  @Uint32()
+  external int gpuPostP99Us;
+  @Uint32()
+  external int gpuFrameP50Us;
+  @Uint32()
+  external int gpuFrameP95Us;
+  @Uint32()
+  external int gpuFrameP99Us;
+  @Uint64()
+  external int gpuBytes;
 }
 
 final class ViewportCamera extends Struct {
@@ -298,6 +350,16 @@ class ViewportNative {
         culled: s.culledLastFrame,
         draws: s.drawsLastFrame,
         shadowDraws: s.shadowDrawsLastFrame,
+        extract: MsPercentiles(s.extractP50Us / 1000, s.extractP95Us / 1000, s.extractP99Us / 1000, s.framesRendered),
+        prepare: MsPercentiles(s.prepareP50Us / 1000, s.prepareP95Us / 1000, s.prepareP99Us / 1000, s.framesRendered),
+        encode: MsPercentiles(s.encodeP50Us / 1000, s.encodeP95Us / 1000, s.encodeP99Us / 1000, s.framesRendered),
+        gpuTimestamps: s.gpuTimestamps != 0,
+        gpuFramesUntimed: s.gpuFramesUntimed,
+        gpuShadow: MsPercentiles(s.gpuShadowP50Us / 1000, s.gpuShadowP95Us / 1000, s.gpuShadowP99Us / 1000, s.gpuFramesTimed),
+        gpuScene: MsPercentiles(s.gpuSceneP50Us / 1000, s.gpuSceneP95Us / 1000, s.gpuSceneP99Us / 1000, s.gpuFramesTimed),
+        gpuPost: MsPercentiles(s.gpuPostP50Us / 1000, s.gpuPostP95Us / 1000, s.gpuPostP99Us / 1000, s.gpuFramesTimed),
+        gpuFrame: MsPercentiles(s.gpuFrameP50Us / 1000, s.gpuFrameP95Us / 1000, s.gpuFrameP99Us / 1000, s.gpuFramesTimed),
+        gpuBytes: s.gpuBytes,
       );
     } finally {
       calloc.free(out);
@@ -343,6 +405,16 @@ class ViewportStatsSnapshot {
     this.culled = 0,
     this.draws = 0,
     this.shadowDraws = 0,
+    this.extract = MsPercentiles.empty,
+    this.prepare = MsPercentiles.empty,
+    this.encode = MsPercentiles.empty,
+    this.gpuTimestamps = false,
+    this.gpuFramesUntimed = 0,
+    this.gpuShadow = MsPercentiles.empty,
+    this.gpuScene = MsPercentiles.empty,
+    this.gpuPost = MsPercentiles.empty,
+    this.gpuFrame = MsPercentiles.empty,
+    this.gpuBytes = 0,
   });
   final int meshes, placeholders, missing, assetErrors;
   final bool sceneCamera;
@@ -363,4 +435,25 @@ class ViewportStatsSnapshot {
   final int framesRendered, framesDropped, framesPresented, presentsWithoutNewFrame, resizes, instances;
   final int presentLagP50, presentLagP95, presentLagMax;
   final double cpuP50Ms, cpuP95Ms, cpuP99Ms, gpuP50Ms, gpuP95Ms, gpuP99Ms, resizeP50Ms, resizeMaxMs;
+
+  /// The render call's stages over the window (M3-16, blueprint §15.4):
+  /// the world's extract, the renderer's prepare (upload + cull) and
+  /// encode (pass recording); `cpuP*Ms` is encode + submit.
+  final MsPercentiles extract, prepare, encode;
+
+  /// GPU pass times from Metal timestamps ([gpuTimestamps]; a device
+  /// without them reports zeros): the shadow pass, the scene pass, post
+  /// (+ present) and the frame's span from the first pass's begin to the
+  /// last pass's end — the passes overlap on Apple GPUs, so the sum
+  /// exceeds the span. The values trail the draw by three or four frames
+  /// and their `count` is the frames read back this window;
+  /// [gpuFramesUntimed] counts the frames (since the viewport was created)
+  /// whose stamps could not be taken because the GPU was too far behind.
+  final bool gpuTimestamps;
+  final int gpuFramesUntimed;
+  final MsPercentiles gpuShadow, gpuScene, gpuPost, gpuFrame;
+
+  /// The renderer's estimate of the GPU memory it holds: resident meshes
+  /// and textures, the attachments, the shadow map, its buffers.
+  final int gpuBytes;
 }

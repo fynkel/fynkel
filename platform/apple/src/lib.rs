@@ -63,16 +63,34 @@ impl Viewport {
     }
 
     /// Renders `extract` into a free slot; see [`IoSurfaceRing::render_with`].
+    /// `extract_us` is how long the caller spent producing the extract
+    /// (recorded with the frame's other stage times, M3-16).
     pub fn render(&mut self, extract: &Extract) -> i32 {
+        self.render_timed(extract, 0)
+    }
+
+    pub fn render_timed(&mut self, extract: &Extract, extract_us: u32) -> i32 {
         let Viewport { ring, renderer } = self;
+        let timed_before = renderer.stats().gpu_timed;
+        let t0 = std::time::Instant::now();
         renderer.prepare(ring.device(), ring.queue(), extract);
-        ring.render_with(|device, _queue, view| {
+        let prepare_us = t0.elapsed().as_micros() as u32;
+        let slot = ring.render_with(|device, _queue, view| {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("fynkel viewport frame"),
             });
             renderer.draw(&mut encoder, view);
             encoder.finish()
-        })
+        });
+        let s = renderer.stats();
+        let gpu = (s.gpu_timed != timed_before).then_some((
+            s.gpu_shadow_us,
+            s.gpu_scene_us,
+            s.gpu_post_us,
+            s.gpu_frame_us,
+        ));
+        ring.record_stage_times(extract_us, prepare_us, s.encode_us, gpu);
+        slot
     }
 
     pub fn instance_count(&self) -> u32 {
@@ -190,14 +208,50 @@ pub struct FynkelAppleViewportStats {
     pub culled_last_frame: u32,
     pub draws_last_frame: u32,
     pub shadow_draws_last_frame: u32,
+    /// Instrumentation (M3-16, blueprint §15.4), over the window: the
+    /// world's extract, the renderer's prepare (upload + cull) and encode
+    /// (pass recording) on the render call — `cpu_*` above is encode +
+    /// submit —; the GPU's pass times from Metal timestamps when the
+    /// device samples them (`gpu_timestamps`; the values trail the draw by
+    /// three or four frames and count only the frames read back,
+    /// `gpu_frames_timed`): shadow, scene, post (+ present), and the
+    /// frame's span from the first pass's begin to the last pass's end
+    /// (the passes overlap on a tile-based GPU, so the sum exceeds it);
+    /// the renderer's GPU memory estimate.
+    pub extract_p50_us: u32,
+    pub extract_p95_us: u32,
+    pub extract_p99_us: u32,
+    pub prepare_p50_us: u32,
+    pub prepare_p95_us: u32,
+    pub prepare_p99_us: u32,
+    pub encode_p50_us: u32,
+    pub encode_p95_us: u32,
+    pub encode_p99_us: u32,
+    pub gpu_timestamps: u32,
+    pub gpu_frames_timed: u32,
+    pub gpu_frames_untimed: u32,
+    pub gpu_shadow_p50_us: u32,
+    pub gpu_shadow_p95_us: u32,
+    pub gpu_shadow_p99_us: u32,
+    pub gpu_scene_p50_us: u32,
+    pub gpu_scene_p95_us: u32,
+    pub gpu_scene_p99_us: u32,
+    pub gpu_post_p50_us: u32,
+    pub gpu_post_p95_us: u32,
+    pub gpu_post_p99_us: u32,
+    pub gpu_frame_p50_us: u32,
+    pub gpu_frame_p95_us: u32,
+    pub gpu_frame_p99_us: u32,
+    pub gpu_bytes: u64,
 }
 
 /// Returned by `fynkel_apple_viewport_render` when the world pointer is
 /// null or the world is poisoned (distinct from -1 = frame dropped).
 pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 
-/// Viewport ABI version; bumped with `include/fynkel_apple.h`.
-pub const APPLE_ABI_VERSION: u32 = 2;
+/// Viewport ABI version; bumped with `include/fynkel_apple.h` (3: the
+/// M3-16 instrumentation fields of `FynkelAppleViewportStats`).
+pub const APPLE_ABI_VERSION: u32 = 3;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -306,8 +360,10 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render(
     if let Some(assets) = w.assets() {
         v.renderer.set_assets(Some(assets.clone()));
     }
+    let t0 = std::time::Instant::now();
     let extract = w.core().extract();
-    v.render(&extract)
+    let extract_us = t0.elapsed().as_micros() as u32;
+    v.render_timed(&extract, extract_us)
 }
 
 /// # Safety
@@ -502,5 +558,30 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
         culled_last_frame: v.frame_stats().culled,
         draws_last_frame: v.frame_stats().draws,
         shadow_draws_last_frame: v.frame_stats().shadow_draws,
+        extract_p50_us: pct(&mut s.extract_us, 0.50),
+        extract_p95_us: pct(&mut s.extract_us, 0.95),
+        extract_p99_us: pct(&mut s.extract_us, 0.99),
+        prepare_p50_us: pct(&mut s.prepare_us, 0.50),
+        prepare_p95_us: pct(&mut s.prepare_us, 0.95),
+        prepare_p99_us: pct(&mut s.prepare_us, 0.99),
+        encode_p50_us: pct(&mut s.encode_us, 0.50),
+        encode_p95_us: pct(&mut s.encode_us, 0.95),
+        encode_p99_us: pct(&mut s.encode_us, 0.99),
+        gpu_timestamps: v.frame_stats().gpu_timestamps as u32,
+        gpu_frames_timed: s.gpu_shadow_us.len() as u32,
+        gpu_frames_untimed: v.frame_stats().gpu_untimed,
+        gpu_shadow_p50_us: pct(&mut s.gpu_shadow_us, 0.50),
+        gpu_shadow_p95_us: pct(&mut s.gpu_shadow_us, 0.95),
+        gpu_shadow_p99_us: pct(&mut s.gpu_shadow_us, 0.99),
+        gpu_scene_p50_us: pct(&mut s.gpu_scene_us, 0.50),
+        gpu_scene_p95_us: pct(&mut s.gpu_scene_us, 0.95),
+        gpu_scene_p99_us: pct(&mut s.gpu_scene_us, 0.99),
+        gpu_post_p50_us: pct(&mut s.gpu_post_us, 0.50),
+        gpu_post_p95_us: pct(&mut s.gpu_post_us, 0.95),
+        gpu_post_p99_us: pct(&mut s.gpu_post_us, 0.99),
+        gpu_frame_p50_us: pct(&mut s.gpu_frame_us, 0.50),
+        gpu_frame_p95_us: pct(&mut s.gpu_frame_us, 0.95),
+        gpu_frame_p99_us: pct(&mut s.gpu_frame_us, 0.99),
+        gpu_bytes: v.frame_stats().gpu_bytes,
     };
 }

@@ -351,6 +351,24 @@ FynkelStatus fynkel_world_stats(
   ffi.Pointer<FynkelWorldStats> out_stats,
 ) => FynkelStatus.fromValue(_fynkel_world_stats(world, out_stats));
 
+/// The subscription budget (M3-16, blueprint C5): a ceiling in bytes on a
+/// tick's snapshot. The first step whose snapshot exceeds it reports
+/// `snapshot_budget` (diagnostic code 20, FYN-R0013) once — again only after
+/// the snapshot came back under; the snapshot is still delivered whole.
+/// 0 removes the ceiling.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<FynkelWorld>, ffi.Uint32)>(
+  symbol: 'fynkel_world_set_snapshot_budget',
+)
+external int _fynkel_world_set_snapshot_budget(
+  ffi.Pointer<FynkelWorld> world,
+  int bytes,
+);
+
+FynkelStatus fynkel_world_set_snapshot_budget(
+  ffi.Pointer<FynkelWorld> world,
+  int bytes,
+) => FynkelStatus.fromValue(_fynkel_world_set_snapshot_budget(world, bytes));
+
 @ffi.Native<ffi.Uint64 Function(ffi.Pointer<FynkelWorld>)>()
 external int fynkel_world_tick(ffi.Pointer<FynkelWorld> world);
 
@@ -1093,6 +1111,33 @@ final class FynkelWorldStats extends ffi.Struct {
 
   @ffi.Uint32()
   external int poisoned;
+
+  /// the last step's snapshot
+  @ffi.Uint64()
+  external int snapshot_bytes;
+
+  /// the largest snapshot so far
+  @ffi.Uint64()
+  external int snapshot_peak_bytes;
+
+  /// fynkel_world_set_snapshot_budget; 0 = none
+  @ffi.Uint32()
+  external int snapshot_budget;
+
+  @ffi.Uint32()
+  external int reserved;
+
+  /// Rust heap in use, the whole engine's
+  @ffi.Uint64()
+  external int native_bytes;
+
+  /// process resident set; 0 where not reported
+  @ffi.Uint64()
+  external int resident_bytes;
+
+  /// CPU bytes of the resident assets
+  @ffi.Uint64()
+  external int residency_bytes;
 }
 
 final class FynkelProjectionInfo extends ffi.Struct {

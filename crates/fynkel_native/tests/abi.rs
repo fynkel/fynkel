@@ -2120,3 +2120,98 @@ fn audio_commands_events_and_queries() {
         Status::InvalidArgument
     );
 }
+
+/// M3-16: memory in the stats and the subscription budget (C5) — one
+/// `SNAPSHOT_BUDGET` per crossing, the snapshot still whole.
+#[test]
+fn memory_stats_and_the_snapshot_budget() {
+    let h = Host::new();
+    let cmds: Vec<SpawnCommand> = (1..=8).map(|i| spawn(i, i as f32, None, "e")).collect();
+    let mut w = Writer::begin(Vec::new(), BufferKind::Commands);
+    for c in &cmds {
+        w.command(1, c);
+    }
+    h.submit(Lane::Simulation, &w.finish());
+    h.step();
+    let entities = h.spawned();
+    assert_eq!(entities.len(), 8);
+    let handles: Vec<u64> = entities.iter().map(|e| e.to_bits()).collect();
+
+    let mut stats = FynkelWorldStats::default();
+    assert_eq!(unsafe { fynkel_world_stats(h.w, &mut stats) }, Status::Ok);
+    assert!(
+        stats.native_bytes > 0,
+        "the counting allocator reports the heap"
+    );
+    assert!(
+        stats.resident_bytes > 0,
+        "the resident set is reported on Apple"
+    );
+    assert_eq!((stats.snapshot_budget, stats.residency_bytes), (0, 0));
+    let empty = stats.snapshot_bytes;
+    assert_eq!(stats.snapshot_peak_bytes, empty);
+
+    // Two subscribed entities fit a budget of three records; eight do not.
+    assert_eq!(
+        unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 2, 1) },
+        Status::Ok
+    );
+    h.step();
+    unsafe { fynkel_world_stats(h.w, &mut stats) };
+    let two = stats.snapshot_bytes;
+    assert_eq!(h.snapshot().len(), 2);
+    assert!(two > empty && stats.snapshot_peak_bytes == two);
+    let budget = empty as u32 + 3 * SnapshotTransformRecord::SIZE as u32;
+    assert_eq!(
+        unsafe { fynkel_world_set_snapshot_budget(h.w, budget) },
+        Status::Ok
+    );
+    h.step();
+    assert!(
+        h.diagnostics().is_empty(),
+        "two records are under the budget"
+    );
+
+    assert_eq!(
+        unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 8, 1) },
+        Status::Ok
+    );
+    h.step();
+    assert_eq!(h.snapshot().len(), 8, "the snapshot is delivered whole");
+    let d = h.diagnostics();
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].code, DiagnosticCode::SNAPSHOT_BUDGET.0);
+    assert!(d[0].message.starts_with("FYN-R0013"), "{}", d[0].message);
+    h.step();
+    assert!(h.diagnostics().is_empty(), "reported once per crossing");
+    unsafe { fynkel_world_stats(h.w, &mut stats) };
+    assert_eq!(stats.snapshot_budget, budget);
+    assert!(
+        stats.snapshot_bytes > budget as u64 && stats.snapshot_peak_bytes == stats.snapshot_bytes
+    );
+
+    // Back under, then over again: a second report.
+    assert_eq!(
+        unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 8, 0) },
+        Status::Ok
+    );
+    h.step();
+    assert!(h.diagnostics().is_empty());
+    assert_eq!(
+        unsafe { fynkel_world_subscribe(h.w, 1, handles.as_ptr(), 8, 1) },
+        Status::Ok
+    );
+    h.step();
+    assert_eq!(h.diagnostics().len(), 1);
+    // Removing the ceiling silences it.
+    assert_eq!(
+        unsafe { fynkel_world_set_snapshot_budget(h.w, 0) },
+        Status::Ok
+    );
+    h.step();
+    assert!(h.diagnostics().is_empty());
+    assert_eq!(
+        unsafe { fynkel_world_set_snapshot_budget(ptr::null_mut(), 1) },
+        Status::InvalidArgument
+    );
+}

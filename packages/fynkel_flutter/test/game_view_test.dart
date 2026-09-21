@@ -83,6 +83,25 @@ void main() {
     expect(last!.viewport!.framesRendered, greaterThan(0));
     expect(last!.platform!.copyCalls, 1);
     expect(last!.physicalWidth, 200);
+    // M3-16: the frame's split, the engine's systems, Flutter's timings,
+    // the GPU stages and memory.
+    final s = last!;
+    expect(s.behaviours.count, s.simulate.count);
+    expect(s.nativeStep.count, s.simulate.count);
+    expect(s.nativeStep.p50, greaterThan(0));
+    expect(s.nativeStep.p95, lessThanOrEqualTo(s.simulate.p95));
+    expect(s.systems, isNotEmpty);
+    expect(s.systems.first.system, SystemKind.step);
+    expect(s.totalWork.p95, greaterThanOrEqualTo(s.simulate.p95));
+    expect(s.viewport!.extract.count, greaterThan(0));
+    expect(s.viewport!.prepare.count, greaterThan(0));
+    expect(s.viewport!.gpuBytes, greaterThan(0));
+    expect(s.world.nativeBytes, greaterThan(0));
+    expect(s.world.residentBytes, greaterThan(0));
+    // The widget tester renders no real Flutter frames, so its timings are
+    // empty; the GPU stamps trail the draw and may not have landed yet.
+    expect(s.flutterBuild.count, greaterThanOrEqualTo(0));
+    expect(s.viewport!.gpuFrame.count, lessThanOrEqualTo(s.viewport!.framesRendered));
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();

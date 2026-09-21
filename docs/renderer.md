@@ -324,6 +324,23 @@ the fixture's Rig scene at tick 1 matches the same extract with the skin
 dropped (bind pose), and after 30 ticks the bent column has moved
 hundreds of pixels to the left while the unposed extract has not.
 
+## GPU timestamps and the memory estimate (M3-16)
+
+With `Features::TIMESTAMP_QUERY` (`device_features(adapter)` asks for it;
+Metal has it everywhere Fynkel runs) the renderer writes a timestamp
+pair at the boundaries of the shadow, scene, post and present passes
+into one of two alternating query sets, resolves the **previous** frame's
+set at the start of the next `draw` (Apple's passes overlap, so a
+same-frame resolve reads unwritten end stamps) and maps the copy without
+waiting; `FrameStats::gpu_shadow_us`/`gpu_scene_us`/`gpu_post_us` are the
+passes and `gpu_frame_us` the span `max(end) − min(begin)`, three or four
+frames late, with `gpu_timed`/`gpu_untimed` as the read-back counters.
+`prepare_us`/`encode_us` time the two CPU halves, and `gpu_bytes` is the
+estimate of what the renderer holds on the GPU (mesh buffers, textures'
+mip bytes, the cube map, attachments per texel × samples, the shadow
+map, its own buffers). [instrumentation.md](instrumentation.md) has the
+full table.
+
 ## Pipelines and caches — the variant cap
 
 Exactly **fourteen** render pipelines exist, all created in `new`

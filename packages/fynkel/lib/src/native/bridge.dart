@@ -76,10 +76,25 @@ class BridgeStats {
     required this.ffiCalls,
     required this.dartCopies,
     required this.dartBytesCopied,
+    this.snapshotBytes = 0,
+    this.snapshotPeakBytes = 0,
+    this.snapshotBudget = 0,
+    this.nativeBytes = 0,
+    this.residentBytes = 0,
+    this.residencyBytes = 0,
   });
   final int tick, frame, submitCalls, stepCalls, queryCalls, bytesIn, bytesOut;
   final int liveEntities, subscriptions, stagedCommands;
   final bool poisoned;
+
+  /// The last tick's snapshot in bytes, the largest so far, and the
+  /// host's ceiling (`World.snapshotBudget`; 0 = none) — blueprint C5.
+  final int snapshotBytes, snapshotPeakBytes, snapshotBudget;
+
+  /// The engine's Rust heap in use, the process's resident set (0 where
+  /// the platform does not report it) and the CPU bytes of the resident
+  /// assets (M3-16, §15.4).
+  final int nativeBytes, residentBytes, residencyBytes;
 
   /// Every FFI call made through this bridge (all families).
   final int ffiCalls;
@@ -506,7 +521,21 @@ class NativeWorld {
       ffiCalls: ffiCalls,
       dartCopies: dartCopies,
       dartBytesCopied: dartBytesCopied,
+      snapshotBytes: s.snapshot_bytes,
+      snapshotPeakBytes: s.snapshot_peak_bytes,
+      snapshotBudget: s.snapshot_budget,
+      nativeBytes: s.native_bytes,
+      residentBytes: s.resident_bytes,
+      residencyBytes: s.residency_bytes,
     );
+  }
+
+  /// The subscription budget (C5): a ceiling in bytes on a tick's
+  /// snapshot; the world reports `snapshot_budget` once per crossing.
+  /// 0 removes it.
+  void setSnapshotBudget(int bytes) {
+    ffiCalls++;
+    _check(fynkel_world_set_snapshot_budget(_w, bytes), 'set_snapshot_budget');
   }
 
   void _check(FynkelStatus s, String op) {

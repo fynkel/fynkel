@@ -98,6 +98,11 @@ impl DiagnosticCode {
     /// The output device could not be opened (`fynkel_world_audio_open`);
     /// the world keeps playing on the null backend, silently (M3-11).
     pub const AUDIO_DEVICE: DiagnosticCode = DiagnosticCode(19);
+    /// A tick's snapshot exceeded the host's subscription budget
+    /// (`fynkel_world_set_snapshot_budget`, blueprint C5); reported once
+    /// per crossing, informational — the snapshot is still published whole
+    /// (M3-16).
+    pub const SNAPSHOT_BUDGET: DiagnosticCode = DiagnosticCode(20);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -120,6 +125,7 @@ impl DiagnosticCode {
             17 => "skin_unavailable",
             18 => "sound_unavailable",
             19 => "audio_device",
+            20 => "snapshot_budget",
             _ => "unknown",
         }
     }

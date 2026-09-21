@@ -313,7 +313,13 @@ fn scene_json(loaded: &LoadedScene, scene: &CookedScene) -> Value {
     })
 }
 
-fn finish(w: &mut FynkelWorld, out: Outcome) -> Status {
+/// Writes the report with the call's wall time (`timing.ms`, M3-16: the
+/// load/startup time of blueprint §15.4) and refreshes the diagnostics.
+fn finish(w: &mut FynkelWorld, mut out: Outcome, started: std::time::Instant) -> Status {
+    if let Some(o) = out.report.as_object_mut() {
+        let ms = started.elapsed().as_secs_f64() * 1e3;
+        o.insert("timing".into(), json!({ "ms": (ms * 1e3).round() / 1e3 }));
+    }
     w.load_report = serde_json::to_vec(&out.report).unwrap_or_default();
     w.stats.bytes_out += w.load_report.len() as u64;
     w.rebuild_diagnostics();
@@ -468,8 +474,9 @@ pub unsafe extern "C" fn fynkel_world_instantiate(
     };
     let parent = (d.parent != 0).then(|| Entity::from_bits(d.parent));
     guarded(world, move |w| {
+        let started = std::time::Instant::now();
         let out = instantiate_prefab(w, id, name.as_deref(), transform, parent);
-        finish(w, out)
+        finish(w, out, started)
     })
 }
 
@@ -489,8 +496,9 @@ pub unsafe extern "C" fn fynkel_world_load_project(
     };
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
+        let started = std::time::Instant::now();
         let out = load(w, &dir, None, LoadMode::Replace);
-        finish(w, out)
+        finish(w, out, started)
     })
 }
 
@@ -518,8 +526,9 @@ pub unsafe extern "C" fn fynkel_world_load_scene(
     };
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
+        let started = std::time::Instant::now();
         let out = load(w, &dir, Some(id), LoadMode::Replace);
-        finish(w, out)
+        finish(w, out, started)
     })
 }
 
@@ -556,8 +565,9 @@ pub unsafe extern "C" fn fynkel_world_load_scene_with(
     };
     let dir = PathBuf::from(dir);
     guarded(world, move |w| {
+        let started = std::time::Instant::now();
         let out = load(w, &dir, Some(id), mode);
-        finish(w, out)
+        finish(w, out, started)
     })
 }
 
@@ -584,8 +594,9 @@ pub unsafe extern "C" fn fynkel_world_unload_scene(
         return Status::InvalidArgument;
     };
     guarded(world, move |w| {
+        let started = std::time::Instant::now();
         let out = unload(w, id);
-        finish(w, out)
+        finish(w, out, started)
     })
 }
 
@@ -613,8 +624,9 @@ pub unsafe extern "C" fn fynkel_world_bind_actions(
         return Status::InvalidArgument;
     };
     guarded(world, move |w| {
+        let started = std::time::Instant::now();
         let out = bind_actions(w, rebinds);
-        finish(w, out)
+        finish(w, out, started)
     })
 }
 

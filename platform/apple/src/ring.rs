@@ -118,6 +118,17 @@ pub struct RingStats {
     pub present_lag: Vec<u32>,
     /// Per present: time spent waiting for an in-flight frame in `acquire_presented`.
     pub acquire_wait_us: Vec<u32>,
+    /// Per rendered frame (M3-16): the world's extract, the renderer's
+    /// prepare and encode.
+    pub extract_us: Vec<u32>,
+    pub prepare_us: Vec<u32>,
+    pub encode_us: Vec<u32>,
+    /// Per frame read back from the GPU's timestamps: shadow, scene, post
+    /// (+ present), the frame's span.
+    pub gpu_shadow_us: Vec<u32>,
+    pub gpu_scene_us: Vec<u32>,
+    pub gpu_post_us: Vec<u32>,
+    pub gpu_frame_us: Vec<u32>,
 }
 
 pub type FrameReadyFn = unsafe extern "C" fn(*mut c_void);
@@ -201,6 +212,7 @@ impl IoSurfaceRing {
         let (device, queue) =
             fynkel_render::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("fynkel apple viewport device"),
+                required_features: fynkel_render::device_features(&adapter),
                 required_limits: fynkel_render::device_limits(&adapter),
                 ..Default::default()
             }))
@@ -474,6 +486,27 @@ impl IoSurfaceRing {
 
     pub fn take_stats(&self) -> RingStats {
         std::mem::take(&mut *self.stats.lock().unwrap())
+    }
+
+    /// Records a rendered frame's stage times (M3-16); `gpu` is the pass
+    /// times of a frame whose timestamps came back on this call, if any.
+    pub fn record_stage_times(
+        &self,
+        extract_us: u32,
+        prepare_us: u32,
+        encode_us: u32,
+        gpu: Option<(u32, u32, u32, u32)>,
+    ) {
+        let mut st = self.stats.lock().unwrap();
+        st.extract_us.push(extract_us);
+        st.prepare_us.push(prepare_us);
+        st.encode_us.push(encode_us);
+        if let Some((shadow, scene, post, frame)) = gpu {
+            st.gpu_shadow_us.push(shadow);
+            st.gpu_scene_us.push(scene);
+            st.gpu_post_us.push(post);
+            st.gpu_frame_us.push(frame);
+        }
     }
 
     /// Blocks until all submitted GPU work has completed (tests, teardown).

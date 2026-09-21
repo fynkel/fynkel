@@ -234,6 +234,16 @@ class Hud extends StatelessWidget {
               '${v.shadowMap == 0 ? 'no shadow' : '${v.shadowCasters} casters in ${v.shadowDraws} draws into a ${v.shadowMap}² shadow map'}',
           'render     ${v.renderWidth}x${v.renderHeight} at msaa ${v.msaa}  '
               'gpu ${v.gpuP50Ms.toStringAsFixed(2)} ms  cpu ${v.cpuP50Ms.toStringAsFixed(2)} ms',
+          // M3-16: the frame's split, the GPU's pass times, memory.
+          'work p95   behaviours ${s.behaviours.p95.toStringAsFixed(2)}  native ${s.nativeStep.p95.toStringAsFixed(2)}  '
+              'extract ${v.extract.p95.toStringAsFixed(2)}  prepare ${v.prepare.p95.toStringAsFixed(2)}  '
+              'encode ${v.encode.p95.toStringAsFixed(2)}  total ${s.totalWork.p95.toStringAsFixed(2)} ms',
+          'gpu p95    frame ${v.gpuFrame.p95.toStringAsFixed(2)} ms  (shadow ${v.gpuShadow.p95.toStringAsFixed(2)}, '
+              'scene ${v.gpuScene.p95.toStringAsFixed(2)}, post ${v.gpuPost.p95.toStringAsFixed(2)})  '
+              '${(v.gpuBytes / 1048576).toStringAsFixed(0)} MB',
+          'memory     native ${(s.world.nativeBytes / 1048576).toStringAsFixed(1)} MB  '
+              'resident ${(s.world.residentBytes / 1048576).toStringAsFixed(0)} MB  '
+              'assets ${(s.world.residencyBytes / 1048576).toStringAsFixed(1)} MB',
         ],
       ],
       for (final d in game.report.diagnostics) '$d',
