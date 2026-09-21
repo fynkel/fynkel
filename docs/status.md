@@ -686,12 +686,18 @@ in its own app, play it, or hear it. That is M3, in this order:
    skinned render path (14 pipelines), `GameObject.animation` in Dart,
    the reference game's rigged character from `tools/character.py`
    posed from the controller, the showcase's runner; `docs/animation.md`.
-15. **Audio** (11, when the game wants a sound) next, then **glTF prefab
-   instancing** (19a, added 2026-09-21: a scene's `prefab.asset` and
-   `World.instantiate` accept a source's `prefab` sub-asset, so a
-   downloaded rig drops into a scene without re-authoring its hierarchy
-   — a converted Mixamo X Bot went through the M3-19 path on 2026-09-21
-   with only that step done by hand), then the reference game's
-   menus/settings/results (15), instrumentation (16), public readiness
-   (17), the gate report (18) — measured with both captures at every
-   step.
+15. **The character pipeline and animation depth** next (the user's
+   call on 2026-09-21 after a Mixamo X Bot went through M3-19 — the
+   core held, the feature was shallow): **19a** glTF prefab instancing
+   (a scene's `prefab.asset` and `World.instantiate` accept a source's
+   `prefab` sub-asset), **19b** FBX import over `ufbx` and the rig
+   document (`hero.rig.json`: one skeleton, clips from other files
+   matched by bone name, `anim/<name>` — no Blender), **19c** blend
+   spaces by parameter with phase sync, layers with bone masks, clip
+   markers as events, opt-in root motion. From 19a on an item passes
+   only on content its implementer did not make (Khronos sample rigs
+   committed under CC-BY, a Mixamo download checked locally — blueprint
+   scope rule). Then **audio** (11, footsteps from 19c's markers), the
+   reference game's menus/settings/results (15), instrumentation (16),
+   public readiness (17), the gate report (18) — measured with both
+   captures at every step.
