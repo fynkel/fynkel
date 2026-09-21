@@ -297,6 +297,9 @@ pub struct AssetDatabase {
     by_id: HashMap<Uuid, usize>,
     /// Sub-asset uuid → (entry, sub id).
     subs: HashMap<Uuid, (usize, String)>,
+    /// Files a duplicate id kept out (`FYN-A0003`), re-read by
+    /// [`AssetDatabase::update`] in case their owner is gone.
+    rejected: Vec<PathBuf>,
 }
 
 impl AssetDatabase {
@@ -321,99 +324,201 @@ impl AssetDatabase {
             return (db, diags);
         }
         files.sort();
-
         for path in &files {
-            let shown = path.display().to_string();
-            let rel = relative(root, path);
-            if let Some(source) = source_path(path) {
-                if !source.is_file() {
-                    diags.push(
-                        Diagnostic::error(
-                            Code::ASSET_ORPHANED_SIDECAR,
-                            format!(
-                                "sidecar has no source file ({} is missing)",
-                                relative(root, &source)
-                            ),
-                        )
-                        .with_document(shown)
-                        .with_suggestion(
-                            "move the sidecar with its file, or delete it if the file is gone",
-                        ),
-                    );
-                    continue;
-                }
-                let meta = match Document::read(path, Some(DocumentKind::Meta)) {
-                    Ok(doc) => Meta::from_document(doc),
-                    Err(d) => {
-                        diags.extend(d);
-                        continue;
-                    }
-                };
-                let own = meta.validate(schemas);
-                let ok = !fynkel_contracts::has_errors(&own);
-                diags.extend(own);
-                if !ok {
-                    continue;
-                }
-                let entry = AssetEntry {
-                    id: meta.id(),
-                    path: relative(root, &source),
-                    name: meta.document.envelope.name.clone(),
-                    kind: AssetKind::Source {
-                        importer: meta.importer.clone(),
-                        importer_version: meta.importer_version,
-                    },
-                    sub_assets: meta.sub_assets.iter().cloned().collect(),
-                };
-                db.insert(
-                    entry,
-                    &meta.sub_assets,
-                    &shown,
-                    &meta.document.root,
-                    &mut diags,
-                );
-            } else if let Some(kind) = DocumentKind::from_path(path) {
-                let doc = match Document::read(path, Some(kind)) {
-                    Ok(doc) => doc,
-                    Err(d) => {
-                        diags.extend(d);
-                        continue;
-                    }
-                };
-                // A rig exposes the skeleton's hierarchy and its named
-                // clips as its own sub-assets (M3-19b), with ids derived
-                // from the document id, so they resolve like a source's.
-                let subs = if kind == DocumentKind::Rig {
-                    crate::rig::Rig::from_document(doc.clone()).sub_assets()
-                } else {
-                    Vec::new()
-                };
-                let entry = AssetEntry {
-                    id: doc.envelope.id,
-                    path: rel,
-                    name: doc.envelope.name.clone(),
-                    kind: AssetKind::Document(kind),
-                    sub_assets: subs.iter().cloned().collect(),
-                };
-                db.insert(entry, &subs, &shown, &doc.root, &mut diags);
-            } else if !sidecar_path(path).is_file() {
-                diags.push(
-                    Diagnostic::error(
-                        Code::ASSET_MISSING_SIDECAR,
-                        "source file has no .meta.json sidecar",
-                    )
-                    .with_document(shown)
-                    .with_suggestion(format!(
-                        "run `fynkel asset init {rel}` to give it an id, or move it out of assets/"
-                    )),
-                );
-            }
+            db.scan_file(path, schemas, &mut diags);
         }
         (db, diags)
     }
 
+    /// Re-reads the files at `paths` (absolute, or relative to the root; a
+    /// source or its sidecar names the pair, a directory names everything
+    /// under it, a path that is gone drops what it held) and replaces their
+    /// entries, leaving every other entry untouched — what a file watcher's
+    /// report needs instead of a full [`AssetDatabase::scan`] (which reads
+    /// every file: ~50 ms for 2 000 assets, against well under a
+    /// millisecond here). Files a duplicate id kept out earlier are re-read
+    /// too, so deleting the first owner of an id admits the second. Returns
+    /// the diagnostics of the re-read files only; a caller that keeps the
+    /// scan's diagnostics drops the ones anchored at these paths (the file,
+    /// its sidecar, its source) first. One difference from a full scan: a
+    /// duplicate id is judged against the entries already held, so the file
+    /// that arrives later loses whatever its path sorts as.
+    pub fn update(&mut self, paths: &[PathBuf], schemas: &SchemaSet) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        let root = self
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.root.clone());
+        let mut files: Vec<PathBuf> = Vec::new();
+        let mut drop_paths: Vec<String> = Vec::new();
+        let mut drop_prefixes: Vec<String> = Vec::new();
+        for p in paths {
+            let abs = if p.is_absolute() {
+                p.clone()
+            } else {
+                root.join(p)
+            };
+            let abs = canonical_or_parent(&abs);
+            let Ok(rel) = abs.strip_prefix(&root) else {
+                continue; // outside the asset root
+            };
+            let rel = relative(&root, &root.join(rel));
+            if rel.is_empty() {
+                continue;
+            }
+            if abs.is_dir() {
+                drop_prefixes.push(format!("{rel}/"));
+                let _ = collect(&abs, &mut files);
+                continue;
+            }
+            let (source, sidecar) = match source_path(&abs) {
+                Some(source) => (source, abs.clone()),
+                None => (abs.clone(), sidecar_path(&abs)),
+            };
+            drop_paths.push(relative(&root, &source));
+            if !abs.exists() {
+                // A directory that is gone reports as a path with no file.
+                drop_prefixes.push(format!("{rel}/"));
+            }
+            if source.is_file() {
+                files.push(source);
+            }
+            if sidecar.is_file() {
+                files.push(sidecar);
+            }
+        }
+        files.extend(std::mem::take(&mut self.rejected));
+        files.sort();
+        files.dedup();
+        for f in &files {
+            drop_paths.push(relative(
+                &root,
+                &source_path(f).unwrap_or_else(|| f.clone()),
+            ));
+        }
+        self.entries.retain(|e| {
+            !drop_paths.contains(&e.path) && !drop_prefixes.iter().any(|p| e.path.starts_with(p))
+        });
+        self.reindex();
+        // `scan_file` relates paths to `self.root`; give it the canonical one
+        // the files were resolved against.
+        let kept_root = std::mem::replace(&mut self.root, root);
+        for f in &files {
+            self.scan_file(f, schemas, &mut diags);
+        }
+        self.root = kept_root;
+        self.entries.sort_by(|a, b| a.path.cmp(&b.path));
+        self.reindex();
+        diags
+    }
+
+    fn reindex(&mut self) {
+        self.by_id.clear();
+        self.subs.clear();
+        for (i, e) in self.entries.iter().enumerate() {
+            self.by_id.insert(e.id, i);
+            for (sub, id) in &e.sub_assets {
+                self.subs.insert(*id, (i, sub.clone()));
+            }
+        }
+    }
+
+    /// Reads one file of the tree: a sidecar makes its source's entry, a
+    /// document its own; a source without a sidecar is reported.
+    fn scan_file(&mut self, path: &Path, schemas: &SchemaSet, diags: &mut Vec<Diagnostic>) {
+        let root = self.root.clone();
+        let root = root.as_path();
+        let shown = path.display().to_string();
+        let rel = relative(root, path);
+        if let Some(source) = source_path(path) {
+            if !source.is_file() {
+                diags.push(
+                    Diagnostic::error(
+                        Code::ASSET_ORPHANED_SIDECAR,
+                        format!(
+                            "sidecar has no source file ({} is missing)",
+                            relative(root, &source)
+                        ),
+                    )
+                    .with_document(shown)
+                    .with_suggestion(
+                        "move the sidecar with its file, or delete it if the file is gone",
+                    ),
+                );
+                return;
+            }
+            let meta = match Document::read(path, Some(DocumentKind::Meta)) {
+                Ok(doc) => Meta::from_document(doc),
+                Err(d) => {
+                    diags.extend(d);
+                    return;
+                }
+            };
+            let own = meta.validate(schemas);
+            let ok = !fynkel_contracts::has_errors(&own);
+            diags.extend(own);
+            if !ok {
+                return;
+            }
+            let entry = AssetEntry {
+                id: meta.id(),
+                path: relative(root, &source),
+                name: meta.document.envelope.name.clone(),
+                kind: AssetKind::Source {
+                    importer: meta.importer.clone(),
+                    importer_version: meta.importer_version,
+                },
+                sub_assets: meta.sub_assets.iter().cloned().collect(),
+            };
+            self.insert(
+                path,
+                entry,
+                &meta.sub_assets,
+                &shown,
+                &meta.document.root,
+                diags,
+            );
+        } else if let Some(kind) = DocumentKind::from_path(path) {
+            let doc = match Document::read(path, Some(kind)) {
+                Ok(doc) => doc,
+                Err(d) => {
+                    diags.extend(d);
+                    return;
+                }
+            };
+            // A rig exposes the skeleton's hierarchy and its named
+            // clips as its own sub-assets (M3-19b), with ids derived
+            // from the document id, so they resolve like a source's.
+            let subs = if kind == DocumentKind::Rig {
+                crate::rig::Rig::from_document(doc.clone()).sub_assets()
+            } else {
+                Vec::new()
+            };
+            let entry = AssetEntry {
+                id: doc.envelope.id,
+                path: rel,
+                name: doc.envelope.name.clone(),
+                kind: AssetKind::Document(kind),
+                sub_assets: subs.iter().cloned().collect(),
+            };
+            self.insert(path, entry, &subs, &shown, &doc.root, diags);
+        } else if !sidecar_path(path).is_file() {
+            diags.push(
+                Diagnostic::error(
+                    Code::ASSET_MISSING_SIDECAR,
+                    "source file has no .meta.json sidecar",
+                )
+                .with_document(shown)
+                .with_suggestion(format!(
+                    "run `fynkel asset init {rel}` to give it an id, or move it out of assets/"
+                )),
+            );
+        }
+    }
+
     fn insert(
         &mut self,
+        file: &Path,
         entry: AssetEntry,
         subs: &[(String, Uuid)],
         shown: &str,
@@ -446,6 +551,7 @@ impl AssetDatabase {
                     )
                     .with_document(shown.to_string()),
                 );
+                self.rejected.push(file.to_path_buf());
                 return;
             }
         }
@@ -647,6 +753,19 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The canonical path of `path`, or — for a path that is gone — its
+/// canonical parent joined with its name, so a deleted file under a
+/// symlinked root (macOS's `/tmp`) still compares with the root.
+fn canonical_or_parent(path: &Path) -> PathBuf {
+    if let Ok(c) = path.canonicalize() {
+        return c;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => canonical_or_parent(parent).join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
 fn relative(root: &Path, path: &Path) -> String {
     let rel = path.strip_prefix(root).unwrap_or(path);
     rel.components()
@@ -675,7 +794,17 @@ pub fn entry_json(e: &AssetEntry) -> serde_json::Value {
         },
     });
     match &e.kind {
-        AssetKind::Document(k) => v["document"] = k.name().into(),
+        AssetKind::Document(k) => {
+            v["document"] = k.name().into();
+            if !e.sub_assets.is_empty() {
+                v["subAssets"] = e
+                    .sub_assets
+                    .iter()
+                    .map(|(k, id)| (k.clone(), serde_json::Value::String(id.to_string())))
+                    .collect::<serde_json::Map<_, _>>()
+                    .into();
+            }
+        }
         AssetKind::Source {
             importer,
             importer_version,

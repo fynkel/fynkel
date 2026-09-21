@@ -1028,6 +1028,13 @@ impl Editor {
         &self.document
     }
 
+    /// The document's file moved (the session renamed or moved the asset):
+    /// `save(None)` writes there from now on and diagnostics name it.
+    /// Nothing else changes — not the revision, not the history.
+    pub fn relocate(&mut self, path: &Path) {
+        self.document.path = Some(path.display().to_string());
+    }
+
     pub fn into_document(self) -> Document {
         self.document
     }

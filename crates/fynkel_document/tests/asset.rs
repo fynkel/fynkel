@@ -284,3 +284,136 @@ fn fresh_sidecars_validate_and_name_the_importer() {
     assert!(meta.sub_assets.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `(id, path, kind, sub-assets)` per entry, sorted by path.
+type Snapshot = Vec<(String, String, String, Vec<(String, String)>)>;
+
+/// The entries and the resolution of every id, as a full scan sees them.
+fn snapshot(db: &AssetDatabase) -> Snapshot {
+    db.entries()
+        .iter()
+        .map(|e| {
+            (
+                e.path.clone(),
+                e.id.to_string(),
+                e.name.clone(),
+                e.sub_assets
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.to_string()))
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn update_re_reads_only_the_named_files_and_agrees_with_a_full_scan() {
+    let schemas = schemas();
+    let dir = valid_tree("update");
+    let (mut db, diags) = AssetDatabase::scan(&dir, &schemas);
+    assert!(diags.is_empty(), "{diags:#?}");
+    let full = |dir: &Path| AssetDatabase::scan(dir, &schemas).0;
+
+    // A new material appears: the one path re-read, the entry there.
+    let extra = dir.join("materials/extra.material.json");
+    let mut doc = Document::new(DocumentKind::Material, "Extra");
+    doc.path = Some(extra.display().to_string());
+    std::fs::write(&extra, doc.write().unwrap()).unwrap();
+    let diags = db.update(std::slice::from_ref(&extra), &schemas);
+    assert!(diags.is_empty(), "{diags:#?}");
+    assert_eq!(db.len(), 5);
+    assert_eq!(
+        db.by_path("materials/extra.material.json").unwrap().name,
+        "Extra"
+    );
+    assert_eq!(snapshot(&db), snapshot(&full(&dir)));
+
+    // A source and its sidecar move to a new folder: the old paths are
+    // reported gone, the new ones read — the id and the sub-assets survive.
+    let rename = |from: &str, to: &str| {
+        let (from, to) = (dir.join(from), dir.join(to));
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::rename(&from, &to).unwrap();
+        std::fs::rename(sidecar_path(&from), sidecar_path(&to)).unwrap();
+    };
+    rename("models/robot.glb", "models/props/bot.glb");
+    let diags = db.update(
+        &[
+            dir.join("models/robot.glb"),
+            dir.join("models/robot.glb.meta.json"),
+            dir.join("models/props/bot.glb"),
+            dir.join("models/props/bot.glb.meta.json"),
+        ],
+        &schemas,
+    );
+    assert!(diags.is_empty(), "{diags:#?}");
+    assert_eq!(db.get(id(ROBOT)).unwrap().path, "models/props/bot.glb");
+    assert_eq!(
+        db.resolve(&AssetRef::new(cid(BODY))).unwrap().entry.path,
+        "models/props/bot.glb"
+    );
+    assert_eq!(snapshot(&db), snapshot(&full(&dir)));
+
+    // Only the sidecar is named (what a watcher may report first): the
+    // pair is still read as one.
+    let moved_sidecar = dir.join("models/props/bot.glb.meta.json");
+    let text = std::fs::read_to_string(&moved_sidecar).unwrap();
+    std::fs::write(
+        &moved_sidecar,
+        text.replace("\"name\": \"robot.glb\"", "\"name\": \"Bot\""),
+    )
+    .unwrap();
+    let diags = db.update(std::slice::from_ref(&moved_sidecar), &schemas);
+    assert!(diags.is_empty(), "{diags:#?}");
+    assert_eq!(db.get(id(ROBOT)).unwrap().name, "Bot");
+    assert_eq!(snapshot(&db), snapshot(&full(&dir)));
+
+    // The texture's sidecar goes: the source is reported without one and
+    // the entry is gone; putting it back restores the entry.
+    let rust_sidecar = dir.join("textures/rust.png.meta.json");
+    let sidecar_text = std::fs::read_to_string(&rust_sidecar).unwrap();
+    std::fs::remove_file(&rust_sidecar).unwrap();
+    let diags = db.update(std::slice::from_ref(&rust_sidecar), &schemas);
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0].code.as_str(), "FYN-A0001");
+    assert!(db.get(id(RUST)).is_none());
+    assert_eq!(snapshot(&db), snapshot(&full(&dir)));
+    std::fs::write(&rust_sidecar, &sidecar_text).unwrap();
+    assert!(db
+        .update(std::slice::from_ref(&rust_sidecar), &schemas)
+        .is_empty());
+    assert_eq!(db.get(id(RUST)).unwrap().path, "textures/rust.png");
+
+    // A copy with the same id is kept out (FYN-A0003, the original wins);
+    // deleting the original then admits the copy without naming it.
+    let copy = dir.join("textures/copy.png");
+    std::fs::copy(dir.join("textures/rust.png"), &copy).unwrap();
+    std::fs::write(sidecar_path(&copy), &sidecar_text).unwrap();
+    let diags = db.update(std::slice::from_ref(&copy), &schemas);
+    assert_eq!(diags.len(), 1, "{diags:#?}");
+    assert_eq!(diags[0].code.as_str(), "FYN-A0003");
+    assert_eq!(db.get(id(RUST)).unwrap().path, "textures/rust.png");
+    std::fs::remove_file(dir.join("textures/rust.png")).unwrap();
+    std::fs::remove_file(&rust_sidecar).unwrap();
+    let diags = db.update(&[dir.join("textures/rust.png")], &schemas);
+    assert!(diags.is_empty(), "{diags:#?}");
+    assert_eq!(db.get(id(RUST)).unwrap().path, "textures/copy.png");
+    assert_eq!(snapshot(&db), snapshot(&full(&dir)));
+
+    // A whole folder goes: naming the (now missing) directory drops what it held.
+    std::fs::remove_dir_all(dir.join("models")).unwrap();
+    let diags = db.update(&[dir.join("models")], &schemas);
+    assert!(diags.is_empty(), "{diags:#?}");
+    assert!(db.get(id(ROBOT)).is_none());
+    assert_eq!(snapshot(&db), snapshot(&full(&dir)));
+
+    // A path outside the root is ignored; a relative path works.
+    assert!(db
+        .update(&[PathBuf::from("/definitely/elsewhere.png")], &schemas)
+        .is_empty());
+    assert!(db
+        .update(&[PathBuf::from("materials/extra.material.json")], &schemas)
+        .is_empty());
+    assert_eq!(db.len(), 4);
+    let _ = std::fs::remove_dir_all(&dir);
+}
