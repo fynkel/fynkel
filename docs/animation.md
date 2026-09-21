@@ -333,3 +333,35 @@ Mac (`fynkel test --headless`'s `systems:` line).
 - Compressed or quantized clips; a clip is cooked as `f32` keys.
 - A skinned mesh collider following the pose (a `Collider` on a joint
   entity is the way).
+- Instancing a source's `prefab` sub-asset from a scene or
+  `World.instantiate` — blueprint item **19a** (after audio, before the
+  reference game's second half). Until then the hierarchy is authored
+  by hand (`playground.py`) or the `prefab` body is copied out of the
+  intermediate (`.fynkel/cache/import/<id>.fyni`: `FYNI` magic, `u32`
+  version, `u32` header length, JSON header with `prefab`) into a
+  `.prefab.json` with a fresh id.
+
+## A downloaded character (Mixamo, 2026-09-21)
+
+The path was tried end to end with the Mixamo X Bot and three clips
+downloaded **with skin** and **In Place** (the engine extracts no root
+motion: a clip that moves the hips forward walks the skin away from its
+`CharacterController`). Mixamo ships FBX; the importer reads glTF, so
+Blender does one conversion, headless (`Blender -b --python
+convert.py`): import the first FBX with its mesh, the others for their
+actions only (delete their armatures), put every action on the one
+armature as a muted NLA track named after the clip, export one GLB with
+`export_animation_mode="NLA_TRACKS"` (one glTF animation per track),
+`export_all_influences=False` (four bones per vertex — `JOINTS_0`/
+`WEIGHTS_0` is all the importer reads), `export_apply=True`, Y up. The
+result imported with no diagnostics — two skinned meshes, one skin of
+65 `mixamorig:` joints (the names are unique, as the importer
+requires), walk 1.0 s / run 0.567 s / jump 1.933 s, a prefab of 68
+entities whose root carries Blender's centimetre scale (0.01) and the
+Z-up rotation — cooked, ran headless (74 entities, 2 skinned meshes over
+130 joints, 0 diagnostics), rendered upright at human height next to
+the starter's cubes, and played from Dart (`play(walk)`, a 0.2 s
+crossfade to `run`, `play(jump, looping: false)` ending at frame 117).
+Keys are baked per frame at 30 fps, so a clip is a few hundred KB of
+`f32`; fine for a handful. The one step done by hand was the prefab
+document above (item 19a).

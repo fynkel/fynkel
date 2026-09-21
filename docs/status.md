@@ -205,6 +205,7 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
 | **The renderer has no IBL and no light culling.** Environment lighting is a constant ambient term, so metals read dark (the showcase's gold and chrome blocks); every draw sees the 8 nearest lights to the camera, whatever it draws; one shadow cascade to 60 m; culling is per instance on the CPU (1.4 ms of prepare at 5 800 records — fine at 120 Hz, not free). | Metallic materials cannot look right; a scene with many small lights lights the wrong things. | IBL and per-object light lists after M3 |
 | **No audio; `targets` unread.** `CLIP` chunks have no consumer; `targets` is validated and unused (`fynkel run -d` picks the device by hand). | Games cannot be heard yet. | M3 (D4; D3's last field) |
 | **Animation V1 is clips, crossfades and skins.** No state machine, no timeline, no clip markers, no layers/masks, no IK or retargeting, no root motion (clips in place by policy), no morph targets; the one blend is a crossfade. | Enough for the reference game's character; the state machine and the sequencer are the next items on the same core (blueprint §9). | after M3 |
+| **An imported hierarchy is not instanceable.** `fynkel import` cooks a source's node tree as the `prefab` sub-asset (with the `Skin` since M3-19), but a scene's `prefab.asset` and `World.instantiate` resolve prefab documents only (`FYN-D0401` for a `.glb`); the hierarchy is re-authored by hand (`playground.py`) or extracted from the intermediate. A converted Mixamo rig (65 joints, three clips) otherwise went through import → cook → headless → render → Dart unchanged on 2026-09-21. | Blueprint item 19a (after 11, before 15): `{ asset, sub: "prefab" }` in scenes and at runtime, `fynkel import --prefab` for authored ids. | M3-19a |
 | **Physics V1 is bodies, a character and queries.** One collider per entity, no joints, mesh colliders static only, collider outlines (`Physics::debug_lines`) not drawn by any host yet; the character does not push dynamic bodies or ride moving platforms (M3-14 decided the relative look delta: consumed by one tick as a rate, `docs/input.md` rule 5; and no camera smoothing — the rig snaps). | Enough for the reference game's player, crates and hazards; ragdolls, vehicles, hinged doors and platform riding are post-1.0. | after M3 |
 | **Input has no Android or web path and no rebinding UI.** `FynkelInputPlugin` is Apple-only (GameController); the touch overlay is fixed to bottom corners; rebinds persist in the settings file (M3-12) but nothing edits them on screen. | Fine for the Apple targets M3 ships; a settings screen needs a runtime rebind API. | after M3 |
 | **Authoring commands have no ABI; the Inspector metadata has no consumer.** `Editor` is Rust-only behind `fynkel scene apply`; `label`/`tooltip`/`min`/`max`/`step` are generated and unread. | The editor (M4) has the commands and the metadata but no handle on them. | M4 (D5) |
@@ -685,7 +686,12 @@ in its own app, play it, or hear it. That is M3, in this order:
    skinned render path (14 pipelines), `GameObject.animation` in Dart,
    the reference game's rigged character from `tools/character.py`
    posed from the controller, the showcase's runner; `docs/animation.md`.
-15. **Audio** (11, when the game wants a sound) next, then the reference
-   game's menus/settings/results (15), instrumentation (16), public
-   readiness (17), the gate report (18) — measured with both captures
-   at every step.
+15. **Audio** (11, when the game wants a sound) next, then **glTF prefab
+   instancing** (19a, added 2026-09-21: a scene's `prefab.asset` and
+   `World.instantiate` accept a source's `prefab` sub-asset, so a
+   downloaded rig drops into a scene without re-authoring its hierarchy
+   — a converted Mixamo X Bot went through the M3-19 path on 2026-09-21
+   with only that step done by hand), then the reference game's
+   menus/settings/results (15), instrumentation (16), public readiness
+   (17), the gate report (18) — measured with both captures at every
+   step.
