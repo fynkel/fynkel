@@ -27,6 +27,9 @@ import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
 import 'project/editor_project.dart';
 import 'project/migration_dialog.dart';
+import 'project_browser/asset_panel.dart';
+import 'project_browser/project_browser_model.dart';
+import 'project_browser/project_panel.dart';
 import 'shell/main_window.dart';
 import 'shell/menu_bar.dart';
 import 'shell/panels.dart';
@@ -146,8 +149,10 @@ class EditorShellState extends State<EditorShell> {
   HierarchyModel? hierarchy;
   InspectorModel? inspector;
   CodegenCheck? codegen;
+  ProjectBrowserModel? browser;
   final consoleSearchFocus = FocusNode(debugLabel: 'console.search');
   final hierarchySearchFocus = FocusNode(debugLabel: 'hierarchy.search');
+  final projectSearchFocus = FocusNode(debugLabel: 'project.search');
   late IdeLauncher ide;
   String? _layoutNotice;
   String? _openError;
@@ -171,12 +176,14 @@ class EditorShellState extends State<EditorShell> {
     workspace?.dispose();
     inspector?.dispose();
     codegen?.dispose();
+    browser?.dispose();
     hierarchy?.dispose();
     tabs?.dispose();
     project?.removeListener(_onProjectChanged);
     project?.close();
     consoleSearchFocus.dispose();
     hierarchySearchFocus.dispose();
+    projectSearchFocus.dispose();
     registry.dispose();
     super.dispose();
   }
@@ -233,12 +240,17 @@ class EditorShellState extends State<EditorShell> {
       title: 'Project',
       icon: Icons.folder_outlined,
       home: PanelHome.bottom,
-      builder: (_) => const ComingPanel(
-        title: 'Project',
-        item: 5,
-        what: 'The asset database as folders and a searchable list.',
-        icon: Icons.folder_outlined,
-      ),
+      builder: (_) {
+        final b = browser;
+        if (b == null) return const SizedBox.shrink();
+        return ProjectPanel(
+          model: b,
+          onOpenDocument: openDocument,
+          onShowAsset: showAssetPanel,
+          run: widget.run,
+          searchFocus: projectSearchFocus,
+        );
+      },
     ),
     PanelSpec(
       id: PanelRegistry.console,
@@ -273,15 +285,14 @@ class EditorShellState extends State<EditorShell> {
     ),
     PanelSpec(
       id: PanelRegistry.import,
-      title: 'Import',
-      icon: Icons.download_outlined,
+      title: 'Asset',
+      icon: Icons.inventory_2_outlined,
       home: PanelHome.bottom,
-      builder: (_) => const ComingPanel(
-        title: 'Import',
-        item: 5,
-        what: 'Import settings of the selected source.',
-        icon: Icons.download_outlined,
-      ),
+      builder: (_) {
+        final b = browser;
+        if (b == null) return const SizedBox.shrink();
+        return AssetPanel(model: b, onOpenDocument: openDocument, onOpenReference: openReference, run: widget.run);
+      },
     ),
   ];
 
@@ -292,6 +303,9 @@ class EditorShellState extends State<EditorShell> {
   bool get _hasTab => _focusedTab != null;
   bool get _canEdit => hierarchy?.canEdit ?? false;
   bool get _hasSelection => hierarchy?.hasSelection ?? false;
+  bool get _canEditAssets => browser?.canEdit ?? false;
+  AssetEntry? get _leadAsset => browser?.leadEntry;
+  bool get _hasAssetSelection => browser?.selection.isNotEmpty ?? false;
 
   void _registerCommands() {
     SingleActivator k(LogicalKeyboardKey key, {bool shift = false, bool alt = false}) =>
@@ -402,6 +416,35 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _focusedTab?.document.canRedo ?? false,
         textIntent: const RedoTextIntent(SelectionChangedCause.keyboard),
         run: () => _focusedTab?.redo(),
+      ),
+      EditorCommand(
+        id: 'assets.undo',
+        baseLabel: 'Undo Asset Operation',
+        labelBuilder: () {
+          final l = browser?.history.undoLabel;
+          return l == null ? 'Undo Asset Operation' : 'Undo $l';
+        },
+        description: 'Takes back the last rename, move, delete, new document or import-settings change',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyZ, alt: true),
+        group: 0,
+        order: 2,
+        enabled: () => _canEditAssets && (browser?.history.canUndo ?? false),
+        run: () => browser?.undo(),
+      ),
+      EditorCommand(
+        id: 'assets.redo',
+        baseLabel: 'Redo Asset Operation',
+        labelBuilder: () {
+          final l = browser?.history.redoLabel;
+          return l == null ? 'Redo Asset Operation' : 'Redo $l';
+        },
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyZ, shift: true, alt: true),
+        group: 0,
+        order: 3,
+        enabled: () => _canEditAssets && (browser?.history.canRedo ?? false),
+        run: () => browser?.redo(),
       ),
       EditorCommand(
         id: 'hierarchy.rename',
@@ -545,6 +588,181 @@ class EditorShellState extends State<EditorShell> {
         shortcut: k(LogicalKeyboardKey.keyG, shift: true),
         enabled: () => codegen != null && codegen!.status != CodegenStatus.running,
         run: () => codegen?.check(),
+      ),
+      // ── Assets (Project menu, group 4) ──
+      EditorCommand(
+        id: 'assets.newScene',
+        baseLabel: 'New Scene',
+        description: 'An empty scene document in the Project browser\'s folder',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyS, shift: true, alt: true),
+        group: 4,
+        order: 0,
+        enabled: () => _canEditAssets,
+        run: () => _newAsset('scene'),
+      ),
+      EditorCommand(
+        id: 'assets.newPrefab',
+        baseLabel: 'New Prefab',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyP, shift: true, alt: true),
+        group: 4,
+        order: 1,
+        enabled: () => _canEditAssets,
+        run: () => _newAsset('prefab'),
+      ),
+      EditorCommand(
+        id: 'assets.newMaterial',
+        baseLabel: 'New Material',
+        description: 'A fynkel.pbr@1 material with the shader\'s defaults',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyM, shift: true, alt: true),
+        group: 4,
+        order: 2,
+        enabled: () => _canEditAssets,
+        run: () => _newAsset('material'),
+      ),
+      EditorCommand(
+        id: 'assets.newFolder',
+        baseLabel: 'New Folder',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyF, shift: true, alt: true),
+        group: 4,
+        order: 3,
+        enabled: () => _canEditAssets,
+        run: () {
+          workspace?.show(PanelRegistry.project);
+          browser?.newFolder();
+        },
+      ),
+      EditorCommand(
+        id: 'assets.open',
+        baseLabel: 'Open Asset',
+        description: 'The selected scene or prefab into a tab; any other asset into the Asset panel',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyO, shift: true, alt: true),
+        group: 4,
+        order: 4,
+        enabled: () => _leadAsset != null,
+        run: () {
+          final a = _leadAsset;
+          if (a == null) return;
+          if (a.document == 'scene' || a.document == 'prefab') {
+            openDocument(a.id);
+          } else {
+            showAssetPanel();
+          }
+        },
+      ),
+      EditorCommand(
+        id: 'assets.rename',
+        baseLabel: 'Rename Asset',
+        description: 'The file and its sidecar move together; the id and every reference survive',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyR, shift: true, alt: true),
+        group: 4,
+        order: 5,
+        enabled: () => _canEditAssets && (browser?.selection.length ?? 0) == 1,
+        run: () {
+          workspace?.show(PanelRegistry.project);
+          browser?.beginRename();
+        },
+      ),
+      EditorCommand(
+        id: 'assets.move',
+        baseLabel: 'Move Asset to Folder…',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyV, shift: true, alt: true),
+        group: 4,
+        order: 6,
+        enabled: () => _canEditAssets && _hasAssetSelection,
+        run: moveAssetsDialog,
+      ),
+      EditorCommand(
+        id: 'assets.delete',
+        baseLabel: 'Delete Asset',
+        description: 'To .fynkel/trash; refused while referenced unless you say "delete anyway"',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.backspace, shift: true, alt: true),
+        group: 4,
+        order: 7,
+        enabled: () => _canEditAssets && _hasAssetSelection,
+        run: () {
+          workspace?.show(PanelRegistry.project);
+          browser?.delete();
+        },
+      ),
+      EditorCommand(
+        id: 'assets.reimport',
+        baseLabel: 'Reimport Asset',
+        description: 'Runs the selected source through its importer with the sidecar\'s settings',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyI, shift: true, alt: true),
+        group: 4,
+        order: 8,
+        enabled: () => _canEditAssets && (_leadAsset?.isSource ?? false),
+        run: () {
+          final a = _leadAsset;
+          if (a == null) return;
+          showAssetPanel();
+          final r = browser?.reimport(a.id);
+          if (r != null && !r.ok) _showError('Reimport refused: ${r.diagnostics.map((d) => d.message).join('; ')}');
+        },
+      ),
+      EditorCommand(
+        id: 'assets.reveal',
+        baseLabel: 'Reveal Asset in Finder',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyE, shift: true, alt: true),
+        group: 4,
+        order: 9,
+        enabled: () => _leadAsset != null,
+        run: () async {
+          final a = _leadAsset;
+          if (a == null) return;
+          final err = await revealInFileBrowser(project!.assetFile(a.path), run: widget.run);
+          if (err != null) _showError('Reveal in Finder failed: $err');
+        },
+      ),
+      EditorCommand(
+        id: 'assets.copyId',
+        baseLabel: 'Copy Asset Id',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyC, shift: true, alt: true),
+        group: 4,
+        order: 10,
+        enabled: () => _leadAsset != null,
+        run: () {
+          final a = _leadAsset;
+          if (a != null) Clipboard.setData(ClipboardData(text: a.id));
+        },
+      ),
+      EditorCommand(
+        id: 'assets.search',
+        baseLabel: 'Search Project',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyP, alt: true),
+        group: 4,
+        order: 11,
+        enabled: () => _hasProject,
+        run: () {
+          workspace?.show(PanelRegistry.project);
+          browser?.requestSearchFocus();
+        },
+      ),
+      EditorCommand(
+        id: 'assets.toggleView',
+        baseLabel: 'Toggle Project Folders / List',
+        labelBuilder: () => browser?.view == BrowserView.list ? 'Show Project as Folders' : 'Show Project as One List',
+        menu: EditorMenu.project,
+        shortcut: k(LogicalKeyboardKey.keyT, shift: true, alt: true),
+        group: 4,
+        order: 12,
+        enabled: () => _hasProject,
+        run: () {
+          workspace?.show(PanelRegistry.project);
+          browser?.toggleView();
+        },
       ),
       EditorCommand(
         id: 'project.new',
@@ -782,6 +1000,7 @@ class EditorShellState extends State<EditorShell> {
       workspace?.dispose();
       inspector?.dispose();
       codegen?.dispose();
+      browser?.dispose();
       hierarchy?.dispose();
       tabs?.dispose();
       final ws = Workspace(registry: _panels, store: widget.layoutStore);
@@ -795,11 +1014,13 @@ class EditorShellState extends State<EditorShell> {
         repoRoot: () => toolchain?.fynkelRoot,
       );
       final ins = InspectorModel(tabs: t, project: opened, codegen: cg, openInIde: ide.open);
+      final b = ProjectBrowserModel(project: opened);
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
       t.addListener(registry.refresh);
       h.addListener(registry.refresh);
       ins.addListener(registry.refresh);
+      b.addListener(registry.refresh);
       setState(() {
         project = opened;
         workspace = ws;
@@ -807,6 +1028,7 @@ class EditorShellState extends State<EditorShell> {
         hierarchy = h;
         inspector = ins;
         codegen = cg;
+        browser = b;
         console = c;
         _layoutNotice = ws.restoreProblem == null
             ? null
@@ -843,18 +1065,21 @@ class EditorShellState extends State<EditorShell> {
     final t = tabs;
     final ins = inspector;
     final cg = codegen;
+    final b = browser;
     setState(() {
       project = null;
       console = null;
       hierarchy = null;
       inspector = null;
       codegen = null;
+      browser = null;
       tabs = null;
       workspace?.dispose();
       workspace = null;
     });
     ins?.dispose();
     cg?.dispose();
+    b?.dispose();
     h?.dispose();
     t?.dispose();
     await closing.close();
@@ -890,6 +1115,63 @@ class EditorShellState extends State<EditorShell> {
     workspace?.show(PanelRegistry.hierarchy);
     final id = d.id ?? RegExp(r'^/entities/([^/]+)').firstMatch(d.pointer ?? '')?.group(1);
     if (id != null) hierarchy?.revealAndSelect(id);
+  }
+
+  // ── Assets ──────────────────────────────────────────────────────────────
+
+  void showAssetPanel() {
+    workspace?.show(PanelRegistry.import);
+    registry.refresh();
+  }
+
+  void _newAsset(String kind) {
+    workspace?.show(PanelRegistry.project);
+    browser?.newDocument(kind);
+  }
+
+  /// The Project browser's "Move to…" for the selection.
+  Future<void> moveAssetsDialog() async {
+    final b = browser;
+    if (b == null || b.selection.isEmpty) return;
+    final ids = b.selection.toList();
+    final folders = ['', ...b.folders];
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        key: const Key('project.moveTo'),
+        title: Text(
+          ids.length == 1 ? 'Move ${p.basename(b.entry(ids.single)?.path ?? '')} to…' : 'Move ${ids.length} assets to…',
+        ),
+        children: [
+          for (final f in folders)
+            SimpleDialogOption(
+              key: Key('project.moveTo.${f.isEmpty ? 'root' : f}'),
+              onPressed: () => Navigator.pop(context, f),
+              child: Text(f.isEmpty ? 'assets (root)' : f),
+            ),
+        ],
+      ),
+    );
+    if (chosen != null) b.move(ids, chosen);
+  }
+
+  /// A "Referenced by" row of the Asset panel: a scene or prefab opens at
+  /// the entity the pointer names; a material is shown in the browser.
+  void openReference(String documentPath, String? pointer) {
+    final b = browser;
+    if (b == null) return;
+    final target = b.entries.where((e) => e.path == documentPath).firstOrNull;
+    if (target == null) return;
+    if (target.document == 'scene' || target.document == 'prefab') {
+      final tab = openDocument(target.id);
+      if (tab == null) return;
+      workspace?.show(PanelRegistry.hierarchy);
+      final id = RegExp(r'^/entities/([^/]+)').firstMatch(pointer ?? '')?.group(1);
+      if (id != null) hierarchy?.revealAndSelect(id);
+    } else {
+      b.reveal(target.id);
+      workspace?.show(PanelRegistry.project);
+    }
   }
 
   /// Saves; a conflict (the file changed on disk) opens the conflict dialog

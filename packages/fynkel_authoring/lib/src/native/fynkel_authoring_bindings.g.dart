@@ -240,11 +240,13 @@ FynkelStatus fynkel_authoring_save(
 );
 
 /// Rescans the project's asset root. `paths_json_utf8` is a JSON array of
-/// paths (absolute, or relative to the project directory) whose reference
-/// index entries are refreshed — what a file watcher reports — or NULL
-/// with 0 (or `[]`) to refresh everything. The database itself is always
-/// re-scanned whole (milliseconds for thousands of assets). Result:
-/// { "ok", "assetCount", "scanned": [...], "diagnostics": [the scan's] }.
+/// paths (absolute, or relative to the project directory) — what a file
+/// watcher reports: only those files are re-read (a source or its sidecar
+/// means the pair, a folder everything under it, a path that is gone drops
+/// what it held) and only the documents at them re-indexed, about a
+/// millisecond in a project of thousands of assets. NULL with 0 (or `[]`)
+/// re-reads everything (tens of milliseconds). Result:
+/// { "ok", "assetCount", "scanned": [...], "diagnostics": [of what was read] }.
 @ffi.Native<
   ffi.UnsignedInt Function(
     ffi.Pointer<FynkelAuthoringSession>,
@@ -287,8 +289,20 @@ FynkelStatus fynkel_authoring_rescan(
 /// version, dart, hasSchema, allowed, schema }] }
 /// schema          type                 one component or behaviour schema (with its
 /// x-fynkel display hints)
+/// assetDetail     asset                the entry + "file": { size, modified },
+/// "dependents": [as dependents], and for a
+/// source "sidecar": { path, importer,
+/// importerVersion, settings, subAssets }, for a
+/// material "material": { shader, alphaMode,
+/// alphaCutoff, doubleSided, fields }, for a
+/// scene or prefab "entities": <count>, for a
+/// rig or blend "fields"
+/// assetHistory                         the asset operations' undo/redo state:
+/// { canUndo, canRedo, undoLabel, redoLabel,
+/// undo: [labels], redo: [labels] }
 /// metadata                             lib/generated/behaviours.g.json, or null
 /// commands                             the command names apply accepts
+/// operations                           the operation names operate accepts
 /// FYNKEL_STATUS_INVALID_ARGUMENT for an unknown kind (FYN-T0004, the
 /// suggestion lists them), a missing or malformed argument (FYN-T0003), no
 /// project (FYN-T0001) or an unknown handle (FYN-T0002).
@@ -317,6 +331,75 @@ FynkelStatus fynkel_authoring_query(
   int args_len,
 ) => FynkelStatus.fromValue(
   _fynkel_authoring_query(
+    session,
+    kind_utf8,
+    kind_len,
+    args_json_utf8,
+    args_len,
+  ),
+);
+
+/// An asset operation by name — the session's own mutations of the asset
+/// tree, next to a document's transactions (blueprint §19.2e item 5). Every
+/// one re-reads only the paths it touched; the ones that change the tree go
+/// on the session's asset history, an undo/redo stack of its own (a
+/// document's undo never moves a file). Paths are relative to the asset
+/// root (or absolute inside it). `args_json_utf8` is a JSON object.
+/// newDocument        kind, path, name?, shader?   a scene, prefab or material as
+/// `Document::new` (kind's suffix added
+/// when missing; name defaults to the
+/// file's stem; a material's shader
+/// validated against the project's)
+/// renameAsset        asset, path                 moves the file — and a source's
+/// sidecar — so the id survives; `path`
+/// ending in `/` or naming a folder keeps
+/// the name; the kind (suffix, extension)
+/// is kept; an open document follows
+/// deleteAsset        asset, force?               refused with every referencing field
+/// in `related` while a document names
+/// the asset (or a sub-asset) unless
+/// force; refused while open; file and
+/// sidecar move to .fynkel/trash/<id>/
+/// setImportSettings  asset, settings             replaces the sidecar's settings object
+/// reimport           asset                       runs the importer with the sidecar's
+/// settings; updates subAssets when they
+/// changed; { ok: false, diagnostics }
+/// when the importer refused; not undoable
+/// undoAsset / redoAsset                          the asset history
+/// Result: { "ok", "op", "label", "entry", "assetCount", "canUndo", "canRedo",
+/// "undoLabel", "redoLabel", ...per operation }. FYNKEL_STATUS_INVALID_ARGUMENT
+/// with FYN-T0003 for a refused operation (nothing was touched) or FYN-T0004
+/// for an unknown kind; FYNKEL_STATUS_LOAD_FAILED with FYN-A0004 for an
+/// unknown asset or FYN-T0006 for an I/O failure; FYNKEL_STATUS_COMMANDS_REJECTED
+/// with FYN-E0009 when there is nothing to undo or redo or FYN-E0007 when the
+/// project is read-only. A reimport the importer refused answers
+/// COMMANDS_REJECTED with { ok: false, diagnostics } and leaves the sidecar
+/// alone.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelAuthoringSession>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_authoring_operate')
+external int _fynkel_authoring_operate(
+  ffi.Pointer<FynkelAuthoringSession> session,
+  ffi.Pointer<ffi.Uint8> kind_utf8,
+  int kind_len,
+  ffi.Pointer<ffi.Uint8> args_json_utf8,
+  int args_len,
+);
+
+FynkelStatus fynkel_authoring_operate(
+  ffi.Pointer<FynkelAuthoringSession> session,
+  ffi.Pointer<ffi.Uint8> kind_utf8,
+  int kind_len,
+  ffi.Pointer<ffi.Uint8> args_json_utf8,
+  int args_len,
+) => FynkelStatus.fromValue(
+  _fynkel_authoring_operate(
     session,
     kind_utf8,
     kind_len,
@@ -356,7 +439,11 @@ enum FynkelStatus {
 
   /// A scene or project document could not be loaded; see
   /// fynkel_world_load_report.
-  FYNKEL_STATUS_LOAD_FAILED(8);
+  FYNKEL_STATUS_LOAD_FAILED(8),
+
+  /// The build or the platform lacks what the call needs (an output device
+  /// for fynkel_world_audio_open); the world stays usable.
+  FYNKEL_STATUS_UNSUPPORTED(9);
 
   final int value;
   const FynkelStatus(this.value);
@@ -371,6 +458,7 @@ enum FynkelStatus {
     6 => FYNKEL_STATUS_OUT_OF_RESOURCES,
     7 => FYNKEL_STATUS_INCOMPATIBLE,
     8 => FYNKEL_STATUS_LOAD_FAILED,
+    9 => FYNKEL_STATUS_UNSUPPORTED,
     _ => throw ArgumentError('Unknown value for FynkelStatus: $value'),
   };
 }
@@ -386,4 +474,4 @@ final class FynkelBufferView extends ffi.Struct {
 
 final class FynkelAuthoringSession extends ffi.Opaque {}
 
-const int FYNKEL_AUTHORING_ABI_VERSION = 1;
+const int FYNKEL_AUTHORING_ABI_VERSION = 2;

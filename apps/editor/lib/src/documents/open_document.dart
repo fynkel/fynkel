@@ -258,7 +258,8 @@ final class OpenDocument extends ChangeNotifier {
         } else {
           _patchTree(edit.affectedIds!);
         }
-      case null:
+      case DocumentChangeKind.moved || null:
+        // The title and location follow the new path; the baseline is the same bytes.
         break;
     }
     notifyListeners();

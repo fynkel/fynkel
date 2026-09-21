@@ -36,7 +36,7 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 46);
+    expect(commands.length, 61);
     for (final c in commands) {
       expect(c.shortcut, isNotNull, reason: '${c.id} has no shortcut');
       expect(c.id, matches(RegExp(r'^[a-z]+(\.[a-zA-Z]+)+$')), reason: '${c.id} is not a dotted id');

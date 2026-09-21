@@ -383,6 +383,9 @@ void main() {
         );
         expect(glb.wholeKind, isNull);
         expect(glb.offeredKinds, {'mesh'});
+        const png = AssetEntry(id: 'i', path: 'a.png', name: 'a', kind: 'source', importer: 'fynkel.image');
+        expect(png.wholeKind, 'texture', reason: 'a material names the image itself');
+        expect(png.offeredKinds, {'texture'});
       },
     );
 

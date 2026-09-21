@@ -118,6 +118,8 @@ final class SessionDocument extends EditorDocument {
       DocumentChangeKind.redone => DocumentEdit(e.kind, affectedIds: e.replayed?.affectedIds ?? const []),
       DocumentChangeKind.saved => const DocumentEdit(DocumentChangeKind.saved, affectedIds: []),
       DocumentChangeKind.reloaded => const DocumentEdit(DocumentChangeKind.reloaded),
+      // An asset operation moved the file: the path changed, the content did not.
+      DocumentChangeKind.moved => const DocumentEdit(DocumentChangeKind.moved, affectedIds: []),
     };
     notifyListeners();
   }

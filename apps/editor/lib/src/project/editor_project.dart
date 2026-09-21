@@ -103,13 +103,18 @@ final class AssetEntry {
   bool get isSource => kind == 'source';
 
   /// The kind a source is referenced as **whole** (no sub-asset): an audio
-  /// source is a `sound` (`fynkel.AudioSource.clip`). Null for the others,
-  /// which are only referenced through their sub-assets.
-  String? get wholeKind => isSource && importer == 'fynkel.audio' ? 'sound' : null;
+  /// source is a `sound` (`fynkel.AudioSource.clip`), an image a `texture`
+  /// (a material's texture slots name the image's own id). Null for the
+  /// others, which are only referenced through their sub-assets.
+  String? get wholeKind => switch (isSource ? importer : null) {
+    'fynkel.audio' => 'sound',
+    'fynkel.image' => 'texture',
+    _ => null,
+  };
 
   /// The Inspector's asset kinds this entry (or one of its subs) offers:
   /// a document's kind; a source's `mesh`, `clip` (anim), `skin`, `prefab`,
-  /// `texture` (image), `material`, and its [wholeKind].
+  /// `material`, and its [wholeKind] (`sound`, `texture`).
   Set<String> get offeredKinds {
     if (!isSource) return {?document};
     final out = <String>{?wholeKind};
@@ -187,6 +192,87 @@ abstract class EditorProject extends ChangeNotifier {
   /// The asset database now.
   List<AssetEntry> assets();
 
+  /// The asset root (absolute) — every [AssetEntry.path] is relative to it.
+  String get assetsDir;
+
+  /// Bumped whenever the asset database changed (a rescan after a save or a
+  /// watcher event, an asset operation); the Project browser re-reads its
+  /// entries when it moves.
+  int get assetsRevision;
+
+  /// The folders under the asset root, relative and `/`-separated, sorted,
+  /// hidden ones skipped (`materials`, `models/characters`).
+  List<String> folders() {
+    final root = Directory(assetsDir);
+    if (!root.existsSync()) return const [];
+    final out = <String>[];
+    void walk(Directory d, String prefix) {
+      final List<FileSystemEntity> children;
+      try {
+        children = d.listSync(followLinks: false);
+      } on FileSystemException {
+        return;
+      }
+      for (final c in children) {
+        if (c is! Directory) continue;
+        final name = p.basename(c.path);
+        if (name.startsWith('.')) continue;
+        final rel = prefix.isEmpty ? name : '$prefix/$name';
+        out.add(rel);
+        walk(c, rel);
+      }
+    }
+
+    walk(root, '');
+    out.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return out;
+  }
+
+  /// Creates an empty folder under the asset root ([rel] relative,
+  /// `/`-separated). Folders are not assets: nothing to index, nothing to
+  /// undo — like Save As, the editor makes the directory itself. Returns
+  /// the problem, or null.
+  String? createFolder(String rel) {
+    try {
+      Directory(p.join(assetsDir, p.joinAll(rel.split('/')))).createSync(recursive: true);
+      return null;
+    } on FileSystemException catch (e) {
+      return 'Cannot create $rel: ${e.osError?.message ?? e.message}';
+    }
+  }
+
+  /// One asset in full (the `assetDetail` query), or null when [id] is not
+  /// in the database.
+  AssetDetail? assetDetail(String id);
+
+  /// Every reference to [id]: `{ document, path, pointer, asset, sub? }`,
+  /// one per referencing field.
+  List<Map<String, Object?>> dependents(String id);
+
+  /// The asset operations' undo/redo state.
+  AssetHistory assetHistory();
+
+  /// An asset operation through the session (`newDocument`, `renameAsset`,
+  /// `deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`,
+  /// `redoAsset`) — one history step each, the database re-read
+  /// incrementally. Throws `AuthoringException` when refused; nothing was
+  /// touched then.
+  OperationResult operate(String kind, [Map<String, Object?> args = const {}]);
+
+  OperationResult newDocument(String kind, String path, {String? name, String? shader}) =>
+      operate('newDocument', {'kind': kind, 'path': path, 'name': ?name, 'shader': ?shader});
+  OperationResult renameAsset(String id, String path) => operate('renameAsset', {'asset': id, 'path': path});
+  OperationResult deleteAsset(String id, {bool force = false}) =>
+      operate('deleteAsset', {'asset': id, if (force) 'force': true});
+  OperationResult setImportSettings(String id, Map<String, Object?> settings) =>
+      operate('setImportSettings', {'asset': id, 'settings': settings});
+  OperationResult reimport(String id) => operate('reimport', {'asset': id});
+  OperationResult undoAsset() => operate('undoAsset');
+  OperationResult redoAsset() => operate('redoAsset');
+
+  /// The absolute path of an asset-root-relative [path].
+  String assetFile(String path) => p.join(assetsDir, p.joinAll(path.split('/')));
+
   /// Whether [id] (and [sub], when given) resolves in the asset database.
   bool assetExists(String id, {String? sub}) {
     for (final a in assets()) {
@@ -224,7 +310,16 @@ abstract class EditorProject extends ChangeNotifier {
 /// The project over the authoring session, with a directory watcher that
 /// rescans changed asset paths and revalidates (debounced).
 final class SessionProject extends EditorProject {
-  SessionProject._(this.session, this._info, {required this.dir});
+  SessionProject._(this.session, this._info, {required this.dir}) {
+    _events = session.events.listen((e) {
+      if (e is DocumentClosed) _open.remove(e.handle)?.dispose();
+      if (e is AssetsChanged) {
+        _assetsRevision++;
+        _info = session.project ?? _info;
+        notifyListeners();
+      }
+    });
+  }
 
   /// Opens [dir]; throws `AuthoringException` when it is not a project.
   /// [watch] false turns the file watcher off (tests).
@@ -263,10 +358,52 @@ final class SessionProject extends EditorProject {
   @override
   EditorDocument openDocument(String pathOrId) {
     final handle = session.openDocument(pathOrId);
-    _events ??= session.events.listen((e) {
-      if (e is DocumentClosed) _open.remove(e.handle)?.dispose();
-    });
     return _open.putIfAbsent(handle.handle, () => SessionDocument(handle));
+  }
+
+  int _assetsRevision = 0;
+  @override
+  int get assetsRevision => _assetsRevision;
+
+  @override
+  String get assetsDir => _info.assetsDir.isEmpty ? p.join(dir, 'assets') : _info.assetsDir;
+
+  @override
+  AssetDetail? assetDetail(String id) {
+    try {
+      return session.assetDetail(id);
+    } on AuthoringException {
+      return null;
+    }
+  }
+
+  @override
+  List<Map<String, Object?>> dependents(String id) {
+    try {
+      return session.dependents(id);
+    } on AuthoringException {
+      return const [];
+    }
+  }
+
+  @override
+  AssetHistory assetHistory() {
+    try {
+      return session.assetHistory();
+    } on AuthoringException {
+      return const AssetHistory.empty();
+    }
+  }
+
+  /// The session re-reads the touched paths and emits `AssetsChanged` (the
+  /// revision moves there); the whole-project validation follows in the
+  /// background so a dangling reference after a forced delete shows up.
+  @override
+  OperationResult operate(String kind, [Map<String, Object?> args = const {}]) {
+    final r = session.operate(kind, args);
+    _info = session.project ?? _info;
+    unawaited(revalidate());
+    return r;
   }
 
   @override
@@ -453,10 +590,16 @@ final class SessionProject extends EditorProject {
     final changed = _pending.toList();
     _pending.clear();
     _fileChanges.add(changed);
-    final assetsDir = _info.assetsDir.isEmpty ? p.join(dir, 'assets') : _info.assetsDir;
-    final assets = changed.where((c) => p.isWithin(assetsDir, c)).toList();
+    final root = assetsDir;
+    final assets = changed.where((c) => p.isWithin(root, c)).toList();
     try {
-      if (assets.isNotEmpty) session.rescan(assets);
+      // The rescan emits AssetsChanged, which moves the revision; a change
+      // that indexes nothing (a folder appeared) still moves it here so the
+      // browser's tree follows.
+      if (assets.isNotEmpty) {
+        _assetsRevision++;
+        session.rescan(assets);
+      }
       _info = session.refreshProject();
     } on AuthoringException catch (e) {
       _validationError = e.toString();

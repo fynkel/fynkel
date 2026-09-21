@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../inspector/field_widgets.dart' show AssetDragPayload;
 import 'hierarchy_model.dart';
 import 'hierarchy_tree.dart';
 
@@ -533,7 +534,8 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
   }
 }
 
-/// The list's background accepts a drop as "append to the roots".
+/// The list's background accepts a drop as "append to the roots": entity
+/// rows reparent there, a prefab from the Project browser instantiates.
 class _RootDropTarget extends StatelessWidget {
   const _RootDropTarget({required this.model, required this.child});
 
@@ -542,14 +544,34 @@ class _RootDropTarget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DragTarget<List<String>>(
-      onWillAcceptWithDetails: (d) =>
-          model.canDrop(d.data, DropTarget(parent: null, index: model.tree?.roots.length ?? 0)),
-      onAcceptWithDetails: (d) =>
-          model.reparent(d.data, DropTarget(parent: null, index: model.tree?.roots.length ?? 0)),
-      builder: (context, candidates, _) => child,
+    DropTarget root() => DropTarget(parent: null, index: model.tree?.roots.length ?? 0);
+    return DragTarget<AssetDragPayload>(
+      onWillAcceptWithDetails: (d) => model.canDropAsset(d.data.toRef(), d.data.kind, root()),
+      onAcceptWithDetails: (d) => model.instantiatePrefab(d.data.toRef(), name: _instanceName(d.data), target: root()),
+      builder: (context, assets, _) => DragTarget<List<String>>(
+        onWillAcceptWithDetails: (d) => model.canDrop(d.data, root()),
+        onAcceptWithDetails: (d) => model.reparent(d.data, root()),
+        builder: (context, candidates, _) => assets.isNotEmpty
+            ? DecoratedBox(
+                decoration: BoxDecoration(border: Border.all(color: Theme.of(context).colorScheme.primary)),
+                child: child,
+              )
+            : child,
+      ),
     );
   }
+}
+
+/// The instance's name from the dragged asset: the prefab file's stem, or
+/// the model's stem for an imported `#prefab`.
+String _instanceName(AssetDragPayload d) {
+  var n = d.name;
+  final hash = n.indexOf('#');
+  if (hash >= 0) n = n.substring(0, hash);
+  for (final suffix in ['.prefab.json', '.glb', '.gltf', '.fbx']) {
+    if (n.toLowerCase().endsWith(suffix)) return n.substring(0, n.length - suffix.length);
+  }
+  return n;
 }
 
 enum _Zone { above, onto, below }
@@ -773,44 +795,63 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
 
     if (widget.renaming) return interactive;
 
-    return DragTarget<List<String>>(
+    return DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) {
         final z = _zoneAt(d.offset);
-        final ok = model.canDrop(d.data, _target(z));
+        final ok = model.canDropAsset(d.data.toRef(), d.data.kind, _target(z));
         setState(() => _zone = ok ? z : null);
         return ok;
       },
       onMove: (d) {
         final z = _zoneAt(d.offset);
-        final ok = model.canDrop(d.data, _target(z));
-        final next = ok ? z : null;
+        final next = model.canDropAsset(d.data.toRef(), d.data.kind, _target(z)) ? z : null;
         if (next != _zone) setState(() => _zone = next);
       },
       onLeave: (_) => setState(() => _zone = null),
       onAcceptWithDetails: (d) {
         final z = _zoneAt(d.offset);
         setState(() => _zone = null);
-        model.reparent(d.data, _target(z));
+        model.instantiatePrefab(d.data.toRef(), name: _instanceName(d.data), target: _target(z));
       },
-      builder: (context, _, _) => model.canEdit
-          ? Draggable<List<String>>(
-              data: selectionForDrag,
-              dragAnchorStrategy: pointerDragAnchorStrategy,
-              feedback: Material(
-                elevation: 4,
-                borderRadius: BorderRadius.circular(4),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text(
-                    selectionForDrag.length == 1 ? n.name : '${selectionForDrag.length} entities',
-                    style: theme.textTheme.bodySmall,
+      builder: (context, _, _) => DragTarget<List<String>>(
+        onWillAcceptWithDetails: (d) {
+          final z = _zoneAt(d.offset);
+          final ok = model.canDrop(d.data, _target(z));
+          setState(() => _zone = ok ? z : null);
+          return ok;
+        },
+        onMove: (d) {
+          final z = _zoneAt(d.offset);
+          final ok = model.canDrop(d.data, _target(z));
+          final next = ok ? z : null;
+          if (next != _zone) setState(() => _zone = next);
+        },
+        onLeave: (_) => setState(() => _zone = null),
+        onAcceptWithDetails: (d) {
+          final z = _zoneAt(d.offset);
+          setState(() => _zone = null);
+          model.reparent(d.data, _target(z));
+        },
+        builder: (context, _, _) => model.canEdit
+            ? Draggable<List<String>>(
+                data: selectionForDrag,
+                dragAnchorStrategy: pointerDragAnchorStrategy,
+                feedback: Material(
+                  elevation: 4,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Text(
+                      selectionForDrag.length == 1 ? n.name : '${selectionForDrag.length} entities',
+                      style: theme.textTheme.bodySmall,
+                    ),
                   ),
                 ),
-              ),
-              childWhenDragging: Opacity(opacity: .4, child: content),
-              child: interactive,
-            )
-          : interactive,
+                childWhenDragging: Opacity(opacity: .4, child: content),
+                child: interactive,
+              )
+            : interactive,
+      ),
     );
   }
 

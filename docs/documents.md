@@ -531,16 +531,62 @@ window, never running game code and never reading a cooked cache
   `formatVersion` — the steps this build knows and, per outdated document,
   the applied steps, the diff and any diagnostics; nothing is written —
   the editor's Preview migration, M4-02), `commands`.
-- **`rescan(paths)`** refreshes the reference index of the paths a file
-  watcher reports (or everything); the database itself is always re-scanned
-  whole — milliseconds for thousands of assets.
+- **`rescan(paths)`** re-reads only the files a watcher (or an operation)
+  names — `AssetDatabase::update` (M4-05): a source or its sidecar names the
+  pair, a directory everything under it, a gone path drops its entry; the
+  reference index is rebuilt for those documents only. A full scan of a
+  2 000-asset project is ~50 ms; one change is well under a millisecond
+  (`crates/fynkel_authoring/tests/ops.rs` asserts both on a generated
+  2 000-asset tree). Files a duplicate id kept out are re-read too, so
+  deleting the first owner of an id admits the second.
+- **`operate(kind, args)`** (M4-05, `crates/fynkel_authoring/src/ops.rs`)
+  is `query`'s mutating twin: the session's own changes to the **asset
+  tree**, next to the per-document transactions. `newDocument { kind:
+  scene|prefab|material, path, name?, shader? }` writes `Document::new`
+  under the asset root (the kind's suffix added when missing; the PBR
+  shader by default; refused when the file or another kind's file of that
+  name exists). `renameAsset { asset, path }` moves a document, or a source
+  **with its sidecar**, so the id survives — `path` is relative to the
+  asset root, a path ending in `/` or naming a directory keeps the file
+  name, parent directories are created, a document keeps its `.kind.json`
+  suffix and a source its extension (refused otherwise), the asset root
+  itself is refused (`the path names the asset root itself`), and an open
+  editor of that document is `relocate`d (its next `save()` writes to the
+  new path; revision and history untouched; the Dart side sees a
+  `DocumentChangeKind.moved`). `deleteAsset { asset, force? }` is
+  **refused while anything references the asset** — `FYN-T0003` with one
+  `related` `FYN-A0004` per referencing field (`document` absolute path,
+  `pointer`, `id`) — and with `force` moves the file and sidecar into
+  `.fynkel/trash/<id>/` (never `rm`), reporting the now-dangling
+  references as warnings. `setImportSettings { asset, settings }`
+  replaces a sidecar's `settings` object; `reimport { asset }` runs the
+  importer in memory with the sidecar's settings and answers `{ ok,
+  summary, subAssets, sidecarWritten }` — `ok: false` with the importer's
+  diagnostics and nothing written when it refuses — bringing `subAssets`
+  up to date (existing ids kept). `undoAsset` / `redoAsset` replay the
+  **asset history**, an undo stack of its own (a document's ⌘Z never moves
+  a file): created documents are removed and re-written byte-for-byte,
+  moves reversed, trashed files brought back, settings restored;
+  `FYN-E0009` when empty. Every operation rescans only the paths it
+  touched and answers `{ ok, op, label, entry, assetCount, canUndo,
+  canRedo, undoLabel, redoLabel, … }`; a refused one touched nothing (a
+  move whose second half failed is undone before it reports). A
+  read-only project refuses every operation with `FYN-E0007`. Queries that
+  go with it: `assetDetail { asset }` — the entry, the file's size and
+  time, a source's sidecar (importer, version, settings, sub-assets), a
+  material's shader/alpha/double-sided/fields, a scene's or prefab's
+  entity count, and the `dependents` rows `{ document, path, pointer,
+  asset, sub? }` — `assetHistory` (`canUndo`, `canRedo`, labels, the undo
+  and redo lists) and `operations` (the kinds).
 - Diagnostics of the session itself are `FYN-T####`: `T0001` no project,
   `T0002` unknown handle, `T0003` invalid request, `T0004` unknown query,
   `T0005` a caught panic, `T0006` I/O.
 
 **The C ABI** (`crates/fynkel_native/include/fynkel_authoring.h`,
-`fynkel_authoring_*`, `FYNKEL_AUTHORING_ABI_VERSION` 1) is the session
-one call per method: text in as UTF-8 with a length, one JSON result out
+`fynkel_authoring_*`, `FYNKEL_AUTHORING_ABI_VERSION` **2** — version 2
+added `fynkel_authoring_operate(session, kind, kind_len, args_json,
+args_len)` for M4-05; an editor built against 1 still loads) is the
+session one call per method: text in as UTF-8 with a length, one JSON result out
 (`fynkel_authoring_result`, `{ "ok": true, ... }` or `{ "ok": false,
 "diagnostics": [...] }`, valid until the next call on the session) and a
 `FynkelStatus` that says which without parsing — `OK`;
@@ -562,7 +608,12 @@ game's runtime has none of these symbols, and CI checks that
 **The Dart side** is `packages/fynkel_authoring` (ffigen bindings over the
 header onto the same code asset as `package:fynkel`; games never depend on
 it): `AuthoringSession` (`openProject`, `openDocument`, the queries typed,
-`rescan`, a broadcast `Stream<AuthoringEvent>`), `DocumentHandle`
+`rescan`, `operate` with typed wrappers — `newDocument`, `renameAsset`,
+`deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`, `redoAsset`
+→ `OperationResult` —, `assetDetail` → `AssetDetail`, `assetHistory` →
+`AssetHistory`, `dependents`, a **synchronous** broadcast
+`Stream<AuthoringEvent>` so an `AssetsChanged` reaches its listeners
+before `operate` returns), `DocumentHandle`
 (`state`, `apply(commands, baseRevision:)` → `Applied`, `undo`/`redo` →
 `Replayed`, `save`, `reload`, `close`, `root()`, `inspect()`,
 `validate()`, `changes`), `Command` builders for every command above,

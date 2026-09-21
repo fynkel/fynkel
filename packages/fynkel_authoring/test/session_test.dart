@@ -66,9 +66,9 @@ Map<String, Object?> entity(DocumentHandle doc, String id) => entities(doc)[id] 
 String nameOf(DocumentHandle doc, String id) => entity(doc, id)['name'] as String;
 
 void main() {
-  test('the loaded runtime speaks authoring ABI v1', () {
+  test('the loaded runtime speaks authoring ABI v2', () {
     expect(AuthoringSession.loadedAbiVersion, authoringAbiVersion);
-    expect(authoringAbiVersion, 1);
+    expect(authoringAbiVersion, 2);
   });
 
   test('a complete edit session on the main scene', () {
@@ -83,7 +83,7 @@ void main() {
     final project = session.openProject(dir.path);
     expect(project.name, 'Fixture Game');
     expect(project.isReadOnly, isFalse);
-    expect(project.assetCount, 16);
+    expect(project.assetCount, 17);
     expect(project.componentTypes, contains('fynkel.Transform'));
     expect(session.project, same(project));
     expect(session.commands(), Command.names);
@@ -177,7 +177,7 @@ void main() {
     final gold = File('${dir.path}/assets/materials/gold.material.json');
     expect(gold.existsSync(), isTrue, reason: 'written into the project, not the cwd');
     expect(main.state.dirty, isFalse, reason: 'saveDocument saved');
-    expect(session.refreshProject().assetCount, 17, reason: 'the new material is in the database');
+    expect(session.refreshProject().assetCount, 18, reason: 'the new material is in the database');
     expect(session.assets(kind: 'document', document: 'material').map((a) => a['path']),
         containsAll(['materials/rusted.material.json', 'materials/gold.material.json']));
     const transactions = 13;
@@ -261,7 +261,7 @@ void main() {
     expect(main.state.canUndo, isFalse);
     expect(main.state.name, 'Main (edited)');
     File(copyPath).deleteSync();
-    expect(session.rescan([copyPath]).assetCount, 17, reason: 'the deleted copy left the database');
+    expect(session.rescan([copyPath]).assetCount, 18, reason: 'the deleted copy left the database');
 
     // Events: one per change, in order, synchronously.
     final changes = events.whereType<DocumentChanged>().toList();
@@ -360,6 +360,154 @@ void main() {
     scene.undo();
     expect(scene.inspect()['entityCount'], before);
     expect(entities(scene).containsKey(copyId), isFalse);
+  });
+
+  test('asset operations: new, rename with the sidecar, delete, settings, reimport, undo — item 5', () {
+    final dir = copyFixture('ops');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    final events = <AuthoringEvent>[];
+    session.events.listen(events.add);
+    session.openProject(dir.path);
+    final before = session.project!.assetCount;
+    expect(session.operations(), containsAll(['newDocument', 'renameAsset', 'deleteAsset', 'setImportSettings', 'reimport']));
+    expect(session.assetHistory().canUndo, isFalse);
+
+    // A new material: written, indexed, on the history; the event carries it.
+    final created = session.newDocument('material', 'materials/gold');
+    expect(created.ok, isTrue);
+    expect(created.label, 'New material gold.material.json');
+    expect(created.entry!['name'], 'gold');
+    expect(created.assetCount, before + 1);
+    expect(created.history.canUndo, isTrue);
+    expect(File('${dir.path}/assets/materials/gold.material.json').existsSync(), isTrue);
+    final goldId = created.id!;
+    final changed = events.whereType<AssetsChanged>().last;
+    expect(changed.operation?.op, 'newDocument');
+    expect(changed.report.assetCount, before + 1);
+    final gold = session.assetDetail(goldId);
+    expect(gold.document, 'material');
+    expect(gold.material!['shader'], 'fynkel.pbr@1');
+    expect(gold.size, greaterThan(0));
+    expect(gold.dependents, isEmpty);
+
+    // Rename a source: the sidecar follows and the id stays; the detail
+    // shows the settings and sub-assets from the sidecar.
+    const robotGlb = 'c0000000-0000-4000-8000-000000000001';
+    final dependents = session.dependents(robotGlb).length;
+    final renamed = session.renameAsset(robotGlb, 'models/bot.glb');
+    expect(renamed.entry!['id'], robotGlb);
+    expect(renamed.entry!['path'], 'models/bot.glb');
+    expect(renamed.path, endsWith('/assets/models/bot.glb'));
+    expect(File('${dir.path}/assets/models/bot.glb.meta.json').existsSync(), isTrue);
+    expect(File('${dir.path}/assets/models/robot.glb.meta.json').existsSync(), isFalse);
+    expect(session.dependents(robotGlb).length, dependents);
+    final bot = session.assetDetail(robotGlb);
+    expect(bot.isSource, isTrue);
+    expect(bot.importer, 'fynkel.gltf');
+    expect(bot.subAssets.keys, contains('prefab'));
+    expect(bot.sidecarPath, endsWith('bot.glb.meta.json'));
+    expect(session.validateProject().ok, isTrue, reason: 'every reference still resolves');
+
+    // An open document moves with its file: a `moved` change, the state's
+    // new path, and save writes there.
+    final doc = session.openDocument(rusted);
+    doc.apply([Command.setDocumentField('/double_sided', true)]);
+    final moved = session.renameAsset(rustedId, 'materials/rust.material.json');
+    expect(moved.label, 'Rename rusted.material.json → rust.material.json');
+    expect(doc.state.path, endsWith('/assets/materials/rust.material.json'));
+    expect(doc.state.dirty, isTrue);
+    final movedEvent = events.whereType<DocumentChanged>().last;
+    expect(movedEvent.kind, DocumentChangeKind.moved);
+    expect(movedEvent.document, same(doc));
+    doc.save();
+    expect(File('${dir.path}/assets/materials/rust.material.json').readAsStringSync(), contains('"double_sided": true'));
+    expect(File('${dir.path}/assets/materials/rusted.material.json').existsSync(), isFalse);
+
+    // Refusals throw with the reason and touch nothing: a referenced
+    // asset's delete lists every dependent in `related`.
+    expect(
+      () => session.deleteAsset(rustedId),
+      throwsA(isA<AuthoringException>()
+          .having((e) => e.status, 'status', AuthoringStatus.invalidArgument)
+          .having((e) => e.code, 'code', 'FYN-T0003')
+          .having((e) => e.diagnostics.single.related.length, 'related', greaterThanOrEqualTo(6))),
+    );
+    expect(() => session.renameAsset(robotGlb, 'models/bot.fbx'),
+        throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')));
+    expect(() => session.renameAsset('11111111-0000-4000-8000-000000000099', 'x.glb'),
+        throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-A0004')));
+    expect(() => session.operate('teleport'),
+        throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0004')));
+    expect(File('${dir.path}/assets/models/bot.glb').existsSync(), isTrue);
+
+    // An unreferenced prefab goes to the trash and comes back on undo.
+    final deleted = session.deleteAsset(coinPrefab);
+    expect(deleted.entry, isNull);
+    expect(deleted.json['trash'], endsWith('/.fynkel/trash/$coinPrefab/coin.prefab.json'));
+    expect(File(deleted.json['trash'] as String).existsSync(), isTrue);
+    expect(File('${dir.path}/assets/prefabs/coin.prefab.json').existsSync(), isFalse);
+    expect(session.assets(document: 'prefab').map((e) => e['id']), isNot(contains(coinPrefab)));
+    final undone = session.undoAsset();
+    expect(undone.label, 'Undo Delete coin.prefab.json');
+    expect(File('${dir.path}/assets/prefabs/coin.prefab.json').existsSync(), isTrue);
+    expect(session.assets(document: 'prefab').map((e) => e['id']), contains(coinPrefab));
+    // Forced: the dependents are warnings and validation catches the dangle.
+    const swatch = 'c0000000-0000-4000-8000-000000000002';
+    final forced = session.deleteAsset(swatch, force: true);
+    expect(forced.diagnostics, isNotEmpty);
+    expect(forced.diagnostics.every((d) => d.severity == Severity.warning), isTrue);
+    expect(session.validateProject().ok, isFalse);
+    session.undoAsset();
+    expect(session.validateProject().ok, isTrue);
+
+    // Import settings: written to the sidecar, read back, reimported with;
+    // a bad value is the importer's refusal, not a throw.
+    final settings = session.setImportSettings(swatch, {'colorSpace': 'linear'});
+    expect(settings.label, 'Import settings of swatch.png');
+    expect(session.assetDetail(swatch).settings, {'colorSpace': 'linear'});
+    final reimported = session.reimport(swatch);
+    expect(reimported.ok, isTrue);
+    expect(reimported.json['sidecarWritten'], false);
+    expect(((reimported.json['summary'] as Map)['textures'] as List).single['colorSpace'], 'linear');
+    session.setImportSettings(swatch, {'colorSpace': 'purple'});
+    final refused = session.reimport(swatch);
+    expect(refused.ok, isFalse);
+    expect(refused.diagnostics, isNotEmpty);
+    session.undoAsset();
+    expect(session.assetDetail(swatch).settings, {'colorSpace': 'linear'});
+    expect(() => session.setImportSettings(rustedId, {}),
+        throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')));
+
+    // The history reads back and empties on undo; nothing to undo is E0009.
+    var history = session.assetHistory();
+    expect(history.undoLabel, 'Import settings of swatch.png');
+    expect(history.undo.length, 4, reason: 'gold, bot, rust, settings');
+    while (session.assetHistory().canUndo) {
+      session.undoAsset();
+    }
+    expect(File('${dir.path}/assets/models/robot.glb.meta.json').existsSync(), isTrue);
+    expect(File('${dir.path}/assets/materials/gold.material.json').existsSync(), isFalse);
+    expect(doc.state.path, endsWith('/assets/materials/rusted.material.json'));
+    expect(session.project!.assetCount, before, reason: 'the project description follows');
+    expect(session.validateProject().ok, isTrue);
+    expect(
+      () => session.undoAsset(),
+      throwsA(isA<AuthoringException>()
+          .having((e) => e.status, 'status', AuthoringStatus.commandsRejected)
+          .having((e) => e.code, 'code', 'FYN-E0009')),
+    );
+    history = session.assetHistory();
+    expect(history.redo.length, 5, reason: 'the undone purple setting is still redoable');
+    expect(history.redoLabel, 'New material gold.material.json');
+    session.redoAsset();
+    expect(File('${dir.path}/assets/materials/gold.material.json').existsSync(), isTrue);
+    // Closing the project drops the history.
+    session.closeProject();
+    session.openProject(dir.path);
+    expect(session.assetHistory().canUndo, isFalse);
+    expect(session.assetHistory().canRedo, isFalse);
   });
 
   test('bad input is a diagnostic, never a crash', () {

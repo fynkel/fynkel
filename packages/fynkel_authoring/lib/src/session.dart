@@ -30,7 +30,10 @@ enum AuthoringStatus {
   panic,
   outOfResources,
   incompatible,
-  loadFailed;
+  loadFailed,
+  /// The build lacks what the call needs (fynkel.h's audio device open);
+  /// no authoring call answers it.
+  unsupported;
 
   static AuthoringStatus _of(n.FynkelStatus s) => switch (s) {
         n.FynkelStatus.FYNKEL_STATUS_OK => ok,
@@ -42,6 +45,7 @@ enum AuthoringStatus {
         n.FynkelStatus.FYNKEL_STATUS_OUT_OF_RESOURCES => outOfResources,
         n.FynkelStatus.FYNKEL_STATUS_INCOMPATIBLE => incompatible,
         n.FynkelStatus.FYNKEL_STATUS_LOAD_FAILED => loadFailed,
+        n.FynkelStatus.FYNKEL_STATUS_UNSUPPORTED => unsupported,
       };
 }
 
@@ -78,8 +82,9 @@ final class AuthoringException implements Exception {
 }
 
 /// What changed in a document, on [AuthoringSession.events] and
-/// [DocumentHandle.changes].
-enum DocumentChangeKind { applied, undone, redone, saved, reloaded }
+/// [DocumentHandle.changes]. `moved`: the file was renamed or moved by an
+/// asset operation while open — the path changed, nothing else.
+enum DocumentChangeKind { applied, undone, redone, saved, reloaded, moved }
 
 /// Something happened in the session — the editor's panels rebuild from these.
 sealed class AuthoringEvent {
@@ -119,10 +124,14 @@ final class DocumentClosed extends AuthoringEvent {
   final int handle;
 }
 
-/// The asset database was rescanned (a save, an explicit rescan).
+/// The asset database was rescanned (a save, an explicit rescan) or an
+/// asset operation changed it ([operation] set).
 final class AssetsChanged extends AuthoringEvent {
-  const AssetsChanged(this.report);
+  const AssetsChanged(this.report, {this.operation});
   final RescanReport report;
+
+  /// The operation that caused the change, when one did.
+  final OperationResult? operation;
 }
 
 /// One authoring session: a project and its open documents, behind the
@@ -226,10 +235,95 @@ final class AuthoringSession implements Finalizable {
 
   /// A read-only query by [kind] (`project`, `documents`, `document`,
   /// `inspect`, `validate`, `validateProject`, `assets`, `asset`,
-  /// `dependents`, `schemas`, `schema`, `metadata`, `commands`) with its
-  /// arguments; returns the `result` value. Throws [AuthoringException]
-  /// (`invalidArgument`) for an unknown kind or a missing argument.
-  Object? queryValue(String kind, [Map<String, Object?> args = const {}]) {
+  /// `dependents`, `assetDetail`, `assetHistory`, `schemas`, `schema`,
+  /// `metadata`, `commands`, `operations`) with its arguments; returns the
+  /// `result` value. Throws [AuthoringException] (`invalidArgument`) for an
+  /// unknown kind or a missing argument.
+  Object? queryValue(String kind, [Map<String, Object?> args = const {}]) =>
+      _kindAndArgs('query $kind', kind, args, n.fynkel_authoring_query)['result'];
+
+  /// An asset operation by [kind] — `newDocument`, `renameAsset`,
+  /// `deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`,
+  /// `redoAsset` — with its arguments (see `fynkel_authoring.h`). The
+  /// session re-reads only the touched paths; an [AssetsChanged] event
+  /// carries the result, and an open document the operation moved gets a
+  /// [DocumentChanged] of kind `moved`. Throws [AuthoringException] when
+  /// the operation is refused (`invalidArgument` with FYN-T0003 and the
+  /// reason — a delete's dependents in `related`; `loadFailed` for an
+  /// unknown asset or an I/O failure; `commandsRejected` with nothing to
+  /// undo or a read-only project); nothing was touched then. A `reimport`
+  /// the importer refused returns normally with `ok` false.
+  OperationResult operate(String kind, [Map<String, Object?> args = const {}]) {
+    final json = _kindAndArgs('operate $kind', kind, args, n.fynkel_authoring_operate, rejectedIsResult: true);
+    if (json['ok'] != true && !json.containsKey('op')) {
+      // Refused before it ran (nothing to undo, read-only): the record has
+      // only diagnostics. A reimport the importer refused names its op.
+      throw AuthoringException('operate $kind', AuthoringStatus.commandsRejected, Diagnostic.listOf(json['diagnostics']));
+    }
+    final r = OperationResult.fromJson(json);
+    if (_project != null) {
+      refreshProject();
+      _relocateOpenDocuments();
+      _events.add(AssetsChanged(RescanReport.fromJson({'assetCount': r.assetCount, 'scanned': const []}), operation: r));
+    }
+    return r;
+  }
+
+  /// A new scene, prefab or material document written as the kind's
+  /// `Document::new`. [path] is relative to the asset root (or absolute
+  /// inside it); the kind's suffix is added when missing. [name] defaults
+  /// to the file's stem; a material may name a [shader] the project has.
+  OperationResult newDocument(String kind, String path, {String? name, String? shader}) =>
+      operate('newDocument', {'kind': kind, 'path': path, 'name': ?name, 'shader': ?shader});
+
+  /// Renames or moves the asset [id] to [path] (relative to the asset
+  /// root; a path ending in `/`, or naming a folder, keeps the file's
+  /// name) with its sidecar, so the id and every reference survive.
+  OperationResult renameAsset(String id, String path) => operate('renameAsset', {'asset': id, 'path': path});
+
+  /// Moves the asset's file (and sidecar) to `.fynkel/trash/<id>/`;
+  /// refused while a document references it unless [force] (the
+  /// dependents are then warnings on the result), and while it is open.
+  OperationResult deleteAsset(String id, {bool force = false}) =>
+      operate('deleteAsset', {'asset': id, if (force) 'force': true});
+
+  /// Replaces a source's sidecar `settings` object.
+  OperationResult setImportSettings(String id, Map<String, Object?> settings) =>
+      operate('setImportSettings', {'asset': id, 'settings': settings});
+
+  /// Runs the source through its importer with the sidecar's settings;
+  /// `ok` false with the importer's diagnostics when it refused.
+  OperationResult reimport(String id) => operate('reimport', {'asset': id});
+
+  /// The asset history's undo and redo.
+  OperationResult undoAsset() => operate('undoAsset');
+  OperationResult redoAsset() => operate('redoAsset');
+
+  /// The asset operations' undo/redo state.
+  AssetHistory assetHistory() => AssetHistory.fromJson(query('assetHistory'));
+
+  /// One asset in full — the entry, its file, sidecar or content summary,
+  /// its dependents; throws (`loadFailed`, FYN-A0004) when unknown.
+  AssetDetail assetDetail(String id) => AssetDetail.fromJson(query('assetDetail', {'asset': id}));
+
+  /// The operation names `operate` accepts.
+  List<String> operations() => _strings(queryValue('operations'));
+
+  /// Open documents whose file an operation moved: their state follows and
+  /// a `moved` change is emitted.
+  void _relocateOpenDocuments() {
+    if (_documents.isEmpty) return;
+    for (final state in documentStates()) {
+      final doc = _documents[state.handle];
+      if (doc == null || doc._state.path == state.path) continue;
+      doc._state = state;
+      _events.add(DocumentChanged(doc, DocumentChangeKind.moved, state));
+    }
+  }
+
+  Map<String, Object?> _kindAndArgs(String op, String kind, Map<String, Object?> args,
+      n.FynkelStatus Function(Pointer<n.FynkelAuthoringSession>, Pointer<Uint8>, int, Pointer<Uint8>, int) f,
+      {bool rejectedIsResult = false}) {
     _check();
     final kindBytes = utf8.encode(kind);
     final argBytes = utf8.encode(jsonEncode(args));
@@ -238,8 +332,7 @@ final class AuthoringSession implements Finalizable {
       buf.asTypedList(kindBytes.length).setAll(0, kindBytes);
       final argPtr = buf + kindBytes.length;
       argPtr.asTypedList(argBytes.length).setAll(0, argBytes);
-      final r = _call('query $kind', () => n.fynkel_authoring_query(_ptr, buf, kindBytes.length, argPtr, argBytes.length));
-      return r['result'];
+      return _call(op, () => f(_ptr, buf, kindBytes.length, argPtr, argBytes.length), rejectedIsResult: rejectedIsResult);
     } finally {
       calloc.free(buf);
     }

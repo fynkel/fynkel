@@ -308,6 +308,42 @@ final class HierarchyModel extends ChangeNotifier {
     return true;
   }
 
+  /// Whether a dragged asset may be dropped: a prefab document or an
+  /// imported `#prefab` (kind `prefab`), into an editable document, not
+  /// into a prefab instance's expansion.
+  bool canDropAsset(Map<String, Object?> ref, String kind, DropTarget target) {
+    final t = _tab;
+    if (t == null || !canEdit || kind != 'prefab') return false;
+    if (ref['asset'] is! String) return false;
+    if (t.kind == 'prefab' && ref['sub'] == null && ref['asset'] == t.document.id) return false;
+    final parent = target.parent;
+    if (parent != null) {
+      final n = t.tree[parent];
+      if (n == null || n.isPrefabInstance) return false;
+    }
+    return true;
+  }
+
+  /// Instantiates the prefab [ref] (`{asset, sub?}`) under [target] — one
+  /// `instantiatePrefab` transaction — and selects the instance.
+  bool instantiatePrefab(Map<String, Object?> ref, {required String name, DropTarget? target}) {
+    final t = _tab;
+    if (t == null || !canEdit) return false;
+    final parent = target?.parent;
+    final index = target == null ? null : (parent == null && !rootOrderIsEditable ? null : target.index);
+    final a = _run([Command.instantiatePrefab(prefab: ref, name: name, parent: parent, index: index)]);
+    if (a == null || !a.ok) return false;
+    final created = a.mutations.isNotEmpty && a.mutations.first.affectedIds.isNotEmpty
+        ? a.mutations.first.affectedIds.first
+        : null;
+    if (created != null && t.tree[created] != null) {
+      if (parent != null) t.tree.expand(parent);
+      t.select(created);
+      notifyListeners();
+    }
+    return true;
+  }
+
   /// Whether [ids] may be dropped at [target]: not onto themselves or
   /// their own descendants; prefab-instance children are not in the document.
   /// Whether the roots can be ordered by a drop: a prefab lists its `roots`;

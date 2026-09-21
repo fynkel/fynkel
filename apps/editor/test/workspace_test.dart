@@ -129,7 +129,7 @@ void main() {
       tester,
       shellApp(prefs: prefs, store: store, projects: {'/fake/game': project}, initialProject: '/fake/game'),
     );
-    for (final title in ['Hierarchy', 'Scene', 'Inspector', 'Project', 'Console', 'Profiler', 'Animation', 'Import']) {
+    for (final title in ['Hierarchy', 'Scene', 'Inspector', 'Project', 'Console', 'Profiler', 'Animation', 'Asset']) {
       expect(find.text(title, skipOffstage: false), findsWidgets, reason: '$title tab');
     }
     expect(find.byKey(const Key('hierarchy.openDocument'), skipOffstage: false), findsOneWidget); // Hierarchy, no tab

@@ -142,7 +142,7 @@ name, read-only chip, Close), the banners, the `Docking` workspace and a
 status bar (error and warning counts, document/source/reference counts,
 "validated HH:MM:SS"; a click shows the Console). The workspace
 (`lib/src/shell/workspace.dart`) is the §22.2 default —
-`Hierarchy | Scene over [Project, Console, Profiler, Animation, Import] | Inspector`,
+`Hierarchy | Scene over [Project, Console, Profiler, Animation, Asset] | Inspector`,
 i.e. `R(Ihierarchy,C(Iscene,T(Iproject,Iconsole,Iprofiler,Ianimation,Iimport)),Iinspector)`
 — saved per user (`layout.json` next to the preferences: the docking
 string, the selected tab ids and the package's format version) on every
@@ -197,10 +197,22 @@ run, Escape closes.
 | `inspector.addComponent` | Edit | ⇧⌘A | the searchable Add Component popup; adds to every selected entity in one transaction |
 | `inspector.openScript` | Edit | ⌥⌘↩ | the selected entity's first behaviour's source in the IDE |
 | `inspector.checkCodegen` | Project | ⇧⌘G | run `fynkel codegen --check --project <dir> --json` in the background; the Inspector banner shows the result |
+| `assets.undo` / `assets.redo` | Edit | ⌥⌘Z / ⇧⌥⌘Z | undo / redo the last **asset operation** (its own history; the label names it: "Undo Rename coin.prefab.json → gold.prefab.json") |
+| `assets.newScene` / `assets.newPrefab` / `assets.newMaterial` | Project | ⇧⌥⌘S / ⇧⌥⌘P / ⇧⌥⌘M | a new document in the Project browser's folder (`New Scene`, `New Scene 2`, …), selected and renaming at once |
+| `assets.newFolder` | Project | ⇧⌥⌘F | a new folder there (`New Folder`), renaming at once |
+| `assets.open` | Project | ⇧⌥⌘O | the selected scene or prefab into a tab; any other asset into the Asset panel |
+| `assets.rename` | Project | ⇧⌥⌘R | rename the selected asset in place (the sidecar moves with it; the id survives) |
+| `assets.move` | Project | ⇧⌥⌘V | move the selected assets to a folder picked from a list |
+| `assets.delete` | Project | ⇧⌥⌘⌫ | delete the selected assets to `.fynkel/trash`; refused while referenced, with the dependents listed and a **Delete anyway** |
+| `assets.reimport` | Project | ⇧⌥⌘I | run the selected source through its importer with the sidecar's settings |
+| `assets.reveal` | Project | ⇧⌥⌘E | reveal the selected asset in Finder (`open -R`; `explorer /select,` and `xdg-open` elsewhere) |
+| `assets.copyId` | Project | ⇧⌥⌘C | the selected asset's id on the clipboard |
+| `assets.search` | Project | ⌥⌘P | focus the Project browser's search field |
+| `assets.toggleView` | Project | ⇧⌥⌘T | the Project browser as folders or as one flat list (the label flips) |
 | `app.preferences` | Edit | ⌘, | Preferences |
 | `window.commandPalette` | Window | ⇧⌘P | the palette |
 | `window.resetLayout` | Window | ⌥⌘0 | the §22.2 default layout |
-| `window.panel.<id>` | Window | ⌥⌘1 … ⌥⌘8 | show/hide Hierarchy, Scene, Inspector, Project, Console, Profiler, Animation, Import (the label flips between Show and Hide) |
+| `window.panel.<id>` | Window | ⌥⌘1 … ⌥⌘8 | show/hide Hierarchy, Scene, Inspector, Project, Console, Profiler, Animation, Asset (the panel id stays `import`; the label flips between Show and Hide) |
 | `console.focusSearch` | Window | ⌥⌘F | focus the Console's filter |
 | `console.copy` | Window | ⌥⌘C | copy the selected or all visible Console lines |
 | `console.openInIde` | Window | ⌥⌘O | open the selected diagnostic in the IDE |
@@ -481,9 +493,154 @@ keeps showing the last committed fields underneath. A project without
 `behaviours.g.json` (the fixture) has nothing to check and no banner.
 
 What item 4 does **not** do: per-field override marks inside an expanded
-prefab instance (item 7), drag-in from the Project browser (the target
-exists; item 5 supplies the drag), the runtime view of a behaviour during
-Play (after V0).
+prefab instance (item 7), the runtime view of a behaviour during Play
+(after V0). Drag-in from the Project browser, left open here, landed with
+item 5 (a row dropped onto an asset field of the matching kind).
+
+## The Project browser (M4-05)
+
+Blueprint §19.2e item 5. `lib/src/project_browser/`: `project_browser_model.dart`
+(the model over `EditorProject`), `project_panel.dart` (the **Project**
+panel), `asset_panel.dart` (the **Asset** panel — item 2's Import
+placeholder, filled), `asset_preview.dart`. Everything that changes a file
+goes through the session's `operate` (§ documents.md "The authoring
+session"): the editor never renames, deletes or writes an asset itself,
+so every operation leaves `fynkel validate` clean or is refused before it
+touches anything. Folders are the one exception — a folder is not an
+asset, has no id and no sidecar, so **New Folder** and an empty folder's
+rename/delete are plain directory work (the precedent is Save As creating
+directories); renaming a folder that holds assets moves each asset through
+the session, one undo step each, and removes the empty tree after.
+
+### The model (`project_browser_model.dart`)
+
+`ProjectBrowserModel` listens to the project and re-reads its entries,
+folders (walked from the asset root, dot-directories skipped), details and
+history whenever `EditorProject.assetsRevision` moves — the
+`SessionProject` bumps it on every `AssetsChanged` event, which the
+watcher's incremental `rescan(paths)` and every operation raise (the
+package's event stream is synchronous, so the browser is current the
+moment `operate` returns). Two **views**: *folders* (a tree beside the
+shown folder's sub-folders and assets) and *list* (every asset, one flat
+list with its folder path). The **search** matches path, name, id and
+sub-asset ids, case-insensitively; from a folder it looks under that
+folder, from the root or the list everywhere. **Kind filters** are a set
+over `scene`, `prefab`, `material`, `rig`, `blend`, `texture` (image
+sources), `model` (glTF/FBX), `sound` (audio), `other`, with live counts;
+**sort** by name, kind, path or modified time, the same choice again
+flipping the direction. Selection is a set with a lead: click, ⌘-toggle,
+⇧-range, ↑↓ (⇧ extends), ⌘A; a selection, lead, renaming row or shown
+folder that a rescan removed is pruned. **Previews**: an image source
+decodes its own file (`Image.file` at twice the row height, cached by
+Flutter; a file that fails to decode falls back to the icon), a material
+is a **swatch** of its `base_color` (white for a PBR material that leaves
+it default; a custom shader gets the icon), everything else the kind's
+icon from `assetKindIcon`. Material preview spheres and mesh thumbnails
+are *not in M4* by the blueprint.
+
+**What a row drags** (`dragPayload`): a document by its kind, an audio
+source as a `sound` and an image as a `texture` — both are referenced
+**whole** (a material's texture slot names the image's own id; the fix in
+`AssetEntry.wholeKind` also lets the Inspector's asset picker offer
+textures), an imported model as its `#prefab`, any other source with
+exactly one sub-asset as that sub-asset; the Asset panel drags a source's
+sub-assets one by one. The payload is the Inspector's `AssetDragPayload`
+(`id`, `sub`, `kind`, `name`; `toRef()` is the document's `{ asset, sub? }`).
+
+**Operations**, each a session call behind `_guard` (a refusal becomes
+`lastError` with the session's reasons; success clears it and any pending
+delete): `newDocument(kind)` finds a fresh `New Scene`, `New Scene 2`, …
+in the shown folder and leaves the row selected and renaming;
+`rename(id, typed)` re-appends the document suffix or the source's
+extension the user left off (`level1` → `level1.scene.json`, `bot.png`
+for a `.glb` → `bot.png.glb` — a typed extension never changes the real
+one) and strips `/`; `move(ids, folder)` passes `folder/file` (or the bare
+file name for the root, which the session refuses as a target) per asset
+and stops at the first refusal; `renameFolder`, `newFolder`, `deleteFolder`
+(refused while the folder holds assets — the message counts them);
+`delete(ids, force)` first asks the project for every target's dependents
+and, when any is referenced, **touches nothing** and parks a
+`DeleteRefusal` (ids, the dependents as `FYN-A0004` diagnostics with
+document, pointer and id) for the panel's dialog — `force` moves them to
+`.fynkel/trash` one by one; `setImportSettings`, `reimport` (the
+importer's `ok: false` is a *result*, shown, not an error), `undo`/`redo`
+over the **asset history** (`AssetHistory`: labels and both stacks). A
+read-only project refuses everything with the lock's reason.
+
+### The Project panel (`project_panel.dart`)
+
+Toolbar: view toggle, search (⌥⌘P), the kind filter menu with counts and
+a badge, sort, **New ▾** (Scene, Prefab, Material, Folder), Undo/Redo of
+asset operations with the operation's label in the tooltip. Below, in the
+folders view, the tree (`assets` root and every folder, the shown one
+highlighted) beside the list; a folder opens on one click, a document
+opens in a tab on double-click (or ↩), any other asset shows the Asset
+panel. Rows show the file name (renaming changes the file, never a
+document's internal `name`, which dims beside it when it differs), a
+preview, the folder path in the list or while filtering, `N sub` with
+the sub-asset ids as a tooltip, and the kind. **Inline rename** (F2, the
+menu, or right after New): ↩ commits, ⎋ cancels, losing focus commits.
+Keys: ↑↓ ⇧↑↓ ↩ F2 ⌫/⌦ ⌘A ⎋ ←(up a folder). Context menus: an asset's
+Open / Show in Asset Panel / Reveal in Finder / Rename / Move to… / Delete /
+Reimport / Copy id / Copy path / New … Here; a folder's Show / Reveal /
+New … Here / Rename Folder / Delete Empty Folder; the empty area's New …
+Here. **Drag and drop**: an asset row is a `Draggable<AssetDragPayload>`
+(dragging a selected row drags the whole selection, the feedback says "3
+assets"); every folder row in the tree and in the list is a drop target
+that moves through the session (the target lights up only when the move
+would change something). The **Delete refused** dialog groups the
+dependents by document path with each pointer, and offers Cancel or
+**Delete anyway**; the error bar shows any other refusal with its reasons
+and a ×; the status line counts `shown of total assets in <where>` and the
+selection, with an up arrow inside a folder.
+
+A finding while testing: a `GestureDetector` that catches the empty-space
+click (clear the selection, focus the list) must be `excludeFromSemantics`
+— with its semantics node in the tree, rows leaving the `ListView` while
+a menu route pops trip the framework's `'node.built'` assertion (the kind
+filter did exactly that; the Hierarchy's identical detector never hit it
+because its rows were never Text-only). It has no semantic meaning anyway.
+
+### The Asset panel (`asset_panel.dart`)
+
+The selected asset's inspector — the blueprint's "selected asset's
+Inspector", as its own panel so the entity Inspector stays where it is:
+header (name, kind, id with Copy), the actions Open (scenes and prefabs),
+Reveal in Finder, Reimport (sources), Delete; **File** (path, size,
+modified); for a source **Import**: importer and version, the sidecar
+path, the importer's known settings as controls — `fynkel.image`
+`colorSpace` (sRGB for colour, linear for data; the default writes no
+key), `fynkel.audio` `stream`, `fynkel.gltf`/`fynkel.fbx`
+`allowExternalFiles` — plus the raw `settings` JSON for everything else;
+**Apply and Reimport** writes the settings through the session (one asset
+history step, undoable) and reimports at once, the result box showing the
+importer's summary (meshes, images, clips, …) or its refusal with the
+diagnostics, **Revert** drops the draft; **Sub-assets**, each row
+draggable onto an Inspector field or the Hierarchy; a material's
+shader, alpha mode, double-sided and fields; a scene's or prefab's entity
+count; **Referenced by (N)** grouped by document, each row opening that
+document — a scene or prefab in a tab with the entity selected
+(`openReference` in `app.dart`: the pointer's `/entities/<id>` is
+revealed), any other document in the browser.
+
+### Drop targets elsewhere
+
+The Inspector's asset fields were `DragTarget<AssetDragPayload>` since
+item 4 and accept a payload of their kind (a `texture` field takes an
+image, a `mesh` field a `#mesh/0`). The **Hierarchy** now takes a
+`prefab` — a prefab document or an imported model's `#prefab` — onto a
+row (a child of it) or the empty area (a new root): one
+`instantiatePrefab` transaction with the instance named after the file,
+the parent expanded and the instance selected; refused into a prefab
+instance's subtree, into a read-only tab, onto the prefab document itself,
+and for every other kind (`HierarchyModel.canDropAsset`). A drop into
+the Scene view arrives with item 6, which owns that surface.
+
+What item 5 does **not** do: material preview spheres and mesh
+thumbnails (not in M4), a material editor panel (the session edits
+material fields since item 1 — `setDocumentField` on a material handle —
+but no panel shows them yet; the Asset panel lists them read-only), the
+Scene-view drop (item 6).
 
 ## What exists after each item
 
@@ -493,7 +650,7 @@ Play (after V0).
 | 2 | 2026-09-21 | `apps/editor`: launcher, docking workspace saved per user, native menu bar + command registry + palette, Console with open-in-IDE, read-only banner, migration preview, preferences (§ The shell). |
 | 3 | 2026-09-21 | Document tabs with save / save-as / revert / close prompts, per-tab undo, the conflict dialog with a diff; the Hierarchy over the session (patched from `affectedIds`, one transaction per operation, keep-world-transform drops), Console → tab (§ Document tabs and the Hierarchy). |
 | 4 | 2026-09-21 | The Inspector: one parser over schema + metadata + the editor's native-hint table (ADR-0018 accepted), one widget per field kind, multi-object editing with mixed values and one transaction per gesture, precheck + session validation with the message kept, Add / Remove Component, prefab override revert, Open script, the codegen banner over `codegen --check --json` (§ The Inspector). |
-| 5 | — | The Project browser. |
+| 5 | 2026-09-21 | The Project browser: folders and a searchable flat list with kind filters and sort, texture previews and material swatches, the Asset panel (sidecar settings, Apply and Reimport, sub-assets, dependents), New / rename / move / delete-with-refusal / Reveal / Copy id as session operations with the asset history's own undo (⌥⌘Z), prefab drop onto the Hierarchy, incremental rescan (§ The Project browser). |
 | 6 | — | The Scene view (edit-preview world, camera, picking, gizmos). |
 | 7 | — | Prefab mode. |
 | 8 | — | Play / Stop and the game Console over the stdout channel. |
@@ -508,7 +665,8 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
-cd apps/editor && flutter analyze --fatal-infos && flutter test   # 116 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 140 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step
+cargo test -p fynkel_authoring --test ops            # the asset operations, and the 2 000-asset tree: a full scan against one change's rescan (< 50 ms)
 cargo run -q -p fynkel_cli --bin fynkel -- codegen --check --project packages/fynkel_generator/example/spinner_game --json   # what the Inspector banner runs
 ```
 
@@ -521,3 +679,15 @@ shows every change; with a tab dirty, edit the same file from a terminal and see
 conflict dialog — never an overwrite; open a 10 000-entity scene and
 scroll and select without a rebuild; close the Playground session that is
 open on the reference game before its scene is edited.
+
+The item 5 gate, driven by the user, again on **copies**: in the Project
+panel rename a texture that a material uses (the material still validates,
+`fynkel validate <copy>` clean, the sidecar moved with it), drag it into
+another folder, delete it — refused with the material listed — then
+**Delete anyway** and ⌥⌘Z to bring it back; New Material / New Scene /
+New Folder and rename each; change a texture's colour space in the Asset
+panel and **Apply and Reimport**; drag a prefab (and `robot.glb#prefab`)
+onto the Hierarchy and a texture onto a material field in the Inspector;
+Reveal in Finder; add a file to `assets/` from Finder and see it appear
+(the watcher's incremental rescan); `fynkel validate <copy>` after every
+step. The reference game's Playground session must be closed first.

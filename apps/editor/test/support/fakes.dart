@@ -127,6 +127,318 @@ final class FakeProject extends EditorProject {
   @override
   List<AssetEntry> assets() => assetEntries;
 
+  // ── Asset operations, in memory (item 5) ──
+
+  @override
+  String get assetsDir => '$dir/assets';
+
+  @override
+  int assetsRevision = 0;
+
+  /// Folders the fake "has" besides the ones `assetEntries` imply.
+  List<String> extraFolders = [];
+
+  /// References per asset id, as the `dependents` query answers them.
+  Map<String, List<Map<String, Object?>>> fakeDependents = {};
+
+  /// Sidecar settings per source id.
+  Map<String, Map<String, Object?>> settings = {};
+
+  /// Material fields per material id (`base_color` → a swatch).
+  Map<String, Map<String, Object?>> materialFields = {};
+
+  /// Every operation asked, `(kind, args)`.
+  final operations = <(String, Map<String, Object?>)>[];
+  final _undo = <(String, void Function())>[];
+  final _redo = <(String, void Function())>[];
+  int _fresh = 0;
+
+  /// What `reimport` answers: null → ok with a summary; a message → refused.
+  String? reimportRefusal;
+
+  @override
+  List<String> folders() {
+    final out = <String>{...extraFolders};
+    for (final e in assetEntries) {
+      final parts = e.path.split('/');
+      for (var i = 1; i < parts.length; i++) {
+        out.add(parts.sublist(0, i).join('/'));
+      }
+    }
+    return out.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  @override
+  String? createFolder(String rel) {
+    extraFolders.add(rel);
+    assetsRevision++;
+    notifyListeners();
+    return null;
+  }
+
+  AssetEntry? entryOf(String id) => assetEntries.where((e) => e.id == id).firstOrNull;
+
+  @override
+  AssetDetail? assetDetail(String id) {
+    final e = entryOf(id);
+    if (e == null) return null;
+    return AssetDetail.fromJson({
+      'id': e.id,
+      'path': e.path,
+      'name': e.name,
+      'kind': e.kind,
+      'document': ?e.document,
+      'importer': ?e.importer,
+      if (e.importer != null) 'importerVersion': 1,
+      'file': {'size': 1234, 'modified': 1758450000.0},
+      if (e.isSource)
+        'sidecar': {
+          'path': '${e.path}.meta.json',
+          'importer': e.importer,
+          'importerVersion': 1,
+          'settings': settings[id] ?? const <String, Object?>{},
+          'subAssets': e.subAssets,
+        },
+      if (e.document == 'material')
+        'material': {
+          'shader': 'fynkel.pbr@1',
+          'alphaMode': 'opaque',
+          'alphaCutoff': 0.5,
+          'doubleSided': false,
+          'fields': materialFields[id] ?? const <String, Object?>{},
+        },
+      if (e.document == 'scene' || e.document == 'prefab') 'entities': 3,
+      'dependents': fakeDependents[id] ?? const [],
+    });
+  }
+
+  @override
+  List<Map<String, Object?>> dependents(String id) => fakeDependents[id] ?? const [];
+
+  @override
+  AssetHistory assetHistory() => AssetHistory.fromJson({
+    'canUndo': _undo.isNotEmpty,
+    'canRedo': _redo.isNotEmpty,
+    'undoLabel': _undo.lastOrNull?.$1,
+    'redoLabel': _redo.lastOrNull?.$1,
+    'undo': [for (final u in _undo) u.$1],
+    'redo': [for (final r in _redo) r.$1],
+  });
+
+  Never _refuse(String code, String message, {List<Map<String, Object?>> related = const []}) =>
+      throw AuthoringException('operate', AuthoringStatus.invalidArgument, [
+        Diagnostic(
+          code: code,
+          severity: Severity.error,
+          message: message,
+          related: [
+            for (final r in related)
+              Diagnostic(
+                code: 'FYN-A0004',
+                severity: Severity.error,
+                message: '${r['path']} references $message',
+                document: '$assetsDir/${r['path']}',
+                pointer: r['pointer'] as String?,
+                id: r['document'] as String?,
+              ),
+          ],
+        ),
+      ]);
+
+  void _replace(String id, AssetEntry e) {
+    final i = assetEntries.indexWhere((x) => x.id == id);
+    if (i < 0) {
+      assetEntries.add(e);
+    } else {
+      assetEntries[i] = e;
+    }
+  }
+
+  Map<String, Object?> _entryJson(AssetEntry e) => {
+    'id': e.id,
+    'path': e.path,
+    'name': e.name,
+    'kind': e.kind,
+    'document': ?e.document,
+    'importer': ?e.importer,
+    if (e.subAssets.isNotEmpty) 'subAssets': e.subAssets,
+  };
+
+  OperationResult _done(String op, String label, AssetEntry? entry, Map<String, Object?> extra) {
+    assetsRevision++;
+    notifyListeners();
+    final h = assetHistory().json;
+    return OperationResult.fromJson({
+      'ok': true,
+      'op': op,
+      'label': label,
+      'entry': entry == null ? null : _entryJson(entry),
+      'assetCount': assetEntries.length,
+      ...h,
+      ...extra,
+    });
+  }
+
+  @override
+  OperationResult operate(String kind, [Map<String, Object?> args = const {}]) {
+    operations.add((kind, args));
+    if (readOnly != null) {
+      throw AuthoringException('operate', AuthoringStatus.commandsRejected, [
+        Diagnostic(code: 'FYN-E0007', severity: Severity.error, message: 'the project is read-only: $readOnly'),
+      ]);
+    }
+    switch (kind) {
+      case 'newDocument':
+        final docKind = args['kind'] as String;
+        var path = args['path'] as String;
+        final suffix = '.$docKind.json';
+        if (!path.endsWith(suffix)) path = '$path$suffix';
+        if (assetEntries.any((e) => e.path == path)) _refuse('FYN-T0003', 'newDocument: $path exists');
+        final stem = path.split('/').last;
+        final name = args['name'] as String? ?? stem.substring(0, stem.length - suffix.length);
+        final e = AssetEntry(
+          id: 'new-${++_fresh}'.padRight(36, '0'),
+          path: path,
+          name: name,
+          kind: 'document',
+          document: docKind,
+        );
+        assetEntries.add(e);
+        final label = 'New $docKind $stem';
+        _redo.clear();
+        _undo.add((label, () => assetEntries.removeWhere((x) => x.id == e.id)));
+        return _done(kind, label, e, {'path': assetFile(path), 'id': e.id});
+      case 'renameAsset':
+        final id = args['asset'] as String;
+        final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        var to = args['path'] as String;
+        final fileName = e.path.split('/').last;
+        if (to.endsWith('/') || folders().contains(to)) {
+          to = to.endsWith('/') ? '$to$fileName' : '$to/$fileName';
+        } else if (!e.isSource) {
+          final suffix = '.${e.document}.json';
+          if (!to.endsWith(suffix)) {
+            if (to.endsWith('.json')) _refuse('FYN-T0003', 'renameAsset: a ${e.document} keeps the $suffix suffix');
+            to = '$to$suffix';
+          }
+        } else if (!to.contains('.')) {
+          to = '$to.${fileName.split('.').last}';
+        }
+        if (to.startsWith('/')) to = to.substring(1);
+        if (assetEntries.any((x) => x.path == to)) _refuse('FYN-T0003', 'renameAsset: $to exists');
+        final newName = !e.isSource && e.name == fileName.substring(0, fileName.length - '.${e.document}.json'.length)
+            ? to.split('/').last.replaceFirst('.${e.document}.json', '')
+            : e.name;
+        final moved = AssetEntry(
+          id: e.id,
+          path: to,
+          name: newName,
+          kind: e.kind,
+          document: e.document,
+          importer: e.importer,
+          subAssets: e.subAssets,
+        );
+        _replace(id, moved);
+        final label = to.split('/').last == fileName
+            ? 'Move $fileName → ${to.substring(0, to.length - fileName.length)}'
+            : 'Rename $fileName → ${to.split('/').last}';
+        _redo.clear();
+        _undo.add((label, () => _replace(id, e)));
+        return _done(kind, label, moved, {'from': assetFile(e.path), 'to': assetFile(to)});
+      case 'deleteAsset':
+        final id = args['asset'] as String;
+        final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        final related = fakeDependents[id] ?? const [];
+        if (related.isNotEmpty && args['force'] != true) {
+          _refuse(
+            'FYN-T0003',
+            'deleteAsset: ${e.path} is referenced by ${related.length} document field${related.length == 1 ? '' : 's'}',
+            related: related,
+          );
+        }
+        if (fakeDocuments.any((d) => d.path == '$assetsDir/${e.path}')) {
+          _refuse('FYN-T0003', 'deleteAsset: ${e.path} is open as a document — close its tab first');
+        }
+        assetEntries.removeWhere((x) => x.id == id);
+        final label = 'Delete ${e.path.split('/').last}';
+        _redo.clear();
+        _undo.add((label, () => assetEntries.add(e)));
+        return _done(kind, label, null, {
+          'path': e.path,
+          'trash': '$dir/.fynkel/trash/$id/${e.path.split('/').last}',
+          'diagnostics': [
+            for (final r in related)
+              {'code': 'FYN-A0004', 'severity': 'warning', 'message': '${r['path']} now dangles'},
+          ],
+        });
+      case 'setImportSettings':
+        final id = args['asset'] as String;
+        final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        if (!e.isSource) _refuse('FYN-T0003', 'setImportSettings: ${e.path} is a document');
+        final next = args['settings'];
+        if (next is! Map<String, Object?>) _refuse('FYN-T0003', 'setImportSettings: settings must be an object');
+        final before = settings[id] ?? const <String, Object?>{};
+        settings[id] = Map.of(next);
+        final label = 'Import settings of ${e.path.split('/').last}';
+        _redo.clear();
+        _undo.add((label, () => settings[id] = before));
+        return _done(kind, label, e, {'settings': next, 'sidecar': '${e.path}.meta.json'});
+      case 'reimport':
+        final id = args['asset'] as String;
+        final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        if (!e.isSource) _refuse('FYN-T0003', 'reimport: ${e.path} is a document');
+        if (reimportRefusal != null) {
+          return OperationResult.fromJson({
+            'ok': false,
+            'op': kind,
+            'path': e.path,
+            'diagnostics': [
+              {'code': 'FYN-A0003', 'severity': 'error', 'message': reimportRefusal},
+            ],
+          });
+        }
+        return OperationResult.fromJson({
+          'ok': true,
+          'op': kind,
+          'label': 'Reimport ${e.path.split('/').last}',
+          'entry': _entryJson(e),
+          'assetCount': assetEntries.length,
+          'summary': {'importer': e.importer},
+          'subAssets': e.subAssets,
+          'sidecarWritten': false,
+          ...assetHistory().json,
+        });
+      case 'undoAsset' || 'redoAsset':
+        final from = kind == 'undoAsset' ? _undo : _redo;
+        if (from.isEmpty) {
+          throw AuthoringException('operate', AuthoringStatus.commandsRejected, [
+            Diagnostic(code: 'FYN-E0009', severity: Severity.error, message: 'nothing to ${kind.substring(0, 4)}'),
+          ]);
+        }
+        final (label, inverse) = from.removeLast();
+        // A snapshot swap: the inverse of the inverse is the state before it ran.
+        final snapshot = List.of(assetEntries);
+        final settingsSnapshot = {for (final s in settings.entries) s.key: Map.of(s.value)};
+        inverse();
+        (kind == 'undoAsset' ? _redo : _undo).add((
+          label,
+          () {
+            assetEntries
+              ..clear()
+              ..addAll(snapshot);
+            settings
+              ..clear()
+              ..addAll(settingsSnapshot);
+          },
+        ));
+        return _done(kind, '${kind == 'undoAsset' ? 'Undo' : 'Redo'} $label', null, {});
+      default:
+        throw AuthoringException('operate', AuthoringStatus.invalidArgument, [
+          Diagnostic(code: 'FYN-T0004', severity: Severity.error, message: 'unknown operation $kind'),
+        ]);
+    }
+  }
+
   @override
   String? fileRevision(String path) => File(path).existsSync() ? 'disk-${File(path).lengthSync()}' : null;
 

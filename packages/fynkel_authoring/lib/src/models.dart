@@ -309,3 +309,148 @@ final class ProjectReport {
   final int references;
   final List<Diagnostic> diagnostics;
 }
+
+/// The asset operations' undo/redo state (`assetHistory` query, and on
+/// every [OperationResult]) — the Project browser's Edit menu.
+final class AssetHistory {
+  AssetHistory.fromJson(this.json)
+      : canUndo = json['canUndo'] == true,
+        canRedo = json['canRedo'] == true,
+        undoLabel = json['undoLabel'] as String?,
+        redoLabel = json['redoLabel'] as String?,
+        undo = _strings(json['undo']),
+        redo = _strings(json['redo']);
+
+  const AssetHistory.empty()
+      : json = const {},
+        canUndo = false,
+        canRedo = false,
+        undoLabel = null,
+        redoLabel = null,
+        undo = const [],
+        redo = const [];
+
+  final Map<String, Object?> json;
+  final bool canUndo;
+  final bool canRedo;
+
+  /// What the next undo / redo would take back, as the menu shows it
+  /// (`Rename robot.glb → bot.glb`), or null.
+  final String? undoLabel;
+  final String? redoLabel;
+
+  /// Every label on each stack, the next one last.
+  final List<String> undo;
+  final List<String> redo;
+}
+
+/// What one asset operation (`operate`) answered: the affected entry
+/// when it still exists, the history after it, the operation's own
+/// fields in [json] (`path`, `from`/`to`, `trash`, `sidecar`, `settings`,
+/// `summary`, `subAssets`, `sidecarWritten`) and any warnings.
+final class OperationResult {
+  OperationResult.fromJson(this.json)
+      : ok = json['ok'] == true,
+        op = json['op'] as String? ?? '',
+        label = json['label'] as String? ?? '',
+        entry = json['entry'] is Map<String, Object?> ? json['entry'] as Map<String, Object?> : null,
+        assetCount = (json['assetCount'] as num?)?.toInt() ?? 0,
+        history = AssetHistory.fromJson(json),
+        diagnostics = Diagnostic.listOf(json['diagnostics']);
+
+  final Map<String, Object?> json;
+
+  /// False only for a `reimport` the importer refused (see [diagnostics]);
+  /// a refused operation throws instead.
+  final bool ok;
+  final String op;
+
+  /// The history label (`New material gold.material.json`).
+  final String label;
+
+  /// The asset's entry after the operation (`fynkel asset list --json`
+  /// shape), or null when it no longer exists (a delete).
+  final Map<String, Object?>? entry;
+  final int assetCount;
+  final AssetHistory history;
+
+  /// Warnings (a forced delete's dependents) or the importer's refusal.
+  final List<Diagnostic> diagnostics;
+
+  /// The new path of a `newDocument`, `renameAsset` (`to`) or the
+  /// trashed file's original path.
+  String? get path => (json['to'] ?? json['path']) as String?;
+
+  /// The id of a created asset.
+  String? get id => json['id'] as String? ?? (entry?['id'] as String?);
+}
+
+/// The `assetDetail` query: one asset and what the Asset panel shows of it.
+final class AssetDetail {
+  AssetDetail.fromJson(this.json)
+      : id = json['id'] as String? ?? '',
+        path = json['path'] as String? ?? '',
+        name = json['name'] as String? ?? '',
+        kind = json['kind'] as String? ?? '',
+        document = json['document'] as String?,
+        importer = json['importer'] as String?,
+        importerVersion = (json['importerVersion'] as num?)?.toInt(),
+        size = (_map(json['file'])['size'] as num?)?.toInt(),
+        modified = (_map(json['file'])['modified'] as num?)?.toDouble(),
+        settings = _map(_map(json['sidecar'])['settings']),
+        sidecarPath = _map(json['sidecar'])['path'] as String?,
+        subAssets = {
+          for (final e in _map(_map(json['sidecar'])['subAssets'] ?? json['subAssets']).entries)
+            if (e.value is String) e.key: e.value as String
+        },
+        material = json['material'] is Map<String, Object?> ? json['material'] as Map<String, Object?> : null,
+        entities = (json['entities'] as num?)?.toInt(),
+        fields = json['fields'] is Map<String, Object?> ? json['fields'] as Map<String, Object?> : null,
+        dependents = [
+          for (final d in json['dependents'] as List? ?? const [])
+            if (d is Map<String, Object?>) d
+        ];
+
+  final Map<String, Object?> json;
+  final String id;
+
+  /// Relative to the asset root, `/`-separated.
+  final String path;
+  final String name;
+
+  /// `document` or `source`.
+  final String kind;
+
+  /// The document kind (`scene`, `prefab`, `material`, `rig`, `blend`) or null for a source.
+  final String? document;
+
+  /// The importer id of a source (`fynkel.image`), or null.
+  final String? importer;
+  final int? importerVersion;
+
+  /// The file's size in bytes and modification time (seconds since the
+  /// epoch), when it could be read.
+  final int? size;
+  final double? modified;
+
+  /// A source's sidecar `settings` object (empty for a document).
+  final Map<String, Object?> settings;
+  final String? sidecarPath;
+
+  /// Sub-asset id → uuid (a source's from its sidecar, a rig's derived).
+  final Map<String, String> subAssets;
+
+  /// A material's `{ shader, alphaMode, alphaCutoff, doubleSided, fields }`.
+  final Map<String, Object?>? material;
+
+  /// A scene's or prefab's entity count.
+  final int? entities;
+
+  /// A rig's or blend's whole root.
+  final Map<String, Object?>? fields;
+
+  /// Every reference to the asset: `{ document, path, pointer, asset, sub? }`.
+  final List<Map<String, Object?>> dependents;
+
+  bool get isSource => kind == 'source';
+}

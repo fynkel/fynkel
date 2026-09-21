@@ -364,6 +364,34 @@ final class FakeDocument extends EditorDocument {
         _entities[id] = {'name': c['name'], 'parent': parent, 'children': <String>[], 'components': comps};
         _insert(parent, id, c['index'] as int?);
         return _Result([id, ?parent]);
+      case 'instantiatePrefab':
+        final parent = c['parent'] as String?;
+        if (parent != null && !_entities.containsKey(parent)) return _Result.error('no entity $parent');
+        final prefab = c['prefab'];
+        if (prefab is! Map || prefab['asset'] is! String) return _Result.error('prefab names no asset');
+        final id = c['id'] as String? ?? 'inst${++_fresh}';
+        _entities[id] = {
+          'name': c['name'] ?? 'Instance',
+          'parent': parent,
+          'children': <String>[],
+          'components': <String, Object?>{
+            't': {
+              'type': 'fynkel.Transform',
+              'version': 1,
+              'data': {
+                'position': [0, 0, 0],
+                'rotation': [0, 0, 0, 1],
+                'scale': [1, 1, 1],
+              },
+            },
+          },
+          'prefab': {
+            'asset': {for (final e in prefab.entries) '${e.key}': e.value},
+            'overrides': <Object?>[],
+          },
+        };
+        _insert(parent, id, c['index'] as int?);
+        return _Result([id, ?parent]);
       case 'deleteObject':
         final id = c['id'] as String;
         final e = _entities[id];
