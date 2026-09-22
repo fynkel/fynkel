@@ -21,6 +21,7 @@ IconData documentKindIcon(String kind) => switch (kind) {
   'material' => Icons.palette_outlined,
   'rig' => Icons.accessibility_new,
   'blend' => Icons.call_split,
+  'volume' => Icons.tune,
   _ => Icons.description_outlined,
 };
 

@@ -47,6 +47,7 @@ use fynkel_cooked::payload::{
     SkinWeight, Vertex, TEXTURE_FORMAT_RGBA16F_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
 };
 use fynkel_core::material::AlphaMode;
+use fynkel_core::volume::{self, PostSettings, VolumeProfile};
 use fynkel_core::{Environment, Extract, Projection};
 use glam::{Mat4, Vec3};
 use wgpu::util::DeviceExt;
@@ -147,6 +148,7 @@ struct FrameUniforms {
     ambient: [f32; 4],
     sky: [f32; 4],
     shadow: [f32; 4],
+    ao: [f32; 4],
     counts: [u32; 4],
     lights: [GpuLight; LIGHT_POOL],
 }
@@ -337,6 +339,8 @@ pub struct FrameStats {
     pub debug_lines: u32,
     /// Whether the frame ran the ambient-occlusion stage (R2).
     pub ambient_occlusion: bool,
+    /// Volumes (R3a) whose profile reached the camera this frame.
+    pub volumes: u32,
     /// Samples per pixel of the scene passes (1 or 4).
     pub msaa: u32,
     /// The internal render size (target × render scale).
@@ -793,6 +797,8 @@ pub struct ExtractRenderer {
     /// Whether this frame's pass chain has the ambient-occlusion stage
     /// (R2): the profile asks for it and the targets exist.
     ao_active: bool,
+    /// The look the last `prepare` resolved from the volumes (R3a).
+    post: PostSettings,
     sky_bind_group: Option<(AssetRef, wgpu::BindGroup)>,
     /// The environment the frame bind group holds (E1), and the 1×1 black
     /// stand-in bound when a scene has none.
@@ -818,6 +824,8 @@ pub struct ExtractRenderer {
     /// texture has no `ENVM`, or it could not be read).
     environments: HashMap<AssetRef, Option<std::sync::Arc<EnvironmentPayload>>>,
     materials: HashMap<AssetRef, Option<GpuMaterial>>,
+    /// Volume profiles (R3a; `None`: it could not be read).
+    volume_profiles: HashMap<AssetRef, Option<VolumeProfile>>,
     asset_errors: Vec<String>,
     stats: FrameStats,
     /// Pass timestamps when the device supports them (M3-16).
@@ -1168,6 +1176,7 @@ impl ExtractRenderer {
             shadow_map,
             shadow_active: false,
             ao_active: false,
+            post: PostSettings::default(),
             sky_bind_group: None,
             ibl: None,
             ibl_none,
@@ -1187,6 +1196,7 @@ impl ExtractRenderer {
             textures: HashMap::new(),
             environments: HashMap::new(),
             materials: HashMap::new(),
+            volume_profiles: HashMap::new(),
             asset_errors: Vec::new(),
             stats: FrameStats::default(),
             gpu_timer: device
@@ -1236,6 +1246,12 @@ impl ExtractRenderer {
 
     pub fn stats(&self) -> FrameStats {
         self.stats
+    }
+
+    /// The look the last `prepare` resolved from the scene's volumes
+    /// (R3a): the engine defaults when none reached the camera.
+    pub fn post_settings(&self) -> PostSettings {
+        self.post
     }
 
     /// The EV100 the last `prepare` exposed the frame at (the camera's
@@ -1437,6 +1453,7 @@ impl ExtractRenderer {
         self.meshes.retain(|r, _| a.is_resident(r.asset));
         self.textures.retain(|r, _| a.is_resident(r.asset));
         self.environments.retain(|r, _| a.is_resident(r.asset));
+        self.volume_profiles.retain(|r, _| a.is_resident(r.asset));
         let textures = &self.textures;
         self.materials.retain(|r, m| {
             a.is_resident(r.asset)
@@ -1464,6 +1481,7 @@ impl ExtractRenderer {
         self.textures.clear();
         self.environments.clear();
         self.materials.clear();
+        self.volume_profiles.clear();
         self.sky_bind_group = None;
         self.ibl_dirty |= self.ibl.take().is_some();
         self.asset_errors.clear();
@@ -2045,9 +2063,17 @@ impl ExtractRenderer {
             stats.shadow_draws = 0;
         }
 
-        // Ambient occlusion (R2): the stage runs when the profile asks
-        // for it and there is opaque geometry for the prepass to draw.
-        self.ao_active = self.attachments.ao.is_some() && stats.draws > stats.transparent;
+        // Volumes (R3a): the frame's look, blended at the camera.
+        let (post, volumes) = self.resolve_volumes(extract, camera_pos);
+        self.post = post;
+        stats.volumes = volumes;
+
+        // Ambient occlusion (R2): the stage runs when the quality profile
+        // asks for it (a volume cannot turn it on), the volumes leave it
+        // an intensity and there is opaque geometry for the prepass.
+        self.ao_active = self.attachments.ao.is_some()
+            && post.ao_intensity > 0.0
+            && stats.draws > stats.transparent;
         stats.ambient_occlusion = self.ao_active;
 
         let u = FrameUniforms {
@@ -2067,6 +2093,7 @@ impl ExtractRenderer {
                 (ibl_mips - 1) as f32,
             ],
             shadow,
+            ao: [post.ao_radius, post.ao_intensity, 0.0, 0.0],
             counts: [
                 n_lights as u32,
                 stats.sky as u32,
@@ -2625,6 +2652,58 @@ impl ExtractRenderer {
         let ok = loaded.is_some();
         self.textures.insert(r.clone(), loaded);
         ok
+    }
+
+    /// The frame's look (R3a): every volume whose profile reads, by its
+    /// weight × how far inside its shape `eye` is, blended over the
+    /// engine defaults (`fynkel_core::volume::resolve`); and how many
+    /// contributed.
+    fn resolve_volumes(&mut self, extract: &Extract, eye: Vec3) -> (PostSettings, u32) {
+        if extract.volumes.is_empty() {
+            return (PostSettings::default(), 0);
+        }
+        let mut amounts = Vec::with_capacity(extract.volumes.len());
+        for v in &extract.volumes {
+            let amount = v.volume.weight * volume::factor(&v.volume, &v.world, eye);
+            if amount > 0.0 && self.volume_profile(&v.volume.profile).is_some() {
+                amounts.push((v.volume.profile.clone(), amount, v.volume.priority));
+            }
+        }
+        let mut contributions: Vec<volume::Contribution<'_>> = amounts
+            .iter()
+            .filter_map(|(r, amount, priority)| {
+                let profile = self.volume_profiles.get(r)?.as_ref()?;
+                Some(volume::Contribution {
+                    profile,
+                    amount: *amount,
+                    priority: *priority,
+                })
+            })
+            .collect();
+        volume::resolve(PostSettings::default(), &mut contributions)
+    }
+
+    /// A volume profile, read once per reference (R3a); `None` when it
+    /// could not be (reported once in `asset_errors`) or there is no
+    /// asset store. A nil reference is "no profile", not an error.
+    fn volume_profile(&mut self, r: &AssetRef) -> Option<VolumeProfile> {
+        if r.is_nil() {
+            return None;
+        }
+        if let Some(p) = self.volume_profiles.get(r) {
+            return *p;
+        }
+        let loaded = match self.assets.as_ref().map(|a| a.volume_profile(r)) {
+            Some(Ok(p)) => Some(p),
+            Some(Err(e)) => {
+                self.asset_errors
+                    .push(format!("volume profile {r}: {}", e.message));
+                None
+            }
+            None => None,
+        };
+        self.volume_profiles.insert(r.clone(), loaded);
+        loaded
     }
 
     /// Reads the environment cooked next to an HDR sky (E1), once per

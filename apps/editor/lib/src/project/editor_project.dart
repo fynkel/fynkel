@@ -408,7 +408,7 @@ final class SessionProject extends EditorProject {
 
   @override
   List<DocumentAsset> documentAssets() {
-    const order = ['scene', 'prefab', 'material', 'rig', 'blend'];
+    const order = ['scene', 'prefab', 'material', 'rig', 'blend', 'volume'];
     final out = [
       for (final a in session.assets(kind: 'document'))
         DocumentAsset(

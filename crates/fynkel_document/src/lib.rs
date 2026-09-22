@@ -33,6 +33,7 @@ pub mod runtime;
 pub mod scene;
 pub mod schema;
 pub mod settings;
+pub mod volume;
 
 use std::path::Path;
 
@@ -56,6 +57,7 @@ pub use rig::Rig;
 pub use runtime::{describe, AuthoredBehaviour, DescribedScene};
 pub use scene::Scene;
 pub use schema::{BehaviourInfo, ComponentInfo, SchemaSet};
+pub use volume::VolumeDocument;
 
 /// Document kinds and their file-name conventions (§6, §7).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -71,10 +73,12 @@ pub enum DocumentKind {
     Rig,
     /// `.blend.json`: clips along one parameter (M3-19c).
     Blend,
+    /// `.volume.json`: a post-processing profile (R3a).
+    Volume,
 }
 
 impl DocumentKind {
-    pub const ALL: [DocumentKind; 8] = [
+    pub const ALL: [DocumentKind; 9] = [
         DocumentKind::Scene,
         DocumentKind::Prefab,
         DocumentKind::Material,
@@ -83,6 +87,7 @@ impl DocumentKind {
         DocumentKind::Meta,
         DocumentKind::Rig,
         DocumentKind::Blend,
+        DocumentKind::Volume,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -95,6 +100,7 @@ impl DocumentKind {
             DocumentKind::Meta => "meta",
             DocumentKind::Rig => "rig",
             DocumentKind::Blend => "blend",
+            DocumentKind::Volume => "volume",
         }
     }
 
@@ -109,6 +115,7 @@ impl DocumentKind {
             DocumentKind::Meta => ".meta.json",
             DocumentKind::Rig => ".rig.json",
             DocumentKind::Blend => ".blend.json",
+            DocumentKind::Volume => ".volume.json",
         }
     }
 
@@ -228,6 +235,17 @@ impl Document {
                     ])])),
                 ));
                 members.push(("sync".into(), Node::string("phase")));
+            }
+            DocumentKind::Volume => {
+                // The engine defaults, spelled out: a new profile shows
+                // what it can override (delete a field to inherit it).
+                members.push((
+                    "ambientOcclusion".into(),
+                    Node::object(vec![
+                        ("radius".into(), Node::float(0.6)),
+                        ("intensity".into(), Node::float(1.35)),
+                    ]),
+                ));
             }
             _ => {}
         }

@@ -110,6 +110,7 @@ Component types:
 - `fynkel.Camera` — `projection`, `fov_y` (radians), `ortho_height`, `near`, `far`, `priority`, `exposure_mode` (`auto` meters the sun; `manual` uses `exposure`, EV100).
 - `fynkel.DirectionalLight` (`intensity` in lux), `fynkel.PointLight` / `fynkel.SpotLight` (`intensity` in candela, `range` in metres; spot `inner_angle` / `outer_angle` in radians) — `color` is linear RGB.
 - `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply. A `sky` that is a **`.hdr`** file lights the scene as well as backing it (E1: the cook prefilters it into an irradiance and a specular cube and `mesh.wgsl` samples them; `fynkel render` says `sky + ibl`), and `ambient_*` is then unused; every other image is a backdrop over the constant ambient. This project's `tools/sky.py` writes `assets/textures/sky.hdr`.
+- `fynkel.Volume` — the frame's *look* by where the camera is (R3a): `profile` names a `<name>.volume.json` (`fynkel document new volume <name>`; R3a's block is `ambientOcclusion { radius, intensity }`, every field optional — present overrides, absent inherits), `shape` `global` | `box` (`size`) | `sphere` (`radius`), `blend_distance` (metres of fade outside the shape), `weight` 0…1, `priority` (higher wins). A volume shapes what the quality profile has on; it never turns on what the profile has off.
 - `fynkel.RigidBody` — `body_type` `static` | `dynamic` | `kinematic`, `mass` (kg, dynamic), `linear_damping`, `angular_damping`, `gravity_scale`, `ccd`. Physics owns a dynamic body's transform; a kinematic one follows the transform your behaviour writes and pushes dynamic bodies.
 - `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `layer`/`mask` (bits of `physics.layers`). Alone it is static geometry; with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
 - `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `layer`/`mask`.
@@ -127,7 +128,8 @@ scene, sorted back-to-front, casts no shadow), `double_sided`.
 
 Quality (`fynkel.project.json` `quality.profiles`, `default`): `shadows`,
 `shadowResolution`, `ambientOcclusion`, `msaa` (1 or 4 in V1),
-`renderScale`, `anisotropy`.
+`renderScale`, `anisotropy` — what the device can afford; how it looks
+is the scene's `fynkel.Volume`s.
 The renderer runs the default profile; switch at runtime with
 `FynkelViewportController.quality = '<name>'` (the starter's HUD cycles
 them on Q) or render one with `fynkel render --quality <name>`.

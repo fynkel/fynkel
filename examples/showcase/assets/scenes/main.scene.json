@@ -1580,6 +1580,55 @@
           }
         ]
       }
+    },
+    "2e0e85c8-6b4c-5753-961f-c2c2990057e5": {
+      "name": "Global Volume",
+      "parent": null,
+      "children": [],
+      "components": {
+        "2b57aac2-24e4-5949-98a9-dc9bb8370242": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "ad668fdc-33b7-5b1f-a80a-626a2e730764": {
+          "type": "fynkel.Volume",
+          "version": 1,
+          "data": {
+            "profile": {
+              "asset": "66eab72c-84f3-4418-976e-eb7eca6381f9"
+            },
+            "shape": "global",
+            "size": [
+              10.0,
+              10.0,
+              10.0
+            ],
+            "radius": 5.0,
+            "blend_distance": 1.0,
+            "weight": 1.0,
+            "priority": 0,
+            "enabled": true
+          }
+        }
+      }
     }
   }
 }

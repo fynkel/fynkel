@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/volume.schema.json",
+  "title": "Fynkel volume profile",
+  "description": "`<name>.volume.json` (R3a, `docs/renderer.md` § Volumes): a post-processing profile — the look overrides a `fynkel.Volume` component applies to the frame. Every block and every field is optional: a field that is present overrides what is below it (the engine default, or a lower-priority volume), a field that is absent is inherited. The renderer blends the volumes that reach the camera once per frame, each by its weight × how far inside its shape the camera is. The project's quality profile is the ceiling: a profile can shape an effect the quality profile has on, never turn on one it has off.",
+  "type": "object",
+  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "properties": {
+    "ambientOcclusion": {
+      "type": "object",
+      "description": "Screen-space ambient occlusion (R2): how much of the sky each pixel can see, applied to ambient and image-based light only.",
+      "properties": {
+        "radius": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 10,
+          "description": "How far the occlusion reaches, in metres (engine default 0.6)."
+        },
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 8,
+          "description": "The exponent the visible fraction is raised to: 0 turns the occlusion off, 1 is linear, larger is darker (engine default 1.35)."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": { "^x-": true },
+  "unevaluatedProperties": false
+}

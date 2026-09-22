@@ -82,6 +82,18 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'sky_intensity': {'unit': 'nit', 'min': 0, 'group': 'Sky', 'order': 3},
     'sky_rotation': {'kind': 'angle', 'unit': 'deg', 'group': 'Sky', 'order': 4},
   },
+  // Volumes (R3a, docs/renderer.md § Volumes): a profile applied by where
+  // the camera stands.
+  'fynkel.Volume': {
+    'profile': {'kind': 'asset(volume)', 'order': 0},
+    'shape': {'group': 'Shape', 'order': 1, 'tooltip': 'global: everywhere; box and sphere fade out over the blend distance.'},
+    'size': {'label': 'Box size', 'group': 'Shape', 'order': 2},
+    'radius': {'label': 'Sphere radius', 'min': 0, 'group': 'Shape', 'order': 3},
+    'blend_distance': {'unit': 'm', 'min': 0, 'group': 'Shape', 'order': 4},
+    'weight': {'kind': 'slider', 'min': 0, 'max': 1, 'step': 0.01, 'order': 5},
+    'priority': {'order': 6, 'tooltip': 'Higher priorities blend over lower ones; ties go by scene order.'},
+    'enabled': {'order': 7},
+  },
   'fynkel.MeshRenderer': {
     'mesh': {'kind': 'asset(mesh)', 'order': 0},
     'material': {'kind': 'asset(material)', 'order': 1},

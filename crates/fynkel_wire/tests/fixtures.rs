@@ -19,7 +19,7 @@ use fynkel_core::schema::*;
 use fynkel_core::{
     Animator, AudioBus, AudioListener, AudioSource, BodyType, CharacterController, Collider,
     ColliderShape, Emitter, Follow, LifetimeDespawn, LookAtCamera, MotionSpace, Name, Oscillate,
-    RigidBody, Rotator, Settings, Skin, ThirdPersonCamera, TriggerZone,
+    RigidBody, Rotator, Settings, Skin, ThirdPersonCamera, TriggerZone, Volume, VolumeShape,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
@@ -673,6 +673,19 @@ fn fixtures_match_generated_codecs() {
             suspended: false,
             streams: 1,
             starved: 5,
+        },
+    );
+    check(
+        "Volume",
+        &Volume {
+            profile: AssetRef::new(mesh_id),
+            shape: VolumeShape::Box,
+            size: Vec3::new(4.0, 3.0, 8.0),
+            radius: 2.5,
+            blend_distance: 1.5,
+            weight: 0.75,
+            priority: -3,
+            enabled: true,
         },
     );
 }

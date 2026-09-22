@@ -231,6 +231,11 @@ pub fn run(args: &[String]) -> ExitCode {
                 "shadowMap": stats.shadow_map,
                 "shadowCascades": stats.shadow_cascades,
                 "ambientOcclusion": stats.ambient_occlusion,
+                "volumes": stats.volumes,
+                "post": {
+                    "aoRadius": renderer.post_settings().ao_radius,
+                    "aoIntensity": renderer.post_settings().ao_intensity,
+                },
                 "quality": {
                     "profile": quality.profile,
                     "shadows": quality.settings.shadows,
@@ -291,10 +296,15 @@ pub fn run(args: &[String]) -> ExitCode {
             } else {
                 "no shadow".to_string()
             },
-            if stats.ambient_occlusion {
-                "ambient occlusion"
-            } else {
-                "no ambient occlusion"
+            match (stats.ambient_occlusion, stats.volumes) {
+                (true, v) => format!(
+                    "ambient occlusion {:.2} m ^{:.2}{}",
+                    renderer.post_settings().ao_radius,
+                    renderer.post_settings().ao_intensity,
+                    if v > 0 { format!(", {v} volume(s)") } else { String::new() }
+                ),
+                (false, 0) => "no ambient occlusion".to_string(),
+                (false, v) => format!("no ambient occlusion, {v} volume(s)"),
             },
             quality.internal_size.0,
             quality.internal_size.1,

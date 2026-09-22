@@ -46,7 +46,7 @@ use crate::command::{Command, Lane};
 use crate::components::{
     Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment, Follow,
     LifetimeDespawn, LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, Skin, SpotLight,
-    ThirdPersonCamera, TriggerZone,
+    ThirdPersonCamera, TriggerZone, Volume,
 };
 use crate::event::{Event, EventPayload, EventQueue};
 use crate::input::{ActionSpec, ActionState, BindingError, Input, InputEvent};
@@ -233,6 +233,15 @@ pub struct ExtractEnvironment {
     pub environment: Environment,
 }
 
+/// An enabled `Volume` (R3a) and where it stands; the renderer resolves
+/// the frame's look from these (`crate::volume`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtractVolume {
+    pub record: u32,
+    pub world: Mat4,
+    pub volume: Volume,
+}
+
 /// What a frame draws (blueprint §8.5): every spatial entity's world
 /// matrix, plus the renderable components resolved against those records.
 /// The renderer reads this and nothing else from the world.
@@ -249,6 +258,8 @@ pub struct Extract {
     pub point_lights: Vec<ExtractPointLight>,
     pub spot_lights: Vec<ExtractSpotLight>,
     pub environment: Option<ExtractEnvironment>,
+    /// Scene order (the tie-break among equal priorities).
+    pub volumes: Vec<ExtractVolume>,
 }
 
 pub struct World {
@@ -971,6 +982,7 @@ impl World {
                         self.ecs.remove::<AudioSource>(entity).is_ok()
                     }
                     ComponentId::AUDIO_LISTENER => self.ecs.remove::<AudioListener>(entity).is_ok(),
+                    ComponentId::VOLUME => self.ecs.remove::<Volume>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -1134,6 +1146,7 @@ impl World {
             ComponentValue::Skin(v) => self.ecs.insert(entity, v),
             ComponentValue::AudioSource(v) => self.ecs.insert(entity, v),
             ComponentValue::AudioListener(v) => self.ecs.insert(entity, v),
+            ComponentValue::Volume(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }
@@ -1861,6 +1874,15 @@ impl World {
                     direction: world.transform_vector3(-Vec3::Z).normalize_or(-Vec3::Z),
                     light: l,
                 });
+            }
+            if let Ok(v) = self.ecs.get::<Volume>(e) {
+                if v.enabled && v.weight > 0.0 {
+                    out.volumes.push(ExtractVolume {
+                        record,
+                        world,
+                        volume: v.clone(),
+                    });
+                }
             }
             if out.environment.is_none() {
                 if let Ok(env) = self.ecs.get::<Environment>(e) {

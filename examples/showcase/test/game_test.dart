@@ -25,7 +25,7 @@ void main() {
 
     expect(game.report.ok, isTrue);
     expect(game.report.diagnostics, isEmpty, reason: 'no load warnings expected');
-    expect(game.report.entityCount, 48, reason: 'the Runner instance adds the glTF scene root (Character) above the joints');
+    expect(game.report.entityCount, 49, reason: 'the Runner instance adds the glTF scene root (Character) above the joints; the Global Volume (R3a) is one more');
     expect((game.report.animation.clips, game.report.animation.skins), (1, 1), reason: 'the runner: run, one skin');
     expect(game.report.behavioursAttached, 2);
     final spinner = game.world.behaviours.whereType<Spinner>().single;

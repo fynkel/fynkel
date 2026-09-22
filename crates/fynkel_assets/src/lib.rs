@@ -43,6 +43,7 @@ use fynkel_core::animation::{
 };
 use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
+use fynkel_core::volume::VolumeProfile;
 use fynkel_core::AudioClip;
 use fynkel_core::SceneDescription;
 pub use fynkel_document::project::{PhysicsSettings, Quality, QualityProfile};
@@ -342,6 +343,7 @@ struct Store {
     materials: HashMap<AssetRef, Arc<PbrMaterial>>,
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
+    volumes: HashMap<AssetRef, VolumeProfile>,
     skins: HashMap<AssetRef, Arc<Skin>>,
     sounds: HashMap<AssetRef, Arc<AudioClip>>,
     /// Residency counts by asset id (`retain` increments, release
@@ -413,6 +415,7 @@ impl Assets {
                 materials: HashMap::new(),
                 clips: HashMap::new(),
                 blends: HashMap::new(),
+                volumes: HashMap::new(),
                 skins: HashMap::new(),
                 sounds: HashMap::new(),
                 counts: HashMap::new(),
@@ -766,6 +769,7 @@ impl Assets {
         s.materials.retain(|r, _| !gone.contains(&r.asset));
         s.clips.retain(|r, _| !gone.contains(&r.asset));
         s.blends.retain(|r, _| !gone.contains(&r.asset));
+        s.volumes.retain(|r, _| !gone.contains(&r.asset));
         s.skins.retain(|r, _| !gone.contains(&r.asset));
         s.sounds.retain(|r, _| !gone.contains(&r.asset));
         s.metas.retain(|id, _| !gone.contains(id));
@@ -781,6 +785,7 @@ impl Assets {
         s.materials.clear();
         s.clips.clear();
         s.blends.clear();
+        s.volumes.clear();
         s.skins.clear();
         s.metas.clear();
         s.evictions += 1;
@@ -985,6 +990,48 @@ impl Assets {
         let space = Arc::new(space);
         self.lock().blends.insert(r.clone(), space.clone());
         Ok(space)
+    }
+
+    /// The cooked volume profile (R3a: the document's JSON chunk) as the
+    /// core's `VolumeProfile`. The cook checked the document against the
+    /// schema, so this only reads it.
+    pub fn volume_profile(&self, r: &AssetRef) -> Result<VolumeProfile, Diagnostic> {
+        if let Some(v) = self.lock().volumes.get(r) {
+            return Ok(*v);
+        }
+        let (entry, meta) = {
+            let mut s = self.lock();
+            let entry = s
+                .index
+                .object(r.asset)
+                .map_err(|d| d.with_pointer(r.sub.clone()))?
+                .clone();
+            let meta = s.meta(&entry)?;
+            (entry, meta)
+        };
+        if entry.kind != "document/volume" || !r.sub.is_empty() {
+            return Err(Diagnostic::error(
+                Code::RUNTIME_CHUNK_MISSING,
+                format!(
+                    "{}: {r} is a {} asset, not a volume profile",
+                    entry.path, entry.kind
+                ),
+            )
+            .with_id(r.asset.to_string()));
+        }
+        let bytes = self.read_chunk(&entry, &meta, KIND_JSON, "")?;
+        let text = String::from_utf8(bytes).map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let doc = Document::parse(DocumentKind::Volume, Some(&entry.path), &text)
+            .map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let volume = fynkel_document::VolumeDocument::from_document(doc);
+        if let Some(d) = volume.read_diagnostics().first() {
+            let mut m = self.malformed_entry(&entry, "JSON");
+            m.message = format!("{}: {}", m.message, d.message);
+            return Err(m);
+        }
+        let profile = volume.profile;
+        self.lock().volumes.insert(r.clone(), profile);
+        Ok(profile)
     }
 
     /// The cooked skin (a `SKIN` chunk, `skin/<s>`) as the core's `Skin`,

@@ -140,6 +140,7 @@ semantic rules on top of the schema pass:
 | `FYN-H0009` | (warning, M3-12, [scenes.md](scenes.md)) a `fynkel.TriggerZone` on an entity without a `fynkel.Collider` whose `is_sensor` is true: it never fires. A blank `event` is a value error (`H0008`, the zone's own `validate()`) |
 | `FYN-H0008` | catalogue rules (M3-10): a `fynkel.Rotator`/`Oscillate`/`Follow`/`LifetimeDespawn`/`Emitter` value the runtime would reject (a zero or non-finite axis, a negative amplitude, frequency, smoothing, seconds, rate or lifetime, a non-finite offset or velocity; since M3-19 a `fynkel.Animator` with a non-finite speed, `docs/animation.md`) — the same `validate()` the tick runs (`docs/catalogue.md`) |
 | `FYN-H0010` | audio rules (M3-11, [audio.md](audio.md)): a `fynkel.AudioSource` or `fynkel.AudioListener` value the runtime would reject with `INVALID_PAYLOAD` — a `volume` outside `0..=1`, a `pitch` outside `0.05..=8` (the components' own `validate()`) |
+| `FYN-H0011` | volume rules (R3a, [renderer.md](renderer.md) § Volumes): a `fynkel.Volume` value the runtime would reject — a `weight` outside `0..=1`, a `size` or `radius` that is not finite and positive, a negative `blend_distance` |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule
@@ -955,6 +956,37 @@ space; the runtime store reads the chunk into a `BlendSpace`
 (`Assets::blend`) and registers it with every point's clip
 (`register_clip` on a blend id counts once). The lock's `documents`
 gains `blend: 1`.
+
+## Volume profiles (R3a)
+
+`<name>.volume.json` (`schemas/volume.schema.json`, hand-written; kind
+`volume`, `fynkel_document::VolumeDocument`) is the look a
+`fynkel.Volume` component applies to the frame ([renderer.md](renderer.md)
+§ Volumes):
+
+```json
+{ "$schema": "https://fynkel.dev/schemas/volume.schema.json", "formatVersion": 1,
+  "id": "…", "name": "Showcase Look",
+  "ambientOcclusion": { "radius": 0.9, "intensity": 1.6 } }
+```
+
+Every block and every field is optional: a present field overrides what
+is below it (the engine default or a lower-priority volume), an absent
+one is inherited — so `{}` is a valid profile that changes nothing and
+`{ "ambientOcclusion": { "intensity": 0 } }` turns the occlusion off and
+nothing else. The schema holds the ranges (`radius` in `(0, 10]` m,
+`intensity` in `[0, 8]`) and refuses unknown blocks and fields
+(`FYN-D0100`); the read view reports what the schema cannot see as
+`FYN-D0700` and leaves the field inherited. `fynkel document new volume
+<name>` writes one with the engine defaults spelled out. The cook
+validates it (errors fail the asset, and a scene whose volume names it
+with it) and writes it through the generic document path as a JSON
+chunk (`documentKind: volume`); a scene depends on the profiles its
+volumes name. The runtime store reads the chunk into a
+`fynkel_core::volume::VolumeProfile` (`Assets::volume_profile`, cached
+per reference, evicted with its asset). The lock's `documents` gains
+`volume: 1`. R3b (bloom) and R3c (colour grading) add blocks, not
+kinds.
 
 ## Migrations
 

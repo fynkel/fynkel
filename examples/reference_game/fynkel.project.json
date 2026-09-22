@@ -178,6 +178,9 @@
     "fynkel.AudioListener": {
       "kind": "native"
     },
+    "fynkel.Volume": {
+      "kind": "native"
+    },
     "game.Player": {
       "kind": "behaviour",
       "version": 1,

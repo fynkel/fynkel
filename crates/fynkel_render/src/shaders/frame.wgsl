@@ -54,6 +54,10 @@ struct Frame {
     // in map uv; z: the fraction of a cascade blended into the next;
     // w: cascades in the atlas.
     shadow: vec4<f32>,
+    // The frame's ambient occlusion as the volumes resolved it (R3a):
+    // x: hemisphere radius (m); y: the exponent the visible fraction is
+    // raised to; zw unused.
+    ao: vec4<f32>,
     // x: lights in the pool; y: 1 when the sky is drawn; z: 1 when the
     // post pass must sRGB-encode (the target is a Unorm format); w: 1
     // when `ssao_tex` holds this frame's ambient occlusion (R2).

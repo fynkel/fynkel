@@ -62,6 +62,8 @@ export 'generated/schema.g.dart'
         SystemTimeRecord,
         ThirdPersonCamera,
         TriggerZone,
+        Volume,
+        VolumeShape,
         componentCodecs,
         componentIds;
 export 'src/animation.dart' show AnimationAssets, AnimatorState;

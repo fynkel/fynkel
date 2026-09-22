@@ -1113,6 +1113,20 @@ it is one depth prepass plus two half-cheap full-screen passes, and the
 quality profile can turn it off (`ambientOcclusion`, default true) for a
 bit-identical picture. `docs/renderer.md` § Ambient occlusion.)*
 
+*(R3a, 2026-09-22: **volumes** — how a frame looks is scene data. A
+`fynkel.Volume` component (global, box or sphere, with a blend distance,
+a weight and a priority) names a `.volume.json` profile of optional
+overrides (present overrides, absent inherits); the renderer blends the
+volumes that reach the camera once a frame on the CPU and uploads the
+result. The quality profile stays the ceiling — it says what the device
+affords, a volume only shapes what it allows. R2's two AO constants were
+the first fields; bloom (R3b) and colour grading (R3c) are blocks in the
+same profile, not new mechanisms. A general game-defined data asset — a
+Unity `ScriptableObject`, `@DataAsset` on a Dart class — was considered
+and deliberately deferred to the package-architecture work, where the
+question of who owns a document kind gets answered once.
+`docs/renderer.md` § Volumes.)*
+
 ## 9. Physics, animation, audio, and input
 
 ### Physics

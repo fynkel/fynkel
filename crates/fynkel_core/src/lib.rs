@@ -31,6 +31,7 @@ pub mod material;
 pub mod memory;
 pub mod schema;
 pub mod settings;
+pub mod volume;
 pub mod world;
 
 /// The clip core; `animation::Skin` (the data) is reached through the
@@ -44,7 +45,7 @@ pub use command::{AnimateOp, AudioOp, Command, Lane};
 pub use components::{
     Animator, Camera, ComponentValue, DirectionalLight, Emitter, Environment, ExposureMode, Follow,
     LifetimeDespawn, LookAtCamera, MeshRenderer, MotionSpace, Oscillate, PointLight, Projection,
-    Rotator, Skin, SpotLight, ThirdPersonCamera, TriggerZone,
+    Rotator, Skin, SpotLight, ThirdPersonCamera, TriggerZone, Volume, VolumeShape,
 };
 pub use event::{Event, EventPayload};
 pub use fynkel_audio::{
@@ -66,8 +67,9 @@ pub use load::{
 pub use settings::Settings;
 pub use world::{
     projection_matrix, view_matrix, Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight,
-    ExtractEnvironment, ExtractMesh, ExtractPointLight, ExtractRecord, ExtractSpotLight, Name,
-    PhysicsOwned, ProjectionInfo, Rejected, SnapshotRecord, StepReport, SubmitReport, World,
-    WorldConfig, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED, PROJECTED_IN_FRONT, PROJECTED_MISSING,
-    PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED, PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
+    ExtractEnvironment, ExtractMesh, ExtractPointLight, ExtractRecord, ExtractSpotLight,
+    ExtractVolume, Name, PhysicsOwned, ProjectionInfo, Rejected, SnapshotRecord, StepReport,
+    SubmitReport, World, WorldConfig, MAX_PROJECTION_ANCHORS, PROJECTED_DROPPED,
+    PROJECTED_IN_FRONT, PROJECTED_MISSING, PROJECTED_NO_CAMERA, PROJECTED_OCCLUDED,
+    PROJECTED_ON_SCREEN, PROJECTED_VISIBLE,
 };

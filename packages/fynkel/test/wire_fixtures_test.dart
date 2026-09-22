@@ -764,4 +764,20 @@ void main() {
     AudioStatsRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
+  check(
+    'Volume',
+    Volume(
+      profile: AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330'),
+      shape: VolumeShape.box,
+      size: const Vec3(4.0, 3.0, 8.0),
+      radius: 2.5,
+      blendDistance: 1.5,
+      weight: 0.75,
+      priority: -3,
+      enabled: true,
+    ),
+    Volume.wireSize,
+    Volume.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
 }

@@ -8,7 +8,7 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0xab5d834fb20093b6",
+  "schemaFingerprint": "0xc2e5042968b9bde5",
   "documents": {
     "blend": 1,
     "material": 2,
@@ -17,7 +17,8 @@
     "project": 1,
     "rig": 1,
     "scene": 3,
-    "shader": 1
+    "shader": 1,
+    "volume": 1
   },
   "importers": {
     "fynkel.audio": 2,

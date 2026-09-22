@@ -1312,3 +1312,56 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
             && d.message.contains("main.scene.json")
             && d.message.contains("energy.blend.json failed")));
 }
+
+#[test]
+fn a_volume_profile_cooks_as_its_document_and_a_scene_depends_on_it() {
+    const LOOK: &str = "c0000000-0000-4000-8000-000000000701";
+    let p = Project::new("volume-doc");
+    let look = |ao: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/volume.schema.json","formatVersion":1,"id":"{LOOK}","name":"Look","ambientOcclusion":{ao}}}"#
+        )
+    };
+    p.write("look.volume.json", &look(r#"{"radius":1.2}"#));
+    let mut scene: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(p.assets().join("scenes/main.scene.json")).unwrap(),
+    )
+    .unwrap();
+    scene["entities"]["c0000000-0000-4000-8000-0000000000e9"] = serde_json::json!({
+        "name": "Global Volume", "parent": null, "children": [],
+        "components": {
+            "c0000000-0000-4000-8000-0000000000c9": {
+                "type": "fynkel.Volume", "version": 1,
+                "data": { "profile": { "asset": LOOK }, "shape": "global", "size": [10, 10, 10],
+                          "radius": 5, "blend_distance": 1, "weight": 1, "priority": 0, "enabled": true }
+            }
+        }
+    });
+    p.write(
+        "scenes/main.scene.json",
+        &serde_json::to_string_pretty(&scene).unwrap(),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    let cooked = r.get(id(LOOK)).unwrap();
+    assert_eq!(cooked.status, Status::Cooked);
+    assert_eq!(cooked.kind, "document/volume");
+    let mut f = ChunkFile::open_path(cooked.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(kinds, ["META", "JSON"]);
+    assert!(r.get(id(MAIN)).unwrap().dependencies.contains(&id(LOOK)));
+
+    // Out of range: the profile fails and the scene that uses it with it.
+    p.write("look.volume.json", &look(r#"{"radius":0}"#));
+    let r = p.cook();
+    assert_eq!(status(&r, LOOK), Status::Failed);
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.pointer.as_deref() == Some("/ambientOcclusion/radius")),
+        "{:?}",
+        r.diagnostics
+    );
+    assert_ne!(status(&r, MAIN), Status::Cooked);
+}

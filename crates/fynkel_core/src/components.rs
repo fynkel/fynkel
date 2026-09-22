@@ -201,6 +201,91 @@ impl Default for Environment {
     }
 }
 
+/// Where a [`Volume`] applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Schema)]
+#[schema(name = "fynkel.VolumeShape")]
+pub enum VolumeShape {
+    /// Everywhere, at full weight.
+    #[default]
+    Global,
+    /// Inside a box of `size` about the entity (its rotation and scale
+    /// included), fading out over `blend_distance` outside it.
+    Box,
+    /// Inside a sphere of `radius` about the entity, fading out over
+    /// `blend_distance` outside it.
+    Sphere,
+}
+
+/// A post-processing volume (R3a, `docs/renderer.md` § Volumes): the look
+/// overrides in `profile` (a `.volume.json`) applied to the frame by how
+/// far inside the shape the camera is. Every frame the renderer starts
+/// from the engine defaults and blends the enabled volumes over them in
+/// `priority` order (ties: scene order), each by `weight` × its shape's
+/// factor — 1 inside, falling linearly to 0 at `blend_distance` outside.
+/// The project's quality profile stays the ceiling: a volume cannot turn
+/// on what the profile has off.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "component", id = 25, name = "fynkel.Volume")]
+pub struct Volume {
+    /// The `.volume.json` profile.
+    pub profile: AssetRef,
+    pub shape: VolumeShape,
+    /// A box's full size in the entity's local units, each `> 0`.
+    pub size: Vec3,
+    /// A sphere's radius in the entity's local units, `> 0`.
+    pub radius: f32,
+    /// Metres outside the shape over which the volume fades out, `>= 0`.
+    pub blend_distance: f32,
+    /// How much of the profile applies, `0..=1`.
+    pub weight: f32,
+    /// Higher priorities blend over lower ones.
+    pub priority: i32,
+    pub enabled: bool,
+}
+
+impl Default for Volume {
+    fn default() -> Self {
+        Self {
+            profile: AssetRef::default(),
+            shape: VolumeShape::Global,
+            size: Vec3::splat(10.0),
+            radius: 5.0,
+            blend_distance: 1.0,
+            weight: 1.0,
+            priority: 0,
+            enabled: true,
+        }
+    }
+}
+
+impl Volume {
+    /// Value rules the schema cannot express (the `INVALID_PAYLOAD` text).
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.size.is_finite() || self.size.min_element() <= 0.0 {
+            return Err(format!(
+                "size must be finite and > 0 on every axis, got {:?}",
+                self.size
+            ));
+        }
+        if !self.radius.is_finite() || self.radius <= 0.0 {
+            return Err(format!(
+                "radius must be finite and > 0, got {}",
+                self.radius
+            ));
+        }
+        if !self.blend_distance.is_finite() || self.blend_distance < 0.0 {
+            return Err(format!(
+                "blend_distance must be finite and >= 0, got {}",
+                self.blend_distance
+            ));
+        }
+        if !(0.0..=1.0).contains(&self.weight) {
+            return Err(format!("weight must be in 0..=1, got {}", self.weight));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -805,6 +890,8 @@ pub enum ComponentValue {
     /// `fynkel_audio` (M3-11).
     AudioSource(AudioSource),
     AudioListener(AudioListener),
+    /// Post-processing (R3a).
+    Volume(Volume),
 }
 
 impl ComponentValue {
@@ -832,6 +919,7 @@ impl ComponentValue {
             ComponentValue::Skin(_) => ComponentId::SKIN,
             ComponentValue::AudioSource(_) => ComponentId::AUDIO_SOURCE,
             ComponentValue::AudioListener(_) => ComponentId::AUDIO_LISTENER,
+            ComponentValue::Volume(_) => ComponentId::VOLUME,
         }
     }
 
@@ -949,6 +1037,7 @@ impl ComponentValue {
             ComponentValue::Skin(_) => {}
             ComponentValue::AudioSource(c) => c.validate()?,
             ComponentValue::AudioListener(c) => c.validate()?,
+            ComponentValue::Volume(c) => c.validate()?,
         }
         Ok(())
     }

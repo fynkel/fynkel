@@ -982,6 +982,17 @@ fn cook_one(
                 info["points"] = json!(blend.points.len());
                 info["sync"] = json!(blend.sync);
             }
+            // A volume profile (R3a) likewise: its fields in range and
+            // readable, then written as it is for the renderer to blend.
+            if doc.kind == DocumentKind::Volume {
+                let volume = fynkel_document::VolumeDocument::from_document(doc.clone());
+                let checked = volume.validate(schemas);
+                let bad = has_errors(&checked);
+                diagnostics.extend(checked);
+                if bad {
+                    return None;
+                }
+            }
             chunks.push(ChunkPlan {
                 kind: KIND_JSON,
                 name: entry.name.clone(),

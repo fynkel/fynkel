@@ -187,14 +187,15 @@ shadow and the scene:
    point from `inv_view_proj`, the normal from the four neighbouring
    depths (the nearer neighbour on each axis, so a silhouette does not
    bend it) flipped to face the camera, then `AO_SAMPLES` (12) points in
-   a hemisphere about that normal, `AO_RADIUS` (0.6 m) out, crowded
+   a hemisphere about that normal, the radius (`frame.ao.x`, 0.6 m
+   unless a volume says otherwise — § Volumes) out, crowded
    toward the origin by a golden-angle spiral and turned per pixel by
    interleaved gradient noise. A sample occludes when the surface drawn
    at its pixel is nearer the eye than the sample point by more than
    `AO_BIAS` (2 cm) — both lie on the same ray, so their distances order
-   them — weighted by `AO_RADIUS / |s − p|` so an occluder beyond the
+   them — weighted by `radius / |s − p|` so an occluder beyond the
    hemisphere fades out instead of darkening across a gap. The result is
-   `(1 − occlusion)^1.35`.
+   `(1 − occlusion)^intensity` (`frame.ao.y`, 1.35 by default).
 3. **The blur** averages a 4×4 square of that, dropping taps more than
    2 % of the view distance away along the ray, which is what turns the
    per-pixel rotation back into a smooth term without smearing across a
@@ -218,7 +219,9 @@ is the prepass's, its end the blur's, so `FrameStats::gpu_ao_us` and
 `ViewportStatsSnapshot.gpuAo` are the whole stage.
 `FrameStats::ambient_occlusion` says whether it ran; the profile's
 `ambientOcclusion` turns it off, and then the chain, the attachments and
-the picture are what they were before R2.
+the picture are what they were before R2. A volume whose intensity
+resolves to 0 skips the three passes too (the attachments stay, so
+walking out of it costs nothing to switch back).
 
 Measured (`benchmarks/m3/results/2026-09-22-94490ad`): 1.81 ms p95 on the
 stress scene, where the whole GPU frame nevertheless fell from 3.56 to
@@ -228,6 +231,58 @@ cost. In a nearly empty frame there is no overdraw to save and the cost
 is just cost: the reference game's GPU frame went 4.01 → 6.11 ms p95. A
 half-resolution AO target is the lever if that ever matters — the
 estimate is low-frequency and blurred anyway.
+
+### Volumes (R3a, `fynkel_core::volume`)
+
+The *look* of a frame — how strong the occlusion is, and from R3b/R3c
+the bloom and the grade — is scene data, not a project setting, and it
+can change with where the camera is. That is a **volume**: a
+`fynkel.Volume` component (id 25) on an entity, pointing at a **profile**
+document.
+
+- **The profile** (`<name>.volume.json`, `schemas/volume.schema.json`,
+  `DocumentKind::Volume`; [documents.md](documents.md) § Volume profiles)
+  is override blocks of optional fields. A field that is present
+  overrides what is below it; a field that is absent is inherited. R3a's
+  one block is `ambientOcclusion { radius (m, > 0), intensity (the
+  exponent, ≥ 0; 0 = off) }` — R2's two constants, now data. `fynkel
+  document new volume <name>` writes one with the engine defaults spelled
+  out.
+- **The component** says where the profile applies: `shape` `global`
+  (everywhere), `box` (`size`, full extents in the entity's local units)
+  or `sphere` (`radius`); `blend_distance` (metres outside the shape
+  over which it fades out), `weight` (`0..=1`), `priority` (higher blends
+  over lower; ties in scene order), `enabled`. Rotation and scale apply:
+  the shape is measured in the entity's local space and the fade
+  distance back in world metres. Its value rules are `FYN-H0011`.
+- **Resolution** runs once a frame on the CPU, in `prepare`
+  (`ExtractRenderer::resolve_volumes` → `volume::resolve`): start from
+  the engine defaults (`PostSettings::default()`, exactly R2's picture),
+  take every enabled volume in the extract (`Extract::volumes`), its
+  amount = `weight × factor(camera position)` — 1 inside the shape, `1 −
+  d / blend_distance` at distance `d` outside it, 0 beyond — and, lowest
+  priority first, lerp each present field toward the profile's value by
+  that amount. The result is `ExtractRenderer::post_settings()`;
+  `FrameStats::volumes` counts the volumes that reached the camera, and
+  `fynkel render` prints both (`ambient occlusion 0.90 m ^1.60, 1
+  volume(s)`; `volumes` and `post` in `--json`).
+- **The quality profile is the ceiling.** A volume shapes an effect the
+  project's quality profile has on; it cannot turn on one the profile has
+  off (`ambientOcclusion: false` keeps the stage off whatever a volume
+  says) — the profile is what the *device* can afford, the volume is
+  what the *scene* wants.
+
+Profiles are read through the asset store (`Assets::volume_profile`, the
+cooked document's `JSON` chunk) once per reference and cached like the
+materials; a scene depends on the profiles its volumes name, so they are
+retained with it. A profile that cannot be read is one `asset_errors`
+line and contributes nothing. Nothing about volumes is on the GPU but
+the result: `Frame.ao` carries the frame's radius and exponent.
+
+Deliberately not in R3a: a volume per camera (there is one camera a
+frame), a volume *mask* layer, animated profiles (a behaviour can set
+`weight` or `enabled` through the component like any other field), and
+non-linear fades.
 
 ### Instancing and culling (`src/culling.rs`)
 
@@ -461,7 +516,7 @@ shadow, and it is not part of any of this — every object sees it.
 
 ## Uniform layout
 
-`Frame` (bind group 0, 4 720 bytes, `shaders/frame.wgsl`): `view_proj`,
+`Frame` (bind group 0, 4 736 bytes, `shaders/frame.wgsl`): `view_proj`,
 `inv_view_proj` (the sky's ray reconstruction), `cascades` (four
 `Cascade { view_proj, rect, params }`: world → that cascade's shadow
 clip, its quadrant in atlas uv, and its normal offset in metres),
@@ -469,8 +524,9 @@ clip, its quadrant in atlas uv, and its normal offset in metres),
 `sun_dir` (`w` = present), `sun_color` (rgb × lux), `ambient` (rgb × lux,
 `w` = `L_max`), `sky` (`x` intensity, `y` rotation, `z` image-based
 lighting active, `w` specular mips − 1), `shadow` (`x` active,
-`y` one atlas texel in uv, `z` the blend band, `w` cascades), `counts` (`x` lights,
-`y` sky drawn, `z` encode sRGB), then `lights: array<Light, LIGHT_POOL>`
+`y` one atlas texel in uv, `z` the blend band, `w` cascades), `ao` (the
+volumes' resolution, § Volumes: `x` radius, `y` exponent), `counts` (`x` lights,
+`y` sky drawn, `z` encode sRGB, `w` ambient occlusion ran), then `lights: array<Light, LIGHT_POOL>`
 (64) —
 `position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
 `direction` (`w` cos outer), `params` (`x` cos inner). Bind group 0 also

@@ -38,6 +38,9 @@ impl ComponentId {
     /// Audio (M3-11): a clip with its playback settings, and the ears.
     pub const AUDIO_SOURCE: ComponentId = ComponentId(23);
     pub const AUDIO_LISTENER: ComponentId = ComponentId(24);
+    /// A post-processing volume (R3a): a profile of look overrides, global
+    /// or blended in by the camera's distance to a box or a sphere.
+    pub const VOLUME: ComponentId = ComponentId(25);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -65,6 +68,7 @@ impl ComponentId {
             22 => Some("fynkel.Skin"),
             23 => Some("fynkel.AudioSource"),
             24 => Some("fynkel.AudioListener"),
+            25 => Some("fynkel.Volume"),
             _ => None,
         }
     }

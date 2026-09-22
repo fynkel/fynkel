@@ -21,7 +21,7 @@ enum AssetSort { name, kind, path, modified }
 
 /// The kinds the filter menu offers, in order; a source is one of the last
 /// four by its importer.
-const browserKinds = ['scene', 'prefab', 'material', 'rig', 'blend', 'texture', 'model', 'sound', 'other'];
+const browserKinds = ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'texture', 'model', 'sound', 'other'];
 
 /// The browser kind of an entry: a document's kind, a source's by importer.
 String browserKindOf(AssetEntry e) {

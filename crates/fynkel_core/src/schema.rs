@@ -19,7 +19,7 @@ use glam::{Quat, Vec3};
 use crate::components::{
     Animator, Camera, DirectionalLight, Emitter, Environment, Follow, LifetimeDespawn,
     LookAtCamera, MeshRenderer, Oscillate, PointLight, Rotator, Skin, SpotLight, ThirdPersonCamera,
-    TriggerZone,
+    TriggerZone, Volume,
 };
 use crate::material::PbrMaterial;
 use crate::settings::Settings;
@@ -825,6 +825,7 @@ pub const ALL: &[&RecordSchema] = &[
     &PlaybackEndedEvent::SCHEMA,
     &AudioStateRecord::SCHEMA,
     &AudioStatsRecord::SCHEMA,
+    &Volume::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

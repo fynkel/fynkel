@@ -1,0 +1,10 @@
+{
+  "$schema": "https://fynkel.dev/schemas/volume.schema.json",
+  "formatVersion": 1,
+  "id": "66eab72c-84f3-4418-976e-eb7eca6381f9",
+  "name": "Showcase Look",
+  "ambientOcclusion": {
+    "radius": 0.9,
+    "intensity": 1.6
+  }
+}

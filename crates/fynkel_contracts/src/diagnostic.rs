@@ -99,6 +99,10 @@ impl Code {
     /// A field the schema accepts but the blend space cannot use (a
     /// malformed assetRef, a non-finite `at`).
     pub const BLEND_MALFORMED_ENTRY: Code = Code("FYN-D0602");
+    // Documents (FYN-D): volume profiles (R3a; `fynkel_document::volume`).
+    /// A field the schema accepts but the renderer cannot use (a value
+    /// that is not a finite number, a block that is not an object).
+    pub const VOLUME_MALFORMED_ENTRY: Code = Code("FYN-D0700");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 
@@ -195,6 +199,10 @@ impl Code {
     /// would reject (a volume outside `0..=1`, a pitch outside
     /// `0.05..=8`; M3-11).
     pub const AUDIO_VALUE: Code = Code("FYN-H0010");
+    /// A `fynkel.Volume` value the runtime would reject (a weight outside
+    /// `0..=1`, a non-positive size or radius, a negative blend distance;
+    /// R3a).
+    pub const VOLUME_VALUE: Code = Code("FYN-H0011");
 
     // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
     /// The transaction's base revision is not the document's current one.

@@ -526,6 +526,7 @@ fn physics_value_rules(
         | "fynkel.TriggerZone"
         | "fynkel.Animator" => Code::CATALOGUE_VALUE,
         "fynkel.AudioSource" | "fynkel.AudioListener" => Code::AUDIO_VALUE,
+        "fynkel.Volume" => Code::VOLUME_VALUE,
         _ => return,
     };
     let Some(Ok(value)) = crate::generated::decode_component(&c.type_id, &c.data) else {
@@ -545,6 +546,7 @@ fn physics_value_rules(
         ComponentValue::Animator(k) => k.validate(),
         ComponentValue::AudioSource(k) => k.validate(),
         ComponentValue::AudioListener(k) => k.validate(),
+        ComponentValue::Volume(k) => k.validate(),
         _ => Ok(()),
     };
     if let Err(msg) = result {

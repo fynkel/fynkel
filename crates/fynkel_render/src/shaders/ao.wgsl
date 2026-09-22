@@ -17,13 +17,11 @@
 // pass writes the other half of the pair).
 @group(1) @binding(1) var ao_source: texture_2d<f32>;
 
-// Samples per pixel of the hemisphere, its radius in metres, how far a
-// sample must be in front of the surface to occlude it, and the exponent
-// the result is shaped by (1 = linear).
+// Samples per pixel of the hemisphere and how far a sample must be in
+// front of the surface to occlude it. The hemisphere's radius and the
+// exponent the result is shaped by are the volumes' (R3a): `frame.ao`.
 const AO_SAMPLES: u32 = 12u;
-const AO_RADIUS: f32 = 0.6;
 const AO_BIAS: f32 = 0.02;
-const AO_INTENSITY: f32 = 1.35;
 // Half the blur's square side, and how far apart two taps may be along
 // the view ray (a fraction of their distance) before they are taken to be
 // different surfaces.
@@ -117,7 +115,7 @@ fn fs_main(in: AoOut) -> @location(0) vec4<f32> {
     var occlusion = 0.0;
     for (var i = 0u; i < AO_SAMPLES; i++) {
         let k = kernel(i, rotation);
-        let q = p + (t * k.x + b * k.y + n * k.z) * AO_RADIUS;
+        let q = p + (t * k.x + b * k.y + n * k.z) * frame.ao.x;
         let clip = frame.view_proj * vec4<f32>(q, 1.0);
         if clip.w <= 0.0 {
             continue;
@@ -141,9 +139,9 @@ fn fs_main(in: AoOut) -> @location(0) vec4<f32> {
         // An occluder beyond the hemisphere is a different surface, not a
         // near one: fade it out rather than darken across the gap.
         let away = length(s - p);
-        occlusion += clamp(AO_RADIUS / max(away, 1e-4), 0.0, 1.0);
+        occlusion += clamp(frame.ao.x / max(away, 1e-4), 0.0, 1.0);
     }
-    let ao = pow(clamp(1.0 - occlusion / f32(AO_SAMPLES), 0.0, 1.0), AO_INTENSITY);
+    let ao = pow(clamp(1.0 - occlusion / f32(AO_SAMPLES), 0.0, 1.0), frame.ao.y);
     return vec4<f32>(ao, 0.0, 0.0, 1.0);
 }
 

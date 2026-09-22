@@ -514,6 +514,9 @@ pub fn query(
             if let Ok(v) = ecs.get::<fynkel_core::AudioListener>(entity) {
                 w.component(ComponentId::AUDIO_LISTENER.0, &*v);
             }
+            if let Ok(v) = ecs.get::<fynkel_core::components::Volume>(entity) {
+                w.component(ComponentId::VOLUME.0, &*v);
+            }
         }
         // A source's playback state (M3-11); no source is an empty
         // response.

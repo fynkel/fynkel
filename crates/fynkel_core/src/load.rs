@@ -555,6 +555,9 @@ impl ComponentValue {
         if let Ok(v) = ecs.copy::<fynkel_audio::AudioListener>(entity) {
             out.push(ComponentValue::AudioListener(v));
         }
+        if let Ok(v) = ecs.get::<crate::components::Volume>(entity) {
+            out.push(ComponentValue::Volume(v.clone()));
+        }
         out
     }
 }

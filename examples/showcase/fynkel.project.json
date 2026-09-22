@@ -114,6 +114,9 @@
     "fynkel.AudioListener": {
       "kind": "native"
     },
+    "fynkel.Volume": {
+      "kind": "native"
+    },
     "game.Spinner": {
       "kind": "behaviour",
       "version": 1,

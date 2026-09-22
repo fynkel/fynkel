@@ -923,6 +923,7 @@ pub fn component_default(type_id: &str) -> Option<Node> {
         "fynkel.AudioListener" => {
             <::fynkel_audio::components::AudioListener as Default>::default().to_node()
         }
+        "fynkel.Volume" => <::fynkel_core::components::Volume as Default>::default().to_node(),
         _ => return None,
     })
 }

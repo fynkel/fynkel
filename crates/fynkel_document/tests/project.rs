@@ -162,7 +162,7 @@ fn the_fixture_project_reads_and_validates_clean() {
         .unwrap();
     assert_eq!((medium.shadow_resolution, medium.msaa), (1024, 4));
     assert!(medium.shadows, "shadows default to on");
-    assert_eq!(project.components.as_ref().unwrap().len(), 23);
+    assert_eq!(project.components.as_ref().unwrap().len(), 24);
     assert_eq!(project.physics.gravity, [0.0, -9.81, 0.0]);
     assert_eq!(project.physics.layers, ["default", "props"]);
     assert_eq!(project.physics.mask(&["props"]), Some(2));
@@ -215,7 +215,7 @@ fn describe_json_lists_everything() {
     assert_eq!(v["assetCount"], 17);
     assert_eq!(v["inputActions"].as_array().unwrap().len(), 4);
     assert_eq!(v["quality"]["default"], "medium");
-    assert_eq!(v["components"].as_array().unwrap().len(), 23);
+    assert_eq!(v["components"].as_array().unwrap().len(), 24);
     assert_eq!(
         v["physics"]["layers"],
         serde_json::json!(["default", "props"])

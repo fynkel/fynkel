@@ -1261,6 +1261,10 @@ pub fn validate_project_with(
                 report.diagnostics.extend(blend.validate(schemas));
                 report.diagnostics.extend(blend.validate_references(&db));
             }
+            DocumentKind::Volume => {
+                let volume = crate::volume::VolumeDocument::from_document(doc);
+                report.diagnostics.extend(volume.validate(schemas));
+            }
             DocumentKind::Project | DocumentKind::Meta => {
                 report.diagnostics.extend(doc.validate(schemas));
             }

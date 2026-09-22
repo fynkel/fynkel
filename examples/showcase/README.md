@@ -6,7 +6,7 @@ at and compare. It is a normal Fynkel game (created by `fynkel create`,
 then authored): a Flutter app plus `fynkel.project.json`, an `assets/`
 tree of strict JSON documents and the Fynkel CLI.
 
-![The showcase after R2](renders/r2.png)
+![The showcase after R3a](renders/r3a.png)
 
 What is in the scene (`assets/scenes/main.scene.json`):
 
@@ -84,6 +84,7 @@ renderer item so the history is a before/after:
 | `e1.png` | E1 — image-based lighting: the sky is `sky.hdr` and lights the scene through its cooked cubes (`sky + ibl` in the render line); the metals reflect it, the floor takes the sky's blue and the shadows go blue with it |
 | `r1.png` | R1 — cascaded shadow maps: four cascades in a 2×2 atlas of the same 2048² map, each fitted to its own slice of the view and tightened to what actually casts. The shadows stop being soft grey smears — edges are crisp, the runner's and the crates' shadows touch their feet instead of floating (19 casters in 36 draws into 4 cascades) |
 | `r2.png` | R2 — ambient occlusion: a depth prepass, 12 hemisphere samples at 0.6 m and a bilateral blur, multiplied into the ambient and IBL term only. The crates, the pillars and the lamp post stop floating — each grows a soft contact shadow where it meets the floor, and the seams inside the arch and along the walls darken; 88 680 pixels changed against `r1.png`, every one of them darker (the sunlit faces are untouched — direct light is the shadow map's job) |
+| `r3a.png` | R3a — volumes: the scene's `Global Volume` entity names `assets/volumes/showcase.volume.json`, whose `ambientOcclusion` widens the radius 0.6 → 0.9 m and deepens the exponent 1.35 → 1.6 (`ambient occlusion 0.90 m ^1.60, 1 volume(s)` in the render line). The contact shading reaches further up the crates, the pillars and the arch; 159 407 pixels changed against `r2.png`, 156 603 of them darker (the other 2 804 lighter, most by one or two levels, at most 16). With the volume disabled the render is `r2.png` to the bit |
 
 To regenerate: `fynkel render --project examples/showcase --out examples/showcase/renders/<item>.png` (`--steps 10` from M3-19, so the runner is posed).
 

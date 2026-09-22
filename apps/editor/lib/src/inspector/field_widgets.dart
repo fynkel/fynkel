@@ -1107,6 +1107,7 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'audio' || 'sound' => Icons.audiotrack,
   'clip' => Icons.animation,
   'skin' || 'rig' => Icons.accessibility_new,
+  'volume' => Icons.tune,
   _ => Icons.insert_drive_file_outlined,
 };
 
