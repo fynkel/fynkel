@@ -26,11 +26,7 @@ fn fs_main(in: SkyOut) -> @location(0) vec4<f32> {
     // in world space (works for orthographic projections too).
     let near = frame.inv_view_proj * vec4<f32>(in.ndc, 0.0, 1.0);
     let far = frame.inv_view_proj * vec4<f32>(in.ndc, 1.0, 1.0);
-    var d = normalize(far.xyz / far.w - near.xyz / near.w);
-    // Rotate the sky about +Y.
-    let c = cos(frame.sky.y);
-    let s = sin(frame.sky.y);
-    d = vec3<f32>(c * d.x + s * d.z, d.y, -s * d.x + c * d.z);
+    let d = rotate_sky(normalize(far.xyz / far.w - near.xyz / near.w));
     // Equirectangular: u = 0.5 looks down -Z, u grows toward +X; v = 0 is up.
     let u = 0.5 + atan2(d.x, -d.z) / (2.0 * PI);
     let v = acos(clamp(d.y, -1.0, 1.0)) / PI;

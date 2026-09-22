@@ -20,7 +20,7 @@ Everything is physical; nothing is "0 to 1" until the post pass.
 | `DirectionalLight.intensity` | lux (illuminance on a facing surface) | the sun; default 10 000 = clear sky |
 | `PointLight.intensity`, `SpotLight.intensity` | candela; illuminance at `d` metres is `I / d²`, windowed to 0 at `range` | |
 | `Environment.ambient_intensity` | lux, constant from every direction | default 2 000 |
-| `Environment.sky_intensity` | nits (cd/m²) at a white texel of the sky | default 5 000 |
+| `Environment.sky_intensity` | nits (cd/m²) at a white texel of the sky — and the scale of the image-based lighting it casts | default 5 000 |
 | `PbrMaterial.emissive` × `emissive_strength` | **relative to the exposure's white** — 1.0 renders as white whatever the EV; not nits, so an authored glow survives any camera | |
 | radiance in the HDR target | nits | `Rgba16Float` |
 | `Camera.exposure` | EV100 | `exposure_mode: manual` |
@@ -223,9 +223,10 @@ height-correlated Smith visibility (Heitz), Schlick Fresnel with
 Radiance per light is `(diffuse + specular) · E · N·L` with `E` the
 light's illuminance at the point (the sun's lux; `I / d² · (1 − (d/range)⁴)²`
 for point and spot lights, spot lights further scaled by
-`smoothstep(cos outer, cos inner, cos θ)`). Constant ambient adds
-`(diffuse + f0) · E_ambient / π · occlusion` — the V1 stand-in for
-image-based lighting. Emissive adds `emissive · strength · L_max`.
+`smoothstep(cos outer, cos inner, cos θ)`). The environment adds one
+term × `occlusion`: with an HDR sky the split-sum image-based lighting
+below, otherwise the constant ambient `(diffuse + f0) · E_ambient / π`.
+Emissive adds `emissive · strength · L_max`.
 
 Every material map is sampled with one repeat/trilinear sampler at `uv0`
 (anisotropic up to the profile's `anisotropy`) over the **full mip chain
@@ -258,6 +259,46 @@ source had none, and the `MESH` chunk info records `"tangents":
 "authored" | "generated" | "none"`. This closes the M2 compromise
 ("tangent generation is a renderer decision").
 
+### Image-based lighting (E1)
+
+An `Environment` whose `sky` names a **`.hdr`** image lights the scene
+from that image; every other sky (a PNG or JPEG backdrop) keeps the
+constant ambient. Split-sum (Karis 2013), with the two environment
+integrals cooked once per image and the BRDF integral built once per
+renderer:
+
+- The cook writes an `ENVM` chunk next to the texture
+  ([documents.md](documents.md)): a GGX-**prefiltered specular cube**,
+  128² with 6 mips for roughness 0 → 1 (256 importance samples a texel,
+  each sampling the equirect at a mip chosen by its solid angle, so a
+  rough level does not sparkle), a cosine-convolved **irradiance cube**
+  at 32² storing `E / π`, and `meanIrradiance` for metering. Both are
+  RGBA16F, in the same equirect frame the sky pass uses, faces in
+  WebGPU order (+X −X +Y −Y +Z −Z).
+- The renderer uploads them as two `TextureCube`s (bind group 0,
+  bindings 4 and 5, with a trilinear clamp-to-edge `cube_sampler` at 3)
+  and builds a 64 × 64 RGBA16F **BRDF LUT** at 6 (`create_brdf_lut`, 512
+  samples per texel, the same height-correlated Smith visibility as
+  `mesh.wgsl`, written in `ensure_fallbacks`). A scene without an
+  environment binds 1 × 1 black cubes, which wgpu zero-initialises.
+- `mesh.wgsl` samples `irradiance_cube` along `rotate_sky(n)` and
+  `specular_cube` along `rotate_sky(reflect(−v, n))` at
+  `roughness · (mips − 1)`, and the LUT at `(N·V, roughness)`:
+  `diffuse · irradiance + prefiltered · (f0 · a + b)`, all × the
+  `sky_intensity` the backdrop uses — so the sky you see and the light
+  it casts are the same image at the same exposure. `rotate_sky` (in
+  `frame.wgsl`) is shared with the sky pass, so `sky_rotation` turns the
+  lighting with the backdrop.
+- Auto exposure meters the environment too: the mean irradiance ×
+  `sky_intensity` joins the ambient term in `EV = log2(max(E_sun,
+  E_ambient, 1) / 2.5)`.
+
+`FrameStats::ibl` says whether the frame sampled an environment, and
+`fynkel render --json` reports it. The cubes are uploaded when the
+`Environment`'s sky changes (`ibl_dirty` → `rebuild_frame_bind_group`);
+their bytes count in the renderer's GPU estimate. No pipeline variant is
+added: the shader mixes between the two terms with `frame.sky.z`.
+
 ## Lights per draw
 
 Up to `MAX_LIGHTS = 8` point + spot lights are uploaded per frame in one
@@ -274,13 +315,16 @@ scenes) is where the budget gets measured. One sun (the first
 `inv_view_proj` (the sky's ray reconstruction), `sun_view_proj` (world →
 shadow map clip), `camera_pos` (`w` = exposure factor `1 / L_max`),
 `sun_dir` (`w` = present), `sun_color` (rgb × lux), `ambient` (rgb × lux,
-`w` = `L_max`), `sky` (`x` intensity, `y` rotation), `shadow` (`x` active,
+`w` = `L_max`), `sky` (`x` intensity, `y` rotation, `z` image-based
+lighting active, `w` specular mips − 1), `shadow` (`x` active,
 `y` `1 / resolution`, `z` normal offset in metres), `counts` (`x` lights,
 `y` sky drawn, `z` encode sRGB), then `lights: array<Light, 8>` —
 `position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
 `direction` (`w` cos outer), `params` (`x` cos inner). Bind group 0 also
 holds the shadow map (`texture_depth_2d`, binding 1 — a 1×1 map when
-shadows are off) and its comparison sampler (binding 2). The shadow pass
+shadows are off), its comparison sampler (binding 2), the environment's
+cube sampler (3), irradiance cube (4), prefiltered specular cube (5) and
+BRDF LUT (6) (§ Image-based lighting). The shadow pass
 binds its own 64-byte `view_proj` uniform at group 0.
 
 Per instance (vertex buffer 1, 128 bytes, locations 6–13): model matrix,
@@ -373,8 +417,8 @@ shadow, blend) differs, and `Pipelines::opaque(skinned, double_sided)` /
 (five texture views + the sampler, the fallback view for every unbound
 slot) and per texture; the post and present bind groups are rebuilt with
 the attachments (`resize`, a quality change), the frame bind group with
-the shadow map, the sky bind group when the `Environment` names a
-different texture, and every material bind group when the sampler
+the shadow map and with the environment's cubes, the sky bind group when
+the `Environment` names a different texture, and every material bind group when the sampler
 changes (anisotropy). Opaque instances are batched by `(mesh, material)`
 in order of first appearance, laid out per batch as § Instancing and
 culling describes; the back-face-culled batches draw before the
@@ -418,7 +462,8 @@ the light budget, spot cone, ambient colour and the default
 roughness maps on the fixture's textures (and the cooked tangents they
 need — the `MESH` info assertion is in `fynkel_import/tests/cook.rs`),
 alpha mask, double-sided back faces, emissive without light, sky backdrop
-+ rotation; from V1 (b): the sun's PCF shadow on a slab (darker under the
++ rotation, the HDR sky lighting a cube through its cooked environment
+(a PNG sky does not) with `sky_rotation` steering the lookup; from V1 (b): the sun's PCF shadow on a slab (darker under the
 cube, a soft edge, gone with `shadows: false`, a 512 map, a non-casting
 sun), `cast_shadows` / `receive_shadows` per `MeshRenderer`, blend
 materials compositing back to front whatever the record order, MSAA 4

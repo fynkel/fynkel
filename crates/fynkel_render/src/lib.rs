@@ -43,7 +43,9 @@
 use std::collections::HashMap;
 
 use fynkel_contracts::AssetRef;
-use fynkel_cooked::payload::{SkinWeight, Vertex, TEXTURE_FORMAT_RGBA8_SRGB};
+use fynkel_cooked::payload::{
+    SkinWeight, Vertex, TEXTURE_FORMAT_RGBA16F_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
+};
 use fynkel_core::material::AlphaMode;
 use fynkel_core::{Environment, Extract, Projection};
 use glam::{Mat4, Vec3};
@@ -57,7 +59,7 @@ pub mod shadow;
 
 pub use culling::{Frustum, Sphere};
 pub use debug::{DebugDraw, DebugVertex};
-pub use fynkel_assets::{Assets, PbrMaterial, QualityProfile};
+pub use fynkel_assets::{Assets, EnvironmentPayload, PbrMaterial, QualityProfile};
 pub use quality::{Quality, QualityStatus};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -313,6 +315,9 @@ pub struct FrameStats {
     pub scene_light: bool,
     /// The `Environment` sky is drawn behind the meshes.
     pub sky: bool,
+    /// The sky is an HDR environment and lights the scene (E1): the
+    /// prefiltered cubes are bound and the constant ambient is off.
+    pub ibl: bool,
     /// Instrumentation (blueprint §15.4, M3-16). Wall time of `prepare`
     /// (upload + cull + the timestamp read-back) and of the last `draw`
     /// (pass recording; the submit is the host's), in microseconds.
@@ -618,6 +623,8 @@ pub struct ExtractRenderer {
     skin_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     shadow_sampler: wgpu::Sampler,
+    /// Clamped trilinear, for the environment cubes and the BRDF table.
+    cube_sampler: wgpu::Sampler,
     present_sampler: wgpu::Sampler,
     cube: GpuMesh,
     fallbacks: Option<Fallbacks>,
@@ -647,6 +654,14 @@ pub struct ExtractRenderer {
     /// mesh pass samples it.
     shadow_active: bool,
     sky_bind_group: Option<(AssetRef, wgpu::BindGroup)>,
+    /// The environment the frame bind group holds (E1), and the 1×1 black
+    /// stand-in bound when a scene has none.
+    ibl: Option<(AssetRef, Ibl)>,
+    ibl_none: Ibl,
+    /// The frame bind group holds an environment other than `ibl`'s.
+    ibl_dirty: bool,
+    brdf_lut: GpuTexture,
+    brdf_lut_texture: wgpu::Texture,
     width: u32,
     height: u32,
     quality: Quality,
@@ -659,6 +674,9 @@ pub struct ExtractRenderer {
     evictions_seen: u64,
     meshes: HashMap<AssetRef, Option<GpuMesh>>,
     textures: HashMap<AssetRef, Option<GpuTexture>>,
+    /// The cooked environments read for an HDR sky (E1; `None`: the
+    /// texture has no `ENVM`, or it could not be read).
+    environments: HashMap<AssetRef, Option<std::sync::Arc<EnvironmentPayload>>>,
     materials: HashMap<AssetRef, Option<GpuMaterial>>,
     asset_errors: Vec<String>,
     stats: FrameStats,
@@ -747,6 +765,16 @@ impl ExtractRenderer {
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,
         };
+        let cube_entry = |binding| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::Cube,
+                multisampled: false,
+            },
+            count: None,
+        };
         let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fynkel frame bgl"),
             entries: &[
@@ -767,6 +795,14 @@ impl ExtractRenderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
+                // Image-based lighting (E1): the irradiance and
+                // prefiltered specular cubes, the split-sum BRDF table
+                // and their sampler. Bound every frame — 1×1 black cubes
+                // when the scene has no HDR environment.
+                sampler_entry(3),
+                cube_entry(4),
+                cube_entry(5),
+                texture_entry(6),
             ],
         });
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -829,6 +865,16 @@ impl ExtractRenderer {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..Default::default()
         });
+        let cube_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("fynkel environment sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            ..Default::default()
+        });
         let present_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("fynkel present sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -880,12 +926,17 @@ impl ExtractRenderer {
                 1
             },
         );
+        let ibl_none = Ibl::none(device);
+        let (brdf_lut, brdf_lut_texture) = create_brdf_lut(device);
         let frame_bind_group = create_frame_bind_group(
             device,
             &frame_layout,
             &uniform_buffer,
             &shadow_map.view,
             &shadow_sampler,
+            &cube_sampler,
+            &ibl_none,
+            &brdf_lut,
         );
 
         Self {
@@ -898,6 +949,7 @@ impl ExtractRenderer {
             skin_layout,
             sampler,
             shadow_sampler,
+            cube_sampler,
             present_sampler,
             cube,
             fallbacks: None,
@@ -923,6 +975,11 @@ impl ExtractRenderer {
             shadow_map,
             shadow_active: false,
             sky_bind_group: None,
+            ibl: None,
+            ibl_none,
+            ibl_dirty: false,
+            brdf_lut,
+            brdf_lut_texture,
             width,
             height,
             quality,
@@ -934,6 +991,7 @@ impl ExtractRenderer {
             evictions_seen: 0,
             meshes: HashMap::new(),
             textures: HashMap::new(),
+            environments: HashMap::new(),
             materials: HashMap::new(),
             asset_errors: Vec::new(),
             stats: FrameStats::default(),
@@ -1113,13 +1171,7 @@ impl ExtractRenderer {
         };
         if resolution != self.shadow_map.resolution {
             self.shadow_map = create_shadow_map(device, resolution);
-            self.frame_bind_group = create_frame_bind_group(
-                device,
-                &self.frame_layout,
-                &self.uniform_buffer,
-                &self.shadow_map.view,
-                &self.shadow_sampler,
-            );
+            self.rebuild_frame_bind_group(device);
         }
         if wanted.anisotropy != old.anisotropy {
             self.sampler = create_material_sampler(device, wanted.anisotropy);
@@ -1127,6 +1179,20 @@ impl ExtractRenderer {
             self.materials.clear();
             self.sky_bind_group = None;
         }
+    }
+
+    /// Rebinds group 0 after the shadow map or the environment changed.
+    fn rebuild_frame_bind_group(&mut self, device: &wgpu::Device) {
+        self.frame_bind_group = create_frame_bind_group(
+            device,
+            &self.frame_layout,
+            &self.uniform_buffer,
+            &self.shadow_map.view,
+            &self.shadow_sampler,
+            &self.cube_sampler,
+            self.ibl.as_ref().map_or(&self.ibl_none, |(_, i)| i),
+            &self.brdf_lut,
+        );
     }
 
     // ------------------------------------------------------------ assets
@@ -1161,6 +1227,7 @@ impl ExtractRenderer {
         let a = assets.clone();
         self.meshes.retain(|r, _| a.is_resident(r.asset));
         self.textures.retain(|r, _| a.is_resident(r.asset));
+        self.environments.retain(|r, _| a.is_resident(r.asset));
         let textures = &self.textures;
         self.materials.retain(|r, m| {
             a.is_resident(r.asset)
@@ -1172,6 +1239,12 @@ impl ExtractRenderer {
                 self.sky_bind_group = None;
             }
         }
+        if let Some((r, _)) = &self.ibl {
+            if !a.is_resident(r.asset) {
+                self.ibl = None;
+                self.ibl_dirty = true;
+            }
+        }
         self.asset_errors.clear();
     }
 
@@ -1180,8 +1253,10 @@ impl ExtractRenderer {
     pub fn clear_assets(&mut self) {
         self.meshes.clear();
         self.textures.clear();
+        self.environments.clear();
         self.materials.clear();
         self.sky_bind_group = None;
+        self.ibl_dirty |= self.ibl.take().is_some();
         self.asset_errors.clear();
     }
 
@@ -1310,9 +1385,6 @@ impl ExtractRenderer {
             .map_or(&default_env, |e| &e.environment);
         let ambient_lux = env.ambient_intensity.max(0.0);
         let ambient = env.ambient_color.max(Vec3::ZERO) * ambient_lux;
-        let ev100 = exposure::ev100_for(component, sun_lux, ambient_lux);
-        self.ev100 = ev100;
-        let white = exposure::white_nits(ev100);
         let sky = env
             .sky
             .as_ref()
@@ -1339,6 +1411,35 @@ impl ExtractRenderer {
             self.sky_bind_group = None;
         }
         stats.sky = sky.is_some();
+
+        // Image-based lighting (E1): the environment prefiltered next to
+        // an HDR sky. An 8-bit sky has no `ENVM` and lights nothing — the
+        // constant ambient stays.
+        let want_ibl = sky.as_ref().filter(|r| self.environment(r));
+        if self.ibl.as_ref().map(|(r, _)| r) != want_ibl {
+            self.ibl = want_ibl.cloned().map(|r| {
+                let env = self.environments[&r].clone().expect("loaded above");
+                let ibl = Ibl::upload(device, queue, &env, &r);
+                (r, ibl)
+            });
+            self.ibl_dirty = true;
+        }
+        if self.ibl_dirty {
+            self.rebuild_frame_bind_group(device);
+            self.ibl_dirty = false;
+        }
+        let ibl_mips = self.ibl.as_ref().map_or(1, |(_, i)| i.specular_mips);
+        // Metering: an IBL scene's ambient illuminance is the
+        // environment's mean irradiance at the sky's intensity.
+        let ibl_lux = self.ibl.as_ref().map_or(0.0, |(r, _)| {
+            let e = self.environments[r].as_ref().expect("bound above");
+            let mean = (e.mean_irradiance[0] + e.mean_irradiance[1] + e.mean_irradiance[2]) / 3.0;
+            mean * env.sky_intensity.max(0.0)
+        });
+        stats.ibl = self.ibl.is_some();
+        let ev100 = exposure::ev100_for(component, sun_lux, ambient_lux.max(ibl_lux));
+        self.ev100 = ev100;
+        let white = exposure::white_nits(ev100);
 
         // Point and spot lights: the nearest MAX_LIGHTS to the camera.
         let mut lights: Vec<(f32, GpuLight)> =
@@ -1657,7 +1758,12 @@ impl ExtractRenderer {
             sun_dir: sun_dir.extend(sun_present as u32 as f32).to_array(),
             sun_color: sun_color.extend(0.0).to_array(),
             ambient: ambient.extend(white).to_array(),
-            sky: [env.sky_intensity.max(0.0), env.sky_rotation, 0.0, 0.0],
+            sky: [
+                env.sky_intensity.max(0.0),
+                env.sky_rotation,
+                stats.ibl as u32 as f32,
+                (ibl_mips - 1) as f32,
+            ],
             shadow,
             counts: [
                 n_lights as u32,
@@ -1709,6 +1815,9 @@ impl ExtractRenderer {
         let textures: u64 = self.textures.values().flatten().map(|t| t.bytes).sum();
         meshes
             + textures
+            + self.ibl.as_ref().map_or(0, |(_, i)| i.bytes())
+            + self.ibl_none.bytes()
+            + self.brdf_lut.bytes
             + self.cube.vertex_buffer.size()
             + self.cube.index_buffer.size()
             + self.attachments.bytes
@@ -1997,6 +2106,7 @@ impl ExtractRenderer {
             [&white, &flat_normal, &white, &white, &white].map(|t| &t.view),
             "fynkel default material",
         );
+        write_brdf_lut(queue, &self.brdf_lut_texture);
         self.fallbacks = Some(Fallbacks {
             white,
             flat_normal,
@@ -2039,10 +2149,10 @@ impl ExtractRenderer {
         }
         let loaded = match self.assets.as_ref().map(|a| a.texture(r)) {
             Some(Ok(payload)) => {
-                let format = if payload.format == TEXTURE_FORMAT_RGBA8_SRGB {
-                    wgpu::TextureFormat::Rgba8UnormSrgb
-                } else {
-                    wgpu::TextureFormat::Rgba8Unorm
+                let format = match payload.format {
+                    TEXTURE_FORMAT_RGBA8_SRGB => wgpu::TextureFormat::Rgba8UnormSrgb,
+                    TEXTURE_FORMAT_RGBA16F_LINEAR => wgpu::TextureFormat::Rgba16Float,
+                    _ => wgpu::TextureFormat::Rgba8Unorm,
                 };
                 Some(upload_rgba8(
                     device,
@@ -2052,7 +2162,7 @@ impl ExtractRenderer {
                         height: payload.height,
                         format,
                         mip_levels: payload.mip_levels,
-                        rgba8: &payload.rgba8,
+                        rgba8: &payload.texels,
                     },
                     &format!("fynkel texture {r}"),
                 ))
@@ -2066,6 +2176,28 @@ impl ExtractRenderer {
         };
         let ok = loaded.is_some();
         self.textures.insert(r.clone(), loaded);
+        ok
+    }
+
+    /// Reads the environment cooked next to an HDR sky (E1), once per
+    /// reference; `false` when the texture has none (an 8-bit sky) or it
+    /// could not be read.
+    fn environment(&mut self, r: &AssetRef) -> bool {
+        if let Some(e) = self.environments.get(r) {
+            return e.is_some();
+        }
+
+        let loaded = match self.assets.as_ref().map(|a| a.environment(r)) {
+            Some(Ok(e)) => e,
+            Some(Err(e)) => {
+                self.asset_errors
+                    .push(format!("environment {r}: {}", e.message));
+                None
+            }
+            None => None,
+        };
+        let ok = loaded.is_some();
+        self.environments.insert(r.clone(), loaded);
         ok
     }
 
@@ -2734,12 +2866,16 @@ fn create_shadow_map(device: &wgpu::Device, resolution: u32) -> ShadowMap {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_frame_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     uniforms: &wgpu::Buffer,
     shadow_map: &wgpu::TextureView,
     shadow_sampler: &wgpu::Sampler,
+    cube_sampler: &wgpu::Sampler,
+    ibl: &Ibl,
+    brdf_lut: &GpuTexture,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("fynkel frame bg"),
@@ -2757,8 +2893,300 @@ fn create_frame_bind_group(
                 binding: 2,
                 resource: wgpu::BindingResource::Sampler(shadow_sampler),
             },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::Sampler(cube_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: wgpu::BindingResource::TextureView(&ibl.irradiance.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(&ibl.specular.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(&brdf_lut.view),
+            },
         ],
     })
+}
+
+/// The cooked environment on the GPU (E1): the cosine-convolved
+/// irradiance cube (E/π) and the GGX-prefiltered specular cube, whose mip
+/// levels run roughness 0 → 1. Both are `Rgba16Float`, both sampled with
+/// the renderer's clamped trilinear `cube_sampler`.
+struct Ibl {
+    irradiance: GpuTexture,
+    specular: GpuTexture,
+    specular_mips: u32,
+}
+
+impl Ibl {
+    /// What a scene without an HDR environment binds: black 1×1 cubes, so
+    /// group 0 is always complete and the shader needs no variant.
+    /// wgpu zeroes a fresh texture, so there is nothing to write.
+    fn none(device: &wgpu::Device) -> Ibl {
+        Ibl {
+            irradiance: create_cube(device, 1, 1, "fynkel ibl none").0,
+            specular: create_cube(device, 1, 1, "fynkel ibl none").0,
+            specular_mips: 1,
+        }
+    }
+
+    /// Uploads a cooked `ENVM` payload.
+    fn upload(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        env: &EnvironmentPayload,
+        r: &AssetRef,
+    ) -> Ibl {
+        let halves = |v: &[u16]| -> Vec<u8> {
+            let mut out = Vec::with_capacity(v.len() * 2);
+            for h in v {
+                out.extend_from_slice(&h.to_le_bytes());
+            }
+            out
+        };
+        let irradiance_bytes = halves(&env.irradiance);
+        let face = (env.irradiance_size * env.irradiance_size) as usize * 8;
+        let irradiance_faces: Vec<&[u8]> = (0..6)
+            .map(|f| &irradiance_bytes[f * face..(f + 1) * face])
+            .collect();
+        let irradiance = upload_cube(
+            device,
+            queue,
+            env.irradiance_size,
+            1,
+            &irradiance_faces,
+            &format!("fynkel irradiance {r}"),
+        );
+        // Every specular level, face by face (the payload is mip-major).
+        let mut specular_bytes = Vec::with_capacity(env.specular_mips as usize);
+        for mip in 0..env.specular_mips {
+            specular_bytes.push(halves(env.specular_level(mip).unwrap_or(&[])));
+        }
+        let mut specular_faces: Vec<&[u8]> = Vec::with_capacity(env.specular_mips as usize * 6);
+        for (mip, bytes) in specular_bytes.iter().enumerate() {
+            let size = (env.specular_size >> mip).max(1) as usize;
+            let face = size * size * 8;
+            for f in 0..6 {
+                specular_faces.push(&bytes[f * face..(f + 1) * face]);
+            }
+        }
+        let specular = upload_cube(
+            device,
+            queue,
+            env.specular_size,
+            env.specular_mips,
+            &specular_faces,
+            &format!("fynkel environment {r}"),
+        );
+        Ibl {
+            irradiance,
+            specular,
+            specular_mips: env.specular_mips,
+        }
+    }
+
+    fn bytes(&self) -> u64 {
+        self.irradiance.bytes + self.specular.bytes
+    }
+}
+
+/// Uploads a `Rgba16Float` cube map. `faces` is mip-major, face-minor
+/// (the `ENVM` order): level 0's six faces, then level 1's, …
+fn upload_cube(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: u32,
+    mips: u32,
+    faces: &[&[u8]],
+    label: &str,
+) -> GpuTexture {
+    let (mut gpu, texture) = create_cube(device, size, mips, label);
+    let mut bytes = 0u64;
+    for (i, data) in faces.iter().enumerate() {
+        let (mip, face) = (i as u32 / 6, i as u32 % 6);
+        let side = (size >> mip).max(1);
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: mip,
+                origin: wgpu::Origin3d {
+                    x: 0,
+                    y: 0,
+                    z: face,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(side * 8),
+                rows_per_image: Some(side),
+            },
+            wgpu::Extent3d {
+                width: side,
+                height: side,
+                depth_or_array_layers: 1,
+            },
+        );
+        bytes += data.len() as u64;
+    }
+    gpu.bytes = bytes;
+    gpu
+}
+
+/// An empty `Rgba16Float` cube (zeroed by wgpu) and its texture, so a
+/// caller can write the levels later.
+fn create_cube(
+    device: &wgpu::Device,
+    size: u32,
+    mips: u32,
+    label: &str,
+) -> (GpuTexture, wgpu::Texture) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 6,
+        },
+        mip_level_count: mips,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::Cube),
+        ..Default::default()
+    });
+    (GpuTexture { view, bytes: 0 }, texture)
+}
+
+/// The split-sum environment BRDF (E1): `∫ f(l, v) / F · n·l dl` over the
+/// GGX lobe, integrated once on the CPU — `x` = `n·v`, `y` = roughness,
+/// `r` = the scale on `F0`, `g` = the bias. The specular answer for a
+/// prefiltered radiance `L` is `L · (F0 · r + g)`. 64×64 RGBA16F; the
+/// table depends on nothing but the BRDF, so it is computed once per
+/// process and uploaded per renderer.
+fn create_brdf_lut(device: &wgpu::Device) -> (GpuTexture, wgpu::Texture) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("fynkel brdf lut"),
+        size: wgpu::Extent3d {
+            width: BRDF_LUT_SIZE,
+            height: BRDF_LUT_SIZE,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    (
+        GpuTexture {
+            view,
+            bytes: (BRDF_LUT_SIZE * BRDF_LUT_SIZE * 8) as u64,
+        },
+        texture,
+    )
+}
+
+/// Fills the table on the first frame (`new` has no queue); the texels
+/// are integrated once per process.
+fn write_brdf_lut(queue: &wgpu::Queue, texture: &wgpu::Texture) {
+    static LUT: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        LUT.get_or_init(brdf_lut_texels),
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(BRDF_LUT_SIZE * 8),
+            rows_per_image: Some(BRDF_LUT_SIZE),
+        },
+        wgpu::Extent3d {
+            width: BRDF_LUT_SIZE,
+            height: BRDF_LUT_SIZE,
+            depth_or_array_layers: 1,
+        },
+    );
+}
+
+const BRDF_LUT_SIZE: u32 = 64;
+const BRDF_LUT_SAMPLES: u32 = 512;
+
+fn brdf_lut_texels() -> Vec<u8> {
+    use fynkel_cooked::payload::f32_to_f16;
+    let n = BRDF_LUT_SIZE as usize;
+    let mut out = Vec::with_capacity(n * n * 8);
+    for y in 0..n {
+        let roughness = (y as f32 + 0.5) / n as f32;
+        let a = roughness * roughness;
+        let a2 = a * a;
+        for x in 0..n {
+            let ndotv = ((x as f32 + 0.5) / n as f32).max(1e-3);
+            let v = [(1.0 - ndotv * ndotv).max(0.0).sqrt(), 0.0, ndotv];
+            let (mut scale, mut bias) = (0.0f32, 0.0f32);
+            for i in 0..BRDF_LUT_SAMPLES {
+                let (x1, x2) = hammersley(i, BRDF_LUT_SAMPLES);
+                let phi = 2.0 * std::f32::consts::PI * x1;
+                let cos_theta = ((1.0 - x2) / (1.0 + (a2 - 1.0) * x2)).sqrt();
+                let sin_theta = (1.0 - cos_theta * cos_theta).max(0.0).sqrt();
+                // The half vector in the tangent frame around +Z = N.
+                let h = [sin_theta * phi.cos(), sin_theta * phi.sin(), cos_theta];
+                let vh = v[0] * h[0] + v[1] * h[1] + v[2] * h[2];
+                let l = [
+                    2.0 * vh * h[0] - v[0],
+                    2.0 * vh * h[1] - v[1],
+                    2.0 * vh * h[2] - v[2],
+                ];
+                if l[2] <= 0.0 {
+                    continue;
+                }
+                let (ndotl, ndoth, vdoth) = (l[2], h[2].max(0.0), vh.max(0.0));
+                // Height-correlated Smith visibility, the shader's.
+                let gv = ndotl * (ndotv * ndotv * (1.0 - a2) + a2).sqrt();
+                let gl = ndotv * (ndotl * ndotl * (1.0 - a2) + a2).sqrt();
+                let vis = 0.5 / (gv + gl).max(1e-6);
+                // pdf = D · n·h / (4 · v·h); the D cancels.
+                let weight = 4.0 * vis * ndotl * vdoth / ndoth.max(1e-6);
+                let fc = (1.0 - vdoth).powi(5);
+                scale += (1.0 - fc) * weight;
+                bias += fc * weight;
+            }
+            let (scale, bias) = (
+                scale / BRDF_LUT_SAMPLES as f32,
+                bias / BRDF_LUT_SAMPLES as f32,
+            );
+            for v in [scale, bias, 0.0, 1.0] {
+                out.extend_from_slice(&f32_to_f16(v).to_le_bytes());
+            }
+        }
+    }
+    out
+}
+
+/// The Hammersley point set (the cook's, `fynkel_import::environment`).
+fn hammersley(i: u32, n: u32) -> (f32, f32) {
+    let mut bits = i;
+    bits = bits.rotate_right(16);
+    bits = ((bits & 0x5555_5555) << 1) | ((bits & 0xAAAA_AAAA) >> 1);
+    bits = ((bits & 0x3333_3333) << 2) | ((bits & 0xCCCC_CCCC) >> 2);
+    bits = ((bits & 0x0F0F_0F0F) << 4) | ((bits & 0xF0F0_F0F0) >> 4);
+    bits = ((bits & 0x00FF_00FF) << 8) | ((bits & 0xFF00_FF00) >> 8);
+    (i as f32 / n as f32, bits as f32 * 2.328_306_4e-10)
 }
 
 fn create_joint_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
@@ -2917,8 +3345,9 @@ fn upload_mesh(
     }
 }
 
-/// A top-row-first RGBA8 image with `mip_levels` levels concatenated in
-/// `rgba8` (the cooked `TEXR` layout; 1 for a flat image).
+/// A top-row-first image with `mip_levels` levels concatenated in
+/// `rgba8` (the cooked `TEXR` layout; 1 for a flat image) — RGBA8, or
+/// RGBA16F when `format` says so (an HDR sky, E1).
 struct Rgba8Image<'a> {
     width: u32,
     height: u32,
@@ -2954,6 +3383,7 @@ fn upload_rgba8(
         rgba8,
     } = image;
     let mip_levels = mip_levels.max(1);
+    let texel = format.block_copy_size(None).unwrap_or(4);
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
@@ -2971,7 +3401,7 @@ fn upload_rgba8(
     let mut at = 0usize;
     for level in 0..mip_levels {
         let (w, h) = fynkel_cooked::payload::mip_size(width, height, level);
-        let len = w as usize * h as usize * 4;
+        let len = w as usize * h as usize * texel as usize;
         let Some(bytes) = rgba8.get(at..at + len) else {
             break;
         };
@@ -2986,7 +3416,7 @@ fn upload_rgba8(
             bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(w * 4),
+                bytes_per_row: Some(w * texel),
                 rows_per_image: Some(h),
             },
             wgpu::Extent3d {

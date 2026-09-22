@@ -233,8 +233,21 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         let le = punctual(frame.lights[i], in.world_pos);
         radiance += shade(n, v, le.xyz, frame.lights[i].color.rgb * le.w, diffuse, f0, a2);
     }
-    // Constant ambient: the diffuse and the specular base each see E/π.
-    radiance += (diffuse + f0) * frame.ambient.rgb / PI * ao;
+    // Environment light. Without an HDR environment: constant ambient,
+    // the diffuse and the specular base each seeing E/π. With one (E1):
+    // the split-sum approximation — the irradiance cube holds E/π for the
+    // normal, the prefiltered cube the GGX-convolved radiance along the
+    // reflection at `roughness · last mip`, and the BRDF table the scale
+    // and bias on F0.
+    let ambient_term = (diffuse + f0) * frame.ambient.rgb / PI;
+    let n_env = rotate_sky(n);
+    let r_env = rotate_sky(reflect(-v, n));
+    let irradiance = textureSample(irradiance_cube, cube_sampler, n_env).rgb;
+    let prefiltered = textureSampleLevel(specular_cube, cube_sampler, r_env, roughness * frame.sky.w).rgb;
+    let ndotv = max(dot(n, v), 1e-4);
+    let ab = textureSampleLevel(brdf_lut, cube_sampler, vec2<f32>(ndotv, roughness), 0.0).rg;
+    let ibl_term = (diffuse * irradiance + prefiltered * (f0 * ab.x + ab.y)) * frame.sky.x;
+    radiance += mix(ambient_term, ibl_term, frame.sky.z) * ao;
     // Emissive is relative to the exposure's white (L_max).
     let emissive = in.emissive.rgb * textureSample(emissive_tex, material_sampler, in.uv).rgb;
     radiance += emissive * frame.ambient.w;

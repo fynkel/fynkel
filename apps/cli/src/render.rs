@@ -222,6 +222,7 @@ pub fn run(args: &[String]) -> ExitCode {
                 "lights": stats.lights,
                 "lightsDropped": stats.lights_dropped,
                 "sky": stats.sky,
+                "ibl": stats.ibl,
                 "ev100": renderer.ev100(),
                 "transparent": stats.transparent,
                 "shadowCasters": stats.shadow_casters,
@@ -266,7 +267,11 @@ pub fn run(args: &[String]) -> ExitCode {
                 String::new()
             },
             renderer.ev100(),
-            if stats.sky { ", sky" } else { "" },
+            match (stats.sky, stats.ibl) {
+                (true, true) => ", sky + ibl",
+                (true, false) => ", sky",
+                _ => "",
+            },
             quality.profile,
             quality.settings.msaa,
             if stats.shadow_map > 0 {

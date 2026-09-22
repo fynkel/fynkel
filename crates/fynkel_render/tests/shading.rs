@@ -377,6 +377,7 @@ const ROBOT_MESH: &str = "c0000000-0000-4000-8000-000000000001";
 const SWATCH: &str = "c0000000-0000-4000-8000-000000000002";
 const NORMAL: &str = "c0000000-0000-4000-8000-000000000003";
 const MR: &str = "c0000000-0000-4000-8000-000000000004";
+const SKY_HDR: &str = "c0000000-0000-4000-8000-000000000007";
 
 /// A copy of the fixture project whose scene the test writes: a camera at
 /// `eye`, one robot cube per material (spread along +X), an optional sun.
@@ -447,6 +448,31 @@ impl Lab {
         .unwrap();
         self.materials.push((id, doc));
         id
+    }
+
+    /// Copies the importer's HDR fixture into the project as a sky (the
+    /// cook writes its ENVM chunk): above 45° the blue sky (0.8, 1.6,
+    /// 4.0), below it red toward -X and green toward +X.
+    fn sky_hdr(&self) -> AssetRef {
+        let from = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fynkel_import/fixtures/textures/sky.hdr");
+        std::fs::copy(from, self.dir.join("assets/textures/sky.hdr")).unwrap();
+        let meta = json!({
+            "$schema": "https://fynkel.dev/schemas/meta.schema.json",
+            "formatVersion": 1,
+            "id": SKY_HDR,
+            "name": "sky.hdr",
+            "importer": "fynkel.image",
+            "importerVersion": 1,
+            "settings": {},
+            "subAssets": {},
+        });
+        std::fs::write(
+            self.dir.join("assets/textures/sky.hdr.meta.json"),
+            serde_json::to_string_pretty(&meta).unwrap(),
+        )
+        .unwrap();
+        AssetRef::new(SKY_HDR.parse().unwrap())
     }
 
     /// Writes the scene, cooks, loads and extracts it.
@@ -716,6 +742,71 @@ fn sky_texture_fills_the_background() {
         .sky_intensity = 0.0;
     let (black, _) = render_lab(&device, &queue, &assets, &extract);
     assert_eq!(corner(&black)[..3], [0, 0, 0]);
+}
+
+#[test]
+fn an_hdr_sky_lights_the_scene_through_its_environment_cubes() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("ibl");
+    let sky = lab.sky_hdr();
+    // A white dielectric with a little gloss: what it shows is the
+    // environment, through the irradiance cube and the prefiltered one.
+    let m = lab.material(json!({ "base_color": [1.0, 1.0, 1.0, 1.0], "roughness": 0.5 }));
+    let eye = Vec3::new(0.0, 0.0, 3.0);
+    let (assets, mut extract) = lab.extract(eye, &[(Vec3::ZERO, m)], false);
+    // The cube fills the middle of the frame; the sky is behind it.
+    let centre = |px: &[[u8; 4]]| px[(H / 2 * W + W / 2) as usize];
+
+    // No sky and no ambient: nothing lights the cube at all.
+    extract.environment = Some(environment(Vec3::ONE, 0.0));
+    let (unlit, r) = render_lab(&device, &queue, &assets, &extract);
+    assert!(!r.stats().ibl);
+    assert!(luminance(centre(&unlit)) < 8.0, "nothing lights it yet");
+
+    let mut render = |asset: &AssetRef, rotation: f32| {
+        extract.environment = Some(ExtractEnvironment {
+            record: 0,
+            environment: Environment {
+                ambient_intensity: 0.0,
+                sky: Some(asset.clone()),
+                sky_intensity: 1500.0,
+                sky_rotation: rotation,
+                ..Environment::default()
+            },
+        });
+        render_lab(&device, &queue, &assets, &extract)
+    };
+
+    // A cooked PNG is a sky but not an environment: the constant-ambient
+    // path stays.
+    let swatch = AssetRef::new(SWATCH.parse().unwrap());
+    let (px, r) = render(&swatch, 0.0);
+    assert!(
+        r.stats().sky && !r.stats().ibl,
+        "a PNG carries no ENVM chunk"
+    );
+    assert!(luminance(centre(&px)) < 8.0);
+
+    // The HDR one lights it.
+    let (lit, r) = render(&sky, 0.0);
+    dump(&lit, "ibl");
+    assert!(r.stats().ibl);
+    let lit_luma = luminance(centre(&lit));
+    assert!(lit_luma > 40.0, "lit by the environment alone: {lit_luma}");
+
+    // The sky rotation turns the lookup with it: a quarter turn puts the
+    // ground's green half where the front face looks, the other way its
+    // red half. (`rotate_sky` maps +Z to +X at +90°.)
+    let (green, _) = render(&sky, std::f32::consts::FRAC_PI_2);
+    let (red, _) = render(&sky, -std::f32::consts::FRAC_PI_2);
+    dump(&green, "ibl-green");
+    dump(&red, "ibl-red");
+    let g = centre(&green);
+    let r = centre(&red);
+    assert!(g[1] > g[0] + 20 && g[1] > g[2], "+90°: green {g:?}");
+    assert!(r[0] > r[1] + 20 && r[0] > r[2], "-90°: red {r:?}");
 }
 
 // ------------------------------------------------- renderer V1 (b): shadows

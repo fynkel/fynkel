@@ -31,7 +31,9 @@ struct Frame {
     sun_color: vec4<f32>,
     // rgb: ambient colour × illuminance (lux); w: L_max (nits at white).
     ambient: vec4<f32>,
-    // x: sky radiance scale (nits); y: sky rotation about +Y (radians).
+    // x: sky radiance scale (nits); y: sky rotation about +Y (radians);
+    // z: 1 when the environment lights the scene (E1); w: the specular
+    // cube's last mip level.
     sky: vec4<f32>,
     // x: 1 when the shadow map holds this frame's sun; y: one shadow
     // texel in map uv; z: receiver normal offset (world units); w: unused.
@@ -45,6 +47,19 @@ struct Frame {
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var shadow_map: texture_depth_2d;
 @group(0) @binding(2) var shadow_sampler: sampler_comparison;
+// Image-based lighting (E1): black 1×1 cubes when the scene has none.
+@group(0) @binding(3) var cube_sampler: sampler;
+@group(0) @binding(4) var irradiance_cube: texture_cube<f32>;
+@group(0) @binding(5) var specular_cube: texture_cube<f32>;
+@group(0) @binding(6) var brdf_lut: texture_2d<f32>;
+
+// A world direction in the environment's frame: the sky's rotation about
+// +Y, so what a mirror reflects is what the sky pass drew.
+fn rotate_sky(d: vec3<f32>) -> vec3<f32> {
+    let c = cos(frame.sky.y);
+    let s = sin(frame.sky.y);
+    return vec3<f32>(c * d.x + s * d.z, d.y, -s * d.x + c * d.z);
+}
 
 fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
     let lo = c * 12.92;
