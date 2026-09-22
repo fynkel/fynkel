@@ -61,7 +61,8 @@ final class DocumentState {
         canUndo = json['canUndo'] == true,
         canRedo = json['canRedo'] == true,
         history = (json['history'] as num?)?.toInt() ?? 0,
-        readOnly = json['readOnly'] as String?;
+        readOnly = json['readOnly'] as String?,
+        sub = json['sub'] as String?;
 
   final Map<String, Object?> json;
   final int handle;
@@ -86,7 +87,215 @@ final class DocumentState {
 
   /// Committed transactions in the history.
   final int history;
+
+  /// Why the document cannot be edited: the project's reason, or — for an
+  /// imported hierarchy — the source it is derived from (M4-07).
   final String? readOnly;
+
+  /// `prefab` when this is an imported hierarchy opened as
+  /// `<id>#prefab` (a model source's or a rig document's node tree, read
+  /// only, under the derived ids its instances use); null otherwise.
+  final String? sub;
+
+  bool get isImportedHierarchy => sub != null;
+}
+
+/// One prefab instance's expansion as Prefab mode shows it (the `instance`
+/// query, M4-07): the anchor, the prefab it comes from, the derived
+/// entities with the overrides applied and marked, and the overrides
+/// annotated with where they landed. `expanded` false means the prefab is
+/// missing or an override does not apply — [diagnostics] say why and
+/// [entities] is empty; the anchor keeps its data either way.
+final class PrefabExpansion {
+  PrefabExpansion.fromJson(this.json)
+      : anchor = json['anchor'] as String? ?? '',
+        instance = json['instance'] as String? ?? '',
+        asset = json['asset'] is Map ? (_map(json['asset'])['asset'] as String? ?? '') : '',
+        sub = json['asset'] is Map ? (_map(json['asset'])['sub'] as String? ?? '') : '',
+        expanded = json['expanded'] == true,
+        prefab = json['prefab'] is Map<String, Object?> ? ExpansionPrefab.fromJson(_map(json['prefab'])) : null,
+        diagnostics = Diagnostic.listOf(json['diagnostics']),
+        entities = [for (final e in json['entities'] as List? ?? const []) ExpandedEntity.fromJson(_map(e))],
+        overrides = [for (final o in json['overrides'] as List? ?? const []) ExpansionOverride.fromJson(_map(o))];
+
+  final Map<String, Object?> json;
+
+  /// The scene entity carrying `prefab`.
+  final String anchor;
+  final String instance;
+
+  /// `prefab.asset` as written: the prefab document's id, or the source
+  /// with [sub] `prefab` for an imported hierarchy.
+  final String asset;
+  final String sub;
+  final bool expanded;
+  final ExpansionPrefab? prefab;
+  final List<Diagnostic> diagnostics;
+
+  /// Expansion document order; a root's `parent` is the anchor.
+  final List<ExpandedEntity> entities;
+  final List<ExpansionOverride> overrides;
+
+  bool get isImported => sub.isNotEmpty;
+
+  /// `<asset>` or `<asset>#<sub>` — what `openDocument` takes.
+  String get open => prefab?.open ?? (sub.isEmpty ? asset : '$asset#$sub');
+
+  ExpandedEntity? entity(String id) {
+    for (final e in entities) {
+      if (e.id == id) return e;
+    }
+    return null;
+  }
+
+  /// The derived entity a prefab-local id became.
+  ExpandedEntity? byLocal(String local) {
+    for (final e in entities) {
+      if (e.local == local) return e;
+    }
+    return null;
+  }
+}
+
+/// The prefab an instance resolves to, and how to open it.
+final class ExpansionPrefab {
+  ExpansionPrefab.fromJson(this.json)
+      : id = json['id'] as String? ?? '',
+        name = json['name'] as String? ?? '',
+        path = json['path'] as String?,
+        kind = json['kind'] as String? ?? 'prefab',
+        open = json['open'] as String? ?? '',
+        handle = (json['handle'] as num?)?.toInt(),
+        readOnly = json['readOnly'] as String?;
+
+  final Map<String, Object?> json;
+
+  /// The prefab document's id (an imported hierarchy's derived one).
+  final String id;
+  final String name;
+
+  /// Relative to the assets directory: the prefab document, or the source
+  /// / rig document the hierarchy comes from.
+  final String? path;
+
+  /// `prefab`, `source` (a model file) or `rig` (a rig document's skeleton).
+  final String kind;
+
+  /// What `openDocument` takes: the id, or `<id>#prefab`.
+  final String open;
+
+  /// The open document's handle when it is open in this session.
+  final int? handle;
+
+  /// Why it cannot be edited (an imported hierarchy, a read-only project).
+  final String? readOnly;
+
+  bool get isImported => kind != 'prefab';
+}
+
+/// One entity of an expansion, under its derived scene id.
+final class ExpandedEntity {
+  ExpandedEntity.fromJson(this.json)
+      : id = json['id'] as String? ?? '',
+        local = json['local'] as String? ?? '',
+        name = json['name'] as String? ?? '',
+        parent = json['parent'] as String?,
+        children = _strings(json['children']),
+        added = json['added'] == true,
+        components = {
+          for (final c in _map(json['components']).entries) c.key: ExpandedComponent.fromJson(_map(c.value)),
+        };
+
+  final Map<String, Object?> json;
+  final String id;
+
+  /// The prefab's own id for this entity — what overrides address.
+  final String local;
+  final String name;
+  final String? parent;
+  final List<String> children;
+
+  /// Added by an `addObject` override.
+  final bool added;
+
+  /// By derived component id.
+  final Map<String, ExpandedComponent> components;
+}
+
+final class ExpandedComponent {
+  ExpandedComponent.fromJson(this.json)
+      : id = json['id'] as String? ?? '',
+        local = json['local'] as String?,
+        type = json['type'] as String? ?? '',
+        version = (json['version'] as num?)?.toInt() ?? 1,
+        data = _map(json['data']),
+        added = json['added'] == true,
+        overridden = _strings(json['overridden']);
+
+  final Map<String, Object?> json;
+  final String id;
+
+  /// The prefab-local component id (null only for a malformed expansion).
+  final String? local;
+  final String type;
+  final int version;
+
+  /// With the overrides applied.
+  final Map<String, Object?> data;
+
+  /// Added by an `addComponent` (or the entity's `addObject`) override.
+  final bool added;
+
+  /// The `data` keys a `setField`/`unsetField` override touches — the
+  /// Inspector's bold.
+  final List<String> overridden;
+}
+
+/// One override of an instance, as written plus where it landed.
+final class ExpansionOverride {
+  ExpansionOverride.fromJson(this.json)
+      : index = (json['index'] as num?)?.toInt() ?? 0,
+        op = json['op'] as String? ?? '',
+        entity = json['entity'] as String? ?? '',
+        entityId = json['entityId'] as String?,
+        entityName = json['entityName'] as String?,
+        component = json['component'] as String?,
+        componentId = json['componentId'] as String?,
+        componentType = json['componentType'] as String?,
+        field = json['field'] as String?,
+        pointer = json['pointer'] as String? ?? '';
+
+  final Map<String, Object?> json;
+
+  /// Position in the instance's `overrides` — what `revertPrefabOverride` takes.
+  final int index;
+
+  /// `setField`, `unsetField`, `addComponent`, `removeComponent`, `addObject`, `removeObject`.
+  final String op;
+
+  /// The prefab-local entity the op addresses.
+  final String entity;
+
+  /// Its derived id (null when it is not in the expansion — a removed
+  /// object, an unknown target).
+  final String? entityId;
+  final String? entityName;
+  final String? component;
+  final String? componentId;
+  final String? componentType;
+  final String? field;
+  final String pointer;
+
+  /// The value a `setField` sets (`json['value']`).
+  Object? get value => json['value'];
+
+  /// The op as the prefab model writes it (`op`, `entity`, …) without
+  /// the annotations — what `setPrefabOverride` takes back.
+  Map<String, Object?> get rawOp => {
+        for (final e in json.entries)
+          if (!const {'index', 'entityId', 'entityName', 'componentId', 'componentType', 'pointer'}.contains(e.key))
+            e.key: e.value,
+      };
 }
 
 /// One command's outcome inside an [Applied] transaction.

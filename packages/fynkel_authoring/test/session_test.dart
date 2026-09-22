@@ -717,6 +717,162 @@ void main() {
   });
 
 
+  test('prefab mode: the instance query, apply to prefab, unpack, imported hierarchies — item 7', () {
+    final dir = copyFixture('prefab_mode');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    session.openProject(dir.path);
+    expect(session.commands(), contains('unpackPrefab'));
+    final main = session.openDocument(mainScene);
+    final sceneBytes = File('${dir.path}/$mainScene').readAsStringSync();
+
+    // Crate A's expansion: one derived entity with the override marked.
+    var x = main.instance(crateA);
+    expect(x.anchor, crateA);
+    expect(x.expanded, isTrue);
+    expect(x.isImported, isFalse);
+    expect(x.asset, cratePrefab);
+    expect(x.open, cratePrefab);
+    expect(x.prefab!.name, 'Crate');
+    expect(x.prefab!.kind, 'prefab');
+    expect(x.prefab!.path, 'prefabs/crate.prefab.json');
+    expect(x.prefab!.handle, isNull);
+    expect(x.prefab!.readOnly, isNull);
+    expect(x.diagnostics, isEmpty);
+    expect(x.entities.map((e) => e.name), ['Crate']);
+    final crateEntity = x.entities.single;
+    expect(crateEntity.local, cratePrefabEntity);
+    expect(crateEntity.parent, crateA);
+    expect(crateEntity.added, isFalse);
+    final renderer = crateEntity.components.values.singleWhere((c) => c.type == 'fynkel.MeshRenderer');
+    expect(renderer.local, cratePrefabRenderer);
+    expect(renderer.data['cast_shadows'], false);
+    expect(renderer.overridden, ['cast_shadows']);
+    expect(x.byLocal(cratePrefabEntity), same(crateEntity));
+    expect(x.entity(crateEntity.id), same(crateEntity));
+    final o = x.overrides.single;
+    expect(o.index, 0);
+    expect(o.op, 'setField');
+    expect(o.entityId, crateEntity.id);
+    expect(o.entityName, 'Crate');
+    expect(o.componentId, renderer.id);
+    expect(o.componentType, 'fynkel.MeshRenderer');
+    expect(o.field, 'cast_shadows');
+    expect(o.value, false);
+    expect(o.rawOp, {
+      'op': 'setField',
+      'entity': cratePrefabEntity,
+      'component': cratePrefabRenderer,
+      'field': 'cast_shadows',
+      'value': false,
+    });
+    expect(() => main.instance(camera), throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-E0008')));
+
+    // Apply to prefab, the two-step way: the prefab document takes the
+    // value, the instance drops the override; the prefab is dirty, not saved.
+    final prefab = session.openDocument(cratePrefab);
+    expect(main.instance(crateA).prefab!.handle, prefab.handle);
+    final applied = prefab.apply([Command.setField(cratePrefabEntity, cratePrefabRenderer, 'cast_shadows', false)]);
+    expect(applied.ok, isTrue, reason: '$applied');
+    expect(main.apply([Command.revertPrefabOverride(crateA, index: 0)]).ok, isTrue);
+    x = main.instance(crateA);
+    expect(x.overrides, isEmpty);
+    final inherited = x.entities.single.components.values.singleWhere((c) => c.type == 'fynkel.MeshRenderer');
+    expect(inherited.data['cast_shadows'], false, reason: 'inherited now');
+    expect(inherited.overridden, isEmpty);
+    expect(prefab.state.dirty, isTrue);
+    main.undo();
+    prefab.undo();
+    expect(main.instance(crateA).overrides, hasLength(1));
+    expect(prefab.state.dirty, isFalse);
+
+    // A broken override: shown with its diagnostic, the anchor kept.
+    expect(
+      main.apply([
+        Command.setPrefabOverrideOp(crateA, {
+          'op': 'setField',
+          'entity': '11111111-0000-4000-8000-0000000000bb',
+          'component': cratePrefabRenderer,
+          'field': 'visible',
+          'value': false,
+        }),
+      ]).ok,
+      isTrue,
+    );
+    x = main.instance(crateA);
+    expect(x.expanded, isFalse);
+    expect(x.entities, isEmpty);
+    expect(x.prefab!.name, 'Crate');
+    expect(x.overrides, hasLength(2));
+    expect(x.overrides[1].entityId, isNull);
+    expect(x.diagnostics.single.code, 'FYN-D0403');
+    final refused = main.apply([Command.unpackPrefab(crateA)]);
+    expect(refused.ok, isFalse);
+    expect(refused.mutations.single.diagnostics.single.code, 'FYN-E0004');
+    main.undo();
+
+    // Unpack Crate A: one transaction, the derived entity is a plain one.
+    final unpacked = main.apply([Command.unpackPrefab(crateA)]);
+    expect(unpacked.ok, isTrue, reason: '$unpacked');
+    expect(unpacked.affectedIds, containsAll([crateA, crateEntity.id, renderer.id]));
+    expect(entity(main, crateA).containsKey('prefab'), isFalse);
+    expect((entity(main, crateA)['children'] as List), [crateEntity.id]);
+    expect(entity(main, crateEntity.id)['parent'], crateA);
+    expect(((entity(main, crateEntity.id)['components'] as Map)[renderer.id] as Map)['data'], renderer.data);
+    expect(entities(main).keys.toList().indexOf(crateEntity.id), entities(main).keys.toList().indexOf(crateA) + 1);
+    expect(() => main.instance(crateA), throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-E0008')));
+    main.undo();
+    expect(main.instance(crateA).expanded, isTrue);
+    expect(File('${dir.path}/$mainScene').readAsStringSync(), sceneBytes, reason: 'nothing written');
+
+    // The rig scene's Imported: a rig document's hierarchy, read-only.
+    final rigDoc = session.openDocument(rigScene);
+    const imported = 'c0000000-0000-4000-8000-0000000004e8';
+    const columnRig = 'c0000000-0000-4000-8000-000000000050';
+    x = rigDoc.instance(imported);
+    expect(x.expanded, isTrue, reason: '${x.diagnostics}');
+    expect(x.isImported, isTrue);
+    expect(x.asset, columnRig);
+    expect(x.sub, 'prefab');
+    expect(x.open, '$columnRig#prefab');
+    expect(x.prefab!.kind, 'rig');
+    expect(x.prefab!.isImported, isTrue);
+    expect(x.prefab!.readOnly, contains('column.rig.json#prefab'));
+    expect(x.entities.map((e) => e.name), ['Rig', 'Body', 'hips', 'spine', 'head', 'Prop']);
+    final prop = x.entities.last;
+    expect(prop.components.values.singleWhere((c) => c.type == 'fynkel.MeshRenderer').overridden, ['material']);
+    final hierarchy = session.openDocument(x.open);
+    expect(session.openDocument('$columnRig#prefab'), same(hierarchy));
+    expect(hierarchy.state.kind, 'prefab');
+    expect(hierarchy.state.sub, 'prefab');
+    expect(hierarchy.state.isImportedHierarchy, isTrue);
+    expect(hierarchy.state.relativePath, 'rigs/column.rig.json#prefab');
+    expect(hierarchy.state.readOnly, x.prefab!.readOnly);
+    expect(rigDoc.instance(imported).prefab!.handle, hierarchy.handle);
+    expect(entities(hierarchy).keys, contains(prop.local));
+    expect(entities(hierarchy).length, 6);
+    expect(hierarchy.roots(), hasLength(1));
+    final readOnly = hierarchy.apply([Command.renameObject(prop.local, 'X')]);
+    expect(readOnly.ok, isFalse);
+    expect(readOnly.allDiagnostics.map((d) => d.code), contains('FYN-E0007'));
+    expect(() => hierarchy.save(), throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-E0007')));
+    hierarchy.reload();
+    expect(hierarchy.state.readOnly, isNotNull);
+    expect(
+      () => session.openDocument('c0000000-0000-4000-8000-000000000003#prefab'),
+      throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-D0401')),
+      reason: 'a texture has no hierarchy',
+    );
+    // Unpack Imported: 15 entities, none an instance, one undo step.
+    expect(rigDoc.apply([Command.unpackPrefab(imported)]).ok, isTrue);
+    expect(rigDoc.inspect()['entityCount'], 15);
+    expect(rigDoc.inspect()['instanceCount'], 0);
+    expect(entities(rigDoc)[prop.id], isNotNull);
+    rigDoc.undo();
+    expect(rigDoc.inspect()['entityCount'], 9);
+  });
+
   test('the migration preview names an outdated scene, its steps and the diff, and writes nothing', () {
     final dir = copyFixture('migrations');
     addTearDown(() => dir.deleteSync(recursive: true));

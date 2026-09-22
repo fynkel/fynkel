@@ -90,6 +90,14 @@ final class Command {
         'components': components,
       };
 
+  /// Adds any override op (the prefab model's `{ op, entity, ... }` object)
+  /// on the instance rooted at [entity], replacing one with the same
+  /// target — `setField`/`unsetField` by field (a whole key of the
+  /// component's `data`, never a pointer into it), `addComponent`/
+  /// `removeComponent` by component, `addObject`/`removeObject` by object.
+  static Map<String, Object?> setPrefabOverrideOp(String entity, Map<String, Object?> op) =>
+      {'command': 'setPrefabOverride', 'entity': entity, 'override': op};
+
   /// Adds a `setField` override on the instance rooted at [entity]: the
   /// prefab's [prefabEntity]/[component]/[field] take [value] here.
   static Map<String, Object?> setPrefabOverride(
@@ -109,6 +117,12 @@ final class Command {
   /// every override when [index] is null.
   static Map<String, Object?> revertPrefabOverride(String entity, {int? index}) =>
       {'command': 'revertPrefabOverride', 'entity': entity, 'index': ?index};
+
+  /// Replaces the instance rooted at [entity] by its expansion, in place:
+  /// the anchor becomes a plain entity whose trailing children are the
+  /// instance roots, the derived entities follow it in the document under
+  /// the ids the runtime already used (M4-07). One undo step.
+  static Map<String, Object?> unpackPrefab(String entity) => {'command': 'unpackPrefab', 'entity': entity};
 
   /// Sets a top-level or nested field of the document itself (a material's
   /// `/base_color`, a scene's `/name`) by JSON pointer.
@@ -148,6 +162,7 @@ final class Command {
     'instantiatePrefab',
     'setPrefabOverride',
     'revertPrefabOverride',
+    'unpackPrefab',
     'setDocumentField',
     'unsetDocumentField',
     'createMaterial',

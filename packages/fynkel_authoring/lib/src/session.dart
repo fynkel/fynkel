@@ -674,6 +674,16 @@ final class DocumentHandle {
     return Diagnostic.listOf(session.query('validate', {'handle': handle})['diagnostics']);
   }
 
+  /// The expansion of the prefab instance anchored at [entity] — its
+  /// derived entities with the overrides applied and marked, the prefab
+  /// it comes from, why it did not expand when it did not (M4-07). Live:
+  /// an open prefab document contributes its unsaved edits. Not an
+  /// instance: `AuthoringException` FYN-E0008; unknown: FYN-E0002.
+  PrefabExpansion instance(String entity) {
+    _check();
+    return PrefabExpansion.fromJson(session.query('instance', {'handle': handle, 'entity': entity}));
+  }
+
   void _check() {
     session._check();
     if (_closed) throw StateError('document handle $handle is closed');
