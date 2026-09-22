@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../theme/icons.dart';
 import 'editor_project.dart';
 
 Future<void> showMigrationPreview(BuildContext context, EditorProject project) {
   return showDialog<void>(
+    animationStyle: AnimationStyle.noAnimation,
     context: context,
     builder: (_) => MigrationPreviewDialog(project: project),
   );
@@ -78,7 +80,7 @@ class _MigrationPreviewDialogState extends State<MigrationPreviewDialog> {
                                     dense: true,
                                     selected: i == _selected,
                                     leading: Icon(
-                                      d.ok ? Icons.upgrade : Icons.error_outline,
+                                      d.ok ? FIcons.upgrade : FIcons.errorOutline,
                                       color: d.ok ? null : theme.colorScheme.error,
                                     ),
                                     title: Text(widget.project.relative(d.path), overflow: TextOverflow.ellipsis),
@@ -142,7 +144,7 @@ class _MigrationPreviewDialogState extends State<MigrationPreviewDialog> {
                           TextButton.icon(
                             key: const Key('migrations.copy'),
                             onPressed: () => Clipboard.setData(ClipboardData(text: command)),
-                            icon: const Icon(Icons.copy, size: 16),
+                            icon: const Icon(FIcons.copy, size: 16),
                             label: const Text('Copy command'),
                           ),
                         ],

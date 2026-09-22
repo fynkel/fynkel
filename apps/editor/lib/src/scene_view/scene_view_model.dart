@@ -6,6 +6,14 @@
 // in the world and, on release, writes exactly one transaction. The panel
 // is a thin skin over this: it forwards pointers and keys and paints what
 // the model projected.
+//
+// Item 9e: the Scene view can be open more than once. The copies draw the
+// same preview world of a document, each through its own camera: a frame
+// is extracted synchronously when the viewport renders and every viewport
+// has its own renderer, so a view sets its camera on the world right
+// before its frame whenever another view drew last ([_worldCamera]) — no
+// engine change. A change one view makes to a world (a drag's preview
+// transforms, the hidden set, a reload) repaints the others ([SceneViews]).
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -31,12 +39,43 @@ import 'gizmo.dart';
 import 'png.dart';
 import 'scene_math.dart';
 
+/// Which Scene view's camera each preview world holds, and at which
+/// version: the copies share a world, so a view sets its own camera again
+/// when another one drew last.
+final _worldCamera = Expando<(SceneTab, int)>('scene.worldCamera');
+
+/// The Scene view copies of one project (item 9e).
+final class SceneViews {
+  final _views = <SceneViewModel>{};
+  int? _recookedAt;
+
+  /// A view changed [preview]'s world (null: every world): the others
+  /// showing it draw again. [reset] when the world was rebuilt, so its
+  /// camera and hidden set must be applied again.
+  void changed(SceneViewModel from, PreviewBackend? preview, {bool reset = false}) {
+    for (final v in List.of(_views)) {
+      if (v != from) v._worldChanged(preview, reset: reset);
+    }
+  }
+
+  /// The first view to see a new assets revision rebuilds the cache for
+  /// all of them; true for that one.
+  bool claimRecook(int revision) {
+    if (_recookedAt == revision) return false;
+    _recookedAt = revision;
+    return true;
+  }
+}
+
 /// One tab's Scene view: its preview world and the editor's state for it.
 final class SceneTab {
-  SceneTab(this.tab, this.state);
+  SceneTab(this.tab, this.state, {this.view = SceneEditorState.firstView});
 
   final OpenDocument tab;
   final SceneEditorState state;
+
+  /// The Scene view copy this belongs to: its camera is the copy's.
+  final String view;
 
   PreviewBackend? preview;
 
@@ -46,7 +85,6 @@ final class SceneTab {
 
   /// Bumped on every camera change; the preview is told on the next frame.
   int cameraVersion = 1;
-  int appliedCamera = 0;
 
   /// The hidden set must be re-applied (a sync respawned entities).
   bool hiddenDirty = true;
@@ -65,14 +103,22 @@ final class SceneTab {
   List<String> clickHits = const [];
   int clickIndex = 0;
 
-  EditorCamera get camera => state.camera;
+  EditorCamera get camera => state.cameraOf(view);
   bool get hasPreview => preview != null && !preview!.isClosed;
 
-  void dispose() {
+  /// This view's camera is the one the world holds.
+  bool get cameraApplied {
+    final p = preview;
+    return p != null && _worldCamera[p] == (this, cameraVersion);
+  }
+
+  /// [closePreview] false for a Scene view copy closing while the document
+  /// stays open: the world is the document's, and other views draw it.
+  void dispose({bool closePreview = true}) {
     _syncs?.cancel();
     _syncs = null;
     final p = preview;
-    if (p != null && !p.isClosed) p.close();
+    if (closePreview && p != null && !p.isClosed) p.close();
     preview = null;
   }
 }
@@ -155,7 +201,10 @@ final class SceneViewModel extends ChangeNotifier {
     required this.editorState,
     FynkelViewportController? controller,
     this.chooseSavePath,
+    this.view = SceneEditorState.firstView,
+    this.views,
   }) : controller = controller ?? FynkelViewportController(placeholders: false) {
+    views?._views.add(this);
     tabs.addListener(_onTabs);
     project.addListener(_onProject);
     editorState.addListener(notifyListeners);
@@ -169,6 +218,12 @@ final class SceneViewModel extends ChangeNotifier {
   final EditorProject project;
   final HierarchyModel hierarchy;
   final EditorState editorState;
+
+  /// Which Scene view copy this is (item 9e): `scene`, `scene#2`, …
+  final String view;
+
+  /// The project's Scene view copies, when there can be more than one.
+  final SceneViews? views;
 
   /// The one native viewport; it renders the focused tab's world.
   final FynkelViewportController controller;
@@ -231,7 +286,7 @@ final class SceneViewModel extends ChangeNotifier {
       if (!existing.hasPreview && existing.openError == null) _openPreview(existing);
       return existing;
     }
-    final st = SceneTab(tab, editorState.scene(tab.document.id));
+    final st = SceneTab(tab, editorState.scene(tab.document.id), view: view);
     _sceneTabs[tab] = st;
     _openPreview(st);
     return st;
@@ -244,7 +299,6 @@ final class SceneViewModel extends ChangeNotifier {
       st.preview = p;
       st.openError = null;
       st.hiddenDirty = true;
-      st.appliedCamera = 0;
       st._syncs?.cancel();
       st._syncs = p.syncs.listen((r) => _onSync(st, r));
       final cook = p.cook;
@@ -320,11 +374,24 @@ final class SceneViewModel extends ChangeNotifier {
     if (project.assetsRevision != _assetsRevision) {
       _assetsRevision = project.assetsRevision;
       // Assets changed under the open previews: the cache is rebuilt so
-      // the picture shows the new mesh or texture.
+      // the picture shows the new mesh or texture — once, by the first
+      // Scene view copy to hear of it.
       final t = current;
-      if (t != null && t.hasPreview) _recook(t, announce: false);
+      if (t != null && t.hasPreview && (views?.claimRecook(_assetsRevision) ?? true)) _recook(t, announce: false);
     }
     _repaint();
+  }
+
+  /// Another Scene view copy changed [preview]'s world (null: all of them).
+  void _worldChanged(PreviewBackend? preview, {required bool reset}) {
+    if (_disposed) return;
+    if (reset) {
+      for (final st in _sceneTabs.values) {
+        if (preview == null || st.preview == preview) st.hiddenDirty = true;
+      }
+    }
+    final p = current?.preview;
+    if (preview == null || p == preview) _repaint();
   }
 
   void _onController() => _repaint();
@@ -431,10 +498,17 @@ final class SceneViewModel extends ChangeNotifier {
     _cameraChanged();
   }
 
+  /// The orientation gizmo's axis end (item 9e): look at the pivot from
+  /// that side (a second click, from the opposite one).
+  void lookFrom(int axis, {required bool positive}) {
+    camera?.lookFrom(axis, positive: positive);
+    _cameraChanged();
+  }
+
   void resetView() {
     final t = current;
     if (t == null) return;
-    t.state.camera = EditorCamera.initial();
+    t.state.setCamera(view, EditorCamera.initial());
     _cameraChanged();
   }
 
@@ -644,6 +718,7 @@ final class SceneViewModel extends ChangeNotifier {
     // any anchor among them itself.
     t.preview!.setHidden(_hiddenAll(t));
     t.hiddenDirty = false;
+    views?.changed(this, t.preview);
   }
 
   // ── Reload / recook / save frame ─────────────────────────────────────
@@ -661,7 +736,8 @@ final class SceneViewModel extends ChangeNotifier {
     try {
       final stats = t.preview!.reload();
       t.hiddenDirty = true;
-      t.appliedCamera = 0;
+      _worldCamera[t.preview!] = null;
+      views?.changed(this, t.preview, reset: true);
       notice = 'Preview reloaded: ${stats.entities} entities';
     } on AuthoringException catch (e) {
       notice = 'Reload failed: $e';
@@ -684,8 +760,9 @@ final class SceneViewModel extends ChangeNotifier {
       final r = t.preview!.recook();
       for (final st in _sceneTabs.values) {
         st.hiddenDirty = true;
-        st.appliedCamera = 0;
+        if (st.preview case final p?) _worldCamera[p] = null;
       }
+      views?.changed(this, null, reset: true);
       if (announce || !r.ok) {
         notice = r.ok
             ? 'Cache rebuilt: ${r.cooked} cooked, ${r.cached} cached'
@@ -780,9 +857,9 @@ final class SceneViewModel extends ChangeNotifier {
     final p = t.preview!;
     final started = DateTime.now();
     try {
-      if (t.appliedCamera != t.cameraVersion) {
+      if (!t.cameraApplied) {
         p.setCamera(t.camera.toPreview());
-        t.appliedCamera = t.cameraVersion;
+        _worldCamera[p] = (t, t.cameraVersion);
       }
       _applyHidden(t);
       controller.debugLines(debugLines(t));
@@ -1113,6 +1190,7 @@ final class SceneViewModel extends ChangeNotifier {
     } on AuthoringException catch (e) {
       notice = 'Preview: $e';
     }
+    views?.changed(this, t.preview);
     _repaint();
   }
 
@@ -1169,6 +1247,7 @@ final class SceneViewModel extends ChangeNotifier {
     } on AuthoringException catch (e) {
       notice = 'Preview: $e';
     }
+    views?.changed(this, t.preview);
     if (commands.isEmpty) {
       _repaint();
       return null;
@@ -1193,6 +1272,7 @@ final class SceneViewModel extends ChangeNotifier {
       try {
         t.preview!.restoreTransforms(d.ids);
       } on AuthoringException catch (_) {}
+      views?.changed(this, t.preview);
     }
     _repaint();
   }
@@ -1415,15 +1495,53 @@ final class SceneViewModel extends ChangeNotifier {
     }
   }
 
-  /// A wheel/trackpad scroll: dolly; with ⇧ pan.
+  /// A mouse wheel: dolly; with ⇧ pan.
   void pointerSignal(PointerSignalEvent e, Offset px) {
     if (e is! PointerScrollEvent || !hasView) return;
     pointer = px;
+    _scroll(e.scrollDelta);
+  }
+
+  /// A scroll of [delta] (a wheel's direction: +y is away from the user).
+  void _scroll(Offset delta) {
     if (_shiftHeld) {
-      pan(-e.scrollDelta.dx, -e.scrollDelta.dy);
+      pan(-delta.dx, -delta.dy);
     } else {
-      dolly(-e.scrollDelta.dy / 40);
+      dolly(-delta.dy / 40);
     }
+  }
+
+  // ── Trackpad ─────────────────────────────────────────────────────────
+  //
+  // On macOS a two-finger scroll and a pinch are not wheel events: they
+  // arrive as one pan-zoom gesture whose pan and scale are totals since it
+  // began. A scroll dollies (⇧ pans) exactly as the wheel does; a pinch
+  // dollies by its own ratio — spread the fingers and the view comes closer.
+
+  Offset _gesturePan = Offset.zero;
+  double _gestureScale = 1;
+
+  void panZoomStart(PointerPanZoomStartEvent e, Offset px) {
+    pointer = px;
+    _gesturePan = Offset.zero;
+    _gestureScale = 1;
+  }
+
+  void panZoomUpdate(PointerPanZoomUpdateEvent e, Offset px) {
+    if (!hasView) return;
+    pointer = px;
+    final pan = e.pan - _gesturePan;
+    final ratio = e.scale / _gestureScale;
+    _gesturePan = e.pan;
+    _gestureScale = e.scale;
+    if (ratio.isFinite && ratio > 0 && ratio != 1) dolly(math.log(ratio) * 10);
+    // A finger movement is the opposite of the scroll it makes.
+    if (pan != Offset.zero) _scroll(-pan);
+  }
+
+  void panZoomEnd(PointerPanZoomEndEvent e, Offset px) {
+    _gesturePan = Offset.zero;
+    _gestureScale = 1;
   }
 
   void _cancelInteraction() {
@@ -1571,6 +1689,7 @@ final class SceneViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    views?._views.remove(this);
     _stopFly();
     tabs.removeListener(_onTabs);
     project.removeListener(_onProject);
@@ -1578,8 +1697,10 @@ final class SceneViewModel extends ChangeNotifier {
     controller.removeListener(_onController);
     _listening?.removeListener(_onTab);
     focusNode.removeListener(_onFocus);
+    // A copy closing leaves the worlds to the documents and the other views.
+    final copy = view != SceneEditorState.firstView;
     for (final st in _sceneTabs.values) {
-      st.dispose();
+      st.dispose(closePreview: !copy);
     }
     _sceneTabs.clear();
     editorState.flush();

@@ -114,4 +114,31 @@ void main() {
     expect(st.hidden, {'a'});
     expect(st.locked, isEmpty);
   });
+
+  test('item 9e: panel copies and Scene view cameras are written, read back and forgotten', () {
+    final s = EditorState.load(dir.path);
+    s.setPanel('inspector#2', {'asset': 'a1'});
+    s.setPanel('project', {'folder': 'sounds', 'view': 'list', 'locked': true});
+    final scene = s.scene('doc-1');
+    final view = scene.cameraOf('scene#2');
+    expect(view.distance, scene.camera.distance, reason: 'a copy starts where the first view is');
+    view.distance = 12;
+    expect(scene.camera.distance, isNot(12), reason: 'its own camera');
+    s.changed();
+
+    final back = EditorState.load(dir.path);
+    expect(back.panel('inspector#2'), {'asset': 'a1'});
+    expect(back.panel('project'), {'folder': 'sounds', 'view': 'list', 'locked': true});
+    expect(back.scene('doc-1').cameraOf('scene#2').distance, 12);
+    expect(back.scene('doc-1').cameraOf(SceneEditorState.firstView), same(back.scene('doc-1').camera));
+
+    back.setPanel('inspector#2', null);
+    back.forgetView('scene#2');
+    final gone = EditorState.load(dir.path);
+    expect(gone.panel('inspector#2'), isNull);
+    expect(gone.scene('doc-1').views.containsKey('scene#2'), isFalse);
+    for (final e in [s, back, gone]) {
+      e.dispose();
+    }
+  });
 }

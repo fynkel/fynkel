@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
+import 'package:fynkel_editor/src/env/tools.dart';
 import 'package:fynkel_editor/src/launcher/launcher.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
@@ -50,6 +52,9 @@ void main() {
     expect(find.byKey(const Key('window.projectName')), findsOneWidget);
     expect(prefs.recents.single.dir, dir.path);
 
+    // Close Project lives in the title bar's project menu.
+    await tester.tap(find.byKey(const Key('window.project')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('window.close')));
     await tester.pumpAndSettle();
     expect(project.closed, isTrue);
@@ -84,6 +89,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('launcher.error')), findsOneWidget);
     expect(find.textContaining('not a Fynkel project'), findsOneWidget);
+  });
+
+  testWidgets('a project named at launch opens once the tools are found, so its codegen check has the CLI', (
+    tester,
+  ) async {
+    // The 9a gate's finding: `Fynkel Editor <dir>` opened the project on the
+    // first frame, the codegen check asked for the CLI before `flutter
+    // --version` had come back, and the Inspector said none was configured.
+    final detected = Completer<Toolchain>();
+    final project = FakeProject(dir: dir.path);
+    tester.view.physicalSize = const Size(1600, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      shellApp(
+        prefs: prefs,
+        projects: {dir.path: project},
+        initialProject: dir.path,
+        detectToolchain: (_) => detected.future,
+      ),
+    );
+    // Frames go by while the tools are looked for (the launcher's spinner
+    // never settles, so step them by hand).
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final shell = tester.state<EditorShellState>(find.byType(EditorShell));
+    expect(shell.toolchain, isNull);
+    expect(shell.project, isNull, reason: 'the project waits for the tools');
+    detected.complete(fakeToolchain());
+    await tester.pumpAndSettle();
+    expect(shell.toolchain?.fynkelCli, isNotNull);
+    expect(shell.project?.dir, dir.path);
   });
 
   testWidgets('a read-only project shows the banner with the lock reason', (tester) async {

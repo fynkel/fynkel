@@ -25,6 +25,7 @@ dependencies:
   # Project directory changes → rescan + revalidate (the Console stays current).
   watcher: ^1.2.1
   path: ^1.9.1
+  lucide_icons_flutter: ^3.1.20
 
 dev_dependencies:
   flutter_test:

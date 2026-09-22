@@ -30,6 +30,7 @@ import 'package:path/path.dart' as p;
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
 import '../project/editor_project.dart';
+import '../project_browser/project_browser_model.dart' show AssetPreview;
 import 'codegen_check.dart';
 import 'field_spec.dart';
 import 'inspector_math.dart';
@@ -203,6 +204,11 @@ final class InspectorModel extends ChangeNotifier {
   /// by the shell); null when no browser is around.
   void Function(String assetId, String? sub)? revealAsset;
 
+  /// An asset's picture for the asset slots and their picker (a texture's
+  /// pixels, a material's swatch), from the Project browser (wired by the
+  /// shell); null draws the kind's icon.
+  AssetPreview Function(AssetEntry entry)? assetPreview;
+
   void dismissError() {
     if (lastError == null) return;
     lastError = null;
@@ -237,8 +243,27 @@ final class InspectorModel extends ChangeNotifier {
 
   // ── Wiring ──────────────────────────────────────────────────────────────
 
+  // ── Lock (item 9c) ──────────────────────────────────────────────────────
+
+  List<String>? _lockedIds;
+
+  /// The Inspector keeps showing these entities of this tab while the
+  /// selection moves on (Unity's padlock); null when it follows the
+  /// selection.
+  bool get locked => _lockedIds != null;
+
+  /// Pins the entities shown now; unpinning follows the selection again.
+  void setLocked(bool on) {
+    if (on == locked) return;
+    if (on && (_tab == null || _ids.isEmpty)) return;
+    _lockedIds = on ? List.of(_ids) : null;
+    _onTabs();
+  }
+
   void _onTabs() {
-    final t = tabs.focused;
+    // A locked Inspector stays on its tab until that tab closes.
+    if (locked && !tabs.open.contains(_tab)) _lockedIds = null;
+    final t = locked ? _tab : tabs.focused;
     if (t != _tab) {
       _tab?.removeListener(_onTab);
       _tab = t;
@@ -272,7 +297,11 @@ final class InspectorModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final ids = List.of(t.selection);
+    final pinned = _lockedIds;
+    // Pinned entities that were deleted drop out; when none is left the lock lets go.
+    if (pinned != null) pinned.retainWhere((id) => t.tree[id] != null);
+    if (pinned != null && pinned.isEmpty) _lockedIds = null;
+    final ids = List.of(_lockedIds ?? t.selection);
     if (!listEquals(ids, _ids)) lastError = null;
     _ids = ids;
     _typesOn.clear();

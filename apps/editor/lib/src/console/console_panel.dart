@@ -13,6 +13,10 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 import '../play/game_console.dart';
 import '../play/game_console_panel.dart';
 import '../project/editor_project.dart';
+import '../theme/icons.dart';
+import '../theme/panel_focus.dart';
+import '../theme/theme.dart';
+import '../theme/tokens.dart';
 
 /// One row: a diagnostic and how many identical ones it stands for.
 final class ConsoleEntry {
@@ -232,10 +236,11 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
   }
 
   void _install() {
-    _tabs = TabController(length: 2, vsync: this, initialIndex: widget.tab?.value ?? 0)
-      ..addListener(() {
-        if (!_tabs!.indexIsChanging) widget.tab?.value = _tabs!.index;
-      });
+    _tabs =
+        TabController(length: 2, vsync: this, initialIndex: widget.tab?.value ?? 0, animationDuration: Duration.zero)
+          ..addListener(() {
+            if (!_tabs!.indexIsChanging) widget.tab?.value = _tabs!.index;
+          });
   }
 
   void _showRequestedTab() {
@@ -290,34 +295,43 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
       listenable: Listenable.merge([model, model.project, game.session]),
       builder: (context, _) {
         final theme = Theme.of(context);
+        final t = context.tokens;
         final errors = model.project.errorCount;
         final gameErrors = game.session.errorCount;
         return Column(
           children: [
-            TabBar(
-              key: const Key('console.tabs'),
-              controller: tabs,
-              labelStyle: theme.textTheme.bodySmall,
-              tabs: [
-                Tab(key: const Key('console.tab.project'), height: 34, text: 'Project${errors > 0 ? ' ($errors)' : ''}'),
-                Tab(
-                  key: const Key('console.tab.game'),
-                  height: 34,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (game.session.isActive)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: Icon(Icons.play_arrow, size: 14, color: theme.colorScheme.primary),
-                        ),
-                      Text('Game${gameErrors > 0 ? ' ($gameErrors)' : ''}'),
-                    ],
+            ColoredBox(
+              color: t.header,
+              child: TabBar(
+                key: const Key('console.tabs'),
+                controller: tabs,
+                labelStyle: theme.textTheme.labelLarge,
+                tabAlignment: TabAlignment.start,
+                isScrollable: true,
+                tabs: [
+                  Tab(
+                    key: const Key('console.tab.project'),
+                    height: t.tab,
+                    text: 'Project${errors > 0 ? ' ($errors)' : ''}',
                   ),
-                ),
-              ],
+                  Tab(
+                    key: const Key('console.tab.game'),
+                    height: t.tab,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (game.session.isActive)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: Icon(FIcons.playArrow, size: 13, color: t.accent),
+                          ),
+                        Text('Game${gameErrors > 0 ? ' ($gameErrors)' : ''}'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const Divider(height: 1),
             Expanded(
               child: TabBarView(
                 controller: tabs,
@@ -347,47 +361,47 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
         final project = model.project;
         return LayoutBuilder(
           builder: (context, box) => Column(
-          children: [
-            _toolbar(context, theme),
-            const Divider(height: 1),
-            Expanded(
-              child: entries.isEmpty
-                  ? Center(
-                      child: Text(
-                        project.validating
-                            ? 'Validating…'
-                            : project.diagnostics.isEmpty
-                            ? 'No diagnostics. The project validates clean.'
-                            : 'Nothing matches the filter.',
-                        style: theme.textTheme.bodyMedium?.copyWith(color: theme.disabledColor),
-                      ),
-                    )
-                  : CallbackShortcuts(
-                      bindings: {
-                        const SingleActivator(LogicalKeyboardKey.arrowDown): () => _moveSelection(1),
-                        const SingleActivator(LogicalKeyboardKey.arrowUp): () => _moveSelection(-1),
-                        const SingleActivator(LogicalKeyboardKey.enter): () {
-                          final d = model.selected?.diagnostic;
-                          if (d != null) model.activate(d);
+            children: [
+              _toolbar(context, theme),
+              const Divider(height: 1),
+              Expanded(
+                child: entries.isEmpty
+                    ? Center(
+                        child: Text(
+                          project.validating
+                              ? 'Validating…'
+                              : project.diagnostics.isEmpty
+                              ? 'No diagnostics. The project validates clean.'
+                              : 'Nothing matches the filter.',
+                          style: theme.textTheme.bodyMedium?.copyWith(color: theme.disabledColor),
+                        ),
+                      )
+                    : CallbackShortcuts(
+                        bindings: {
+                          const SingleActivator(LogicalKeyboardKey.arrowDown): () => _moveSelection(1),
+                          const SingleActivator(LogicalKeyboardKey.arrowUp): () => _moveSelection(-1),
+                          const SingleActivator(LogicalKeyboardKey.enter): () {
+                            final d = model.selected?.diagnostic;
+                            if (d != null) model.activate(d);
+                          },
+                          const SingleActivator(LogicalKeyboardKey.keyC, meta: true): model.copy,
                         },
-                        const SingleActivator(LogicalKeyboardKey.keyC, meta: true): model.copy,
-                      },
-                      child: Focus(
-                        focusNode: _listFocus,
-                        child: ListView.builder(
-                          itemCount: entries.length,
-                          itemBuilder: (context, i) => _row(context, theme, entries[i]),
+                        child: Focus(
+                          focusNode: _listFocus,
+                          child: ListView.builder(
+                            itemCount: entries.length,
+                            itemBuilder: (context, i) => _row(context, theme, entries[i]),
+                          ),
                         ),
                       ),
-                    ),
-            ),
-            if (model.selected != null) ...[
+              ),
+              if (model.selected != null) ...[
+                const Divider(height: 1),
+                _detail(theme, model.selected!, box.maxHeight * 0.4),
+              ],
               const Divider(height: 1),
-              _detail(theme, model.selected!, box.maxHeight * 0.4),
+              _status(theme, project),
             ],
-            const Divider(height: 1),
-            _status(theme, project),
-          ],
           ),
         );
       },
@@ -396,8 +410,13 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
 
   Widget _toolbar(BuildContext context, ThemeData theme) {
     final project = model.project;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+    final t = context.tokens;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      padding: const EdgeInsets.fromLTRB(4, 3, 4, 3),
       child: Row(
         children: [
           Expanded(
@@ -405,16 +424,17 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
               key: const Key('console.search'),
               controller: _search,
               focusNode: _searchFocus,
+              style: theme.textTheme.bodySmall?.copyWith(color: t.text),
               decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 18),
+                prefixIcon: Icon(FIcons.search, size: 13, color: t.textDisabled),
+                prefixIconConstraints: BoxConstraints(minWidth: t.row, minHeight: t.row),
                 hintText: 'Search code, message, file, pointer…',
-                border: const OutlineInputBorder(),
                 suffixIcon: model.query.isEmpty
                     ? null
                     : IconButton(
                         tooltip: 'Clear',
-                        icon: const Icon(Icons.close, size: 16),
+                        iconSize: 12,
+                        icon: const Icon(FIcons.close),
                         onPressed: () {
                           _search.clear();
                           model.setQuery('');
@@ -428,7 +448,7 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
           for (final s in Severity.values) ...[
             FilterChip(
               key: Key('console.filter.${s.name}'),
-              avatar: Icon(_iconOf(s), size: 16, color: _colorOf(theme, s)),
+              avatar: Icon(_iconOf(s), size: 13, color: _colorOf(theme, s)),
               label: Text('${model.countOf(s)}'),
               tooltip: '${s.name}s',
               selected: model.severities.contains(s),
@@ -449,27 +469,27 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
           IconButton(
             key: const Key('console.copy'),
             tooltip: 'Copy the selected row, or every visible row',
-            icon: const Icon(Icons.copy, size: 18),
+            icon: const Icon(FIcons.copy),
             onPressed: model.entries.isEmpty ? null : model.copy,
           ),
           IconButton(
             key: const Key('console.openInEditor'),
             tooltip: 'Open in Editor — the scene or prefab into a tab, its entity selected (⌥⌘E)',
-            icon: const Icon(Icons.account_tree_outlined, size: 18),
+            icon: const Icon(FIcons.accountTreeOutlined),
             onPressed: model.canOpenSelectedInEditor ? model.openSelectedInEditor : null,
           ),
           IconButton(
             key: const Key('console.open'),
             tooltip: 'Open in IDE (⌥⌘O)',
-            icon: const Icon(Icons.open_in_new, size: 18),
+            icon: const Icon(FIcons.openInNew),
             onPressed: model.canOpenSelected ? model.openSelected : null,
           ),
           IconButton(
             key: const Key('console.revalidate'),
             tooltip: 'Validate the project again',
             icon: project.validating
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.refresh, size: 18),
+                ? SizedBox(width: t.icon, height: t.icon, child: const CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(FIcons.refresh),
             onPressed: project.validating ? null : project.revalidate,
           ),
         ],
@@ -481,7 +501,9 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
     final d = e.diagnostic;
     final key = ConsoleEntry.keyOf(d);
     final selected = key == model.selectedKey;
-    final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'Menlo', fontFamilyFallback: const ['monospace']);
+    final t = context.tokens;
+    final focused = PanelFocus.of(context);
+    final mono = monoStyle(context, color: selected ? t.onSelectedRowSecondary(focused: focused) : null);
     return InkWell(
       key: Key('console.row.$key'),
       onTap: () {
@@ -496,22 +518,29 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
         if (isDouble && d.document != null) model.activate(d);
       },
       child: Container(
-        color: selected ? theme.colorScheme.primaryContainer : null,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        height: context.tokens.row + 2,
+        alignment: Alignment.centerLeft,
+        color: selected ? t.selectedRow(focused: focused) : null,
+        padding: EdgeInsets.symmetric(horizontal: context.tokens.pad),
         child: Row(
           children: [
-            Icon(_iconOf(d.severity), size: 16, color: _colorOf(theme, d.severity)),
+            Icon(_iconOf(d.severity), size: 13, color: _colorOf(theme, d.severity)),
             const SizedBox(width: 6),
-            SizedBox(width: 84, child: Text(d.code, style: mono)),
-            Expanded(child: Text(d.message, overflow: TextOverflow.ellipsis)),
+            SizedBox(width: 78, child: Text(d.code, style: mono)),
+            Expanded(
+              child: Text(
+                d.message,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: selected ? t.onSelectedRow(focused: focused) : t.text,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             if (e.count > 1)
               Container(
                 margin: const EdgeInsets.only(left: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                decoration: BoxDecoration(color: context.tokens.lineStrong, borderRadius: context.tokens.cornerControl),
                 child: Text('×${e.count}', style: theme.textTheme.labelSmall),
               ),
             const SizedBox(width: 12),
@@ -532,7 +561,7 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
 
   Widget _detail(ThemeData theme, ConsoleEntry e, double maxHeight) {
     final d = e.diagnostic;
-    final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'Menlo', fontFamilyFallback: const ['monospace']);
+    final mono = monoStyle(context);
     return Container(
       key: const Key('console.detail'),
       constraints: BoxConstraints(maxHeight: maxHeight.clamp(40.0, 140.0)),
@@ -565,8 +594,14 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
         : '${project.errorCount} errors, ${project.warningCount} warnings · ${project.documents} documents, '
               '${project.sources} sources, ${project.references} references'
               '${when == null ? '' : ' · validated ${_time(when)}'}';
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+    return Container(
+      height: theme.tokens.row + 2,
+      alignment: Alignment.centerLeft,
+      padding: EdgeInsets.symmetric(horizontal: theme.tokens.pad),
+      decoration: BoxDecoration(
+        color: theme.tokens.header,
+        border: Border(top: theme.tokens.hairline),
+      ),
       child: Row(
         children: [
           Expanded(
@@ -574,7 +609,7 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
               text,
               key: const Key('console.status'),
               style: theme.textTheme.bodySmall?.copyWith(
-                color: project.validationError != null ? theme.colorScheme.error : theme.disabledColor,
+                color: project.validationError != null ? theme.tokens.error : theme.tokens.textSecondary,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -588,14 +623,14 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:${t.second.toString().padLeft(2, '0')}';
 
   static IconData _iconOf(Severity s) => switch (s) {
-    Severity.error => Icons.error,
-    Severity.warning => Icons.warning_amber,
-    Severity.info => Icons.info_outline,
+    Severity.error => FIcons.error,
+    Severity.warning => FIcons.warningAmber,
+    Severity.info => FIcons.infoOutline,
   };
 
   static Color _colorOf(ThemeData theme, Severity s) => switch (s) {
-    Severity.error => theme.colorScheme.error,
-    Severity.warning => Colors.orange,
-    Severity.info => theme.colorScheme.primary,
+    Severity.error => theme.tokens.error,
+    Severity.warning => theme.tokens.warning,
+    Severity.info => theme.tokens.info,
   };
 }

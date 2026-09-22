@@ -13,6 +13,7 @@ import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/console/console_panel.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
+import 'package:fynkel_editor/src/project/editor_project.dart' show ComponentType;
 import 'package:fynkel_editor/src/shell/workspace.dart';
 
 import 'support/fakes.dart';
@@ -315,6 +316,40 @@ void main() {
       return tester.state<EditorShellState>(find.byType(EditorShell));
     }
 
+    testWidgets(
+      'Create Entity with Component goes through the picker: grouped, searchable, no-defaults shown disabled',
+      (tester) async {
+        project.types = [
+          ...project.types,
+          const ComponentType(type: 'fynkel.Collider', authored: true, allowed: true), // no defaults
+        ];
+        final shell = await openShell(tester);
+        shell.openDocument('scene-a');
+        await tester.pumpAndSettle();
+        shell.registry.execute('hierarchy.createWith');
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('createWith')), findsOneWidget);
+        for (final type in ['fynkel.Camera', 'fynkel.Light', 'fynkel.MeshRenderer', 'fynkel.Collider']) {
+          expect(find.byKey(Key('createWith.$type')), findsOneWidget, reason: type);
+        }
+        // Not authored (Skin), not allowed (AudioSource), and Transform (every entity has one) are not offered.
+        expect(find.byKey(const Key('createWith.fynkel.Skin')), findsNothing);
+        expect(find.byKey(const Key('createWith.fynkel.AudioSource')), findsNothing);
+        expect(find.byKey(const Key('createWith.fynkel.Transform')), findsNothing);
+        expect(find.byKey(const Key('createWith.note.fynkel.Collider')), findsOneWidget);
+
+        await tester.enterText(find.byKey(const Key('createWith.search')), 'camera');
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('createWith')), findsNothing);
+        final tab = shell.tabs!.focused!;
+        expect(tab.selection, hasLength(1));
+        expect(tab.tree[tab.selection.first]!.name, 'Camera');
+        expect(tab.dirty, isTrue);
+      },
+    );
+
     testWidgets('Open Document lists the scenes; a tab appears with the dirty dot after an edit and ⌘S saves', (
       tester,
     ) async {
@@ -322,7 +357,7 @@ void main() {
       expect(find.byKey(const Key('tabs.empty')), findsOneWidget);
       await tester.tap(find.byKey(const Key('tabs.open')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('dialog.openDocument')), findsOneWidget);
+      expect(find.byKey(const Key('openDocument')), findsOneWidget);
       await tester.enterText(find.byKey(const Key('openDocument.search')), 'scene b');
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('openDocument.scene-a')), findsNothing);

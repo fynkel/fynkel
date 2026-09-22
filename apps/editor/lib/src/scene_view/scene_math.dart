@@ -339,6 +339,51 @@ final class EditorCamera {
 
   void toggleProjection() => orthographic = !orthographic;
 
+  /// The orientation gizmo's click on an axis end (item 9e): the camera
+  /// moves to the [axis] (0 X, 1 Y, 2 Z) side of the pivot — [positive] or
+  /// not — and looks back at it, at the same distance. Already looking from
+  /// there, it goes to the opposite side. Looking straight down the front
+  /// (+Z) is at the bottom of the picture, as seen standing in front;
+  /// looking straight up, at the top (the rig has no roll; the pitch stops
+  /// just short of vertical, [maxPitch]).
+  void lookFrom(int axis, {required bool positive}) {
+    if (viewFrom == (axis, positive)) positive = !positive;
+    _unalign();
+    if (axis == 1) {
+      yaw = 0;
+      pitch = positive ? -maxPitch : maxPitch;
+    } else {
+      final side = [0.0, 0.0, 0.0]..[axis] = positive ? 1.0 : -1.0;
+      _lookAlong(vScale(side, -1));
+    }
+  }
+
+  /// The axis side the camera looks from — (axis, positive side) — when it
+  /// looks straight along an axis; null between them.
+  (int, bool)? get viewFrom {
+    final f = forward;
+    for (var axis = 0; axis < 3; axis++) {
+      if (f[axis].abs() >= _alignedCos) return (axis, f[axis] < 0);
+    }
+    return null;
+  }
+
+  /// How close to an axis [forward] must be to count as looking along it
+  /// (the vertical views stop half a degree short, at [maxPitch]).
+  static final _alignedCos = math.cos(0.75 * math.pi / 180);
+
+  /// The name of the view the camera looks from — the engine's front is +Z
+  /// (the default camera looks along −Z) — or null between them.
+  String? get viewName => switch (viewFrom) {
+    (0, true) => 'Right',
+    (0, false) => 'Left',
+    (1, true) => 'Top',
+    (1, false) => 'Bottom',
+    (2, true) => 'Front',
+    (2, false) => 'Back',
+    _ => null,
+  };
+
   Map<String, Object?> toJson() => {
     'pivot': pivot,
     'distance': distance,

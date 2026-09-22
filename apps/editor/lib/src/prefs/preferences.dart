@@ -8,6 +8,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
+import '../theme/tokens.dart';
+
 enum EditorTheme {
   system,
   light,
@@ -55,6 +57,7 @@ final class IdePreset {
 final class Preferences extends ChangeNotifier {
   Preferences._(this.file, Map<String, Object?> json)
     : theme = EditorTheme.parse(json['theme']),
+      density = EditorDensity.parse(json['density']),
       ideCommand = json['ideCommand'] as String? ?? IdePreset.presets.first.command,
       fynkelCli = _blankToNull(json['fynkelCli'] as String?),
       fynkelRoot = _blankToNull(json['fynkelRoot'] as String?),
@@ -98,6 +101,9 @@ final class Preferences extends ChangeNotifier {
   String? loadError;
 
   EditorTheme theme;
+
+  /// How tall every row, field and toolbar in the editor is.
+  EditorDensity density;
   String ideCommand;
 
   /// Explicit path of the `fynkel` CLI, when the user set one.
@@ -113,6 +119,7 @@ final class Preferences extends ChangeNotifier {
   static const maxRecents = 12;
 
   void setTheme(EditorTheme t) => _update(() => theme = t);
+  void setDensity(EditorDensity d) => _update(() => density = d);
   void setIdeCommand(String c) => _update(() => ideCommand = c.trim().isEmpty ? IdePreset.presets.first.command : c);
   void setFynkelCli(String? path) => _update(() => fynkelCli = _blankToNull(path));
   void setFynkelRoot(String? path) => _update(() => fynkelRoot = _blankToNull(path));
@@ -135,6 +142,7 @@ final class Preferences extends ChangeNotifier {
 
   Map<String, Object?> toJson() => {
     'theme': theme.name,
+    'density': density.name,
     'ideCommand': ideCommand,
     'fynkelCli': fynkelCli,
     'fynkelRoot': fynkelRoot,

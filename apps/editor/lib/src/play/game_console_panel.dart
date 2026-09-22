@@ -7,8 +7,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../theme/icons.dart';
+import '../theme/panel_focus.dart';
 import 'game_console.dart';
 import 'game_record.dart';
+
+import '../theme/theme.dart';
+import '../theme/tokens.dart';
 
 class GameConsoleView extends StatefulWidget {
   const GameConsoleView({super.key, required this.model, required this.onPlay, required this.onStop, this.searchFocus});
@@ -139,18 +144,19 @@ class _GameConsoleViewState extends State<GameConsoleView> {
   Widget _toolbar(ThemeData theme) {
     final session = model.session;
     final active = session.isActive;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+    final t = theme.tokens;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      padding: const EdgeInsets.fromLTRB(4, 3, 4, 3),
       child: Row(
         children: [
           IconButton(
             key: const Key('console.game.play'),
             tooltip: active ? 'Stop the game (⌘.)' : 'Play the project (⌘P)',
-            icon: Icon(
-              active ? Icons.stop : Icons.play_arrow,
-              size: 20,
-              color: active ? theme.colorScheme.error : null,
-            ),
+            icon: Icon(active ? FIcons.stop : FIcons.playArrow, size: t.icon + 2, color: active ? t.error : t.accent),
             onPressed: active ? widget.onStop : widget.onPlay,
           ),
           Expanded(
@@ -158,16 +164,17 @@ class _GameConsoleViewState extends State<GameConsoleView> {
               key: const Key('console.game.search'),
               controller: _search,
               focusNode: _searchFocus,
+              style: theme.textTheme.bodySmall?.copyWith(color: t.text),
               decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 18),
+                prefixIcon: Icon(FIcons.search, size: 13, color: t.textDisabled),
+                prefixIconConstraints: BoxConstraints(minWidth: t.row, minHeight: t.row),
                 hintText: 'Search the game\'s output…',
-                border: const OutlineInputBorder(),
                 suffixIcon: model.query.isEmpty
                     ? null
                     : IconButton(
                         tooltip: 'Clear',
-                        icon: const Icon(Icons.close, size: 16),
+                        iconSize: 12,
+                        icon: const Icon(FIcons.close),
                         onPressed: () {
                           _search.clear();
                           model.setQuery('');
@@ -181,7 +188,7 @@ class _GameConsoleViewState extends State<GameConsoleView> {
           for (final s in Severity.values) ...[
             FilterChip(
               key: Key('console.game.filter.${s.name}'),
-              avatar: Icon(_iconOf(s), size: 16, color: _colorOf(theme, s)),
+              avatar: Icon(_iconOf(s), size: 13, color: _colorOf(theme, s)),
               label: Text('${model.countOf(s)}'),
               tooltip: '${s.name}s',
               selected: model.severities.contains(s),
@@ -220,19 +227,19 @@ class _GameConsoleViewState extends State<GameConsoleView> {
           IconButton(
             key: const Key('console.game.copy'),
             tooltip: 'Copy the selected row, or every visible row',
-            icon: const Icon(Icons.copy, size: 18),
+            icon: const Icon(FIcons.copy),
             onPressed: model.entries.isEmpty ? null : model.copy,
           ),
           IconButton(
             key: const Key('console.game.open'),
             tooltip: 'Open what this row is about (↩)',
-            icon: const Icon(Icons.account_tree_outlined, size: 18),
+            icon: const Icon(FIcons.accountTreeOutlined),
             onPressed: model.canOpenSelected ? model.openSelected : null,
           ),
           IconButton(
             key: const Key('console.game.clear'),
             tooltip: 'Clear the Game tab (⇧⌘K)',
-            icon: const Icon(Icons.clear_all, size: 18),
+            icon: const Icon(FIcons.clearAll),
             onPressed: session.records.isEmpty ? null : session.clear,
           ),
         ],
@@ -244,7 +251,9 @@ class _GameConsoleViewState extends State<GameConsoleView> {
     final r = e.record;
     final key = model.keyOf(e);
     final selected = key == model.selectedKey;
-    final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'Menlo', fontFamilyFallback: const ['monospace']);
+    final t = theme.tokens;
+    final focused = PanelFocus.of(context);
+    final mono = monoStyle(context, color: selected ? t.onSelectedRowSecondary(focused: focused) : null);
     return InkWell(
       key: Key('console.game.row.$key'),
       onTap: () {
@@ -257,11 +266,13 @@ class _GameConsoleViewState extends State<GameConsoleView> {
         if (isDouble) model.activate(r);
       },
       child: Container(
-        color: selected ? theme.colorScheme.primaryContainer : null,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        height: theme.tokens.row + 2,
+        alignment: Alignment.centerLeft,
+        color: selected ? t.selectedRow(focused: focused) : null,
+        padding: EdgeInsets.symmetric(horizontal: theme.tokens.pad),
         child: Row(
           children: [
-            Icon(_iconOf(r.severity), size: 14, color: _colorOf(theme, r.severity)),
+            Icon(_iconOf(r.severity), size: 13, color: _colorOf(theme, r.severity)),
             const SizedBox(width: 6),
             SizedBox(
               width: 54,
@@ -274,15 +285,20 @@ class _GameConsoleViewState extends State<GameConsoleView> {
             ),
             if (r.code != null) ...[const SizedBox(width: 6), SizedBox(width: 84, child: Text(r.code!, style: mono))],
             const SizedBox(width: 6),
-            Expanded(child: Text(r.message, overflow: TextOverflow.ellipsis)),
+            Expanded(
+              child: Text(
+                r.message,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: selected ? t.onSelectedRow(focused: focused) : t.text,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             if (e.count > 1)
               Container(
                 margin: const EdgeInsets.only(left: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 5),
+                decoration: BoxDecoration(color: theme.tokens.lineStrong, borderRadius: theme.tokens.cornerControl),
                 child: Text('×${e.count}', style: theme.textTheme.labelSmall),
               ),
             const SizedBox(width: 12),
@@ -298,7 +314,7 @@ class _GameConsoleViewState extends State<GameConsoleView> {
 
   Widget _detail(ThemeData theme, GameEntry e, double maxHeight) {
     final r = e.record;
-    final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'Menlo', fontFamilyFallback: const ['monospace']);
+    final mono = monoStyle(context);
     return Container(
       key: const Key('console.game.detail'),
       constraints: BoxConstraints(maxHeight: maxHeight.clamp(40.0, 140.0)),
@@ -340,8 +356,14 @@ class _GameConsoleViewState extends State<GameConsoleView> {
       if (dropped > 0) '$dropped older rows dropped',
       if (session.runningOlderFiles) 'edited since Play — changes apply on the next Play',
     ].join(' · ');
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+    return Container(
+      height: theme.tokens.row + 2,
+      alignment: Alignment.centerLeft,
+      padding: EdgeInsets.symmetric(horizontal: theme.tokens.pad),
+      decoration: BoxDecoration(
+        color: theme.tokens.header,
+        border: Border(top: theme.tokens.hairline),
+      ),
       child: Row(
         children: [
           Expanded(
@@ -349,7 +371,7 @@ class _GameConsoleViewState extends State<GameConsoleView> {
               text,
               key: const Key('console.game.status'),
               style: theme.textTheme.bodySmall?.copyWith(
-                color: session.crashed || session.failure != null ? theme.colorScheme.error : theme.disabledColor,
+                color: session.crashed || session.failure != null ? theme.tokens.error : theme.tokens.textSecondary,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -360,14 +382,14 @@ class _GameConsoleViewState extends State<GameConsoleView> {
   }
 
   static IconData _iconOf(Severity s) => switch (s) {
-    Severity.error => Icons.error,
-    Severity.warning => Icons.warning_amber,
-    Severity.info => Icons.info_outline,
+    Severity.error => FIcons.error,
+    Severity.warning => FIcons.warningAmber,
+    Severity.info => FIcons.infoOutline,
   };
 
   static Color _colorOf(ThemeData theme, Severity s) => switch (s) {
-    Severity.error => theme.colorScheme.error,
-    Severity.warning => Colors.orange,
-    Severity.info => theme.colorScheme.primary,
+    Severity.error => theme.tokens.error,
+    Severity.warning => theme.tokens.warning,
+    Severity.info => theme.tokens.info,
   };
 }

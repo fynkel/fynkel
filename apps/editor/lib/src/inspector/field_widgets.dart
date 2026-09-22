@@ -2,14 +2,20 @@
 // numbers with a label drag, bounds, step and unit (a slider when hinted),
 // integers, booleans, strings (single or multiline), enum menus, vectors,
 // rotation as Euler degrees over the stored quaternion, colours with a
-// picker, asset references with a searchable picker and drag-in, entity
-// references, layer masks, arrays, nested objects and a JSON fallback.
+// picker, asset references with the shared picker (item 9d) and drag-in,
+// entity references, layer masks, arrays, nested objects and a JSON fallback.
 //
 // Every widget shows the *committed* value it is given and reports an edit
 // through `onCommit` exactly once per user gesture: a drag previews locally
 // and commits on release (one transaction, one undo step); a text field
 // commits on ↩ or on losing focus, and ⎋ puts the committed value back.
 // A mixed value (the selection disagrees) is drawn as `—` until edited.
+//
+// Item 9b: the Inspector reads left to right — one label column, the value
+// left-aligned right after it, the unit right after the number, the axis
+// letter inside a vector's field, an empty value `—` and an empty slot
+// `None`. A number shows at most three decimals until it is clicked, then
+// its full precision, so a narrow field never cuts a value off.
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -17,7 +23,11 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../picker/picker.dart';
 import '../project/editor_project.dart';
+import '../theme/icons.dart';
+import '../theme/theme.dart';
+import '../theme/tokens.dart';
 import 'field_spec.dart';
 import 'inspector_math.dart';
 
@@ -38,8 +48,21 @@ final class AssetDragPayload {
 
 typedef CommitValue = void Function(Object? value);
 
-const _rowHeight = 26.0;
-const _labelWidth = 0.42;
+/// One inspector control, from the density preference (item 9a): a little
+/// taller than a list row, because a field has a border of its own.
+double _rowHeight(BuildContext context) => context.tokens.row + 4;
+
+/// The label column (item 9b): the same width on every row, so the values
+/// line up in one column down the whole Inspector — narrower only when the
+/// panel is.
+const _labelColumn = 112.0;
+const _labelShare = 0.45;
+
+/// Where a label column ends for a row [width] wide.
+double labelColumnWidth(double width) => math.min(_labelColumn, width * _labelShare);
+
+/// The gap between the label column and the value.
+const _labelGap = 10.0;
 
 /// A label on the left, a control on the right, the error under both.
 class FieldRow extends StatelessWidget {
@@ -84,14 +107,17 @@ class FieldRow extends StatelessWidget {
       label,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.bodySmall?.copyWith(fontWeight: overridden ? FontWeight.bold : null),
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: overridden ? context.tokens.text : context.tokens.textSecondary,
+        fontWeight: overridden ? FontWeight.w600 : null,
+      ),
     );
     if (tooltip != null && tooltip!.isNotEmpty) {
       text = Tooltip(message: tooltip!, waitDuration: const Duration(milliseconds: 500), child: text);
     }
     if (dragLabel != null) text = dragLabel!(text);
     return Padding(
-      padding: EdgeInsets.only(left: indent, top: 1, bottom: 1),
+      padding: EdgeInsets.only(left: indent, top: 2, bottom: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -100,41 +126,41 @@ class FieldRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 SizedBox(
-                  width: math.max(60, c.maxWidth * _labelWidth - indent),
+                  width: math.max(48, labelColumnWidth(c.maxWidth + indent) - indent),
                   child: Row(
                     children: [
                       Expanded(child: text),
                       if (unit != null && unit!.isNotEmpty)
                         Padding(
-                          padding: const EdgeInsets.only(left: 4, right: 2),
+                          padding: const EdgeInsets.only(left: 5, right: 2),
                           child: Text(
                             unit!,
                             key: const ValueKey('field.unit'),
-                            style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
+                            style: theme.textTheme.labelSmall?.copyWith(color: context.tokens.textDisabled),
                           ),
                         ),
                       if (overridden && onRevert != null)
                         IconButton(
                           key: const ValueKey('field.revert'),
                           tooltip: 'Revert override — back to the prefab\'s value',
-                          icon: const Icon(Icons.undo, size: 14),
+                          icon: const Icon(FIcons.undo, size: 13),
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                          constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                           onPressed: onRevert,
                         ),
                       if (overridden && onApply != null)
                         IconButton(
                           key: const ValueKey('field.apply'),
                           tooltip: 'Apply to prefab — this value becomes the prefab\'s',
-                          icon: const Icon(Icons.upload, size: 14),
+                          icon: const Icon(FIcons.upload, size: 13),
                           padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                          constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
                           onPressed: onApply,
                         ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: _labelGap),
                 Expanded(child: child),
               ],
             ),
@@ -145,7 +171,7 @@ class FieldRow extends StatelessWidget {
               child: Text(
                 error!,
                 key: const ValueKey('field.error'),
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                style: theme.textTheme.bodySmall?.copyWith(color: context.tokens.error),
               ),
             ),
         ],
@@ -157,36 +183,55 @@ class FieldRow extends StatelessWidget {
 // ── Text entry shared by number and string fields ──────────────────────────
 
 /// A compact text field that commits on ↩ / focus loss and restores on ⎋.
+///
+/// A single line is drawn as the Inspector's own field box (item 9b): the
+/// recessed fill, a hairline that turns accent while editing, an optional
+/// [leading] inside it (a vector's axis letter, a colour swatch), the
+/// value left-aligned, the [unit] right after the value, and an optional
+/// [trailing] (a pick button). Multiline text keeps the theme's field.
 class _CommitText extends StatefulWidget {
   const _CommitText({
     super.key,
     required this.text,
     required this.onCommit,
+    this.display,
     this.enabled = true,
     this.multiline = false,
-    this.suffix,
-    this.hint,
-    this.alignRight = false,
+    this.unit,
+    this.hint = '—',
     this.monospace = false,
+    this.leading,
+    this.trailing,
   });
 
+  /// The committed value in full; what an edit starts from.
   final String text;
+
+  /// A shorter form shown while the field is not being edited (a number's
+  /// three decimals); [text] when null.
+  final String? display;
   final void Function(String text) onCommit;
   final bool enabled;
   final bool multiline;
-  final String? suffix;
+  final String? unit;
+
+  /// Shown dim when the value is empty.
   final String? hint;
-  final bool alignRight;
   final bool monospace;
+  final Widget? leading;
+  final Widget? trailing;
 
   @override
   State<_CommitText> createState() => _CommitTextState();
 }
 
 class _CommitTextState extends State<_CommitText> {
-  late final _controller = TextEditingController(text: widget.text);
+  late final _controller = TextEditingController(text: _shown);
   final _focus = FocusNode(debugLabel: 'inspector.text');
   bool _editing = false;
+  bool _hover = false;
+
+  String get _shown => widget.display ?? widget.text;
 
   @override
   void initState() {
@@ -198,7 +243,7 @@ class _CommitTextState extends State<_CommitText> {
   void didUpdateWidget(covariant _CommitText old) {
     super.didUpdateWidget(old);
     // A new committed value replaces the text unless the user is mid-edit.
-    if (!_editing && widget.text != _controller.text) _controller.text = widget.text;
+    if (!_editing && _shown != _controller.text) _controller.text = _shown;
   }
 
   @override
@@ -212,10 +257,15 @@ class _CommitTextState extends State<_CommitText> {
   void _onFocus() {
     if (_focus.hasFocus) {
       _editing = true;
-      _controller.selection = TextSelection(baseOffset: 0, extentOffset: _controller.text.length);
+      // Editing starts from the full value, all of it selected.
+      _controller.value = TextEditingValue(
+        text: widget.text,
+        selection: TextSelection(baseOffset: 0, extentOffset: widget.text.length),
+      );
     } else if (_editing) {
       _commit();
     }
+    if (mounted) setState(() {});
   }
 
   void _commit() {
@@ -224,42 +274,160 @@ class _CommitTextState extends State<_CommitText> {
       widget.onCommit(_controller.text);
     }
     // Whatever the outcome, show the committed value (a refusal keeps the old one).
-    if (mounted) setState(() => _controller.text = widget.text);
+    if (mounted) setState(() => _controller.text = _shown);
   }
 
   void _cancel() {
     _editing = false;
-    _controller.text = widget.text;
+    _controller.text = _shown;
     _focus.unfocus();
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = context.tokens;
+    final style = widget.monospace
+        ? monoStyle(context, color: widget.enabled ? t.text : t.textDisabled)
+        : theme.textTheme.bodySmall?.copyWith(color: widget.enabled ? t.text : t.textDisabled);
+    if (widget.multiline) {
+      return CallbackShortcuts(
+        bindings: {const SingleActivator(LogicalKeyboardKey.escape): _cancel},
+        child: TextField(
+          controller: _controller,
+          focusNode: _focus,
+          enabled: widget.enabled,
+          maxLines: null,
+          minLines: 3,
+          keyboardType: TextInputType.multiline,
+          style: style,
+          decoration: InputDecoration(hintText: widget.hint),
+        ),
+      );
+    }
+    final textLeft = widget.leading == null ? 6.0 : 3.0;
+    final field = TextField(
+      controller: _controller,
+      focusNode: _focus,
+      enabled: widget.enabled,
+      maxLines: 1,
+      style: style,
+      decoration: InputDecoration(
+        isCollapsed: true,
+        filled: false,
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        disabledBorder: InputBorder.none,
+        hintText: widget.hint,
+        hintStyle: style?.copyWith(color: t.textDisabled),
+        contentPadding: EdgeInsets.only(left: textLeft, right: 4),
+      ),
+      onSubmitted: (_) {
+        _commit();
+        _focus.unfocus();
+      },
+    );
+    final edge = !widget.enabled
+        ? t.line
+        : _focus.hasFocus
+        ? t.accent
+        : _hover
+        ? t.textDisabled
+        : t.lineStrong;
     return CallbackShortcuts(
       bindings: {const SingleActivator(LogicalKeyboardKey.escape): _cancel},
-      child: TextField(
-        controller: _controller,
-        focusNode: _focus,
-        enabled: widget.enabled,
-        maxLines: widget.multiline ? null : 1,
-        minLines: widget.multiline ? 3 : 1,
-        keyboardType: widget.multiline ? TextInputType.multiline : TextInputType.text,
-        textAlign: widget.alignRight ? TextAlign.right : TextAlign.left,
-        style: theme.textTheme.bodySmall?.copyWith(fontFamily: widget.monospace ? 'monospace' : null),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: widget.hint,
-          suffixText: widget.suffix,
-          suffixStyle: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
-          border: const OutlineInputBorder(),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: Container(
+          height: t.fieldHeight,
+          decoration: BoxDecoration(
+            color: t.field,
+            border: Border.all(color: edge),
+            borderRadius: t.cornerControl,
+          ),
+          child: Row(
+            children: [
+              ?widget.leading,
+              Expanded(
+                child: widget.unit == null || widget.unit!.isEmpty
+                    ? Center(child: field)
+                    : Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [
+                          Center(child: field),
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: _UnitAfterText(
+                                controller: _controller,
+                                style: style,
+                                unit: widget.unit!,
+                                left: textLeft,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+              ?widget.trailing,
+            ],
+          ),
         ),
-        onSubmitted: (_) {
-          _commit();
-          if (!widget.multiline) _focus.unfocus();
-        },
       ),
+    );
+  }
+}
+
+/// The unit drawn right after the value (`20 m`, `45°`) — measured, so it
+/// follows the number instead of sitting at the far end of the field, and
+/// left out when the value would run into it.
+class _UnitAfterText extends StatelessWidget {
+  const _UnitAfterText({required this.controller, required this.style, required this.unit, required this.left});
+
+  final TextEditingController controller;
+  final TextStyle? style;
+  final String unit;
+  final double left;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final scaler = MediaQuery.textScalerOf(context);
+    final unitStyle = style?.copyWith(color: t.textDisabled);
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        if (controller.text.isEmpty) return const SizedBox.shrink();
+        final value = TextPainter(
+          text: TextSpan(text: controller.text, style: style),
+          textDirection: TextDirection.ltr,
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout();
+        final u = TextPainter(
+          text: TextSpan(text: unit, style: unitStyle),
+          textDirection: TextDirection.ltr,
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout();
+        final x = left + value.width + (unit == '°' ? 0.5 : 3);
+        final unitWidth = u.width;
+        value.dispose();
+        u.dispose();
+        return LayoutBuilder(
+          builder: (context, c) {
+            if (x + unitWidth + 2 > c.maxWidth) return const SizedBox.shrink();
+            return Padding(
+              padding: EdgeInsets.only(left: x),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(unit, key: const ValueKey('number.unit'), style: unitStyle, maxLines: 1),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -349,6 +517,14 @@ class _NumberFieldState extends State<NumberField> {
     return formatNumber(_toShown(v.toDouble()), integer: widget.integer, decimals: _decimals);
   }
 
+  /// What the field shows until it is clicked: three decimals at most.
+  String get _display {
+    if (widget.mixed) return '—';
+    final v = _preview ?? widget.value?.toDouble();
+    if (v == null) return '';
+    return formatNumberShort(_toShown(v), integer: widget.integer);
+  }
+
   double get _dragStep {
     final s = widget.step;
     if (s != null) return _toShown(s.toDouble());
@@ -418,16 +594,43 @@ class _NumberFieldState extends State<NumberField> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final t = context.tokens;
     final unit = widget.unit ?? (widget.angle ? '°' : null);
-    // A compact (per-axis) field is too narrow for "20 m" plus a suffix; the row's label carries the unit.
-    final suffix = widget.compact && unit != '°' ? null : unit;
+    // A compact (per-axis) field is too narrow for "20 m"; the row's label carries the unit. Degrees stay.
+    final shownUnit = widget.compact && unit != '°' ? null : unit;
+    // A vector component: its axis letter inside the field, in the gizmo's colour, is the drag handle.
+    final letter = widget.compact ? widget.label : null;
     final text = _CommitText(
       key: const ValueKey('number.text'),
       text: _text,
+      display: _display,
       enabled: widget.enabled,
-      alignRight: true,
-      suffix: suffix,
+      unit: shownUnit,
+      leading: letter == null
+          ? null
+          : _dragSurface(
+              Padding(
+                key: const ValueKey('number.axis'),
+                padding: const EdgeInsets.only(left: 6),
+                child: SizedBox(
+                  width: 9,
+                  child: Text(
+                    letter,
+                    style: TextStyle(
+                      fontFamily: uiFontFamily,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: switch (letter) {
+                        'X' => t.axisX,
+                        'Y' => t.axisY,
+                        'Z' => t.axisZ,
+                        _ => t.textSecondary,
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
       onCommit: _onText,
     );
     Widget control = text;
@@ -453,25 +656,12 @@ class _NumberFieldState extends State<NumberField> {
               ),
             ),
           ),
+          const SizedBox(width: 6),
           SizedBox(width: 72, child: text),
         ],
       );
     }
-    if (widget.compact) {
-      return Row(
-        children: [
-          if (widget.label != null)
-            _dragSurface(
-              Padding(
-                padding: const EdgeInsets.only(right: 3),
-                child: Text(widget.label!, style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor)),
-              ),
-            ),
-          Expanded(child: control),
-        ],
-      );
-    }
-    if (widget.label == null) return control;
+    if (widget.compact || widget.label == null) return control;
     return FieldRow(
       label: widget.label!,
       tooltip: widget.tooltip,
@@ -494,6 +684,18 @@ String formatNumber(double v, {bool integer = false, int decimals = 6}) {
   return s == '-0' ? '0' : s;
 }
 
+/// The number a field shows while it is not being edited (item 9b): three
+/// decimals at most, so it fits a narrow field; a value too small for
+/// that keeps three significant digits rather than showing as `0`.
+String formatNumberShort(double v, {bool integer = false}) {
+  if (integer) return v.round().toString();
+  final s = formatNumber(v, decimals: 3);
+  if (s != '0' || v == 0) return s;
+  var p = v.toStringAsPrecision(3);
+  if (p.contains('.') && !p.contains('e')) p = p.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+  return p;
+}
+
 // ── Boolean ────────────────────────────────────────────────────────────────
 
 class BoolField extends StatelessWidget {
@@ -508,7 +710,7 @@ class BoolField extends StatelessWidget {
   Widget build(BuildContext context) => Align(
     alignment: Alignment.centerLeft,
     child: SizedBox(
-      height: _rowHeight,
+      height: _rowHeight(context),
       child: Checkbox(
         tristate: mixed,
         value: mixed ? null : (value ?? false),
@@ -543,10 +745,47 @@ class StringField extends StatelessWidget {
   @override
   Widget build(BuildContext context) => _CommitText(
     text: mixed ? '—' : (value ?? ''),
-    hint: hint,
+    hint: hint ?? '—',
     multiline: multiline,
     enabled: enabled,
     onCommit: onCommit,
+  );
+}
+
+/// The Inspector's field box around something that is not a text field
+/// (a menu, a mask, an asset slot): the same fill, hairline and height.
+class FieldBox extends StatelessWidget {
+  const FieldBox({super.key, required this.child, this.edge, this.padding = const EdgeInsets.only(left: 6)});
+
+  final Widget child;
+  final Color? edge;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return Container(
+      height: t.fieldHeight,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: t.field,
+        border: Border.all(color: edge ?? t.lineStrong),
+        borderRadius: t.cornerControl,
+      ),
+      child: child,
+    );
+  }
+}
+
+/// A value inside a [FieldBox]: the text, or `—` dim when there is none.
+Widget _boxText(BuildContext context, String text, {Key? key, String empty = '—'}) {
+  final t = context.tokens;
+  return Text(
+    text.isEmpty ? empty : text,
+    key: key,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: text.isEmpty ? t.textDisabled : t.text),
   );
 }
 
@@ -573,8 +812,9 @@ class EnumField extends StatelessWidget {
     final theme = Theme.of(context);
     final shown = mixed ? '—' : (value ?? '');
     return SizedBox(
-      height: _rowHeight,
+      height: context.tokens.fieldHeight,
       child: PopupMenuButton<String>(
+        popUpAnimationStyle: AnimationStyle.noAnimation,
         enabled: enabled,
         tooltip: '',
         onSelected: onCommit,
@@ -585,28 +825,18 @@ class EnumField extends StatelessWidget {
               height: 28,
               child: Row(
                 children: [
-                  SizedBox(width: 18, child: v == value && !mixed ? const Icon(Icons.check, size: 14) : null),
+                  SizedBox(width: 18, child: v == value && !mixed ? const Icon(FIcons.check, size: 14) : null),
                   Text(humanize(v), style: theme.textTheme.bodySmall),
                 ],
               ),
             ),
         ],
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          decoration: BoxDecoration(
-            border: Border.all(color: theme.dividerColor),
-            borderRadius: BorderRadius.circular(4),
-          ),
+        child: FieldBox(
+          padding: const EdgeInsets.only(left: 6, right: 4),
           child: Row(
             children: [
-              Expanded(
-                child: Text(
-                  shown.isEmpty ? '' : humanize(shown),
-                  style: theme.textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Icon(Icons.arrow_drop_down, size: 16, color: theme.hintColor),
+              Expanded(child: _boxText(context, shown.isEmpty || mixed ? '' : humanize(shown))),
+              Icon(FIcons.chevronDown, size: 12, color: context.tokens.textDisabled),
             ],
           ),
         ),
@@ -753,7 +983,8 @@ class _EulerFieldState extends State<EulerField> {
 
 // ── Colour ─────────────────────────────────────────────────────────────────
 
-/// A linear RGB(A) colour: a swatch that opens the picker, the hex next to it.
+/// A linear RGB(A) colour: its hex in a field with the swatch inside, at
+/// the start; the swatch opens the colour picker.
 class ColorField extends StatelessWidget {
   const ColorField({
     super.key,
@@ -786,6 +1017,7 @@ class ColorField extends StatelessWidget {
         ? List<double>.filled(components, 1.0)
         : [for (final v in value!) v.toDouble()];
     final picked = await showDialog<List<double>>(
+      animationStyle: AnimationStyle.noAnimation,
       context: context,
       builder: (_) => ColorPickerDialog(initial: start, alpha: components == 4),
     );
@@ -794,42 +1026,42 @@ class ColorField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        InkWell(
-          key: const ValueKey('color.swatch'),
-          onTap: enabled ? () => _pick(context) : null,
-          child: Container(
-            width: 36,
-            height: 20,
-            decoration: BoxDecoration(
-              color: mixed ? null : _color,
-              gradient: mixed ? LinearGradient(colors: [theme.disabledColor, theme.cardColor]) : null,
-              border: Border.all(color: theme.dividerColor),
-              borderRadius: BorderRadius.circular(3),
+    final t = context.tokens;
+    return _CommitText(
+      key: const ValueKey('color.hex'),
+      text: mixed || value == null || value!.length < 3 ? '—' : linearRgbToHex(value!),
+      enabled: enabled,
+      monospace: true,
+      // The swatch sits inside the field, at its start; a click on it opens the picker.
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 3),
+        child: MouseRegion(
+          cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+          child: GestureDetector(
+            key: const ValueKey('color.swatch'),
+            onTap: enabled ? () => _pick(context) : null,
+            child: Container(
+              width: 26,
+              height: t.fieldHeight - 8,
+              decoration: BoxDecoration(
+                color: mixed ? null : _color,
+                gradient: mixed ? LinearGradient(colors: [t.textDisabled, t.field]) : null,
+                border: Border.all(color: t.lineStrong),
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
           ),
         ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: _CommitText(
-            key: const ValueKey('color.hex'),
-            text: mixed || value == null || value!.length < 3 ? '—' : linearRgbToHex(value!),
-            enabled: enabled,
-            monospace: true,
-            onCommit: (t) {
-              final rgb = hexToLinearRgb(t);
-              if (rgb == null) return;
-              if (components == 4 && rgb.length == 3) {
-                rgb.add(value != null && value!.length > 3 ? value![3].toDouble() : 1.0);
-              }
-              if (components == 3 && rgb.length == 4) rgb.removeLast();
-              onCommit(rgb);
-            },
-          ),
-        ),
-      ],
+      ),
+      onCommit: (text) {
+        final rgb = hexToLinearRgb(text);
+        if (rgb == null) return;
+        if (components == 4 && rgb.length == 3) {
+          rgb.add(value != null && value!.length > 3 ? value![3].toDouble() : 1.0);
+        }
+        if (components == 3 && rgb.length == 4) rgb.removeLast();
+        onCommit(rgb);
+      },
     );
   }
 }
@@ -1008,10 +1240,14 @@ class _SvPainter extends CustomPainter {
 
 // ── Asset reference ────────────────────────────────────────────────────────
 
-/// `{ asset, sub? }`: the asset's name, a picker, drag-in from the Project
-/// browser, Clear when the field is nullable. An unknown asset is refused
-/// by the model's precheck (`FYN-A0004`) before any command is sent.
-class AssetField extends StatelessWidget {
+/// `{ asset, sub? }` as a slot (item 9b/9d): the asset's picture or icon,
+/// its name with the part dim after it (`robot › mesh/0`), **None** dim when
+/// empty, and inside the box a clear button (a nullable field) and ⊙,
+/// which opens [showPicker] with the assets of the field's kind grouped by
+/// folder and by source file. A drag from the Project browser drops in. An
+/// unknown asset is refused by the model's precheck (`FYN-A0004`) before
+/// any command is sent.
+class AssetField extends StatefulWidget {
   const AssetField({
     super.key,
     required this.value,
@@ -1019,6 +1255,8 @@ class AssetField extends StatelessWidget {
     required this.candidates,
     required this.onCommit,
     this.kind,
+    this.subject,
+    this.thumbnail,
     this.mixed = false,
     this.nullable = false,
     this.enabled = true,
@@ -1030,65 +1268,212 @@ class AssetField extends StatelessWidget {
   /// The assets the picker lists (already filtered by [kind]).
   final List<AssetEntry> Function() candidates;
   final String? kind;
+
+  /// What the picker's title names (the field's label).
+  final String? subject;
+
+  /// An asset's picture at a size (a texture's pixels, a material's
+  /// swatch); the kind's icon when null.
+  final Widget Function(AssetEntry entry, double size)? thumbnail;
   final bool mixed;
   final bool nullable;
   final bool enabled;
   final void Function(Map<String, Object?>? ref) onCommit;
 
-  Future<void> _pick(BuildContext context) async {
-    final picked = await showDialog<Map<String, Object?>?>(
-      context: context,
-      builder: (_) => AssetPickerDialog(kind: kind, entries: candidates(), current: value),
+  @override
+  State<AssetField> createState() => _AssetFieldState();
+}
+
+/// `id` or `id#sub`: a picker row's value (a map would not compare equal).
+String _refKey(Map<String, Object?>? ref) {
+  if (ref == null || ref['asset'] == null) return '';
+  final sub = ref['sub'] as String?;
+  return sub == null || sub.isEmpty ? '${ref['asset']}' : '${ref['asset']}#$sub';
+}
+
+Map<String, Object?> _refOf(String key) {
+  final at = key.indexOf('#');
+  return at < 0 ? {'asset': key} : {'asset': key.substring(0, at), 'sub': key.substring(at + 1)};
+}
+
+String _folderOf(String path) {
+  final at = path.lastIndexOf('/');
+  return at < 0 ? '' : path.substring(0, at);
+}
+
+/// The picker's rows for an `asset(<kind>)` field: documents and whole
+/// sources under their folder, a source's parts under the source file.
+List<PickerItem<String>> assetPickerItems(
+  List<AssetEntry> entries, {
+  String? kind,
+  Widget Function(AssetEntry entry, double size)? thumbnail,
+}) {
+  final byFolder = <String, List<PickerItem<String>>>{};
+  final bySource = <AssetEntry, List<PickerItem<String>>>{};
+  List<(String, String)> facts(AssetEntry a, String k, [String? sub]) => [
+    ('Kind', k),
+    if (sub != null) ('Part', sub),
+    ('File', a.path),
+    if (a.importer != null) ('Importer', a.importer!),
+  ];
+  WidgetBuilder? picture(AssetEntry a) {
+    final th = thumbnail;
+    return th == null ? null : (context) => th(a, 124);
+  }
+
+  for (final a in entries) {
+    final folder = _folderOf(a.path);
+    if (!a.isSource) {
+      if (kind != null && a.document != kind) continue;
+      final k = a.document ?? 'document';
+      byFolder
+          .putIfAbsent(folder, () => [])
+          .add(
+            PickerItem(
+              value: a.id,
+              title: a.name,
+              icon: assetKindIcon(k),
+              group: folder.isEmpty ? 'assets' : folder,
+              keywords: '${a.path} ${a.id}',
+              facts: facts(a, k),
+              preview: picture(a),
+            ),
+          );
+      continue;
+    }
+    final whole = a.wholeKind;
+    if (whole != null && (kind == null || whole == kind)) {
+      byFolder
+          .putIfAbsent(folder, () => [])
+          .add(
+            PickerItem(
+              value: a.id,
+              title: a.name,
+              icon: assetKindIcon(whole),
+              group: folder.isEmpty ? 'assets' : folder,
+              keywords: '${a.path} ${a.id}',
+              facts: facts(a, whole),
+              preview: picture(a),
+            ),
+          );
+    }
+    for (final sub in a.subAssets.keys) {
+      final k = AssetEntry.subKind(sub);
+      if (kind != null && k != kind) continue;
+      bySource
+          .putIfAbsent(a, () => [])
+          .add(
+            PickerItem(
+              value: '${a.id}#$sub',
+              title: sub,
+              icon: assetKindIcon(k),
+              group: a.name,
+              groupDetail: a.path,
+              keywords: '${a.name} ${a.path} ${a.id}',
+              facts: facts(a, k, sub),
+            ),
+          );
+    }
+  }
+  int byName(String a, String b) => a.toLowerCase().compareTo(b.toLowerCase());
+  final groups = <(String, List<PickerItem<String>>)>[
+    for (final e in byFolder.entries) (e.key, e.value..sort((a, b) => byName(a.title, b.title))),
+    for (final e in bySource.entries) ('${e.key.path}\u0000', e.value),
+  ]..sort((a, b) => byName(a.$1, b.$1));
+  return [for (final g in groups) ...g.$2];
+}
+
+class _AssetFieldState extends State<AssetField> {
+  Future<void> _pick() async {
+    final kind = widget.kind;
+    final choice = await showPicker<String>(
+      context,
+      title: kind == null ? 'Choose an asset' : 'Choose a $kind',
+      subject: widget.subject,
+      anchor: globalRectOf(context),
+      items: assetPickerItems(widget.candidates(), kind: kind, thumbnail: widget.thumbnail),
+      allowNone: widget.nullable,
+      current: _refKey(widget.value).isEmpty ? null : _refKey(widget.value),
+      hint: 'Search by name or path',
+      keyPrefix: 'assetPicker',
+      countNoun: kind == null ? 'assets' : '${kind}s',
+      empty: 'No ${kind ?? 'asset'} matches.',
     );
-    if (picked != null) onCommit(picked['asset'] == null ? null : picked);
+    if (!mounted || choice == null) return;
+    widget.onCommit(choice.isNone ? null : _refOf(choice.value!));
+  }
+
+  AssetEntry? _entry() {
+    final id = widget.value?['asset'];
+    if (id == null || widget.thumbnail == null) return null;
+    for (final a in widget.candidates()) {
+      if (a.id == id) return a;
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tokens;
     final theme = Theme.of(context);
+    final style = theme.textTheme.bodySmall;
+    final value = widget.value;
+    final face = widget.mixed ? '—' : widget.describe(value);
+    final split = face.indexOf(' › ');
+    final name = split < 0 ? face : face.substring(0, split);
+    final part = split < 0 ? null : face.substring(split);
+    final empty = value == null && !widget.mixed;
+    final entry = _entry();
     return DragTarget<AssetDragPayload>(
-      onWillAcceptWithDetails: (d) => enabled && (kind == null || d.data.kind == kind),
-      onAcceptWithDetails: (d) => onCommit(d.data.toRef()),
+      onWillAcceptWithDetails: (d) => widget.enabled && (widget.kind == null || d.data.kind == widget.kind),
+      onAcceptWithDetails: (d) => widget.onCommit(d.data.toRef()),
       builder: (context, candidatesIn, rejected) {
-        final hot = candidatesIn.isNotEmpty;
-        return Container(
-          height: _rowHeight,
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: hot
-                  ? theme.colorScheme.primary
-                  : (rejected.isNotEmpty ? theme.colorScheme.error : theme.dividerColor),
-            ),
-            borderRadius: BorderRadius.circular(4),
-          ),
+        final edge = candidatesIn.isNotEmpty ? t.accent : (rejected.isNotEmpty ? t.error : null);
+        return FieldBox(
+          edge: edge,
+          padding: const EdgeInsets.only(left: 5, right: 1),
           child: Row(
             children: [
-              const SizedBox(width: 6),
-              Icon(assetKindIcon(kind), size: 14, color: theme.hintColor),
-              const SizedBox(width: 4),
+              if (entry != null && !empty)
+                SizedBox.square(dimension: 14, child: widget.thumbnail!(entry, 14))
+              else
+                Icon(assetKindIcon(widget.kind), size: 13, color: empty ? t.textDisabled : t.textSecondary),
+              const SizedBox(width: 5),
               Expanded(
-                child: Text(
-                  mixed ? '—' : describe(value),
-                  key: const ValueKey('asset.name'),
-                  style: theme.textTheme.bodySmall?.copyWith(color: value == null && !mixed ? theme.hintColor : null),
-                  overflow: TextOverflow.ellipsis,
+                child: MouseRegion(
+                  cursor: widget.enabled ? SystemMouseCursors.click : MouseCursor.defer,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: widget.enabled ? _pick : null,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(text: name),
+                            if (part != null)
+                              TextSpan(
+                                text: part,
+                                style: TextStyle(color: t.textDisabled),
+                              ),
+                          ],
+                        ),
+                        key: const ValueKey('asset.name'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: style?.copyWith(color: empty ? t.textDisabled : t.text),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              if (nullable && value != null && enabled)
-                IconButton(
-                  tooltip: 'Clear',
-                  icon: const Icon(Icons.close, size: 14),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                  onPressed: () => onCommit(null),
-                ),
-              IconButton(
+              if (widget.nullable && value != null && widget.enabled)
+                _InBoxButton(tooltip: 'Clear', icon: FIcons.close, onPressed: () => widget.onCommit(null)),
+              _InBoxButton(
                 key: const ValueKey('asset.pick'),
                 tooltip: 'Choose…',
-                icon: const Icon(Icons.more_horiz, size: 16),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                onPressed: enabled ? () => _pick(context) : null,
+                icon: FIcons.pick,
+                onPressed: widget.enabled ? _pick : null,
               ),
             ],
           ),
@@ -1098,181 +1483,100 @@ class AssetField extends StatelessWidget {
   }
 }
 
-IconData assetKindIcon(String? kind) => switch (kind) {
-  'mesh' => Icons.view_in_ar_outlined,
-  'material' => Icons.palette_outlined,
-  'texture' => Icons.image_outlined,
-  'prefab' => Icons.widgets_outlined,
-  'scene' => Icons.landscape_outlined,
-  'audio' || 'sound' => Icons.audiotrack,
-  'clip' => Icons.animation,
-  'skin' || 'rig' => Icons.accessibility_new,
-  'volume' => Icons.tune,
-  _ => Icons.insert_drive_file_outlined,
-};
+/// A small button inside a field box (⊙, ×): no fill until hovered.
+class _InBoxButton extends StatelessWidget {
+  const _InBoxButton({super.key, required this.tooltip, required this.icon, required this.onPressed});
 
-/// The searchable asset list; answers `{asset, sub?}`, `{asset: null}` for
-/// "None", or null when cancelled.
-class AssetPickerDialog extends StatefulWidget {
-  const AssetPickerDialog({super.key, required this.entries, this.kind, this.current});
-
-  final List<AssetEntry> entries;
-  final String? kind;
-  final Map<String, Object?>? current;
-
-  @override
-  State<AssetPickerDialog> createState() => _AssetPickerDialogState();
-}
-
-class _AssetPickerDialogState extends State<AssetPickerDialog> {
-  final _query = TextEditingController();
-
-  /// The rows: a document asset is one row; a source offers one row per matching sub-asset.
-  List<(String title, String subtitle, Map<String, Object?> ref)> get _rows {
-    final q = _query.text.trim().toLowerCase();
-    final out = <(String, String, Map<String, Object?>)>[];
-    for (final a in widget.entries) {
-      if (!a.isSource) {
-        if (widget.kind == null || a.document == widget.kind) out.add((a.name, a.path, {'asset': a.id}));
-        continue;
-      }
-      // A source referenced whole (an audio clip): one row without a sub.
-      if (a.wholeKind != null && (widget.kind == null || a.wholeKind == widget.kind)) {
-        out.add((a.name, a.path, {'asset': a.id}));
-      }
-      for (final sub in a.subAssets.keys) {
-        if (widget.kind != null && AssetEntry.subKind(sub) != widget.kind) continue;
-        out.add(('${a.name} › $sub', a.path, {'asset': a.id, 'sub': sub}));
-      }
-    }
-    out.retainWhere((r) => q.isEmpty || r.$1.toLowerCase().contains(q) || r.$2.toLowerCase().contains(q));
-    out.sort((a, b) => a.$1.toLowerCase().compareTo(b.$1.toLowerCase()));
-    return out;
-  }
-
-  @override
-  void dispose() {
-    _query.dispose();
-    super.dispose();
-  }
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final rows = _rows;
-    final cur = widget.current;
-    return AlertDialog(
-      title: Text(widget.kind == null ? 'Choose an asset' : 'Choose a ${widget.kind}'),
-      content: SizedBox(
-        width: 420,
-        height: 360,
-        child: Column(
-          children: [
-            TextField(
-              key: const ValueKey('assetPicker.search'),
-              controller: _query,
-              autofocus: true,
-              decoration: const InputDecoration(
-                isDense: true,
-                prefixIcon: Icon(Icons.search, size: 16),
-                hintText: 'Search by name or path',
-              ),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (_) {
-                if (rows.length == 1) Navigator.of(context).pop(rows.single.$3);
-              },
-            ),
-            const SizedBox(height: 6),
-            Expanded(
-              child: rows.isEmpty
-                  ? Center(child: Text('No ${widget.kind ?? 'asset'} matches.', style: theme.textTheme.bodySmall))
-                  : ListView.builder(
-                      itemCount: rows.length,
-                      itemExtent: 40,
-                      itemBuilder: (context, i) {
-                        final (title, subtitle, ref) = rows[i];
-                        final selected =
-                            cur != null && cur['asset'] == ref['asset'] && (cur['sub'] ?? '') == (ref['sub'] ?? '');
-                        return ListTile(
-                          key: ValueKey('assetPicker.row.$i'),
-                          dense: true,
-                          selected: selected,
-                          leading: Icon(
-                            assetKindIcon(
-                              widget.kind ?? (ref['sub'] != null ? AssetEntry.subKind(ref['sub'] as String) : null),
-                            ),
-                            size: 16,
-                          ),
-                          title: Text(title, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
-                          subtitle: Text(
-                            subtitle,
-                            style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          onTap: () => Navigator.of(context).pop(ref),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop({'asset': null}), child: const Text('None')),
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
-      ],
+    final t = context.tokens;
+    return IconButton(
+      tooltip: tooltip,
+      icon: Icon(icon, size: 12),
+      color: t.textSecondary,
+      disabledColor: t.textDisabled,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: BoxConstraints.tightFor(width: t.fieldHeight - 2, height: t.fieldHeight - 2),
+      style: IconButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: t.cornerControl)),
+      onPressed: onPressed,
     );
   }
 }
 
+IconData assetKindIcon(String? kind) => switch (kind) {
+  'mesh' => FIcons.viewInArOutlined,
+  'material' => FIcons.paletteOutlined,
+  'texture' => FIcons.imageOutlined,
+  'prefab' => FIcons.widgetsOutlined,
+  'scene' => FIcons.landscapeOutlined,
+  'audio' || 'sound' => FIcons.audiotrack,
+  'clip' => FIcons.animation,
+  'skin' || 'rig' => FIcons.accessibilityNew,
+  'volume' => FIcons.tune,
+  _ => FIcons.insertDriveFileOutlined,
+};
+
 // ── Entity reference ───────────────────────────────────────────────────────
 
 /// An entity named by its name (what authored components store): a text
-/// field with the document's names offered as you type.
+/// field with ⊙ inside, which opens [showPicker] with the document's names.
 class EntityField extends StatelessWidget {
   const EntityField({
     super.key,
     required this.value,
     required this.names,
     required this.onCommit,
+    this.subject,
     this.mixed = false,
     this.enabled = true,
   });
 
   final String? value;
   final List<String> Function() names;
+  final String? subject;
   final bool mixed;
   final bool enabled;
   final void Function(String name) onCommit;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Expanded(
-          child: StringField(value: value, mixed: mixed, enabled: enabled, hint: 'Entity name', onCommit: onCommit),
+    return Builder(
+      builder: (context) => _CommitText(
+        text: mixed ? '—' : (value ?? ''),
+        hint: 'None',
+        enabled: enabled,
+        onCommit: onCommit,
+        trailing: _InBoxButton(
+          key: const ValueKey('entity.pick'),
+          tooltip: 'Choose an entity',
+          icon: FIcons.pick,
+          onPressed: enabled
+              ? () async {
+                  final choice = await showPicker<String>(
+                    context,
+                    title: 'Choose an entity',
+                    subject: subject,
+                    anchor: globalRectOf(context),
+                    items: [
+                      for (final n in names())
+                        PickerItem(value: n, id: 'entity.$n', title: n, icon: FIcons.cropSquare, facts: [('Name', n)]),
+                    ],
+                    current: value,
+                    hint: 'Search by name',
+                    keyPrefix: 'entityPicker',
+                    countNoun: 'entities',
+                    empty: 'No entity in this document has that name.',
+                  );
+                  if (choice != null && !choice.isNone) onCommit(choice.value!);
+                }
+              : null,
         ),
-        SizedBox(
-          height: _rowHeight,
-          child: PopupMenuButton<String>(
-            key: const ValueKey('entity.pick'),
-            enabled: enabled,
-            tooltip: 'Choose an entity',
-            icon: Icon(Icons.adjust, size: 16, color: theme.hintColor),
-            padding: EdgeInsets.zero,
-            onSelected: onCommit,
-            itemBuilder: (_) => [
-              for (final n in names())
-                PopupMenuItem(
-                  value: n,
-                  height: 26,
-                  child: Text(n, style: theme.textTheme.bodySmall),
-                ),
-            ],
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -1280,7 +1584,7 @@ class EntityField extends StatelessWidget {
 // ── Layer mask ─────────────────────────────────────────────────────────────
 
 /// A 32-bit mask: the project's physics layer names as check rows (bits
-/// past the named layers show as `Layer N`), and the number itself.
+/// past the named layers show as `Layer N`), summarised by name.
 class LayerMaskField extends StatelessWidget {
   const LayerMaskField({
     super.key,
@@ -1316,8 +1620,9 @@ class LayerMaskField extends StatelessWidget {
     final v = value ?? 0;
     final rows = math.max(layers.length, _highestBit(v) + 1);
     return SizedBox(
-      height: _rowHeight,
+      height: context.tokens.fieldHeight,
       child: PopupMenuButton<int>(
+        popUpAnimationStyle: AnimationStyle.noAnimation,
         enabled: enabled,
         tooltip: '',
         onSelected: (bit) {
@@ -1337,27 +1642,12 @@ class LayerMaskField extends StatelessWidget {
               child: Text(i < layers.length ? layers[i] : 'Layer $i', style: theme.textTheme.bodySmall),
             ),
         ],
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          decoration: BoxDecoration(
-            border: Border.all(color: theme.dividerColor),
-            borderRadius: BorderRadius.circular(4),
-          ),
+        child: FieldBox(
+          padding: const EdgeInsets.only(left: 6, right: 4),
           child: Row(
             children: [
-              Expanded(
-                child: Text(
-                  _summary(),
-                  key: const ValueKey('layerMask.summary'),
-                  style: theme.textTheme.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Text(
-                mixed || value == null ? '' : '$v',
-                style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-              ),
-              Icon(Icons.arrow_drop_down, size: 16, color: theme.hintColor),
+              Expanded(child: _boxText(context, _summary(), key: const ValueKey('layerMask.summary'))),
+              Icon(FIcons.chevronDown, size: 12, color: context.tokens.textDisabled),
             ],
           ),
         ),

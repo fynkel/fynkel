@@ -2,8 +2,8 @@
 // one flat list; search, kind filters, sort; New ▾, the asset history's
 // undo/redo; rows drag as `AssetDragPayload` (onto Inspector fields, the
 // Hierarchy, a folder here); the context menu, inline rename, delete with
-// the "referenced by" dialog; double-click opens documents and shows the
-// Asset panel for sources.
+// the "referenced by" dialog; double-click opens documents and shows any
+// other asset in the Inspector (item 9c).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -12,10 +12,17 @@ import 'package:path/path.dart' as p;
 import '../env/tools.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload, assetKindIcon;
 import '../project/editor_project.dart';
+import '../shell/notices.dart';
+import '../inspector/inspector_chrome.dart' show InspectorCaption;
+import '../theme/icons.dart';
+import '../theme/lock_button.dart';
+import '../theme/panel_focus.dart';
 import 'asset_preview.dart';
+import '../theme/tokens.dart';
 import 'project_browser_model.dart';
 
-const projectRowHeight = 26.0;
+/// One browser row, from the density preference (item 9a).
+double projectRowHeight(BuildContext context) => context.tokens.row + 2;
 
 class ProjectPanel extends StatefulWidget {
   const ProjectPanel({
@@ -32,7 +39,8 @@ class ProjectPanel extends StatefulWidget {
   /// A scene or prefab double-clicked: into a tab.
   final void Function(String id) onOpenDocument;
 
-  /// Any other asset double-clicked: the Asset panel is shown.
+  /// Any other asset double-clicked (or Show in Inspector): the Inspector
+  /// shows it and comes forward.
   final VoidCallback onShowAsset;
   final RunProcess run;
   final FocusNode? searchFocus;
@@ -152,7 +160,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
   Future<void> _reveal(String rel) async {
     final err = await revealInFileBrowser(model.project.assetFile(rel), run: widget.run);
     if (err != null && mounted) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text('Reveal in Finder failed: $err')));
+      Notices.maybeOf(context)?.show('Reveal in Finder failed: $err');
     }
   }
 
@@ -164,6 +172,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       byDocument.putIfAbsent(model.assetPath(d.document ?? '?'), () => []).add(d);
     }
     final force = await showDialog<bool>(
+      animationStyle: AnimationStyle.noAnimation,
       context: context,
       builder: (context) => AlertDialog(
         key: const Key('project.deleteRefused'),
@@ -225,6 +234,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
   Future<void> _moveTo(List<String> ids) async {
     final folders = ['', ...model.folders];
     final chosen = await showDialog<String>(
+      animationStyle: AnimationStyle.noAnimation,
       context: context,
       builder: (context) => SimpleDialog(
         key: const Key('project.moveTo'),
@@ -240,7 +250,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
               onPressed: () => Navigator.pop(context, f),
               child: Row(
                 children: [
-                  Icon(f.isEmpty ? Icons.home_outlined : Icons.folder_outlined, size: 16),
+                  Icon(f.isEmpty ? FIcons.homeOutlined : FIcons.folderOutlined, size: 16),
                   const SizedBox(width: 8),
                   Text(f.isEmpty ? 'assets (root)' : f),
                 ],
@@ -259,11 +269,12 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final isDoc = e.document == 'scene' || e.document == 'prefab';
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final choice = await showMenu<String>(
+      popUpAnimationStyle: AnimationStyle.noAnimation,
       context: context,
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
         if (isDoc) PopupMenuItem(value: 'open', enabled: !many, child: const Text('Open  ⇧⌥⌘O')),
-        const PopupMenuItem(value: 'show', child: Text('Show in Asset Panel')),
+        const PopupMenuItem(value: 'show', child: Text('Show in Inspector')),
         const PopupMenuItem(value: 'reveal', child: Text('Reveal in Finder  ⇧⌥⌘E')),
         const PopupMenuDivider(),
         PopupMenuItem(value: 'rename', enabled: model.canEdit && !many, child: const Text('Rename  ⇧⌥⌘R')),
@@ -307,9 +318,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       case 'reimport':
         final r = model.reimport(e.id);
         if (r != null && !r.ok && mounted) {
-          ScaffoldMessenger.maybeOf(this.context)?.showSnackBar(
-            SnackBar(content: Text('Reimport refused: ${r.diagnostics.map((d) => d.message).join('; ')}')),
-          );
+          Notices.maybeOf(this.context)?.show('Reimport refused: ${r.diagnostics.map((d) => d.message).join('; ')}');
         }
       case 'copyId':
         await Clipboard.setData(ClipboardData(text: e.id));
@@ -328,6 +337,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final isRoot = rel.isEmpty;
     final choice = await showMenu<String>(
+      popUpAnimationStyle: AnimationStyle.noAnimation,
       context: context,
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
@@ -410,65 +420,159 @@ class _ProjectPanelState extends State<ProjectPanel> {
 
   @override
   Widget build(BuildContext context) {
+    // A browser squeezed narrower than its toolbar, tree and columns (a
+    // copy beside another, item 9e; a dragged divider) keeps its layout and
+    // is cut at the right edge instead of crushing its rows.
+    return LayoutBuilder(
+      builder: (context, c) {
+        final body = _body(context);
+        if (c.maxWidth >= _minWidth) return body;
+        return ClipRect(
+          child: OverflowBox(alignment: Alignment.topLeft, minWidth: _minWidth, maxWidth: _minWidth, child: body),
+        );
+      },
+    );
+  }
+
+  /// The narrowest the browser lays out at.
+  static const _minWidth = 400.0;
+
+  Widget _body(BuildContext context) {
     final theme = Theme.of(context);
     final folders = model.visibleFolders;
     final assets = model.visibleAssets;
     return Column(
       children: [
         _toolbar(context, theme),
-        const Divider(height: 1),
         Expanded(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (model.view == BrowserView.folders) ...[
                 SizedBox(width: 180, child: _tree(theme)),
-                const VerticalDivider(width: 1),
+                VerticalDivider(width: 1, color: context.tokens.line),
               ],
               Expanded(
-                child: Focus(
-                  focusNode: _listFocus,
-                  onKeyEvent: _onKey,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    // The empty-space tap has no semantic meaning; with it in the semantics tree,
-                    // rows leaving the list while a menu route pops trip the framework's
-                    // "node.built" assertion (the kind filter did exactly that).
-                    excludeFromSemantics: true,
-                    onTap: () {
-                      _listFocus.requestFocus();
-                      model.clearSelection();
-                    },
-                    onSecondaryTapUp: (d) => _folderMenu(context, model.folder, d.globalPosition),
-                    child: folders.isEmpty && assets.isEmpty
-                        ? Center(
-                            child: Text(
-                              model.filtering
-                                  ? 'Nothing matches.'
-                                  : 'This folder is empty. Use New ▾ or drop files here.',
-                              key: const Key('project.noRows'),
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
-                            ),
-                          )
-                        : ListView.builder(
-                            key: const Key('project.list'),
-                            itemCount: folders.length + assets.length,
-                            itemExtent: projectRowHeight,
-                            itemBuilder: (context, i) => i < folders.length
-                                ? _folderRow(context, theme, folders[i], inList: true)
-                                : _assetRow(context, theme, assets[i - folders.length]),
-                          ),
-                  ),
+                child: LayoutBuilder(
+                  builder: (context, c) {
+                    final columns = c.maxWidth >= _columnsFrom;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _columnHeader(context, theme, columns: columns),
+                        Expanded(child: _list(context, theme, folders, assets, columns: columns)),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
           ),
         ),
-        if (model.lastError != null) _errorBar(theme, model.lastError!),
-        const Divider(height: 1),
-        _status(theme, assets.length),
+        if (model.lastError != null) _errorBar(context, theme, model.lastError!),
+        _status(context, theme, assets.length),
       ],
+    );
+  }
+
+  /// Below this width the list shows names and kinds only.
+  static const _columnsFrom = 380.0;
+
+  Widget _list(
+    BuildContext context,
+    ThemeData theme,
+    List<String> folders,
+    List<AssetEntry> assets, {
+    required bool columns,
+  }) {
+    return Focus(
+      focusNode: _listFocus,
+      onKeyEvent: _onKey,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        // The empty-space tap has no semantic meaning; with it in the semantics tree,
+        // rows leaving the list while a menu route pops trip the framework's
+        // "node.built" assertion (the kind filter did exactly that).
+        excludeFromSemantics: true,
+        onTap: () {
+          _listFocus.requestFocus();
+          model.clearSelection();
+        },
+        onSecondaryTapUp: (d) => _folderMenu(context, model.folder, d.globalPosition),
+        child: folders.isEmpty && assets.isEmpty
+            ? Center(
+                child: Text(
+                  model.filtering ? 'Nothing matches.' : 'This folder is empty. Use New ▾ or drop files here.',
+                  key: const Key('project.noRows'),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
+                ),
+              )
+            : ListView.builder(
+                key: const Key('project.list'),
+                itemCount: folders.length + assets.length,
+                itemExtent: projectRowHeight(context),
+                itemBuilder: (context, i) => i < folders.length
+                    ? _folderRow(context, theme, folders[i], inList: true, columns: columns)
+                    : _assetRow(context, theme, assets[i - folders.length], columns: columns),
+              ),
+      ),
+    );
+  }
+
+  /// Name | Kind | Contents | Size. Name and Kind sort (again to flip).
+  Widget _columnHeader(BuildContext context, ThemeData theme, {required bool columns}) {
+    final t = context.tokens;
+    final style = InspectorCaption.style(context);
+    Widget sortable(AssetSort s, String label, {double? width}) {
+      final on = model.sort == s;
+      final cell = InkWell(
+        key: Key('project.column.${s.name}'),
+        onTap: () => model.setSort(s),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label.toUpperCase(), style: on ? style.copyWith(color: t.textSecondary) : style),
+            if (on) ...[
+              const SizedBox(width: 3),
+              Icon(model.descending ? FIcons.arrowDownward : FIcons.arrowUpward, size: 10, color: t.textSecondary),
+            ],
+          ],
+        ),
+      );
+      return width == null
+          ? Expanded(
+              child: Align(alignment: Alignment.centerLeft, child: cell),
+            )
+          : SizedBox(
+              width: width,
+              child: Align(alignment: Alignment.centerLeft, child: cell),
+            );
+    }
+
+    return Container(
+      key: const Key('project.columns'),
+      height: t.row,
+      // Lines the captions up with the names after each row's picture.
+      padding: EdgeInsets.only(left: 6 + t.row - 2 + 8),
+      decoration: BoxDecoration(border: Border(bottom: t.hairline)),
+      child: Row(
+        children: [
+          sortable(AssetSort.name, 'Name'),
+          sortable(AssetSort.kind, 'Kind', width: _AssetRow.kindWidth),
+          if (columns) ...[
+            SizedBox(
+              width: _AssetRow.contentsWidth,
+              child: Text('CONTENTS', style: style),
+            ),
+            SizedBox(
+              width: _AssetRow.sizeWidth,
+              child: Text('SIZE', style: style, textAlign: TextAlign.right),
+            ),
+          ],
+          const SizedBox(width: _AssetRow.endGap),
+        ],
+      ),
     );
   }
 
@@ -476,8 +580,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final history = model.history;
     final kinds = model.kinds;
     final counts = model.countsByKind;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+    final t = context.tokens;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      padding: const EdgeInsets.fromLTRB(3, 3, 3, 3),
       child: Row(
         children: [
           SegmentedButton<BrowserView>(
@@ -490,12 +599,12 @@ class _ProjectPanelState extends State<ProjectPanel> {
             segments: const [
               ButtonSegment(
                 value: BrowserView.folders,
-                icon: Icon(Icons.folder_outlined, size: 16),
+                icon: Icon(FIcons.folderOutlined, size: 14),
                 tooltip: 'Folders',
               ),
               ButtonSegment(
                 value: BrowserView.list,
-                icon: Icon(Icons.view_list_outlined, size: 16),
+                icon: Icon(FIcons.viewListOutlined, size: 14),
                 tooltip: 'Flat list',
               ),
             ],
@@ -508,19 +617,19 @@ class _ProjectPanelState extends State<ProjectPanel> {
               key: const Key('project.search'),
               controller: _search,
               focusNode: _searchFocus,
+              style: theme.textTheme.bodySmall?.copyWith(color: t.text),
               decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 16),
+                prefixIcon: Icon(FIcons.search, size: 13, color: t.textDisabled),
+                prefixIconConstraints: BoxConstraints(minWidth: t.row, minHeight: t.row),
                 hintText: model.view == BrowserView.folders && model.folder.isNotEmpty
                     ? 'Search under ${model.folder}…'
                     : 'Search name, path, id, sub-asset…',
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(vertical: 6),
                 suffixIcon: model.query.isEmpty
                     ? null
                     : IconButton(
                         tooltip: 'Clear',
-                        icon: const Icon(Icons.close, size: 14),
+                        iconSize: 12,
+                        icon: const Icon(FIcons.close),
                         onPressed: () {
                           _search.clear();
                           model.setQuery('');
@@ -535,9 +644,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
             isLabelVisible: kinds.isNotEmpty,
             label: Text('${kinds.length}'),
             child: PopupMenuButton<String>(
+              popUpAnimationStyle: AnimationStyle.noAnimation,
               key: const Key('project.filter'),
               tooltip: 'Show only these kinds',
-              icon: Icon(Icons.filter_list, size: 18, color: kinds.isNotEmpty ? theme.colorScheme.primary : null),
+              icon: Icon(FIcons.filterList, color: kinds.isNotEmpty ? t.accent : null),
               itemBuilder: (context) => [
                 for (final k in browserKinds)
                   CheckedPopupMenuItem(
@@ -563,9 +673,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
             ),
           ),
           PopupMenuButton<AssetSort>(
+            popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('project.sort'),
             tooltip: 'Sort (again to flip)',
-            icon: Icon(model.descending ? Icons.arrow_downward : Icons.arrow_upward, size: 18),
+            icon: Icon(model.descending ? FIcons.arrowDownward : FIcons.arrowUpward),
             itemBuilder: (context) => [
               for (final s in AssetSort.values)
                 CheckedPopupMenuItem(
@@ -577,10 +688,18 @@ class _ProjectPanelState extends State<ProjectPanel> {
             ],
             onSelected: (s) => model.setSort(s),
           ),
+          LockButton(
+            key: const Key('project.lock'),
+            locked: model.locked,
+            lockTip: 'Lock: stay in this folder when an asset is shown elsewhere',
+            unlockTip: 'Unlock: follow "Show in Project" again',
+            onChanged: model.setLocked,
+          ),
           PopupMenuButton<String>(
+            popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('project.new'),
             tooltip: 'New scene, prefab, material or folder in the shown folder',
-            icon: const Icon(Icons.add, size: 18),
+            icon: const Icon(FIcons.add),
             enabled: model.canEdit,
             itemBuilder: (context) => [
               PopupMenuItem(
@@ -606,11 +725,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
               const PopupMenuItem(
                 key: Key('project.new.folder'),
                 value: 'folder',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(Icons.create_new_folder_outlined),
-                  title: Text('New Folder'),
-                ),
+                child: ListTile(dense: true, leading: Icon(FIcons.createNewFolderOutlined), title: Text('New Folder')),
               ),
             ],
             onSelected: (v) => v == 'folder' ? model.newFolder() : model.newDocument(v),
@@ -618,13 +733,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
           IconButton(
             key: const Key('project.undo'),
             tooltip: history.canUndo ? 'Undo ${history.undoLabel}  ⌥⌘Z' : 'Nothing to undo',
-            icon: const Icon(Icons.undo, size: 18),
+            icon: const Icon(FIcons.undo),
             onPressed: history.canUndo && model.canEdit ? model.undo : null,
           ),
           IconButton(
             key: const Key('project.redo'),
             tooltip: history.canRedo ? 'Redo ${history.redoLabel}  ⇧⌥⌘Z' : 'Nothing to redo',
-            icon: const Icon(Icons.redo, size: 18),
+            icon: const Icon(FIcons.redo),
             onPressed: history.canRedo && model.canEdit ? model.redo : null,
           ),
         ],
@@ -636,7 +751,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final folders = model.folders;
     return ListView(
       key: const Key('project.tree'),
-      itemExtent: projectRowHeight,
+      itemExtent: projectRowHeight(context),
       children: [
         _folderRow(context, theme, '', inList: false),
         for (final f in folders) _folderRow(context, theme, f, inList: false),
@@ -644,7 +759,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _folderRow(BuildContext context, ThemeData theme, String rel, {required bool inList}) {
+  Widget _folderRow(BuildContext context, ThemeData theme, String rel, {required bool inList, bool columns = false}) {
     final depth = inList || rel.isEmpty ? 0 : rel.split('/').length;
     final name = rel.isEmpty ? 'assets' : p.basename(rel);
     final current = !inList && rel == model.folder;
@@ -656,6 +771,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
       name: name,
       depth: depth,
       current: current,
+      inList: inList,
+      columns: columns,
       renaming: renaming,
       renameController: renaming ? _rename : null,
       onTap: () {
@@ -667,7 +784,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _assetRow(BuildContext context, ThemeData theme, AssetEntry e) {
+  Widget _assetRow(BuildContext context, ThemeData theme, AssetEntry e, {required bool columns}) {
     final renaming = model.renamingAsset == e.id;
     return _AssetRow(
       key: Key('project.asset.${e.id}'),
@@ -676,6 +793,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       selected: model.isSelected(e.id),
       lead: model.lead == e.id,
       showPath: model.view == BrowserView.list || model.filtering,
+      columns: columns,
       renaming: renaming,
       renameController: renaming ? _rename : null,
       onTap: () => _tap(e),
@@ -685,14 +803,18 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _errorBar(ThemeData theme, String message) {
+  Widget _errorBar(BuildContext context, ThemeData theme, String message) {
+    final t = context.tokens;
     return Container(
       key: const Key('project.error'),
-      color: theme.colorScheme.errorContainer,
-      padding: const EdgeInsets.fromLTRB(8, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: t.surfaceOf(t.error, .22),
+        border: Border(top: t.hairline),
+      ),
+      padding: EdgeInsets.fromLTRB(t.pad, 2, 2, 2),
       child: Row(
         children: [
-          Icon(Icons.error_outline, size: 16, color: theme.colorScheme.onErrorContainer),
+          Icon(FIcons.errorOutline, size: 13, color: t.error),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -702,13 +824,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          IconButton(tooltip: 'Dismiss', icon: const Icon(Icons.close, size: 14), onPressed: model.clearError),
+          IconButton(tooltip: 'Dismiss', iconSize: 12, icon: const Icon(FIcons.close), onPressed: model.clearError),
         ],
       ),
     );
   }
 
-  Widget _status(ThemeData theme, int shown) {
+  Widget _status(BuildContext context, ThemeData theme, int shown) {
     final total = model.entries.length;
     final selected = model.selection.length;
     final where = model.view == BrowserView.list
@@ -721,15 +843,22 @@ class _ProjectPanelState extends State<ProjectPanel> {
       'in $where',
       if (selected > 0) '· $selected selected',
     ].join(' ');
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    final t = context.tokens;
+    return Container(
+      height: t.row + 2,
+      alignment: Alignment.centerLeft,
+      padding: EdgeInsets.symmetric(horizontal: t.pad),
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(top: t.hairline),
+      ),
       child: Row(
         children: [
           if (model.view == BrowserView.folders && model.folder.isNotEmpty)
             InkWell(
               key: const Key('project.up'),
               onTap: model.goUp,
-              child: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.arrow_upward, size: 14)),
+              child: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(FIcons.arrowUpward, size: 13)),
             ),
           Expanded(
             child: Text(
@@ -757,6 +886,8 @@ class _FolderRow extends StatefulWidget {
     required this.name,
     required this.depth,
     required this.current,
+    this.inList = false,
+    this.columns = false,
     required this.renaming,
     required this.renameController,
     required this.onTap,
@@ -769,6 +900,12 @@ class _FolderRow extends StatefulWidget {
   final String name;
   final int depth;
   final bool current;
+
+  /// A row of the list (not the tree): it fills the list's columns.
+  final bool inList;
+
+  /// Contents and Size too (a wide enough panel).
+  final bool columns;
   final bool renaming;
   final TextEditingController? renameController;
   final VoidCallback onTap;
@@ -787,21 +924,21 @@ class _FolderRowState extends State<_FolderRow> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = context.tokens;
+    final focused = PanelFocus.of(context);
     final content = Container(
-      height: projectRowHeight,
+      height: projectRowHeight(context),
       padding: EdgeInsets.only(left: 6.0 + widget.depth * 14),
       decoration: BoxDecoration(
-        color: widget.current
-            ? theme.colorScheme.primaryContainer.withValues(alpha: .7)
-            : (_hot ? theme.colorScheme.primary.withValues(alpha: .15) : null),
-        border: _hot ? Border.all(color: theme.colorScheme.primary) : null,
+        color: widget.current ? t.selectedRow(focused: focused) : (_hot ? t.surfaceOf(t.accent, .2) : null),
+        border: _hot ? Border.all(color: t.accent) : null,
       ),
       child: Row(
         children: [
           Icon(
-            widget.rel.isEmpty ? Icons.home_outlined : (widget.current ? Icons.folder_open : Icons.folder_outlined),
-            size: 16,
-            color: theme.colorScheme.primary,
+            widget.rel.isEmpty ? FIcons.homeOutlined : (widget.current ? FIcons.folderOpen : FIcons.folderOutlined),
+            size: 14,
+            color: widget.current ? t.onSelectedRowSecondary(focused: focused) : t.textSecondary,
           ),
           const SizedBox(width: 6),
           Expanded(
@@ -812,8 +949,36 @@ class _FolderRowState extends State<_FolderRow> {
                     onSubmit: widget.onRenameSubmit,
                     onCancel: widget.model.cancelRename,
                   )
-                : Text(widget.name, style: theme.textTheme.bodyMedium, overflow: TextOverflow.ellipsis),
+                : Text(
+                    widget.name,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: widget.current ? t.onSelectedRow(focused: focused) : t.text,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
           ),
+          if (widget.inList && !widget.renaming) ...[
+            SizedBox(
+              width: _AssetRow.kindWidth,
+              child: Text('folder', style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled)),
+            ),
+            if (widget.columns) ...[
+              SizedBox(
+                width: _AssetRow.contentsWidth,
+                child: Text(
+                  switch (widget.model.folderCount(widget.rel)) {
+                    0 => 'empty',
+                    1 => '1 asset',
+                    final n => '$n assets',
+                  },
+                  key: Key('project.contents.folder.${widget.rel}'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
+                ),
+              ),
+              const SizedBox(width: _AssetRow.sizeWidth),
+            ],
+            const SizedBox(width: _AssetRow.endGap),
+          ],
         ],
       ),
     );
@@ -847,6 +1012,7 @@ class _AssetRow extends StatelessWidget {
     required this.selected,
     required this.lead,
     required this.showPath,
+    required this.columns,
     required this.renaming,
     required this.renameController,
     required this.onTap,
@@ -855,11 +1021,20 @@ class _AssetRow extends StatelessWidget {
     required this.onRenameCancel,
   });
 
+  // The fixed columns, shared with the header and the folder rows.
+  static const kindWidth = 72.0;
+  static const contentsWidth = 70.0;
+  static const sizeWidth = 60.0;
+  static const endGap = 10.0;
+
   final ProjectBrowserModel model;
   final AssetEntry entry;
   final bool selected;
   final bool lead;
   final bool showPath;
+
+  /// Contents and Size too (a wide enough panel).
+  final bool columns;
   final bool renaming;
   final TextEditingController? renameController;
   final VoidCallback onTap;
@@ -875,13 +1050,19 @@ class _AssetRow extends StatelessWidget {
     final kind = browserKindOf(e);
     final stem = ProjectBrowserModel.editableName(e);
     final showName = !e.isSource && e.name.isNotEmpty && e.name != stem;
+    final t = context.tokens;
+    final focused = PanelFocus.of(context);
+    // The lead row in full; the rest of a multi-selection a step quieter.
+    final fill = t.selectedRow(focused: focused);
+    final on = selected ? t.onSelectedRow(focused: focused) : t.text;
+    final dim = selected ? t.onSelectedRowSecondary(focused: focused) : t.textDisabled;
     final content = Container(
-      height: projectRowHeight,
+      height: projectRowHeight(context),
       padding: const EdgeInsets.only(left: 6),
-      color: selected ? theme.colorScheme.primaryContainer.withValues(alpha: lead ? 1 : .6) : null,
+      color: selected ? (lead ? fill : t.surfaceOf(fill, .7)) : null,
       child: Row(
         children: [
-          AssetPreviewWidget(preview: model.preview(e), size: 20),
+          AssetPreviewWidget(preview: model.preview(e), size: t.row - 2),
           const SizedBox(width: 8),
           if (renaming)
             Expanded(
@@ -893,44 +1074,81 @@ class _AssetRow extends StatelessWidget {
               ),
             )
           else ...[
-            Flexible(
-              flex: 3,
-              child: Text(file, style: theme.textTheme.bodyMedium, overflow: TextOverflow.ellipsis),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    flex: 3,
+                    child: Text(
+                      file,
+                      style: theme.textTheme.bodyMedium?.copyWith(color: on),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (showName) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      flex: 2,
+                      child: Text(
+                        '“${e.name}”',
+                        style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                  if (showPath && e.path.contains('/')) ...[
+                    const SizedBox(width: 8),
+                    Flexible(
+                      flex: 3,
+                      child: Text(
+                        e.path.substring(0, e.path.lastIndexOf('/')),
+                        style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ),
-            if (showName) ...[
-              const SizedBox(width: 8),
-              Flexible(
-                flex: 2,
+            SizedBox(
+              width: kindWidth,
+              child: Text(
+                kind,
+                style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (columns) ...[
+              SizedBox(
+                width: contentsWidth,
+                child: e.isSource && e.subAssets.isNotEmpty
+                    ? Tooltip(
+                        message: e.subAssets.keys.join(', '),
+                        child: Text(
+                          e.subAssets.length == 1 ? '1 part' : '${e.subAssets.length} parts',
+                          key: Key('project.contents.${e.id}'),
+                          style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                        ),
+                      )
+                    : null,
+              ),
+              SizedBox(
+                width: sizeWidth,
                 child: Text(
-                  '“${e.name}”',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-                  overflow: TextOverflow.ellipsis,
+                  switch (model.size(e)) {
+                    final n? => formatBytes(n),
+                    null => '',
+                  },
+                  key: Key('project.size.${e.id}'),
+                  textAlign: TextAlign.right,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: dim,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
               ),
             ],
-            if (showPath && e.path.contains('/')) ...[
-              const SizedBox(width: 8),
-              Flexible(
-                flex: 3,
-                child: Text(
-                  e.path.substring(0, e.path.lastIndexOf('/')),
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-            const Spacer(),
-            if (e.isSource && e.subAssets.isNotEmpty)
-              Tooltip(
-                message: e.subAssets.keys.join(', '),
-                child: Text(
-                  '${e.subAssets.length} sub',
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                ),
-              ),
-            const SizedBox(width: 8),
-            Text(kind, style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor)),
-            const SizedBox(width: 8),
+            const SizedBox(width: endGap),
           ],
         ],
       ),

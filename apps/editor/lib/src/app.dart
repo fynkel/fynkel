@@ -24,6 +24,7 @@ import 'inspector/inspector_model.dart';
 import 'inspector/inspector_panel.dart';
 import 'inspector/prefab_actions.dart' as prefab;
 import 'launcher/launcher.dart';
+import 'picker/picker.dart';
 import 'play/game_console.dart';
 import 'play/game_record.dart';
 import 'play/play_prompt.dart';
@@ -32,16 +33,20 @@ import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
 import 'project/editor_project.dart';
 import 'project/migration_dialog.dart';
-import 'project_browser/asset_panel.dart';
 import 'project_browser/project_browser_model.dart';
 import 'project_browser/project_panel.dart';
 import 'scene_view/editor_state.dart';
 import 'scene_view/scene_panel.dart';
 import 'scene_view/scene_view_model.dart';
+import 'shell/editor_selection.dart';
 import 'shell/main_window.dart';
 import 'shell/menu_bar.dart';
+import 'shell/notices.dart';
 import 'shell/panels.dart';
 import 'shell/workspace.dart';
+import 'theme/focus_ring.dart';
+import 'theme/icons.dart';
+import 'theme/theme.dart';
 
 const editorVersion = '0.1.0';
 
@@ -107,16 +112,14 @@ class FynkelEditorApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: prefs,
       builder: (context, _) {
-        ThemeData themeOf(Brightness b) => ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF3B82F6), brightness: b),
-          visualDensity: VisualDensity.compact,
-          useMaterial3: true,
-        );
         return MaterialApp(
           title: 'Fynkel Editor',
           debugShowCheckedModeBanner: false,
-          theme: themeOf(Brightness.light),
-          darkTheme: themeOf(Brightness.dark),
+          // A theme or density change lands at once, like everything else.
+          themeAnimationDuration: Duration.zero,
+          builder: (context, child) => FocusRingLayer(child: child ?? const SizedBox.shrink()),
+          theme: fynkelTheme(brightness: Brightness.light, density: prefs.density),
+          darkTheme: fynkelTheme(brightness: Brightness.dark, density: prefs.density),
           themeMode: switch (prefs.theme) {
             EditorTheme.system => ThemeMode.system,
             EditorTheme.light => ThemeMode.light,
@@ -187,12 +190,47 @@ class EditorShellState extends State<EditorShell> {
   PlaySession? play;
   GameConsoleModel? gameConsole;
   DocumentTabs? tabs;
-  HierarchyModel? hierarchy;
-  InspectorModel? inspector;
   CodegenCheck? codegen;
-  ProjectBrowserModel? browser;
-  SceneViewModel? scene;
   EditorState? editorState;
+
+  // Item 9e: the Hierarchy, the Inspector, the Project browser and the
+  // Scene view can be open more than once. Each copy has its own model, by
+  // the copy's id (`inspector`, `inspector#2`, …); a first copy's model
+  // lives as long as the project, another copy's as long as its panel.
+  final _hierarchies = <String, HierarchyModel>{};
+  final _inspectors = <String, InspectorModel>{};
+
+  /// What each Inspector copy shows (item 9c): entities, an asset, a part, a folder.
+  final _selections = <String, EditorSelection>{};
+  final _browsers = <String, ProjectBrowserModel>{};
+  final _scenes = <String, SceneViewModel>{};
+
+  /// The padlocks the tabs last drew, so a tab redraws only when one moved.
+  final _locksSeen = <String, bool>{};
+
+  /// The Hierarchy operations the Scene views run (drop a prefab, Delete):
+  /// always on the focused tab, whatever a Hierarchy copy is locked to.
+  HierarchyModel? _sceneOps;
+  SceneViews? _sceneViews;
+
+  // The copy commands address: the one that had the keyboard last.
+  HierarchyModel? get hierarchy => _active(_hierarchies, PanelRegistry.hierarchy);
+  InspectorModel? get inspector => _active(_inspectors, PanelRegistry.inspector);
+  EditorSelection? get selection => _active(_selections, PanelRegistry.inspector);
+  ProjectBrowserModel? get browser => _active(_browsers, PanelRegistry.project);
+  SceneViewModel? get scene => _active(_scenes, PanelRegistry.scene);
+
+  // A copy's models by its id (tests).
+  @visibleForTesting
+  HierarchyModel? hierarchyOf(String id) => _hierarchies[id];
+  @visibleForTesting
+  EditorSelection? selectionOf(String id) => _selections[id];
+  @visibleForTesting
+  ProjectBrowserModel? browserOf(String id) => _browsers[id];
+  @visibleForTesting
+  SceneViewModel? sceneOf(String id) => _scenes[id];
+
+  T? _active<T>(Map<String, T> models, String base) => models[workspace?.activeCopy(base) ?? base] ?? models[base];
   final consoleSearchFocus = FocusNode(debugLabel: 'console.search');
   final gameSearchFocus = FocusNode(debugLabel: 'console.game.search');
 
@@ -203,7 +241,10 @@ class EditorShellState extends State<EditorShell> {
   final projectSearchFocus = FocusNode(debugLabel: 'project.search');
   late IdeLauncher ide;
   String? _layoutNotice;
-  String? _openError;
+
+  /// The status bar's message line (the launcher's strip before a project
+  /// is open): what a Material app would show as a snackbar.
+  final notices = Notices();
   bool _opening = false;
 
   @override
@@ -213,21 +254,24 @@ class EditorShellState extends State<EditorShell> {
     _panels = PanelRegistry(_panelSpecs());
     _registerCommands();
     widget.prefs.addListener(_onPrefsChanged);
-    _detect();
+    final detected = _detect();
+    // A project named at launch opens once the tools are known: its open runs
+    // the codegen check, which needs the CLI the detection is still finding.
     final initial = widget.initialProject;
-    if (initial != null) WidgetsBinding.instance.addPostFrameCallback((_) => openProjectDir(initial));
+    if (initial != null) {
+      detected.then((_) {
+        if (mounted) openProjectDir(initial);
+      });
+    }
   }
 
   @override
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
     workspace?.dispose();
-    scene?.dispose();
+    _disposeCopies();
     editorState?.dispose();
-    inspector?.dispose();
     codegen?.dispose();
-    browser?.dispose();
-    hierarchy?.dispose();
     tabs?.dispose();
     project?.removeListener(_onProjectChanged);
     project?.close();
@@ -239,6 +283,7 @@ class EditorShellState extends State<EditorShell> {
     hierarchySearchFocus.dispose();
     projectSearchFocus.dispose();
     registry.dispose();
+    notices.dispose();
     super.dispose();
   }
 
@@ -258,15 +303,17 @@ class EditorShellState extends State<EditorShell> {
     PanelSpec(
       id: PanelRegistry.hierarchy,
       title: 'Hierarchy',
-      icon: Icons.account_tree_outlined,
+      icon: FIcons.accountTreeOutlined,
       home: PanelHome.left,
-      builder: (_) {
-        final h = hierarchy;
+      copies: true,
+      locked: _isLocked,
+      builder: (_, id) {
+        final h = _hierarchies[id];
         if (h == null) return const SizedBox.shrink();
         return HierarchyPanel(
           model: h,
           onOpenDocument: openDocumentDialog,
-          searchFocus: hierarchySearchFocus,
+          searchFocus: PanelIds.number(id) == 1 ? hierarchySearchFocus : null,
           commands: registry,
         );
       },
@@ -274,10 +321,12 @@ class EditorShellState extends State<EditorShell> {
     PanelSpec(
       id: PanelRegistry.scene,
       title: 'Scene',
-      icon: Icons.view_in_ar_outlined,
+      icon: FIcons.viewInArOutlined,
+      fullTitle: 'Scene View',
       home: PanelHome.center,
-      builder: (_) {
-        final s = scene;
+      copies: true,
+      builder: (_, id) {
+        final s = _scenes[id];
         if (s == null) return const SizedBox.shrink();
         return ScenePanel(model: s, showViewport: widget.sceneViewport);
       },
@@ -285,37 +334,49 @@ class EditorShellState extends State<EditorShell> {
     PanelSpec(
       id: PanelRegistry.inspector,
       title: 'Inspector',
-      icon: Icons.tune,
+      icon: FIcons.tune,
       home: PanelHome.right,
-      builder: (_) {
-        final i = inspector;
+      copies: true,
+      locked: _isLocked,
+      builder: (_, id) {
+        final i = _inspectors[id];
         if (i == null) return const SizedBox.shrink();
-        return InspectorPanel(model: i);
+        return InspectorPanel(
+          model: i,
+          selection: _selections[id],
+          browser: _browsers[PanelRegistry.project],
+          onOpenDocument: openDocument,
+          onOpenReference: openReference,
+          run: widget.run,
+        );
       },
     ),
     PanelSpec(
       id: PanelRegistry.project,
       title: 'Project',
-      icon: Icons.folder_outlined,
+      icon: FIcons.folderOutlined,
+      fullTitle: 'Project Browser',
       home: PanelHome.bottom,
-      builder: (_) {
-        final b = browser;
+      copies: true,
+      locked: _isLocked,
+      builder: (_, id) {
+        final b = _browsers[id];
         if (b == null) return const SizedBox.shrink();
         return ProjectPanel(
           model: b,
           onOpenDocument: openDocument,
-          onShowAsset: showAssetPanel,
+          onShowAsset: showAssetInInspector,
           run: widget.run,
-          searchFocus: projectSearchFocus,
+          searchFocus: PanelIds.number(id) == 1 ? projectSearchFocus : null,
         );
       },
     ),
     PanelSpec(
       id: PanelRegistry.console,
       title: 'Console',
-      icon: Icons.terminal,
+      icon: FIcons.terminal,
       home: PanelHome.bottom,
-      builder: (_) {
+      builder: (_, _) {
         final c = console;
         if (c == null) return const SizedBox.shrink();
         return ConsolePanel(
@@ -333,33 +394,22 @@ class EditorShellState extends State<EditorShell> {
     PanelSpec(
       id: PanelRegistry.profiler,
       title: 'Profiler',
-      icon: Icons.speed,
+      icon: FIcons.speed,
       home: PanelHome.bottom,
-      builder: (_) =>
-          const ComingPanel(title: 'Profiler', item: 9, what: 'Frame time, ticks, bridge bytes.', icon: Icons.speed),
+      builder: (_, _) =>
+          const ComingPanel(title: 'Profiler', item: 9, what: 'Frame time, ticks, bridge bytes.', icon: FIcons.speed),
     ),
     PanelSpec(
       id: PanelRegistry.animation,
       title: 'Animation',
-      icon: Icons.animation,
+      icon: FIcons.animation,
       home: PanelHome.bottom,
-      builder: (_) => const ComingPanel(
+      builder: (_, _) => const ComingPanel(
         title: 'Animation',
         item: 6,
         what: 'Clips and the pose of the selection.',
-        icon: Icons.animation,
+        icon: FIcons.animation,
       ),
-    ),
-    PanelSpec(
-      id: PanelRegistry.import,
-      title: 'Asset',
-      icon: Icons.inventory_2_outlined,
-      home: PanelHome.bottom,
-      builder: (_) {
-        final b = browser;
-        if (b == null) return const SizedBox.shrink();
-        return AssetPanel(model: b, onOpenDocument: openDocument, onOpenReference: openReference, run: widget.run);
-      },
     ),
   ];
 
@@ -797,7 +847,7 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'assets.open',
         baseLabel: 'Open Asset',
-        description: 'The selected scene or prefab into a tab; any other asset into the Asset panel',
+        description: 'The selected scene or prefab into a tab; any other asset into the Inspector',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyO, shift: true, alt: true),
         group: 4,
@@ -809,7 +859,7 @@ class EditorShellState extends State<EditorShell> {
           if (a.document == 'scene' || a.document == 'prefab') {
             openDocument(a.id);
           } else {
-            showAssetPanel();
+            showAssetInInspector();
           }
         },
       ),
@@ -863,7 +913,7 @@ class EditorShellState extends State<EditorShell> {
         run: () {
           final a = _leadAsset;
           if (a == null) return;
-          showAssetPanel();
+          showAssetInInspector();
           final r = browser?.reimport(a.id);
           if (r != null && !r.ok) _showError('Reimport refused: ${r.diagnostics.map((d) => d.message).join('; ')}');
         },
@@ -1271,13 +1321,32 @@ class EditorShellState extends State<EditorShell> {
         EditorCommand(
           id: 'window.panel.$id',
           baseLabel: 'Toggle ${_panels.byId(id)!.title}',
-          labelBuilder: () => '${workspace?.isVisible(id) ?? true ? 'Hide' : 'Show'} ${_panels.byId(id)!.title}',
+          labelBuilder: () => '${workspace?.isShown(id) ?? true ? 'Hide' : 'Show'} ${_panels.byId(id)!.title}',
           menu: EditorMenu.window,
           shortcut: k(_digit(i + 1), alt: true),
           group: 2,
           order: i,
           enabled: () => _hasProject,
           run: () => togglePanel(id),
+        ),
+      for (final (i, id) in copyablePanels.indexed)
+        EditorCommand(
+          id: 'window.newCopy.$id',
+          baseLabel: 'New ${_panels.byId(id)!.name}',
+          description:
+              'Another ${_panels.byId(id)!.name} beside the one used last, with its own ${switch (id) {
+                PanelRegistry.inspector => 'selection and padlock',
+                PanelRegistry.project => 'folder and padlock',
+                PanelRegistry.hierarchy => 'padlock',
+                _ => 'camera',
+              }}',
+          menu: EditorMenu.window,
+          // ⇧ with the panel's own Show / Hide: ⇧⌥⌘1 a new Hierarchy.
+          shortcut: k(_digit(PanelRegistry.defaultOrder.indexOf(id) + 1), alt: true, shift: true),
+          group: 4,
+          order: i,
+          enabled: () => _hasProject,
+          run: () => newPanelCopy(id),
         ),
       EditorCommand(
         id: 'console.focusSearch',
@@ -1392,6 +1461,7 @@ class EditorShellState extends State<EditorShell> {
       return;
     }
     final created = await showDialog<String>(
+      animationStyle: AnimationStyle.noAnimation,
       context: context,
       builder: (_) => NewProjectDialog(toolchain: tc, chooseDirectory: widget.chooseDirectory, run: widget.run),
     );
@@ -1410,12 +1480,9 @@ class EditorShellState extends State<EditorShell> {
       await project?.close();
       project?.removeListener(_onProjectChanged);
       workspace?.dispose();
-      scene?.dispose();
+      _disposeCopies();
       editorState?.dispose();
-      inspector?.dispose();
       codegen?.dispose();
-      browser?.dispose();
-      hierarchy?.dispose();
       tabs?.dispose();
       final ws = Workspace(registry: _panels, store: widget.layoutStore);
       final t = DocumentTabs(project: opened);
@@ -1429,43 +1496,36 @@ class EditorShellState extends State<EditorShell> {
         cli: () => toolchain?.fynkelCli,
         repoRoot: () => toolchain?.fynkelRoot,
       );
-      final ins = InspectorModel(tabs: t, project: opened, codegen: cg, openInIde: ide.open);
-      final b = ProjectBrowserModel(project: opened);
-      ins.revealAsset = (asset, sub) {
-        workspace?.show(PanelRegistry.project);
-        b.reveal(asset);
-      };
       final es = EditorState.load(opened.dir);
-      final sv = SceneViewModel(
-        tabs: t,
-        project: opened,
-        hierarchy: h,
-        editorState: es,
-        chooseSavePath: widget.chooseSavePath,
-      );
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
       ps.addListener(registry.refresh);
       t.addListener(_onTabsChanged);
-      h.addListener(registry.refresh);
-      ins.addListener(registry.refresh);
-      b.addListener(registry.refresh);
-      sv.addListener(registry.refresh);
       gameConsole?.dispose();
       play?.dispose();
+      project = opened;
+      tabs = t;
+      codegen = cg;
+      editorState = es;
+      _sceneOps = h;
+      _sceneViews = SceneViews();
+      // The first copies, then any other the saved layout has.
+      for (final base in _creationOrder) {
+        _newCopyModel(base);
+      }
+      workspace = ws;
+      _syncCopies();
+      ws.addListener(_syncCopies);
+      ws.focusedPanel.addListener(_onPanelFocused);
       setState(() {
         project = opened;
         workspace = ws;
         play = ps;
         gameConsole = gc;
         tabs = t;
-        hierarchy = h;
-        inspector = ins;
         codegen = cg;
-        browser = b;
         console = c;
         editorState = es;
-        scene = sv;
         _layoutNotice = ws.restoreProblem == null
             ? null
             : 'The saved layout was replaced by the default: ${ws.restoreProblem}.';
@@ -1474,8 +1534,8 @@ class EditorShellState extends State<EditorShell> {
               '${_layoutNotice ?? ''}${_layoutNotice == null ? '' : ' '}'
               '.fynkel/editor.json did not parse and starts fresh: ${es.loadProblem}.';
         }
-        _openError = null;
       });
+      notices.dismiss(); // a launcher error is about the project that did not open
       widget.prefs.addRecent(opened.dir, opened.name);
       registry.refresh();
       // A project with Dart behaviours gets its codegen check once at open, in the background.
@@ -1620,18 +1680,13 @@ class EditorShellState extends State<EditorShell> {
       if (path != null) {
         final tab = openDocument(path);
         if (tab != null) {
-          workspace?.show(PanelRegistry.hierarchy);
-          final id = record.id ?? RegExp(r'^/entities/([^/]+)').firstMatch(record.pointer ?? '')?.group(1);
-          if (id != null) hierarchy?.revealAndSelect(id);
+          _revealEntity(tab, record.id ?? RegExp(r'^/entities/([^/]+)').firstMatch(record.pointer ?? '')?.group(1));
           return;
         }
       }
     }
     final id = record.id;
-    if (id != null && opened.assetExists(id)) {
-      workspace?.show(PanelRegistry.project);
-      browser?.reveal(id);
-    }
+    if (id != null && opened.assetExists(id)) revealInProject(id);
   }
 
   /// Closes the project; every dirty tab gets its save prompt first, and a
@@ -1645,32 +1700,23 @@ class EditorShellState extends State<EditorShell> {
     }
     workspace?.save();
     closing.removeListener(_onProjectChanged);
-    final h = hierarchy;
     final t = tabs;
-    final ins = inspector;
     final cg = codegen;
-    final b = browser;
-    final sv = scene;
     final es = editorState;
+    final ws = workspace;
+    ws?.removeListener(_syncCopies);
     setState(() {
       project = null;
       console = null;
-      hierarchy = null;
-      inspector = null;
       codegen = null;
-      browser = null;
       tabs = null;
-      scene = null;
       editorState = null;
-      workspace?.dispose();
       workspace = null;
     });
-    sv?.dispose();
+    ws?.dispose();
+    _disposeCopies();
     es?.dispose();
-    ins?.dispose();
     cg?.dispose();
-    b?.dispose();
-    h?.dispose();
     t?.dispose();
     await closing.close();
     registry.refresh();
@@ -1678,10 +1724,10 @@ class EditorShellState extends State<EditorShell> {
 
   // ── Documents ───────────────────────────────────────────────────────────
 
-  Future<void> openDocumentDialog() async {
+  Future<void> openDocumentDialog({Rect? anchor}) async {
     final pr = project;
     if (pr == null) return;
-    final asset = await showOpenDocumentDialog(context, pr);
+    final asset = await showOpenDocumentDialog(context, pr, anchor: anchor);
     if (asset == null) return;
     openDocument(asset.id);
   }
@@ -1702,16 +1748,64 @@ class EditorShellState extends State<EditorShell> {
     if (doc == null) return;
     final tab = openDocument(doc);
     if (tab == null) return;
-    workspace?.show(PanelRegistry.hierarchy);
-    final id = d.id ?? RegExp(r'^/entities/([^/]+)').firstMatch(d.pointer ?? '')?.group(1);
-    if (id != null) hierarchy?.revealAndSelect(id);
+    _revealEntity(tab, d.id ?? RegExp(r'^/entities/([^/]+)').firstMatch(d.pointer ?? '')?.group(1));
   }
 
   // ── Assets ──────────────────────────────────────────────────────────────
 
-  void showAssetPanel() {
-    workspace?.show(PanelRegistry.import);
+  /// The browser's lead asset in the Inspector (Open Asset on a
+  /// non-document, Show in Inspector, Reimport), the Inspector brought
+  /// forward: the copy used last that is not locked — a new one when every
+  /// copy is (item 9e: a lock is never broken from outside the panel).
+  void showAssetInInspector() {
+    final ws = workspace;
+    if (ws == null) return;
+    final lead = browser?.lead;
+    final id = _unlockedCopy(PanelRegistry.inspector);
+    if (lead != null) _selections[id]?.inspect(InspectAsset(lead));
+    ws.show(id);
     registry.refresh();
+  }
+
+  /// "Show in Project" — a Game row, a "Used by" row, an asset slot's arrow:
+  /// the asset revealed in the Project browser copy used last that is not
+  /// locked; a new copy opens when every copy is locked.
+  void revealInProject(String assetId) {
+    final ws = workspace;
+    if (ws == null) return;
+    final id = _unlockedCopy(PanelRegistry.project);
+    ws.show(id);
+    _browsers[id]?.reveal(assetId);
+  }
+
+  /// The copy of [base] an explicit request goes to: the one used last that
+  /// is not locked, shown if hidden; else a new copy.
+  String _unlockedCopy(String base) {
+    final ws = workspace!;
+    final free = ws.copiesByRecency(base).where((id) => !_isLocked(id)).firstOrNull;
+    if (free != null) return free;
+    if (!ws.isShown(base) && !_isLocked(base)) return base;
+    if (!ws.isShown(base)) ws.show(base);
+    return ws.openCopy(base) ?? base;
+  }
+
+  /// [tab]'s entity [id] selected and scrolled to in a Hierarchy showing
+  /// [tab]: the copy used last when it does, else another that does (an
+  /// unlocked copy follows the focused tab); a new copy opens when every
+  /// copy is locked to another document.
+  void _revealEntity(OpenDocument tab, String? id) {
+    final ws = workspace;
+    if (ws == null) return;
+    const base = PanelRegistry.hierarchy;
+    var target = ws.copiesByRecency(base).where((c) => _hierarchies[c]?.tab == tab).firstOrNull;
+    target ??= (!ws.isShown(base) && _hierarchies[base]?.tab == tab) ? base : null;
+    if (target == null) {
+      // Every copy is locked to another document.
+      if (!ws.isShown(base)) ws.show(base);
+      target = ws.openCopy(base) ?? base;
+    }
+    ws.show(target);
+    if (id != null) _hierarchies[target]?.revealAndSelect(id);
   }
 
   void _newAsset(String kind) {
@@ -1726,6 +1820,7 @@ class EditorShellState extends State<EditorShell> {
     final ids = b.selection.toList();
     final folders = ['', ...b.folders];
     final chosen = await showDialog<String>(
+      animationStyle: AnimationStyle.noAnimation,
       context: context,
       builder: (context) => SimpleDialog(
         key: const Key('project.moveTo'),
@@ -1745,7 +1840,7 @@ class EditorShellState extends State<EditorShell> {
     if (chosen != null) b.move(ids, chosen);
   }
 
-  /// A "Referenced by" row of the Asset panel: a scene or prefab opens at
+  /// A "Used by" row of an asset's Inspector page: a scene or prefab opens at
   /// the entity the pointer names; a material is shown in the browser.
   void openReference(String documentPath, String? pointer) {
     final b = browser;
@@ -1755,12 +1850,9 @@ class EditorShellState extends State<EditorShell> {
     if (target.document == 'scene' || target.document == 'prefab') {
       final tab = openDocument(target.id);
       if (tab == null) return;
-      workspace?.show(PanelRegistry.hierarchy);
-      final id = RegExp(r'^/entities/([^/]+)').firstMatch(pointer ?? '')?.group(1);
-      if (id != null) hierarchy?.revealAndSelect(id);
+      _revealEntity(tab, RegExp(r'^/entities/([^/]+)').firstMatch(pointer ?? '')?.group(1));
     } else {
-      b.reveal(target.id);
-      workspace?.show(PanelRegistry.project);
+      revealInProject(target.id);
     }
   }
 
@@ -1838,30 +1930,242 @@ class EditorShellState extends State<EditorShell> {
     }
   }
 
+  /// Create Entity with Component, through the shared picker (item 9d): the
+  /// authorable native components, grouped like Add Component; one without
+  /// defaults is shown and cannot be chosen.
   Future<void> createWithDialog() async {
     final h = hierarchy;
-    if (h == null || !h.canEdit) return;
+    final pr = project;
+    if (h == null || pr == null || !h.canEdit) return;
     final types = h.nativeComponentTypes.where((c) => c.type != 'fynkel.Transform').toList();
-    final type = await showDialog<String>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        key: const Key('dialog.createWith'),
-        title: const Text('Create Entity with…'),
-        children: [
-          for (final c in types)
-            SimpleDialogOption(
-              key: Key('createWith.${c.type}'),
-              onPressed: () => Navigator.pop(context, c.type),
-              child: Text(c.type),
+    final choice = await showPicker<String>(
+      context,
+      title: 'Create Entity with Component',
+      hint: 'Search components',
+      keyPrefix: 'createWith',
+      countNoun: 'components',
+      items: [
+        for (final c in types)
+          if (inspector?.specFor(c.type) case final spec?)
+            PickerItem(
+              value: c.type,
+              id: c.type,
+              title: spec.title,
+              group: spec.category ?? 'Engine',
+              icon: componentIcon(spec),
+              enabled: pr.componentDefaults(c.type) != null,
+              note: pr.componentDefaults(c.type) == null ? 'no defaults' : null,
+              keywords: c.type,
+              facts: [('Type', c.type)],
+              description: spec.description,
             ),
-        ],
-      ),
+      ],
     );
-    if (type != null) h.createWith(type);
+    if (choice == null || choice.isNone) return;
+    h.createWith(choice.value);
   }
 
   void togglePanel(String id) {
     workspace?.toggle(id);
+    registry.refresh();
+  }
+
+  // ── Panel copies (item 9e) ──────────────────────────────────────────────
+
+  /// The panels that can be open more than once, in the Window menu's order.
+  static const copyablePanels = [
+    PanelRegistry.hierarchy,
+    PanelRegistry.scene,
+    PanelRegistry.inspector,
+    PanelRegistry.project,
+  ];
+
+  /// The order copies' models are made in: the Project browsers before the
+  /// Inspectors (an Inspector follows every browser and recalls its lock
+  /// through one).
+  static const _creationOrder = [
+    PanelRegistry.hierarchy,
+    PanelRegistry.project,
+    PanelRegistry.inspector,
+    PanelRegistry.scene,
+  ];
+
+  /// Window ▸ New Inspector (and the tab menu's): another copy beside the
+  /// one used last.
+  void newPanelCopy(String base) {
+    workspace?.openCopy(base);
+    registry.refresh();
+  }
+
+  bool _isLocked(String id) => switch (PanelIds.base(id)) {
+    PanelRegistry.inspector => _selections[id]?.locked ?? false,
+    PanelRegistry.project => _browsers[id]?.locked ?? false,
+    PanelRegistry.hierarchy => _hierarchies[id]?.locked ?? false,
+    _ => false,
+  };
+
+  /// The models of copy [id] of a copyable panel, wired like the first's.
+  void _newCopyModel(String id) {
+    final opened = project!;
+    final t = tabs!;
+    final es = editorState!;
+    switch (PanelIds.base(id)) {
+      case PanelRegistry.hierarchy:
+        final h = HierarchyModel(tabs: t, project: opened);
+        h.addListener(() => _onCopyChanged(id));
+        _hierarchies[id] = h;
+      case PanelRegistry.inspector:
+        final ins = InspectorModel(tabs: t, project: opened, codegen: codegen!, openInIde: ide.open);
+        ins.revealAsset = (asset, sub) => revealInProject(asset);
+        // A preview depends on the asset only; any browser draws it.
+        ins.assetPreview = (asset) => _browsers.values.first.preview(asset);
+        final sel = EditorSelection(inspector: ins);
+        for (final b in _browsers.values) {
+          sel.addBrowser(b);
+        }
+        sel.recall(es.panel(id));
+        ins.addListener(registry.refresh);
+        sel.addListener(() => _onCopyChanged(id));
+        _inspectors[id] = ins;
+        _selections[id] = sel;
+      case PanelRegistry.project:
+        final b = ProjectBrowserModel(project: opened);
+        b.recall(es.panel(id));
+        for (final sel in _selections.values) {
+          sel.addBrowser(b);
+        }
+        b.addListener(() => _onCopyChanged(id));
+        _browsers[id] = b;
+      case PanelRegistry.scene:
+        final sv = SceneViewModel(
+          tabs: t,
+          project: opened,
+          hierarchy: _sceneOps!,
+          editorState: es,
+          chooseSavePath: widget.chooseSavePath,
+          view: id,
+          views: _sceneViews,
+        );
+        sv.addListener(registry.refresh);
+        _scenes[id] = sv;
+    }
+  }
+
+  /// A copy's model changed: commands re-check, its tab redraws when its
+  /// padlock moved, and what it remembers is written (an Inspector's lock,
+  /// a Project browser's folder).
+  void _onCopyChanged(String id) {
+    registry.refresh();
+    final locked = _isLocked(id);
+    if (_locksSeen[id] != locked) {
+      _locksSeen[id] = locked;
+      workspace?.refreshTabs();
+    }
+    final es = editorState;
+    if (es == null) return;
+    switch (PanelIds.base(id)) {
+      case PanelRegistry.inspector:
+        es.setPanel(id, _selections[id]?.remembered);
+      case PanelRegistry.project:
+        es.setPanel(id, _browsers[id]?.remembered);
+    }
+  }
+
+  /// The layout changed: a copy that appeared gets its models, a copy that
+  /// closed loses them and what it remembered (its cameras too). First
+  /// copies keep theirs while the project is open.
+  void _syncCopies() {
+    final ws = workspace;
+    final es = editorState;
+    if (ws == null || es == null || project == null) return;
+    for (final base in _creationOrder) {
+      final shown = ws.copiesOf(base).toSet();
+      for (final id in shown) {
+        if (PanelIds.number(id) > 1 && !_hasModel(id)) _newCopyModel(id);
+      }
+      for (final id in [..._copyIds(base)]) {
+        if (PanelIds.number(id) > 1 && !shown.contains(id)) {
+          _disposeCopy(id);
+          es.setPanel(id, null);
+          if (base == PanelRegistry.scene) es.forgetView(id);
+        }
+      }
+    }
+  }
+
+  bool _hasModel(String id) =>
+      _hierarchies.containsKey(id) ||
+      _inspectors.containsKey(id) ||
+      _browsers.containsKey(id) ||
+      _scenes.containsKey(id);
+
+  Iterable<String> _copyIds(String base) => switch (base) {
+    PanelRegistry.hierarchy => _hierarchies.keys,
+    PanelRegistry.inspector => _inspectors.keys,
+    PanelRegistry.project => _browsers.keys,
+    _ => _scenes.keys,
+  };
+
+  /// Drops copy [id]'s models after the frame that unmounts its panel.
+  void _disposeCopy(String id) {
+    final h = _hierarchies.remove(id);
+    final ins = _inspectors.remove(id);
+    final sel = _selections.remove(id);
+    final b = _browsers.remove(id);
+    final sv = _scenes.remove(id);
+    _locksSeen.remove(id);
+    if (b != null) {
+      for (final other in _selections.values) {
+        other.removeBrowser(b);
+      }
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      sv?.dispose();
+      sel?.dispose();
+      ins?.dispose();
+      b?.dispose();
+      h?.dispose();
+    });
+  }
+
+  /// Every copy's models, the Scene views first (they use the Hierarchy
+  /// operations) — the project is closing.
+  void _disposeCopies() {
+    for (final sv in _scenes.values) {
+      sv.dispose();
+    }
+    for (final sel in _selections.values) {
+      sel.dispose();
+    }
+    for (final m in [..._inspectors.values, ..._browsers.values, ..._hierarchies.values]) {
+      m.dispose();
+    }
+    _scenes.clear();
+    _selections.clear();
+    _inspectors.clear();
+    _browsers.clear();
+    _hierarchies.clear();
+    _locksSeen.clear();
+    _sceneOps?.dispose();
+    _sceneOps = null;
+    _sceneViews = null;
+  }
+
+  /// A panel copy took the keyboard. Every unlocked Inspector shows that
+  /// panel's selection again (a click back in the Hierarchy after browsing
+  /// assets); a Hierarchy locked to a document in the background brings
+  /// that document forward — what you work on is what the Scene view and
+  /// the Inspector show.
+  void _onPanelFocused() {
+    final id = workspace?.focusedPanel.value;
+    if (id == null) return;
+    final base = PanelIds.base(id);
+    final h = _hierarchies[id];
+    final t = tabs;
+    if (h != null && h.locked && t != null && h.tab != null && h.tab != t.focused) t.focus(h.tab);
+    for (final sel in _selections.values) {
+      sel.panelFocused(base, from: _browsers[id]);
+    }
     registry.refresh();
   }
 
@@ -1884,20 +2188,21 @@ class EditorShellState extends State<EditorShell> {
   );
 
   void showAbout() {
-    showAboutDialog(
+    showDialog<void>(
       context: context,
-      applicationName: 'Fynkel Editor',
-      applicationVersion: 'version $editorVersion · authoring ABI v$authoringAbiVersion',
-      applicationLegalese:
-          'The editor never runs game code; a game\'s runtime carries no editor code (ADR-0016, ADR-0018).',
+      animationStyle: AnimationStyle.noAnimation,
+      builder: (_) => const AboutDialog(
+        applicationName: 'Fynkel Editor',
+        applicationVersion: 'version $editorVersion · authoring ABI v$authoringAbiVersion',
+        applicationLegalese:
+            'The editor never runs game code; a game\'s runtime carries no editor code (ADR-0016, ADR-0018).',
+      ),
     );
   }
 
   void _showError(String message) {
     if (!mounted) return;
-    setState(() => _openError = message);
-    ScaffoldMessenger.maybeOf(context)
-        ?.showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 8)));
+    notices.show(message);
   }
 
   // ── Build ───────────────────────────────────────────────────────────────
@@ -1923,7 +2228,7 @@ class EditorShellState extends State<EditorShell> {
         workspace: workspace!,
         tabBar: DocumentTabBar(
           tabs: tabs!,
-          onOpen: openDocumentDialog,
+          onOpen: (anchor) => openDocumentDialog(anchor: anchor),
           onClose: closeTab,
           onSaveAs: saveTabAs,
           onShowConflict: resolveConflict,
@@ -1936,6 +2241,17 @@ class EditorShellState extends State<EditorShell> {
         onStop: stopPlaying,
         onClose: closeProject,
         onRevalidate: p0.revalidate,
+        onReveal: () => registry.execute('project.reveal'),
+        onCommandPalette: showPalette,
+        recents: widget.prefs.recents,
+        onOpenProject: openProjectDialog,
+        onOpenRecent: openProjectDir,
+        codegen: codegen,
+        codegenDrift: () {
+          final i = inspector;
+          return i != null && i.hasMetadata ? i.committedDrift.length : 0;
+        },
+        onCheckCodegen: () => codegen?.check(),
         onMigrationPreview: () => showMigrationPreview(context, p0),
         layoutNotice: _layoutNotice,
         onDismissNotice: () => setState(() => _layoutNotice = null),
@@ -1952,23 +2268,16 @@ class EditorShellState extends State<EditorShell> {
             child: EditorMenuBar(
               registry: registry,
               native: widget.nativeMenuBar,
-              child: Stack(
-                children: [
-                  Positioned.fill(child: body),
-                  if (_openError != null && p0 == null)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: MaterialBanner(
-                        key: const Key('shell.error'),
-                        content: Text(_openError!),
-                        actions: [
-                          TextButton(onPressed: () => setState(() => _openError = null), child: const Text('Dismiss')),
+              child: NoticesScope(
+                notices: notices,
+                child: p0 == null || workspace == null
+                    ? Column(
+                        children: [
+                          Expanded(child: body),
+                          NoticeStrip(key: const Key('shell.error'), notices: notices),
                         ],
-                      ),
-                    ),
-                ],
+                      )
+                    : body,
               ),
             ),
           ),

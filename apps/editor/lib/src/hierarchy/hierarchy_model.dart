@@ -9,6 +9,8 @@
 // of the `addObject` that added it), Create Empty Child an `addObject`
 // override, Rename only for an added object (its `addObject` re-issued);
 // derived entities are never duplicated, dragged or drop targets.
+// Item 9e: the padlock keeps a Hierarchy on one document while another tab
+// is focused (a second Hierarchy copy locked to a prefab beside the scene).
 import 'package:flutter/foundation.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
@@ -71,8 +73,22 @@ final class HierarchyModel extends ChangeNotifier {
 
   HierarchyFilter get filter => _tab?.tree.filter ?? const HierarchyFilter();
 
+  // ── The padlock (item 9e) ────────────────────────────────────────────
+
+  OpenDocument? _pinned;
+
+  /// Showing one document whatever tab is focused; its close lets go.
+  bool get locked => _pinned != null;
+
+  void setLocked(bool on) {
+    if (on == locked || (on && _tab == null)) return;
+    _pinned = on ? _tab : null;
+    _onTabs();
+  }
+
   void _onTabs() {
-    final f = tabs.focused;
+    if (_pinned != null && !tabs.open.contains(_pinned)) _pinned = null;
+    final f = _pinned ?? tabs.focused;
     if (f != _tab) {
       _tab?.removeListener(_onTab);
       _tab = f;

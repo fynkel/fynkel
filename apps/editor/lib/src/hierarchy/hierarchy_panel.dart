@@ -11,10 +11,16 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../commands/commands.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
+import '../theme/icons.dart';
+import '../theme/lock_button.dart';
+import '../theme/panel_focus.dart';
+import '../theme/tokens.dart';
 import 'hierarchy_model.dart';
 import 'hierarchy_tree.dart';
 
-const hierarchyRowHeight = 24.0;
+/// One tree row, from the density preference (item 9a) — the scroll math,
+/// the list's `itemExtent` and the row itself all measure with this.
+double hierarchyRowHeight(BuildContext context) => context.tokens.row;
 
 class HierarchyPanel extends StatefulWidget {
   const HierarchyPanel({super.key, required this.model, required this.onOpenDocument, this.searchFocus, this.commands});
@@ -94,13 +100,14 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     if (t == null || !_scroll.hasClients) return;
     final i = t.rowIndexOf(id);
     if (i < 0) return;
-    final top = i * hierarchyRowHeight;
+    final h = hierarchyRowHeight(context);
+    final top = i * h;
     final viewTop = _scroll.offset;
     final viewBottom = viewTop + _scroll.position.viewportDimension;
     if (top < viewTop) {
       _scroll.jumpTo(top);
-    } else if (top + hierarchyRowHeight > viewBottom) {
-      _scroll.jumpTo(top + hierarchyRowHeight - _scroll.position.viewportDimension);
+    } else if (top + h > viewBottom) {
+      _scroll.jumpTo(top + h - _scroll.position.viewportDimension);
     }
   }
 
@@ -150,20 +157,32 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = context.tokens;
     final tab = model.tab;
-    if (tab == null) return _empty(theme);
+    if (tab == null) return _empty(context, theme);
     final tree = tab.tree;
     final rows = tree.rows;
     return Column(
       children: [
         _toolbar(context, theme),
-        const Divider(height: 1),
+        if (model.locked)
+          Container(
+            key: const Key('hierarchy.lockedTo'),
+            width: double.infinity,
+            color: t.header,
+            padding: EdgeInsets.symmetric(horizontal: t.pad, vertical: 3),
+            child: Text(
+              'Locked to ${tab.tabLabel}',
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(color: t.textSecondary),
+            ),
+          ),
         if (tab.document.readOnly != null)
           Container(
             key: const Key('hierarchy.readOnly'),
             width: double.infinity,
-            color: theme.colorScheme.surfaceContainerHighest,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            color: t.header,
+            padding: EdgeInsets.symmetric(horizontal: t.pad, vertical: 3),
             child: Text(
               'Read-only — ${tab.document.readOnly}',
               style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
@@ -196,28 +215,27 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
                         key: const Key('hierarchy.list'),
                         controller: _scroll,
                         itemCount: rows.length,
-                        itemExtent: hierarchyRowHeight,
+                        itemExtent: hierarchyRowHeight(context),
                         itemBuilder: (context, i) => _row(context, theme, tab.tree, rows[i]),
                       ),
                     ),
                   ),
                 ),
         ),
-        if (tab.lastError != null) _errorBar(theme, tab.lastError!),
-        const Divider(height: 1),
-        _status(theme, tree, tab.selection.length),
+        if (tab.lastError != null) _errorBar(context, theme, tab.lastError!),
+        _status(context, theme, tree, tab.selection.length),
       ],
     );
   }
 
-  Widget _empty(ThemeData theme) {
+  Widget _empty(BuildContext context, ThemeData theme) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.account_tree_outlined, size: 40, color: theme.disabledColor),
+            Icon(FIcons.accountTreeOutlined, size: 32, color: context.tokens.textDisabled),
             const SizedBox(height: 12),
             Text('No document open', style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
@@ -230,7 +248,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             FilledButton.tonalIcon(
               key: const Key('hierarchy.openDocument'),
               onPressed: widget.onOpenDocument,
-              icon: const Icon(Icons.folder_open, size: 18),
+              icon: const Icon(FIcons.folderOpen),
               label: const Text('Open Document…'),
             ),
           ],
@@ -243,8 +261,13 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     final filter = model.filter;
     final activeFilters =
         filter.componentTypes.length + (filter.prefab == PrefabFilter.any ? 0 : 1) + (filter.hasError ? 1 : 0);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(6, 4, 4, 4),
+    final t = context.tokens;
+    return Container(
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      padding: EdgeInsets.fromLTRB(t.gap, 3, 3, 3),
       child: Row(
         children: [
           Expanded(
@@ -252,17 +275,17 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
               key: const Key('hierarchy.search'),
               controller: _search,
               focusNode: _searchFocus,
+              style: theme.textTheme.bodySmall?.copyWith(color: t.text),
               decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 16),
+                prefixIcon: Icon(FIcons.search, size: 13, color: t.textDisabled),
+                prefixIconConstraints: BoxConstraints(minWidth: t.row, minHeight: t.row),
                 hintText: 'Search name, id, component…',
-                border: const OutlineInputBorder(),
-                contentPadding: const EdgeInsets.symmetric(vertical: 6),
                 suffixIcon: filter.query.isEmpty
                     ? null
                     : IconButton(
                         tooltip: 'Clear',
-                        icon: const Icon(Icons.close, size: 14),
+                        iconSize: 12,
+                        icon: const Icon(FIcons.close),
                         onPressed: () {
                           _search.clear();
                           model.setQuery('');
@@ -277,9 +300,10 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             isLabelVisible: activeFilters > 0,
             label: Text('$activeFilters'),
             child: PopupMenuButton<String>(
+              popUpAnimationStyle: AnimationStyle.noAnimation,
               key: const Key('hierarchy.filter'),
               tooltip: 'Filter by component, prefab state, errors',
-              icon: Icon(Icons.filter_list, size: 18, color: activeFilters > 0 ? theme.colorScheme.primary : null),
+              icon: Icon(FIcons.filterList, color: activeFilters > 0 ? t.accent : null),
               itemBuilder: (context) => [
                 CheckedPopupMenuItem(
                   key: const Key('hierarchy.filter.hasError'),
@@ -335,16 +359,24 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
               },
             ),
           ),
+          LockButton(
+            key: const Key('hierarchy.lock'),
+            locked: model.locked,
+            lockTip: 'Lock: keep showing this document when another tab is focused',
+            unlockTip: 'Unlock: follow the focused tab again',
+            onChanged: model.hasDocument ? model.setLocked : null,
+          ),
           PopupMenuButton<String>(
+            popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('hierarchy.create'),
             tooltip: 'Create an entity (under the selection when one is selected)',
-            icon: const Icon(Icons.add, size: 18),
+            icon: const Icon(FIcons.add),
             enabled: model.canEdit,
             itemBuilder: (context) => [
               const PopupMenuItem(
                 key: Key('hierarchy.create.empty'),
                 value: '',
-                child: ListTile(dense: true, leading: Icon(Icons.add_box_outlined), title: Text('Create Empty')),
+                child: ListTile(dense: true, leading: Icon(FIcons.addBoxOutlined), title: Text('Create Empty')),
               ),
               const PopupMenuDivider(),
               for (final c in model.nativeComponentTypes)
@@ -358,9 +390,10 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             onSelected: (v) => v.isEmpty ? model.createEmpty() : model.createWith(v),
           ),
           PopupMenuButton<String>(
+            popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('hierarchy.more'),
             tooltip: 'More',
-            icon: const Icon(Icons.more_vert, size: 18),
+            icon: const Icon(FIcons.moreVert),
             itemBuilder: (context) => [
               CheckedPopupMenuItem(
                 key: const Key('hierarchy.keepWorld'),
@@ -388,22 +421,26 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     );
   }
 
-  Widget _errorBar(ThemeData theme, String text) {
+  Widget _errorBar(BuildContext context, ThemeData theme, String text) {
+    final t = context.tokens;
     return Container(
       key: const Key('hierarchy.error'),
-      color: theme.colorScheme.errorContainer,
-      padding: const EdgeInsets.fromLTRB(8, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: t.surfaceOf(t.error, .22),
+        border: Border(top: t.hairline),
+      ),
+      padding: EdgeInsets.fromLTRB(t.pad, 2, 2, 2),
       child: Row(
         children: [
-          Icon(Icons.error_outline, size: 14, color: theme.colorScheme.onErrorContainer),
+          Icon(FIcons.errorOutline, size: 13, color: t.error),
           const SizedBox(width: 6),
           Expanded(
             child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onErrorContainer)),
           ),
           IconButton(
-            iconSize: 14,
+            iconSize: 12,
             padding: EdgeInsets.zero,
-            icon: const Icon(Icons.close),
+            icon: const Icon(FIcons.close),
             onPressed: () {
               model.tab?.lastError = null;
               setState(() {});
@@ -414,12 +451,17 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     );
   }
 
-  Widget _status(ThemeData theme, HierarchyTree tree, int selected) {
+  Widget _status(BuildContext context, ThemeData theme, HierarchyTree tree, int selected) {
     final visible = tree.rows.length;
+    final t = context.tokens;
     return Container(
       key: const Key('hierarchy.status'),
-      height: 22,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      height: t.row + 2,
+      padding: EdgeInsets.symmetric(horizontal: t.pad),
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(top: t.hairline),
+      ),
       alignment: Alignment.centerLeft,
       child: Text(
         '${tree.entityCount} entities'
@@ -502,6 +544,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     ];
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final choice = await showMenu<String>(
+      popUpAnimationStyle: AnimationStyle.noAnimation,
       context: context,
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
@@ -690,7 +733,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
   _Zone _zoneAt(Offset global) {
     final box = context.findRenderObject() as RenderBox?;
     if (box == null) return _Zone.onto;
-    final y = box.globalToLocal(global).dy / hierarchyRowHeight;
+    final y = box.globalToLocal(global).dy / box.size.height;
     // Between two roots of a scene there is no order to drop into (the roots
     // follow the entity key order), so a root row offers no insertion line.
     final orderable = widget.row.node.parent != null || widget.model.rootOrderIsEditable;
@@ -725,31 +768,47 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
     final n = row.node;
     final model = widget.model;
     final selectionForDrag = model.tab!.isSelected(n.id) ? model.tab!.selection.toList() : [n.id];
+    final t = context.tokens;
+    final focused = PanelFocus.of(context);
+    final onRow = t.onSelectedRow(focused: focused);
+    final onRowDim = t.onSelectedRowSecondary(focused: focused);
     final content = Container(
-      height: hierarchyRowHeight,
-      padding: EdgeInsets.only(left: 4.0 + row.depth * 16),
+      height: hierarchyRowHeight(context),
+      padding: EdgeInsets.only(left: 4.0 + row.depth * 14),
       decoration: BoxDecoration(
-        color: widget.selected ? theme.colorScheme.primaryContainer : null,
+        color: widget.selected ? t.selectedRow(focused: focused) : null,
         border: switch (_zone) {
-          _Zone.above => Border(top: BorderSide(color: theme.colorScheme.primary, width: 2)),
-          _Zone.below => Border(bottom: BorderSide(color: theme.colorScheme.primary, width: 2)),
-          _Zone.onto => Border.all(color: theme.colorScheme.primary, width: 1.5),
+          _Zone.above => Border(top: BorderSide(color: t.accent, width: 2)),
+          _Zone.below => Border(bottom: BorderSide(color: t.accent, width: 2)),
+          _Zone.onto => Border.all(color: t.accent, width: 1.5),
           null => null,
         },
       ),
       child: Row(
         children: [
           SizedBox(
-            width: 18,
+            width: 16,
             child: row.hasChildren
                 ? InkWell(
                     key: Key('hierarchy.expander.${n.id}'),
                     onTap: widget.onToggle,
-                    child: Icon(row.expanded ? Icons.expand_more : Icons.chevron_right, size: 16),
+                    child: Icon(
+                      row.expanded ? FIcons.expandMore : FIcons.chevronRight,
+                      size: 14,
+                      color: widget.selected ? onRowDim : t.textSecondary,
+                    ),
                   )
                 : null,
           ),
-          Icon(_iconOf(n), size: 14, color: row.matches ? theme.colorScheme.onSurfaceVariant : theme.disabledColor),
+          Icon(
+            _iconOf(n),
+            size: 13,
+            color: widget.selected
+                ? onRowDim
+                : row.matches
+                ? t.textSecondary
+                : t.textDisabled,
+          ),
           const SizedBox(width: 6),
           Expanded(
             child: widget.renaming
@@ -780,7 +839,11 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                     key: Key('hierarchy.name.${n.id}'),
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: row.matches ? (n.isDerived && !n.added ? theme.hintColor : null) : theme.disabledColor,
+                      color: widget.selected
+                          ? onRow
+                          : row.matches
+                          ? (n.isDerived && !n.added ? t.textSecondary : t.text)
+                          : t.textDisabled,
                       fontStyle: n.name.isEmpty || n.isDerived ? FontStyle.italic : null,
                       fontWeight: n.overriddenFields > 0 ? FontWeight.bold : null,
                     ),
@@ -795,10 +858,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                 key: Key('hierarchy.derived.${n.id}'),
                 margin: const EdgeInsets.only(left: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 4),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.secondaryContainer,
-                  borderRadius: BorderRadius.circular(6),
-                ),
+                decoration: BoxDecoration(color: t.lineStrong, borderRadius: t.cornerControl),
                 child: Text(
                   n.added ? '+' : '${n.overriddenFields}',
                   style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSecondaryContainer),
@@ -814,13 +874,10 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                 key: Key('hierarchy.prefab.${n.id}'),
                 margin: const EdgeInsets.only(left: 4),
                 padding: const EdgeInsets.symmetric(horizontal: 4),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.tertiaryContainer,
-                  borderRadius: BorderRadius.circular(6),
-                ),
+                decoration: BoxDecoration(color: t.surfaceOf(t.accent, .28), borderRadius: t.cornerControl),
                 child: Row(
                   children: [
-                    Icon(Icons.widgets_outlined, size: 10, color: theme.colorScheme.onTertiaryContainer),
+                    Icon(FIcons.widgetsOutlined, size: 10, color: theme.colorScheme.onTertiaryContainer),
                     if (n.overrideCount > 0)
                       Text(
                         ' ${n.overrideCount}',
@@ -835,12 +892,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
               message: widget.errors.map((e) => '${e.code}: ${e.message}').join('\n'),
               child: Padding(
                 padding: const EdgeInsets.only(left: 4),
-                child: Icon(
-                  Icons.error,
-                  key: Key('hierarchy.errorBadge.${n.id}'),
-                  size: 14,
-                  color: theme.colorScheme.error,
-                ),
+                child: Icon(FIcons.error, key: Key('hierarchy.errorBadge.${n.id}'), size: 13, color: t.error),
               ),
             ),
           const SizedBox(width: 6),
@@ -918,14 +970,14 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
   }
 
   static IconData _iconOf(HierarchyNode n) {
-    if (n.isPrefabInstance) return Icons.widgets_outlined;
-    if (n.hasComponent('fynkel.Camera')) return Icons.videocam_outlined;
-    if (n.hasComponent('fynkel.Light')) return Icons.lightbulb_outline;
-    if (n.hasComponent('fynkel.MeshRenderer')) return Icons.view_in_ar_outlined;
-    if (n.hasComponent('fynkel.RigidBody')) return Icons.sports_basketball_outlined;
-    if (n.hasComponent('fynkel.Collider')) return Icons.crop_square;
-    if (n.hasComponent('fynkel.Animator')) return Icons.animation;
-    if (n.children.isNotEmpty) return Icons.folder_outlined;
-    return Icons.circle_outlined;
+    if (n.isPrefabInstance) return FIcons.widgetsOutlined;
+    if (n.hasComponent('fynkel.Camera')) return FIcons.videocamOutlined;
+    if (n.hasComponent('fynkel.Light')) return FIcons.lightbulbOutline;
+    if (n.hasComponent('fynkel.MeshRenderer')) return FIcons.viewInArOutlined;
+    if (n.hasComponent('fynkel.RigidBody')) return FIcons.sportsBasketballOutlined;
+    if (n.hasComponent('fynkel.Collider')) return FIcons.cropSquare;
+    if (n.hasComponent('fynkel.Animator')) return FIcons.animation;
+    if (n.children.isNotEmpty) return FIcons.folderOutlined;
+    return FIcons.circleOutlined;
   }
 }

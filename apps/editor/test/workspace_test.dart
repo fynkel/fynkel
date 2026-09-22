@@ -3,6 +3,7 @@
 import 'package:docking/docking.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel_editor/src/theme/icons.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
@@ -18,12 +19,11 @@ PanelRegistry registry() => PanelRegistry([
     (PanelRegistry.console, PanelHome.bottom),
     (PanelRegistry.profiler, PanelHome.bottom),
     (PanelRegistry.animation, PanelHome.bottom),
-    (PanelRegistry.import, PanelHome.bottom),
   ])
-    PanelSpec(id: id, title: id, icon: Icons.square, home: home, builder: (_) => Text('body $id')),
+    PanelSpec(id: id, title: id, icon: FIcons.cropSquare, home: home, builder: (_, _) => Text('body $id')),
 ]);
 
-const defaultShape = 'R(Ihierarchy,C(Iscene,T(Iproject,Iconsole,Iprofiler,Ianimation,Iimport)),Iinspector)';
+const defaultShape = 'R(Ihierarchy,C(Iscene,T(Iproject,Iconsole,Iprofiler,Ianimation)),Iinspector)';
 
 void main() {
   test('the default workspace is the §22.2 shape and is saved on first use', () {
@@ -31,7 +31,7 @@ void main() {
     final ws = Workspace(registry: registry(), store: store);
     expect(ws.layout.hierarchy(nameInfo: true), defaultShape);
     expect(ws.restoreProblem, isNull);
-    expect(ws.visiblePanels.length, 8);
+    expect(ws.visiblePanels.length, 7);
     ws.save();
     expect(store.read()!.dockingFormat, 'V1');
     expect(store.read()!.selected, ['project']);
@@ -41,24 +41,21 @@ void main() {
     final ws = Workspace(registry: registry(), store: MemoryLayoutStore());
     ws.toggle(PanelRegistry.console);
     expect(ws.isVisible(PanelRegistry.console), isFalse);
-    expect(
-      ws.layout.hierarchy(nameInfo: true),
-      'R(Ihierarchy,C(Iscene,T(Iproject,Iprofiler,Ianimation,Iimport)),Iinspector)',
-    );
+    expect(ws.layout.hierarchy(nameInfo: true), 'R(Ihierarchy,C(Iscene,T(Iproject,Iprofiler,Ianimation)),Iinspector)');
     ws.toggle(PanelRegistry.console);
     expect(
       ws.layout.hierarchy(nameInfo: true),
-      'R(Ihierarchy,C(Iscene,T(Iproject,Iprofiler,Ianimation,Iimport,Iconsole)),Iinspector)',
+      'R(Ihierarchy,C(Iscene,T(Iproject,Iprofiler,Ianimation,Iconsole)),Iinspector)',
     );
-    expect(ws.layout.findDockingTabsWithItem(PanelRegistry.console)!.selectedIndex, 4);
+    expect(ws.layout.findDockingTabsWithItem(PanelRegistry.console)!.selectedIndex, 3);
 
     ws.hide(PanelRegistry.hierarchy);
     ws.show(PanelRegistry.hierarchy); // no left sibling → the left edge of the whole workspace
     expect(
       ws.layout.hierarchy(nameInfo: true),
-      'R(Ihierarchy,C(Iscene,T(Iproject,Iprofiler,Ianimation,Iimport,Iconsole)),Iinspector)',
+      'R(Ihierarchy,C(Iscene,T(Iproject,Iprofiler,Ianimation,Iconsole)),Iinspector)',
     );
-    expect(ws.layout.findDockingTabsWithItem(PanelRegistry.console)!.selectedIndex, 4, reason: 'selection survives');
+    expect(ws.layout.findDockingTabsWithItem(PanelRegistry.console)!.selectedIndex, 3, reason: 'selection survives');
     ws.hide(PanelRegistry.inspector);
     ws.show(PanelRegistry.inspector);
     expect(ws.layout.hierarchy(nameInfo: true), endsWith(',Iinspector)'));
@@ -109,6 +106,31 @@ void main() {
     expect(LayoutSnapshot.fromJson('nope'), isNull);
   });
 
+  test('a saved layout with a retired panel (the Asset panel) loads without it and is saved again', () {
+    final store = MemoryLayoutStore();
+    // A layout saved before item 9c, when `import` (the Asset panel) was a bottom tab.
+    final old = PanelRegistry([
+      ...registry().all,
+      PanelSpec(
+        id: 'import',
+        title: 'import',
+        icon: FIcons.cropSquare,
+        home: PanelHome.bottom,
+        builder: (_, _) => const Text('asset'),
+      ),
+    ]);
+    final before = Workspace(registry: old, store: store);
+    before.show('import');
+    expect(before.layout.hierarchy(nameInfo: true), contains('Iimport'));
+    before.save();
+    expect(store.read()!.layout, contains('import'));
+
+    final ws = Workspace(registry: registry(), store: store);
+    expect(ws.restoreProblem, isNull, reason: 'the rest of the layout is kept');
+    expect(ws.layout.hierarchy(nameInfo: true), defaultShape);
+    expect(store.read()!.layout, isNot(contains('import')), reason: 'saved again without it');
+  });
+
   test('reset restores the default and saves it', () {
     final store = MemoryLayoutStore();
     final ws = Workspace(registry: registry(), store: store);
@@ -121,7 +143,7 @@ void main() {
     expect(again.layout.hierarchy(nameInfo: true), defaultShape);
   });
 
-  testWidgets('the shell shows all eight panels, keeps them alive, and the layout survives a restart', (tester) async {
+  testWidgets('the shell shows all seven panels, keeps them alive, and the layout survives a restart', (tester) async {
     final store = MemoryLayoutStore();
     final prefs = Preferences.inMemory();
     var project = FakeProject(dir: '/fake/game');
@@ -129,14 +151,14 @@ void main() {
       tester,
       shellApp(prefs: prefs, store: store, projects: {'/fake/game': project}, initialProject: '/fake/game'),
     );
-    for (final title in ['Hierarchy', 'Scene', 'Inspector', 'Project', 'Console', 'Profiler', 'Animation', 'Asset']) {
+    for (final title in ['Hierarchy', 'Scene', 'Inspector', 'Project', 'Console', 'Profiler', 'Animation']) {
       expect(find.text(title, skipOffstage: false), findsWidgets, reason: '$title tab');
     }
     expect(find.byKey(const Key('hierarchy.openDocument'), skipOffstage: false), findsOneWidget); // Hierarchy, no tab
     expect(
-      find.textContaining('Open a document and select an entity.', skipOffstage: false),
+      find.byKey(const Key('inspector.empty'), skipOffstage: false),
       findsOneWidget,
-    ); // Inspector empty state (no document open)
+    ); // Inspector empty state (nothing selected, no document open)
     expect(find.byKey(const Key('console.search'), skipOffstage: false), findsOneWidget); // Console alive while hidden
 
     final shell = tester.state<EditorShellState>(find.byType(EditorShell));
@@ -149,6 +171,9 @@ void main() {
     expect(saved.layout, isNot(contains('profiler')));
 
     // A tab close through the docking UI hides the panel and saves.
+    // Close Project lives in the title bar's project menu.
+    await tester.tap(find.byKey(const Key('window.project')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('window.close')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('launcher.open')), findsOneWidget);

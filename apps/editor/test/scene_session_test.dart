@@ -33,9 +33,24 @@ final class Stack {
       hierarchy: hierarchy,
       editorState: editorState,
       chooseSavePath: (name) async => savePath == null ? null : '$savePath/$name',
+      views: views,
     );
     model.setViewportSize(1600, 900);
   }
+
+  /// The Scene views over this project (item 9e: a copy joins them).
+  final views = SceneViews();
+
+  /// Another Scene view copy over the same tabs and world.
+  SceneViewModel copy(String view) => SceneViewModel(
+    tabs: tabs,
+    project: project,
+    hierarchy: hierarchy,
+    editorState: editorState,
+    chooseSavePath: (name) async => null,
+    view: view,
+    views: views,
+  )..setViewportSize(800, 600);
 
   /// Where Save Frame writes (null: the dialog was cancelled).
   String? savePath;
@@ -361,7 +376,7 @@ void main() {
     final pixels = s.model.captureFrame()!;
     expect(st.frames, 1);
     expect(st.lastSlot, greaterThanOrEqualTo(0));
-    expect(st.appliedCamera, st.cameraVersion, reason: 'the camera reached the world');
+    expect(st.cameraApplied, isTrue, reason: 'the camera reached the world');
     expect(s.model.viewportWidth, 320);
     expect(pixels.length, 320 * 200 * 4);
     expect(pixels.any((b) => b != 0), isTrue, reason: 'not black');
@@ -405,5 +420,64 @@ void main() {
     // comparison with `fynkel render --scene main --size 320x200`.
     final keep = Platform.environment['FYNKEL_SCENE_FRAME_OUT'];
     if (keep != null && keep.isNotEmpty) File(clean).copySync(keep);
+  });
+
+  test('two Scene views draw one world from two cameras (item 9e)', () async {
+    const channel = MethodChannel('fynkel_flutter/viewport');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'registerTexture':
+          return 11;
+        case 'rebindTexture' || 'unregisterTexture':
+          return null;
+        case 'stats':
+          return <String, Object?>{};
+      }
+      throw MissingPluginException(call.method);
+    });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null),
+    );
+    final s = await Stack.open('copies');
+    addTearDown(s.close);
+    final second = s.copy('scene#2');
+    s.tabs.openDocument(mainScene)!;
+    final a = s.model.current!;
+    final b = second.current!;
+    expect(a.hasPreview, isTrue, reason: a.openError);
+    expect(identical(a.preview, b.preview), isTrue, reason: 'one world per document');
+
+    // Each copy has its own camera, starting where the first one was.
+    expect(b.camera.distance, a.camera.distance);
+    b.camera.orbit(90, -30);
+    b.camera.distance = a.camera.distance * 2;
+    expect(b.camera.distance, isNot(a.camera.distance));
+    expect(s.editorState.scene(mainScene).views.keys, contains('scene#2'));
+
+    for (final m in [s.model, second]) {
+      m.controller.requestSize(160, 100);
+    }
+    for (var i = 0; i < 10; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(s.model.controller.isAttached && second.controller.isAttached, isTrue);
+
+    // The world holds the camera of the view that drew last; the other one
+    // sets its own again before drawing — two different pictures.
+    final first = s.model.captureFrame()!;
+    expect(a.cameraApplied, isTrue);
+    final other = second.captureFrame()!;
+    expect(b.cameraApplied, isTrue);
+    expect(a.cameraApplied, isFalse, reason: 'the second view took the world');
+    expect(other, isNot(first));
+    final again = s.model.captureFrame()!;
+    expect(a.cameraApplied, isTrue);
+    expect(again, first, reason: 'the first view gets its own picture back');
+
+    // The copy closes: the world stays the document's, and its cameras go.
+    second.dispose();
+    expect(a.hasPreview, isTrue);
+    s.editorState.forgetView('scene#2');
+    expect(s.editorState.scene(mainScene).views.keys, isNot(contains('scene#2')));
   });
 }

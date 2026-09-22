@@ -1,23 +1,29 @@
 // The Project browser (item 5) over the fake project: the model (folders,
 // list, search, kind filters, sort, selection, previews, drag payloads,
-// every operation and its refusal), the Project and Asset panels, a
-// prefab dropped onto the Hierarchy, and the shell's asset commands.
+// every operation and its refusal), the Project panel, the Inspector's
+// asset, part and folder pages (item 9c), a prefab dropped onto the
+// Hierarchy, and the shell's asset commands.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel_editor/src/theme/icons.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_panel.dart';
+import 'package:fynkel_editor/src/inspector/asset_pages.dart';
 import 'package:fynkel_editor/src/inspector/field_widgets.dart';
+import 'package:fynkel_editor/src/inspector/inspector_chrome.dart';
+import 'package:fynkel_editor/src/inspector/inspector_model.dart';
+import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
-import 'package:fynkel_editor/src/project_browser/asset_panel.dart';
 import 'package:fynkel_editor/src/project_browser/project_browser_model.dart';
 import 'package:fynkel_editor/src/project_browser/project_panel.dart';
+import 'package:fynkel_editor/src/shell/editor_selection.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
 
 import 'support/fakes.dart';
@@ -91,6 +97,32 @@ FakeProject fakeProject({String dir = '/fake/game', String? readOnly}) {
 
 void main() {
   group('ProjectBrowserModel', () {
+    test('item 9e: the padlock and what a restart brings back (folder, view, lock)', () {
+      final project = fakeProject();
+      final model = ProjectBrowserModel(project: project);
+      addTearDown(model.dispose);
+      var notified = 0;
+      model.addListener(() => notified++);
+      model.setFolder('sounds');
+      model.setView(BrowserView.list);
+      expect(model.remembered, {'folder': 'sounds', 'view': 'list'});
+      model.setLocked(true);
+      expect(notified, greaterThanOrEqualTo(3));
+      expect(model.remembered, {'folder': 'sounds', 'view': 'list', 'locked': true});
+      // A locked browser still follows the user's own clicks.
+      model.setFolder('textures');
+      expect(model.folder, 'textures');
+
+      final again = ProjectBrowserModel(project: project);
+      addTearDown(again.dispose);
+      again.recall({'folder': 'sounds', 'view': 'list', 'locked': true});
+      expect((again.folder, again.view, again.locked), ('sounds', BrowserView.list, true));
+      final gone = ProjectBrowserModel(project: project);
+      addTearDown(gone.dispose);
+      gone.recall({'folder': 'deleted', 'view': 'nonsense'});
+      expect((gone.folder, gone.view, gone.locked), ('', BrowserView.folders, false));
+    });
+
     test('folders view shows a folder\'s own assets and sub-folders; the list view shows everything sorted', () {
       final project = fakeProject();
       final model = ProjectBrowserModel(project: project);
@@ -481,12 +513,12 @@ void main() {
       await tester.tap(find.byKey(const Key('project.folder.row.models')));
       await tester.pumpAndSettle();
       expect(model.folder, 'models', reason: 'one click enters a folder');
-      // A double-click on a source shows the Asset panel; on a scene, opens the tab.
+      // A double-click on a source shows it in the Inspector; on a scene, opens the tab.
       await doubleTap(tester, find.byKey(const Key('project.asset.$robot')));
       expect(shown, [robot]);
       expect(opened, isEmpty);
       // The flat list shows every asset; the search narrows it.
-      await tester.tap(find.byIcon(Icons.view_list_outlined));
+      await tester.tap(find.byIcon(FIcons.viewListOutlined));
       await tester.pumpAndSettle();
       expect(model.view, BrowserView.list);
       expect(find.byKey(const Key('project.asset.$mainScene')), findsOneWidget);
@@ -558,7 +590,7 @@ void main() {
       'Delete on a referenced asset shows the dependents and "Delete anyway" forces it; the error bar shows refusals',
       (tester) async {
         final (_, model, _, _) = await pumpPanel(tester);
-        await tester.tap(find.byIcon(Icons.view_list_outlined));
+        await tester.tap(find.byIcon(FIcons.viewListOutlined));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const Key('project.asset.$rusted')));
         await tester.pumpAndSettle();
@@ -583,23 +615,54 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('project.error')), findsOneWidget);
         await tester.tap(
-          find.descendant(of: find.byKey(const Key('project.error')), matching: find.byIcon(Icons.close)),
+          find.descendant(of: find.byKey(const Key('project.error')), matching: find.byIcon(FIcons.close)),
         );
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('project.error')), findsNothing);
       },
     );
 
+    testWidgets('the list has Name | Kind | Contents | Size columns; Name and Kind sort', (tester) async {
+      final (_, model, _, _) = await pumpPanel(tester);
+      expect(find.byKey(const Key('project.columns')), findsOneWidget);
+      expect(find.text('CONTENTS'), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const Key('project.contents.folder.models'))).data, '1 asset');
+      await tester.tap(find.byIcon(FIcons.viewListOutlined));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(find.byKey(Key('project.contents.$robot'))).data, '3 parts');
+      expect(find.byKey(Key('project.contents.$tone')), findsNothing, reason: 'a whole file has no parts to count');
+      expect(find.byKey(Key('project.size.$tone')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('project.column.kind')));
+      await tester.pumpAndSettle();
+      expect(model.sort, AssetSort.kind);
+      expect(model.descending, isFalse);
+      await tester.tap(find.byKey(const Key('project.column.kind')));
+      await tester.pumpAndSettle();
+      expect(model.descending, isTrue, reason: 'again flips');
+      await tester.tap(find.byKey(const Key('project.column.name')));
+      await tester.pumpAndSettle();
+      expect(model.sort, AssetSort.name);
+      // A narrow list (the folder tree beside it) keeps Name and Kind only.
+      model.setView(BrowserView.folders);
+      tester.view.physicalSize = const Size(520, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpAndSettle();
+      expect(find.text('CONTENTS'), findsNothing);
+      expect(find.text('KIND'), findsOneWidget);
+    });
+
     testWidgets('dragging a row onto a folder in the tree moves it (the selection when the row is selected)', (
       tester,
     ) async {
       final (project, model, _, _) = await pumpPanel(tester);
-      await tester.tap(find.byIcon(Icons.view_list_outlined));
+      await tester.tap(find.byIcon(FIcons.viewListOutlined));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('project.asset.$tone')));
       await tester.pumpAndSettle();
       // Back to folders: the tree is there; the row still shows in the root? No — list rows are in the list.
-      await tester.tap(find.byIcon(Icons.folder_outlined).first);
+      await tester.tap(find.byIcon(FIcons.folderOutlined).first);
       await tester.pumpAndSettle();
       model.setFolder('sounds');
       await tester.pumpAndSettle();
@@ -617,18 +680,26 @@ void main() {
     });
   });
 
-  group('AssetPanel', () {
-    Future<(FakeProject, ProjectBrowserModel, List<String>, List<(String, String?)>)> pumpAsset(
+  group('Inspector asset pages', () {
+    Future<(FakeProject, ProjectBrowserModel, EditorSelection, List<String>, List<(String, String?)>)> pumpAsset(
       WidgetTester tester,
       String lead,
     ) async {
       final project = fakeProject();
       final model = ProjectBrowserModel(project: project);
-      addTearDown(model.dispose);
+      final tabs = DocumentTabs(project: project);
+      final inspector = InspectorModel(tabs: tabs, project: project);
+      final selection = EditorSelection(inspector: inspector, browser: model);
+      addTearDown(() {
+        selection.dispose();
+        inspector.dispose();
+        tabs.dispose();
+        model.dispose();
+      });
       model.select(lead);
       final opened = <String>[];
       final refs = <(String, String?)>[];
-      // Tall, so every section of the panel's list is built.
+      // Tall, so every section of the page's list is built.
       tester.view.physicalSize = const Size(600, 2200);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -639,8 +710,10 @@ void main() {
             body: SizedBox(
               height: 2200,
               width: 500,
-              child: AssetPanel(
-                model: model,
+              child: InspectorPanel(
+                model: inspector,
+                selection: selection,
+                browser: model,
                 onOpenDocument: opened.add,
                 onOpenReference: (d, ptr) => refs.add((d, ptr)),
                 run: RecordingRunner().call,
@@ -650,23 +723,31 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      return (project, model, opened, refs);
+      return (project, model, selection, opened, refs);
     }
 
-    testWidgets('a source: sidecar settings edited and applied with a reimport, sub-assets, dependents', (
-      tester,
-    ) async {
-      final (project, model, _, refs) = await pumpAsset(tester, swatch);
-      expect(find.byKey(const Key('asset.title')), findsOneWidget);
-      expect(find.text('swatch.png'), findsOneWidget);
-      expect(find.textContaining('imported by fynkel.image'), findsOneWidget);
-      expect(find.byKey(const Key('asset.applySettings')), findsOneWidget);
-      expect(tester.widget<FilledButton>(find.byKey(const Key('asset.applySettings'))).onPressed, isNull);
+    Future<void> chooseLinear(WidgetTester tester) async {
       await tester.tap(find.byKey(const Key('asset.settings.colorSpace')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('linear (data)').last);
       await tester.pumpAndSettle();
-      expect(tester.widget<FilledButton>(find.byKey(const Key('asset.applySettings'))).onPressed, isNotNull);
+    }
+
+    testWidgets('a source: import settings applied from the bar with a reimport, and what uses it', (tester) async {
+      final (project, model, _, _, refs) = await pumpAsset(tester, swatch);
+      expect(find.byKey(const Key('asset.title')), findsOneWidget);
+      expect(find.text('swatch.png'), findsOneWidget);
+      expect(find.textContaining('imported by fynkel.image'), findsOneWidget);
+      expect(find.byKey(const Key('facts.Kind')), findsOneWidget);
+      expect(find.byKey(const Key('inspector.applyBar')), findsNothing, reason: 'nothing to apply yet');
+      await chooseLinear(tester);
+      expect(find.byKey(const Key('inspector.applyBar')), findsOneWidget);
+      // Revert puts the sidecar's settings back and the bar goes away.
+      await tester.tap(find.byKey(const Key('asset.revertSettings')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('inspector.applyBar')), findsNothing);
+      expect(find.text('sRGB (colour)'), findsOneWidget);
+      await chooseLinear(tester);
       await tester.tap(find.byKey(const Key('asset.applySettings')));
       await tester.pumpAndSettle();
       expect(project.settings[swatch], {'colorSpace': 'linear'});
@@ -674,8 +755,10 @@ void main() {
       expect(find.byKey(const Key('asset.reimportResult')), findsOneWidget);
       expect(find.textContaining('Reimported'), findsOneWidget);
       expect(model.detail(swatch)!.settings, {'colorSpace': 'linear'});
-      // Dependents (an image has no sub-assets of its own).
+      expect(find.byKey(const Key('inspector.applyBar')), findsNothing);
+      // What uses it (an image has no parts of its own).
       expect(find.byKey(const Key('asset.sub.image/0')), findsNothing);
+      expect(find.textContaining('USED BY · 1'), findsOneWidget);
       expect(find.text('materials/rusted.material.json'), findsOneWidget);
       await tester.tap(find.byKey(const Key('asset.dependent.materials/rusted.material.json/base_color_texture')));
       await tester.pumpAndSettle();
@@ -688,15 +771,26 @@ void main() {
       expect(find.textContaining('must be srgb or linear'), findsOneWidget);
     });
 
-    testWidgets('a material shows its swatch and factors; a scene has Open; nothing selected is said so', (
+    testWidgets('settings JSON that does not parse keeps Apply off and says why', (tester) async {
+      await pumpAsset(tester, swatch);
+      await tester.tap(find.byKey(const Key('asset.settings.json')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('asset.settings.jsonField')), '{ nope');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('inspector.applyBar')), findsOneWidget);
+      expect(find.textContaining('does not parse'), findsWidgets);
+      expect(tester.widget<FilledButton>(find.byKey(const Key('asset.applySettings'))).onPressed, isNull);
+    });
+
+    testWidgets('a material shows its swatch and factors; a scene has Open; a cleared selection empties the page', (
       tester,
     ) async {
-      final (_, model, opened, _) = await pumpAsset(tester, rusted);
-      expect(find.byKey(const Key('preview.swatch')), findsOneWidget);
+      final (_, model, _, opened, _) = await pumpAsset(tester, rusted);
+      expect(find.byKey(const Key('preview.swatch')), findsWidgets);
       expect(find.text('fynkel.pbr@1'), findsOneWidget);
       expect(find.text('base_color'), findsOneWidget);
       expect(find.text('[0.5,0.25,0.125,1.0]'), findsOneWidget);
-      expect(find.textContaining('Referenced by (2)'), findsOneWidget);
+      expect(find.textContaining('USED BY · 2'), findsOneWidget);
       expect(find.byKey(const Key('asset.open')), findsNothing);
       model.select(mainScene);
       await tester.pumpAndSettle();
@@ -706,12 +800,99 @@ void main() {
       expect(opened, [mainScene]);
       model.clearSelection();
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('asset.empty')), findsOneWidget);
+      expect(find.byKey(const Key('inspector.empty')), findsOneWidget);
       model.select(robot);
       await tester.pumpAndSettle();
+      expect(find.textContaining('PARTS · 3'), findsOneWidget);
       expect(find.byKey(const Key('asset.sub.mesh/0')), findsOneWidget);
       expect(find.byKey(const Key('asset.sub.prefab')), findsOneWidget);
       expect(find.byKey(const Key('asset.settings.allowExternalFiles')), findsOneWidget);
+    });
+
+    testWidgets('a document kind registers its own sections; an unregistered kind shows the generic summary', (
+      tester,
+    ) async {
+      addTearDown(() => AssetDocumentSections.unregister('scene'));
+      final (_, model, _, _, _) = await pumpAsset(tester, mainScene);
+      expect(find.textContaining('SCENE'), findsWidgets, reason: 'the generic summary');
+      expect(find.byKey(const Key('test.sceneSection')), findsNothing);
+      // What a later data-asset kind does: one registration, no new panel.
+      AssetDocumentSections.register(
+        'scene',
+        (context, e, d) => [
+          InspectorSection(
+            key: const Key('test.sceneSection'),
+            title: 'Level',
+            children: [InspectorValueRow('Entities', '${d.entities}')],
+          ),
+        ],
+      );
+      model.select(rusted);
+      await tester.pumpAndSettle();
+      model.select(mainScene);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('test.sceneSection')), findsOneWidget);
+      expect(find.textContaining('LEVEL'), findsOneWidget);
+      expect(AssetDocumentSections.kinds, containsAll(['material', 'scene']));
+      // The material's own sections are untouched.
+      model.select(rusted);
+      await tester.pumpAndSettle();
+      expect(find.text('fynkel.pbr@1'), findsOneWidget);
+    });
+
+    testWidgets('a part opens its own page with a link back to its file; Open on an imported prefab', (tester) async {
+      final (_, model, selection, opened, _) = await pumpAsset(tester, robot);
+      await tester.tap(find.byKey(const Key('asset.part.mesh/0')));
+      await tester.pumpAndSettle();
+      expect(selection.target, const InspectAsset(robot, sub: 'mesh/0'));
+      expect(find.byKey(const Key('asset.part.title')), findsOneWidget);
+      expect(find.text('mesh · a part of robot.glb'), findsOneWidget);
+      expect(find.byKey(const Key('asset.part.drag')), findsOneWidget);
+      expect(find.byKey(const Key('asset.part.open')), findsNothing, reason: 'a mesh is not opened');
+      await tester.tap(find.byKey(const Key('asset.part.back')));
+      await tester.pumpAndSettle();
+      expect(selection.target, const InspectAsset(robot));
+      expect(find.byKey(const Key('asset.title')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('asset.part.prefab')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('asset.part.open')));
+      expect(opened, ['$robot#prefab']);
+      expect(model.lead, robot, reason: 'inspecting a part does not move the browser');
+    });
+
+    testWidgets('the padlock keeps the page while the browser selection moves; unlocking catches up', (tester) async {
+      final (_, model, selection, _, _) = await pumpAsset(tester, rusted);
+      await tester.tap(find.byKey(const Key('inspector.lock')));
+      await tester.pumpAndSettle();
+      expect(selection.locked, isTrue);
+      model.select(swatch);
+      await tester.pumpAndSettle();
+      expect(selection.target, const InspectAsset(rusted));
+      expect(find.text('fynkel.pbr@1'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('inspector.lock')));
+      await tester.pumpAndSettle();
+      expect(selection.locked, isFalse);
+      expect(selection.target, const InspectAsset(swatch));
+      expect(find.text('swatch.png'), findsOneWidget);
+    });
+
+    testWidgets('a folder shows what is inside it by kind; Open goes there in the browser', (tester) async {
+      final (_, model, selection, _, _) = await pumpAsset(tester, rusted);
+      model.setFolder('materials');
+      await tester.pumpAndSettle();
+      expect(selection.target, const InspectFolder('materials'));
+      expect(find.byKey(const Key('folder.title')), findsOneWidget);
+      expect(find.byKey(const Key('folder.kind.material')), findsOneWidget);
+      selection.inspect(const InspectFolder(''));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('folder.sub.models')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('folder.sub.models')));
+      await tester.pumpAndSettle();
+      expect(selection.target, const InspectFolder('models'));
+      expect(model.folder, 'materials', reason: 'inspecting a folder does not move the browser');
+      await tester.tap(find.byKey(const Key('folder.open')));
+      await tester.pumpAndSettle();
+      expect(model.folder, 'models');
     });
   });
 
@@ -826,14 +1007,14 @@ void main() {
   });
 
   group('shell', () {
-    testWidgets('the Project and Asset panels are there; the asset commands run through the browser', (tester) async {
+    testWidgets('the Project panel is there; the asset commands run through the browser', (tester) async {
       final project = fakeProject();
       final prefs = Preferences.inMemory();
       await pumpLarge(tester, shellApp(prefs: prefs, projects: {'/fake/game': project}, initialProject: '/fake/game'));
       final shell = tester.state<EditorShellState>(find.byType(EditorShell));
       expect(shell.browser, isNotNull);
       expect(find.byKey(const Key('project.folder.tree.root')), findsOneWidget);
-      expect(shell.workspace!.isVisible(PanelRegistry.import), isTrue);
+      expect(shell.workspace!.isVisible(PanelRegistry.inspector), isTrue);
       // New Scene from the menu: a renaming row in the root folder.
       expect(shell.registry.execute('assets.newScene'), isTrue);
       await tester.pumpAndSettle();
@@ -848,7 +1029,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(shell.browser!.entry(created), isNull);
       expect(shell.registry.byId('assets.redo')!.isEnabled, isTrue);
-      // Open Asset on a scene opens the tab; on a source it shows the Asset panel.
+      // Open Asset on a source shows it in the Inspector; on a scene it opens the tab.
+      shell.browser!.select(robot);
+      expect(shell.registry.execute('assets.open'), isTrue);
+      await tester.pumpAndSettle();
+      expect(shell.selection!.target, const InspectAsset(robot));
+      expect(find.byKey(const Key('asset.title')), findsOneWidget);
       shell.browser!.select(loose);
       project.addDocument(
         FakeDocument(

@@ -16,6 +16,7 @@ import 'package:fynkel_editor/src/hierarchy/transform_math.dart';
 import 'package:fynkel_editor/src/inspector/field_widgets.dart' show AssetDragPayload;
 import 'package:fynkel_editor/src/scene_view/editor_state.dart';
 import 'package:fynkel_editor/src/scene_view/gizmo.dart';
+import 'package:fynkel_editor/src/scene_view/orientation_gizmo.dart';
 import 'package:fynkel_editor/src/scene_view/scene_math.dart';
 import 'package:fynkel_editor/src/scene_view/scene_panel.dart';
 import 'package:fynkel_editor/src/scene_view/scene_view_model.dart';
@@ -271,6 +272,39 @@ void main() {
       final d = st.camera.distance;
       r.model.pointerSignal(PointerScrollEvent(position: px, scrollDelta: const Offset(0, -40)), px);
       expect(st.camera.distance, lessThan(d));
+    });
+
+    test('a trackpad scrolls and pinches the view like the wheel (macOS sends them as pan-zoom)', () {
+      final r = Rig();
+      addTearDown(r.dispose);
+      final st = r.open();
+      const px = Offset(800, 450);
+      final d0 = st.camera.distance;
+      // Fingers that move the page down, as a wheel rolled away does: the view comes closer.
+      r.model.panZoomStart(const PointerPanZoomStartEvent(position: px), px);
+      r.model.panZoomUpdate(const PointerPanZoomUpdateEvent(position: px, pan: Offset(0, 20)), px);
+      r.model.panZoomUpdate(const PointerPanZoomUpdateEvent(position: px, pan: Offset(0, 40)), px);
+      r.model.panZoomEnd(const PointerPanZoomEndEvent(position: px), px);
+      final d1 = st.camera.distance;
+      expect(d1, lessThan(d0));
+      // The same as one wheel scroll of 40 (the gesture's totals are applied as deltas).
+      final wheel = Rig();
+      addTearDown(wheel.dispose);
+      final ws = wheel.open();
+      wheel.model.pointerSignal(PointerScrollEvent(position: px, scrollDelta: const Offset(0, -40)), px);
+      expect(d1, closeTo(ws.camera.distance, 1e-9));
+
+      // A pinch out halves the distance; a pinch in doubles it.
+      r.model.panZoomStart(const PointerPanZoomStartEvent(position: px), px);
+      r.model.panZoomUpdate(const PointerPanZoomUpdateEvent(position: px, scale: 1.5), px);
+      r.model.panZoomUpdate(const PointerPanZoomUpdateEvent(position: px, scale: 2), px);
+      r.model.panZoomEnd(const PointerPanZoomEndEvent(position: px), px);
+      expect(st.camera.distance, closeTo(d1 / 2, 1e-9));
+      r.model.panZoomStart(const PointerPanZoomStartEvent(position: px), px);
+      r.model.panZoomUpdate(const PointerPanZoomUpdateEvent(position: px, scale: 0.5), px);
+      r.model.panZoomEnd(const PointerPanZoomEndEvent(position: px), px);
+      expect(st.camera.distance, closeTo(d1, 1e-9));
+      expect(st.cameraVersion, greaterThan(1));
     });
   });
 
@@ -735,6 +769,70 @@ void main() {
 
     /// The panel's picture origin in the window (physical = logical here).
     Offset origin(WidgetTester tester) => tester.getTopLeft(find.byKey(const Key('scene.overlay')));
+
+    testWidgets('item 9e: the orientation gizmo turns with the camera; its ends, centre, caption and drag', (
+      tester,
+    ) async {
+      final r = await pump(tester);
+      final st = r.model.current!;
+      final gizmo = find.byKey(const Key('scene.orient'));
+      expect(gizmo, findsOneWidget);
+      final centre = tester.getCenter(gizmo);
+      expect(find.text('Front · Persp'), findsOneWidget, reason: 'the rig looks down −Z from +Z');
+
+      // The ends as drawn now: +X to the right, +Y up, Z towards the viewer.
+      Offset endOf(int axis, bool positive) =>
+          centre +
+          OrientationGizmo.endsFor(st.camera).singleWhere((e) => e.axis == axis && e.positive == positive).offset;
+      expect(endOf(0, true).dx, greaterThan(centre.dx + 20));
+      expect(endOf(1, true).dy, lessThan(centre.dy - 20));
+
+      await tester.tapAt(endOf(1, true));
+      await tester.pump();
+      expect(st.camera.viewName, 'Top');
+      expect(find.text('Top · Persp'), findsOneWidget);
+      expect(st.cameraVersion, greaterThan(1), reason: 'the world is told');
+
+      expect(tester.getCenter(gizmo), centre, reason: 'the circle stays put while the caption changes');
+      await tester.tapAt(endOf(0, false));
+      await tester.pump();
+      expect(st.camera.viewName, 'Left');
+      // Again on the same end: from the other side.
+      await tester.tapAt(endOf(0, false));
+      await tester.pump();
+      expect(st.camera.viewName, 'Right');
+
+      // Looking along X, the X end covers the centre: a click there is a
+      // click on that end (from the other side again), what the eye sees.
+      expect(OrientationGizmo.endAt(st.camera, Offset.zero)?.axis, 0);
+      await tester.tapAt(centre);
+      await tester.pump();
+      expect(st.camera.viewName, 'Left');
+      expect(st.camera.orthographic, isFalse);
+
+      // The caption always switches the projection.
+      await tester.tap(find.byKey(const Key('scene.orient.projection')));
+      await tester.pump();
+      expect(st.camera.orthographic, isTrue);
+      expect(find.text('Left · Ortho'), findsOneWidget);
+
+      // A drag orbits (and is not a click).
+      final yaw = st.camera.yaw;
+      await tester.dragFrom(centre + const Offset(-20, 20), const Offset(100, 0));
+      await tester.pump();
+      expect(st.camera.yaw, isNot(closeTo(yaw, 1e-6)));
+      expect(st.camera.viewName, isNull);
+      expect(st.tab.selection, isEmpty, reason: 'nothing reached the picture under it');
+
+      // Between views no end covers the centre, and a click there switches
+      // the projection too.
+      expect(OrientationGizmo.endAt(st.camera, Offset.zero), isNull);
+      final ortho = st.camera.orthographic;
+      await tester.tapAt(centre);
+      await tester.pump();
+      expect(st.camera.orthographic, !ortho);
+      await tester.pump(const Duration(seconds: 1)); // the camera's debounced save
+    });
 
     testWidgets('a tap selects, hotkeys switch tools and frame, Escape clears, ⌫ deletes', (tester) async {
       final r = await pump(tester);

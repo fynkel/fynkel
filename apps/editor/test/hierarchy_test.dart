@@ -114,6 +114,44 @@ void main() {
     });
   });
 
+  test('item 9e: a locked Hierarchy keeps its document while another tab is focused; its close lets go', () {
+    final (project, tabs, model) = setUpModel();
+    addTearDown(() {
+      model.dispose();
+      tabs.dispose();
+    });
+    final first = tabs.focused!;
+    final other = project.addDocument(
+      FakeDocument(path: '/fake/game/assets/b.scene.json', id: 'b', entities: {'x': FakeDocument.entity('X')}),
+    );
+    var notified = 0;
+    model.addListener(() => notified++);
+    model.setLocked(true);
+    expect(model.locked, isTrue);
+    expect(notified, 1, reason: 'the padlock redraws');
+    final second = tabs.openDocument(other.id)!;
+    expect(tabs.focused, second);
+    expect(model.tab, first, reason: 'locked to the first document');
+    model.setLocked(false);
+    expect(model.tab, second, reason: 'unlocked, it follows the focused tab again');
+    model.setLocked(true);
+    tabs.closeDiscarding(second);
+    expect(model.locked, isFalse);
+    expect(model.tab, first);
+
+    // Nothing to lock without a document.
+    final empty = HierarchyModel(
+      tabs: DocumentTabs(project: FakeProject(dir: '/fake/empty')),
+      project: project,
+    );
+    addTearDown(() {
+      empty.tabs.dispose();
+      empty.dispose();
+    });
+    empty.setLocked(true);
+    expect(empty.locked, isFalse);
+  });
+
   group('operations, one transaction each', () {
     test('rename in place', () {
       final (project, tabs, model) = setUpModel();

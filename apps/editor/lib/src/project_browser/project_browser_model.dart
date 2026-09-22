@@ -34,6 +34,13 @@ String browserKindOf(AssetEntry e) {
   };
 }
 
+/// A file size for people: `812 B`, `14.2 KB`, `3.10 MB`.
+String formatBytes(int n) {
+  if (n < 1024) return '$n B';
+  if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
+  return '${(n / (1024 * 1024)).toStringAsFixed(2)} MB';
+}
+
 /// The `assetKindIcon` kind of a browser kind.
 String iconKindOf(String browserKind) => switch (browserKind) {
   'model' => 'mesh',
@@ -97,7 +104,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   AssetSort sort = AssetSort.name;
   bool descending = false;
 
-  /// Selected asset ids and the one the Asset panel shows.
+  /// Selected asset ids and the lead (the one the Inspector shows).
   final Set<String> selection = {};
   String? lead;
 
@@ -119,6 +126,8 @@ final class ProjectBrowserModel extends ChangeNotifier {
   List<String> _folders = const [];
   final _details = <String, AssetDetail?>{};
   final _modified = <String, DateTime?>{};
+  final _sizes = <String, int?>{};
+  Map<String, int>? _folderCounts;
   AssetHistory? _history;
 
   void _sync() {
@@ -130,6 +139,8 @@ final class ProjectBrowserModel extends ChangeNotifier {
     _folders = project.folders();
     _details.clear();
     _modified.clear();
+    _sizes.clear();
+    _folderCounts = null;
     _history = null;
     // What vanished leaves the selection.
     selection.removeWhere((id) => !_byId.containsKey(id));
@@ -186,6 +197,36 @@ final class ProjectBrowserModel extends ChangeNotifier {
         return null;
       }
     });
+  }
+
+  /// The file's size in bytes (the Size column); null when it cannot be read.
+  int? size(AssetEntry e) {
+    _sync();
+    return _sizes.putIfAbsent(e.id, () {
+      try {
+        return File(project.assetFile(e.path)).lengthSync();
+      } on FileSystemException {
+        return null;
+      }
+    });
+  }
+
+  /// How many assets are inside [rel], at any depth (a folder row's Contents).
+  int folderCount(String rel) {
+    _sync();
+    final counts = _folderCounts ??= () {
+      final out = <String, int>{};
+      for (final e in _entries) {
+        var at = e.path.lastIndexOf('/');
+        while (at > 0) {
+          final f = e.path.substring(0, at);
+          out.update(f, (n) => n + 1, ifAbsent: () => 1);
+          at = f.lastIndexOf('/');
+        }
+      }
+      return out;
+    }();
+    return rel.isEmpty ? _entries.length : counts[rel] ?? 0;
   }
 
   // ── What the list shows ─────────────────────────────────────────────
@@ -366,6 +407,33 @@ final class ProjectBrowserModel extends ChangeNotifier {
     select(id);
   }
 
+  // ── The padlock (item 9e) ────────────────────────────────────────────
+
+  /// A locked browser stays where it is: "Show in Project", a Game row or
+  /// an asset slot's arrow reveals in another copy — the shell opens one
+  /// when every copy is locked. The user's own clicks still move it.
+  bool locked = false;
+
+  void setLocked(bool on) {
+    if (on == locked) return;
+    locked = on;
+    notifyListeners();
+  }
+
+  /// What a restart brings back: the folder, the view and the padlock.
+  Map<String, Object?> get remembered => {'folder': folder, 'view': view.name, if (locked) 'locked': true};
+
+  /// Restores [remembered]; a folder that is gone falls back to the root.
+  void recall(Object? json) {
+    if (json is! Map) return;
+    _sync();
+    final f = json['folder'];
+    if (f is String && (f.isEmpty || _folders.contains(f))) folder = f;
+    view = BrowserView.values.asNameMap()[json['view']] ?? view;
+    locked = json['locked'] == true;
+    notifyListeners();
+  }
+
   /// Moves the lead by [delta] rows (⇧ extends).
   void step(int delta, {bool extend = false}) {
     final rows = visibleAssets;
@@ -437,7 +505,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
 
   /// What a row drags: a document by its kind, a whole audio source as a
   /// `sound`, otherwise the source's first sub-asset of each kind is not
-  /// guessed — the Asset panel drags a source's sub-assets one by one.
+  /// guessed — the Inspector's asset page drags a source's parts one by one.
   AssetDragPayload? dragPayload(AssetEntry e, {String? sub}) {
     final name = p.basename(e.path);
     if (sub != null) {

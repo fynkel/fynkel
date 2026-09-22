@@ -190,4 +190,46 @@ void main() {
     expectVec(transformDirection(m, [1, 0, 0]), [0, 0, -1]);
     expectVec(quatNormalize(quatMul(q, quatConjugate(q))), quatIdentity);
   });
+
+  test('item 9e: looking from an axis side, the view names, and a second click from the opposite side', () {
+    final c = EditorCamera.initial();
+    c.pivot = [1, 2, 3];
+    c.distance = 8;
+    expect(c.viewName, isNull, reason: 'the default view is between the axes');
+    for (final (axis, positive, name) in [
+      (0, true, 'Right'),
+      (0, false, 'Left'),
+      (1, true, 'Top'),
+      (1, false, 'Bottom'),
+      (2, true, 'Front'),
+      (2, false, 'Back'),
+    ]) {
+      final v = EditorCamera.initial()..pivot = [1, 2, 3];
+      v.distance = 8;
+      v.lookFrom(axis, positive: positive);
+      expect(v.viewName, name);
+      expect(v.viewFrom, (axis, positive));
+      expect(v.forward[axis], closeTo(positive ? -1 : 1, 1e-4), reason: '$name looks back at the pivot');
+      expect(v.pivot, [1, 2, 3], reason: 'the pivot stays');
+      expect(vDistance(v.position, v.pivot), closeTo(8, 1e-9), reason: 'so does the distance');
+      if (axis == 1) {
+        expect(
+          v.up[2],
+          closeTo(positive ? -1 : 1, 1e-2),
+          reason: 'the front at the bottom looking down, at the top looking up',
+        );
+      }
+      v.lookFrom(axis, positive: positive);
+      expect(v.viewFrom, (axis, !positive), reason: 'again: from the other side');
+    }
+    // From an aligned scene camera: the exact matrix is dropped.
+    c.alignTo(Trs(position: const [0, 0, 5], rotation: const [0, 0, 0, 1], scale: const [1, 1, 1]).toMatrix());
+    expect(c.viewName, 'Front');
+    c.lookFrom(0, positive: true);
+    expect(c.alignedWorld, isNull);
+    expect(c.viewName, 'Right');
+    // A small orbit leaves the named view.
+    c.orbit(10, 0);
+    expect(c.viewName, isNull);
+  });
 }

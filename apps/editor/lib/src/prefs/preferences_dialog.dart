@@ -1,6 +1,8 @@
-// Preferences (⌘,): theme, the IDE command, the tool paths, the layout reset.
+// Preferences (⌘,): theme, density, the IDE command, the tool paths, the
+// layout reset.
 import 'package:flutter/material.dart';
 
+import '../theme/tokens.dart';
 import 'preferences.dart';
 
 Future<void> showPreferencesDialog(
@@ -10,6 +12,7 @@ Future<void> showPreferencesDialog(
   required VoidCallback onToolsChanged,
 }) {
   return showDialog<void>(
+    animationStyle: AnimationStyle.noAnimation,
     context: context,
     builder: (_) => PreferencesDialog(prefs: prefs, onResetLayout: onResetLayout, onToolsChanged: onToolsChanged),
   );
@@ -88,6 +91,16 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
                   ],
                   selected: {prefs.theme},
                   onSelectionChanged: (s) => prefs.setTheme(s.first),
+                ),
+                const SizedBox(height: 16),
+                Text('Density', style: theme.textTheme.titleSmall),
+                Text('How tall every row, field and toolbar is.', style: theme.textTheme.bodySmall),
+                const SizedBox(height: 4),
+                SegmentedButton<EditorDensity>(
+                  key: const Key('prefs.density'),
+                  segments: [for (final d in EditorDensity.values) ButtonSegment(value: d, label: Text(d.label))],
+                  selected: {prefs.density},
+                  onSelectionChanged: (s) => prefs.setDensity(s.first),
                 ),
                 const SizedBox(height: 16),
                 Text('IDE command', style: theme.textTheme.titleSmall),

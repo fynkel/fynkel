@@ -16,16 +16,43 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../env/tools.dart';
+import '../picker/picker.dart';
+import '../project_browser/asset_preview.dart';
+import '../project_browser/project_browser_model.dart';
+import '../shell/editor_selection.dart';
+import '../shell/notices.dart';
+import '../theme/icons.dart';
+import 'asset_pages.dart';
 import 'codegen_check.dart';
 import 'field_spec.dart';
 import 'field_widgets.dart';
+import 'inspector_chrome.dart';
 import 'inspector_math.dart';
+import '../theme/theme.dart';
+import '../theme/tokens.dart';
 import 'inspector_model.dart';
 
 class InspectorPanel extends StatefulWidget {
-  const InspectorPanel({super.key, required this.model});
+  const InspectorPanel({
+    super.key,
+    required this.model,
+    this.selection,
+    this.browser,
+    this.onOpenDocument,
+    this.onOpenReference,
+    this.run = runProcess,
+  });
 
   final InspectorModel model;
+
+  /// What to show (item 9c): entities, an asset, a part, a folder. Null
+  /// shows the entity page alone (a test that pumps the model by itself).
+  final EditorSelection? selection;
+  final ProjectBrowserModel? browser;
+  final void Function(String id)? onOpenDocument;
+  final void Function(String documentPath, String? pointer)? onOpenReference;
+  final RunProcess run;
 
   @override
   State<InspectorPanel> createState() => _InspectorPanelState();
@@ -40,6 +67,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
   void initState() {
     super.initState();
     model.addListener(_onModel);
+    widget.selection?.addListener(_onModel);
   }
 
   @override
@@ -49,11 +77,16 @@ class _InspectorPanelState extends State<InspectorPanel> {
       old.model.removeListener(_onModel);
       model.addListener(_onModel);
     }
+    if (old.selection != widget.selection) {
+      old.selection?.removeListener(_onModel);
+      widget.selection?.addListener(_onModel);
+    }
   }
 
   @override
   void dispose() {
     model.removeListener(_onModel);
+    widget.selection?.removeListener(_onModel);
     super.dispose();
   }
 
@@ -63,8 +96,59 @@ class _InspectorPanelState extends State<InspectorPanel> {
 
   @override
   Widget build(BuildContext context) {
+    final browser = widget.browser;
+    final sel = widget.selection;
+    final target = sel?.target;
+    if (browser != null) {
+      void openDocument(String id) => widget.onOpenDocument?.call(id);
+      void openReference(String doc, String? pointer) => widget.onOpenReference?.call(doc, pointer);
+      switch (target) {
+        case InspectAsset(:final id, sub: null):
+          return AssetPage(
+            key: ValueKey('inspector.asset.$id'),
+            model: browser,
+            id: id,
+            selection: sel,
+            onOpenDocument: openDocument,
+            onOpenReference: openReference,
+            run: widget.run,
+          );
+        case InspectAsset(:final id, :final sub?):
+          return SubAssetPage(
+            key: ValueKey('inspector.part.$id.$sub'),
+            model: browser,
+            id: id,
+            sub: sub,
+            selection: sel,
+            onOpenDocument: openDocument,
+            onOpenReference: openReference,
+          );
+        case InspectFolder(:final rel):
+          return FolderPage(
+            key: ValueKey('inspector.folder.$rel'),
+            model: browser,
+            rel: rel,
+            selection: sel,
+            run: widget.run,
+          );
+        case InspectEntities() || null:
+          break;
+      }
+    }
+    if (target == null && sel != null && !model.hasDocument) {
+      return const InspectorEmpty(
+        key: ValueKey('inspector.empty'),
+        icon: FIcons.touchAppOutlined,
+        title: 'Nothing selected',
+        message: 'Select an entity in the Hierarchy, or an asset or a folder in the Project panel.',
+      );
+    }
+    return _entityPage(context);
+  }
+
+  Widget _entityPage(BuildContext context) {
     final theme = Theme.of(context);
-    if (!model.hasDocument) return _empty(context, Icons.tune, 'Open a document and select an entity.');
+    if (!model.hasDocument) return _empty(context, FIcons.tune, 'Open a document and select an entity.');
     final banner = _banner(context);
     if (model.tooMany) {
       return Column(
@@ -73,7 +157,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
           Expanded(
             child: _empty(
               context,
-              Icons.select_all,
+              FIcons.selectAll,
               '${model.selection.length} entities selected.\nSelect up to ${model.maxEntities} to edit them together.',
             ),
           ),
@@ -85,7 +169,13 @@ class _InspectorPanelState extends State<InspectorPanel> {
         children: [
           ?banner,
           Expanded(
-            child: _empty(context, Icons.touch_app_outlined, 'Nothing selected.\nClick an entity in the Hierarchy.'),
+            child: _empty(
+              context,
+              FIcons.touchAppOutlined,
+              widget.selection == null
+                  ? 'Nothing selected.\nClick an entity in the Hierarchy.'
+                  : 'Nothing selected.\nClick an entity in the Hierarchy, or an asset in the Project panel.',
+            ),
           ),
         ],
       );
@@ -95,13 +185,14 @@ class _InspectorPanelState extends State<InspectorPanel> {
       children: [
         ?banner,
         _header(context),
-        const Divider(height: 1),
         Expanded(
-          child: ListView(
+          child: CustomScrollView(
             key: const ValueKey('inspector.list'),
-            padding: const EdgeInsets.only(bottom: 12),
-            children: [
-              if (model.single?.isDerived ?? false) _DerivedBanner(model: model, entity: model.single!),
+            slivers: [
+              if (model.single?.isDerived ?? false)
+                SliverToBoxAdapter(
+                  child: _DerivedBanner(model: model, entity: model.single!),
+                ),
               for (final slot in model.slots)
                 _ComponentCard(
                   key: ValueKey('card.${slot.key}'),
@@ -112,40 +203,51 @@ class _InspectorPanelState extends State<InspectorPanel> {
                     () => _collapsed.contains(slot.key) ? _collapsed.remove(slot.key) : _collapsed.add(slot.key),
                   ),
                 ),
-              if (model.single?.prefab != null) _PrefabSection(model: model, entity: model.single!),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                child: OutlinedButton.icon(
-                  key: const ValueKey('inspector.addComponent'),
-                  onPressed: model.canEdit ? () => showAddComponent(context, model) : null,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Add Component'),
-                ),
-              ),
-              if (model.lastError != null && model.errors.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: SelectableText(
-                          model.lastError!,
-                          key: const ValueKey('inspector.lastError'),
-                          style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+              SliverPadding(
+                padding: const EdgeInsets.only(bottom: 12),
+                sliver: SliverList.list(
+                  children: [
+                    if (model.single?.prefab != null) _PrefabSection(model: model, entity: model.single!),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                      child: Builder(
+                        builder: (button) => OutlinedButton.icon(
+                          key: const ValueKey('inspector.addComponent'),
+                          onPressed: model.canEdit
+                              ? () => showAddComponent(context, model, anchor: globalRectOf(button))
+                              : null,
+                          icon: const Icon(FIcons.add),
+                          label: const Text('Add Component'),
                         ),
                       ),
-                      IconButton(
-                        key: const ValueKey('inspector.dismissError'),
-                        tooltip: 'Dismiss',
-                        icon: const Icon(Icons.close, size: 14),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                        onPressed: model.dismissError,
+                    ),
+                    if (model.lastError != null && model.errors.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: SelectableText(
+                                model.lastError!,
+                                key: const ValueKey('inspector.lastError'),
+                                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                              ),
+                            ),
+                            IconButton(
+                              key: const ValueKey('inspector.dismissError'),
+                              tooltip: 'Dismiss',
+                              icon: const Icon(FIcons.close, size: 14),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                              onPressed: model.dismissError,
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
+              ),
             ],
           ),
         ),
@@ -159,7 +261,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 36, color: theme.hintColor),
+          Icon(icon, size: 32, color: context.tokens.textDisabled),
           const SizedBox(height: 8),
           Text(
             text,
@@ -173,19 +275,24 @@ class _InspectorPanelState extends State<InspectorPanel> {
 
   Widget _header(BuildContext context) {
     final theme = Theme.of(context);
+    final t = context.tokens;
     final single = model.single;
     if (single != null) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+      return Container(
+        decoration: BoxDecoration(
+          color: t.header,
+          border: Border(bottom: t.hairline),
+        ),
+        padding: EdgeInsets.fromLTRB(t.pad, 5, t.pad, 5),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
                 Icon(
-                  single.prefab != null ? Icons.widgets_outlined : Icons.category_outlined,
-                  size: 16,
-                  color: theme.hintColor,
+                  single.prefab != null ? FIcons.widgetsOutlined : FIcons.categoryOutlined,
+                  size: t.icon,
+                  color: single.prefab != null ? t.accent : t.textSecondary,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -197,20 +304,19 @@ class _InspectorPanelState extends State<InspectorPanel> {
                     onCommit: model.rename,
                   ),
                 ),
+                if (widget.selection != null) ...[
+                  const SizedBox(width: 2),
+                  InspectorLockButton(selection: widget.selection!),
+                ],
               ],
             ),
             const SizedBox(height: 2),
             Row(
               children: [
-                Expanded(
-                  child: SelectableText(
-                    single.id,
-                    style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor, fontFamily: 'monospace'),
-                  ),
-                ),
+                Expanded(child: SelectableText(single.id, style: monoStyle(context, size: 10))),
                 IconButton(
                   tooltip: 'Copy id',
-                  icon: const Icon(Icons.copy, size: 12),
+                  icon: const Icon(FIcons.copy, size: 12),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
                   onPressed: () => Clipboard.setData(ClipboardData(text: single.id)),
@@ -222,11 +328,15 @@ class _InspectorPanelState extends State<InspectorPanel> {
       );
     }
     final n = model.entities.length;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+    return Container(
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      padding: EdgeInsets.fromLTRB(t.pad, 5, t.pad, 5),
       child: Row(
         children: [
-          Icon(Icons.select_all, size: 16, color: theme.hintColor),
+          Icon(FIcons.selectAll, size: t.icon, color: t.textSecondary),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -236,6 +346,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (widget.selection != null) InspectorLockButton(selection: widget.selection!),
         ],
       ),
     );
@@ -262,8 +373,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
       isError = true;
     }
     if (headline == null) return null;
-    final color = isError ? theme.colorScheme.errorContainer : theme.colorScheme.tertiaryContainer;
-    final onColor = isError ? theme.colorScheme.onErrorContainer : theme.colorScheme.onTertiaryContainer;
+    final t = context.tokens;
+    final color = t.surfaceOf(isError ? t.error : t.warning, .2);
+    final onColor = isError ? t.error : t.warning;
     return Material(
       key: const ValueKey('inspector.codegenBanner'),
       color: color,
@@ -274,7 +386,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
           children: [
             Row(
               children: [
-                Icon(isError ? Icons.error_outline : Icons.sync_problem, size: 16, color: onColor),
+                Icon(isError ? FIcons.errorOutline : FIcons.syncProblem, size: t.icon, color: onColor),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -305,7 +417,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                       key: const ValueKey('inspector.copyCommand'),
                       style: TextButton.styleFrom(foregroundColor: onColor, visualDensity: VisualDensity.compact),
                       onPressed: () => Clipboard.setData(ClipboardData(text: check.command)),
-                      icon: const Icon(Icons.copy, size: 14),
+                      icon: const Icon(FIcons.copy, size: 14),
                       label: Text(check.command, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
                     ),
                     TextButton.icon(
@@ -314,7 +426,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                       onPressed: status == CodegenStatus.running ? null : check.check,
                       icon: status == CodegenStatus.running
                           ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5))
-                          : const Icon(Icons.refresh, size: 14),
+                          : const Icon(FIcons.refresh, size: 14),
                       label: const Text('Check again', style: TextStyle(fontSize: 11)),
                     ),
                   ],
@@ -346,86 +458,100 @@ class _ComponentCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = context.tokens;
     final spec = slot.spec;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InkWell(
-          onTap: onToggle,
-          child: Container(
-            height: 28,
-            color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-            padding: const EdgeInsets.only(left: 4, right: 2),
-            child: Row(
-              children: [
-                Icon(collapsed ? Icons.chevron_right : Icons.expand_more, size: 16),
-                Icon(componentIcon(spec), size: 14, color: theme.hintColor),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Tooltip(
-                    message: spec.description ?? spec.type,
-                    waitDuration: const Duration(milliseconds: 600),
-                    child: Text.rich(
-                      TextSpan(
-                        text: spec.title,
-                        style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                        children: [
-                          if (spec.isBehaviour)
-                            TextSpan(
-                              text: '  ${spec.namespace}',
-                              style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                            ),
-                          if (slot.index > 0)
-                            TextSpan(
-                              text: '  #${slot.index + 1}',
-                              style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                            ),
-                        ],
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+    return SliverMainAxisGroup(
+      slivers: [
+        PinnedHeaderSliver(
+          child: Material(
+            color: t.header,
+            child: InkWell(
+              onTap: onToggle,
+              child: Container(
+                height: t.row + 6,
+                decoration: BoxDecoration(
+                  color: t.header,
+                  border: Border(top: t.hairline, bottom: t.hairline),
                 ),
-                if (spec.missingSchema)
-                  Tooltip(
-                    message: 'No schema for ${spec.type}: fields are shown as JSON. Run `fynkel codegen`.',
-                    child: Icon(Icons.help_outline, size: 14, color: theme.colorScheme.error),
-                  ),
-                PopupMenuButton<String>(
-                  key: ValueKey('card.menu.${slot.key}'),
-                  tooltip: '',
-                  padding: EdgeInsets.zero,
-                  iconSize: 16,
-                  onSelected: (v) => _menu(context, v),
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'reset',
-                      enabled: model.canEdit,
-                      height: 28,
-                      child: const Text('Reset to Defaults'),
+                padding: const EdgeInsets.only(left: 2, right: 2),
+                child: Row(
+                  children: [
+                    Icon(collapsed ? FIcons.chevronRight : FIcons.expandMore, size: 14, color: t.textSecondary),
+                    const SizedBox(width: 2),
+                    Icon(componentIcon(spec), size: 14, color: t.textSecondary),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Tooltip(
+                        message: spec.description ?? spec.type,
+                        waitDuration: const Duration(milliseconds: 600),
+                        child: Text.rich(
+                          TextSpan(
+                            text: spec.title,
+                            style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: t.text),
+                            children: [
+                              if (spec.isBehaviour)
+                                TextSpan(
+                                  text: '  ${spec.namespace}',
+                                  style: theme.textTheme.labelSmall?.copyWith(color: t.textDisabled),
+                                ),
+                              if (slot.index > 0)
+                                TextSpan(
+                                  text: '  #${slot.index + 1}',
+                                  style: theme.textTheme.labelSmall?.copyWith(color: t.textDisabled),
+                                ),
+                            ],
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ),
-                    if (spec.isBehaviour) const PopupMenuItem(value: 'open', height: 28, child: Text('Open Script')),
-                    const PopupMenuItem(value: 'copyType', height: 28, child: Text('Copy Type Name')),
-                    const PopupMenuDivider(),
-                    PopupMenuItem(
-                      value: 'remove',
-                      enabled: model.canEdit,
-                      height: 28,
-                      child: const Text('Remove Component'),
+                    if (spec.missingSchema)
+                      Tooltip(
+                        message: 'No schema for ${spec.type}: fields are shown as JSON. Run `fynkel codegen`.',
+                        child: Icon(FIcons.helpOutline, size: 13, color: t.error),
+                      ),
+                    PopupMenuButton<String>(
+                      popUpAnimationStyle: AnimationStyle.noAnimation,
+                      key: ValueKey('card.menu.${slot.key}'),
+                      tooltip: '',
+                      padding: EdgeInsets.zero,
+                      iconSize: 14,
+                      onSelected: (v) => _menu(context, v),
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                          value: 'reset',
+                          enabled: model.canEdit,
+                          height: 28,
+                          child: const Text('Reset to Defaults'),
+                        ),
+                        if (spec.isBehaviour)
+                          const PopupMenuItem(value: 'open', height: 28, child: Text('Open Script')),
+                        const PopupMenuItem(value: 'copyType', height: 28, child: Text('Copy Type Name')),
+                        const PopupMenuDivider(),
+                        PopupMenuItem(
+                          value: 'remove',
+                          enabled: model.canEdit,
+                          height: 28,
+                          child: const Text('Remove Component'),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
-        if (!collapsed) Padding(padding: const EdgeInsets.fromLTRB(8, 4, 8, 6), child: _fields(context)),
+        if (!collapsed)
+          SliverToBoxAdapter(
+            child: Padding(padding: EdgeInsets.fromLTRB(t.pad, 4, t.pad, 8), child: _fields(context)),
+          ),
       ],
     );
   }
 
   Future<void> _menu(BuildContext context, String v) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
+    final notices = Notices.maybeOf(context);
     switch (v) {
       case 'remove':
         model.removeComponent(slot);
@@ -435,7 +561,7 @@ class _ComponentCard extends StatelessWidget {
         await Clipboard.setData(ClipboardData(text: slot.type));
       case 'open':
         final err = await model.openScript(slot);
-        if (err != null) messenger?.showSnackBar(SnackBar(content: Text(err)));
+        if (err != null) notices?.show(err);
     }
   }
 
@@ -452,35 +578,11 @@ class _ComponentCard extends StatelessWidget {
       if (f.group != group) {
         group = f.group;
         if (group != null) {
-          rows.add(
-            Padding(
-              padding: const EdgeInsets.only(top: 6, bottom: 2),
-              child: Text(
-                group,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.hintColor,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ),
-          );
+          rows.add(Padding(padding: const EdgeInsets.only(top: 10, bottom: 3), child: InspectorCaption(group)));
         }
       }
       if (f.header != null) {
-        rows.add(
-          Padding(
-            padding: const EdgeInsets.only(top: 6, bottom: 2),
-            child: Text(
-              f.header!,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.hintColor,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.4,
-              ),
-            ),
-          ),
-        );
+        rows.add(Padding(padding: const EdgeInsets.only(top: 10, bottom: 3), child: InspectorCaption(f.header!)));
       }
       rows.add(
         _FieldEditor(key: ValueKey('field.${slot.key}.${f.name}'), model: model, slot: slot, spec: f, path: f.name),
@@ -515,7 +617,7 @@ class _ComponentCard extends StatelessWidget {
     if (!any) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Text('No fields.', style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
+        child: Text('No fields.', style: theme.textTheme.bodySmall?.copyWith(color: context.tokens.textDisabled)),
       );
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows);
@@ -529,72 +631,72 @@ IconData componentIcon(ComponentSpec spec) {
     if (known != null) return known;
   }
   return switch (spec.type) {
-    'fynkel.Transform' => Icons.open_with,
-    'fynkel.Camera' || 'fynkel.ThirdPersonCamera' || 'fynkel.LookAtCamera' => Icons.videocam_outlined,
-    'fynkel.DirectionalLight' || 'fynkel.PointLight' || 'fynkel.SpotLight' => Icons.lightbulb_outline,
-    'fynkel.Environment' => Icons.wb_sunny_outlined,
-    'fynkel.MeshRenderer' => Icons.view_in_ar_outlined,
-    'fynkel.Skin' || 'fynkel.Animator' => Icons.accessibility_new,
+    'fynkel.Transform' => FIcons.openWith,
+    'fynkel.Camera' || 'fynkel.ThirdPersonCamera' || 'fynkel.LookAtCamera' => FIcons.videocamOutlined,
+    'fynkel.DirectionalLight' || 'fynkel.PointLight' || 'fynkel.SpotLight' => FIcons.lightbulbOutline,
+    'fynkel.Environment' => FIcons.wbSunnyOutlined,
+    'fynkel.MeshRenderer' => FIcons.viewInArOutlined,
+    'fynkel.Skin' || 'fynkel.Animator' => FIcons.accessibilityNew,
     'fynkel.RigidBody' ||
     'fynkel.Collider' ||
     'fynkel.CharacterController' ||
-    'fynkel.TriggerZone' => Icons.sports_basketball_outlined,
-    'fynkel.Emitter' || 'fynkel.LifetimeDespawn' => Icons.auto_awesome_outlined,
-    'fynkel.Rotator' || 'fynkel.Oscillate' || 'fynkel.Follow' => Icons.motion_photos_on_outlined,
-    _ => spec.isBehaviour ? Icons.code : Icons.extension_outlined,
+    'fynkel.TriggerZone' => FIcons.sportsBasketballOutlined,
+    'fynkel.Emitter' || 'fynkel.LifetimeDespawn' => FIcons.autoAwesomeOutlined,
+    'fynkel.Rotator' || 'fynkel.Oscillate' || 'fynkel.Follow' => FIcons.motionPhotosOnOutlined,
+    _ => spec.isBehaviour ? FIcons.code : FIcons.extensionOutlined,
   };
 }
 
 /// The `icon` hint names a Material icon; the ones a behaviour is likely to
 /// use. An unknown name falls back to the type's default.
 const _materialIcons = <String, IconData>{
-  'rotate_right': Icons.rotate_right,
-  'rotate_left': Icons.rotate_left,
-  'directions_run': Icons.directions_run,
-  'person': Icons.person,
-  'bolt': Icons.bolt,
-  'star': Icons.star,
-  'favorite': Icons.favorite,
-  'flag': Icons.flag,
-  'timer': Icons.timer,
-  'toggle_on': Icons.toggle_on,
-  'door_front': Icons.door_front_door_outlined,
-  'lock': Icons.lock_outline,
-  'key': Icons.key,
-  'sports_esports': Icons.sports_esports,
-  'gamepad': Icons.gamepad,
-  'code': Icons.code,
-  'extension': Icons.extension,
-  'motion': Icons.motion_photos_on_outlined,
-  'sensors': Icons.sensors,
-  'music_note': Icons.music_note,
-  'volume_up': Icons.volume_up,
-  'visibility': Icons.visibility,
-  'speed': Icons.speed,
-  'settings': Icons.settings,
-  'build': Icons.build,
-  'science': Icons.science,
-  'psychology': Icons.psychology,
-  'smart_toy': Icons.smart_toy,
-  'pets': Icons.pets,
-  'eco': Icons.eco,
-  'water_drop': Icons.water_drop,
-  'local_fire_department': Icons.local_fire_department,
-  'ac_unit': Icons.ac_unit,
-  'brush': Icons.brush,
-  'text_fields': Icons.text_fields,
-  'chat': Icons.chat,
-  'shopping_cart': Icons.shopping_cart,
-  'inventory': Icons.inventory_2_outlined,
-  'health_and_safety': Icons.health_and_safety,
-  'shield': Icons.shield,
-  'gps_fixed': Icons.gps_fixed,
-  'explore': Icons.explore,
-  'map': Icons.map,
-  'camera': Icons.videocam_outlined,
-  'light': Icons.lightbulb_outline,
-  'move': Icons.open_with,
-  'physics': Icons.sports_basketball_outlined,
+  'rotate_right': FIcons.rotateRight,
+  'rotate_left': FIcons.rotateLeft,
+  'directions_run': FIcons.directionsRun,
+  'person': FIcons.person,
+  'bolt': FIcons.bolt,
+  'star': FIcons.star,
+  'favorite': FIcons.favorite,
+  'flag': FIcons.flag,
+  'timer': FIcons.timer,
+  'toggle_on': FIcons.toggleOn,
+  'door_front': FIcons.doorFrontDoorOutlined,
+  'lock': FIcons.lockOutline,
+  'key': FIcons.key,
+  'sports_esports': FIcons.sportsEsports,
+  'gamepad': FIcons.gamepad,
+  'code': FIcons.code,
+  'extension': FIcons.extension,
+  'motion': FIcons.motionPhotosOnOutlined,
+  'sensors': FIcons.sensors,
+  'music_note': FIcons.musicNote,
+  'volume_up': FIcons.volumeUp,
+  'visibility': FIcons.visibility,
+  'speed': FIcons.speed,
+  'settings': FIcons.settings,
+  'build': FIcons.build,
+  'science': FIcons.science,
+  'psychology': FIcons.psychology,
+  'smart_toy': FIcons.smartToy,
+  'pets': FIcons.pets,
+  'eco': FIcons.eco,
+  'water_drop': FIcons.waterDrop,
+  'local_fire_department': FIcons.localFireDepartment,
+  'ac_unit': FIcons.acUnit,
+  'brush': FIcons.brush,
+  'text_fields': FIcons.textFields,
+  'chat': FIcons.chat,
+  'shopping_cart': FIcons.shoppingCart,
+  'inventory': FIcons.inventory2Outlined,
+  'health_and_safety': FIcons.healthAndSafety,
+  'shield': FIcons.shield,
+  'gps_fixed': FIcons.gpsFixed,
+  'explore': FIcons.explore,
+  'map': FIcons.map,
+  'camera': FIcons.videocamOutlined,
+  'light': FIcons.lightbulbOutline,
+  'move': FIcons.openWith,
+  'physics': FIcons.sportsBasketballOutlined,
 };
 
 // ── One field ──────────────────────────────────────────────────────────────
@@ -752,8 +854,13 @@ class _FieldEditor extends StatelessWidget {
             nullable: spec.nullable,
             mixed: mixed,
             enabled: _enabled,
+            subject: label,
             describe: model.describeAsset,
             candidates: () => model.assetsFor(spec.assetKind),
+            thumbnail: switch (model.assetPreview) {
+              final preview? => (e, size) => AssetPreviewWidget(preview: preview(e), size: size),
+              null => null,
+            },
             onCommit: _commit,
           ),
         );
@@ -763,6 +870,7 @@ class _FieldEditor extends StatelessWidget {
           error,
           EntityField(
             value: value?.toString(),
+            subject: label,
             names: model.entityNames,
             mixed: mixed,
             enabled: _enabled,
@@ -839,7 +947,7 @@ class _FieldEditor extends StatelessWidget {
                 IconButton(
                   key: ValueKey('array.add.$path'),
                   tooltip: 'Add item',
-                  icon: const Icon(Icons.add, size: 14),
+                  icon: const Icon(FIcons.add, size: 14),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
                   onPressed: () => model.setField(
@@ -887,7 +995,7 @@ class _FieldEditor extends StatelessWidget {
                 if (_enabled)
                   IconButton(
                     tooltip: 'Remove item',
-                    icon: const Icon(Icons.remove, size: 14),
+                    icon: const Icon(FIcons.remove, size: 14),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 22, minHeight: 26),
                     onPressed: () {
@@ -996,15 +1104,18 @@ class _PrefabSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          height: 28,
-          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          height: context.tokens.row + 4,
+          decoration: BoxDecoration(
+            color: context.tokens.header,
+            border: Border(top: context.tokens.hairline, bottom: context.tokens.hairline),
+          ),
           padding: const EdgeInsets.only(left: 8, right: 2),
           child: Row(
             children: [
               Icon(
-                missing || broken ? Icons.broken_image_outlined : Icons.widgets_outlined,
-                size: 14,
-                color: missing || broken ? theme.colorScheme.error : theme.hintColor,
+                missing || broken ? FIcons.brokenImageOutlined : FIcons.widgetsOutlined,
+                size: 13,
+                color: missing || broken ? context.tokens.error : context.tokens.accent,
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -1066,7 +1177,7 @@ class _PrefabSection extends StatelessWidget {
                           IconButton(
                             key: ValueKey('prefab.revert.$i'),
                             tooltip: 'Revert this override',
-                            icon: const Icon(Icons.undo, size: 14),
+                            icon: const Icon(FIcons.undo, size: 14),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
                             onPressed: model.canEdit ? () => model.revertOverride(entity.id, index: i) : null,
@@ -1074,7 +1185,7 @@ class _PrefabSection extends StatelessWidget {
                           IconButton(
                             key: ValueKey('prefab.apply.$i'),
                             tooltip: applyWhy ?? 'Apply this override to the prefab',
-                            icon: const Icon(Icons.upload, size: 14),
+                            icon: const Icon(FIcons.upload, size: 14),
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
                             onPressed: applyWhy == null ? () => model.applyOverrides(entity.id, index: i) : null,
@@ -1097,7 +1208,7 @@ class _PrefabSection extends StatelessWidget {
                     key: const ValueKey('prefab.applyAll'),
                     style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                     onPressed: applyWhy == null ? () => model.applyOverrides(entity.id) : null,
-                    icon: const Icon(Icons.upload, size: 14),
+                    icon: const Icon(FIcons.upload, size: 14),
                     label: const Text('Apply to prefab', style: TextStyle(fontSize: 11)),
                   ),
                 ),
@@ -1106,7 +1217,7 @@ class _PrefabSection extends StatelessWidget {
                   key: const ValueKey('prefab.revertAll'),
                   style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                   onPressed: model.canEdit ? () => model.revertOverride(entity.id) : null,
-                  icon: const Icon(Icons.undo, size: 14),
+                  icon: const Icon(FIcons.undo, size: 14),
                   label: const Text('Revert all', style: TextStyle(fontSize: 11)),
                 ),
               Tooltip(
@@ -1115,7 +1226,7 @@ class _PrefabSection extends StatelessWidget {
                   key: const ValueKey('prefab.unpack'),
                   style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                   onPressed: unpackWhy == null ? () => model.unpack(entity.id) : null,
-                  icon: const Icon(Icons.unarchive_outlined, size: 14),
+                  icon: const Icon(FIcons.unarchiveOutlined, size: 14),
                   label: const Text('Unpack', style: TextStyle(fontSize: 11)),
                 ),
               ),
@@ -1123,14 +1234,14 @@ class _PrefabSection extends StatelessWidget {
                 key: const ValueKey('prefab.open'),
                 style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                 onPressed: x == null || missing ? null : () => model.openPrefab(entity.id),
-                icon: const Icon(Icons.open_in_new, size: 14),
+                icon: const Icon(FIcons.openInNew, size: 14),
                 label: const Text('Open prefab', style: TextStyle(fontSize: 11)),
               ),
               TextButton.icon(
                 key: const ValueKey('prefab.selectAsset'),
                 style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                 onPressed: model.revealAsset == null ? null : () => model.selectPrefabAsset(entity.id),
-                icon: const Icon(Icons.folder_open_outlined, size: 14),
+                icon: const Icon(FIcons.folderOpenOutlined, size: 14),
                 label: const Text('Select prefab asset', style: TextStyle(fontSize: 11)),
               ),
             ],
@@ -1157,11 +1268,11 @@ class _DerivedBanner extends StatelessWidget {
     final anchorName = model.tab?.tree[anchor]?.name ?? anchor;
     final prefabName = x?.prefab?.name ?? x?.asset ?? '';
     return Container(
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      color: context.tokens.surfaceOf(context.tokens.accent, .18),
       padding: const EdgeInsets.fromLTRB(8, 4, 2, 4),
       child: Row(
         children: [
-          Icon(Icons.widgets_outlined, size: 14, color: theme.hintColor),
+          Icon(FIcons.widgetsOutlined, size: 13, color: context.tokens.accent),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
@@ -1222,131 +1333,55 @@ String describeOverride(Map<String, Object?> o) {
 
 // ── Add Component ──────────────────────────────────────────────────────────
 
-/// The searchable Add Component popup; adds to every selected entity.
-Future<void> showAddComponent(BuildContext context, InspectorModel model) async {
-  final type = await showDialog<String>(
-    context: context,
-    builder: (_) => _AddComponentDialog(model: model),
+/// Add Component through the shared picker (item 9d), adding to every
+/// selected entity: the addable types
+/// grouped by category, a type the selection already holds listed dim with
+/// where it is (an entity holds one component per type, FYN-D0204). Under
+/// [anchor] (the Add button) or at the top of the window (the command).
+Future<void> showAddComponent(BuildContext context, InspectorModel model, {Rect? anchor}) async {
+  final selected = model.entities.length;
+  String? alreadyOn(String type) {
+    final on = model.entitiesWith(type);
+    if (on.isEmpty) return null;
+    if (selected == 1) return 'already on ${on.single.name.isEmpty ? 'this entity' : on.single.name}';
+    if (on.length == selected) return 'already on every selected entity';
+    return 'already on ${on.length} of $selected';
+  }
+
+  final single = model.single;
+  final choice = await showPicker<String>(
+    context,
+    title: 'Add Component',
+    subject: selected == 1
+        ? (single == null || single.name.isEmpty ? null : single.name)
+        : (selected > 1 ? '$selected entities' : null),
+    anchor: anchor,
+    hint: 'Search components and behaviours',
+    keyPrefix: 'addComponent',
+    countNoun: 'types',
+    items: [
+      for (final t in model.addableTypes())
+        if (alreadyOn(t.type) case final held)
+          PickerItem(
+            value: t.type,
+            id: t.type,
+            title: t.title,
+            detail: t.spec.isBehaviour ? 'behaviour' : null,
+            group: t.category,
+            icon: componentIcon(t.spec),
+            enabled: held == null,
+            note: held,
+            keywords: t.type,
+            facts: [('Type', t.type), ('Kind', t.spec.isBehaviour ? 'behaviour' : 'component')],
+            description: held == null
+                ? t.spec.description
+                : '${t.spec.description == null ? '' : '${t.spec.description}\n\n'}'
+                      'An entity holds one component per type (FYN-D0204).',
+          ),
+    ],
   );
-  if (type == null) return;
-  if (!model.addComponent(type) && model.lastError != null && context.mounted) {
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(model.lastError!)));
-  }
-}
-
-class _AddComponentDialog extends StatefulWidget {
-  const _AddComponentDialog({required this.model});
-
-  final InspectorModel model;
-
-  @override
-  State<_AddComponentDialog> createState() => _AddComponentDialogState();
-}
-
-class _AddComponentDialogState extends State<_AddComponentDialog> {
-  final _query = TextEditingController();
-
-  @override
-  void dispose() {
-    _query.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final types = widget.model.addableTypes(_query.text);
-    final selected = widget.model.entities.length;
-    String? alreadyOn(String type) {
-      final on = widget.model.entitiesWith(type);
-      if (on.isEmpty) return null;
-      if (selected == 1) return 'already on ${on.single.name.isEmpty ? 'this entity' : on.single.name}';
-      if (on.length == selected) return 'already on every selected entity';
-      return 'already on ${on.length} of $selected';
-    }
-
-    final addable = [
-      for (final t in types)
-        if (alreadyOn(t.type) == null) t,
-    ];
-    return AlertDialog(
-      title: const Text('Add Component'),
-      content: SizedBox(
-        width: 420,
-        height: 380,
-        child: Column(
-          children: [
-            TextField(
-              key: const ValueKey('addComponent.search'),
-              controller: _query,
-              autofocus: true,
-              decoration: const InputDecoration(
-                isDense: true,
-                prefixIcon: Icon(Icons.search, size: 16),
-                hintText: 'Search components and behaviours',
-              ),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (_) {
-                if (addable.length == 1) Navigator.of(context).pop(addable.single.type);
-              },
-            ),
-            const SizedBox(height: 6),
-            Expanded(
-              child: types.isEmpty
-                  ? Center(child: Text('Nothing matches.', style: theme.textTheme.bodySmall))
-                  : ListView.builder(
-                      itemCount: types.length,
-                      itemBuilder: (context, i) {
-                        final t = types[i];
-                        final held = alreadyOn(t.type);
-                        final newCategory = i == 0 || types[i - 1].category != t.category;
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (newCategory)
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
-                                child: Text(
-                                  t.category,
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.hintColor,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ListTile(
-                              key: ValueKey('addComponent.${t.type}'),
-                              dense: true,
-                              enabled: held == null,
-                              leading: Icon(componentIcon(t.spec), size: 16),
-                              title: Text(t.title, style: theme.textTheme.bodySmall),
-                              subtitle: Text(
-                                t.spec.description ?? t.type,
-                                style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: held == null
-                                  ? null
-                                  : Tooltip(
-                                      message: 'An entity holds one component per type (FYN-D0204).',
-                                      child: Text(
-                                        held,
-                                        key: ValueKey('addComponent.held.${t.type}'),
-                                        style: theme.textTheme.labelSmall?.copyWith(color: theme.hintColor),
-                                      ),
-                                    ),
-                              onTap: held == null ? () => Navigator.of(context).pop(t.type) : null,
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-      actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel'))],
-    );
+  if (choice == null || choice.isNone) return;
+  if (!model.addComponent(choice.value!) && model.lastError != null && context.mounted) {
+    Notices.maybeOf(context)?.show(model.lastError!);
   }
 }

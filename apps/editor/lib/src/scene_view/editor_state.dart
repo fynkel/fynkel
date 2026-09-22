@@ -1,7 +1,9 @@
 // `.fynkel/editor.json`: the project-local editor state the blueprint lets
 // the editor write directly (§19.2e "Files the editor reads or writes
 // directly") — per scene the editor camera and the hidden and locked
-// flags, plus the Scene view's toggles. Editor-only by design: none of it
+// flags, plus the Scene view's toggles, and (item 9e) the cameras of the
+// Scene view's other copies and what each panel copy remembers across a
+// restart (an Inspector's lock, a Project browser's folder). Editor-only by design: none of it
 // is in a document, so `fynkel validate` and git never see a camera move.
 // One JSON file, replaced atomically like the preferences; a file that
 // does not parse is replaced, never repaired in place.
@@ -16,12 +18,32 @@ import 'scene_math.dart';
 
 /// What the editor remembers about one scene or prefab document, by its id.
 final class SceneEditorState {
-  SceneEditorState({EditorCamera? camera, Set<String>? hidden, Set<String>? locked})
+  SceneEditorState({EditorCamera? camera, Set<String>? hidden, Set<String>? locked, Map<String, EditorCamera>? views})
     : camera = camera ?? EditorCamera.initial(),
       hidden = hidden ?? <String>{},
-      locked = locked ?? <String>{};
+      locked = locked ?? <String>{},
+      views = views ?? <String, EditorCamera>{};
 
+  /// The Scene view's first copy has the panel's id; its camera is [camera].
+  static const firstView = 'scene';
+
+  /// The camera of the Scene view's first copy.
   EditorCamera camera;
+
+  /// The cameras of the other copies (item 9e), by copy id (`scene#2`). A
+  /// copy that has not looked at this document yet starts where the first
+  /// copy's camera is.
+  final Map<String, EditorCamera> views;
+
+  EditorCamera cameraOf(String view) => view == firstView ? camera : views.putIfAbsent(view, camera.copy);
+
+  void setCamera(String view, EditorCamera c) {
+    if (view == firstView) {
+      camera = c;
+    } else {
+      views[view] = c;
+    }
+  }
 
   /// Entity ids left out of the picture and of picking (with their
   /// descendants) — editor-only.
@@ -35,6 +57,7 @@ final class SceneEditorState {
     'camera': camera.toJson(),
     if (hidden.isNotEmpty) 'hidden': hidden.toList()..sort(),
     if (locked.isNotEmpty) 'locked': locked.toList()..sort(),
+    if (views.isNotEmpty) 'views': {for (final e in views.entries) e.key: e.value.toJson()},
   };
 
   static SceneEditorState fromJson(Object? json) {
@@ -45,10 +68,16 @@ final class SceneEditorState {
               if (s is String) s,
           }
         : <String>{};
+    final views = json['views'];
     return SceneEditorState(
       camera: EditorCamera.fromJson(json['camera']),
       hidden: ids(json['hidden']),
       locked: ids(json['locked']),
+      views: {
+        if (views is Map)
+          for (final e in views.entries)
+            if ((e.key, EditorCamera.fromJson(e.value)) case (final String k, final EditorCamera c)) k: c,
+      },
     );
   }
 }
@@ -106,6 +135,11 @@ final class EditorState extends ChangeNotifier {
         if (json['scenes'] is Map)
           for (final e in (json['scenes'] as Map).entries)
             if (e.key is String) e.key as String: SceneEditorState.fromJson(e.value),
+      },
+      _panels = {
+        if (json['panels'] is Map)
+          for (final e in (json['panels'] as Map).entries)
+            if (e.key is String) e.key as String: e.value,
       };
 
   static const formatVersion = 1;
@@ -154,6 +188,32 @@ final class EditorState extends ChangeNotifier {
   bool hasScene(String documentId) => _scenes.containsKey(documentId);
   Iterable<String> get sceneIds => _scenes.keys;
 
+  final Map<String, Object?> _panels;
+
+  /// What the panel copy [id] remembers (item 9e), or null.
+  Object? panel(String id) => _panels[id];
+
+  /// Remembers [value] (JSON) for the panel copy [id]; null forgets it.
+  /// Saves only when it changed.
+  void setPanel(String id, Object? value) {
+    if (value == null) {
+      if (_panels.remove(id) == null) return;
+    } else {
+      if (jsonEncode(_panels[id]) == jsonEncode(value)) return;
+      _panels[id] = value;
+    }
+    save();
+  }
+
+  /// A Scene view copy closed: its cameras go with it.
+  void forgetView(String view) {
+    var any = false;
+    for (final s in _scenes.values) {
+      any |= s.views.remove(view) != null;
+    }
+    if (any) save();
+  }
+
   /// Marks a change and saves; the toggles above are written by the model
   /// through this.
   void changed() {
@@ -196,6 +256,7 @@ final class EditorState extends ChangeNotifier {
     'overlays': showOverlays,
     'stats': showStats,
     'scenes': {for (final e in _scenes.entries) e.key: e.value.toJson()},
+    if (_panels.isNotEmpty) 'panels': _panels,
   };
 
   /// Atomic replacement (`editor.json.tmp`, then rename over); null when

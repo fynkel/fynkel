@@ -10,6 +10,8 @@ import 'package:path/path.dart' as p;
 import '../env/tools.dart';
 import '../prefs/preferences.dart';
 import '../project/editor_project.dart';
+import '../theme/icons.dart';
+import '../theme/tokens.dart';
 
 /// Picks a directory; null when the user cancels. Injected so tests never open a dialog.
 typedef ChooseDirectory = Future<String?> Function(BuildContext context, {String? title, String? initialDirectory});
@@ -71,6 +73,7 @@ class _LauncherScreenState extends State<LauncherScreen> {
       return;
     }
     final created = await showDialog<String>(
+      animationStyle: AnimationStyle.noAnimation,
       context: context,
       builder: (_) => NewProjectDialog(toolchain: tc, chooseDirectory: widget.chooseDirectory, run: widget.run),
     );
@@ -104,19 +107,19 @@ class _LauncherScreenState extends State<LauncherScreen> {
                           FilledButton.icon(
                             key: const Key('launcher.new'),
                             onPressed: _newProject,
-                            icon: const Icon(Icons.add),
+                            icon: const Icon(FIcons.add),
                             label: const Text('New Project…'),
                           ),
                           OutlinedButton.icon(
                             key: const Key('launcher.open'),
                             onPressed: _open,
-                            icon: const Icon(Icons.folder_open),
+                            icon: const Icon(FIcons.folderOpen),
                             label: const Text('Open Project…'),
                           ),
                           TextButton.icon(
                             key: const Key('launcher.preferences'),
                             onPressed: widget.onPreferences,
-                            icon: const Icon(Icons.settings),
+                            icon: const Icon(FIcons.settings),
                             label: const Text('Preferences…'),
                           ),
                         ],
@@ -178,7 +181,7 @@ class _RecentTile extends StatelessWidget {
       key: Key('launcher.recent.${recent.dir}'),
       dense: true,
       enabled: exists,
-      leading: Icon(exists ? Icons.videogame_asset : Icons.link_off),
+      leading: Icon(exists ? FIcons.videogameAsset : FIcons.linkOff),
       title: Text(recent.name.isEmpty ? p.basename(recent.dir) : recent.name),
       subtitle: Text(
         exists ? recent.dir : '${recent.dir} — missing',
@@ -189,7 +192,7 @@ class _RecentTile extends StatelessWidget {
       trailing: IconButton(
         key: Key('launcher.recent.remove.${recent.dir}'),
         tooltip: 'Remove from recent projects',
-        icon: const Icon(Icons.close, size: 16),
+        icon: const Icon(FIcons.close, size: 16),
         onPressed: onRemove,
       ),
       onTap: exists ? onOpen : null,
@@ -219,7 +222,7 @@ class _ChecksPanel extends StatelessWidget {
               IconButton(
                 key: const Key('launcher.checks.refresh'),
                 tooltip: 'Run the checks again',
-                icon: const Icon(Icons.refresh, size: 18),
+                icon: const Icon(FIcons.refresh, size: 18),
                 onPressed: onRefresh,
               ),
             ],
@@ -248,16 +251,16 @@ class _ChecksPanel extends StatelessWidget {
                         children: [
                           Icon(
                             c.ok
-                                ? Icons.check_circle
+                                ? FIcons.checkCircle
                                 : c.warning
-                                ? Icons.warning_amber
-                                : Icons.cancel,
+                                ? FIcons.warningAmber
+                                : FIcons.cancel,
                             size: 20,
                             color: c.ok
-                                ? Colors.green
+                                ? theme.tokens.ok
                                 : c.warning
-                                ? Colors.orange
-                                : theme.colorScheme.error,
+                                ? theme.tokens.warning
+                                : theme.tokens.error,
                           ),
                           const SizedBox(width: 12),
                           Expanded(

@@ -606,6 +606,7 @@ Widget shellApp({
   Future<String?> Function(String suggestedName)? chooseSavePath,
   StartPlayProcess? startPlayProcess,
   bool sceneViewport = false,
+  Future<Toolchain> Function(Preferences prefs)? detectToolchain,
 }) {
   return FynkelEditorApp(
     key: key,
@@ -625,7 +626,7 @@ Widget shellApp({
     // Widget tests have no Metal texture to draw into; the Scene view's
     // model still runs over the fake preview through the painted layer.
     sceneViewport: sceneViewport,
-    detectToolchain: (_) async => toolchain ?? fakeToolchain(),
+    detectToolchain: detectToolchain ?? (_) async => toolchain ?? fakeToolchain(),
     run: runner?.call ?? RecordingRunner().call,
     startPlayProcess: startPlayProcess ?? _noPlayProcess,
     nativeMenuBar: false,

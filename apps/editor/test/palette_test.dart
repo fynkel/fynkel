@@ -81,13 +81,19 @@ void main() {
     r.execute('help.about'); // disables itself
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: CommandPalette(registry: r)),
+        home: Builder(
+          builder: (context) => Center(
+            child: ElevatedButton(onPressed: () => showCommandPalette(context, r), child: const Text('open')),
+          ),
+        ),
       ),
     );
+    await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('palette.item.help.about')));
     await tester.pumpAndSettle();
     expect(r.executed, ['help.about']);
+    expect(find.byKey(const Key('palette.search')), findsOneWidget, reason: 'the palette stays open');
     expect(find.text('No matching command'), findsNothing);
     await tester.enterText(find.byKey(const Key('palette.search')), 'zzzz');
     await tester.pumpAndSettle();

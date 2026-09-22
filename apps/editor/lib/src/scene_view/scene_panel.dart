@@ -1,15 +1,23 @@
-// The Scene panel (blueprint §19.2e item 6): a toolbar, the viewport over
-// the focused tab's edit-preview world, the gizmo and marquee painted on
-// top, a stats overlay, and a line for the last notice. Every pointer and
+// The Scene panel (blueprint §19.2e item 6): the viewport over the focused
+// tab's edit-preview world, the gizmo and marquee painted on top, the
+// toolbar floating over the picture in translucent groups (item 9b) with the
+// stats overlay under it and the orientation gizmo (item 9e) at its right,
+// and at the bottom the last notice and a readout of
+// the camera and tool — the picture takes the panel's full height. Every pointer and
 // key goes to the model; the panel paints what the model projected.
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../inspector/field_widgets.dart' show AssetDragPayload;
+import '../theme/icons.dart';
 import 'editor_state.dart';
 import 'gizmo.dart';
+import '../theme/tokens.dart';
+import 'orientation_gizmo.dart';
 import 'scene_view_model.dart';
 
 class ScenePanel extends StatefulWidget {
@@ -58,22 +66,15 @@ class _ScenePanelState extends State<ScenePanel> {
     final theme = Theme.of(context);
     final tab = model.current;
     if (tab == null) {
-      return _sign(
-        theme,
-        Icons.view_in_ar_outlined,
-        'No document open',
-        'Open a scene or prefab (⇧⌘O) to see it here.',
-      );
+      return _sign(theme, FIcons.viewInArOutlined, 'No document open', 'Open a scene or prefab (⇧⌘O) to see it here.');
     }
     if (!tab.hasPreview) {
-      return Column(
+      return Stack(
         children: [
-          _toolbar(context, theme, tab),
-          const Divider(height: 1),
-          Expanded(
+          Positioned.fill(
             child: _sign(
               theme,
-              Icons.visibility_off_outlined,
+              FIcons.visibilityOffOutlined,
               tab.tab.kind == 'material' ? 'A material has no world' : 'No preview',
               tab.openError ?? 'The preview could not be opened.',
               action: tab.tab.kind == 'material'
@@ -81,25 +82,82 @@ class _ScenePanelState extends State<ScenePanel> {
                   : TextButton.icon(
                       key: const Key('scene.retry'),
                       onPressed: model.reload,
-                      icon: const Icon(Icons.refresh, size: 16),
+                      icon: const Icon(FIcons.refresh),
                       label: const Text('Try again'),
                     ),
             ),
           ),
+          Positioned(left: _inset, top: _inset, right: _inset, child: _toolbar(context, theme, tab)),
         ],
       );
     }
     return Column(
       children: [
-        _toolbar(context, theme, tab),
-        const Divider(height: 1),
-        Expanded(child: _view(context, theme, tab)),
-        if (model.notice != null) _noticeBar(theme, model.notice!),
-        const Divider(height: 1),
-        _status(theme, tab),
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(child: _view(context, theme, tab)),
+              // Over the picture: the toolbar, then what reads the picture.
+              // Only the groups and chips take the pointer; the space
+              // between them is the viewport's.
+              Positioned(
+                left: _inset,
+                top: _inset,
+                right: _inset,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _toolbar(context, theme, tab),
+                    const SizedBox(height: 6),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (model.showStats) Flexible(child: _stats(theme, tab)),
+                        const Spacer(),
+                        if (model.drag?.readout.isNotEmpty ?? false) ...[
+                          _chip(theme, model.drag!.readout, key: const Key('scene.readout')),
+                          const SizedBox(width: 6),
+                        ],
+                        _orientation(context, tab),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                left: _inset,
+                right: _inset,
+                bottom: _inset,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (model.notice != null) ...[_noticeBar(theme, model.notice!), const SizedBox(height: 6)],
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Flexible(child: _status(theme, tab)),
+                        const SizedBox(width: 6),
+                        if (model.hasHidden)
+                          _chip(
+                            theme,
+                            '${tab.state.hidden.length} hidden (⇧H shows all)',
+                            key: const Key('scene.hiddenChip'),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
+
+  /// The floating toolbar's distance from the picture's edges.
+  static const _inset = 8.0;
 
   Widget _sign(ThemeData theme, IconData icon, String title, String body, {Widget? action}) => Center(
     child: SingleChildScrollView(
@@ -107,7 +165,7 @@ class _ScenePanelState extends State<ScenePanel> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 40, color: theme.disabledColor),
+          Icon(icon, size: 32, color: theme.tokens.textDisabled),
           const SizedBox(height: 12),
           Text(title, style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
@@ -128,127 +186,179 @@ class _ScenePanelState extends State<ScenePanel> {
   Widget _toolbar(BuildContext context, ThemeData theme, SceneTab tab) {
     final live = tab.hasPreview;
     final cam = tab.camera;
-    return SizedBox(
-      height: 34,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
+    // Two sides: the tools and their space at the left; the camera, what
+    // the picture shows, what is hidden or locked and the reload at the
+    // right. A narrow panel wraps the right side under the left instead of
+    // hiding any of it.
+    return Wrap(
+      key: const Key('scene.toolbar'),
+      alignment: WrapAlignment.spaceBetween,
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        _pill(theme, [
+          _toolGroup(theme, live),
+          _pillGap(theme),
+          _toggle(
+            key: 'scene.space',
+            icon: model.space == GizmoSpace.local ? FIcons.cropRotate : FIcons.public,
+            tooltip: model.space == GizmoSpace.local ? 'Local axes (X → world)' : 'World axes (X → local)',
+            on: model.space == GizmoSpace.local,
+            enabled: live,
+            onTap: model.toggleSpace,
+          ),
+          _toggle(
+            key: 'scene.snap',
+            icon: FIcons.gridGoldenratio,
+            tooltip: model.snap.enabled
+                ? 'Snapping on: ${_fmt(model.snap.move)} m, ${_fmt(model.snap.angle)}°, ×${_fmt(model.snap.scale)} (⌥⌘G; hold ⌘ to invert)'
+                : 'Snapping off (⌥⌘G; hold ⌘ to snap)',
+            on: model.snap.enabled,
+            enabled: live,
+            onTap: model.toggleSnap,
+            onLongPress: () => _snapDialog(context),
+          ),
+        ]),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
           children: [
-            const SizedBox(width: 4),
-            _toolGroup(theme, live),
-            const SizedBox(width: 6),
-            _toggle(
-              key: 'scene.space',
-              icon: model.space == GizmoSpace.local ? Icons.crop_rotate : Icons.public,
-              tooltip: model.space == GizmoSpace.local ? 'Local axes (X → world)' : 'World axes (X → local)',
-              on: model.space == GizmoSpace.local,
-              enabled: live,
-              onTap: model.toggleSpace,
-            ),
-            _toggle(
-              key: 'scene.snap',
-              icon: Icons.grid_goldenratio,
-              tooltip: model.snap.enabled
-                  ? 'Snapping on: ${_fmt(model.snap.move)} m, ${_fmt(model.snap.angle)}°, ×${_fmt(model.snap.scale)} (⌥⌘G; hold ⌘ to invert)'
-                  : 'Snapping off (⌥⌘G; hold ⌘ to snap)',
-              on: model.snap.enabled,
-              enabled: live,
-              onTap: model.toggleSnap,
-              onLongPress: () => _snapDialog(context),
-            ),
-            const SizedBox(width: 6),
-            _toggle(
-              key: 'scene.projection',
-              icon: cam.orthographic ? Icons.grid_on : Icons.videocam_outlined,
-              tooltip: cam.orthographic ? 'Orthographic (5 → perspective)' : 'Perspective (5 → orthographic)',
-              on: cam.orthographic,
-              enabled: live,
-              onTap: model.toggleProjection,
-            ),
-            _button(
-              key: 'scene.frame',
-              icon: Icons.center_focus_strong,
-              tooltip: 'Frame selected (F) — everything with ⇧F',
-              enabled: live,
-              onTap: model.frameSelected,
-            ),
-            _button(
-              key: 'scene.alignView',
-              icon: Icons.photo_camera_front_outlined,
-              tooltip: 'Look through the selected camera (⌥⌘L)',
-              enabled: live && model.canAlignToSelectedCamera,
-              onTap: model.alignViewToSelectedCamera,
-            ),
-            const SizedBox(width: 6),
-            _toggle(
-              key: 'scene.grid',
-              icon: Icons.grid_4x4,
-              tooltip: 'Grid and axes (⌘G)',
-              on: model.showGrid,
-              enabled: live,
-              onTap: model.toggleGrid,
-            ),
-            _toggle(
-              key: 'scene.overlays',
-              icon: Icons.lightbulb_outline,
-              tooltip: 'Light and camera icons (⌘I)',
-              on: model.showOverlays,
-              enabled: live,
-              onTap: model.toggleOverlays,
-            ),
-            _toggle(
-              key: 'scene.stats',
-              icon: Icons.query_stats,
-              tooltip: 'Stats overlay (⌘T)',
-              on: model.showStats,
-              enabled: live,
-              onTap: model.toggleStats,
-            ),
-            const SizedBox(width: 6),
-            _button(
-              key: 'scene.hide',
-              icon: Icons.visibility_off_outlined,
-              tooltip: 'Hide / show selected (H) — editor only, never saved in the scene',
-              enabled: live && tab.tab.selection.isNotEmpty,
-              onTap: model.toggleHiddenSelection,
-            ),
-            _button(
-              key: 'scene.showAll',
-              icon: Icons.visibility_outlined,
-              tooltip: 'Show all (⇧H)',
-              enabled: live && model.hasHidden,
-              onTap: model.showAll,
-            ),
-            _button(
-              key: 'scene.lock',
-              icon: Icons.lock_outline,
-              tooltip: 'Lock / unlock selected (L) — a locked entity is not picked or dragged here',
-              enabled: live && tab.tab.selection.isNotEmpty,
-              onTap: model.toggleLockedSelection,
-            ),
-            const SizedBox(width: 6),
-            _button(
-              key: 'scene.reload',
-              icon: Icons.refresh,
-              tooltip: 'Reload the preview world (⌃⌘R)',
-              enabled: true,
-              onTap: model.reload,
-            ),
-            const SizedBox(width: 4),
+            _pill(theme, [
+              _toggle(
+                key: 'scene.projection',
+                icon: cam.orthographic ? FIcons.gridOn : FIcons.videocamOutlined,
+                tooltip: cam.orthographic ? 'Orthographic (5 → perspective)' : 'Perspective (5 → orthographic)',
+                on: cam.orthographic,
+                enabled: live,
+                onTap: model.toggleProjection,
+              ),
+              _button(
+                key: 'scene.frame',
+                icon: FIcons.centerFocusStrong,
+                tooltip: 'Frame selected (F) — everything with ⇧F',
+                enabled: live,
+                onTap: model.frameSelected,
+              ),
+              _button(
+                key: 'scene.alignView',
+                icon: FIcons.photoCameraFrontOutlined,
+                tooltip: 'Look through the selected camera (⌥⌘L)',
+                enabled: live && model.canAlignToSelectedCamera,
+                onTap: model.alignViewToSelectedCamera,
+              ),
+              _pillGap(theme),
+              _toggle(
+                key: 'scene.grid',
+                icon: FIcons.grid4x4,
+                tooltip: 'Grid and axes (⌘G)',
+                on: model.showGrid,
+                enabled: live,
+                onTap: model.toggleGrid,
+              ),
+              _toggle(
+                key: 'scene.overlays',
+                icon: FIcons.lightbulbOutline,
+                tooltip: 'Light and camera icons (⌘I)',
+                on: model.showOverlays,
+                enabled: live,
+                onTap: model.toggleOverlays,
+              ),
+              _toggle(
+                key: 'scene.stats',
+                icon: FIcons.queryStats,
+                tooltip: 'Stats overlay (⌘T)',
+                on: model.showStats,
+                enabled: live,
+                onTap: model.toggleStats,
+              ),
+            ]),
+            _pill(theme, [
+              _button(
+                key: 'scene.hide',
+                icon: FIcons.visibilityOffOutlined,
+                tooltip: 'Hide / show selected (H) — editor only, never saved in the scene',
+                enabled: live && tab.tab.selection.isNotEmpty,
+                onTap: model.toggleHiddenSelection,
+              ),
+              _button(
+                key: 'scene.showAll',
+                icon: FIcons.visibilityOutlined,
+                tooltip: 'Show all (⇧H)',
+                enabled: live && model.hasHidden,
+                onTap: model.showAll,
+              ),
+              _button(
+                key: 'scene.lock',
+                icon: FIcons.lockOutline,
+                tooltip: 'Lock / unlock selected (L) — a locked entity is not picked or dragged here',
+                enabled: live && tab.tab.selection.isNotEmpty,
+                onTap: model.toggleLockedSelection,
+              ),
+              _pillGap(theme),
+              _button(
+                key: 'scene.reload',
+                icon: FIcons.refresh,
+                tooltip: 'Reload the preview world (⌃⌘R)',
+                enabled: true,
+                onTap: model.reload,
+              ),
+            ]),
           ],
+        ),
+      ],
+    );
+  }
+
+  /// The orientation gizmo: its drags orbit like the viewport's (in
+  /// physical pixels, as the viewport's pointer is).
+  Widget _orientation(BuildContext context, SceneTab tab) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return OrientationGizmo(
+      camera: tab.camera,
+      onLookFrom: (axis, positive) => model.lookFrom(axis, positive: positive),
+      onToggleProjection: model.toggleProjection,
+      onOrbit: (d) => model.orbit(d.dx * dpr, d.dy * dpr),
+    );
+  }
+
+  /// One group of the floating toolbar: frosted over the picture.
+  Widget _pill(ThemeData theme, List<Widget> children) {
+    final t = theme.tokens;
+    final radius = BorderRadius.circular(8);
+    return ClipRRect(
+      borderRadius: radius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: t.overlay,
+            borderRadius: radius,
+            border: Border.all(color: t.overlayEdge),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: children),
         ),
       ),
     );
   }
 
+  /// A hairline between the kinds of control inside one group.
+  Widget _pillGap(ThemeData theme) => Container(
+    width: 1,
+    height: 14,
+    margin: const EdgeInsets.symmetric(horizontal: 3),
+    color: theme.tokens.overlayEdge,
+  );
+
   Widget _toolGroup(ThemeData theme, bool live) {
     const tools = [
-      (SceneTool.select, Icons.near_me_outlined, 'Select (Q)'),
-      (SceneTool.move, Icons.open_with, 'Move (W)'),
-      (SceneTool.rotate, Icons.rotate_right, 'Rotate (E)'),
-      (SceneTool.scale, Icons.aspect_ratio, 'Scale (R)'),
+      (SceneTool.select, FIcons.nearMeOutlined, 'Select (Q)'),
+      (SceneTool.move, FIcons.openWith, 'Move (W)'),
+      (SceneTool.rotate, FIcons.rotateRight, 'Rotate (E)'),
+      (SceneTool.scale, FIcons.aspectRatio, 'Scale (R)'),
     ];
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         for (final (tool, icon, tip) in tools)
           _toggle(
@@ -279,23 +389,22 @@ class _ScenePanelState extends State<ScenePanel> {
         key: Key(key),
         onTap: enabled ? onTap : null,
         onLongPress: enabled ? onLongPress : null,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(6),
         child: Container(
-          width: 28,
-          height: 26,
-          margin: const EdgeInsets.symmetric(horizontal: 1),
+          width: theme.tokens.row + 4,
+          height: theme.tokens.row + 2,
           decoration: BoxDecoration(
-            color: on && enabled ? theme.colorScheme.primary.withValues(alpha: 0.18) : null,
-            borderRadius: BorderRadius.circular(4),
+            color: on && enabled ? theme.tokens.accent.withValues(alpha: .22) : null,
+            borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(
             icon,
-            size: 16,
+            size: 14,
             color: !enabled
-                ? theme.disabledColor
+                ? theme.tokens.textDisabled
                 : on
-                ? theme.colorScheme.primary
-                : theme.iconTheme.color,
+                ? theme.tokens.accent
+                : theme.tokens.textSecondary,
           ),
         ),
       ),
@@ -316,6 +425,7 @@ class _ScenePanelState extends State<ScenePanel> {
     final angle = TextEditingController(text: _fmt(s.angle));
     final scale = TextEditingController(text: _fmt(s.scale));
     final ok = await showDialog<bool>(
+      animationStyle: AnimationStyle.noAnimation,
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Snap steps'),
@@ -392,7 +502,7 @@ class _ScenePanelState extends State<ScenePanel> {
                 focusNode: model.focusNode,
                 onKeyEvent: (_, e) => model.handleKey(e),
                 onPointerEvent: _pointer,
-                placeholder: ColoredBox(color: theme.colorScheme.surfaceContainerLowest),
+                placeholder: ColoredBox(color: theme.tokens.window),
                 // A window or splitter drag changes the constraints on
                 // every frame; resizing the ring that often blinks the
                 // picture. The last frame is held, scaled, until the drag
@@ -415,7 +525,10 @@ class _ScenePanelState extends State<ScenePanel> {
                   onPointerCancel: (e) => _pointer(e, e.localPosition * dpr),
                   onPointerHover: (e) => _pointer(e, e.localPosition * dpr),
                   onPointerSignal: (e) => _pointer(e, e.localPosition * dpr),
-                  child: ColoredBox(color: theme.colorScheme.surfaceContainerLowest, child: const SizedBox.expand()),
+                  onPointerPanZoomStart: (e) => _pointer(e, e.localPosition * dpr),
+                  onPointerPanZoomUpdate: (e) => _pointer(e, e.localPosition * dpr),
+                  onPointerPanZoomEnd: (e) => _pointer(e, e.localPosition * dpr),
+                  child: ColoredBox(color: theme.tokens.window, child: const SizedBox.expand()),
                 ),
               ),
             // The gizmo and the marquee: 2D, on top, in logical pixels.
@@ -429,28 +542,15 @@ class _ScenePanelState extends State<ScenePanel> {
                   marquee: model.marquee,
                   dpr: dpr,
                   focused: model.hasFocus,
-                  accent: theme.colorScheme.primary,
+                  accent: theme.tokens.accent,
                 ),
                 child: const SizedBox.expand(),
               ),
             ),
-            if (model.showStats) Positioned(left: 8, top: 8, child: _stats(theme, tab)),
-            if (model.drag?.readout.isNotEmpty ?? false)
-              Positioned(right: 8, top: 8, child: _chip(theme, model.drag!.readout, key: const Key('scene.readout'))),
-            if (model.hasHidden)
-              Positioned(
-                right: 8,
-                bottom: 8,
-                child: _chip(
-                  theme,
-                  '${tab.state.hidden.length} hidden (⇧H shows all)',
-                  key: const Key('scene.hiddenChip'),
-                ),
-              ),
             if (candidates.isNotEmpty)
               IgnorePointer(
                 child: DecoratedBox(
-                  decoration: BoxDecoration(border: Border.all(color: theme.colorScheme.primary, width: 2)),
+                  decoration: BoxDecoration(border: Border.all(color: theme.tokens.accent, width: 2)),
                   child: const SizedBox.expand(),
                 ),
               ),
@@ -484,6 +584,12 @@ class _ScenePanelState extends State<ScenePanel> {
         model.pointerHover(e, px);
       case PointerSignalEvent():
         model.pointerSignal(e, px);
+      case PointerPanZoomStartEvent():
+        model.panZoomStart(e, px);
+      case PointerPanZoomUpdateEvent():
+        model.panZoomUpdate(e, px);
+      case PointerPanZoomEndEvent():
+        model.panZoomEnd(e, px);
       case _:
         break;
     }
@@ -491,12 +597,13 @@ class _ScenePanelState extends State<ScenePanel> {
 
   Widget _chip(ThemeData theme, String text, {Key? key}) => Container(
     key: key,
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
     decoration: BoxDecoration(
-      color: theme.colorScheme.surface.withValues(alpha: 0.85),
-      borderRadius: BorderRadius.circular(4),
+      color: theme.tokens.overlay,
+      border: Border.all(color: theme.tokens.overlayEdge),
+      borderRadius: BorderRadius.circular(6),
     ),
-    child: Text(text, style: theme.textTheme.labelSmall),
+    child: Text(text, style: theme.textTheme.labelSmall?.copyWith(fontFeatures: const [FontFeature.tabularFigures()])),
   );
 
   Widget _stats(ThemeData theme, SceneTab tab) {
@@ -517,8 +624,9 @@ class _ScenePanelState extends State<ScenePanel> {
       key: const Key('scene.statsBox'),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(4),
+        color: theme.tokens.overlay,
+        border: Border.all(color: theme.tokens.overlayEdge),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -530,20 +638,26 @@ class _ScenePanelState extends State<ScenePanel> {
 
   Widget _noticeBar(ThemeData theme, String text) => Container(
     key: const Key('scene.notice'),
-    width: double.infinity,
-    color: theme.colorScheme.surfaceContainerHighest,
+    constraints: const BoxConstraints(maxWidth: 560),
+    decoration: BoxDecoration(
+      color: theme.tokens.overlay,
+      border: Border.all(color: theme.tokens.overlayEdge),
+      borderRadius: BorderRadius.circular(8),
+    ),
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     child: Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.info_outline, size: 14, color: theme.colorScheme.onSurfaceVariant),
+        Icon(FIcons.infoOutline, size: 13, color: theme.tokens.info),
         const SizedBox(width: 6),
-        Expanded(
+        Flexible(
           child: Text(text, style: theme.textTheme.bodySmall, maxLines: 3, overflow: TextOverflow.ellipsis),
         ),
+        const SizedBox(width: 6),
         InkWell(
           key: const Key('scene.dismissNotice'),
           onTap: () => setState(() => model.notice = null),
-          child: const Padding(padding: EdgeInsets.all(2), child: Icon(Icons.close, size: 14)),
+          child: const Padding(padding: EdgeInsets.all(2), child: Icon(FIcons.close, size: 12)),
         ),
       ],
     ),
@@ -561,26 +675,28 @@ class _ScenePanelState extends State<ScenePanel> {
           (model.snap.enabled ? ' · snap' : ''),
       ?model.noGizmoReason,
     ].join('   ');
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              text,
-              key: const Key('scene.status'),
-              style: theme.textTheme.labelSmall?.copyWith(color: theme.disabledColor),
-              overflow: TextOverflow.ellipsis,
-            ),
+    return Tooltip(
+      message:
+          'Navigate: ⌥-drag orbit · ⌥⇧-drag or middle-drag pan · ⌥-right-drag dolly · '
+          'right-drag look + WASDQE · scroll or pinch dolly · ⇧-scroll pan',
+      waitDuration: const Duration(milliseconds: 500),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: theme.tokens.overlay,
+          border: Border.all(color: theme.tokens.overlayEdge),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          text,
+          key: const Key('scene.status'),
+          maxLines: 1,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.tokens.textSecondary,
+            fontFeatures: const [FontFeature.tabularFigures()],
           ),
-          Flexible(
-            child: Text(
-              '⌥-drag orbit · ⌥⇧-drag / middle pan · ⌥-right dolly · right-drag look + WASDQE · scroll dolly',
-              style: theme.textTheme.labelSmall?.copyWith(color: theme.disabledColor),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
     );
   }
@@ -609,7 +725,7 @@ class _OverlayPainter extends CustomPainter {
   final bool focused;
   final Color accent;
 
-  static const axisColors = [Color(0xFFE5484D), Color(0xFF46A758), Color(0xFF3E63DD)];
+  static const axisColors = sceneAxisColors;
   static const highlight = Color(0xFFFFD60A);
 
   Color _colorOf(GizmoHandle h) {

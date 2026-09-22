@@ -1,4 +1,4 @@
-// A row's or the Asset panel's preview: the decoded texture, the material
+// A row's, a picker's or an Inspector page's preview: the decoded texture, the material
 // swatch, or the kind's icon.
 import 'dart:io';
 

@@ -596,8 +596,14 @@ void main() {
       expect(launcher.calls, isEmpty);
       expect(shell.play!.state, PlayState.idle);
       expect(shell.consoleTab.value, ConsolePanel.projectTab);
-      expect(find.textContaining('`fynkel run` refuses'), findsOneWidget);
-      await tester.pumpAndSettle(const Duration(seconds: 9)); // the SnackBar's own timer
+      // Said in the status bar, where it stays until dismissed.
+      expect(
+        find.descendant(of: find.byKey(const Key('notice')), matching: find.textContaining('`fynkel run` refuses')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('notice.dismiss')));
+      await tester.pump();
+      expect(find.byKey(const Key('notice')), findsNothing);
     });
 
     testWidgets('Play runs the project, its records reach the Game tab, and a row opens the entity', (tester) async {

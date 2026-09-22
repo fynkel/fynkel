@@ -11,6 +11,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Command;
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
@@ -955,8 +956,8 @@ void main() {
       expect(find.byKey(const ValueKey('card.fynkel.Transform#0')), findsOneWidget);
       expect(find.byKey(const ValueKey('card.game.Spinner#0')), findsOneWidget);
       // Groups from the hints.
-      expect(find.text('Motion'), findsOneWidget);
-      expect(find.text('Shadows'), findsOneWidget);
+      expect(find.text('MOTION'), findsOneWidget);
+      expect(find.text('SHADOWS'), findsOneWidget);
 
       // Drag X of position by 100 px: 0.01 per pixel → 3.0.
       final before = tab.document.history;
@@ -1035,7 +1036,15 @@ void main() {
       final cast = tester.widget<Checkbox>(inField('fynkel.MeshRenderer#0', 'cast_shadows', find.byType(Checkbox)));
       expect(cast.tristate, isTrue);
       expect(cast.value, isNull);
-      expect(inField('fynkel.Transform#0', 'position', find.text('—')), findsOneWidget); // X differs, Y and Z agree
+      // X differs, Y and Z agree (the '—' hint of an empty field is not a value).
+      expect(
+        inField(
+          'fynkel.Transform#0',
+          'position',
+          find.byWidgetPredicate((w) => w is EditableText && w.controller.text == '—'),
+        ),
+        findsOneWidget,
+      );
       // Ticking the mixed box sets both true in one transaction.
       final before = tab.document.history;
       await tester.tap(inField('fynkel.MeshRenderer#0', 'cast_shadows', find.byType(Checkbox)));
@@ -1057,7 +1066,7 @@ void main() {
       // Open the mesh picker: only mesh sub-assets are rows, not the material or the clip.
       await tester.tap(inField('fynkel.MeshRenderer#0', 'mesh', find.byKey(const ValueKey('asset.pick'))));
       await tester.pumpAndSettle();
-      expect(find.text('Choose a mesh'), findsOneWidget);
+      expect(find.textContaining('Choose a mesh'), findsOneWidget);
       expect(find.byKey(const ValueKey('assetPicker.row.0')), findsOneWidget);
       expect(find.byKey(const ValueKey('assetPicker.row.1')), findsNothing);
       await tester.enterText(find.byKey(const ValueKey('assetPicker.search')), 'zzz');
@@ -1076,15 +1085,28 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: AssetPickerDialog(entries: r.project.assets(), kind: 'sound'),
+            body: AssetField(
+              value: null,
+              kind: 'sound',
+              describe: r.model.describeAsset,
+              candidates: () => r.model.assetsFor('sound'),
+              onCommit: (_) {},
+            ),
           ),
         ),
       );
+      await tester.tap(find.byKey(const ValueKey('asset.pick')));
       await tester.pumpAndSettle();
-      expect(find.text('Choose a sound'), findsOneWidget);
+      expect(find.textContaining('Choose a sound'), findsOneWidget);
+      expect(find.byKey(const ValueKey('assetPicker.none')), findsNothing, reason: 'the field is not nullable');
       expect(find.byKey(const ValueKey('assetPicker.row.0')), findsOneWidget);
       expect(find.byKey(const ValueKey('assetPicker.row.1')), findsNothing);
-      expect(find.text('tone'), findsOneWidget);
+      expect(
+        find.descendant(of: find.byKey(const ValueKey('assetPicker.row.0')), matching: find.text('tone')),
+        findsOneWidget,
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
       await pumpPanel(tester, r.model);
 
       // The Spinner's nullable showcase: None → set through the picker → Clear.
@@ -1101,6 +1123,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(r.model.slots.singleWhere((s) => s.type == 'game.Spinner').value('showcase'), isNull);
       expect(r.model.slots.singleWhere((s) => s.type == 'game.Spinner').isSet('showcase'), isTrue);
+      // The picker's None row (a nullable field only) empties it too.
+      await tester.tap(inField('game.Spinner#0', 'showcase', find.byKey(const ValueKey('asset.pick'))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('assetPicker.row.0')));
+      await tester.pumpAndSettle();
+      expect(r.model.slots.singleWhere((s) => s.type == 'game.Spinner').value('showcase'), isNotNull);
+      await tester.tap(inField('game.Spinner#0', 'showcase', find.byKey(const ValueKey('asset.pick'))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('assetPicker.none')));
+      await tester.pumpAndSettle();
+      expect(r.model.slots.singleWhere((s) => s.type == 'game.Spinner').value('showcase'), isNull);
 
       // A programmatic unknown reference is refused with FYN-A0004 (what a bad drop would produce).
       final mesh = r.model.slots.singleWhere((s) => s.type == 'fynkel.MeshRenderer');
@@ -1228,10 +1261,9 @@ void main() {
       await tester.pumpAndSettle();
       await tester.enterText(find.byKey(const ValueKey('addComponent.search')), 'transform');
       await tester.pumpAndSettle();
-      final held = find.byKey(const ValueKey('addComponent.held.fynkel.Transform'));
+      final held = find.byKey(const ValueKey('addComponent.note.fynkel.Transform'));
       expect(held, findsOneWidget);
       expect(tester.widget<Text>(held).data, 'already on Crate A');
-      expect(tester.widget<ListTile>(find.byKey(const ValueKey('addComponent.fynkel.Transform'))).enabled, isFalse);
       // ↩ with one visible match adds nothing when that match is held; a tap on the row does nothing.
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
@@ -1243,10 +1275,11 @@ void main() {
       // A type the entity lacks is offered plainly.
       await tester.enterText(find.byKey(const ValueKey('addComponent.search')), 'point');
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('addComponent.held.fynkel.PointLight')), findsNothing);
-      expect(tester.widget<ListTile>(find.byKey(const ValueKey('addComponent.fynkel.PointLight'))).enabled, isTrue);
-      await tester.tap(find.text('Cancel'));
+      expect(find.byKey(const ValueKey('addComponent.note.fynkel.PointLight')), findsNothing);
+      expect(find.byKey(const ValueKey('addComponent.fynkel.PointLight')), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('addComponent.search')), findsNothing);
 
       // A refusal that is not one field's shows under the cards, with a ×.
       expect(r.model.addComponent('fynkel.Transform'), isFalse);
@@ -1310,25 +1343,14 @@ void main() {
       expect(axisFields.map((f) => f.decoration!.suffixText), everyElement(isNull));
       expect(find.byKey(const ValueKey('field.unit')), findsOneWidget);
       expect(tester.widget<Text>(find.byKey(const ValueKey('field.unit'))).data, 'm');
-      // A full-width number keeps its suffix; a compact degree field keeps °.
-      expect(
-        tester
-            .widget<TextField>(
-              find.descendant(of: find.byKey(const ValueKey('plain')), matching: find.byType(TextField)),
-            )
-            .decoration!
-            .suffixText,
-        'm',
-      );
-      expect(
-        tester
-            .widget<TextField>(
-              find.descendant(of: find.byKey(const ValueKey('angle')), matching: find.byType(TextField)),
-            )
-            .decoration!
-            .suffixText,
-        '°',
-      );
+      // A full-width number draws its unit right after the value; a compact degree field keeps °.
+      String unitOf(String key) => tester
+          .widget<Text>(
+            find.descendant(of: find.byKey(ValueKey(key)), matching: find.byKey(const ValueKey('number.unit'))),
+          )
+          .data!;
+      expect(unitOf('plain'), 'm');
+      expect(unitOf('angle'), '°');
     });
 
     testWidgets('the layer mask names the project layers; the colour picker commits linear values', (tester) async {

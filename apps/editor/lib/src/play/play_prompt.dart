@@ -10,6 +10,7 @@ enum PlaySaveChoice { save, playAnyway, cancel }
 
 Future<PlaySaveChoice> showPlaySavePrompt(BuildContext context, List<OpenDocument> dirty) async {
   final r = await showDialog<PlaySaveChoice>(
+    animationStyle: AnimationStyle.noAnimation,
     context: context,
     builder: (context) => AlertDialog(
       key: const Key('dialog.playSave'),
@@ -25,8 +26,7 @@ Future<PlaySaveChoice> showPlaySavePrompt(BuildContext context, List<OpenDocumen
               '• ${tab.title} — ${tab.document.history} transaction${tab.document.history == 1 ? '' : 's'}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
-          if (dirty.length > 8)
-            Text('• and ${dirty.length - 8} more', style: Theme.of(context).textTheme.bodySmall),
+          if (dirty.length > 8) Text('• and ${dirty.length - 8} more', style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
       actions: [

@@ -1,7 +1,7 @@
-// The tab strip over the docking area (one tab per open document: kind
-// icon, name, dirty dot or error badge, conflict badge, close ×; middle
-// click closes; right click for Close / Close Others / Save / Revert / Save
-// As) and the dialogs the tabs need: the save prompt on close, the Open
+// The document tabs in the window's title bar (one tab per open document:
+// kind icon, name, dirty dot or error badge, conflict badge, close × on the
+// focused tab and under the pointer; middle click closes; right click for
+// Close / Close Others / Save / Revert / Save As) and the dialogs the tabs need: the save prompt on close, the Open
 // Document picker, Save As, and the conflict dialog with the revisions and
 // the diff. Every document-changing call goes through the tab's
 // `OpenDocument` — the dialogs never touch a file.
@@ -10,19 +10,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../picker/picker.dart';
 import '../project/editor_project.dart';
+import '../theme/icons.dart';
+import '../theme/tokens.dart';
 import 'document_tabs.dart';
 import 'line_diff.dart';
 import 'open_document.dart';
 
 IconData documentKindIcon(String kind) => switch (kind) {
-  'scene' => Icons.landscape_outlined,
-  'prefab' => Icons.widgets_outlined,
-  'material' => Icons.palette_outlined,
-  'rig' => Icons.accessibility_new,
-  'blend' => Icons.call_split,
-  'volume' => Icons.tune,
-  _ => Icons.description_outlined,
+  'scene' => FIcons.landscapeOutlined,
+  'prefab' => FIcons.widgetsOutlined,
+  'material' => FIcons.paletteOutlined,
+  'rig' => FIcons.accessibilityNew,
+  'blend' => FIcons.callSplit,
+  'volume' => FIcons.tune,
+  _ => FIcons.descriptionOutlined,
 };
 
 class DocumentTabBar extends StatelessWidget {
@@ -38,8 +41,8 @@ class DocumentTabBar extends StatelessWidget {
 
   final DocumentTabs tabs;
 
-  /// "Open Document…" (the + button).
-  final VoidCallback onOpen;
+  /// "Open Document…" (the + button); the picker opens under [anchor].
+  final void Function(Rect anchor) onOpen;
 
   /// Close with the save prompt.
   final void Function(OpenDocument tab) onClose;
@@ -50,145 +53,75 @@ class DocumentTabBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final t = context.tokens;
+    // Sits in the window's title bar (item 9b): the tabs take the width they
+    // need, so the bar's empty space to their right still moves the window.
     return ListenableBuilder(
       listenable: tabs,
-      builder: (context, _) => Container(
+      builder: (context, _) => Row(
         key: const Key('tabs.bar'),
-        height: 32,
-        color: theme.colorScheme.surfaceContainerHigh,
-        child: Row(
-          children: [
-            Expanded(
-              child: tabs.open.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'No document open — ⇧⌘O opens a scene or prefab',
-                          key: const Key('tabs.empty'),
-                          style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
-                        ),
+        children: [
+          if (tabs.open.isEmpty)
+            Flexible(
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: t.gap),
+                child: Text(
+                  'No document open — ⇧⌘O',
+                  key: const Key('tabs.empty'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
+                ),
+              ),
+            )
+          else
+            Flexible(
+              child: ScrollConfiguration(
+                behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+                child: ListView(
+                  shrinkWrap: true,
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    for (final o in tabs.open)
+                      _Tab(
+                        key: Key('tab.${o.document.id}'),
+                        tab: o,
+                        focused: tabs.focused == o,
+                        onFocus: () => tabs.focus(o),
+                        onClose: () => onClose(o),
+                        onMenu: (at) => _menu(context, o, at),
+                        onShowConflict: () => onShowConflict(o),
                       ),
-                    )
-                  : ScrollConfiguration(
-                      behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [for (final t in tabs.open) _tab(context, theme, t)],
-                      ),
-                    ),
+                  ],
+                ),
+              ),
             ),
-            IconButton(
+          Builder(
+            builder: (button) => IconButton(
               key: const Key('tabs.open'),
               tooltip: 'Open Document… (⇧⌘O)',
-              icon: const Icon(Icons.add, size: 18),
-              onPressed: onOpen,
+              iconSize: 15,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 26, height: 26),
+              color: t.textSecondary,
+              icon: const Icon(FIcons.add),
+              onPressed: () => onOpen(_globalRect(button)),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _tab(BuildContext context, ThemeData theme, OpenDocument t) {
-    final focused = tabs.focused == t;
-    return ListenableBuilder(
-      listenable: t,
-      builder: (context, _) {
-        final errors = t.errorCount;
-        final tooltip = [
-          t.location,
-          if (t.dirty) 'unsaved edits (${t.document.history} in history)',
-          if (t.hasConflict) 'changed on disk — click the badge',
-          if (errors > 0) '$errors error${errors == 1 ? '' : 's'}',
-        ].join('\n');
-        return Listener(
-          onPointerDown: (e) {
-            if (e.buttons == kMiddleMouseButton) onClose(t);
-          },
-          child: GestureDetector(
-            onSecondaryTapUp: (d) => _menu(context, t, d.globalPosition),
-            child: Tooltip(
-              message: tooltip,
-              waitDuration: const Duration(milliseconds: 600),
-              child: InkWell(
-                key: Key('tab.${t.document.id}'),
-                onTap: () => tabs.focus(t),
-                child: Container(
-                  padding: const EdgeInsets.only(left: 10, right: 4),
-                  decoration: BoxDecoration(
-                    color: focused ? theme.colorScheme.surface : null,
-                    border: Border(
-                      bottom: BorderSide(color: focused ? theme.colorScheme.primary : Colors.transparent, width: 2),
-                      right: BorderSide(color: theme.dividerColor),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(documentKindIcon(t.kind), size: 14, color: focused ? null : theme.disabledColor),
-                      const SizedBox(width: 6),
-                      Text(
-                        t.tabLabel,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: focused ? FontWeight.w600 : null,
-                          fontStyle: t.document.readOnly != null ? FontStyle.italic : null,
-                        ),
-                      ),
-                      if (t.hasConflict) ...[
-                        const SizedBox(width: 4),
-                        InkWell(
-                          key: Key('tab.conflict.${t.document.id}'),
-                          onTap: () => onShowConflict(t),
-                          child: Tooltip(
-                            message: 'This file changed on disk while you had unsaved edits. Click to resolve.',
-                            child: Icon(Icons.warning_amber_rounded, size: 14, color: Colors.orange.shade700),
-                          ),
-                        ),
-                      ] else if (errors > 0) ...[
-                        const SizedBox(width: 4),
-                        Container(
-                          key: Key('tab.errors.${t.document.id}'),
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.errorContainer,
-                            borderRadius: BorderRadius.circular(7),
-                          ),
-                          child: Text(
-                            '$errors',
-                            style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onErrorContainer),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(width: 2),
-                      SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: t.dirty
-                            ? _DirtyOrClose(key: Key('tab.dirty.${t.document.id}'), onClose: () => onClose(t))
-                            : IconButton(
-                                key: Key('tab.close.${t.document.id}'),
-                                tooltip: 'Close (⌘W)',
-                                padding: EdgeInsets.zero,
-                                iconSize: 14,
-                                icon: const Icon(Icons.close),
-                                onPressed: () => onClose(t),
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
+  static Rect _globalRect(BuildContext context) {
+    final box = context.findRenderObject() as RenderBox;
+    return box.localToGlobal(Offset.zero) & box.size;
   }
 
   Future<void> _menu(BuildContext context, OpenDocument t, Offset at) async {
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final choice = await showMenu<String>(
+      popUpAnimationStyle: AnimationStyle.noAnimation,
       context: context,
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
@@ -223,6 +156,148 @@ class DocumentTabBar extends StatelessWidget {
   }
 }
 
+/// One tab: kind icon, name, the conflict or error badge, and at the end
+/// the dirty dot or the close × (on the focused tab, and under the pointer).
+class _Tab extends StatefulWidget {
+  const _Tab({
+    super.key,
+    required this.tab,
+    required this.focused,
+    required this.onFocus,
+    required this.onClose,
+    required this.onMenu,
+    required this.onShowConflict,
+  });
+
+  final OpenDocument tab;
+  final bool focused;
+  final VoidCallback onFocus;
+  final VoidCallback onClose;
+  final void Function(Offset at) onMenu;
+  final VoidCallback onShowConflict;
+
+  @override
+  State<_Tab> createState() => _TabState();
+}
+
+class _TabState extends State<_Tab> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final k = context.tokens;
+    final t = widget.tab;
+    final focused = widget.focused;
+    return ListenableBuilder(
+      listenable: t,
+      builder: (context, _) {
+        final errors = t.errorCount;
+        final tooltip = [
+          t.location,
+          if (t.dirty) 'unsaved edits (${t.document.history} in history)',
+          if (t.hasConflict) 'changed on disk — click the badge',
+          if (errors > 0) '$errors error${errors == 1 ? '' : 's'}',
+        ].join('\n');
+        final id = t.document.id;
+        final Widget end;
+        if (t.dirty) {
+          end = _DirtyOrClose(key: Key('tab.dirty.$id'), onClose: widget.onClose);
+        } else if (focused || _hover) {
+          end = IconButton(
+            key: Key('tab.close.$id'),
+            tooltip: 'Close (⌘W)',
+            padding: EdgeInsets.zero,
+            iconSize: 13,
+            color: k.textSecondary,
+            icon: const Icon(FIcons.close),
+            onPressed: widget.onClose,
+          );
+        } else {
+          end = const SizedBox.shrink();
+        }
+        return Listener(
+          onPointerDown: (e) {
+            if (e.buttons == kMiddleMouseButton) widget.onClose();
+          },
+          child: MouseRegion(
+            onEnter: (_) => setState(() => _hover = true),
+            onExit: (_) => setState(() => _hover = false),
+            child: GestureDetector(
+              onSecondaryTapUp: (d) => widget.onMenu(d.globalPosition),
+              child: Tooltip(
+                message: tooltip,
+                waitDuration: const Duration(milliseconds: 600),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 1),
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: InkWell(
+                        onTap: widget.onFocus,
+                        borderRadius: BorderRadius.circular(6),
+                        hoverColor: k.hover,
+                        child: Container(
+                          height: 28,
+                          padding: const EdgeInsets.only(left: 10, right: 4),
+                          decoration: BoxDecoration(
+                            color: focused ? k.panel : null,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: focused ? k.lineStrong : Colors.transparent),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(documentKindIcon(t.kind), size: 13, color: focused ? k.accent : k.textDisabled),
+                              const SizedBox(width: 6),
+                              Text(
+                                t.tabLabel,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: focused ? k.text : k.textSecondary,
+                                  fontWeight: focused ? FontWeight.w500 : null,
+                                  fontStyle: t.document.readOnly != null ? FontStyle.italic : null,
+                                ),
+                              ),
+                              if (t.hasConflict) ...[
+                                const SizedBox(width: 4),
+                                InkWell(
+                                  key: Key('tab.conflict.$id'),
+                                  onTap: widget.onShowConflict,
+                                  child: Tooltip(
+                                    message: 'This file changed on disk while you had unsaved edits. Click to resolve.',
+                                    child: Icon(FIcons.warningAmberRounded, size: 14, color: k.warning),
+                                  ),
+                                ),
+                              ] else if (errors > 0) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  key: Key('tab.errors.$id'),
+                                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                                  decoration: BoxDecoration(
+                                    color: k.surfaceOf(k.error, .3),
+                                    borderRadius: BorderRadius.circular(7),
+                                  ),
+                                  child: Text('$errors', style: theme.textTheme.labelSmall?.copyWith(color: k.error)),
+                                ),
+                              ],
+                              const SizedBox(width: 3),
+                              SizedBox(width: 18, height: 18, child: end),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// The dirty dot, which turns into the close × under the pointer.
 class _DirtyOrClose extends StatefulWidget {
   const _DirtyOrClose({super.key, required this.onClose});
@@ -238,7 +313,7 @@ class _DirtyOrCloseState extends State<_DirtyOrClose> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final k = context.tokens;
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -246,11 +321,12 @@ class _DirtyOrCloseState extends State<_DirtyOrClose> {
           ? IconButton(
               tooltip: 'Close (⌘W) — asks about the unsaved edits',
               padding: EdgeInsets.zero,
-              iconSize: 14,
-              icon: const Icon(Icons.close),
+              iconSize: 13,
+              color: k.textSecondary,
+              icon: const Icon(FIcons.close),
               onPressed: widget.onClose,
             )
-          : Center(child: Icon(Icons.circle, size: 9, color: theme.colorScheme.primary)),
+          : Center(child: Icon(FIcons.circle, size: 8, color: k.text)),
     );
   }
 }
@@ -262,6 +338,7 @@ enum ClosePromptChoice { save, discard, cancel }
 /// "Save changes to X?" — Save / Don't Save / Cancel.
 Future<ClosePromptChoice> showClosePrompt(BuildContext context, OpenDocument tab) async {
   final r = await showDialog<ClosePromptChoice>(
+    animationStyle: AnimationStyle.noAnimation,
     context: context,
     builder: (context) => AlertDialog(
       key: const Key('dialog.closePrompt'),
@@ -296,6 +373,7 @@ enum RevertChoice { revert, cancel }
 
 Future<bool> showRevertPrompt(BuildContext context, OpenDocument tab) async {
   final r = await showDialog<RevertChoice>(
+    animationStyle: AnimationStyle.noAnimation,
     context: context,
     builder: (context) => AlertDialog(
       key: const Key('dialog.revert'),
@@ -317,111 +395,37 @@ Future<bool> showRevertPrompt(BuildContext context, OpenDocument tab) async {
   return r == RevertChoice.revert;
 }
 
-/// Lists the project's scenes and prefabs; returns the chosen asset's path (absolute) or null.
-Future<DocumentAsset?> showOpenDocumentDialog(BuildContext context, EditorProject project) {
-  final all = project.documentAssets().where((a) => a.kind == 'scene' || a.kind == 'prefab').toList();
-  return showDialog<DocumentAsset>(
-    context: context,
-    builder: (context) => _OpenDocumentDialog(assets: all, project: project),
-  );
-}
-
-class _OpenDocumentDialog extends StatefulWidget {
-  const _OpenDocumentDialog({required this.assets, required this.project});
-
-  final List<DocumentAsset> assets;
-  final EditorProject project;
-
-  @override
-  State<_OpenDocumentDialog> createState() => _OpenDocumentDialogState();
-}
-
-class _OpenDocumentDialogState extends State<_OpenDocumentDialog> {
-  String _query = '';
-  int _cursor = 0;
-
-  List<DocumentAsset> get _visible {
-    final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return widget.assets;
-    return [
-      for (final a in widget.assets)
-        if (q.split(RegExp(r'\s+')).every('${a.name} ${a.path} ${a.kind}'.toLowerCase().contains)) a,
-    ];
-  }
-
-  void _pick(DocumentAsset a) => Navigator.pop(context, a);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final visible = _visible;
-    if (_cursor >= visible.length) _cursor = visible.isEmpty ? 0 : visible.length - 1;
-    return AlertDialog(
-      key: const Key('dialog.openDocument'),
-      title: const Text('Open Document'),
-      content: SizedBox(
-        width: 520,
-        height: 400,
-        child: Column(
-          children: [
-            CallbackShortcuts(
-              bindings: {
-                const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
-                    setState(() => _cursor = (_cursor + 1).clamp(0, visible.isEmpty ? 0 : visible.length - 1)),
-                const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
-                    setState(() => _cursor = (_cursor - 1).clamp(0, 999999)),
-                const SingleActivator(LogicalKeyboardKey.enter): () {
-                  if (visible.isNotEmpty) _pick(visible[_cursor]);
-                },
-              },
-              child: TextField(
-                key: const Key('openDocument.search'),
-                autofocus: true,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  prefixIcon: Icon(Icons.search, size: 18),
-                  hintText: 'Search scenes and prefabs by name or path',
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (v) => setState(() {
-                  _query = v;
-                  _cursor = 0;
-                }),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: visible.isEmpty
-                  ? Center(
-                      child: Text(
-                        widget.assets.isEmpty ? 'This project has no scenes or prefabs.' : 'Nothing matches.',
-                        style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
-                      ),
-                    )
-                  : ListView.builder(
-                      itemCount: visible.length,
-                      itemExtent: 40,
-                      itemBuilder: (context, i) {
-                        final a = visible[i];
-                        return ListTile(
-                          key: Key('openDocument.${a.id}'),
-                          dense: true,
-                          selected: i == _cursor,
-                          leading: Icon(documentKindIcon(a.kind), size: 18),
-                          title: Text(a.name.isEmpty ? p.basename(a.path) : a.name),
-                          subtitle: Text(a.path, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
-                          trailing: Text(a.kind, style: theme.textTheme.labelSmall),
-                          onTap: () => _pick(a),
-                        );
-                      },
-                    ),
-            ),
-          ],
+/// Open Document through the shared picker (item 9d): the project's scenes
+/// and prefabs, grouped by kind, each with its folder.
+Future<DocumentAsset?> showOpenDocumentDialog(BuildContext context, EditorProject project, {Rect? anchor}) async {
+  final all = project.documentAssets().where((a) => a.kind == 'scene' || a.kind == 'prefab').toList()
+    ..sort((a, b) {
+      if (a.kind != b.kind) return a.kind == 'scene' ? -1 : 1;
+      return a.path.toLowerCase().compareTo(b.path.toLowerCase());
+    });
+  final choice = await showPicker<DocumentAsset>(
+    context,
+    title: 'Open Document',
+    anchor: anchor,
+    hint: 'Search scenes and prefabs by name or path',
+    keyPrefix: 'openDocument',
+    countNoun: 'documents',
+    empty: 'Nothing matches.',
+    items: [
+      for (final a in all)
+        PickerItem(
+          value: a,
+          id: a.id,
+          title: a.name.isEmpty ? p.basename(a.path) : a.name,
+          detail: p.dirname(a.path) == '.' ? null : p.dirname(a.path),
+          group: a.kind == 'scene' ? 'Scenes' : 'Prefabs',
+          icon: documentKindIcon(a.kind),
+          keywords: '${a.path} ${a.kind}',
+          facts: [('Kind', a.kind), ('File', a.path)],
         ),
-      ),
-      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel'))],
-    );
-  }
+    ],
+  );
+  return choice?.value;
 }
 
 /// A relative path under the project for a copy; returns the absolute path or null.
@@ -444,6 +448,7 @@ Future<String?> showSaveAsDialog(BuildContext context, OpenDocument tab) {
   }
 
   return showDialog<String>(
+    animationStyle: AnimationStyle.noAnimation,
     context: context,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) {
@@ -498,6 +503,7 @@ Future<ConflictChoice> showConflictDialog(BuildContext context, OpenDocument tab
   final text = unifiedDiff(diff);
   String short(String? r) => r == null ? '(unreadable)' : (r.length > 12 ? r.substring(0, 12) : r);
   final r = await showDialog<ConflictChoice>(
+    animationStyle: AnimationStyle.noAnimation,
     context: context,
     builder: (context) {
       final theme = Theme.of(context);
@@ -506,7 +512,7 @@ Future<ConflictChoice> showConflictDialog(BuildContext context, OpenDocument tab
         key: const Key('dialog.conflict'),
         title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange.shade700),
+            Icon(FIcons.warningAmberRounded, color: theme.tokens.warning),
             const SizedBox(width: 8),
             Expanded(child: Text('${tab.title} changed on disk')),
           ],
@@ -573,7 +579,7 @@ Future<ConflictChoice> showConflictDialog(BuildContext context, OpenDocument tab
                             TextSpan(
                               text: '$line\n',
                               style: line.startsWith('+')
-                                  ? mono?.copyWith(color: Colors.green.shade700)
+                                  ? mono?.copyWith(color: theme.tokens.ok)
                                   : line.startsWith('-')
                                   ? mono?.copyWith(color: theme.colorScheme.error)
                                   : line.startsWith('@@')
