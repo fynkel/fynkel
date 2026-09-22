@@ -6,6 +6,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show tan;
 
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:test/test.dart';
@@ -25,6 +26,9 @@ const robotSpinner = 'c0000000-0000-4000-8000-0000000000c2';
 const crateA = 'c0000000-0000-4000-8000-0000000000e2';
 const floor = 'c0000000-0000-4000-8000-0000000000e4';
 const crateB = 'c0000000-0000-4000-8000-0000000000e5';
+const sun = 'c0000000-0000-4000-8000-0000000000e3';
+const floorTransform = 'c0000000-0000-4000-8000-0000000000d0';
+const cratePrefab = 'c0000000-0000-4000-8000-000000000040';
 const rig = 'c0000000-0000-4000-8000-0000000004e2';
 // Fresh ids for what the session creates.
 const lamp = '11111111-0000-4000-8000-000000000001';
@@ -66,9 +70,9 @@ Map<String, Object?> entity(DocumentHandle doc, String id) => entities(doc)[id] 
 String nameOf(DocumentHandle doc, String id) => entity(doc, id)['name'] as String;
 
 void main() {
-  test('the loaded runtime speaks authoring ABI v2', () {
+  test('the loaded runtime speaks authoring ABI v3', () {
     expect(AuthoringSession.loadedAbiVersion, authoringAbiVersion);
-    expect(authoringAbiVersion, 2);
+    expect(authoringAbiVersion, 3);
   });
 
   test('a complete edit session on the main scene', () {
@@ -573,6 +577,145 @@ void main() {
     expect(e.toString(), contains('FYN-E0001'));
     expect(e.diagnostics.single.toString(), 'error FYN-E0001: stale (a:3)');
   });
+
+  test('the edit-preview world follows the document and never edits it — item 6', () {
+    final dir = copyFixture('preview');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    final events = <AuthoringEvent>[];
+    session.events.listen(events.add);
+    session.openProject(dir.path);
+    final scene = session.openDocument(mainScene);
+    expect(scene.preview, isNull);
+
+    // The first preview cooks the project into its cache and loads the world.
+    final preview = scene.openPreview();
+    expect(identical(scene.openPreview(), preview), isTrue, reason: 'idempotent');
+    expect(scene.preview, same(preview));
+    expect(preview.cook, isNotNull);
+    expect(preview.cook!.ok, isTrue, reason: preview.cook!.diagnostics.join('; '));
+    expect(File('${dir.path}/.fynkel/cache/index.json').existsSync(), isTrue);
+    expect(preview.stats.entities, 7);
+    expect(preview.stats.loads, 1);
+    expect(preview.diagnostics, isEmpty);
+    expect(preview.worldAddress, isNot(0));
+
+    // The editor camera: 20 m up, 2 m aside, looking straight down (the
+    // sun's icon sits right above the robot). Column-major: the rotation
+    // −90° about X maps +Y to −Z and +Z to +Y.
+    const editorCamera = PreviewCamera(
+      world: [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 2, 20, 0, 1],
+      near: 0.1,
+      far: 100,
+    );
+    preview.setCamera(editorCamera);
+
+    // Pick the robot through the pixel its centre projects to.
+    final matrices = preview.worldMatrices([robot]);
+    final m = matrices[robot]!;
+    final centre = [m[12], m[13] + 0.5, m[14]];
+    // View: camera at (2, 20, 0) looking down −Y; 60° vertical fov, 16:9.
+    final vx = centre[0] - 2, vy = -centre[2], depth = 20 - centre[1];
+    final f = 1 / tan(30 * 3.141592653589793 / 180);
+    final ndc = [vx * f / (16 / 9) / depth, vy * f / depth];
+    final pick = preview.pick(editorCamera, 16 / 9, ndc);
+    expect(pick.hits, isNotEmpty);
+    expect(pick.nearest!.id, robot, reason: pick.hits.map((h) => h.id).join(','));
+    expect(pick.nearest!.mesh, isTrue);
+    expect(preview.pickRay([centre[0], 5, centre[2]], [0, -1, 0]).nearest!.id, robot);
+    // Hidden: gone from the picks and counted; shown again.
+    expect(preview.setHidden([robot]), 1);
+    expect(preview.pick(editorCamera, 16 / 9, ndc).hits.map((h) => h.id), isNot(contains(robot)));
+    expect(preview.refreshStats().hidden, 1);
+    expect(preview.setHidden([]), 0);
+    // The whole scene under a marquee from above; outline and icon lines.
+    final all = preview.pickRect(editorCamera, 16 / 9, [-1, -1], [1, 1]);
+    expect(all, containsAll([robot, floor, crateA, crateB, camera, sun]));
+    final outline = preview.lines(outline: [robot]);
+    expect(outline.count, 12, reason: 'a box');
+    expect(outline.data.length, 120);
+    final icons = preview.lines(iconsAspect: 16 / 9);
+    expect(icons.count, greaterThan(12), reason: 'the camera frustum and the sun arrows');
+
+    // A transaction keeps the world in step, incrementally, and says so on
+    // the record and as an event; the world dumps like a fresh load.
+    events.clear();
+    final before = preview.dump();
+    final applied = scene.apply([Command.setField(floor, floorTransform, 'position', [0, -1.5, 0])]);
+    expect(applied.ok, isTrue);
+    expect(applied.previews.single.handle, scene.handle);
+    expect(applied.previews.single.updated, 1);
+    expect(applied.previews.single.reloaded, isFalse);
+    expect(events.whereType<PreviewSynced>().single.document, same(scene));
+    final after = preview.dump();
+    expect(after, isNot(equals(before)));
+    expect(preview.reload().entities, 7);
+    expect(preview.dump(), after, reason: 'incremental == fresh');
+    expect(preview.stats.loads, 2);
+    // Undo brings it back.
+    final undone = scene.undo();
+    expect(undone.previews.single.updated, 1);
+    expect(preview.dump(), before);
+
+    // A prefab edited in another tab reaches the scene's preview.
+    final prefab = session.openDocument(cratePrefab);
+    events.clear();
+    final edited = prefab.apply([Command.setField(cratePrefabEntity, cratePrefabRenderer, 'visible', false)]);
+    expect(edited.ok, isTrue);
+    expect(edited.previews.single.handle, scene.handle);
+    expect(edited.previews.single.updated, greaterThan(0), reason: 'both crates');
+    expect(preview.refreshStats().meshes, lessThan(preview.stats.entities));
+    prefab.undo();
+
+    // The gizmo's preview is not an edit.
+    preview.setTransforms([
+      const PreviewTransform(id: robot, position: [3, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1]),
+    ]);
+    expect(preview.worldMatrices([robot])[robot]![12], 3);
+    expect(scene.refreshState().dirty, isFalse);
+    preview.restoreTransforms([robot]);
+    expect(preview.worldMatrices([robot])[robot]![12], m[12]);
+    expect(preview.resync().isNoOp, isTrue);
+
+    // Recook rebuilds the cache and reloads every preview over it; the
+    // world pointer stays.
+    final address = preview.worldAddress;
+    final recook = preview.recook();
+    expect(recook.ok, isTrue);
+    expect(preview.cook, same(recook));
+    expect(preview.stats.loads, 3);
+    expect(preview.worldAddress, address);
+
+    // Refusals: a material has no preview; a bad argument; an unknown id.
+    final material = session.openDocument(rusted);
+    expect(
+      () => material.openPreview(),
+      throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')),
+    );
+    expect(
+      () => preview.pick(editorCamera, 16 / 9, [0]),
+      throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')),
+    );
+    expect(
+      () => preview.worldMatrices([lamp]),
+      throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-T0003')),
+    );
+
+    // Closing the preview keeps the document; closing the document drops
+    // its preview.
+    preview.close();
+    expect(preview.isClosed, isTrue);
+    expect(preview.worldAddress, 0);
+    expect(scene.preview, isNull);
+    expect(() => preview.dump(), throwsStateError);
+    final again = scene.openPreview();
+    expect(again.cook, isNull, reason: 'the cache is open already');
+    scene.close();
+    expect(again.isClosed, isTrue);
+    expect(again.worldAddress, 0);
+  });
+
 
   test('the migration preview names an outdated scene, its steps and the diff, and writes nothing', () {
     final dir = copyFixture('migrations');

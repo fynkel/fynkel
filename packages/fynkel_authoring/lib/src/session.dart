@@ -17,6 +17,8 @@ import 'diagnostic.dart';
 import 'models.dart';
 import 'native/fynkel_authoring_bindings.g.dart' as n;
 
+part 'preview.dart';
+
 /// The authoring ABI version this package was written against.
 const int authoringAbiVersion = n.FYNKEL_AUTHORING_ABI_VERSION;
 
@@ -266,6 +268,7 @@ final class AuthoringSession implements Finalizable {
       _relocateOpenDocuments();
       _events.add(AssetsChanged(RescanReport.fromJson({'assetCount': r.assetCount, 'scanned': const []}), operation: r));
     }
+    _publishPreviews(json);
     return r;
   }
 
@@ -405,6 +408,7 @@ final class AuthoringSession implements Finalizable {
         : _text('rescan', jsonEncode(list), (p, len) => n.fynkel_authoring_rescan(_ptr, p, len));
     final report = RescanReport.fromJson(r);
     _events.add(AssetsChanged(report));
+    _publishPreviews(r);
     return report;
   }
 
@@ -415,6 +419,7 @@ final class AuthoringSession implements Finalizable {
     _disposed = true;
     for (final d in _documents.values) {
       d._closed = true;
+      d._preview?._closed = true;
     }
     _documents.clear();
     _finalizer.detach(this);
@@ -431,9 +436,20 @@ final class AuthoringSession implements Finalizable {
   void _closeAllHandles() {
     for (final d in _documents.values) {
       d._closed = true;
+      d._preview?._closed = true;
+      d._preview = null;
       _events.add(DocumentClosed(d.handle));
     }
     _documents.clear();
+  }
+
+  /// Publishes the `previews` reports a call's result carries — one
+  /// [PreviewSynced] per edit-preview world the session brought up to
+  /// date — after the call's own event.
+  void _publishPreviews(Map<String, Object?> result) {
+    for (final report in PreviewSyncReport.listOf(result['previews'])) {
+      _events.add(PreviewSynced(_documents[report.handle], report));
+    }
   }
 
   /// Runs one ABI call and reads its JSON result. `commandsRejected` is
@@ -489,10 +505,34 @@ final class DocumentHandle {
   final int handle;
   DocumentState _state;
   bool _closed = false;
+  ScenePreview? _preview;
 
   /// The state after the last call on this document.
   DocumentState get state => _state;
   bool get isClosed => _closed;
+
+  /// The edit-preview world of this document while one is open.
+  ScenePreview? get preview => _preview;
+
+  /// Opens the edit-preview world of this scene or prefab (item 6): the
+  /// project cooked into its cache when this is the session's first
+  /// preview, an edit-mode world loaded fresh from the live document and
+  /// kept equal to it from here on. Idempotent. Throws
+  /// ([AuthoringStatus.invalidArgument], FYN-T0003) for a material,
+  /// (`loadFailed`) when the cache cannot be opened.
+  ScenePreview openPreview() {
+    _check();
+    final existing = _preview;
+    if (existing != null && !existing._closed) return existing;
+    final r = session._call('previewOpen', () => n.fynkel_authoring_preview_open(session._ptr, handle));
+    final cook = r['cook'] is Map<String, Object?> ? CookReport.fromJson(r['cook'] as Map<String, Object?>) : null;
+    return _preview = ScenePreview._(
+      this,
+      PreviewStats.fromJson(_mapOf(r['stats'])),
+      Diagnostic.listOf(r['diagnostics']),
+      cook,
+    );
+  }
 
   /// Changes to this document only, from [AuthoringSession.events].
   Stream<DocumentChanged> get changes =>
@@ -523,6 +563,7 @@ final class DocumentHandle {
     final applied = Applied.fromJson(r);
     if (applied.state != null) _state = applied.state!;
     if (applied.ok) session._events.add(DocumentChanged(this, DocumentChangeKind.applied, _state, applied: applied));
+    session._publishPreviews(r);
     return applied;
   }
 
@@ -536,9 +577,11 @@ final class DocumentHandle {
 
   Replayed _replay(String op, DocumentChangeKind kind, n.FynkelStatus Function() f) {
     _check();
-    final t = Replayed.fromJson(session._call(op, f));
+    final r = session._call(op, f);
+    final t = Replayed.fromJson(r);
     _state = t.state;
     session._events.add(DocumentChanged(this, kind, _state, replayed: t));
+    session._publishPreviews(r);
     return t;
   }
 
@@ -554,6 +597,7 @@ final class DocumentHandle {
         : session._text('save', path, (p, len) => n.fynkel_authoring_save(session._ptr, handle, p, len));
     _state = DocumentState.fromJson(_mapOf(r['state']));
     session._events.add(DocumentChanged(this, DocumentChangeKind.saved, _state));
+    session._publishPreviews(r);
     return r['path'] as String? ?? _state.path;
   }
 
@@ -565,6 +609,7 @@ final class DocumentHandle {
     final r = session._call('reload', () => n.fynkel_authoring_reload_document(session._ptr, handle));
     _state = DocumentState.fromJson(_mapOf(r['state']));
     session._events.add(DocumentChanged(this, DocumentChangeKind.reloaded, _state));
+    session._publishPreviews(r);
     return _state;
   }
 
@@ -573,6 +618,8 @@ final class DocumentHandle {
     if (_closed) return;
     session._call('closeDocument', () => n.fynkel_authoring_close_document(session._ptr, handle));
     _closed = true;
+    _preview?._closed = true;
+    _preview = null;
     session._documents.remove(handle);
     session._events.add(DocumentClosed(handle));
   }

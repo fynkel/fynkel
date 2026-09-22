@@ -1,6 +1,8 @@
 // Typed views over the JSON the authoring ABI writes. Every model keeps the
 // raw map in `json` so a panel can reach a field these classes do not name.
 
+import 'dart:typed_data';
+
 import 'diagnostic.dart';
 
 Map<String, Object?> _map(Object? v) => v is Map<String, Object?> ? v : const {};
@@ -147,7 +149,8 @@ final class Applied {
         revision = json['revision'] as String? ?? '',
         mutations = [for (final m in json['mutations'] as List? ?? const []) Mutation.fromJson(_map(m))],
         diagnostics = Diagnostic.listOf(json['diagnostics']),
-        state = json['state'] is Map<String, Object?> ? DocumentState.fromJson(_map(json['state'])) : null;
+        state = json['state'] is Map<String, Object?> ? DocumentState.fromJson(_map(json['state'])) : null,
+        previews = PreviewSyncReport.listOf(json['previews']);
 
   final Map<String, Object?> json;
   final bool ok;
@@ -163,6 +166,10 @@ final class Applied {
 
   /// The document's state after the call.
   final DocumentState? state;
+
+  /// The edit-preview worlds of the session brought up to date with this
+  /// transaction (empty when none is open).
+  final List<PreviewSyncReport> previews;
 
   /// The transaction was refused because the document moved on since the
   /// `baseRevision` the caller named (FYN-E0001); nothing was touched.
@@ -183,7 +190,8 @@ final class Replayed {
         revision = json['revision'] as String? ?? '',
         commands = _strings(json['commands']),
         affectedIds = _strings(json['affectedIds']),
-        state = DocumentState.fromJson(_map(json['state']));
+        state = DocumentState.fromJson(_map(json['state'])),
+        previews = PreviewSyncReport.listOf(json['previews']);
 
   final Map<String, Object?> json;
   final String transactionId;
@@ -196,6 +204,9 @@ final class Replayed {
   final List<String> commands;
   final List<String> affectedIds;
   final DocumentState state;
+
+  /// The edit-preview worlds brought up to date with the replay.
+  final List<PreviewSyncReport> previews;
 }
 
 /// One step `fynkel migrate` knows: `kind` documents at `from` become `to`.
@@ -277,7 +288,8 @@ final class RescanReport {
   RescanReport.fromJson(this.json)
       : assetCount = (json['assetCount'] as num?)?.toInt() ?? 0,
         scanned = _strings(json['scanned']),
-        diagnostics = Diagnostic.listOf(json['diagnostics']);
+        diagnostics = Diagnostic.listOf(json['diagnostics']),
+        previews = PreviewSyncReport.listOf(json['previews']);
 
   final Map<String, Object?> json;
   final int assetCount;
@@ -285,6 +297,10 @@ final class RescanReport {
   /// The paths whose reference index entries were refreshed.
   final List<String> scanned;
   final List<Diagnostic> diagnostics;
+
+  /// The edit-preview worlds re-described over the rescanned database (a
+  /// prefab changed on disk reaches the scenes that instance it).
+  final List<PreviewSyncReport> previews;
 }
 
 /// `fynkel validate --json` over the open project.
@@ -356,13 +372,17 @@ final class OperationResult {
         entry = json['entry'] is Map<String, Object?> ? json['entry'] as Map<String, Object?> : null,
         assetCount = (json['assetCount'] as num?)?.toInt() ?? 0,
         history = AssetHistory.fromJson(json),
-        diagnostics = Diagnostic.listOf(json['diagnostics']);
+        diagnostics = Diagnostic.listOf(json['diagnostics']),
+        previews = PreviewSyncReport.listOf(json['previews']);
 
   final Map<String, Object?> json;
 
   /// False only for a `reimport` the importer refused (see [diagnostics]);
   /// a refused operation throws instead.
   final bool ok;
+
+  /// The edit-preview worlds brought up to date after the operation.
+  final List<PreviewSyncReport> previews;
   final String op;
 
   /// The history label (`New material gold.material.json`).
@@ -454,3 +474,207 @@ final class AssetDetail {
 
   bool get isSource => kind == 'source';
 }
+
+// ---- the edit-preview world (item 6, authoring ABI v3) ------------------
+
+/// The report of one incremental sync of a preview against its document
+/// (`Preview::sync`): what the diff did, and whether it fell back to a
+/// fresh load.
+final class PreviewSyncReport {
+  PreviewSyncReport.fromJson(this.json)
+      : handle = json['handle'] as int? ?? 0,
+        spawned = json['spawned'] as int? ?? 0,
+        destroyed = json['destroyed'] as int? ?? 0,
+        updated = json['updated'] as int? ?? 0,
+        reordered = json['reordered'] as int? ?? 0,
+        steps = json['steps'] as int? ?? 0,
+        reloaded = json['reloaded'] == true,
+        diagnostics = Diagnostic.listOf(json['diagnostics']),
+        describeDiagnostics = Diagnostic.listOf(json['describeDiagnostics']);
+
+  final Map<String, Object?> json;
+
+  /// The document handle the preview belongs to.
+  final int handle;
+  final int spawned, destroyed, updated, reordered;
+
+  /// World steps the sync took (0: nothing to do).
+  final int steps;
+
+  /// The diff did not settle and the world was loaded fresh instead.
+  final bool reloaded;
+
+  /// The world's diagnostics of the sync (or of the fallback load).
+  final List<Diagnostic> diagnostics;
+
+  /// Diagnostics of describing the document (a dangling reference).
+  final List<Diagnostic> describeDiagnostics;
+
+  /// Nothing changed in the world.
+  bool get isNoOp => steps == 0 && !reloaded;
+
+  static List<PreviewSyncReport> listOf(Object? v) =>
+      v is List ? [for (final r in v) if (r is Map<String, Object?>) PreviewSyncReport.fromJson(r)] : const [];
+}
+
+/// The counts the stats overlay shows.
+final class PreviewStats {
+  PreviewStats.fromJson(Map<String, Object?> json)
+      : entities = json['entities'] as int? ?? 0,
+        live = json['live'] as int? ?? 0,
+        meshes = json['meshes'] as int? ?? 0,
+        lights = json['lights'] as int? ?? 0,
+        hidden = json['hidden'] as int? ?? 0,
+        tick = json['tick'] as int? ?? 0,
+        loads = json['loads'] as int? ?? 0,
+        syncs = json['syncs'] as int? ?? 0;
+
+  const PreviewStats.zero()
+      : entities = 0,
+        live = 0,
+        meshes = 0,
+        lights = 0,
+        hidden = 0,
+        tick = 0,
+        loads = 0,
+        syncs = 0;
+
+  /// Entities of the document in the preview; live entities in the world
+  /// (equal unless a load was refused).
+  final int entities, live;
+
+  /// Mesh instances and lights the picture has (hidden ones left out).
+  final int meshes, lights;
+  final int hidden;
+
+  /// The world's tick: every step the preview took (never a game tick).
+  final int tick;
+
+  /// Fresh loads (1 after open; +1 per fallback, Reload or recook) and
+  /// incremental syncs so far.
+  final int loads, syncs;
+}
+
+/// The editor camera the picture is drawn through — in the scene camera's
+/// place, never a game camera. [world] is the camera's world matrix, 16
+/// numbers column-major (glam `Mat4::to_cols_array` order); the camera
+/// looks along its −Z. [fovY] is in radians; the fields default to the
+/// engine's `Camera` defaults (60°, 10 m, 0.1, 1000, auto exposure).
+/// [manualExposure] is an EV100 that replaces the automatic exposure (a
+/// scene camera's `exposure_mode: manual`, when the view is aligned to
+/// one).
+final class PreviewCamera {
+  const PreviewCamera({
+    required this.world,
+    this.orthographic = false,
+    this.fovY = 1.0471975511965976,
+    this.orthoHeight = 10,
+    this.near = 0.1,
+    this.far = 1000,
+    this.manualExposure,
+  });
+
+  final List<double> world;
+  final bool orthographic;
+  final double fovY, orthoHeight, near, far;
+  final double? manualExposure;
+
+  Map<String, Object?> toJson() => {
+        'world': world,
+        'projection': orthographic ? 'orthographic' : 'perspective',
+        'fovY': fovY,
+        'orthoHeight': orthoHeight,
+        'near': near,
+        'far': far,
+        'exposureMode': manualExposure == null ? 'auto' : 'manual',
+        if (manualExposure != null) 'exposure': manualExposure,
+      };
+
+  /// The camera at a viewport's [aspect] (width / height): what a pick or
+  /// a marquee needs to turn a pixel into a ray.
+  Map<String, Object?> viewJson(double aspect) => {...toJson(), 'aspect': aspect};
+}
+
+/// One entity a pick ray hit.
+final class PreviewHit {
+  PreviewHit.fromJson(Map<String, Object?> json)
+      : id = json['id'] as String? ?? '',
+        distance = (json['distance'] as num? ?? 0).toDouble(),
+        point = _doubles(json['point']),
+        mesh = json['mesh'] == true;
+
+  final String id;
+
+  /// Along the ray from its origin, metres.
+  final double distance;
+
+  /// World-space hit point `[x, y, z]`.
+  final List<double> point;
+
+  /// Hit on a mesh's triangle (false: the icon sphere of a light, camera
+  /// or empty).
+  final bool mesh;
+}
+
+/// The result of a pick: the ray that was cast and every entity it hit,
+/// nearest first (a repeated click cycles through them).
+final class PreviewPick {
+  PreviewPick.fromJson(Map<String, Object?> json)
+      : origin = _doubles(_map(json['ray'])['origin']),
+        dir = _doubles(_map(json['ray'])['dir']),
+        hits = [for (final h in json['hits'] as List? ?? const []) PreviewHit.fromJson(_map(h))];
+
+  final List<double> origin, dir;
+  final List<PreviewHit> hits;
+
+  bool get isEmpty => hits.isEmpty;
+  PreviewHit? get nearest => hits.isEmpty ? null : hits.first;
+}
+
+/// A local transform the gizmo previews: position `[x, y, z]`, rotation
+/// `[x, y, z, w]` (unit), scale `[x, y, z]`.
+final class PreviewTransform {
+  const PreviewTransform({required this.id, required this.position, required this.rotation, required this.scale});
+
+  final String id;
+  final List<double> position, rotation, scale;
+
+  Map<String, Object?> toJson() => {'id': id, 'position': position, 'rotation': rotation, 'scale': scale};
+}
+
+/// The lines a `lines` call returned: [count] segments as ten numbers each
+/// — `ax ay az bx by bz r g b a` — flat in [data], ready for the viewport's
+/// debug lines.
+final class PreviewLines {
+  PreviewLines.fromJson(Map<String, Object?> json)
+      : count = json['count'] as int? ?? 0,
+        data = Float32List.fromList([
+          for (final line in json['lines'] as List? ?? const [])
+            for (final v in line as List) (v as num).toDouble(),
+        ]);
+
+  final int count;
+  final Float32List data;
+}
+
+/// The cook the first preview of a session ran, or a `recook` (the
+/// `fynkel cook --json` report).
+final class CookReport {
+  CookReport.fromJson(this.json)
+      : ok = json['ok'] == true,
+        profile = json['profile'] as String? ?? '',
+        cached = json['cached'] as int? ?? 0,
+        cooked = json['cooked'] as int? ?? 0,
+        failed = json['failed'] as int? ?? 0,
+        diagnostics = Diagnostic.listOf(json['diagnostics']);
+
+  final Map<String, Object?> json;
+
+  /// No asset failed to cook.
+  final bool ok;
+  final String profile;
+  final int cached, cooked, failed;
+  final List<Diagnostic> diagnostics;
+}
+
+List<double> _doubles(Object? v) => v is List ? [for (final x in v) if (x is num) x.toDouble()] : const [];
