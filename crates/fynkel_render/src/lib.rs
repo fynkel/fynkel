@@ -70,8 +70,15 @@ pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// The sun's shadow map format.
 pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-/// Point + spot lights one draw can see (the nearest to the camera win).
+/// Point + spot lights one object can be lit by — the blueprint's Tier-1
+/// budget. The strongest at the object's bounds win (E1 light culling).
 pub const MAX_LIGHTS: usize = 8;
+
+/// Point + spot lights one frame can carry. Lights whose range misses the
+/// camera frustum never enter it (that cannot change the picture: only
+/// what is inside the frustum is shaded); when more than this reach the
+/// view, the nearest to the camera win and the rest are counted dropped.
+pub const LIGHT_POOL: usize = 64;
 
 /// Background colour: the bytes written to the target where nothing was
 /// drawn (no tone mapping or encoding applies). Shared with the
@@ -106,8 +113,10 @@ struct Instance {
     emissive: [f32; 4],
     /// metallic, roughness, normal_scale, occlusion_strength
     params: [f32; 4],
-    /// alpha cutoff (or `NO_CUTOFF` / `BLEND`), unlit, double-sided,
-    /// receives shadows
+    /// alpha cutoff (or `NO_CUTOFF` / `BLEND`), unlit, the object's light
+    /// list in the frame's list buffer (E1 — `z` was the double-sided
+    /// flag, which only the CPU ever read: it picks the pipeline), and
+    /// whether it receives shadows
     flags: [f32; 4],
 }
 
@@ -136,7 +145,7 @@ struct FrameUniforms {
     sky: [f32; 4],
     shadow: [f32; 4],
     counts: [u32; 4],
-    lights: [GpuLight; MAX_LIGHTS],
+    lights: [GpuLight; LIGHT_POOL],
 }
 
 #[repr(C)]
@@ -307,10 +316,16 @@ pub struct FrameStats {
     /// The internal render size (target × render scale).
     pub render_width: u32,
     pub render_height: u32,
-    /// Point + spot lights uploaded (≤ [`MAX_LIGHTS`]).
+    /// Point + spot lights uploaded to the frame's pool (≤ [`LIGHT_POOL`]):
+    /// those whose range reaches the view.
     pub lights: u32,
-    /// Point + spot lights beyond the budget, left out this frame.
+    /// Point + spot lights that reached the view but did not fit the pool.
     pub lights_dropped: u32,
+    /// The longest per-object light list this frame (≤ [`MAX_LIGHTS`]).
+    pub lights_max_per_object: u32,
+    /// Instances that had more lights on them than [`MAX_LIGHTS`]: the
+    /// weakest at their bounds were left out.
+    pub lights_overflow: u32,
     pub scene_camera: bool,
     pub scene_light: bool,
     /// The `Environment` sky is drawn behind the meshes.
@@ -644,6 +659,13 @@ pub struct ExtractRenderer {
     batches: Vec<Batch>,
     transparent: Vec<TransparentDraw>,
     batch_index: HashMap<BatchKey, usize>,
+    /// Reused by `assign_lights`: (illuminance at the bounds, pool index).
+    light_scratch: Vec<(f32, u8)>,
+    /// One light list per instance, in the instance buffer's order — the
+    /// storage array the mesh stages index with `Instance.flags[2]`.
+    light_lists: Vec<[u32; 4]>,
+    light_list_buffer: wgpu::Buffer,
+    light_list_capacity: u32,
     debug: DebugDraw,
     debug_buffer: wgpu::Buffer,
     debug_capacity: u32,
@@ -809,22 +831,28 @@ impl ExtractRenderer {
             label: Some("fynkel shadow bgl"),
             entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
         });
+        // Group 2 is what a mesh stage reads per instance: the frame's
+        // joint palettes (M3-19) and its light lists (E1).
+        let storage_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
         let skin_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fynkel skin bgl"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
+            entries: &[storage_entry(0), storage_entry(1)],
         });
         let joint_capacity = 64;
         let joint_buffer = create_joint_buffer(device, joint_capacity);
-        let joint_bind_group = create_joint_bind_group(device, &skin_layout, &joint_buffer);
+        let light_list_capacity = 256;
+        let light_list_buffer = create_light_list_buffer(device, light_list_capacity);
+        let joint_bind_group =
+            create_joint_bind_group(device, &skin_layout, &joint_buffer, &light_list_buffer);
         let shadow_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("fynkel shadow bg"),
             layout: &shadow_layout,
@@ -967,6 +995,10 @@ impl ExtractRenderer {
             batches: Vec::new(),
             transparent: Vec::new(),
             batch_index: HashMap::new(),
+            light_scratch: Vec::with_capacity(LIGHT_POOL),
+            light_lists: Vec::new(),
+            light_list_buffer,
+            light_list_capacity,
             debug: DebugDraw::default(),
             debug_buffer,
             debug_capacity,
@@ -1441,7 +1473,8 @@ impl ExtractRenderer {
         self.ev100 = ev100;
         let white = exposure::white_nits(ev100);
 
-        // Point and spot lights: the nearest MAX_LIGHTS to the camera.
+        // Point and spot lights: every one of them, culled to the view
+        // and assigned per object below.
         let mut lights: Vec<(f32, GpuLight)> =
             Vec::with_capacity(extract.point_lights.len() + extract.spot_lights.len());
         for l in &extract.point_lights {
@@ -1478,15 +1511,6 @@ impl ExtractRenderer {
                 },
             ));
         }
-        lights.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let mut packed = [GpuLight::default(); MAX_LIGHTS];
-        let n_lights = lights.len().min(MAX_LIGHTS);
-        for (slot, (_, l)) in packed.iter_mut().zip(lights.iter()) {
-            *slot = *l;
-        }
-        stats.lights = n_lights as u32;
-        stats.lights_dropped = (lights.len() - n_lights) as u32;
-
         // The sun's shadow fit depends only on the camera, so it comes
         // before the instances: casters are culled against its box.
         let fit = (self.quality.shadows && sun_present && sun_casts)
@@ -1494,12 +1518,32 @@ impl ExtractRenderer {
         let camera_frustum = Frustum::from_view_proj(&view_proj);
         let light_frustum = fit.as_ref().map(|f| Frustum::from_view_proj(&f.view_proj));
 
+        // The frame's light pool (E1). A light whose range sphere misses
+        // the camera frustum reaches nothing that is shaded, so it never
+        // enters the pool — exact, not an approximation, and it is why
+        // `frustum_culling` does not gate this. The nearest to the camera
+        // fill the pool when more than `LIGHT_POOL` still reach the view.
+        lights.retain(|(_, l)| {
+            camera_frustum.intersects(&Sphere {
+                center: Vec3::new(l.position[0], l.position[1], l.position[2]),
+                radius: l.position[3],
+            })
+        });
+        lights.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let n_lights = lights.len().min(LIGHT_POOL);
+        let mut packed = [GpuLight::default(); LIGHT_POOL];
+        for (slot, (_, l)) in packed.iter_mut().zip(lights.iter()) {
+            *slot = *l;
+        }
+        stats.lights = n_lights as u32;
+        stats.lights_dropped = (lights.len() - n_lights) as u32;
+
         // Instances: opaque and mask by (mesh, material) in order of
         // first appearance; blend on their own, sorted back-to-front.
         // Each instance is tagged with where it is drawn — see the batch
         // layout below.
-        let mut grouped: Vec<(bool, Vec<(Instance, Visibility)>)> = Vec::new();
-        let mut blended: Vec<(f32, BatchKey, bool, Instance)> = Vec::new();
+        let mut grouped: Vec<(bool, Vec<Grouped>)> = Vec::new();
+        let mut blended: Vec<(f32, BatchKey, bool, Instance, [u32; 4])> = Vec::new();
         self.batch_index.clear();
         let mut mesh_of_record: HashMap<u32, usize> = HashMap::with_capacity(extract.meshes.len());
         for (i, m) in extract.meshes.iter().enumerate() {
@@ -1588,8 +1632,8 @@ impl ExtractRenderer {
             // Culling: the mesh's bounding sphere in world space against
             // the camera frustum and, for casters, the sun's box. A
             // caster outside the view still shadows what is in it.
+            let sphere = bounds.transformed(&r.world);
             let (in_view, casts) = if self.frustum_culling {
-                let sphere = bounds.transformed(&r.world);
                 (
                     camera_frustum.intersects(&sphere),
                     casts
@@ -1606,6 +1650,18 @@ impl ExtractRenderer {
                     continue;
                 }
             }
+            // The object's light list (E1): the lights of the pool that
+            // reach its bounds, the strongest first. Only what is shaded
+            // needs one — a shadow-only instance is never lit, and an
+            // unlit material ignores every light.
+            let mut light_list = [0u32; 4];
+            if in_view && n_lights > 0 && instance.flags[1] < 0.5 {
+                let (list, count, overflow) =
+                    assign_lights(&packed[..n_lights], &sphere, &mut self.light_scratch);
+                light_list = list;
+                stats.lights_max_per_object = stats.lights_max_per_object.max(count as u32);
+                stats.lights_overflow += overflow as u32;
+            }
             if blend {
                 let origin = r.world.w_axis.truncate();
                 blended.push((
@@ -1613,6 +1669,7 @@ impl ExtractRenderer {
                     key,
                     double_sided,
                     instance,
+                    light_list,
                 ));
                 continue;
             }
@@ -1632,13 +1689,18 @@ impl ExtractRenderer {
                     (false, true) => Visibility::SceneOnly,
                     (false, false) => unreachable!("skipped above"),
                 },
+                light_list,
             ));
         }
 
         // Batch layout: [shadow only][both][scene only], so the shadow
         // draw is the first two and the scene draw the last two — one
         // contiguous range each, one upload.
+        // Either storage buffer of group 2 outgrowing its capacity means
+        // one new bind group for both.
+        let mut rebind_group_2 = false;
         self.instances.clear();
+        self.light_lists.clear();
         self.batches.clear();
         self.transparent.clear();
         let mut keys: Vec<(BatchKey, usize)> = self.batch_index.drain().collect();
@@ -1647,8 +1709,8 @@ impl ExtractRenderer {
         for (key, slot) in keys {
             let (double_sided, list) = &mut grouped[slot];
             // Stable: instances keep their order within a category.
-            list.sort_by_key(|(_, v)| *v as u8);
-            let count_of = |v: Visibility| list.iter().filter(|(_, x)| *x == v).count() as u32;
+            list.sort_by_key(|(_, v, _)| *v as u8);
+            let count_of = |v: Visibility| list.iter().filter(|(_, x, _)| *x == v).count() as u32;
             let (shadow_only, both) =
                 (count_of(Visibility::ShadowOnly), count_of(Visibility::Both));
             let start = self.instances.len() as u32;
@@ -1670,28 +1732,49 @@ impl ExtractRenderer {
                 shadow_first: start,
                 shadow_count,
             });
-            self.instances.extend(list.iter().map(|(i, _)| *i));
+            // Every instance says where its light list is: the two live
+            // in the same slot of their buffers.
+            for (instance, _, lights) in list.iter() {
+                let mut instance = *instance;
+                instance.flags[2] = self.instances.len() as f32;
+                self.instances.push(instance);
+                self.light_lists.push(*lights);
+            }
         }
         // Farthest first.
         blended.sort_by(|a, b| b.0.total_cmp(&a.0));
-        for (_, key, double_sided, instance) in blended {
+        for (_, key, double_sided, mut instance, lights) in blended {
             self.transparent.push(TransparentDraw {
                 key,
                 double_sided,
                 index: self.instances.len() as u32,
             });
+            instance.flags[2] = self.instances.len() as f32;
             self.instances.push(instance);
+            self.light_lists.push(lights);
         }
         let n = self.instances.len() as u32;
         if n > self.instance_capacity {
             self.instance_capacity = n.next_power_of_two().max(self.instance_capacity * 2);
             self.instance_buffer = create_instance_buffer(device, self.instance_capacity);
         }
+        // The light lists sit in the same slots as the instances, so the
+        // two buffers grow together.
+        if n > self.light_list_capacity {
+            self.light_list_capacity = n.next_power_of_two().max(self.light_list_capacity * 2);
+            self.light_list_buffer = create_light_list_buffer(device, self.light_list_capacity);
+            rebind_group_2 = true;
+        }
         if n > 0 {
             queue.write_buffer(
                 &self.instance_buffer,
                 0,
                 bytemuck::cast_slice(&self.instances),
+            );
+            queue.write_buffer(
+                &self.light_list_buffer,
+                0,
+                bytemuck::cast_slice(&self.light_lists),
             );
         }
         stats.batches = self.batches.len() as u32;
@@ -1713,8 +1796,15 @@ impl ExtractRenderer {
         if n_joints > self.joint_capacity {
             self.joint_capacity = n_joints.next_power_of_two().max(self.joint_capacity * 2);
             self.joint_buffer = create_joint_buffer(device, self.joint_capacity);
-            self.joint_bind_group =
-                create_joint_bind_group(device, &self.skin_layout, &self.joint_buffer);
+            rebind_group_2 = true;
+        }
+        if rebind_group_2 {
+            self.joint_bind_group = create_joint_bind_group(
+                device,
+                &self.skin_layout,
+                &self.joint_buffer,
+                &self.light_list_buffer,
+            );
         }
         if stats.skinned > 0 && n_joints > 0 {
             queue.write_buffer(&self.joint_buffer, 0, bytemuck::cast_slice(&extract.joints));
@@ -2273,6 +2363,51 @@ impl ExtractRenderer {
     }
 }
 
+/// An instance on its way into the buffer: its data, where it is drawn,
+/// and the light list that goes into the same slot.
+type Grouped = (Instance, Visibility, [u32; 4]);
+
+/// The lights of `pool` that reach `sphere`, packed for an [`Instance`]:
+/// up to [`MAX_LIGHTS`] pool indices one per byte (the first four in `x`,
+/// the next four in `y`) and how many in `z`. Returns that list, its
+/// length and whether lights were left out. When more than the budget
+/// reach one object the strongest at its bounds win — the weakest are the
+/// ones a viewer is least likely to miss, and the choice is stable while
+/// nothing moves.
+fn assign_lights(
+    pool: &[GpuLight],
+    sphere: &Sphere,
+    scratch: &mut Vec<(f32, u8)>,
+) -> ([u32; 4], usize, bool) {
+    scratch.clear();
+    for (i, l) in pool.iter().enumerate() {
+        let center = Vec3::new(l.position[0], l.position[1], l.position[2]);
+        let range = l.position[3];
+        // How far the light is from the nearest point of the bounds.
+        let d = (center.distance(sphere.center) - sphere.radius).max(0.0);
+        if d >= range {
+            continue;
+        }
+        // The shader's own windowed inverse square there, on the light's
+        // brightest channel: the most this object can get from it.
+        let ratio = d / range;
+        let window = 1.0 - ratio * ratio * ratio * ratio;
+        let peak = l.color[0].max(l.color[1]).max(l.color[2]);
+        scratch.push((peak * window * window / d.max(1e-2).powi(2), i as u8));
+    }
+    let overflow = scratch.len() > MAX_LIGHTS;
+    if overflow {
+        scratch.sort_unstable_by(|a, b| b.0.total_cmp(&a.0));
+        scratch.truncate(MAX_LIGHTS);
+    }
+    let mut list = [0u32; 4];
+    for (n, (_, i)) in scratch.iter().enumerate() {
+        list[n / 4] |= u32::from(*i) << ((n % 4) * 8);
+    }
+    list[2] = scratch.len() as u32;
+    (list, scratch.len(), overflow)
+}
+
 /// The per-instance data for a material at `world`.
 fn instance_for(m: &PbrMaterial, world: Mat4, receive_shadows: bool) -> Instance {
     let cutoff = match m.alpha_mode {
@@ -2293,7 +2428,8 @@ fn instance_for(m: &PbrMaterial, world: Mat4, receive_shadows: bool) -> Instance
         flags: [
             cutoff,
             0.0,
-            if m.double_sided { 1.0 } else { 0.0 },
+            // Filled in when the instance takes its place in the buffer.
+            0.0,
             if receive_shadows { 1.0 } else { 0.0 },
         ],
     }
@@ -3201,15 +3337,33 @@ fn create_joint_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
 fn create_joint_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    buffer: &wgpu::Buffer,
+    joints: &wgpu::Buffer,
+    light_lists: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("fynkel skin bg"),
         layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: buffer.as_entire_binding(),
-        }],
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: joints.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: light_lists.as_entire_binding(),
+            },
+        ],
+    })
+}
+
+/// The per-instance light lists (E1): four `u32` each, indexed by an
+/// instance's `flags[2]`.
+fn create_light_list_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("fynkel light lists"),
+        size: capacity as u64 * 16,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
     })
 }
 

@@ -299,15 +299,37 @@ renderer:
 their bytes count in the renderer's GPU estimate. No pipeline variant is
 added: the shader mixes between the two terms with `frame.sky.z`.
 
-## Lights per draw
+## Lights per object (E1)
 
-Up to `MAX_LIGHTS = 8` point + spot lights are uploaded per frame in one
-uniform array and every draw sees all of them; when a scene has more, the
-eight nearest to the camera are kept and `FrameStats::lights_dropped`
-counts the rest (`fynkel render --json`: `lights`, `lightsDropped`). No
-culling or clustering yet — V1 (c) (item 6, frustum culling and stress
-scenes) is where the budget gets measured. One sun (the first
-`DirectionalLight`), the only light that casts a shadow.
+A frame has a **pool** of up to `LIGHT_POOL = 64` point + spot lights, and
+each object is shaded by the `MAX_LIGHTS = 8` of them that reach it — the
+blueprint's Tier-1 budget, now spent per object instead of per frame.
+
+Two passes, both on the CPU in `prepare`:
+
+1. **Into the pool.** A light whose range sphere misses the camera
+   frustum is left out: only what is inside the frustum is shaded, so
+   this cannot change the picture (it is exact, not conservative, which
+   is why the `frustum_culling` switch does not gate it). If more than
+   `LIGHT_POOL` still reach the view, the nearest to the camera win and
+   `FrameStats::lights_dropped` counts the rest.
+2. **Onto the object.** Each instance's world bounding sphere — the one
+   frustum culling already computes — is tested against every light in
+   the pool: those whose range reaches it are scored by the shader's own
+   windowed inverse square at the nearest point of the bounds, times the
+   light's brightest channel. The strongest `MAX_LIGHTS` win; the list is
+   the pool indices, one per byte. Shadow-only instances and unlit
+   materials get no list — neither is shaded by a punctual light.
+
+`FrameStats`: `lights` (the pool), `lights_dropped`, `lights_max_per_object`
+and `lights_overflow` (instances that had more than eight on them);
+`fynkel render --json` prints all four (`lights`, `lightsDropped`,
+`lightsMaxPerObject`, `lightsOverflow`). No clustering and no compute
+pass: the assignment is a loop over the pool per instance, which is why
+the pool is bounded.
+
+One sun (the first `DirectionalLight`), the only light that casts a
+shadow, and it is not part of any of this — every object sees it.
 
 ## Uniform layout
 
@@ -318,7 +340,8 @@ shadow map clip), `camera_pos` (`w` = exposure factor `1 / L_max`),
 `w` = `L_max`), `sky` (`x` intensity, `y` rotation, `z` image-based
 lighting active, `w` specular mips − 1), `shadow` (`x` active,
 `y` `1 / resolution`, `z` normal offset in metres), `counts` (`x` lights,
-`y` sky drawn, `z` encode sRGB), then `lights: array<Light, 8>` —
+`y` sky drawn, `z` encode sRGB), then `lights: array<Light, LIGHT_POOL>`
+(64) —
 `position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
 `direction` (`w` cos outer), `params` (`x` cos inner). Bind group 0 also
 holds the shadow map (`texture_depth_2d`, binding 1 — a 1×1 map when
@@ -331,12 +354,19 @@ Per instance (vertex buffer 1, 128 bytes, locations 6–13): model matrix,
 `tint` (base colour factor), `emissive` (rgb × strength; `w` = the
 instance's first joint in the palette, § Skinning), `params`
 (metallic, roughness, normal_scale, occlusion_strength), `flags` (alpha
-cutoff, −1 opaque or −2 blend; unlit; double-sided; receives shadows).
+cutoff, −1 opaque or −2 blend; unlit; **the slot of this instance's light
+list**; receives shadows). `flags.z` was the double-sided flag, which no
+shader read — the CPU picks the pipeline from it — and the pipeline's
+sixteen vertex attributes (0–5 vertex, 6–13 instance, 14–15 skin weights)
+are all taken, so the list itself lives in a storage buffer.
 
 Bind group 2 (`skin_layout`, vertex stage, part of the mesh and shadow
-pipeline layouts and always bound): one read-only storage buffer of
-`array<mat4x4<f32>>`, the frame's joint palettes (§ Skinning; 64 matrices
-before the first growth, `next_power_of_two` beyond).
+pipeline layouts and always bound): two read-only storage buffers —
+binding 0 `array<mat4x4<f32>>`, the frame's joint palettes (§ Skinning; 64
+matrices before the first growth, `next_power_of_two` beyond), and
+binding 1 `array<vec4<u32>>`, one light list per instance in the instance
+buffer's order (§ Lights per object; 256 before the first growth). Either
+outgrowing its capacity rebuilds the one bind group.
 
 ### Skinning (M3-19, [animation.md](animation.md))
 

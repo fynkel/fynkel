@@ -221,6 +221,8 @@ pub fn run(args: &[String]) -> ExitCode {
                 "sceneLight": stats.scene_light,
                 "lights": stats.lights,
                 "lightsDropped": stats.lights_dropped,
+                "lightsMaxPerObject": stats.lights_max_per_object,
+                "lightsOverflow": stats.lights_overflow,
                 "sky": stats.sky,
                 "ibl": stats.ibl,
                 "ev100": renderer.ev100(),
@@ -261,10 +263,11 @@ pub fn run(args: &[String]) -> ExitCode {
             if stats.scene_camera { "scene" } else { "default" },
             if stats.scene_light { "scene" } else { "default" },
             stats.lights,
-            if stats.lights_dropped > 0 {
-                format!(" ({} dropped)", stats.lights_dropped)
-            } else {
-                String::new()
+            match (stats.lights_dropped, stats.lights_overflow) {
+                (0, 0) => String::new(),
+                (0, o) => format!(" (≤ {} each, {o} object(s) clipped)", stats.lights_max_per_object),
+                (d, 0) => format!(" ({d} dropped)"),
+                (d, o) => format!(" ({d} dropped, {o} object(s) clipped)"),
             },
             renderer.ev100(),
             match (stats.sky, stats.ibl) {

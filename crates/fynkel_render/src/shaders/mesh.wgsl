@@ -2,7 +2,8 @@
 // Opaque and transparent mesh stages (docs/renderer.md): Cook-Torrance
 // (GGX, height-correlated Smith, Schlick) in physical units into the
 // linear HDR target — one sun (lux) shadowed by its PCF-filtered map,
-// constant ambient (lux), up to MAX_LIGHTS point/spot lights (candela),
+// constant ambient (lux), the object's own MAX_LIGHTS point/spot lights
+// out of the frame's pool (candela),
 // every material map, normal mapping from the vertex tangent, `alphaMode`
 // mask by discard. The HDR alpha tells the post pass what the texel is:
 // 0 background, 1 scene-referred radiance (nits) — a `blend` material
@@ -27,8 +28,8 @@ struct VsIn {
     // Per-instance (fynkel_render::Instance): model matrix columns, base
     // colour factor, emissive (rgb × strength, nits-relative), params
     // (metallic, roughness, normal_scale, occlusion_strength), flags
-    // (alpha cutoff, -1 opaque or -2 blend; unlit; double-sided;
-    // receives shadows).
+    // (alpha cutoff, -1 opaque or -2 blend; unlit; the slot of this
+    // instance's light list; receives shadows).
     @location(6) m0: vec4<f32>,
     @location(7) m1: vec4<f32>,
     @location(8) m2: vec4<f32>,
@@ -49,12 +50,20 @@ struct VsOut {
     @location(5) emissive: vec4<f32>,
     @location(6) params: vec4<f32>,
     @location(7) flags: vec4<f32>,
+    @location(8) @interpolate(flat) lights: vec4<u32>,
 };
 
 // The frame's joint palettes (M3-19): every skinned instance's matrices
 // back to back, mesh space → posed joint → mesh space; an instance's
 // first joint is `emissive.w`.
 @group(2) @binding(0) var<storage, read> joints: array<mat4x4<f32>>;
+
+// Every instance's light list (E1 light culling): the pool indices that
+// reach it, one per byte — the first four in `x`, the next four in `y` —
+// and how many in `z`. An instance's own slot is `flags.z`; there is no
+// room for this among the vertex attributes (the pipeline's sixteen are
+// all taken), and the stage reads it once per vertex.
+@group(2) @binding(1) var<storage, read> instance_lights: array<vec4<u32>>;
 
 // A skinned mesh's third vertex buffer: the cooked SkinWeight (four
 // joint indices into the instance's palette, four weights summing to 1).
@@ -100,6 +109,7 @@ fn vertex(in: VsIn, model: mat4x4<f32>) -> VsOut {
     out.emissive = in.emissive;
     out.params = in.params;
     out.flags = in.flags;
+    out.lights = instance_lights[u32(in.flags.z)];
     return out;
 }
 
@@ -229,9 +239,14 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         }
         radiance += visibility * shade(n, v, frame.sun_dir.xyz, frame.sun_color.rgb, diffuse, f0, a2);
     }
-    for (var i = 0u; i < frame.counts.x; i++) {
-        let le = punctual(frame.lights[i], in.world_pos);
-        radiance += shade(n, v, le.xyz, frame.lights[i].color.rgb * le.w, diffuse, f0, a2);
+    // Only the lights this object was given (E1 light culling): its list
+    // is the pool indices packed a byte each, strongest first.
+    let n_lights = min(in.lights.z, MAX_LIGHTS);
+    for (var i = 0u; i < n_lights; i++) {
+        let word = select(in.lights.y, in.lights.x, i < 4u);
+        let light = frame.lights[(word >> ((i & 3u) * 8u)) & 0xffu];
+        let le = punctual(light, in.world_pos);
+        radiance += shade(n, v, le.xyz, light.color.rgb * le.w, diffuse, f0, a2);
     }
     // Environment light. Without an HDR environment: constant ambient,
     // the diffuse and the specular base each seeing E/π. With one (E1):

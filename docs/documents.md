@@ -1602,8 +1602,8 @@ extract offscreen from the same store to a PNG, 1280×720 by default
 (`--json`: `{ ok, out, size, project, scene: { id, name, key, entities,
 rejectedComponents }, cache, instances, culled, draws, shadowDraws,
 meshes, placeholders, missing, transparent, batches, sceneCamera,
-sceneLight, lights, lightsDropped, sky, ibl, ev100, shadowCasters, shadowMap,
-quality: { profile, shadows,
+sceneLight, lights, lightsDropped, lightsMaxPerObject, lightsOverflow,
+sky, ibl, ev100, shadowCasters, shadowMap, quality: { profile, shadows,
 shadowResolution, msaa, renderScale, anisotropy, renderSize },
 assetErrors, diagnostics }`; `docs/renderer.md` names the counts).
 `--quality <profile>` renders with one of the project's quality profiles

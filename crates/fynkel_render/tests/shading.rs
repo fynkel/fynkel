@@ -15,7 +15,7 @@ use fynkel_core::{
 use fynkel_import::{cook_project, CookOptions};
 use fynkel_render::{
     clear_rgba8, exposure, headless_device, render_offscreen, Assets, ExtractRenderer, Quality,
-    MAX_LIGHTS, PIPELINE_VARIANTS,
+    LIGHT_POOL, MAX_LIGHTS, PIPELINE_VARIANTS,
 };
 use glam::{Mat4, Quat, Vec3};
 use serde_json::{json, Value};
@@ -231,7 +231,9 @@ fn no_light_is_black_and_a_point_light_lights_its_side() {
     let px = render_offscreen(&device, &queue, &mut r, &e);
     assert!(drawn_mean(&px).0 < 1.0, "windowed to zero past range");
 
-    // The budget: the nearest MAX_LIGHTS are kept, the rest counted.
+    // The budgets (E1 light culling): every light that reaches the view
+    // goes into the frame's pool, and each object takes the MAX_LIGHTS
+    // strongest at its own bounds out of it.
     e.point_lights.clear();
     for i in 0..20 {
         e.point_lights
@@ -241,7 +243,127 @@ fn no_light_is_black_and_a_point_light_lights_its_side() {
     let s = r.stats();
     assert_eq!(
         (s.lights, s.lights_dropped),
-        (MAX_LIGHTS as u32, 20 - MAX_LIGHTS as u32)
+        (20, 0),
+        "all of them reach it"
+    );
+    assert_eq!(s.lights_max_per_object, MAX_LIGHTS as u32);
+    assert_eq!(
+        s.lights_overflow, 2,
+        "both drawn cubes — the scene's and the camera's placeholder — had          more lights on them than one object can take"
+    );
+
+    // Past the pool the nearest to the camera win, as before. (Clustered
+    // over the cube: spread out, the far ones would miss the view and
+    // never reach the pool at all — the case below.)
+    e.point_lights.clear();
+    for i in 0..(LIGHT_POOL + 20) {
+        e.point_lights
+            .push(point(Vec3::new(i as f32 * 0.01, 3.0, 0.0), 50.0, 30.0));
+    }
+    render_offscreen(&device, &queue, &mut r, &e);
+    let s = r.stats();
+    assert_eq!((s.lights, s.lights_dropped), (LIGHT_POOL as u32, 20));
+    assert_eq!(s.lights_max_per_object, MAX_LIGHTS as u32);
+
+    // A light whose range cannot reach the view is not in the pool at
+    // all — nothing that is shaded could have seen it.
+    e.point_lights.clear();
+    e.point_lights
+        .push(point(Vec3::new(2.5, 0.5, 2.5), 300.0, 20.0));
+    e.point_lights
+        .push(point(Vec3::new(400.0, 0.0, 0.0), 300.0, 20.0));
+    render_offscreen(&device, &queue, &mut r, &e);
+    assert_eq!((r.stats().lights, r.stats().lights_dropped), (1, 0));
+}
+
+#[test]
+fn each_object_is_lit_by_the_lights_that_reach_it() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    // Two cubes six metres apart, each with its own lights close by and
+    // out of reach of the other: eight red ones around the left cube and
+    // a single green one at the right. The red eight are nearer the
+    // camera, so a frame budget of "the eight nearest the camera" would
+    // spend itself on the left cube and leave the right one black.
+    let eye = Vec3::new(0.0, 0.0, 12.0);
+    let mut e = Extract::default();
+    e.records.push(record(0, Mat4::from_translation(eye)));
+    e.records
+        .push(record(1, Mat4::from_translation(Vec3::new(-3.0, 0.0, 0.0))));
+    e.records
+        .push(record(2, Mat4::from_translation(Vec3::new(3.0, 0.0, 0.0))));
+    e.camera = Some(ExtractCamera {
+        record: 0,
+        world: Mat4::from_translation(eye),
+        camera: Camera::default(),
+    });
+    e.environment = Some(environment(Vec3::ONE, 0.0));
+    manual(&mut e, 4.0);
+    let light = |position: Vec3, color: Vec3| ExtractPointLight {
+        record: 0,
+        position,
+        light: PointLight {
+            color,
+            intensity: 400.0,
+            range: 4.0,
+        },
+    };
+    for i in 0..8 {
+        e.point_lights.push(light(
+            Vec3::new(-3.0 + i as f32 * 0.01, 0.0, 2.0),
+            Vec3::new(1.0, 0.0, 0.0),
+        ));
+    }
+    e.point_lights
+        .push(light(Vec3::new(3.0, 0.0, 2.0), Vec3::new(0.0, 1.0, 0.0)));
+
+    let px = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&px, "per-object-lights");
+    let s = r.stats();
+    assert_eq!(
+        (s.lights, s.lights_dropped),
+        (9, 0),
+        "all nine are in the pool"
+    );
+    assert_eq!(
+        s.lights_max_per_object, MAX_LIGHTS as u32,
+        "the left cube took eight"
+    );
+    assert_eq!(s.lights_overflow, 0, "nobody had more than eight on it");
+
+    // Each cube in its own light's colour, and neither in the other's.
+    let half = |left: bool, c: usize| {
+        let mut sum = 0.0;
+        let mut n = 0;
+        for y in 0..H {
+            for x in 0..W {
+                let p = px[(y * W + x) as usize];
+                if is_background(p) || (x < W / 2) != left {
+                    continue;
+                }
+                sum += p[c] as f32;
+                n += 1;
+            }
+        }
+        (sum / n.max(1) as f32, n)
+    };
+    let (left_red, left_n) = half(true, 0);
+    let (left_green, _) = half(true, 1);
+    let (right_green, right_n) = half(false, 1);
+    let (right_red, _) = half(false, 0);
+    assert!(
+        left_n > 80 && right_n > 80,
+        "both cubes are drawn ({left_n}, {right_n})"
+    );
+    assert!(
+        left_red > left_green + 20.0,
+        "the left cube is red ({left_red} vs {left_green})"
+    );
+    assert!(
+        right_green > right_red + 20.0,
+        "the right cube is lit by its own light, not left black ({right_green} vs {right_red})"
     );
 }
 
