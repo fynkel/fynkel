@@ -403,7 +403,9 @@ without shared state — `fynkel scene inspect --json` and `fynkel prefab
 inspect --json` print it as `revision`.
 
 `Editor::apply(Request { id?, baseRevision?, commands }, &schemas)` runs one
-**transaction** atomically:
+**transaction** atomically (`Editor::apply_with_prefabs(request, &schemas,
+&PrefabLibrary)` is the same with the prefabs the document can see, which
+only `unpackPrefab` reads — `apply` passes an empty library):
 
 1. When `baseRevision` is given and differs from the editor's revision the
    whole request is a conflict (`FYN-E0001`): nothing is read, nothing is
@@ -458,6 +460,7 @@ pointer into it such as `/position/1`):
 | `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]` | `createObject` plus `prefab: { asset, instance, overrides: [] }`; scene documents only |
 | `setPrefabOverride` | `entity`, `override` (a prefab-model op object) | replaces the override with the same target (field for `setField`/`unsetField`, component for `addComponent`/`removeComponent`, object for `addObject`/`removeObject`), else appends |
 | `revertPrefabOverride` | `entity`, `index?` | removes one override, or all of them |
+| `unpackPrefab` | `entity` | replaces the instance by its expansion, in place: the anchor loses `prefab` and gains the instance roots as trailing children, the expanded entities (the prefab's with the overrides applied, under the ids the runtime derives) are inserted right after the anchor in `entities` — the document then reads exactly like `expand`'s; needs the prefab library (`Editor::apply_with_prefabs`), an instance that does not expand is refused (`FYN-E0004` with the `D040x` in `related`), not an instance `FYN-E0008`; one undo step (M4-07) |
 | `duplicateObject` | `id`, `newId?`, `name?`, `index?` | deep-copies the subtree with fresh entity, component and prefab-instance ids (every reference inside the copy remapped), placed right after the original or at `index`; the copy's root is the first affected id; a taken `newId` is `FYN-E0010`; one undo step (M4-01) |
 | `setDocumentField` | `pointer`, `value` | sets a field of the document itself by RFC 6901 pointer — a material's `/base_color`, a scene's `/name`; the envelope's identity (`/$schema`, `/kind`, `/formatVersion`, `/id`) and a scene's `/entities` / `/roots` are refused with `FYN-E0012` (M4-01) |
 | `unsetDocumentField` | `pointer` | removes a document field (`/name` cannot be unset, `FYN-E0012`) (M4-01) |
@@ -498,10 +501,19 @@ window, never running game code and never reading a cooked cache
   behind a small integer **handle** (idempotent; handles are never reused
   in a session). `apply`, `undo`, `redo`, `save(path?)`, `reload`,
   `close_document` act on a handle; `state_json` is what a tab strip shows
-  (`path`, `relativePath`, `kind`, `id`, `name`, `formatVersion`,
+  (`path`, `relativePath`, `sub`, `kind`, `id`, `name`, `formatVersion`,
   `revision`, `dirty`, `canUndo`, `canRedo`, `history` — the transactions
   left to undo — and `readOnly`). The name is read live from the root, so
-  `setDocumentField /name` shows at once.
+  `setDocumentField /name` shows at once. **`open_document("<id or
+  path>#prefab")`** (M4-07) opens an **imported hierarchy** — the prefab the
+  importer derives from a model source (`hero.glb`) or a rig document's
+  skeleton, the one an instance `{ asset, sub: "prefab" }` expands — as a
+  read-only prefab document: `kind` `prefab`, `sub` `"prefab"`, `path` the
+  source file, `relativePath` with `#prefab` appended, `readOnly` naming
+  the source; every transaction on it is `FYN-E0007`. A texture's or any
+  other sub is `FYN-D0401`. Its entities carry the derived `node/<i>` ids
+  the runtime uses, so an override written against the instance addresses
+  the same ids the tab shows.
 - **Writes inside a transaction** (`createMaterial`, `saveDocument`) take a
   relative path from the **project directory**, not the process's working
   directory, and the paths a committed transaction wrote are rescanned so
@@ -530,7 +542,26 @@ window, never running game code and never reading a cooked cache
   `fynkel migrate` would do to every document behind its kind's
   `formatVersion` — the steps this build knows and, per outdated document,
   the applied steps, the diff and any diagnostics; nothing is written —
-  the editor's Preview migration, M4-02), `commands`.
+  the editor's Preview migration, M4-02), `instance` (`handle`, `entity`
+  → the expansion of the prefab instance anchored at `entity`, M4-07:
+  `{ anchor, instance, asset: { asset, sub }, expanded, prefab: { id, name,
+  path, kind: prefab|source|rig, open, handle, readOnly } | null,
+  diagnostics, entities: [{ id, local, name, parent, children, added,
+  components: { <id>: { id, local, type, version, data, added, overridden:
+  [field] } } }], overrides: [{ index, op, entity, entityId, entityName,
+  component?, componentId?, componentType?, field?, value?, pointer }] }` —
+  `entities` in the expansion's document order under the **derived** ids
+  (a root's `parent` is the anchor), `local` the prefab's own ids,
+  `overridden` the `setField`/`unsetField` keys of a component (the
+  Inspector's bold), `added` an `addComponent`/`addObject`; the library is
+  the preview's — an **open prefab editor first**, dirty edits included,
+  then disk, imported hierarchies from the source's chunk or the rig — so
+  `prefab.open`/`handle` say when the instance follows a tab; a prefab
+  that is not available (`FYN-D0401`) or an override that does not apply
+  (`D0403`/`D0404`/`D0407`) is `expanded: false` with the diagnostics and
+  no entities — the anchor keeps its data and nothing is rewritten; not an
+  instance `FYN-E0008`, unknown entity `FYN-E0002`; `crates/fynkel_authoring/src/instance.rs`,
+  `tests/prefab_mode.rs`), `commands`.
 - **`rescan(paths)`** re-reads only the files a watcher (or an operation)
   names — `AssetDatabase::update` (M4-05): a source or its sidecar names the
   pair, a directory everything under it, a gone path drops its entry; the
@@ -617,7 +648,12 @@ it): `AuthoringSession` (`openProject`, `openDocument`, the queries typed,
 before `operate` returns), `DocumentHandle`
 (`state`, `apply(commands, baseRevision:)` → `Applied`, `undo`/`redo` →
 `Replayed`, `save`, `reload`, `close`, `root()`, `inspect()`,
-`validate()`, `changes`), `Command` builders for every command above,
+`validate()`, `instance(anchor)` → `PrefabExpansion` (M4-07: `prefab` an
+`ExpansionPrefab` with `isImported`, `entities` as `ExpandedEntity`/
+`ExpandedComponent`, `overrides` as `ExpansionOverride`, `entity(id)`,
+`byLocal(local)`), `changes`), `Command` builders for every command above
+(`setPrefabOverrideOp(entity, op)` takes any override op object,
+`unpackPrefab`),
 the ADR-0014 `Diagnostic` record and `AuthoringException` (`isConflict`,
 `isReadOnly`, `isNothingToReplay`, `isPoisoned`). Its test drives a
 complete session over the ABI on a copy of the fixture project.
@@ -1461,10 +1497,10 @@ fynkel document format <path>... [--check] [--json]
 fynkel document new <kind> <name> [--out <path>] [--json]
 fynkel scene inspect <path> [--json] [--schemas <dir>] [--prefabs <dir>] [--expand]
 fynkel scene validate <path>... [--json] [--schemas <dir>] [--prefabs <dir>]
-fynkel scene apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>]
+fynkel scene apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>] [--prefabs <dir>]
 fynkel prefab inspect <path> [--json] [--schemas <dir>]
 fynkel prefab validate <path>... [--json] [--schemas <dir>]
-fynkel prefab apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>]
+fynkel prefab apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>] [--prefabs <dir>]
 fynkel material inspect <path> [--json] [--schemas <dir>] [--shader <manifest>]...
 fynkel material validate <path>... [--json] [--schemas <dir>] [--shader <manifest>]...
 fynkel shader inspect <path> | --builtin <shaderId> [--json]
@@ -1502,7 +1538,9 @@ instead. Scenes with instances resolve prefabs from `--prefabs <dir>`
 under it serve `{ asset, sub: "prefab" }` instances, M3-19a) and report
 override problems in `validate`. `prefab inspect` prints roots and the tree. `scene apply` and
 `prefab apply` run one authoring transaction from a patch file (see
-[Authoring commands and transactions](#authoring-commands-and-transactions)). `material inspect` prints the resolved material (every
+[Authoring commands and transactions](#authoring-commands-and-transactions)); a patch
+that `unpackPrefab`s reads the prefabs the way `inspect --expand` does (`--prefabs`, else the
+document's directory). `material inspect` prints the resolved material (every
 manifest parameter with its value, `(default)` where the material did not set
 it; every slot with its binding or fallback); `--shader` adds custom manifests
 to the built-in library (a manifest with errors is reported and left out).

@@ -1254,6 +1254,106 @@ fn validate_project_describe_lock_and_schema_commands_fix_their_exit_codes() {
     let _ = std::fs::remove_dir_all(&empty);
 }
 
+/// M4-07: `unpackPrefab` through `scene apply` reads the prefabs the way
+/// `inspect --expand` does (`--prefabs`, else the scene's directory); the
+/// written scene inspects exactly like the expansion of the original, and
+/// without the prefabs the transaction is refused with the D0401 attached.
+#[test]
+fn scene_apply_unpacks_prefabs_with_the_inspect_library() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixtures = root.join("crates/fynkel_document/fixtures");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .output()
+            .unwrap()
+    };
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-unpack-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let scene = dir.join("instances.scene.json");
+    std::fs::copy(fixtures.join("prefab/instances_ok.scene.json"), &scene).unwrap();
+    let original = std::fs::read_to_string(&scene).unwrap();
+    let scene_s = scene.to_str().unwrap();
+    let prefabs = fixtures.to_str().unwrap();
+    let patch = dir.join("ops.json");
+    std::fs::write(
+        &patch,
+        serde_json::json!([
+            {"command": "unpackPrefab", "entity": "20000000-0000-4000-8000-0000000000a1"},
+            {"command": "unpackPrefab", "entity": "20000000-0000-4000-8000-0000000000a2"}
+        ])
+        .to_string(),
+    )
+    .unwrap();
+
+    // The reference: the original scene expanded.
+    let out = run(&[
+        "scene",
+        "inspect",
+        "--json",
+        "--expand",
+        scene_s,
+        "--prefabs",
+        prefabs,
+    ]);
+    let expanded: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(expanded["entityCount"], 7);
+
+    // Without the prefabs (the temp directory holds none): refused, untouched.
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], false);
+    let refused = &v["diagnostics"][0];
+    assert_eq!(refused["code"], "FYN-E0004", "{v}");
+    assert_eq!(refused["related"][0]["code"], "FYN-D0401", "{v}");
+    assert_eq!(std::fs::read_to_string(&scene).unwrap(), original);
+
+    // With them: written, and the plain inspection of the result is the
+    // expansion (ids, names, order, override values).
+    let out = run(&[
+        "scene",
+        "apply",
+        scene_s,
+        "--patch",
+        patch.to_str().unwrap(),
+        "--prefabs",
+        prefabs,
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["written"], true);
+    assert_eq!(v["mutations"].as_array().unwrap().len(), 2);
+    assert_eq!(v["mutations"][0]["command"], "unpackPrefab");
+    let out = run(&["scene", "inspect", "--json", scene_s]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let unpacked: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(unpacked["expanded"], false);
+    assert_eq!(unpacked["entityCount"], 7);
+    assert_eq!(unpacked["instanceCount"], 0);
+    assert_eq!(unpacked["roots"], expanded["roots"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn scene_apply_dry_runs_conflicts_and_writes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

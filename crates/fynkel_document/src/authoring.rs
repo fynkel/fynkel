@@ -28,9 +28,9 @@ use uuid::Uuid;
 
 use crate::json::{Member, Node, Span, Value};
 use crate::material::{Material, ShaderLibrary};
-use crate::prefab::Prefab;
+use crate::prefab::{self, Prefab, PrefabLibrary};
 use crate::scene::{escape, Scene};
-use crate::{diagnostic_json, has_errors, parse_uuid, Document, DocumentKind, SchemaSet};
+use crate::{diagnostic_json, has_errors, parse_uuid, Document, DocumentKind, Envelope, SchemaSet};
 
 // ------------------------------------------------------------------ revision
 
@@ -149,6 +149,17 @@ pub enum Command {
         entity: Uuid,
         index: Option<usize>,
     },
+    /// Replaces an instance by its expansion (M4-07): the anchor loses its
+    /// `prefab` key and gains the instance roots as trailing children, the
+    /// expanded entities — the prefab's entities with the overrides applied
+    /// and the ids the runtime derives — are inserted right after the anchor
+    /// in `entities`, so the document reads exactly like the expansion.
+    /// Needs the prefab library ([`Editor::apply_with_prefabs`]); an
+    /// instance that does not expand (unknown prefab, invalid override,
+    /// id collision) is refused with its expansion diagnostics.
+    UnpackPrefab {
+        entity: Uuid,
+    },
     /// Copies an entity and its subtree next to the original (M4-01):
     /// fresh entity, component and prefab-instance ids, every reference
     /// to a copied id inside the copy remapped, the copy named `name` (or
@@ -203,6 +214,7 @@ impl Command {
             Command::InstantiatePrefab { .. } => "instantiatePrefab",
             Command::SetPrefabOverride { .. } => "setPrefabOverride",
             Command::RevertPrefabOverride { .. } => "revertPrefabOverride",
+            Command::UnpackPrefab { .. } => "unpackPrefab",
             Command::DuplicateObject { .. } => "duplicateObject",
             Command::SetDocumentField { .. } => "setDocumentField",
             Command::UnsetDocumentField { .. } => "unsetDocumentField",
@@ -346,6 +358,9 @@ impl Command {
                 entity: uuid("entity")?,
                 index: index()?,
             },
+            "unpackPrefab" => Command::UnpackPrefab {
+                entity: uuid("entity")?,
+            },
             "duplicateObject" => Command::DuplicateObject {
                 id: uuid("id")?,
                 new_id: opt_uuid("newId")?,
@@ -439,6 +454,7 @@ impl Command {
             Command::RevertPrefabOverride { entity, index } => {
                 json!({ "entity": entity.to_string(), "index": index })
             }
+            Command::UnpackPrefab { entity } => json!({ "entity": entity.to_string() }),
             Command::DuplicateObject {
                 id,
                 new_id,
@@ -1073,6 +1089,18 @@ impl Editor {
 
     /// Applies one transaction atomically. See the module docs.
     pub fn apply(&mut self, request: Request, schemas: &SchemaSet) -> Applied {
+        self.apply_with_prefabs(request, schemas, &PrefabLibrary::empty())
+    }
+
+    /// [`Editor::apply`] with the prefabs the document can see: only
+    /// `unpackPrefab` reads them (an empty library makes every unpack
+    /// fail with `D0401`); the other commands never look.
+    pub fn apply_with_prefabs(
+        &mut self,
+        request: Request,
+        schemas: &SchemaSet,
+        prefabs: &PrefabLibrary,
+    ) -> Applied {
         let transaction_id = request.id.unwrap_or_else(Uuid::new_v4);
         let base_revision = self.revision.clone();
         let mut out = Applied {
@@ -1117,6 +1145,9 @@ impl Editor {
                 let mut cx = Cx {
                     root: &mut self.document.root,
                     kind: self.document.kind,
+                    envelope: &self.document.envelope,
+                    prefabs,
+                    schemas,
                     edits: Vec::new(),
                 };
                 let res = cx.run(&r.command);
@@ -1351,6 +1382,9 @@ impl SideEffect {
 struct Cx<'a> {
     root: &'a mut Node,
     kind: DocumentKind,
+    envelope: &'a Envelope,
+    prefabs: &'a PrefabLibrary,
+    schemas: &'a SchemaSet,
     edits: Vec<Edit>,
 }
 
@@ -1518,6 +1552,7 @@ impl Cx<'_> {
                 }
                 vec![*entity]
             }
+            Command::UnpackPrefab { entity } => self.unpack(*entity)?,
             Command::DuplicateObject {
                 id,
                 new_id,
@@ -2090,6 +2125,117 @@ impl Cx<'_> {
     /// component and prefab-instance id in it gets a new UUID and every
     /// string equal to a remapped id inside the copy follows, so
     /// references between copied entities stay internal to the copy.
+    /// `unpackPrefab`: the expansion of one instance written into the
+    /// document. The whole scene is expanded (the way the runtime and
+    /// `fynkel scene expand` do it, so nested prefabs and imported
+    /// hierarchies come out the same); only this anchor's part is taken.
+    fn unpack(&mut self, entity: Uuid) -> Result<Vec<Uuid>, Diagnostic> {
+        let e = self.entity_pointer(entity)?;
+        if self
+            .root
+            .pointer(&format!("{e}/prefab"))
+            .and_then(Node::as_object)
+            .is_none()
+        {
+            return Err(Diagnostic::error(
+                Code::EDIT_NOT_AN_INSTANCE,
+                format!("unpackPrefab: entity {entity} is not a prefab instance"),
+            )
+            .with_pointer(e)
+            .with_id(entity.to_string()));
+        }
+        let scene = Scene::from_document(Document {
+            kind: DocumentKind::Scene,
+            path: None,
+            root: self.root.clone(),
+            envelope: self.envelope.clone(),
+        });
+        let expanded = prefab::expand(&scene, self.prefabs, self.schemas);
+        let Some(inst) = expanded.instances.iter().find(|i| i.anchor == entity) else {
+            // Why it did not expand: the diagnostics about this anchor, or
+            // all of them when none names it (a nested prefab's problem).
+            let text = entity.to_string();
+            let mut why: Vec<Diagnostic> = expanded
+                .diagnostics
+                .iter()
+                .filter(|d| d.id.as_deref() == Some(text.as_str()))
+                .cloned()
+                .collect();
+            if why.is_empty() {
+                why = expanded.diagnostics.clone();
+            }
+            let mut d = Diagnostic::error(
+                Code::EDIT_INVALID_COMMAND,
+                format!(
+                    "unpackPrefab: the instance at {entity} cannot be expanded ({} problem(s))",
+                    why.len()
+                ),
+            )
+            .with_pointer(format!("{e}/prefab"))
+            .with_id(text)
+            .with_suggestion(
+                "fix the instance's prefab and overrides first; an instance whose expansion fails has nothing to unpack",
+            );
+            d.related = why;
+            return Err(d);
+        };
+        let ex_entities = expanded
+            .document
+            .root
+            .get("entities")
+            .and_then(Node::as_object)
+            .expect("the expansion has an entities object");
+        let member = |id: Uuid| -> &Node {
+            let key = id.to_string();
+            &ex_entities
+                .iter()
+                .find(|m| m.key == key)
+                .expect("the expansion has every derived entity")
+                .value
+        };
+
+        // The anchor: no `prefab`, the instance roots appended to its children.
+        self.edits.push(Edit::RemoveMember {
+            parent: e.clone(),
+            key: "prefab".into(),
+        });
+        if let Some(children) = member(entity).get("children") {
+            let p = format!("{e}/children");
+            if self.root.pointer(&p).is_some() {
+                self.edits.push(Edit::Replace {
+                    pointer: p,
+                    value: children.clone(),
+                });
+            } else {
+                self.edits.push(Edit::InsertMember {
+                    parent: e.clone(),
+                    index: usize::MAX,
+                    key: "children".into(),
+                    value: children.clone(),
+                });
+            }
+        }
+        // The derived entities right after the anchor, in expansion order.
+        let position = self
+            .root
+            .get("entities")
+            .and_then(Node::as_object)
+            .and_then(|m| m.iter().position(|m| m.key == entity.to_string()))
+            .expect("the anchor is an entity");
+        let mut affected = vec![entity];
+        for (i, (_, sid)) in inst.entities.iter().enumerate() {
+            self.edits.push(Edit::InsertMember {
+                parent: "/entities".into(),
+                index: position + 1 + i,
+                key: sid.to_string(),
+                value: member(*sid).clone(),
+            });
+            affected.push(*sid);
+        }
+        affected.extend(inst.components.iter().map(|(_, sid)| *sid));
+        Ok(affected)
+    }
+
     fn duplicate(
         &mut self,
         id: Uuid,

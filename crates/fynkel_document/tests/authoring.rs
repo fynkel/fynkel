@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use fynkel_contracts::AssetRef;
 use fynkel_document::authoring::diff;
 use fynkel_document::{
-    Applied, Command, ComponentSpec, Document, DocumentKind, Editor, Node, Prefab, Request,
-    Revision, Scene, SchemaSet,
+    expand, Applied, Command, ComponentSpec, Document, DocumentKind, Editor, Node, Prefab,
+    PrefabLibrary, Request, Revision, Scene, SchemaSet,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -716,6 +716,200 @@ fn instantiate_and_override_prefabs() {
     assert_eq!(text(&editor), original);
 }
 
+const TURRET_B: &str = "20000000-0000-4000-8000-0000000000a2";
+
+/// The prefabs the `prefab/` fixtures instance (four prefab documents).
+fn library() -> PrefabLibrary {
+    let (lib, diags) = PrefabLibrary::scan(&fixtures());
+    assert!(diags.is_empty(), "{diags:#?}");
+    lib
+}
+
+fn unpack(editor: &mut Editor, lib: &PrefabLibrary, entity: &str) -> Applied {
+    let r = editor.apply_with_prefabs(
+        Request::new(vec![Command::UnpackPrefab { entity: u(entity) }]),
+        &schemas(),
+        lib,
+    );
+    assert!(r.ok, "{:#?}", r.all_diagnostics());
+    r
+}
+
+#[test]
+fn unpack_prefab_writes_the_expansion_in_place() {
+    let (mut editor, original) = open("prefab/instances_ok.scene.json");
+    let lib = library();
+    let s = schemas();
+
+    // The whole scene expanded the runtime's way is the reference.
+    let expected = expand(&editor.scene(), &lib, &s);
+    assert!(!expected.has_errors(), "{:#?}", expected.diagnostics);
+    let expected_text = expected.document.write().unwrap();
+    let a = expected
+        .instances
+        .iter()
+        .find(|i| i.anchor == u(TURRET_A))
+        .unwrap()
+        .clone();
+
+    // Unpack Turret A: the anchor is a plain entity, the derived entities
+    // follow it in document order, everything else is untouched.
+    let r = unpack(&mut editor, &lib, TURRET_A);
+    let m = &r.mutations[0];
+    assert_eq!(m.command, "unpackPrefab");
+    assert_eq!(m.affected_ids[0], u(TURRET_A));
+    let derived: Vec<Uuid> = a.entities.iter().map(|(_, sid)| *sid).collect();
+    assert_eq!(&m.affected_ids[1..1 + derived.len()], &derived[..]);
+    for (_, cid) in &a.components {
+        assert!(m.affected_ids.contains(cid), "component {cid} is affected");
+    }
+    let sc = scene(&editor);
+    let anchor = sc.entity(u(TURRET_A)).unwrap();
+    assert!(anchor.prefab.is_none());
+    assert_eq!(sc.instances().count(), 1, "Turret B is still an instance");
+    let order: Vec<Uuid> = sc.entities.iter().map(|e| e.id).collect();
+    let at = order.iter().position(|id| *id == u(TURRET_A)).unwrap();
+    assert_eq!(&order[at + 1..at + 1 + derived.len()], &derived[..]);
+    // The instance roots are the anchor's trailing children, each derived
+    // entity's parent points back into the scene.
+    let roots: Vec<Uuid> = a
+        .entities
+        .iter()
+        .filter(|(_, sid)| sc.entity(*sid).unwrap().parent == Some(u(TURRET_A)))
+        .map(|(_, sid)| *sid)
+        .collect();
+    assert!(!roots.is_empty());
+    assert_eq!(
+        anchor.children[anchor.children.len() - roots.len()..],
+        roots[..]
+    );
+    for (_, sid) in &a.entities {
+        let e = sc.entity(*sid).unwrap();
+        assert!(
+            sc.entity(e.parent.unwrap()).is_some(),
+            "{sid} hangs off the scene"
+        );
+    }
+    // The overrides were applied: Turret A's setField turned cast_shadows off.
+    let b1 = a.entity(u("10000000-0000-4000-8000-0000000000b1")).unwrap();
+    let renderer = sc
+        .entity(b1)
+        .unwrap()
+        .components
+        .iter()
+        .find(|c| c.type_id == "fynkel.MeshRenderer")
+        .unwrap();
+    assert_eq!(
+        renderer.data.get("cast_shadows").unwrap().to_serde(),
+        json!(false)
+    );
+    assert!(
+        sc.validate(&s).iter().all(|d| !d.is_error()),
+        "{:#?}",
+        sc.validate(&s)
+    );
+
+    // Unpacking the second instance too gives exactly the whole expansion.
+    unpack(&mut editor, &lib, TURRET_B);
+    assert_eq!(text(&editor), expected_text);
+    assert_eq!(scene(&editor).instances().count(), 0);
+
+    // Two transactions, two undo steps, back to the byte.
+    editor.undo().unwrap();
+    assert_eq!(scene(&editor).instances().count(), 1);
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+    editor.redo().unwrap();
+    editor.redo().unwrap();
+    assert_eq!(text(&editor), expected_text);
+    editor.undo().unwrap();
+    editor.undo().unwrap();
+
+    // Not an instance.
+    let r = editor.apply_with_prefabs(
+        Request::new(vec![Command::UnpackPrefab { entity: u(LABEL) }]),
+        &s,
+        &lib,
+    );
+    assert!(!r.ok);
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0008");
+    // Unknown entity.
+    let r = editor.apply_with_prefabs(
+        Request::new(vec![Command::UnpackPrefab { entity: u(KID1) }]),
+        &s,
+        &lib,
+    );
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0002");
+    // Without the library (plain `apply`) the prefab is unknown: refused
+    // with the expansion's D0401 in `related`, nothing rewritten.
+    let r = editor.apply(
+        Request::new(vec![Command::UnpackPrefab {
+            entity: u(TURRET_A),
+        }]),
+        &s,
+    );
+    assert!(!r.ok);
+    let d = &r.mutations[0].diagnostics[0];
+    assert_eq!(d.code.0, "FYN-E0004");
+    assert_eq!(d.related.len(), 1);
+    assert_eq!(d.related[0].code.0, "FYN-D0401");
+    assert_eq!(d.related[0].id.as_deref(), Some(TURRET_A));
+    assert_eq!(text(&editor), original);
+    assert!(!editor.is_dirty());
+}
+
+#[test]
+fn unpack_prefab_of_an_imported_hierarchy() {
+    // The fixture project's `Imported` instances `column.rig.json#prefab`
+    // (a rig document whose hierarchy comes from `rig.glb`): the library
+    // needs the importer, and the unpacked entities carry the derived
+    // `node/<i>` ids with the Prop's material override applied.
+    const IMPORTED: &str = "c0000000-0000-4000-8000-0000000004e8";
+    let (mut editor, original) = open("project/assets/scenes/rig.scene.json");
+    let s = schemas();
+    let (db, _) = fynkel_document::AssetDatabase::scan(&fixtures().join("project/assets"), &s);
+    let mut lib = PrefabLibrary::empty();
+    let diags = lib.add_sources(
+        &db,
+        &PrefabLibrary::wanted_sources(&editor.scene()),
+        &fynkel_import::ImportedPrefabs::default(),
+    );
+    assert!(diags.is_empty(), "{diags:#?}");
+    let expected = expand(&editor.scene(), &lib, &s);
+    assert!(!expected.has_errors(), "{:#?}", expected.diagnostics);
+
+    unpack(&mut editor, &lib, IMPORTED);
+    assert_eq!(text(&editor), expected.document.write().unwrap());
+    let sc = scene(&editor);
+    let names: Vec<&str> = sc.entities.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "Camera", "Sun", "Rig", "Body", "hips", "spine", "head", "Prop", "Imported", "Rig",
+            "Body", "hips", "spine", "head", "Prop"
+        ]
+    );
+    let prop = sc.entities.last().unwrap();
+    assert_eq!(prop.parent, Some(sc.entities[9].id));
+    let renderer = prop
+        .components
+        .iter()
+        .find(|c| c.type_id == "fynkel.MeshRenderer")
+        .unwrap();
+    assert_eq!(
+        renderer.data.get("material").unwrap().to_serde()["asset"],
+        json!("c0000000-0000-4000-8000-000000000020"),
+        "the override is applied"
+    );
+    assert!(
+        sc.validate(&s).iter().all(|d| !d.is_error()),
+        "{:#?}",
+        sc.validate(&s)
+    );
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+}
+
 // --------------------------------------------------------------- side effects
 
 #[test]
@@ -898,6 +1092,7 @@ fn commands_round_trip_through_json() {
             entity: u(ROOT),
             index: Some(1),
         },
+        Command::UnpackPrefab { entity: u(ROOT) },
         Command::DuplicateObject {
             id: u(ROOT),
             new_id: Some(u(KID2)),
@@ -943,6 +1138,7 @@ fn commands_round_trip_through_json() {
             "instantiatePrefab",
             "setPrefabOverride",
             "revertPrefabOverride",
+            "unpackPrefab",
             "duplicateObject",
             "setDocumentField",
             "unsetDocumentField",

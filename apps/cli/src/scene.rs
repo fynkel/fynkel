@@ -21,11 +21,11 @@ use fynkel_document::{
 pub fn usage(cmd: &str) -> ExitCode {
     if cmd == "prefab" {
         eprintln!(
-            "usage:\n  fynkel prefab inspect <path> [--json] [--schemas <dir>]      roots, entity tree and component summary\n  fynkel prefab validate <path>... [--json] [--schemas <dir>]  schema + semantic validation\n  fynkel prefab apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>]\n                                               apply one authoring transaction (see `fynkel scene apply`)"
+            "usage:\n  fynkel prefab inspect <path> [--json] [--schemas <dir>]      roots, entity tree and component summary\n  fynkel prefab validate <path>... [--json] [--schemas <dir>]  schema + semantic validation\n  fynkel prefab apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>] [--prefabs <dir>]\n                                               apply one authoring transaction (see `fynkel scene apply`)"
         );
     } else {
         eprintln!(
-            "usage:\n  fynkel scene inspect <path> [--json] [--schemas <dir>] [--prefabs <dir>] [--expand]\n                                               entity tree and component summary (expanded: instances replaced by their entities)\n  fynkel scene validate <path>... [--json] [--schemas <dir>] [--prefabs <dir>]\n                                               schema + semantic validation, prefab instances resolved and their overrides checked\n  fynkel scene apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>]\n                                               apply one authoring transaction: the patch is an array of commands or\n                                               {{ baseRevision?, transactionId?, commands: [...] }}; a stale baseRevision is a\n                                               conflict; a transaction that would leave errors is rejected whole; --dry-run\n                                               prints the diff instead of writing"
+            "usage:\n  fynkel scene inspect <path> [--json] [--schemas <dir>] [--prefabs <dir>] [--expand]\n                                               entity tree and component summary (expanded: instances replaced by their entities)\n  fynkel scene validate <path>... [--json] [--schemas <dir>] [--prefabs <dir>]\n                                               schema + semantic validation, prefab instances resolved and their overrides checked\n  fynkel scene apply <path> --patch <ops.json> [--dry-run] [--json] [--schemas <dir>] [--prefabs <dir>]\n                                               apply one authoring transaction: the patch is an array of commands or\n                                               {{ baseRevision?, transactionId?, commands: [...] }}; a stale baseRevision is a\n                                               conflict; a transaction that would leave errors is rejected whole; --dry-run\n                                               prints the diff instead of writing; unpackPrefab reads the prefabs like inspect"
         );
     }
     ExitCode::from(2)
@@ -313,8 +313,20 @@ fn apply(opts: &Opts, kind: DocumentKind, schemas: &SchemaSet) -> ExitCode {
         Ok(e) => e,
         Err(diags) => return report(&diags, opts.json),
     };
-    let applied = editor.apply(request, schemas);
-    let mut diags = applied.all_diagnostics();
+    // `unpackPrefab` (M4-07) reads the instance's prefab: the same library
+    // `inspect --expand` uses (`--prefabs`, else the document's directory).
+    let mut diags = Vec::new();
+    let unpacks = request
+        .commands
+        .iter()
+        .any(|c| matches!(c.command, fynkel_document::Command::UnpackPrefab { .. }));
+    let library = if unpacks {
+        library_for(&editor.scene(), opts, path, schemas, &mut diags)
+    } else {
+        PrefabLibrary::empty()
+    };
+    let applied = editor.apply_with_prefabs(request, schemas, &library);
+    diags.extend(applied.all_diagnostics());
     let mut diff = None;
     let mut written = false;
     if applied.ok {
