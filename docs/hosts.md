@@ -475,6 +475,46 @@ Measured on mac-m3max-2026 at 1600×1104 physical, 24 satellites: 120 Hz
 frames, 60 fixed ticks/s, Dart simulate ≈ 0.02 ms, `render()` call ≈ 0.1 ms,
 present lag 0, no dropped frames.
 
+## The editor channel (M4-08)
+
+A game started by the editor reports what it is doing on **its own
+stdout**, as JSON lines, and only then: `package:fynkel` writes a record
+when — and only when — `FYNKEL_EDITOR_CHANNEL=stdio` is in the process's
+environment (ADR-0016; `EditorChannel`, exported from
+`package:fynkel`). Nothing comes back the other way: the channel is one
+line of communication, from the game to whoever started it. A game run by
+hand, by a player, or by CI prints exactly what it always printed, and
+`EditorChannel.enabled` is false.
+
+The editor sets the variable on `fynkel run`; Flutter passes its
+environment down to the app, so no CLI flag is involved. Every record is
+one line of an object with `fynkel` (the kind) and `seq` (a counter,
+from 1, unique and increasing for the life of the process — a reader can
+tell a dropped line from a repeat):
+
+| Kind | Written by | Fields |
+| --- | --- | --- |
+| `log` | `Diagnostics.log` (the default `PrintDiagnostics` stays quiet while the channel is on, so a line is not shown twice) | `message`, `source` (`game` unless the caller says), `tick` |
+| `diagnostic` | every diagnostic the engine collects — the step's (`_collectDiagnostics`) and the load report's | the §14.2 record: `code`, `severity`, `message`, `tick`, `source`, `document`, `pointer`, `id`, `line`, `column`, `suggestion`, `related[]`, and `entity` (the runtime handle) when the diagnostic is about one |
+| `stats` | `FynkelGameView`'s reporting window (the channel counts as a listener, so a game that passes no `onStats` still reports) | `fps`, `frames`, `ticks`, `missed`, `dropped`, `entities`, `workP50`/`workP95`/`workP99`, `draws`, `memNative`, `memResident`, `summary` |
+| `state` | `World`'s constructor and every load | `started` (`pid`, `fixedDt`), `loaded` (`op`, `scene`, `sceneId`, `document`, `entities`, `assets`, `behaviours`, `loadMs`), `loadFailed` |
+
+A step diagnostic carries the runtime entity handle; when the world knows
+which authored entity that was — the load report's
+`behaviours[].authoringId` — it carries `id` and the scene's `document`
+too, which is what lets the editor's Console take the user to the entity.
+
+Codes on the wire are the diagnostic's own name (`missedDeadline`,
+`staleEntity`) for the runtime's, and `FYN-…` for what the loader
+reports. Informational ones (`FynkelDiagnostic.isInformational`:
+missed deadlines, too many anchors) go out as `severity: "info"`, so a
+long first frame is a note, not an error.
+
+Writing is best-effort and never throws: the sink is `stdout.writeln` and
+a failure (a closed pipe) is swallowed — a game must not die because
+nobody is listening any more. `EditorChannel.debugUse` swaps the sink and
+the flag for tests.
+
 ## iOS smoke test (M1-09)
 
 The same host, Dart code, Swift texture glue (`FynkelViewportTexture.swift`,

@@ -280,6 +280,14 @@ chosen from a measurement: eight subscribed transforms are 728 bytes
   `work` line (behaviours / native / render / total at p95), a `gpu`
   line (frame and passes at p95, the memory estimate), a `memory` line;
   the reference game a `dart heap` line.
+- **The editor channel** (M4-08, [hosts.md](hosts.md) § The editor
+  channel): a game started with `FYNKEL_EDITOR_CHANNEL=stdio` writes each
+  reporting window as a `stats` record on its stdout — the same numbers
+  `FynkelFrameStats` carries (`fps`, `frames`, `ticks`, `missed`,
+  `dropped`, `entities`, `workP50/95/99`, `draws`, `memNative`,
+  `memResident`, `summary`) — whether or not the game passes `onStats`.
+  The editor's Console shows the last one in its status line; item 9's
+  Profiler reads the series.
 - **`ViewportStatsSnapshot`** (viewport ABI v3; v4 added the editor's
   debug lines and frame read-back, no stats change; **v5** added `gpuAo`,
   R2's ambient-occlusion stage): `extract`, `prepare`,

@@ -715,6 +715,28 @@ watcher saw). `nothing ticks`: the world's tick counter moves only with
 the sync's own steps, never with time — a rigid body stays where the
 document put it for as long as the tab is open.
 
+### Resizing the panel (why it used to blink)
+
+The panel draws **on demand** — a camera move, a selection, a sync, never
+a clock — so an idle Scene view costs nothing. A drag of the window or of
+a splitter, though, hands the viewport a new size on every frame, and
+each size reallocates the ring's surfaces and rebinds the Flutter texture;
+nothing can render while that is in flight (`renderHandle` refuses a frame
+mid-resize), so the picture blinked on and off for the length of the drag.
+
+Two things fix it, and both keep a *game*'s behaviour exactly as it was:
+
+- `FynkelViewport.resizeDebounce` (new; `Duration.zero` by default, which
+  is what a game wants — its viewport is the window and it draws every
+  frame anyway). The Scene view passes **120 ms**: the last good frame
+  stays on screen, scaled by Flutter, until the drag settles, and the ring
+  is then resized **once**. The first size is never held — there is
+  nothing on screen to scale yet.
+- A frame the ring refused because a resize was in flight is **asked for
+  again** instead of being dropped (`SceneViewModel.renderFrame`). Drawing
+  on demand means a lost frame is lost until the next thing happens; now
+  the panel catches up by itself.
+
 ### The camera (`EditorCamera`)
 
 An orbit rig — `pivot`, `distance`, `yaw`, `pitch` (clamped short of the
@@ -1033,6 +1055,184 @@ for an authored copy); picking a derived entity *in the picture* (a hit
 inside an instance selects the anchor, item 6 — select the inner row in
 the Hierarchy instead, then the gizmo is there).
 
+## Play and the game Console (M4-08)
+
+Explained simply: **Play** runs your game the way a player would get it —
+a separate app in its own window, built by the same `fynkel run` you use
+from a terminal. The editor does not run any of it: it starts the
+program, listens to what the program says, and shows that in the
+Console's new **Game** tab. **Stop** kills it. If the game crashes, or
+somebody kills it from outside, the editor says so with the exit code and
+not one byte of your project changes — the editor never writes a document
+on the game's behalf.
+
+The editor and the game stay two processes (ADR-0016, ADR-0018). Play is
+the third and last CLI command the editor shells out to, after
+`fynkel create` and `fynkel codegen --check --json`.
+
+### The channel (the shared `package:fynkel` touch)
+
+The game talks to the editor over **one pipe in one direction**: its own
+stdout, as JSON lines, and only when it was started with
+`FYNKEL_EDITOR_CHANNEL=stdio` in its environment. There is no socket, no
+shared memory, and nothing ever travels the other way — Stop is a signal,
+never a line on stdin. A game started by hand prints exactly what it
+always printed; `EditorChannel.enabled` is false and the code is inert.
+The records are described in [hosts.md](hosts.md) § The editor channel;
+`lib/src/play/game_record.dart` is the editor's reader
+(`GameRecord.parse` finds the record anywhere in the line, because
+`flutter run` prefixes the app's output with `flutter: `; anything that
+is not a record is an `output` row).
+
+### The run (`lib/src/play/play_session.dart`)
+
+`PlaySession` is one run, from ▶ to gone:
+
+- `play()` starts `fynkel run --project <dir> -d macos` with the working
+  directory at the project and `FYNKEL_EDITOR_CHANNEL=stdio` added to the
+  environment the editor itself has. **The device is named on purpose**:
+  without `-d`, `flutter run` chooses among everything connected — a
+  phone, every open simulator, Chrome — and when more than one could
+  serve it refuses to choose at all (*"More than one device connected"*,
+  exit code 1) or picks a phone. Play means "run it here", so the editor
+  names the desktop it is running on (`defaultPlayDevice()`); playing on
+  a device stays `fynkel run -d <id>` from a terminal until the editor
+  grows a picker. (`fynkel run` passes
+  `--dart-define=FYNKEL_PROJECT=…` to Flutter, and Flutter passes its own
+  environment down, so the variable reaches the game: no CLI change.)
+- The state goes `idle → starting` (the CLI is validating, cooking,
+  building) `→ running` (the game's own `started` record arrived, with
+  its pid) `→ exited`, or `→ stopping` in between when Stop was pressed.
+  The toolbar's label is that state in words, with the scene once the
+  game says which one it loaded.
+- Every line of stdout and stderr becomes a `GameRecord`. The tab keeps
+  the last 5 000; older rows are dropped and **counted**, so nothing
+  disappears silently.
+- `stop()` signals the process **tree** (below) and returns when the
+  process is reaped.
+- The exit appends one row: `the game exited with code N — nothing in the
+  project was changed` when it was not asked for, so a crash reads as a
+  crash. `crashed` is true only for a non-zero exit nobody asked for.
+- A run can also die **before the game ever starts** — validation, the
+  cook, the build, a device `flutter run` could not pick. Nothing came
+  over the channel then, so the reason is in the process's own lines:
+  `failedToStart` is true, the toolbar says *Did not start (code N)*
+  instead of *Exited with code N*, the last row says `the run failed
+  before the game started … the lines above are what `fynkel run`
+  printed`, and **the Console turns its Output switch on by itself** for
+  that run so those lines are on screen. Switching it off again sticks;
+  the next Play starts over.
+- The stdout and stderr subscriptions are deliberately **not** cancelled
+  at the exit: a process that printed and died can still have lines in
+  the pipe, and `exitCode` may well complete first.
+
+### Stop kills the tree (`process_tree.dart`)
+
+`fynkel run` starts `flutter run`, which starts the game: killing only
+the child the editor holds would leave the window on screen. macOS has no
+`setsid` here, so `ProcessTree` reads the machine's table
+(`ps -A -o pid=,ppid=`), walks it from the editor's child, and signals
+**deepest first** — SIGTERM to that list (plus the game's own pid from
+the `started` record), a grace of three seconds, then SIGKILL to whatever
+of *that same list* is still alive. The list is taken **before** the
+first signal on purpose: once the root dies its children are reparented
+to launchd and no later walk would find them.
+
+### Play saves first
+
+The game reads files from disk, so anything unsaved is not in the run.
+With dirty tabs, Play asks: **Save and Play**, **Play Without Saving**,
+or Cancel (`play_prompt.dart`, `dialog.playSave`). A project that has
+**errors** never plays — `fynkel run` would refuse it anyway: the Console
+comes up on its **Project** tab with the count, and double-clicking a row
+goes to the offending line, as always.
+
+Editing during a run is allowed and marked: the moment a document's
+history or the project's assets change, the toolbar and a banner say
+*"The project changed since Play started — the game is running the older
+files. Changes apply on the next Play."* with Stop and Play again. Merely
+opening a tab is not an edit.
+
+The Console's status line names the **game's** pid, not the CLI's. Three
+processes are involved — `fynkel run`, the `flutter run` it starts, and
+the game itself — and only the last one is worth knowing: it is what a
+`kill -9` from a terminal needs, and what the `started` record carries.
+Until the game announces itself the line says *cli pid N* instead, so the
+two are never confused for one another.
+
+The warning belongs to the run, not to the edit: the moment the game is
+gone — Stop, a crash, an exit — the banner and the toolbar's *edited since
+Play* suffix go with it (`runningOlderFiles = isActive && editedWhilePlaying`).
+Nothing is on screen running the older files any more, so there is nothing
+to warn about; the flag itself stays for the run's record. A run that Stop
+ended reads **Stopped**, not *Exited with code -15* — that code is the
+signal Stop sent (SIGTERM), and the Console's rows still carry it. Both
+found by the user's gate.
+
+**Play again** is not ▶. ▶ refuses while a game is up (it is ■ then), so
+the banner's button has its own path: it stops the run that is up — the
+same process-tree Stop — and only then starts a fresh one, with the save
+prompt for whatever the edit left dirty. It is disabled while a Stop is
+already in flight. Found by the user's gate, where the button did nothing
+at all: it was wired to ▶, which returns immediately while a run is
+active.
+
+### The Game tab (`game_console.dart`, `game_console_panel.dart`)
+
+The Console has two tabs now, **Project** (every diagnostic of the
+validated project, item 2) and **Game** (this run). Both carry the error
+count in the tab label. The Game tab's rows are tick, source, code,
+message and the place — the document and pointer, or the asset id, or the
+runtime entity handle when the game knew no authored one. Filters,
+search, collapsing of repeats and ⌘C work exactly as the Project tab's,
+so one Console behaves one way; two switches are its own: **Output**
+(the CLI's and Flutter's own lines, off by default — a Play shows the
+game, not the build log; a run that dies before the game starts turns
+this on by itself, because its reason is in those lines) and **Stats** (the per-second windows, off; the
+Profiler is where those belong, item 9, and the last window is in the
+status line).
+
+A row that names something opens it on ↩ or a double-click: the document
+in a tab with the entity selected in the Hierarchy (through the same
+`revealAndSelect` a Project row uses, so a diagnostic about an entity
+inside a prefab instance opens the instance on the way), or the asset
+revealed in the Project panel.
+
+A game names its documents the way the **cooked** project is laid out —
+from the assets root, `scenes/menu.scene.json` — while the editor works in
+project paths (`assets/scenes/menu.scene.json`). `_recordDocument` tries
+the game's spelling first and the project path second, and takes an
+absolute path (a game started from the source tree) as it is. Nothing
+else would open: found by the user's gate, where a double-click on a
+`loaded` row did nothing at all because the test behind it had used a
+path no game ever sends.
+
+### Commands
+
+| Id | Menu | Shortcut | Does |
+| --- | --- | --- | --- |
+| `play.start` | Play | ⌘P | saves what is dirty (after asking), then runs the project; the label reads *Playing…* while a run is up |
+| `play.stop` | Play | ⌘. | SIGTERM then SIGKILL to the game and everything it started |
+| `play.showConsole` | Play | ⌥⌘J | the Console with the Game tab in front |
+| `play.clearConsole` | Play | ⇧⌘K | empties the Game tab (the run, if any, keeps going) |
+
+The toolbar carries the same ▶ / ■ and the state, which is a link to the
+Game tab.
+
+### What item 8 does not do
+
+Choosing what to play on — Play runs the desktop app; a phone or a
+simulator is `fynkel run -d <id>` from a terminal; attaching to a game
+that is already running (the editor starts it, or it is not on the
+channel); hot-reloading a running game with an edit (the
+banner says the change applies on the next Play — the game reads files at
+load); anything the game does not send (the channel is the SDK's own
+emission points: `Diagnostics.log`, the engine's diagnostics, the load
+report, `FynkelGameView`'s stats — a `print` in a behaviour is an
+`output` row like any other); driving the game from the editor (no
+stdin, no commands, ADR-0016); the per-frame graphs — item 9's Profiler
+reads the same `stats` records.
+
 ## What exists after each item
 
 | Item | Done | What |
@@ -1044,7 +1244,7 @@ the Hierarchy instead, then the gizmo is there).
 | 5 | 2026-09-21 | The Project browser: folders and a searchable flat list with kind filters and sort, texture previews and material swatches, the Asset panel (sidecar settings, Apply and Reimport, sub-assets, dependents), New / rename / move / delete-with-refusal / Reveal / Copy id as session operations with the asset history's own undo (⌥⌘Z), prefab drop onto the Hierarchy, incremental rescan (§ The Project browser). |
 | 6 | 2026-09-22 | The Scene view: `FynkelViewport` per scene tab over the session's edit-preview world (incremental sync, fallback reload, Reload and Rebuild cache), the editor camera saved per scene in `.fynkel/editor.json`, grid / axes / light-camera-collider icons / selection outline as renderer debug lines, click (stacked-hit cycling) and marquee picking through the world, move / rotate / scale gizmos in world or local axes with snapping and one transaction per drag (preview in the world, commit on release, multi-selection about the lead), editor-only hidden and locked flags, prefab drop at the hit point, stats overlay, Save Frame as a PNG identical to `fynkel render` (§ The Scene view). |
 | 7 | 2026-09-22 | Prefab mode: instances expand in the Hierarchy as derived rows (inherited / bold overridden / added), every edit on a derived entity an override on the anchor (the Inspector's fields and the Scene view's gizmo alike), per-field Revert and Apply in the Inspector, Apply to prefab (two transactions in two documents), Revert all, Unpack (`unpackPrefab`, one transaction), Open prefab in its own tab, imported hierarchies (`<glb>#prefab`, `<rig>#prefab`) opened read-only with the derived ids, missing / broken prefabs shown with their diagnostics and never rewritten, Select prefab asset (§ Prefab mode). |
-| 8 | — | Play / Stop and the game Console over the stdout channel. |
+| 8 | 2026-09-22 | Play / Stop over `fynkel run` with `FYNKEL_EDITOR_CHANNEL=stdio`: `package:fynkel`'s one-directional stdout channel (log / diagnostic / stats / state records), the Console's Game tab with the same filters, search and collapsing as the Project tab and a row that opens the document with its entity selected, the process-tree Stop (SIGTERM deepest-first, grace, SIGKILL), the save prompt, the refusal to play a project with errors, and the "changes apply on the next Play" banner whose **Play again** stops the run before it starts the next one; Play names the desktop (`-d macos`) so `flutter run` never picks a phone or refuses to choose, and a run that dies before the game starts shows the output that says why (§ Play and the game Console). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 
@@ -1056,7 +1256,9 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
-cd apps/editor && flutter analyze --fatal-infos && flutter test   # 219 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step; scene_session_test.dart picks every entity of every fixture scene through the real edit-preview world, drags the gizmo (one undo step, the incremental world equal to a fresh load), hides without touching the document, drags the entity inside Crate A as one setPrefabOverride on the anchor (the prefab file's bytes unchanged, the sync incremental, one undo), looks through and writes back the scene camera, and renders through the real viewport (Metal, offscreen; the frame's PNG equals the first capture byte for byte); prefab_session_test.dart (M4-07) reverts and re-adds Crate A's override, instances the coin, applies an override to coin.prefab.json and undoes per document, unpacks and reloads, overrides and unpacks the Imported rig, opens a broken reference without rewriting the file, and opens rig.glb#prefab read-only — every override list checked against the raw document and `inspect`'s count
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 242 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step; scene_session_test.dart picks every entity of every fixture scene through the real edit-preview world, drags the gizmo (one undo step, the incremental world equal to a fresh load), hides without touching the document, drags the entity inside Crate A as one setPrefabOverride on the anchor (the prefab file's bytes unchanged, the sync incremental, one undo), looks through and writes back the scene camera, and renders through the real viewport (Metal, offscreen; the frame's PNG equals the first capture byte for byte); prefab_session_test.dart (M4-07) reverts and re-adds Crate A's override, instances the coin, applies an override to coin.prefab.json and undoes per document, unpacks and reloads, overrides and unpacks the Imported rig, opens a broken reference without rewriting the file, and opens rig.glb#prefab read-only — every override list checked against the raw document and `inspect`'s count; play_test.dart (M4-08) parses the channel's records behind a `flutter run` prefix, builds and signals a process tree from a canned `ps` table, drives a whole run over a fake process (the environment it was given, `starting → running → exited`, a crash's code, the dropped-row count, the CLI that is not there, a run that dies before the game starts — the device `flutter run` could not pick — with the Console showing the output that says why) and the shell (a project with errors refused onto the Project tab, the Game tab's rows, a diagnostic row that opens the scene with the entity selected, Stop, the "changes apply on the next Play" banner and its Play again — the old run stopped, the dirty document saved, a second process started and the banner gone —, the save prompt's three answers)
+cd apps/editor && flutter test test/play_process_test.dart   # M4-08 against a *real* process: a shell script that announces itself on the channel and starts a grandchild — Stop takes the grandchild with it, a `kill -9` from outside ends in the exit code with the records it wrote still in the Console, and both leave every document in the project byte-identical
+cd packages/fynkel && dart test test/editor_channel_test.dart  # the channel itself: `started`/`loaded` with a monotonic `seq`, a failed load as FYN- records then `loadFailed`, a missed deadline as `info`, `Diagnostics.log` as a log record with PrintDiagnostics quiet — and with the variable unset, not a byte written
 FYNKEL_SCENE_FRAME_OUT=/tmp/main-320x200.png flutter test test/scene_session_test.dart --name viewport   # keeps the clean 320×200 frame of the fixture's Main through its camera …
 cargo run -q -p fynkel_cli --bin fynkel -- render --project <fixture copy> --scene c0000000-0000-4000-8000-000000000030 --out /tmp/cli.png --size 320x200   # … to compare with this: 0 differing pixels (2026-09-22)
 cargo test -p fynkel_authoring --test preview        # the edit-preview world: load, the incremental sync == a fresh load after every transaction kind, picking, outlines, hidden, the anchor map
@@ -1127,3 +1329,26 @@ scene's `prefab.asset` to a wrong id from a terminal, open it: the
 badge, the broken icon, the diagnostic in the Console, Revert still
 offered, ⌘S writes the same bytes (a diff of the copy shows nothing
 for that entity). Never the committed fixture.
+
+The item 8 gate, driven by the user, on a **copy** of the reference game:
+press ▶ (⌘P) — the toolbar says *Starting…*, then *Playing · Playground*,
+the game's window opens, and its diagnostics and `Diagnostics.log` lines
+appear in the Console's Game tab within a frame of the game writing them
+(the reference game logs on a pickup; the Console's tick column moves).
+Double-click a diagnostic row that names an entity: its scene opens with
+that entity selected. Press ■ (⌘.) and watch the window go — then
+`pgrep -f <the copy's name>` finds nothing of the run left. Play again
+and `kill -9` the game from a terminal: the toolbar says *Exited with
+code -9*, the rows it had already written are still there, and
+`diff -r --exclude=fynkel_cache --exclude=.fynkel <the game>/assets
+<the copy>/assets` is silent — the editor wrote no document for the game,
+neither on the way in nor on the way out. Edit a scene while the game
+runs: the banner appears and the running game keeps the older files;
+Play again and the change is in. Finally break the project (a misspelt
+field from a terminal) and press ▶: it refuses, the Console comes up on
+the Project tab with the count, and a double-click goes to the line. Then
+break the *code* instead (a typo in a behaviour of the copy, which the
+editor cannot see) and press ▶: the build fails, the game never starts,
+the toolbar says *Did not start (code 1)* and the Console shows the
+compiler's own lines without being asked. Never the committed reference
+game.
