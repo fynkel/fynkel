@@ -137,14 +137,15 @@ the unified diff, any diagnostics, and the command to run
 `migrations` query and **writes nothing** — the editor never migrates on
 its own; `fynkel migrate` keeps `<file>.bak`.
 
-**The main window** (`lib/src/shell/main_window.dart`): a toolbar (project
-name, read-only chip, Close), the banners, the `Docking` workspace and a
-status bar (error and warning counts, document/source/reference counts,
-"validated HH:MM:SS"; a click shows the Console). The workspace
+**The main window** (`lib/src/shell/main_window.dart`): the title bar
+(the project menu, the document tabs, Play, the codegen state and the
+command search — § The title bar, item 9b), the banners, the `Docking`
+workspace and a status bar (error and warning counts,
+document/source/reference counts, "validated HH:MM:SS"; a click shows the
+Console; the current notice at its end). The workspace
 (`lib/src/shell/workspace.dart`) is the §22.2 default —
-`Hierarchy | Scene over [Project, Console, Profiler, Animation, Asset] | Inspector`,
-i.e. `R(Ihierarchy,C(Iscene,T(Iproject,Iconsole,Iprofiler,Ianimation,Iimport)),Iinspector)`
-— saved per user (`layout.json` next to the preferences: the docking
+`Hierarchy | Scene over [Project, Console, Profiler, Animation] | Inspector`
+(item 9c took the Asset panel into the Inspector) — saved per user (`layout.json` next to the preferences: the docking
 string, the selected tab ids and the package's format version) on every
 change and restored on the next start; a string that fails to load falls
 back to the default with a notice; **Reset layout** (⌥⌘0, also in
@@ -177,7 +178,7 @@ run, Escape closes.
 | `project.migrations` | Project | ⌥⌘M | the migration preview |
 | `project.reveal` | Project | ⇧⌘R | reveal the project in Finder |
 | `app.quit` | Project | ⌘Q | quit |
-| `document.open` | Project | ⇧⌘O | the Open Document dialog (scenes and prefabs of the project, searchable) |
+| `document.open` | Project | ⇧⌘O | the Open Document picker (scenes and prefabs of the project, searchable; § One picker) |
 | `document.save` | Project | ⌘S | save the focused tab through the session (refused while it has a disk conflict — the conflict dialog opens instead) |
 | `document.saveAs` | Project | ⇧⌘S | save the focused tab under a new relative path (never over an existing file) |
 | `document.saveAll` | Project | ⌥⌘S | save every dirty tab |
@@ -216,7 +217,7 @@ run, Escape closes.
 | `assets.undo` / `assets.redo` | Edit | ⌥⌘Z / ⇧⌥⌘Z | undo / redo the last **asset operation** (its own history; the label names it: "Undo Rename coin.prefab.json → gold.prefab.json") |
 | `assets.newScene` / `assets.newPrefab` / `assets.newMaterial` | Project | ⇧⌥⌘S / ⇧⌥⌘P / ⇧⌥⌘M | a new document in the Project browser's folder (`New Scene`, `New Scene 2`, …), selected and renaming at once |
 | `assets.newFolder` | Project | ⇧⌥⌘F | a new folder there (`New Folder`), renaming at once |
-| `assets.open` | Project | ⇧⌥⌘O | the selected scene or prefab into a tab; any other asset into the Asset panel |
+| `assets.open` | Project | ⇧⌥⌘O | the selected scene or prefab into a tab; any other asset into the Inspector |
 | `assets.rename` | Project | ⇧⌥⌘R | rename the selected asset in place (the sidecar moves with it; the id survives) |
 | `assets.move` | Project | ⇧⌥⌘V | move the selected assets to a folder picked from a list |
 | `assets.delete` | Project | ⇧⌥⌘⌫ | delete the selected assets to `.fynkel/trash`; refused while referenced, with the dependents listed and a **Delete anyway** |
@@ -228,7 +229,8 @@ run, Escape closes.
 | `app.preferences` | Edit | ⌘, | Preferences |
 | `window.commandPalette` | Window | ⇧⌘P | the palette |
 | `window.resetLayout` | Window | ⌥⌘0 | the §22.2 default layout |
-| `window.panel.<id>` | Window | ⌥⌘1 … ⌥⌘8 | show/hide Hierarchy, Scene, Inspector, Project, Console, Profiler, Animation, Asset (the panel id stays `import`; the label flips between Show and Hide) |
+| `window.panel.<id>` | Window | ⌥⌘1 … ⌥⌘7 | show/hide Hierarchy, Scene, Inspector, Project, Console, Profiler, Animation (the label flips between Show and Hide; the Asset panel's `import` is retired, item 9c) |
+| `window.newCopy.<id>` | Window | ⇧⌥⌘1 … ⇧⌥⌘4 | New Hierarchy / New Scene View / New Inspector / New Project Browser: another copy beside the one used last (item 9e) |
 | `console.focusSearch` | Window | ⌥⌘F | focus the Console's filter |
 | `console.copy` | Window | ⌥⌘C | copy the selected or all visible Console lines |
 | `console.openInIde` | Window | ⌥⌘O | open the selected diagnostic in the IDE |
@@ -559,8 +561,8 @@ source as a `sound` and an image as a `texture` — both are referenced
 **whole** (a material's texture slot names the image's own id; the fix in
 `AssetEntry.wholeKind` also lets the Inspector's asset picker offer
 textures), an imported model as its `#prefab`, any other source with
-exactly one sub-asset as that sub-asset; the Asset panel drags a source's
-sub-assets one by one. The payload is the Inspector's `AssetDragPayload`
+exactly one sub-asset as that sub-asset; the Inspector's asset page drags a
+source's parts one by one. The payload is the Inspector's `AssetDragPayload`
 (`id`, `sub`, `kind`, `name`; `toRef()` is the document's `{ asset, sub? }`).
 
 **Operations**, each a session call behind `_guard` (a refusal becomes
@@ -590,14 +592,14 @@ a badge, sort, **New ▾** (Scene, Prefab, Material, Folder), Undo/Redo of
 asset operations with the operation's label in the tooltip. Below, in the
 folders view, the tree (`assets` root and every folder, the shown one
 highlighted) beside the list; a folder opens on one click, a document
-opens in a tab on double-click (or ↩), any other asset shows the Asset
-panel. Rows show the file name (renaming changes the file, never a
+opens in a tab on double-click (or ↩), any other asset shows in the
+Inspector. Rows show the file name (renaming changes the file, never a
 document's internal `name`, which dims beside it when it differs), a
 preview, the folder path in the list or while filtering, `N sub` with
 the sub-asset ids as a tooltip, and the kind. **Inline rename** (F2, the
 menu, or right after New): ↩ commits, ⎋ cancels, losing focus commits.
 Keys: ↑↓ ⇧↑↓ ↩ F2 ⌫/⌦ ⌘A ⎋ ←(up a folder). Context menus: an asset's
-Open / Show in Asset Panel / Reveal in Finder / Rename / Move to… / Delete /
+Open / Show in Inspector / Reveal in Finder / Rename / Move to… / Delete /
 Reimport / Copy id / Copy path / New … Here; a folder's Show / Reveal /
 New … Here / Rename Folder / Delete Empty Folder; the empty area's New …
 Here. **Drag and drop**: an asset row is a `Draggable<AssetDragPayload>`
@@ -617,11 +619,13 @@ a menu route pops trip the framework's `'node.built'` assertion (the kind
 filter did exactly that; the Hierarchy's identical detector never hit it
 because its rows were never Text-only). It has no semantic meaning anyway.
 
-### The Asset panel (`asset_panel.dart`)
+### The Asset panel (item 5; since item 9c the Inspector's asset page)
 
-The selected asset's inspector — the blueprint's "selected asset's
-Inspector", as its own panel so the entity Inspector stays where it is:
-header (name, kind, id with Copy), the actions Open (scenes and prefabs),
+What follows is what item 5 built as its own panel. Item 9c moved all of
+it into the Inspector (`lib/src/inspector/asset_pages.dart`, § One
+Inspector) — the same content, with the import settings' Revert and
+Apply on a bar pinned to the page's bottom; the panel and its file are
+gone. Item 5's panel showed: header (name, kind, id with Copy), the actions Open (scenes and prefabs),
 Reveal in Finder, Reimport (sources), Delete; **File** (path, size,
 modified); for a source **Import**: importer and version, the sidecar
 path, the importer's known settings as controls — `fynkel.image`
@@ -656,7 +660,7 @@ lands where the pointer's ray hits (§ The Scene view › Prefab drop).
 What item 5 does **not** do: material preview spheres and mesh
 thumbnails (not in M4), a material editor panel (the session edits
 material fields since item 1 — `setDocumentField` on a material handle —
-but no panel shows them yet; the Asset panel lists them read-only).
+but no panel shows them yet; the Inspector's asset page lists them read-only).
 
 ## The Scene view (M4-06)
 
@@ -748,7 +752,12 @@ follow; the matrices are the runtime's own (`perspectiveMatrix` and
 through the scene camera differ only by the camera. Mouse: **⌥-drag
 orbit**, **⌥⇧-drag or middle-drag pan** (the pivot slides in the view
 plane, one pixel one pixel), **⌥-right-drag or scroll dolly** (never
-through the pivot; `minDistance` 5 cm), **right-drag look + WASDQE fly**
+through the pivot; `minDistance` 5 cm; ⇧-scroll pans), and on a
+trackpad **two-finger scroll or pinch dolly** — macOS sends both as one
+pan-zoom gesture, not as wheel events, so the panel listens for it
+(`panZoomStart/Update/End`: the scroll part dollies exactly as the wheel
+does, a pinch by its own ratio, spread fingers bringing the view closer),
+**right-drag look + WASDQE fly**
 (a 16 ms timer while the button is down; ⇧ four times faster; the speed
 scales with the distance). Keys: **F** frames the selection (its outline
 bounds; hidden entities skipped; nothing selected → everything),
@@ -1014,8 +1023,8 @@ labelled `hero.glb › prefab` / `column.rig.json › prefab` — as a
 **read-only prefab document** (`state.sub == "prefab"`, the banner names
 the source): its entities carry the derived `node/<i>` ids, so an
 override written in the scene addresses exactly the rows this tab shows.
-The Asset panel's sub-asset list has an open button on the `prefab`
-sub-asset for the same tab. Overrides on such an instance work in full
+The Inspector's asset page lists the source's parts; the `prefab` part's
+own page has an **Open** button for the same tab. Overrides on such an instance work in full
 (the Imported rig of the fixture's Rig scene is the test's case); Apply
 is refused because the source cannot be edited; Unpack works and is the
 way to "make it mine".
@@ -1233,6 +1242,322 @@ report, `FynkelGameView`'s stats — a `print` in a behaviour is an
 stdin, no commands, ADR-0016); the per-frame graphs — item 9's Profiler
 reads the same `stats` records.
 
+## The look (item 9a)
+
+The editor is meant to read like a tool — Unity's density, Rider's
+structure, Framer's finish — not like a Material demo. All of it comes
+from one place, `lib/src/theme/`:
+
+- **`tokens.dart`** — `FynkelTokens`, a `ThemeExtension` reached as
+  `context.tokens`: the surfaces (`window`, `panel`, `header`, `field` —
+  recessed, darker than the panel it sits in — `popup`, `overlay` and
+  `overlayEdge` for things drawn over the picture), one hairline (`line`,
+  and `lineStrong` for the focused tab), three inks (`text`,
+  `textSecondary`, `textDisabled`), **one accent** `#3E7BFA` used only for
+  selection, focus and "on" (`accent`, `accentSoft` for a quiet tint), and
+  the diagnostics' own hues (`error`, `warning`, `ok`, `info`) kept apart
+  from it. Dark and light are two designed sets, not an inversion. The
+  metrics: `row`, `toolbar`, `tab`, `pad` 8, `gap` 6, `icon` 16.
+- **Density** (Preferences): Compact, Default or Comfortable — rows of 18,
+  20 or 24 px; every row, field and toolbar derives its height from it.
+- **`theme.dart`** — the `ThemeData`, every component theme explicit
+  (buttons, fields, checkboxes, menus, tooltips, chips, dialogs), the
+  platform UI face and the platform monospace for ids, paths, numbers and
+  JSON, tabular figures for numbers.
+- **`chrome.dart`** — the docking tabs (`tabbed_view`) and splitters
+  (`multi_split_view`) from the same tokens instead of the packages'
+  presets.
+- **`icons.dart`** — `FIcons`, Lucide's 16 px stroke icons
+  (`lucide_icons_flutter`, docs/toolchain.md) under the names the panels
+  used before; `Icons.` appears nowhere in `lib/`. `@Expose(icon: 'star')`
+  in a game names one of these by its short name, so a name is not free to
+  change.
+- **`focus_ring.dart`** — one accent outline around whatever the
+  *keyboard* reached, drawn by a layer over the whole app: it shows after
+  Tab, an arrow or a shortcut that moves focus, never after a click, and
+  not for a key that moves no focus (W in the Scene view); text fields are
+  skipped (their border already says it); it is clipped to the scroll
+  views around the focused widget; it appears and moves without animation.
+- **`panel_focus.dart`** — which panel holds focus (item 9b): a selected
+  row is the accent only there and a quiet tint in every other panel, so
+  there is never more than one blue selection on the screen.
+
+**Nothing animates but hover.** Every `showDialog`, `showMenu` and
+`PopupMenuButton` passes `AnimationStyle.noAnimation`; tabs do not slide,
+tiles do not roll open, the theme switches at once. `test/look_test.dart`
+reads the sources and fails on a popup without it.
+
+**Notices** (`lib/src/shell/notices.dart`) replace snackbars: the one line
+the editor says something in — *Reveal in Finder failed*, *Reimport
+refused*, *Could not open …* — sits at the end of the status bar (the
+launcher's own strip before a project is open), with an × and, for an
+error, a red icon; it stays until dismissed or replaced by the next one,
+because an error that slides away after four seconds is one nobody read.
+
+## The title bar (item 9b)
+
+One bar at the top holds what used to be a project line, a toolbar and a
+tab row (`MainWindow._titleBar`, 38 px, key `window.titleBar`):
+
+- **The project** (`window.project`): its name (`window.projectName`, the
+  path in the tooltip, a spinner while it validates) opens a menu — the
+  path, **Open Project…** (`window.openProject`), up to five **recent
+  projects** (`window.recent.<i>`; the current one is left out and one whose
+  folder is gone is shown disabled), **Validate Again**, **Reveal in
+  Finder**, **Close Project** (`window.close`). A read-only project shows
+  its chip (`window.readOnlyChip`) beside it.
+- **The document tabs** (`lib/src/documents/document_tab_bar.dart`): a dot
+  when unsaved, a close button on the active and the hovered tab only, the
+  conflict and error badges, and **+** (`tabs.open`) opening the Open
+  Document picker under itself.
+- **Play** in the middle of the window: ▶ / ■ and the run's state, a click
+  on the state showing the Game tab (§ Play and the game Console).
+- **The codegen state** (`window.codegen`): nothing until the project has
+  been checked, an icon when the generated code is current, *Run codegen*
+  when it is stale or the committed metadata has drifted, *Codegen check
+  failed* when the check itself failed; a click checks again
+  (`fynkel codegen --check --json`, as the Inspector's banner does).
+- **The command search** (`window.commands`, ⇧⌘P): opens the palette.
+
+On macOS the bar *is* the window's title bar. `MainFlutterWindow.swift`
+makes the native one transparent with its title hidden and the content
+full-size, and adds an empty `NSToolbar` in the `.unifiedCompact` style —
+that is what makes the native bar 38 pt tall with the traffic lights
+centred in it. The window is **not movable by its background**
+(`isMovable = false`): otherwise AppKit starts a window drag from a press
+anywhere in the bar, a Flutter button included. The bar's empty space
+(`window.drag`, a detector *under* the bar's contents, so only a press
+that no control took reaches it) asks the native side over the
+`fynkel.editor/window` channel: `startDrag` (`performDrag(with:)` with the
+current event) and `titleBarDoubleClick` (the system's *double-click a
+window's title bar to* setting: zoom, minimise or nothing). The bar leaves
+room for the traffic lights, except in full screen (`fullScreen` from the
+window's notifications). The Dart half is
+`lib/src/shell/window_chrome.dart`; where the native half is missing (a
+widget test, another platform) every call is a no-op and no room is left.
+
+## The Scene view's overlay (item 9b)
+
+The picture takes the Scene panel's whole height; everything else floats
+on it in frosted strips (a 12 px blur behind the `overlay` token, an
+`overlayEdge` border, radius 8):
+
+- top left: the tools, their space (world / local) and snapping; top
+  right: the camera and what the picture shows (projection, frame, align,
+  grid, overlays, stats), then what is hidden or locked and Reload. The
+  toolbar is a `Wrap`, not a scroll view: the space between the groups
+  lets clicks, drags and scrolls through to the picture, and a narrow
+  panel wraps the right side under the left instead of hiding any of it.
+  A toggle that is on is the accent at 22 %, not a solid block.
+- under the toolbar: the stats overlay (left) and the readout chip.
+- bottom: the last notice (`scene.notice`), the camera-and-tool readout
+  (`scene.status`, the navigation keys in its tooltip) and the hidden
+  count (`scene.hiddenChip`).
+
+The viewport is a `Texture`, so Flutter draws over it like over any
+widget.
+
+## Reading the Inspector (item 9b)
+
+One label column; the value starts right after it, left-aligned (the
+spreadsheet `alignRight` is gone), the unit beside the number
+(`number.unit`: `1.8 m`, `45°`), the axis letter inside each part of a
+vector; a value is never clipped. Groups are small uppercase captions. A
+layer mask shows its names (`Everything`, `Nothing`, or the list), an
+empty value `—`. The Project list has fixed columns — name, kind,
+contents, size (`project.columns`, `project.column.name` / `.kind`,
+`project.contents.<id>`, `project.size.<id>`) — and a selected row's
+secondary text stays legible.
+
+## One Inspector (item 9c)
+
+The Inspector shows **whatever was selected last**, the way Unity's does.
+`EditorSelection` (`lib/src/shell/editor_selection.dart`) holds one
+target:
+
+| Target | Written by | The page |
+| --- | --- | --- |
+| `InspectEntities` | the Hierarchy, the Scene view | the entity page (the components, as since item 4) |
+| `InspectAsset(id)` | the Project panel, *Show in Inspector* | `AssetPage` |
+| `InspectAsset(id, sub: 'mesh/0')` | a part row on an asset page | `SubAssetPage` |
+| `InspectFolder(rel)` | a folder in the Project panel | `FolderPage` |
+
+Selecting in one place moves the Inspector there, and so does coming back
+to a panel: a click in the Hierarchy shows its selection again even when
+it did not change. The Hierarchy keeps its own multi-selection for entity
+work. **Pickers never write the selection** — choosing a texture for a
+material's slot is not selecting the texture, and it would take the
+Inspector away from the field being edited.
+
+**The pages** (`lib/src/inspector/asset_pages.dart`) are built from one set
+of pieces (`inspector_chrome.dart`), so an entity, an asset, a part and a
+folder read alike: the header (picture, name, what it is, the id with
+Copy, the padlock), the facts row (`facts.<label>`), uppercase section
+captions, label/value rows on the fields' label column, and the **apply
+bar** (`inspector.applyBar`) pinned to the bottom while something is not
+applied yet.
+
+- **An asset**: Open (a scene or a prefab), Reveal in Finder, Reimport (a
+  source), Delete; **File**; a source's **Import settings** — the
+  importer's known settings as controls plus the raw JSON; a change brings
+  up the apply bar with **Revert** (`asset.revertSettings`) and **Apply and
+  Reimport** (`asset.applySettings`: the sidecar through the session, one
+  asset-history step, then the reimport, its summary or refusal shown);
+  **Parts** (click one to inspect it, drag one onto a field); the document
+  kind's own sections; **Used by**, each row opening the referencing
+  document at the field.
+- **A part** (`asset.part.title`): what it is and which file it comes
+  from, a link back (`asset.part.back`), its uuid, a drag handle
+  (`asset.part.drag`), **Open** on an imported model's `prefab` part
+  (`asset.part.open`, the read-only tab of § Prefab mode › Imported
+  hierarchies) and the uses of that part.
+- **A folder** (`folder.title`): what is inside it by kind
+  (`folder.kind.<kind>`), its subfolders (`folder.sub.<name>`), Open and
+  Reveal.
+
+**A document kind's sections are registered**, not written into the page:
+`AssetDocumentSections.register(kind, builder)` gives every document of
+that kind its own sections on the asset page, in place of the generic
+summary (a scene's or prefab's entity count, or the document's top-level
+fields). The material's factors are registered this way today; a later
+data-asset kind (`@DataAsset`, the packages stream) registers one builder
+— no panel, no change to the page.
+
+**Open** is offered for scenes, prefabs and an imported model's `prefab`
+part. Materials and blend spaces have no editor in M4, so opening one
+would give an empty tab; their pages show their content read-only until
+an editor for them exists.
+
+**The lock** (`inspector.lock`, the padlock in the header) keeps the
+Inspector on its target while other things are selected; locking the
+entity page pins those entities in the model as well. An explicit
+request — *Show in Inspector* — goes to another Inspector instead, a new
+one when every copy is locked (item 9e; until then it moved the locked
+Inspector). Unlocking goes to what was selected meanwhile.
+
+The Asset panel's panel id `import` is **retired**
+(`PanelRegistry.retired`): a saved layout that still holds it loads with
+it dropped and is saved again without it, rather than falling back to the
+default. Its Window menu item went with it — 90 commands (94 since item
+9e's four New <Panel>).
+
+## One picker (item 9d)
+
+Every place that asks "which one?" opens the same popover,
+`showPicker<T>` (`lib/src/picker/picker.dart`): a search field, the
+results in groups, **None** first where the field may be empty, a preview
+pane on the right (a thumbnail and a few facts, the description when
+there is one), and the same keys everywhere — ↑ ↓ move, ⏎ chooses, esc
+closes. A row that cannot be chosen is shown disabled with its note (a
+component the entity already has, a component without defaults). It sits
+under the field that asked, its right edge on the field's (above it when
+there is no room below), or at the top of the window for the palette and
+Open Document, and opens without an animation.
+
+| Who asks | Prefix | Groups |
+| --- | --- | --- |
+| an asset slot | `assetPicker` | by folder; a part by its source file |
+| an entity slot | `entityPicker` | — |
+| Open Document (⇧⌘O, the tab bar's **+**) | `openDocument` | Scenes, Prefabs |
+| Add Component | `addComponent` | by category |
+| Create Entity with Component (the Hierarchy's) | `createWith` | by category |
+| the command palette (⇧⌘P) | `palette` | by menu |
+
+The keys are the prefix's: `<prefix>` (the popover), `.search`, `.title`,
+`.<id>` for a row (`.row.<i>` for one without an id), `.note.<id>`,
+`.none`, `.preview`, `.count`, `.empty`.
+
+## Panel tabs, copies and the orientation gizmo (item 9e)
+
+**The tabs** (`_PanelTab` in `lib/src/shell/workspace.dart`). A panel's
+tab is its icon and its title — nothing else until the pointer is over
+it, when a close × fades in (the `motion` token; hover is the one thing
+9a lets move). A locked copy shows its padlock after the title. The title
+is cut at 180 px, and in a group too narrow for it the row clips instead
+of overflowing. The maximise button is gone: a **right click** on a tab
+opens its menu — **Maximise** / **Restore**, **Close**, and for a panel
+that can be copied **New <Panel>** — and a **double click** maximises or
+restores. The menu opens without an animation, like every menu.
+
+**Copies.** The Hierarchy, the Scene view, the Inspector and the Project
+browser can be open more than once; the Console, the Profiler and the
+Animation panel stay single. A copy's id is `<panel>#<n>` with the lowest
+free number (`inspector#2`), its title `Inspector 2`. **New <Panel>** —
+the tab menu's, or Window ▸ New Hierarchy / New Scene View / New
+Inspector / New Project Browser (`window.newCopy.<id>`, ⇧⌥⌘1 … ⇧⌥⌘4:
+the panel's own Show / Hide with ⇧) —
+opens it to the right of the copy used last, as wide as that one (the
+docking package would otherwise give the newcomer what is left). Each
+copy has its own model:
+
+| Panel | A copy's own | Its padlock |
+| --- | --- | --- |
+| Inspector | target (an `EditorSelection` each) | keeps the target while other things are selected |
+| Project browser | folder, selection, search, list / grid | keeps the folder: a reveal goes elsewhere |
+| Hierarchy | — | holds its document; unlocked it follows the focused tab |
+| Scene view | camera, per document | — |
+
+**Which copy answers.** Commands and the menus address the copy that had
+the keyboard last (`Workspace.activeCopy`, most recent first; a copy that
+is opened or focused by the editor itself counts). An **explicit
+request** — Show in Inspector, Show in Project, a Console or Game row
+that opens an entity — goes to the copy used last **that is not
+locked**, and when every copy is locked a new one opens: a lock is never
+broken from outside its panel. (This replaces 9c's rule that Show in
+Inspector moved a locked Inspector.) A locked Hierarchy whose document
+tab is focused brings its own tab forward.
+
+**What comes back after a restart.** The layout (`layout.json`) keeps the
+copies, where they are and which tab of a group was in front. What each
+copy knew lives in the project's `.fynkel/editor.json` under `panels`,
+by copy id: an Inspector locked on an asset, a part or a folder comes
+back locked on it (when it still exists); a Project browser comes back in
+its folder and view, with its lock. A lock on **entities** and a
+Hierarchy's lock on a **document** do not come back — the editor opens a
+project with no documents open, so there is nothing for them to hold.
+Closing a copy forgets its entry.
+
+**The Scene view's copies need no engine change.** They share the
+document's one edit-preview world; each view sets its own camera on the
+world right before it renders (`cameraApplied`), which is enough because
+the extract is synchronous and each viewport has its own renderer. The
+cameras of copies 2 and up are saved per document under `views` in the
+same scene entry (a copy that has not looked at a document yet starts
+from the first copy's camera); closing a copy forgets them.
+`scene_session_test.dart` draws one world from two cameras through the
+real Metal viewport.
+
+**The orientation gizmo** (`lib/src/scene_view/orientation_gizmo.dart`,
+key `scene.orient`). In the Scene view's top right, under the toolbar: an
+84 px frosted circle with the world's three axes as the camera sees them
+— the positive ends as filled circles labelled X Y Z in the axis colours
+(red, green, blue, the move gizmo's too), the negative ends as rings
+labelled only under the pointer, the far ends drawn first and dimmer.
+
+- **Click an end**: the camera looks at the pivot from that side (Right
+  from +X, Top from +Y, Front from +Z). Click the end it already looks
+  from: the other side. Top and Bottom keep +Z at the bottom (looking
+  down) or the top (looking up) of the picture.
+- **Click the centre**: perspective / orthographic — unless an end covers
+  it. Looking straight along an axis, that axis's end sits on the centre,
+  and the click is the end's (the other side): what you see is what you
+  click.
+- **The caption** under the circle (`scene.orient.projection`) names the
+  view while the camera looks within 0.75° of an axis — `Front · Persp`,
+  `Top · Ortho` — and just the projection in between. A click on it
+  always switches the projection (like **5**).
+- **Drag** anywhere on the circle: orbit, exactly as ⌥-drag does.
+
+The gizmo keeps its place while the caption changes under it.
+
+**A known glitch, not ours.** When the docking package rebuilds a narrow
+tab group whose tabs are hidden, `tabbed_view`'s tab-strip corner
+overflows for one frame and a debug build reports it. It is inside the
+package, cannot be seen in a release build and has no effect;
+`panels_test.dart` lets exactly that report through
+(`ignoreTabStripCornerOverflow`, matched on the package's paint frame)
+around the one step that causes it.
+
 ## What exists after each item
 
 | Item | Done | What |
@@ -1245,6 +1570,11 @@ reads the same `stats` records.
 | 6 | 2026-09-22 | The Scene view: `FynkelViewport` per scene tab over the session's edit-preview world (incremental sync, fallback reload, Reload and Rebuild cache), the editor camera saved per scene in `.fynkel/editor.json`, grid / axes / light-camera-collider icons / selection outline as renderer debug lines, click (stacked-hit cycling) and marquee picking through the world, move / rotate / scale gizmos in world or local axes with snapping and one transaction per drag (preview in the world, commit on release, multi-selection about the lead), editor-only hidden and locked flags, prefab drop at the hit point, stats overlay, Save Frame as a PNG identical to `fynkel render` (§ The Scene view). |
 | 7 | 2026-09-22 | Prefab mode: instances expand in the Hierarchy as derived rows (inherited / bold overridden / added), every edit on a derived entity an override on the anchor (the Inspector's fields and the Scene view's gizmo alike), per-field Revert and Apply in the Inspector, Apply to prefab (two transactions in two documents), Revert all, Unpack (`unpackPrefab`, one transaction), Open prefab in its own tab, imported hierarchies (`<glb>#prefab`, `<rig>#prefab`) opened read-only with the derived ids, missing / broken prefabs shown with their diagnostics and never rewritten, Select prefab asset (§ Prefab mode). |
 | 8 | 2026-09-22 | Play / Stop over `fynkel run` with `FYNKEL_EDITOR_CHANNEL=stdio`: `package:fynkel`'s one-directional stdout channel (log / diagnostic / stats / state records), the Console's Game tab with the same filters, search and collapsing as the Project tab and a row that opens the document with its entity selected, the process-tree Stop (SIGTERM deepest-first, grace, SIGKILL), the save prompt, the refusal to play a project with errors, and the "changes apply on the next Play" banner whose **Play again** stops the run before it starts the next one; Play names the desktop (`-d macos`) so `flutter run` never picks a phone or refuses to choose, and a run that dies before the game starts shows the output that says why (§ Play and the game Console). |
+| 9a | 2026-09-22 | The look: the design tokens and an explicit theme in `lib/src/theme/`, the Density preference, the docking chrome from the tokens, Lucide icons, the keyboard focus ring, notices in the status bar instead of snackbars, nothing animated but hover (§ The look). |
+| 9b | built 2026-09-22 (gate pending) | One title bar (the project menu with recent projects, the document tabs, Play centred, the codegen state, the command search) that is the macOS title bar; the Scene view's toolbar floating over the picture; the Inspector read left to right with units; the accent following focus; the Project list in columns (§ The title bar, § The Scene view's overlay, § Reading the Inspector). |
+| 9c | built 2026-09-22 (gate pending) | One Inspector for whatever was selected last — entities, an asset, a part, a folder — with the Asset panel's content as its pages, import settings applied or reverted from a pinned bar, the lock, and document kinds' sections registered by kind (§ One Inspector). |
+| 9d | built 2026-09-22 (gate pending) | One picker for asset and entity slots, Open Document, Add Component, Create Entity with Component and the palette (§ One picker). |
+| 9e | built 2026-09-23 (gate pending) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 
@@ -1256,7 +1586,7 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
-cd apps/editor && flutter analyze --fatal-infos && flutter test   # 242 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step; scene_session_test.dart picks every entity of every fixture scene through the real edit-preview world, drags the gizmo (one undo step, the incremental world equal to a fresh load), hides without touching the document, drags the entity inside Crate A as one setPrefabOverride on the anchor (the prefab file's bytes unchanged, the sync incremental, one undo), looks through and writes back the scene camera, and renders through the real viewport (Metal, offscreen; the frame's PNG equals the first capture byte for byte); prefab_session_test.dart (M4-07) reverts and re-adds Crate A's override, instances the coin, applies an override to coin.prefab.json and undoes per document, unpacks and reloads, overrides and unpacks the Imported rig, opens a broken reference without rewriting the file, and opens rig.glb#prefab read-only — every override list checked against the raw document and `inspect`'s count; play_test.dart (M4-08) parses the channel's records behind a `flutter run` prefix, builds and signals a process tree from a canned `ps` table, drives a whole run over a fake process (the environment it was given, `starting → running → exited`, a crash's code, the dropped-row count, the CLI that is not there, a run that dies before the game starts — the device `flutter run` could not pick — with the Console showing the output that says why) and the shell (a project with errors refused onto the Project tab, the Game tab's rows, a diagnostic row that opens the scene with the entity selected, Stop, the "changes apply on the next Play" banner and its Play again — the old run stopped, the dirty document saved, a second process started and the banner gone —, the save prompt's three answers)
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 293 tests (`-j 4` when another stream is compiling: the real-session files each cook a copy of the fixture and time out at 30 s when starved); look_test.dart checks the focus ring, the notices and that nothing opens animated; title_bar_test.dart the bar, its menu, the recent projects, the codegen state and the macOS channel (mocked); editor_selection_test.dart and project_browser_test.dart the one Inspector, its pages, the lock and the registered sections; picker_test.dart the picker and each user's own test its keys; panels_test.dart (9e) the panel copies, their tabs, locks and routing, and a restart that brings them back; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step; scene_session_test.dart picks every entity of every fixture scene through the real edit-preview world, drags the gizmo (one undo step, the incremental world equal to a fresh load), hides without touching the document, drags the entity inside Crate A as one setPrefabOverride on the anchor (the prefab file's bytes unchanged, the sync incremental, one undo), looks through and writes back the scene camera, and renders through the real viewport (Metal, offscreen; the frame's PNG equals the first capture byte for byte); prefab_session_test.dart (M4-07) reverts and re-adds Crate A's override, instances the coin, applies an override to coin.prefab.json and undoes per document, unpacks and reloads, overrides and unpacks the Imported rig, opens a broken reference without rewriting the file, and opens rig.glb#prefab read-only — every override list checked against the raw document and `inspect`'s count; play_test.dart (M4-08) parses the channel's records behind a `flutter run` prefix, builds and signals a process tree from a canned `ps` table, drives a whole run over a fake process (the environment it was given, `starting → running → exited`, a crash's code, the dropped-row count, the CLI that is not there, a run that dies before the game starts — the device `flutter run` could not pick — with the Console showing the output that says why) and the shell (a project with errors refused onto the Project tab, the Game tab's rows, a diagnostic row that opens the scene with the entity selected, Stop, the "changes apply on the next Play" banner and its Play again — the old run stopped, the dirty document saved, a second process started and the banner gone —, the save prompt's three answers)
 cd apps/editor && flutter test test/play_process_test.dart   # M4-08 against a *real* process: a shell script that announces itself on the channel and starts a grandchild — Stop takes the grandchild with it, a `kill -9` from outside ends in the exit code with the records it wrote still in the Console, and both leave every document in the project byte-identical
 cd packages/fynkel && dart test test/editor_channel_test.dart  # the channel itself: `started`/`loaded` with a monotonic `seq`, a failed load as FYN- records then `loadFailed`, a missed deadline as `info`, `Diagnostics.log` as a log record with PrintDiagnostics quiet — and with the variable unset, not a byte written
 FYNKEL_SCENE_FRAME_OUT=/tmp/main-320x200.png flutter test test/scene_session_test.dart --name viewport   # keeps the clean 320×200 frame of the fixture's Main through its camera …
@@ -1352,3 +1682,63 @@ editor cannot see) and press ▶: the build fails, the game never starts,
 the toolbar says *Did not start (code 1)* and the Console shows the
 compiler's own lines without being asked. Never the committed reference
 game.
+
+
+The items 9a–9d gate, driven by the user, on a **copy** of the reference
+game (`cp -R examples/reference_game /tmp/refgame-gate`, then open the
+copy — never the committed game):
+
+- **9a** — Preferences (⌘,): Dark and Light, each switching at once;
+  Compact, Default and Comfortable, every row, field and toolbar following.
+  Click in the Hierarchy, then Tab and the arrows through every panel and
+  a dialog: a thin blue ring always shows where focus is, a click hides
+  it, W in the Scene view does not bring it back. File → Open Project… on
+  a folder that is not a project: the message sits in the status bar with
+  an × until dismissed. Menus, the palette, Preferences and About open at
+  once.
+- **9b** — the top bar is one bar with the traffic lights in it: drag the
+  window by its empty space (not by a tab or a button), double-click that
+  space (the window zooms, or does what System Settings says), enter and
+  leave full screen (the room for the traffic lights goes and comes back).
+  The project menu: the recent projects (switch to one and back), Reveal,
+  Close. The **+** after the tabs opens Open Document under itself. Add an
+  `@Expose` field to a behaviour in the copy's `lib/` and click the codegen
+  icon: it says *Run codegen*; run `fynkel codegen` in the copy, click
+  again: the quiet icon. Open the Playground: the Scene toolbar floats over the
+  picture, clicks and scrolls between its groups reach the picture, and a
+  narrow Scene panel wraps it; the Inspector's numbers sit next to their
+  labels with units; only the focused panel's selection is blue; the
+  Project list's columns.
+- **9c** — select an entity, then a texture, a model, one of the model's
+  parts (and back to the model with the link), a material, a folder: the
+  Inspector follows each. Change a texture's colour space: the bar comes
+  up; Revert; change it again and Apply and Reimport; ⌥⌘Z. Lock the
+  Inspector on an entity and select other things: it stays; unlock. A
+  saved layout that had the Asset panel opens without it.
+- **9d** — keyboard only, each of the six: an asset slot (Tab to its
+  button, ⏎), an entity slot, ⇧⌘O, Add Component, Create Entity with
+  Component, ⇧⌘P — type to filter, ↑ ↓, ⏎ chooses, esc closes; **None**
+  where a slot may be empty; the preview on the right.
+
+Then item 9e, on the same copy:
+
+- **Tabs** — no × and no maximise button on any panel tab; the × fades in
+  under the pointer and closes. Right-click a tab: Maximise, then
+  Restore; double-click does the same. Close from the menu, then bring
+  the panel back from Window.
+- **Zoom** — in the Scene view, two fingers up and down on the trackpad
+  and a pinch both move the camera in and out; the mouse wheel too.
+- **The gizmo** — click X, Y, Z and the three dots: the caption says
+  Right, Top, Front, Left, Bottom, Back; click the same end twice: the
+  other side. The centre (between views) and the caption switch Persp
+  and Ortho. Drag the circle: the camera orbits.
+- **Copies** — Window ▸ New Inspector, lock it on a texture, select
+  entities: the first Inspector follows, the locked one does not. Show in
+  Inspector from the Project browser with both locked: a third opens.
+  New Project Browser: two folders side by side; lock one and use Show in
+  Project on an asset elsewhere — the unlocked one moves. New Scene View:
+  look from Top in one and from Front in the other; move an entity in
+  one and watch it in both. New Hierarchy, lock it on a prefab tab, then
+  switch to the scene tab: the locked one stays on the prefab. Quit and
+  reopen the copy: the copies, the Inspector's lock on the texture, the
+  browsers' folders and the two cameras come back.

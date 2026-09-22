@@ -77,6 +77,7 @@ The editor (`apps/editor`, M4 item 2; a Flutter macOS app, `flutter pub get && f
 | `path` | 1.9.x | the layout and preferences files under `~/Library/Application Support/Fynkel Editor/`, project-relative diagnostic paths |
 | `fynkel_flutter` (path) | — | the Scene view's `FynkelViewport` over the edit-preview world (M4-06): the same texture widget a game host uses, with viewport ABI 4's `renderHandle`/`debugLines`/`readFrame` |
 | `fake_async` | 1.3.x (dev) | the Scene view's debounced editor-state save under a fake clock (M4-06) |
+| `lucide_icons_flutter` | 3.1.20 | the editor's icon font (item 9a): Lucide's 16 px stroke icons in place of Material Symbols, reached only through `FIcons` in `lib/src/theme/icons.dart` (docs/editor.md § The look); MIT-licensed (the Lucide drawings ISC), a font and its constants, no code that runs |
 
 Behaviour generator (`packages/fynkel_generator`, ADR-0012 pipeline (b), M2-16):
 
