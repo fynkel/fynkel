@@ -18,5 +18,16 @@ fynkel_core.workspace = true
 fynkel_physics.workspace = true
 fynkel_scene.workspace = true
 fynkel_audio.workspace = true
+# The edit-preview world (M4-06): the cooked cache the Scene view draws
+# from, its mesh payloads for picking and outlines.
+fynkel_assets.workspace = true
+glam.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+# `tests/preview.rs` renders the edit-preview world and a plain game world
+# of the same scene headlessly and compares the pixels.
+fynkel_render.workspace = true
+wgpu.workspace = true
+

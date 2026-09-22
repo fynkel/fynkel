@@ -11,17 +11,21 @@
 //! `authoring`) and the Dart package over it stay thin and the CLI can
 //! link this crate directly.
 //!
-//! The session never runs game code and never touches a cooked cache
-//! (that is the edit-preview world of item 6). Diagnostics of the session
-//! itself are `FYN-T####`; document content keeps its `FYN-D`/`FYN-E`.
+//! The session never runs game code. The edit-preview world of item 6
+//! ([`preview`]) is a `fynkel_core::World` in edit mode — commands,
+//! propagation and the snapshot, no system — described from the live
+//! documents by [`AuthoringSession::describe`] and drawn from the cooked
+//! cache [`OpenProject::cook`] fills. Diagnostics of the session itself
+//! are `FYN-T####`; document content keeps its `FYN-D`/`FYN-E`.
 
 #![allow(clippy::result_large_err)] // `Diagnostic` is the workspace's error type
 
 pub mod ops;
+pub mod preview;
 pub mod project;
 pub mod query;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{Code, Diagnostic};
@@ -33,6 +37,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 pub use ops::{AssetHistory, AssetOp, Done, OPERATIONS, TRASH_DIR};
+pub use preview::{Hit, Line, Preview, Ray, SyncReport, View};
 pub use project::{OpenProject, Reference, METADATA_FILE};
 
 /// An open document in a session; never reused within a session.
@@ -371,6 +376,128 @@ impl AuthoringSession {
         let mut out = doc.editor.validate(&project.schemas);
         out.extend(project.assets.check_references(doc.editor.document()));
         Ok(out)
+    }
+
+    /// The runtime description of the document `handle` as the Scene view
+    /// shows it (M4-06): the **live** document (unsaved edits included) —
+    /// a scene, or a prefab read as a scene — with every prefab instance
+    /// expanded against the prefabs *as they are now*: an open prefab
+    /// document contributes its editor's content, the others their file;
+    /// imported hierarchies (`{ asset, sub: "prefab" }`) come from the
+    /// importer as in project validation. `description` is what
+    /// `World::load_scene` takes; `behaviours` the authored behaviour
+    /// components (the preview draws nothing for them); `diagnostics` the
+    /// expansion's and the description's (an unknown component type, a
+    /// value that does not decode). A material document is refused
+    /// (`FYN-T0003`): it has no entities to preview.
+    pub fn describe(&self, handle: Handle) -> Result<fynkel_document::DescribedScene, Diagnostic> {
+        self.describe_with_anchors(handle).map(|(d, _)| d)
+    }
+
+    /// [`describe`](Self::describe) plus the **anchor map**: every entity
+    /// the expansion made (a prefab instance's inner entities, nested
+    /// instances included) → the *document* entity that carries the
+    /// instance. The Scene view selects and hides whole instances, so a
+    /// pick inside one answers with its anchor.
+    pub fn describe_with_anchors(
+        &self,
+        handle: Handle,
+    ) -> Result<(fynkel_document::DescribedScene, HashMap<Uuid, Uuid>), Diagnostic> {
+        let project = self.require_project()?;
+        let doc = self.document(handle)?;
+        let document = doc.editor.document();
+        let scene = match document.kind {
+            DocumentKind::Scene => doc.editor.scene(),
+            DocumentKind::Prefab => {
+                fynkel_document::Prefab::from_document(document.clone()).scene()
+            }
+            other => {
+                return Err(Diagnostic::error(
+                    Code::SESSION_INVALID_REQUEST,
+                    format!("a {} document has no scene to preview", other.name()),
+                )
+                .with_document(doc.path.display().to_string())
+                .with_suggestion("open a scene or a prefab in the Scene view"));
+            }
+        };
+        let (library, mut diagnostics) = self.prefab_library(project, &scene);
+        let expanded = fynkel_document::expand(&scene, &library, &project.schemas);
+        diagnostics.extend(expanded.diagnostics.iter().cloned());
+        let mut described = fynkel_document::describe(&expanded.scene(), &project.schemas);
+        diagnostics.append(&mut described.diagnostics);
+        described.diagnostics = diagnostics;
+        // Inner → anchor, then chased to the outermost anchor (a nested
+        // instance's anchor is itself an expanded entity).
+        let mut anchors: HashMap<Uuid, Uuid> = HashMap::new();
+        for instance in &expanded.instances {
+            for (_, scene_id) in &instance.entities {
+                anchors.insert(*scene_id, instance.anchor);
+            }
+        }
+        let resolved: HashMap<Uuid, Uuid> = anchors
+            .keys()
+            .map(|id| {
+                let mut a = anchors[id];
+                let mut hops = 0;
+                while let Some(next) = anchors.get(&a) {
+                    a = *next;
+                    hops += 1;
+                    if hops > 64 {
+                        break;
+                    }
+                }
+                (*id, a)
+            })
+            .collect();
+        Ok((described, resolved))
+    }
+
+    /// Every prefab document of the project — the open ones from their
+    /// editors, the rest from disk — plus the imported hierarchies `scene`
+    /// and those prefabs instantiate.
+    fn prefab_library(
+        &self,
+        project: &OpenProject,
+        scene: &fynkel_document::Scene,
+    ) -> (fynkel_document::PrefabLibrary, Vec<Diagnostic>) {
+        use fynkel_document::{AssetKind, Prefab, PrefabLibrary};
+        let mut library = PrefabLibrary::empty();
+        let mut diagnostics = Vec::new();
+        let mut open: Vec<PathBuf> = Vec::new();
+        for d in self.documents.values() {
+            if d.editor.document().kind == DocumentKind::Prefab {
+                library.add(Prefab::from_document(d.editor.document().clone()));
+                open.push(d.path.clone());
+            }
+        }
+        for entry in project.assets.entries() {
+            if entry.kind != AssetKind::Document(DocumentKind::Prefab) {
+                continue;
+            }
+            let file = entry.file(project.assets.root());
+            let canonical = file.canonicalize().unwrap_or_else(|_| file.clone());
+            if open.contains(&canonical) {
+                continue;
+            }
+            match Document::read(&file, Some(DocumentKind::Prefab)) {
+                Ok(doc) => library.add(Prefab::from_document(doc)),
+                Err(diags) => diagnostics.extend(diags),
+            }
+        }
+        let mut wanted = PrefabLibrary::wanted_sources(scene);
+        for prefab in library.prefabs() {
+            for key in PrefabLibrary::wanted_sources(&prefab.scene()) {
+                if !wanted.contains(&key) {
+                    wanted.push(key);
+                }
+            }
+        }
+        diagnostics.extend(library.add_sources(
+            &project.assets,
+            &wanted,
+            &fynkel_import::ImportedPrefabs::default(),
+        ));
+        (library, diagnostics)
     }
 
     // ---------------------------------------------------------------- JSON

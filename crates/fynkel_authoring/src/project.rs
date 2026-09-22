@@ -151,6 +151,45 @@ impl OpenProject {
         self.project.assets_dir(&self.dir)
     }
 
+    /// The project's cooked cache directory (`.fynkel/cache`), where
+    /// [`OpenProject::cook`] writes and the edit-preview world reads.
+    pub fn cache_dir(&self) -> PathBuf {
+        fynkel_import::project_cache_dir(&self.dir)
+    }
+
+    /// Cooks the project into its cache — `fynkel cook` in process, over
+    /// the session's database and schemas (M4-06): what the edit-preview
+    /// world needs for meshes, materials, textures and skins. The project
+    /// (name, startup scene, quality, input actions, physics) is recorded
+    /// in the index as the CLI records it, so a viewport opening the same
+    /// cache sees the same project. Only stale objects cook; a cook with
+    /// failed assets is a report whose `has_errors()` says so — the
+    /// preview draws the others.
+    pub fn cook(&self) -> fynkel_import::CookReport {
+        let startup_scene = self
+            .project
+            .startup_scene
+            .as_ref()
+            .and_then(|r| self.assets.resolve(r).ok())
+            .map(|r| r.entry.id);
+        let opts = fynkel_import::CookOptions {
+            project: Some(fynkel_import::CookProject {
+                name: self.project.name().to_string(),
+                startup_scene,
+                quality: self.project.quality.clone(),
+                input_actions: self.project.input_actions.clone(),
+                physics: self.project.physics.clone(),
+            }),
+            ..fynkel_import::CookOptions::default()
+        };
+        fynkel_import::cook(
+            &self.assets,
+            &self.schemas,
+            &fynkel_import::Cache::at(&self.cache_dir()),
+            &opts,
+        )
+    }
+
     /// The shader library a material document is validated against: the
     /// built-ins plus every manifest under the asset root that validates.
     pub fn shaders(&self) -> ShaderLibrary {
