@@ -260,7 +260,16 @@ Metal timestamps and `gpu_bytes`, the renderer's GPU memory estimate.
 `fynkel_apple_viewport_set_quality(viewport, name, len)` (M3-05, additive
 to ABI 2) selects a quality profile of the loaded project by name (an
 empty name: the project default); `-1` and a logged warning naming the
-profiles when it does not exist.
+profiles when it does not exist. **ABI 4** (M4-06, additive; the
+editor's Scene view): `fynkel_apple_viewport_debug_lines(viewport,
+lines, count)` queues world-space line segments for the next render —
+ten floats each (`ax ay az bx by bz r g b a`, metres, linear RGBA) —
+drawn by the renderer's debug pass (depth-tested against the opaque
+scene, unlit) and cleared by every render, so a host queues again before
+each frame; `fynkel_apple_viewport_read_frame(viewport, slot, out, cap)`
+copies the frame of ring slot `slot` (a render's return value) as
+tightly packed RGBA8, top row first, blocking until the GPU is idle — a
+screenshot, never a per-frame call. Games never call either.
 
 Since M3-01 all of that lives in **`package:fynkel_flutter`**
 (`packages/fynkel_flutter`), the Flutter plugin every game depends on:
@@ -274,7 +283,7 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   installs the Rust→Swift frame-ready callback), `rebindTexture`, `stats`,
   `unregisterTexture` — every call after registration names its
   `textureId`, so an editor can show several viewports.
-- `lib/src/viewport_native.dart` — the viewport ABI v3 as `@Native` externals
+- `lib/src/viewport_native.dart` — the viewport ABI v4 as `@Native` externals
   on the same code asset as `package:fynkel`.
 - `FynkelViewportController` — one native viewport: `requestSize(w, h)` in
   physical pixels creates the ring and registers the texture, later calls
@@ -287,7 +296,7 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   when attached; `qualityOk` says whether the last name was known;
   M3-05); `takeStats()` (Rust) and `platformStats()`
   (Swift); `detach()` is the ordered teardown (clear callback → unregister →
-  destroy) and the controller is reusable afterwards.
+  destroy) and the controller is reusable afterwards. M4-06 (ABI 4): `renderHandle(worldAddress)` renders a world the controller does not own — the editor's edit-preview world, by its native address —, `debugLines(Float32List)` queues the overlay segments for the next render, `readFrame(slot)` copies a rendered slot as RGBA8 (`Uint8List`, `physicalWidth × physicalHeight × 4`).
 - `FynkelViewport` — the widget: `LayoutBuilder` × device pixel ratio →
   `requestSize`, the `Texture`, `Focus` + `Listener` (pointer positions in
   viewport physical pixels; `onFocusChange`), a placeholder until attached

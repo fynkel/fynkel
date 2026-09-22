@@ -205,7 +205,8 @@ chosen from a measurement: eight subscribed transforms are 728 bytes
   `work` line (behaviours / native / render / total at p95), a `gpu`
   line (frame and passes at p95, the memory estimate), a `memory` line;
   the reference game a `dart heap` line.
-- **`ViewportStatsSnapshot`** (viewport ABI v3): `extract`, `prepare`,
+- **`ViewportStatsSnapshot`** (viewport ABI v3; v4 added the editor's
+  debug lines and frame read-back, no stats change): `extract`, `prepare`,
   `encode`, `gpuTimestamps`, `gpuFramesUntimed`, `gpuShadow`, `gpuScene`,
   `gpuPost`, `gpuFrame` (each `MsPercentiles` over the window; the GPU
   ones counted by read-backs), `gpuBytes`.

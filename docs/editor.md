@@ -197,6 +197,21 @@ run, Escape closes.
 | `inspector.addComponent` | Edit | ⇧⌘A | the searchable Add Component popup; adds to every selected entity in one transaction |
 | `inspector.openScript` | Edit | ⌥⌘↩ | the selected entity's first behaviour's source in the IDE |
 | `inspector.checkCodegen` | Project | ⇧⌘G | run `fynkel codegen --check --project <dir> --json` in the background; the Inspector banner shows the result |
+| `scene.tool.select` / `scene.tool.move` / `scene.tool.rotate` / `scene.tool.scale` | Edit | ⌘1 / ⌘2 / ⌘3 / ⌘4 | the Scene view's tool (Q W E R in the viewport) |
+| `scene.toggleSpace` | Edit | ⌘L | gizmo axes world ↔ local (X in the viewport; scale is always local) |
+| `scene.toggleSnap` | Edit | ⌥⌘G | snapping on/off (the steps: long-press the snap button) |
+| `scene.toggleHidden` | Edit | ⇧⌘H | hide / show the selection's subtrees in the Scene view (H) — editor-only, never in the document |
+| `scene.showAll` | Edit | ⇧⌘U | show every hidden entity (⇧H) |
+| `scene.toggleLocked` | Edit | ⌘K | lock / unlock the selection against picking and dragging (L) |
+| `scene.alignCameraToView` | Edit | ⇧⌘L | write the editor camera into the selected `fynkel.Camera` entity: one transaction (Transform + lens fields) |
+| `view.frameSelected` / `view.frameAll` | View | ⌘F / ⇧⌘F | frame the selection's bounds (F) / everything visible (⇧F) |
+| `view.toggleProjection` | View | ⌘5 | perspective ↔ orthographic (5) |
+| `view.alignToCamera` | View | ⌥⌘L | look through the selected scene camera (its exact matrix, lens and exposure) |
+| `view.reset` | View | ⇧⌘0 | the initial editor camera |
+| `view.toggleGrid` / `view.toggleOverlays` / `view.toggleStats` | View | ⌘G / ⌘I / ⌘T | grid and axes / light-camera-collider icons / the stats overlay |
+| `view.reload` | View | ⌃⌘R | the preview world emptied and loaded fresh from the live document |
+| `view.recook` | View | ⌃⇧⌘R | cook the project again and reload every preview over the new cache |
+| `view.saveFrame` | View | ⌥⌘X | one frame of the viewport as a PNG at its physical size (the pixel gate's tool) |
 | `assets.undo` / `assets.redo` | Edit | ⌥⌘Z / ⇧⌥⌘Z | undo / redo the last **asset operation** (its own history; the label names it: "Undo Rename coin.prefab.json → gold.prefab.json") |
 | `assets.newScene` / `assets.newPrefab` / `assets.newMaterial` | Project | ⇧⌥⌘S / ⇧⌥⌘P / ⇧⌥⌘M | a new document in the Project browser's folder (`New Scene`, `New Scene 2`, …), selected and renaming at once |
 | `assets.newFolder` | Project | ⇧⌥⌘F | a new folder there (`New Folder`), renaming at once |
@@ -633,14 +648,226 @@ row (a child of it) or the empty area (a new root): one
 `instantiatePrefab` transaction with the instance named after the file,
 the parent expanded and the instance selected; refused into a prefab
 instance's subtree, into a read-only tab, onto the prefab document itself,
-and for every other kind (`HierarchyModel.canDropAsset`). A drop into
-the Scene view arrives with item 6, which owns that surface.
+and for every other kind (`HierarchyModel.canDropAsset`). The **Scene
+view** (item 6) takes the same payload onto its picture — the instance
+lands where the pointer's ray hits (§ The Scene view › Prefab drop).
 
 What item 5 does **not** do: material preview spheres and mesh
 thumbnails (not in M4), a material editor panel (the session edits
 material fields since item 1 — `setDocumentField` on a material handle —
-but no panel shows them yet; the Asset panel lists them read-only), the
-Scene-view drop (item 6).
+but no panel shows them yet; the Asset panel lists them read-only).
+
+## The Scene view (M4-06)
+
+Blueprint §19.2e item 6. `lib/src/scene_view/`: `scene_view_model.dart`
+(the model — one `SceneTab` per open scene or prefab tab, the camera, the
+tools, picking, the gizmo drag, the pointer and key handling),
+`scene_panel.dart` (the **Scene** panel: toolbar, the `FynkelViewport`, the
+2-D overlay, the stats box, the status line), `scene_math.dart` (vectors,
+quaternions, the projection matrices — the runtime's own formulas —, the
+`EditorCamera` rig, `ViewProjection`, `Ray`), `gizmo.dart` (the gizmo's
+geometry and its projection to pixels), `editor_state.dart` (the editor
+state file), `png.dart` (a PNG writer and reader for Save Frame and the
+tests). The picture is the session's **edit-preview world**
+(§ documents.md "The edit-preview world"): a real `fynkel_core::World` in
+edit mode that holds the *live* document — dirty edits included, prefab
+instances expanded, imported hierarchies from the importer — and never
+runs a system. The editor never steps it, never submits a command to it
+and never reads a cooked cache itself; every change reaches it through
+the session, which brings every open preview up to date before `apply`,
+`undo`, `redo`, `reload`, `save`, `rescan` or `operate` returns.
+
+In five-year-old terms: the Scene view is a window onto a frozen copy of
+the scene. The copy is redrawn from the document after every change; the
+camera you fly around with is the editor's own and is never written into
+the scene unless you ask (⇧⌘L); dragging a thing shows it moving in the
+window and writes the document **once**, when you let go.
+
+### The world behind the picture
+
+`EditorDocument.openPreview()` → `PreviewBackend` (`SessionPreview` over
+`ScenePreview` in production, `FakePreviewBackend` in the widget tests).
+The model opens a tab's preview the first time the tab is focused and
+closes it with the tab (`SceneTab.dispose`). A material tab has no world
+(`FYN-T0003`: "A material has no world"); a preview that failed to open
+shows the diagnostic and a **Try again**. The first preview of a session
+cooks the project in process (`fynkel cook`'s cooker; the report is on
+the preview's `cook`) — a failed cook is announced in the notice bar with
+the failed assets counted, the preview draws the rest. The viewport
+renders the world by its native address (`FynkelViewportController.
+renderHandle(preview.worldAddress)`, viewport ABI v4) and adopts the
+world's own asset store, so nothing is configured on the viewport.
+
+**Sync.** The session diffs the world against the description the
+document has *now* and applies only the differences through the world's
+own command path (`PreviewSyncReport`: `spawned`, `destroyed`, `updated`,
+`reordered`, `steps`). When a round makes no progress it falls back to a
+fresh load and says `reloaded: true`; the model counts those
+(`SceneTab.fallbackReloads`) and shows "Preview reloaded: the incremental
+sync could not apply a change (n×)". After every sync or reload the model
+re-applies the hidden set (the world's filter is applied at set time
+only) and its camera. **Reload** (⌃⌘R) is the same fresh load on demand;
+**Rebuild cache** (⌃⇧⌘R) cooks the project again and reloads every
+preview over the new cache — the model also runs it on its own when the
+project's `assetsRevision` moves (an import, a reimport, a file the
+watcher saw). `nothing ticks`: the world's tick counter moves only with
+the sync's own steps, never with time — a rigid body stays where the
+document put it for as long as the tab is open.
+
+### The camera (`EditorCamera`)
+
+An orbit rig — `pivot`, `distance`, `yaw`, `pitch` (clamped short of the
+poles), perspective or orthographic, `fovY`, `near`, `far`, an optional
+manual exposure — from which `world`, `view` and `projection(aspect)`
+follow; the matrices are the runtime's own (`perspectiveMatrix` and
+`orthographicMatrix` reproduce `fynkel_core::projection_matrix`, Metal's
+0..1 depth), so the picture through the editor camera and the picture
+through the scene camera differ only by the camera. Mouse: **⌥-drag
+orbit**, **⌥⇧-drag or middle-drag pan** (the pivot slides in the view
+plane, one pixel one pixel), **⌥-right-drag or scroll dolly** (never
+through the pivot; `minDistance` 5 cm), **right-drag look + WASDQE fly**
+(a 16 ms timer while the button is down; ⇧ four times faster; the speed
+scales with the distance). Keys: **F** frames the selection (its outline
+bounds; hidden entities skipped; nothing selected → everything),
+**⇧F** frames all, **5** toggles perspective/orthographic (the
+orthographic height keeps what the perspective view showed at the pivot),
+**⇧⌘0** resets the view. **Look through the selected camera** (⌥⌘L,
+`alignViewToSelectedCamera`) takes the lead entity's `fynkel.Camera`
+exactly — its world matrix (`EditorCamera.alignTo`: the rig approximates
+the matrix and the *exact* matrix is used until the next movement releases
+it), `projection`, `fov_y`, `ortho_height`, `near`, `far`,
+`exposure_mode`/`exposure` — which is how the pixel gate is driven: the
+Scene view through the scene's camera is `fynkel render`'s picture.
+**Align selected camera to view** (⇧⌘L, `alignSelectedCameraToView`) is
+the opposite, one transaction of `setField`s on the camera entity's
+Transform (local = inverse(parent world) × view) and its lens fields;
+exposure is left as the scene camera's own. The camera is saved **per
+scene** in the editor state file (below), coalesced 400 ms after the last
+movement, flushed on close.
+
+### What is drawn over the world
+
+Debug lines (`FynkelViewportController.debugLines`, ten floats a segment,
+drawn by the renderer's depth-tested unlit debug pass, cleared by every
+render): the **grid** on y = 0 at an adaptive power-of-ten step near a
+twentieth of the camera distance, 40 × 40 cells around the pivot, every
+tenth line brighter, the **world axes** through the origin (X red, Y
+green, Z blue) — ⌘G; the **icons** of every light (its colour: point range
+circles, spot cone, directional arrows), camera (frustum to 4 m) and
+collider (its shape, green) — ⌘I; the **selection outline** — each
+selected entity's mesh bounds as twelve orange edges, a cross for an
+entity without a mesh, an anchor's whole instance. All three come from
+the world (`preview.lines(outline:, iconsAspect:)`) so they are exact
+about what is there. The **gizmo** and the **marquee** are 2-D, painted
+by `_OverlayPainter` in logical pixels over the viewport from
+`ProjectedGizmo` (the same projection the hit test uses). The **stats
+overlay** (⌘T) shows the picture's size and the model's own frame time,
+the world's counts (`entities` with `live`, `meshes`, `lights`, `hidden`;
+`tick`, `loads`, `syncs`, the tab's fallback reloads — the tick moves
+only with the syncs' own steps, never with time) and the viewport's last
+frame (draws, CPU and GPU p50, frames rendered; placeholders, missing
+assets and asset errors when there are any).
+
+### Selection
+
+A **click** asks the world (`preview.pick(camera, aspect, ndc)`): every
+entity the ray meets, nearest first — a visible mesh through its
+bounding sphere then its triangles, anything else through a 25 cm sphere
+at its origin, a hit inside a prefab instance answering as its anchor —
+minus locked and hidden entities; the nearest is selected and revealed in
+the Hierarchy. A repeated click **on the same pixel (± 3 px) cycles**
+through the stacked hits. ⌘-click toggles, ⇧-click adds; a click on
+nothing clears (with a modifier held it keeps the selection). A drag of
+more than 4 px on empty space or with the select tool is a **marquee**
+(`preview.pickRect`: the entities whose projected bounds overlap the
+rectangle); the same modifiers. The Hierarchy and the Inspector follow
+the tab's selection as always — the Scene view owns no selection state of
+its own.
+
+### The gizmo
+
+Tools **Q** select, **W** move, **E** rotate, **R** scale (⌘1–⌘4 as
+commands); **X** toggles world/local axes (scale is always local);
+**⌥⌘G** toggles snapping, a long-press on the snap button edits the
+steps (move 0.5 m, angle 15°, scale 0.1 by default), ⌘ held during a
+drag inverts snapping for that drag. The gizmo sits at the **lead**
+entity's world origin at a constant 90 px, axes as lines with tips, three
+plane squares (move) and a centre square (move: screen-plane; scale:
+uniform), rings for rotate (grabbed on the stroke; the ring facing away
+flips its sign so a drag always turns the way the pointer goes). A drag
+(`beginDrag` → `updateDrag` → `endDrag`) computes one delta — a move
+along the axis line closest to the pointer ray, or on the plane the ray
+hits; a rotation from the pointer's angle about the projected pivot; a
+scale factor from the pointer's distance — applies it to **every
+draggable target about the lead's pivot** (`delta × startWorld`, then
+back to the parent's space: `inverse(parentWorld) × newWorld`; move keeps
+each target's rotation and scale, rotate keeps its scale) and previews
+it in the world only (`preview.setTransforms` — the document stays
+clean, `dirty` false, no transaction). Releasing restores the preview
+(`restoreTransforms`) and commits **one transaction** of `setField`s for
+the fields that changed (compared as the document would write them); a
+drag that moved nothing writes nothing; **Esc** cancels and restores;
+undo, redo and a reload from outside cancel a drag in flight. The
+targets are the topmost selected entities that are unlocked and have a
+`fynkel.Transform`, the lead first; children of a selected parent ride
+along, so they are not moved twice. When a transform tool shows no gizmo
+the status line says why (`noGizmoReason`: "locked (L to unlock)", "no
+Transform component — add one in the Inspector to move it", "read-only:
+no gizmo"). The readout chip shows the delta while dragging (`+1.25 m`,
+`45°`, `×2.00`).
+
+### Hidden and locked (editor-only)
+
+**H** hides the selection's topmost entities and their subtrees (all
+hidden → shows them), **⇧H** shows all, **L** locks/unlocks the
+selection. Hidden entities leave the picture, the picks, the outline and
+the bounds of F/⇧F; locked ones are never picked or dragged but the
+Hierarchy still selects them. Both live in the **editor state file**,
+`.fynkel/editor.json` (`EditorState`, `formatVersion` 1: the tool, the
+axes space, the snap steps, the grid/icons/stats toggles, and per scene
+id its camera, `hidden` and `locked`) — never in the document, which
+stays clean; a file from a newer editor is read and never overwritten
+(`readOnlyReason`), a garbage file starts fresh and is replaced on the
+next save (`loadProblem` is mentioned in the layout notice), and
+`EditorState.inMemory()` is what the tests use.
+
+### Prefab drop
+
+A prefab (a prefab document or an imported model's `#prefab`) dragged
+from the Project browser onto the picture lands **where it hits**: the
+nearest mesh under the pointer, else the ground plane y = 0, else 5 m
+along the ray (snapped when snapping is on) — one `instantiatePrefab`
+transaction through the Hierarchy model with the instance's Transform at
+that point, named after the file, appended at the root and selected. The
+drop's position comes through the picture's own render box (the toolbar
+above it does not shift it) and the browsers anchor their drag feedback
+at the pointer, so `DragTargetDetails.offset` *is* the pointer.
+
+### Save Frame
+
+**Save Frame…** (⌥⌘X) asks for a file, renders one frame and writes it
+as a PNG at the viewport's physical size (`readFrame`, viewport ABI v4:
+RGBA8, top row first) — the pixel gate's tool: through the scene camera
+with the grid, icons and selection off it is `fynkel render --size WxH`
+of the same scene to the byte (`test/scene_session_test.dart` proves it
+for the fixture's Main at 320×200 against a saved render; the notice
+says when the grid, icons or an outline are in the picture).
+
+### Commands
+
+Every command below is first-class (menu entry, palette entry, shortcut,
+stable id); the ones that write do so in exactly one transaction. Scene
+hotkeys without modifiers (Q W E R X F H L 5 Esc ⌫ WASDQE) belong to the
+viewport's focus node and never fire in a text field.
+
+### What item 6 does not do
+
+Mesh thumbnails and material spheres (M5, the world now exists for
+them); the Inspector's numeric drag previewing in the world (its drag
+commits once already; the preview-then-commit rule is the gizmo's here);
+vertex/edge snapping and surface-snapped placement beyond the drop point;
+multiple Scene views of one document; a game camera as the editor camera
+(never — ADR-0016).
 
 ## What exists after each item
 
@@ -651,7 +878,7 @@ Scene-view drop (item 6).
 | 3 | 2026-09-21 | Document tabs with save / save-as / revert / close prompts, per-tab undo, the conflict dialog with a diff; the Hierarchy over the session (patched from `affectedIds`, one transaction per operation, keep-world-transform drops), Console → tab (§ Document tabs and the Hierarchy). |
 | 4 | 2026-09-21 | The Inspector: one parser over schema + metadata + the editor's native-hint table (ADR-0018 accepted), one widget per field kind, multi-object editing with mixed values and one transaction per gesture, precheck + session validation with the message kept, Add / Remove Component, prefab override revert, Open script, the codegen banner over `codegen --check --json` (§ The Inspector). |
 | 5 | 2026-09-21 | The Project browser: folders and a searchable flat list with kind filters and sort, texture previews and material swatches, the Asset panel (sidecar settings, Apply and Reimport, sub-assets, dependents), New / rename / move / delete-with-refusal / Reveal / Copy id as session operations with the asset history's own undo (⌥⌘Z), prefab drop onto the Hierarchy, incremental rescan (§ The Project browser). |
-| 6 | — | The Scene view (edit-preview world, camera, picking, gizmos). |
+| 6 | 2026-09-22 | The Scene view: `FynkelViewport` per scene tab over the session's edit-preview world (incremental sync, fallback reload, Reload and Rebuild cache), the editor camera saved per scene in `.fynkel/editor.json`, grid / axes / light-camera-collider icons / selection outline as renderer debug lines, click (stacked-hit cycling) and marquee picking through the world, move / rotate / scale gizmos in world or local axes with snapping and one transaction per drag (preview in the world, commit on release, multi-selection about the lead), editor-only hidden and locked flags, prefab drop at the hit point, stats overlay, Save Frame as a PNG identical to `fynkel render` (§ The Scene view). |
 | 7 | — | Prefab mode. |
 | 8 | — | Play / Stop and the game Console over the stdout channel. |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
@@ -665,7 +892,11 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
-cd apps/editor && flutter analyze --fatal-infos && flutter test   # 140 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 194 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step; scene_session_test.dart picks every entity of every fixture scene through the real edit-preview world, drags the gizmo (one undo step, the incremental world equal to a fresh load), hides without touching the document, looks through and writes back the scene camera, and renders through the real viewport (Metal, offscreen; the frame's PNG equals the first capture byte for byte)
+FYNKEL_SCENE_FRAME_OUT=/tmp/main-320x200.png flutter test test/scene_session_test.dart --name viewport   # keeps the clean 320×200 frame of the fixture's Main through its camera …
+cargo run -q -p fynkel_cli --bin fynkel -- render --project <fixture copy> --scene c0000000-0000-4000-8000-000000000030 --out /tmp/cli.png --size 320x200   # … to compare with this: 0 differing pixels (2026-09-22)
+cargo test -p fynkel_authoring --test preview        # the edit-preview world: load, the incremental sync == a fresh load after every transaction kind, picking, outlines, hidden, the anchor map
+cd packages/fynkel_flutter && flutter test          # viewport ABI v4: debug lines and read_frame on the real renderer
 cargo test -p fynkel_authoring --test ops            # the asset operations, and the 2 000-asset tree: a full scan against one change's rescan (< 50 ms)
 cargo run -q -p fynkel_cli --bin fynkel -- codegen --check --project packages/fynkel_generator/example/spinner_game --json   # what the Inspector banner runs
 ```
@@ -691,3 +922,21 @@ onto the Hierarchy and a texture onto a material field in the Inspector;
 Reveal in Finder; add a file to `assets/` from Finder and see it appear
 (the watcher's incremental rescan); `fynkel validate <copy>` after every
 step. The reference game's Playground session must be closed first.
+
+The item 6 gate, driven by the user, on **copies** again: open a copy of
+the reference game, open its Playground in a tab and watch the Scene
+view — orbit (⌥-drag), pan (middle-drag), dolly (scroll), fly
+(right-drag + WASD), F on a selection, ⇧F, 5, ⌘G / ⌘I / ⌘T; click
+entities (a second click on the same spot cycles to what is behind),
+⌘-click and ⇧-click, drag a marquee; W and drag a crate along an axis, on
+a plane, with ⌥⌘G snapping on — **one** ⌘Z brings it back and the
+Inspector shows the committed numbers; E and R the same; select several
+and drag; H / ⇧H / L, and `git status` on the copy shows only
+`.fynkel/editor.json` changed by any of that; drag a prefab from the
+Project panel onto the floor; select the scene's camera, ⌥⌘L, ⌘G ⌘I Esc,
+then **Save Frame…** (⌥⌘X) and compare with
+`cargo run -q -p fynkel_cli --bin fynkel -- render --project <copy> --scene <playground id> --out /tmp/r.png --size <the saved size>`
+(`cmp` says identical); leave the tab open for 60 s and see every rigid
+body where the document put it (the stats overlay's tick does not move);
+edit the playground's scene file from a terminal and see the picture
+follow the reload. The Playground session must be closed first.

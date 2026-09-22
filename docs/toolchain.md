@@ -75,6 +75,8 @@ The editor (`apps/editor`, M4 item 2; a Flutter macOS app, `flutter pub get && f
 | `file_picker` | 10.3.10 | the native directory picker behind Open and New Project (macOS `NSOpenPanel`); injected in tests |
 | `watcher` | 1.2.1 | the project-directory watcher that rescans and revalidates on every change (400 ms debounce; caches, build output, `.git/` and the platform runner directories ignored) |
 | `path` | 1.9.x | the layout and preferences files under `~/Library/Application Support/Fynkel Editor/`, project-relative diagnostic paths |
+| `fynkel_flutter` (path) | — | the Scene view's `FynkelViewport` over the edit-preview world (M4-06): the same texture widget a game host uses, with viewport ABI 4's `renderHandle`/`debugLines`/`readFrame` |
+| `fake_async` | 1.3.x (dev) | the Scene view's debounced editor-state save under a fake clock (M4-06) |
 
 Behaviour generator (`packages/fynkel_generator`, ADR-0012 pipeline (b), M2-16):
 

@@ -583,9 +583,10 @@ window, never running game code and never reading a cooked cache
   `T0005` a caught panic, `T0006` I/O.
 
 **The C ABI** (`crates/fynkel_native/include/fynkel_authoring.h`,
-`fynkel_authoring_*`, `FYNKEL_AUTHORING_ABI_VERSION` **2** — version 2
+`fynkel_authoring_*`, `FYNKEL_AUTHORING_ABI_VERSION` **3** — version 2
 added `fynkel_authoring_operate(session, kind, kind_len, args_json,
-args_len)` for M4-05; an editor built against 1 still loads) is the
+args_len)` for M4-05, version 3 the edit-preview world below for M4-06;
+an editor built against an older version still loads) is the
 session one call per method: text in as UTF-8 with a length, one JSON result out
 (`fynkel_authoring_result`, `{ "ok": true, ... }` or `{ "ok": false,
 "diagnostics": [...] }`, valid until the next call on the session) and a
@@ -620,6 +621,88 @@ before `operate` returns), `DocumentHandle`
 the ADR-0014 `Diagnostic` record and `AuthoringException` (`isConflict`,
 `isReadOnly`, `isNothingToReplay`, `isPoisoned`). Its test drives a
 complete session over the ABI on a copy of the fixture project.
+
+#### The edit-preview world (M4-06)
+
+What the editor's Scene view draws (blueprint §19.2e item 6; ADR-0016's
+resolutions): a `fynkel_core::World` in **`WorldConfig::edit_mode`** —
+`step()` applies commands and propagates transforms, no system ever runs,
+the tick counter counts only those steps — holding the **live** document:
+dirty edits included, prefab instances expanded from the editors that
+have the prefab open (or from disk), imported hierarchies from the
+importer. `crates/fynkel_authoring/src/preview.rs` (`Preview`, the
+editor's own crate) maps authoring ids to entities and works on a
+`&mut World` handed in; the world itself is owned by `fynkel_native`
+(`PreviewSlot` in `src/authoring.rs`), so the `FynkelWorld` a viewport
+renders is the one the session edits. The session never runs game code
+and the editor never submits a command or a step to this world
+(`fynkel_world_submit`/`fynkel_world_step` on it would be undone by the
+next sync).
+
+- **Load.** `AuthoringSession::describe_with_anchors(handle)` describes
+  the document as `fynkel_document::describe_scene` would for the runtime
+  and adds the **anchor map** — every derived entity of a prefab instance
+  to the anchor that owns it, so a pick inside an instance answers with
+  the anchor the document knows. `Preview::load` is a `World::load_scene`
+  of that description with the skins registered and the closure retained.
+  The first preview of a session **cooks the project into its cache in
+  process** (`OpenProject::cook`, the same cooker as `fynkel cook`; the
+  report is the open result's `cook`) and every later preview shares the
+  asset store — a failed source is reported and the rest is drawn.
+- **Sync — the incremental rule.** After `apply`, `undo`, `redo`,
+  `reload`, `save`, `rescan` and `operate` the session brings every open
+  preview up to date *before it returns*: `Preview::sync` diffs the world
+  against the description the document has **now** and only the
+  differences become commands — spawns, destroys, reparents, renames,
+  component sets and removes, sibling order — applied through the world's
+  own command path over as many steps as the new hierarchy is deep
+  (`MAX_SYNC_ROUNDS` 64; no document is that deep). Undo, redo, prefab
+  overrides, duplicates and an edit to a prefab open in another tab all go
+  through the same diff; nothing has a special case. When a round makes no
+  progress (the world rejected a command) the preview falls back to a
+  fresh **reload** and says so (`SyncReport { spawned, destroyed, updated,
+  reordered, steps, reloaded }`, reported as `"previews": [{ handle,
+  … }]` on the call's result). This deviates from the blueprint's
+  per-`Mutation` mapping on purpose: a diff needs no knowledge of the
+  transaction kinds and is proven equal to a fresh load after every one of
+  them (`tests/preview.rs` compares `Preview::dump` — the state keyed by
+  authoring id in the shape of `fynkel state dump --json` — with a reload
+  after each transaction kind).
+- **Queries.** `pick(ray)` — a mesh through its bounding sphere then its
+  triangles (two-sided), anything else through a 25 cm sphere
+  (`ICON_RADIUS`) at its origin, nearest first, hits mapped to anchors;
+  `pick_rect` — the entities whose projected bounds overlap a rectangle;
+  `outline_lines` — twelve edges of a mesh's bounds, a cross for the rest,
+  an anchor's whole instance; `icon_lines` — lights in their colour (range
+  circles, cone, arrows), cameras (their frustum to `CAMERA_OUTLINE_DEPTH`
+  4 m), colliders (green); `set_transforms`/`restore_transforms` — the
+  gizmo's preview of local transforms without touching the document;
+  `set_hidden` — the editor's hidden set (a filter in the world's dump and
+  picks, never in the document); `world_matrix`; `stats`. A `View` is
+  `{ world[16], aspect, projection?, fovY?, orthoHeight?, near?, far?,
+  exposureMode?, exposure? }` with the runtime's own projection formulas.
+- **The ABI (version 3).** `fynkel_authoring_preview_open(session, handle)`
+  → `{ "ok", "opened", "stats", "cook"?, "diagnostics" }` (FYN-T0003 for a
+  material — nothing to preview); `fynkel_authoring_preview_close`;
+  `fynkel_authoring_preview_world` → `const FynkelWorld*` for the viewport
+  ABI (`fynkel_apple_viewport_render`, `fynkel_world_stats`…), valid until
+  the preview, document, project or session closes;
+  `fynkel_authoring_preview_call(session, handle, kind, args_json)` with
+  the kinds `camera` (the editor camera, so the world's exposure follows
+  it), `hidden`, `pick` (`view` + `ndc`, or a `ray`), `pickRect`, `lines`
+  (`outline` ids and colour, `iconsAspect`), `worldMatrix`,
+  `setTransforms`, `restoreTransforms`, `resync`, `reload`, `recook` (cook
+  again, point every preview at the new store, reload each), `dump`,
+  `stats`. `close_document` reports `previewClosed`.
+- **Dart.** `DocumentHandle.openPreview()` →
+  `ScenePreview` (`worldAddress` for `FynkelViewportController.
+  renderHandle`, `stats`, `diagnostics`, `cook`; `setCamera`,
+  `setHidden`, `pick`/`pickRay`/`pickRect` → `PreviewPick`, `lines` →
+  `PreviewLines`, `worldMatrices`, `setTransforms`/`restoreTransforms`,
+  `resync` → `PreviewSyncReport`, `reload`/`refreshStats` →
+  `PreviewStats`, `recook` → `CookReport`, `dump`, `close`), and a
+  `PreviewSynced` event on the session's stream after every call that
+  synced.
 
 **Big documents (D7).** RFC 6901 lookups go through `json::Locator`, which
 caches paths and builds a per-object key index lazily for objects of 16+
