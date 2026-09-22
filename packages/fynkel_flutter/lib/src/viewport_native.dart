@@ -6,12 +6,13 @@
 
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 3;
+const viewportAbiVersion = 4;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -209,6 +210,16 @@ external void _setPlaceholders(Pointer<Void> vp, int enabled);
   assetId: _asset,
 )
 external int _setQuality(Pointer<Void> vp, Pointer<Uint8> name, int len);
+@Native<Int32 Function(Pointer<Void>, Pointer<Float>, Uint32)>(
+  symbol: 'fynkel_apple_viewport_debug_lines',
+  assetId: _asset,
+)
+external int _debugLines(Pointer<Void> vp, Pointer<Float> lines, int count);
+@Native<Int32 Function(Pointer<Void>, Int32, Pointer<Uint8>, Uint32)>(
+  symbol: 'fynkel_apple_viewport_read_frame',
+  assetId: _asset,
+)
+external int _readFrame(Pointer<Void> vp, int slot, Pointer<Uint8> out, int cap);
 
 class ViewportNative {
   ViewportNative() {
@@ -284,6 +295,40 @@ class ViewportNative {
 
   /// Whether entities without a MeshRenderer draw as placeholder cubes.
   void setPlaceholders(Pointer<Void> vp, bool enabled) => _setPlaceholders(vp, enabled ? 1 : 0);
+
+  /// Queues world-space line segments for the next render (viewport ABI
+  /// v4): ten floats per segment — `ax ay az bx by bz r g b a` — flat in
+  /// [lines]. Returns how many were queued (a non-finite segment is
+  /// dropped). The renderer's debug pass draws and empties the queue with
+  /// every render, so queue again before each frame.
+  int debugLines(Pointer<Void> vp, Float32List lines) {
+    final count = lines.length ~/ 10;
+    if (count == 0) return 0;
+    final p = calloc<Float>(count * 10);
+    try {
+      p.asTypedList(count * 10).setAll(0, lines);
+      return _debugLines(vp, p, count);
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// The frame in ring [slot] (a render's return value) as tightly packed
+  /// RGBA8, top row first, [width] × [height] × 4 bytes (viewport ABI v4).
+  /// Blocks until the GPU is idle — a screenshot, never a per-frame call.
+  /// Null for a slot the ring lacks.
+  Uint8List? readFrame(Pointer<Void> vp, int slot, int width, int height) {
+    final len = width * height * 4;
+    if (len == 0 || slot < 0) return null;
+    final p = calloc<Uint8>(len);
+    try {
+      final n = _readFrame(vp, slot, p, len);
+      if (n != len) return null;
+      return Uint8List.fromList(p.asTypedList(len));
+    } finally {
+      calloc.free(p);
+    }
+  }
 
   /// Selects the project's quality profile by name (null: the project's
   /// default). False when the store being drawn from has profiles and none

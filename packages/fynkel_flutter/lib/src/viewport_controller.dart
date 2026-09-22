@@ -296,9 +296,38 @@ class FynkelViewportController extends ChangeNotifier {
   /// Returns the slot index, -1 when the ring was full (frame dropped) or
   /// [renderNoWorld]; null when the viewport is not attached or is mid-resize
   /// (the simulation still advanced, so no time is lost).
-  int? render(World world) {
+  int? render(World world) => renderHandle(world.native.handleAddress);
+
+  /// [render] for a world the host holds only as its native `FynkelWorld*`
+  /// address — the editor's edit-preview world
+  /// (`ScenePreview.worldAddress`, authoring ABI v3), which no Dart [World]
+  /// wraps because nothing steps it from Dart. 0 renders nothing
+  /// ([renderNoWorld]).
+  int? renderHandle(int worldAddress) {
     if (_state != ViewportState.attached) return null;
-    return _native!.render(_viewport, world.native.handleAddress);
+    return _native!.render(_viewport, worldAddress);
+  }
+
+  /// Queues world-space line segments the next [render] draws on top of
+  /// the scene — ten floats each, `ax ay az bx by bz r g b a` (metres;
+  /// linear RGBA), flat in [lines] — through the renderer's debug pass
+  /// (depth-tested, unlit; the editor's grid, gizmos and outlines). The
+  /// queue empties with every render: queue, then render, every frame.
+  /// Returns the segments queued, or null when the viewport is not
+  /// attached.
+  int? debugLines(Float32List lines) {
+    if (_state != ViewportState.attached) return null;
+    return _native!.debugLines(_viewport, lines);
+  }
+
+  /// The pixels of the frame a [render] returned as [slot]: tightly packed
+  /// RGBA8, top row first, [physicalWidth] × [physicalHeight] × 4 bytes —
+  /// the editor's Save Frame and its pixel gate against `fynkel render`.
+  /// Blocks until the GPU is idle, so never per frame. Null when the
+  /// viewport is not attached or the slot is not one of its ring's.
+  Uint8List? readFrame(int slot) {
+    if (_state != ViewportState.attached) return null;
+    return _native!.readFrame(_viewport, slot, _width, _height);
   }
 
   /// Rust-side counters since the last call (encode/GPU/present timings).

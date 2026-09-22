@@ -3,6 +3,8 @@
 // `flutter test`): a viewport is created headlessly on the host GPU, so
 // this also exercises create → register → resize/rebind → detach ordering.
 
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
@@ -50,7 +52,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 3);
+    expect(viewportAbiVersion, 4);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -74,10 +76,31 @@ void main() {
     final world = World.create();
     addTearDown(world.dispose);
     world.frame(1 / 60);
+    // Debug lines queue for the next render (viewport ABI v4): a NaN
+    // segment is dropped; the render that follows draws them (the Rust
+    // test `debug_lines.rs` counts them in the frame).
+    final lines = Float32List.fromList([
+      0, 0, 0, 1, 0, 0, 1, 0, 0, 1, //
+      0, 0, 0, double.nan, 0, 0, 1, 0, 0, 1, //
+    ]);
+    expect(controller.debugLines(lines), 1);
+    expect(controller.debugLines(Float32List(0)), 0);
     final slot = controller.render(world);
     expect(slot, isNotNull);
     expect(slot, greaterThanOrEqualTo(0));
-    expect(controller.render(world), isNot(renderNoWorld));
+    // A world by its native address (the editor's preview world); 0 is no
+    // world.
+    final handleSlot = controller.renderHandle(world.native.handleAddress);
+    expect(handleSlot, isNot(renderNoWorld));
+    // The rendered slot's pixels come back as RGBA8 at the physical size
+    // (viewport ABI v4: the editor's Save Frame); a slot the ring lacks is
+    // null.
+    final frame = controller.readFrame(handleSlot!);
+    expect(frame, isNotNull);
+    expect(frame!.length, 64 * 48 * 4);
+    expect(frame.every((b) => b == 0), isFalse, reason: 'the clear colour is not black');
+    expect(controller.readFrame(9), isNull);
+    expect(controller.renderHandle(0), renderNoWorld);
 
     // Quality profiles come from the project the world's cache was cooked
     // from; this world has none, so any name is accepted and the engine

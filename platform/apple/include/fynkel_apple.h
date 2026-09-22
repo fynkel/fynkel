@@ -1,5 +1,8 @@
-/* Fynkel macOS viewport ABI v3 (platform/apple). Pairs with fynkel.h: the
- * same dylib exports both. See platform/apple/README.md for the contract. */
+/* Fynkel macOS viewport ABI v4 (platform/apple). Pairs with fynkel.h: the
+ * same dylib exports both. See platform/apple/README.md for the contract.
+ * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
+ * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
+ * editor's overlays and Save Frame, M4-06). */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
 
@@ -10,7 +13,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 2
+#define FYNKEL_APPLE_ABI_VERSION 4
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -115,6 +118,20 @@ void fynkel_apple_viewport_set_placeholders(FynkelAppleViewport *vp, int32_t ena
  * has that name (the default stays). */
 int32_t fynkel_apple_viewport_set_quality(FynkelAppleViewport *vp,
                                           const uint8_t *name_utf8, uint32_t name_len);
+/* Queues `count` world-space line segments for the NEXT render — ten floats
+ * each, ax ay az bx by bz r g b a (metres; linear RGBA) — drawn by the
+ * renderer's debug pass: depth-tested against the opaque scene, unlit,
+ * cleared by every render (queue again before each frame). Returns the
+ * segments queued (a non-finite segment is dropped), -1 for NULL. */
+int32_t fynkel_apple_viewport_debug_lines(FynkelAppleViewport *vp,
+                                          const float *lines, uint32_t count);
+/* Copies the frame in ring slot `slot` (a render's return value) into `out`
+ * as tightly packed RGBA8, top row first: width * height * 4 bytes at the
+ * viewport's size. Blocks until the GPU is idle — a screenshot, never a
+ * per-frame call. Returns the bytes written, -1 for NULL, a bad slot or a
+ * `cap` smaller than the frame. */
+int32_t fynkel_apple_viewport_read_frame(const FynkelAppleViewport *vp, int32_t slot,
+                                         uint8_t *out, uint32_t cap);
 
 /* Presenter (raster) thread: the only call it makes. */
 int32_t fynkel_apple_viewport_acquire_presented(const FynkelAppleViewport *vp);

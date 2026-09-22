@@ -250,8 +250,10 @@ pub struct FynkelAppleViewportStats {
 pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 
 /// Viewport ABI version; bumped with `include/fynkel_apple.h` (3: the
-/// M3-16 instrumentation fields of `FynkelAppleViewportStats`).
-pub const APPLE_ABI_VERSION: u32 = 3;
+/// M3-16 instrumentation fields of `FynkelAppleViewportStats`; 4:
+/// `fynkel_apple_viewport_debug_lines` and `fynkel_apple_viewport_read_frame`,
+/// the editor's overlays and its Save Frame — M4-06).
+pub const APPLE_ABI_VERSION: u32 = 4;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -468,6 +470,82 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_quality(
         );
         -1
     }
+}
+
+/// Queues `count` world-space line segments for the NEXT render of this
+/// viewport — ten `f32` each: `ax ay az bx by bz r g b a` (metres; linear,
+/// display-referred RGBA) — through the renderer's debug primitives
+/// (blueprint §19.2d item 5): depth-tested against the opaque scene, never
+/// written, unlit. The queue empties with every render, so a host draws its
+/// grid, gizmos and outlines by queuing them before each frame (the
+/// editor's Scene view, M4-06). Returns the segments queued, -1 for a NULL
+/// viewport or a NULL `lines` with a non-zero `count`; a non-finite value
+/// drops that segment.
+///
+/// # Safety
+/// `vp` must be a live viewport; `lines` readable for `count * 10` floats,
+/// or NULL with `count` 0.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_debug_lines(
+    vp: *mut Viewport,
+    lines: *const f32,
+    count: u32,
+) -> i32 {
+    let Some(v) = vp.as_mut() else { return -1 };
+    if count == 0 {
+        return 0;
+    }
+    if lines.is_null() {
+        return -1;
+    }
+    let floats = std::slice::from_raw_parts(lines, count as usize * 10);
+    let debug = v.renderer.debug();
+    let mut queued = 0;
+    for l in floats.chunks_exact(10) {
+        if l.iter().any(|f| !f.is_finite()) {
+            continue;
+        }
+        debug.line(
+            glam::Vec3::new(l[0], l[1], l[2]),
+            glam::Vec3::new(l[3], l[4], l[5]),
+            [l[6], l[7], l[8], l[9]],
+        );
+        queued += 1;
+    }
+    queued
+}
+
+/// Copies the frame in ring slot `slot` (what `fynkel_apple_viewport_render`
+/// returned) into `out` as tightly packed RGBA8, top row first — `width ×
+/// height × 4` bytes at the viewport's current size. Blocks until every
+/// submitted frame has completed; the editor's Save Frame and its pixel
+/// gate against `fynkel render`, never a per-frame path. Returns the bytes
+/// written, or -1 for a NULL viewport or `out`, a slot the ring lacks, or a
+/// `cap` smaller than the frame.
+///
+/// # Safety
+/// `vp` must be a live viewport; `out` writable for `cap` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_read_frame(
+    vp: *const Viewport,
+    slot: i32,
+    out: *mut u8,
+    cap: u32,
+) -> i32 {
+    let Some(v) = vp.as_ref() else { return -1 };
+    if out.is_null() || slot < 0 {
+        return -1;
+    }
+    let (w, h) = v.ring.size();
+    let needed = w as usize * h as usize * 4;
+    if (cap as usize) < needed {
+        return -1;
+    }
+    let Some(pixels) = v.ring.read_frame(slot as u32) else {
+        return -1;
+    };
+    std::ptr::copy_nonoverlapping(pixels.as_ptr(), out, needed);
+    needed as i32
 }
 
 /// Sets the bounded wait `fynkel_apple_viewport_acquire_presented` may spend

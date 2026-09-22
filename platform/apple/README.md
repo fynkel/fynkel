@@ -32,8 +32,16 @@ lag-0 wait bounds, viewport over a stepped world).
 
 ## ABI
 
-`include/fynkel_apple.h` (v1). The dylib built from this crate also exports
+`include/fynkel_apple.h` (v4: v2 came with the M3 spike — the asset
+store, placeholders — and grew the M3-05/05a/06 stats fields, v3 the
+M3-16 instrumentation fields, v4 the editor's
+`fynkel_apple_viewport_debug_lines` and `fynkel_apple_viewport_read_frame`
+— M4-06, additive). The dylib built from this crate also exports
 `fynkel_native`'s ABI (`crates/fynkel_native/include/fynkel.h`), so a Flutter
 host loads one library. `fynkel_apple_viewport_render(viewport, world)` takes
 the `FynkelWorld*` the SDK holds and extracts it in Rust; the host never sees
-the renderer.
+the renderer. `debug_lines` queues world-space segments (ten floats each,
+linear RGBA) for the next render's depth-tested unlit debug pass and is
+cleared by that render; `read_frame(slot, out, cap)` copies a rendered
+slot as RGBA8, top row first, after waiting for the GPU — a screenshot
+path (`fynkel render` and the editor's Save Frame agree to the byte).

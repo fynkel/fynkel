@@ -530,6 +530,35 @@ impl IoSurfaceRing {
             Some(p)
         }
     }
+
+    /// The whole frame in slot `index` as tightly packed RGBA8 rows, top
+    /// row first — the editor's "Save Frame" and its pixel gate against
+    /// `fynkel render` (viewport ABI v4). Waits for every submitted frame
+    /// to complete first, so the slot's picture is the one its render
+    /// drew; never on a per-frame path.
+    pub fn read_frame(&self, index: u32) -> Option<Vec<u8>> {
+        use objc2_io_surface::IOSurfaceLockOptions;
+        let s = self.surfaces.get(index as usize)?;
+        let (width, height) = self.size();
+        self.wait_idle();
+        let mut out = Vec::with_capacity((width * height * 4) as usize);
+        unsafe {
+            if s.lock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut()) != 0 {
+                return None;
+            }
+            let base = s.base_address().as_ptr() as *const u8;
+            let stride = s.bytes_per_row();
+            for y in 0..height as usize {
+                let row = std::slice::from_raw_parts(base.add(y * stride), width as usize * 4);
+                for px in row.chunks_exact(4) {
+                    // The ring's surfaces are BGRA (`TEXTURE_FORMAT`).
+                    out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+                }
+            }
+            s.unlock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut());
+        }
+        Some(out)
+    }
 }
 
 type RingParts = (Vec<Slot>, Vec<CFRetained<IOSurfaceRef>>);
