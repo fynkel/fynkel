@@ -230,10 +230,12 @@ pub fn run(args: &[String]) -> ExitCode {
                 "shadowCasters": stats.shadow_casters,
                 "shadowMap": stats.shadow_map,
                 "shadowCascades": stats.shadow_cascades,
+                "ambientOcclusion": stats.ambient_occlusion,
                 "quality": {
                     "profile": quality.profile,
                     "shadows": quality.settings.shadows,
                     "shadowResolution": quality.settings.shadow_resolution,
+                    "ambientOcclusion": quality.settings.ambient_occlusion,
                     "msaa": quality.settings.msaa,
                     "renderScale": quality.settings.render_scale,
                     "anisotropy": quality.settings.anisotropy,
@@ -245,7 +247,7 @@ pub fn run(args: &[String]) -> ExitCode {
         );
     } else {
         println!(
-            "{}: {}x{} — {} \"{}\": {} entities, {} instances in {} draw(s) ({} meshes, {} placeholders, {} missing, {} transparent, {} skinned over {} joints, {} culled), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}, quality {} (msaa {}, {}, {}x{})",
+            "{}: {}x{} — {} \"{}\": {} entities, {} instances in {} draw(s) ({} meshes, {} placeholders, {} missing, {} transparent, {} skinned over {} joints, {} culled), camera {}, sun {}, {} light(s){}, EV100 {:.2}{}, quality {} (msaa {}, {}, {}, {}x{})",
             opts.out.display(),
             opts.width,
             opts.height,
@@ -288,6 +290,11 @@ pub fn run(args: &[String]) -> ExitCode {
                 )
             } else {
                 "no shadow".to_string()
+            },
+            if stats.ambient_occlusion {
+                "ambient occlusion"
+            } else {
+                "no ambient occlusion"
             },
             quality.internal_size.0,
             quality.internal_size.1,

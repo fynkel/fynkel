@@ -239,6 +239,7 @@ class Hud extends StatelessWidget {
               'extract ${v.extract.p95.toStringAsFixed(2)}  prepare ${v.prepare.p95.toStringAsFixed(2)}  '
               'encode ${v.encode.p95.toStringAsFixed(2)}  total ${s.totalWork.p95.toStringAsFixed(2)} ms',
           'gpu p95    frame ${v.gpuFrame.p95.toStringAsFixed(2)} ms  (shadow ${v.gpuShadow.p95.toStringAsFixed(2)}, '
+              'ao ${v.gpuAo.p95.toStringAsFixed(2)}, '
               'scene ${v.gpuScene.p95.toStringAsFixed(2)}, post ${v.gpuPost.p95.toStringAsFixed(2)})  '
               '${(v.gpuBytes / 1048576).toStringAsFixed(0)} MB',
           'memory     native ${(s.world.nativeBytes / 1048576).toStringAsFixed(1)} MB  '

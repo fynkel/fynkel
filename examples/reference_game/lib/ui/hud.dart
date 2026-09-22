@@ -169,6 +169,7 @@ class StatsBlock extends StatelessWidget {
         if (s.viewport case final v?) ...[
           'meshes     ${v.instances} drawn in ${v.draws} draws, ${v.culled} culled, ${v.missing} missing',
           'gpu p95    frame ${v.gpuFrame.p95.toStringAsFixed(2)} ms  (shadow ${v.gpuShadow.p95.toStringAsFixed(2)}, '
+              'ao ${v.gpuAo.p95.toStringAsFixed(2)}, '
               'scene ${v.gpuScene.p95.toStringAsFixed(2)}, post ${v.gpuPost.p95.toStringAsFixed(2)})  '
               '${(v.gpuBytes / 1048576).toStringAsFixed(0)} MB',
           'memory     native ${(s.world.nativeBytes / 1048576).toStringAsFixed(1)} MB  '

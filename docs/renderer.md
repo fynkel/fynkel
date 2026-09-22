@@ -45,14 +45,20 @@ without an `Environment` component uses `Environment::default()` (white
 
 ## Passes
 
-The chain is `shadow → opaque → transparent → post → presentation`, every
-pass with fixed inputs and outputs; the opaque and transparent stages
-share one render pass because they share the attachments.
+The chain is `shadow → depth prepass → ambient occlusion → AO blur →
+opaque → transparent → post → presentation`, every pass with fixed
+inputs and outputs; the opaque and transparent stages share one render
+pass because they share the attachments. The three middle passes are the
+ambient-occlusion stage (R2) and run only while the quality profile asks
+for it; without them the chain is exactly what it was, down to the bits.
 
 | Pass | Reads | Writes | When |
 | --- | --- | --- | --- |
 | **shadow** | shadow uniforms (sun `view_proj`), casters' base-colour map (mask discard) | `SHADOW_FORMAT` (`Depth32Float`) map, `shadow_resolution`², cleared | shadows on, a casting sun, ≥ 1 caster |
-| **opaque** | frame uniforms, shadow map, material maps | HDR colour (`HDR_FORMAT` `Rgba16Float`, `msaa` samples) + `Depth32Float`, both cleared (colour to transparent black); at MSAA 4 the colour resolves into the single-sample HDR texture and the samples are discarded | always |
+| **depth prepass** | frame uniforms, the opaque instances, their base-colour map (mask discard) | the scene `Depth32Float` (`msaa` samples), cleared and **stored** | ambient occlusion on, ≥ 1 opaque draw |
+| **ambient occlusion** | the frame uniform alone, the stored depth | `AO_FORMAT` (`R8Unorm`) at the internal size | the same |
+| **AO blur** | the frame uniform, the depth, the AO target | a second `R8Unorm` — what the opaque pass samples | the same |
+| **opaque** | frame uniforms, shadow map, the AO target, material maps | HDR colour (`HDR_FORMAT` `Rgba16Float`, `msaa` samples) + `Depth32Float`, the colour cleared to transparent black and the depth **loaded** from the prepass (cleared when the stage did not run); at MSAA 4 the colour resolves into the single-sample HDR texture and the samples are discarded | always |
 | **transparent** | the same, plus the depth just written (read-only) | the same colour attachment, blended | `blend` instances or debug lines queued |
 | **post** | resolved HDR texture, frame + post uniforms | the host's target — or the LDR intermediate (target format, internal size) when `render_scale ≠ 1` | always |
 | **presentation** | LDR intermediate | the host's target, bilinear | `render_scale ≠ 1` |
@@ -64,7 +70,9 @@ share one render pass because they share the attachments.
    mask` casters discard exactly as in the opaque pass; `blend` materials
    never cast. `MeshRenderer.cast_shadows` opts a mesh out; placeholders
    and missing-mesh cubes cast.
-2. **Opaque**: back-face-culled batches first, then double-sided ones,
+2. **Depth prepass, ambient occlusion, AO blur**: § Ambient occlusion
+   below.
+3. **Opaque**: back-face-culled batches first, then double-sided ones,
    one `draw_indexed` per batch over its scene range (the instances
    inside the camera frustum, `Batch::first..+count`), then the
    **sky**, when the `Environment` names a texture: a fullscreen triangle
@@ -72,13 +80,13 @@ share one render pass because they share the attachments.
    equirectangular lookup (`u = 0.5 + atan2(d.x, −d.z) / 2π` — `u = 0.5`
    looks down −Z, `v` from up to down; `sky_rotation` turns the sky about
    +Y) × `sky_intensity`.
-3. **Transparent**: every `blend` instance sorted **back to front** by the
+4. **Transparent**: every `blend` instance sorted **back to front** by the
    distance of its origin from the camera (whatever the record order),
    one `draw_indexed` each, depth tested and not written, blended
    `SrcAlpha / OneMinusSrcAlpha` (colour) and `One / OneMinusSrcAlpha`
    (alpha, so the coverage accumulates). Then the **debug lines**
    (`LineList`, depth `LessEqual` without write, no lighting).
-4. **Post**: exposure → ACES (Stephen Hill's fit of the RRT + sRGB ODT) →
+5. **Post**: exposure → ACES (Stephen Hill's fit of the RRT + sRGB ODT) →
    sRGB encode unless the target format is an sRGB format (then the
    hardware encodes). The HDR alpha channel is a tag with coverage:
    `0` background → the exact `CLEAR_COLOR` bytes (`clear_rgba8()`; what
@@ -88,7 +96,7 @@ share one render pass because they share the attachments.
    composited over the clear colour by `coverage`; `> 1.5` display-referred
    (unlit magenta cube, debug lines: alpha 2 × coverage) → clamped and
    encoded only. At coverage 1 the result is bit-identical to V1 (a).
-5. **Presentation**: only with a render scale, a bilinear fullscreen copy
+6. **Presentation**: only with a render scale, a bilinear fullscreen copy
    of the LDR intermediate to the target size.
 
 ### Shadows (`src/shadow.rs`, `shaders/shadow.wgsl`)
@@ -150,6 +158,76 @@ term in the band would blend everywhere — which is what it did in the
 first cut, and it cost 0.8 ms of the scene pass at stress scale).
 Points no cascade covers — past the shadowed range — are lit. Only the
 sun's direct term is shadowed; ambient and punctual lights are not.
+
+### Ambient occlusion (`shaders/ao.wgsl`, R2)
+
+The sun's shadow says what the sun cannot see; ambient occlusion says
+what the *sky* cannot see — the contact darkening in a corner, under a
+crate, along a seam — and without it every ambient-lit surface is the
+same flat value whatever is standing next to it.
+
+It is screen-space, computed from depth, in three passes between the
+shadow and the scene:
+
+1. **The depth prepass** draws every opaque and mask instance the scene
+   pass will draw — the same four pipelines, the same batches, the same
+   ranges — with `fs_depth` (colour dropped, only the alpha-mask discard
+   left) over the scene pass's **own vertex stage**. Two things make the
+   depths agree to the bit, and both are load-bearing: `VsOut.clip` is
+   `@invariant`, and the prepass culls exactly as the scene pass does
+   (`Pipelines::depth(skinned, double_sided)` mirrors `opaque(…)`). The
+   scene pass then loads this depth rather than clearing it, and its
+   compare is `LessEqual` so an equal depth still shades. A prepass that
+   culled differently would write a *nearer* depth than the scene pass
+   computes and reject nearly every fragment — which is exactly what a
+   single no-culling prepass did before this was fixed.
+2. **The SSAO pass** reads that depth (`texture_depth_multisampled_2d`
+   at MSAA, sample 0 — AO is low-frequency, per-sample occlusion buys
+   nothing) and writes one `R8Unorm` byte a pixel. Per pixel: the world
+   point from `inv_view_proj`, the normal from the four neighbouring
+   depths (the nearer neighbour on each axis, so a silhouette does not
+   bend it) flipped to face the camera, then `AO_SAMPLES` (12) points in
+   a hemisphere about that normal, `AO_RADIUS` (0.6 m) out, crowded
+   toward the origin by a golden-angle spiral and turned per pixel by
+   interleaved gradient noise. A sample occludes when the surface drawn
+   at its pixel is nearer the eye than the sample point by more than
+   `AO_BIAS` (2 cm) — both lie on the same ray, so their distances order
+   them — weighted by `AO_RADIUS / |s − p|` so an occluder beyond the
+   hemisphere fades out instead of darkening across a gap. The result is
+   `(1 − occlusion)^1.35`.
+3. **The blur** averages a 4×4 square of that, dropping taps more than
+   2 % of the view distance away along the ray, which is what turns the
+   per-pixel rotation back into a smooth term without smearing across a
+   silhouette.
+
+`mesh.wgsl` multiplies the blurred value into `ao` — the material's own
+occlusion factor — so it scales **only** the ambient and IBL term:
+
+```wgsl
+radiance += mix(ambient_term, ibl_term, frame.sky.z) * ao;
+```
+
+Direct light is not occluded by it (that is the shadow map's job, and
+darkening a sunlit face with a screen-space guess is the classic way to
+make a scene look dirty). Blend instances are skipped: they are not in
+the prepass, so the AO under them belongs to whatever is behind them.
+
+The stage is one `R8Unorm` pair at the internal size (2 bytes a pixel on
+top of the attachments) and one query pair in the GPU timer — its begin
+is the prepass's, its end the blur's, so `FrameStats::gpu_ao_us` and
+`ViewportStatsSnapshot.gpuAo` are the whole stage.
+`FrameStats::ambient_occlusion` says whether it ran; the profile's
+`ambientOcclusion` turns it off, and then the chain, the attachments and
+the picture are what they were before R2.
+
+Measured (`benchmarks/m3/results/2026-09-22-94490ad`): 1.81 ms p95 on the
+stress scene, where the whole GPU frame nevertheless fell from 3.56 to
+3.07 ms p95 — the depth prepass hands the scene pass a complete depth
+buffer, and at 5 530 instances early-Z saves more than the three passes
+cost. In a nearly empty frame there is no overdraw to save and the cost
+is just cost: the reference game's GPU frame went 4.01 → 6.11 ms p95. A
+half-resolution AO target is the lever if that ever matters — the
+estimate is low-frequency and blurred anyway.
 
 ### Instancing and culling (`src/culling.rs`)
 
@@ -223,15 +301,18 @@ carries them, and `ExtractRenderer` resolves the active one at each
    project has it,
 3. the project's default profile (`unknown_profile` names the requested
    one when it was not found — the request is kept for the next store),
-4. the engine defaults (`profile: "default"`: shadows on, 2048, MSAA 4,
-   scale 1, anisotropy 8) when the project declares no quality block.
+4. the engine defaults (`profile: "default"`: shadows on, 2048, ambient
+   occlusion on, MSAA 4, scale 1, anisotropy 8) when the project declares
+   no quality block.
 
 A profile becomes a `Quality` through `clamped()`: `msaa` 1 or 4,
 `shadow_resolution` a power of two in `256..=8192`, `render_scale` in
 `0.25..=2`, `anisotropy` in `1..=16`; `textureMaxSize` is the cook's
-concern (D3) and the renderer ignores it. Switching is cheap where it can
+concern (D3) and the renderer ignores it; `ambientOcclusion` is a
+straight on/off. Switching is cheap where it can
 be: pipelines are rebuilt only when the sample count changes,
-attachments when the internal size or samples change, the shadow map
+attachments when the internal size, the samples or the AO toggle change,
+the shadow map
 when its resolution changes, the material sampler (and with it the cached
 material bind groups) when the anisotropy changes. `quality()` reports the
 `QualityStatus` in force; `quality_profiles()` lists the names. Every
@@ -453,12 +534,14 @@ hundreds of pixels to the left while the unposed extract has not.
 
 With `Features::TIMESTAMP_QUERY` (`device_features(adapter)` asks for it;
 Metal has it everywhere Fynkel runs) the renderer writes a timestamp
-pair at the boundaries of the shadow, scene, post and present passes
-into one of two alternating query sets, resolves the **previous** frame's
+pair at the boundaries of the shadow, scene, post and present passes,
+and a fifth pair split across the ambient-occlusion stage's three passes
+(begin at the prepass, end at the blur), into one of two alternating
+query sets, resolves the **previous** frame's
 set at the start of the next `draw` (Apple's passes overlap, so a
 same-frame resolve reads unwritten end stamps) and maps the copy without
-waiting; `FrameStats::gpu_shadow_us`/`gpu_scene_us`/`gpu_post_us` are the
-passes and `gpu_frame_us` the span `max(end) − min(begin)`, three or four
+waiting; `FrameStats::gpu_shadow_us`/`gpu_ao_us`/`gpu_scene_us`/`gpu_post_us` are
+the passes and `gpu_frame_us` the span `max(end) − min(begin)`, three or four
 frames late, with `gpu_timed`/`gpu_untimed` as the read-back counters.
 `prepare_us`/`encode_us` time the two CPU halves, and `gpu_bytes` is the
 estimate of what the renderer holds on the GPU (mesh buffers, textures'
@@ -468,20 +551,23 @@ full table.
 
 ## Pipelines and caches — the variant cap
 
-Exactly **fourteen** render pipelines exist, all created in `new`
+Exactly **twenty** render pipelines exist, all created in `new`
 (`PIPELINE_VARIANTS`) and rebuilt as a set only when the sample count
 changes; nothing is compiled at draw time:
 
 | Pipeline | Target | Samples | Culling | Depth | Blend | Vertex entry |
 | --- | --- | --- | --- | --- | --- | --- |
-| `mesh` | HDR | msaa | back | write, `Less` | — | `vs_main` |
-| `mesh_double_sided` | HDR | msaa | none | write, `Less` | — | `vs_main` |
-| `transparent` | HDR | msaa | back | read, `Less` | src-alpha | `vs_main` |
-| `transparent_double_sided` | HDR | msaa | none | read, `Less` | src-alpha | `vs_main` |
+| `mesh` | HDR | msaa | back | write, `LessEqual` | — | `vs_main` |
+| `mesh_double_sided` | HDR | msaa | none | write, `LessEqual` | — | `vs_main` |
+| `transparent` | HDR | msaa | back | read, `LessEqual` | src-alpha | `vs_main` |
+| `transparent_double_sided` | HDR | msaa | none | read, `LessEqual` | src-alpha | `vs_main` |
 | `mesh_skinned`, `mesh_skinned_double_sided`, `transparent_skinned`, `transparent_skinned_double_sided` | the same four | | | | | `vs_skinned` (M3-19, § Skinning) |
 | `sky` | HDR | msaa | none | read, `LessEqual` | — | |
 | `shadow` | shadow map (depth only) | 1 | none | write, `Less`, biased | — | `vs_main` |
 | `shadow_skinned` | the same | | | | | `vs_skinned` |
+| `depth`, `depth_double_sided` | none (depth only) | msaa | back / none | write, `LessEqual` | — | `vs_main` (R2, § Ambient occlusion) |
+| `depth_skinned`, `depth_skinned_double_sided` | the same two | | | | | `vs_skinned` |
+| `ao`, `ao_blur` | `R8Unorm` | 1 | none | none | — | |
 | `debug` | HDR | msaa | none | read, `LessEqual` | — | |
 | `post` | host format | 1 | none | none | — | |
 | `present` | host format | 1 | none | none | — | |
@@ -491,8 +577,9 @@ instance flags and fallback textures — not variants. A new variant needs
 a row in this table. The item 19 rework of the cap: skinning is a
 different vertex input layout (a third vertex buffer) and a different
 vertex entry, which wgpu cannot make data, so it doubles the mesh and
-shadow rows — the 9 of M3-05 became 14, still all created up front and
-never at draw time; nothing else about a skinned draw (material, lights,
+shadow rows — the 9 of M3-05 became 14, and R2's depth prepass (which
+must cull exactly as the opaque pass does) plus the two AO passes made
+20, still all created up front and never at draw time; nothing else about a skinned draw (material, lights,
 shadow, blend) differs, and `Pipelines::opaque(skinned, double_sided)` /
 `transparent(…)` pick the variant. Bind groups are cached per material `AssetRef`
 (five texture views + the sampler, the fallback view for every unbound
@@ -551,7 +638,11 @@ cube, a soft edge, gone with `shadows: false`, a 512 map, a non-casting
 sun); from R1: a sixty-metre corridor with a caster at each end, both
 shadowed (every quadrant of the atlas drawn and sampled where it
 belongs), the near one keeping contact with the floor, and no seam in
-the luminance of the lit floor where the cascades change;
+the luminance of the lit floor where the cascades change; from R2: a
+cube standing on an ambient-lit floor — the floor at its foot darkens by
+a quarter, the open floor four metres away is bit-identical to the same
+frame with `ambientOcclusion: false`, and the occlusion fades outward
+over about forty centimetres instead of ending at an edge;
 `cast_shadows` / `receive_shadows` per `MeshRenderer`, blend
 materials compositing back to front whatever the record order, MSAA 4
 blending silhouette edges (and 8 ≡ 4, 2 ≡ 1), render scale 0.5 / 0.75 /

@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 4
+#define FYNKEL_APPLE_ABI_VERSION 5
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -81,6 +81,7 @@ typedef struct FynkelAppleViewportStats {
   uint32_t encode_p50_us, encode_p95_us, encode_p99_us;
   uint32_t gpu_timestamps, gpu_frames_timed, gpu_frames_untimed;
   uint32_t gpu_shadow_p50_us, gpu_shadow_p95_us, gpu_shadow_p99_us;
+  uint32_t gpu_ao_p50_us, gpu_ao_p95_us, gpu_ao_p99_us;
   uint32_t gpu_scene_p50_us, gpu_scene_p95_us, gpu_scene_p99_us;
   uint32_t gpu_post_p50_us, gpu_post_p95_us, gpu_post_p99_us;
   uint32_t gpu_frame_p50_us, gpu_frame_p95_us, gpu_frame_p99_us;

@@ -55,8 +55,8 @@ struct Frame {
     // w: cascades in the atlas.
     shadow: vec4<f32>,
     // x: lights in the pool; y: 1 when the sky is drawn; z: 1 when the
-    // post pass must sRGB-encode (the target is a Unorm format);
-    // w: unused.
+    // post pass must sRGB-encode (the target is a Unorm format); w: 1
+    // when `ssao_tex` holds this frame's ambient occlusion (R2).
     counts: vec4<u32>,
     // The frame's lights. A mesh reads only the ones its instance lists
     // (E1 light culling); the index is a byte of `Instance.lights`.
@@ -71,6 +71,9 @@ struct Frame {
 @group(0) @binding(4) var irradiance_cube: texture_cube<f32>;
 @group(0) @binding(5) var specular_cube: texture_cube<f32>;
 @group(0) @binding(6) var brdf_lut: texture_2d<f32>;
+// Ambient occlusion at the internal size (R2): a 1×1 white texture when
+// the profile has it off. The AO passes do not bind this group.
+@group(0) @binding(7) var ssao_tex: texture_2d<f32>;
 
 // A world direction in the environment's frame: the sky's rotation about
 // +Y, so what a mirror reflects is what the sky pass drew.

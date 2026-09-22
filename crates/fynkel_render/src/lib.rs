@@ -70,6 +70,9 @@ pub const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// The sun's shadow map format.
 pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+/// The ambient-occlusion targets (R2): one byte a pixel, 1 unoccluded.
+pub const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+
 /// Point + spot lights one object can be lit by — the blueprint's Tier-1
 /// budget. The strongest at the object's bounds win (E1 light culling).
 pub const MAX_LIGHTS: usize = 8;
@@ -332,6 +335,8 @@ pub struct FrameStats {
     pub shadow_cascades: u32,
     /// Debug lines drawn.
     pub debug_lines: u32,
+    /// Whether the frame ran the ambient-occlusion stage (R2).
+    pub ambient_occlusion: bool,
     /// Samples per pixel of the scene passes (1 or 4).
     pub msaa: u32,
     /// The internal render size (target × render scale).
@@ -369,11 +374,13 @@ pub struct FrameStats {
     pub gpu_timestamps: bool,
     /// GPU time of the most recently read-back frame's passes (the
     /// read-back trails the draw by three or four frames): the shadow
-    /// pass, the scene pass (opaque + sky + transparent, resolved), post
-    /// (+ present), and the frame's span from the first pass's begin to
-    /// the last pass's end — less than the sum on a tile-based GPU, whose
-    /// passes overlap.
+    /// pass, the ambient-occlusion stage (the depth prepass, SSAO and its
+    /// blur, timed as one span), the scene pass (opaque + sky +
+    /// transparent, resolved), post (+ present), and the frame's span
+    /// from the first pass's begin to the last pass's end — less than the
+    /// sum on a tile-based GPU, whose passes overlap.
     pub gpu_shadow_us: u32,
+    pub gpu_ao_us: u32,
     pub gpu_scene_us: u32,
     pub gpu_post_us: u32,
     pub gpu_frame_us: u32,
@@ -386,9 +393,14 @@ pub struct FrameStats {
     pub gpu_timed: u32,
 }
 
-/// The sun's shadow, the scene, post (+ present): begin/end query pairs
-/// (`GpuTimer`).
-const TIMESTAMP_QUERIES: u32 = 8;
+/// The sun's shadow, the scene, post (+ present) and the ambient
+/// occlusion stage: begin/end query pairs (`GpuTimer`). The AO pair is
+/// split across three passes — its begin is the depth prepass's, its end
+/// the blur's — so the stage is one span.
+const TIMESTAMP_QUERIES: u32 = 10;
+/// The query pair the ambient-occlusion stage writes (after the four the
+/// original pass chain uses: shadow 0, scene 1, post 2, presentation 3).
+const AO_PAIR: u32 = 4;
 const TIMESTAMP_SLOTS: usize = 3;
 
 /// A read-back slot of the [`GpuTimer`]: `state` 0 free, 1 copied into by
@@ -396,9 +408,10 @@ const TIMESTAMP_SLOTS: usize = 3;
 struct TimestampSlot {
     buffer: wgpu::Buffer,
     state: std::sync::Arc<std::sync::atomic::AtomicU8>,
-    /// Which pass pairs the frame wrote (a skipped shadow or present pass
-    /// leaves stale values in its queries).
+    /// Which pass pairs the frame wrote (a skipped shadow, AO or present
+    /// pass leaves stale values in its queries).
     shadow: bool,
+    ao: bool,
     present: bool,
 }
 
@@ -416,7 +429,7 @@ struct GpuTimer {
     /// frame's stamps until `draw` resolves it.
     writing: usize,
     /// The previous frame's pass flags, resolved with its set.
-    pending: Option<(bool, bool)>,
+    pending: Option<(bool, bool, bool)>,
     resolve: wgpu::Buffer,
     slots: Vec<TimestampSlot>,
     next: usize,
@@ -449,6 +462,7 @@ impl GpuTimer {
                 }),
                 state: Default::default(),
                 shadow: false,
+                ao: false,
                 present: false,
             })
             .collect();
@@ -465,20 +479,37 @@ impl GpuTimer {
 
     /// The pass's timestamp writes for query pair `pair`.
     fn writes(&self, pair: u32) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        self.writes_part(pair, true, true)
+    }
+
+    /// Half a pair: the AO stage's three passes share pair 4, the first
+    /// writing its beginning and the last its end.
+    fn writes_part(
+        &self,
+        pair: u32,
+        begin: bool,
+        end: bool,
+    ) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
         Some(wgpu::RenderPassTimestampWrites {
             query_set: &self.query_sets[self.writing],
-            beginning_of_pass_write_index: Some(pair * 2),
-            end_of_pass_write_index: Some(pair * 2 + 1),
+            beginning_of_pass_write_index: begin.then_some(pair * 2),
+            end_of_pass_write_index: end.then_some(pair * 2 + 1),
         })
     }
 
     /// Before a frame's passes: resolves the previous frame's set into the
     /// next free slot (the frame goes untimed when every slot is still in
-    /// flight) and swaps the sets; `shadow`/`present` are this frame's
-    /// pass flags, kept for its own resolve next time.
-    fn begin_frame(&mut self, encoder: &mut wgpu::CommandEncoder, shadow: bool, present: bool) {
+    /// flight) and swaps the sets; `shadow`/`ao`/`present` are this
+    /// frame's pass flags, kept for its own resolve next time.
+    fn begin_frame(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        shadow: bool,
+        ao: bool,
+        present: bool,
+    ) {
         use std::sync::atomic::Ordering;
-        if let Some((shadow, present)) = self.pending.take() {
+        if let Some((shadow, ao, present)) = self.pending.take() {
             let previous = 1 - self.writing;
             let i = self.next;
             let slot = &mut self.slots[i];
@@ -499,23 +530,24 @@ impl GpuTimer {
                     u64::from(TIMESTAMP_QUERIES) * 8,
                 );
                 slot.shadow = shadow;
+                slot.ao = ao;
                 slot.present = present;
                 slot.state.store(1, Ordering::Release);
                 self.next = (i + 1) % TIMESTAMP_SLOTS;
             }
         }
         self.writing = 1 - self.writing;
-        self.pending = Some((shadow, present));
+        self.pending = Some((shadow, ao, present));
     }
 
     /// Reads back what has arrived and asks for what has been submitted:
     /// the pass times of the most recently mapped slot, in microseconds
-    /// (shadow, scene, post, whole frame).
+    /// (shadow, ambient occlusion, scene, post, whole frame).
     fn collect(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Option<(u32, u32, u32, u32)> {
+    ) -> Option<(u32, u32, u32, u32, u32)> {
         use std::sync::atomic::Ordering;
         // Map callbacks fire from the poll.
         let _ = device.poll(wgpu::PollType::Poll);
@@ -540,6 +572,12 @@ impl GpuTimer {
                     };
                     let span = |b: usize, e: usize| us(ticks[e].saturating_sub(ticks[b]));
                     let shadow = if slot.shadow { span(0, 1) } else { 0 };
+                    let ao_span = 2 * AO_PAIR as usize;
+                    let ao = if slot.ao {
+                        span(ao_span, ao_span + 1)
+                    } else {
+                        0
+                    };
                     let scene = span(2, 3);
                     let post = span(4, 5) + if slot.present { span(6, 7) } else { 0 };
                     // A tile-based GPU starts a pass's vertex stage before
@@ -550,12 +588,15 @@ impl GpuTimer {
                     if slot.shadow {
                         pairs.push(0);
                     }
+                    if slot.ao {
+                        pairs.push(AO_PAIR as usize);
+                    }
                     if slot.present {
                         pairs.push(3);
                     }
                     let first = pairs.iter().map(|p| ticks[p * 2]).min().unwrap_or(0);
                     let last = pairs.iter().map(|p| ticks[p * 2 + 1]).max().unwrap_or(0);
-                    latest = Some((shadow, scene, post, us(last.saturating_sub(first))));
+                    latest = Some((shadow, ao, scene, post, us(last.saturating_sub(first))));
                 }
                 1 => {
                     let state = slot.state.clone();
@@ -595,6 +636,17 @@ struct Pipelines {
     /// Depth only, from the sun.
     shadow: wgpu::RenderPipeline,
     shadow_skinned: wgpu::RenderPipeline,
+    /// Depth only, from the camera, for the opaque instances the scene
+    /// pass will draw: the ambient-occlusion stage's input (R2). The
+    /// vertex stage and the culling are the mesh pass's, so the depths
+    /// match exactly and its `LessEqual` compare keeps every fragment.
+    depth: wgpu::RenderPipeline,
+    depth_double_sided: wgpu::RenderPipeline,
+    depth_skinned: wgpu::RenderPipeline,
+    depth_skinned_double_sided: wgpu::RenderPipeline,
+    /// Screen-space ambient occlusion and its blur.
+    ao: wgpu::RenderPipeline,
+    ao_blur: wgpu::RenderPipeline,
     /// Debug lines.
     debug: wgpu::RenderPipeline,
     post: wgpu::RenderPipeline,
@@ -619,8 +671,12 @@ struct Attachments {
     width: u32,
     height: u32,
     sample_count: u32,
-    /// Depth for the scene passes (multisampled with the colour).
+    /// Depth for the scene passes (multisampled with the colour). The
+    /// depth prepass fills and stores it; the AO passes read it.
     depth_view: wgpu::TextureView,
+    /// Ambient occlusion at this size (R2); `None` while the profile has
+    /// it off, and then the pass chain has no AO stage at all.
+    ao: Option<AoTargets>,
     /// The multisampled HDR colour, resolved into `hdr_view`; `None` at
     /// one sample (the scene passes write `hdr_view` directly).
     hdr_msaa_view: Option<wgpu::TextureView>,
@@ -633,6 +689,19 @@ struct Attachments {
     present_bind_group: Option<wgpu::BindGroup>,
     /// Texture memory of the attachments (the GPU memory estimate).
     bytes: u64,
+}
+
+/// Ambient occlusion (R2) at the internal size: the SSAO estimate and the
+/// blur that removes its per-pixel rotation, R8 each. Each pass reads the
+/// target the other writes, so neither is ever bound and attached at once.
+struct AoTargets {
+    view: wgpu::TextureView,
+    blur_view: wgpu::TextureView,
+    /// Group 1 of the SSAO pass: the scene depth, and `blur_view` (which
+    /// the pass does not read — the layout is shared with the blur).
+    ao_bind_group: wgpu::BindGroup,
+    /// Group 1 of the blur: the scene depth and `view`.
+    blur_bind_group: wgpu::BindGroup,
 }
 
 /// The sun's shadow map: `resolution` 1 is the placeholder bound while the
@@ -675,6 +744,11 @@ pub struct ExtractRenderer {
     frame_layout: wgpu::BindGroupLayout,
     material_layout: wgpu::BindGroupLayout,
     single_layout: wgpu::BindGroupLayout,
+    /// The AO passes' two layouts (R2); `ao_layout` follows the sample
+    /// count, so a quality switch rebuilds it with the pipelines.
+    ao_layout: wgpu::BindGroupLayout,
+    ao_frame_layout: wgpu::BindGroupLayout,
+    ao_frame_bind_group: wgpu::BindGroup,
     shadow_layout: wgpu::BindGroupLayout,
     skin_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -716,6 +790,9 @@ pub struct ExtractRenderer {
     /// The shadow map holds this frame's sun: the shadow pass runs and the
     /// mesh pass samples it.
     shadow_active: bool,
+    /// Whether this frame's pass chain has the ambient-occlusion stage
+    /// (R2): the profile asks for it and the targets exist.
+    ao_active: bool,
     sky_bind_group: Option<(AssetRef, wgpu::BindGroup)>,
     /// The environment the frame bind group holds (E1), and the 1×1 black
     /// stand-in bound when a scene has none.
@@ -747,7 +824,7 @@ pub struct ExtractRenderer {
     gpu_timer: Option<GpuTimer>,
     /// The last timestamps read back (shadow, scene, post, frame; µs)
     /// and how many frames have been read back.
-    gpu_times: (u32, u32, u32, u32),
+    gpu_times: (u32, u32, u32, u32, u32),
     gpu_timed: u32,
     ev100: f32,
     /// Fallback camera when the extract has none.
@@ -866,6 +943,9 @@ impl ExtractRenderer {
                 cube_entry(4),
                 cube_entry(5),
                 texture_entry(6),
+                // The frame's ambient occlusion (R2): a 1×1 white map
+                // while the profile has it off.
+                texture_entry(7),
             ],
         });
         // The shadow pass binds one cascade at a time out of the one
@@ -940,6 +1020,16 @@ impl ExtractRenderer {
                 uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
             ],
         });
+        let ao_layout = create_ao_layout(device, quality.msaa);
+        let ao_frame_layout = create_ao_frame_layout(device);
+        let ao_frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("fynkel ao frame bg"),
+            layout: &ao_frame_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
         let sampler = create_material_sampler(device, quality.anisotropy);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("fynkel shadow sampler"),
@@ -981,6 +1071,8 @@ impl ExtractRenderer {
                 single: &single_layout,
                 shadow: &shadow_layout,
                 skin: &skin_layout,
+                ao_frame: &ao_frame_layout,
+                ao: &ao_layout,
             },
         );
 
@@ -1001,6 +1093,7 @@ impl ExtractRenderer {
             width,
             height,
             &single_layout,
+            &ao_layout,
             &present_sampler,
             &post_buffer,
         );
@@ -1023,6 +1116,13 @@ impl ExtractRenderer {
             &cube_sampler,
             &ibl_none,
             &brdf_lut,
+            // Never read before the first `prepare` (the uniform's AO
+            // flag is 0 until then), and rebound with the real target or
+            // the white fallback as soon as one runs.
+            attachments
+                .ao
+                .as_ref()
+                .map_or(&brdf_lut.view, |a| &a.blur_view),
         );
 
         Self {
@@ -1031,6 +1131,9 @@ impl ExtractRenderer {
             frame_layout,
             material_layout,
             single_layout,
+            ao_layout,
+            ao_frame_layout,
+            ao_frame_bind_group,
             shadow_layout,
             skin_layout,
             sampler,
@@ -1064,6 +1167,7 @@ impl ExtractRenderer {
             attachments,
             shadow_map,
             shadow_active: false,
+            ao_active: false,
             sky_bind_group: None,
             ibl: None,
             ibl_none,
@@ -1089,7 +1193,7 @@ impl ExtractRenderer {
                 .features()
                 .contains(wgpu::Features::TIMESTAMP_QUERY)
                 .then(|| GpuTimer::new(device)),
-            gpu_times: (0, 0, 0, 0),
+            gpu_times: (0, 0, 0, 0, 0),
             gpu_timed: 0,
             ev100: exposure::ev100_from_lux(exposure::FALLBACK_SUN_LUX),
             camera: Camera::default(),
@@ -1113,9 +1217,12 @@ impl ExtractRenderer {
             self.width,
             self.height,
             &self.single_layout,
+            &self.ao_layout,
             &self.present_sampler,
             &self.post_buffer,
         );
+        // Group 0 holds the AO target the mesh pass samples (R2).
+        self.rebuild_frame_bind_group(device);
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -1234,6 +1341,8 @@ impl ExtractRenderer {
         let old = self.quality;
         self.quality = wanted;
         if wanted.msaa != self.pipelines.sample_count {
+            // The AO passes read the depth as the sample count stores it.
+            self.ao_layout = create_ao_layout(device, wanted.msaa);
             self.pipelines = create_pipelines(
                 device,
                 self.format,
@@ -1244,6 +1353,8 @@ impl ExtractRenderer {
                     single: &self.single_layout,
                     shadow: &self.shadow_layout,
                     skin: &self.skin_layout,
+                    ao_frame: &self.ao_frame_layout,
+                    ao: &self.ao_layout,
                 },
             );
         }
@@ -1251,6 +1362,7 @@ impl ExtractRenderer {
         if internal != (self.attachments.width, self.attachments.height)
             || wanted.msaa != self.attachments.sample_count
             || (wanted.render_scale != 1.0) != self.attachments.ldr_view.is_some()
+            || wanted.ambient_occlusion != self.attachments.ao.is_some()
         {
             self.rebuild_attachments(device);
         }
@@ -1282,6 +1394,13 @@ impl ExtractRenderer {
             &self.cube_sampler,
             self.ibl.as_ref().map_or(&self.ibl_none, |(_, i)| i),
             &self.brdf_lut,
+            // The frame's AO, or a white map: `counts.w` is 0 whenever
+            // the fallback is bound, so the mesh pass never reads it.
+            match (&self.attachments.ao, &self.fallbacks) {
+                (Some(ao), _) => &ao.blur_view,
+                (None, Some(f)) => &f.white.view,
+                (None, None) => &self.brdf_lut.view,
+            },
         );
     }
 
@@ -1387,9 +1506,10 @@ impl ExtractRenderer {
             encode_us: self.stats.encode_us,
             gpu_timestamps: self.gpu_timer.is_some(),
             gpu_shadow_us: self.gpu_times.0,
-            gpu_scene_us: self.gpu_times.1,
-            gpu_post_us: self.gpu_times.2,
-            gpu_frame_us: self.gpu_times.3,
+            gpu_ao_us: self.gpu_times.1,
+            gpu_scene_us: self.gpu_times.2,
+            gpu_post_us: self.gpu_times.3,
+            gpu_frame_us: self.gpu_times.4,
             gpu_untimed: self.gpu_timer.as_ref().map_or(0, |t| t.untimed),
             gpu_timed: self.gpu_timed,
             ..FrameStats::default()
@@ -1925,6 +2045,11 @@ impl ExtractRenderer {
             stats.shadow_draws = 0;
         }
 
+        // Ambient occlusion (R2): the stage runs when the profile asks
+        // for it and there is opaque geometry for the prepass to draw.
+        self.ao_active = self.attachments.ao.is_some() && stats.draws > stats.transparent;
+        stats.ambient_occlusion = self.ao_active;
+
         let u = FrameUniforms {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
@@ -1946,7 +2071,7 @@ impl ExtractRenderer {
                 n_lights as u32,
                 stats.sky as u32,
                 self.pipelines.encode_srgb as u32,
-                0,
+                self.ao_active as u32,
             ],
             lights: packed,
         };
@@ -2014,6 +2139,9 @@ impl ExtractRenderer {
     /// | Pass | Reads | Writes |
     /// | --- | --- | --- |
     /// | shadow | caster instances, the sun fit | the shadow map (depth) |
+    /// | depth prepass | opaque/mask instances | the scene depth |
+    /// | ambient occlusion | the scene depth | the AO target |
+    /// | AO blur | the AO target, the scene depth | the AO the mesh pass samples |
     /// | scene: opaque | opaque/mask instances, materials, lights, the shadow map | HDR colour (× samples) + depth |
     /// | scene: sky | the environment texture | HDR colour where depth is untouched |
     /// | scene: transparent | blend instances back-to-front, debug lines; depth (read) | HDR colour |
@@ -2028,11 +2156,16 @@ impl ExtractRenderer {
         let present =
             self.attachments.ldr_view.is_some() && self.attachments.present_bind_group.is_some();
         let shadow = self.shadow_active;
+        let ao = self.ao_active;
         if let Some(timer) = self.gpu_timer.as_mut() {
-            timer.begin_frame(encoder, shadow, present);
+            timer.begin_frame(encoder, shadow, ao, present);
         }
         if self.shadow_active {
             self.shadow_pass(encoder);
+        }
+        if ao {
+            self.depth_prepass(encoder);
+            self.ao_passes(encoder);
         }
         self.scene_pass(encoder);
         let a = &self.attachments;
@@ -2062,6 +2195,19 @@ impl ExtractRenderer {
     /// them.
     fn timestamps(&self, pair: u32) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
         self.gpu_timer.as_ref().and_then(|t| t.writes(pair))
+    }
+
+    /// One end of a query pair: the AO stage's three passes share pair
+    /// `AO_PAIR`, so the whole stage reads as one span.
+    fn timestamps_part(
+        &self,
+        pair: u32,
+        begin: bool,
+        end: bool,
+    ) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        self.gpu_timer
+            .as_ref()
+            .and_then(|t| t.writes_part(pair, begin, end))
     }
 
     /// Depth only, from the sun, every caster inside its box (each
@@ -2140,6 +2286,102 @@ impl ExtractRenderer {
         }
     }
 
+    /// The camera depth prepass (R2): every opaque and mask instance the
+    /// scene pass will draw, depth only, with the scene pass's own vertex
+    /// stage. The scene pass then loads this depth instead of clearing —
+    /// its compare is `LessEqual`, and early-z drops the overdraw the
+    /// prepass has already resolved.
+    fn depth_prepass(&self, encoder: &mut wgpu::CommandEncoder) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("fynkel depth prepass"),
+            timestamp_writes: self.timestamps_part(AO_PAIR, true, false),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.attachments.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        let Some(fallbacks) = self.fallbacks.as_ref() else {
+            return;
+        };
+        if self.instances.is_empty() {
+            return;
+        }
+        pass.set_bind_group(0, &self.frame_bind_group, &[]);
+        pass.set_bind_group(2, &self.joint_bind_group, &[]);
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        // The scene pass's opaque loop exactly, with the colour dropped.
+        for (skinned, double_sided) in [(false, false), (false, true), (true, false), (true, true)]
+        {
+            let mut bound = false;
+            for b in self.batches.iter().filter(|b| {
+                b.key.skinned == skinned && b.double_sided == double_sided && b.count > 0
+            }) {
+                let Some(mesh) = self.mesh_for(&b.key) else {
+                    continue;
+                };
+                if !bound {
+                    pass.set_pipeline(self.pipelines.depth(skinned, double_sided));
+                    bound = true;
+                }
+                pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
+                bind_mesh(&mut pass, mesh, skinned);
+                pass.draw_indexed(0..mesh.index_count, 0, b.first..b.first + b.count);
+            }
+        }
+    }
+
+    /// Screen-space ambient occlusion from the prepass's depth, then the
+    /// blur that averages its per-pixel rotation away (R2). Group 0 is
+    /// the frame uniform alone: the mesh pass's group 0 holds the target
+    /// the blur writes.
+    fn ao_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+        let Some(ao) = self.attachments.ao.as_ref() else {
+            return;
+        };
+        for (label, target, pipeline, bind_group, timestamps) in [
+            (
+                "fynkel ao",
+                &ao.view,
+                &self.pipelines.ao,
+                &ao.ao_bind_group,
+                None,
+            ),
+            (
+                "fynkel ao blur",
+                &ao.blur_view,
+                &self.pipelines.ao_blur,
+                &ao.blur_bind_group,
+                self.timestamps_part(AO_PAIR, false, true),
+            ),
+        ] {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(label),
+                timestamp_writes: timestamps,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &self.ao_frame_bind_group, &[]);
+            pass.set_bind_group(1, bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
     /// Opaque batches (culled, then double-sided), the sky behind them,
     /// then the transparent instances back-to-front and the debug lines.
     fn scene_pass(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -2167,7 +2409,13 @@ impl ExtractRenderer {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &a.depth_view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    // The depth prepass has already written this frame's
+                    // opaque depth when the AO stage ran (R2).
+                    load: if self.ao_active {
+                        wgpu::LoadOp::Load
+                    } else {
+                        wgpu::LoadOp::Clear(1.0)
+                    },
                     store: wgpu::StoreOp::Discard,
                 }),
                 stencil_ops: None,
@@ -2582,6 +2830,17 @@ impl Pipelines {
         }
     }
 
+    /// The depth prepass twin of [`opaque`](Self::opaque): same vertex
+    /// stage, same culling, no colour (R2).
+    fn depth(&self, skinned: bool, double_sided: bool) -> &wgpu::RenderPipeline {
+        match (skinned, double_sided) {
+            (false, false) => &self.depth,
+            (false, true) => &self.depth_double_sided,
+            (true, false) => &self.depth_skinned,
+            (true, true) => &self.depth_skinned_double_sided,
+        }
+    }
+
     fn transparent(&self, skinned: bool, double_sided: bool) -> &wgpu::RenderPipeline {
         match (skinned, double_sided) {
             (false, false) => &self.transparent,
@@ -2592,7 +2851,7 @@ impl Pipelines {
     }
 
     const fn count() -> usize {
-        14
+        20
     }
 }
 
@@ -2603,13 +2862,18 @@ struct Layouts<'a> {
     single: &'a wgpu::BindGroupLayout,
     shadow: &'a wgpu::BindGroupLayout,
     skin: &'a wgpu::BindGroupLayout,
+    /// The AO passes' group 0: the frame uniform alone (the mesh pass's
+    /// group 0 holds the texture the blur writes).
+    ao_frame: &'a wgpu::BindGroupLayout,
+    ao: &'a wgpu::BindGroupLayout,
 }
 
-/// The fourteen pipeline variants (`docs/renderer.md`) for one sample
+/// The twenty pipeline variants (`docs/renderer.md`) for one sample
 /// count: mesh (cull back), mesh double-sided (cull none), transparent
 /// (blend, cull back), transparent double-sided, the same four skinned
 /// (`vs_skinned`, a third vertex buffer of joint weights and the palette
-/// storage buffer at group 2), sky, shadow, shadow skinned, debug lines,
+/// storage buffer at group 2), sky, shadow, shadow skinned, the four
+/// camera depth prepass twins, SSAO, the AO blur, debug lines,
 /// post, present. Nothing else is ever created; a quality switch to
 /// another sample count rebuilds this set.
 fn create_pipelines(
@@ -2624,6 +2888,8 @@ fn create_pipelines(
         single: single_layout,
         shadow: shadow_layout,
         skin: skin_layout,
+        ao_frame: ao_frame_layout,
+        ao: ao_layout,
     } = layouts;
     let module = |label, body: &str| {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -2645,6 +2911,20 @@ fn create_pipelines(
         label: Some("fynkel shadow shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("shaders/shadow.wgsl").into()),
     });
+    // The AO passes read the scene depth as it is stored: multisampled
+    // with the colour, or plain at one sample. `textureLoad`'s last
+    // argument is the sample index or the mip level; 0 is right for both.
+    let ao_shader = module(
+        "fynkel ao shader",
+        &include_str!("shaders/ao.wgsl").replace(
+            "DEPTH_TEXTURE",
+            if sample_count > 1 {
+                "texture_depth_multisampled_2d"
+            } else {
+                "texture_depth_2d"
+            },
+        ),
+    );
 
     // Group 2 (the joint palettes) is part of every mesh layout so the
     // passes bind it once; the static stages simply never read it.
@@ -2670,6 +2950,11 @@ fn create_pipelines(
     let debug_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("fynkel debug pl"),
         bind_group_layouts: &[Some(frame_layout)],
+        ..Default::default()
+    });
+    let ao_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("fynkel ao pl"),
+        bind_group_layouts: &[Some(ao_frame_layout), Some(ao_layout)],
         ..Default::default()
     });
     let hdr_target = [Some(wgpu::ColorTargetState {
@@ -2728,11 +3013,16 @@ fn create_pipelines(
             attributes: &wgpu::vertex_attr_array![14 => Uint16x4, 15 => Float32x4],
         }),
     ];
+    // `fs_depth` (no colour target) is the camera depth prepass; the rest
+    // shade. The compare is `LessEqual` because a prepass has already
+    // written exactly the depth the scene pass computes — the vertex
+    // stage is the same function, so the two agree to the bit.
     let mesh = |label,
                 skinned: bool,
                 cull_mode,
                 targets: &[Option<wgpu::ColorTargetState>],
-                depth_write| {
+                depth_write,
+                entry: &str| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(&mesh_layout),
@@ -2748,7 +3038,7 @@ fn create_pipelines(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some(entry),
                 compilation_options: Default::default(),
                 targets,
             }),
@@ -2761,7 +3051,7 @@ fn create_pipelines(
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(depth_write),
-                depth_compare: Some(wgpu::CompareFunction::Less),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -2814,6 +3104,39 @@ fn create_pipelines(
     };
     let shadow = shadow_pipeline("fynkel shadow pipeline", false);
     let shadow_skinned = shadow_pipeline("fynkel shadow skinned pipeline", true);
+    let ao_target = [Some(wgpu::ColorTargetState {
+        format: AO_FORMAT,
+        blend: Some(wgpu::BlendState::REPLACE),
+        write_mask: wgpu::ColorWrites::ALL,
+    })];
+    let ao_pipeline = |label, entry: &str| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&ao_pl),
+            vertex: wgpu::VertexState {
+                module: &ao_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ao_shader,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                targets: &ao_target,
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            // The AO targets are single-sample whatever the scene is.
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
     let debug = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("fynkel debug pipeline"),
         layout: Some(&debug_pl),
@@ -2914,13 +3237,21 @@ fn create_pipelines(
     );
     let back = Some(wgpu::Face::Back);
     Pipelines {
-        mesh: mesh("fynkel mesh pipeline", false, back, &hdr_target, true),
+        mesh: mesh(
+            "fynkel mesh pipeline",
+            false,
+            back,
+            &hdr_target,
+            true,
+            "fs_main",
+        ),
         mesh_double_sided: mesh(
             "fynkel mesh pipeline (double-sided)",
             false,
             None,
             &hdr_target,
             true,
+            "fs_main",
         ),
         transparent: mesh(
             "fynkel transparent pipeline",
@@ -2928,6 +3259,7 @@ fn create_pipelines(
             back,
             &hdr_blend_target,
             false,
+            "fs_main",
         ),
         transparent_double_sided: mesh(
             "fynkel transparent pipeline (double-sided)",
@@ -2935,6 +3267,7 @@ fn create_pipelines(
             None,
             &hdr_blend_target,
             false,
+            "fs_main",
         ),
         mesh_skinned: mesh(
             "fynkel mesh skinned pipeline",
@@ -2942,6 +3275,7 @@ fn create_pipelines(
             back,
             &hdr_target,
             true,
+            "fs_main",
         ),
         mesh_skinned_double_sided: mesh(
             "fynkel mesh skinned pipeline (double-sided)",
@@ -2949,6 +3283,7 @@ fn create_pipelines(
             None,
             &hdr_target,
             true,
+            "fs_main",
         ),
         transparent_skinned: mesh(
             "fynkel transparent skinned pipeline",
@@ -2956,6 +3291,7 @@ fn create_pipelines(
             back,
             &hdr_blend_target,
             false,
+            "fs_main",
         ),
         transparent_skinned_double_sided: mesh(
             "fynkel transparent skinned pipeline (double-sided)",
@@ -2963,10 +3299,38 @@ fn create_pipelines(
             None,
             &hdr_blend_target,
             false,
+            "fs_main",
         ),
         sky,
         shadow,
         shadow_skinned,
+        depth: mesh("fynkel depth pipeline", false, back, &[], true, "fs_depth"),
+        depth_double_sided: mesh(
+            "fynkel depth pipeline (double-sided)",
+            false,
+            None,
+            &[],
+            true,
+            "fs_depth",
+        ),
+        depth_skinned: mesh(
+            "fynkel depth skinned pipeline",
+            true,
+            back,
+            &[],
+            true,
+            "fs_depth",
+        ),
+        depth_skinned_double_sided: mesh(
+            "fynkel depth skinned pipeline (double-sided)",
+            true,
+            None,
+            &[],
+            true,
+            "fs_depth",
+        ),
+        ao: ao_pipeline("fynkel ao pipeline", "fs_main"),
+        ao_blur: ao_pipeline("fynkel ao blur pipeline", "fs_blur"),
         debug,
         post,
         present,
@@ -3009,11 +3373,13 @@ fn create_attachments(
     width: u32,
     height: u32,
     single_layout: &wgpu::BindGroupLayout,
+    ao_layout: &wgpu::BindGroupLayout,
     present_sampler: &wgpu::Sampler,
     post_buffer: &wgpu::Buffer,
 ) -> Attachments {
     let (w, h) = quality.internal_size(width, height);
     let samples = quality.msaa;
+    // The AO passes sample the depth the prepass stored (R2).
     let depth_view = create_attachment(
         device,
         "fynkel depth",
@@ -3021,8 +3387,32 @@ fn create_attachments(
         h,
         samples,
         DEPTH_FORMAT,
-        wgpu::TextureUsages::RENDER_ATTACHMENT,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
     );
+    let ao = quality.ambient_occlusion.then(|| {
+        let ao_usage =
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+        let view = create_attachment(device, "fynkel ao", w, h, 1, AO_FORMAT, ao_usage);
+        let blur_view = create_attachment(device, "fynkel ao blur", w, h, 1, AO_FORMAT, ao_usage);
+        AoTargets {
+            ao_bind_group: create_ao_bind_group(
+                device,
+                ao_layout,
+                &depth_view,
+                &blur_view,
+                "fynkel ao bg",
+            ),
+            blur_bind_group: create_ao_bind_group(
+                device,
+                ao_layout,
+                &depth_view,
+                &view,
+                "fynkel ao blur bg",
+            ),
+            view,
+            blur_view,
+        }
+    });
     let hdr_view = create_attachment(
         device,
         "fynkel hdr",
@@ -3073,7 +3463,8 @@ fn create_attachments(
         )
     });
     // Depth32 × samples, HDR rgba16f × samples when resolved, the HDR
-    // resolve, the LDR at render scale (4 bytes a texel).
+    // resolve, the LDR at render scale (4 bytes a texel), the two AO
+    // targets (one byte each).
     let texels = u64::from(w.max(1)) * u64::from(h.max(1));
     let bytes = texels * 4 * u64::from(samples)
         + if samples > 1 {
@@ -3082,12 +3473,14 @@ fn create_attachments(
             0
         }
         + texels * 8
-        + if ldr_view.is_some() { texels * 4 } else { 0 };
+        + if ldr_view.is_some() { texels * 4 } else { 0 }
+        + if ao.is_some() { texels * 2 } else { 0 };
     Attachments {
         width: w,
         height: h,
         sample_count: samples,
         depth_view,
+        ao,
         hdr_msaa_view,
         hdr_view,
         ldr_view,
@@ -3122,6 +3515,7 @@ fn create_frame_bind_group(
     cube_sampler: &wgpu::Sampler,
     ibl: &Ibl,
     brdf_lut: &GpuTexture,
+    ao: &wgpu::TextureView,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("fynkel frame bg"),
@@ -3154,6 +3548,10 @@ fn create_frame_bind_group(
             wgpu::BindGroupEntry {
                 binding: 6,
                 resource: wgpu::BindingResource::TextureView(&brdf_lut.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(ao),
             },
         ],
     })
@@ -3483,6 +3881,76 @@ fn create_instance_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer 
         size: capacity as u64 * std::mem::size_of::<Instance>() as u64,
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
+    })
+}
+
+/// Group 1 of the AO passes: the scene depth as the sample count stores
+/// it, and the other AO target.
+fn create_ao_layout(device: &wgpu::Device, sample_count: u32) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("fynkel ao bgl"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: sample_count > 1,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+        ],
+    })
+}
+
+/// Group 0 of the AO passes: the frame uniform on its own.
+fn create_ao_frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("fynkel ao frame bgl"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    })
+}
+
+fn create_ao_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    depth: &wgpu::TextureView,
+    other: &wgpu::TextureView,
+    label: &str,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(depth),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(other),
+            },
+        ],
     })
 }
 

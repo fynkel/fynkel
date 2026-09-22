@@ -21,6 +21,9 @@ pub struct Quality {
     pub shadows: bool,
     /// Shadow map side in texels (power of two).
     pub shadow_resolution: u32,
+    /// Screen-space ambient occlusion: the depth prepass, the SSAO pass
+    /// and its blur, sampled by the mesh pass's ambient term (R2).
+    pub ambient_occlusion: bool,
     /// Samples per pixel of the scene passes: 1 or 4.
     pub msaa: u32,
     /// Internal resolution relative to the target (1.0 = native).
@@ -40,6 +43,7 @@ impl From<&QualityProfile> for Quality {
         Quality {
             shadows: p.shadows,
             shadow_resolution: p.shadow_resolution,
+            ambient_occlusion: p.ambient_occlusion,
             msaa: p.msaa,
             render_scale: p.render_scale as f32,
             anisotropy: p.anisotropy,
@@ -61,6 +65,7 @@ impl Quality {
         };
         Quality {
             shadows: self.shadows,
+            ambient_occlusion: self.ambient_occlusion,
             shadow_resolution: self
                 .shadow_resolution
                 .clamp(MIN_SHADOW_RESOLUTION, MAX_SHADOW_RESOLUTION)
@@ -105,6 +110,7 @@ mod tests {
             Quality {
                 shadows: true,
                 shadow_resolution: 2048,
+                ambient_occlusion: true,
                 msaa: 4,
                 render_scale: 1.0,
                 anisotropy: 8,
@@ -119,6 +125,7 @@ mod tests {
             name: "wild".into(),
             shadows: true,
             shadow_resolution: 3000,
+            ambient_occlusion: true,
             msaa: 8,
             render_scale: 9.0,
             anisotropy: 64,

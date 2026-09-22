@@ -12,6 +12,9 @@
 //! the commands validate against the embedded schema set (`schemas.rs`).
 //! Exit codes: 0 ok, 1 error, 2 usage or `--check` found drift.
 
+// `fynkel render --json` nests deeply enough for serde_json's default.
+#![recursion_limit = "256"]
+
 mod asset;
 mod behaviours;
 mod bundle;

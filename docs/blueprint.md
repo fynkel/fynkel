@@ -1102,6 +1102,17 @@ Likely order:
 
 Do not implement TAA, SSAO, SSR, ray tracing, or GPU-driven rendering merely to match another engine's feature list.
 
+*(R2, 2026-09-22: SSAO landed, and the rule above is why it is worth
+saying what forced it. Not a feature list — the picture. Contact
+darkening is the one cue the engine had no answer for: the ambient and
+IBL terms light every crevice as if it were open sky, so a crate sitting
+on a floor floats, and no amount of shadow-map work fixes it because the
+sun is not what lights that gap. The estimate multiplies the ambient/IBL
+term only — direct light is never occluded by a screen-space guess —,
+it is one depth prepass plus two half-cheap full-screen passes, and the
+quality profile can turn it off (`ambientOcclusion`, default true) for a
+bit-identical picture. `docs/renderer.md` § Ambient occlusion.)*
+
 ## 9. Physics, animation, audio, and input
 
 ### Physics

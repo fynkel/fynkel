@@ -126,7 +126,8 @@ Materials (`assets/materials/*.material.json`, `fynkel.pbr@1`): `alpha_mode`
 scene, sorted back-to-front, casts no shadow), `double_sided`.
 
 Quality (`fynkel.project.json` `quality.profiles`, `default`): `shadows`,
-`shadowResolution`, `msaa` (1 or 4 in V1), `renderScale`, `anisotropy`.
+`shadowResolution`, `ambientOcclusion`, `msaa` (1 or 4 in V1),
+`renderScale`, `anisotropy`.
 The renderer runs the default profile; switch at runtime with
 `FynkelViewportController.quality = '<name>'` (the starter's HUD cycles
 them on Q) or render one with `fynkel render --quality <name>`.

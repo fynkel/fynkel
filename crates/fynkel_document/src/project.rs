@@ -42,6 +42,8 @@ pub struct QualityProfile {
     pub name: String,
     pub shadows: bool,
     pub shadow_resolution: u32,
+    /// Screen-space ambient occlusion (R2).
+    pub ambient_occlusion: bool,
     pub msaa: u32,
     pub render_scale: f64,
     pub anisotropy: u32,
@@ -57,6 +59,7 @@ impl QualityProfile {
             name: "default".to_string(),
             shadows: true,
             shadow_resolution: 2048,
+            ambient_occlusion: true,
             msaa: 4,
             render_scale: 1.0,
             anisotropy: 8,
@@ -69,7 +72,7 @@ impl QualityProfile {
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name, "shadows": self.shadows, "shadowResolution": self.shadow_resolution,
-            "msaa": self.msaa, "renderScale": self.render_scale, "anisotropy": self.anisotropy,
+            "ambientOcclusion": self.ambient_occlusion, "msaa": self.msaa, "renderScale": self.render_scale, "anisotropy": self.anisotropy,
             "textureMaxSize": self.texture_max_size,
         })
     }
@@ -83,6 +86,9 @@ impl QualityProfile {
             name: v["name"].as_str()?.to_string(),
             shadows: v["shadows"].as_bool().unwrap_or(d.shadows),
             shadow_resolution: int("shadowResolution", d.shadow_resolution),
+            ambient_occlusion: v["ambientOcclusion"]
+                .as_bool()
+                .unwrap_or(d.ambient_occlusion),
             msaa: int("msaa", d.msaa),
             render_scale: v["renderScale"].as_f64().unwrap_or(d.render_scale),
             anisotropy: int("anisotropy", d.anisotropy),
@@ -383,6 +389,11 @@ impl Project {
                             .and_then(Node::as_bool)
                             .unwrap_or(d.shadows),
                         shadow_resolution: int("shadowResolution", d.shadow_resolution),
+                        ambient_occlusion: m
+                            .value
+                            .get("ambientOcclusion")
+                            .and_then(Node::as_bool)
+                            .unwrap_or(d.ambient_occlusion),
                         msaa: int("msaa", d.msaa),
                         render_scale: m
                             .value

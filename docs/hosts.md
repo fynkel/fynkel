@@ -283,8 +283,9 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   installs the Rust→Swift frame-ready callback), `rebindTexture`, `stats`,
   `unregisterTexture` — every call after registration names its
   `textureId`, so an editor can show several viewports.
-- `lib/src/viewport_native.dart` — the viewport ABI v4 as `@Native` externals
-  on the same code asset as `package:fynkel`.
+- `lib/src/viewport_native.dart` — the viewport ABI **v5** as `@Native`
+  externals on the same code asset as `package:fynkel` (v5 adds `gpuAo` to
+  the stats struct: R2's ambient-occlusion stage).
 - `FynkelViewportController` — one native viewport: `requestSize(w, h)` in
   physical pixels creates the ring and registers the texture, later calls
   are coalesced resizes (native resize → Swift rebind; `render()` returns

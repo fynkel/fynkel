@@ -15,7 +15,7 @@ stopwatches around the calls the SDK actually makes.
 | render extraction | `fynkel_apple_viewport_render` around `World::extract`; the headless host once per frame | `ViewportStatsSnapshot.extract`; headless `extract_time` |
 | render preparation | `Renderer::prepare` (uploads, culling, instance building) | `FrameStats::prepare_us`; `ViewportStatsSnapshot.prepare` |
 | encode | `Renderer::draw` (pass recording) | `FrameStats::encode_us`; `ViewportStatsSnapshot.encode`; `cpuP*Ms` is encode + submit |
-| GPU pass timings | `wgpu::QuerySet` timestamps at the boundaries of the shadow, scene, post and present passes (Metal stage timestamps) | `FrameStats::gpu_*_us`; `ViewportStatsSnapshot.gpuShadow/gpuScene/gpuPost/gpuFrame`; the standalone `[1s]` line's `gpu ms` |
+| GPU pass timings | `wgpu::QuerySet` timestamps at the boundaries of the shadow, scene, post and present passes, and one pair spanning the ambient-occlusion stage's three passes (Metal stage timestamps) | `FrameStats::gpu_*_us`; `ViewportStatsSnapshot.gpuShadow/gpuAo/gpuScene/gpuPost/gpuFrame`; the standalone `[1s]` line's `gpu ms` |
 | draw/dispatch counts, visible/culled | the renderer's `FrameStats` (M3-06) | `ViewportStatsSnapshot.draws/instances/culled/shadowDraws` |
 | bridge calls/bytes/copies | `Bridge` counters + `FynkelWorldStats` | `BridgeStats.ffiCalls/bytesIn/bytesOut/dartCopies` |
 | Dart allocations and GC (C3) | `DartHeapProbe` (`package:fynkel_flutter`): the VM's `GC` timeline events and `getMemoryUsage` over the app's own service, once per stats window | `FynkelFrameStats.dartHeap` (`profileDartHeap: true`); `[alloc]`/`[stats]` lines; `benchmarks/m0/capture.py` `alloc_aot`, `benchmarks/m3/capture.py` |
@@ -46,7 +46,7 @@ FynkelFrameStats.renderCall        the viewport render call
   ├─ viewport.encode               Renderer::draw
   └─ cpuP*Ms − encode              queue submit
 viewport.gpuFrame                  first pass begin → last pass end, on the GPU (trails by 3–4 frames)
-  ├─ gpuShadow / gpuScene / gpuPost   the passes; they overlap, so the sum exceeds the span
+  ├─ gpuShadow / gpuAo / gpuScene / gpuPost   the passes; they overlap, so the sum exceeds the span
 flutterBuild / flutterRaster       Flutter's own UI-thread build and raster-thread work per frame
 ```
 
@@ -265,14 +265,14 @@ chosen from a measurement: eight subscribed transforms are 728 bytes
   `key=value` pairs (counts; every timer as `p50/p95/p99` ms — `interval`,
   `simulate`, `render`, `behaviours`, `native`, `work`, `build`, `raster`,
   `extract`, `prepare`, `encode`, `cpu`, `gpu_complete`, `gpu_frame`,
-  `gpu_shadow`/`gpu_scene`/`gpu_post`; `gpu_n`, `gpu_untimed`; the memory
-  in bytes; `heap`, `heap_alloc`, `gc`, `gc_pause` when the probe is on).
+  `gpu_shadow`/`gpu_ao`/`gpu_scene`/`gpu_post`; `gpu_n`, `gpu_untimed`;
+  the memory in bytes; `heap`, `heap_alloc`, `gc`, `gc_pause` when the probe is on).
   `hosts/flutter_apple` prints it as `[stats] …` every window, the
   reference game does under `FYNKEL_CAPTURE=1`; the M3 capture parses
   one format for both scenes.
 - **`hosts/flutter_apple`**'s stats block: `dart behaviours ms … native
   step ms … total work ms`, `rust extract ms … prepare ms … encode ms`,
-  `gpu pass ms shadow/scene/post/frame`, `memory MB native/resident/
+  `gpu pass ms shadow/ao/scene/post/frame`, `memory MB native/resident/
   assets/gpu snapshot B (peak, budget)`, `dart heap KB … allocated
   KB/frame … gc n= pause ms=`, `systems µs (last tick)`; the `[host]`
   line carries them and `[alloc]` the heap for `benchmarks/m0/capture.py`.
@@ -281,10 +281,11 @@ chosen from a measurement: eight subscribed transforms are 728 bytes
   line (frame and passes at p95, the memory estimate), a `memory` line;
   the reference game a `dart heap` line.
 - **`ViewportStatsSnapshot`** (viewport ABI v3; v4 added the editor's
-  debug lines and frame read-back, no stats change): `extract`, `prepare`,
-  `encode`, `gpuTimestamps`, `gpuFramesUntimed`, `gpuShadow`, `gpuScene`,
-  `gpuPost`, `gpuFrame` (each `MsPercentiles` over the window; the GPU
-  ones counted by read-backs), `gpuBytes`.
+  debug lines and frame read-back, no stats change; **v5** added `gpuAo`,
+  R2's ambient-occlusion stage): `extract`, `prepare`,
+  `encode`, `gpuTimestamps`, `gpuFramesUntimed`, `gpuShadow`, `gpuAo`,
+  `gpuScene`, `gpuPost`, `gpuFrame` (each `MsPercentiles` over the
+  window; the GPU ones counted by read-backs), `gpuBytes`.
 
 ## The captures
 

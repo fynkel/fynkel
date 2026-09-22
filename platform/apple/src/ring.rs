@@ -123,9 +123,10 @@ pub struct RingStats {
     pub extract_us: Vec<u32>,
     pub prepare_us: Vec<u32>,
     pub encode_us: Vec<u32>,
-    /// Per frame read back from the GPU's timestamps: shadow, scene, post
-    /// (+ present), the frame's span.
+    /// Per frame read back from the GPU's timestamps: shadow, ambient
+    /// occlusion, scene, post (+ present), the frame's span.
     pub gpu_shadow_us: Vec<u32>,
+    pub gpu_ao_us: Vec<u32>,
     pub gpu_scene_us: Vec<u32>,
     pub gpu_post_us: Vec<u32>,
     pub gpu_frame_us: Vec<u32>,
@@ -495,14 +496,15 @@ impl IoSurfaceRing {
         extract_us: u32,
         prepare_us: u32,
         encode_us: u32,
-        gpu: Option<(u32, u32, u32, u32)>,
+        gpu: Option<(u32, u32, u32, u32, u32)>,
     ) {
         let mut st = self.stats.lock().unwrap();
         st.extract_us.push(extract_us);
         st.prepare_us.push(prepare_us);
         st.encode_us.push(encode_us);
-        if let Some((shadow, scene, post, frame)) = gpu {
+        if let Some((shadow, ao, scene, post, frame)) = gpu {
             st.gpu_shadow_us.push(shadow);
+            st.gpu_ao_us.push(ao);
             st.gpu_scene_us.push(scene);
             st.gpu_post_us.push(post);
             st.gpu_frame_us.push(frame);

@@ -243,7 +243,7 @@ def summarize_stats(windows, warmup):
            "ticks_per_s": statistics.median(x["ticks"] for x in w),
            "dropped_total": sum(x.get("dropped", 0) for x in w), "missed_total": sum(x.get("missed", 0) for x in w)}
     for k in ("interval", "simulate", "render", "behaviours", "native", "work", "build", "raster", "extract", "prepare",
-              "encode", "cpu", "gpu_complete", "gpu_frame", "gpu_shadow", "gpu_scene", "gpu_post"):
+              "encode", "cpu", "gpu_complete", "gpu_frame", "gpu_shadow", "gpu_ao", "gpu_scene", "gpu_post"):
         res[k + "_ms"] = m0.agg(w, k)
     for k in ("entities", "instances", "draws", "culled", "shadow", "snapshot", "snapshot_peak", "mem_native", "mem_resident",
               "mem_assets", "mem_gpu", "gpu_timestamps"):
@@ -505,7 +505,7 @@ def markdown(r):
               f"| **total work** (simulate + render()) | — | **{m0.fmt(fs.get('work_ms'))}** |",
               f"| extract / prepare / encode | — / {fmt2(s.get('prepare_ms'))} / — | {m0.fmt(fs.get('extract_ms'))} / {m0.fmt(fs.get('prepare_ms'))} / {m0.fmt(fs.get('encode_ms'))} |",
               f"| GPU frame (timestamps) | {fmt2(s.get('gpu_frame_ms'))} ({s.get('gpu_timed_per_s')}/s timed, {s.get('gpu_untimed_total')} untimed) | {m0.fmt(fs.get('gpu_frame_ms'))} ({fs.get('gpu_timed_per_s')}/s timed, {fs.get('gpu_untimed_total')} untimed) |",
-              f"| GPU shadow / scene / post | — | {m0.fmt(fs.get('gpu_shadow_ms'))} / {m0.fmt(fs.get('gpu_scene_ms'))} / {m0.fmt(fs.get('gpu_post_ms'))} |",
+              f"| GPU shadow / AO / scene / post | — | {m0.fmt(fs.get('gpu_shadow_ms'))} / {m0.fmt(fs.get('gpu_ao_ms'))} / {m0.fmt(fs.get('gpu_scene_ms'))} / {m0.fmt(fs.get('gpu_post_ms'))} |",
               f"| memory native / resident / GPU (MB) | {s.get('mem_native_mb')} / {s.get('mem_resident_mb')} / {s.get('mem_gpu_mb')} | "
               f"{mb(fs.get('mem_native'))} / {mb(fs.get('mem_resident'))} / {mb(fs.get('mem_gpu'))} (assets {mb(fs.get('mem_assets'))}, snapshot {fs.get('snapshot')} B) |",
               f"| Dart heap (C3) | — | {heap_line(fs.get('dart_heap'))} |"]
@@ -535,7 +535,7 @@ def markdown(r):
             f"| engine CPU prepare+encode+submit | {m0.fmt(rs.get('cpu_encode_submit_ms'))} | {m0.fmt(ra.get('cpu_ms'))} |",
             f"| extract / prepare / encode | — / {fmt2(rs.get('prepare_ms'))} / — | {m0.fmt(ra.get('extract_ms'))} / {m0.fmt(ra.get('prepare_ms'))} / {m0.fmt(ra.get('encode_ms'))} |",
             f"| GPU frame (timestamps) | {fmt2(rs.get('gpu_frame_ms'))} ({rs.get('gpu_timed_per_s')}/s timed) | {m0.fmt(ra.get('gpu_frame_ms'))} ({ra.get('gpu_timed_per_s')}/s timed, {ra.get('gpu_untimed_total')} untimed) |",
-            f"| GPU shadow / scene / post | — | {m0.fmt(ra.get('gpu_shadow_ms'))} / {m0.fmt(ra.get('gpu_scene_ms'))} / {m0.fmt(ra.get('gpu_post_ms'))} |",
+            f"| GPU shadow / AO / scene / post | — | {m0.fmt(ra.get('gpu_shadow_ms'))} / {m0.fmt(ra.get('gpu_ao_ms'))} / {m0.fmt(ra.get('gpu_scene_ms'))} / {m0.fmt(ra.get('gpu_post_ms'))} |",
             f"| Flutter UI build / raster | — | {m0.fmt(ra.get('build_ms'))} / {m0.fmt(ra.get('raster_ms'))} |",
             f"| instances / draws / culled | {rs.get('instances')} / {rs.get('draws')} / {rs.get('culled')} | {ra.get('instances')} / {ra.get('draws')} / {ra.get('culled')} |",
             f"| memory native / resident / GPU (MB) | {rs.get('mem_native_mb')} / {rs.get('mem_resident_mb')} / {rs.get('mem_gpu_mb')} | "

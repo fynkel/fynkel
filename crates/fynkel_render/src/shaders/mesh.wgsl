@@ -41,7 +41,11 @@ struct VsIn {
 };
 
 struct VsOut {
-    @builtin(position) clip: vec4<f32>,
+    // Invariant so the depth prepass and the scene pass compute the same
+    // clip position to the bit: they are two pipelines over this one
+    // vertex stage, and the scene pass's depth compare is `LessEqual`
+    // against what the prepass wrote (R2).
+    @builtin(position) @invariant clip: vec4<f32>,
     @location(0) world_pos: vec3<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) world_tangent: vec4<f32>,
@@ -236,6 +240,20 @@ fn sun_visibility(p: vec3<f32>, n: vec3<f32>) -> f32 {
     return 1.0;
 }
 
+// The camera depth prepass (R2): the scene pass's own vertex stage, so
+// the depth it writes is the depth the scene pass computes, with only the
+// alpha-mask discard behind it. No colour target.
+@fragment
+fn fs_depth(in: VsOut) {
+    let cutoff = in.flags.x;
+    if cutoff >= 0.0 {
+        let a = textureSample(base_color_tex, material_sampler, in.uv).a * in.color.a;
+        if a < cutoff {
+            discard;
+        }
+    }
+}
+
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let base = textureSample(base_color_tex, material_sampler, in.uv) * in.color;
@@ -275,7 +293,13 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     let metallic = clamp(in.params.x * mr.b, 0.0, 1.0);
     let roughness = clamp(in.params.y * mr.g, 0.045, 1.0);
     let a2 = roughness * roughness * roughness * roughness;
-    let ao = 1.0 + in.params.w * (textureSample(occlusion_tex, material_sampler, in.uv).r - 1.0);
+    var ao = 1.0 + in.params.w * (textureSample(occlusion_tex, material_sampler, in.uv).r - 1.0);
+    // Screen-space ambient occlusion (R2) on top of the material's own,
+    // for the instances the depth prepass drew: the blended ones are not
+    // in that depth, so the AO under them belongs to what is behind.
+    if frame.counts.w == 1u && cutoff > -1.5 {
+        ao *= textureLoad(ssao_tex, vec2<i32>(in.clip.xy), 0).r;
+    }
     let diffuse = albedo * (1.0 - metallic);
     let f0 = mix(vec3<f32>(0.04), albedo, metallic);
     let v = normalize(frame.camera_pos.xyz - in.world_pos);

@@ -369,7 +369,7 @@ class _ViewportPageState extends State<ViewportPage> with WidgetsBindingObserver
         'dart behaviours ms     ${f.behaviours.format(3)}  native step ms ${f.nativeStep.format(3)}  total work ms ${f.totalWork.format()}',
         if (s != null) ...[
           'rust extract ms        ${s.extract.format(3)}  prepare ms ${s.prepare.format(3)}  encode ms ${s.encode.format(3)}',
-          'gpu pass ms            shadow p95=${s.gpuShadow.p95.toStringAsFixed(3)} scene p95=${s.gpuScene.p95.toStringAsFixed(3)} post p95=${s.gpuPost.p95.toStringAsFixed(3)}  frame ${s.gpuFrame.format(3)}  (n=${s.gpuFrame.count}, untimed=${s.gpuFramesUntimed}, timestamps=${s.gpuTimestamps})',
+          'gpu pass ms            shadow p95=${s.gpuShadow.p95.toStringAsFixed(3)} ao p95=${s.gpuAo.p95.toStringAsFixed(3)} scene p95=${s.gpuScene.p95.toStringAsFixed(3)} post p95=${s.gpuPost.p95.toStringAsFixed(3)}  frame ${s.gpuFrame.format(3)}  (n=${s.gpuFrame.count}, untimed=${s.gpuFramesUntimed}, timestamps=${s.gpuTimestamps})',
           'memory MB              native=${(b.nativeBytes / 1048576).toStringAsFixed(1)} resident=${(b.residentBytes / 1048576).toStringAsFixed(1)} assets=${(b.residencyBytes / 1048576).toStringAsFixed(1)} gpu=${(s.gpuBytes / 1048576).toStringAsFixed(1)}  snapshot B=${b.snapshotBytes} (peak ${b.snapshotPeakBytes}, budget ${b.snapshotBudget})',
           'rust cpu encode+submit p50=${s.cpuP50Ms.toStringAsFixed(3)} p95=${s.cpuP95Ms.toStringAsFixed(3)} p99=${s.cpuP99Ms.toStringAsFixed(3)}',
           'submit→gpu complete    p50=${s.gpuP50Ms.toStringAsFixed(2)} p95=${s.gpuP95Ms.toStringAsFixed(2)} p99=${s.gpuP99Ms.toStringAsFixed(2)}',

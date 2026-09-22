@@ -85,6 +85,7 @@ impl Viewport {
         let s = renderer.stats();
         let gpu = (s.gpu_timed != timed_before).then_some((
             s.gpu_shadow_us,
+            s.gpu_ao_us,
             s.gpu_scene_us,
             s.gpu_post_us,
             s.gpu_frame_us,
@@ -233,6 +234,11 @@ pub struct FynkelAppleViewportStats {
     pub gpu_shadow_p50_us: u32,
     pub gpu_shadow_p95_us: u32,
     pub gpu_shadow_p99_us: u32,
+    /// The ambient-occlusion stage (R2): the depth prepass, SSAO and its
+    /// blur, timed as one span.
+    pub gpu_ao_p50_us: u32,
+    pub gpu_ao_p95_us: u32,
+    pub gpu_ao_p99_us: u32,
     pub gpu_scene_p50_us: u32,
     pub gpu_scene_p95_us: u32,
     pub gpu_scene_p99_us: u32,
@@ -253,7 +259,7 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// M3-16 instrumentation fields of `FynkelAppleViewportStats`; 4:
 /// `fynkel_apple_viewport_debug_lines` and `fynkel_apple_viewport_read_frame`,
 /// the editor's overlays and its Save Frame — M4-06).
-pub const APPLE_ABI_VERSION: u32 = 4;
+pub const APPLE_ABI_VERSION: u32 = 5;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -651,6 +657,9 @@ pub unsafe extern "C" fn fynkel_apple_viewport_take_stats(
         gpu_shadow_p50_us: pct(&mut s.gpu_shadow_us, 0.50),
         gpu_shadow_p95_us: pct(&mut s.gpu_shadow_us, 0.95),
         gpu_shadow_p99_us: pct(&mut s.gpu_shadow_us, 0.99),
+        gpu_ao_p50_us: pct(&mut s.gpu_ao_us, 0.50),
+        gpu_ao_p95_us: pct(&mut s.gpu_ao_us, 0.95),
+        gpu_ao_p99_us: pct(&mut s.gpu_ao_us, 0.99),
         gpu_scene_p50_us: pct(&mut s.gpu_scene_us, 0.50),
         gpu_scene_p95_us: pct(&mut s.gpu_scene_us, 0.95),
         gpu_scene_p99_us: pct(&mut s.gpu_scene_us, 0.99),

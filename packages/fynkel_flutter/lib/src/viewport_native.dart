@@ -12,7 +12,7 @@ import 'package:ffi/ffi.dart';
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 4;
+const viewportAbiVersion = 5;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -123,6 +123,12 @@ final class ViewportStats extends Struct {
   external int gpuShadowP95Us;
   @Uint32()
   external int gpuShadowP99Us;
+  @Uint32()
+  external int gpuAoP50Us;
+  @Uint32()
+  external int gpuAoP95Us;
+  @Uint32()
+  external int gpuAoP99Us;
   @Uint32()
   external int gpuSceneP50Us;
   @Uint32()
@@ -401,6 +407,7 @@ class ViewportNative {
         gpuTimestamps: s.gpuTimestamps != 0,
         gpuFramesUntimed: s.gpuFramesUntimed,
         gpuShadow: MsPercentiles(s.gpuShadowP50Us / 1000, s.gpuShadowP95Us / 1000, s.gpuShadowP99Us / 1000, s.gpuFramesTimed),
+        gpuAo: MsPercentiles(s.gpuAoP50Us / 1000, s.gpuAoP95Us / 1000, s.gpuAoP99Us / 1000, s.gpuFramesTimed),
         gpuScene: MsPercentiles(s.gpuSceneP50Us / 1000, s.gpuSceneP95Us / 1000, s.gpuSceneP99Us / 1000, s.gpuFramesTimed),
         gpuPost: MsPercentiles(s.gpuPostP50Us / 1000, s.gpuPostP95Us / 1000, s.gpuPostP99Us / 1000, s.gpuFramesTimed),
         gpuFrame: MsPercentiles(s.gpuFrameP50Us / 1000, s.gpuFrameP95Us / 1000, s.gpuFrameP99Us / 1000, s.gpuFramesTimed),
@@ -456,6 +463,7 @@ class ViewportStatsSnapshot {
     this.gpuTimestamps = false,
     this.gpuFramesUntimed = 0,
     this.gpuShadow = MsPercentiles.empty,
+    this.gpuAo = MsPercentiles.empty,
     this.gpuScene = MsPercentiles.empty,
     this.gpuPost = MsPercentiles.empty,
     this.gpuFrame = MsPercentiles.empty,
@@ -487,7 +495,9 @@ class ViewportStatsSnapshot {
   final MsPercentiles extract, prepare, encode;
 
   /// GPU pass times from Metal timestamps ([gpuTimestamps]; a device
-  /// without them reports zeros): the shadow pass, the scene pass, post
+  /// without them reports zeros): the shadow pass, the ambient-occlusion
+  /// stage (the depth prepass, SSAO and its blur — zero while the quality
+  /// profile has it off), the scene pass, post
   /// (+ present) and the frame's span from the first pass's begin to the
   /// last pass's end — the passes overlap on Apple GPUs, so the sum
   /// exceeds the span. The values trail the draw by three or four frames
@@ -496,7 +506,7 @@ class ViewportStatsSnapshot {
   /// whose stamps could not be taken because the GPU was too far behind.
   final bool gpuTimestamps;
   final int gpuFramesUntimed;
-  final MsPercentiles gpuShadow, gpuScene, gpuPost, gpuFrame;
+  final MsPercentiles gpuShadow, gpuAo, gpuScene, gpuPost, gpuFrame;
 
   /// The renderer's estimate of the GPU memory it holds: resident meshes
   /// and textures, the attachments, the shadow map, its buffers.

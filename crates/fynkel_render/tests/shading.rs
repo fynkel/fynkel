@@ -470,7 +470,7 @@ fn orthographic_camera_has_no_perspective() {
 
 #[test]
 fn a_fixed_set_of_pipelines() {
-    assert_eq!(PIPELINE_VARIANTS, 14);
+    assert_eq!(PIPELINE_VARIANTS, 20);
 }
 
 // ------------------------------------------------------------ materials
@@ -1105,6 +1105,93 @@ fn cascades_shadow_the_whole_corridor_without_a_seam() {
         .map(|w| (w[1] - w[0]).abs())
         .fold(0.0f32, f32::max);
     assert!(step < 8.0, "no cascade seam on the lit floor: {walk:?}");
+}
+
+/// R2: the ambient occlusion the profile can turn off. Lit by ambient
+/// alone, so what the floor shows is the occlusion term and nothing else.
+#[test]
+fn ambient_occlusion_darkens_what_a_wall_closes_in_and_leaves_the_open_floor() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    r.camera.eye = Vec3::new(4.0, 2.5, 6.0);
+    r.camera.target = Vec3::new(0.5, 0.3, 0.0);
+    let mut e = Extract::default();
+    // A 40 m floor with its top at y = 0 and a two-metre cube standing on
+    // it, its -X face at x = -1 and its +X face at x = 1.
+    e.records.push(record(
+        0,
+        Mat4::from_scale_rotation_translation(
+            Vec3::new(40.0, 0.2, 40.0),
+            Quat::IDENTITY,
+            Vec3::new(0.0, -0.1, 0.0),
+        ),
+    ));
+    e.records.push(record(
+        1,
+        Mat4::from_scale_rotation_translation(
+            Vec3::splat(2.0),
+            Quat::IDENTITY,
+            Vec3::new(0.0, 1.0, 0.0),
+        ),
+    ));
+    e.environment = Some(environment(Vec3::ONE, 6_000.0));
+
+    // The corner where the cube meets the floor, and open floor four
+    // metres away — the same surface, the same light, the same normal.
+    let corner = Vec3::new(1.15, 0.0, 0.0);
+    let open = Vec3::new(5.0, 0.0, 0.0);
+    // The camera does not move, so the pixels are fixed up front and the
+    // sampler does not hold the renderer.
+    let at = |world: Vec3| {
+        let (x, y) = pixel_of(&r, world);
+        (y.min(H - 1) * W + x.min(W - 1)) as usize
+    };
+    let corner_px = at(corner);
+    let open_px = at(open);
+    let walk_px: Vec<usize> = (0..12)
+        .map(|i| at(Vec3::new(1.15 + i as f32 * 0.1, 0.0, 0.0)))
+        .collect();
+    let sample = |px: &[[u8; 4]], i: usize| px[i];
+
+    let px = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&px, "ao");
+    assert!(r.stats().ambient_occlusion);
+    let (ao_corner, ao_open) = (sample(&px, corner_px), sample(&px, open_px));
+    assert!(!is_background(ao_corner) && !is_background(ao_open));
+
+    // Without it the two are the same flat grey.
+    r.set_quality(Quality {
+        ambient_occlusion: false,
+        ..Quality::default()
+    });
+    let flat = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&flat, "ao-off");
+    assert!(!r.stats().ambient_occlusion);
+    let (flat_corner, flat_open) = (sample(&flat, corner_px), sample(&flat, open_px));
+    assert!(
+        (luminance(flat_corner) - luminance(flat_open)).abs() < 4.0,
+        "ambient alone is flat without AO: {flat_corner:?} vs {flat_open:?}"
+    );
+
+    // With it, the corner darkens and the open floor does not.
+    assert!(
+        luminance(ao_corner) < luminance(flat_corner) * 0.85,
+        "the corner darkens: {ao_corner:?} vs {flat_corner:?}"
+    );
+    assert!(
+        (luminance(ao_open) - luminance(flat_open)).abs() < 6.0,
+        "open floor is untouched: {ao_open:?} vs {flat_open:?}"
+    );
+
+    // And the occlusion fades with distance from the wall rather than
+    // stopping at an edge: walking away from it only ever lightens.
+    let walk: Vec<f32> = walk_px.iter().map(|i| luminance(px[*i])).collect();
+    assert!(
+        walk[0] < walk[walk.len() - 1] - 3.0,
+        "the occlusion fades outward: {walk:?}"
+    );
 }
 
 #[test]

@@ -140,6 +140,7 @@ class FynkelFrameStats {
         'gpu_complete=${v.gpuP50Ms.toStringAsFixed(3)}/${v.gpuP95Ms.toStringAsFixed(3)}/${v.gpuP99Ms.toStringAsFixed(3)}',
         'gpu_frame=${pct(v.gpuFrame)}',
         'gpu_shadow=${pct(v.gpuShadow)}',
+        'gpu_ao=${pct(v.gpuAo)}',
         'gpu_scene=${pct(v.gpuScene)}',
         'gpu_post=${pct(v.gpuPost)}',
         'gpu_n=${v.gpuFrame.count}',
