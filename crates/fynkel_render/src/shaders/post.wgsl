@@ -6,6 +6,10 @@
 // radiance premultiplied by coverage — a multisample resolve or a blended
 // transparent over the background — composited over the clear colour by
 // that coverage, ~2 display-referred (unlit): clamped and encoded only.
+// Bloom (R3b), when the stage ran: its level 0 is added to the exposed
+// scene-referred radiance before ACES, and over the uncovered part of a
+// pixel it lights the clear colour (a screen blend, in the target's
+// encoding); display-referred texels are left alone.
 
 @group(1) @binding(0) var hdr_sampler: sampler;
 @group(1) @binding(1) var hdr_tex: texture_2d<f32>;
@@ -14,6 +18,9 @@ struct PostParams {
     clear_color: vec4<f32>,
 };
 @group(1) @binding(2) var<uniform> post: PostParams;
+// The bloom chain's level 0 at half the internal size (a 1×1 black
+// placeholder while the quality profile has bloom off).
+@group(1) @binding(3) var bloom_tex: texture_2d<f32>;
 
 struct PostOut {
     @builtin(position) clip: vec4<f32>,
@@ -49,12 +56,32 @@ fn aces(c: vec3<f32>) -> vec3<f32> {
     return clamp(out, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// The exposed glow at this pixel, tinted and scaled; 0 without bloom.
+fn glow(p: vec2<f32>) -> vec3<f32> {
+    if frame.bloom.w <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let uv = p / vec2<f32>(textureDimensions(hdr_tex));
+    let b = textureSampleLevel(bloom_tex, hdr_sampler, uv, 0.0).rgb;
+    return b * frame.bloom.w * frame.bloom_tint.rgb;
+}
+
 @fragment
 fn fs_main(in: PostOut) -> @location(0) vec4<f32> {
     let hdr = textureLoad(hdr_tex, vec2<i32>(in.clip.xy), 0);
+    let bloom = glow(in.clip.xy);
+    // The clear colour is already in the target's encoding.
+    var background = post.clear_color.rgb;
+    if frame.bloom.w > 0.0 {
+        var lit = aces(bloom);
+        if frame.counts.z == 1u {
+            lit = srgb_encode(lit);
+        }
+        background += (vec3<f32>(1.0) - background) * lit;
+    }
     if hdr.a < 0.001 {
         // Written as-is: CLEAR_COLOR names the bytes in the target.
-        return vec4<f32>(post.clear_color.rgb, 1.0);
+        return vec4<f32>(background, 1.0);
     }
     var color: vec3<f32>;
     var coverage: f32;
@@ -63,12 +90,11 @@ fn fs_main(in: PostOut) -> @location(0) vec4<f32> {
         color = clamp(hdr.rgb / coverage, vec3<f32>(0.0), vec3<f32>(1.0));
     } else {
         coverage = min(hdr.a, 1.0);
-        color = aces(hdr.rgb / coverage * frame.camera_pos.w);
+        color = aces(hdr.rgb / coverage * frame.camera_pos.w + bloom);
     }
     if frame.counts.z == 1u {
         color = srgb_encode(color);
     }
-    // The clear colour is already in the target's encoding.
-    color = mix(post.clear_color.rgb, color, coverage);
+    color = mix(background, color, coverage);
     return vec4<f32>(color, 1.0);
 }

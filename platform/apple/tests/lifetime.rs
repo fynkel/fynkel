@@ -50,7 +50,11 @@ fn viewport_lifetimes_do_not_grow_the_process() {
     world.begin_frame(1.0 / 60.0);
     world.step();
 
-    for _ in 0..10 {
+    // Warm up until the process plateaus: each lifetime builds the
+    // renderer's pipelines, and Metal's caches settle over the first few
+    // dozen (R3b's three bloom pipelines pushed ten past it — 240
+    // lifetimes grow no more than 60, so it is slack, not a leak).
+    for _ in 0..30 {
         cycle(&world);
     }
     let baseline = resident_bytes();

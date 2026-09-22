@@ -1127,6 +1127,15 @@ and deliberately deferred to the package-architecture work, where the
 question of who owns a document kind gets answered once.
 `docs/renderer.md` § Volumes.)*
 
+*(R3b, 2026-09-22: **bloom** — the first new block in the volume profile
+(`bloom { intensity, threshold, scatter, tint }`), off until a volume
+gives it an intensity, capped by the quality profile's `bloom`. The
+standard dual-filter chain (a Karis-weighted soft-knee prefilter, a
+13-tap downsample, a tent upsample blended by scatter) in half-resolution
+mips of one texture, added to the exposed radiance before ACES. No lens
+dirt or flares: they are taste, and a game that wants them can add a
+block. `docs/renderer.md` § Bloom.)*
+
 ## 9. Physics, animation, audio, and input
 
 ### Physics

@@ -2,9 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fynkel.dev/schemas/volume.schema.json",
   "title": "Fynkel volume profile",
-  "description": "`<name>.volume.json` (R3a, `docs/renderer.md` § Volumes): a post-processing profile — the look overrides a `fynkel.Volume` component applies to the frame. Every block and every field is optional: a field that is present overrides what is below it (the engine default, or a lower-priority volume), a field that is absent is inherited. The renderer blends the volumes that reach the camera once per frame, each by its weight × how far inside its shape the camera is. The project's quality profile is the ceiling: a profile can shape an effect the quality profile has on, never turn on one it has off.",
+  "description": "`<name>.volume.json` (R3a, `docs/renderer.md` § Volumes): a post-processing profile: the look overrides (ambient occlusion R3a, bloom R3b) a `fynkel.Volume` component applies to the frame. Every block and every field is optional: a field that is present overrides what is below it (the engine default, or a lower-priority volume), a field that is absent is inherited. The renderer blends the volumes that reach the camera once per frame, each by its weight × how far inside its shape the camera is. The project's quality profile is the ceiling: a profile can shape an effect the quality profile has on, never turn on one it has off.",
   "type": "object",
-  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "allOf": [
+    {
+      "$ref": "https://fynkel.dev/schemas/envelope.schema.json"
+    }
+  ],
   "properties": {
     "ambientOcclusion": {
       "type": "object",
@@ -24,8 +28,46 @@
         }
       },
       "additionalProperties": false
+    },
+    "bloom": {
+      "type": "object",
+      "description": "Bloom (R3b): light brighter than the threshold spreads into its neighbourhood, blurred over a chain of half-size copies of the frame and added back before tone mapping. Off until a profile gives it an intensity.",
+      "properties": {
+        "intensity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "How much of the blurred light is added back: 0 is off (engine default 0)."
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 20,
+          "description": "The brightness after exposure (1 = white) above which a pixel starts to glow, with a soft knee of half the threshold (engine default 0.9)."
+        },
+        "scatter": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "How far the glow spreads: 0 keeps it tight around the source, 1 carries it wide (engine default 0.7)."
+        },
+        "tint": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "Linear RGB multiplied into the glow, each `0..=1` (engine default [1, 1, 1])."
+        }
+      },
+      "additionalProperties": false
     }
   },
-  "patternProperties": { "^x-": true },
+  "patternProperties": {
+    "^x-": true
+  },
   "unevaluatedProperties": false
 }

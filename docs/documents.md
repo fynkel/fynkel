@@ -967,15 +967,18 @@ gains `blend: 1`.
 ```json
 { "$schema": "https://fynkel.dev/schemas/volume.schema.json", "formatVersion": 1,
   "id": "…", "name": "Showcase Look",
-  "ambientOcclusion": { "radius": 0.9, "intensity": 1.6 } }
+  "ambientOcclusion": { "radius": 0.9, "intensity": 1.6 },
+  "bloom": { "intensity": 1.0, "threshold": 0.7, "scatter": 0.7 } }
 ```
 
 Every block and every field is optional: a present field overrides what
 is below it (the engine default or a lower-priority volume), an absent
 one is inherited — so `{}` is a valid profile that changes nothing and
 `{ "ambientOcclusion": { "intensity": 0 } }` turns the occlusion off and
-nothing else. The schema holds the ranges (`radius` in `(0, 10]` m,
-`intensity` in `[0, 8]`) and refuses unknown blocks and fields
+nothing else. The schema holds the ranges (`ambientOcclusion`: `radius`
+in `(0, 10]` m, `intensity` in `[0, 8]`; `bloom` (R3b): `intensity` in
+`[0, 10]` — 0, the default, is off —, `threshold` in `[0, 20]` exposed
+brightness, `scatter` in `[0, 1]`, `tint` three numbers in `[0, 1]`) and refuses unknown blocks and fields
 (`FYN-D0100`); the read view reports what the schema cannot see as
 `FYN-D0700` and leaves the field inherited. `fynkel document new volume
 <name>` writes one with the engine defaults spelled out. The cook
@@ -985,8 +988,8 @@ chunk (`documentKind: volume`); a scene depends on the profiles its
 volumes name. The runtime store reads the chunk into a
 `fynkel_core::volume::VolumeProfile` (`Assets::volume_profile`, cached
 per reference, evicted with its asset). The lock's `documents` gains
-`volume: 1`. R3b (bloom) and R3c (colour grading) add blocks, not
-kinds.
+`volume: 1`. R3b's `bloom` block was the first addition, and R3c
+(colour grading) adds another: blocks, not kinds.
 
 ## Migrations
 
@@ -1305,7 +1308,7 @@ the database still cooks.
 `<cache>/index.json` after every cook: `{ fynkel: "cache-index",
 cacheVersion, containerVersion, schemaFingerprint, profile, project: {
 name, startupScene, quality: { default, profiles: [{ name, shadows,
-shadowResolution, ambientOcclusion, msaa, renderScale, anisotropy,
+shadowResolution, ambientOcclusion, bloom, msaa, renderScale, anisotropy,
 textureMaxSize }] } |
 null } | null, assets: [{ id, path, name, kind, status, key, file,
 dependencies }] }` — how the runtime finds "the current cooked file
@@ -1392,7 +1395,7 @@ makes a directory a project. It is a document (envelope, strict JSON,
 | `assets` | The asset root, relative to the project directory (default `assets`; no `..`, no absolute path) |
 | `inputActions` | The game's actions (§5.1, [input.md](input.md)): `name → { type: button \| axis1d \| axis2d, description?, bindings: ["<device>:<control>", …] }` — `keyboard:WASD`, `keyboard:Space`, `mouse:delta*0.0025` (an axis control takes a `*<factor>` scale, M3-14), `gamepad:leftStick`, `touch:overlay/jump`, …; every binding is checked against the runtime's grammar (`FYN-P0009`). The cook copies the block into the cache index; the runtime compiles it into the world's binding table when the project loads (M3-07) |
 | `physics` | `{ gravity: [x, y, z], layers: [name, …] }` ([physics.md](physics.md), M3-08): the world's gravity (default `[0, -9.81, 0]`) and up to 32 unique collision layer names (bit `i` of a collider's `layer`/`mask`; default `["default"]`) — `FYN-P0013` on more than 32, an empty or duplicate name, or a non-finite gravity. The cook copies the block into the cache index; the world applies it when the project loads |
-| `quality` | `{ default, profiles: { name → { shadows, shadowResolution, ambientOcclusion, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults (shadows on, 2048, ambient occlusion on, MSAA 4, scale 1, anisotropy 8, 4096). The cook copies the block into the cache index and the renderer reads it there (`docs/renderer.md` — MSAA runs at 1 or 4, the other values are clamped; `ambientOcclusion` is R2's screen-space occlusion); `textureMaxSize` is for the cook |
+| `quality` | `{ default, profiles: { name → { shadows, shadowResolution, ambientOcclusion, bloom, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults (shadows on, 2048, ambient occlusion on, bloom allowed, MSAA 4, scale 1, anisotropy 8, 4096). The cook copies the block into the cache index and the renderer reads it there (`docs/renderer.md` — MSAA runs at 1 or 4, the other values are clamped; `ambientOcclusion` is R2's screen-space occlusion, `bloom` whether R3b's bloom may run — a volume gives it its strength); `textureMaxSize` is for the cook |
 | `components` | The component registry: `typeId → { kind: native \| behaviour, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
 | `targets` | `macos \| ios \| android \| windows \| linux \| web → { enabled (default true), profile (default dev) }`; all disabled is a warning |
 | `x-*` | Tool extensions, kept verbatim |

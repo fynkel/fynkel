@@ -73,6 +73,11 @@ pub const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float
 
 /// The ambient-occlusion targets (R2): one byte a pixel, 1 unoccluded.
 pub const AO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// Bloom's mip chain (R3b): exposed radiance, half the internal size and
+/// down.
+pub const BLOOM_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+/// Levels of the bloom chain at most: at 1280×720 the last is 20×11.
+pub const BLOOM_LEVELS: u32 = 6;
 
 /// Point + spot lights one object can be lit by — the blueprint's Tier-1
 /// budget. The strongest at the object's bounds win (E1 light culling).
@@ -149,6 +154,8 @@ struct FrameUniforms {
     sky: [f32; 4],
     shadow: [f32; 4],
     ao: [f32; 4],
+    bloom: [f32; 4],
+    bloom_tint: [f32; 4],
     counts: [u32; 4],
     lights: [GpuLight; LIGHT_POOL],
 }
@@ -339,6 +346,8 @@ pub struct FrameStats {
     pub debug_lines: u32,
     /// Whether the frame ran the ambient-occlusion stage (R2).
     pub ambient_occlusion: bool,
+    /// Whether the frame ran the bloom stage (R3b).
+    pub bloom: bool,
     /// Volumes (R3a) whose profile reached the camera this frame.
     pub volumes: u32,
     /// Samples per pixel of the scene passes (1 or 4).
@@ -651,6 +660,12 @@ struct Pipelines {
     /// Screen-space ambient occlusion and its blur.
     ao: wgpu::RenderPipeline,
     ao_blur: wgpu::RenderPipeline,
+    /// Bloom (R3b): the bright-pass into the chain's first level, the
+    /// downsample between levels, and the upsample blended back over the
+    /// finer level by `scatter` (the blend constant).
+    bloom_prefilter: wgpu::RenderPipeline,
+    bloom_down: wgpu::RenderPipeline,
+    bloom_up: wgpu::RenderPipeline,
     /// Debug lines.
     debug: wgpu::RenderPipeline,
     post: wgpu::RenderPipeline,
@@ -681,6 +696,9 @@ struct Attachments {
     /// Ambient occlusion at this size (R2); `None` while the profile has
     /// it off, and then the pass chain has no AO stage at all.
     ao: Option<AoTargets>,
+    /// Bloom's chain (R3b); `None` while the profile has it off, and then
+    /// the post pass reads a black placeholder.
+    bloom: Option<BloomTargets>,
     /// The multisampled HDR colour, resolved into `hdr_view`; `None` at
     /// one sample (the scene passes write `hdr_view` directly).
     hdr_msaa_view: Option<wgpu::TextureView>,
@@ -706,6 +724,18 @@ struct AoTargets {
     ao_bind_group: wgpu::BindGroup,
     /// Group 1 of the blur: the scene depth and `view`.
     blur_bind_group: wgpu::BindGroup,
+}
+
+/// Bloom's mip chain (R3b) at half the internal size: one view per level,
+/// and the group 1 each pass reads — the HDR frame for the bright-pass,
+/// the finer level for a downsample, the coarser one for an upsample.
+struct BloomTargets {
+    levels: Vec<wgpu::TextureView>,
+    prefilter_bind_group: wgpu::BindGroup,
+    /// `down[i]` reads level `i` (drawn into level `i + 1`).
+    down: Vec<wgpu::BindGroup>,
+    /// `up[i]` reads level `i + 1` (blended into level `i`).
+    up: Vec<wgpu::BindGroup>,
 }
 
 /// The sun's shadow map: `resolution` 1 is the placeholder bound while the
@@ -753,6 +783,11 @@ pub struct ExtractRenderer {
     ao_layout: wgpu::BindGroupLayout,
     ao_frame_layout: wgpu::BindGroupLayout,
     ao_frame_bind_group: wgpu::BindGroup,
+    /// The post pass's group 1: the HDR, its parameters and bloom's first
+    /// level (R3b).
+    post_layout: wgpu::BindGroupLayout,
+    /// A bloom pass's group 1: the level (or HDR frame) it reads.
+    bloom_layout: wgpu::BindGroupLayout,
     shadow_layout: wgpu::BindGroupLayout,
     skin_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -797,6 +832,10 @@ pub struct ExtractRenderer {
     /// Whether this frame's pass chain has the ambient-occlusion stage
     /// (R2): the profile asks for it and the targets exist.
     ao_active: bool,
+    /// Whether this frame's pass chain has the bloom stage (R3b): the
+    /// profile allows it, the chain exists and the volumes give it an
+    /// intensity.
+    bloom_active: bool,
     /// The look the last `prepare` resolved from the volumes (R3a).
     post: PostSettings,
     sky_bind_group: Option<(AssetRef, wgpu::BindGroup)>,
@@ -1028,6 +1067,19 @@ impl ExtractRenderer {
                 uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
             ],
         });
+        let post_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fynkel post bgl"),
+            entries: &[
+                sampler_entry(0),
+                texture_entry(1),
+                uniform_entry(2, wgpu::ShaderStages::FRAGMENT),
+                texture_entry(3),
+            ],
+        });
+        let bloom_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fynkel bloom bgl"),
+            entries: &[sampler_entry(0), texture_entry(1)],
+        });
         let ao_layout = create_ao_layout(device, quality.msaa);
         let ao_frame_layout = create_ao_frame_layout(device);
         let ao_frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1081,6 +1133,8 @@ impl ExtractRenderer {
                 skin: &skin_layout,
                 ao_frame: &ao_frame_layout,
                 ao: &ao_layout,
+                post: &post_layout,
+                bloom: &bloom_layout,
             },
         );
 
@@ -1100,8 +1154,12 @@ impl ExtractRenderer {
             &quality,
             width,
             height,
-            &single_layout,
-            &ao_layout,
+            AttachmentLayouts {
+                present: &single_layout,
+                post: &post_layout,
+                ao: &ao_layout,
+                bloom: &bloom_layout,
+            },
             &present_sampler,
             &post_buffer,
         );
@@ -1142,6 +1200,8 @@ impl ExtractRenderer {
             ao_layout,
             ao_frame_layout,
             ao_frame_bind_group,
+            post_layout,
+            bloom_layout,
             shadow_layout,
             skin_layout,
             sampler,
@@ -1176,6 +1236,7 @@ impl ExtractRenderer {
             shadow_map,
             shadow_active: false,
             ao_active: false,
+            bloom_active: false,
             post: PostSettings::default(),
             sky_bind_group: None,
             ibl: None,
@@ -1226,8 +1287,12 @@ impl ExtractRenderer {
             &self.quality,
             self.width,
             self.height,
-            &self.single_layout,
-            &self.ao_layout,
+            AttachmentLayouts {
+                present: &self.single_layout,
+                post: &self.post_layout,
+                ao: &self.ao_layout,
+                bloom: &self.bloom_layout,
+            },
             &self.present_sampler,
             &self.post_buffer,
         );
@@ -1371,6 +1436,8 @@ impl ExtractRenderer {
                     skin: &self.skin_layout,
                     ao_frame: &self.ao_frame_layout,
                     ao: &self.ao_layout,
+                    post: &self.post_layout,
+                    bloom: &self.bloom_layout,
                 },
             );
         }
@@ -1379,6 +1446,7 @@ impl ExtractRenderer {
             || wanted.msaa != self.attachments.sample_count
             || (wanted.render_scale != 1.0) != self.attachments.ldr_view.is_some()
             || wanted.ambient_occlusion != self.attachments.ao.is_some()
+            || wanted.bloom != self.attachments.bloom.is_some()
         {
             self.rebuild_attachments(device);
         }
@@ -2075,6 +2143,10 @@ impl ExtractRenderer {
             && post.ao_intensity > 0.0
             && stats.draws > stats.transparent;
         stats.ambient_occlusion = self.ao_active;
+        // Bloom (R3b): the profile allows it and a volume gives it an
+        // intensity; otherwise the post pass adds nothing, bit for bit.
+        self.bloom_active = self.attachments.bloom.is_some() && post.bloom_intensity > 0.0;
+        stats.bloom = self.bloom_active;
 
         let u = FrameUniforms {
             view_proj: view_proj.to_cols_array_2d(),
@@ -2094,6 +2166,18 @@ impl ExtractRenderer {
             ],
             shadow,
             ao: [post.ao_radius, post.ao_intensity, 0.0, 0.0],
+            bloom: [
+                post.bloom_threshold.max(0.0),
+                post.bloom_threshold.max(0.0) * 0.5,
+                // Unity's mapping: neither end leaves a level out.
+                0.05 + 0.9 * post.bloom_scatter.clamp(0.0, 1.0),
+                if self.bloom_active {
+                    post.bloom_intensity
+                } else {
+                    0.0
+                },
+            ],
+            bloom_tint: post.bloom_tint.max(Vec3::ZERO).extend(0.0).to_array(),
             counts: [
                 n_lights as u32,
                 stats.sky as u32,
@@ -2195,6 +2279,12 @@ impl ExtractRenderer {
             self.ao_passes(encoder);
         }
         self.scene_pass(encoder);
+        // The post pair spans the bloom stage when it runs: its bright-pass
+        // writes the beginning, the post pass the end.
+        let bloom = self.bloom_active;
+        if bloom {
+            self.bloom_passes(encoder);
+        }
         let a = &self.attachments;
         let post_target = a.ldr_view.as_ref().unwrap_or(target);
         self.fullscreen_pass(
@@ -2203,7 +2293,7 @@ impl ExtractRenderer {
             post_target,
             &self.pipelines.post,
             &a.post_bind_group,
-            2,
+            self.timestamps_part(2, !bloom, true),
         );
         if let (Some(_), Some(present)) = (&a.ldr_view, &a.present_bind_group) {
             self.fullscreen_pass(
@@ -2212,7 +2302,7 @@ impl ExtractRenderer {
                 target,
                 &self.pipelines.present,
                 present,
-                3,
+                self.timestamps(3),
             );
         }
         self.stats.encode_us = encode_start.elapsed().as_micros() as u32;
@@ -2409,6 +2499,83 @@ impl ExtractRenderer {
         }
     }
 
+    /// Bloom (R3b): the bright-pass from the HDR frame into level 0, a
+    /// downsample into each coarser level, then back up — each level
+    /// replaced by itself mixed with the tent of the coarser one by
+    /// `scatter` (the blend constant). Level 0 is what the post pass adds.
+    fn bloom_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+        let Some(bloom) = self.attachments.bloom.as_ref() else {
+            return;
+        };
+        let scatter = f64::from(0.05 + 0.9 * self.post.bloom_scatter.clamp(0.0, 1.0));
+        let n = bloom.levels.len();
+        let mut steps: Vec<(&str, usize, &wgpu::RenderPipeline, &wgpu::BindGroup, bool)> =
+            Vec::with_capacity(2 * n - 1);
+        steps.push((
+            "fynkel bloom prefilter",
+            0,
+            &self.pipelines.bloom_prefilter,
+            &bloom.prefilter_bind_group,
+            false,
+        ));
+        for i in 1..n {
+            steps.push((
+                "fynkel bloom down",
+                i,
+                &self.pipelines.bloom_down,
+                &bloom.down[i - 1],
+                false,
+            ));
+        }
+        for i in (0..n - 1).rev() {
+            steps.push((
+                "fynkel bloom up",
+                i,
+                &self.pipelines.bloom_up,
+                &bloom.up[i],
+                true,
+            ));
+        }
+        for (k, (label, level, pipeline, bind_group, blend)) in steps.into_iter().enumerate() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(label),
+                timestamp_writes: if k == 0 {
+                    self.timestamps_part(2, true, false)
+                } else {
+                    None
+                },
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &bloom.levels[level],
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        // An upsample mixes over what the downsample left.
+                        load: if blend {
+                            wgpu::LoadOp::Load
+                        } else {
+                            wgpu::LoadOp::Clear(wgpu::Color::BLACK)
+                        },
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                ..Default::default()
+            });
+            pass.set_pipeline(pipeline);
+            if blend {
+                pass.set_blend_constant(wgpu::Color {
+                    r: scatter,
+                    g: scatter,
+                    b: scatter,
+                    a: scatter,
+                });
+            }
+            pass.set_bind_group(0, &self.ao_frame_bind_group, &[]);
+            pass.set_bind_group(1, bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+
     /// Opaque batches (culled, then double-sided), the sky behind them,
     /// then the transparent instances back-to-front and the debug lines.
     fn scene_pass(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -2516,11 +2683,11 @@ impl ExtractRenderer {
         target: &wgpu::TextureView,
         pipeline: &wgpu::RenderPipeline,
         bind_group: &wgpu::BindGroup,
-        timestamp_pair: u32,
+        timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>,
     ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(label),
-            timestamp_writes: self.timestamps(timestamp_pair),
+            timestamp_writes,
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 depth_slice: None,
@@ -2930,7 +3097,7 @@ impl Pipelines {
     }
 
     const fn count() -> usize {
-        20
+        23
     }
 }
 
@@ -2945,9 +3112,21 @@ struct Layouts<'a> {
     /// group 0 holds the texture the blur writes).
     ao_frame: &'a wgpu::BindGroupLayout,
     ao: &'a wgpu::BindGroupLayout,
+    /// The post pass's group 1 (the HDR, its parameters, bloom's level 0).
+    post: &'a wgpu::BindGroupLayout,
+    /// A bloom pass's group 1 (R3b).
+    bloom: &'a wgpu::BindGroupLayout,
 }
 
-/// The twenty pipeline variants (`docs/renderer.md`) for one sample
+/// The bind group layouts the attachments' bind groups are made over.
+struct AttachmentLayouts<'a> {
+    present: &'a wgpu::BindGroupLayout,
+    post: &'a wgpu::BindGroupLayout,
+    ao: &'a wgpu::BindGroupLayout,
+    bloom: &'a wgpu::BindGroupLayout,
+}
+
+/// The twenty-three pipeline variants (`docs/renderer.md`) for one sample
 /// count: mesh (cull back), mesh double-sided (cull none), transparent
 /// (blend, cull back), transparent double-sided, the same four skinned
 /// (`vs_skinned`, a third vertex buffer of joint weights and the palette
@@ -2969,6 +3148,8 @@ fn create_pipelines(
         skin: skin_layout,
         ao_frame: ao_frame_layout,
         ao: ao_layout,
+        post: post_layout,
+        bloom: bloom_layout,
     } = layouts;
     let module = |label, body: &str| {
         device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -2982,6 +3163,7 @@ fn create_pipelines(
     let sky_shader = module("fynkel sky shader", include_str!("shaders/sky.wgsl"));
     let debug_shader = module("fynkel debug shader", include_str!("shaders/debug.wgsl"));
     let post_shader = module("fynkel post shader", include_str!("shaders/post.wgsl"));
+    let bloom_shader = module("fynkel bloom shader", include_str!("shaders/bloom.wgsl"));
     let present_shader = module(
         "fynkel present shader",
         include_str!("shaders/present.wgsl"),
@@ -3029,6 +3211,18 @@ fn create_pipelines(
     let debug_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("fynkel debug pl"),
         bind_group_layouts: &[Some(frame_layout)],
+        ..Default::default()
+    });
+    let post_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("fynkel post pl"),
+        bind_group_layouts: &[Some(frame_layout), Some(post_layout)],
+        ..Default::default()
+    });
+    // The bloom passes share the AO passes' group 0: the frame uniform
+    // alone.
+    let bloom_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("fynkel bloom pl"),
+        bind_group_layouts: &[Some(ao_frame_layout), Some(bloom_layout)],
         ..Default::default()
     });
     let ao_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -3216,6 +3410,48 @@ fn create_pipelines(
             cache: None,
         })
     };
+    let bloom_pipeline = |label, entry: &str, blend| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&bloom_pl),
+            vertex: wgpu::VertexState {
+                module: &bloom_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &bloom_shader,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: BLOOM_FORMAT,
+                    blend: Some(blend),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    // `lerp(finer, coarser, scatter)`: the upsample is the source, the
+    // level it lands on the destination.
+    let scatter = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Constant,
+        dst_factor: wgpu::BlendFactor::OneMinusConstant,
+        operation: wgpu::BlendOperation::Add,
+    };
+    let bloom_scatter = wgpu::BlendState {
+        color: scatter,
+        alpha: scatter,
+    };
     let debug = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("fynkel debug pipeline"),
         layout: Some(&debug_pl),
@@ -3252,13 +3488,14 @@ fn create_pipelines(
         cache: None,
     });
     let fullscreen = |label,
+                      layout: &wgpu::PipelineLayout,
                       shader: &wgpu::ShaderModule,
                       targets: &[Option<wgpu::ColorTargetState>],
                       depth,
                       multisample| {
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
-            layout: Some(&single_pl),
+            layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: shader,
                 entry_point: Some("vs_main"),
@@ -3284,6 +3521,7 @@ fn create_pipelines(
     };
     let sky = fullscreen(
         "fynkel sky pipeline",
+        &single_pl,
         &sky_shader,
         &hdr_target,
         Some(wgpu::DepthStencilState {
@@ -3302,6 +3540,7 @@ fn create_pipelines(
     })];
     let post = fullscreen(
         "fynkel post pipeline",
+        &post_pl,
         &post_shader,
         &host_target,
         None,
@@ -3309,6 +3548,7 @@ fn create_pipelines(
     );
     let present = fullscreen(
         "fynkel present pipeline",
+        &single_pl,
         &present_shader,
         &host_target,
         None,
@@ -3410,6 +3650,17 @@ fn create_pipelines(
         ),
         ao: ao_pipeline("fynkel ao pipeline", "fs_main"),
         ao_blur: ao_pipeline("fynkel ao blur pipeline", "fs_blur"),
+        bloom_prefilter: bloom_pipeline(
+            "fynkel bloom prefilter pipeline",
+            "fs_prefilter",
+            wgpu::BlendState::REPLACE,
+        ),
+        bloom_down: bloom_pipeline(
+            "fynkel bloom down pipeline",
+            "fs_down",
+            wgpu::BlendState::REPLACE,
+        ),
+        bloom_up: bloom_pipeline("fynkel bloom up pipeline", "fs_up", bloom_scatter),
         debug,
         post,
         present,
@@ -3451,11 +3702,16 @@ fn create_attachments(
     quality: &Quality,
     width: u32,
     height: u32,
-    single_layout: &wgpu::BindGroupLayout,
-    ao_layout: &wgpu::BindGroupLayout,
+    layouts: AttachmentLayouts<'_>,
     present_sampler: &wgpu::Sampler,
     post_buffer: &wgpu::Buffer,
 ) -> Attachments {
+    let AttachmentLayouts {
+        present: single_layout,
+        post: post_layout,
+        ao: ao_layout,
+        bloom: bloom_layout,
+    } = layouts;
     let (w, h) = quality.internal_size(width, height);
     let samples = quality.msaa;
     // The AO passes sample the depth the prepass stored (R2).
@@ -3523,14 +3779,110 @@ fn create_attachments(
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         )
     });
-    let post_bind_group = create_single_bind_group(
-        device,
-        single_layout,
-        present_sampler,
-        &hdr_view,
-        post_buffer,
-        "fynkel post bg",
-    );
+    // Bloom (R3b): half the internal size, as many levels as fit (down
+    // to 2 texels on the short side), each one a view the passes attach.
+    let (bw, bh) = ((w / 2).max(1), (h / 2).max(1));
+    let mut bloom_texels = 0u64;
+    let bloom = quality.bloom.then(|| {
+        let mut count = 1;
+        while count < BLOOM_LEVELS && (bw >> count) >= 2 && (bh >> count) >= 2 {
+            count += 1;
+        }
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fynkel bloom"),
+            size: wgpu::Extent3d {
+                width: bw,
+                height: bh,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: count,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: BLOOM_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let levels: Vec<wgpu::TextureView> = (0..count)
+            .map(|level| {
+                bloom_texels += u64::from((bw >> level).max(1)) * u64::from((bh >> level).max(1));
+                texture.create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("fynkel bloom level"),
+                    base_mip_level: level,
+                    mip_level_count: Some(1),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        let reads = |view: &wgpu::TextureView, label| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: bloom_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Sampler(present_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                ],
+            })
+        };
+        let n = levels.len();
+        BloomTargets {
+            prefilter_bind_group: reads(&hdr_view, "fynkel bloom prefilter bg"),
+            down: levels[..n - 1]
+                .iter()
+                .map(|v| reads(v, "fynkel bloom down bg"))
+                .collect(),
+            up: levels[1..]
+                .iter()
+                .map(|v| reads(v, "fynkel bloom up bg"))
+                .collect(),
+            levels,
+        }
+    });
+    // Without the chain the post pass reads a black texel (textures start
+    // zeroed).
+    let bloom_placeholder = bloom.is_none().then(|| {
+        create_attachment(
+            device,
+            "fynkel bloom placeholder",
+            1,
+            1,
+            1,
+            BLOOM_FORMAT,
+            wgpu::TextureUsages::TEXTURE_BINDING,
+        )
+    });
+    let bloom_view = match (&bloom, &bloom_placeholder) {
+        (Some(b), _) => &b.levels[0],
+        (None, Some(p)) => p,
+        (None, None) => unreachable!("one of the two exists"),
+    };
+    let post_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("fynkel post bg"),
+        layout: post_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Sampler(present_sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&hdr_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: post_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(bloom_view),
+            },
+        ],
+    });
     let present_bind_group = ldr_view.as_ref().map(|ldr| {
         create_single_bind_group(
             device,
@@ -3543,7 +3895,7 @@ fn create_attachments(
     });
     // Depth32 × samples, HDR rgba16f × samples when resolved, the HDR
     // resolve, the LDR at render scale (4 bytes a texel), the two AO
-    // targets (one byte each).
+    // targets (one byte each), bloom's chain (rgba16f).
     let texels = u64::from(w.max(1)) * u64::from(h.max(1));
     let bytes = texels * 4 * u64::from(samples)
         + if samples > 1 {
@@ -3553,13 +3905,15 @@ fn create_attachments(
         }
         + texels * 8
         + if ldr_view.is_some() { texels * 4 } else { 0 }
-        + if ao.is_some() { texels * 2 } else { 0 };
+        + if ao.is_some() { texels * 2 } else { 0 }
+        + bloom_texels * 8;
     Attachments {
         width: w,
         height: h,
         sample_count: samples,
         depth_view,
         ao,
+        bloom,
         hdr_msaa_view,
         hdr_view,
         ldr_view,

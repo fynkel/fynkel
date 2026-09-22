@@ -12,7 +12,8 @@
 //! schema's to report).
 
 use fynkel_contracts::{Code, Diagnostic};
-use fynkel_core::volume::{AoOverrides, VolumeProfile};
+use fynkel_core::volume::{AoOverrides, BloomOverrides, VolumeProfile};
+use glam::Vec3;
 use uuid::Uuid;
 
 use crate::json::Node;
@@ -41,39 +42,19 @@ impl VolumeDocument {
         }
         let root = &document.root;
         let mut profile = VolumeProfile::default();
-        if let Some(block) = root.get("ambientOcclusion") {
-            if block.as_object().is_some() {
-                let mut number = |field: &str| -> Option<f32> {
-                    let node = block.get(field)?;
-                    match node.as_f64() {
-                        Some(v) if v.is_finite() => Some(v as f32),
-                        _ => {
-                            diags.push(anchor(
-                                root,
-                                Diagnostic::error(
-                                    Code::VOLUME_MALFORMED_ENTRY,
-                                    format!("ambientOcclusion.{field} must be a finite number"),
-                                ),
-                                &format!("/ambientOcclusion/{field}"),
-                            ));
-                            None
-                        }
-                    }
-                };
-                profile.ambient_occlusion = AoOverrides {
-                    radius: number("radius"),
-                    intensity: number("intensity"),
-                };
-            } else {
-                diags.push(anchor(
-                    root,
-                    Diagnostic::error(
-                        Code::VOLUME_MALFORMED_ENTRY,
-                        "ambientOcclusion must be an object",
-                    ),
-                    "/ambientOcclusion",
-                ));
-            }
+        if let Some(mut block) = Block::open(root, "ambientOcclusion", &mut diags) {
+            profile.ambient_occlusion = AoOverrides {
+                radius: block.number("radius"),
+                intensity: block.number("intensity"),
+            };
+        }
+        if let Some(mut block) = Block::open(root, "bloom", &mut diags) {
+            profile.bloom = BloomOverrides {
+                intensity: block.number("intensity"),
+                threshold: block.number("threshold"),
+                scatter: block.number("scatter"),
+                tint: block.color("tint"),
+            };
         }
         VolumeDocument {
             document,
@@ -115,6 +96,85 @@ impl VolumeDocument {
             }
         }
         out
+    }
+}
+
+/// One override block being read: every field that does not read is a
+/// `FYN-D0700` at its pointer and stays absent (inherited).
+struct Block<'a> {
+    root: &'a Node,
+    node: &'a Node,
+    name: &'static str,
+    diags: &'a mut Vec<Diagnostic>,
+}
+
+impl<'a> Block<'a> {
+    /// The block, when present and an object; a present non-object is
+    /// reported and skipped.
+    fn open(
+        root: &'a Node,
+        name: &'static str,
+        diags: &'a mut Vec<Diagnostic>,
+    ) -> Option<Block<'a>> {
+        let node = root.get(name)?;
+        if node.as_object().is_none() {
+            diags.push(anchor(
+                root,
+                Diagnostic::error(
+                    Code::VOLUME_MALFORMED_ENTRY,
+                    format!("{name} must be an object"),
+                ),
+                &format!("/{name}"),
+            ));
+            return None;
+        }
+        Some(Block {
+            root,
+            node,
+            name,
+            diags,
+        })
+    }
+
+    fn malformed(&mut self, field: &str, what: &str) {
+        let name = self.name;
+        self.diags.push(anchor(
+            self.root,
+            Diagnostic::error(
+                Code::VOLUME_MALFORMED_ENTRY,
+                format!("{name}.{field} must be {what}"),
+            ),
+            &format!("/{name}/{field}"),
+        ));
+    }
+
+    fn number(&mut self, field: &str) -> Option<f32> {
+        let node = self.node.get(field)?;
+        match node.as_f64() {
+            Some(v) if v.is_finite() => Some(v as f32),
+            _ => {
+                self.malformed(field, "a finite number");
+                None
+            }
+        }
+    }
+
+    /// Linear RGB as `[r, g, b]`.
+    fn color(&mut self, field: &str) -> Option<Vec3> {
+        let node = self.node.get(field)?;
+        let rgb: Option<Vec<f32>> = node.as_array().and_then(|items| {
+            items
+                .iter()
+                .map(|n| n.as_f64().filter(|v| v.is_finite()).map(|v| v as f32))
+                .collect()
+        });
+        match rgb.as_deref() {
+            Some(&[r, g, b]) => Some(Vec3::new(r, g, b)),
+            _ => {
+                self.malformed(field, "three finite numbers [r, g, b]");
+                None
+            }
+        }
     }
 }
 

@@ -1,11 +1,12 @@
-//! Volume profiles (R3a): `.volume.json` read into the core's
+//! Volume profiles (R3a, bloom R3b): `.volume.json` read into the core's
 //! `VolumeProfile` — present fields override, absent ones inherit —
 //! and checked by the schema's ranges.
 
 use std::path::Path;
 
-use fynkel_core::volume::{AoOverrides, VolumeProfile};
+use fynkel_core::volume::{AoOverrides, BloomOverrides, VolumeProfile};
 use fynkel_document::{Code, Document, DocumentKind, SchemaSet, VolumeDocument};
+use glam::Vec3;
 
 fn schemas() -> SchemaSet {
     SchemaSet::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schemas")).unwrap()
@@ -43,6 +44,18 @@ fn present_fields_override_and_absent_ones_inherit() {
     );
     assert_eq!(codes(&radius), []);
 
+    let bloom = doc(r#","bloom":{"intensity":1.2,"tint":[1,0.8,0.6]}"#);
+    assert_eq!(
+        bloom.profile.bloom,
+        BloomOverrides {
+            intensity: Some(1.2),
+            tint: Some(Vec3::new(1.0, 0.8, 0.6)),
+            ..BloomOverrides::default()
+        }
+    );
+    assert_eq!(bloom.profile.ambient_occlusion, AoOverrides::default());
+    assert_eq!(codes(&bloom), []);
+
     let both = doc(r#","ambientOcclusion":{"radius":0.4,"intensity":0}"#);
     assert_eq!(both.profile.ambient_occlusion.intensity, Some(0.0));
     assert_eq!(codes(&both), []);
@@ -67,7 +80,19 @@ fn the_schema_holds_the_ranges_and_the_view_reads_what_it_can() {
         codes(&doc(r#","ambientOcclusion":{"radius":1,"samples":64}"#)),
         [d("/ambientOcclusion/samples")]
     );
-    assert_eq!(codes(&doc(r#","bloom":{}"#)), [d("/bloom")]);
+    assert_eq!(codes(&doc(r#","lensFlare":{}"#)), [d("/lensFlare")]);
+    assert_eq!(
+        codes(&doc(r#","bloom":{"scatter":1.5}"#)),
+        [d("/bloom/scatter")]
+    );
+    assert_eq!(
+        codes(&doc(r#","bloom":{"tint":[1,0.5]}"#)),
+        [d("/bloom/tint")]
+    );
+    // A tint that does not read stays inherited, reported once.
+    let short = doc(r#","bloom":{"intensity":1,"tint":[1,0.5]}"#);
+    assert_eq!(short.profile.bloom.tint, None);
+    assert_eq!(short.profile.bloom.intensity, Some(1.0));
     // A value of the wrong type: the schema says so once, and the view
     // leaves the field inherited.
     let wrong = doc(r#","ambientOcclusion":{"radius":"wide"}"#);
@@ -81,5 +106,14 @@ fn the_schema_holds_the_ranges_and_the_view_reads_what_it_can() {
     let fresh = Document::new(DocumentKind::Volume, "Look");
     let fresh = VolumeDocument::from_document(fresh);
     assert_eq!(fresh.profile.ambient_occlusion.radius, Some(0.6));
+    assert_eq!(
+        fresh.profile.bloom,
+        BloomOverrides {
+            intensity: Some(0.0),
+            threshold: Some(0.9),
+            scatter: Some(0.7),
+            tint: Some(Vec3::ONE),
+        }
+    );
     assert_eq!(codes(&fresh), []);
 }

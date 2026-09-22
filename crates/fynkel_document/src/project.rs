@@ -44,6 +44,8 @@ pub struct QualityProfile {
     pub shadow_resolution: u32,
     /// Screen-space ambient occlusion (R2).
     pub ambient_occlusion: bool,
+    /// Bloom (R3b): allowed; a volume gives it an intensity.
+    pub bloom: bool,
     pub msaa: u32,
     pub render_scale: f64,
     pub anisotropy: u32,
@@ -60,6 +62,7 @@ impl QualityProfile {
             shadows: true,
             shadow_resolution: 2048,
             ambient_occlusion: true,
+            bloom: true,
             msaa: 4,
             render_scale: 1.0,
             anisotropy: 8,
@@ -72,7 +75,7 @@ impl QualityProfile {
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({
             "name": self.name, "shadows": self.shadows, "shadowResolution": self.shadow_resolution,
-            "ambientOcclusion": self.ambient_occlusion, "msaa": self.msaa, "renderScale": self.render_scale, "anisotropy": self.anisotropy,
+            "ambientOcclusion": self.ambient_occlusion, "bloom": self.bloom, "msaa": self.msaa, "renderScale": self.render_scale, "anisotropy": self.anisotropy,
             "textureMaxSize": self.texture_max_size,
         })
     }
@@ -89,6 +92,7 @@ impl QualityProfile {
             ambient_occlusion: v["ambientOcclusion"]
                 .as_bool()
                 .unwrap_or(d.ambient_occlusion),
+            bloom: v["bloom"].as_bool().unwrap_or(d.bloom),
             msaa: int("msaa", d.msaa),
             render_scale: v["renderScale"].as_f64().unwrap_or(d.render_scale),
             anisotropy: int("anisotropy", d.anisotropy),
@@ -394,6 +398,11 @@ impl Project {
                             .get("ambientOcclusion")
                             .and_then(Node::as_bool)
                             .unwrap_or(d.ambient_occlusion),
+                        bloom: m
+                            .value
+                            .get("bloom")
+                            .and_then(Node::as_bool)
+                            .unwrap_or(d.bloom),
                         msaa: int("msaa", d.msaa),
                         render_scale: m
                             .value

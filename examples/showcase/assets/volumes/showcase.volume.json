@@ -6,5 +6,10 @@
   "ambientOcclusion": {
     "radius": 0.9,
     "intensity": 1.6
+  },
+  "bloom": {
+    "intensity": 1.0,
+    "threshold": 0.7,
+    "scatter": 0.7
   }
 }

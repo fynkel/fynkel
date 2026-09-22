@@ -246,6 +246,22 @@ impl Document {
                         ("intensity".into(), Node::float(1.35)),
                     ]),
                 ));
+                members.push((
+                    "bloom".into(),
+                    Node::object(vec![
+                        ("intensity".into(), Node::float(0.0)),
+                        ("threshold".into(), Node::float(0.9)),
+                        ("scatter".into(), Node::float(0.7)),
+                        (
+                            "tint".into(),
+                            Node::synthetic(Value::Array(vec![
+                                Node::float(1.0),
+                                Node::float(1.0),
+                                Node::float(1.0),
+                            ])),
+                        ),
+                    ]),
+                ));
             }
             _ => {}
         }

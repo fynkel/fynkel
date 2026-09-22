@@ -472,7 +472,7 @@ fn orthographic_camera_has_no_perspective() {
 
 #[test]
 fn a_fixed_set_of_pipelines() {
-    assert_eq!(PIPELINE_VARIANTS, 20);
+    assert_eq!(PIPELINE_VARIANTS, 23);
 }
 
 // ------------------------------------------------------------ materials
@@ -1811,4 +1811,138 @@ fn pass_timestamps_and_the_memory_estimate() {
         eprintln!("no timestamp queries on this adapter");
         assert!(!s.gpu_timestamps);
     }
+}
+
+/// R3b: bloom, shaped by the volumes and capped by the quality profile.
+/// A lit two-metre cube on the clear colour: the glow shows where there
+/// is nothing but background, so what changes is the bloom and nothing
+/// else.
+#[test]
+fn bloom_spreads_bright_light_past_its_edges_and_the_threshold_keeps_the_rest() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let lab = Lab::new("bloom");
+    let glow = lab.volume(
+        1,
+        json!({ "bloom": { "intensity": 1.0, "threshold": 0.0 } }),
+    );
+    let high = lab.volume(
+        2,
+        json!({ "bloom": { "intensity": 1.0, "threshold": 20.0 } }),
+    );
+    let red = lab.volume(
+        3,
+        json!({ "bloom": { "intensity": 1.0, "threshold": 0.0, "tint": [1.0, 0.0, 0.0] } }),
+    );
+    let tight = lab.volume(
+        4,
+        json!({ "bloom": { "intensity": 1.0, "threshold": 0.0, "scatter": 0.0 } }),
+    );
+    let wide = lab.volume(
+        5,
+        json!({ "bloom": { "intensity": 1.0, "threshold": 0.0, "scatter": 1.0 } }),
+    );
+    let (assets, _) = lab.extract(Vec3::new(0.0, 0.3, 3.0), &[], false);
+
+    let mut r = renderer(&device);
+    r.set_assets(Some(assets.clone()));
+    r.camera.eye = Vec3::new(0.0, 0.0, 7.0);
+    r.camera.target = Vec3::ZERO;
+    let mut base = Extract::default();
+    base.records.push(record(
+        0,
+        Mat4::from_scale_rotation_translation(Vec3::splat(2.0), Quat::IDENTITY, Vec3::ZERO),
+    ));
+    base.environment = Some(environment(Vec3::ONE, 20_000.0));
+    let with = |profile: &AssetRef| {
+        let mut e = base.clone();
+        e.volumes = vec![ExtractVolume {
+            record: 9,
+            world: Mat4::IDENTITY,
+            volume: Volume {
+                profile: profile.clone(),
+                ..Volume::default()
+            },
+        }];
+        e
+    };
+    let at = |world: Vec3| {
+        let (x, y) = pixel_of(&r, world);
+        (y.min(H - 1) * W + x.min(W - 1)) as usize
+    };
+    // Background a little past the cube's +X edge (x = 1 on the front
+    // face), further out, and the image's corner.
+    let near = at(Vec3::new(1.25, 0.0, 1.0));
+    let far = at(Vec3::new(2.2, 0.0, 1.0));
+    let corner = 0;
+
+    let plain = render_offscreen(&device, &queue, &mut r, &base);
+    assert!(!r.stats().bloom, "no volume, no bloom");
+    assert!(is_background(plain[near]) && is_background(plain[far]));
+    // Off is off to the bit: the profile without the chain renders the
+    // same picture as the chain with no intensity.
+    r.set_quality(Quality {
+        bloom: false,
+        ..Quality::default()
+    });
+    let quality_off = render_offscreen(&device, &queue, &mut r, &base);
+    assert_eq!(plain, quality_off);
+    // And it is the ceiling: a volume cannot turn it on.
+    let capped = render_offscreen(&device, &queue, &mut r, &with(&glow));
+    assert!(!r.stats().bloom);
+    assert_eq!(capped, quality_off);
+    r.set_quality(Quality::default());
+
+    // With it, the light crosses the silhouette onto the background and
+    // fades with distance; the image's far corner stays the clear colour
+    // within a step or two.
+    let bloomed = render_offscreen(&device, &queue, &mut r, &with(&glow));
+    dump(&bloomed, "bloom");
+    assert!(r.stats().bloom);
+    assert_eq!(r.post_settings().bloom_intensity, 1.0);
+    assert!(
+        luminance(bloomed[near]) > luminance(plain[near]) + 8.0,
+        "the glow reaches past the edge: {:?} vs {:?}",
+        bloomed[near],
+        plain[near]
+    );
+    assert!(
+        luminance(bloomed[near]) > luminance(bloomed[far]),
+        "and fades outward: {:?} vs {:?}",
+        bloomed[near],
+        bloomed[far]
+    );
+    assert!(
+        (luminance(bloomed[corner]) - luminance(plain[corner])).abs() < 3.0,
+        "the far corner is barely touched: {:?} vs {:?}",
+        bloomed[corner],
+        plain[corner]
+    );
+
+    // A threshold above everything in the frame leaves nothing to glow:
+    // the stage runs and the picture is the plain one to the bit.
+    let above = render_offscreen(&device, &queue, &mut r, &with(&high));
+    assert!(r.stats().bloom);
+    assert_eq!(above, plain, "nothing is brighter than the threshold");
+
+    // The tint colours the glow: red only.
+    let reddened = render_offscreen(&device, &queue, &mut r, &with(&red));
+    let (p, c) = (reddened[near], plain[near]);
+    assert!(p[0] > c[0] + 8, "red glows: {p:?} vs {c:?}");
+    assert!(
+        p[1].abs_diff(c[1]) <= 1 && p[2].abs_diff(c[2]) <= 1,
+        "green and blue do not: {p:?} vs {c:?}"
+    );
+
+    // Scatter carries the glow further out.
+    let tight_px = render_offscreen(&device, &queue, &mut r, &with(&tight));
+    let wide_px = render_offscreen(&device, &queue, &mut r, &with(&wide));
+    dump(&wide_px, "bloom-wide");
+    assert!(
+        luminance(wide_px[far]) > luminance(tight_px[far]) + 2.0,
+        "a wide scatter reaches further: {:?} vs {:?}",
+        wide_px[far],
+        tight_px[far]
+    );
 }

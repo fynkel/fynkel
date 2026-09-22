@@ -1,6 +1,7 @@
 //! Post-processing volumes (R3a, `docs/renderer.md` § Volumes): the look
-//! a frame is drawn with, resolved once per frame on the CPU from the
-//! scene's [`Volume`] components and their profiles.
+//! a frame is drawn with — ambient occlusion (R3a), bloom (R3b) —
+//! resolved once per frame on the CPU from the scene's [`Volume`]
+//! components and their profiles.
 //!
 //! A [`VolumeProfile`] (a `.volume.json`) holds *overrides*: a field that
 //! is present replaces the engine default, a field that is absent leaves
@@ -25,10 +26,27 @@ pub struct AoOverrides {
     pub intensity: Option<f32>,
 }
 
+/// The bloom block of a profile (R3b): light brighter than the threshold
+/// spreads into its neighbourhood.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BloomOverrides {
+    /// How much of the blurred light is added back; 0 is off.
+    pub intensity: Option<f32>,
+    /// The exposed brightness (1 = white after exposure) above which a
+    /// pixel starts to glow, with a soft knee of half the threshold.
+    pub threshold: Option<f32>,
+    /// `0..=1`: how far the glow spreads — how much of each coarser level
+    /// is kept against the finer one.
+    pub scatter: Option<f32>,
+    /// Linear RGB multiplied into the glow.
+    pub tint: Option<Vec3>,
+}
+
 /// A `.volume.json`: the override blocks, each field optional.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct VolumeProfile {
     pub ambient_occlusion: AoOverrides,
+    pub bloom: BloomOverrides,
 }
 
 /// The resolved look of one frame.
@@ -36,17 +54,31 @@ pub struct VolumeProfile {
 pub struct PostSettings {
     pub ao_radius: f32,
     pub ao_intensity: f32,
+    pub bloom_intensity: f32,
+    pub bloom_threshold: f32,
+    pub bloom_scatter: f32,
+    pub bloom_tint: Vec3,
 }
 
 /// R2's constants: a scene without volumes looks as it did.
 pub const DEFAULT_AO_RADIUS: f32 = 0.6;
 pub const DEFAULT_AO_INTENSITY: f32 = 1.35;
+/// Bloom is off until a volume gives it an intensity (R3b), so a scene
+/// without one renders as it did; the other defaults are what an
+/// intensity alone gets.
+pub const DEFAULT_BLOOM_INTENSITY: f32 = 0.0;
+pub const DEFAULT_BLOOM_THRESHOLD: f32 = 0.9;
+pub const DEFAULT_BLOOM_SCATTER: f32 = 0.7;
 
 impl Default for PostSettings {
     fn default() -> Self {
         Self {
             ao_radius: DEFAULT_AO_RADIUS,
             ao_intensity: DEFAULT_AO_INTENSITY,
+            bloom_intensity: DEFAULT_BLOOM_INTENSITY,
+            bloom_threshold: DEFAULT_BLOOM_THRESHOLD,
+            bloom_scatter: DEFAULT_BLOOM_SCATTER,
+            bloom_tint: Vec3::ONE,
         }
     }
 }
@@ -119,6 +151,13 @@ pub fn resolve(base: PostSettings, contributions: &mut [Contribution<'_>]) -> (P
         let ao = &c.profile.ambient_occlusion;
         blend(&mut s.ao_radius, ao.radius, t);
         blend(&mut s.ao_intensity, ao.intensity, t);
+        let bloom = &c.profile.bloom;
+        blend(&mut s.bloom_intensity, bloom.intensity, t);
+        blend(&mut s.bloom_threshold, bloom.threshold, t);
+        blend(&mut s.bloom_scatter, bloom.scatter, t);
+        if let Some(tint) = bloom.tint {
+            s.bloom_tint += (tint - s.bloom_tint) * t;
+        }
     }
     (s, used)
 }
@@ -186,12 +225,14 @@ mod tests {
                 radius: Some(1.6),
                 intensity: None,
             },
+            ..VolumeProfile::default()
         };
         let off = VolumeProfile {
             ambient_occlusion: AoOverrides {
                 radius: None,
                 intensity: Some(0.0),
             },
+            ..VolumeProfile::default()
         };
         let base = PostSettings::default();
         // Absent fields inherit: the radius profile leaves intensity alone.
@@ -231,6 +272,7 @@ mod tests {
                         radius: None,
                         intensity: Some(2.0),
                     },
+                    ..VolumeProfile::default()
                 },
                 amount: 1.0,
                 priority: 1,
@@ -245,6 +287,40 @@ mod tests {
         assert_eq!(
             (s.ao_radius, s.ao_intensity, n),
             (DEFAULT_AO_RADIUS, 0.0, 2)
+        );
+    }
+
+    #[test]
+    fn bloom_is_off_by_default_and_its_tint_blends_per_channel() {
+        let base = PostSettings::default();
+        assert_eq!(base.bloom_intensity, 0.0);
+        let warm = VolumeProfile {
+            bloom: BloomOverrides {
+                intensity: Some(2.0),
+                tint: Some(Vec3::new(1.0, 0.5, 0.0)),
+                ..BloomOverrides::default()
+            },
+            ..VolumeProfile::default()
+        };
+        let (s, n) = resolve(
+            base,
+            &mut [Contribution {
+                profile: &warm,
+                amount: 0.5,
+                priority: 0,
+            }],
+        );
+        assert_eq!(n, 1);
+        assert!((s.bloom_intensity - 1.0).abs() < 1e-6);
+        assert!((s.bloom_tint - Vec3::new(1.0, 0.75, 0.5)).length() < 1e-6);
+        // Absent fields inherit, and the AO block is untouched.
+        assert_eq!(
+            (s.bloom_threshold, s.bloom_scatter, s.ao_radius),
+            (
+                DEFAULT_BLOOM_THRESHOLD,
+                DEFAULT_BLOOM_SCATTER,
+                DEFAULT_AO_RADIUS
+            )
         );
     }
 }

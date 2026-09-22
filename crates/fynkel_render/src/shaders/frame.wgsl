@@ -58,6 +58,13 @@ struct Frame {
     // x: hemisphere radius (m); y: the exponent the visible fraction is
     // raised to; zw unused.
     ao: vec4<f32>,
+    // The frame's bloom as the volumes resolved it (R3b): x: threshold;
+    // y: the soft knee (half the threshold); z: how much of each coarser
+    // level is blended over the finer one (scatter, 0.05..0.95); w: the
+    // intensity the post pass adds it with — 0 when the stage did not run.
+    bloom: vec4<f32>,
+    // rgb: the glow's tint (linear); w unused.
+    bloom_tint: vec4<f32>,
     // x: lights in the pool; y: 1 when the sky is drawn; z: 1 when the
     // post pass must sRGB-encode (the target is a Unorm format); w: 1
     // when `ssao_tex` holds this frame's ambient occlusion (R2).

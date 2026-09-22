@@ -231,16 +231,22 @@ pub fn run(args: &[String]) -> ExitCode {
                 "shadowMap": stats.shadow_map,
                 "shadowCascades": stats.shadow_cascades,
                 "ambientOcclusion": stats.ambient_occlusion,
+                "bloom": stats.bloom,
                 "volumes": stats.volumes,
                 "post": {
                     "aoRadius": renderer.post_settings().ao_radius,
                     "aoIntensity": renderer.post_settings().ao_intensity,
+                    "bloomIntensity": renderer.post_settings().bloom_intensity,
+                    "bloomThreshold": renderer.post_settings().bloom_threshold,
+                    "bloomScatter": renderer.post_settings().bloom_scatter,
+                    "bloomTint": renderer.post_settings().bloom_tint.to_array(),
                 },
                 "quality": {
                     "profile": quality.profile,
                     "shadows": quality.settings.shadows,
                     "shadowResolution": quality.settings.shadow_resolution,
                     "ambientOcclusion": quality.settings.ambient_occlusion,
+                    "bloom": quality.settings.bloom,
                     "msaa": quality.settings.msaa,
                     "renderScale": quality.settings.render_scale,
                     "anisotropy": quality.settings.anisotropy,
@@ -296,15 +302,20 @@ pub fn run(args: &[String]) -> ExitCode {
             } else {
                 "no shadow".to_string()
             },
-            match (stats.ambient_occlusion, stats.volumes) {
-                (true, v) => format!(
-                    "ambient occlusion {:.2} m ^{:.2}{}",
-                    renderer.post_settings().ao_radius,
-                    renderer.post_settings().ao_intensity,
-                    if v > 0 { format!(", {v} volume(s)") } else { String::new() }
-                ),
-                (false, 0) => "no ambient occlusion".to_string(),
-                (false, v) => format!("no ambient occlusion, {v} volume(s)"),
+            {
+                let post = renderer.post_settings();
+                let mut look = if stats.ambient_occlusion {
+                    format!("ambient occlusion {:.2} m ^{:.2}", post.ao_radius, post.ao_intensity)
+                } else {
+                    "no ambient occlusion".to_string()
+                };
+                if stats.bloom {
+                    look += &format!(", bloom {:.2} >{:.2}", post.bloom_intensity, post.bloom_threshold);
+                }
+                if stats.volumes > 0 {
+                    look += &format!(", {} volume(s)", stats.volumes);
+                }
+                look
             },
             quality.internal_size.0,
             quality.internal_size.1,

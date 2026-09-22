@@ -24,6 +24,9 @@ pub struct Quality {
     /// Screen-space ambient occlusion: the depth prepass, the SSAO pass
     /// and its blur, sampled by the mesh pass's ambient term (R2).
     pub ambient_occlusion: bool,
+    /// Bloom (R3b): the bright-pass and its mip chain exist; a volume
+    /// gives it an intensity.
+    pub bloom: bool,
     /// Samples per pixel of the scene passes: 1 or 4.
     pub msaa: u32,
     /// Internal resolution relative to the target (1.0 = native).
@@ -44,6 +47,7 @@ impl From<&QualityProfile> for Quality {
             shadows: p.shadows,
             shadow_resolution: p.shadow_resolution,
             ambient_occlusion: p.ambient_occlusion,
+            bloom: p.bloom,
             msaa: p.msaa,
             render_scale: p.render_scale as f32,
             anisotropy: p.anisotropy,
@@ -66,6 +70,7 @@ impl Quality {
         Quality {
             shadows: self.shadows,
             ambient_occlusion: self.ambient_occlusion,
+            bloom: self.bloom,
             shadow_resolution: self
                 .shadow_resolution
                 .clamp(MIN_SHADOW_RESOLUTION, MAX_SHADOW_RESOLUTION)
@@ -111,6 +116,7 @@ mod tests {
                 shadows: true,
                 shadow_resolution: 2048,
                 ambient_occlusion: true,
+                bloom: true,
                 msaa: 4,
                 render_scale: 1.0,
                 anisotropy: 8,
@@ -126,6 +132,7 @@ mod tests {
             shadows: true,
             shadow_resolution: 3000,
             ambient_occlusion: true,
+            bloom: true,
             msaa: 8,
             render_scale: 9.0,
             anisotropy: 64,

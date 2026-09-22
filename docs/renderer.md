@@ -46,11 +46,13 @@ without an `Environment` component uses `Environment::default()` (white
 ## Passes
 
 The chain is `shadow → depth prepass → ambient occlusion → AO blur →
-opaque → transparent → post → presentation`, every pass with fixed
-inputs and outputs; the opaque and transparent stages share one render
-pass because they share the attachments. The three middle passes are the
-ambient-occlusion stage (R2) and run only while the quality profile asks
-for it; without them the chain is exactly what it was, down to the bits.
+opaque → transparent → bloom → post → presentation`, every pass with
+fixed inputs and outputs; the opaque and transparent stages share one
+render pass because they share the attachments. The three passes before
+the opaque one are the ambient-occlusion stage (R2) and run only while
+the quality profile asks for it; the bloom stage (R3b) runs only while
+the profile allows it *and* the frame's volumes give it an intensity.
+Without them the chain is exactly what it was, down to the bits.
 
 | Pass | Reads | Writes | When |
 | --- | --- | --- | --- |
@@ -60,7 +62,8 @@ for it; without them the chain is exactly what it was, down to the bits.
 | **AO blur** | the frame uniform, the depth, the AO target | a second `R8Unorm` — what the opaque pass samples | the same |
 | **opaque** | frame uniforms, shadow map, the AO target, material maps | HDR colour (`HDR_FORMAT` `Rgba16Float`, `msaa` samples) + `Depth32Float`, the colour cleared to transparent black and the depth **loaded** from the prepass (cleared when the stage did not run); at MSAA 4 the colour resolves into the single-sample HDR texture and the samples are discarded | always |
 | **transparent** | the same, plus the depth just written (read-only) | the same colour attachment, blended | `blend` instances or debug lines queued |
-| **post** | resolved HDR texture, frame + post uniforms | the host's target — or the LDR intermediate (target format, internal size) when `render_scale ≠ 1` | always |
+| **bloom** | the resolved HDR texture, the frame uniform | `BLOOM_FORMAT` (`Rgba16Float`) chain at half the internal size, up to `BLOOM_LEVELS` (6) mips: a prefilter into level 0, a downsample into each next level, a blended upsample back into each finer one | bloom on in the quality profile, the resolved intensity > 0 |
+| **post** | resolved HDR texture, bloom level 0, frame + post uniforms | the host's target — or the LDR intermediate (target format, internal size) when `render_scale ≠ 1` | always |
 | **presentation** | LDR intermediate | the host's target, bilinear | `render_scale ≠ 1` |
 
 1. **Shadow**: the sun's orthographic view (`src/shadow.rs`, below) is
@@ -96,6 +99,8 @@ for it; without them the chain is exactly what it was, down to the bits.
    composited over the clear colour by `coverage`; `> 1.5` display-referred
    (unlit magenta cube, debug lines: alpha 2 × coverage) → clamped and
    encoded only. At coverage 1 the result is bit-identical to V1 (a).
+   With bloom (§ Bloom) its level 0 is added to the exposed radiance
+   before ACES, and screen-blended over the uncovered part of a pixel.
 6. **Presentation**: only with a render scale, a bilinear fullscreen copy
    of the LDR intermediate to the target size.
 
@@ -234,8 +239,8 @@ estimate is low-frequency and blurred anyway.
 
 ### Volumes (R3a, `fynkel_core::volume`)
 
-The *look* of a frame — how strong the occlusion is, and from R3b/R3c
-the bloom and the grade — is scene data, not a project setting, and it
+The *look* of a frame — how strong the occlusion is, the bloom (R3b),
+and from R3c the grade — is scene data, not a project setting, and it
 can change with where the camera is. That is a **volume**: a
 `fynkel.Volume` component (id 25) on an entity, pointing at a **profile**
 document.
@@ -245,7 +250,10 @@ document.
   is override blocks of optional fields. A field that is present
   overrides what is below it; a field that is absent is inherited. R3a's
   one block is `ambientOcclusion { radius (m, > 0), intensity (the
-  exponent, ≥ 0; 0 = off) }` — R2's two constants, now data. `fynkel
+  exponent, ≥ 0; 0 = off) }` — R2's two constants, now data; R3b adds
+  `bloom { intensity (≥ 0; 0 = off, the default), threshold (exposed
+  brightness, default 0.9), scatter (`0..=1`, default 0.7), tint ([r,
+  g, b], per channel) }` (§ Bloom). `fynkel
   document new volume <name>` writes one with the engine defaults spelled
   out.
 - **The component** says where the profile applies: `shape` `global`
@@ -264,12 +272,12 @@ document.
   priority first, lerp each present field toward the profile's value by
   that amount. The result is `ExtractRenderer::post_settings()`;
   `FrameStats::volumes` counts the volumes that reached the camera, and
-  `fynkel render` prints both (`ambient occlusion 0.90 m ^1.60, 1
-  volume(s)`; `volumes` and `post` in `--json`).
+  `fynkel render` prints both (`ambient occlusion 0.90 m ^1.60, bloom
+  1.00 >0.70, 1 volume(s)`; `volumes`, `bloom` and `post` in `--json`).
 - **The quality profile is the ceiling.** A volume shapes an effect the
   project's quality profile has on; it cannot turn on one the profile has
-  off (`ambientOcclusion: false` keeps the stage off whatever a volume
-  says) — the profile is what the *device* can afford, the volume is
+  off (`ambientOcclusion: false` or `bloom: false` keeps that stage off
+  whatever a volume says) — the profile is what the *device* can afford, the volume is
   what the *scene* wants.
 
 Profiles are read through the asset store (`Assets::volume_profile`, the
@@ -277,12 +285,60 @@ cooked document's `JSON` chunk) once per reference and cached like the
 materials; a scene depends on the profiles its volumes name, so they are
 retained with it. A profile that cannot be read is one `asset_errors`
 line and contributes nothing. Nothing about volumes is on the GPU but
-the result: `Frame.ao` carries the frame's radius and exponent.
+the result: `Frame.ao` carries the frame's radius and exponent,
+`Frame.bloom` and `Frame.bloom_tint` the bloom.
 
 Deliberately not in R3a: a volume per camera (there is one camera a
 frame), a volume *mask* layer, animated profiles (a behaviour can set
 `weight` or `enabled` through the component like any other field), and
 non-linear fades.
+
+### Bloom (`shaders/bloom.wgsl`, R3b)
+
+Light brighter than white spreads into its neighbourhood — a lamp head,
+the sunlit face of a pillar, an emissive panel — the way it does in a
+lens and an eye. It is a volume block (§ Volumes), off by default: a
+scene without a volume that names `bloom.intensity` renders exactly as
+R3a did, and the stage does not run.
+
+1. **Prefilter** (level 0, half the internal size): four `textureLoad`s
+   of the resolved HDR, each ×exposure (`Frame.camera_pos.w`, so the
+   threshold is in *exposed* units: 1 = white on the screen) and clamped
+   at 1024 so a single hot texel cannot become a square, averaged with
+   Karis weights `1 / (1 + luma)` (the fireflies of a specular highlight
+   do not flicker the glow). Background texels (alpha 0) and
+   display-referred ones (alpha > 1.5: debug lines, the unlit magenta
+   cube) contribute nothing. Then a soft-knee threshold: `threshold`
+   with a knee of half of it, so brightness enters the glow over a band
+   instead of at an edge.
+2. **Downsample**, level by level down to 2 texels on the short side
+   (at most six levels): Jimenez's 13-tap filter (Call of Duty: Advanced
+   Warfare), bilinear, which is what keeps the chain free of the blocky
+   pulsing a 2×2 box leaves.
+3. **Upsample**, coarsest first: a 9-tap tent into each finer level,
+   **blended** over what the downsample left there with
+   `Constant / OneMinusConstant` — the blend constant is `0.05 + 0.9 ×
+   scatter` (`set_blend_constant`), so `scatter` 0 keeps the glow tight
+   around its source and 1 carries the coarse levels wide. No extra
+   targets: every level is a mip of one texture, read in one pass and
+   written in the next.
+4. **Composite** in the post pass: `aces(radiance × exposure + glow ×
+   intensity × tint)` for a lit pixel; over the background (and the
+   uncovered part of an edge pixel) the glow screen-blends onto the clear
+   colour, `bg + (1 − bg) × aces(glow)`, so a lamp against the sky still
+   haloes.
+
+The bloom passes bind the one-entry frame group the AO passes use (group
+0) and their own `{sampler, texture}` group 1; the post pass gained its
+own layout with the chain's level 0 at binding 3 (a 1×1 black texture
+while the quality profile has bloom off). The chain costs `8 bytes ×
+(w/2 × h/2) × 4/3` of memory; the stage is timed as part of the post
+pair (§ GPU timestamps), so the Apple ABI did not change.
+
+`bloom` in the quality profile (default true) is the ceiling as for AO:
+with it false the chain is not even allocated. Deliberately not in R3b:
+lens dirt, anamorphic streaks, a physically based (convolution) bloom,
+and per-light flares.
 
 ### Instancing and culling (`src/culling.rs`)
 
@@ -357,16 +413,16 @@ carries them, and `ExtractRenderer` resolves the active one at each
 3. the project's default profile (`unknown_profile` names the requested
    one when it was not found — the request is kept for the next store),
 4. the engine defaults (`profile: "default"`: shadows on, 2048, ambient
-   occlusion on, MSAA 4, scale 1, anisotropy 8) when the project declares
+   occlusion on, bloom allowed, MSAA 4, scale 1, anisotropy 8) when the project declares
    no quality block.
 
 A profile becomes a `Quality` through `clamped()`: `msaa` 1 or 4,
 `shadow_resolution` a power of two in `256..=8192`, `render_scale` in
 `0.25..=2`, `anisotropy` in `1..=16`; `textureMaxSize` is the cook's
-concern (D3) and the renderer ignores it; `ambientOcclusion` is a
-straight on/off. Switching is cheap where it can
+concern (D3) and the renderer ignores it; `ambientOcclusion` and
+`bloom` are straight on/offs. Switching is cheap where it can
 be: pipelines are rebuilt only when the sample count changes,
-attachments when the internal size, the samples or the AO toggle change,
+attachments when the internal size, the samples or the AO or bloom toggle change,
 the shadow map
 when its resolution changes, the material sampler (and with it the cached
 material bind groups) when the anisotropy changes. `quality()` reports the
@@ -516,7 +572,7 @@ shadow, and it is not part of any of this — every object sees it.
 
 ## Uniform layout
 
-`Frame` (bind group 0, 4 736 bytes, `shaders/frame.wgsl`): `view_proj`,
+`Frame` (bind group 0, 4 768 bytes, `shaders/frame.wgsl`): `view_proj`,
 `inv_view_proj` (the sky's ray reconstruction), `cascades` (four
 `Cascade { view_proj, rect, params }`: world → that cascade's shadow
 clip, its quadrant in atlas uv, and its normal offset in metres),
@@ -525,7 +581,9 @@ clip, its quadrant in atlas uv, and its normal offset in metres),
 `w` = `L_max`), `sky` (`x` intensity, `y` rotation, `z` image-based
 lighting active, `w` specular mips − 1), `shadow` (`x` active,
 `y` one atlas texel in uv, `z` the blend band, `w` cascades), `ao` (the
-volumes' resolution, § Volumes: `x` radius, `y` exponent), `counts` (`x` lights,
+volumes' resolution, § Volumes: `x` radius, `y` exponent), `bloom` (`x`
+threshold, `y` knee, `z` the upsample blend `0.05 + 0.9 × scatter`, `w`
+intensity — 0 when the stage did not run), `bloom_tint` (rgb), `counts` (`x` lights,
 `y` sky drawn, `z` encode sRGB, `w` ambient occlusion ran), then `lights: array<Light, LIGHT_POOL>`
 (64) —
 `position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
@@ -597,7 +655,8 @@ query sets, resolves the **previous** frame's
 set at the start of the next `draw` (Apple's passes overlap, so a
 same-frame resolve reads unwritten end stamps) and maps the copy without
 waiting; `FrameStats::gpu_shadow_us`/`gpu_ao_us`/`gpu_scene_us`/`gpu_post_us` are
-the passes and `gpu_frame_us` the span `max(end) − min(begin)`, three or four
+the passes (the post pair begins at the bloom prefilter when bloom ran,
+so `gpu_post_us` includes it) and `gpu_frame_us` the span `max(end) − min(begin)`, three or four
 frames late, with `gpu_timed`/`gpu_untimed` as the read-back counters.
 `prepare_us`/`encode_us` time the two CPU halves, and `gpu_bytes` is the
 estimate of what the renderer holds on the GPU (mesh buffers, textures'
@@ -607,7 +666,7 @@ full table.
 
 ## Pipelines and caches — the variant cap
 
-Exactly **twenty** render pipelines exist, all created in `new`
+Exactly **twenty-three** render pipelines exist, all created in `new`
 (`PIPELINE_VARIANTS`) and rebuilt as a set only when the sample count
 changes; nothing is compiled at draw time:
 
@@ -624,6 +683,8 @@ changes; nothing is compiled at draw time:
 | `depth`, `depth_double_sided` | none (depth only) | msaa | back / none | write, `LessEqual` | — | `vs_main` (R2, § Ambient occlusion) |
 | `depth_skinned`, `depth_skinned_double_sided` | the same two | | | | | `vs_skinned` |
 | `ao`, `ao_blur` | `R8Unorm` | 1 | none | none | — | |
+| `bloom_prefilter`, `bloom_down` | `Rgba16Float` | 1 | none | none | — | (R3b, § Bloom) |
+| `bloom_up` | the same | 1 | none | none | constant (scatter) | |
 | `debug` | HDR | msaa | none | read, `LessEqual` | — | |
 | `post` | host format | 1 | none | none | — | |
 | `present` | host format | 1 | none | none | — | |
@@ -635,7 +696,7 @@ different vertex input layout (a third vertex buffer) and a different
 vertex entry, which wgpu cannot make data, so it doubles the mesh and
 shadow rows — the 9 of M3-05 became 14, and R2's depth prepass (which
 must cull exactly as the opaque pass does) plus the two AO passes made
-20, still all created up front and never at draw time; nothing else about a skinned draw (material, lights,
+20, and R3b's three bloom passes 23, still all created up front and never at draw time; nothing else about a skinned draw (material, lights,
 shadow, blend) differs, and `Pipelines::opaque(skinned, double_sided)` /
 `transparent(…)` pick the variant. Bind groups are cached per material `AssetRef`
 (five texture views + the sampler, the fallback view for every unbound
@@ -698,7 +759,13 @@ the luminance of the lit floor where the cascades change; from R2: a
 cube standing on an ambient-lit floor — the floor at its foot darkens by
 a quarter, the open floor four metres away is bit-identical to the same
 frame with `ambientOcclusion: false`, and the occlusion fades outward
-over about forty centimetres instead of ending at an edge;
+over about forty centimetres instead of ending at an edge; from R3b: a
+bright cube under a hot environment — a volume with bloom intensity 0 is
+bit-identical to the quality profile's `bloom: false`, the profile's
+off beats a volume's on, the glow lifts the background next to the cube
+and fades with distance, a threshold above the scene's brightness
+changes nothing, a red tint only reddens, and a wider scatter reaches
+farther;
 `cast_shadows` / `receive_shadows` per `MeshRenderer`, blend
 materials compositing back to front whatever the record order, MSAA 4
 blending silhouette edges (and 8 ≡ 4, 2 ≡ 1), render scale 0.5 / 0.75 /
