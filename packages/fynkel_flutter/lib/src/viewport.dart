@@ -23,6 +23,7 @@ class FynkelViewport extends StatefulWidget {
     this.onFocusChange,
     this.filterQuality = FilterQuality.none,
     this.placeholder,
+    this.resizeDebounce = Duration.zero,
   });
 
   final FynkelViewportController controller;
@@ -43,6 +44,17 @@ class FynkelViewport extends StatefulWidget {
   /// background color) and, with the error, when creation failed.
   final Widget? placeholder;
 
+  /// How long a new size must hold before the ring is resized. Zero (the
+  /// default, and what a game wants) resizes as the constraints change.
+  ///
+  /// A window drag changes the constraints on every frame, and every
+  /// resize reallocates the ring's surfaces and rebinds the texture —
+  /// nothing renders while that is in flight, so the picture blinks. A
+  /// short debounce holds the last good frame, scaled, until the drag
+  /// settles, and then resizes once. The first size is never held: there
+  /// is nothing on screen to scale yet.
+  final Duration resizeDebounce;
+
   @override
   State<FynkelViewport> createState() => _FynkelViewportState();
 }
@@ -62,8 +74,39 @@ class _FynkelViewportState extends State<FynkelViewport> {
 
   @override
   void dispose() {
+    _resize?.cancel();
     _ownedFocus?.dispose();
     super.dispose();
+  }
+
+  Timer? _resize;
+  (int, int)? _wanted;
+
+  /// The size the constraints ask for, held for [FynkelViewport.resizeDebounce]
+  /// while it keeps changing (a window drag).
+  void _wantSize(int w, int h) {
+    final controller = widget.controller;
+    if (widget.resizeDebounce == Duration.zero || !controller.isAttached) {
+      _resize?.cancel();
+      _resize = null;
+      controller.requestSize(w, h);
+      return;
+    }
+    if (w == controller.physicalWidth && h == controller.physicalHeight) {
+      // Back to the size it already has: whatever was queued is moot.
+      _resize?.cancel();
+      _resize = null;
+      _wanted = null;
+      return;
+    }
+    _wanted = (w, h);
+    _resize?.cancel();
+    _resize = Timer(widget.resizeDebounce, () {
+      _resize = null;
+      final size = _wanted;
+      _wanted = null;
+      if (size != null && mounted) controller.requestSize(size.$1, size.$2);
+    });
   }
 
   void _pointer(PointerEvent e, double dpr) {
@@ -89,7 +132,7 @@ class _FynkelViewportState extends State<FynkelViewport> {
         // Layout may run during a build; the controller notifies listeners
         // when it attaches, so defer the request past this frame.
         scheduleMicrotask(() {
-          if (mounted) widget.controller.requestSize(w, h);
+          if (mounted) _wantSize(w, h);
         });
         return Focus(
           focusNode: _focus,

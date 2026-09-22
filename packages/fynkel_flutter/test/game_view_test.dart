@@ -156,6 +156,55 @@ void main() {
     expect(world.audio.stats.device, isFalse);
   });
 
+  testWidgets('a debounced viewport resizes once when a drag settles, a game on every frame', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    Future<int> resizesWhileDragging({required Duration debounce}) async {
+      final controller = FynkelViewportController(placeholders: false);
+      addTearDown(controller.dispose);
+      var side = 100.0;
+      late StateSetter setSide;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: StatefulBuilder(
+              builder: (context, setState) {
+                setSide = setState;
+                return SizedBox(
+                  width: side,
+                  height: side,
+                  child: FynkelViewport(controller: controller, resizeDebounce: debounce),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(controller.isAttached, isTrue, reason: 'the first size is never held back');
+      expect(controller.physicalWidth, 100);
+
+      // The drag: a new size on every frame, none of them final.
+      for (var i = 0; i < 8; i++) {
+        setSide(() => side += 10);
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      await tester.pump(const Duration(milliseconds: 200)); // the drag settles
+      await tester.pumpAndSettle();
+      expect(controller.physicalWidth, 180, reason: 'it ends at the size the drag left');
+      final n = controller.resizes;
+      await tester.pumpWidget(const SizedBox());
+      return n;
+    }
+
+    // A game: its viewport is the window and it draws every frame anyway.
+    expect(await resizesWhileDragging(debounce: Duration.zero), greaterThan(1));
+    // The editor: one resize, and the last frame is held (scaled) until then.
+    expect(await resizesWhileDragging(debounce: const Duration(milliseconds: 120)), 1);
+  });
+
   testWidgets('shows the placeholder until attached and the error on failure', (tester) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
       throw PlatformException(code: 'texture', message: 'nope');

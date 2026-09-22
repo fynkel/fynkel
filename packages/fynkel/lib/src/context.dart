@@ -5,6 +5,7 @@
 // callback — never through hidden process-global state, so a test can run
 // gameplay code against a `TestGameContext` with its own clock.
 
+import 'editor_channel.dart';
 import 'input.dart';
 import 'settings.dart';
 
@@ -34,12 +35,16 @@ abstract interface class DiagnosticsService {
   void log(String message, {String source = 'game'});
 }
 
-/// Prints through `print`.
+/// Prints through `print` — silent under the editor channel, where the
+/// facade already wrote the `log` record ([EditorChannel]) and a print
+/// would show the line in the editor's Console twice.
 class PrintDiagnostics implements DiagnosticsService {
   const PrintDiagnostics();
 
   @override
-  void log(String message, {String source = 'game'}) => print('[$source] $message');
+  void log(String message, {String source = 'game'}) {
+    if (!EditorChannel.enabled) print('[$source] $message');
+  }
 }
 
 /// The services of one running world (or one test). Facades resolve through
@@ -165,8 +170,14 @@ abstract final class Time {
   static double get alpha => GameContext.require('Time.alpha').time.alpha;
 }
 
-/// Static facade over the current context's [DiagnosticsService].
+/// Static facade over the current context's [DiagnosticsService]. Every
+/// log also goes out on the editor channel when one is listening (a `log`
+/// record with the tick, the source and the message), whatever service the
+/// game installed.
 abstract final class Diagnostics {
-  static void log(String message, {String source = 'game'}) =>
-      GameContext.require('Diagnostics.log').diagnostics.log(message, source: source);
+  static void log(String message, {String source = 'game'}) {
+    final context = GameContext.require('Diagnostics.log');
+    if (EditorChannel.enabled) EditorChannel.log(message, source: source, tick: context.time.tick);
+    context.diagnostics.log(message, source: source);
+  }
 }

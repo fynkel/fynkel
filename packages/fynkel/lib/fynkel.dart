@@ -72,6 +72,7 @@ export 'src/asset_ref.dart';
 export 'src/context.dart';
 export 'math.dart';
 export 'src/diagnostics.dart';
+export 'src/editor_channel.dart';
 export 'src/events.dart';
 export 'src/input.dart';
 export 'src/model.dart';

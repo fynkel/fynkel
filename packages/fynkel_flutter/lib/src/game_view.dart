@@ -160,6 +160,25 @@ class FynkelFrameStats {
       ],
     ].join(' ');
   }
+
+  /// This window as the editor channel's `stats` record (blueprint
+  /// §19.2e item 8): the numbers a Play session shows live, plus
+  /// [summary] for the row the Console prints.
+  Map<String, Object?> channelRecord() => {
+    'fps': double.parse(fps.toStringAsFixed(2)),
+    'frames': frames,
+    'ticks': fixedTicks,
+    'missed': missedDeadlines,
+    'dropped': dropped,
+    'entities': world.liveEntities,
+    'workP50': double.parse(totalWork.p50.toStringAsFixed(3)),
+    'workP95': double.parse(totalWork.p95.toStringAsFixed(3)),
+    'workP99': double.parse(totalWork.p99.toStringAsFixed(3)),
+    'draws': viewport?.draws,
+    'memNative': world.nativeBytes,
+    'memResident': world.residentBytes,
+    'summary': summary(),
+  };
 }
 
 class FynkelGameView extends StatefulWidget {
@@ -354,13 +373,17 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     FynkelInputChannel.attach(input);
     if (widget.audio && !widget.world.audio.isOpen) _openedAudio = widget.world.audio.open();
     _ticker = createTicker(_onTick)..start();
-    if (widget.onStats != null) {
+    if (_wantsStats) {
       _statsTimer = Timer.periodic(widget.statsInterval, (_) => _report());
       SchedulerBinding.instance.addTimingsCallback(_onTimings);
       _timingsInstalled = true;
       if (widget.profileDartHeap) unawaited(_connectHeapProbe());
     }
   }
+
+  /// Whether the window is worth measuring: the host asked for it, or the
+  /// editor channel is listening (ADR-0016 — Play's stats records).
+  bool get _wantsStats => widget.onStats != null || EditorChannel.enabled;
 
   bool _timingsInstalled = false;
   DartHeapProbe? _heapProbe;
@@ -412,8 +435,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     }
     if ((oldWidget.onStats == null) != (widget.onStats == null) || oldWidget.statsInterval != widget.statsInterval) {
       _statsTimer?.cancel();
-      _statsTimer = widget.onStats == null ? null : Timer.periodic(widget.statsInterval, (_) => _report());
-      _installTimings(widget.onStats != null);
+      _statsTimer = _wantsStats ? Timer.periodic(widget.statsInterval, (_) => _report()) : null;
+      _installTimings(_wantsStats);
     }
   }
 
@@ -536,6 +559,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _rasterMs.clear();
     _ticks = _missed = _dropped = _skipped = _frames = 0;
     _window.reset();
+    if (EditorChannel.enabled) EditorChannel.stats(stats.channelRecord(), tick: widget.world.tick);
     widget.onStats?.call(stats);
   }
 

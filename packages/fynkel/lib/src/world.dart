@@ -14,6 +14,7 @@ import 'asset_ref.dart';
 import 'audio.dart';
 import 'context.dart';
 import 'diagnostics.dart';
+import 'editor_channel.dart';
 import 'events.dart';
 import 'input.dart';
 import 'native/bridge.dart';
@@ -44,6 +45,10 @@ class World {
     _behaviours = _BehaviourSystem(this);
     scenes = SceneManager._(this);
     projection = ProjectionView._(this);
+    // The editor's Play reads this process's stdout (ADR-0016): say the
+    // world exists before anything is loaded, so the Console has a first
+    // row within a frame of the launch.
+    EditorChannel.state('started', tick: 0, fields: {'pid': EditorChannel.processId, 'fixedDt': fixedDt});
   }
 
   /// Creates a world on a fresh [NativeLibrary] (or the given one).
@@ -156,8 +161,10 @@ class World {
   final List<int> _toSubscribe = [];
 
   /// Called with the diagnostics of each step/submit in release mode
-  /// (debug mode throws [FynkelError] instead). Defaults to `print`.
-  void Function(List<FynkelDiagnostic>) onDiagnostics = (d) => print(d.join('\n'));
+  /// (debug mode throws [FynkelError] instead). Defaults to `print` —
+  /// silent under the editor channel, which already carries the record
+  /// ([EditorChannel]), so the Console shows each diagnostic once.
+  void Function(List<FynkelDiagnostic>) onDiagnostics = _printDiagnostics;
 
   /// Throw [FynkelError] on error diagnostics (rejections, protocol errors).
   /// Informational ones ([FynkelDiagnostic.isInformational], e.g. a missed
@@ -470,11 +477,38 @@ class World {
       if (d.entity != 0) _byEntity[d.entity]?._clearOverlay();
     }
     if (context == 'step') _simulationTargets.clear();
+    if (EditorChannel.enabled) _reportToEditor(list, context);
     if (throwOnDiagnostics && list.any((d) => !d.isInformational)) {
       throw FynkelError(list, context: context);
     }
     onDiagnostics(list);
   }
+
+  /// The runtime diagnostics of one step/submit as §14.2 records: the
+  /// wire code's name (`stale_entity`) is the record's `code`, the entity
+  /// the authored one when the last load knew an authoring id for it — so
+  /// a Console row can select the entity in the scene it came from.
+  void _reportToEditor(List<FynkelDiagnostic> list, String context) {
+    for (final d in list) {
+      final authored = _authoredEntities[d.entity];
+      EditorChannel.diagnostic(
+        code: d.code.name,
+        severity: d.isInformational ? 'info' : 'error',
+        message: d.message,
+        tick: tick,
+        source: context,
+        entity: d.entity == 0 ? null : d.entity,
+        id: authored,
+        document: authored == null ? null : _authoredDocument,
+      );
+    }
+  }
+
+  /// Authoring ids of the entities the last loads spawned with a behaviour
+  /// (the only runtime → authored mapping the SDK has), and the scene
+  /// document they came from. Filled only while the editor channel is on.
+  final Map<int, String> _authoredEntities = {};
+  String? _authoredDocument;
 
   // ---------------------------------------------------------------- reads
 
@@ -838,13 +872,59 @@ class World {
         if (op == 'loadProject') physics = report.physics;
         if (op != 'bindActions') _loadedScenes = report.scenes;
         report = _attachAuthoredBehaviours(report);
+        if (EditorChannel.enabled) _loadedForEditor(report, op);
         if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
         return report;
       case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        if (EditorChannel.enabled) _loadedForEditor(report, op);
         throw FynkelLoadError(report, context: op);
       default:
         throw FynkelBridgeError('$op: $status');
     }
+  }
+
+  /// One load as the editor sees it: every document diagnostic as its
+  /// §14.2 record (the file, pointer, line and suggestion the loader
+  /// reported, so the Console opens the document at the spot) and one
+  /// `state` record naming the scene. The behaviours' authoring ids stay
+  /// as the runtime → authored map for later step diagnostics.
+  void _loadedForEditor(LoadReport report, String op) {
+    final document = report.scenePath;
+    for (final d in report.diagnostics) {
+      EditorChannel.diagnostic(
+        code: d.code,
+        severity: d.severity,
+        message: d.message,
+        tick: tick,
+        source: op,
+        document: d.document ?? document,
+        pointer: d.pointer,
+        line: d.line,
+        column: d.column,
+        suggestion: d.suggestion,
+      );
+    }
+    if (!report.ok) {
+      EditorChannel.state('loadFailed', tick: tick, fields: {'op': op, 'scene': report.sceneName, 'document': document});
+      return;
+    }
+    if (op == 'bindActions') return;
+    if (report.behaviours.isNotEmpty) {
+      _authoredDocument = document;
+      for (final b in report.behaviours) {
+        if (b.authoringId.isNotEmpty) _authoredEntities[b.entity] = b.authoringId;
+      }
+    }
+    EditorChannel.state('loaded', tick: tick, fields: {
+      'op': op,
+      'scene': report.sceneName,
+      'sceneId': report.sceneId,
+      'document': document,
+      'entities': report.entityCount,
+      'assets': report.assetCount,
+      'behaviours': report.behavioursAttached,
+      'loadMs': report.loadMs,
+    });
   }
 
   /// Instantiates every authored behaviour of a loaded scene from
@@ -959,8 +1039,17 @@ class World {
   /// The report of the last [instantiate] (null before any).
   InstantiateReport? lastInstantiate;
 
-  /// Called with the warnings of a successful load. Defaults to `print`.
-  void Function(List<LoadDiagnostic>) onLoadDiagnostics = (d) => print(d.join('\n'));
+  /// Called with the warnings of a successful load. Defaults to `print`
+  /// (silent under the editor channel, as [onDiagnostics] is).
+  void Function(List<LoadDiagnostic>) onLoadDiagnostics = _printLoadDiagnostics;
+
+  static void _printDiagnostics(List<FynkelDiagnostic> d) {
+    if (!EditorChannel.enabled) print(d.join('\n'));
+  }
+
+  static void _printLoadDiagnostics(List<LoadDiagnostic> d) {
+    if (!EditorChannel.enabled) print(d.join('\n'));
+  }
 
   BridgeStats stats() => _native.stats();
 
