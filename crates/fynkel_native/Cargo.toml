@@ -17,10 +17,12 @@ crate-type = ["cdylib", "rlib"]
 # `fynkel_authoring_*` symbol and none of `fynkel_authoring`'s code reaches
 # a game (§1.1 rule 6; CI asserts it with `nm`).
 default = ["authoring"]
-authoring = ["dep:fynkel_authoring"]
+authoring = ["dep:fynkel_authoring", "dep:uuid"]
 
 [dependencies]
 fynkel_authoring = { workspace = true, optional = true }
+# Entity ids of the edit-preview world's calls (authoring ABI v3).
+uuid = { workspace = true, optional = true }
 fynkel_contracts.workspace = true
 fynkel_core.workspace = true
 fynkel_audio = { workspace = true, features = ["device"] }

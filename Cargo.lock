@@ -862,15 +862,19 @@ dependencies = [
 name = "fynkel_authoring"
 version = "0.0.1"
 dependencies = [
+ "fynkel_assets",
  "fynkel_audio",
  "fynkel_contracts",
  "fynkel_core",
  "fynkel_document",
  "fynkel_import",
  "fynkel_physics",
+ "fynkel_render",
  "fynkel_scene",
+ "glam 0.33.7",
  "serde_json",
  "uuid",
+ "wgpu",
 ]
 
 [[package]]
@@ -1014,6 +1018,7 @@ dependencies = [
  "glam 0.33.7",
  "log",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

@@ -1,7 +1,10 @@
 /*
- * Fynkel authoring ABI — version 2 (M4-01, blueprint §19.2e item 1,
+ * Fynkel authoring ABI — version 3 (M4-01, blueprint §19.2e item 1,
  * ADR-0016; version 2 added fynkel_authoring_operate and the assetDetail,
- * assetHistory and operations queries for item 5, the Project browser).
+ * assetHistory and operations queries for item 5, the Project browser;
+ * version 3 added the edit-preview world — fynkel_authoring_preview_open /
+ * _close / _world / _call and the "previews" reports — for item 6, the
+ * Scene view).
  *
  * The editor's entry points over the authoring session
  * (crates/fynkel_authoring): one open project — its file, lock, schemas,
@@ -43,8 +46,12 @@
  * - Every function is safe to call with NULL (an error status, or an empty
  *   view). Rust panics never cross this boundary (ADR-0014).
  * - Not thread-safe: one session is driven from one thread at a time.
- * - The session never runs game code and never reads a cooked cache
- *   (ADR-0016/0018).
+ * - The session never runs game code (ADR-0016/0018). Its edit-preview
+ *   worlds (version 3) are fynkel_core worlds in edit mode — no systems,
+ *   nothing ticks — that read the project's cooked cache (.fynkel/cache,
+ *   written by the session itself with `fynkel cook` in process) for
+ *   meshes, materials and skins, and that the viewport ABI draws like any
+ *   world.
  */
 #ifndef FYNKEL_AUTHORING_H
 #define FYNKEL_AUTHORING_H
@@ -56,9 +63,10 @@
 extern "C" {
 #endif
 
-#define FYNKEL_AUTHORING_ABI_VERSION 2u
+#define FYNKEL_AUTHORING_ABI_VERSION 3u
 
 typedef struct FynkelAuthoringSession FynkelAuthoringSession;
+/* The edit-preview world's type is fynkel.h's FynkelWorld. */
 
 /* FYNKEL_AUTHORING_ABI_VERSION of the loaded library. */
 uint32_t fynkel_authoring_abi_version(void);
@@ -105,7 +113,8 @@ FynkelStatus fynkel_authoring_open_document(FynkelAuthoringSession* session,
                                             uint32_t len,
                                             uint32_t* out_handle);
 /* Drops the document and its history (unsaved edits are lost — ask
- * first). Result: { "ok": true, "handle" }. */
+ * first) — and its edit-preview world, when one is open. Result:
+ * { "ok": true, "handle", "previewClosed" }. */
 FynkelStatus fynkel_authoring_close_document(FynkelAuthoringSession* session,
                                              uint32_t handle);
 /* Re-reads the document from disk: the history is dropped, the revision
@@ -151,6 +160,15 @@ FynkelStatus fynkel_authoring_save(FynkelAuthoringSession* session,
                                    uint32_t handle,
                                    const uint8_t* path_utf8,
                                    uint32_t path_len);
+
+/* Every call above that can change a document or what a scene's prefabs
+ * expand to — apply, undo, redo, reload_document, save, rescan and operate —
+ * brings every open edit-preview world up to date before it returns (the
+ * incremental sync rule: the diff of the world against the document, a
+ * fresh load when the diff does not settle) and adds "previews": [{
+ * handle, spawned, destroyed, updated, reordered, steps, reloaded,
+ * diagnostics[], describeDiagnostics? }] to its result when at least one
+ * preview is open. */
 
 /* Rescans the project's asset root. `paths_json_utf8` is a JSON array of
  * paths (absolute, or relative to the project directory) — what a file
@@ -249,6 +267,113 @@ FynkelStatus fynkel_authoring_operate(FynkelAuthoringSession* session,
                                       uint32_t kind_len,
                                       const uint8_t* args_json_utf8,
                                       uint32_t args_len);
+
+/* ---- The edit-preview world (version 3; blueprint §19.2e item 6) ------
+ *
+ * Opens the edit-preview world of the scene or prefab document at `handle`:
+ * a FynkelWorld in edit mode (no systems — nothing moves unless a command
+ * moved it) loaded fresh from the live document (its prefabs expanded, the
+ * ones open in other tabs from their live documents), drawing from the
+ * project's cooked cache. The first preview of a session cooks the project
+ * in process (`fynkel cook`; the report is in "cook") and opens the cache;
+ * later previews share the store. Idempotent: an open preview is left as it
+ * is ("opened": false, no "cook"). Result: { "ok", "handle", "opened",
+ * "cook"?: <the fynkel cook --json report>, "stats": { entities, live,
+ * meshes, lights, hidden, tick, loads, syncs }, "diagnostics": [of the
+ * description and the load] }. FYNKEL_STATUS_INVALID_ARGUMENT with
+ * FYN-T0003 for a material (nothing to preview), FYN-T0002 for an unknown
+ * handle, FYN-T0001 without a project; FYNKEL_STATUS_LOAD_FAILED when the
+ * cache cannot be opened at all (a cook with failed assets still opens —
+ * the preview draws the others and the report says which failed). */
+FynkelStatus fynkel_authoring_preview_open(FynkelAuthoringSession* session,
+                                           uint32_t handle);
+/* Drops the edit-preview world of `handle`; the document stays open. The
+ * world pointer must not be rendered from afterwards. Result:
+ * { "ok", "handle", "closed" }. */
+FynkelStatus fynkel_authoring_preview_close(FynkelAuthoringSession* session,
+                                            uint32_t handle);
+/* The edit-preview world of `handle` for the viewport ABI
+ * (fynkel_apple_viewport_render draws it and adopts its asset store like
+ * any world's) and for fynkel.h's reads (fynkel_world_stats,
+ * fynkel_world_query). NULL when no preview is open for the handle, or the
+ * session is NULL or poisoned. Valid until fynkel_authoring_preview_close,
+ * the document's close, the project's close or the session's destruction
+ * — and stable across recook. Never write to it through
+ * fynkel_world_submit / fynkel_world_step / fynkel_world_load_*: the
+ * preview owns its commands and its steps, and the next resync would undo
+ * or fight the change. */
+const FynkelWorld* fynkel_authoring_preview_world(const FynkelAuthoringSession* session,
+                                                  uint32_t handle);
+/* A call on the edit-preview world of `handle`, by kind with JSON
+ * arguments (an object, or NULL with 0). Vectors are JSON arrays of
+ * numbers; a matrix is 16 numbers column-major; ids are UUID strings; a
+ * `view` is { world: [16], aspect, projection?: "perspective" |
+ * "orthographic", fovY? (radians), orthoHeight?, near?, far?,
+ * exposureMode?: "auto" | "manual", exposure? (EV100) } — the camera
+ * fields default to the engine's Camera defaults. Every result carries
+ * "ok" and "handle". The world holds the document *expanded*: a prefab
+ * instance's inner entities have derived ids the document does not
+ * list, so `pick`, `pickRect`, `hidden` and `lines.outline` speak in
+ * document entities — a hit inside an instance answers as the entity
+ * that carries the instance (its anchor, once), hiding or outlining an
+ * anchor hides or outlines its whole instance. `worldMatrix`,
+ * `setTransforms` and `dump` take and give the ids as they are.
+ *   camera          world, projection?, fovY?, orthoHeight?, near?, far?,
+ *                   exposureMode?, exposure?
+ *                                       the editor camera the picture is drawn through,
+ *                                       in the scene camera's place (never a game camera)
+ *   hidden          ids                 exactly these entities and their descendants left
+ *                                       out of the picture and of picking (the editor's
+ *                                       hidden flag; [] shows all) → "hidden": count
+ *   pick            view + ndc [2], or ray { origin [3], dir [3] }
+ *                                       every entity the ray hits, nearest first: a
+ *                                       visible mesh through its bounding sphere then
+ *                                       its triangles, anything else through a 0.25 m
+ *                                       sphere at its origin → "ray", "hits": [{ id,
+ *                                       distance, point [3], mesh }]
+ *   pickRect        view, min [2], max [2] (NDC)
+ *                                       the entities whose projected bounds overlap the
+ *                                       rectangle (the marquee) → "ids"
+ *   lines           outline?: { ids, color? [4] }, icons?: { aspect }
+ *                                       the selection outline (each id's bounds as
+ *                                       twelve edges, or a cross for an entity without
+ *                                       a mesh; default colour orange) and/or the icons
+ *                                       of every light, camera and collider → "count",
+ *                                       "lines": [[ax, ay, az, bx, by, bz, r, g, b, a]]
+ *                                       — ready for fynkel_apple_viewport_debug_lines
+ *   worldMatrix     ids                 → "matrices": { id: [16] } (FYN-T0003 for an
+ *                                       id not in the world)
+ *   setTransforms   transforms: [{ id, position [3], rotation [4] (x, y, z, w), scale [3] }]
+ *                                       the gizmo's preview: the local transforms set
+ *                                       in the world only (the document is untouched,
+ *                                       stays clean) → "count"
+ *   restoreTransforms ids               the transforms back to the document's (a
+ *                                       cancelled drag) → "count"
+ *   resync                              the incremental sync now (a no-op when the
+ *                                       world already matches) → the sync report +
+ *                                       "stats"
+ *   reload                              the fallback and the user's Reload: the world
+ *                                       emptied and the document loaded fresh →
+ *                                       "stats", "diagnostics"
+ *   recook                              project-wide: cooks the project again, reopens
+ *                                       the cache, points every preview's world at it
+ *                                       and reloads each → "cook", "previews": [{
+ *                                       handle, stats, diagnostics }]
+ *   dump                                the world as `fynkel state dump` prints it, in
+ *                                       document order (the gate's incremental-vs-fresh
+ *                                       comparison) → "dump": { document, entityCount,
+ *                                       entities: [{ id, name, parent, children, local,
+ *                                       world, components }] }
+ *   stats                               → "stats", "diagnostics"
+ * FYNKEL_STATUS_INVALID_ARGUMENT for an unknown kind (FYN-T0004, the
+ * suggestion lists them), a missing or malformed argument (FYN-T0003), a
+ * handle without a preview (FYN-T0002). */
+FynkelStatus fynkel_authoring_preview_call(FynkelAuthoringSession* session,
+                                           uint32_t handle,
+                                           const uint8_t* kind_utf8,
+                                           uint32_t kind_len,
+                                           const uint8_t* args_json_utf8,
+                                           uint32_t args_len);
 
 /* UTF-8 JSON of the last call on this session (empty before any, or for
  * NULL). Valid until the next call on the session. */

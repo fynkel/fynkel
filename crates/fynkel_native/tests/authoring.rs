@@ -598,3 +598,300 @@ fn asset_operations_cross_the_edge_with_their_statuses() {
         "Rename gold.material.json → aurum.material.json"
     );
 }
+
+// ---------------------------------------------------------------- previews
+
+const MAIN_SCENE: &str = "assets/scenes/main.scene.json";
+const MAIN_ROBOT: &str = "c0000000-0000-4000-8000-0000000000e1";
+const MAIN_FLOOR: &str = "c0000000-0000-4000-8000-0000000000e4";
+const MAIN_FLOOR_TRANSFORM: &str = "c0000000-0000-4000-8000-0000000000d0";
+
+impl Host {
+    fn preview_call(&self, handle: u32, kind: &str, args: &Value) -> Status {
+        let text = args.to_string();
+        unsafe {
+            fynkel_authoring_preview_call(
+                self.0,
+                handle,
+                kind.as_ptr(),
+                kind.len() as u32,
+                text.as_ptr(),
+                text.len() as u32,
+            )
+        }
+    }
+
+    fn undo(&self, handle: u32) -> Status {
+        unsafe { fynkel_authoring_undo(self.0, handle) }
+    }
+}
+
+/// The edit-preview world across the edge (ABI v3): opened over a cook,
+/// rendered from through its world pointer, picked, hidden, kept in step
+/// with the document by apply and undo (the incremental dump equals a
+/// reload's), recooked, and closed with its document.
+#[test]
+fn the_edit_preview_world_crosses_the_edge() {
+    let copy = Copy::new("preview");
+    let host = Host::new();
+    assert_eq!(host.open_project(&copy.dir), Status::Ok);
+    let (status, scene) = host.open_document(MAIN_SCENE);
+    assert_eq!(status, Status::Ok);
+
+    // Nothing before it is opened.
+    assert!(unsafe { fynkel_authoring_preview_world(host.0, scene) }.is_null());
+    assert_eq!(
+        host.preview_call(scene, "stats", &json!({})),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0002"]);
+
+    // Open: the project cooks into its cache, the world loads.
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open(host.0, scene) },
+        Status::Ok
+    );
+    let opened = host.result();
+    assert_eq!(opened["opened"], true);
+    assert_eq!(opened["cook"]["ok"], true, "{opened}");
+    assert_eq!(opened["stats"]["entities"], 7);
+    assert_eq!(opened["diagnostics"], json!([]));
+    assert!(copy.dir.join(".fynkel/cache/index.json").is_file());
+    // Again: idempotent, no second cook.
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open(host.0, scene) },
+        Status::Ok
+    );
+    assert_eq!(host.result()["opened"], false);
+    assert!(host.result().get("cook").is_none());
+
+    // The world pointer is a live edit-mode world with the scene in it.
+    let world = unsafe { fynkel_authoring_preview_world(host.0, scene) };
+    assert!(!world.is_null());
+    let core = unsafe { (*world).core() };
+    assert!(core.is_edit_mode());
+    let meshes = core.extract().meshes.len();
+    assert!(meshes > 0);
+    assert_eq!(json!(meshes), opened["stats"]["meshes"]);
+    assert!(
+        unsafe { (*world).assets() }.is_some(),
+        "the viewport adopts the store"
+    );
+
+    // The editor camera: 20 m up and 2 m aside (the sun's icon sits right
+    // above the robot), looking straight down.
+    let looking_down = glam::Mat4::from_rotation_translation(
+        glam::Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+        glam::Vec3::new(2.0, 20.0, 0.0),
+    );
+    let view = json!({
+        "world": looking_down.to_cols_array(),
+        "aspect": 16.0 / 9.0,
+        "near": 0.1,
+        "far": 100.0,
+    });
+    assert_eq!(host.preview_call(scene, "camera", &view), Status::Ok);
+    assert_eq!(
+        core.edit_camera().map(|(m, _)| *m),
+        Some(looking_down),
+        "the extract draws through it"
+    );
+
+    // Pick through the pixel at the robot's centre.
+    assert_eq!(
+        host.preview_call(scene, "worldMatrix", &json!({ "ids": [MAIN_ROBOT] })),
+        Status::Ok
+    );
+    let m = host.result()["matrices"][MAIN_ROBOT]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap() as f32)
+        .collect::<Vec<_>>();
+    let robot =
+        glam::Mat4::from_cols_array(&m.try_into().unwrap()).transform_point3(glam::Vec3::Y * 0.5);
+    let vp = fynkel_core::projection_matrix(
+        &fynkel_core::components::Camera {
+            far: 100.0,
+            ..Default::default()
+        },
+        16.0 / 9.0,
+    ) * fynkel_core::view_matrix(&looking_down);
+    let clip = vp * robot.extend(1.0);
+    let ndc = [clip.x / clip.w, clip.y / clip.w];
+    let pick = json!({ "view": view, "ndc": ndc });
+    assert_eq!(host.preview_call(scene, "pick", &pick), Status::Ok);
+    let hits = host.result();
+    assert_eq!(hits["hits"][0]["id"], MAIN_ROBOT, "{hits}");
+    assert_eq!(hits["hits"][0]["mesh"], true);
+    // The same pick with an explicit ray.
+    let ray = json!({ "ray": { "origin": [robot.x, 5.0, robot.z], "dir": [0, -1, 0] } });
+    assert_eq!(host.preview_call(scene, "pick", &ray), Status::Ok);
+    assert_eq!(host.result()["hits"][0]["id"], MAIN_ROBOT);
+
+    // Hidden: gone from the picks, counted in the stats; back again.
+    assert_eq!(
+        host.preview_call(scene, "hidden", &json!({ "ids": [MAIN_ROBOT] })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["hidden"], 1);
+    assert_eq!(host.preview_call(scene, "pick", &pick), Status::Ok);
+    assert!(
+        host.result()["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|h| h["id"] != MAIN_ROBOT),
+        "{}",
+        host.result()
+    );
+    assert_eq!(host.preview_call(scene, "stats", &json!({})), Status::Ok);
+    assert_eq!(host.result()["stats"]["hidden"], 1);
+    assert_eq!(
+        host.preview_call(scene, "hidden", &json!({ "ids": [] })),
+        Status::Ok
+    );
+
+    // Lines: the robot's outline is a box (12 edges); the icons of a
+    // camera and a sun are there.
+    assert_eq!(
+        host.preview_call(
+            scene,
+            "lines",
+            &json!({ "outline": { "ids": [MAIN_ROBOT] }, "icons": { "aspect": 16.0 / 9.0 } })
+        ),
+        Status::Ok
+    );
+    let lines = host.result();
+    assert!(lines["count"].as_u64().unwrap() > 12, "{}", lines["count"]);
+    assert_eq!(lines["lines"][0].as_array().unwrap().len(), 10);
+
+    // A transaction: the apply result carries the preview's report and
+    // the incremental world dumps exactly like a reload of the document.
+    assert_eq!(host.preview_call(scene, "dump", &json!({})), Status::Ok);
+    let before = host.result()["dump"].clone();
+    assert_eq!(
+        host.apply(
+            scene,
+            &json!([{ "command": "setField", "entity": MAIN_FLOOR, "component": MAIN_FLOOR_TRANSFORM, "field": "position", "value": [0, -1.5, 0] }])
+        ),
+        Status::Ok
+    );
+    let applied = host.result();
+    assert_eq!(applied["previews"][0]["handle"], scene, "{applied}");
+    assert_eq!(applied["previews"][0]["updated"], 1);
+    assert_eq!(applied["previews"][0]["reloaded"], false);
+    assert_eq!(host.preview_call(scene, "dump", &json!({})), Status::Ok);
+    let incremental = host.result()["dump"].clone();
+    assert_ne!(incremental, before);
+    assert_eq!(host.preview_call(scene, "reload", &json!({})), Status::Ok);
+    assert_eq!(host.result()["stats"]["entities"], 7);
+    assert_eq!(host.preview_call(scene, "dump", &json!({})), Status::Ok);
+    assert_eq!(host.result()["dump"], incremental, "incremental == fresh");
+    // Undo brings the world back with the document.
+    assert_eq!(host.undo(scene), Status::Ok);
+    assert_eq!(host.result()["previews"][0]["updated"], 1);
+    assert_eq!(host.preview_call(scene, "dump", &json!({})), Status::Ok);
+    assert_eq!(host.result()["dump"], before);
+
+    // The gizmo's preview is not an edit: the document stays clean and a
+    // resync finds nothing to do once the transforms are restored.
+    assert_eq!(
+        host.preview_call(
+            scene,
+            "setTransforms",
+            &json!({ "transforms": [{ "id": MAIN_ROBOT, "position": [3, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] }] })
+        ),
+        Status::Ok
+    );
+    assert_eq!(
+        host.query("document", Some(&json!({ "handle": scene }))),
+        Status::Ok
+    );
+    assert_eq!(host.result()["result"]["dirty"], false);
+    assert_eq!(
+        host.preview_call(scene, "restoreTransforms", &json!({ "ids": [MAIN_ROBOT] })),
+        Status::Ok
+    );
+    assert_eq!(host.preview_call(scene, "resync", &json!({})), Status::Ok);
+    let resync = host.result();
+    assert_eq!(
+        (&resync["updated"], &resync["spawned"], &resync["steps"]),
+        (&json!(0), &json!(0), &json!(0))
+    );
+
+    // Recook: the cache rebuilt, every preview reloaded over the new store.
+    assert_eq!(host.preview_call(scene, "recook", &json!({})), Status::Ok);
+    let recook = host.result();
+    assert_eq!(recook["cook"]["ok"], true, "{recook}");
+    assert_eq!(recook["previews"][0]["handle"], scene);
+    assert_eq!(recook["previews"][0]["stats"]["entities"], 7);
+    let world2 = unsafe { fynkel_authoring_preview_world(host.0, scene) };
+    assert_eq!(world, world2, "the world pointer stays put");
+
+    // A manual exposure (an aligned scene camera's) reaches the edit camera.
+    let view = json!({
+        "world": looking_down.to_cols_array(),
+        "aspect": 16.0 / 9.0,
+        "exposureMode": "manual",
+        "exposure": 12.5,
+    });
+    assert_eq!(host.preview_call(scene, "camera", &view), Status::Ok);
+    let (_, camera) = core.edit_camera().unwrap();
+    assert_eq!(
+        camera.exposure_mode,
+        fynkel_core::components::ExposureMode::Manual
+    );
+    assert_eq!(camera.exposure, 12.5);
+
+    // Refusals: bad arguments, an unknown call, a material.
+    assert_eq!(
+        host.preview_call(scene, "pick", &json!({ "ndc": [0, 0] })),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0003"]);
+    let view =
+        json!({ "world": looking_down.to_cols_array(), "aspect": 1.0, "exposureMode": "bright" });
+    assert_eq!(
+        host.preview_call(scene, "camera", &view),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0003"]);
+    assert_eq!(
+        host.preview_call(scene, "teleport", &json!({})),
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0004"]);
+    let (status, material) = host.open_document("assets/materials/rusted.material.json");
+    assert_eq!(status, Status::Ok);
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open(host.0, material) },
+        Status::InvalidArgument
+    );
+    assert_eq!(codes(&host.result()), ["FYN-T0003"]);
+
+    // Closing the document closes its preview; the pointer is gone.
+    assert_eq!(
+        unsafe { fynkel_authoring_close_document(host.0, scene) },
+        Status::Ok
+    );
+    assert_eq!(host.result()["previewClosed"], true);
+    assert!(unsafe { fynkel_authoring_preview_world(host.0, scene) }.is_null());
+
+    // NULL safety.
+    assert!(unsafe { fynkel_authoring_preview_world(ptr::null(), 0) }.is_null());
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_open(ptr::null_mut(), 0) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe { fynkel_authoring_preview_close(ptr::null_mut(), 0) },
+        Status::InvalidArgument
+    );
+    assert_eq!(
+        unsafe {
+            fynkel_authoring_preview_call(ptr::null_mut(), 0, ptr::null(), 0, ptr::null(), 0)
+        },
+        Status::InvalidArgument
+    );
+}
