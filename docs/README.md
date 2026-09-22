@@ -33,7 +33,7 @@
 | 0002 | M0 scope and Flutter/wgpu viewport composition path | Accepted, measured; Path A selected |
 | 0003 | `hecs` behind `fynkel_ecs` | Accepted |
 | 0004 | Dart/Rust command-snapshot protocol and wire format | Accepted |
-| 0005 | License, repository, contribution, trademark | **Open** — before M3 public push |
+| 0005 | License, repository, contribution, trademark | **Open** — deferred to public readiness (b), when the repository goes public |
 | 0006 | Source document format and asset identity | Accepted |
 | 0007 | Engine as a library; hosts own the loop | Accepted |
 | 0008 | Dart execution model (main isolate, sync step, timestep, events) | Accepted |
@@ -50,7 +50,7 @@
 
 ## Still open
 
-- ADR-0005 license (decide before going public at M3).
+- ADR-0005 license — deferred with the rest of the publishing paperwork to a "public readiness (b)" item for when the repository goes public (blueprint §19.2d item 17, done thin on 2026-09-22).
 - Whether Windows is 1.1 or later.
 - MCP server on top of the CLI (post-1.0, cheap).
 - ~~Runtime-inspection channel between editor and the separate Play process (design in M4).~~ Resolved 2026-09-21 (ADR-0016 resolutions): JSON lines on the game's stdout under `FYNKEL_EDITOR_CHANNEL=stdio`; inspection itself is built after Editor V0.

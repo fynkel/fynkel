@@ -463,6 +463,29 @@ dropped and `FYN-R0012` (`tooManyAnchors`, informational) is reported
 once. In a test: `world.projection.add(object, offset:)`, `setViewport(w,
 h)`, `update()`, then `anchor.x`/`y`/`visible`/`occluded`/`depth`.
 
+## Where the frame goes (stats; docs/instrumentation.md in the engine)
+
+`FynkelGameView(onStats: …)` hands the app a `FynkelFrameStats` once a
+second: `fps`, `tickInterval`, `simulate` (ticks + extract), `behaviours`
+(the Dart `fixedUpdate`/`update` time), `nativeStep`, `renderCall`,
+`totalWork` (= simulate + render(); its p95 is the engine's 12 ms budget
+at 60 Hz), `flutterBuild`/`flutterRaster` (Flutter's own), `viewport`
+(`extract`/`prepare`/`encode` inside render(), instances, draws, culled,
+shadow casters, the GPU's pass times `gpuFrame`/`gpuShadow`/`gpuScene`/
+`gpuPost` from timestamps, GPU bytes), `world` (native / resident / asset bytes, the
+snapshot size), `systems` (µs per native phase — physics, animation,
+transforms, …) and, with `profileDartHeap: true` on a debug or profile
+build, `dartHeap` (heap size, bytes allocated per frame, GC count and
+pause). Each timer is a `p50`/`p95`/`p99` in ms. lib/main.dart's HUD prints
+the block; with `FYNKEL_CAPTURE=1` in the environment the app also prints
+`stats.summary()` as one `[stats] key=value …` line a second (run the
+`flutter build macos --profile` bundle's executable that way — AOT, with
+the VM service the heap line needs), which a script can grep. The Rust side measures the same without
+a window: `fynkel test --headless --json` reports per-tick step / extract
+/ frame times, memory and `systems`. Budget a feature by these numbers,
+not by feel; a behaviour that allocates per tick shows up in `dartHeap`
+first.
+
 ## Do
 
 - Run the loop above before declaring work done; paste the failing command's output when it fails.

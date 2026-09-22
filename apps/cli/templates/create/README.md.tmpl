@@ -49,6 +49,11 @@ writes from `update` and the HUD binds with `ModelBuilder` — a bound
 widget rebuilds when a value changed, never per frame — and the labels
 over the Cube and the Crate are `WorldLabel`s in a `ProjectionLayer`,
 pinned to the objects through the world's projection view (docs/hud.md).
+The HUD's stats block is `FynkelFrameStats` (`onStats`, once a second):
+where the frame goes — behaviours, native ticks, render(), the GPU's pass
+times, the Dart heap's allocation rate on a debug/profile build — with
+`FYNKEL_CAPTURE=1` printing it as a `[stats]` line for scripts
+(docs/instrumentation.md).
 After changing an exposed field, an id or adding a behaviour class, run `fynkel
 codegen --project .` and commit the regenerated `lib/generated/` and
 `schemas/behaviours/`.

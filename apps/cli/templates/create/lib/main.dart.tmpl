@@ -19,9 +19,14 @@
 // HUD: the mover's readout and the pause banner are bound to the game's
 // `HudModel` fields (`ModelBuilder`; docs/hud.md) — behaviours write them,
 // the bound widgets rebuild on change only; the stats block refreshes once
-// a second from `onStats`. World labels: a `ProjectionLayer` pins
-// `WorldLabel`s to the Cube and the Crate through the world's bounded
-// projection view (one call per frame, no rebuilds).
+// a second from `onStats` (`FynkelFrameStats`: where the frame goes —
+// behaviours, native ticks, render(), the GPU's pass times, the Dart heap
+// when the build carries a VM service; docs/instrumentation.md). Run with
+// FYNKEL_CAPTURE=1 to get the same as one `[stats] key=value …` line a
+// second on stdout (`FynkelFrameStats.summary()`, greppable from a script).
+// World labels: a `ProjectionLayer` pins `WorldLabel`s to the Cube and the
+// Crate through the world's bounded projection view (one call per frame,
+// no rebuilds).
 
 import 'dart:io';
 
@@ -33,6 +38,9 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'game/game.dart';
 import 'game/hud_model.dart';
 import 'game/spinner.dart';
+
+/// `FYNKEL_CAPTURE=1` prints the stats line once a second (benchmarks).
+final bool capturing = (Platform.environment['FYNKEL_CAPTURE'] ?? '').isNotEmpty;
 
 void main() => runApp(const GameApp());
 
@@ -167,7 +175,14 @@ class _GamePageState extends State<GamePage> {
         audio: true,
         onKeyEvent: _onKey,
         onFrame: _onFrame,
-        onStats: (s) => setState(() => _stats = s),
+        // Once a second. `profileDartHeap` adds the Dart heap's allocation
+        // rate and GC pauses (C3) to the stats when the build has a VM
+        // service (debug, profile); a release build reports none.
+        profileDartHeap: true,
+        onStats: (s) {
+          setState(() => _stats = s);
+          if (capturing) debugPrint('[stats] ${s.summary()}');
+        },
         overlay: ModelBinding<HudModel>(
           model: game.hud,
           child: Stack(
@@ -258,6 +273,10 @@ class Hud extends StatelessWidget {
               'resident ${(s.world.residentBytes / 1048576).toStringAsFixed(0)} MB  '
               'snapshot ${s.world.snapshotBytes} B',
         ],
+        if (s.dartHeap case final h?)
+          'dart heap  ${(h.heapUsage / 1048576).toStringAsFixed(1)} MB  '
+              '${(h.allocatedBytes / 1024 / (s.frames == 0 ? 1 : s.frames)).toStringAsFixed(1)} KB/frame allocated  '
+              '${h.gcCollections} gc (${h.gcPauseMs.toStringAsFixed(1)} ms)',
         // The last tick's phases (`World.systemTimes`, M3-10): where a
         // slow tick goes — physics, the native movers, the transforms.
         'systems    ${_systems(s.systems)}',

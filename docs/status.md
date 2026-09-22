@@ -1,4 +1,4 @@
-# Engine status — 2026-09-21 (M2 gate: GO; M3 in progress, items 1–10, 12–14 and 19 done; M4 started in parallel, §6 item 16)
+# Engine status — 2026-09-22 (M2 gate: GO; M3 in progress, items 1–17 and 19 done, 17 thin; M4 in parallel, §6 item 16)
 
 The one-page, plain-words answer to "what do we have, is it solid, what is
 missing". Rewritten at every milestone gate and updated whenever a row below
@@ -391,8 +391,9 @@ Not bugs — things done the simple way with a note to revisit.
 - `FYNKEL_STATUS_LOAD_FAILED` (8) and the Apple viewport ABI v2 were added
   without a deprecation window (v3 and v4 were additive); both ABIs are
   pre-release.
-- ADR-0005 (license) is still open; nothing is public yet. Due at the M3
-  gate.
+- ADR-0005 (license) is still open; nothing is public yet. Deferred with
+  the rest of the paperwork to a "public readiness (b)" item when the
+  repository goes public (blueprint §19.2d item 17, thin on 2026-09-22).
 
 ## 5. Verification (what "green" means)
 
@@ -1077,6 +1078,20 @@ p95 64 µs / extract 42 / frame 106, native 6 MB; Dart heap 39 KB/frame
 between runs (physics p95/max 3.9/8.8 → 13.3/48.8 ms once; the Flutter
 host's GPU spans with Flutter's raster beside them) — recorded in
 `docs/instrumentation.md`, medians stable.
+M3-17 thin (2026-09-22): **clean-clone run at `0668ad0`** — `git clone`
+into a temporary directory, `cargo install --path apps/cli` (1 min
+release build), then `examples/reference_game` through its README's
+commands only with `fynkel` on `PATH` and no `FYNKEL_CLI`: `validate`
+(23 documents, 0 errors), `test --headless` (the Menu, checksum
+`28009f79997fa559`), the recorded route (1398 ticks, 182 entities,
+checksum `338f8239bd95b101`, 0 diagnostics), `render` (179 entities, 53
+instances in 13 draws), `flutter test` (8 passed), `cook`, `flutter build
+macos --debug`, the bundle launched with `FYNKEL_CAPTURE=1` — ten
+`[stats]` lines at 121 frames/s, total work 1.49 ms p95. The one hidden
+assumption: the game's README linked a top-level `README.md` that did
+not exist (added, minimal). The fresh starter (create → validate →
+headless with the recording → codegen → analyze → test) green with the
+stats section, `profileDartHeap` and the capture line in place.
 
 ## 6. Verdict and next steps
 
@@ -1202,8 +1217,19 @@ in its own app, play it, or hear it. That is M3, in this order:
    the AOT capture in `benchmarks/m0/capture.py`, `FynkelFrameStats.
    summary()`, `benchmarks/m3/capture.py` over both scenes with the
    12 ms p95 total-work check — `results/2026-09-22-0427213`: stress
-   7.59 ms p95, reference game 1.62 ms p95, every check green). **Next:
-   public readiness (17)**, then the gate report (18) — measured with
+   7.59 ms p95, reference game 1.62 ms p95, every check green). **Public
+   readiness (17) done thin** (2026-09-22, the user's call — no reader
+   yet): the starter template and its `AGENTS.md`/`README.md` at the M3
+   SDK (the stats section, `profileDartHeap`, the `[stats]` capture
+   line), a minimal top-level `README.md`, and the gate run — a clean
+   clone through `cargo install --path apps/cli` and the reference
+   game's README commands only, up to the built bundle printing
+   `[stats]` lines; the license, `LICENSE`, `CONTRIBUTING.md`, issue
+   templates, the first-time-reader README and CI on a fork are
+   deferred to a "public readiness (b)" item for when the repository
+   goes public (blueprint item 17). **Next: the Dart allocation gap**
+   (§3: 40–60 KB/frame in a Flutter app — attribute with the probe,
+   reduce what is Fynkel's), then the gate report (18) — measured with
    both captures at every step.
 16. **M4 — the editor — has started in parallel** (2026-09-21, the user's
    call): branch `editor` in its own worktree, the backlog in blueprint
