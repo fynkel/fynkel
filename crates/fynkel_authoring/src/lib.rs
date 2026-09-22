@@ -20,6 +20,7 @@
 
 #![allow(clippy::result_large_err)] // `Diagnostic` is the workspace's error type
 
+pub mod instance;
 pub mod ops;
 pub mod preview;
 pub mod project;
@@ -28,7 +29,7 @@ pub mod query;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use fynkel_contracts::{Code, Diagnostic};
+use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use fynkel_document::authoring::{Applied, Command, Editor, Request, Transaction};
 use fynkel_document::{
     diagnostic_json, Document, DocumentCodec, DocumentKind, Node, ProjectReport,
@@ -59,6 +60,7 @@ pub const COMMANDS: &[&str] = &[
     "instantiatePrefab",
     "setPrefabOverride",
     "revertPrefabOverride",
+    "unpackPrefab",
     "setDocumentField",
     "unsetDocumentField",
     "createMaterial",
@@ -67,9 +69,28 @@ pub const COMMANDS: &[&str] = &[
 
 /// One open document: the editor and where its file is.
 pub struct OpenDocument {
-    /// Canonical absolute path of the file.
+    /// Canonical absolute path of the file — for an imported hierarchy
+    /// (`<id>#prefab`, M4-07) the source's or the rig document's.
     pub path: PathBuf,
+    /// `Some("prefab")` when this is an imported hierarchy opened through
+    /// `open_document("<id>#prefab")`: the prefab document the importer
+    /// derives, under the derived `node/<i>` ids, read-only.
+    pub sub: Option<String>,
+    /// Why this document cannot be edited, when it cannot (the imported
+    /// hierarchy's case; a read-only *project* is reported by the session).
+    pub read_only: Option<String>,
     pub editor: Editor,
+}
+
+impl OpenDocument {
+    /// The document as a client names it: the path, `#<sub>` for an
+    /// imported hierarchy.
+    pub fn shown(&self) -> String {
+        match &self.sub {
+            Some(sub) => format!("{}#{sub}", self.path.display()),
+            None => self.path.display().to_string(),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -153,7 +174,20 @@ impl AuthoringSession {
     /// Idempotent: a document already open returns its handle. Other
     /// document kinds, newer and outdated documents are refused with the
     /// editor's `FYN-E0007`.
+    ///
+    /// `<id>#prefab` (or `<path>#prefab`) opens an **imported hierarchy**
+    /// (M4-07): the prefab document the importer derives from a model
+    /// source (`hero.glb`) or a rig document's skeleton — the one an
+    /// instance `{ asset: <id>, sub: "prefab" }` expands — as a read-only
+    /// prefab document (`readOnly` names the source); a source without a
+    /// hierarchy or a rig whose skeleton is not an imported model is
+    /// `FYN-D0401`.
     pub fn open_document(&mut self, path_or_id: &str) -> Result<Handle, Vec<Diagnostic>> {
+        if let Some((asset, sub)) = path_or_id.rsplit_once('#') {
+            if !sub.is_empty() && !asset.is_empty() {
+                return self.open_imported(asset, sub);
+            }
+        }
         let project = self.require_project().map_err(|d| vec![d])?;
         let path = match path_or_id.parse::<Uuid>() {
             Ok(id) => {
@@ -181,20 +215,152 @@ impl AuthoringSession {
                     .with_document(path.display().to_string()),
             ]
         })?;
-        if let Some((h, _)) = self.documents.iter().find(|(_, d)| d.path == canonical) {
+        if let Some((h, _)) = self
+            .documents
+            .iter()
+            .find(|(_, d)| d.path == canonical && d.sub.is_none())
+        {
             return Ok(*h);
         }
         let editor = self.read_editor(&canonical)?;
+        Ok(self.insert(OpenDocument {
+            path: canonical,
+            sub: None,
+            read_only: None,
+            editor,
+        }))
+    }
+
+    fn insert(&mut self, document: OpenDocument) -> Handle {
         let handle = self.next_handle;
         self.next_handle += 1;
-        self.documents.insert(
-            handle,
-            OpenDocument {
-                path: canonical,
-                editor,
-            },
+        self.documents.insert(handle, document);
+        handle
+    }
+
+    /// `open_document("<id or path>#<sub>")`: the imported hierarchy.
+    fn open_imported(&mut self, asset: &str, sub: &str) -> Result<Handle, Vec<Diagnostic>> {
+        let project = self.require_project().map_err(|d| vec![d])?;
+        let id = match asset.parse::<Uuid>() {
+            Ok(id) => id,
+            Err(_) => {
+                // A path: the entry whose file it is.
+                let p = Path::new(asset);
+                let full = if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    project.dir.join(p)
+                };
+                let canonical = full.canonicalize().map_err(|e| {
+                    vec![
+                        Diagnostic::error(Code::SESSION_IO, format!("cannot open: {e}"))
+                            .with_document(full.display().to_string()),
+                    ]
+                })?;
+                project
+                    .assets
+                    .entries()
+                    .iter()
+                    .find(|e| {
+                        e.file(project.assets.root())
+                            .canonicalize()
+                            .is_ok_and(|f| f == canonical)
+                    })
+                    .map(|e| e.id)
+                    .ok_or_else(|| {
+                        vec![Diagnostic::error(
+                            Code::SESSION_IO,
+                            format!("{} is not an asset of the project", full.display()),
+                        )
+                        .with_document(full.display().to_string())]
+                    })?
+            }
+        };
+        let entry = project.assets.get(id).ok_or_else(|| {
+            vec![Diagnostic::error(
+                Code::SESSION_IO,
+                format!("no asset with id {id} in the project"),
+            )
+            .with_id(id.to_string())]
+        })?;
+        let path = entry.file(project.assets.root());
+        let canonical = path.canonicalize().unwrap_or(path);
+        if let Some((h, _)) = self
+            .documents
+            .iter()
+            .find(|(_, d)| d.path == canonical && d.sub.as_deref() == Some(sub))
+        {
+            return Ok(*h);
+        }
+        let (editor, read_only) = self.read_imported(id, sub)?;
+        Ok(self.insert(OpenDocument {
+            path: canonical,
+            sub: Some(sub.to_string()),
+            read_only: Some(read_only),
+            editor,
+        }))
+    }
+
+    /// The imported hierarchy `{ asset: id, sub }` names, as an editor,
+    /// and why it is read-only.
+    fn read_imported(&self, id: Uuid, sub: &str) -> Result<(Editor, String), Vec<Diagnostic>> {
+        use fynkel_document::{AssetKind, PrefabLibrary};
+        let project = self.require_project().map_err(|d| vec![d])?;
+        let entry = project.assets.get(id).ok_or_else(|| {
+            vec![Diagnostic::error(
+                Code::SESSION_IO,
+                format!("no asset with id {id} in the project"),
+            )
+            .with_id(id.to_string())]
+        })?;
+        let shown = format!("{}#{sub}", entry.path);
+        let not_available = |why: &str| {
+            vec![Diagnostic::error(
+                Code::PREFAB_UNKNOWN,
+                format!("prefab {id}#{sub} is not available: {why}"),
+            )
+            .with_document(shown.clone())
+            .with_id(id.to_string())
+            .with_suggestion(
+                "an imported hierarchy is a model source's or a rig document's \"prefab\" sub-asset",
+            )]
+        };
+        let what = match &entry.kind {
+            AssetKind::Source { .. } => "source",
+            AssetKind::Document(DocumentKind::Rig) => "rig",
+            AssetKind::Document(kind) => {
+                return Err(not_available(&format!(
+                    "a {} document has no imported hierarchy",
+                    kind.name()
+                )))
+            }
+        };
+        if sub != fynkel_document::rig::RIG_PREFAB_SUB {
+            return Err(not_available(&format!(
+                "the hierarchy is the \"prefab\" sub-asset, not {sub:?}"
+            )));
+        }
+        let mut library = PrefabLibrary::empty();
+        let diags = library.add_sources(
+            &project.assets,
+            &[(id, sub.to_string())],
+            &fynkel_import::ImportedPrefabs::default(),
         );
-        Ok(handle)
+        if fynkel_document::has_errors(&diags) {
+            return Err(diags);
+        }
+        let prefab = library
+            .get_ref(&AssetRef::with_sub(crate::project::to_contract(id), sub))
+            .ok_or_else(|| {
+                not_available(match what {
+                    "rig" => "the rig's skeleton is not an imported model with a node hierarchy",
+                    _ => "the source imports without a node hierarchy",
+                })
+            })?;
+        let mut document = prefab.document.clone();
+        document.path = Some(shown.clone());
+        let editor = Editor::open_with(document, &project.schemas, project.shaders())?;
+        Ok((editor, imported_reason(&shown, what)))
     }
 
     fn read_editor(&self, path: &Path) -> Result<Editor, Vec<Diagnostic>> {
@@ -205,11 +371,45 @@ impl AuthoringSession {
 
     /// Re-reads the document from disk; the history is dropped and the
     /// revision is the file's. Unsaved edits are lost — the client asks.
+    /// An imported hierarchy is imported again.
     pub fn reload(&mut self, handle: Handle) -> Result<(), Vec<Diagnostic>> {
-        let path = self.document(handle).map_err(|d| vec![d])?.path.clone();
-        let editor = self.read_editor(&path)?;
+        let doc = self.document(handle).map_err(|d| vec![d])?;
+        let path = doc.path.clone();
+        let editor = match doc.sub.clone() {
+            Some(sub) => {
+                let id = self.imported_id(handle).map_err(|d| vec![d])?;
+                self.read_imported(id, &sub)?.0
+            }
+            None => self.read_editor(&path)?,
+        };
         self.documents.get_mut(&handle).unwrap().editor = editor;
         Ok(())
+    }
+
+    /// The asset id an imported-hierarchy handle was opened from.
+    fn imported_id(&self, handle: Handle) -> Result<Uuid, Diagnostic> {
+        let project = self.require_project()?;
+        let doc = self.document(handle)?;
+        project
+            .assets
+            .entries()
+            .iter()
+            .find(|e| {
+                e.file(project.assets.root())
+                    .canonicalize()
+                    .is_ok_and(|f| f == doc.path)
+            })
+            .map(|e| e.id)
+            .ok_or_else(|| {
+                Diagnostic::error(
+                    Code::SESSION_IO,
+                    format!(
+                        "{} is no longer an asset of the project",
+                        doc.path.display()
+                    ),
+                )
+                .with_document(doc.shown())
+            })
     }
 
     pub fn close_document(&mut self, handle: Handle) -> Result<(), Diagnostic> {
@@ -236,18 +436,26 @@ impl AuthoringSession {
         self.documents.keys().copied().collect()
     }
 
-    /// The handle of the open document at `path`, if any.
+    /// The handle of the open document at `path` (not an imported
+    /// hierarchy of it), if any.
     pub fn handle_of(&self, path: &Path) -> Option<Handle> {
         let canonical = path.canonicalize().ok()?;
         self.documents
             .iter()
-            .find(|(_, d)| d.path == canonical)
+            .find(|(_, d)| d.path == canonical && d.sub.is_none())
             .map(|(h, _)| *h)
     }
 
     fn writable(&self, handle: Handle) -> Result<(), Diagnostic> {
         let project = self.require_project()?;
         let doc = self.document(handle)?;
+        if let Some(reason) = &doc.read_only {
+            return Err(Diagnostic::error(
+                Code::EDIT_NOT_EDITABLE,
+                format!("the document is read-only: {reason}"),
+            )
+            .with_document(doc.shown()));
+        }
         if let Some(reason) = &project.read_only {
             return Err(Diagnostic::error(
                 Code::EDIT_NOT_EDITABLE,
@@ -267,9 +475,23 @@ impl AuthoringSession {
     /// the project directory (the editor's process may run from anywhere),
     /// and the paths a committed transaction wrote are rescanned so the
     /// asset database sees the new material or the saved document at once.
-    /// `Err` only when the handle is unknown or the project is read-only.
+    /// `Err` only when the handle is unknown or the document or project is
+    /// read-only. `unpackPrefab` sees the prefabs as the preview does —
+    /// open prefab documents from their editors, the rest from disk, the
+    /// imported hierarchies through the importer ([`Self::describe`]).
     pub fn apply(&mut self, handle: Handle, mut request: Request) -> Result<Applied, Diagnostic> {
         self.writable(handle)?;
+        let unpacks = request
+            .commands
+            .iter()
+            .any(|c| matches!(c.command, Command::UnpackPrefab { .. }));
+        let library = if unpacks {
+            let project = self.project.as_ref().unwrap();
+            let doc = self.documents.get(&handle).unwrap();
+            self.prefab_library(project, &doc.editor.scene()).0
+        } else {
+            fynkel_document::PrefabLibrary::empty()
+        };
         let project = self.project.as_ref().unwrap();
         let doc = self.documents.get_mut(&handle).unwrap();
         let mut written: Vec<PathBuf> = Vec::new();
@@ -291,7 +513,9 @@ impl AuthoringSession {
                 _ => {}
             }
         }
-        let applied = doc.editor.apply(request, &project.schemas);
+        let applied = doc
+            .editor
+            .apply_with_prefabs(request, &project.schemas, &library);
         if applied.ok && !written.is_empty() {
             let written: Vec<PathBuf> = written
                 .into_iter()
@@ -465,7 +689,8 @@ impl AuthoringSession {
         let mut diagnostics = Vec::new();
         let mut open: Vec<PathBuf> = Vec::new();
         for d in self.documents.values() {
-            if d.editor.document().kind == DocumentKind::Prefab {
+            // An open imported hierarchy is what the importer gives below.
+            if d.editor.document().kind == DocumentKind::Prefab && d.sub.is_none() {
                 library.add(Prefab::from_document(d.editor.document().clone()));
                 open.push(d.path.clone());
             }
@@ -503,16 +728,25 @@ impl AuthoringSession {
     // ---------------------------------------------------------------- JSON
 
     /// The document's state without its content: `{ handle, path,
-    /// relativePath, kind, id, name, formatVersion, revision, dirty,
-    /// canUndo, canRedo, history, readOnly }`.
+    /// relativePath, sub, kind, id, name, formatVersion, revision, dirty,
+    /// canUndo, canRedo, history, readOnly }`. An imported hierarchy has
+    /// `sub: "prefab"`, `#prefab` on its `relativePath`, and `readOnly`
+    /// naming the source; otherwise `readOnly` is the project's.
     pub fn state_json(&self, handle: Handle) -> Result<Value, Diagnostic> {
         let project = self.require_project()?;
         let doc = self.document(handle)?;
         let document = doc.editor.document();
+        let relative = project
+            .relative_to_assets(&doc.path)
+            .map(|r| match &doc.sub {
+                Some(sub) => format!("{r}#{sub}"),
+                None => r,
+            });
         Ok(json!({
             "handle": handle,
             "path": doc.path.display().to_string(),
-            "relativePath": project.relative_to_assets(&doc.path),
+            "relativePath": relative,
+            "sub": doc.sub,
             "kind": document.kind.name(),
             "id": document.envelope.id.to_string(),
             "name": live_name(document),
@@ -522,7 +756,7 @@ impl AuthoringSession {
             "canUndo": doc.editor.can_undo(),
             "canRedo": doc.editor.can_redo(),
             "history": doc.editor.history().len(),
-            "readOnly": project.read_only,
+            "readOnly": doc.read_only.clone().or_else(|| project.read_only.clone()),
         }))
     }
 
@@ -718,6 +952,17 @@ fn root_ids(root: &Node) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// Why an imported hierarchy (`<shown>`, a `source` or a `rig`) is read-only.
+pub(crate) fn imported_reason(shown: &str, kind: &str) -> String {
+    let what = match kind {
+        "rig" => "a rig document's skeleton",
+        _ => "a model source",
+    };
+    format!(
+        "{shown} is an imported hierarchy ({what}): its entities are derived from the file at import, so it cannot be edited here — instance it and override fields, or `fynkel import --prefab` for an editable copy"
+    )
 }
 
 fn unknown_handle(handle: Handle) -> Diagnostic {

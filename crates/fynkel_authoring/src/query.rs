@@ -19,6 +19,7 @@ use crate::{AuthoringSession, Handle, COMMANDS};
 /// | `documents` | | the open documents' states |
 /// | `document` | `handle`, `root?` (default true) | [`AuthoringSession::document_json`] / `state_json` |
 /// | `inspect` | `handle` | [`AuthoringSession::inspect_json`] |
+/// | `instance` | `handle`, `entity` (UUID text) | one prefab instance's expansion, its prefab and its overrides marked on the derived entities ([`AuthoringSession::instance_json`], M4-07) |
 /// | `validate` | `handle` | `{ ok, diagnostics }` |
 /// | `validateProject` | | the `ProjectReport` JSON |
 /// | `assets` | `kind?` (`document`/`source`), `document?` (a kind name) | the entries |
@@ -39,6 +40,7 @@ pub const KINDS: &[&str] = &[
     "documents",
     "document",
     "inspect",
+    "instance",
     "validate",
     "validateProject",
     "assets",
@@ -87,6 +89,11 @@ impl AuthoringSession {
                 }
             }
             "inspect" => self.inspect_json(handle_arg(args)?).map_err(one),
+            "instance" => {
+                let handle = handle_arg(args)?;
+                let entity = uuid_arg(args, "entity")?;
+                self.instance_json(handle, entity).map_err(one)
+            }
             "validate" => {
                 let diags = self.validate(handle_arg(args)?).map_err(one)?;
                 Ok(fynkel_document::diagnostics_json(&diags))
