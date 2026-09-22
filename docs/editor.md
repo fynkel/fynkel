@@ -196,6 +196,7 @@ run, Escape closes.
 | `hierarchy.expandAll` / `hierarchy.collapseAll` | Edit | ⌥⌘] / ⌥⌘[ | expand or collapse every node |
 | `inspector.addComponent` | Edit | ⇧⌘A | the searchable Add Component popup; adds to every selected entity in one transaction |
 | `inspector.openScript` | Edit | ⌥⌘↩ | the selected entity's first behaviour's source in the IDE |
+| `prefab.applyOverrides` / `prefab.revertOverrides` / `prefab.unpack` / `prefab.open` / `prefab.selectAsset` | Edit | ⇧⌥⌘A / ⇧⌥⌘U / ⇧⌥⌘X / ⇧⌥⌘D / ⇧⌥⌘L | prefab mode on the selected instance (§ Prefab mode): apply the overrides to the prefab (two transactions, two documents), revert them all, unpack, open the prefab's tab, select its asset |
 | `inspector.checkCodegen` | Project | ⇧⌘G | run `fynkel codegen --check --project <dir> --json` in the background; the Inspector banner shows the result |
 | `scene.tool.select` / `scene.tool.move` / `scene.tool.rotate` / `scene.tool.scale` | Edit | ⌘1 / ⌘2 / ⌘3 / ⌘4 | the Scene view's tool (Q W E R in the viewport) |
 | `scene.toggleSpace` | Edit | ⌘L | gizmo axes world ↔ local (X in the viewport; scale is always local) |
@@ -373,7 +374,7 @@ records for undo, and can save — the editor never edits JSON by hand.
 
 What item 3 does **not** do: show a component's fields (item 4, the
 Inspector), draw the scene (item 6), or open prefab mode from a badge
-(item 7). Materials open as tabs but have no Hierarchy (a material has no
+(item 7 — it did). Materials open as tabs but have no Hierarchy (a material has no
 entities) — the tab shows the document's diagnostics and saves.
 
 ## The Inspector (M4-04)
@@ -508,7 +509,7 @@ keeps showing the last committed fields underneath. A project without
 `behaviours.g.json` (the fixture) has nothing to check and no banner.
 
 What item 4 does **not** do: per-field override marks inside an expanded
-prefab instance (item 7), the runtime view of a behaviour during Play
+prefab instance (item 7 — landed there), the runtime view of a behaviour during Play
 (after V0). Drag-in from the Project browser, left open here, landed with
 item 5 (a row dropped onto an asset field of the matching kind).
 
@@ -869,6 +870,169 @@ vertex/edge snapping and surface-snapped placement beyond the drop point;
 multiple Scene views of one document; a game camera as the editor camera
 (never — ADR-0016).
 
+## Prefab mode (M4-07)
+
+Explained simply: a **prefab** is a recipe — "a coin is a mesh, a
+trigger and a spin". A scene puts **instances** of the recipe down; each
+instance may change a few things ("this coin is worth 5") — those are
+**overrides**. Prefab mode is how the editor shows the recipe, the copies
+and the changes, and moves changes between them: open the recipe in its
+own tab and edit it like a scene (every copy follows); in the scene, see
+which fields a copy changed (**bold**), throw a change away (**Revert**),
+push it into the recipe so every copy gets it (**Apply to prefab**), or
+turn the copy into plain entities that forget the recipe (**Unpack**).
+Nothing here runs game code; every write is a session transaction the
+crate validates.
+
+### The instance in the Hierarchy
+
+A prefab instance's anchor row keeps its badge (item 3); → on it now
+**opens the whole instance**: the expansion's entities appear under the
+anchor as **derived rows** — italic, in the hint colour while they are
+purely inherited, **bold with a count badge** when a component of theirs
+has overridden fields, a `+` badge when an override added them. The rows
+come from the session's `instance` query (`HierarchyTree.expansionOf`,
+one fetch per anchor, cached until a transaction touches the anchor or
+the prefab document changes — an open prefab tab's unsaved edits show at
+once in every scene that instances it, through `DocumentTabs`'
+prefab-change broadcast). Derived ids are the runtime's derived ids
+(`node/<i>` for an imported hierarchy), so a Console diagnostic about an
+expanded entity selects its row — opening the instance on the way
+(`HierarchyTree.locate`).
+
+Everything you do to a derived row is an **override on the anchor** —
+one `setPrefabOverride` transaction each, never a write to the prefab:
+rename (only an *added* entity — a prefab's own entity is named by the
+prefab: "rename it there (Open prefab)"), delete (a `removeObject`
+override; on an added entity, the revert of the `addObject` that added
+it, together with its added descendants, highest index first, one
+transaction), Create Empty Child / Create with component (an `addObject`
+override with a fresh id — the new row is selected and renaming). Refused
+with a reason in the status line: duplicating a derived entity
+("duplicate the instance"), dragging one or dropping onto one, dropping
+an asset or another prefab into an instance. **The Scene view's gizmo
+works on a derived row too** (gate finding, 2026-09-22): the drag
+previews on the derived entity in the world and commits as `setField`
+overrides on the anchor — `position` / `rotation` / `scale` as whole
+keys, the prefab-local ids from the expansion (`HierarchyNode.transformLocal`)
+— one transaction, one ⌘Z, the prefab file untouched. The context menu says so in
+its labels ("Delete ⌫ (as an override)", "Create Empty Child (as an
+override)") and carries the five prefab commands below. A read-only tab
+(an imported hierarchy, § below) shows a banner over the tree with the
+reason.
+
+### The instance in the Inspector
+
+Selecting a derived entity shows a banner — "Part of the instance *Coin*
+(prefab coin) — inherited; edits become overrides", or "Added to the
+instance … by an override" — with **Select instance**. Its components are
+the expansion's: every field editor works, and a value that differs from
+the prefab is **bold** with two extra buttons on its row — **Revert**
+(`revertPrefabOverride` of that field's override) and **Apply**
+(`field.apply`: the two-step apply of that one override, below). A field
+edit on a derived component is a `setField` override on the anchor
+(`field` is a whole top-level key of the component's `data` — the crate's
+override model — so editing `position.x` overrides `position`);
+`unsetField`, Reset to Defaults, Add Component (`addComponent` override)
+and Remove Component (the revert of the override that added it, or a
+`removeComponent` override) follow the same rule, and multi-object
+editing folds them per key. The prefab's own entities cannot be renamed
+here either (the name field is disabled).
+
+The anchor's **Prefab instance** section (item 4) grew into the mode's
+control panel: the prefab's name and kind ("imported hierarchy,
+read-only"), a broken-link icon and the diagnostics when the instance
+does not expand, the override list (each op described — "Light.intensity
+= 5 on Mesh", "+ Component TriggerZone on Root", "+ Object Extra under
+Root" — with **Revert** and **Apply** per row), and the buttons **Apply
+to prefab**, **Revert all**, **Unpack**, **Open prefab** and **Select
+prefab asset**; a disabled button carries its reason as the tooltip.
+
+### Apply, Revert, Unpack — what each writes
+
+- **Apply to prefab** (`prefab.applyOverrides`, ⇧⌥⌘A; per field or per
+  override row) is the blueprint's two-step rule: the prefab document is
+  opened in a tab (in the background, if it is not open) and gets **one
+  transaction** with the overrides translated into its own commands
+  (`setField`/`unsetField` on the prefab-local component, `addComponent`,
+  `removeComponent`, `createObject` with the override's ids,
+  `deleteObject`); then the scene gets **one** `revertPrefabOverride`
+  transaction (all, or the applied indices highest first). **Two undo
+  steps**, one per document, each in its own tab's history: ⌘Z in the
+  scene brings the override back while the prefab keeps the value; ⌘Z in
+  the prefab tab undoes the prefab's change. Both tabs are dirty until
+  saved. Refused, with the reason on the button: a read-only scene, no
+  overrides, a missing prefab, an imported hierarchy ("The prefab cannot
+  be edited: …"), an instance that does not expand ("fix or revert the
+  broken override first"). `lib/src/inspector/prefab_actions.dart` holds
+  this once for the Inspector, the Hierarchy and the commands.
+- **Revert** (`prefab.revertOverrides`, ⇧⌥⌘U; per field, per row, or all)
+  is one `revertPrefabOverride` transaction.
+- **Unpack** (`prefab.unpack`, ⇧⌥⌘X) is one `unpackPrefab` transaction —
+  the session's new command (a shared `fynkel_document` touch, M4-07):
+  the anchor loses its `prefab` block, the expanded entities are inserted
+  into the document right after it **under the derived ids** the runtime
+  already used (so the edit-preview world does not even reload), the
+  instance roots become the anchor's trailing children. One ⌘Z puts the
+  instance back. Refused for an instance that does not expand.
+- **Open prefab** (`prefab.open`, ⇧⌥⌘D) opens the prefab document — or the
+  imported hierarchy, read-only — in its own tab and focuses it; the tab
+  has its own Hierarchy, Inspector, edit-preview world and history like
+  any scene tab (a prefab's roots are its `roots` list). **Select prefab
+  asset** (`prefab.selectAsset`, ⇧⌥⌘L) shows the Project panel with the
+  prefab document (or the model source / rig the hierarchy came from)
+  selected.
+
+### Imported hierarchies
+
+An instance of `<model>#prefab` or `<rig>#prefab` expands like any other
+(kind `source` or `rig` in the section header). **Open prefab** opens the
+hierarchy the importer derives — `openDocument("<id>#prefab")`, a tab
+labelled `hero.glb › prefab` / `column.rig.json › prefab` — as a
+**read-only prefab document** (`state.sub == "prefab"`, the banner names
+the source): its entities carry the derived `node/<i>` ids, so an
+override written in the scene addresses exactly the rows this tab shows.
+The Asset panel's sub-asset list has an open button on the `prefab`
+sub-asset for the same tab. Overrides on such an instance work in full
+(the Imported rig of the fixture's Rig scene is the test's case); Apply
+is refused because the source cannot be edited; Unpack works and is the
+way to "make it mine".
+
+### Missing and broken prefabs
+
+An instance whose prefab is gone (`FYN-D0401`), or whose override no
+longer applies (`D0403` a component the prefab lost, `D0404`, `D0407`),
+still opens: the anchor row keeps its badge and its data, the Inspector
+section shows the broken icon and the diagnostics, the Console lists them,
+Apply and Unpack are disabled with the reason, **Revert** (and Revert all)
+and **Select prefab asset** stay available, and saving the document
+without touching the instance writes the same bytes — nothing is
+"repaired" behind the user's back. The `instance` query answers `expanded:
+false` for such an anchor; the Hierarchy shows no derived rows under it.
+
+### Commands
+
+| Id | Menu | Shortcut | Does |
+| --- | --- | --- | --- |
+| `prefab.applyOverrides` | Edit | ⇧⌥⌘A | the selected instance's overrides into its prefab, then reverted here — two transactions in two documents |
+| `prefab.revertOverrides` | Edit | ⇧⌥⌘U | every override of the selected instance dropped — one transaction |
+| `prefab.unpack` | Edit | ⇧⌥⌘X | the instance replaced by its expansion as plain entities — one transaction |
+| `prefab.open` | Edit | ⇧⌥⌘D | the instance's prefab (an imported hierarchy read-only) in its own tab |
+| `prefab.selectAsset` | Edit | ⇧⌥⌘L | the prefab document or model source revealed in the Project panel |
+
+All five are enabled when the selection lies in one instance (the anchor
+or any of its derived rows), and appear in the Hierarchy's context menu.
+
+### What item 7 does not do
+
+Nested-instance apply across two levels of prefab (a nested instance's
+overrides apply to the inner prefab, the outer document is untouched —
+the crate's model); a visual diff of a prefab against an instance;
+editing an imported hierarchy (import it with `fynkel import --prefab`
+for an authored copy); picking a derived entity *in the picture* (a hit
+inside an instance selects the anchor, item 6 — select the inner row in
+the Hierarchy instead, then the gizmo is there).
+
 ## What exists after each item
 
 | Item | Done | What |
@@ -879,7 +1043,7 @@ multiple Scene views of one document; a game camera as the editor camera
 | 4 | 2026-09-21 | The Inspector: one parser over schema + metadata + the editor's native-hint table (ADR-0018 accepted), one widget per field kind, multi-object editing with mixed values and one transaction per gesture, precheck + session validation with the message kept, Add / Remove Component, prefab override revert, Open script, the codegen banner over `codegen --check --json` (§ The Inspector). |
 | 5 | 2026-09-21 | The Project browser: folders and a searchable flat list with kind filters and sort, texture previews and material swatches, the Asset panel (sidecar settings, Apply and Reimport, sub-assets, dependents), New / rename / move / delete-with-refusal / Reveal / Copy id as session operations with the asset history's own undo (⌥⌘Z), prefab drop onto the Hierarchy, incremental rescan (§ The Project browser). |
 | 6 | 2026-09-22 | The Scene view: `FynkelViewport` per scene tab over the session's edit-preview world (incremental sync, fallback reload, Reload and Rebuild cache), the editor camera saved per scene in `.fynkel/editor.json`, grid / axes / light-camera-collider icons / selection outline as renderer debug lines, click (stacked-hit cycling) and marquee picking through the world, move / rotate / scale gizmos in world or local axes with snapping and one transaction per drag (preview in the world, commit on release, multi-selection about the lead), editor-only hidden and locked flags, prefab drop at the hit point, stats overlay, Save Frame as a PNG identical to `fynkel render` (§ The Scene view). |
-| 7 | — | Prefab mode. |
+| 7 | 2026-09-22 | Prefab mode: instances expand in the Hierarchy as derived rows (inherited / bold overridden / added), every edit on a derived entity an override on the anchor (the Inspector's fields and the Scene view's gizmo alike), per-field Revert and Apply in the Inspector, Apply to prefab (two transactions in two documents), Revert all, Unpack (`unpackPrefab`, one transaction), Open prefab in its own tab, imported hierarchies (`<glb>#prefab`, `<rig>#prefab`) opened read-only with the derived ids, missing / broken prefabs shown with their diagnostics and never rewritten, Select prefab asset (§ Prefab mode). |
 | 8 | — | Play / Stop and the game Console over the stdout channel. |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
@@ -892,11 +1056,13 @@ cargo test -p fynkel_native --test authoring         # the ABI: statuses, result
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features
 nm -gU target/debug/libfynkel_platform_apple.dylib | grep -c fynkel_authoring_   # 0
-cd apps/editor && flutter analyze --fatal-infos && flutter test   # 194 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step; scene_session_test.dart picks every entity of every fixture scene through the real edit-preview world, drags the gizmo (one undo step, the incremental world equal to a fresh load), hides without touching the document, looks through and writes back the scene camera, and renders through the real viewport (Metal, offscreen; the frame's PNG equals the first capture byte for byte)
+cd apps/editor && flutter analyze --fatal-infos && flutter test   # 219 tests; documents_session_test.dart drives tabs + Hierarchy on the real session (a 10 000-entity scene, the conflict path through the watcher); inspector_session_test.dart sets every field of the fixture's scenes and the reference game's playground to itself and saves byte-identically; project_browser_session_test.dart renames, moves, deletes (refused, forced, undone), creates and re-imports on a copy of the fixture with `validateProject` clean after every step; scene_session_test.dart picks every entity of every fixture scene through the real edit-preview world, drags the gizmo (one undo step, the incremental world equal to a fresh load), hides without touching the document, drags the entity inside Crate A as one setPrefabOverride on the anchor (the prefab file's bytes unchanged, the sync incremental, one undo), looks through and writes back the scene camera, and renders through the real viewport (Metal, offscreen; the frame's PNG equals the first capture byte for byte); prefab_session_test.dart (M4-07) reverts and re-adds Crate A's override, instances the coin, applies an override to coin.prefab.json and undoes per document, unpacks and reloads, overrides and unpacks the Imported rig, opens a broken reference without rewriting the file, and opens rig.glb#prefab read-only — every override list checked against the raw document and `inspect`'s count
 FYNKEL_SCENE_FRAME_OUT=/tmp/main-320x200.png flutter test test/scene_session_test.dart --name viewport   # keeps the clean 320×200 frame of the fixture's Main through its camera …
 cargo run -q -p fynkel_cli --bin fynkel -- render --project <fixture copy> --scene c0000000-0000-4000-8000-000000000030 --out /tmp/cli.png --size 320x200   # … to compare with this: 0 differing pixels (2026-09-22)
 cargo test -p fynkel_authoring --test preview        # the edit-preview world: load, the incremental sync == a fresh load after every transaction kind, picking, outlines, hidden, the anchor map
 cd packages/fynkel_flutter && flutter test          # viewport ABI v4: debug lines and read_frame on the real renderer
+cargo test -p fynkel_authoring --test prefab_mode    # M4-07: the instance query live against an open prefab, apply as two transactions, unpackPrefab, imported hierarchies read-only, the broken cases left alone
+cargo test -p fynkel_document --test authoring        # unpackPrefab and apply_with_prefabs (the shared touch)
 cargo test -p fynkel_authoring --test ops            # the asset operations, and the 2 000-asset tree: a full scan against one change's rescan (< 50 ms)
 cargo run -q -p fynkel_cli --bin fynkel -- codegen --check --project packages/fynkel_generator/example/spinner_game --json   # what the Inspector banner runs
 ```
@@ -940,3 +1106,24 @@ then **Save Frame…** (⌥⌘X) and compare with
 body where the document put it (the stats overlay's tick does not move);
 edit the playground's scene file from a terminal and see the picture
 follow the reload. The Playground session must be closed first.
+
+The item 7 gate, driven by the user, on a **copy** of the fixture project
+(`crates/fynkel_document/fixtures/project`): open Main, press → on
+**Crate A** and see the instance open with its `Crate` row bold (the
+fixture's override: MeshRenderer `cast_shadows` = false); select the
+row, see the bold field, **Revert**
+it, ⌘Z, then **Apply to prefab** — the crate prefab's tab opens dirty, the
+scene's override is gone, ⌘Z in the scene brings it back, ⌘Z in the
+prefab tab undoes the prefab; ⌘S both and
+`cargo run -q -p fynkel_cli --bin fynkel -- scene inspect <copy>/assets/scenes/main.scene.json --json`
+shows the override count, `prefab inspect <copy>/assets/prefabs/crate.prefab.json --json`
+the new value. Drag `coin.prefab.json` into the scene, open it, change
+the trigger's `event`, Apply, Unpack (⇧⌥⌘X), ⌘S — `scene inspect` shows
+one instance fewer and the coin's entities as plain ones; ⌘Z puts the
+instance back. Open Rig, open **Imported**: its `node/…` rows, an
+override on one, **Open prefab** (the tab `rig.glb › prefab`, read-only
+banner, no gizmo), Apply disabled with its reason, Unpack. Edit a
+scene's `prefab.asset` to a wrong id from a terminal, open it: the
+badge, the broken icon, the diagnostic in the Console, Revert still
+offered, ⌘S writes the same bytes (a diff of the copy shows nothing
+for that entity). Never the committed fixture.
