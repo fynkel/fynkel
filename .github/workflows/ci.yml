@@ -131,6 +131,7 @@ jobs:
         working-directory: examples/showcase
         run: |
           cmp assets/models/character.glb ../reference_game/assets/models/character.glb   # the runner is the reference game's character (tools/character.py)
+          python3 tools/sky.py && git diff --exit-code -- assets/textures/sky.hdr            # the HDR environment is generated (E1)
           "$GITHUB_WORKSPACE/target/debug/fynkel" validate
           "$GITHUB_WORKSPACE/target/debug/fynkel" test --headless
           "$GITHUB_WORKSPACE/target/debug/fynkel" render --out "${{ runner.temp }}/showcase.png" --steps 10

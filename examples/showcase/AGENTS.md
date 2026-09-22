@@ -33,8 +33,9 @@ assets/scenes/          *.scene.json      entities, hierarchy, components (see "
 assets/prefabs/         *.prefab.json     reusable entity trees, instantiated from scenes with overrides
 assets/materials/       *.material.json   PBR fields (base_color, metallic, roughness, <slot>_texture, …) for fynkel.pbr@1, or parameters/textures for a custom shader
 assets/models/          glTF/GLB sources + <file>.meta.json sidecars (asset id, importer, sub-asset ids)
-assets/textures/        PNG/JPEG sources + sidecars
+assets/textures/        PNG/JPEG/HDR sources + sidecars (`sky.hdr` is the environment: it lights the scene, not just the background)
 assets/audio/           WAV/Ogg sources + sidecars
+tools/                  generators for the content the project carries (`sky.py` → `assets/textures/sky.hdr`)
 test/                   `flutter test`: headless simulation, no window or GPU
 .fynkel/cache/          cooked assets (`fynkel cook`); ignored by git — the only thing the running game reads
 fynkel_cache/           the cache staged for the app bundle (`pubspec.yaml` assets:); ignored by git except its README — what the app reads on a device
@@ -108,7 +109,7 @@ Component types:
 - `fynkel.MeshRenderer` — `mesh: { asset, sub: "mesh/<n>" }`, `material: { asset }`, `cast_shadows`, `receive_shadows` (the first `DirectionalLight` with `cast_shadows` casts one PCF shadow map), `visible`.
 - `fynkel.Camera` — `projection`, `fov_y` (radians), `ortho_height`, `near`, `far`, `priority`, `exposure_mode` (`auto` meters the sun; `manual` uses `exposure`, EV100).
 - `fynkel.DirectionalLight` (`intensity` in lux), `fynkel.PointLight` / `fynkel.SpotLight` (`intensity` in candela, `range` in metres; spot `inner_angle` / `outer_angle` in radians) — `color` is linear RGB.
-- `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply.
+- `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply. A `sky` that is a **`.hdr`** file lights the scene as well as backing it (E1: the cook prefilters it into an irradiance and a specular cube and `mesh.wgsl` samples them; `fynkel render` says `sky + ibl`), and `ambient_*` is then unused; every other image is a backdrop over the constant ambient. This project's `tools/sky.py` writes `assets/textures/sky.hdr`.
 - `fynkel.RigidBody` — `body_type` `static` | `dynamic` | `kinematic`, `mass` (kg, dynamic), `linear_damping`, `angular_damping`, `gravity_scale`, `ccd`. Physics owns a dynamic body's transform; a kinematic one follows the transform your behaviour writes and pushes dynamic bodies.
 - `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `layer`/`mask` (bits of `physics.layers`). Alone it is static geometry; with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
 - `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `layer`/`mask`.

@@ -444,9 +444,11 @@ procedural or custom sky later.
 ## The showcase
 
 `examples/showcase` (README there) is the scene to look at: an evening
-sun with long shadows, a spot and two point lights, the sky, textured
-PBR, metals, overlapping blend panels, a mask card, an orbiting camera,
-three quality profiles, and (M3-19) the reference game's rigged runner —
+sun with long shadows, a spot and two point lights, the sky — an HDR
+one since E1, so it lights the scene as well as backing it
+(`tools/sky.py` writes `assets/textures/sky.hdr`) —, textured PBR,
+metals that read as metal, overlapping blend panels, a mask card, an
+orbiting camera, three quality profiles, and (M3-19) the reference game's rigged runner —
 a skinned mesh looping its run clip in place, the skinned caster in the
 shadow map. `fynkel render --project examples/showcase --steps 10` draws
 the view the app opens on with the runner mid-stride; `renders/<item>.png`
