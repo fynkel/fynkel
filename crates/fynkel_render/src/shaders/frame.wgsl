@@ -9,6 +9,18 @@ const MAX_LIGHTS: u32 = 8u;
 const LIGHT_POINT: f32 = 0.0;
 const LIGHT_SPOT: f32 = 1.0;
 const PI: f32 = 3.14159265358979;
+// Shadow cascades (fynkel_render::shadow::CASCADES), a 2×2 atlas inside
+// the one shadow map.
+const CASCADES: u32 = 4u;
+
+struct Cascade {
+    // World → this cascade's shadow clip space (orthographic, depth 0..1).
+    view_proj: mat4x4<f32>,
+    // xy: the cascade's quadrant origin in atlas uv; zw: its size.
+    rect: vec4<f32>,
+    // x: receiver normal offset (world units); yzw: unused.
+    params: vec4<f32>,
+};
 
 struct Light {
     // xyz: world position; w: range (metres).
@@ -24,8 +36,8 @@ struct Light {
 struct Frame {
     view_proj: mat4x4<f32>,
     inv_view_proj: mat4x4<f32>,
-    // World → the sun's shadow clip space (orthographic, depth 0..1).
-    sun_view_proj: mat4x4<f32>,
+    // The sun's shadow cascades, nearest first.
+    cascades: array<Cascade, CASCADES>,
     // xyz: camera position; w: exposure factor 1 / L_max.
     camera_pos: vec4<f32>,
     // xyz: unit vector toward the sun; w: 1 when a sun is present.
@@ -38,8 +50,9 @@ struct Frame {
     // z: 1 when the environment lights the scene (E1); w: the specular
     // cube's last mip level.
     sky: vec4<f32>,
-    // x: 1 when the shadow map holds this frame's sun; y: one shadow
-    // texel in map uv; z: receiver normal offset (world units); w: unused.
+    // x: 1 when the shadow map holds this frame's sun; y: one atlas texel
+    // in map uv; z: the fraction of a cascade blended into the next;
+    // w: cascades in the atlas.
     shadow: vec4<f32>,
     // x: lights in the pool; y: 1 when the sky is drawn; z: 1 when the
     // post pass must sRGB-encode (the target is a Unorm format);

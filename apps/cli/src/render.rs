@@ -229,6 +229,7 @@ pub fn run(args: &[String]) -> ExitCode {
                 "transparent": stats.transparent,
                 "shadowCasters": stats.shadow_casters,
                 "shadowMap": stats.shadow_map,
+                "shadowCascades": stats.shadow_cascades,
                 "quality": {
                     "profile": quality.profile,
                     "shadows": quality.settings.shadows,
@@ -279,8 +280,11 @@ pub fn run(args: &[String]) -> ExitCode {
             quality.settings.msaa,
             if stats.shadow_map > 0 {
                 format!(
-                    "{} caster(s) in {} draw(s) into a {}² shadow map",
-                    stats.shadow_casters, stats.shadow_draws, stats.shadow_map
+                    "{} caster(s) in {} draw(s) into {} cascades of a {}² shadow map",
+                    stats.shadow_casters,
+                    stats.shadow_draws,
+                    stats.shadow_cascades,
+                    stats.shadow_map
                 )
             } else {
                 "no shadow".to_string()

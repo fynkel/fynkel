@@ -137,7 +137,7 @@ const LIGHT_SPOT: f32 = 1.0;
 struct FrameUniforms {
     view_proj: [[f32; 4]; 4],
     inv_view_proj: [[f32; 4]; 4],
-    sun_view_proj: [[f32; 4]; 4],
+    cascades: [GpuCascade; shadow::CASCADES],
     camera_pos: [f32; 4],
     sun_dir: [f32; 4],
     sun_color: [f32; 4],
@@ -148,11 +148,29 @@ struct FrameUniforms {
     lights: [GpuLight; LIGHT_POOL],
 }
 
+/// One cascade as the mesh shader reads it (R1): where it looks from,
+/// which corner of the atlas it lives in, and what a receiver must be
+/// pushed along its normal to stay out of its own shadow.
+#[repr(C)]
+#[derive(Clone, Copy, Default, bytemuck::Pod, bytemuck::Zeroable)]
+struct GpuCascade {
+    /// World → this cascade's light clip.
+    view_proj: [[f32; 4]; 4],
+    /// The cascade's rectangle in atlas uv: origin, then size.
+    rect: [f32; 4],
+    /// x: normal offset in world units; yzw unused.
+    params: [f32; 4],
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct ShadowUniforms {
     view_proj: [[f32; 4]; 4],
 }
+
+/// One cascade's slot in the shadow pass's uniform buffer: the pass
+/// binds it by dynamic offset, so the four fits ride one buffer.
+const SHADOW_UNIFORM_STRIDE: u64 = 256;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -309,6 +327,9 @@ pub struct FrameStats {
     /// The shadow map side drawn this frame (0: no shadow — the profile
     /// has shadows off, or no sun casts).
     pub shadow_map: u32,
+    /// Cascades drawn into that map's 2×2 atlas (0 when no shadow was
+    /// drawn); each one is `shadow_map / 2` on a side.
+    pub shadow_cascades: u32,
     /// Debug lines drawn.
     pub debug_lines: u32,
     /// Samples per pixel of the scene passes (1 or 4).
@@ -625,6 +646,26 @@ impl ShadowMap {
     fn bytes(&self) -> u64 {
         u64::from(self.resolution) * u64::from(self.resolution) * 4
     }
+
+    /// The side of one cascade's quadrant: the map holds the four of them
+    /// in a 2×2 atlas, so the sun costs the same memory it always did (R1).
+    fn cascade_side(&self) -> u32 {
+        (self.resolution / 2).max(1)
+    }
+
+    /// Cascade `i`'s quadrant in atlas uv — origin then size — inset by one
+    /// texel so a PCF tap at the edge cannot reach its neighbour.
+    fn cascade_rect(&self, i: usize) -> [f32; 4] {
+        let side = self.cascade_side() as f32;
+        let atlas = self.resolution as f32;
+        let (col, row) = ((i % 2) as f32, (i / 2) as f32);
+        [
+            (col * side + 1.0) / atlas,
+            (row * side + 1.0) / atlas,
+            (side - 2.0).max(1.0) / atlas,
+            (side - 2.0).max(1.0) / atlas,
+        ]
+    }
 }
 
 /// What a frame draws: filled from an [`Extract`] by [`ExtractRenderer::prepare`].
@@ -740,7 +781,7 @@ impl ExtractRenderer {
         });
         let shadow_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("fynkel shadow uniforms"),
-            size: std::mem::size_of::<ShadowUniforms>() as u64,
+            size: SHADOW_UNIFORM_STRIDE * shadow::CASCADES as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -827,9 +868,22 @@ impl ExtractRenderer {
                 texture_entry(6),
             ],
         });
+        // The shadow pass binds one cascade at a time out of the one
+        // buffer, so its uniform takes a dynamic offset (R1).
         let shadow_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fynkel shadow bgl"),
-            entries: &[uniform_entry(0, wgpu::ShaderStages::VERTEX)],
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(
+                        std::mem::size_of::<ShadowUniforms>() as u64
+                    ),
+                },
+                count: None,
+            }],
         });
         // Group 2 is what a mesh stage reads per instance: the frame's
         // joint palettes (M3-19) and its light lists (E1).
@@ -858,7 +912,11 @@ impl ExtractRenderer {
             layout: &shadow_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: shadow_uniform_buffer.as_entire_binding(),
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &shadow_uniform_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(std::mem::size_of::<ShadowUniforms>() as u64),
+                }),
             }],
         });
         let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1555,6 +1613,7 @@ impl ExtractRenderer {
             skinned: false,
         };
         let cube_bounds = self.cube.bounds;
+        let mut caster_bounds: Option<Sphere> = None;
         for (ri, r) in extract.records.iter().enumerate() {
             let (key, double_sided, instance, casts, blend, bounds) =
                 match mesh_of_record.get(&(ri as u32)) {
@@ -1633,14 +1692,24 @@ impl ExtractRenderer {
             // the camera frustum and, for casters, the sun's box. A
             // caster outside the view still shadows what is in it.
             let sphere = bounds.transformed(&r.world);
+            // Whether this caster reaches the shadowed range at all,
+            // tested against the loose fit whether or not culling is on:
+            // what casts decides how tight the cascades are (R1), and
+            // culling must not change the picture.
+            let reaches_shadow = casts
+                && light_frustum
+                    .as_ref()
+                    .is_some_and(|f| f.intersects(&sphere));
+            if reaches_shadow {
+                // A subset of the loose fit, so the cascades can only
+                // shrink against it, never grow.
+                caster_bounds = Some(match caster_bounds {
+                    Some(u) => u.union(&sphere),
+                    None => sphere,
+                });
+            }
             let (in_view, casts) = if self.frustum_culling {
-                (
-                    camera_frustum.intersects(&sphere),
-                    casts
-                        && light_frustum
-                            .as_ref()
-                            .is_some_and(|f| f.intersects(&sphere)),
-                )
+                (camera_frustum.intersects(&sphere), reaches_shadow)
             } else {
                 (true, casts && fit.is_some())
             };
@@ -1815,24 +1884,42 @@ impl ExtractRenderer {
         // casts and something is there to cast.
         self.shadow_active = casters_total > 0;
         let mut shadow = [0.0f32; 4];
-        let mut sun_view_proj = Mat4::IDENTITY;
-        if let Some(fit) = fit.filter(|_| self.shadow_active) {
-            sun_view_proj = fit.view_proj;
+        let mut cascades = [GpuCascade::default(); shadow::CASCADES];
+        if fit.is_some() && self.shadow_active {
+            // The cascades are fitted now, not before the loop: the
+            // casters' bounds are what tightens them, and they are only
+            // known once every record has been through (R1).
+            let fitted = shadow::fit_cascades(
+                sun_dir,
+                &shape,
+                self.shadow_map.cascade_side(),
+                caster_bounds,
+            );
             shadow = [
                 1.0,
                 1.0 / self.shadow_map.resolution as f32,
-                fit.texel_world * SHADOW_NORMAL_OFFSET_TEXELS,
-                0.0,
+                shadow::CASCADE_BLEND,
+                shadow::CASCADES as f32,
             ];
-            queue.write_buffer(
-                &self.shadow_uniform_buffer,
-                0,
-                bytemuck::bytes_of(&ShadowUniforms {
-                    view_proj: fit.view_proj.to_cols_array_2d(),
-                }),
-            );
+            for (i, f) in fitted.fits.iter().enumerate() {
+                cascades[i] = GpuCascade {
+                    view_proj: f.view_proj.to_cols_array_2d(),
+                    rect: self.shadow_map.cascade_rect(i),
+                    params: [f.texel_world * SHADOW_NORMAL_OFFSET_TEXELS, 0.0, 0.0, 0.0],
+                };
+                queue.write_buffer(
+                    &self.shadow_uniform_buffer,
+                    i as u64 * SHADOW_UNIFORM_STRIDE,
+                    bytemuck::bytes_of(&ShadowUniforms {
+                        view_proj: f.view_proj.to_cols_array_2d(),
+                    }),
+                );
+            }
             stats.shadow_casters = casters_total;
             stats.shadow_map = self.shadow_map.resolution;
+            stats.shadow_cascades = shadow::CASCADES as u32;
+            // Every batch with casters is drawn once per cascade.
+            stats.shadow_draws *= shadow::CASCADES as u32;
         } else {
             self.shadow_active = false;
             stats.shadow_draws = 0;
@@ -1841,7 +1928,7 @@ impl ExtractRenderer {
         let u = FrameUniforms {
             view_proj: view_proj.to_cols_array_2d(),
             inv_view_proj: view_proj.inverse().to_cols_array_2d(),
-            sun_view_proj: sun_view_proj.to_cols_array_2d(),
+            cascades,
             camera_pos: camera_pos
                 .extend(exposure::exposure_factor(ev100))
                 .to_array(),
@@ -1997,35 +2084,58 @@ impl ExtractRenderer {
         let Some(fallbacks) = self.fallbacks.as_ref() else {
             return;
         };
-        pass.set_bind_group(0, &self.shadow_bind_group, &[]);
         pass.set_bind_group(2, &self.joint_bind_group, &[]);
         pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-        // Static casters, then the skinned ones: one pipeline switch.
-        for skinned in [false, true] {
-            let mut bound = false;
-            for b in self
-                .batches
-                .iter()
-                .filter(|b| b.key.skinned == skinned && b.shadow_count > 0)
-            {
-                let Some(mesh) = self.mesh_for(&b.key) else {
-                    continue;
-                };
-                if !bound {
-                    pass.set_pipeline(if skinned {
-                        &self.pipelines.shadow_skinned
-                    } else {
-                        &self.pipelines.shadow
-                    });
-                    bound = true;
+        // One quadrant of the atlas per cascade: the viewport moves, the
+        // dynamic offset picks that cascade's matrix, and the same casters
+        // are drawn into each — what a cascade does not cover its
+        // projection clips away (R1). The viewport is the quadrant inset
+        // by a texel, matching `ShadowMap::cascade_rect`, so the border
+        // stays at the cleared far depth and a PCF tap at the edge of one
+        // cascade reads "lit" instead of its neighbour.
+        let side = self.shadow_map.cascade_side() as f32;
+        for cascade in 0..shadow::CASCADES {
+            let (col, row) = ((cascade % 2) as f32, (cascade / 2) as f32);
+            pass.set_viewport(
+                col * side + 1.0,
+                row * side + 1.0,
+                (side - 2.0).max(1.0),
+                (side - 2.0).max(1.0),
+                0.0,
+                1.0,
+            );
+            pass.set_bind_group(
+                0,
+                &self.shadow_bind_group,
+                &[(cascade as u64 * SHADOW_UNIFORM_STRIDE) as u32],
+            );
+            // Static casters, then the skinned ones: one pipeline switch.
+            for skinned in [false, true] {
+                let mut bound = false;
+                for b in self
+                    .batches
+                    .iter()
+                    .filter(|b| b.key.skinned == skinned && b.shadow_count > 0)
+                {
+                    let Some(mesh) = self.mesh_for(&b.key) else {
+                        continue;
+                    };
+                    if !bound {
+                        pass.set_pipeline(if skinned {
+                            &self.pipelines.shadow_skinned
+                        } else {
+                            &self.pipelines.shadow
+                        });
+                        bound = true;
+                    }
+                    pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
+                    bind_mesh(&mut pass, mesh, skinned);
+                    pass.draw_indexed(
+                        0..mesh.index_count,
+                        0,
+                        b.shadow_first..b.shadow_first + b.shadow_count,
+                    );
                 }
-                pass.set_bind_group(1, self.material_for(&b.key, fallbacks), &[]);
-                bind_mesh(&mut pass, mesh, skinned);
-                pass.draw_indexed(
-                    0..mesh.index_count,
-                    0,
-                    b.shadow_first..b.shadow_first + b.shadow_count,
-                );
             }
         }
     }

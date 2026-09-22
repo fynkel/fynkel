@@ -93,28 +93,63 @@ share one render pass because they share the attachments.
 
 ### Shadows (`src/shadow.rs`, `shaders/shadow.wgsl`)
 
-One shadowed directional light — the sun — one cascade, one square map
-(`shadow_resolution` texels, default 2048). Each frame `shadow::fit`
-bounds the camera frustum out to `SHADOW_DISTANCE = 60 m` (or the
-camera's `far`) with a sphere, looks along `−to_sun` with the eye at the
-origin, snaps the sphere centre to the shadow texel grid in light space
-(so the map does not shimmer as the camera moves) and builds the ortho box
-`±r` around it, reaching `3r + 10 m` back toward the sun so casters
-outside the view still shadow what is in it. `SunFit::texel_world` is the
-map's world size per texel. The sun's shadow is active when the quality
-profile has `shadows`, the sun casts (`DirectionalLight.cast_shadows`,
-or the host's fallback sun) and at least one caster exists;
-`FrameStats::shadow_map` reports the map side (0 when none) and
-`shadow_casters` the casters.
+One shadowed directional light — the sun — one square map
+(`shadow_resolution` texels, default 2048) holding `CASCADES = 4`
+cascades as a **2×2 atlas**, so the sun costs the same GPU memory it did
+with a single fit (which matters on a phone).
 
-Receivers (`MeshRenderer.receive_shadows`, instance `flags.w`) offset the
-lookup point 1.5 texels along the geometric normal
-(`SHADOW_NORMAL_OFFSET_TEXELS`, the mapped normal is not used for this),
-project it by `sun_view_proj`, and take a 3×3 **PCF** with a linear
-`LessEqual` comparison sampler (`textureSampleCompareLevel`) — nine taps
-one texel apart, so the penumbra is about three texels wide. Points
-outside the map or beyond its far plane are lit. Only the sun's direct
-term is shadowed; ambient and punctual lights are not.
+`shadow::fit_cascades` splits the view out to `SHADOW_DISTANCE = 60 m`
+(or the camera's `far`, or the far side of the casters when they stop
+sooner) into four slices by the *practical* split scheme — the
+logarithmic and uniform splits mixed by `SPLIT_LAMBDA = 0.75`, so the
+slice nearest the camera is a few metres deep and the last one is tens.
+Each slice's frustum corners are bounded by a sphere, that sphere is
+**tightened to the casters' own bounds** when they are smaller (one
+`Sphere::union` over the frame's casters, accumulated in the same
+`prepare` loop that builds the instances — a scene whose casters span
+twelve metres is never fitted to sixty; the union is taken over the
+casters that reach the *loose* fit whether or not `frustum_culling` is
+on, so culling still cannot change the picture), and `shadow::fit_sphere` then
+looks along `−to_sun` with the eye at the origin, snaps the sphere
+centre to that cascade's texel grid in light space (so the map does not
+shimmer as the camera moves) and builds the ortho box `±r` around it,
+reaching `3r + 10 m` back toward the sun so casters outside the view
+still shadow what is in it. `SunFit::texel_world` is that cascade's
+world size per texel. At 2048 the nearest cascade is about six times
+finer than the single fit it replaced.
+
+The shadow pass draws once per cascade: the viewport moves to that
+cascade's quadrant (inset one texel, so the cleared border stops a PCF
+tap from reaching the neighbour) and a **dynamic offset**
+(`SHADOW_UNIFORM_STRIDE = 256`) picks its `view_proj` out of the one
+shadow uniform buffer. The caster set is the same in every cascade —
+what a cascade does not cover its projection clips away — so
+`FrameStats::shadow_draws` is the batches with casters times
+`shadow_cascades`, while `shadow_casters` stays the distinct casters.
+Per-cascade caster culling is not done yet
+(`docs/status.md` §3). The sun's shadow is
+active when the quality profile has `shadows`, the sun casts
+(`DirectionalLight.cast_shadows`, or the host's fallback sun) and at
+least one caster exists; `FrameStats::shadow_map` reports the map side
+(0 when none), `shadow_cascades` the cascades in it.
+
+Receivers (`MeshRenderer.receive_shadows`, instance `flags.w`) pick the
+first cascade whose projection contains the point, offset the lookup 1.5
+texels **of that cascade** along the geometric normal
+(`SHADOW_NORMAL_OFFSET_TEXELS`, the mapped normal is not used for this;
+per cascade, so a near shadow keeps contact with its caster instead of
+peter-panning), remap into the cascade's atlas rect and take a 3×3
+**PCF** with a linear `LessEqual` comparison sampler
+(`textureSampleCompareLevel`) — nine taps one atlas texel apart, so the
+penumbra is about three texels of that cascade wide. Over the outer
+`CASCADE_BLEND = 0.1` of a cascade's *sides* the result is cross-faded
+into the next one, so the change of texel density is a gradient and not
+a seam (the sides only: a cascade's depth range reaches `3r + 10 m` back
+toward the sun, so every receiver sits near its far plane and a depth
+term in the band would blend everywhere — which is what it did in the
+first cut, and it cost 0.8 ms of the scene pass at stress scale).
+Points no cascade covers — past the shadowed range — are lit. Only the
+sun's direct term is shadowed; ambient and punctual lights are not.
 
 ### Instancing and culling (`src/culling.rs`)
 
@@ -128,10 +163,13 @@ by the model matrix, radius by the largest axis scale, so a non-uniform
 scale stays conservative). Two `Frustum`s are built before the instance
 loop (Gribb–Hartmann planes of a `view_proj` with `0..=1` clip depth):
 the camera's and, when the sun casts, the light's box from `shadow::fit`
-— which is why the fit now precedes the instances. The test is
-sphere-vs-plane with the sphere kept when it touches, so culling never
-changes the picture: `frustum_culling = false` renders pixel-identically
-(the culling test asserts it).
+— the loose fit around the whole shadowed range, which is why it still
+precedes the instances even though the cascades are fitted after them.
+The test is sphere-vs-plane with the sphere kept when it touches, so
+culling never changes the picture: `frustum_culling = false` renders
+pixel-identically (the culling test asserts it — which is why the
+casters' bound the cascades are tightened to is taken against the loose
+fit either way, not against whatever culling left).
 
 Each opaque instance is tagged with where it is drawn — a caster outside
 the view but inside the light's box is **shadow only**, a caster in view
@@ -144,7 +182,8 @@ upload, no duplicate instance. `FrameStats::instances` is what the scene
 passes draw, `culled` the records outside the camera frustum (drawn into
 the shadow map or not), `draws` the scene pass's mesh draw calls (opaque
 batches with something in view + one per transparent instance),
-`shadow_draws` the shadow pass's, `batches` the distinct opaque pairs.
+`shadow_draws` the shadow pass's (the batches with casters times the
+cascades), `batches` the distinct opaque pairs.
 The stress capture checks `draws ≤ batches` at 5 000 meshes
 (`benchmarks/m3/capture.py`, below).
 
@@ -341,13 +380,15 @@ shadow, and it is not part of any of this — every object sees it.
 
 ## Uniform layout
 
-`Frame` (bind group 0, 816 bytes, `shaders/frame.wgsl`): `view_proj`,
-`inv_view_proj` (the sky's ray reconstruction), `sun_view_proj` (world →
-shadow map clip), `camera_pos` (`w` = exposure factor `1 / L_max`),
+`Frame` (bind group 0, 4 720 bytes, `shaders/frame.wgsl`): `view_proj`,
+`inv_view_proj` (the sky's ray reconstruction), `cascades` (four
+`Cascade { view_proj, rect, params }`: world → that cascade's shadow
+clip, its quadrant in atlas uv, and its normal offset in metres),
+`camera_pos` (`w` = exposure factor `1 / L_max`),
 `sun_dir` (`w` = present), `sun_color` (rgb × lux), `ambient` (rgb × lux,
 `w` = `L_max`), `sky` (`x` intensity, `y` rotation, `z` image-based
 lighting active, `w` specular mips − 1), `shadow` (`x` active,
-`y` `1 / resolution`, `z` normal offset in metres), `counts` (`x` lights,
+`y` one atlas texel in uv, `z` the blend band, `w` cascades), `counts` (`x` lights,
 `y` sky drawn, `z` encode sRGB), then `lights: array<Light, LIGHT_POOL>`
 (64) —
 `position` (`w` range), `color` (rgb × cd, `w` 0 point / 1 spot),
@@ -356,7 +397,9 @@ holds the shadow map (`texture_depth_2d`, binding 1 — a 1×1 map when
 shadows are off), its comparison sampler (binding 2), the environment's
 cube sampler (3), irradiance cube (4), prefiltered specular cube (5) and
 BRDF LUT (6) (§ Image-based lighting). The shadow pass
-binds its own 64-byte `view_proj` uniform at group 0.
+binds its own 64-byte `view_proj` uniform at group 0, one slot per
+cascade at `SHADOW_UNIFORM_STRIDE` (256) bytes, chosen by a dynamic
+offset.
 
 Per instance (vertex buffer 1, 128 bytes, locations 6–13): model matrix,
 `tint` (base colour factor), `emissive` (rgb × strength; `w` = the
@@ -505,7 +548,11 @@ alpha mask, double-sided back faces, emissive without light, sky backdrop
 + rotation, the HDR sky lighting a cube through its cooked environment
 (a PNG sky does not) with `sky_rotation` steering the lookup; from V1 (b): the sun's PCF shadow on a slab (darker under the
 cube, a soft edge, gone with `shadows: false`, a 512 map, a non-casting
-sun), `cast_shadows` / `receive_shadows` per `MeshRenderer`, blend
+sun); from R1: a sixty-metre corridor with a caster at each end, both
+shadowed (every quadrant of the atlas drawn and sampled where it
+belongs), the near one keeping contact with the floor, and no seam in
+the luminance of the lit floor where the cascades change;
+`cast_shadows` / `receive_shadows` per `MeshRenderer`, blend
 materials compositing back to front whatever the record order, MSAA 4
 blending silhouette edges (and 8 ≡ 4, 2 ≡ 1), render scale 0.5 / 0.75 /
 2 presenting at the target size (and back to native pixel-identical),
@@ -520,8 +567,11 @@ robot with its swatch, normal and metallic-roughness maps under its
 `Sun`) from the cache alone. `FYNKEL_RENDER_DUMP_DIR=<dir>` /
 `FYNKEL_RENDER_DUMP=<file>` write the frames as PPM for eyeballing.
 `src/exposure.rs`, `src/shadow.rs`, `src/quality.rs`, `src/culling.rs`
-and `src/debug.rs` have unit tests for the meter, the light fit, the
-clamps, the sphere/frustum test and the primitives. The M0 capture
+and `src/debug.rs` have unit tests for the meter, the light fit (the
+splits tiling the shadowed range, every cascade finer than the next and
+the nearest six times finer than the single fit it replaced, the
+casters' bounds tightening a cascade without dropping a caster), the
+clamps, the sphere/frustum test and its union, and the primitives. The M0 capture
 (`benchmarks/m0/results/2026-09-20-12859e1`) shows the cube scene
 unchanged at MSAA 4 with the shadow pass: 122 / 120 frames per second,
 engine CPU ≈ 0.1 ms, GPU ≈ 0.7–1 ms.
@@ -571,6 +621,15 @@ stays within a millisecond of the same scene without them. Capture
 2.00 / 2.10 ms against 1.56 / 1.64, GPU frame 3.73 / 4.24 ms against
 2.93 / 2.94 — the shading of eight lights a pixel costs more than the
 assignment does.
+
+Capture `2026-09-22-5abaac3` is the same field after R1, and it is what
+the cascades cost: 122 frames/s, p99 interval 8.66 ms, eighteen checks
+green. The shadow pass runs four times a frame for **0.31 / 0.55 ms**
+against 0.40 / 0.40 with one cascade — each cascade is a quarter of the
+map, so the rasterised area did not change and only the vertex work
+multiplied. The scene pass carries the rest: 1.73 / 3.08 ms against
+1.85 / 2.42, about +0.7 ms at p95 for the per-pixel cascade selection
+and the blend band.
 
 `generate.py --app` wraps the same project in the `fynkel create`
 starter app (runners, `main.dart` with the HUD, the Spinner behaviour;

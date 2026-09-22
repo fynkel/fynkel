@@ -1020,6 +1020,93 @@ fn the_sun_casts_a_pcf_shadow_that_the_quality_profile_can_turn_off() {
     assert_eq!(r.stats().shadow_map, 0);
 }
 
+/// R1: the shadowed range is split into cascades in a 2×2 atlas. A
+/// corridor sixty metres deep with a caster at each end: both are
+/// shadowed (so every quadrant of the atlas is drawn and sampled where
+/// it should be), the near one keeps contact with the ground, and the
+/// lit floor between them has no seam where the cascades change.
+#[test]
+fn cascades_shadow_the_whole_corridor_without_a_seam() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    r.camera.eye = Vec3::new(0.0, 4.0, 10.0);
+    r.camera.target = Vec3::new(0.0, 0.0, -25.0);
+    let mut e = Extract::default();
+    // The floor: 30 × 140 m, its top at y = -0.5.
+    e.records.push(record(
+        0,
+        Mat4::from_scale_rotation_translation(
+            Vec3::new(30.0, 0.2, 140.0),
+            Quat::IDENTITY,
+            Vec3::new(0.0, -0.6, -40.0),
+        ),
+    ));
+    // A unit cube two metres from the camera, and a four-metre one forty
+    // metres down the corridor — the first and the last cascade.
+    e.records
+        .push(record(1, Mat4::from_translation(Vec3::new(-3.0, 0.0, 2.0))));
+    e.records.push(record(
+        2,
+        Mat4::from_scale_rotation_translation(
+            Vec3::splat(4.0),
+            Quat::IDENTITY,
+            Vec3::new(5.0, 1.5, -40.0),
+        ),
+    ));
+    let mut sun = sun(Vec3::new(0.6, -1.0, 0.0), 10_000.0);
+    sun.light.cast_shadows = true;
+    e.directional_lights.push(sun);
+
+    let px = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&px, "cascades");
+    let stats = r.stats();
+    assert_eq!(
+        stats.shadow_cascades,
+        fynkel_render::shadow::CASCADES as u32
+    );
+    assert_eq!(stats.shadow_map, 2048);
+    let sample = |world: Vec3| {
+        let (x, y) = pixel_of(&r, world);
+        px[(y.min(H - 1) * W + x.min(W - 1)) as usize]
+    };
+
+    // Both casters shadow the floor.
+    let near_lit = sample(Vec3::new(1.0, -0.5, 2.0));
+    let near_shadow = sample(Vec3::new(-2.4, -0.5, 2.0));
+    assert!(!is_background(near_lit) && !is_background(near_shadow));
+    assert!(
+        luminance(near_shadow) < luminance(near_lit) * 0.7,
+        "near {near_shadow:?} vs {near_lit:?}"
+    );
+    let far_lit = sample(Vec3::new(0.0, -0.5, -40.0));
+    let far_shadow = sample(Vec3::new(7.4, -0.5, -40.0));
+    assert!(!is_background(far_lit) && !is_background(far_shadow));
+    assert!(
+        luminance(far_shadow) < luminance(far_lit) * 0.7,
+        "far {far_shadow:?} vs {far_lit:?}"
+    );
+    // The near cube's shadow starts at its own foot: a cascade fitted to
+    // sixty metres offsets the lookup far enough to detach it.
+    let contact = sample(Vec3::new(-2.45, -0.5, 2.0));
+    assert!(
+        luminance(contact) < luminance(near_lit) * 0.7,
+        "the shadow keeps contact: {contact:?} vs {near_lit:?}"
+    );
+
+    // The lit floor down the middle crosses every cascade boundary; a
+    // seam would show as a step in luminance.
+    let walk: Vec<f32> = (0..40)
+        .map(|i| luminance(sample(Vec3::new(0.0, -0.5, 5.0 - i as f32 * 1.2))))
+        .collect();
+    let step = walk
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(step < 8.0, "no cascade seam on the lit floor: {walk:?}");
+}
+
 #[test]
 fn culling_drops_what_is_off_screen_without_changing_the_picture() {
     let Some((device, queue)) = device() else {
@@ -1067,8 +1154,13 @@ fn culling_drops_what_is_off_screen_without_changing_the_picture() {
             stats.draws,
             stats.shadow_draws
         ),
-        (2, 4, 1, 1),
+        // One batch of casters, drawn once per cascade (R1).
+        (2, 4, 1, fynkel_render::shadow::CASCADES as u32),
         "{stats:?}"
+    );
+    assert_eq!(
+        stats.shadow_cascades,
+        fynkel_render::shadow::CASCADES as u32
     );
     // The off-screen cube above the slab is still a caster.
     assert!(stats.shadow_casters >= 3, "{stats:?}");

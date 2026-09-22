@@ -165,26 +165,75 @@ fn punctual(light: Light, p: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(l, e);
 }
 
-// The sun's visibility at `p` (surface normal `n`): 3×3 PCF over the
-// shadow map, each tap hardware-filtered (2×2) by the comparison sampler.
-// A normal offset of one texel keeps flat receivers acne-free; points
-// outside the map or beyond its far plane are lit.
-fn sun_visibility(p: vec3<f32>, n: vec3<f32>) -> f32 {
-    let c = frame.sun_view_proj * vec4<f32>(p + n * frame.shadow.z, 1.0);
-    let ndc = c.xyz / c.w;
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || ndc.z > 1.0 {
-        return 1.0;
-    }
+// Where a point lands in one cascade: its place in the atlas, the depth
+// to compare, whether the cascade covers it at all, and how close to the
+// cascade's border it is (0 at the centre, 1 at the edge).
+struct CascadeHit {
+    inside: bool,
+    uv: vec2<f32>,
+    depth: f32,
+    edge: f32,
+};
+
+fn cascade_project(i: u32, p: vec3<f32>, n: vec3<f32>) -> CascadeHit {
+    let c = frame.cascades[i];
+    // The normal offset is per cascade: it is a texel of *that* cascade,
+    // so the near ones barely move the sample and stay in contact.
+    let clip = c.view_proj * vec4<f32>(p + n * c.params.x, 1.0);
+    let ndc = clip.xyz / clip.w;
+    let local = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+    var hit: CascadeHit;
+    hit.inside = all(local >= vec2<f32>(0.0)) && all(local <= vec2<f32>(1.0))
+        && ndc.z >= 0.0 && ndc.z <= 1.0;
+    // The quadrant this cascade was drawn into.
+    hit.uv = c.rect.xy + local * c.rect.zw;
+    hit.depth = ndc.z;
+    // Only the sides: the cascade's depth range reaches far back toward
+    // the sun, so a receiver sits near its far plane and a depth term
+    // here would blend everywhere.
+    hit.edge = max(abs(local.x * 2.0 - 1.0), abs(local.y * 2.0 - 1.0));
+    return hit;
+}
+
+// 3×3 PCF over the atlas, each tap hardware-filtered (2×2) by the
+// comparison sampler. A cascade's quadrant is inset by a texel and the
+// border stays at the cleared far depth, so a tap that leaves the
+// cascade reads "lit" rather than its neighbour's depths.
+fn shadow_pcf(uv: vec2<f32>, depth: f32) -> f32 {
     let texel = frame.shadow.y;
     var lit = 0.0;
     for (var y = -1; y <= 1; y++) {
         for (var x = -1; x <= 1; x++) {
             let offset = vec2<f32>(f32(x), f32(y)) * texel;
-            lit += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, ndc.z);
+            lit += textureSampleCompareLevel(shadow_map, shadow_sampler, uv + offset, depth);
         }
     }
     return lit / 9.0;
+}
+
+// The sun's visibility at `p` (surface normal `n`): the first cascade
+// that covers the point, cross-faded into the next over the outer band
+// so the change of resolution is a gradient and not a seam. A point no
+// cascade covers — past the shadow distance — is lit.
+fn sun_visibility(p: vec3<f32>, n: vec3<f32>) -> f32 {
+    let count = u32(frame.shadow.w);
+    let blend = max(frame.shadow.z, 1e-4);
+    for (var i = 0u; i < count; i++) {
+        let hit = cascade_project(i, p, n);
+        if !hit.inside {
+            continue;
+        }
+        var lit = shadow_pcf(hit.uv, hit.depth);
+        let t = (hit.edge - (1.0 - blend)) / blend;
+        if t > 0.0 && i + 1u < count {
+            let next = cascade_project(i + 1u, p, n);
+            if next.inside {
+                lit = mix(lit, shadow_pcf(next.uv, next.depth), clamp(t, 0.0, 1.0));
+            }
+        }
+        return lit;
+    }
+    return 1.0;
 }
 
 @fragment

@@ -6,11 +6,12 @@ at and compare. It is a normal Fynkel game (created by `fynkel create`,
 then authored): a Flutter app plus `fynkel.project.json`, an `assets/`
 tree of strict JSON documents and the Fynkel CLI.
 
-![The showcase after E1](renders/e1.png)
+![The showcase after R1](renders/r1.png)
 
 What is in the scene (`assets/scenes/main.scene.json`):
 
-- a low evening **sun** (4 000 lux, 32° up) casting the one shadow map,
+- a low evening **sun** (4 000 lux, 32° up) casting the one shadow map
+  (four cascades in it since R1),
   long shadows from the pillars, the ledge and the robot; two crates show
   the per-mesh opt-outs (`Crate No Cast`, `Crate No Receive`)
 - a warm **spot light** over the robot, a warm and a cool **point light**
@@ -81,6 +82,7 @@ renderer item so the history is a before/after:
 | `m3-08b.png` | M3-08b — the character controller and the camera rig (no visible change here; the before/after of the physics work) |
 | `m3-19.png` | M3-19 — Animation: the runner (a skinned mesh on a joint palette, `--steps 10` = 0.15 s into the `run` clip: mid-stride, arms swinging, a skinned caster in the shadow map); 28 instances in 17 draws, 1 skinned over 11 joints |
 | `e1.png` | E1 — image-based lighting: the sky is `sky.hdr` and lights the scene through its cooked cubes (`sky + ibl` in the render line); the metals reflect it, the floor takes the sky's blue and the shadows go blue with it |
+| `r1.png` | R1 — cascaded shadow maps: four cascades in a 2×2 atlas of the same 2048² map, each fitted to its own slice of the view and tightened to what actually casts. The shadows stop being soft grey smears — edges are crisp, the runner's and the crates' shadows touch their feet instead of floating (19 casters in 36 draws into 4 cascades) |
 
 To regenerate: `fynkel render --project examples/showcase --out examples/showcase/renders/<item>.png` (`--steps 10` from M3-19, so the runner is posed).
 

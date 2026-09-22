@@ -15,6 +15,25 @@ pub struct Sphere {
 }
 
 impl Sphere {
+    /// The smallest sphere this implementation builds around both: the
+    /// one that contains the other when it does, else the sphere through
+    /// their far sides. Used to gather what casts into one bound (R1).
+    pub fn union(&self, other: &Sphere) -> Sphere {
+        let d = self.center.distance(other.center);
+        if d + other.radius <= self.radius {
+            return *self;
+        }
+        if d + self.radius <= other.radius {
+            return *other;
+        }
+        let radius = (d + self.radius + other.radius) * 0.5;
+        Sphere {
+            center: self.center
+                + (other.center - self.center) * ((radius - self.radius) / d.max(1e-6)),
+            radius,
+        }
+    }
+
     /// The sphere around a cooked mesh's axis-aligned bounds (its centre
     /// and half diagonal).
     pub fn from_bounds(min: [f32; 3], max: [f32; 3]) -> Sphere {
@@ -94,6 +113,31 @@ mod tests {
             100.0,
         );
         Frustum::from_view_proj(&(proj * view))
+    }
+
+    #[test]
+    fn a_union_contains_both_spheres() {
+        let a = Sphere {
+            center: Vec3::new(-2.0, 0.0, 0.0),
+            radius: 1.0,
+        };
+        let b = Sphere {
+            center: Vec3::new(6.0, 0.0, 0.0),
+            radius: 3.0,
+        };
+        let u = a.union(&b);
+        for s in [a, b] {
+            assert!(u.center.distance(s.center) + s.radius <= u.radius + 1e-4);
+        }
+        // Tight: the union spans exactly the two far sides.
+        assert!((u.radius - 6.0).abs() < 1e-4, "{}", u.radius);
+        // A sphere already inside the other is swallowed, either way round.
+        let inner = Sphere {
+            center: Vec3::new(6.5, 0.0, 0.0),
+            radius: 0.5,
+        };
+        assert_eq!(b.union(&inner), b);
+        assert_eq!(inner.union(&b), b);
     }
 
     #[test]
