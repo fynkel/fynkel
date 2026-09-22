@@ -36,7 +36,7 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 61);
+    expect(commands.length, 82);
     for (final c in commands) {
       expect(c.shortcut, isNotNull, reason: '${c.id} has no shortcut');
       expect(c.id, matches(RegExp(r'^[a-z]+(\.[a-zA-Z]+)+$')), reason: '${c.id} is not a dotted id');
@@ -82,10 +82,34 @@ void main() {
         'hierarchy.search',
         'hierarchy.expandAll',
         'hierarchy.collapseAll',
+        'scene.tool.select',
+        'scene.tool.move',
+        'scene.tool.rotate',
+        'scene.tool.scale',
+        'scene.toggleSpace',
+        'scene.toggleSnap',
+        'scene.toggleHidden',
+        'scene.showAll',
+        'scene.toggleLocked',
+        'scene.alignCameraToView',
+        'view.frameSelected',
+        'view.frameAll',
+        'view.toggleProjection',
+        'view.alignToCamera',
+        'view.reset',
+        'view.toggleGrid',
+        'view.toggleOverlays',
+        'view.toggleStats',
+        'view.reload',
+        'view.recook',
+        'view.saveFrame',
         'help.about',
         'help.documentation',
       ]),
     );
+    expect(CommandRegistry.shortcutLabel(registry.byId('view.reload')!.shortcut!), '⌃⌘R');
+    expect(CommandRegistry.shortcutLabel(registry.byId('view.recook')!.shortcut!), '⌃⇧⌘R');
+    expect(CommandRegistry.shortcutLabel(registry.byId('view.frameSelected')!.shortcut!), '⌘F');
     expect(CommandRegistry.shortcutLabel(registry.byId('window.commandPalette')!.shortcut!), '⇧⌘P');
     expect(CommandRegistry.shortcutLabel(registry.byId('window.panel.console')!.shortcut!), '⌥⌘5');
     expect(CommandRegistry.shortcutLabel(registry.byId('document.save')!.shortcut!), '⌘S');

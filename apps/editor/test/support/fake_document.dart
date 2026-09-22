@@ -13,6 +13,8 @@ import 'dart:io';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/documents/editor_document.dart';
 
+import 'fake_preview.dart';
+
 final class FakeDocument extends EditorDocument {
   FakeDocument({
     required this.path,
@@ -370,21 +372,34 @@ final class FakeDocument extends EditorDocument {
         final prefab = c['prefab'];
         if (prefab is! Map || prefab['asset'] is! String) return _Result.error('prefab names no asset');
         final id = c['id'] as String? ?? 'inst${++_fresh}';
+        // The anchor's own components: a Transform by default, replaced by
+        // the spec's (the Scene view's drop puts the instance where it hit).
+        final components = <String, Object?>{
+          't': {
+            'type': 'fynkel.Transform',
+            'version': 1,
+            'data': {
+              'position': [0, 0, 0],
+              'rotation': [0, 0, 0, 1],
+              'scale': [1, 1, 1],
+            },
+          },
+        };
+        for (final (i, spec) in (c['components'] as List? ?? const []).indexed) {
+          if (spec is! Map) continue;
+          final type = spec['type'];
+          final key = type == 'fynkel.Transform' ? 't' : (spec['id'] as String? ?? 'c$i');
+          components[key] = {
+            'type': type,
+            'version': spec['version'] ?? 1,
+            'data': _deepCopy(spec['data'] as Map<String, Object?>? ?? {}),
+          };
+        }
         _entities[id] = {
           'name': c['name'] ?? 'Instance',
           'parent': parent,
           'children': <String>[],
-          'components': <String, Object?>{
-            't': {
-              'type': 'fynkel.Transform',
-              'version': 1,
-              'data': {
-                'position': [0, 0, 0],
-                'rotation': [0, 0, 0, 1],
-                'scale': [1, 1, 1],
-              },
-            },
-          },
+          'components': components,
           'prefab': {
             'asset': {for (final e in prefab.entries) '${e.key}': e.value},
             'overrides': <Object?>[],
@@ -683,9 +698,36 @@ final class FakeDocument extends EditorDocument {
     notifyListeners();
   }
 
+  // ── Preview ────────────────────────────────────────────────────────────
+
+  FakePreviewBackend? _preview;
+
+  /// Previews opened so far (a closed tab's preview is closed with it).
+  int previewsOpened = 0;
+
+  @override
+  PreviewBackend openPreview() {
+    if (kind == 'material') {
+      throw AuthoringException('previewOpen', AuthoringStatus.invalidArgument, [
+        Diagnostic(code: 'FYN-T0003', severity: Severity.error, message: 'preview: a material has no world'),
+      ]);
+    }
+    final open = _preview;
+    if (open != null && !open.isClosed) return open;
+    previewsOpened++;
+    return _preview = FakePreviewBackend(this);
+  }
+
+  @override
+  PreviewBackend? get preview => _preview == null || _preview!.isClosed ? null : _preview;
+
+  /// The fake backend itself, open or not (tests read its calls).
+  FakePreviewBackend? get fakePreview => _preview;
+
   @override
   void close() {
     _closed = true;
+    _preview?.close();
   }
 }
 

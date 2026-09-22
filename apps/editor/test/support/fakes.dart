@@ -16,6 +16,7 @@ import 'package:fynkel_editor/src/shell/workspace.dart';
 import 'fake_document.dart';
 
 export 'fake_document.dart';
+export 'fake_preview.dart';
 
 final class FakeProject extends EditorProject {
   FakeProject({required this.dir, this.name = 'Fake Game', this.readOnly, List<Diagnostic> diagnostics = const []})
@@ -530,6 +531,8 @@ Widget shellApp({
   RecordingRunner? runner,
   VoidCallback? quit,
   String? initialProject,
+  Future<String?> Function(String suggestedName)? chooseSavePath,
+  bool sceneViewport = false,
 }) {
   return FynkelEditorApp(
     key: key,
@@ -545,6 +548,10 @@ Widget shellApp({
       return p;
     },
     chooseDirectory: (_, {title, initialDirectory}) async => chosenDirectory,
+    chooseSavePath: chooseSavePath ?? (name) async => null,
+    // Widget tests have no Metal texture to draw into; the Scene view's
+    // model still runs over the fake preview through the painted layer.
+    sceneViewport: sceneViewport,
     detectToolchain: (_) async => toolchain ?? fakeToolchain(),
     run: runner?.call ?? RecordingRunner().call,
     nativeMenuBar: false,

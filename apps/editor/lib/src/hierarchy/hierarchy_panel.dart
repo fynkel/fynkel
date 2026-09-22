@@ -547,7 +547,8 @@ class _RootDropTarget extends StatelessWidget {
     DropTarget root() => DropTarget(parent: null, index: model.tree?.roots.length ?? 0);
     return DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) => model.canDropAsset(d.data.toRef(), d.data.kind, root()),
-      onAcceptWithDetails: (d) => model.instantiatePrefab(d.data.toRef(), name: _instanceName(d.data), target: root()),
+      onAcceptWithDetails: (d) =>
+          model.instantiatePrefab(d.data.toRef(), name: prefabInstanceName(d.data.name), target: root()),
       builder: (context, assets, _) => DragTarget<List<String>>(
         onWillAcceptWithDetails: (d) => model.canDrop(d.data, root()),
         onAcceptWithDetails: (d) => model.reparent(d.data, root()),
@@ -560,18 +561,6 @@ class _RootDropTarget extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The instance's name from the dragged asset: the prefab file's stem, or
-/// the model's stem for an imported `#prefab`.
-String _instanceName(AssetDragPayload d) {
-  var n = d.name;
-  final hash = n.indexOf('#');
-  if (hash >= 0) n = n.substring(0, hash);
-  for (final suffix in ['.prefab.json', '.glb', '.gltf', '.fbx']) {
-    if (n.toLowerCase().endsWith(suffix)) return n.substring(0, n.length - suffix.length);
-  }
-  return n;
 }
 
 enum _Zone { above, onto, below }
@@ -811,7 +800,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
       onAcceptWithDetails: (d) {
         final z = _zoneAt(d.offset);
         setState(() => _zone = null);
-        model.instantiatePrefab(d.data.toRef(), name: _instanceName(d.data), target: _target(z));
+        model.instantiatePrefab(d.data.toRef(), name: prefabInstanceName(d.data.name), target: _target(z));
       },
       builder: (context, _, _) => DragTarget<List<String>>(
         onWillAcceptWithDetails: (d) {

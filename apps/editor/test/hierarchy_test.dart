@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_panel.dart';
@@ -217,6 +218,34 @@ void main() {
       expect(tree['crate']!.parent, isNull);
       expect(tree.roots, ['cam', 'robot', 'floor', 'crate']); // key order: the index means nothing in a scene
       expect(tree['crate']!.transform!.position, [-3.5, 0, 0]);
+      expect(doc.history, 2);
+    });
+
+    test('keep world transform survives a rotated parent (the affine inverse is a real inverse)', () {
+      final (project, tabs, model) = setUpModel();
+      addTearDown(tabs.dispose);
+      final doc = project.fakeDocuments.first;
+      // Robot turned 90° about Y (quaternion [0, sin 45°, 0, cos 45°]).
+      const s = 0.7071067811865476;
+      expect(
+        tabs.focused!.transaction([
+          Command.setField('robot', 't', 'rotation', [0, s, 0, s]),
+        ])?.ok,
+        isTrue,
+      );
+      expect(model.reparent(['crate'], const DropTarget(parent: 'robot', index: 0)), isTrue);
+      final tree = model.tree!;
+      final world = Trs.fromMatrix(tree.worldMatrix('crate'));
+      for (var i = 0; i < 3; i++) {
+        expect(world.position[i], closeTo([3, 0, 0][i], 1e-6), reason: 'world position stays at (3, 0, 0)');
+        expect(world.scale[i], closeTo(1, 1e-6));
+      }
+      // Local: the crate sits 7 m from the robot along world −X, which in the
+      // robot's frame (turned 90° about Y: local +Z → world +X) is −Z, halved
+      // by the robot's scale 2.
+      final local = tree['crate']!.transform!;
+      expect(local.position[0].abs(), lessThan(1e-6));
+      expect(local.position[2], closeTo(-3.5, 1e-6));
       expect(doc.history, 2);
     });
 

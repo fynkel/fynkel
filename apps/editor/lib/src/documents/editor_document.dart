@@ -70,6 +70,104 @@ abstract class EditorDocument extends ChangeNotifier {
 
   /// The typed view `fynkel scene|prefab inspect --json` prints.
   Map<String, Object?> inspect();
+
+  /// The edit-preview world of this scene or prefab (item 6), opened on
+  /// first use; a material has none (`AuthoringException`, FYN-T0003).
+  PreviewBackend openPreview();
+
+  /// The preview while it is open.
+  PreviewBackend? get preview;
+}
+
+/// The edit-preview world as the Scene view uses it — `ScenePreview` behind
+/// a `SessionDocument`, an in-memory fake in the widget tests. Vectors are
+/// plain lists like the package's.
+abstract class PreviewBackend {
+  /// The native `FynkelWorld*` the viewport renders; 0 once closed.
+  int get worldAddress;
+  bool get isClosed;
+
+  /// The counts after the last call that returned them.
+  PreviewStats get stats;
+
+  /// The load's and the description's diagnostics.
+  List<Diagnostic> get diagnostics;
+
+  /// The cook that opened the cache or the last rebuild, when this
+  /// preview ran it.
+  CookReport? get cook;
+
+  /// One report per sync the session ran for this preview after a
+  /// transaction, undo, redo, reload or rescan — the incremental sync
+  /// rule at work, `reloaded` when it fell back to a fresh load.
+  Stream<PreviewSyncReport> get syncs;
+
+  void setCamera(PreviewCamera camera);
+  int setHidden(Iterable<String> ids);
+  PreviewPick pick(PreviewCamera camera, double aspect, List<double> ndc);
+  List<String> pickRect(PreviewCamera camera, double aspect, List<double> min, List<double> max);
+  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect});
+  Map<String, List<double>> worldMatrices(Iterable<String> ids);
+  void setTransforms(Iterable<PreviewTransform> transforms);
+  void restoreTransforms(Iterable<String> ids);
+  PreviewSyncReport resync();
+  PreviewStats reload();
+  CookReport recook();
+  Map<String, Object?> dump();
+  PreviewStats refreshStats();
+  void close();
+}
+
+/// [ScenePreview] as a [PreviewBackend].
+final class SessionPreview implements PreviewBackend {
+  SessionPreview(this.preview);
+
+  final ScenePreview preview;
+
+  @override
+  int get worldAddress => preview.worldAddress;
+  @override
+  bool get isClosed => preview.isClosed;
+  @override
+  PreviewStats get stats => preview.stats;
+  @override
+  List<Diagnostic> get diagnostics => preview.diagnostics;
+  @override
+  CookReport? get cook => preview.cook;
+  @override
+  Stream<PreviewSyncReport> get syncs => preview.session.events
+      .where((e) => e is PreviewSynced && e.document == preview.document)
+      .map((e) => (e as PreviewSynced).report);
+  @override
+  void setCamera(PreviewCamera camera) => preview.setCamera(camera);
+  @override
+  int setHidden(Iterable<String> ids) => preview.setHidden(ids);
+  @override
+  PreviewPick pick(PreviewCamera camera, double aspect, List<double> ndc) => preview.pick(camera, aspect, ndc);
+  @override
+  List<String> pickRect(PreviewCamera camera, double aspect, List<double> min, List<double> max) =>
+      preview.pickRect(camera, aspect, min, max);
+  @override
+  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect}) =>
+      preview.lines(outline: outline, outlineColor: outlineColor, iconsAspect: iconsAspect);
+  @override
+  Map<String, List<double>> worldMatrices(Iterable<String> ids) => preview.worldMatrices(ids);
+  @override
+  void setTransforms(Iterable<PreviewTransform> transforms) => preview.setTransforms(transforms);
+  @override
+  void restoreTransforms(Iterable<String> ids) => preview.restoreTransforms(ids);
+  @override
+  PreviewSyncReport resync() => preview.resync();
+  @override
+  PreviewStats reload() => preview.reload();
+  @override
+  CookReport recook() => preview.recook();
+  @override
+  Map<String, Object?> dump() => preview.dump();
+  @override
+  PreviewStats refreshStats() => preview.refreshStats();
+  @override
+  void close() => preview.close();
 }
 
 /// The real document over the authoring session.
@@ -146,10 +244,23 @@ final class SessionDocument extends EditorDocument {
   @override
   Map<String, Object?> inspect() => handle.inspect();
 
+  SessionPreview? _preview;
+
+  @override
+  PreviewBackend openPreview() {
+    final open = _preview;
+    if (open != null && !open.isClosed) return open;
+    return _preview = SessionPreview(handle.openPreview());
+  }
+
+  @override
+  PreviewBackend? get preview => _preview == null || _preview!.isClosed ? null : _preview;
+
   @override
   void close() {
     _sub?.cancel();
     _sub = null;
+    _preview = null;
     if (!handle.isClosed) handle.close();
   }
 

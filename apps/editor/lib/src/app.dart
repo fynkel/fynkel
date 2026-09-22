@@ -30,6 +30,9 @@ import 'project/migration_dialog.dart';
 import 'project_browser/asset_panel.dart';
 import 'project_browser/project_browser_model.dart';
 import 'project_browser/project_panel.dart';
+import 'scene_view/editor_state.dart';
+import 'scene_view/scene_panel.dart';
+import 'scene_view/scene_view_model.dart';
 import 'shell/main_window.dart';
 import 'shell/menu_bar.dart';
 import 'shell/panels.dart';
@@ -44,6 +47,16 @@ typedef OpenProject = Future<EditorProject> Function(String dir);
 Future<String?> pickDirectory(BuildContext context, {String? title, String? initialDirectory}) =>
     FilePicker.platform.getDirectoryPath(dialogTitle: title, initialDirectory: initialDirectory);
 
+/// Where "Save Frame…" writes its PNG; the tests inject a path.
+typedef ChooseSavePath = Future<String?> Function(String suggestedName);
+
+Future<String?> pickSavePath(String suggestedName) => FilePicker.platform.saveFile(
+  dialogTitle: 'Save Frame',
+  fileName: suggestedName,
+  type: FileType.custom,
+  allowedExtensions: const ['png'],
+);
+
 class FynkelEditorApp extends StatelessWidget {
   const FynkelEditorApp({
     super.key,
@@ -51,17 +64,24 @@ class FynkelEditorApp extends StatelessWidget {
     required this.layoutStore,
     this.openProject = _openSessionProject,
     this.chooseDirectory = pickDirectory,
+    this.chooseSavePath = pickSavePath,
     this.detectToolchain,
     this.run = runProcess,
     this.nativeMenuBar,
     this.quit,
     this.initialProject,
+    this.sceneViewport = true,
   });
 
   final Preferences prefs;
   final LayoutStore layoutStore;
   final OpenProject openProject;
   final ChooseDirectory chooseDirectory;
+  final ChooseSavePath chooseSavePath;
+
+  /// False leaves the native texture out of the Scene view (widget tests
+  /// without a Metal device drive the model through the painted layer).
+  final bool sceneViewport;
   final Future<Toolchain> Function(Preferences prefs)? detectToolchain;
   final RunProcess run;
   final bool? nativeMenuBar;
@@ -97,8 +117,10 @@ class FynkelEditorApp extends StatelessWidget {
             layoutStore: layoutStore,
             openProject: openProject,
             chooseDirectory: chooseDirectory,
+            chooseSavePath: chooseSavePath,
             detectToolchain: detectToolchain ?? (prefs) => Toolchain.detect(prefs: prefs, run: run),
             run: run,
+            sceneViewport: sceneViewport,
             nativeMenuBar: nativeMenuBar,
             quit: quit ?? () => exit(0),
             initialProject: initialProject,
@@ -116,17 +138,21 @@ class EditorShell extends StatefulWidget {
     required this.layoutStore,
     required this.openProject,
     required this.chooseDirectory,
+    required this.chooseSavePath,
     required this.detectToolchain,
     required this.run,
     required this.quit,
     this.nativeMenuBar,
     this.initialProject,
+    this.sceneViewport = true,
   });
 
   final Preferences prefs;
   final LayoutStore layoutStore;
   final OpenProject openProject;
   final ChooseDirectory chooseDirectory;
+  final ChooseSavePath chooseSavePath;
+  final bool sceneViewport;
   final Future<Toolchain> Function(Preferences prefs) detectToolchain;
   final RunProcess run;
   final VoidCallback quit;
@@ -150,6 +176,8 @@ class EditorShellState extends State<EditorShell> {
   InspectorModel? inspector;
   CodegenCheck? codegen;
   ProjectBrowserModel? browser;
+  SceneViewModel? scene;
+  EditorState? editorState;
   final consoleSearchFocus = FocusNode(debugLabel: 'console.search');
   final hierarchySearchFocus = FocusNode(debugLabel: 'hierarchy.search');
   final projectSearchFocus = FocusNode(debugLabel: 'project.search');
@@ -174,6 +202,8 @@ class EditorShellState extends State<EditorShell> {
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
     workspace?.dispose();
+    scene?.dispose();
+    editorState?.dispose();
     inspector?.dispose();
     codegen?.dispose();
     browser?.dispose();
@@ -217,12 +247,11 @@ class EditorShellState extends State<EditorShell> {
       title: 'Scene',
       icon: Icons.view_in_ar_outlined,
       home: PanelHome.center,
-      builder: (_) => const ComingPanel(
-        title: 'Scene',
-        item: 6,
-        what: 'The edit-preview world: camera, picking, gizmos.',
-        icon: Icons.view_in_ar_outlined,
-      ),
+      builder: (_) {
+        final s = scene;
+        if (s == null) return const SizedBox.shrink();
+        return ScenePanel(model: s, showViewport: widget.sceneViewport);
+      },
     ),
     PanelSpec(
       id: PanelRegistry.inspector,
@@ -303,13 +332,14 @@ class EditorShellState extends State<EditorShell> {
   bool get _hasTab => _focusedTab != null;
   bool get _canEdit => hierarchy?.canEdit ?? false;
   bool get _hasSelection => hierarchy?.hasSelection ?? false;
+  bool get _hasView => scene?.hasView ?? false;
   bool get _canEditAssets => browser?.canEdit ?? false;
   AssetEntry? get _leadAsset => browser?.leadEntry;
   bool get _hasAssetSelection => browser?.selection.isNotEmpty ?? false;
 
   void _registerCommands() {
-    SingleActivator k(LogicalKeyboardKey key, {bool shift = false, bool alt = false}) =>
-        SingleActivator(key, meta: true, shift: shift, alt: alt);
+    SingleActivator k(LogicalKeyboardKey key, {bool shift = false, bool alt = false, bool control = false}) =>
+        SingleActivator(key, meta: true, shift: shift, alt: alt, control: control);
     registry.registerAll([
       // ── Documents (Project menu, group 1) ──
       EditorCommand(
@@ -830,6 +860,91 @@ class EditorShellState extends State<EditorShell> {
         group: 9,
         run: widget.quit,
       ),
+      // ── Scene view: tools and the editor-only flags (Edit menu, group 2) ──
+      for (final (i, tool, label, key) in const [
+        (0, SceneTool.select, 'Select Tool', LogicalKeyboardKey.digit1),
+        (1, SceneTool.move, 'Move Tool', LogicalKeyboardKey.digit2),
+        (2, SceneTool.rotate, 'Rotate Tool', LogicalKeyboardKey.digit3),
+        (3, SceneTool.scale, 'Scale Tool', LogicalKeyboardKey.digit4),
+      ])
+        EditorCommand(
+          id: 'scene.tool.${tool.name}',
+          baseLabel: label,
+          description: 'The Scene view\'s ${tool.name} tool (also ${'QWER'[i]} while the view has focus)',
+          menu: EditorMenu.edit,
+          shortcut: k(key),
+          group: 2,
+          order: i,
+          enabled: () => _hasView,
+          run: () => scene?.tool = tool,
+        ),
+      EditorCommand(
+        id: 'scene.toggleSpace',
+        baseLabel: 'Toggle Local / World Axes',
+        labelBuilder: () => scene?.space == GizmoSpace.local ? 'Use World Axes' : 'Use Local Axes',
+        description: 'The gizmo\'s axes: the entity\'s own or the world\'s (X in the view)',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyL),
+        group: 2,
+        order: 4,
+        enabled: () => _hasView,
+        run: () => scene?.toggleSpace(),
+      ),
+      EditorCommand(
+        id: 'scene.toggleSnap',
+        baseLabel: 'Toggle Snapping',
+        labelBuilder: () => scene?.snap.enabled ?? false ? 'Snapping Off' : 'Snapping On',
+        description: 'Move, rotate and scale in steps (hold ⌘ during a drag to invert)',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyG, alt: true),
+        group: 2,
+        order: 5,
+        enabled: () => _hasView,
+        run: () => scene?.toggleSnap(),
+      ),
+      EditorCommand(
+        id: 'scene.toggleHidden',
+        baseLabel: 'Hide / Show Selected',
+        description: 'Editor-only: out of the picture and of picking, never in the scene file (H in the view)',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyH, shift: true),
+        group: 3,
+        order: 0,
+        enabled: () => _hasView && _hasSelection,
+        run: () => scene?.toggleHiddenSelection(),
+      ),
+      EditorCommand(
+        id: 'scene.showAll',
+        baseLabel: 'Show All Hidden',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyU, shift: true),
+        group: 3,
+        order: 1,
+        enabled: () => scene?.hasHidden ?? false,
+        run: () => scene?.showAll(),
+      ),
+      EditorCommand(
+        id: 'scene.toggleLocked',
+        baseLabel: 'Lock / Unlock Selected',
+        description: 'Editor-only: a locked entity is not picked or dragged in the Scene view (L in the view)',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyK),
+        group: 3,
+        order: 2,
+        enabled: () => _hasView && _hasSelection,
+        run: () => scene?.toggleLockedSelection(),
+      ),
+      EditorCommand(
+        id: 'scene.alignCameraToView',
+        baseLabel: 'Align Selected Camera to View',
+        description: 'The selected camera entity moves to where the view is, one transaction',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyL, shift: true),
+        group: 3,
+        order: 3,
+        enabled: () => _canEdit && (scene?.canAlignToSelectedCamera ?? false),
+        run: () => scene?.alignSelectedCameraToView(),
+      ),
       EditorCommand(
         id: 'app.preferences',
         baseLabel: 'Preferences…',
@@ -837,6 +952,129 @@ class EditorShellState extends State<EditorShell> {
         shortcut: k(LogicalKeyboardKey.comma),
         group: 9,
         run: showPreferences,
+      ),
+      // ── View menu: the Scene view's camera and overlays ──
+      EditorCommand(
+        id: 'view.frameSelected',
+        baseLabel: 'Frame Selected',
+        description: 'The camera swings to fit the selection (everything when nothing is selected); F in the view',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyF),
+        group: 0,
+        order: 0,
+        enabled: () => _hasView,
+        run: () => scene?.frameSelected(),
+      ),
+      EditorCommand(
+        id: 'view.frameAll',
+        baseLabel: 'Frame All',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyF, shift: true),
+        group: 0,
+        order: 1,
+        enabled: () => _hasView,
+        run: () => scene?.frameAll(),
+      ),
+      EditorCommand(
+        id: 'view.toggleProjection',
+        baseLabel: 'Toggle Perspective / Orthographic',
+        labelBuilder: () => scene?.camera?.orthographic ?? false ? 'Perspective' : 'Orthographic',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.digit5),
+        group: 0,
+        order: 2,
+        enabled: () => _hasView,
+        run: () => scene?.toggleProjection(),
+      ),
+      EditorCommand(
+        id: 'view.alignToCamera',
+        baseLabel: 'Look Through Selected Camera',
+        description: 'The view takes the selected camera\'s placement and lens — the picture is what it renders',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyL, alt: true),
+        group: 0,
+        order: 3,
+        enabled: () => scene?.canAlignToSelectedCamera ?? false,
+        run: () => scene?.alignViewToSelectedCamera(),
+      ),
+      EditorCommand(
+        id: 'view.reset',
+        baseLabel: 'Reset View',
+        description: 'The editor camera back to its starting place',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.digit0, shift: true),
+        group: 0,
+        order: 4,
+        enabled: () => _hasView,
+        run: () => scene?.resetView(),
+      ),
+      EditorCommand(
+        id: 'view.toggleGrid',
+        baseLabel: 'Toggle Grid and Axes',
+        labelBuilder: () => scene?.showGrid ?? true ? 'Hide Grid and Axes' : 'Show Grid and Axes',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyG),
+        group: 1,
+        order: 0,
+        enabled: () => _hasView,
+        run: () => scene?.toggleGrid(),
+      ),
+      EditorCommand(
+        id: 'view.toggleOverlays',
+        baseLabel: 'Toggle Light and Camera Icons',
+        labelBuilder: () => scene?.showOverlays ?? true ? 'Hide Light and Camera Icons' : 'Show Light and Camera Icons',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyI),
+        group: 1,
+        order: 1,
+        enabled: () => _hasView,
+        run: () => scene?.toggleOverlays(),
+      ),
+      EditorCommand(
+        id: 'view.toggleStats',
+        baseLabel: 'Toggle Stats Overlay',
+        labelBuilder: () => scene?.showStats ?? false ? 'Hide Stats Overlay' : 'Show Stats Overlay',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyT),
+        group: 1,
+        order: 2,
+        enabled: () => _hasView,
+        run: () => scene?.toggleStats(),
+      ),
+      EditorCommand(
+        id: 'view.reload',
+        baseLabel: 'Reload Preview',
+        description:
+            'The preview world emptied and loaded fresh from the document (the fallback the sync uses on its own)',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyR, control: true),
+        group: 2,
+        order: 0,
+        enabled: () => _hasTab && (_focusedTab!.kind == 'scene' || _focusedTab!.kind == 'prefab'),
+        run: () => scene?.reload(),
+      ),
+      EditorCommand(
+        id: 'view.recook',
+        baseLabel: 'Rebuild Asset Cache and Reload',
+        description: '`fynkel cook` in process, then every preview reloaded',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyR, control: true, shift: true),
+        group: 2,
+        order: 1,
+        enabled: () => _hasView,
+        run: () => scene?.recook(),
+      ),
+      EditorCommand(
+        id: 'view.saveFrame',
+        baseLabel: 'Save Frame…',
+        description:
+            'One frame of the Scene view as a PNG at the viewport\'s size (the pixel gate against `fynkel render`)',
+        menu: EditorMenu.view,
+        shortcut: k(LogicalKeyboardKey.keyX, alt: true),
+        group: 2,
+        order: 2,
+        enabled: () => _hasView,
+        run: () => unawaited(scene?.saveFrame()),
       ),
       EditorCommand(
         id: 'window.commandPalette',
@@ -998,6 +1236,8 @@ class EditorShellState extends State<EditorShell> {
       await project?.close();
       project?.removeListener(_onProjectChanged);
       workspace?.dispose();
+      scene?.dispose();
+      editorState?.dispose();
       inspector?.dispose();
       codegen?.dispose();
       browser?.dispose();
@@ -1015,12 +1255,21 @@ class EditorShellState extends State<EditorShell> {
       );
       final ins = InspectorModel(tabs: t, project: opened, codegen: cg, openInIde: ide.open);
       final b = ProjectBrowserModel(project: opened);
+      final es = EditorState.load(opened.dir);
+      final sv = SceneViewModel(
+        tabs: t,
+        project: opened,
+        hierarchy: h,
+        editorState: es,
+        chooseSavePath: widget.chooseSavePath,
+      );
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
       t.addListener(registry.refresh);
       h.addListener(registry.refresh);
       ins.addListener(registry.refresh);
       b.addListener(registry.refresh);
+      sv.addListener(registry.refresh);
       setState(() {
         project = opened;
         workspace = ws;
@@ -1030,9 +1279,16 @@ class EditorShellState extends State<EditorShell> {
         codegen = cg;
         browser = b;
         console = c;
+        editorState = es;
+        scene = sv;
         _layoutNotice = ws.restoreProblem == null
             ? null
             : 'The saved layout was replaced by the default: ${ws.restoreProblem}.';
+        if (es.loadProblem != null) {
+          _layoutNotice =
+              '${_layoutNotice ?? ''}${_layoutNotice == null ? '' : ' '}'
+              '.fynkel/editor.json did not parse and starts fresh: ${es.loadProblem}.';
+        }
         _openError = null;
       });
       widget.prefs.addRecent(opened.dir, opened.name);
@@ -1066,6 +1322,8 @@ class EditorShellState extends State<EditorShell> {
     final ins = inspector;
     final cg = codegen;
     final b = browser;
+    final sv = scene;
+    final es = editorState;
     setState(() {
       project = null;
       console = null;
@@ -1074,9 +1332,13 @@ class EditorShellState extends State<EditorShell> {
       codegen = null;
       browser = null;
       tabs = null;
+      scene = null;
+      editorState = null;
       workspace?.dispose();
       workspace = null;
     });
+    sv?.dispose();
+    es?.dispose();
     ins?.dispose();
     cg?.dispose();
     b?.dispose();

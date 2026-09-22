@@ -325,13 +325,18 @@ final class HierarchyModel extends ChangeNotifier {
   }
 
   /// Instantiates the prefab [ref] (`{asset, sub?}`) under [target] — one
-  /// `instantiatePrefab` transaction — and selects the instance.
-  bool instantiatePrefab(Map<String, Object?> ref, {required String name, DropTarget? target}) {
+  /// `instantiatePrefab` transaction — and selects the instance. With
+  /// [transform] the instance root gets that `fynkel.Transform` (the Scene
+  /// view's drop puts it where the pointer hit).
+  bool instantiatePrefab(Map<String, Object?> ref, {required String name, DropTarget? target, Trs? transform}) {
     final t = _tab;
     if (t == null || !canEdit) return false;
     final parent = target?.parent;
     final index = target == null ? null : (parent == null && !rootOrderIsEditable ? null : target.index);
-    final a = _run([Command.instantiatePrefab(prefab: ref, name: name, parent: parent, index: index)]);
+    final components = [if (transform != null) componentSpec('fynkel.Transform', data: transform.toData())];
+    final a = _run([
+      Command.instantiatePrefab(prefab: ref, name: name, parent: parent, index: index, components: components),
+    ]);
     if (a == null || !a.ok) return false;
     final created = a.mutations.isNotEmpty && a.mutations.first.affectedIds.isNotEmpty
         ? a.mutations.first.affectedIds.first
@@ -429,4 +434,16 @@ final class HierarchyModel extends ChangeNotifier {
     _tab?.removeListener(_onTab);
     super.dispose();
   }
+}
+
+/// The instance's name from a dragged asset's name: the prefab file's
+/// stem, or the model's stem for an imported `#prefab`.
+String prefabInstanceName(String assetName) {
+  var n = assetName;
+  final hash = n.indexOf('#');
+  if (hash >= 0) n = n.substring(0, hash);
+  for (final suffix in ['.prefab.json', '.glb', '.gltf', '.fbx']) {
+    if (n.toLowerCase().endsWith(suffix)) return n.substring(0, n.length - suffix.length);
+  }
+  return n;
 }

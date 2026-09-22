@@ -178,15 +178,16 @@ List<double> matInverseAffine(List<double> m) {
     -(b * i - c * h) / det, (a * i - c * g) / det, -(a * h - b * g) / det, //
     (b * f - c * e) / det, -(a * f - c * d) / det, (a * e - b * d) / det,
   ];
-  // inv is row-major 3×3 here: inv[r*3+c]. Column-major output.
+  // `inv` is the cofactor matrix, row-major (inv[r*3+c]); the inverse is
+  // its transpose, so column c of the column-major output is row c of it.
   final tx = m[12], ty = m[13], tz = m[14];
-  final ntx = -(inv[0] * tx + inv[1] * ty + inv[2] * tz);
-  final nty = -(inv[3] * tx + inv[4] * ty + inv[5] * tz);
-  final ntz = -(inv[6] * tx + inv[7] * ty + inv[8] * tz);
+  final ntx = -(inv[0] * tx + inv[3] * ty + inv[6] * tz);
+  final nty = -(inv[1] * tx + inv[4] * ty + inv[7] * tz);
+  final ntz = -(inv[2] * tx + inv[5] * ty + inv[8] * tz);
   return [
-    inv[0], inv[3], inv[6], 0, //
-    inv[1], inv[4], inv[7], 0, //
-    inv[2], inv[5], inv[8], 0, //
+    inv[0], inv[1], inv[2], 0, //
+    inv[3], inv[4], inv[5], 0, //
+    inv[6], inv[7], inv[8], 0, //
     ntx, nty, ntz, 1,
   ];
 }

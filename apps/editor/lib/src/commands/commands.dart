@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 enum EditorMenu {
   project('Project'),
   edit('Edit'),
+  view('View'),
   window('Window'),
   help('Help');
 

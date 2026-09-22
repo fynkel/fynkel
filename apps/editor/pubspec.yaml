@@ -14,6 +14,10 @@ dependencies:
   # feature (the user-define below); a game never lists that feature.
   fynkel_authoring:
     path: ../../packages/fynkel_authoring
+  # The Scene view's `FynkelViewport` (item 6): the same texture widget a
+  # game host uses, here over the edit-preview world (viewport ABI v4).
+  fynkel_flutter:
+    path: ../../packages/fynkel_flutter
   # The docking workspace (blueprint §19.2e item 2; ADR-0016 resolutions record the spike).
   docking: ^1.16.2
   # The launcher's directory chooser (Open project, New project's parent directory).
@@ -26,6 +30,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # The Scene view's debounced state save under a fake clock.
+  fake_async: ^1.3.3
 
 flutter:
   uses-material-design: true
