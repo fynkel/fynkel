@@ -147,6 +147,11 @@ class _FynkelViewportState extends State<FynkelViewport> {
             onPointerCancel: (e) => _pointer(e, dpr),
             onPointerHover: (e) => _pointer(e, dpr),
             onPointerSignal: (e) => _pointer(e, dpr),
+            // A trackpad's two-finger scroll and pinch (macOS): not wheel
+            // signals but one pan-zoom gesture.
+            onPointerPanZoomStart: (e) => _pointer(e, dpr),
+            onPointerPanZoomUpdate: (e) => _pointer(e, dpr),
+            onPointerPanZoomEnd: (e) => _pointer(e, dpr),
             child: ListenableBuilder(
               listenable: widget.controller,
               builder: (context, _) {

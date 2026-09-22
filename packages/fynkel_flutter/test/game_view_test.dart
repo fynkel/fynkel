@@ -1,6 +1,7 @@
 // `FynkelGameView` drives `World.frame` from the Ticker and renders into
 // the viewport (real Rust viewport, mocked texture channel).
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -218,4 +219,28 @@ void main() {
     expect(controller.state, ViewportState.failed);
     expect(find.textContaining('Viewport failed'), findsOneWidget);
   });
+
+  testWidgets('forwards a trackpad\'s pan-zoom gesture, not only the wheel', (tester) async {
+    final controller = FynkelViewportController();
+    addTearDown(controller.dispose);
+    final seen = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FynkelViewport(controller: controller, onPointerEvent: (e, _) => seen.add(_panZoomPhase(e))),
+      ),
+    );
+    final pad = TestPointer(1, PointerDeviceKind.trackpad);
+    final at = tester.getCenter(find.byType(FynkelViewport));
+    await tester.sendEventToBinding(pad.panZoomStart(at));
+    await tester.sendEventToBinding(pad.panZoomUpdate(at, pan: const Offset(0, 12), scale: 1.2));
+    await tester.sendEventToBinding(pad.panZoomEnd());
+    expect(seen, ['start', 'update', 'end']);
+  });
 }
+
+String _panZoomPhase(PointerEvent e) => switch (e) {
+  PointerPanZoomStartEvent() => 'start',
+  PointerPanZoomUpdateEvent() => 'update',
+  PointerPanZoomEndEvent() => 'end',
+  _ => '${e.runtimeType}',
+};
