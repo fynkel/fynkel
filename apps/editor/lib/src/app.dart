@@ -22,6 +22,7 @@ import 'hierarchy/hierarchy_panel.dart';
 import 'inspector/codegen_check.dart';
 import 'inspector/inspector_model.dart';
 import 'inspector/inspector_panel.dart';
+import 'inspector/prefab_actions.dart' as prefab;
 import 'launcher/launcher.dart';
 import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
@@ -239,7 +240,12 @@ class EditorShellState extends State<EditorShell> {
       builder: (_) {
         final h = hierarchy;
         if (h == null) return const SizedBox.shrink();
-        return HierarchyPanel(model: h, onOpenDocument: openDocumentDialog, searchFocus: hierarchySearchFocus);
+        return HierarchyPanel(
+          model: h,
+          onOpenDocument: openDocumentDialog,
+          searchFocus: hierarchySearchFocus,
+          commands: registry,
+        );
       },
     ),
     PanelSpec(
@@ -334,6 +340,15 @@ class EditorShellState extends State<EditorShell> {
   bool get _hasSelection => hierarchy?.hasSelection ?? false;
   bool get _hasView => scene?.hasView ?? false;
   bool get _canEditAssets => browser?.canEdit ?? false;
+
+  /// Prefab mode: the one prefab instance the selection is about (the
+  /// anchor itself or its derived entities), or null.
+  String? get _selectionAnchor => prefab.selectionAnchor(tabs?.focused);
+  PrefabExpansion? get _selectionExpansion {
+    final a = _selectionAnchor;
+    return a == null ? null : tabs?.focused?.expansionOf(a);
+  }
+
   AssetEntry? get _leadAsset => browser?.leadEntry;
   bool get _hasAssetSelection => browser?.selection.isNotEmpty ?? false;
 
@@ -606,6 +621,88 @@ class EditorShellState extends State<EditorShell> {
             if (err != null) _showError(err);
             return;
           }
+        },
+      ),
+      // ── Prefab mode (Edit menu, group 4) ──
+      EditorCommand(
+        id: 'prefab.applyOverrides',
+        baseLabel: 'Apply to Prefab',
+        description: 'The selected instance\'s overrides become the prefab\'s values, then are reverted here',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyA, shift: true, alt: true),
+        group: 4,
+        order: 0,
+        enabled: () {
+          final a = _selectionAnchor;
+          return _canEdit && a != null && (inspector?.cannotApply(a) == null);
+        },
+        run: () {
+          final a = _selectionAnchor;
+          if (a == null) return;
+          if (!(inspector?.applyOverrides(a) ?? false) && inspector?.lastError != null) {
+            _showError(inspector!.lastError!);
+          }
+        },
+      ),
+      EditorCommand(
+        id: 'prefab.revertOverrides',
+        baseLabel: 'Revert Prefab Overrides',
+        description: 'Drops every override of the selected instance — back to the prefab',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyU, shift: true, alt: true),
+        group: 4,
+        order: 1,
+        enabled: () => _canEdit && (_selectionExpansion?.overrides.isNotEmpty ?? false),
+        run: () {
+          final a = _selectionAnchor;
+          if (a != null) inspector?.revertOverride(a);
+        },
+      ),
+      EditorCommand(
+        id: 'prefab.unpack',
+        baseLabel: 'Unpack Prefab Instance',
+        description: 'The instance becomes plain entities of this document (one undo step)',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyX, shift: true, alt: true),
+        group: 4,
+        order: 2,
+        enabled: () {
+          final a = _selectionAnchor;
+          return _canEdit && a != null && (inspector?.cannotUnpack(a) == null);
+        },
+        run: () {
+          final a = _selectionAnchor;
+          if (a == null) return;
+          if (!(inspector?.unpack(a) ?? false) && inspector?.lastError != null) _showError(inspector!.lastError!);
+        },
+      ),
+      EditorCommand(
+        id: 'prefab.open',
+        baseLabel: 'Open Prefab',
+        description: 'The selected instance\'s prefab in its own tab (an imported hierarchy read-only)',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyD, shift: true, alt: true),
+        group: 4,
+        order: 3,
+        enabled: () => _selectionExpansion?.prefab != null,
+        run: () {
+          final a = _selectionAnchor;
+          if (a == null) return;
+          if (!(inspector?.openPrefab(a) ?? false) && inspector?.lastError != null) _showError(inspector!.lastError!);
+        },
+      ),
+      EditorCommand(
+        id: 'prefab.selectAsset',
+        baseLabel: 'Select Prefab Asset',
+        description: 'Reveals the selected instance\'s prefab (or model source) in the Project browser',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyL, shift: true, alt: true),
+        group: 4,
+        order: 4,
+        enabled: () => _selectionAnchor != null && browser != null,
+        run: () {
+          final a = _selectionAnchor;
+          if (a != null) inspector?.selectPrefabAsset(a);
         },
       ),
       EditorCommand(
@@ -1255,6 +1352,10 @@ class EditorShellState extends State<EditorShell> {
       );
       final ins = InspectorModel(tabs: t, project: opened, codegen: cg, openInIde: ide.open);
       final b = ProjectBrowserModel(project: opened);
+      ins.revealAsset = (asset, sub) {
+        workspace?.show(PanelRegistry.project);
+        b.reveal(asset);
+      };
       final es = EditorState.load(opened.dir);
       final sv = SceneViewModel(
         tabs: t,

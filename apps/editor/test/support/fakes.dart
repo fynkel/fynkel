@@ -89,14 +89,54 @@ final class FakeProject extends EditorProject {
 
   FakeDocument addDocument(FakeDocument d) {
     fakeDocuments.add(d);
+    d.expander ??= (doc, anchor) => fakeExpand(
+      doc,
+      anchor,
+      prefabs: prefabDocument,
+      handleOf: (p) => openedHandles.contains(p.id) ? fakeDocuments.indexOf(p) + 1 : null,
+    );
     return d;
   }
+
+  /// The prefab document an instance's `{asset, sub}` resolves to: a
+  /// prefab-kind document by id, or a fake imported hierarchy (a document
+  /// with [FakeDocument.sub] `prefab` whose id is the source's).
+  FakeDocument? prefabDocument(String asset, String? sub) {
+    for (final d in fakeDocuments) {
+      if (d.kind != 'prefab') continue;
+      if (sub == null && d.sub == null && d.id == asset) return d;
+      if (sub != null && d.sub == sub && (d.id == asset || d.sourceId == asset)) return d;
+    }
+    return null;
+  }
+
+  /// Ids `openDocument` was asked for (the fake session's "open" set, for
+  /// `ExpansionPrefab.handle`).
+  final openedHandles = <String>{};
 
   @override
   EditorDocument openDocument(String pathOrId) {
     opened.add(pathOrId);
+    final hash = pathOrId.indexOf('#');
+    if (hash >= 0) {
+      final asset = pathOrId.substring(0, hash);
+      final sub = pathOrId.substring(hash + 1);
+      for (final d in fakeDocuments) {
+        if (d.sub == sub && (d.id == asset || d.sourceId == asset || d.path == asset || d.relativePath == asset)) {
+          openedHandles.add(d.id);
+          return d;
+        }
+      }
+      throw AuthoringException('openDocument', AuthoringStatus.loadFailed, [
+        Diagnostic(code: 'FYN-D0401', severity: Severity.error, message: 'no imported hierarchy $pathOrId'),
+      ]);
+    }
     for (final d in fakeDocuments) {
-      if (d.id == pathOrId || d.path == pathOrId || d.relativePath == pathOrId) return d;
+      if (d.sub != null) continue;
+      if (d.id == pathOrId || d.path == pathOrId || d.relativePath == pathOrId) {
+        openedHandles.add(d.id);
+        return d;
+      }
     }
     throw AuthoringException('openDocument', AuthoringStatus.loadFailed, [
       Diagnostic(code: 'FYN-D0900', severity: Severity.error, message: 'no document $pathOrId'),

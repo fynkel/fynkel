@@ -4,6 +4,9 @@
 // by entity, the last refused transaction, and the file's baseline text so
 // an external change is told apart from the editor's own save (no local
 // edits → silent reload; local edits → a conflict that is never overwritten).
+// Prefab mode (item 7): the tree fetches an instance's expansion through
+// the document's `instance` query when an anchor is opened; the tabs tell
+// every scene when a prefab document changed so the expansions refresh.
 import 'dart:collection';
 import 'dart:io';
 
@@ -108,19 +111,28 @@ final class OpenDocument extends ChangeNotifier {
   String get fileName => p.basename(document.path);
   String get title => document.name.isNotEmpty ? document.name : fileName;
 
-  /// The file's stem without the kind's extension (`main-mine` for `main-mine.scene.json`).
+  /// The file's stem without the kind's extension (`main-mine` for
+  /// `main-mine.scene.json`; `column` for an imported `column.rig.json#prefab`).
   String get fileStem {
     var stem = fileName;
-    for (final ext in const ['.scene.json', '.prefab.json', '.material.json', '.json']) {
+    final hash = stem.indexOf('#');
+    if (hash >= 0) stem = stem.substring(0, hash);
+    for (final ext in const ['.scene.json', '.prefab.json', '.material.json', '.rig.json', '.json']) {
       if (stem.endsWith(ext)) return stem.substring(0, stem.length - ext.length);
     }
-    return stem;
+    final dot = stem.lastIndexOf('.');
+    return dot > 0 ? stem.substring(0, dot) : stem;
   }
+
+  /// An imported hierarchy (`<id>#prefab`): read-only, derived ids.
+  bool get isImportedHierarchy => document.isImportedHierarchy;
 
   /// What the tab shows: the document's name, plus the file's stem when the two
   /// disagree ("Main · main-mine" after a Save As — the name inside the file is
   /// still "Main", and the gate found that confusing without the file).
   String get tabLabel {
+    // An imported hierarchy is named after its source: `rig.glb › prefab`.
+    if (isImportedHierarchy) return '$fileName › ${document.sub}';
     String norm(String s) => s.toLowerCase().replaceAll(RegExp(r'[\s_\-]+'), '');
     if (document.name.isEmpty || norm(document.name) == norm(fileStem)) return title;
     return '$title · $fileStem';
@@ -147,10 +159,36 @@ final class OpenDocument extends ChangeNotifier {
   bool get treeBuilt => _tree != null;
 
   void _buildTree() {
-    final t = _tree ??= HierarchyTree();
+    final t = _tree ??= HierarchyTree()..expansionProvider = _expansion;
     t.build(document.root(), roots: document.roots());
     _refreshDiagnostics(t);
     _pruneSelection();
+  }
+
+  /// The tree's provider: one `instance` query; a failure (the entity went
+  /// away, a closed document) is recorded in [lastError] and answers null.
+  PrefabExpansion? _expansion(String anchor) {
+    try {
+      return document.instance(anchor);
+    } on AuthoringException catch (e) {
+      lastError = 'Could not expand the prefab instance $anchor: $e';
+      return null;
+    }
+  }
+
+  /// The expansion of the instance anchored at [anchor], fetched on first
+  /// use; null for a plain entity.
+  PrefabExpansion? expansionOf(String anchor) => tree.expansionOf(anchor);
+
+  /// Another open document changed (a prefab this scene may instance,
+  /// edited live): the cached expansions are re-fetched so the derived
+  /// nodes and the Inspector show the prefab as it is now.
+  void onPrefabDocumentChanged() {
+    final t = _tree;
+    if (t == null || t.expansions.isEmpty) return;
+    t.refreshExpansions();
+    _pruneSelection();
+    notifyListeners();
   }
 
   void _patchTree(List<String> ids) {
@@ -458,9 +496,11 @@ final class OpenDocument extends ChangeNotifier {
   void _pruneSelection() {
     final t = _tree;
     if (t == null) return;
-    selection.removeWhere((id) => !t.nodes.containsKey(id));
-    if (anchor != null && !t.nodes.containsKey(anchor!)) anchor = null;
-    if (lead != null && !t.nodes.containsKey(lead!)) lead = null;
+    // `contains` re-fetches a selected derived entity's expansion when its
+    // anchor was just invalidated, so the selection survives the edit.
+    selection.removeWhere((id) => !t.contains(id));
+    if (anchor != null && !t.contains(anchor!)) anchor = null;
+    if (lead != null && !t.contains(lead!)) lead = null;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────

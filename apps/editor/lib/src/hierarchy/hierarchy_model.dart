@@ -3,11 +3,18 @@
 // undo step and one revision in `fynkel scene inspect --json` after save.
 // Reparenting with "keep world transform" puts the `setField`s on the
 // moved entity's Transform into the same transaction as the move.
+// Prefab mode (item 7): a derived entity (one a prefab instance expands
+// to) is not in the document, so its operations are override ops on the
+// instance's anchor — Delete is a `removeObject` override (or the revert
+// of the `addObject` that added it), Create Empty Child an `addObject`
+// override, Rename only for an added object (its `addObject` re-issued);
+// derived entities are never duplicated, dragged or drop targets.
 import 'package:flutter/foundation.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
+import '../inspector/prefab_actions.dart' as prefab;
 import '../project/editor_project.dart';
 import 'hierarchy_tree.dart';
 import 'transform_math.dart';
@@ -48,6 +55,17 @@ final class HierarchyModel extends ChangeNotifier {
   HierarchyTree? get tree => _tab?.tree;
   bool get hasDocument => _tab != null;
   bool get canEdit => _tab != null && _tab!.document.readOnly == null;
+
+  /// [id] is a derived entity of a prefab instance (not in the document).
+  bool isDerived(String id) => _tab?.tree[id]?.isDerived ?? false;
+
+  /// Whether [id] can be renamed in place: a document entity, or an
+  /// object an override added to an instance (its `addObject` is re-issued).
+  bool canRename(String id) {
+    final n = _tab?.tree[id];
+    return canEdit && n != null && (!n.isDerived || n.added);
+  }
+
   Iterable<String> get selection => _tab?.selection ?? const [];
   bool get hasSelection => _tab != null && _tab!.selection.isNotEmpty;
 
@@ -146,10 +164,12 @@ final class HierarchyModel extends ChangeNotifier {
 
   void clearSelection() => _tab?.clearSelection();
 
-  /// Reveals (expands the ancestors of) and selects [id]; false when unknown.
+  /// Reveals (expands the ancestors of) and selects [id]; false when
+  /// unknown. A derived entity of an instance not opened yet is found by
+  /// expanding the instance (`HierarchyTree.locate`).
   bool revealAndSelect(String id) {
     final t = _tab;
-    if (t == null || t.tree[id] == null) return false;
+    if (t == null || !t.tree.locate(id)) return false;
     if (!t.tree.filter.isEmpty && !t.tree.matching.contains(id)) t.tree.setFilter(const HierarchyFilter());
     t.tree.reveal(id);
     t.select(id);
@@ -176,14 +196,16 @@ final class HierarchyModel extends ChangeNotifier {
     final n = t.tree[t.lead!];
     if (n == null) return;
     if (right) {
-      if (n.children.isEmpty) return;
       if (!t.tree.expanded.contains(n.id)) {
+        if (n.children.isEmpty && !n.isPrefabInstance) return;
         t.tree.expand(n.id);
+        if (t.tree.childrenOf(n.id).isEmpty) t.tree.collapse(n.id);
       } else {
-        t.select(n.children.first);
+        final kids = t.tree.childrenOf(n.id);
+        if (kids.isNotEmpty) t.select(kids.first);
       }
     } else {
-      if (t.tree.expanded.contains(n.id) && n.children.isNotEmpty) {
+      if (t.tree.expanded.contains(n.id) && t.tree.childrenOf(n.id).isNotEmpty) {
         t.tree.collapse(n.id);
       } else if (n.parent != null) {
         t.select(n.parent!);
@@ -204,7 +226,14 @@ final class HierarchyModel extends ChangeNotifier {
 
   void beginRename([String? id]) {
     final target = id ?? _tab?.lead ?? _tab?.selection.lastOrNull;
-    if (target == null || !canEdit || _tab?.tree[target] == null) return;
+    if (target == null || !canRename(target)) {
+      final t = _tab;
+      if (t != null && target != null && canEdit && isDerived(target)) {
+        t.lastError = 'A prefab instance\'s entity is named by the prefab — rename it there (Open prefab).';
+        t.keepEditing();
+      }
+      return;
+    }
     renaming = target;
     notifyListeners();
   }
@@ -224,6 +253,18 @@ final class HierarchyModel extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    if (n.isDerived) {
+      final t = _tab!;
+      final x = t.expansionOf(n.anchor!);
+      final e = x?.entity(id);
+      if (x == null || e == null || !e.added) {
+        t.lastError = 'A prefab instance\'s entity is named by the prefab — rename it there (Open prefab).';
+        notifyListeners();
+        return false;
+      }
+      final op = prefab.reissuedAddObjectOverride(x, e, name: trimmed);
+      return _run([Command.setPrefabOverrideOp(n.anchor!, op)])?.ok ?? false;
+    }
     return _run([Command.renameObject(id, trimmed)])?.ok ?? false;
   }
 
@@ -233,8 +274,15 @@ final class HierarchyModel extends ChangeNotifier {
   bool duplicate([Iterable<String>? ids]) {
     final t = _tab;
     if (t == null) return false;
-    final targets = t.tree.topmost(ids ?? t.selection);
-    if (targets.isEmpty) return false;
+    final all = t.tree.topmost(ids ?? t.selection);
+    final targets = all.where((id) => !t.tree[id]!.isDerived).toList();
+    if (targets.isEmpty) {
+      if (all.isNotEmpty) {
+        t.lastError = 'A prefab instance\'s entities cannot be duplicated on their own — duplicate the instance.';
+        t.keepEditing();
+      }
+      return false;
+    }
     final a = _run([for (final id in targets) Command.duplicateObject(id)]);
     if (a == null || !a.ok) return false;
     final copies = [
@@ -246,6 +294,9 @@ final class HierarchyModel extends ChangeNotifier {
   }
 
   /// Deletes the topmost selected entities (their subtrees go with them).
+  /// A derived entity is removed from its instance instead: a
+  /// `removeObject` override, or — for an object an override added — the
+  /// revert of that `addObject`. One transaction for the whole selection.
   bool delete([Iterable<String>? ids]) {
     final t = _tab;
     if (t == null) return false;
@@ -257,7 +308,44 @@ final class HierarchyModel extends ChangeNotifier {
         .map(t.tree.rowIndexOf)
         .where((i) => i >= 0)
         .fold<int>(rows.length, (a, b) => a < b ? a : b);
-    final a = _run([for (final id in targets) Command.deleteObject(id)]);
+    final commands = <Map<String, Object?>>[];
+    final reverts = <String, List<int>>{};
+    final removes = <Map<String, Object?>>[];
+    for (final id in targets) {
+      final n = t.tree[id]!;
+      if (!n.isDerived) {
+        commands.add(Command.deleteObject(id));
+        continue;
+      }
+      final anchor = n.anchor!;
+      final x = t.expansionOf(anchor);
+      final e = x?.entity(id);
+      if (x == null || e == null) {
+        t.lastError = 'The prefab instance did not expand; nothing to remove.';
+        notifyListeners();
+        return false;
+      }
+      // The added objects below it lose their target with it: their
+      // `addObject`s are reverted too.
+      for (final d in [id, ...t.tree.subtree(id).where((s) => s != id)]) {
+        final de = x.entity(d);
+        if (de == null) continue;
+        if (de.added) {
+          final i = prefab.addObjectIndexOf(x, de);
+          if (i != null) (reverts[anchor] ??= []).add(i);
+        } else if (d == id) {
+          removes.add(Command.setPrefabOverrideOp(anchor, prefab.removeObjectOverride(e)));
+        }
+      }
+    }
+    // Reverts by index highest first (a removal never shifts the next),
+    // then the new override ops (appended after the removals).
+    for (final entry in reverts.entries) {
+      final indices = entry.value.toSet().toList()..sort((a, b) => b.compareTo(a));
+      commands.addAll([for (final i in indices) Command.revertPrefabOverride(entry.key, index: i)]);
+    }
+    commands.addAll(removes);
+    final a = _run(commands);
     if (a == null || !a.ok) return false;
     final after = t.tree.rows;
     if (after.isNotEmpty) {
@@ -294,6 +382,8 @@ final class HierarchyModel extends ChangeNotifier {
       components.add(componentSpec(type, data: data));
       name = type.split('.').last;
     }
+    final underNode = under == null ? null : t.tree[under];
+    if (underNode != null && underNode.isDerived) return _createDerived(underNode, name, components);
     final a = _run([Command.createObject(name: name, parent: under, components: components)]);
     if (a == null || !a.ok) return false;
     final created = a.mutations.isNotEmpty && a.mutations.first.affectedIds.isNotEmpty
@@ -301,6 +391,28 @@ final class HierarchyModel extends ChangeNotifier {
         : null;
     if (created != null && t.tree[created] != null) {
       if (under != null) t.tree.expand(under);
+      t.select(created);
+      renaming = created;
+      notifyListeners();
+    }
+    return true;
+  }
+
+  /// Under a derived entity: an `addObject` override on its anchor (one
+  /// transaction); the new derived entity is selected once the refreshed
+  /// expansion shows it.
+  bool _createDerived(HierarchyNode under, String name, List<Map<String, Object?>> components) {
+    final t = _tab!;
+    final anchor = under.anchor!;
+    final x = t.expansionOf(anchor);
+    final e = x?.entity(under.id);
+    if (x == null || e == null) return false;
+    final op = prefab.addObjectOverride(name: name, parent: e.local, components: components);
+    final a = _run([Command.setPrefabOverrideOp(anchor, op)]);
+    if (a == null || !a.ok) return false;
+    final created = t.expansionOf(anchor)?.byLocal(op['entity'] as String)?.id;
+    if (created != null && t.tree[created] != null) {
+      t.tree.expand(under.id);
       t.select(created);
       renaming = created;
       notifyListeners();
@@ -319,7 +431,7 @@ final class HierarchyModel extends ChangeNotifier {
     final parent = target.parent;
     if (parent != null) {
       final n = t.tree[parent];
-      if (n == null || n.isPrefabInstance) return false;
+      if (n == null || n.isPrefabInstance || n.isDerived) return false;
     }
     return true;
   }
@@ -332,6 +444,7 @@ final class HierarchyModel extends ChangeNotifier {
     final t = _tab;
     if (t == null || !canEdit) return false;
     final parent = target?.parent;
+    if (parent != null && (t.tree[parent]?.isDerived ?? true)) return false;
     final index = target == null ? null : (parent == null && !rootOrderIsEditable ? null : target.index);
     final components = [if (transform != null) componentSpec('fynkel.Transform', data: transform.toData())];
     final a = _run([
@@ -360,8 +473,12 @@ final class HierarchyModel extends ChangeNotifier {
     if (t == null || !canEdit) return false;
     final moving = t.tree.topmost(ids);
     if (moving.isEmpty) return false;
+    // A derived entity sits where its prefab puts it; an instance's
+    // expansion takes no document entities.
+    if (moving.any((id) => t.tree[id]!.isDerived)) return false;
     if (target.parent != null) {
-      if (t.tree[target.parent!] == null) return false;
+      final p = t.tree[target.parent!];
+      if (p == null || p.isDerived) return false;
       for (final id in moving) {
         if (t.tree.isAncestorOrSelf(id, target.parent!)) return false;
       }

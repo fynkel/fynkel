@@ -8,6 +8,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
@@ -414,6 +415,88 @@ void main() {
       expect(st.tab.undo(), isTrue);
       expect(st.tab.tree['crate']!.transform!.position, [4, 0, 0]);
       expect(st.tab.tree['robot']!.transform!.position, [-4, 0, 0]);
+    });
+
+    test('a move of a derived entity is one setPrefabOverride on its anchor; the prefab is untouched', () {
+      final r = Rig();
+      addTearDown(r.dispose);
+      final prefabDoc = r.project.addDocument(
+        FakeDocument(
+          path: '/fake/game/assets/prefabs/crate.prefab.json',
+          relativePath: 'prefabs/crate.prefab.json',
+          id: 'crate-prefab',
+          kind: 'prefab',
+          name: 'Crate',
+          roots: ['root'],
+          entities: {
+            'root': FakeDocument.entity('Crate', children: ['mesh']),
+            'mesh': FakeDocument.entity('Mesh', parent: 'root', position: [0, 1, 0]),
+          },
+        ),
+      );
+      final prefabText = prefabDoc.revision;
+      expect(
+        r.document.apply([
+          Command.instantiatePrefab(
+            prefab: {'asset': 'crate-prefab'},
+            id: 'inst',
+            name: 'Crate A',
+            components: [
+              {
+                'id': 'inst:t',
+                'type': 'fynkel.Transform',
+                'version': 1,
+                'data': {
+                  'position': [2, 0, 0],
+                  'rotation': [0, 0, 0, 1],
+                  'scale': [1, 1, 1],
+                },
+              },
+            ],
+          ),
+        ]).ok,
+        isTrue,
+      );
+      final st = r.open();
+      r.model.tool = SceneTool.move;
+      r.hierarchy.expand('inst');
+      final mesh = st.tab.tree['inst:mesh']!;
+      expect(mesh.isDerived, isTrue);
+      expect(mesh.transformId, 'inst:t');
+      st.tab.select('inst:mesh');
+      expect(r.model.noGizmoReason, isNull, reason: 'a derived entity with a Transform has the gizmo');
+      expect(r.model.gizmoGeometry()!.pivot, [2, 1, 0], reason: 'the derived entity\'s world origin');
+      final g = r.model.projectedGizmo()!;
+      final tip = g.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
+      expect(r.model.beginDrag(GizmoHandle.x, tip), isTrue);
+      r.model.updateDrag(tip + const Offset(80, 0));
+      expect(r.preview.overrides.keys, ['inst:mesh'], reason: 'previewed on the derived entity in the world');
+      final previewed = r.preview.overrides['inst:mesh']!;
+      expect(previewed.position[0], greaterThan(0.5));
+      final applied = r.model.endDrag();
+      expect(applied?.ok, isTrue);
+      expect(r.applies(), 2, reason: 'the instantiate, then exactly one transaction for the drag');
+      expect(r.document.history, 2);
+      // The override, on the anchor, addresses the prefab-local ids with the whole position.
+      final overrides = (r.document.entitiesView['inst']!['prefab'] as Map)['overrides'] as List;
+      expect(overrides, hasLength(1));
+      final o = overrides.single as Map;
+      expect(o['op'], 'setField');
+      expect(o['entity'], 'mesh');
+      expect(o['component'], 't');
+      expect(o['field'], 'position');
+      expect((o['value'] as List)[0], closeTo(previewed.position[0], 1e-9));
+      expect((o['value'] as List)[1], closeTo(1, 1e-9));
+      expect(prefabDoc.revision, prefabText, reason: 'the prefab document is never written by a drag');
+      // The world and the Hierarchy follow the committed override; undo is one step.
+      expect(r.preview.overrides, isEmpty);
+      final committed = st.tab.tree['inst:mesh']!.transform!;
+      expect(committed.position[0], closeTo(previewed.position[0], 1e-9));
+      expect(st.tab.tree['inst:mesh']!.overriddenFields, 1);
+      expect(r.preview.worldOf('inst:mesh')![12], closeTo(2 + previewed.position[0], 1e-9));
+      expect(st.tab.undo(), isTrue);
+      expect(st.tab.tree['inst:mesh']!.transform!.position, [0, 1, 0]);
+      expect(((r.document.entitiesView['inst']!['prefab'] as Map)['overrides'] as List), isEmpty);
     });
 
     test('a read-only document has no gizmo drag', () {

@@ -5,6 +5,14 @@
 // transaction's `affectedIds` only, so a 10 000-entity scene never rebuilds
 // its nodes for one rename. The flat list of visible rows (what the
 // virtualised list shows) is computed lazily and cached.
+//
+// Prefab mode (item 7): a prefab instance's anchor shows its expansion —
+// the prefab's entities under the derived ids the runtime uses — as
+// *derived* nodes below its authored children. They are fetched lazily
+// through [HierarchyTree.expansionProvider] (the session's `instance`
+// query) when an anchor is first opened or one of its derived ids is asked
+// for, cached per anchor, and dropped when the anchor changes, the
+// document is rebuilt or a prefab document edits (`invalidateExpansions`).
 import 'package:flutter/foundation.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
@@ -21,12 +29,28 @@ final class HierarchyNode {
 
   /// The `fynkel.Transform` component's id and data, when the entity has one.
   String? transformId;
+
+  /// A derived entity's Transform under its prefab-local component id —
+  /// what a `setField` override on the anchor addresses (the gizmo's
+  /// drag of a derived entity, M4-07). Null for a document entity.
+  String? transformLocal;
   Trs? transform;
 
   /// Set for the root entity of a prefab instance.
   bool isPrefabInstance = false;
   String? prefabAsset;
   int overrideCount = 0;
+
+  /// Prefab mode: the anchor whose expansion this derived node belongs to
+  /// (null for an entity of the document), the prefab-local id overrides
+  /// address, whether an `addObject` override added it, and how many of
+  /// its fields overrides touch.
+  String? anchor;
+  String? local;
+  bool added = false;
+  int overriddenFields = 0;
+
+  bool get isDerived => anchor != null;
 
   /// Bumped on every patch; a row widget keyed on it repaints only then.
   int version = 0;
@@ -66,6 +90,40 @@ final class HierarchyNode {
       prefabAsset = null;
       overrideCount = 0;
     }
+    version++;
+  }
+
+  /// Reads a derived entity of [anchor]'s expansion: the applied
+  /// components (so the icons, the filter and the world matrix are right);
+  /// `transformId` is the derived component id and `transformLocal` the
+  /// prefab's — the gizmo's drag of a derived entity becomes a `setField`
+  /// override on the anchor, never a write to the prefab.
+  void readExpanded(ExpandedEntity e, {required String anchor}) {
+    name = e.name;
+    parent = e.parent;
+    children = List.of(e.children);
+    this.anchor = anchor;
+    local = e.local;
+    added = e.added;
+    transformId = null;
+    transformLocal = null;
+    transform = null;
+    final types = <String>[];
+    var overridden = 0;
+    for (final c in e.components.values) {
+      types.add(c.type);
+      overridden += c.overridden.length;
+      if (c.type == 'fynkel.Transform' && transformId == null) {
+        transformId = c.id;
+        transformLocal = c.local ?? c.id;
+        transform = Trs.fromData(c.data);
+      }
+    }
+    componentTypes = types;
+    overriddenFields = overridden;
+    isPrefabInstance = false;
+    prefabAsset = null;
+    overrideCount = 0;
     version++;
   }
 
@@ -168,15 +226,52 @@ final class HierarchyTree extends ChangeNotifier {
   int builds = 0;
   int patches = 0;
 
+  /// Prefab mode: answers an anchor's expansion (the `instance` query), or
+  /// null when it cannot be asked; set by the tab. Called lazily — when an
+  /// anchor is opened, or a derived id it owns is looked up.
+  PrefabExpansion? Function(String anchor)? expansionProvider;
+
+  /// The expansions fetched so far, by anchor (an entry may be an
+  /// unexpanded one: `expanded` false with its diagnostics).
+  final expansions = <String, PrefabExpansion>{};
+
+  /// Anchors asked and answered null (no provider, a query failure) — not
+  /// asked again until invalidated.
+  final _unanswered = <String>{};
+
+  /// Derived id → its anchor, for every derived id ever fetched here; kept
+  /// through invalidation because the ids are deterministic, so a selected
+  /// derived entity survives its anchor's refetch.
+  final _anchorOfDerived = <String, String>{};
+
+  /// Counter the tests read: `instance` queries asked.
+  int expansionFetches = 0;
+
   HierarchyFilter _filter = const HierarchyFilter();
   HierarchyFilter get filter => _filter;
   List<HierarchyRow>? _rows;
   Set<String>? _matching;
 
-  bool get isEmpty => nodes.isEmpty;
-  int get entityCount => nodes.length;
+  bool get isEmpty => entityCount == 0;
 
-  HierarchyNode? operator [](String id) => nodes[id];
+  /// The document's own entities (derived nodes are not counted).
+  int get entityCount => _documentEntities;
+  int _documentEntities = 0;
+
+  /// The node of [id]; a derived id whose anchor's expansion is not
+  /// fetched yet (or was dropped) fetches it first.
+  HierarchyNode? operator [](String id) {
+    final n = nodes[id];
+    if (n != null) return n;
+    final anchor = _anchorOfDerived[id];
+    if (anchor != null && nodes[anchor]?.isPrefabInstance == true) {
+      expansionOf(anchor);
+      return nodes[id];
+    }
+    return null;
+  }
+
+  bool contains(String id) => this[id] != null;
 
   /// Reads the whole document (`entities` by id, `roots` when the kind has them).
   void build(Map<String, Object?> root, {List<String>? roots}) {
@@ -201,7 +296,10 @@ final class HierarchyTree extends ChangeNotifier {
           if (n.parent == null) n.id,
       ];
     }
-    expanded.removeWhere((id) => !nodes.containsKey(id));
+    _documentEntities = nodes.length;
+    expanded.removeWhere((id) => !nodes.containsKey(id) && !_anchorOfDerived.containsKey(id));
+    expansions.clear();
+    _unanswered.clear();
     builds++;
     _invalidate();
   }
@@ -212,11 +310,15 @@ final class HierarchyTree extends ChangeNotifier {
   void patch(EntityPatch p) {
     for (final e in p.entities.entries) {
       final v = e.value;
+      final before = nodes[e.key];
+      if (before != null && !before.isDerived) _documentEntities--;
+      if (before?.isPrefabInstance ?? false) invalidateExpansion(e.key);
       if (v == null) {
         nodes.remove(e.key);
         expanded.remove(e.key);
       } else {
         (nodes[e.key] ??= HierarchyNode(e.key)).read(v);
+        _documentEntities++;
       }
     }
     roots = [
@@ -225,6 +327,103 @@ final class HierarchyTree extends ChangeNotifier {
     ];
     patches++;
     _invalidate();
+  }
+
+  // ── Prefab mode: expansions ───────────────────────────────────────────
+
+  /// The expansion of [anchor], fetched now when it is not cached; null
+  /// when [anchor] is not a prefab instance or the provider cannot answer.
+  PrefabExpansion? expansionOf(String anchor) {
+    final cached = expansions[anchor];
+    if (cached != null) return cached;
+    final n = nodes[anchor];
+    if (n == null || !n.isPrefabInstance || _unanswered.contains(anchor)) return null;
+    final provider = expansionProvider;
+    if (provider == null) return null;
+    expansionFetches++;
+    final x = provider(anchor);
+    if (x == null) {
+      _unanswered.add(anchor);
+      return null;
+    }
+    expansions[anchor] = x;
+    for (final e in x.entities) {
+      _anchorOfDerived[e.id] = anchor;
+      (nodes[e.id] ??= HierarchyNode(e.id)).readExpanded(e, anchor: anchor);
+    }
+    _rows = null;
+    _matching = null;
+    return x;
+  }
+
+  /// The instance roots the expansion of [anchor] adds below its authored
+  /// children (empty for a plain entity or an unexpanded instance).
+  List<String> instanceRootsOf(String anchor) {
+    final x = expansionOf(anchor);
+    if (x == null) return const [];
+    return [
+      for (final e in x.entities)
+        if (e.parent == anchor) e.id,
+    ];
+  }
+
+  /// The children a row opens to: the document's, then the instance's roots.
+  List<String> childrenOf(String id) {
+    final n = nodes[id];
+    if (n == null) return const [];
+    if (!n.isPrefabInstance) return n.children;
+    final derived = instanceRootsOf(id);
+    return derived.isEmpty ? n.children : [...n.children, ...derived];
+  }
+
+  /// Drops the cached expansion of [anchor] and its derived nodes; the next
+  /// look re-asks the provider.
+  void invalidateExpansion(String anchor) {
+    final x = expansions.remove(anchor);
+    _unanswered.remove(anchor);
+    if (x == null) return;
+    for (final e in x.entities) {
+      if (nodes[e.id]?.anchor == anchor) nodes.remove(e.id);
+    }
+    _rows = null;
+    _matching = null;
+  }
+
+  /// Drops every cached expansion (a prefab document changed, a reload).
+  void invalidateExpansions() {
+    for (final a in expansions.keys.toList()) {
+      invalidateExpansion(a);
+    }
+    _unanswered.clear();
+    _invalidate();
+  }
+
+  /// Re-fetches the expansions that were cached (so an open instance stays
+  /// open with fresh derived nodes) and notifies.
+  void refreshExpansions() {
+    final anchors = expansions.keys.toList();
+    invalidateExpansions();
+    for (final a in anchors) {
+      expansionOf(a);
+    }
+    _invalidate();
+  }
+
+  /// The anchor a derived [id] belongs to, or null for a document entity.
+  String? anchorOf(String id) => nodes[id]?.anchor ?? _anchorOfDerived[id];
+
+  /// Makes [id] a known node when it is a derived entity of an instance
+  /// whose expansion was not fetched yet (a Console diagnostic names an
+  /// expanded entity): asks each unexpanded instance in turn. False when no
+  /// node and no expansion holds it.
+  bool locate(String id) {
+    if (nodes[id] != null) return true;
+    for (final n in nodes.values.toList()) {
+      if (!n.isPrefabInstance || expansions.containsKey(n.id)) continue;
+      expansionOf(n.id);
+      if (nodes[id] != null) return true;
+    }
+    return false;
   }
 
   void setErrors(Map<String, List<Diagnostic>> e) {
@@ -303,12 +502,13 @@ final class HierarchyTree extends ChangeNotifier {
     return m;
   }
 
-  /// A subtree's ids, [id] first, depth-first.
+  /// A subtree's ids, [id] first, depth-first (an anchor's fetched
+  /// expansion included).
   List<String> subtree(String id) {
     final out = <String>[];
     void walk(String i) {
       out.add(i);
-      for (final c in nodes[i]?.children ?? const <String>[]) {
+      for (final c in childrenOf(i)) {
         walk(c);
       }
     }
@@ -321,8 +521,21 @@ final class HierarchyTree extends ChangeNotifier {
 
   bool isExpanded(String id) => expanded.contains(id);
 
+  /// Opens [id]; a prefab instance opens whole (its derived subtree is
+  /// small and read as one thing — the first look at an instance shows
+  /// all of it), and a derived node only itself.
   void expand(String id) {
-    if (expanded.add(id)) _invalidate();
+    var changed = expanded.add(id);
+    final n = nodes[id];
+    if (n != null && n.isPrefabInstance) {
+      final x = expansionOf(id);
+      if (x != null) {
+        for (final e in x.entities) {
+          if (e.children.isNotEmpty) changed |= expanded.add(e.id);
+        }
+      }
+    }
+    if (changed) _invalidate();
   }
 
   void collapse(String id) {
@@ -333,8 +546,8 @@ final class HierarchyTree extends ChangeNotifier {
 
   void expandAll() {
     expanded.addAll([
-      for (final n in nodes.values)
-        if (n.children.isNotEmpty) n.id,
+      for (final n in nodes.values.toList())
+        if (childrenOf(n.id).isNotEmpty) n.id,
     ]);
     _invalidate();
   }
@@ -378,9 +591,14 @@ final class HierarchyTree extends ChangeNotifier {
         final n = nodes[id];
         if (n == null) return;
         final open = expanded.contains(id);
-        out.add(HierarchyRow(n, depth: depth, hasChildren: n.children.isNotEmpty, expanded: open, matches: true));
+        // A collapsed anchor's expansion is not fetched for the row: an
+        // instance has children (its prefab is never empty) unless it is
+        // fetched and known not to.
+        final kids = open || expansions.containsKey(id) ? childrenOf(id) : n.children;
+        final hasChildren = kids.isNotEmpty || (n.isPrefabInstance && !expansions.containsKey(id));
+        out.add(HierarchyRow(n, depth: depth, hasChildren: hasChildren, expanded: open, matches: true));
         if (open) {
-          for (final c in n.children) {
+          for (final c in kids) {
             walk(c, depth + 1);
           }
         }
@@ -402,7 +620,7 @@ final class HierarchyTree extends ChangeNotifier {
       final n = nodes[id];
       if (n == null || !keep.contains(id)) return;
       final kids = [
-        for (final c in n.children)
+        for (final c in childrenOf(id))
           if (keep.contains(c)) c,
       ];
       out.add(

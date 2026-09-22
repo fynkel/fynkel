@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../commands/commands.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import 'hierarchy_model.dart';
 import 'hierarchy_tree.dart';
@@ -16,13 +17,17 @@ import 'hierarchy_tree.dart';
 const hierarchyRowHeight = 24.0;
 
 class HierarchyPanel extends StatefulWidget {
-  const HierarchyPanel({super.key, required this.model, required this.onOpenDocument, this.searchFocus});
+  const HierarchyPanel({super.key, required this.model, required this.onOpenDocument, this.searchFocus, this.commands});
 
   final HierarchyModel model;
 
   /// The empty state's "Open Document…".
   final VoidCallback onOpenDocument;
   final FocusNode? searchFocus;
+
+  /// The registry the context menu's Prefab mode items run through
+  /// (`prefab.*` — the same commands as the Edit menu and the palette).
+  final CommandRegistry? commands;
 
   @override
   State<HierarchyPanel> createState() => _HierarchyPanelState();
@@ -153,6 +158,17 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       children: [
         _toolbar(context, theme),
         const Divider(height: 1),
+        if (tab.document.readOnly != null)
+          Container(
+            key: const Key('hierarchy.readOnly'),
+            width: double.infinity,
+            color: theme.colorScheme.surfaceContainerHighest,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Text(
+              'Read-only — ${tab.document.readOnly}',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+            ),
+          ),
         Expanded(
           child: rows.isEmpty
               ? Center(
@@ -472,20 +488,46 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     final n = tab.tree[id];
     if (n == null) return;
     final many = tab.selection.length > 1;
+    final derived = n.isDerived;
+    final anyDerived = tab.selection.any((s) => tab.tree[s]?.isDerived ?? false);
+    final prefabCommands = [
+      for (final cid in const [
+        'prefab.revertOverrides',
+        'prefab.applyOverrides',
+        'prefab.unpack',
+        'prefab.open',
+        'prefab.selectAsset',
+      ])
+        ?widget.commands?.byId(cid),
+    ];
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
     final choice = await showMenu<String>(
       context: context,
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
-        PopupMenuItem(value: 'rename', enabled: model.canEdit && !many, child: const Text('Rename  ↩')),
+        PopupMenuItem(value: 'rename', enabled: model.canRename(id) && !many, child: const Text('Rename  ↩')),
         PopupMenuItem(
           value: 'duplicate',
-          enabled: model.canEdit,
+          enabled: model.canEdit && !anyDerived,
           child: Text(many ? 'Duplicate Selection  ⌘D' : 'Duplicate  ⌘D'),
         ),
-        PopupMenuItem(value: 'delete', enabled: model.canEdit, child: Text(many ? 'Delete Selection  ⌫' : 'Delete  ⌫')),
+        PopupMenuItem(
+          value: 'delete',
+          enabled: model.canEdit,
+          child: Text(
+            many
+                ? 'Delete Selection  ⌫'
+                : derived
+                ? (n.added ? 'Delete  ⌫  (reverts the override that added it)' : 'Delete  ⌫  (as an override)')
+                : 'Delete  ⌫',
+          ),
+        ),
         const PopupMenuDivider(),
-        PopupMenuItem(value: 'createEmpty', enabled: model.canEdit && !many, child: const Text('Create Empty Child')),
+        PopupMenuItem(
+          value: 'createEmpty',
+          enabled: model.canEdit && !many,
+          child: Text(derived ? 'Create Empty Child  (as an override)' : 'Create Empty Child'),
+        ),
         for (final c in model.nativeComponentTypes)
           if (c.type != 'fynkel.Transform')
             PopupMenuItem(
@@ -496,14 +538,24 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
         const PopupMenuDivider(),
         PopupMenuItem(
           value: 'moveToRoot',
-          enabled: model.canEdit && tab.selection.any((s) => tab.tree[s]?.parent != null),
+          enabled: model.canEdit && !anyDerived && tab.selection.any((s) => tab.tree[s]?.parent != null),
           child: const Text('Move to Root'),
         ),
         PopupMenuItem(
           value: 'toggle',
-          enabled: n.children.isNotEmpty,
+          enabled: n.children.isNotEmpty || n.isPrefabInstance,
           child: Text(tab.tree.expanded.contains(id) ? 'Collapse' : 'Expand'),
         ),
+        if ((n.isPrefabInstance || derived) && prefabCommands.isNotEmpty) ...[
+          const PopupMenuDivider(),
+          for (final c in prefabCommands)
+            PopupMenuItem(
+              key: Key('hierarchy.menu.${c.id}'),
+              value: 'command:${c.id}',
+              enabled: c.isEnabled,
+              child: Text('${c.label}${c.shortcut == null ? '' : '  ${CommandRegistry.shortcutLabel(c.shortcut!)}'}'),
+            ),
+        ],
         const PopupMenuDivider(),
         PopupMenuItem(value: 'copyId', child: Text('Copy id  ${id.length > 13 ? '${id.substring(0, 13)}…' : id}')),
         if (n.isPrefabInstance) PopupMenuItem(value: 'copyPrefab', child: Text('Copy prefab asset id')),
@@ -530,6 +582,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
         break;
       default:
         if (choice.startsWith('createWith:')) model.createWith(choice.substring('createWith:'.length), parent: id);
+        if (choice.startsWith('command:')) widget.commands?.execute(choice.substring('command:'.length));
     }
   }
 }
@@ -727,11 +780,31 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                     key: Key('hierarchy.name.${n.id}'),
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: row.matches ? null : theme.disabledColor,
-                      fontStyle: n.name.isEmpty ? FontStyle.italic : null,
+                      color: row.matches ? (n.isDerived && !n.added ? theme.hintColor : null) : theme.disabledColor,
+                      fontStyle: n.name.isEmpty || n.isDerived ? FontStyle.italic : null,
+                      fontWeight: n.overriddenFields > 0 ? FontWeight.bold : null,
                     ),
                   ),
           ),
+          if (n.isDerived && (n.added || n.overriddenFields > 0))
+            Tooltip(
+              message: n.added
+                  ? 'Added to the instance by an override'
+                  : '${n.overriddenFields} overridden field${n.overriddenFields == 1 ? '' : 's'}',
+              child: Container(
+                key: Key('hierarchy.derived.${n.id}'),
+                margin: const EdgeInsets.only(left: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  n.added ? '+' : '${n.overriddenFields}',
+                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSecondaryContainer),
+                ),
+              ),
+            ),
           if (n.isPrefabInstance)
             Tooltip(
               message:

@@ -5,8 +5,16 @@
 // Open script, Copy type), the prefab instance's override list with Revert,
 // and Add Component as a searchable popup. Everything it writes goes
 // through `InspectorModel` — one transaction per gesture.
+//
+// Prefab mode (item 7): an instance's anchor shows its prefab (name, kind,
+// a missing or broken one with its diagnostics), the annotated override
+// list with Revert / Apply to prefab per row and for all, Unpack, Open
+// prefab and Select prefab asset; a derived entity's fields show the
+// overridden ones bold with Revert and Apply arrows, and a banner names
+// the instance it belongs to.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import 'codegen_check.dart';
 import 'field_spec.dart';
@@ -93,6 +101,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
             key: const ValueKey('inspector.list'),
             padding: const EdgeInsets.only(bottom: 12),
             children: [
+              if (model.single?.isDerived ?? false) _DerivedBanner(model: model, entity: model.single!),
               for (final slot in model.slots)
                 _ComponentCard(
                   key: ValueKey('card.${slot.key}'),
@@ -183,7 +192,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                   child: StringField(
                     key: const ValueKey('inspector.name'),
                     value: single.name,
-                    enabled: model.canEdit,
+                    enabled: model.canRename,
                     hint: 'Name',
                     onCommit: model.rename,
                   ),
@@ -488,6 +497,11 @@ class _ComponentCard extends StatelessWidget {
             label: humanize(key),
             tooltip: 'Not in the schema — edited as JSON.',
             error: model.errorFor(slot, key),
+            overridden: slot.isOverridden(key),
+            onRevert: model.canRevertField(slot, key) ? () => model.revertField(slot, key) : null,
+            onApply: slot.isOverridden(key) && model.cannotApplyField(slot, key) == null
+                ? () => model.applyField(slot, key)
+                : null,
             child: JsonField(
               value: slot.value(key),
               mixed: slot.isMixed(key),
@@ -639,6 +653,9 @@ class _FieldEditor extends StatelessWidget {
           slider: spec.slider,
           integer: spec.kind == FieldKind.integer,
           enabled: _enabled,
+          overridden: _overridden,
+          onRevert: _onRevert,
+          onApply: _onApply,
           onCommit: _commit,
         );
       case FieldKind.boolean:
@@ -773,8 +790,26 @@ class _FieldEditor extends StatelessWidget {
     }
   }
 
-  Widget _row(String label, String? error, Widget child, {String? unit}) =>
-      FieldRow(label: label, tooltip: spec.tooltip, error: error, indent: indent, unit: unit, child: child);
+  Widget _row(String label, String? error, Widget child, {String? unit}) => FieldRow(
+    label: label,
+    tooltip: spec.tooltip,
+    error: error,
+    indent: indent,
+    unit: unit,
+    overridden: _overridden,
+    onRevert: _onRevert,
+    onApply: _onApply,
+    child: child,
+  );
+
+  /// Prefab mode: the field's top-level key was written by an override on
+  /// a derived instance — bold, with Revert and (when the prefab can take
+  /// it) Apply.
+  bool get _overridden => slot.isOverridden(path);
+  VoidCallback? get _onRevert =>
+      _overridden && model.canRevertField(slot, path) ? () => model.revertField(slot, _writePath) : null;
+  VoidCallback? get _onApply =>
+      _overridden && model.cannotApplyField(slot, path) == null ? () => model.applyField(slot, _writePath) : null;
 
   Widget _array(BuildContext context, String label, String? error, Object? value) {
     final theme = Theme.of(context);
@@ -789,6 +824,9 @@ class _FieldEditor extends StatelessWidget {
           tooltip: spec.tooltip,
           error: error,
           indent: indent,
+          overridden: _overridden,
+          onRevert: _onRevert,
+          onApply: _onApply,
           child: Row(
             children: [
               Expanded(
@@ -927,6 +965,10 @@ List<Object> _numbersLike(List<double> values, List<num>? previous) => [
 
 // ── Prefab overrides ───────────────────────────────────────────────────────
 
+/// The anchor's Prefab mode section: the prefab it comes from, the
+/// override list (Revert / Apply per row, for all), Unpack, Open prefab,
+/// Select prefab asset; a missing or broken prefab shows its diagnostics
+/// and keeps the instance's data.
 class _PrefabSection extends StatelessWidget {
   const _PrefabSection({required this.model, required this.entity});
 
@@ -937,6 +979,19 @@ class _PrefabSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final p = entity.prefab!;
+    final x = entity.expansion;
+    final prefabInfo = x?.prefab;
+    final assetText = model.describeAsset({'asset': p.assetId, if (p.sub != null) 'sub': p.sub});
+    final title = prefabInfo == null
+        ? 'Prefab instance — $assetText'
+        : 'Prefab instance — ${prefabInfo.name.isEmpty ? assetText : prefabInfo.name}'
+              '${prefabInfo.isImported ? ' (imported hierarchy, read-only)' : ''}';
+    final broken = x != null && !x.expanded;
+    final missing = x == null || x.prefab == null;
+    final applyWhy = model.cannotApply(entity.id);
+    final unpackWhy = model.cannotUnpack(entity.id);
+    final overrides = x?.overrides;
+    final count = overrides?.length ?? p.overrides.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -946,29 +1001,48 @@ class _PrefabSection extends StatelessWidget {
           padding: const EdgeInsets.only(left: 8, right: 2),
           child: Row(
             children: [
-              Icon(Icons.widgets_outlined, size: 14, color: theme.hintColor),
+              Icon(
+                missing || broken ? Icons.broken_image_outlined : Icons.widgets_outlined,
+                size: 14,
+                color: missing || broken ? theme.colorScheme.error : theme.hintColor,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Prefab instance — ${model.describeAsset({'asset': p.assetId, if (p.sub != null) 'sub': p.sub})}',
+                  title,
                   key: const ValueKey('prefab.title'),
                   style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (p.overrides.isNotEmpty)
-                TextButton(
-                  key: const ValueKey('prefab.revertAll'),
-                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                  onPressed: model.canEdit ? () => model.revertOverride(entity.id) : null,
-                  child: const Text('Revert all', style: TextStyle(fontSize: 11)),
-                ),
             ],
           ),
         ),
+        if (x != null && x.diagnostics.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 8, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  missing
+                      ? 'The prefab is missing — the instance keeps its data and is not rewritten.'
+                      : 'The instance does not expand — the instance keeps its data and is not rewritten.',
+                  key: const ValueKey('prefab.broken'),
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                ),
+                for (var i = 0; i < x.diagnostics.length; i++)
+                  SelectableText(
+                    '${x.diagnostics[i].code}: ${x.diagnostics[i].message}',
+                    key: ValueKey('prefab.diagnostic.$i'),
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                  ),
+              ],
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 8, 6),
-          child: p.overrides.isEmpty
+          child: count == 0
               ? Text(
                   'No overrides — every field is the prefab\'s.',
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
@@ -976,12 +1050,14 @@ class _PrefabSection extends StatelessWidget {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (var i = 0; i < p.overrides.length; i++)
+                    for (var i = 0; i < count; i++)
                       Row(
                         children: [
                           Expanded(
                             child: Text(
-                              describeOverride(p.overrides[i]),
+                              overrides != null
+                                  ? describeExpansionOverride(overrides[i])
+                                  : describeOverride(p.overrides[i]),
                               key: ValueKey('prefab.override.$i'),
                               style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis,
@@ -995,14 +1071,137 @@ class _PrefabSection extends StatelessWidget {
                             constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
                             onPressed: model.canEdit ? () => model.revertOverride(entity.id, index: i) : null,
                           ),
+                          IconButton(
+                            key: ValueKey('prefab.apply.$i'),
+                            tooltip: applyWhy ?? 'Apply this override to the prefab',
+                            icon: const Icon(Icons.upload, size: 14),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+                            onPressed: applyWhy == null ? () => model.applyOverrides(entity.id, index: i) : null,
+                          ),
                         ],
                       ),
                   ],
                 ),
         ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 8, 6),
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 2,
+            children: [
+              if (count > 0)
+                Tooltip(
+                  message: applyWhy ?? 'Apply every override to the prefab, then revert them here',
+                  child: TextButton.icon(
+                    key: const ValueKey('prefab.applyAll'),
+                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                    onPressed: applyWhy == null ? () => model.applyOverrides(entity.id) : null,
+                    icon: const Icon(Icons.upload, size: 14),
+                    label: const Text('Apply to prefab', style: TextStyle(fontSize: 11)),
+                  ),
+                ),
+              if (count > 0)
+                TextButton.icon(
+                  key: const ValueKey('prefab.revertAll'),
+                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                  onPressed: model.canEdit ? () => model.revertOverride(entity.id) : null,
+                  icon: const Icon(Icons.undo, size: 14),
+                  label: const Text('Revert all', style: TextStyle(fontSize: 11)),
+                ),
+              Tooltip(
+                message: unpackWhy ?? 'Unpack — the instance becomes plain entities of this document',
+                child: TextButton.icon(
+                  key: const ValueKey('prefab.unpack'),
+                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                  onPressed: unpackWhy == null ? () => model.unpack(entity.id) : null,
+                  icon: const Icon(Icons.unarchive_outlined, size: 14),
+                  label: const Text('Unpack', style: TextStyle(fontSize: 11)),
+                ),
+              ),
+              TextButton.icon(
+                key: const ValueKey('prefab.open'),
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                onPressed: x == null || missing ? null : () => model.openPrefab(entity.id),
+                icon: const Icon(Icons.open_in_new, size: 14),
+                label: const Text('Open prefab', style: TextStyle(fontSize: 11)),
+              ),
+              TextButton.icon(
+                key: const ValueKey('prefab.selectAsset'),
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                onPressed: model.revealAsset == null ? null : () => model.selectPrefabAsset(entity.id),
+                icon: const Icon(Icons.folder_open_outlined, size: 14),
+                label: const Text('Select prefab asset', style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
+}
+
+/// A derived entity's banner: the instance it belongs to, whether an
+/// override added it, and a way back to the anchor.
+class _DerivedBanner extends StatelessWidget {
+  const _DerivedBanner({required this.model, required this.entity});
+
+  final InspectorModel model;
+  final EntityInfo entity;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final anchor = entity.anchor!;
+    final x = model.expansionOf(anchor);
+    final anchorName = model.tab?.tree[anchor]?.name ?? anchor;
+    final prefabName = x?.prefab?.name ?? x?.asset ?? '';
+    return Container(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      padding: const EdgeInsets.fromLTRB(8, 4, 2, 4),
+      child: Row(
+        children: [
+          Icon(Icons.widgets_outlined, size: 14, color: theme.hintColor),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              entity.added
+                  ? 'Added to the instance $anchorName by an override'
+                  : 'Part of the instance $anchorName${prefabName.isEmpty ? '' : ' (prefab $prefabName)'} — '
+                        'inherited; edits become overrides',
+              key: const ValueKey('prefab.derived'),
+              style: theme.textTheme.bodySmall,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('prefab.selectInstance'),
+            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+            onPressed: () => model.tab?.select(anchor),
+            child: const Text('Select instance', style: TextStyle(fontSize: 11)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// `setField Mesh (Crate) › Mesh Renderer › cast_shadows = false` — an
+/// override as the expansion annotates it (names, not prefab-local ids).
+String describeExpansionOverride(ExpansionOverride o) {
+  final entity = o.entityName?.isNotEmpty ?? false ? o.entityName! : o.entity;
+  final component = o.componentType ?? o.component;
+  final target = [entity, component, o.field].where((s) => s != null).join(' › ');
+  return switch (o.op) {
+    'setField' => '$target = ${prettyJson(o.value)}',
+    'unsetField' => '$target unset',
+    'addComponent' => 'add ${o.rawOp['type'] ?? component ?? ''} on $entity',
+    'removeComponent' => 'remove $target',
+    'addObject' => 'add object ${o.rawOp['name'] ?? o.entity}',
+    'removeObject' => 'remove object $entity',
+    _ => '${o.op} $target',
+  };
 }
 
 /// `setField robot/mesh.cast_shadows = false`, `addComponent …`.

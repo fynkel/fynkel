@@ -51,6 +51,7 @@ class FieldRow extends StatelessWidget {
     this.error,
     this.overridden = false,
     this.onRevert,
+    this.onApply,
     this.dragLabel,
     this.indent = 0,
     this.unit,
@@ -65,9 +66,12 @@ class FieldRow extends StatelessWidget {
   /// their narrow per-axis fields.
   final String? unit;
 
-  /// Bold label with a revert arrow (a prefab instance's overridden field; item 7 fills it).
+  /// Bold label with a revert arrow and an apply arrow (Prefab mode, item
+  /// 7: a derived entity's field an override wrote — Revert drops the
+  /// override, Apply writes it into the prefab).
   final bool overridden;
   final VoidCallback? onRevert;
+  final VoidCallback? onApply;
 
   /// When set, the label is a horizontal drag surface (numbers).
   final Widget Function(Widget label)? dragLabel;
@@ -111,11 +115,21 @@ class FieldRow extends StatelessWidget {
                         ),
                       if (overridden && onRevert != null)
                         IconButton(
-                          tooltip: 'Revert to the prefab\'s value',
+                          key: const ValueKey('field.revert'),
+                          tooltip: 'Revert override — back to the prefab\'s value',
                           icon: const Icon(Icons.undo, size: 14),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
                           onPressed: onRevert,
+                        ),
+                      if (overridden && onApply != null)
+                        IconButton(
+                          key: const ValueKey('field.apply'),
+                          tooltip: 'Apply to prefab — this value becomes the prefab\'s',
+                          icon: const Icon(Icons.upload, size: 14),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+                          onPressed: onApply,
                         ),
                     ],
                   ),
@@ -273,6 +287,9 @@ class NumberField extends StatefulWidget {
     this.label,
     this.tooltip,
     this.error,
+    this.overridden = false,
+    this.onRevert,
+    this.onApply,
     this.compact = false,
     this.onDragState,
   });
@@ -297,6 +314,11 @@ class NumberField extends StatefulWidget {
   final String? label;
   final String? tooltip;
   final String? error;
+
+  /// The row's Prefab-mode marks (see [FieldRow.overridden]).
+  final bool overridden;
+  final VoidCallback? onRevert;
+  final VoidCallback? onApply;
 
   /// A vector component: narrow, with the axis letter as the drag handle.
   final bool compact;
@@ -454,6 +476,9 @@ class _NumberFieldState extends State<NumberField> {
       label: widget.label!,
       tooltip: widget.tooltip,
       error: widget.error,
+      overridden: widget.overridden,
+      onRevert: widget.onRevert,
+      onApply: widget.onApply,
       dragLabel: _dragSurface,
       child: control,
     );

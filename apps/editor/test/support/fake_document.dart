@@ -3,10 +3,14 @@
 // deleteObject, renameObject, reparentObject, duplicateObject, setField,
 // addComponent) and the Inspector uses (setField by JSON pointer,
 // unsetField, assignAsset, removeComponent, setPrefabOverride,
-// revertPrefabOverride; `reject` stands in for the crate's validation)
-// with snapshots for undo/redo, content-hash revisions, the
+// revertPrefabOverride, unpackPrefab; `reject` stands in for the crate's
+// validation) with snapshots for undo/redo, content-hash revisions, the
 // FYN-E0001 refusal on a stale base, and — when `path` points at a real
 // file — save/reload through the disk so the conflict path can be driven.
+// Prefab mode: `instance(anchor)` answers the `instance` query through
+// [FakeDocument.expander] (the fake project's `fakeExpand`, which walks
+// the prefab document's entities and applies the override ops the way the
+// crate does, under deterministic derived ids `<instance>:<local>`).
 import 'dart:convert';
 import 'dart:io';
 
@@ -25,6 +29,8 @@ final class FakeDocument extends EditorDocument {
     List<String>? roots,
     this.readOnly,
     this.relativePath,
+    this.sub,
+    this.sourceId,
     this.onDisk = false,
     // ignore: prefer_initializing_formals
   }) : _name = name {
@@ -87,6 +93,13 @@ final class FakeDocument extends EditorDocument {
     },
   };
 
+  static String _overrideTarget(Map o) => switch (o['op']) {
+    'setField' || 'unsetField' => 'field:${o['entity']}:${o['component']}:${o['field']}',
+    'addComponent' || 'removeComponent' => 'component:${o['entity']}:${o['component']}',
+    'addObject' || 'removeObject' => 'object:${o['entity']}',
+    _ => 'other:${o['op']}:${o['entity']}:${o['component']}:${o['field']}',
+  };
+
   /// A handy entity map: Transform at [position] plus [components].
   static Map<String, Object?> entity(
     String name, {
@@ -126,6 +139,18 @@ final class FakeDocument extends EditorDocument {
   String get name => _name;
   @override
   final String? readOnly;
+
+  /// `prefab` for a fake imported hierarchy (`<id>#prefab`), with the
+  /// source asset's id in [sourceId] (the document's own id is the
+  /// sub-asset's, as the session derives it).
+  @override
+  final String? sub;
+  final String? sourceId;
+
+  /// Answers the `instance` query for an anchor of this document; the fake
+  /// project sets it (`fakeExpand` over its prefab documents). Without one
+  /// every instance is unexpanded (FYN-D0401).
+  PrefabExpansion Function(FakeDocument doc, String anchor)? expander;
 
   /// Save writes and reload reads `path` as a file.
   final bool onDisk;
@@ -238,6 +263,25 @@ final class FakeDocument extends EditorDocument {
 
   @override
   List<Diagnostic> validate() => validation;
+
+  @override
+  PrefabExpansion instance(String anchor) {
+    calls.add('instance');
+    final e = _entities[anchor];
+    if (e == null) {
+      throw AuthoringException('query', AuthoringStatus.invalidArgument, [
+        Diagnostic(code: 'FYN-E0002', severity: Severity.error, message: 'unknown entity $anchor'),
+      ]);
+    }
+    if (e['prefab'] is! Map) {
+      throw AuthoringException('query', AuthoringStatus.invalidArgument, [
+        Diagnostic(code: 'FYN-E0008', severity: Severity.error, message: 'instance: $anchor is not a prefab instance'),
+      ]);
+    }
+    final x = expander;
+    if (x != null) return x(this, anchor);
+    return fakeExpand(this, anchor, prefabs: (_, _) => null);
+  }
 
   @override
   Map<String, Object?> inspect() => {
@@ -498,14 +542,9 @@ final class FakeDocument extends EditorDocument {
         if (prefab == null) return _Result.error('$id is not a prefab instance');
         final list = (prefab['overrides'] as List?) ?? (prefab['overrides'] = <Object?>[]);
         final op = _deepCopyValue(c['override']) as Map;
-        final i = list.indexWhere(
-          (o) =>
-              o is Map &&
-              o['op'] == op['op'] &&
-              o['entity'] == op['entity'] &&
-              o['component'] == op['component'] &&
-              o['field'] == op['field'],
-        );
+        // The crate replaces the override with the same target: a field's
+        // setField/unsetField, a component's add/remove, an object's add/remove.
+        final i = list.indexWhere((o) => o is Map && _overrideTarget(o) == _overrideTarget(op));
         if (i >= 0) {
           list[i] = op;
         } else {
@@ -528,6 +567,46 @@ final class FakeDocument extends EditorDocument {
           list.removeAt(index);
         }
         return _Result([id]);
+      case 'unpackPrefab':
+        final id = c['entity'] as String;
+        final e = _entities[id];
+        if (e == null) return _Result.error('no entity $id');
+        if (e['prefab'] is! Map) return _Result.error('FYN-E0008 $id is not a prefab instance');
+        final x = instance(id);
+        if (!x.expanded) {
+          return _Result.error(
+            'FYN-E0004 unpackPrefab: the instance at $id cannot be expanded '
+            '(${x.diagnostics.map((d) => '${d.code}: ${d.message}').join('; ')})',
+          );
+        }
+        e.remove('prefab');
+        final roots = [
+          for (final d in x.entities)
+            if (d.parent == id) d.id,
+        ];
+        e['children'] = [...(e['children'] as List? ?? const []), ...roots];
+        // The derived entities follow the anchor in the document, in expansion order.
+        final next = <String, Map<String, Object?>>{};
+        final affected = <String>[id];
+        for (final entry in _entities.entries) {
+          next[entry.key] = entry.value;
+          if (entry.key != id) continue;
+          for (final d in x.entities) {
+            next[d.id] = {
+              'name': d.name,
+              'parent': d.parent,
+              'children': List<String>.of(d.children),
+              'components': {
+                for (final comp in d.components.values)
+                  comp.id: {'type': comp.type, 'version': comp.version, 'data': _deepCopyValue(comp.data)},
+              },
+            };
+            affected.add(d.id);
+            affected.addAll(d.components.keys);
+          }
+        }
+        _entities = next;
+        return _Result(affected);
       default:
         return _Result.error('unknown command ${c['command']}');
     }
@@ -724,11 +803,237 @@ final class FakeDocument extends EditorDocument {
   /// The fake backend itself, open or not (tests read its calls).
   FakePreviewBackend? get fakePreview => _preview;
 
+  /// Like the session: a closed handle's unsaved edits are gone — the next
+  /// reader (an instance's expansion) sees the saved document.
   @override
   void close() {
     _closed = true;
     _preview?.close();
+    while (dirty && _undo.isNotEmpty) {
+      final s = _undo.removeLast();
+      _entities = s.entities;
+      _roots = s.roots;
+      _name = s.name;
+    }
+    _undo.clear();
+    _redo.clear();
   }
+}
+
+/// The `instance` query, faked: expands the prefab document [prefabs]
+/// answers for the anchor's `prefab.asset` (null → FYN-D0401, unexpanded)
+/// and applies the overrides in order the way `fynkel_document::prefab`
+/// does — a bad target is FYN-D0403 and leaves the instance unexpanded,
+/// the anchor's data untouched. Derived ids are `<instance>:<local>`.
+PrefabExpansion fakeExpand(
+  FakeDocument doc,
+  String anchor, {
+  required FakeDocument? Function(String asset, String? sub) prefabs,
+  int? Function(FakeDocument prefab)? handleOf,
+}) {
+  final e = doc.entitiesView[anchor]!;
+  final prefab = e['prefab'] as Map;
+  final ref = prefab['asset'];
+  final asset = ref is Map ? ref['asset'] as String? ?? '' : ref?.toString() ?? '';
+  final sub = ref is Map ? ref['sub'] as String? : null;
+  final instance = prefab['instance'] as String? ?? anchor;
+  final rawOverrides = [
+    for (final o in prefab['overrides'] as List? ?? const [])
+      if (o is Map) Map<String, Object?>.from(o),
+  ];
+  String derive(String local) => '$instance:$local';
+  final pointerBase = '/entities/$anchor/prefab/overrides';
+  final overrides = <Map<String, Object?>>[
+    for (final (i, o) in rawOverrides.indexed) {...o, 'index': i, 'pointer': '$pointerBase/$i'},
+  ];
+  final diagnostics = <Map<String, Object?>>[];
+  final source = prefabs(asset, sub);
+  Map<String, Object?>? prefabBlock;
+  if (source == null) {
+    diagnostics.add({
+      'code': 'FYN-D0401',
+      'severity': 'error',
+      'message': 'unknown prefab ${sub == null ? asset : '$asset#$sub'}',
+      'id': anchor,
+      'pointer': '/entities/$anchor/prefab/asset',
+    });
+  } else {
+    prefabBlock = {
+      'id': source.id,
+      'name': source.name,
+      'path': source.relativePath,
+      'kind': source.sub != null ? 'source' : 'prefab',
+      'open': source.sub != null ? '${source.id}#${source.sub}' : source.id,
+      'handle': handleOf?.call(source),
+      'readOnly': source.readOnly,
+    };
+  }
+  // The prefab's entities, deep-copied, then the overrides applied.
+  final entities = <String, Map<String, Object?>>{
+    if (source != null)
+      for (final en in source.entitiesView.entries) en.key: jsonDecode(jsonEncode(en.value)) as Map<String, Object?>,
+  };
+  var roots = source == null ? <String>[] : List<String>.of(source.roots());
+  final overridden = <String, Set<String>>{}; // local component → fields
+  final addedComponents = <String>{};
+  final addedEntities = <String>{};
+  void bad(Map<String, Object?> o, String why) {
+    diagnostics.add({
+      'code': 'FYN-D0403',
+      'severity': 'error',
+      'message': 'override ${o['index']}: $why',
+      'id': anchor,
+      'pointer': o['pointer'],
+    });
+  }
+
+  if (source != null) {
+    for (final o in overrides) {
+      final local = o['entity'] as String? ?? '';
+      final target = entities[local];
+      switch (o['op']) {
+        case 'setField' || 'unsetField':
+          final comp = target == null ? null : ((target['components'] as Map)[o['component']] as Map?);
+          if (comp == null) {
+            bad(o, 'no component ${o['component']} on entity $local in the prefab');
+            continue;
+          }
+          final field = o['field'] as String? ?? '';
+          if (o['op'] == 'setField') {
+            (comp['data'] as Map)[field] = jsonDecode(jsonEncode(o['value']));
+          } else {
+            (comp['data'] as Map).remove(field);
+          }
+          (overridden[o['component'] as String] ??= {}).add(field);
+        case 'addComponent':
+          if (target == null) {
+            bad(o, 'no entity $local in the prefab');
+            continue;
+          }
+          final cid = o['component'] as String;
+          (target['components'] as Map)[cid] = {
+            'type': o['type'],
+            'version': o['version'] ?? 1,
+            'data': jsonDecode(jsonEncode(o['data'] ?? <String, Object?>{})),
+          };
+          addedComponents.add(cid);
+        case 'removeComponent':
+          final removed = target == null ? null : (target['components'] as Map).remove(o['component']);
+          if (removed == null) {
+            bad(o, 'no component ${o['component']} on entity $local in the prefab');
+            continue;
+          }
+        case 'addObject':
+          final parent = o['parent'] as String?;
+          if (parent != null && !entities.containsKey(parent)) {
+            bad(o, 'no parent $parent in the prefab');
+            continue;
+          }
+          final comps = <String, Object?>{};
+          final given = o['components'];
+          if (given is Map) {
+            for (final c in given.entries) {
+              comps[c.key as String] = jsonDecode(jsonEncode(c.value));
+              addedComponents.add(c.key as String);
+            }
+          }
+          entities[local] = {'name': o['name'] ?? '', 'parent': parent, 'children': <String>[], 'components': comps};
+          if (parent == null) {
+            roots.add(local);
+          } else {
+            (entities[parent]!['children'] as List).add(local);
+          }
+          addedEntities.add(local);
+        case 'removeObject':
+          if (target == null) {
+            bad(o, 'no entity $local in the prefab');
+            continue;
+          }
+          void drop(String id) {
+            final t = entities.remove(id);
+            if (t == null) return;
+            for (final c in t['children'] as List) {
+              drop(c as String);
+            }
+          }
+          final parent = target['parent'] as String?;
+          drop(local);
+          if (parent == null) {
+            roots.remove(local);
+          } else {
+            (entities[parent]?['children'] as List?)?.remove(local);
+          }
+        default:
+          diagnostics.add({
+            'code': 'FYN-D0407',
+            'severity': 'error',
+            'message': 'override ${o['index']}: malformed op ${o['op']}',
+            'id': anchor,
+            'pointer': o['pointer'],
+          });
+      }
+    }
+  }
+  final expanded = source != null && diagnostics.isEmpty;
+  final entityJson = <Map<String, Object?>>[];
+  if (expanded) {
+    for (final en in entities.entries) {
+      final local = en.key;
+      final t = en.value;
+      final parent = t['parent'] as String?;
+      entityJson.add({
+        'id': derive(local),
+        'local': local,
+        'name': t['name'],
+        'parent': parent == null ? anchor : derive(parent),
+        'children': [for (final c in t['children'] as List) derive(c as String)],
+        'added': addedEntities.contains(local),
+        'components': {
+          for (final c in (t['components'] as Map).entries)
+            derive(c.key as String): {
+              'id': derive(c.key as String),
+              'local': c.key,
+              'type': (c.value as Map)['type'],
+              'version': (c.value as Map)['version'] ?? 1,
+              'data': (c.value as Map)['data'],
+              'added': addedComponents.contains(c.key) || addedEntities.contains(local),
+              'overridden': (overridden[c.key]?.toList() ?? const <String>[]),
+            },
+        },
+      });
+    }
+  }
+  // Annotate the overrides with where they landed.
+  for (final o in overrides) {
+    final local = o['entity'] as String?;
+    if (expanded && local != null && entities.containsKey(local)) {
+      o['entityId'] = derive(local);
+      o['entityName'] = entities[local]!['name'];
+      final comp = o['component'] as String?;
+      if (comp != null) {
+        final c = (entities[local]!['components'] as Map)[comp] as Map?;
+        if (c != null) {
+          o['componentId'] = derive(comp);
+          o['componentType'] = c['type'];
+        } else if (o['op'] == 'removeComponent') {
+          final original = (source.entitiesView[local]?['components'] as Map?)?[comp] as Map?;
+          o['componentType'] = original?['type'];
+        }
+      }
+    } else if (local != null && source != null && source.entitiesView.containsKey(local)) {
+      o['entityName'] = source.entitiesView[local]!['name'];
+    }
+  }
+  return PrefabExpansion.fromJson({
+    'anchor': anchor,
+    'instance': instance,
+    'asset': {'asset': asset, 'sub': ?sub},
+    'expanded': expanded,
+    'prefab': prefabBlock,
+    'diagnostics': diagnostics,
+    'entities': entityJson,
+    'overrides': overrides,
+  });
 }
 
 final class _Snapshot {

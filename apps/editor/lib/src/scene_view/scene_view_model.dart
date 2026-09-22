@@ -24,6 +24,7 @@ import '../documents/open_document.dart';
 import '../hierarchy/hierarchy_model.dart';
 import '../hierarchy/transform_math.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
+import '../inspector/prefab_actions.dart' as prefab;
 import '../project/editor_project.dart';
 import 'editor_state.dart';
 import 'gizmo.dart';
@@ -85,10 +86,20 @@ final class GizmoTarget {
     required this.startLocal,
     required this.startWorld,
     required this.parentWorld,
+    this.anchor,
+    this.entityLocal,
+    this.transformLocal,
   });
 
   final String id;
   final String transformId;
+
+  /// A derived entity of a prefab instance: the anchor its override goes
+  /// on, and the prefab-local ids the override addresses.
+  final String? anchor;
+  final String? entityLocal;
+  final String? transformLocal;
+  bool get isDerived => anchor != null;
   final Trs startLocal;
   final List<double> startWorld;
   final List<double> parentWorld;
@@ -862,6 +873,9 @@ final class SceneViewModel extends ChangeNotifier {
     if (_dragTargets(t).isNotEmpty) return null;
     final top = t.tab.tree.topmost(t.tab.selection);
     if (top.every(t.state.locked.contains)) return 'locked (L to unlock)';
+    if (top.any((id) => t.tab.tree[id]?.isDerived ?? false)) {
+      return 'no Transform component on the prefab\'s entity — add one in the Inspector (an override) to move it';
+    }
     return 'no Transform component — add one in the Inspector to move it';
   }
 
@@ -932,6 +946,9 @@ final class SceneViewModel extends ChangeNotifier {
           startLocal: node.transform ?? Trs.identity,
           startWorld: world,
           parentWorld: parentWorld,
+          anchor: node.anchor,
+          entityLocal: node.local,
+          transformLocal: node.transformLocal,
         ),
       );
     }
@@ -1099,9 +1116,10 @@ final class SceneViewModel extends ChangeNotifier {
   }
 
   /// The drag ends: the previewed transforms become one transaction of
-  /// `setField`s (only the fields that changed); a drag that moved
-  /// nothing writes nothing. Returns the transaction's outcome (null when
-  /// none was needed or the call failed).
+  /// `setField`s (only the fields that changed) — for a derived entity of
+  /// a prefab instance, `setField` overrides on its anchor (M4-07); a drag
+  /// that moved nothing writes nothing. Returns the transaction's outcome
+  /// (null when none was needed or the call failed).
   Applied? endDrag() {
     final d = drag;
     final t = current;
@@ -1116,7 +1134,21 @@ final class SceneViewModel extends ChangeNotifier {
       if (!d.moved || target.current.sameAs(target.startLocal)) continue;
       final before = target.startLocal.toData(), after = target.current.toData();
       for (final field in const ['position', 'rotation', 'scale']) {
-        if ('${before[field]}' != '${after[field]}') {
+        if ('${before[field]}' == '${after[field]}') continue;
+        if (target.isDerived) {
+          commands.add(
+            Command.setPrefabOverrideOp(
+              target.anchor!,
+              prefab.setFieldOverride(
+                entity: target.entityLocal ?? target.id,
+                component: target.transformLocal ?? target.transformId,
+                data: after,
+                path: field,
+                value: after[field],
+              ),
+            ),
+          );
+        } else {
           commands.add(Command.setField(target.id, target.transformId, field, after[field]));
         }
       }

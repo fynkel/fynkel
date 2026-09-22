@@ -514,6 +514,14 @@ class _AssetPanelState extends State<AssetPanel> {
             '${uuid.length > 8 ? uuid.substring(0, 8) : uuid}…',
             style: theme.textTheme.labelSmall?.copyWith(fontFamily: 'monospace', color: theme.hintColor),
           ),
+          if (kind == 'prefab')
+            IconButton(
+              key: Key('asset.sub.open.$sub'),
+              tooltip: 'Open the imported hierarchy in a tab (read-only; Prefab mode)',
+              icon: const Icon(Icons.open_in_new, size: 12),
+              visualDensity: VisualDensity.compact,
+              onPressed: () => widget.onOpenDocument('${e.id}#$sub'),
+            ),
           IconButton(
             tooltip: 'Copy the sub-asset uuid',
             icon: const Icon(Icons.copy, size: 12),

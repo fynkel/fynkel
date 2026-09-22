@@ -39,7 +39,16 @@ abstract class EditorDocument extends ChangeNotifier {
 
   /// Committed transactions in the history.
   int get history;
+
+  /// Why the document cannot be edited: the project's reason, or — for an
+  /// imported hierarchy — the source its entities are derived from.
   String? get readOnly;
+
+  /// `prefab` when this is an imported hierarchy opened as `<id>#prefab`
+  /// (a model source's or a rig document's node tree, read-only, under the
+  /// derived ids its instances use); null for a document of the project.
+  String? get sub;
+  bool get isImportedHierarchy => sub != null;
   bool get isClosed;
 
   /// What the last notification was about.
@@ -70,6 +79,13 @@ abstract class EditorDocument extends ChangeNotifier {
 
   /// The typed view `fynkel scene|prefab inspect --json` prints.
   Map<String, Object?> inspect();
+
+  /// Prefab mode (item 7): the expansion of the prefab instance anchored
+  /// at [anchor] — its derived entities with the overrides applied and
+  /// marked, the prefab it comes from, why it did not expand when it did
+  /// not. Live: an open prefab document contributes its unsaved edits.
+  /// Not an instance: `AuthoringException` FYN-E0008; unknown: FYN-E0002.
+  PrefabExpansion instance(String anchor);
 
   /// The edit-preview world of this scene or prefab (item 6), opened on
   /// first use; a material has none (`AuthoringException`, FYN-T0003).
@@ -205,6 +221,8 @@ final class SessionDocument extends EditorDocument {
   @override
   String? get readOnly => state.readOnly;
   @override
+  String? get sub => state.sub;
+  @override
   bool get isClosed => handle.isClosed;
   @override
   DocumentEdit? get lastEdit => _lastEdit;
@@ -243,6 +261,8 @@ final class SessionDocument extends EditorDocument {
   List<Diagnostic> validate() => handle.validate();
   @override
   Map<String, Object?> inspect() => handle.inspect();
+  @override
+  PrefabExpansion instance(String anchor) => handle.instance(anchor);
 
   SessionPreview? _preview;
 

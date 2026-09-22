@@ -114,11 +114,36 @@ final class FakePreviewBackend implements PreviewBackend {
 
   // ── Transforms ─────────────────────────────────────────────────────────
 
+  /// The expanded entities of every prefab instance, as the real world
+  /// holds them under their derived ids (M4-07): parent and Transform.
+  Map<String, (String?, Trs?)> get _derived {
+    final out = <String, (String?, Trs?)>{};
+    for (final e in document.entitiesView.entries) {
+      if (e.value['prefab'] == null) continue;
+      final PrefabExpansion x;
+      try {
+        x = document.instance(e.key);
+      } on AuthoringException {
+        continue;
+      }
+      for (final d in x.entities) {
+        Trs? t;
+        for (final c in d.components.values) {
+          if (c.type == 'fynkel.Transform') t ??= Trs.fromData(c.data);
+        }
+        out[d.id] = (d.parent, t);
+      }
+    }
+    return out;
+  }
+
+  bool _known(String id) => document.entitiesView.containsKey(id) || _derived.containsKey(id);
+
   Trs? _local(String id) {
     final o = overrides[id];
     if (o != null) return o;
     final e = document.entitiesView[id];
-    if (e == null) return null;
+    if (e == null) return _derived[id]?.$2;
     for (final c in (e['components'] as Map? ?? const {}).values) {
       if (c is Map && c['type'] == 'fynkel.Transform') {
         final d = c['data'];
@@ -128,14 +153,16 @@ final class FakePreviewBackend implements PreviewBackend {
     return null;
   }
 
-  /// The world matrix of [id] from the document and the overrides; null
-  /// for an entity without a Transform (or unknown).
+  String? _parentOf(String id) => document.entitiesView[id]?['parent'] as String? ?? _derived[id]?.$1;
+
+  /// The world matrix of [id] from the document, the expansions and the
+  /// overrides; null for an entity without a Transform (or unknown).
   List<double>? worldOf(String id) {
     final chain = <String>[];
     String? cur = id;
     while (cur != null && chain.length < 100000) {
       chain.insert(0, cur);
-      cur = document.entitiesView[cur]?['parent'] as String?;
+      cur = _parentOf(cur);
     }
     if (_local(id) == null) return null;
     var m = List.of(identityMatrix);
@@ -346,7 +373,7 @@ final class FakePreviewBackend implements PreviewBackend {
   void setTransforms(Iterable<PreviewTransform> transforms) {
     _check('setTransforms');
     for (final t in transforms) {
-      if (!document.entitiesView.containsKey(t.id)) continue;
+      if (!_known(t.id)) continue;
       overrides[t.id] = Trs(position: t.position, rotation: t.rotation, scale: t.scale);
     }
   }

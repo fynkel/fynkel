@@ -182,6 +182,54 @@ void main() {
       expect(back[i], closeTo(startWorld[i], 1e-6), reason: 'element $i');
     }
 
+    // Move the entity *inside* Crate A (its derived `Crate`, M4-07): the
+    // drag previews on the derived entity in the world and commits as one
+    // `setPrefabOverride` on the anchor — the prefab file is untouched,
+    // the incremental sync moves the derived entity, one undo.
+    s.hierarchy.expand(crateA);
+    final derived = tab.tree.childrenOf(crateA).singleWhere((id) => tab.tree[id]!.isDerived);
+    expect(tab.tree[derived]!.transformId, isNotNull);
+    tab.select(derived);
+    s.model.tool = SceneTool.move;
+    s.model.frameSelected();
+    st.camera.distance = 8;
+    expect(s.model.noGizmoReason, isNull);
+    final derivedStart = preview.worldMatrices([derived])[derived]!;
+    final dg = s.model.projectedGizmo()!;
+    final dtip = dg.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
+    expect(s.model.beginDrag(GizmoHandle.x, dtip), isTrue);
+    s.model.updateDrag(dtip + const Offset(120, 0));
+    final derivedPreviewed = preview.worldMatrices([derived])[derived]!;
+    expect(derivedPreviewed[12], greaterThan(derivedStart[12] + 0.5));
+    expect(tab.document.history, history);
+    final prefabBytes = File('${s.dir.path}/assets/prefabs/crate.prefab.json').readAsBytesSync();
+    syncs.clear();
+    final dApplied = s.model.endDrag();
+    expect(dApplied, isNotNull, reason: s.model.notice);
+    expect(dApplied!.ok, isTrue, reason: dApplied.diagnostics.join('; '));
+    expect(tab.document.history, history + 1, reason: 'one transaction');
+    final overrides = (tab.document.entities([crateA]).entities[crateA]!['prefab'] as Map)['overrides'] as List;
+    final positionOverride = overrides.whereType<Map>().where((o) => o['field'] == 'position').toList();
+    expect(positionOverride, hasLength(1), reason: 'a setField override on the anchor: $overrides');
+    expect(positionOverride.single['op'], 'setField');
+    expect(positionOverride.single['entity'], tab.tree[derived]!.local);
+    expect(positionOverride.single['component'], tab.tree[derived]!.transformLocal);
+    final dCommitted = preview.worldMatrices([derived])[derived]!;
+    expect(dCommitted[12], closeTo(derivedPreviewed[12], 1e-4));
+    expect(tab.tree[derived]!.overriddenFields, greaterThanOrEqualTo(1));
+    expect(File('${s.dir.path}/assets/prefabs/crate.prefab.json').readAsBytesSync(), prefabBytes);
+    await Future<void>.delayed(Duration.zero);
+    expect(syncs.single.reloaded, isFalse, reason: 'the incremental sync');
+    final incremental2 = preview.dump();
+    preview.reload();
+    expect(preview.dump(), incremental2);
+    expect(tab.undo(), isTrue);
+    expect(tab.document.history, history);
+    final dBack = preview.worldMatrices([derived])[derived]!;
+    for (var i = 0; i < 16; i++) {
+      expect(dBack[i], closeTo(derivedStart[i], 1e-6), reason: 'element $i');
+    }
+
     // Rotate Crate B (a rigid body) about its local Y with snapping: one
     // transaction, rotation only.
     s.model.tool = SceneTool.rotate;

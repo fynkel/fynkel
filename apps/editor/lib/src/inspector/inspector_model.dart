@@ -13,6 +13,14 @@
 //
 // Specs come from `field_spec.dart` over the project's schemas and the
 // committed behaviour metadata; nothing here runs game code.
+//
+// Prefab mode (item 7): a selected derived entity (one a prefab instance
+// expands to) is read from its anchor's expansion, not the document; its
+// slots show the applied values with the overridden fields marked, and
+// every edit becomes an override op on the anchor (`setPrefabOverride`,
+// one transaction) — a field's `setField`/`unsetField`, `addComponent`,
+// `removeComponent`, an added object's re-issued `addObject`. Per field:
+// Revert (drop that override) and Apply to prefab (`prefab_actions.dart`).
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
@@ -25,6 +33,7 @@ import '../project/editor_project.dart';
 import 'codegen_check.dart';
 import 'field_spec.dart';
 import 'inspector_math.dart';
+import 'prefab_actions.dart' as prefab;
 
 /// One component on one selected entity.
 final class ComponentInstance {
@@ -34,6 +43,11 @@ final class ComponentInstance {
     required this.type,
     required this.version,
     required this.data,
+    this.anchor,
+    this.entityLocal,
+    this.local,
+    this.added = false,
+    this.overridden = const {},
   });
 
   final String entityId;
@@ -41,6 +55,18 @@ final class ComponentInstance {
   final String type;
   final int version;
   final Map<String, Object?> data;
+
+  /// Set on a derived component: the prefab instance's anchor, the
+  /// prefab-local ids of the entity and the component (what an override
+  /// names), whether an override added the component, and the keys of
+  /// `data` an override wrote.
+  final String? anchor;
+  final String? entityLocal;
+  final String? local;
+  final bool added;
+  final Set<String> overridden;
+
+  bool get isDerived => anchor != null;
 }
 
 /// The same component type at the same position on every selected entity.
@@ -76,17 +102,47 @@ final class ComponentSlot {
   /// Whether every instance has [path] set (a missing key means the schema default applies).
   bool isSet(String path) => instances.every((i) => hasPath(i.data, path));
 
+  /// Every instance is a derived component of a prefab instance.
+  bool get isDerived => instances.every((i) => i.isDerived);
+
+  /// Some instance is derived (mixed derived and document components edit
+  /// per instance: overrides for the derived, `setField`s for the rest).
+  bool get anyDerived => instances.any((i) => i.isDerived);
+
+  /// Whether [path]'s top-level key is overridden on some derived instance (shown bold).
+  bool isOverridden(String path) {
+    final key = topLevelKey(path);
+    return instances.any((i) => i.isDerived && i.overridden.contains(key));
+  }
+
   @override
   String toString() => 'ComponentSlot($key × ${instances.length})';
 }
 
 /// A selected entity's header data.
 final class EntityInfo {
-  const EntityInfo({required this.id, required this.name, this.prefab});
+  const EntityInfo({
+    required this.id,
+    required this.name,
+    this.prefab,
+    this.expansion,
+    this.anchor,
+    this.added = false,
+  });
 
   final String id;
   final String name;
   final PrefabInstanceInfo? prefab;
+
+  /// For an anchor: its expansion (the prefab it comes from, the annotated
+  /// overrides, why it did not expand); null when the query failed.
+  final PrefabExpansion? expansion;
+
+  /// For a derived entity: its instance's anchor, and whether an override added it.
+  final String? anchor;
+  final bool added;
+
+  bool get isDerived => anchor != null;
 }
 
 /// A scene entity that is a prefab instance anchor: `prefab: { asset, instance, overrides }`.
@@ -142,6 +198,10 @@ final class InspectorModel extends ChangeNotifier {
   /// read-only document): shown under the cards until the selection changes,
   /// the next transaction is accepted — from anywhere — or [dismissError].
   String? lastError;
+
+  /// Select prefab asset: reveals the asset in the Project browser (wired
+  /// by the shell); null when no browser is around.
+  void Function(String assetId, String? sub)? revealAsset;
 
   void dismissError() {
     if (lastError == null) return;
@@ -222,22 +282,63 @@ final class InspectorModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    final EntityPatch patch;
-    try {
-      patch = t.document.entities(_ids);
-    } catch (e) {
-      lastError = '$e';
-      _entities = const [];
-      _slots = const [];
-      notifyListeners();
-      return;
+    // Derived entities are read from their anchor's expansion; the rest
+    // from the document in one `entities` query.
+    final documentIds = [
+      for (final id in _ids)
+        if (!(t.tree[id]?.isDerived ?? false)) id,
+    ];
+    EntityPatch? patch;
+    if (documentIds.isNotEmpty) {
+      try {
+        patch = t.document.entities(documentIds);
+      } catch (e) {
+        lastError = '$e';
+        _entities = const [];
+        _slots = const [];
+        notifyListeners();
+        return;
+      }
     }
     final infos = <EntityInfo>[];
     final perEntity = <List<ComponentInstance>>[];
     for (final id in _ids) {
-      final e = patch.entities[id];
+      final node = t.tree[id];
+      if (node != null && node.isDerived) {
+        final x = t.expansionOf(node.anchor!);
+        final de = x?.entity(id);
+        if (x == null || de == null) continue; // the expansion changed under us; the tab prunes next
+        infos.add(EntityInfo(id: id, name: de.name, anchor: node.anchor, added: de.added));
+        final types = _typesOn[id] = <String>{};
+        perEntity.add([
+          for (final c in de.components.entries)
+            ComponentInstance(
+              entityId: id,
+              componentId: c.key,
+              type: c.value.type,
+              version: c.value.version,
+              data: Map<String, Object?>.from(c.value.data),
+              anchor: node.anchor,
+              entityLocal: de.local,
+              local: c.value.local,
+              added: c.value.added,
+              overridden: c.value.overridden.toSet(),
+            ),
+        ]);
+        types.addAll(de.components.values.map((c) => c.type));
+        continue;
+      }
+      final e = patch?.entities[id];
       if (e == null) continue; // deleted under us; the tab prunes the selection next
-      infos.add(EntityInfo(id: id, name: e['name'] as String? ?? '', prefab: _prefabOf(e)));
+      final p = _prefabOf(e);
+      infos.add(
+        EntityInfo(
+          id: id,
+          name: e['name'] as String? ?? '',
+          prefab: p,
+          expansion: p == null ? null : t.expansionOf(id),
+        ),
+      );
       final comps = <ComponentInstance>[];
       final types = _typesOn[id] = <String>{};
       final map = e['components'];
@@ -484,18 +585,48 @@ final class InspectorModel extends ChangeNotifier {
         return false;
       }
     }
-    final commands = [
-      for (final i in slot.instances) Command.setField(i.entityId, i.componentId, field, _copyJson(value)),
-    ];
+    final commands = [for (final i in slot.instances) _setFieldCommand(i, field, value)];
     return _commit(commands, key);
+  }
+
+  /// `setField` on a document component; a `setField` override on the
+  /// anchor for a derived one (the whole top-level key, folded from the
+  /// applied value when [field] is a pointer below it).
+  Map<String, Object?> _setFieldCommand(ComponentInstance i, String field, Object? value) {
+    if (!i.isDerived) return Command.setField(i.entityId, i.componentId, field, _copyJson(value));
+    return Command.setPrefabOverrideOp(
+      i.anchor!,
+      prefab.setFieldOverride(
+        entity: i.entityLocal!,
+        component: i.local ?? i.componentId,
+        data: i.data,
+        path: field,
+        value: value,
+      ),
+    );
   }
 
   /// Several fields of the slot at once (a whole vector, Euler angles → one quaternion), one transaction.
   bool setFields(ComponentSlot slot, Map<String, Object?> values) {
     final commands = <Map<String, Object?>>[];
     for (final i in slot.instances) {
+      // A derived instance's folded keys: later entries see the earlier ones'
+      // values when two paths share a top-level key.
+      var data = i.data;
       for (final e in values.entries) {
-        commands.add(Command.setField(i.entityId, i.componentId, e.key, _copyJson(e.value)));
+        if (i.isDerived) {
+          final op = prefab.setFieldOverride(
+            entity: i.entityLocal!,
+            component: i.local ?? i.componentId,
+            data: data,
+            path: e.key,
+            value: e.value,
+          );
+          data = {...data, op['field'] as String: op['value']};
+          commands.add(Command.setPrefabOverrideOp(i.anchor!, op));
+        } else {
+          commands.add(Command.setField(i.entityId, i.componentId, e.key, _copyJson(e.value)));
+        }
       }
     }
     final key = '${slot.key}/${_topLevel(values.keys.first)}';
@@ -505,7 +636,160 @@ final class InspectorModel extends ChangeNotifier {
   /// Removes [field] from every instance (the schema default applies again).
   bool unsetField(ComponentSlot slot, String field) {
     final key = '${slot.key}/${_topLevel(field)}';
-    return _commit([for (final i in slot.instances) Command.unsetField(i.entityId, i.componentId, field)], key);
+    return _commit([
+      for (final i in slot.instances)
+        i.isDerived
+            ? Command.setPrefabOverrideOp(
+                i.anchor!,
+                prefab.unsetFieldOverride(entity: i.entityLocal!, component: i.local ?? i.componentId, path: field),
+              )
+            : Command.unsetField(i.entityId, i.componentId, field),
+    ], key);
+  }
+
+  // ── Prefab mode ─────────────────────────────────────────────────────────
+
+  /// The override indices, per anchor, that wrote [field] of the slot's
+  /// derived instances (empty when the field is inherited everywhere).
+  Map<String, List<int>> _fieldOverrides(ComponentSlot slot, String field) {
+    final t = _tab;
+    final out = <String, List<int>>{};
+    if (t == null) return out;
+    final key = topLevelKey(field);
+    for (final i in slot.instances) {
+      if (!i.isDerived) continue;
+      final x = t.expansionOf(i.anchor!);
+      if (x == null) continue;
+      final index = prefab.fieldOverrideIndexOf(
+        x,
+        entity: i.entityLocal!,
+        component: i.local ?? i.componentId,
+        field: key,
+      );
+      if (index != null) (out[i.anchor!] ??= []).add(index);
+    }
+    return out;
+  }
+
+  /// Whether Revert / Apply to prefab is offered on [field] of [slot]: the
+  /// field is overridden on a derived instance and the document is editable.
+  bool canRevertField(ComponentSlot slot, String field) => canEdit && slot.isOverridden(field);
+
+  /// Why Apply to prefab is not possible for the slot's anchors, or null.
+  String? cannotApplyField(ComponentSlot slot, String field) {
+    final t = _tab;
+    if (t == null) return 'No document.';
+    if (!slot.isOverridden(field)) return 'This field is the prefab\'s.';
+    for (final i in slot.instances) {
+      if (!i.isDerived) continue;
+      final x = t.expansionOf(i.anchor!);
+      if (x == null) return 'The instance did not expand.';
+      final why = prefab.cannotApply(t, x);
+      if (why != null) return why;
+    }
+    return null;
+  }
+
+  /// Revert override on one field: drops the override(s) that wrote it on
+  /// the slot's derived instances. One transaction.
+  bool revertField(ComponentSlot slot, String field) {
+    final per = _fieldOverrides(slot, field);
+    if (per.isEmpty) return false;
+    final commands = <Map<String, Object?>>[];
+    for (final e in per.entries) {
+      final indices = e.value.toSet().toList()..sort((a, b) => b.compareTo(a));
+      commands.addAll([for (final i in indices) Command.revertPrefabOverride(e.key, index: i)]);
+    }
+    return _commit(commands, '${slot.key}/${_topLevel(field)}');
+  }
+
+  /// Apply to prefab on one field: the override(s) that wrote it become the
+  /// prefab's value (a transaction on the prefab document), then are
+  /// reverted on the instance — per anchor, two undo steps each.
+  bool applyField(ComponentSlot slot, String field) {
+    final t = _tab;
+    final per = _fieldOverrides(slot, field);
+    if (t == null || per.isEmpty) return false;
+    final key = '${slot.key}/${_topLevel(field)}';
+    for (final e in per.entries) {
+      final outcome = prefab.applyOverrides(tabs, t, e.key, indices: e.value);
+      if (!outcome.ok) {
+        _errors[key] = outcome.error ?? 'Apply to prefab failed.';
+        lastError = outcome.error;
+        notifyListeners();
+        return false;
+      }
+    }
+    _errors.remove(key);
+    notifyListeners();
+    return true;
+  }
+
+  /// The expansion of the selected anchor [entityId] (fetched now when needed).
+  PrefabExpansion? expansionOf(String entityId) => _tab?.expansionOf(entityId);
+
+  /// Why Apply to prefab is not possible for the anchor [entityId], or null.
+  String? cannotApply(String entityId) {
+    final t = _tab;
+    final x = t?.expansionOf(entityId);
+    if (t == null || x == null) return 'Not a prefab instance.';
+    return prefab.cannotApply(t, x);
+  }
+
+  /// Why Unpack is not possible for the anchor [entityId], or null.
+  String? cannotUnpack(String entityId) {
+    final t = _tab;
+    final x = t?.expansionOf(entityId);
+    if (t == null || x == null) return 'Not a prefab instance.';
+    return prefab.cannotUnpack(t, x);
+  }
+
+  /// Apply to prefab: every override of the instance [entityId] (or the one
+  /// at [index]) is written to the prefab document — its tab opens behind
+  /// this one — then reverted here. Two undo steps, one per document.
+  bool applyOverrides(String entityId, {int? index}) {
+    final t = _tab;
+    if (t == null || !canEdit) return false;
+    final outcome = prefab.applyOverrides(tabs, t, entityId, indices: index == null ? null : [index]);
+    lastError = outcome.ok ? null : outcome.error;
+    notifyListeners();
+    return outcome.ok;
+  }
+
+  /// Unpack: the instance [entityId] becomes plain entities, one transaction.
+  bool unpack(String entityId) {
+    final t = _tab;
+    if (t == null || !canEdit) return false;
+    final ok = prefab.unpackInstance(t, entityId);
+    lastError = ok ? null : t.lastError;
+    notifyListeners();
+    return ok;
+  }
+
+  /// Open prefab: the instance's prefab document (an imported hierarchy
+  /// read-only) in its own tab, focused.
+  bool openPrefab(String entityId) {
+    final x = _tab?.expansionOf(entityId);
+    if (x == null) return false;
+    final tab = tabs.openDocument(x.open);
+    if (tab == null) {
+      lastError = tabs.openError;
+      notifyListeners();
+      return false;
+    }
+    return true;
+  }
+
+  /// Select prefab asset: reveals the prefab (or the model source) in the
+  /// Project browser.
+  bool selectPrefabAsset(String entityId) {
+    final reveal = revealAsset;
+    final x = _tab?.expansionOf(entityId);
+    final e = _entities.where((e) => e.id == entityId).firstOrNull;
+    final asset = x?.asset ?? e?.prefab?.assetId;
+    if (reveal == null || asset == null) return false;
+    reveal(asset, x == null ? e?.prefab?.sub : (x.sub.isEmpty ? null : x.sub));
+    return true;
   }
 
   bool _commit(List<Map<String, Object?>> commands, String errorKey) {
@@ -554,18 +838,66 @@ final class InspectorModel extends ChangeNotifier {
       }
       data = d;
     }
-    final commands = [
-      for (final e in _entities)
-        Command.addComponent(e.id, {'type': type, 'version': spec.version ?? 1, 'data': _copyJson(data)}),
-    ];
+    final t = _tab!;
+    final commands = <Map<String, Object?>>[];
+    for (final e in _entities) {
+      if (e.isDerived) {
+        final local = t.expansionOf(e.anchor!)?.entity(e.id)?.local;
+        if (local == null) continue;
+        commands.add(
+          Command.setPrefabOverrideOp(
+            e.anchor!,
+            prefab.addComponentOverride(entity: local, type: type, version: spec.version ?? 1, data: data),
+          ),
+        );
+      } else {
+        commands.add(Command.addComponent(e.id, {'type': type, 'version': spec.version ?? 1, 'data': _copyJson(data)}));
+      }
+    }
     final a = _run(commands);
     notifyListeners();
     return a?.ok ?? false;
   }
 
-  /// Removes the slot's component from every selected entity. One transaction.
+  /// Removes the slot's component from every selected entity. One
+  /// transaction. On a derived instance: the `addComponent` override that
+  /// added it is reverted, an added object's `addObject` is re-issued
+  /// without it, an inherited component gets a `removeComponent` override.
   bool removeComponent(ComponentSlot slot) {
-    final a = _run([for (final i in slot.instances) Command.removeComponent(i.entityId, i.componentId)]);
+    final t = _tab;
+    if (t == null) return false;
+    final commands = <Map<String, Object?>>[];
+    final reverts = <String, List<int>>{};
+    final ops = <Map<String, Object?>>[];
+    for (final i in slot.instances) {
+      if (!i.isDerived) {
+        commands.add(Command.removeComponent(i.entityId, i.componentId));
+        continue;
+      }
+      final x = t.expansionOf(i.anchor!);
+      final de = x?.entity(i.entityId);
+      if (x == null || de == null) continue;
+      final component = i.local ?? i.componentId;
+      if (de.added) {
+        ops.add(Command.setPrefabOverrideOp(i.anchor!, prefab.reissuedAddObjectOverride(x, de, without: component)));
+      } else if (i.added) {
+        final index = prefab.addComponentIndexOf(x, entity: de.local, component: component);
+        if (index != null) (reverts[i.anchor!] ??= []).add(index);
+      } else {
+        ops.add(
+          Command.setPrefabOverrideOp(
+            i.anchor!,
+            prefab.removeComponentOverride(entity: de.local, component: component),
+          ),
+        );
+      }
+    }
+    for (final e in reverts.entries) {
+      final indices = e.value.toSet().toList()..sort((a, b) => b.compareTo(a));
+      commands.addAll([for (final i in indices) Command.revertPrefabOverride(e.key, index: i)]);
+    }
+    commands.addAll(ops);
+    final a = _run(commands);
     _errors.removeWhere((k, _) => k.startsWith('${slot.key}/'));
     notifyListeners();
     return a?.ok ?? false;
@@ -579,9 +911,7 @@ final class InspectorModel extends ChangeNotifier {
     final commands = <Map<String, Object?>>[];
     for (final i in slot.instances) {
       for (final e in defaults.entries) {
-        if (!deepEquals(i.data[e.key], e.value)) {
-          commands.add(Command.setField(i.entityId, i.componentId, e.key, _copyJson(e.value)));
-        }
+        if (!deepEquals(i.data[e.key], e.value)) commands.add(_setFieldCommand(i, e.key, e.value));
       }
     }
     if (commands.isEmpty) return true;
@@ -591,13 +921,35 @@ final class InspectorModel extends ChangeNotifier {
     return a?.ok ?? false;
   }
 
-  /// Renames the single selected entity.
+  /// Renames the single selected entity. A derived entity is named by its
+  /// prefab — only an object an override added is renamed (its `addObject`
+  /// re-issued).
   bool rename(String name) {
     final e = single;
     if (e == null || name.trim().isEmpty || name == e.name) return false;
+    if (e.isDerived) {
+      final x = _tab?.expansionOf(e.anchor!);
+      final de = x?.entity(e.id);
+      if (x == null || de == null || !de.added) {
+        lastError = 'A prefab instance\'s entity is named by the prefab — rename it there (Open prefab).';
+        notifyListeners();
+        return false;
+      }
+      final a = _run([
+        Command.setPrefabOverrideOp(e.anchor!, prefab.reissuedAddObjectOverride(x, de, name: name.trim())),
+      ]);
+      notifyListeners();
+      return a?.ok ?? false;
+    }
     final a = _run([Command.renameObject(e.id, name.trim())]);
     notifyListeners();
     return a?.ok ?? false;
+  }
+
+  /// Whether the single selected entity's name can be edited.
+  bool get canRename {
+    final e = single;
+    return canEdit && e != null && (!e.isDerived || e.added);
   }
 
   /// Drops one prefab override of [entityId] (all of them when [index] is null).
@@ -632,7 +984,7 @@ final class InspectorModel extends ChangeNotifier {
     return open(file);
   }
 
-  static String _topLevel(String field) => field.startsWith('/') ? field.substring(1).split('/').first : field;
+  static String _topLevel(String field) => topLevelKey(field);
 
   @override
   void dispose() {
@@ -649,6 +1001,9 @@ List<CommittedDrift> committedDrift_(Map<String, Object?>? metadata, Map<String,
     committedDrift(metadata, files);
 
 // ── Value helpers ──────────────────────────────────────────────────────────
+
+/// The top-level key of a field path (`/position/1` → `position`).
+String topLevelKey(String field) => field.startsWith('/') ? field.substring(1).split('/').first : field;
 
 /// Reads `a/1/b` (or a plain key) out of [data]; null when absent.
 Object? readPath(Map<String, Object?> data, String path) {
