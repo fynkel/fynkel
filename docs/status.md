@@ -342,7 +342,7 @@ Python 0.5 k) plus 5.5 k lines of docs, over 45 commits.
 | **Physics V1 is bodies, a character and queries.** One collider per entity, no joints, mesh colliders static only, collider outlines (`Physics::debug_lines`) not drawn by any host yet; the character does not push dynamic bodies or ride moving platforms (M3-14 decided the relative look delta: consumed by one tick as a rate, `docs/input.md` rule 5; and no camera smoothing — the rig snaps). | Enough for the reference game's player, crates and hazards; ragdolls, vehicles, hinged doors and platform riding are post-1.0. | after M3 |
 | **Input has no Android or web path and no rebinding UI.** `FynkelInputPlugin` is Apple-only (GameController); the touch overlay is fixed to bottom corners; rebinds persist in the settings file (M3-12) but nothing edits them on screen. | Fine for the Apple targets M3 ships; a settings screen needs a runtime rebind API. | after M3 |
 | **Native components' Inspector hints live in an editor table, not in Rust attributes.** ADR-0018 asks for `#[fynkel(...)]` field attributes on the component structs; M4-04 shipped the behaviour half (`@Expose` hints through the generator) and a table in `apps/editor/lib/src/inspector/native_hints.dart` for the 23 built-ins (audio included), read underneath the schema's `x-fynkel`. | Editing a native component's hint means editing the editor, not the component; one code path either way. | M3 stream, when `fynkel_schema_derive` is next touched |
-| **A Flutter app allocates 40–60 KB per frame on the Dart heap** (the host 39–43, the reference game 56 KB/frame; 3–4 scavenges a second of 0.15–0.25 ms). The SDK's own path is 1.5 KB/frame (`tool/alloc_bench.dart`); the rest is the framework's per-frame work in these apps (the ticker, the game view's stats, the HUD's projection layer, Impeller) and has not been attributed. | Fine at 120 Hz on the M3 Max (no old-space collection during play); on a phone the scavenges are where a p99 stutter would come from. | after M3 — attribute with the probe per widget, then decide |
+| **A Flutter frame allocates ≈ 12 KB on the Dart heap before Fynkel runs** (profile build, a running `Ticker`; a `CircularProgressIndicator` +7 KB/frame, a `Text` rebuilt every frame +16). The 40–60 KB/frame the first captures read was attributed on 2026-09-22 (docs/instrumentation.md § What a Flutter frame costs): 39 KB of the game's 57 were the SDK's read path — `find` re-decoding the entity table and `get<T>()` decoding every component each tick, the label layer repainting every frame — and were fixed (the game reads 17.6 KB/frame idle at the spawn, behaviours ≈ 2 KB; the m3 capture's 12 s window 26.3 where it read 68.8; the host's 35–45 is the framework plus its own two progress indicators, Fynkel's share 2–3 KB). | The framework's floor is not Fynkel's to move; what a game adds is its HUD. On a phone the scavenges (1–2 a second now) are still where a p99 stutter would come from. | recorded; re-read with every capture |
 | **Everything runs on the Flutter UI thread** (step, extract, render). | Fine at current sizes; ADR-0007 allows a render thread later, so extraction must stay cheap. | M5 |
 | **Single machine, single profile.** Every number is from one M3 Max and one iPhone; no second display / DPI change exercised. | Regressions elsewhere would not be seen. | first release |
 
@@ -1078,6 +1078,17 @@ p95 64 µs / extract 42 / frame 106, native 6 MB; Dart heap 39 KB/frame
 between runs (physics p95/max 3.9/8.8 → 13.3/48.8 ms once; the Flutter
 host's GPU spans with Flutter's raster beside them) — recorded in
 `docs/instrumentation.md`, medians stable.
+The allocation gap (2026-09-22, after 17): the full gate again on the
+Dart-only change (`packages/fynkel` 150 tests, `fynkel_flutter` 25,
+the starter, showcase and reference game unchanged in checksum), then
+both captures alone: `benchmarks/m0/results/2026-09-22-871c353` (the
+JIT bench 2.7 KB/frame with the new `find` + `get` per tick; the host's
+AOT 44.6 KB/frame, unchanged by design) and **`benchmarks/m3/results/
+2026-09-22-871c353`, sixteen checks green on the first run**: stress
+total work 8.06 ms p95, reference game 1.52 ms p95, the game's Dart
+heap **26.3 KB/frame and 25 collections in 12 s** where `0427213` read
+68.8 and 61 on the same window (17.6 KB/frame idle in the attribution
+harness; docs/instrumentation.md § What a Flutter frame costs).
 M3-17 thin (2026-09-22): **clean-clone run at `0668ad0`** — `git clone`
 into a temporary directory, `cargo install --path apps/cli` (1 min
 release build), then `examples/reference_game` through its README's
@@ -1227,10 +1238,11 @@ in its own app, play it, or hear it. That is M3, in this order:
    `[stats]` lines; the license, `LICENSE`, `CONTRIBUTING.md`, issue
    templates, the first-time-reader README and CI on a fork are
    deferred to a "public readiness (b)" item for when the repository
-   goes public (blueprint item 17). **Next: the Dart allocation gap**
-   (§3: 40–60 KB/frame in a Flutter app — attribute with the probe,
-   reduce what is Fynkel's), then the gate report (18) — measured with
-   both captures at every step.
+   goes public (blueprint item 17). The Dart allocation gap is
+   attributed and closed on Fynkel's side (2026-09-22: the game 57 →
+   17.6 KB/frame, the framework's ≈ 12 KB floor documented in §3 and
+   docs/instrumentation.md). **Next: the gate report (18)** — measured
+   with both captures at every step.
 16. **M4 — the editor — has started in parallel** (2026-09-21, the user's
    call): branch `editor` in its own worktree, the backlog in blueprint
    §19.2e (ten items: the authoring ABI D5 + D7 first, then the shell,

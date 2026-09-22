@@ -42,7 +42,7 @@ class WireBuffer {
   /// address and length are unchanged, so a steady-state frame allocates
   /// no views (M1 gate).
   void reparse() {
-    final d = ByteData.sublistView(bytes);
+    final d = data;
     if (d.getUint32(0, Endian.little) != bufferMagic) throw const FormatException('bad buffer magic');
     final version = d.getUint16(4, Endian.little);
     if (version != abiVersion) throw FormatException('buffer ABI version $version, expected $abiVersion');
@@ -77,6 +77,10 @@ class WireBuffer {
   }
 
   final Uint8List bytes;
+
+  /// The whole buffer, header included, as one [ByteData] made once.
+  late final ByteData data = ByteData.sublistView(bytes);
+
   int kind = 0;
   int recordCount = 0;
   int recordsEnd = -1;
@@ -317,7 +321,7 @@ class RecordBatch {
 
   void add(WireRecord record) {
     _reserve(recordSize);
-    _bytes.buffer.asUint8List(_len, recordSize).fillRange(0, recordSize, 0);
+    _view.fillRange(_len, _len + recordSize, 0);
     record.encode(_bytes, _len, _strings);
     _len += recordSize;
     _count++;

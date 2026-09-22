@@ -158,6 +158,81 @@ the service): `benchmarks/m0/capture.py` builds it, runs it and parses
 the host's `[alloc]` lines into `alloc_aot` (`benchmarks/m0/results`),
 next to the JIT `tool/alloc_bench.dart` numbers it always had.
 
+### What a Flutter frame costs, and what was Fynkel's
+
+The first captures read 39–43 KB/frame in the host and 56–69 KB/frame
+in the reference game with the SDK path alone at 1.5 KB/frame, and
+status §3 carried the gap. Attributed on 2026-09-22 (profile bundles,
+the probe's `[stats]` line, each configuration run alone, KB/frame):
+
+* **A blank Flutter app with a running `Ticker` allocates ≈ 12 KB per
+  frame** on the Dart heap in a profile build — the frame's timeline
+  events, the scheduler's callbacks, the scene build — before any
+  Fynkel code runs (a release build has less instrumentation and no
+  service to read it from). A `CircularProgressIndicator` adds ≈ 7
+  KB/frame (its animation rebuilds and repaints every frame); a `Text`
+  rebuilt every frame ≈ 16 KB/frame.
+* The **host** (`hosts/flutter_apple`): blank 12.5; the host's page
+  without the viewport 22.3; the game view tree with the tick skipped
+  22.8; + the heap probe 22.7; + `onStats` 23.4; + the tick 24.4; the
+  full host 34.6. The host's number is the framework's baseline plus its
+  own two progress indicators (the "keeps Flutter animating at display
+  rate" one on the page and the overlay's) and its per-second rebuilds —
+  they stay, they are the demo; Fynkel's share of a host frame is 2–3 KB.
+  Read the host's `[alloc]` line with that in mind.
+* The **reference game** idle at the spawn: 57.3 with everything on;
+  without the projection layer 53.7; without behaviours 18.5; without
+  behaviours and input 18.2; without those and the projection 14.7;
+  without the frame, the render call and the projection 13.7 — so
+  `render()` and the engine's frame were ≈ 1 KB and **the behaviours
+  were ≈ 39 KB/frame, all of it in the SDK's read path**: `Player`
+  calls `world.find(cameraName)?.get<ThirdPersonCamera>()` every tick,
+  and `find` re-fetched and re-decoded the whole entity table (names,
+  parents, children — maps and strings for 180 entities) each tick,
+  `get<T>()` decoded *every* component of the object into a fresh map
+  each tick, and the label layer repainted every frame.
+
+Fixed the same day (`package:fynkel` `world.dart`, `projection.dart`,
+`wire/buffers.dart`, `native/bridge.dart`; `package:fynkel_flutter`
+`projection_layer.dart`, `game_view.dart`), each a contract kept:
+
+* the entity table is re-decoded only when the `entities` query's bytes
+  differ from the retained copy of the last decode (a step marks it
+  stale; the next `find` runs the query — in place, no copy — and
+  compares eight bytes at a time; every spawn, despawn, rename and
+  reparent shows in those bytes, which is why the check is the bytes and
+  not the `Spawned`/`Destroyed` events — a prefab `instantiate` emits
+  none);
+* a typed read copies the tick's `QUERY_COMPONENTS` answer into a buffer
+  the object keeps (reallocated only when the length changes), reads the
+  ids present from the headers as a bitmask, and decodes only the
+  component asked for; `components` decodes them all; the one query per
+  object per tick and read-your-writes are unchanged (`components_test`
+  asserts the query counts as before);
+* `WireBuffer.reparse()` reuses the buffer's `ByteData` instead of
+  making one per query; the bridge keeps one cached query view **per
+  query kind**, so an `entities` query and the `components` queries of a
+  tick no longer evict each other's view (a re-wrap is five objects);
+* `ProjectionView.update()` writes the batch through one reused record,
+  reads the answers in place, and notifies its listeners **only when an
+  anchor moved, was re-flagged, appeared or was dropped**; the layer
+  wraps each child in a `RepaintBoundary` (a moved label is
+  re-composited); the game view reuses its two stopwatches.
+
+After: the reference game **17.6 KB/frame** idle at the spawn (the
+same scene without behaviours 15.6 — the behaviours are ≈ 2 KB now),
+1.3 scavenges a second, in the attribution's harness (six one-second
+windows after a four-second warm-up, the median); `benchmarks/m3/
+capture.py` on its own 12 s window, which includes the scene's first
+seconds, reads **26.3 KB/frame and 25 collections** where the same
+window read 68.8 and 61 before (`results/2026-09-22-871c353` against
+`0427213`). The host's `alloc_aot` in `benchmarks/m0` stays at 43–45
+KB/frame — its progress indicators, by design. `tool/alloc_bench.dart`
+gained one `find` and one typed `get` per tick as the regression check
+— they cost ≈ 180 B per frame on top of the movers (2.6 → 2.7 KB/frame
+JIT). What remains is the framework's frame and the game's own HUD; a
+game that wants less rebuilds less.
+
 ## The subscription budget (C5)
 
 Blueprint §5.4 says a snapshot is bounded by what the host subscribed;
@@ -246,8 +321,9 @@ render call 4.08 of which extract 2.13 and prepare 1.74; the GPU frame
 p95** (behaviours 0.19, native step 0.32, render() 1.09); the Dart heap
 39 KB/frame allocated in the host and 56 KB/frame in the game (the
 Flutter framework's own per-frame work is in that number; the SDK path
-alone is 1.5 KB/frame, `tool/alloc_bench.dart`), 3–4 scavenges a
-second of 0.15–0.25 ms each. What varied between three runs on the
+alone is 1.5 KB/frame, `tool/alloc_bench.dart` — attributed and cut to
+17.6 KB/frame in the game the same day, § What a Flutter frame costs),
+3–4 scavenges a second of 0.15–0.25 ms each. What varied between three runs on the
 same build was the tail, not the medians: the headless physics run's
 p95/max (3.9/8.8, 3.7/8.5, 13.3/48.8 ms — one run in three has a burst
 of slow ticks; the p50 is 3.2–3.5 ms every time) and the GPU spans in

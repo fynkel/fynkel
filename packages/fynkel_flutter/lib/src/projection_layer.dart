@@ -167,7 +167,11 @@ class _ProjectionLayerState extends State<ProjectionLayer> {
         return Flow(
           delegate: _AnchorFlowDelegate(widget.children, _anchors, size, repaint: _repaint),
           clipBehavior: Clip.hardEdge,
-          children: widget.children,
+          // Each child behind its own boundary: a frame that moves an
+          // anchor re-places the child's layer, it does not re-record its
+          // picture; a frame that moves nothing repaints nothing (the view
+          // notifies on change only).
+          children: [for (final c in widget.children) RepaintBoundary(child: c)],
         );
       },
     );

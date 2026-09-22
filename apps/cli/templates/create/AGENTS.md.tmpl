@@ -484,7 +484,12 @@ the VM service the heap line needs), which a script can grep. The Rust side meas
 a window: `fynkel test --headless --json` reports per-tick step / extract
 / frame times, memory and `systems`. Budget a feature by these numbers,
 not by feel; a behaviour that allocates per tick shows up in `dartHeap`
-first.
+first. The floor is the framework's: a Flutter frame with a running ticker
+allocates ≈ 12 KB on the Dart heap in a profile build before any game code
+runs, a `CircularProgressIndicator` ≈ 7 KB/frame more, a `Text` rebuilt
+every frame ≈ 16; the SDK's `find` + `get<T>()` per tick are a few hundred
+bytes. Read the number against that, and rebuild HUD widgets on change,
+not per frame (`ModelValue`, `ValueListenableBuilder`).
 
 ## Do
 

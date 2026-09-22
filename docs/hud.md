@@ -134,8 +134,14 @@ if (anchor.visible) place(anchor.x, anchor.y);
   poses the renderer draws (`clock.alpha()`, the M2 interpolation). Call it
   after `World.frame`; `FynkelGameView` does so on every tick when the view
   is not empty. It returns the number of anchors projected, bumps
-  `version`, and runs the `addListener` listeners once. An empty view makes
-  no call. `camera` is the entity projected from (null: no enabled
+  `version`, and runs the `addListener` listeners once **when something
+  changed** — an anchor moved, was re-flagged, appeared or was dropped; a
+  still frame (the camera and every anchored object at rest) notifies
+  nothing, so an overlay bound to the view repaints only when it must
+  (the M3 allocation gap: a label layer repainting at 120 Hz was a
+  measurable share of a frame's Dart allocation). The answers are read
+  from the call's buffer in place; the batch is reused. An empty view
+  makes no call. `camera` is the entity projected from (null: no enabled
   `fynkel.Camera` in the world — the viewport's fallback camera is not
   projected).
 * The viewport is in the caller's pixels — logical pixels for a Flutter
@@ -230,9 +236,11 @@ FynkelGameView(
   unchanged `target` keeps its anchor, `offset`/`occlusionMask` are updated
   in place), reports its own size to the view (`LayoutBuilder` →
   `setViewport`), and moves the children with a `Flow`: the flow delegate
-  repaints on the view's listener and positions each child by a paint
-  transform, so **no widget rebuilds per frame**; the layer rebuilds only
-  when its children change. A child that is not `visible` is not painted
+  repaints on the view's listener (only when an anchor changed, above) and
+  positions each child by a paint transform, so **no widget rebuilds per
+  frame**; each child sits in its own `RepaintBoundary`, so a moved label
+  is re-composited, not re-painted; the layer rebuilds only when its
+  children change. A child that is not `visible` is not painted
   and not hit-testable. Size the layer like the viewport it overlays (a
   `Stack` child of `FynkelGameView.overlay` fills it).
 * `ProjectedAnchor(target, offset, occlusionMask, alignment, nudge,

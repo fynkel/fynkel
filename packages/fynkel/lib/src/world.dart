@@ -22,7 +22,7 @@ import 'settings.dart';
 import 'systems.dart';
 import 'transform_writer.dart';
 import 'wire/buffers.dart';
-import 'wire/support.dart' show WireRecord;
+import 'wire/support.dart' show WireRecord, WireStrings, writeVec3;
 
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
@@ -253,7 +253,7 @@ class World {
     for (final go in _byEntity.values) {
       go._clearOverlay();
     }
-    _entityTable = null;
+    _entityTableStale = true;
     _collectDiagnostics('step');
     return r;
   }
@@ -528,8 +528,24 @@ class World {
   /// Every live entity with its parent and name as the last step left
   /// them (`FYNKEL_QUERY_ENTITIES`), fetched once per tick on the first
   /// [find]; objects spawned this tick are not in it yet.
-  _EntityTable get _entities => _entityTable ??= _EntityTable.query(_native);
+  /// The per-tick entity table (names, parents, children), decoded from
+  /// the `entities` query. A step marks it stale rather than dropping it:
+  /// the next lookup re-runs the query (in place, no copy) and re-decodes
+  /// only when the bytes differ from the table's own retained copy —
+  /// every spawn, despawn, rename and reparent, native or Dart, shows up
+  /// there, and a `find` in a `fixedUpdate` costs no allocation while the
+  /// world's structure stands still (M3, the allocation gap).
+  _EntityTable get _entities {
+    final t = _entityTable;
+    if (t != null && !_entityTableStale) return t;
+    _entityTableStale = false;
+    final b = _native.query(QueryKind.entities);
+    if (t != null && t.sameBytes(b)) return t;
+    return _entityTable = _EntityTable.decode(b);
+  }
+
   _EntityTable? _entityTable;
+  bool _entityTableStale = false;
 
   /// The first entity named [name] in the world (scene order), as a
   /// [GameObject] — an existing handle when there is one, else one
@@ -575,6 +591,42 @@ class World {
       if (codec != null && codec.wireSize <= size) sink(id, codec.decode(d, off, b.tail));
       off += size;
     }
+  }
+
+  /// The ids present in a `FYNKEL_QUERY_COMPONENTS` response as a bitmask
+  /// (ids below 63; a larger id sets bit 63, which [GameObject._lookup]
+  /// treats as present). Headers only, nothing decoded.
+  int _componentMask(WireBuffer b) {
+    final d = b.records;
+    var off = 0;
+    var mask = 0;
+    for (var i = 0; i < b.recordCount; i++) {
+      final id = d.getUint32(off, Endian.little);
+      final size = d.getUint32(off + 4, Endian.little);
+      off += gen.ComponentHeader.wireSize + size;
+      mask |= 1 << (id < 63 ? id : 63);
+    }
+    return mask;
+  }
+
+  /// Decodes only component [wantId] from a `FYNKEL_QUERY_COMPONENTS`
+  /// response (null when absent or unknown to this build), so a typed
+  /// read in a `fixedUpdate` allocates that one record, not every
+  /// component the object has.
+  WireRecord? _decodeComponent(WireBuffer b, int wantId) {
+    final d = b.records;
+    var off = 0;
+    for (var i = 0; i < b.recordCount; i++) {
+      final id = d.getUint32(off, Endian.little);
+      final size = d.getUint32(off + 4, Endian.little);
+      off += gen.ComponentHeader.wireSize;
+      if (id == wantId) {
+        final codec = gen.componentCodecs[id];
+        return codec != null && codec.wireSize <= size ? codec.decode(d, off, b.tail) : null;
+      }
+      off += size;
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------- physics (M3-08)
@@ -1143,11 +1195,23 @@ class GameObject {
   Map<int, WireRecord?>? _components;
   bool _componentsQueried = false;
 
+  /// The tick's `QUERY_COMPONENTS` response, copied into a buffer this
+  /// object keeps (reallocated only when its length changes), and the ids
+  /// it holds as a bitmask ([World._componentMask]): the one query per
+  /// object per tick is made on the first typed read, and every read
+  /// decodes just the component it asks for from the copy — an object
+  /// with six components read for one of them allocates one record, not
+  /// six (M3, the allocation gap).
+  Uint8List? _componentBytes;
+  WireBuffer? _componentView;
+  int _presentMask = 0;
+
   void _clearOverlay() {
     _overlay = null;
     _stagedValid = false;
-    _components = null;
+    _components?.clear();
     _componentsQueried = false;
+    _presentMask = 0;
   }
 
   /// The staged writer, seeded from the current local value when nothing is
@@ -1296,29 +1360,61 @@ class GameObject {
   /// Every native component this object has, id order (`Transform` first,
   /// as [localTransform]), staged writes included.
   List<WireRecord> get components {
-    if (!_componentsQueried) _queryComponents();
-    final c = _components!;
+    _decodeAllComponents();
+    final c = _components ??= {};
     final ids = c.keys.where((id) => c[id] != null).toList()..sort();
     return [for (final id in ids) id == gen.Transform.componentId ? localTransform : c[id]!];
   }
 
+  /// The component [id] as this tick sees it: a staged write, else the
+  /// world's value decoded from the tick's one query (see
+  /// [_componentBytes]); an id the object lacks is answered from the mask.
   WireRecord? _lookup(int id) {
     final c = _components ??= {};
     if (c.containsKey(id)) return c[id];
-    if (!_componentsQueried) {
-      _queryComponents();
-      return c[id];
-    }
-    return null;
+    _queryComponents();
+    final view = _componentView;
+    if (view == null || (_presentMask & (1 << (id < 63 ? id : 63))) == 0) return null;
+    final value = world._decodeComponent(view, id);
+    if (value != null) c[id] = value;
+    return value;
   }
 
+  /// The tick's query, once: the response copied into [_componentBytes]
+  /// and its mask read. Nothing on an object the world does not have.
   void _queryComponents() {
+    if (_componentsQueried) return;
     _componentsQueried = true;
-    final c = _components ??= {};
+    _presentMask = 0;
     final e = _entity;
-    if (e == null || !_alive) return;
-    world._decodeComponents(world._native.query(QueryKind.components, entity: e), (id, v) {
-      if (!c.containsKey(id)) c[id] = v; // staged writes win
+    if (e == null || !_alive) {
+      _componentView = null;
+      return;
+    }
+    final b = world._native.query(QueryKind.components, entity: e);
+    final n = b.bytes.length;
+    var buf = _componentBytes;
+    var view = _componentView;
+    if (buf == null || view == null || buf.length != n) {
+      buf = _componentBytes = Uint8List(n);
+      buf.setAll(0, b.bytes);
+      view = _componentView = WireBuffer(buf);
+    } else {
+      buf.setAll(0, b.bytes);
+      view.reparse();
+    }
+    _presentMask = world._componentMask(view);
+  }
+
+  /// Every component from the tick's query into the cache (staged writes
+  /// win), for [components].
+  void _decodeAllComponents() {
+    _queryComponents();
+    final view = _componentView;
+    if (view == null) return;
+    final c = _components ??= {};
+    world._decodeComponents(view, (id, v) {
+      if (!c.containsKey(id)) c[id] = v;
     });
   }
 
@@ -1630,10 +1726,9 @@ class _WorldTime implements TimeService {
 /// The world's entities, parents and names as one query (M3-08b); built
 /// lazily per tick by [World.find] and friends.
 class _EntityTable {
-  _EntityTable._(this._parents, this._names, this._byName, this._children);
+  _EntityTable._(this._parents, this._names, this._byName, this._children, this._raw);
 
-  factory _EntityTable.query(NativeWorld native) {
-    final b = native.query(QueryKind.entities);
+  factory _EntityTable.decode(WireBuffer b) {
     final parents = <int, int>{};
     final names = <int, String>{};
     final byName = <String, List<int>>{};
@@ -1650,13 +1745,35 @@ class _EntityTable {
         (byName[r.name] ??= []).add(r.entity);
       }
     }
-    return _EntityTable._(parents, names, byName, children);
+    return _EntityTable._(parents, names, byName, children, Uint8List.fromList(b.bytes));
   }
 
   final Map<int, int> _parents;
   final Map<int, String> _names;
   final Map<String, List<int>> _byName;
   final Map<int, List<int>> _children;
+
+  /// The query bytes this table was decoded from.
+  final Uint8List _raw;
+  late final ByteData _rawData = ByteData.sublistView(_raw);
+
+  /// Whether [b] holds the same records and tail as this table's source
+  /// (the header's request id is skipped), eight bytes at a time; no
+  /// allocation.
+  bool sameBytes(WireBuffer b) {
+    final a = _raw;
+    final n = b.bytes.length;
+    if (n != a.length) return false;
+    final x = _rawData, y = b.data;
+    var i = bufferHeaderSize;
+    for (; i + 8 <= n; i += 8) {
+      if (x.getUint64(i, Endian.little) != y.getUint64(i, Endian.little)) return false;
+    }
+    for (; i < n; i++) {
+      if (a[i] != b.bytes[i]) return false;
+    }
+    return true;
+  }
 
   int? firstNamed(String name) => _byName[name]?.first;
   List<int> allNamed(String name) => _byName[name] ?? const [];

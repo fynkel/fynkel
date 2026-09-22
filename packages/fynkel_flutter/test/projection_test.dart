@@ -253,7 +253,18 @@ void main() {
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(microseconds: 16667));
     }
-    expect(updates, greaterThanOrEqualTo(5));
+    expect(w.projection.version, greaterThanOrEqualTo(5), reason: 'one update per frame');
+    expect(updates, greaterThanOrEqualTo(1), reason: 'the label was placed');
     expect(w.projection.anchors.single.visible, isTrue);
+    // A still scene does not notify (nothing to repaint); a moved crate does.
+    final placed = updates;
+    await tester.pump(const Duration(microseconds: 16667));
+    await tester.pump(const Duration(microseconds: 16667));
+    expect(updates, placed);
+    crate.setLocalPosition(3, 0, 0);
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(microseconds: 16667));
+    }
+    expect(updates, greaterThan(placed));
   });
 }

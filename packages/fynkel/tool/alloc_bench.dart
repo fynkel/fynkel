@@ -2,7 +2,8 @@
 // M1 gate: "steady-state Dart allocation per frame is zero or documented").
 //
 // Runs the hub + satellites scene (the same motion as hosts/headless and the
-// Flutter host) on package:fynkel for a warm-up and a sample window, and
+// Flutter host, plus one `find` and one typed `get` per tick — what a
+// behaviour does) on package:fynkel for a warm-up and a sample window, and
 // reads the VM's allocation profile and GC timeline over the sample through
 // the service protocol. JIT numbers (`dart run`); AOT (Flutter release)
 // allocates the same objects, its GC pauses differ.
@@ -185,6 +186,11 @@ class _Scene {
         s.object = world.spawn(transform: _local(s, t), parent: hub);
       }
     }
+    // The read path a behaviour takes every tick (M3, the allocation gap):
+    // a lookup by name is the entity table's byte comparison, a typed read
+    // decodes one record from the object's retained query copy.
+    if (world.find('hub') != hub) throw StateError('find');
+    if (hub.get<Name>() == null) throw StateError('get');
     // Hot path (C1): reusable writers, no Transform/Vec3/Quat per write.
     _w.identity().setRotationAxisAngle(0, 1, 0, t * 0.8).rotateAxisAngle(1, 0, 0, t * 0.35).setUniformScale(0.8);
     hub.writeLocal(_w);

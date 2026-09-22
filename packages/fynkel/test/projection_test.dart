@@ -204,6 +204,46 @@ void main() {
     w.projection.update();
   });
 
+  test('listeners run when an anchor moved, not for a still frame', () {
+    final w = loaded();
+    final crate = w.find('Crate A')!;
+    w.projection.setViewport(800, 600);
+    var runs = 0;
+    w.projection.addListener(() => runs++);
+    final a = w.projection.add(crate);
+    expect(w.projection.update(), 1);
+    expect(runs, 1, reason: 'a fresh anchor is placed');
+    final x = a.x;
+    expect(w.projection.update(), 1);
+    expect(w.projection.update(), 1);
+    expect(runs, 1, reason: 'nothing moved: no repaint');
+    expect(w.projection.version, 3, reason: 'the version still counts every update');
+
+    crate.setLocalPosition(2.5, 0, 0);
+    w.frame(1 / 60);
+    expect(w.projection.update(), 1);
+    expect(runs, 1, reason: 'the frame interpolates from the tick before the move: still');
+    w.frame(1 / 60);
+    expect(w.projection.update(), 1);
+    expect(a.x, isNot(closeTo(x, 0.01)));
+    expect(runs, 2);
+    w.projection.update();
+    expect(runs, 2);
+
+    // A second anchor appearing is a change; so is one going missing.
+    final b = w.projection.add(crate, offset: const Vec3(0, 1, 0));
+    w.projection.update();
+    expect(runs, 3);
+    expect(b.visible, isTrue);
+    crate.destroy();
+    w.frame(1 / 60);
+    w.frame(1 / 60);
+    w.projection.update();
+    expect(runs, 4, reason: 'both anchors are missing now');
+    w.projection.update();
+    expect(runs, 4);
+  });
+
   test('without a camera nothing is placed; without anchors nothing is called', () {
     final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8);
     addTearDown(w.dispose);

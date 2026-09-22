@@ -93,11 +93,11 @@ class FynkelFrameStats {
   /// [renderCall] at the same percentile (an upper bound on the sum's
   /// percentile) — the number the blueprint's 12 ms p95 target is about.
   MsPercentiles get totalWork => MsPercentiles(
-        simulate.p50 + renderCall.p50,
-        simulate.p95 + renderCall.p95,
-        simulate.p99 + renderCall.p99,
-        frames,
-      );
+    simulate.p50 + renderCall.p50,
+    simulate.p95 + renderCall.p95,
+    simulate.p99 + renderCall.p99,
+    frames,
+  );
 
   /// The window on one line of `key=value` pairs for a capture to parse
   /// (`benchmarks/m3/capture.py` reads `[stats] …` lines from an app's
@@ -283,6 +283,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   final _rasterMs = <double>[];
   int _ticks = 0, _missed = 0, _dropped = 0, _skipped = 0, _frames = 0;
   final _window = Stopwatch()..start();
+  // Reused per tick (a frame allocates no timers).
+  final _simWatch = Stopwatch(), _renderWatch = Stopwatch();
 
   /// Whether the loop is currently muted (hidden, or [setPaused]).
   bool get paused => _ticker.muted;
@@ -454,7 +456,9 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _primed = true;
     _frames++;
 
-    final sim = Stopwatch()..start();
+    final sim = _simWatch
+      ..reset()
+      ..start();
     final plan = world.frame(dt, input: input.take(dt), fixedUpdate: widget.fixedUpdate);
     sim.stop();
     _simMs.add(sim.elapsedMicroseconds / 1000);
@@ -478,7 +482,9 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       return;
     }
     if (c.state != ViewportState.attached) return;
-    final sw = Stopwatch()..start();
+    final sw = _renderWatch
+      ..reset()
+      ..start();
     final slot = c.render(world);
     sw.stop();
     _renderCallMs.add(sw.elapsedMicroseconds / 1000);

@@ -26,6 +26,7 @@ class ProjectionView {
   final World _world;
   final List<ScreenAnchor> _anchors = [];
   final RecordBatch _batch = RecordBatch(BufferKind.projectionAnchors, gen.ProjectionAnchorRecord.wireSize, 64 * 32);
+  final _AnchorRecord _record = _AnchorRecord();
   final List<void Function()> _listeners = [];
   double _width = 0;
   double _height = 0;
@@ -90,7 +91,9 @@ class ProjectionView {
     _anchors.clear();
   }
 
-  /// Listeners run after every [update] (a Flutter layer repaints).
+  /// Listeners run after an [update] that moved, re-flagged or dropped an
+  /// anchor (a Flutter layer repaints); an update that changed nothing —
+  /// a still camera over still targets — runs none.
   void addListener(void Function() listener) => _listeners.add(listener);
   void removeListener(void Function() listener) => _listeners.remove(listener);
 
@@ -103,13 +106,21 @@ class ProjectionView {
     final n = _anchors.length;
     final take = n < maxAnchors ? n : maxAnchors;
     _batch.clear();
+    var dropped = false;
     for (var i = 0; i < take; i++) {
       final a = _anchors[i];
+      if (a._dropped || a._fresh) dropped = true;
       a._dropped = false;
-      _batch.add(gen.ProjectionAnchorRecord(entity: a._entityOrZero(), offset: a.offset, mask: a.occlusionMask));
+      a._fresh = false;
+      _batch.add(_record
+        ..entity = a._entityOrZero()
+        ..offset = a.offset
+        ..mask = a.occlusionMask);
     }
     for (var i = take; i < n; i++) {
-      _anchors[i]
+      final a = _anchors[i];
+      if (!a._dropped || a._flags != 0) dropped = true;
+      a
         .._dropped = true
         .._flags = 0;
     }
@@ -121,14 +132,24 @@ class ProjectionView {
     );
     _batch.clear();
     _camera = camera == 0 ? null : camera;
-    var i = 0;
-    for (final r in b.fixed(gen.ProjectedPointRecord.wireSize, gen.ProjectedPointRecord.decode)) {
-      if (i >= take) break;
-      final a = _anchors[i++];
-      a._x = r.x;
-      a._y = r.y;
-      a._depth = r.depth;
-      a._flags = r.flags;
+    // Read in place (no record objects) and notice whether anything moved:
+    // a listener is a Flutter layer's repaint, which an idle frame with a
+    // still camera and still targets should not cost.
+    var changed = dropped;
+    final d = b.records;
+    final rows = b.recordCount < take ? b.recordCount : take;
+    for (var i = 0; i < rows; i++) {
+      final o = i * gen.ProjectedPointRecord.wireSize;
+      final a = _anchors[i];
+      final x = d.getFloat32(o + 8, Endian.little);
+      final y = d.getFloat32(o + 12, Endian.little);
+      final depth = d.getFloat32(o + 16, Endian.little);
+      final flags = d.getUint32(o + 20, Endian.little);
+      if (x != a._x || y != a._y || depth != a._depth || flags != a._flags) changed = true;
+      a._x = x;
+      a._y = y;
+      a._depth = depth;
+      a._flags = flags;
     }
     if (n > maxAnchors) {
       if (!_overflowReported) {
@@ -151,8 +172,10 @@ class ProjectionView {
       _overflowReported = false;
     }
     _version++;
-    for (final l in _listeners.toList(growable: false)) {
-      l();
+    if (changed) {
+      for (final l in _listeners.toList(growable: false)) {
+        l();
+      }
     }
     return projected;
   }
@@ -181,6 +204,10 @@ class ScreenAnchor {
   double _depth = 0;
   int _flags = 0;
   bool _dropped = false;
+
+  /// Not projected yet: the first [ProjectionView.update] that places it
+  /// notifies whatever its result is.
+  bool _fresh = true;
 
   /// Still registered with its view.
   bool get isAttached => _attached;
@@ -232,4 +259,20 @@ class ScreenAnchor {
       'ScreenAnchor(${target is GameObject ? (target as GameObject).name : target} '
       '${visible ? 'visible' : 'hidden'} x=${x.toStringAsFixed(1)} y=${y.toStringAsFixed(1)} depth=${depth.toStringAsFixed(2)}'
       '${occluded ? ' occluded' : ''}${missing ? ' missing' : ''}${dropped ? ' dropped' : ''})';
+}
+
+/// A reusable `fynkel.rec.ProjectionAnchor` writer (the generated record
+/// is immutable; one of these per view keeps [ProjectionView.update]
+/// free of allocation).
+class _AnchorRecord implements WireRecord {
+  int entity = 0;
+  Vec3 offset = Vec3.zero;
+  int mask = 0;
+
+  @override
+  void encode(ByteData d, int offset, WireStrings strings) {
+    d.setUint64(offset + 0, entity, Endian.little);
+    writeVec3(d, offset + 8, this.offset);
+    d.setUint32(offset + 20, mask, Endian.little);
+  }
 }

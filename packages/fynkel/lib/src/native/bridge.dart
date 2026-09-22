@@ -290,7 +290,9 @@ class NativeWorld {
   final _diagnosticsView = _ViewCache();
   final _eventsView = _ViewCache();
   final _afterPhysicsView = _ViewCache();
-  final _queryView = _ViewCache();
+  // Queries: one cache per kind, so an `entities` query and the
+  // `components` queries a tick makes do not evict each other's view.
+  final _queryViews = [for (final _ in QueryKind.values) _ViewCache()];
   final _inputView = _ViewCache();
   final _physicsView = _ViewCache();
   final _projectionView = _ViewCache();
@@ -340,7 +342,7 @@ class NativeWorld {
     ffiCalls++;
     final s = fynkel_world_query(_w, _query, _view);
     _check(s, 'query');
-    final b = _wrap(_view.ref, _queryView);
+    final b = _wrap(_view.ref, _queryViews[kind.index]);
     assert(b.requestId == _requestId);
     return b;
   }
