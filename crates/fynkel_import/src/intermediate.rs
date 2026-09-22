@@ -12,7 +12,8 @@
 //! section (offsets count from the end of the header). Vertices are
 //! [`Vertex::STRIDE`] bytes each, indices `u32`, skin weights
 //! [`SkinWeight::STRIDE`] bytes each (one per vertex, or none), texels
-//! RGBA8, samples `f32` interleaved; skins and animations are stored in
+//! RGBA8 (an HDR texture's `f32` RGB in a second blob, E1), samples `f32`
+//! interleaved; skins and animations are stored in
 //! their cooked payload form (`fynkel_cooked::payload`).
 //! Serialization is deterministic: field order is fixed, there are no
 //! maps with unstable order, floats are written as IEEE bits.
@@ -21,7 +22,7 @@ use fynkel_contracts::Diagnostic;
 use serde::{Deserialize, Serialize};
 
 pub const MAGIC: &[u8; 4] = b"FYNI";
-pub const INTERMEDIATE_VERSION: u32 = 5;
+pub const INTERMEDIATE_VERSION: u32 = 6;
 
 /// The one vertex layout every mesh is normalized to (72 bytes); the
 /// cooked `MESH` payload uses the same one, so it is defined next to the
@@ -130,7 +131,8 @@ impl ColorSpace {
 }
 
 /// A decoded texture: RGBA8, row-major, top row first, no mipmaps (M3
-/// generates them at load or cook time).
+/// generates them at load or cook time) — or, for an HDR source (E1),
+/// linear RGB `f32` radiance in `hdr` and an empty `rgba8`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TextureData {
     /// Sub-asset id, `None` when the asset itself is the texture (a `.png`).
@@ -141,8 +143,20 @@ pub struct TextureData {
     pub color_space: ColorSpace,
     /// Whether the source carried an alpha channel (the RGBA8 always has one).
     pub source_has_alpha: bool,
-    /// `width * height * 4` bytes.
+    /// `width * height * 4` bytes; empty when `hdr` is set.
     pub rgba8: Vec<u8>,
+    /// An HDR source (`.hdr`, always linear): `width * height * 3` floats,
+    /// row-major, top row first. The cook writes it as RGBA16F and — the
+    /// image being an environment — prefilters it for image-based
+    /// lighting (`ENVM`).
+    pub hdr: Option<Vec<f32>>,
+}
+
+impl TextureData {
+    /// Whether the texture is HDR radiance rather than 8-bit texels.
+    pub fn is_hdr(&self) -> bool {
+        self.hdr.is_some()
+    }
 }
 
 /// A decoded audio clip: interleaved `f32` PCM in `[-1, 1]` — or, for a
@@ -260,6 +274,9 @@ struct TextureHeader {
     #[serde(rename = "sourceHasAlpha")]
     source_has_alpha: bool,
     rgba8: [u64; 2],
+    /// `f32` RGB, little-endian (E1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hdr: Option<[u64; 2]>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -408,6 +425,13 @@ impl Intermediate {
                 color_space: t.color_space,
                 source_has_alpha: t.source_has_alpha,
                 rgba8: push(&t.rgba8),
+                hdr: t.hdr.as_ref().map(|h| {
+                    let mut bytes = Vec::with_capacity(h.len() * 4);
+                    for v in h {
+                        bytes.extend_from_slice(&v.to_le_bytes());
+                    }
+                    push(&bytes)
+                }),
             })
             .collect();
         let clips = self
@@ -570,9 +594,27 @@ impl Intermediate {
         for t in header.textures {
             let label = t.sub_id.clone().unwrap_or_else(|| t.name.clone());
             let data = slice(t.rgba8, &label)?;
-            if data.len() as u64 != t.width as u64 * t.height as u64 * 4 {
-                return Err(bad(&format!("{label}: texel blob size")));
-            }
+            let texels = t.width as u64 * t.height as u64;
+            let hdr = match t.hdr {
+                None => {
+                    if data.len() as u64 != texels * 4 {
+                        return Err(bad(&format!("{label}: texel blob size")));
+                    }
+                    None
+                }
+                Some(range) => {
+                    let floats = slice(range, &label)?;
+                    if !data.is_empty() || floats.len() as u64 != texels * 12 {
+                        return Err(bad(&format!("{label}: HDR texel blob size")));
+                    }
+                    Some(
+                        floats
+                            .chunks_exact(4)
+                            .map(|c| f32::from_le_bytes(c.try_into().unwrap()))
+                            .collect(),
+                    )
+                }
+            };
             textures.push(TextureData {
                 sub_id: t.sub_id,
                 name: t.name,
@@ -581,6 +623,7 @@ impl Intermediate {
                 color_space: t.color_space,
                 source_has_alpha: t.source_has_alpha,
                 rgba8: data.to_vec(),
+                hdr,
             });
         }
         let mut clips = Vec::with_capacity(header.clips.len());
@@ -665,6 +708,7 @@ impl Intermediate {
             "textures": self.textures.iter().map(|t| serde_json::json!({
                 "subId": t.sub_id, "name": t.name, "width": t.width, "height": t.height,
                 "colorSpace": t.color_space.name(), "sourceHasAlpha": t.source_has_alpha,
+                "hdr": t.is_hdr(),
             })).collect::<Vec<_>>(),
             "clips": self.clips.iter().map(|c| serde_json::json!({
                 "subId": c.sub_id, "name": c.name, "codec": c.codec, "sampleRate": c.sample_rate,

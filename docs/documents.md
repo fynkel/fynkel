@@ -1123,11 +1123,36 @@ colour space is **declared, not detected**: the sidecar's
 normal, roughness, metallic, occlusion and other data maps) — the same
 `colorSpace` a material's texture binding can state, so the two can be
 checked against each other later. A value that is neither is `FYN-A0104`
-anchored at `/settings/colorSpace` of the sidecar. Only PNG and JPEG are
-compiled in (`image` with `default-features = false`); anything else is
-`A0103`. Limits: `max_image_bytes` (64 MiB of file), `max_texture_dimension`
-(16 384 per side, enforced before decoding) → `A0101`. A standalone
-texture has no sub-assets: an `assetRef` to it is `{ asset }` alone.
+anchored at `/settings/colorSpace` of the sidecar. Only PNG, JPEG and
+Radiance HDR are compiled in (`image` with `default-features = false`);
+anything else is `A0103`. Limits: `max_image_bytes` (64 MiB of file),
+`max_texture_dimension` (16 384 per side, enforced before decoding) →
+`A0101`. A standalone texture has no sub-assets: an `assetRef` to it is
+`{ asset }` alone.
+
+**HDR environments (E1, [renderer.md](renderer.md) § Image-based
+lighting).** `.hdr` (Radiance RGBE, flat or run-length scanlines) → one
+`TextureData` whose `hdr` is `width × height × 3` linear `f32` radiance
+values (`rgba8` empty, `colorSpace` always `linear` — a sidecar saying
+`srgb` is `A0104` at `/settings/colorSpace`, the file is what it is). The
+cook writes it as `TEXR` format 3 (RGBA16F, the chain averaged in `f32`,
+alpha 1; `hdr: true` in the chunk info) **and** — an HDR image being an
+environment — an `ENVM` chunk next to it under the same name: the image
+prefiltered for image-based lighting by `fynkel_import::environment`
+(a 128² six-level GGX specular cube, roughness 0 at level 0 to 1 at the
+last, importance-sampled with 256 samples per texel and the lookups
+filtered by the solid angle each sample stands for; a 32² irradiance
+cube of E/π; the mean irradiance for the exposure estimate; chunk info
+`specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`). The
+equirect mapping and the cube face order are the shaders' (`u = 0.5`
+looks down −Z and grows toward +X, `v = 0` is up; faces +X −X +Y −Y +Z
+−Z with the GL texel rule), so a mirror reflects the sky drawn behind
+it. Deterministic: fixed sample sets, `f32` throughout. An 8-bit sky
+gets no `ENVM` and lights nothing — the scene keeps its constant
+ambient. Fixture: `fixtures/textures/sky.py` → `sky.hdr` (64×32, blue
+above 45°, red toward −X, green toward +X below), pinned as
+`sky.expected.fyni`; `tests/cook.rs` checks the two chunks and the
+irradiance against the closed-form integrals.
 
 ### Audio (`fynkel.audio`, version 2)
 
@@ -1152,14 +1177,15 @@ music — music, not effects). No sub-assets.
 
 ### The intermediate's bytes
 
-`.fyni`: `FYNI`, version (5 since M3-11 part 2: a clip header carries
+`.fyni`: `FYNI`, version (6 since E1: a texture header may carry an `hdr`
+blob of `f32` RGB; 5 since M3-11 part 2: a clip header carries
 `frames` and, streamed, the source blob's `[offset, length]` with no
 samples), a JSON header (source, importer, meshes / materials / images /
 textures / clips / skins / animations with `[offset, length]` into the
 blob area, the prefab document when there is one, the sub-asset ids) and
 4-byte-aligned blobs (vertices, `u32` indices, skin weights, encoded image
-bytes, RGBA8 texels, `f32` samples or a streamed sound's source bytes,
-joint tables and key data). `Intermediate::to_bytes`/`from_bytes`
+bytes, RGBA8 texels or an HDR image's `f32` RGB, `f32` samples or a
+streamed sound's source bytes, joint tables and key data). `Intermediate::to_bytes`/`from_bytes`
 round-trip; the committed `fixtures/robot.expected.fyni`,
 `fixtures/textures/swatch.expected.fyni` and
 `fixtures/audio/tone.expected.fyni` pin the format, the normalization and
@@ -1238,7 +1264,8 @@ chunk of the same name/sub (the decoded `PbrMaterial`, what the renderer
 reads; a material document cooks the same pair), embedded glTF images →
 decoded `TEXR` in the colour space the importer assigned them (dual-use
 images arrive as two sub-assets, one per colour space), the asset's own
-texture → `TEXR`, clips → `CLIP` (or `STRM` for a sidecar's `stream: true`: the source bytes, M3-11 part 2), the prefab → `JSON`. A `fynkel.file` source: its bytes in one
+texture → `TEXR` (an HDR image as RGBA16F plus its prefiltered `ENVM`,
+E1; cache version 6), clips → `CLIP` (or `STRM` for a sidecar's `stream: true`: the source bytes, M3-11 part 2), the prefab → `JSON`. A `fynkel.file` source: its bytes in one
 `BLOB` chunk. A sidecar whose `subAssets` fall behind the import cooks with
 a warning (the container carries the derived ids) — `fynkel import`
 updates the sidecar; the cooker never writes outside the cache.
@@ -1266,18 +1293,20 @@ Chunk kinds and payloads:
 
 | Kind | Payload |
 | --- | --- |
-| `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `mipLevels`; `sampleRate`, `channels`, `frames`, `codec` (+ `streamed: true`, `bytes` for a `STRM`); `entities`; `extension` |
+| `META` | JSON: `{ fynkel: "cooked", version, id, name, path, kind, importer, importerVersion, profile, key, dependencies: [uuid], subAssets: { sub: uuid }, chunks: [{ index, kind, name, sub?, id?, … }] }` — per-chunk extras: `documentKind`; `vertices`, `indices`, `material`; `width`, `height`, `colorSpace`, `sourceHasAlpha`, `hdr`, `mipLevels`; `specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`; `sampleRate`, `channels`, `frames`, `codec` (+ `streamed: true`, `bytes` for a `STRM`); `entities`; `extension` |
 | `JSON` | A document's canonical text (scene, prefab, material, …) |
 | `MATL` | `u32` payload version (1), `u32` record size (`PbrMaterial::SIZE`, 184), `u32` string-tail length, `u32` reserved, then the `fynkel.PbrMaterial` wire record (ADR-0012 layout: `Vec4` 16 bytes, optional asset refs as a nil id when unbound) and its string tail (the `sub` ids). `fynkel_wire::material::{encode_material, decode_material}`. META extras: `shader`, `alphaMode`, `textures` (the bound slot names). |
 | `MESH` | `u32` vertex count, `u32` index count, `[f32; 3]` bounds min, `[f32; 3]` bounds max, vertices (72 bytes each, the intermediate's layout), `u32` indices |
-| `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear), `u32` mip levels (the full chain, `full_mip_count(w, h)`), then every level's `w × h × 4` texels concatenated, level 0 first, top row first (`TexturePayload::level(i)` / `base()`) |
+| `TEXR` | `u32` width, `u32` height, `u32` format (1 = RGBA8 sRGB, 2 = RGBA8 linear, 3 = RGBA16F linear — an HDR image, E1), `u32` mip levels (the full chain, `full_mip_count(w, h)`), then every level's `w × h` texels (4 bytes each, 8 for format 3) concatenated, level 0 first, top row first (`TexturePayload::level(i)` / `base()` / `texel_bytes()`) |
+| `ENVM` | `u32` specular face size, `u32` specular mip levels, `u32` irradiance face size, `[f32; 3]` mean irradiance, then the specular cube — per level, per face (+X −X +Y −Y +Z −Z), `size²` RGBA16F texels — and the irradiance cube (six faces of `size²` RGBA16F texels of E/π). An HDR image's prefiltered environment (E1); `EnvironmentPayload::specular_level(m)`; faces are bounded to `MAX_ENVIRONMENT_FACE` (2048) on decode. META extras: `specularSize`, `specularMips`, `irradianceSize`, `meanIrradiance`. |
 | `CLIP` | `u32` sample rate, `u32` channels, `u64` frames, interleaved `f32` samples |
 | `STRM` | `u32` sample rate, `u32` channels, `u64` frames, `u32` codec length, `u32` data length, the codec name (`pcm`, `vorbis`), the source file's bytes — a streamed sound (the sidecar's `stream: true`), decoded by the runtime as it plays |
 | `BLOB` | The source file's bytes |
 
-`fynkel_cooked::payload::{decode_mesh, decode_texture, decode_clip, decode_stream}` (and
+`fynkel_cooked::payload::{decode_mesh, decode_texture, decode_environment, decode_clip, decode_stream}` (and
 the `encode_*` counterparts, `Vertex`, `MeshPayload`, `TexturePayload`,
-`ClipPayload`) read the typed payloads back (length-checked, indices
+`EnvironmentPayload`, `ClipPayload`, the `f32_to_f16`/`f16_to_f32` pair
+the half-float payloads use) read the typed payloads back (length-checked, indices
 bounds-checked; `None` on a malformed payload); `fynkel_import::cook`
 re-exports them.
 

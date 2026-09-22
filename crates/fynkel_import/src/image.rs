@@ -1,12 +1,15 @@
 //! Texture importer (`fynkel.image`, blueprint §19.2c item 11): PNG and
-//! JPEG → RGBA8 with a declared colour space. Only those two formats are
-//! compiled in; anything else is `FYN-A0103`. Grey, grey+alpha, RGB, RGBA,
-//! palette and 16-bit sources all become 8-bit RGBA (16-bit is narrowed;
-//! HDR inputs are a later item). No resizing, no mipmaps, no flipping:
-//! rows are stored top first, as the file has them — M3 decides what the
-//! GPU upload does with that.
+//! JPEG → RGBA8 with a declared colour space; Radiance `.hdr` (E1) →
+//! linear `f32` RGB radiance, an environment for image-based lighting.
+//! Only those three formats are compiled in; anything else is
+//! `FYN-A0103`. Grey, grey+alpha, RGB, RGBA, palette and 16-bit sources
+//! all become 8-bit RGBA (16-bit is narrowed). No resizing, no mipmaps,
+//! no flipping: rows are stored top first, as the file has them — the
+//! cook builds the mip chain and, for an HDR image, the prefiltered
+//! environment.
 //!
-//! Sidecar settings: `colorSpace` (`srgb` | `linear`, default `srgb`).
+//! Sidecar settings: `colorSpace` (`srgb` | `linear`, default `srgb`; an
+//! HDR image is linear radiance and refuses `srgb`).
 
 use std::io::Cursor;
 use std::path::Path;
@@ -23,7 +26,9 @@ pub const IMPORTER_VERSION: u32 = 1;
 /// Import settings read from the sidecar's `settings`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
-    pub color_space: ColorSpace,
+    /// `None` when the sidecar leaves it to the default: `srgb` for an
+    /// 8-bit image, `linear` (the only possibility) for an HDR one.
+    pub color_space: Option<ColorSpace>,
 }
 
 impl Settings {
@@ -32,9 +37,9 @@ impl Settings {
     /// invisible bug).
     pub fn from_meta(meta: &Meta) -> Result<Settings, Diagnostic> {
         let color_space = match meta.settings.get("colorSpace") {
-            None => ColorSpace::Srgb,
+            None => None,
             Some(n) => match n.as_str().and_then(ColorSpace::parse) {
-                Some(c) => c,
+                Some(c) => Some(c),
                 None => {
                     return Err(Diagnostic::error(
                         Code::IMPORT_INVALID_DATA,
@@ -81,6 +86,16 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         .unwrap_or_default();
     let texture = match decode(&bytes, &name, settings.color_space, limits) {
         Ok(t) => t,
+        // A setting the image refuses is the sidecar's fault, not the file's.
+        Err(d) if d.pointer.is_some() => {
+            return fail(
+                d.with_document(
+                    fynkel_document::asset::sidecar_path(path)
+                        .display()
+                        .to_string(),
+                ),
+            )
+        }
         Err(d) => return fail(d),
     };
     let mut intermediate = Intermediate::empty(
@@ -112,12 +127,13 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     }
 }
 
-/// Decodes PNG/JPEG bytes to a texture. Shared with the glTF path, whose
-/// embedded images go through the same limits and normalization.
+/// Decodes PNG/JPEG/HDR bytes to a texture. Shared with the glTF path,
+/// whose embedded images go through the same limits and normalization.
+/// `color_space` is the sidecar's choice, `None` for the default.
 pub fn decode(
     bytes: &[u8],
     name: &str,
-    color_space: ColorSpace,
+    color_space: Option<ColorSpace>,
     limits: &Limits,
 ) -> Result<TextureData, Diagnostic> {
     if bytes.len() as u64 > limits.max_image_bytes {
@@ -136,7 +152,7 @@ pub fn decode(
     let Some(format) = reader.format() else {
         return Err(Diagnostic::error(
             Code::IMPORT_UNSUPPORTED,
-            "not a PNG or JPEG (only those two image formats are imported)",
+            "not a PNG, JPEG or Radiance HDR (only those image formats are imported)",
         ));
     };
     let mut reader = reader;
@@ -178,14 +194,35 @@ pub fn decode(
         ));
     }
     let source_has_alpha = decoded.color().has_alpha();
+    if format == image::ImageFormat::Hdr {
+        if color_space == Some(ColorSpace::Srgb) {
+            return Err(Diagnostic::error(
+                Code::IMPORT_INVALID_DATA,
+                "an HDR image is linear radiance; settings.colorSpace cannot be \"srgb\"",
+            )
+            .with_pointer("/settings/colorSpace"));
+        }
+        let hdr = decoded.into_rgb32f().into_raw();
+        return Ok(TextureData {
+            sub_id: None,
+            name: name.to_string(),
+            width,
+            height,
+            color_space: ColorSpace::Linear,
+            source_has_alpha,
+            rgba8: Vec::new(),
+            hdr: Some(hdr),
+        });
+    }
     let rgba8 = decoded.into_rgba8().into_raw();
     Ok(TextureData {
         sub_id: None,
         name: name.to_string(),
         width,
         height,
-        color_space,
+        color_space: color_space.unwrap_or(ColorSpace::Srgb),
         source_has_alpha,
         rgba8,
+        hdr: None,
     })
 }

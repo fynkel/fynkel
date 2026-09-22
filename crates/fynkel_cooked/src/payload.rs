@@ -1,4 +1,5 @@
-//! The typed chunk payloads (`MESH`, `TEXR`, `CLIP`, `SKIN`, `ANIM`): the
+//! The typed chunk payloads (`MESH`, `TEXR`, `ENVM`, `CLIP`, `SKIN`,
+//! `ANIM`): the
 //! layouts the cooker writes and the runtime reads. They live here, next
 //! to the container, so a loader needs nothing from the importers.
 //! Everything is little-endian; a malformed payload decodes to `None`,
@@ -9,8 +10,13 @@
 //!       [f32; 3] bounds max, vertices (72 bytes each), u32 indices,
 //!       then — a skinned mesh only (M3-19) — one `SkinWeight` per vertex
 //!       (u16 × 4 joint indices, f32 × 4 weights: 24 bytes)
-//! TEXR  u32 width, u32 height, u32 format, u32 mip levels (1),
-//!       width × height × 4 texels, top row first
+//! TEXR  u32 width, u32 height, u32 format, u32 mip levels, every level
+//!       base first, top row first: 4 bytes a texel (RGBA8, formats 1
+//!       and 2) or 8 (RGBA16F, format 3)
+//! ENVM  u32 specular size, u32 specular mips, u32 irradiance size,
+//!       [f32; 3] mean irradiance, then the prefiltered specular cube
+//!       (per mip, per face +X −X +Y −Y +Z −Z, size² RGBA16F texels) and
+//!       the irradiance cube (6 faces of size² RGBA16F texels)
 //! CLIP  u32 sample rate, u32 channels, u64 frames, interleaved f32 samples
 //! SKIN  u32 joint count, str skeleton, then per joint: str name,
 //!       u32 parent (joint index, `u32::MAX` for none), [f32; 16] inverse
@@ -27,6 +33,18 @@
 
 pub const TEXTURE_FORMAT_RGBA8_SRGB: u32 = 1;
 pub const TEXTURE_FORMAT_RGBA8_LINEAR: u32 = 2;
+/// Linear half-float RGBA (E1): an HDR image, 8 bytes a texel.
+pub const TEXTURE_FORMAT_RGBA16F_LINEAR: u32 = 3;
+
+/// Bytes of one texel of `format`, `None` for a format this build does
+/// not know.
+pub fn texel_bytes(format: u32) -> Option<usize> {
+    match format {
+        TEXTURE_FORMAT_RGBA8_SRGB | TEXTURE_FORMAT_RGBA8_LINEAR => Some(4),
+        TEXTURE_FORMAT_RGBA16F_LINEAR => Some(8),
+        _ => None,
+    }
+}
 
 /// The one vertex layout every mesh is normalized to (72 bytes): position,
 /// normal, tangent (xyz + handedness), two uv sets, linear RGBA colour.
@@ -520,19 +538,20 @@ pub fn decode_animation(bytes: &[u8]) -> Option<AnimationPayload> {
     })
 }
 
-/// A `TEXR` payload: RGBA8, top row first, every mip level concatenated
-/// from the base down (M3-08b): level `i` is `max(width >> i, 1)` by
-/// `max(height >> i, 1)` texels. `mip_levels` is 1 for a texture cooked
-/// without a chain; a full chain ends at 1×1.
+/// A `TEXR` payload: top row first, every mip level concatenated from
+/// the base down (M3-08b): level `i` is `max(width >> i, 1)` by
+/// `max(height >> i, 1)` texels of `texel_bytes(format)` each.
+/// `mip_levels` is 1 for a texture cooked without a chain; a full chain
+/// ends at 1×1.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TexturePayload {
     pub width: u32,
     pub height: u32,
-    /// `TEXTURE_FORMAT_RGBA8_SRGB` or `TEXTURE_FORMAT_RGBA8_LINEAR`.
+    /// One of the `TEXTURE_FORMAT_*` constants.
     pub format: u32,
     pub mip_levels: u32,
     /// All levels, base first.
-    pub rgba8: Vec<u8>,
+    pub texels: Vec<u8>,
 }
 
 impl TexturePayload {
@@ -541,17 +560,23 @@ impl TexturePayload {
         mip_size(self.width, self.height, level)
     }
 
+    /// Bytes of one texel.
+    pub fn texel_bytes(&self) -> usize {
+        texel_bytes(self.format).unwrap_or(4)
+    }
+
     /// The texels of level `i` (`None` past `mip_levels`).
     pub fn level(&self, level: u32) -> Option<&[u8]> {
         if level >= self.mip_levels {
             return None;
         }
+        let texel = self.texel_bytes();
         let mut at = 0usize;
         for l in 0..level {
-            at += level_bytes(self.width, self.height, l);
+            at += level_bytes(self.width, self.height, texel, l);
         }
-        let len = level_bytes(self.width, self.height, level);
-        self.rgba8.get(at..at + len)
+        let len = level_bytes(self.width, self.height, texel, level);
+        self.texels.get(at..at + len)
     }
 
     /// Level 0.
@@ -570,35 +595,35 @@ pub fn full_mip_count(width: u32, height: u32) -> u32 {
     32 - width.max(height).max(1).leading_zeros()
 }
 
-fn level_bytes(width: u32, height: u32, level: u32) -> usize {
+fn level_bytes(width: u32, height: u32, texel: usize, level: u32) -> usize {
     let (w, h) = mip_size(width, height, level);
-    w as usize * h as usize * 4
+    w as usize * h as usize * texel
 }
 
 /// Bytes of a chain of `mip_levels` levels, or `None` on overflow.
-fn chain_bytes(width: u32, height: u32, mip_levels: u32) -> Option<usize> {
+fn chain_bytes(width: u32, height: u32, texel: usize, mip_levels: u32) -> Option<usize> {
     let mut total = 0usize;
     for l in 0..mip_levels {
         let (w, h) = mip_size(width, height, l);
-        total = total.checked_add((w as usize).checked_mul(h as usize)?.checked_mul(4)?)?;
+        total = total.checked_add((w as usize).checked_mul(h as usize)?.checked_mul(texel)?)?;
     }
     Some(total)
 }
 
-/// `rgba8` holds `mip_levels` levels concatenated (`chain_bytes`).
+/// `texels` holds `mip_levels` levels concatenated (`chain_bytes`).
 pub fn encode_texture(
     width: u32,
     height: u32,
     format: u32,
     mip_levels: u32,
-    rgba8: &[u8],
+    texels: &[u8],
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(16 + rgba8.len());
+    let mut out = Vec::with_capacity(16 + texels.len());
     out.extend_from_slice(&width.to_le_bytes());
     out.extend_from_slice(&height.to_le_bytes());
     out.extend_from_slice(&format.to_le_bytes());
     out.extend_from_slice(&mip_levels.to_le_bytes());
-    out.extend_from_slice(rgba8);
+    out.extend_from_slice(texels);
     out
 }
 
@@ -608,15 +633,11 @@ pub fn decode_texture(bytes: &[u8]) -> Option<TexturePayload> {
     }
     let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     let (width, height, format, mip_levels) = (u32_at(0), u32_at(4), u32_at(8), u32_at(12));
-    if width == 0
-        || height == 0
-        || mip_levels == 0
-        || mip_levels > full_mip_count(width, height)
-        || !(format == TEXTURE_FORMAT_RGBA8_SRGB || format == TEXTURE_FORMAT_RGBA8_LINEAR)
-    {
+    let texel = texel_bytes(format)?;
+    if width == 0 || height == 0 || mip_levels == 0 || mip_levels > full_mip_count(width, height) {
         return None;
     }
-    if bytes.len() != 16usize.checked_add(chain_bytes(width, height, mip_levels)?)? {
+    if bytes.len() != 16usize.checked_add(chain_bytes(width, height, texel, mip_levels)?)? {
         return None;
     }
     Some(TexturePayload {
@@ -624,8 +645,182 @@ pub fn decode_texture(bytes: &[u8]) -> Option<TexturePayload> {
         height,
         format,
         mip_levels,
-        rgba8: bytes[16..].to_vec(),
+        texels: bytes[16..].to_vec(),
     })
+}
+
+/// An `ENVM` payload (E1, `docs/renderer.md` § Image-based lighting): the
+/// products the cook prefilters from an HDR environment, ready to upload
+/// as two cube maps. `specular` holds `specular_mips` levels, each six
+/// faces (+X −X +Y −Y +Z −Z, the WebGPU cube order) of
+/// `(specular_size >> mip)²` RGBA16F texels — level `m` is the
+/// environment convolved with GGX at roughness `m / (specular_mips − 1)`
+/// (level 0 the mirror). `irradiance` is six faces of
+/// `irradiance_size²` texels of E/π: the cosine-weighted irradiance for
+/// the texel's normal, divided by π, so a diffuse surface's outgoing
+/// radiance is albedo × texel. `mean_irradiance` is E averaged over the
+/// sphere, in the source's units, for the exposure estimate.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvironmentPayload {
+    pub specular_size: u32,
+    pub specular_mips: u32,
+    pub irradiance_size: u32,
+    pub mean_irradiance: [f32; 3],
+    /// Half floats, `4 × texels` per face.
+    pub specular: Vec<u16>,
+    pub irradiance: Vec<u16>,
+}
+
+/// The largest cube face the runtime accepts (bounded decoding).
+pub const MAX_ENVIRONMENT_FACE: u32 = 2048;
+
+impl EnvironmentPayload {
+    /// Half floats of one specular mip level (six faces).
+    pub fn specular_level_len(&self, mip: u32) -> usize {
+        let size = (self.specular_size >> mip).max(1) as usize;
+        size * size * 6 * 4
+    }
+
+    /// The six faces of specular level `mip`, `None` past `specular_mips`.
+    pub fn specular_level(&self, mip: u32) -> Option<&[u16]> {
+        if mip >= self.specular_mips {
+            return None;
+        }
+        let at: usize = (0..mip).map(|m| self.specular_level_len(m)).sum();
+        self.specular.get(at..at + self.specular_level_len(mip))
+    }
+}
+
+fn environment_lens(
+    specular_size: u32,
+    specular_mips: u32,
+    irradiance_size: u32,
+) -> Option<(usize, usize)> {
+    let mut specular = 0usize;
+    for m in 0..specular_mips {
+        let size = (specular_size >> m).max(1) as usize;
+        specular = specular.checked_add(size.checked_mul(size)?.checked_mul(24)?)?;
+    }
+    let irradiance = (irradiance_size as usize)
+        .checked_mul(irradiance_size as usize)?
+        .checked_mul(24)?;
+    Some((specular, irradiance))
+}
+
+pub fn encode_environment(env: &EnvironmentPayload) -> Vec<u8> {
+    let mut out = Vec::with_capacity(24 + (env.specular.len() + env.irradiance.len()) * 2);
+    out.extend_from_slice(&env.specular_size.to_le_bytes());
+    out.extend_from_slice(&env.specular_mips.to_le_bytes());
+    out.extend_from_slice(&env.irradiance_size.to_le_bytes());
+    for v in env.mean_irradiance {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    for v in env.specular.iter().chain(&env.irradiance) {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out
+}
+
+pub fn decode_environment(bytes: &[u8]) -> Option<EnvironmentPayload> {
+    if bytes.len() < 24 {
+        return None;
+    }
+    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let f32_at = |at: usize| f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let (specular_size, specular_mips, irradiance_size) = (u32_at(0), u32_at(4), u32_at(8));
+    let mean_irradiance = [f32_at(12), f32_at(16), f32_at(20)];
+    if specular_size == 0
+        || specular_size > MAX_ENVIRONMENT_FACE
+        || irradiance_size == 0
+        || irradiance_size > MAX_ENVIRONMENT_FACE
+        || specular_mips == 0
+        || specular_mips > full_mip_count(specular_size, specular_size)
+        || !mean_irradiance.iter().all(|v| v.is_finite() && *v >= 0.0)
+    {
+        return None;
+    }
+    let (specular_len, irradiance_len) =
+        environment_lens(specular_size, specular_mips, irradiance_size)?;
+    if bytes.len()
+        != 24usize.checked_add(specular_len.checked_add(irradiance_len)?.checked_mul(2)?)?
+    {
+        return None;
+    }
+    let halves: Vec<u16> = bytes[24..]
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    let (specular, irradiance) = halves.split_at(specular_len);
+    Some(EnvironmentPayload {
+        specular_size,
+        specular_mips,
+        irradiance_size,
+        mean_irradiance,
+        specular: specular.to_vec(),
+        irradiance: irradiance.to_vec(),
+    })
+}
+
+/// IEEE 754 binary16 from an `f32`, round to nearest even; out of range
+/// is ±infinity, NaN stays NaN.
+pub fn f32_to_f16(v: f32) -> u16 {
+    let bits = v.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let exp = ((bits >> 23) & 0xff) as i32;
+    let mant = bits & 0x7f_ffff;
+    if exp == 0xff {
+        // Infinity or NaN.
+        return sign | 0x7c00 | if mant != 0 { 0x200 } else { 0 };
+    }
+    let e = exp - 127 + 15;
+    if e >= 0x1f {
+        return sign | 0x7c00;
+    }
+    if e <= 0 {
+        if e < -10 {
+            return sign;
+        }
+        // Subnormal half: shift the implicit bit in and round.
+        let m = mant | 0x80_0000;
+        let shift = (14 - e) as u32;
+        let half = m >> shift;
+        let rem = m & ((1 << shift) - 1);
+        let midpoint = 1u32 << (shift - 1);
+        let round_up = rem > midpoint || (rem == midpoint && half & 1 == 1);
+        return sign | (half as u16 + round_up as u16);
+    }
+    let half = ((e as u32) << 10) | (mant >> 13);
+    let rem = mant & 0x1fff;
+    let round_up = rem > 0x1000 || (rem == 0x1000 && half & 1 == 1);
+    // A carry out of the mantissa rolls into the exponent (and to
+    // infinity at the top), which is the right answer.
+    sign | (half + round_up as u32) as u16
+}
+
+/// The `f32` of an IEEE 754 binary16.
+pub fn f16_to_f32(h: u16) -> f32 {
+    let sign = ((h & 0x8000) as u32) << 16;
+    let exp = ((h >> 10) & 0x1f) as u32;
+    let mant = (h & 0x3ff) as u32;
+    let bits = match exp {
+        0 => {
+            if mant == 0 {
+                sign
+            } else {
+                // Subnormal: normalize.
+                let mut m = mant;
+                let mut e: i32 = 1;
+                while m & 0x400 == 0 {
+                    m <<= 1;
+                    e -= 1;
+                }
+                sign | (((e - 15 + 127) as u32) << 23) | ((m & 0x3ff) << 13)
+            }
+        }
+        0x1f => sign | 0x7f80_0000 | (mant << 13),
+        _ => sign | ((exp + 127 - 15) << 23) | (mant << 13),
+    };
+    f32::from_bits(bits)
 }
 
 /// A `CLIP` payload: interleaved `f32` samples in `[-1, 1]`.
@@ -892,6 +1087,18 @@ mod tests {
         assert_eq!(d.base(), &[1, 2, 3, 4, 5, 6, 7, 8]);
         assert!(d.level(1).is_none());
         assert!(decode_texture(&encode_texture(2, 1, 9, 1, &[0; 8])).is_none());
+        // Half floats are 8 bytes a texel.
+        let h = encode_texture(2, 1, TEXTURE_FORMAT_RGBA16F_LINEAR, 1, &[0; 16]);
+        let d = decode_texture(&h).unwrap();
+        assert_eq!((d.texel_bytes(), d.base().len()), (8, 16));
+        assert!(decode_texture(&encode_texture(
+            2,
+            1,
+            TEXTURE_FORMAT_RGBA16F_LINEAR,
+            1,
+            &[0; 8]
+        ))
+        .is_none());
         // A chain: 4×2 → 2×1 → 1×1 (full_mip_count 3); the bytes must add up.
         assert_eq!(full_mip_count(4, 2), 3);
         assert_eq!(full_mip_count(1, 1), 1);
@@ -938,5 +1145,54 @@ mod tests {
         let d = decode_clip(&c).unwrap();
         assert_eq!((d.sample_rate, d.channels, d.frames), (48_000, 2, 2));
         assert!(decode_clip(&c[..c.len() - 4]).is_none());
+    }
+
+    #[test]
+    fn half_floats_round_trip() {
+        for v in [
+            0.0f32, -0.0, 1.0, -1.0, 0.5, 1.5, 65504.0, 6.1035e-5, 5.96e-8, 3.3, 1000.25,
+        ] {
+            let back = f16_to_f32(f32_to_f16(v));
+            assert!((back - v).abs() <= v.abs() * 1e-3 + 1e-7, "{v} -> {back}");
+        }
+        assert_eq!(f32_to_f16(1.0), 0x3c00);
+        assert_eq!(f32_to_f16(-2.0), 0xc000);
+        assert_eq!(f32_to_f16(1e6), 0x7c00, "overflow is infinity");
+        assert_eq!(f16_to_f32(0x7c00), f32::INFINITY);
+        assert!(f16_to_f32(f32_to_f16(f32::NAN)).is_nan());
+        assert_eq!(f32_to_f16(1e-9), 0, "below the subnormals is zero");
+        // Round to nearest even at the halfway point.
+        assert_eq!(f32_to_f16(f32::from_bits(0x3f80_1000)), 0x3c00);
+        assert_eq!(f32_to_f16(f32::from_bits(0x3f80_3000)), 0x3c02);
+    }
+
+    #[test]
+    fn environment_round_trip() {
+        let env = EnvironmentPayload {
+            specular_size: 4,
+            specular_mips: 2,
+            irradiance_size: 2,
+            mean_irradiance: [0.5, 0.25, 1.0],
+            specular: (0..(16 + 4) * 6 * 4).map(|i| i as u16).collect(),
+            irradiance: vec![0x3c00; 4 * 6 * 4],
+        };
+        let bytes = encode_environment(&env);
+        assert_eq!(
+            bytes.len(),
+            24 + (env.specular.len() + env.irradiance.len()) * 2
+        );
+        let d = decode_environment(&bytes).unwrap();
+        assert_eq!(d, env);
+        assert_eq!(d.specular_level(0).unwrap().len(), 16 * 24);
+        assert_eq!(d.specular_level(1).unwrap().len(), 4 * 24);
+        assert_eq!(d.specular_level(1).unwrap()[0], (16 * 24) as u16);
+        assert!(d.specular_level(2).is_none());
+        assert!(decode_environment(&bytes[..bytes.len() - 2]).is_none());
+        let mut short = env.clone();
+        short.specular_mips = 3;
+        assert!(decode_environment(&encode_environment(&short)).is_none());
+        let mut huge = env.clone();
+        huge.specular_size = MAX_ENVIRONMENT_FACE * 2;
+        assert!(decode_environment(&encode_environment(&huge)).is_none());
     }
 }

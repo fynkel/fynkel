@@ -14,8 +14,8 @@ use fynkel_core::material::AlphaMode;
 use fynkel_document::asset::AssetDatabase;
 use fynkel_document::SchemaSet;
 use fynkel_import::cook::{
-    decode_clip, decode_mesh, decode_stream, decode_texture, TEXTURE_FORMAT_RGBA8_LINEAR,
-    TEXTURE_FORMAT_RGBA8_SRGB,
+    decode_clip, decode_environment, decode_mesh, decode_stream, decode_texture,
+    TEXTURE_FORMAT_RGBA16F_LINEAR, TEXTURE_FORMAT_RGBA8_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
 };
 use fynkel_import::{cook, Cache, CookOptions, CookReport, Status};
 use fynkel_wire::material::decode_material;
@@ -292,6 +292,102 @@ fn a_streamed_sound_cooks_to_a_strm_chunk() {
 }
 
 #[test]
+fn an_hdr_image_cooks_its_texture_and_environment() {
+    const SKY: &str = "c0000000-0000-4000-8000-000000000005";
+    let p = Project::new("hdr");
+    std::fs::copy(
+        fixtures().join("textures/sky.hdr"),
+        p.assets().join("textures/sky.hdr"),
+    )
+    .unwrap();
+    p.write(
+        "textures/sky.hdr.meta.json",
+        &format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{SKY}","name":"sky.hdr","importer":"fynkel.image","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
+        ),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(status(&r, SKY), Status::Cooked);
+    let sky = r.get(id(SKY)).unwrap();
+    let bytes = std::fs::read(sky.file.as_ref().unwrap()).unwrap();
+    let c = Container::parse(&bytes).unwrap();
+    let kinds: Vec<String> = c.chunks().iter().map(|ch| ch.kind_str()).collect();
+    assert_eq!(kinds, ["META", "TEXR", "ENVM"]);
+    let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
+    let texr = &meta["chunks"][1];
+    assert_eq!(texr["hdr"], true);
+    assert_eq!(texr["colorSpace"], "linear");
+    assert_eq!(texr["name"], "sky.hdr");
+    let t = decode_texture(c.read(1, 1 << 24).unwrap()).unwrap();
+    assert_eq!(
+        (t.width, t.height, t.format, t.mip_levels, t.texel_bytes()),
+        (64, 32, TEXTURE_FORMAT_RGBA16F_LINEAR, 7, 8)
+    );
+    // Half floats: the top-left texel is the bright blue sky, alpha 1.
+    let half = |at: usize| {
+        fynkel_cooked::payload::f16_to_f32(u16::from_le_bytes([t.base()[at], t.base()[at + 1]]))
+    };
+    assert!((half(4) - 4.0).abs() < 0.05, "{}", half(4));
+    assert_eq!(half(6), 1.0);
+    // The 1×1 level is the mean radiance: a quarter blue sky over a
+    // red/green ground averages to about (0.98, 1.19, 1.08).
+    let top = t.level(6).unwrap();
+    let mean = |c: usize| {
+        fynkel_cooked::payload::f16_to_f32(u16::from_le_bytes([top[c * 2], top[c * 2 + 1]]))
+    };
+    assert!(
+        (mean(0) - 0.99).abs() < 0.05 && (mean(2) - 1.08).abs() < 0.05,
+        "{} {} {}",
+        mean(0),
+        mean(1),
+        mean(2)
+    );
+
+    let envm = &meta["chunks"][2];
+    assert_eq!(envm["name"], "sky.hdr");
+    assert_eq!(envm["specularSize"], 128);
+    assert_eq!(envm["specularMips"], 6);
+    assert_eq!(envm["irradianceSize"], 32);
+    let env = decode_environment(c.read(2, 1 << 24).unwrap()).unwrap();
+    assert_eq!(
+        (env.specular_size, env.specular_mips, env.irradiance_size),
+        (128, 6, 32)
+    );
+    assert_eq!(envm["meanIrradiance"][2], env.mean_irradiance[2]);
+    // Up is blue in the mirror level and in the irradiance; the ground's
+    // irradiance below is the red/green mix.
+    let texel = |halves: &[u16], size: usize, face: usize| {
+        let at = ((face * size + size / 2) * size + size / 2) * 4;
+        [halves[at], halves[at + 1], halves[at + 2]].map(fynkel_cooked::payload::f16_to_f32)
+    };
+    let up = texel(env.specular_level(0).unwrap(), 128, 2);
+    assert!(up[2] > 3.9 && up[0] < 0.9, "{up:?}");
+    let e_up = texel(&env.irradiance, 32, 2);
+    let e_down = texel(&env.irradiance, 32, 3);
+    // E(up) = π/2 × sky + π/2 × the ground above the horizon.
+    assert!(
+        (e_up[2] - 2.05).abs() < 0.1 && (e_up[0] - 0.93).abs() < 0.1,
+        "{e_up:?}"
+    );
+    assert!(
+        (e_down[0] - 1.05).abs() < 0.1 && e_down[2] < 0.2,
+        "{e_down:?}"
+    );
+    // Mean E = ¼ ∫ L dω: the ground's 10.7 sr outweigh the sky's 1.8.
+    assert!(
+        (env.mean_irradiance[0] - 3.19).abs() < 0.1 && (env.mean_irradiance[2] - 2.1).abs() < 0.1,
+        "{:?}",
+        env.mean_irradiance
+    );
+
+    // Deterministic, and cached on the second cook.
+    let again = p.cook();
+    assert_eq!(status(&again, SKY), Status::Cached);
+    assert_eq!(std::fs::read(sky.file.as_ref().unwrap()).unwrap(), bytes);
+}
+
+#[test]
 fn editing_a_document_invalidates_it_and_its_dependents_only() {
     let p = Project::new("edit-doc");
     let first = p.cook();
@@ -483,7 +579,7 @@ fn containers_read_back_with_bounded_decoding() {
         (4, 3, TEXTURE_FORMAT_RGBA8_SRGB)
     );
     assert_eq!(t.mip_levels, 3, "4×3 → 2×1 → 1×1: the full chain");
-    assert_eq!(t.rgba8.len(), 48 + 8 + 4);
+    assert_eq!(t.texels.len(), 48 + 8 + 4);
     let base = t.base();
     assert_eq!(base.len(), 48);
     assert!(base[0] < base[12], "red rises along x, as in the source");

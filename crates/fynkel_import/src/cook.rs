@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{has_errors, Code, Diagnostic};
 use fynkel_cooked::{
-    Writer, KIND_ANIMATION, KIND_BLOB, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN,
-    KIND_STREAM, KIND_TEXTURE,
+    Writer, KIND_ANIMATION, KIND_BLOB, KIND_CLIP, KIND_ENVIRONMENT, KIND_JSON, KIND_MATERIAL,
+    KIND_MESH, KIND_SKIN, KIND_STREAM, KIND_TEXTURE,
 };
 use fynkel_document::asset::{asset_refs, AssetDatabase, AssetEntry, AssetKind, Meta};
 use fynkel_document::prefab::{expand, Prefab, PrefabLibrary};
@@ -43,8 +43,9 @@ pub const DEFAULT_PROFILE: &str = "dev";
 
 /// Texture chunk formats (`TEXR` payload, `format` field).
 pub use fynkel_cooked::payload::{
-    decode_clip, decode_mesh, decode_stream, decode_texture, ClipPayload as ClipChunk,
-    MeshPayload as MeshChunk, StreamPayload as StreamChunk, TexturePayload as TextureChunk,
+    decode_clip, decode_environment, decode_mesh, decode_stream, decode_texture,
+    ClipPayload as ClipChunk, EnvironmentPayload as EnvironmentChunk, MeshPayload as MeshChunk,
+    StreamPayload as StreamChunk, TexturePayload as TextureChunk, TEXTURE_FORMAT_RGBA16F_LINEAR,
     TEXTURE_FORMAT_RGBA8_LINEAR, TEXTURE_FORMAT_RGBA8_SRGB,
 };
 
@@ -1499,7 +1500,7 @@ fn plan_intermediate(
         }
     }
     for image in &im.images {
-        match crate::image::decode(&image.bytes, &image.name, image.color_space, limits) {
+        match crate::image::decode(&image.bytes, &image.name, Some(image.color_space), limits) {
             Ok(texture) => chunks.push(texture_chunk(&texture, Some(image.sub_id.clone()))),
             Err(d) => diagnostics.push(
                 Diagnostic::warning(
@@ -1511,11 +1512,31 @@ fn plan_intermediate(
         }
     }
     for texture in &im.textures {
+        let name = if texture.sub_id.is_none() {
+            asset_name.to_string()
+        } else {
+            texture.name.clone()
+        };
         let mut c = texture_chunk(texture, texture.sub_id.clone());
-        if texture.sub_id.is_none() {
-            c.name = asset_name.to_string();
-        }
+        c.name = name.clone();
         chunks.push(c);
+        if let Some(hdr) = &texture.hdr {
+            // An HDR image is an environment: its prefiltered products
+            // (E1) sit next to the texture under the same sub-asset.
+            let env = crate::environment::prefilter(texture.width, texture.height, hdr);
+            chunks.push(ChunkPlan {
+                kind: KIND_ENVIRONMENT,
+                name,
+                sub: texture.sub_id.clone(),
+                info: json!({
+                    "specularSize": env.specular_size,
+                    "specularMips": env.specular_mips,
+                    "irradianceSize": env.irradiance_size,
+                    "meanIrradiance": env.mean_irradiance,
+                }),
+                payload: fynkel_cooked::payload::encode_environment(&env),
+            });
+        }
     }
     for clip in &im.clips {
         let name = if clip.sub_id.is_none() {
@@ -1705,6 +1726,7 @@ fn texture_chunk(t: &TextureData, sub: Option<String>) -> ChunkPlan {
             "height": t.height,
             "colorSpace": t.color_space.name(),
             "sourceHasAlpha": t.source_has_alpha,
+            "hdr": t.is_hdr(),
             "mipLevels": fynkel_cooked::payload::full_mip_count(t.width, t.height),
         }),
         payload: encode_texture(t),
@@ -1724,20 +1746,65 @@ pub fn encode_mesh(mesh: &MeshData) -> Vec<u8> {
 }
 
 /// `TEXR` (see `fynkel_cooked::payload`): the image and its full mip
-/// chain down to 1×1 (M3-08b), so the renderer never filters at load.
+/// chain down to 1×1 (M3-08b), so the renderer never filters at load. An
+/// HDR image (E1) is written as linear RGBA16F, its chain averaged in
+/// `f32`.
 pub fn encode_texture(t: &TextureData) -> Vec<u8> {
+    let mip_levels = fynkel_cooked::payload::full_mip_count(t.width, t.height);
+    if let Some(hdr) = &t.hdr {
+        let chain = mip_chain_f32(t.width, t.height, hdr);
+        let mut halves = Vec::with_capacity(chain.len() / 3 * 8);
+        for texel in chain.chunks_exact(3) {
+            for v in texel {
+                halves.extend_from_slice(&fynkel_cooked::payload::f32_to_f16(*v).to_le_bytes());
+            }
+            halves.extend_from_slice(&fynkel_cooked::payload::f32_to_f16(1.0).to_le_bytes());
+        }
+        return fynkel_cooked::payload::encode_texture(
+            t.width,
+            t.height,
+            TEXTURE_FORMAT_RGBA16F_LINEAR,
+            mip_levels,
+            &halves,
+        );
+    }
     let (format, srgb) = match t.color_space {
         ColorSpace::Srgb => (TEXTURE_FORMAT_RGBA8_SRGB, true),
         ColorSpace::Linear => (TEXTURE_FORMAT_RGBA8_LINEAR, false),
     };
     let chain = mip_chain(t.width, t.height, &t.rgba8, srgb);
-    fynkel_cooked::payload::encode_texture(
-        t.width,
-        t.height,
-        format,
-        fynkel_cooked::payload::full_mip_count(t.width, t.height),
-        &chain,
-    )
+    fynkel_cooked::payload::encode_texture(t.width, t.height, format, mip_levels, &chain)
+}
+
+/// `mip_chain` for `f32` RGB: every level of `base` concatenated, each a
+/// 2×2 box filter of the one above.
+pub fn mip_chain_f32(width: u32, height: u32, base: &[f32]) -> Vec<f32> {
+    let levels = fynkel_cooked::payload::full_mip_count(width, height);
+    let mut out = Vec::with_capacity(base.len() * 4 / 3 + 3);
+    out.extend_from_slice(base);
+    let (mut w, mut h) = (width as usize, height as usize);
+    let mut prev = base.to_vec();
+    for _ in 1..levels {
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = vec![0f32; nw * nh * 3];
+        for y in 0..nh {
+            for x in 0..nw {
+                let (x0, y0) = (2 * x, 2 * y);
+                let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+                for c in 0..3 {
+                    next[(y * nw + x) * 3 + c] = 0.25
+                        * (prev[(y0 * w + x0) * 3 + c]
+                            + prev[(y0 * w + x1) * 3 + c]
+                            + prev[(y1 * w + x0) * 3 + c]
+                            + prev[(y1 * w + x1) * 3 + c]);
+                }
+            }
+        }
+        out.extend_from_slice(&next);
+        prev = next;
+        (w, h) = (nw, nh);
+    }
+    out
 }
 
 /// Every level of `base` (`width`×`height` RGBA8) concatenated, each a

@@ -415,9 +415,10 @@ Node names are the contract, as above: the prefab's entities are named
 after their nodes (an unnamed node gets `node<i>`), so an instantiated
 prefab resolves its own clips.
 
-The intermediate is `FYNI` version 4 (`skins` and `animations` next to
-`meshes`, the animations with their markers), the cache version 5; the
-cooked container is unchanged
+Skins and animations entered the intermediate at `FYNI` version 4
+(`skins` and `animations` next to `meshes`, the animations with their
+markers) and the cache at version 5; both have moved on since (E1: `FYNI`
+6, cache 6). The cooked container is unchanged
 (`docs/documents.md` § Cache). The runtime store (`fynkel_assets`)
 converts the payloads into the core's `Clip`/`Skin` on demand
 (`Assets::clip`, `Assets::skin`) and `register_animation(scene, world)`

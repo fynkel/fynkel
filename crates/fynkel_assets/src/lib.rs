@@ -28,14 +28,15 @@ use std::sync::{Arc, Mutex};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic, Uuid};
 use fynkel_cooked::payload::{
-    decode_animation, decode_clip, decode_mesh, decode_skin, decode_stream, decode_texture,
-    ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR, ANIM_INTERPOLATION_STEP,
-    ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE, ANIM_PROPERTY_TRANSLATION,
+    decode_animation, decode_clip, decode_environment, decode_mesh, decode_skin, decode_stream,
+    decode_texture, ANIM_INTERPOLATION_CUBIC_SPLINE, ANIM_INTERPOLATION_LINEAR,
+    ANIM_INTERPOLATION_STEP, ANIM_PROPERTY_ROTATION, ANIM_PROPERTY_SCALE,
+    ANIM_PROPERTY_TRANSLATION,
 };
-pub use fynkel_cooked::payload::{MeshPayload, TexturePayload};
+pub use fynkel_cooked::payload::{EnvironmentPayload, MeshPayload, TexturePayload};
 use fynkel_cooked::{
-    ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_JSON, KIND_MATERIAL, KIND_MESH, KIND_SKIN,
-    KIND_STREAM, KIND_TEXTURE,
+    ChunkFile, KIND_ANIMATION, KIND_CLIP, KIND_ENVIRONMENT, KIND_JSON, KIND_MATERIAL, KIND_MESH,
+    KIND_SKIN, KIND_STREAM, KIND_TEXTURE,
 };
 use fynkel_core::animation::{
     BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Marker, Property, Skin,
@@ -336,6 +337,8 @@ struct Store {
     metas: HashMap<Uuid, Arc<ObjectMeta>>,
     meshes: HashMap<AssetRef, Arc<MeshPayload>>,
     textures: HashMap<AssetRef, Arc<TexturePayload>>,
+    /// `Some` for an HDR image, `None` recorded for one without an `ENVM`.
+    environments: HashMap<AssetRef, Option<Arc<EnvironmentPayload>>>,
     materials: HashMap<AssetRef, Arc<PbrMaterial>>,
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
@@ -406,6 +409,7 @@ impl Assets {
                 metas: HashMap::new(),
                 meshes: HashMap::new(),
                 textures: HashMap::new(),
+                environments: HashMap::new(),
                 materials: HashMap::new(),
                 clips: HashMap::new(),
                 blends: HashMap::new(),
@@ -478,7 +482,12 @@ impl Assets {
                 .sum::<u64>()
                 + s.textures
                     .values()
-                    .map(|t| t.rgba8.len() as u64)
+                    .map(|t| t.texels.len() as u64)
+                    .sum::<u64>()
+                + s.environments
+                    .values()
+                    .flatten()
+                    .map(|e| (e.specular.len() + e.irradiance.len()) as u64 * 2)
                     .sum::<u64>(),
             evictions: s.evictions,
         }
@@ -753,6 +762,7 @@ impl Assets {
         let gone: HashSet<Uuid> = gone.into_iter().collect();
         s.meshes.retain(|r, _| !gone.contains(&r.asset));
         s.textures.retain(|r, _| !gone.contains(&r.asset));
+        s.environments.retain(|r, _| !gone.contains(&r.asset));
         s.materials.retain(|r, _| !gone.contains(&r.asset));
         s.clips.retain(|r, _| !gone.contains(&r.asset));
         s.blends.retain(|r, _| !gone.contains(&r.asset));
@@ -767,6 +777,7 @@ impl Assets {
         let mut s = self.lock();
         s.meshes.clear();
         s.textures.clear();
+        s.environments.clear();
         s.materials.clear();
         s.clips.clear();
         s.blends.clear();
@@ -794,6 +805,25 @@ impl Assets {
         let payload = decode_texture(&bytes).ok_or_else(|| self.malformed(r, "TEXR"))?;
         let payload = Arc::new(payload);
         self.lock().textures.insert(r.clone(), payload.clone());
+        Ok(payload)
+    }
+
+    /// The prefiltered environment cooked next to an HDR image (E1):
+    /// `Ok(None)` for a texture that has none (an 8-bit sky lights nothing
+    /// — the constant ambient stays), an error only when the object cannot
+    /// be read.
+    pub fn environment(&self, r: &AssetRef) -> Result<Option<Arc<EnvironmentPayload>>, Diagnostic> {
+        if let Some(e) = self.lock().environments.get(r) {
+            return Ok(e.clone());
+        }
+        let payload = if self.has_chunk(r, KIND_ENVIRONMENT)? {
+            let bytes = self.chunk(r, KIND_ENVIRONMENT)?;
+            let payload = decode_environment(&bytes).ok_or_else(|| self.malformed(r, "ENVM"))?;
+            Some(Arc::new(payload))
+        } else {
+            None
+        };
+        self.lock().environments.insert(r.clone(), payload.clone());
         Ok(payload)
     }
 

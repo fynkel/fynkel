@@ -36,7 +36,7 @@ pub fn importer_for(path: &Path) -> &'static str {
     match ext.as_str() {
         "gltf" | "glb" => GLTF_IMPORTER,
         "fbx" => FBX_IMPORTER,
-        "png" | "jpg" | "jpeg" => IMAGE_IMPORTER,
+        "png" | "jpg" | "jpeg" | "hdr" => IMAGE_IMPORTER,
         "wav" | "ogg" => AUDIO_IMPORTER,
         _ => FILE_IMPORTER,
     }

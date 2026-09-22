@@ -1,8 +1,8 @@
 //! The texture and audio importers (blueprint §19.2c item 11): every
-//! source layout normalizes to RGBA8 / interleaved f32, the sidecar's
-//! colour space is honoured, only PNG/JPEG and WAV/Ogg Vorbis are read,
-//! limits hold, and the bytes are deterministic (committed for the
-//! lossless sources).
+//! source layout normalizes to RGBA8 / interleaved f32 (a Radiance HDR to
+//! linear f32 RGB, E1), the sidecar's colour space is honoured, only
+//! PNG/JPEG/HDR and WAV/Ogg Vorbis are read, limits hold, and the bytes
+//! are deterministic (committed for the lossless sources).
 
 use std::path::{Path, PathBuf};
 
@@ -172,7 +172,66 @@ fn colour_space_comes_from_the_sidecar() {
 }
 
 #[test]
-fn only_png_and_jpeg_are_images() {
+fn an_hdr_image_is_linear_f32_radiance() {
+    // `fixtures/textures/sky.py`: 64×32, bright blue over the top quarter,
+    // red on the left half below it, green on the right.
+    let path = fixture("textures/sky.hdr");
+    let meta = Meta::new(&path);
+    assert_eq!(meta.importer, "fynkel.image");
+    let r = import(&path, &meta, &Limits::default());
+    assert!(!r.has_errors(), "{:#?}", r.diagnostics);
+    let i = r.intermediate.unwrap();
+    let t = &i.textures[0];
+    assert_eq!((t.width, t.height), (64, 32));
+    assert_eq!(t.color_space, ColorSpace::Linear);
+    assert!(t.is_hdr());
+    assert!(t.rgba8.is_empty());
+    let hdr = t.hdr.as_ref().unwrap();
+    assert_eq!(hdr.len(), 64 * 32 * 3);
+    let px = |x: usize, y: usize| &hdr[(y * 64 + x) * 3..(y * 64 + x) * 3 + 3];
+    let near = |a: &[f32], b: [f32; 3]| {
+        a.iter()
+            .zip(b)
+            .all(|(a, b)| (a - b).abs() < 0.03 * b + 0.02)
+    };
+    assert!(near(px(10, 2), [0.8, 1.6, 4.0]), "{:?}", px(10, 2));
+    assert!(near(px(10, 20), [2.0, 0.1, 0.1]), "{:?}", px(10, 20));
+    assert!(near(px(50, 20), [0.1, 2.0, 0.1]), "{:?}", px(50, 20));
+    assert!(hdr.iter().any(|v| *v > 1.0), "an HDR image keeps its range");
+    assert_matches_expected(&i, "textures/sky.expected.fyni");
+
+    // The sidecar may say `linear` (the truth) but not `srgb`.
+    let linear = import(
+        &path,
+        &meta_with_settings(&path, r#"{"colorSpace":"linear"}"#),
+        &Limits::default(),
+    );
+    assert!(!linear.has_errors());
+    let bad = import(
+        &path,
+        &meta_with_settings(&path, r#"{"colorSpace":"srgb"}"#),
+        &Limits::default(),
+    );
+    assert_eq!(
+        codes(&bad),
+        [Code::IMPORT_INVALID_DATA],
+        "{:#?}",
+        bad.diagnostics
+    );
+    assert_eq!(
+        bad.diagnostics[0].pointer.as_deref(),
+        Some("/settings/colorSpace")
+    );
+    assert!(bad.diagnostics[0]
+        .document
+        .as_deref()
+        .unwrap()
+        .ends_with("sky.hdr.meta.json"));
+    assert!(bad.intermediate.is_none());
+}
+
+#[test]
+fn only_png_jpeg_and_hdr_are_images() {
     // A GIF pushed through the image importer by its sidecar.
     let path = fixture("textures/swatch.gif");
     let mut meta = Meta::new(&path);
