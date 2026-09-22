@@ -10,6 +10,8 @@
 | [`ideas.md`](ideas.md) | Post-1.0 ideas (plugins, roadmap). Non-binding. |
 | [`m0-architecture-report.md`](m0-architecture-report.md) | M0 go/no-go: gate results, measured numbers, Path A selected, Path C fallback. |
 | [`m1-gate-report.md`](m1-gate-report.md) | M1 go/no-go: gate results, Dart allocation per frame, leak tests, bandwidth. |
+| [`m2-gate-report.md`](m2-gate-report.md) | M2 go/no-go: the seven data-layer criteria, corpus tallies, tooling timings, carry-over D1–D8. |
+| [`m3-gate-report.md`](m3-gate-report.md) | M3 go/no-go: the six criteria with evidence, the clean-clone run, the stress and reference-game numbers, the decided deviations, carry-over E1–E9. |
 | [`toolchain.md`](toolchain.md) | Frozen toolchain matrix (M0). |
 | [`catalogue.md`](catalogue.md) | The native component catalogue (M3-10): `Rotator`, `Oscillate`, `Follow`, `LookAtCamera`, `LifetimeDespawn`, `Emitter` — semantics, where in the tick they run, prefab registration, per-system time, cost. |
 | [`codegen.md`](codegen.md) | Schema codegen pipeline: Rust structs → JSON Schema, Dart and Rust codecs, fixtures (M1). |

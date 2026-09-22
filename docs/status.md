@@ -1,10 +1,10 @@
-# Engine status — 2026-09-22 (M2 gate: GO; M3 in progress, items 1–17 and 19 done, 17 thin; M4 in parallel, §6 item 16)
+# Engine status — 2026-09-22 (M3 gate: GO with two named exceptions; M4 in parallel, §6)
 
 The one-page, plain-words answer to "what do we have, is it solid, what is
 missing". Rewritten at every milestone gate and updated whenever a row below
 changes. Numbers come from the gate reports (`m0-architecture-report.md`,
-`m1-gate-report.md`, `m2-gate-report.md`) and the captures under
-`benchmarks/`; nothing here is estimated.
+`m1-gate-report.md`, `m2-gate-report.md`, `m3-gate-report.md`) and the
+captures under `benchmarks/`; nothing here is estimated.
 
 ## 1. What exists
 
@@ -1106,16 +1106,25 @@ stats section, `profileDartHeap` and the capture line in place.
 
 ## 6. Verdict and next steps
 
-M2 is closed with a GO (`m2-gate-report.md`). The data layer is the shape the
-blueprint asked for: plain files with exact diagnostics, identity that
-survives edits, moves and re-imports, prefabs that expand deterministically,
-a cache that re-cooks exactly what changed, and behaviours that go from a
-Dart class to a schema to a running instance — all of it driven by `--json`
-commands that an agent can run, and all of it measured in milliseconds.
-Nothing built so far needs to be torn down.
+M3 is closed with a GO (`m3-gate-report.md`, 2026-09-22) carrying two
+named exceptions that are decisions, not failures: the repository stays
+private (item 17 done thin — license, `LICENSE`, `CONTRIBUTING.md`, CI on
+a fork and the C ABI bump wait for a reader, "public readiness (b)"), and
+the reference game ran on the iPhone simulator, not a device (M6
+qualifies it). Everything else the §16 gate asked for is in: a clean
+clone builds and runs the game through its README (run at `6176d5e`),
+it is playable end to end on macOS, no editor is needed, the frame paths
+are instrumented on every surface, and both scenes are captured against
+the manifest with sixteen checks green
+(`benchmarks/m3/results/2026-09-22-871c353`). The carry-over list is
+E1–E9 in the report's §5; §3 above is its living copy.
 
-What the gate could not prove is the game: nobody can see a created project
-in its own app, play it, or hear it. That is M3, in this order:
+**Next on this stream: E1, image-based lighting** (the renderer's
+constant ambient term is the one thing in the showcase that looks
+wrong), then the rest of §3 as the reference game or the editor needs
+it. M4 continues on its branch (item 16 below); M5 opens when M4 closes.
+
+The M3 backlog as it landed, for the record:
 
 1. ~~**`package:fynkel_flutter`** (D1)~~ — done (M3-01): the viewport widget
    and Swift plugin as a package; the template uses it; a created project
@@ -1241,8 +1250,10 @@ in its own app, play it, or hear it. That is M3, in this order:
    goes public (blueprint item 17). The Dart allocation gap is
    attributed and closed on Fynkel's side (2026-09-22: the game 57 →
    17.6 KB/frame, the framework's ≈ 12 KB floor documented in §3 and
-   docs/instrumentation.md). **Next: the gate report (18)** — measured
-   with both captures at every step.
+   docs/instrumentation.md). **The gate report (18) done short**
+   (2026-09-22, `m3-gate-report.md`: the six criteria with evidence, the
+   clean-clone run at `6176d5e`, the numbers, the decided deviations —
+   the ABI stays at 1 —, carry-overs E1–E9, GO).
 16. **M4 — the editor — has started in parallel** (2026-09-21, the user's
    call): branch `editor` in its own worktree, the backlog in blueprint
    §19.2e (ten items: the authoring ABI D5 + D7 first, then the shell,
