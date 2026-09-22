@@ -33,14 +33,25 @@ counted, and the tick's p50 stays under 4 ms with everything else on. The
 `game.Wobble`); their HUD numbers are recorded by hand in the results
 (capture.py drives the bare project). Aggregation as in
 benchmarks/m0/capture.py (median of per-second p50/p95, max of per-second
-p99). Gate (item 16): the 12 ms p95 total-work target (blueprint §15.2:
+p99). Gate (E1 light culling): the same field regenerated with 256 point
+and spot lights over it (`generate.py --lights`, `project-lights`, its own
+lock and cook) and run in the standalone host — the frame's pool fills, no
+object takes more than the per-object budget, and `prepare` (where the
+per-object assignment runs) stays within a millisecond of the same scene's
+prepare without the lights. Gate (item 16): the 12 ms p95 total-work
+target (blueprint §15.2:
 `simulate + render()` per frame, `FynkelFrameStats.totalWork`) checked on
 both scenes in their Flutter apps, the GPU pass timestamps read back, the
 headless report carrying the same timers, the reference game's Dart heap
 steady (allocation and GC per frame recorded, not gated).
 
-Usage: python3 benchmarks/m3/capture.py [--skip-build] [--sample 10] [--warmup 2]
-       [--quality <profile>] [--no-flutter]
+Usage: caffeinate -du python3 benchmarks/m3/capture.py [--skip-build]
+       [--sample 10] [--warmup 2] [--quality <profile>] [--no-flutter]
+
+Run it alone and with the display awake: the hosts present to a real
+surface, so an idle display (or a window covered by another) throttles
+them and the `[1s]` / `[stats]` windows come out short — `caffeinate -du`
+is what keeps an unattended run honest.
 """
 import argparse
 import datetime as dt
@@ -66,10 +77,15 @@ STANDALONE = ROOT / "target/release/fynkel_host_standalone"
 REFERENCE = ROOT / "examples/reference_game"
 REFERENCE_CACHE = REFERENCE / ".fynkel/cache"
 REFERENCE_APP = REFERENCE / "build/macos/Build/Products/Profile/reference_game.app/Contents/MacOS/reference_game"
+LIGHTS = ROOT / "benchmarks/stress/project-lights"
+LIGHTS_CACHE = LIGHTS / ".fynkel/cache"
+LIGHTS_N = 256  # 4× the renderer's frame pool (fynkel_render::LIGHT_POOL)
 PLAYGROUND = REFERENCE / "assets/scenes/playground.scene.json"
 ROUTE = REFERENCE / "test/collect_all.input.json"
 NUM = m0.NUM
 TOTAL_WORK_P95_MS = 12.0
+# fynkel_render::LIGHT_POOL / MAX_LIGHTS (E1 light culling).
+LIGHT_POOL, MAX_LIGHTS = 64, 8
 
 
 def build():
@@ -94,6 +110,25 @@ def prepare_stress():
         "shadow_casters": r["shadowCasters"], "shadow_draws": r["shadowDraws"], "shadow_map": r["shadowMap"],
         "quality": r["quality"],
     }
+
+
+def prepare_lights(n=LIGHTS_N):
+    """The many-lights variant of the same field (E1 light culling): the
+    stress scene with `n` point and spot lights scattered over it, whose
+    ranges overlap, so more lights than the per-object budget reach most
+    objects and more than the frame pool reach the view. Generated, locked,
+    cooked and rendered once for the per-object counts."""
+    print(f"stress scene, {n} lights…", flush=True)
+    gen = m0.sh([sys.executable, str(ROOT / "benchmarks/stress/generate.py"), "--out", str(LIGHTS), "--lights", str(n)])
+    m0.sh([str(FYNKEL), "project", "lock", "--project", str(LIGHTS)])
+    m0.sh([str(FYNKEL), "cook", "--project", str(LIGHTS)])
+    out = m0.sh([str(FYNKEL), "render", "--project", str(LIGHTS), "--no-cook", "--json",
+                 "--out", str(ROOT / "benchmarks/stress/render-lights.png")])
+    r = json.loads(out)
+    return {"generator": gen, "authored": n, "entities": r["scene"]["entities"],
+            "instances": r["instances"], "culled": r["culled"], "draws": r["draws"],
+            "lights": r["lights"], "lights_dropped": r["lightsDropped"],
+            "lights_max_per_object": r["lightsMaxPerObject"], "lights_overflow": r["lightsOverflow"]}
 
 
 def capture_physics(steps=600):
@@ -360,6 +395,26 @@ def gate(r):
             (f"the rigs drawn skinned by the standalone host at 120 Hz ({s.get('skinned')} skinned instances in view, "
              f"{s.get('frames_per_s')} frames/s)", (s.get("skinned") or 0) >= 150 and (s.get("frames_per_s") or 0) >= 118),
         ]
+    # E1 light culling: the many-lights variant of the same field. The
+    # per-object assignment is a CPU loop over the frame's pool, so what
+    # is gated is `prepare` — it must stay close to the same scene's
+    # prepare without the lights, and no object may exceed the budget.
+    li, ls = r.get("lights") or {}, r.get("lights_standalone") or {}
+    base, lit = (s.get("prepare_ms") or {}).get("p95"), (ls.get("prepare_ms") or {}).get("p95")
+    if li:
+        checks += [
+            (f"{li['authored']} lights over the stress field culled per object "
+             f"({li['lights']} of {li['authored']} in the frame's pool, {li['lights_dropped']} dropped; "
+             f"≤ {li['lights_max_per_object']} reach an object, {li['lights_overflow']} of {li['instances']} clipped)",
+             li["lights"] == LIGHT_POOL and li["lights_dropped"] > 0 and li["lights_max_per_object"] == MAX_LIGHTS
+             and li["lights_overflow"] > 0),
+        ]
+        if lit is None or base is None:
+            checks.append(("the assignment stays cheap at stress scale: no `[1s]` windows to compare", False))
+        else:
+            checks.append((f"the assignment stays cheap at stress scale: prepare p95 {lit:.2f} ms with the lights, "
+                           f"{base:.2f} ms without (+{lit - base:.2f} ms, < 1 ms more and < 3 ms)",
+                           lit - base < 1.0 and lit < 3.0))
     # Item 16: the 12 ms p95 total-work target checked on both scenes, the
     # GPU timestamps read back, the headless report's timers present.
     fs = (r.get("flutter_path_a") or {}).get("stats") or {}
@@ -511,7 +566,23 @@ def markdown(r):
                   f"{an['skinned_meshes']} skinned meshes over {an['joints']} joints, {an['entities']} animators and skins stepped "
                   f"({an['clips']} clips and spaces, {an['skins']} skins registered); {an['markers']} markers crossed over the settled "
                   f"run, {an['ended']} clips ended, {an['diagnostics']} diagnostics."]
-    lines += ["", "## Gate (items 6, 8, 10, 19c and 16)", ""]
+    li, ls = r.get("lights") or {}, r.get("lights_standalone") or {}
+    if li:
+        lines += ["", "## Lights (the many-lights variant, E1 light culling)", "",
+                  f"The same field with {li['authored']} point and spot lights scattered over it "
+                  f"(`generate.py --lights {li['authored']}`, `benchmarks/stress/project-lights`): "
+                  f"{li['lights']} of them reach the view and enter the frame's pool ({li['lights_dropped']} dropped), "
+                  f"at most {li['lights_max_per_object']} reach any one object and {li['lights_overflow']} of "
+                  f"{li['instances']} drawn instances are clipped to that budget.", "",
+                  "| Metric | Standalone, no lights | Standalone, "
+                  f"{li['authored']} lights |", "| --- | --- | --- |",
+                  f"| frames per second | {s.get('frames_per_s')} | {ls.get('frames_per_s')} |",
+                  f"| presented interval | {m0.fmt(s.get('interval_ms'))} | {m0.fmt(ls.get('interval_ms'))} |",
+                  f"| **prepare** (the assignment) | **{fmt2(s.get('prepare_ms'))}** | **{fmt2(ls.get('prepare_ms'))}** |",
+                  f"| simulate | {fmt2(s.get('sim_ms'))} | {fmt2(ls.get('sim_ms'))} |",
+                  f"| GPU frame (timestamps) | {fmt2(s.get('gpu_frame_ms'))} | {fmt2(ls.get('gpu_frame_ms'))} |",
+                  f"| instances / draws | {s.get('instances')} / {s.get('draws')} | {ls.get('instances')} / {ls.get('draws')} |"]
+    lines += ["", "## Gate (items 6, 8, 10, 19c and 16, and E1)", ""]
     lines += [f"- {'PASS' if g['passed'] else 'FAIL'} — {g['check']}" for g in r["gate"]]
     return "\n".join(lines) + "\n"
 
@@ -535,6 +606,11 @@ def main():
     }
     result["physics"] = capture_physics()
     result["standalone"] = capture_standalone(warmup, sample, a.quality)
+    # E1 light culling: the same field under many lights, measured against
+    # the run above (same quality, same warm-up and sample).
+    result["lights"] = prepare_lights()
+    result["lights_standalone"] = capture_standalone(warmup, sample, a.quality, cache=LIGHTS_CACHE,
+                                                     label=f"stress scene, {result['lights']['authored']} lights")
     result["flutter_path_a"] = {} if a.no_flutter else capture_flutter(warmup, sample)
     # Item 16: the reference game — cooked, rendered, the route headless,
     # the Playground in the standalone host and in the game itself.

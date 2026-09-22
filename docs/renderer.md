@@ -328,6 +328,14 @@ and `lights_overflow` (instances that had more than eight on them);
 pass: the assignment is a loop over the pool per instance, which is why
 the pool is bounded.
 
+That loop is what the stress scene's many-lights variant measures
+(`generate.py --lights`, below): 5 571 instances against a full pool of
+64 cost **+0.45 ms of `prepare`** (2.10 ms p95 against 1.64 ms for the
+same frame with one light), and that is the ceiling — the pool is capped,
+so authoring more lights only grows the frustum pass over them, which
+runs once a frame. A cluster grid buys nothing at this budget; it becomes
+the answer when the *pool* has to grow, not when the scene does.
+
 One sun (the first `DirectionalLight`), the only light that casts a
 shadow, and it is not part of any of this — every object sees it.
 
@@ -549,6 +557,20 @@ capture (`2026-09-20-cf2b3eb`, profile `medium`): 5 804 entities, 5 343
 instances drawn in 15 draws (458 culled, 5 702 casters in 14 shadow
 draws), standalone 122 frames/s with prepare + encode + submit 1.4 ms
 p50, Flutter 120 ticks/s with `render()` 2.6 ms and GPU 3.2 ms p50.
+
+`generate.py --lights N` scatters N lamps over the same field on their
+own grid — three in four point lights (range 8 m), every fourth a spot
+(14 m) — without moving anything else (the default is 0, and the bare
+project regenerates identical). `capture.py` generates, locks, cooks and
+runs that variant (`benchmarks/stress/project-lights`, 256 lights) right
+after the baseline run and gates the E1 light culling on it: the pool
+fills (64 of the 256 reach the view, 189 dropped), no object takes more
+than 8 (738 of 5 530 instances clipped to the budget), and `prepare`
+stays within a millisecond of the same scene without them. Capture
+`2026-09-22-64221f7`: 121 frames/s against 122, prepare p50/p95
+2.00 / 2.10 ms against 1.56 / 1.64, GPU frame 3.73 / 4.24 ms against
+2.93 / 2.94 — the shading of eight lights a pixel costs more than the
+assignment does.
 
 `generate.py --app` wraps the same project in the `fynkel create`
 starter app (runners, `main.dart` with the HUD, the Spinner behaviour;

@@ -33,6 +33,14 @@ git — the generator is the source):
                           `spine` playing in a loop (item 19c: the animation
                           stress — clips, a blend space, layers, markers
                           crossed every lap, 200 skin palettes)
+  N lamps                "Lamp NNN" (--lights N, off by default): point
+                          lights (range 8 m) and every fourth a spot (14 m)
+                          on their own grid over the field, ranges
+                          overlapping — more lights than the per-object
+                          budget reach most objects and more than the frame
+                          pool reach the view. capture.py's many-lights
+                          variant (E1 light culling: the per-object
+                          assignment measured at stress scale)
   Lantern                a PointLight with a `Follow` on "Body 000"
   Fountain               an `Emitter` at the field's centre: 10 Sparks/s
                           (assets/prefabs/spark.prefab.json, a small dynamic
@@ -72,6 +80,7 @@ the CLI at $FYNKEL_CLI or target/debug/fynkel.
 Usage: python3 benchmarks/stress/generate.py [--out DIR] [--static 5000]
        [--bodies 500] [--behaviours 300] [--rigs 200] [--seed 1] [--app]
        [--no-movers]   (the statics stand still: the item 6/8 baseline)
+       [--lights 0]    (the many-lights variant, E1)
 """
 import argparse
 import json
@@ -181,6 +190,17 @@ def look_at_camera():
     return {"type": "fynkel.LookAtCamera", "version": 1, "data": {"lock_y": True}}
 
 
+def point_light(color, intensity, range_m):
+    return {"type": "fynkel.PointLight", "version": 1, "data": {
+        "color": r6(color), "intensity": round(intensity, 3), "range": round(range_m, 3)}}
+
+
+def spot_light(color, intensity, range_m, inner, outer):
+    return {"type": "fynkel.SpotLight", "version": 1, "data": {
+        "color": r6(color), "intensity": round(intensity, 3), "range": round(range_m, 3),
+        "inner_angle": round(inner, 4), "outer_angle": round(outer, 4)}}
+
+
 def follow(target, offset, smoothing):
     return {"type": "fynkel.Follow", "version": 1, "data": {
         "target": target, "offset": list(offset), "smoothing": smoothing, "look_at": False}}
@@ -252,7 +272,7 @@ def project_doc():
     }
 
 
-def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, movers=True):
+def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, movers=True, n_lights=0):
     rng = random.Random(seed)
     entities = {}
 
@@ -290,7 +310,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
         # The catalogue's other three (item 10): a light that follows the
         # first body down and around, a fountain of sparks at the centre.
         add("Lantern", [transform((0, 8, 0)), follow("Body 000", (0.0, 2.0, 0.0), 4.0),
-                        {"type": "fynkel.PointLight", "version": 1, "data": {"color": [1.0, 0.85, 0.6], "intensity": 400.0, "range": 12.0}}])
+                        point_light((1.0, 0.85, 0.6), 400.0, 12.0)])
         add("Fountain", [transform((0, 1.5, 0)), emitter(SPARK_ID, rate=10.0, lifetime=4.0, max_alive=40, velocity=(0.0, 9.0, 0.0))])
 
     # A jittered grid over the field for everything that stands on it.
@@ -356,6 +376,27 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
         for name, parent, local, _, _ in SKELETON:
             layer = [animator({"asset": CHARACTER, "sub": "anim/4"}, speed=rng.uniform(0.8, 1.25), additive=True)] if name == "spine" and n % 4 == 0 else []
             joints[name] = add(name, [transform(local)] + layer, key=f"Rig {n:03}/{name}", parent=joints[parent] if parent else rig)
+    # The many-lights variant (E1 light culling): lamps on their own
+    # jittered grid over the field, drawn from a second stream so the
+    # objects above are placed exactly as they are without them. Three in
+    # four are point lights, the fourth a spot shining down the field; the
+    # ranges overlap, so most objects are reached by more than the per-
+    # object budget and the frame by more than the pool.
+    lrng = random.Random(seed * 7919 + 1)
+    lcols = int(math.ceil(math.sqrt(max(n_lights, 1) * FIELD_W / FIELD_D)))
+    lrows = int(math.ceil(max(n_lights, 1) / lcols))
+    for n in range(n_lights):
+        c, r = n % lcols, n // lcols
+        x = -FIELD_W / 2 + (c + 0.5) * FIELD_W / lcols + lrng.uniform(-0.3, 0.3) * FIELD_W / lcols
+        z = -FIELD_D / 2 + (r + 0.5) * FIELD_D / lrows + lrng.uniform(-0.3, 0.3) * FIELD_D / lrows
+        hue = [(1.0, 0.8, 0.55), (0.6, 0.75, 1.0), (1.0, 0.55, 0.5), (0.6, 1.0, 0.7)][n % 4]
+        if n % 4 == 3:
+            light = spot_light(hue, lrng.uniform(600, 900), 14.0, math.radians(20), math.radians(32))
+            rot = quat_mul(quat_axis_angle((0, 1, 0), lrng.uniform(0, math.tau)), quat_axis_angle((1, 0, 0), math.radians(-70)))
+        else:
+            light = point_light(hue, lrng.uniform(200, 320), 8.0)
+            rot = (0, 0, 0, 1)
+        add(f"Lamp {n:03}", [transform((x, lrng.uniform(2.5, 4.5), z), rot), light])
     return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 3,
             "id": str(SCENE_ID), "name": "Stress", "entities": entities}
 
@@ -387,6 +428,8 @@ def main():
     ap.add_argument("--bodies", type=int, default=500)
     ap.add_argument("--behaviours", type=int, default=300)
     ap.add_argument("--rigs", type=int, default=200)
+    ap.add_argument("--lights", type=int, default=0,
+                    help="scatter N point and spot lights over the field (E1 light culling: capture.py's many-lights variant)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--app", action="store_true", help="wrap the project in the `fynkel create` starter app so it runs on a device")
     ap.add_argument("--no-movers", action="store_true", help="no catalogue components: the statics stand still (the item 6/8 baseline)")
@@ -423,7 +466,7 @@ def main():
         if not (out / ".gitignore").exists():  # an earlier --app run keeps the starter's
             (out / ".gitignore").write_text(".fynkel/\n")
     (out / "fynkel.project.json").write_text(json.dumps(project, indent=2) + "\n")
-    scene = scene_doc(a.static, a.bodies, a.behaviours, a.rigs, a.seed, orbit=a.app, movers=not a.no_movers)
+    scene = scene_doc(a.static, a.bodies, a.behaviours, a.rigs, a.seed, orbit=a.app, movers=not a.no_movers, n_lights=a.lights)
     (out / "assets/scenes/stress.scene.json").write_text(json.dumps(scene) + "\n")
     (out / "assets/prefabs/spark.prefab.json").write_text(json.dumps(spark_prefab(), indent=2) + "\n")
     if a.app:
@@ -431,7 +474,8 @@ def main():
         subprocess.run([cli, "codegen", "--project", str(out), "--root", str(ROOT)], check=True)
     pairs = len(STATIC_PAIRS) + 2 + 1 + 1  # + body, behaviour, floor, rig
     print(f"{out}: {len(scene['entities'])} entities ({a.static} {'static' if a.no_movers else 'native movers'}, "
-          f"{a.bodies} bodies, {a.behaviours} behaviours{' (game.Wobble)' if a.app else ''}, {a.rigs} animated rigs), "
+          f"{a.bodies} bodies, {a.behaviours} behaviours{' (game.Wobble)' if a.app else ''}, {a.rigs} animated rigs"
+          f"{f', {a.lights} lamps' if a.lights else ''}), "
           f"{len(MATERIALS)} materials, {pairs} distinct (mesh, material) pairs")
 
 

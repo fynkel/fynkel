@@ -291,13 +291,21 @@ chosen from a measurement: eight subscribed transforms are 728 bytes
 `benchmarks/m0/capture.py` keeps its M0/M1 tables and adds `alloc_aot`
 (above). `benchmarks/m3/capture.py` (`--skip-build` after `cargo build
 --release --workspace`, `flutter build macos --profile` in
-`hosts/flutter_apple` and `examples/reference_game`; run it **alone**)
-records both scenes against the manifest (`benchmarks/profiles`):
+`hosts/flutter_apple` and `examples/reference_game`; run it **alone**
+and under `caffeinate -du` — the hosts present to a real surface, so an
+idle display throttles them and the windows come out short) records both
+scenes against the manifest (`benchmarks/profiles`):
 
 - **the stress scene** — cooked, rendered for the counts, its physics and
   systems headlessly (items 8, 10, 19c), the standalone host's `[1s]`
   lines and the Flutter host's `[stats]` lines (the profile bundle, so
   the Dart heap is in them);
+- **the many-lights variant of the stress scene** (E1 light culling) —
+  the same field regenerated with 256 point and spot lights
+  (`generate.py --lights`, `benchmarks/stress/project-lights`, its own
+  lock and cook), rendered for the per-object light counts and run in
+  the standalone host, so `prepare` under many lights is measured
+  against the same scene without them;
 - **the reference game** — cooked, the Playground rendered for the
   counts, the route (`test/collect_all.input.json`) replayed headlessly
   for the tick-side timers (`step_time`, `extract_time`, `frame_time`,
@@ -312,7 +320,10 @@ work** on the stress scene in the Flutter host and on the reference game
 in its own app (`work` p95 < 12, from the windows after the warm-up),
 the GPU pass timestamps read back in both apps, and the headless report
 carrying the timers on the route (with the Dart heap recorded, not
-gated). `benchmarks/m3/results/<date>-<commit>.{json,md}` is the
+gated). E1 adds two more: the light pool and the per-object budget hold
+on the many-lights variant, and its `prepare` p95 stays within a
+millisecond of the baseline run's (`2026-09-22-64221f7`: 2.10 ms against
+1.64 with 256 lights over the field). `benchmarks/m3/results/<date>-<commit>.{json,md}` is the
 record; the first with these numbers is `2026-09-22-0427213`: the
 stress scene's total work **7.59 ms p95** in the Flutter host (simulate
 3.50 — native ticks with 540 bodies, 200 rigs and 5 000 movers —, the
