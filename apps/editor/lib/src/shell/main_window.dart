@@ -1,8 +1,10 @@
-// The main window: toolbar (project, read-only badge), the docking
-// workspace, the status bar (diagnostic counts → Console).
+// The main window: toolbar (project, read-only badge, Play / Stop and the
+// run's state), the docking workspace, the status bar (diagnostic counts →
+// Console).
 import 'package:docking/docking.dart';
 import 'package:flutter/material.dart';
 
+import '../play/play_session.dart';
 import '../project/editor_project.dart';
 import 'workspace.dart';
 
@@ -16,6 +18,10 @@ class MainWindow extends StatelessWidget {
     required this.onClose,
     required this.onRevalidate,
     required this.onMigrationPreview,
+    this.play,
+    this.onPlay,
+    this.onReplay,
+    this.onStop,
     this.layoutNotice,
     this.onDismissNotice,
   });
@@ -26,6 +32,16 @@ class MainWindow extends StatelessWidget {
   /// The document tabs, above the docking area.
   final Widget? tabBar;
   final VoidCallback onShowConsole;
+
+  /// The run (ADR-0016): null before a project is open.
+  final PlaySession? play;
+  final VoidCallback? onPlay;
+
+  /// Play again from the edited-during-play banner: stops the run that is up
+  /// and starts a fresh one. [onPlay] refuses while a run is active — the
+  /// banner only ever shows while one is — so the banner needs its own.
+  final VoidCallback? onReplay;
+  final VoidCallback? onStop;
   final VoidCallback onClose;
   final VoidCallback onRevalidate;
   final VoidCallback onMigrationPreview;
@@ -42,6 +58,28 @@ class MainWindow extends StatelessWidget {
       body: Column(
         children: [
           _toolbar(context, theme),
+          if (play != null)
+            ListenableBuilder(
+              listenable: play!,
+              builder: (context, _) => !play!.runningOlderFiles
+                  ? const SizedBox.shrink()
+                  : MaterialBanner(
+                      key: const Key('window.playEdited'),
+                      leading: const Icon(Icons.edit_note),
+                      content: const Text(
+                        'The project changed since Play started — the game is running the older files. '
+                        'Changes apply on the next Play.',
+                      ),
+                      actions: [
+                        TextButton(onPressed: onStop, child: const Text('Stop')),
+                        TextButton(
+                          key: const Key('window.playAgain'),
+                          onPressed: play!.state == PlayState.stopping ? null : onReplay,
+                          child: const Text('Play again'),
+                        ),
+                      ],
+                    ),
+            ),
           if (project.isReadOnly)
             MaterialBanner(
               key: const Key('window.readOnly'),
@@ -131,6 +169,7 @@ class MainWindow extends StatelessWidget {
                 ),
               ),
             const SizedBox(width: 8),
+            if (play != null) _playControls(theme),
             IconButton(
               tooltip: 'Validate the project again',
               icon: project.validating
@@ -147,6 +186,57 @@ class MainWindow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  /// ▶ / ■ and the run's state — starting, playing (with the scene), or
+  /// the exit code the last run ended with.
+  Widget _playControls(ThemeData theme) {
+    final session = play!;
+    return ListenableBuilder(
+      listenable: session,
+      builder: (context, _) {
+        final active = session.isActive;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              key: const Key('window.play'),
+              tooltip: active ? 'Stop the game (⌘.)' : 'Play the project (⌘P)',
+              icon: Icon(
+                active ? Icons.stop : Icons.play_arrow,
+                size: 20,
+                color: active ? theme.colorScheme.error : theme.colorScheme.primary,
+              ),
+              onPressed: session.state == PlayState.stopping ? null : (active ? onStop : onPlay),
+            ),
+            if (session.state != PlayState.idle)
+              InkWell(
+                key: const Key('window.playState'),
+                onTap: onShowConsole,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (session.state == PlayState.starting || session.state == PlayState.stopping)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 6),
+                          child: SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2)),
+                        ),
+                      Text(
+                        session.statusText,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: session.crashed ? theme.colorScheme.error : theme.disabledColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 

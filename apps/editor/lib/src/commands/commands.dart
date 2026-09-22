@@ -9,6 +9,7 @@ enum EditorMenu {
   project('Project'),
   edit('Edit'),
   view('View'),
+  play('Play'),
   window('Window'),
   help('Help');
 

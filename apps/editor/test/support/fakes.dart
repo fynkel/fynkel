@@ -9,13 +9,16 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/editor_document.dart';
 import 'package:fynkel_editor/src/env/tools.dart';
+import 'package:fynkel_editor/src/play/play_session.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
 
 import 'fake_document.dart';
+import 'fake_process.dart';
 
 export 'fake_document.dart';
+export 'fake_process.dart';
 export 'fake_preview.dart';
 
 final class FakeProject extends EditorProject {
@@ -552,6 +555,35 @@ final class RecordingRunner {
   }
 }
 
+/// The default for a widget test: Play must not reach a real process.
+Future<Process> _noPlayProcess(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+  Map<String, String>? environment,
+}) async => throw StateError('this test did not expect Play to start $executable');
+
+/// Hands Play a [FakePlayProcess] and remembers how it was asked for.
+final class FakePlayLauncher {
+  final calls = <(String, List<String>, String?, Map<String, String>?)>[];
+  final processes = <FakePlayProcess>[];
+
+  /// The process of the last Play (the test feeds it channel records).
+  FakePlayProcess get last => processes.last;
+
+  Future<Process> call(
+    String executable,
+    List<String> arguments, {
+    String? workingDirectory,
+    Map<String, String>? environment,
+  }) async {
+    calls.add((executable, arguments, workingDirectory, environment));
+    final p = FakePlayProcess(pid: 7000 + processes.length);
+    processes.add(p);
+    return p;
+  }
+}
+
 /// Creates a directory that passes `isFynkelProject` (a project file only).
 Directory fakeProjectDir(String name) {
   final dir = Directory.systemTemp.createTempSync('fynkel_editor_$name');
@@ -572,6 +604,7 @@ Widget shellApp({
   VoidCallback? quit,
   String? initialProject,
   Future<String?> Function(String suggestedName)? chooseSavePath,
+  StartPlayProcess? startPlayProcess,
   bool sceneViewport = false,
 }) {
   return FynkelEditorApp(
@@ -594,6 +627,7 @@ Widget shellApp({
     sceneViewport: sceneViewport,
     detectToolchain: (_) async => toolchain ?? fakeToolchain(),
     run: runner?.call ?? RecordingRunner().call,
+    startPlayProcess: startPlayProcess ?? _noPlayProcess,
     nativeMenuBar: false,
     quit: quit ?? () {},
     initialProject: initialProject,

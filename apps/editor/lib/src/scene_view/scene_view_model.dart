@@ -787,6 +787,14 @@ final class SceneViewModel extends ChangeNotifier {
       _applyHidden(t);
       controller.debugLines(debugLines(t));
       final slot = controller.renderHandle(p.worldAddress);
+      // A resize in flight refuses the frame (the ring is being rebuilt).
+      // The editor draws on demand, so without asking again this frame
+      // would simply be lost and the panel would sit on a stale — or
+      // blank — surface until the next thing to happen.
+      if (slot == null && controller.state == ViewportState.resizing) {
+        requestFrame();
+        return null;
+      }
       t.lastSlot = slot;
       t.frames++;
       lastFrameMs = DateTime.now().difference(started).inMicroseconds / 1000;

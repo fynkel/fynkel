@@ -393,6 +393,12 @@ class _ScenePanelState extends State<ScenePanel> {
                 onKeyEvent: (_, e) => model.handleKey(e),
                 onPointerEvent: _pointer,
                 placeholder: ColoredBox(color: theme.colorScheme.surfaceContainerLowest),
+                // A window or splitter drag changes the constraints on
+                // every frame; resizing the ring that often blinks the
+                // picture. The last frame is held, scaled, until the drag
+                // settles (a game resizes as it goes: its viewport is the
+                // window, and it is drawing every frame anyway).
+                resizeDebounce: const Duration(milliseconds: 120),
               )
             else
               Focus(

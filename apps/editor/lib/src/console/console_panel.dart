@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../play/game_console.dart';
+import '../play/game_console_panel.dart';
 import '../project/editor_project.dart';
 
 /// One row: a diagnostic and how many identical ones it stands for.
@@ -170,19 +172,47 @@ final class ConsoleModel extends ChangeNotifier {
   }
 }
 
+/// The Console panel: the project's diagnostics, and — once a project is
+/// open — the running game's records beside them (item 8). Two tabs, one
+/// panel: the counts are on the tabs, so a Play that errors is visible
+/// while the Project tab is in front.
 class ConsolePanel extends StatefulWidget {
-  const ConsolePanel({super.key, required this.model, this.searchFocus});
+  const ConsolePanel({
+    super.key,
+    required this.model,
+    this.searchFocus,
+    this.tab,
+    this.game,
+    this.gameSearchFocus,
+    this.onPlay,
+    this.onStop,
+  });
+
+  /// The tabs, by index.
+  static const projectTab = 0;
+  static const gameTab = 1;
 
   final ConsoleModel model;
 
   /// The `console.focusSearch` command puts focus here.
   final FocusNode? searchFocus;
 
+  /// Which tab is in front; the shell writes it (Play shows the Game tab)
+  /// and a tap on a tab writes back.
+  final ValueNotifier<int>? tab;
+
+  /// The Game tab; null in a window without a project (and in the tests
+  /// that only drive the project's diagnostics).
+  final GameConsoleModel? game;
+  final FocusNode? gameSearchFocus;
+  final VoidCallback? onPlay;
+  final VoidCallback? onStop;
+
   @override
   State<ConsolePanel> createState() => _ConsolePanelState();
 }
 
-class _ConsolePanelState extends State<ConsolePanel> {
+class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderStateMixin {
   final _search = TextEditingController();
   late final FocusNode _searchFocus = widget.searchFocus ?? FocusNode(debugLabel: 'console.search');
   final _listFocus = FocusNode(debugLabel: 'console.list');
@@ -191,19 +221,57 @@ class _ConsolePanelState extends State<ConsolePanel> {
 
   ConsoleModel get model => widget.model;
 
+  TabController? _tabs;
+
   @override
   void initState() {
     super.initState();
     _search.text = model.query;
+    if (widget.game != null) _install();
+    widget.tab?.addListener(_showRequestedTab);
+  }
+
+  void _install() {
+    _tabs = TabController(length: 2, vsync: this, initialIndex: widget.tab?.value ?? 0)
+      ..addListener(() {
+        if (!_tabs!.indexIsChanging) widget.tab?.value = _tabs!.index;
+      });
+  }
+
+  void _showRequestedTab() {
+    final wanted = widget.tab?.value;
+    final tabs = _tabs;
+    if (wanted == null || tabs == null || tabs.index == wanted) return;
+    tabs.animateTo(wanted);
+  }
+
+  @override
+  void didUpdateWidget(ConsolePanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.tab != widget.tab) {
+      oldWidget.tab?.removeListener(_showRequestedTab);
+      widget.tab?.addListener(_showRequestedTab);
+    }
+    if ((oldWidget.game == null) != (widget.game == null)) {
+      _tabs?.dispose();
+      _tabs = null;
+      if (widget.game != null) _install();
+    }
   }
 
   @override
   void dispose() {
+    widget.tab?.removeListener(_showRequestedTab);
+    _tabs?.dispose();
     _search.dispose();
     if (widget.searchFocus == null) _searchFocus.dispose();
     _listFocus.dispose();
     super.dispose();
   }
+
+  /// `console.showGame` puts the Game tab in front (and `console.*` the
+  /// project's, so a command always lands where it can be seen).
+  void showTab(int index) => _tabs?.animateTo(index);
 
   void _moveSelection(int delta) {
     final es = model.entries;
@@ -215,13 +283,70 @@ class _ConsolePanelState extends State<ConsolePanel> {
 
   @override
   Widget build(BuildContext context) {
+    final game = widget.game;
+    final tabs = _tabs;
+    if (game == null || tabs == null) return _project(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([model, model.project, game.session]),
+      builder: (context, _) {
+        final theme = Theme.of(context);
+        final errors = model.project.errorCount;
+        final gameErrors = game.session.errorCount;
+        return Column(
+          children: [
+            TabBar(
+              key: const Key('console.tabs'),
+              controller: tabs,
+              labelStyle: theme.textTheme.bodySmall,
+              tabs: [
+                Tab(key: const Key('console.tab.project'), height: 34, text: 'Project${errors > 0 ? ' ($errors)' : ''}'),
+                Tab(
+                  key: const Key('console.tab.game'),
+                  height: 34,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (game.session.isActive)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Icon(Icons.play_arrow, size: 14, color: theme.colorScheme.primary),
+                        ),
+                      Text('Game${gameErrors > 0 ? ' ($gameErrors)' : ''}'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: TabBarView(
+                controller: tabs,
+                children: [
+                  _project(context),
+                  GameConsoleView(
+                    model: game,
+                    searchFocus: widget.gameSearchFocus,
+                    onPlay: widget.onPlay ?? () {},
+                    onStop: widget.onStop ?? () {},
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _project(BuildContext context) {
     return ListenableBuilder(
       listenable: Listenable.merge([model, model.project]),
       builder: (context, _) {
         final theme = Theme.of(context);
         final entries = model.entries;
         final project = model.project;
-        return Column(
+        return LayoutBuilder(
+          builder: (context, box) => Column(
           children: [
             _toolbar(context, theme),
             const Divider(height: 1),
@@ -256,10 +381,14 @@ class _ConsolePanelState extends State<ConsolePanel> {
                       ),
                     ),
             ),
-            if (model.selected != null) ...[const Divider(height: 1), _detail(theme, model.selected!)],
+            if (model.selected != null) ...[
+              const Divider(height: 1),
+              _detail(theme, model.selected!, box.maxHeight * 0.4),
+            ],
             const Divider(height: 1),
             _status(theme, project),
           ],
+          ),
         );
       },
     );
@@ -401,12 +530,12 @@ class _ConsolePanelState extends State<ConsolePanel> {
     );
   }
 
-  Widget _detail(ThemeData theme, ConsoleEntry e) {
+  Widget _detail(ThemeData theme, ConsoleEntry e, double maxHeight) {
     final d = e.diagnostic;
     final mono = theme.textTheme.bodySmall?.copyWith(fontFamily: 'Menlo', fontFamilyFallback: const ['monospace']);
     return Container(
       key: const Key('console.detail'),
-      constraints: const BoxConstraints(maxHeight: 140),
+      constraints: BoxConstraints(maxHeight: maxHeight.clamp(40.0, 140.0)),
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       alignment: Alignment.topLeft,
       child: SingleChildScrollView(

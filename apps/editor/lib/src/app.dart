@@ -24,6 +24,10 @@ import 'inspector/inspector_model.dart';
 import 'inspector/inspector_panel.dart';
 import 'inspector/prefab_actions.dart' as prefab;
 import 'launcher/launcher.dart';
+import 'play/game_console.dart';
+import 'play/game_record.dart';
+import 'play/play_prompt.dart';
+import 'play/play_session.dart';
 import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
 import 'project/editor_project.dart';
@@ -68,6 +72,7 @@ class FynkelEditorApp extends StatelessWidget {
     this.chooseSavePath = pickSavePath,
     this.detectToolchain,
     this.run = runProcess,
+    this.startPlayProcess = spawnPlayProcess,
     this.nativeMenuBar,
     this.quit,
     this.initialProject,
@@ -85,6 +90,10 @@ class FynkelEditorApp extends StatelessWidget {
   final bool sceneViewport;
   final Future<Toolchain> Function(Preferences prefs)? detectToolchain;
   final RunProcess run;
+
+  /// Starts the game process for Play (`fynkel run`); a test injects a
+  /// fake so no window ever opens.
+  final StartPlayProcess startPlayProcess;
   final bool? nativeMenuBar;
   final VoidCallback? quit;
 
@@ -121,6 +130,7 @@ class FynkelEditorApp extends StatelessWidget {
             chooseSavePath: chooseSavePath,
             detectToolchain: detectToolchain ?? (prefs) => Toolchain.detect(prefs: prefs, run: run),
             run: run,
+            startPlayProcess: startPlayProcess,
             sceneViewport: sceneViewport,
             nativeMenuBar: nativeMenuBar,
             quit: quit ?? () => exit(0),
@@ -143,6 +153,7 @@ class EditorShell extends StatefulWidget {
     required this.detectToolchain,
     required this.run,
     required this.quit,
+    this.startPlayProcess = spawnPlayProcess,
     this.nativeMenuBar,
     this.initialProject,
     this.sceneViewport = true,
@@ -156,6 +167,7 @@ class EditorShell extends StatefulWidget {
   final bool sceneViewport;
   final Future<Toolchain> Function(Preferences prefs) detectToolchain;
   final RunProcess run;
+  final StartPlayProcess startPlayProcess;
   final VoidCallback quit;
   final bool? nativeMenuBar;
   final String? initialProject;
@@ -172,6 +184,8 @@ class EditorShellState extends State<EditorShell> {
   EditorProject? project;
   Workspace? workspace;
   ConsoleModel? console;
+  PlaySession? play;
+  GameConsoleModel? gameConsole;
   DocumentTabs? tabs;
   HierarchyModel? hierarchy;
   InspectorModel? inspector;
@@ -180,6 +194,11 @@ class EditorShellState extends State<EditorShell> {
   SceneViewModel? scene;
   EditorState? editorState;
   final consoleSearchFocus = FocusNode(debugLabel: 'console.search');
+  final gameSearchFocus = FocusNode(debugLabel: 'console.game.search');
+
+  /// Which Console tab is in front — the shell moves it (Play shows the
+  /// Game tab, a refused Play the Project tab) and the panel follows.
+  final consoleTab = ValueNotifier<int>(ConsolePanel.projectTab);
   final hierarchySearchFocus = FocusNode(debugLabel: 'hierarchy.search');
   final projectSearchFocus = FocusNode(debugLabel: 'project.search');
   late IdeLauncher ide;
@@ -212,7 +231,11 @@ class EditorShellState extends State<EditorShell> {
     tabs?.dispose();
     project?.removeListener(_onProjectChanged);
     project?.close();
+    gameConsole?.dispose();
+    play?.dispose();
+    consoleTab.dispose();
     consoleSearchFocus.dispose();
+    gameSearchFocus.dispose();
     hierarchySearchFocus.dispose();
     projectSearchFocus.dispose();
     registry.dispose();
@@ -295,7 +318,16 @@ class EditorShellState extends State<EditorShell> {
       builder: (_) {
         final c = console;
         if (c == null) return const SizedBox.shrink();
-        return ConsolePanel(model: c, searchFocus: consoleSearchFocus);
+        return ConsolePanel(
+          key: const Key('console.panel'),
+          model: c,
+          tab: consoleTab,
+          searchFocus: consoleSearchFocus,
+          game: gameConsole,
+          gameSearchFocus: gameSearchFocus,
+          onPlay: playProject,
+          onStop: stopPlaying,
+        );
       },
     ),
     PanelSpec(
@@ -1173,6 +1205,51 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _hasView,
         run: () => unawaited(scene?.saveFrame()),
       ),
+      // ── Play (Play menu) ──
+      EditorCommand(
+        id: 'play.start',
+        baseLabel: 'Play',
+        labelBuilder: () => play?.isActive ?? false ? 'Playing…' : 'Play',
+        description: 'Run the project as its own app (`fynkel run`) and show what it says in the Console',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyP),
+        group: 0,
+        order: 0,
+        enabled: () => _hasProject && !(play?.isActive ?? false),
+        run: playProject,
+      ),
+      EditorCommand(
+        id: 'play.stop',
+        baseLabel: 'Stop',
+        description: 'Kill the game and everything it started',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.period),
+        group: 0,
+        order: 1,
+        enabled: () => play?.isActive ?? false,
+        run: stopPlaying,
+      ),
+      EditorCommand(
+        id: 'play.showConsole',
+        baseLabel: 'Game Console',
+        description: 'The Console\'s Game tab: the running game\'s logs, diagnostics and state',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyJ, alt: true),
+        group: 1,
+        order: 0,
+        enabled: () => _hasProject,
+        run: showGameConsole,
+      ),
+      EditorCommand(
+        id: 'play.clearConsole',
+        baseLabel: 'Clear Game Console',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyK, shift: true),
+        group: 1,
+        order: 1,
+        enabled: () => (play?.records.isNotEmpty ?? false),
+        run: () => play?.clear(),
+      ),
       EditorCommand(
         id: 'window.commandPalette',
         baseLabel: 'Command Palette…',
@@ -1344,6 +1421,8 @@ class EditorShellState extends State<EditorShell> {
       final t = DocumentTabs(project: opened);
       final h = HierarchyModel(tabs: t, project: opened);
       final c = ConsoleModel(project: opened, openInIde: ide.open, openInEditor: openDiagnosticInEditor);
+      final ps = PlaySession(projectDir: opened.dir, cli: () => toolchain?.fynkelCli, start: widget.startPlayProcess);
+      final gc = GameConsoleModel(session: ps, relative: opened.relative, openRecord: openGameRecord);
       final cg = CodegenCheck(
         projectDir: opened.dir,
         run: widget.run,
@@ -1366,14 +1445,19 @@ class EditorShellState extends State<EditorShell> {
       );
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
-      t.addListener(registry.refresh);
+      ps.addListener(registry.refresh);
+      t.addListener(_onTabsChanged);
       h.addListener(registry.refresh);
       ins.addListener(registry.refresh);
       b.addListener(registry.refresh);
       sv.addListener(registry.refresh);
+      gameConsole?.dispose();
+      play?.dispose();
       setState(() {
         project = opened;
         workspace = ws;
+        play = ps;
+        gameConsole = gc;
         tabs = t;
         hierarchy = h;
         inspector = ins;
@@ -1406,13 +1490,156 @@ class EditorShellState extends State<EditorShell> {
     }
   }
 
-  void _onProjectChanged() => registry.refresh();
+  void _onProjectChanged() {
+    _noteEditDuringPlay();
+    registry.refresh();
+  }
+
+  void _onTabsChanged() {
+    _noteEditDuringPlay();
+    registry.refresh();
+  }
+
+  /// What the documents on screen look like: the project's asset revision
+  /// and, per open tab that was edited at all, its history depth and dirty
+  /// flag. Play remembers it; anything else means the game is running older
+  /// bytes. Merely opening (or closing, or reordering) a tab is not an
+  /// edit, so an untouched tab is left out and the list is sorted.
+  String _editSignature() {
+    final parts = <String>[];
+    for (final tab in tabs?.open ?? const <OpenDocument>[]) {
+      if (tab.document.history == 0 && !tab.dirty) continue;
+      parts.add('${tab.path}:${tab.document.history}:${tab.dirty}');
+    }
+    parts.sort();
+    return '${project?.assetsRevision ?? 0}|${parts.join('|')}';
+  }
+
+  String? _playEditBaseline;
+
+  void _noteEditDuringPlay() {
+    final session = play;
+    if (session == null || !session.isActive || _playEditBaseline == null) return;
+    if (_editSignature() != _playEditBaseline) session.markEdited();
+  }
+
+  // ── Play ────────────────────────────────────────────────────────────────
+
+  /// Runs the project in its own process (ADR-0016). A project with errors
+  /// never runs — `fynkel run` would refuse it anyway, and the Console is
+  /// where the reasons are. Dirty documents get the save prompt first: the
+  /// game reads files, not the editor's memory.
+  Future<void> playProject() async {
+    final opened = project;
+    final session = play;
+    if (opened == null || session == null || session.isActive) return;
+    if (opened.errorCount > 0) {
+      showGameConsole(project: true);
+      _showError(
+        'The project has ${opened.errorCount} error${opened.errorCount == 1 ? '' : 's'}; `fynkel run` refuses to '
+        'run it. The Console\'s Project tab lists them — double-click a row to go to it.',
+      );
+      return;
+    }
+    final dirty = List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[]);
+    if (dirty.isNotEmpty) {
+      final choice = await showPlaySavePrompt(context, dirty);
+      if (!mounted) return;
+      switch (choice) {
+        case PlaySaveChoice.cancel:
+          return;
+        case PlaySaveChoice.save:
+          for (final tab in dirty) {
+            if (!await saveTab(tab)) return;
+          }
+        case PlaySaveChoice.playAnyway:
+          break;
+      }
+      if (!mounted) return;
+    }
+    showGameConsole();
+    _playEditBaseline = _editSignature();
+    await session.play();
+    if (!mounted) return;
+    _noteEditDuringPlay();
+    registry.refresh();
+  }
+
+  /// Play again while a run is up (the edited-during-play banner): the
+  /// running game is stopped first, then the project starts fresh from the
+  /// files on disk. [playProject] alone refuses while a run is active.
+  Future<void> replayProject() async {
+    final session = play;
+    if (session == null) return;
+    if (session.isActive) {
+      if (session.state == PlayState.stopping) return;
+      await stopPlaying();
+      if (!mounted) return;
+    }
+    await playProject();
+  }
+
+  Future<void> stopPlaying() async {
+    final session = play;
+    if (session == null || !session.isActive) return;
+    await session.stop();
+    if (mounted) registry.refresh();
+  }
+
+  /// Shows the Console with the Game tab in front (or the Project tab).
+  void showGameConsole({bool project = false}) {
+    workspace?.show(PanelRegistry.console);
+    consoleTab.value = project ? ConsolePanel.projectTab : ConsolePanel.gameTab;
+  }
+
+  /// Where a record's document is on disk, or null when it is nowhere.
+  ///
+  /// A game names a document the way the **cooked** project does — from
+  /// the assets root, `scenes/menu.scene.json` — while the editor works
+  /// in project paths (`assets/scenes/menu.scene.json`). Both are tried,
+  /// the game's spelling first; an absolute path (a game started from the
+  /// source tree) is taken as it is.
+  String? _recordDocument(EditorProject opened, String document) {
+    final parts = p.joinAll(document.split('/'));
+    for (final candidate in [
+      if (p.isAbsolute(document)) document else ...[p.join(opened.assetsDir, parts), p.join(opened.dir, parts)],
+    ]) {
+      if (File(candidate).existsSync()) return candidate;
+    }
+    return null;
+  }
+
+  /// A Game row's target: the document it names (with the entity selected),
+  /// or the asset it names in the Project panel.
+  void openGameRecord(GameRecord record) {
+    final opened = project;
+    if (opened == null) return;
+    final document = record.document;
+    if (document != null) {
+      final path = _recordDocument(opened, document);
+      if (path != null) {
+        final tab = openDocument(path);
+        if (tab != null) {
+          workspace?.show(PanelRegistry.hierarchy);
+          final id = record.id ?? RegExp(r'^/entities/([^/]+)').firstMatch(record.pointer ?? '')?.group(1);
+          if (id != null) hierarchy?.revealAndSelect(id);
+          return;
+        }
+      }
+    }
+    final id = record.id;
+    if (id != null && opened.assetExists(id)) {
+      workspace?.show(PanelRegistry.project);
+      browser?.reveal(id);
+    }
+  }
 
   /// Closes the project; every dirty tab gets its save prompt first, and a
   /// Cancel there keeps the project open.
   Future<void> closeProject() async {
     final closing = project;
     if (closing == null) return;
+    await stopPlaying();
     for (final tab in List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[])) {
       if (!await closeTab(tab)) return;
     }
@@ -1702,7 +1929,11 @@ class EditorShellState extends State<EditorShell> {
           onShowConflict: resolveConflict,
           onRevert: revertTab,
         ),
-        onShowConsole: () => workspace!.show(PanelRegistry.console),
+        onShowConsole: showGameConsole,
+        play: play,
+        onPlay: playProject,
+        onReplay: replayProject,
+        onStop: stopPlaying,
         onClose: closeProject,
         onRevalidate: p0.revalidate,
         onMigrationPreview: () => showMigrationPreview(context, p0),
