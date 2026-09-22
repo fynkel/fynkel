@@ -1571,10 +1571,10 @@ around the one step that causes it.
 | 7 | 2026-09-22 | Prefab mode: instances expand in the Hierarchy as derived rows (inherited / bold overridden / added), every edit on a derived entity an override on the anchor (the Inspector's fields and the Scene view's gizmo alike), per-field Revert and Apply in the Inspector, Apply to prefab (two transactions in two documents), Revert all, Unpack (`unpackPrefab`, one transaction), Open prefab in its own tab, imported hierarchies (`<glb>#prefab`, `<rig>#prefab`) opened read-only with the derived ids, missing / broken prefabs shown with their diagnostics and never rewritten, Select prefab asset (§ Prefab mode). |
 | 8 | 2026-09-22 | Play / Stop over `fynkel run` with `FYNKEL_EDITOR_CHANNEL=stdio`: `package:fynkel`'s one-directional stdout channel (log / diagnostic / stats / state records), the Console's Game tab with the same filters, search and collapsing as the Project tab and a row that opens the document with its entity selected, the process-tree Stop (SIGTERM deepest-first, grace, SIGKILL), the save prompt, the refusal to play a project with errors, and the "changes apply on the next Play" banner whose **Play again** stops the run before it starts the next one; Play names the desktop (`-d macos`) so `flutter run` never picks a phone or refuses to choose, and a run that dies before the game starts shows the output that says why (§ Play and the game Console). |
 | 9a | 2026-09-22 | The look: the design tokens and an explicit theme in `lib/src/theme/`, the Density preference, the docking chrome from the tokens, Lucide icons, the keyboard focus ring, notices in the status bar instead of snackbars, nothing animated but hover (§ The look). |
-| 9b | built 2026-09-22 (gate pending) | One title bar (the project menu with recent projects, the document tabs, Play centred, the codegen state, the command search) that is the macOS title bar; the Scene view's toolbar floating over the picture; the Inspector read left to right with units; the accent following focus; the Project list in columns (§ The title bar, § The Scene view's overlay, § Reading the Inspector). |
-| 9c | built 2026-09-22 (gate pending) | One Inspector for whatever was selected last — entities, an asset, a part, a folder — with the Asset panel's content as its pages, import settings applied or reverted from a pinned bar, the lock, and document kinds' sections registered by kind (§ One Inspector). |
-| 9d | built 2026-09-22 (gate pending) | One picker for asset and entity slots, Open Document, Add Component, Create Entity with Component and the palette (§ One picker). |
-| 9e | built 2026-09-23 (gate pending) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
+| 9b | done 2026-09-23 (gate driven by the user) | One title bar (the project menu with recent projects, the document tabs, Play centred, the codegen state, the command search) that is the macOS title bar; the Scene view's toolbar floating over the picture; the Inspector read left to right with units; the accent following focus; the Project list in columns (§ The title bar, § The Scene view's overlay, § Reading the Inspector). |
+| 9c | done 2026-09-23 (gate driven by the user) | One Inspector for whatever was selected last — entities, an asset, a part, a folder — with the Asset panel's content as its pages, import settings applied or reverted from a pinned bar, the lock, and document kinds' sections registered by kind (§ One Inspector). |
+| 9d | done 2026-09-23 (gate driven by the user) | One picker for asset and entity slots, Open Document, Add Component, Create Entity with Component and the palette (§ One picker). |
+| 9e | done 2026-09-23 (gate driven by the user) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 
@@ -1685,8 +1685,11 @@ game.
 
 
 The items 9a–9d gate, driven by the user, on a **copy** of the reference
-game (`cp -R examples/reference_game /tmp/refgame-gate`, then open the
-copy — never the committed game):
+game (`cp -R examples/reference_game /tmp/refgame-gate`, then point the
+copy's three `path: ../../packages/…` dependencies in `pubspec.yaml` at
+the repo's `packages/` with absolute paths and run `flutter pub get` in
+it — outside the repo the relative paths resolve to nothing and the
+codegen check fails — then open the copy, never the committed game):
 
 - **9a** — Preferences (⌘,): Dark and Light, each switching at once;
   Compact, Default and Comfortable, every row, field and toolbar following.
