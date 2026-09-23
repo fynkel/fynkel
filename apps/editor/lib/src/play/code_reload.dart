@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as p;
 
 /// One line of the status file (version 1).
 @immutable
@@ -36,7 +37,8 @@ class CodeReload {
   final int seq;
 
   /// `building` (a handover, P3c), `starting`, `running`, `reloading`,
-  /// `reloaded`, `reloadFailed`, `failed`, `exited`.
+  /// `reloaded`, `reloadFailed`, `reloadRejected` (it compiles, but only a
+  /// restart applies it), `restarting`, `restarted`, `failed`, `exited`.
   final String state;
 
   /// Why a reload failed (the compiler's or the VM's words).
@@ -50,6 +52,7 @@ class CodeReload {
   final int? pid;
 
   bool get failed => state == 'reloadFailed';
+  bool get rejected => state == 'reloadRejected';
 }
 
 /// Follows the status file; [last] is its newest event.
@@ -71,6 +74,17 @@ class CodeReloadStatus extends ChangeNotifier {
   CodeReload? _last;
 
   CodeReload? get last => _last;
+
+  /// Asks `fynkel editor` for a hot restart (P3b): the file it looks for
+  /// next to the status file. False when it could not be written.
+  bool requestRestart() {
+    try {
+      File(p.join(p.dirname(path), 'restart.request')).writeAsStringSync('');
+      return true;
+    } on FileSystemException {
+      return false;
+    }
+  }
 
   /// Reads the file when it changed; notifies on a new event.
   void poll() {

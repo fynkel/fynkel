@@ -299,6 +299,47 @@ class EditorShellState extends State<EditorShell> {
         notices.show('Code reloaded in ${r.ms ?? '?'} ms$files', severity: NoticeSeverity.info);
       case 'reloadFailed':
         notices.show('Code did not reload$files: ${r.message ?? 'no reason given'}');
+      case 'reloadRejected':
+        // It compiles, but only a restart applies it (P3b). With nothing
+        // to lose the editor restarts at once, as the ADR says; with
+        // unsaved documents or a running game it asks first.
+        final unsaved = tabs?.anyDirty ?? false;
+        final playing = gameRun?.running ?? false;
+        if (!unsaved && !playing) {
+          notices.show('A code change needs a restart$files: restarting…', severity: NoticeSeverity.info);
+          unawaited(restartToApply());
+        } else {
+          notices.show(
+            'A code change needs a restart$files${playing ? ', which ends Play' : ''}: ${r.message ?? ''}',
+            severity: NoticeSeverity.warning,
+            action: NoticeAction(unsaved ? 'Save and Restart' : 'Restart', () => unawaited(restartToApply())),
+          );
+        }
+      case 'restarted':
+        notices.show('Restarted to apply the code changes in ${r.ms ?? '?'} ms', severity: NoticeSeverity.info);
+    }
+  }
+
+  /// Applies code changes a hot reload cannot (P3b): saves every document,
+  /// stops Play, remembers the open tabs and selection, and asks
+  /// `fynkel editor` for a hot restart. The restarted editor opens the
+  /// project again and puts the tabs back.
+  Future<void> restartToApply() async {
+    final status = codeReload;
+    if (status == null) return;
+    final failed = tabs?.saveAll() ?? const <OpenDocument>[];
+    if (failed.isNotEmpty) {
+      _showError('Did not restart: ${failed.map((d) => d.title).join(', ')} could not be saved.');
+      return;
+    }
+    await stopPlaying();
+    workspace?.save();
+    _rememberSession();
+    editorState?.flush();
+    if (status.requestRestart()) {
+      notices.show('Restarting to apply the code changes…', severity: NoticeSeverity.info);
+    } else {
+      _showError('Could not ask `fynkel editor` to restart.');
     }
   }
 
@@ -1117,7 +1158,11 @@ class EditorShellState extends State<EditorShell> {
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyQ),
         group: 9,
-        run: widget.quit,
+        run: () {
+          _rememberSession();
+          editorState?.flush();
+          widget.quit();
+        },
       ),
       // ── Scene view: tools and the editor-only flags (Edit menu, group 2) ──
       for (final (i, tool) in SceneTools.all.indexed)
@@ -1406,6 +1451,19 @@ class EditorShellState extends State<EditorShell> {
         run: togglePlayGizmos,
       ),
       EditorCommand(
+        id: 'play.restart',
+        baseLabel: 'Restart to Apply Code Changes',
+        description:
+            'Save every document and restart the editor with the current code (for a change a hot reload cannot apply); '
+            'the open tabs and selection come back',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyR, control: true, alt: true),
+        group: 1,
+        order: 10,
+        enabled: () => codeReload != null && _hasProject,
+        run: () => unawaited(restartToApply()),
+      ),
+      EditorCommand(
         id: 'play.showConsole',
         baseLabel: 'Game Console',
         description: 'The Console\'s Game tab: the running game\'s logs, diagnostics and state',
@@ -1677,6 +1735,7 @@ class EditorShellState extends State<EditorShell> {
         }
       });
       notices.dismiss(); // a launcher error is about the project that did not open
+      _restoreSession();
       widget.prefs.addRecent(opened.dir, opened.name);
       registry.refresh();
       // A project with Dart behaviours gets its codegen check once at open, in the background.
@@ -1698,7 +1757,54 @@ class EditorShellState extends State<EditorShell> {
 
   void _onTabsChanged() {
     _noteEditDuringPlay();
+    _rememberSession();
     registry.refresh();
+  }
+
+  /// What reopens [tab]: its asset id, or `<id>#prefab`.
+  static String _tabKey(OpenDocument tab) {
+    final sub = tab.document.sub;
+    return sub == null ? tab.document.id : '${tab.document.id}#$sub';
+  }
+
+  /// True while the tabs are put back, or closed because the project is
+  /// (the session is what was open, not what closing left).
+  bool _sessionFrozen = false;
+
+  /// The open tabs, the one in front and each one's selection, into
+  /// `.fynkel/editor.json` (P3b); written only when they changed.
+  void _rememberSession() {
+    final t = tabs, es = editorState;
+    if (t == null || es == null || _sessionFrozen) return;
+    es.setSession(
+      tabs: [for (final tab in t.open) _tabKey(tab)],
+      focused: t.focused == null ? null : _tabKey(t.focused!),
+      selection: {
+        for (final tab in t.open)
+          if (tab.selection.isNotEmpty) _tabKey(tab): tab.selection.toList(),
+      },
+    );
+  }
+
+  /// Puts back the tabs [_rememberSession] recorded, as Unity reopens the
+  /// scene you were in. A document that no longer opens is left out.
+  void _restoreSession() {
+    final t = tabs, es = editorState;
+    if (t == null || es == null || es.openTabs.isEmpty) return;
+    _sessionFrozen = true;
+    try {
+      for (final key in es.openTabs) {
+        final tab = t.openDocument(key, focus: false);
+        final ids = es.selections[key];
+        if (tab != null && ids != null) tab.setSelection(ids.where(tab.tree.nodes.containsKey));
+      }
+      final front = es.focusedTab == null ? null : t.open.where((o) => _tabKey(o) == es.focusedTab).firstOrNull;
+      t.focus(front ?? t.open.lastOrNull);
+      t.openError = null;
+    } finally {
+      _sessionFrozen = false;
+    }
+    _rememberSession();
   }
 
   /// What the documents on screen look like: the project's asset revision
@@ -1918,8 +2024,15 @@ class EditorShellState extends State<EditorShell> {
       return true;
     }
     await stopPlaying();
-    for (final tab in List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[])) {
-      if (!await closeTab(tab)) return false;
+    // A selection alone does not reach the tab listeners: record it now.
+    _rememberSession();
+    _sessionFrozen = true;
+    try {
+      for (final tab in List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[])) {
+        if (!await closeTab(tab)) return false;
+      }
+    } finally {
+      _sessionFrozen = false;
     }
     workspace?.save();
     if (!mounted) return false;
@@ -1945,8 +2058,15 @@ class EditorShellState extends State<EditorShell> {
     final closing = project;
     if (closing == null) return;
     await stopPlaying();
-    for (final tab in List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[])) {
-      if (!await closeTab(tab)) return;
+    // A selection alone does not reach the tab listeners: record it now.
+    _rememberSession();
+    _sessionFrozen = true;
+    try {
+      for (final tab in List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[])) {
+        if (!await closeTab(tab)) return;
+      }
+    } finally {
+      _sessionFrozen = false;
     }
     workspace?.save();
     closing.removeListener(_onProjectChanged);

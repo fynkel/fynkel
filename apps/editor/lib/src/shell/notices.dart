@@ -12,10 +12,21 @@ import '../theme/tokens.dart';
 enum NoticeSeverity { error, warning, info }
 
 final class Notice {
-  const Notice(this.message, this.severity);
+  const Notice(this.message, this.severity, {this.action});
 
   final String message;
   final NoticeSeverity severity;
+
+  /// A button beside the message (*Save and Restart*); the notice goes
+  /// when it is pressed.
+  final NoticeAction? action;
+}
+
+final class NoticeAction {
+  const NoticeAction(this.label, this.run);
+
+  final String label;
+  final VoidCallback run;
 }
 
 /// The current notice, if any. One at a time: a new one replaces the old.
@@ -24,8 +35,8 @@ final class Notices extends ChangeNotifier {
 
   Notice? get current => _current;
 
-  void show(String message, {NoticeSeverity severity = NoticeSeverity.error}) {
-    _current = Notice(message, severity);
+  void show(String message, {NoticeSeverity severity = NoticeSeverity.error, NoticeAction? action}) {
+    _current = Notice(message, severity, action: action);
     notifyListeners();
   }
 
@@ -81,6 +92,20 @@ class NoticeLine extends StatelessWidget {
                 ),
               ),
             ),
+            if (n.action case final action?)
+              TextButton(
+                key: const Key('notice.action'),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: Size(0, t.row),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: () {
+                  notices.dismiss();
+                  action.run();
+                },
+                child: Text(action.label),
+              ),
             SizedBox.square(
               dimension: t.row,
               child: IconButton(

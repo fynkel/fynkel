@@ -3,7 +3,8 @@
 // directly") — per scene the editor camera and the hidden and locked
 // flags, plus the Scene view's toggles, and (item 9e) the cameras of the
 // Scene view's other copies and what each panel copy remembers across a
-// restart (an Inspector's lock, a Project browser's folder). Editor-only by design: none of it
+// restart (an Inspector's lock, a Project browser's folder), and (P3b) the
+// open tabs with their selections. Editor-only by design: none of it
 // is in a document, so `fynkel validate` and git never see a camera move.
 // One JSON file, replaced atomically like the preferences; a file that
 // does not parse is replaced, never repaired in place.
@@ -137,6 +138,20 @@ final class EditorState extends ChangeNotifier {
           for (final e in (json['scenes'] as Map).entries)
             if (e.key is String) e.key as String: SceneEditorState.fromJson(e.value),
       },
+      openTabs = [
+        if (json['session'] case {'tabs': final List<Object?> tabs})
+          for (final t in tabs)
+            if (t is String) t,
+      ],
+      focusedTab = switch (json['session']) {
+        {'focused': final String f} => f,
+        _ => null,
+      },
+      selections = {
+        if (json['session'] case {'selection': final Map<Object?, Object?> sel})
+          for (final e in sel.entries)
+            if (e.key is String && e.value is List) e.key as String: [for (final id in e.value as List) '$id'],
+      },
       _panels = {
         if (json['panels'] is Map)
           for (final e in (json['panels'] as Map).entries)
@@ -191,6 +206,30 @@ final class EditorState extends ChangeNotifier {
 
   bool hasScene(String documentId) => _scenes.containsKey(documentId);
   Iterable<String> get sceneIds => _scenes.keys;
+
+  /// The open tabs, in order, and the one in front (P3b: a restart, or
+  /// the next open, puts them back): what reopens each (an asset id, or
+  /// `<id>#prefab`).
+  List<String> openTabs;
+  String? focusedTab;
+
+  /// Each open tab's selection, by the same key.
+  Map<String, List<String>> selections;
+
+  /// Remembers the open tabs; saves only when something changed.
+  void setSession({required List<String> tabs, String? focused, required Map<String, List<String>> selection}) {
+    final before = jsonEncode(_sessionJson());
+    openTabs = tabs;
+    focusedTab = focused;
+    selections = selection;
+    if (jsonEncode(_sessionJson()) != before) save();
+  }
+
+  Map<String, Object?> _sessionJson() => {
+    'tabs': openTabs,
+    'focused': ?focusedTab,
+    if (selections.isNotEmpty) 'selection': selections,
+  };
 
   final Map<String, Object?> _panels;
 
@@ -262,6 +301,7 @@ final class EditorState extends ChangeNotifier {
     if (playGizmos) 'playGizmos': true,
     'scenes': {for (final e in _scenes.entries) e.key: e.value.toJson()},
     if (_panels.isNotEmpty) 'panels': _panels,
+    if (openTabs.isNotEmpty) 'session': _sessionJson(),
   };
 
   /// Atomic replacement (`editor.json.tmp`, then rename over); null when

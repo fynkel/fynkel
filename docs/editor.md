@@ -1420,7 +1420,8 @@ the game inside the editor, and a save in `lib/` hot reloads it.
   generated files and then puts them back.
 - Each outcome goes to `status.json` next to the host (version 1: `seq`,
   `state` — `starting`, `running`, `reloading`, `reloaded`,
-  `reloadFailed`, `failed`, `exited` — `message`, `ms`, `files`). The
+  `reloadFailed`, `reloadRejected`, `restarting`, `restarted`, `failed`,
+  `exited` — `message`, `ms`, `files`). The
   editor follows it (`CodeReloadStatus`) and shows a notice: *Code
   reloaded in N ms* or *Code did not reload*, with the compiler's errors
   (paths relative to the project). The terminal gets the same lines.
@@ -1477,10 +1478,31 @@ directory) and pick projects from there.
 copy finds the checkout it was built from, so `fynkel editor` works from
 any directory. Install again after pulling CLI changes.
 
-A hot reload keeps the editor's state (open documents, undo). A change
-that a hot reload cannot apply, such as a new field on a const class,
-needs a restart, and a restart would drop unsaved edits. Offering a
-restart that saves first, and restoring the open tabs after it, is P3b.
+### Restart to Apply (P3b)
+
+A hot reload keeps the editor's state (open documents, undo). Some
+changes a hot reload cannot apply, such as a new field on a const class.
+Flutter rejects those (`reloadRejected` in `status.json`), and the editor
+restarts to apply them:
+
+- With nothing unsaved and the game not running, it restarts at once, as
+  Unity recompiles after a script change. The window stays; the editor
+  starts over with the new code in under a second.
+- Otherwise a notice says the change needs a restart, with **Save and
+  Restart** (or **Restart**). Nothing restarts until you choose it.
+- **Play → Restart to Apply Code Changes** (⌃⌥⌘R) does the same at any
+  time.
+- Restarting saves every document first (a save that fails stops it),
+  stops Play, and writes `restart.request` next to `status.json`.
+  `fynkel editor` takes the file and hot restarts the app (`restarting`,
+  then `restarted`).
+
+**The open tabs come back** on every open, not only after a restart, as
+Unity reopens the scene you were in. The editor keeps the open tabs, the
+one in front and each tab's selection in `.fynkel/editor.json` (the
+`session` key). They are recorded as tabs change, and before a restart,
+closing the project or quitting. A document that no longer opens is left
+out.
 
 ## The Game view: Play in the editor (ADR-0021 P4)
 
