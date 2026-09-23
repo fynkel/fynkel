@@ -141,14 +141,20 @@ fn entities(world: &World) -> Value {
     while let Some((e, parent)) = stack.pop() {
         let id = id_of(world, e);
         let children = scene::children_of(ecs, e);
+        let types: Vec<&str> = ComponentValue::all_of(world, e)
+            .iter()
+            .filter_map(|c| c.id().name())
+            .collect();
         out.push(json!({
             "id": id,
+            "entity": e.to_bits(),
             "name": ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
             "parent": parent,
             "spawned": id.starts_with(RUNTIME_PREFIX),
             "layer": ecs.copy::<Layer>(e).map(|l| l.layer).unwrap_or(0),
             "tags": ecs.get::<Tags>(e).map(|t| t.to_node().to_serde()).unwrap_or(Value::Null),
             "children": children.len(),
+            "types": types,
         }));
         for c in children.into_iter().rev() {
             stack.push((c, Some(id.clone())));
@@ -173,6 +179,7 @@ fn entity(world: &World, e: Entity) -> Value {
         .unwrap_or_default();
     json!({
         "id": id_of(world, e),
+        "entity": e.to_bits(),
         "name": ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
         "parent": scene::parent_of(ecs, e).map(|p| id_of(world, p)),
         "world": world_t.to_node().to_serde(),

@@ -106,6 +106,16 @@ fn entities_carry_authoring_ids_and_the_games_own_are_runtime() {
     assert_eq!(rows[1]["parent"], json!(uid(1)));
     assert_eq!(rows[0]["children"], json!(2));
     assert_eq!(rows[0]["spawned"], json!(false));
+    assert_eq!(
+        rows[2]["types"],
+        json!(["fynkel.Transform", "fynkel.Camera"])
+    );
+    let e2 = rows[2]["entity"].as_u64().unwrap();
+    assert_eq!(
+        live::id_of(&w, Entity::from_bits(e2)),
+        uid(2),
+        "the handle is the entity's"
+    );
     let names: Vec<&str> = rows[4..]
         .iter()
         .map(|r| r["name"].as_str().unwrap())
