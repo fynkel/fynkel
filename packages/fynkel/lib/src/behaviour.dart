@@ -87,6 +87,82 @@ class Expose {
   final String? showIf;
 }
 
+/// When the editor draws a declarative [Gizmo].
+enum GizmoWhen {
+  /// While its entity is selected.
+  selected,
+
+  /// On every entity carrying the behaviour.
+  always,
+}
+
+/// The space a declarative [Gizmo]'s value is in.
+enum GizmoSpace {
+  /// The entity's: moved, turned and scaled with it.
+  local,
+
+  /// The world's: a position is absolute, a direction or size keeps its
+  /// axes whatever the entity's rotation (it still sits at the entity).
+  world,
+}
+
+/// Draws an `@Expose` field in the editor's Scene view (ADR-0019 §3): the
+/// editor never runs game code, so a behaviour *describes* its gizmos, and
+/// the generator writes them into `behaviours.g.json` and the field's
+/// schema `x-fynkel` beside the [Expose] hints. Each is also a handle the
+/// Inspector's Edit toggle turns on: dragging it sets the field, one undo
+/// step. Metadata only.
+///
+/// - [Gizmo.radius] — a `double`: a wire sphere of that radius about the
+///   entity, with a dot per axis to drag.
+/// - [Gizmo.box] — a `Vec3`: a wire box of that size (full extents) centred
+///   on the entity, a dot per face.
+/// - [Gizmo.point] — a `Vec3`: a position (the entity's local space, or the
+///   world's), dragged in the view's plane.
+/// - [Gizmo.direction] — a `Vec3`: an arrow from the entity along it, its
+///   tip dragged.
+/// - [Gizmo.cone] — a `double` length along the entity's −Z, with [angle]
+///   naming a sibling `double` field holding the half angle in radians: a
+///   spot light's shape.
+/// - [Gizmo.lineTo] — a `String` naming an entity: a line to it (nothing to
+///   drag; pick it in the Inspector).
+/// - [Gizmo.path] — a `List<Vec3>`: a polyline through the points, each one
+///   dragged in the view's plane.
+///
+/// [color] is `0xAARRGGBB` (the editor's gizmo colour when null).
+class Gizmo {
+  const Gizmo.radius({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
+      : shape = 'radius',
+        angle = null;
+  const Gizmo.box({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
+      : shape = 'box',
+        angle = null;
+  const Gizmo.point({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
+      : shape = 'point',
+        angle = null;
+  const Gizmo.direction({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
+      : shape = 'direction',
+        angle = null;
+  const Gizmo.cone({required String this.angle, this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
+      : shape = 'cone';
+  const Gizmo.lineTo({this.color, this.when = GizmoWhen.selected})
+      : shape = 'lineTo',
+        space = GizmoSpace.world,
+        angle = null;
+  const Gizmo.path({this.color, this.when = GizmoWhen.selected, this.space = GizmoSpace.local})
+      : shape = 'path',
+        angle = null;
+
+  /// `radius`, `box`, `point`, `direction`, `cone`, `lineTo` or `path`.
+  final String shape;
+  final int? color;
+  final GizmoWhen when;
+  final GizmoSpace space;
+
+  /// [Gizmo.cone]'s sibling angle field.
+  final String? angle;
+}
+
 /// What a fixed tick hands to [Behaviour.fixedUpdate].
 class FixedUpdateContext {
   const FixedUpdateContext({required this.tick, required this.dt, required this.events, required this.context});
