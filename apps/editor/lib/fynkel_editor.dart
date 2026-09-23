@@ -1,0 +1,32 @@
+/// The editor as a library (ADR-0021): `apps/editor`'s own `main` runs it
+/// without a game; the project editor `fynkel editor <dir>` generates runs
+/// it with the project's game compiled in ([EditorGame]).
+library;
+
+import 'dart:io';
+
+import 'package:flutter/widgets.dart';
+import 'package:path/path.dart' as p;
+
+import 'src/app.dart';
+import 'src/play/editor_game.dart';
+import 'src/prefs/preferences.dart';
+import 'src/shell/workspace.dart';
+
+export 'src/play/editor_game.dart';
+
+/// `fynkel_editor [project-dir]` — the directory opens at start; [game] is
+/// the project's game when this is its project editor.
+void runFynkelEditor(List<String> args, {EditorGame? game}) {
+  final prefs = Preferences.load(Preferences.defaultFile());
+  final layout = FileLayoutStore(File(p.join(Preferences.defaultDirectory().path, 'layout.json')));
+  final initial = args.where((a) => !a.startsWith('-')).firstOrNull ?? game?.projectDir;
+  runApp(
+    FynkelEditorApp(
+      prefs: prefs,
+      layoutStore: layout,
+      initialProject: initial == null ? null : Directory(initial).absolute.path,
+      game: game,
+    ),
+  );
+}

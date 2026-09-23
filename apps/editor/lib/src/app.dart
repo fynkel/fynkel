@@ -25,6 +25,8 @@ import 'inspector/inspector_panel.dart';
 import 'inspector/prefab_actions.dart' as prefab;
 import 'launcher/launcher.dart';
 import 'picker/picker.dart';
+import 'play/code_reload.dart';
+import 'play/editor_game.dart';
 import 'play/game_console.dart';
 import 'play/game_record.dart';
 import 'play/play_prompt.dart';
@@ -82,6 +84,8 @@ class FynkelEditorApp extends StatelessWidget {
     this.quit,
     this.initialProject,
     this.sceneViewport = true,
+    this.game,
+    this.codeReloadStatus,
   });
 
   final Preferences prefs;
@@ -89,6 +93,13 @@ class FynkelEditorApp extends StatelessWidget {
   final OpenProject openProject;
   final ChooseDirectory chooseDirectory;
   final ChooseSavePath chooseSavePath;
+
+  /// The project's game when this is its project editor (ADR-0021, built
+  /// by `fynkel editor <dir>`); null in the plain editor.
+  final EditorGame? game;
+
+  /// Where `fynkel editor` reports hot reloads; null: `FYNKEL_EDITOR_STATUS`.
+  final String? codeReloadStatus;
 
   /// False leaves the native texture out of the Scene view (widget tests
   /// without a Metal device drive the model through the painted layer).
@@ -138,6 +149,8 @@ class FynkelEditorApp extends StatelessWidget {
             nativeMenuBar: nativeMenuBar,
             quit: quit ?? () => exit(0),
             initialProject: initialProject,
+            game: game,
+            codeReloadStatus: codeReloadStatus ?? CodeReloadStatus.environmentPath,
           ),
         );
       },
@@ -160,6 +173,8 @@ class EditorShell extends StatefulWidget {
     this.nativeMenuBar,
     this.initialProject,
     this.sceneViewport = true,
+    this.game,
+    this.codeReloadStatus,
   });
 
   final Preferences prefs;
@@ -167,6 +182,8 @@ class EditorShell extends StatefulWidget {
   final OpenProject openProject;
   final ChooseDirectory chooseDirectory;
   final ChooseSavePath chooseSavePath;
+  final EditorGame? game;
+  final String? codeReloadStatus;
   final bool sceneViewport;
   final Future<Toolchain> Function(Preferences prefs) detectToolchain;
   final RunProcess run;
@@ -247,10 +264,27 @@ class EditorShellState extends State<EditorShell> {
   final notices = Notices();
   bool _opening = false;
 
+  /// `fynkel editor`'s hot reloads (ADR-0021): each outcome is a notice.
+  CodeReloadStatus? codeReload;
+
+  void _onCodeReload() {
+    final r = codeReload?.last;
+    if (r == null) return;
+    final files = r.files.isEmpty ? '' : ' (${r.files.join(', ')})';
+    switch (r.state) {
+      case 'reloaded':
+        notices.show('Code reloaded in ${r.ms ?? '?'} ms$files', severity: NoticeSeverity.info);
+      case 'reloadFailed':
+        notices.show('Code did not reload$files: ${r.message ?? 'no reason given'}');
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     ide = IdeLauncher(widget.prefs);
+    final status = widget.codeReloadStatus;
+    if (status != null) codeReload = CodeReloadStatus(status)..addListener(_onCodeReload);
     _panels = PanelRegistry(_panelSpecs());
     _registerCommands();
     widget.prefs.addListener(_onPrefsChanged);
@@ -268,6 +302,7 @@ class EditorShellState extends State<EditorShell> {
   @override
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
+    codeReload?.dispose();
     workspace?.dispose();
     _disposeCopies();
     editorState?.dispose();

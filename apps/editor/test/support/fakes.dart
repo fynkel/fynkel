@@ -625,6 +625,7 @@ Widget shellApp({
   StartPlayProcess? startPlayProcess,
   bool sceneViewport = false,
   Future<Toolchain> Function(Preferences prefs)? detectToolchain,
+  String? codeReloadStatus,
 }) {
   return FynkelEditorApp(
     key: key,
@@ -650,6 +651,7 @@ Widget shellApp({
     nativeMenuBar: false,
     quit: quit ?? () {},
     initialProject: initialProject,
+    codeReloadStatus: codeReloadStatus,
   );
 }
 
