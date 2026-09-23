@@ -1424,6 +1424,22 @@ the game inside the editor, and a save in `lib/` hot reloads it.
   editor follows it (`CodeReloadStatus`) and shows a notice: *Code
   reloaded in N ms* or *Code did not reload*, with the compiler's errors
   (paths relative to the project). The terminal gets the same lines.
+- **Opening without a build.** After a build, the command records what
+  the app was built from in `build/fynkel_launch.json` (next to the
+  Flutter app: the project's `.fynkel/editor_host`, or `apps/editor` for
+  the plain editor). It keeps two fingerprints, by file content: the
+  **native** side (the Flutter engine, `pubspec.yaml`/`pubspec.lock`, the
+  macOS runner, `crates/`, `schemas/`, the packages' build hooks) and the
+  **Dart** code (`lib/` of the app, the editor, the packages and the
+  project). The next open with the same native side launches the built
+  app directly, with the engine switches `flutter run` uses. Its window
+  is up in about 0.3 s instead of 11–20 s. `flutter attach` then connects
+  in the background (hot reload is on about 2 s later). If the Dart code
+  changed since the build, one hot restart (under a second) brings it
+  up to date. A native change, or an app that does not start, means a
+  full `flutter run` build, as before. The plain editor attaches only
+  when its code needs that restart. `FYNKEL_LAUNCH_TRACE=<dir>` writes
+  the files each fingerprint covered.
 - A project whose code does not compile cannot build its project editor.
   The command prints the build's last lines and suggests `--plain`.
 - `FYNKEL_EDITOR_TRACE=1` echoes every line `flutter run` prints.
@@ -1437,9 +1453,9 @@ directory) and pick projects from there.
 
 - The editor starts `fynkel editor <dir> --handover` detached, with its
   output in `.fynkel/editor_host/editor.log`. It shows *Opening <name>…*
-  with Flutter's progress (the first build of a project's editor takes
-  about half a minute to a minute; later opens are quick) and quits once
-  the project editor is up.
+  with Flutter's progress and quits once the project editor is up. The
+  first build of a project's editor takes 15–30 s; later opens skip the
+  build and take well under a second (see *Opening without a build*).
 - Before it does, Play stops, and dirty documents get their save prompt.
   Cancel on the prompt, or on the *Opening* dialog, keeps you here (Cancel
   on the dialog also ends the build and everything it started).

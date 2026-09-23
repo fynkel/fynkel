@@ -23,6 +23,7 @@ mod cook;
 mod create;
 mod document;
 mod editor;
+mod editor_launch;
 mod import;
 mod material;
 mod migrate;

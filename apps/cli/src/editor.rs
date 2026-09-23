@@ -33,6 +33,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use serde_json::{json, Value};
 
+use crate::editor_launch;
+
 pub fn usage() -> ExitCode {
     eprintln!(
         "usage:\n  fynkel editor [<project dir>] [--plain] [--handover] [--flutter <path>]\n                                               the editor with the project's game compiled in (Play runs inside it; hot reload on save);\n                                               --plain (or no project) runs the editor without a game;\n                                               --handover: started by an editor that hands the project over (it follows status.json)"
@@ -132,6 +134,73 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     };
     let started = Instant::now();
     let cwd = host.clone().unwrap_or_else(|| editor.clone());
+    let exe = std::env::current_exe().ok();
+    let mut env: Vec<(&str, PathBuf)> = vec![("FYNKEL_ROOT", root.clone())];
+    if let Some(exe) = &exe {
+        env.push(("FYNKEL_CLI", exe.clone()));
+    }
+    if let Some(h) = &host {
+        env.push(("FYNKEL_EDITOR_STATUS", h.join(STATUS_FILE)));
+    }
+
+    // Nothing native changed since the last build: launch the built app
+    // and attach, no build (editor_launch.rs).
+    let inputs = editor_launch::Inputs {
+        root: root.clone(),
+        app: cwd.clone(),
+        project: host.as_ref().and(project.clone()),
+        flutter: flutter.clone(),
+    };
+    let stamp = inputs.stamp();
+    let built = editor_launch::read_stamp(&cwd).filter(|s| s.native == stamp.native);
+    if let (Some(built), Some(app_exe)) = (built, editor_launch::built_app(&cwd)) {
+        let args: Vec<&Path> = project.as_deref().into_iter().collect();
+        let env: Vec<(&str, &Path)> = env.iter().map(|(k, v)| (*k, v.as_path())).collect();
+        match editor_launch::launch(&app_exe, &cwd, &args, &env, Duration::from_secs(30)) {
+            Ok((app, uri, lines)) => {
+                say(&format!(
+                    "opened the built editor in {:.1} s (nothing native changed)",
+                    started.elapsed().as_secs_f64()
+                ));
+                let stale = built.dart != stamp.dart;
+                // The plain editor needs Flutter only to bring its code up
+                // to date; a project editor, for hot reload on save.
+                let tool = if host.is_some() || stale {
+                    let mut cmd = Command::new(&flutter);
+                    cmd.args(["attach", "--machine", "-d", "macos", "--debug-url", &uri])
+                        .current_dir(&cwd)
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped());
+                    match cmd.spawn() {
+                        Ok(c) => Some(c),
+                        Err(e) => {
+                            say(&format!(
+                                "hot reload is off: cannot run flutter attach: {e}"
+                            ));
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                return supervise(
+                    tool,
+                    Session {
+                        project: project.as_deref(),
+                        host: host.as_deref(),
+                        started,
+                        seq,
+                        app: Some((app, lines)),
+                        restart: stale,
+                        stamp: None,
+                    },
+                );
+            }
+            Err(why) => say(&format!("{why}; building it instead")),
+        }
+    }
+
     if host.is_some() {
         let pub_get = Command::new(&flutter)
             .args(["pub", "get"])
@@ -165,59 +234,90 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     if let Some(p) = &project {
         cmd.arg("--dart-entrypoint-args").arg(p);
     }
-    let exe = std::env::current_exe().ok();
     cmd.current_dir(&cwd)
-        .env("FYNKEL_ROOT", &root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(exe) = &exe {
-        cmd.env("FYNKEL_CLI", exe);
+    for (k, v) in &env {
+        cmd.env(k, v);
     }
-    if let Some(h) = &host {
-        cmd.env("FYNKEL_EDITOR_STATUS", h.join(STATUS_FILE));
-    }
-    let mut child = match cmd.spawn() {
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return fail(seq, &format!("cannot run {}: {e}", flutter.display())),
     };
     supervise(
-        &mut child,
-        project.as_deref(),
-        host.as_deref(),
-        started,
-        seq,
+        Some(child),
+        Session {
+            project: project.as_deref(),
+            host: host.as_deref(),
+            started,
+            seq,
+            app: None,
+            restart: false,
+            stamp: Some(editor_launch::Recording {
+                inputs,
+                dart: stamp.dart,
+            }),
+        },
     )
 }
 
-/// Runs until the editor exits: relays what matters, hot reloads on save.
-fn supervise(
-    child: &mut Child,
-    project: Option<&Path>,
-    host: Option<&Path>,
+/// One editor run, as [supervise] follows it.
+struct Session<'a> {
+    project: Option<&'a Path>,
+    host: Option<&'a Path>,
     started: Instant,
     seq: u64,
-) -> ExitCode {
+    /// The built app, launched directly; the tool is then `flutter attach`
+    /// (or nothing), and the run ends when the app does.
+    app: Option<(Child, mpsc::Receiver<editor_launch::AppLine>)>,
+    /// The Dart code changed since the app was built: one hot restart once
+    /// attached.
+    restart: bool,
+    /// After a build: what it was built from, recorded once it is up.
+    stamp: Option<editor_launch::Recording>,
+}
+
+/// Runs until the editor exits: relays what matters, hot reloads on save.
+fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
+    let Session {
+        project,
+        host,
+        started,
+        seq,
+        app,
+        restart,
+        stamp,
+    } = session;
     let (tx, rx) = mpsc::channel::<Line>();
-    let stdout = child.stdout.take().expect("piped");
-    let stderr = child.stderr.take().expect("piped");
-    let out_tx = tx.clone();
-    std::thread::spawn(move || {
-        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-            if out_tx.send(Line::Out(line)).is_err() {
-                break;
+    let (mut app, app_lines) = match app {
+        Some((child, lines)) => (Some(child), Some(lines)),
+        None => (None, None),
+    };
+    if let Some(lines) = app_lines {
+        let app_tx = tx.clone();
+        std::thread::spawn(move || {
+            for line in lines {
+                let line = match line {
+                    editor_launch::AppLine::Out(l) => Line::App(l),
+                    editor_launch::AppLine::Closed => Line::AppClosed,
+                };
+                if app_tx.send(line).is_err() {
+                    break;
+                }
             }
+        });
+    }
+    let direct = app.is_some();
+    let mut tool = tool;
+    let stdin = match tool.as_mut() {
+        Some(child) => {
+            spawn_readers(child, tx);
+            child.stdin.take()
         }
-        let _ = out_tx.send(Line::Closed);
-    });
-    std::thread::spawn(move || {
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-            if tx.send(Line::Err(line)).is_err() {
-                break;
-            }
-        }
-    });
-    let stdin = Arc::new(Mutex::new(child.stdin.take().expect("piped")));
+        None => None,
+    };
+    let stdin = Arc::new(Mutex::new(stdin));
     let mut state = Supervisor {
         app: None,
         next_id: 1,
@@ -228,8 +328,16 @@ fn supervise(
         ready: false,
         changed: Vec::new(),
         compiler: Vec::new(),
+        restart_due: false,
+        restart,
+        stamp,
     };
-    state.write_status("starting", "", None, &[]);
+    if direct {
+        state.ready = true;
+        state.write_status("running", "", None, &[]);
+    } else {
+        state.write_status("starting", "", None, &[]);
+    }
     let lib = project.map(|p| p.join("lib"));
     let watching = host.is_some();
     let mut seen = lib
@@ -250,9 +358,30 @@ fn supervise(
                 }
                 state.keep(format!("[flutter] {line}"))
             }
-            Ok(Line::Closed) => closed = true,
+            Ok(Line::App(line)) => {
+                if std::env::var_os("FYNKEL_EDITOR_TRACE").is_some() {
+                    say(&format!("[trace:app] {line}"));
+                }
+            }
+            Ok(Line::Closed) if direct => {
+                if watching {
+                    say("hot reload is off: flutter attach ended (the editor keeps running)");
+                }
+                state.app = None;
+            }
+            Ok(Line::Closed) | Ok(Line::AppClosed) => closed = true,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => closed = true,
+        }
+        if std::mem::take(&mut state.restart_due) {
+            say("the code changed since this editor was built → hot restart");
+            state.request(
+                &stdin,
+                "app.restart",
+                "stale",
+                json!({"fullRestart": true, "pause": false, "reason": "stale"}),
+                Vec::new(),
+            );
         }
         // Hot reload: a change settles for 150 ms (an editor's save writes
         // more than once) before one reload covers it.
@@ -276,12 +405,23 @@ fn supervise(
             state.request(
                 &stdin,
                 "app.restart",
+                "app.restart",
                 json!({"fullRestart": false, "pause": false, "reason": "save"}),
                 files,
             );
         }
     }
-    let status = child.wait();
+    let status = match app.as_mut() {
+        Some(app) => {
+            let status = app.wait();
+            if let Some(t) = tool.as_mut() {
+                let _ = t.kill();
+                let _ = t.wait();
+            }
+            status
+        }
+        None => tool.as_mut().expect("a build has its tool").wait(),
+    };
     let code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(1);
     if !state.ready {
         eprintln!(
@@ -305,16 +445,43 @@ fn supervise(
     ExitCode::from(code.clamp(0, 255) as u8)
 }
 
+/// Relays a Flutter tool's stdout and stderr, in order per stream.
+fn spawn_readers(child: &mut Child, tx: mpsc::Sender<Line>) {
+    let stdout = child.stdout.take().expect("piped");
+    let stderr = child.stderr.take().expect("piped");
+    let out_tx = tx.clone();
+    std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if out_tx.send(Line::Out(line)).is_err() {
+                break;
+            }
+        }
+        let _ = out_tx.send(Line::Closed);
+    });
+    std::thread::spawn(move || {
+        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            if tx.send(Line::Err(line)).is_err() {
+                break;
+            }
+        }
+    });
+}
+
 enum Line {
+    /// The Flutter tool's stdout (`flutter run` or `flutter attach`).
     Out(String),
     Err(String),
+    /// The tool ended.
     Closed,
+    /// The directly launched app said something.
+    App(String),
+    AppClosed,
 }
 
 struct Supervisor {
     app: Option<String>,
     next_id: u64,
-    /// Requests in flight: id → (method, sent at, files).
+    /// Requests in flight: id → (what for, sent at, files).
     pending: BTreeMap<u64, (String, Instant, Vec<String>)>,
     seq: u64,
     status: Option<PathBuf>,
@@ -328,6 +495,12 @@ struct Supervisor {
     /// arrive on stderr; the response only says "DevFS synchronization
     /// failed").
     compiler: Vec<String>,
+    /// A launched app whose code is older than the files: restart it once
+    /// attached ([Self::restart_due] asks the loop to).
+    restart: bool,
+    restart_due: bool,
+    /// After a build: what it was built from, written once it is up.
+    stamp: Option<editor_launch::Recording>,
 }
 
 impl Supervisor {
@@ -342,8 +515,9 @@ impl Supervisor {
 
     fn request(
         &mut self,
-        stdin: &Arc<Mutex<ChildStdin>>,
+        stdin: &Arc<Mutex<Option<ChildStdin>>>,
         method: &str,
+        what: &str,
         mut params: Value,
         files: Vec<String>,
     ) {
@@ -353,9 +527,10 @@ impl Supervisor {
         self.next_id += 1;
         self.compiler.clear();
         self.pending
-            .insert(id, (method.to_string(), Instant::now(), files));
+            .insert(id, (what.to_string(), Instant::now(), files));
         let line = json!([{"id": id, "method": method, "params": params}]).to_string();
-        if let Ok(mut s) = stdin.lock() {
+        if let Ok(mut guard) = stdin.lock() {
+            let Some(s) = guard.as_mut() else { return };
             let _ = writeln!(s, "{line}");
             let _ = s.flush();
         }
@@ -379,10 +554,24 @@ impl Supervisor {
                             .as_str()
                             .map(str::to_string)
                             .or(self.app.take());
+                        if std::mem::take(&mut self.restart) {
+                            self.restart_due = true;
+                        }
+                        if self.ready {
+                            // Attached to the launched app.
+                            say(&format!(
+                                "hot reload on ({:.1} s)",
+                                started.elapsed().as_secs_f64()
+                            ));
+                            continue;
+                        }
                         self.ready = true;
                         self.tail.clear();
                         say(&format!("ready ({:.1} s)", started.elapsed().as_secs_f64()));
                         self.write_status("running", "", None, &[]);
+                        if let Some(recording) = self.stamp.take() {
+                            recording.finish();
+                        }
                     }
                     "app.log" => {
                         let log = params["log"].as_str().unwrap_or("").trim_end();
@@ -420,7 +609,14 @@ impl Supervisor {
                 if !ok && !errors.is_empty() {
                     message = errors;
                 }
-                if method == "app.restart" {
+                if method == "stale" {
+                    if ok {
+                        say(&format!("up to date in {ms} ms"));
+                    } else {
+                        say(&format!("the hot restart FAILED in {ms} ms: {message}"));
+                        self.write_status("reloadFailed", &message, Some(ms), &files);
+                    }
+                } else if method == "app.restart" {
                     if ok {
                         say(&format!("reloaded in {ms} ms"));
                         self.write_status("reloaded", "", Some(ms), &files);
