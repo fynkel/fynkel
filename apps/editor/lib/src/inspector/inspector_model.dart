@@ -29,6 +29,7 @@ import 'package:path/path.dart' as p;
 
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
+import '../play/play_document.dart' show PlayDocument;
 import '../project/editor_project.dart';
 import '../project_browser/project_browser_model.dart' show AssetPreview;
 import '../scene_view/component_handles.dart' show ComponentHandlers;
@@ -71,6 +72,19 @@ final class ComponentInstance {
   final Set<String> overridden;
 
   bool get isDerived => anchor != null;
+
+  /// The same component with the same values.
+  bool sameAs(ComponentInstance o) =>
+      entityId == o.entityId &&
+      componentId == o.componentId &&
+      type == o.type &&
+      version == o.version &&
+      anchor == o.anchor &&
+      entityLocal == o.entityLocal &&
+      local == o.local &&
+      added == o.added &&
+      setEquals(overridden, o.overridden) &&
+      deepEquals(data, o.data);
 }
 
 /// The same component type at the same position on every selected entity.
@@ -117,6 +131,16 @@ final class ComponentSlot {
   bool isOverridden(String path) {
     final key = topLevelKey(path);
     return instances.any((i) => i.isDerived && i.overridden.contains(key));
+  }
+
+  /// The same components with the same values, under the same spec.
+  bool sameAs(ComponentSlot o) {
+    if (type != o.type || index != o.index || !identical(spec, o.spec)) return false;
+    if (instances.length != o.instances.length) return false;
+    for (var i = 0; i < instances.length; i++) {
+      if (!instances[i].sameAs(o.instances[i])) return false;
+    }
+    return true;
   }
 
   @override
@@ -303,11 +327,44 @@ final class InspectorModel extends ChangeNotifier {
     final t = locked ? _tab : tabs.shown;
     if (t != _tab) {
       _tab?.removeListener(_onTab);
+      _liveValues?.removeListener(_onLiveValues);
       _tab = t;
       _tab?.addListener(_onTab);
+      _liveValues = switch (_tab?.document) {
+        final PlayDocument d => d.values,
+        _ => null,
+      };
+      _liveValues?.addListener(_onLiveValues);
       _errors.clear();
     }
     _refresh();
+  }
+
+  // ── Live Play (ADR-0021 P7) ─────────────────────────────────────────────
+
+  /// The running game's value changes (a selected entity moved), when the
+  /// tab shown is the running game.
+  ValueListenable<int>? _liveValues;
+  bool _liveOnly = false;
+  int _generation = 0;
+
+  /// Moves on every change but a live value refresh: while it stands, a
+  /// card whose slot is the same object may be drawn as it was.
+  int get generation => _generation;
+
+  void _onLiveValues() {
+    _liveOnly = true;
+    try {
+      _refresh();
+    } finally {
+      _liveOnly = false;
+    }
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_liveOnly) _generation++;
+    super.notifyListeners();
   }
 
   void _onTab() {
@@ -431,10 +488,21 @@ final class InspectorModel extends ChangeNotifier {
       if (c.type == 'fynkel.Tags') _tagsOn.putIfAbsent(c.entityId, () => c);
     }
     _entities = infos;
-    _slots = _pair(perEntity);
+    _slots = _keepUnchanged(_pair(perEntity));
     // Errors of slots that vanished go with them.
     _errors.removeWhere((k, _) => !_slots.any((s) => k.startsWith('${s.key}/')));
     notifyListeners();
+  }
+
+  /// [next] with each slot that did not change replaced by the one shown
+  /// now, so the panel can keep its card.
+  List<ComponentSlot> _keepUnchanged(List<ComponentSlot> next) {
+    if (_slots.isEmpty || next.isEmpty) return next;
+    final before = {for (final s in _slots) s.key: s};
+    return [
+      for (final s in next)
+        if (before[s.key] case final old? when old.sameAs(s)) old else s,
+    ];
   }
 
   PrefabInstanceInfo? _prefabOf(Map<String, Object?> e) {
@@ -1134,6 +1202,7 @@ final class InspectorModel extends ChangeNotifier {
     project.removeListener(_onProject);
     codegen?.removeListener(notifyListeners);
     _tab?.removeListener(_onTab);
+    _liveValues?.removeListener(_onLiveValues);
     super.dispose();
   }
 }

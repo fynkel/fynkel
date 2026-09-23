@@ -13,12 +13,14 @@
 // Refresh is a poll ([refresh], about ten times a second while Play runs):
 // the entity table comes back only when it changed (the world hashes it)
 // and is then compared row by row, and the entities someone
-// watches (the Inspector's selection) are re-read whole; only what changed
-// is reported, as an `applied` edit with those ids, which the tab patches
-// its tree from like any transaction.
+// watches (the Inspector's selection) are re-read whole. A changed row is
+// reported as an `applied` edit with those ids, which the tab patches its
+// tree from like any transaction; a watched entity whose values alone
+// moved only bumps [PlayDocument.values], so the Hierarchy is left alone.
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:fynkel/fynkel.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
@@ -109,6 +111,13 @@ final class PlayDocument extends EditorDocument {
   /// The last whole read of an entity, as the document stores it, by id.
   final Map<String, Map<String, Object?>> _full = {};
   final Map<String, String> _fullJson = {};
+
+  /// Bumped when a watched entity's values changed and no row did (the
+  /// Inspector listens; nothing else needs to).
+  final values = ValueNotifier<int>(0);
+
+  /// The watched entities whose values the last [values] bump was for.
+  List<String> lastMoved = const [];
 
   /// Refreshes run and how long the last one took (the design's budget is
   /// 0.5 ms for the reference game's Playground).
@@ -216,6 +225,7 @@ final class PlayDocument extends EditorDocument {
   @override
   void dispose() {
     close();
+    values.dispose();
     super.dispose();
   }
 
@@ -228,6 +238,7 @@ final class PlayDocument extends EditorDocument {
     final watch = Stopwatch()..start();
     final before = _rows;
     final List<String> affected;
+    final moved = <String>[];
     try {
       final rows = backend.changedEntities();
       affected = rows == null ? [] : _read(rows);
@@ -236,7 +247,7 @@ final class PlayDocument extends EditorDocument {
         final was = _fullJson[id];
         _full.remove(id);
         _document(id);
-        if (was != null && _fullJson[id] != was) affected.add(id);
+        if (was != null && _fullJson[id] != was) moved.add(id);
       }
     } on AuthoringException {
       // The world went (Stop is on its way) or refused: nothing to show.
@@ -244,7 +255,15 @@ final class PlayDocument extends EditorDocument {
     }
     refreshes++;
     lastRefresh = watch.elapsed;
-    if (affected.isEmpty) return;
+    if (affected.isEmpty) {
+      if (moved.isNotEmpty) {
+        lastMoved = moved;
+        values.value++;
+      }
+      return;
+    }
+    // A row changed: the tab re-reads those, and the Inspector everything
+    // it shows (the moved entities with it).
     for (final id in affected) {
       if (!_rows.containsKey(id) || before[id] != _rows[id]) _full.remove(id);
     }
@@ -290,6 +309,31 @@ final class PlayDocument extends EditorDocument {
     return affected;
   }
 
+  /// The open scene's component ids for [id] by type, read once per scene
+  /// revision (the scene may be edited in its tab while the game runs).
+  Map<String, List<String>> _sceneIds(String id) {
+    final s = scene;
+    if (s == null || id.startsWith('runtime:') || s.isClosed) return const {};
+    if (s.revision != _sceneRevision) {
+      _sceneRevision = s.revision;
+      _sceneIdCache.clear();
+    }
+    return _sceneIdCache[id] ??= () {
+      final byType = <String, List<String>>{};
+      final components = s.entities([id]).entities[id]?['components'];
+      if (components is Map) {
+        for (final c in components.entries) {
+          final type = (c.value as Map?)?['type'];
+          if (type is String) (byType[type] ??= []).add(c.key as String);
+        }
+      }
+      return byType;
+    }();
+  }
+
+  String? _sceneRevision;
+  final Map<String, Map<String, List<String>>> _sceneIdCache = {};
+
   /// [id] as the scene document would store it, read on first use.
   Map<String, Object?>? _document(String id) {
     final cached = _full[id];
@@ -302,7 +346,7 @@ final class PlayDocument extends EditorDocument {
     } on AuthoringException {
       return null;
     }
-    final ids = _SceneComponentIds(scene, id);
+    final ids = _SceneComponentIds(id, _sceneIds(id));
     final components = <String, Object?>{};
     for (final c in state.components) {
       components[ids.forType(c.type)] = {'type': c.type, 'version': 1, 'data': c.data};
@@ -325,19 +369,10 @@ final class PlayDocument extends EditorDocument {
 /// The open scene's component ids for one entity, by type, in order; an
 /// id of its own for a component the scene does not have.
 final class _SceneComponentIds {
-  _SceneComponentIds(EditorDocument? scene, this.entity) {
-    if (scene == null || entity.startsWith('runtime:') || scene.isClosed) return;
-    final e = scene.entities([entity]).entities[entity];
-    final components = e?['components'];
-    if (components is! Map) return;
-    for (final c in components.entries) {
-      final type = (c.value as Map?)?['type'];
-      if (type is String) (_byType[type] ??= []).add(c.key as String);
-    }
-  }
+  _SceneComponentIds(this.entity, this._byType);
 
   final String entity;
-  final Map<String, List<String>> _byType = {};
+  final Map<String, List<String>> _byType;
   final Map<String, int> _used = {};
 
   String forType(String type) {

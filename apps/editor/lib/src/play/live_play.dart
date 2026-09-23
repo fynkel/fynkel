@@ -2,7 +2,10 @@
 // Hierarchy and the Inspector show its world (a `PlayDocument` as the
 // tabs' `live` document); on Stop they return to the scene tab. The
 // selection goes with them both ways, for every entity that came from the
-// scene — Unity's rule.
+// scene — Unity's rule. A game that loads the scene a frame or more after
+// its world shows up (the reference game's Menu → Playground) gets the
+// selection when those entities appear, unless something else was
+// selected first.
 import 'package:fynkel/fynkel.dart' as fynkel;
 
 import '../documents/document_tabs.dart';
@@ -21,6 +24,9 @@ final class LivePlay {
   /// The scene tab Play started from (its selection comes back to it).
   OpenDocument? _scene;
 
+  /// The scene's selection, waiting for the running world to have it.
+  List<String>? _wanted;
+
   PlayDocument? get document => tabs.live?.document as PlayDocument?;
 
   /// Shows [world] — the running game's, or null when none runs.
@@ -36,14 +42,38 @@ final class LivePlay {
     final doc = PlayDocument(backend: _backend(world), scene: scene?.document);
     final live = OpenDocument(doc, project: tabs.project);
     doc.watched = () => live.selection;
-    final carried = [
-      for (final id in scene?.selection ?? const <String>{})
-        if (live.tree.contains(id)) id,
-    ];
-    if (carried.isNotEmpty) live.setSelection(carried);
+    final wanted = [...?scene?.selection];
     _world = world;
     _scene = scene;
+    _wanted = wanted.isEmpty ? null : wanted;
+    _carry(live);
+    if (_wanted != null) live.addListener(_onLive);
     tabs.live = live;
+  }
+
+  /// Selects what the scene had selected, once the running world has some
+  /// of it; gives up when something else gets selected first.
+  void _carry(OpenDocument live) {
+    final wanted = _wanted;
+    if (wanted == null) return;
+    if (live.selection.isNotEmpty) {
+      _wanted = null;
+      return;
+    }
+    final carried = [
+      for (final id in wanted)
+        if (live.tree.contains(id)) id,
+    ];
+    if (carried.isEmpty) return;
+    _wanted = null;
+    live.setSelection(carried);
+  }
+
+  void _onLive() {
+    final live = tabs.live;
+    if (live == null) return;
+    _carry(live);
+    if (_wanted == null) live.removeListener(_onLive);
   }
 
   void _end() {
@@ -51,7 +81,9 @@ final class LivePlay {
     final scene = _scene;
     _world = null;
     _scene = null;
+    _wanted = null;
     if (live == null) return;
+    live.removeListener(_onLive);
     if (scene != null && tabs.open.contains(scene)) {
       final back = [
         for (final id in live.selection)

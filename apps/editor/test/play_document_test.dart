@@ -11,6 +11,7 @@ import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/inspector/inspector_model.dart';
+import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/live_play.dart';
 import 'package:fynkel_editor/src/play/play_document.dart';
@@ -161,7 +162,7 @@ void main() {
     expect(doc.apply([]).ok, isFalse);
   });
 
-  test('a refresh reports only what changed, and re-reads the watched entities', () {
+  test('a refresh reports only what changed; a watched entity\'s moving values go to `values` alone', () {
     final live = running();
     final doc = PlayDocument(backend: live, scene: scene(), interval: const Duration(days: 1));
     addTearDown(doc.dispose);
@@ -179,9 +180,18 @@ void main() {
     expect(doc.lastEdit!.affectedIds, unorderedEquals(['robot', 'runtime:100']));
     expect(doc.entities(['robot']).entities['robot']!['name'], 'Hero');
 
+    final edit = doc.lastEdit;
     live.native['floor']![0].data['position'] = [0, 3, 0];
     doc.refresh();
-    expect(doc.lastEdit!.affectedIds, ['floor'], reason: 'a watched entity whose values moved');
+    expect(told, 1, reason: 'no row changed: the tab (and the Hierarchy) hear nothing');
+    expect(doc.lastEdit, same(edit));
+    expect(doc.values.value, 1);
+    expect(doc.lastMoved, ['floor']);
+    expect(((doc.entities(['floor']).entities['floor']!['components'] as Map).values.first as Map)['data'], {
+      'position': [0, 3, 0],
+      'rotation': [0, 0, 0, 1],
+      'scale': [1, 1, 1],
+    });
 
     live.rows.removeWhere((r) => r.id == 'runtime:99');
     doc.refresh();
@@ -227,6 +237,77 @@ void main() {
     expect(hierarchy.tab, same(main));
     expect(main.selection, {'floor'}, reason: "back to the scene, without what the game made");
     expect(main.tree['robot']!.name, 'Robot', reason: 'nothing of the run reached the document');
+    play.dispose();
+  });
+
+  testWidgets('a scene the game loads after its world shows up still gets the selection', (tester) async {
+    final project = FakeProject(dir: '/fake/game')..addDocument(scene());
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    tabs.openDocument('main')!.setSelection(['robot']);
+    // The world starts on another scene (a menu).
+    final live = FakeLive()..add('runtime:1', 'Menu camera');
+    final play = LivePlay(tabs: tabs, backend: (_) => live);
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+
+    play.follow(world);
+    expect(tabs.live!.selection, isEmpty);
+    live.rows.clear();
+    live
+      ..add('robot', 'Robot', handle: 7)
+      ..add('floor', 'Floor');
+    play.document!.refresh();
+    expect(tabs.live!.selection, {'robot'}, reason: 'carried once the robot is there');
+
+    // Once carried (or once the user picked something), it is not forced again.
+    tabs.live!.setSelection(['floor']);
+    live.rename('robot', 'Hero');
+    play.document!.refresh();
+    expect(tabs.live!.selection, {'floor'});
+    play.dispose();
+  });
+
+  testWidgets('a moving value rebuilds its field alone: the other cards and fields keep their widgets', (tester) async {
+    final project = FakeProject(dir: '/fake/game')..addDocument(scene());
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    final inspector = InspectorModel(tabs: tabs, project: project);
+    addTearDown(inspector.dispose);
+    final hierarchy = HierarchyModel(tabs: tabs, project: project);
+    addTearDown(hierarchy.dispose);
+    tabs.openDocument('main')!.setSelection(['robot']);
+    final live = running();
+    final play = LivePlay(tabs: tabs, backend: (_) => live);
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    play.follow(world);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SizedBox(width: 420, height: 1200, child: InspectorPanel(model: inspector))),
+      ),
+    );
+    final generation = inspector.generation;
+    final slots = List.of(inspector.slots);
+    Widget card(String key) => tester.widget(find.byKey(ValueKey('card.$key')));
+    Widget field(String key) => tester.widget(find.byKey(ValueKey('field.$key')));
+    final light = card('fynkel.PointLight#0');
+    final rotation = field('fynkel.Transform#0.rotation');
+    final position = field('fynkel.Transform#0.position');
+    var hierarchyTold = 0;
+    hierarchy.addListener(() => hierarchyTold++);
+
+    live.native['robot']![0].data['position'] = [0, 2, 0];
+    play.document!.refresh();
+    await tester.pump();
+    expect(hierarchyTold, 0);
+    expect(inspector.generation, generation, reason: 'only values moved');
+    expect(inspector.slots[1], same(slots[1]), reason: 'the light did not change');
+    expect(inspector.slots[0], isNot(same(slots[0])));
+    expect(card('fynkel.PointLight#0'), same(light));
+    expect(field('fynkel.Transform#0.rotation'), same(rotation));
+    expect(field('fynkel.Transform#0.position'), isNot(same(position)));
+    expect(inspector.slots[0].value('position'), [0, 2, 0]);
     play.dispose();
   });
 

@@ -63,6 +63,16 @@ class InspectorPanel extends StatefulWidget {
 class _InspectorPanelState extends State<InspectorPanel> {
   final _collapsed = <String>{};
 
+  /// The cards drawn last, by slot key: while the model's generation holds
+  /// (only the running game's values moved) a card whose slot is the same
+  /// object is handed back as it was and not built again.
+  final _cards = <String, ({ComponentSlot slot, int generation, bool collapsed, Widget card})>{};
+
+  /// The same one level down: a field whose value did not move keeps its
+  /// widget when its card is built again (a moving position rebuilds three
+  /// number fields, not the Transform's nine).
+  final _fieldWidgets = <String, _KeptField>{};
+
   InspectorModel get model => widget.model;
 
   @override
@@ -78,6 +88,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
     if (old.model != model) {
       old.model.removeListener(_onModel);
       model.addListener(_onModel);
+      _cards.clear();
+      _fieldWidgets.clear();
+      _chrome.clear();
     }
     if (old.selection != widget.selection) {
       old.selection?.removeListener(_onModel);
@@ -186,7 +199,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ?banner,
-        _header(context),
+        _kept('header', () => _header(context)),
         Expanded(
           child: CustomScrollView(
             key: const ValueKey('inspector.list'),
@@ -195,17 +208,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 SliverToBoxAdapter(
                   child: _DerivedBanner(model: model, entity: model.single!),
                 ),
-              for (final slot in model.slots)
-                _ComponentCard(
-                  key: ValueKey('card.${slot.key}'),
-                  model: model,
-                  slot: slot,
-                  collapsed: _collapsed.contains(slot.key),
-                  onToggle: () => setState(
-                    () => _collapsed.contains(slot.key) ? _collapsed.remove(slot.key) : _collapsed.add(slot.key),
-                  ),
-                ),
-              SliverPadding(
+              for (final slot in model.slots) _card(slot),
+              _kept('footer', () => SliverPadding(
                 padding: const EdgeInsets.only(bottom: 12),
                 sliver: SliverList.list(
                   children: [
@@ -249,12 +253,50 @@ class _InspectorPanelState extends State<InspectorPanel> {
                       ),
                   ],
                 ),
-              ),
+              )),
             ],
           ),
         ),
       ],
     );
+  }
+
+  /// The page around the cards (the header, the Add Component section)
+  /// built once per generation and theme, like the cards.
+  final _chrome = <String, ({int generation, ThemeData theme, Widget widget})>{};
+
+  Widget _kept(String what, Widget Function() build) {
+    final theme = Theme.of(context);
+    final old = _chrome[what];
+    if (old != null && old.generation == model.generation && identical(old.theme, theme)) return old.widget;
+    final w = build();
+    _chrome[what] = (generation: model.generation, theme: theme, widget: w);
+    return w;
+  }
+
+  Widget _card(ComponentSlot slot) {
+    final collapsed = _collapsed.contains(slot.key);
+    final kept = _cards[slot.key];
+    if (kept != null &&
+        identical(kept.slot, slot) &&
+        kept.generation == model.generation &&
+        kept.collapsed == collapsed) {
+      return kept.card;
+    }
+    if (_cards.length > 64) _cards.clear();
+    if (_fieldWidgets.length > 512) _fieldWidgets.clear();
+    final card = _ComponentCard(
+      key: ValueKey('card.${slot.key}'),
+      model: model,
+      slot: slot,
+      kept: _fieldWidgets,
+      collapsed: collapsed,
+      onToggle: () => setState(
+        () => _collapsed.contains(slot.key) ? _collapsed.remove(slot.key) : _collapsed.add(slot.key),
+      ),
+    );
+    _cards[slot.key] = (slot: slot, generation: model.generation, collapsed: collapsed, card: card);
+    return card;
   }
 
   Widget _empty(BuildContext context, IconData icon, String text) {
@@ -504,6 +546,8 @@ class _EditInSceneButton extends StatelessWidget {
   }
 }
 
+typedef _KeptField = ({int generation, Object? value, bool mixed, Widget widget});
+
 class _ComponentCard extends StatelessWidget {
   const _ComponentCard({
     super.key,
@@ -511,10 +555,14 @@ class _ComponentCard extends StatelessWidget {
     required this.slot,
     required this.collapsed,
     required this.onToggle,
+    this.kept,
   });
 
   final InspectorModel model;
   final ComponentSlot slot;
+
+  /// The panel's field widgets from the last build, by `slot.key/field`.
+  final Map<String, _KeptField>? kept;
   final bool collapsed;
   final VoidCallback onToggle;
 
@@ -629,6 +677,23 @@ class _ComponentCard extends StatelessWidget {
     }
   }
 
+  /// [f]'s editor — the one built before while the model's generation
+  /// holds and the value is the same.
+  Widget _field(FieldSpec f) => _kept(f.name, () => _FieldEditor(model: model, slot: slot, spec: f, path: f.name));
+
+  Widget _kept(String name, Widget Function() build) {
+    final k = '${slot.key}/$name';
+    final value = slot.value(name);
+    final mixed = slot.isMixed(name);
+    final old = kept?[k];
+    if (old != null && old.generation == model.generation && old.mixed == mixed && deepEquals(old.value, value)) {
+      return old.widget;
+    }
+    final w = RepaintBoundary(key: ValueKey('field.${slot.key}.$name'), child: build());
+    kept?[k] = (generation: model.generation, value: value, mixed: mixed, widget: w);
+    return w;
+  }
+
   Widget _fields(BuildContext context) {
     final theme = Theme.of(context);
     final spec = slot.spec;
@@ -648,9 +713,7 @@ class _ComponentCard extends StatelessWidget {
       if (f.header != null) {
         rows.add(Padding(padding: const EdgeInsets.only(top: 10, bottom: 3), child: InspectorCaption(f.header!)));
       }
-      rows.add(
-        _FieldEditor(key: ValueKey('field.${slot.key}.${f.name}'), model: model, slot: slot, spec: f, path: f.name),
-      );
+      rows.add(_field(f));
     }
     // Keys the schema does not list (an open schema, or none): JSON rows.
     if (spec.additionalProperties || spec.missingSchema) {
@@ -658,8 +721,7 @@ class _ComponentCard extends StatelessWidget {
         if (spec.field(key) != null) continue;
         any = true;
         rows.add(
-          FieldRow(
-            key: ValueKey('field.${slot.key}.$key'),
+          _kept(key, () => FieldRow(
             label: humanize(key),
             tooltip: 'Not in the schema — edited as JSON.',
             error: model.errorFor(slot, key),
@@ -674,7 +736,7 @@ class _ComponentCard extends StatelessWidget {
               enabled: model.canEdit,
               onCommit: (v) => model.setField(slot, key, v),
             ),
-          ),
+          )),
         );
       }
     }
