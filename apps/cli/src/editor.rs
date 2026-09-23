@@ -48,6 +48,11 @@ pub const HOST_DIR: &str = ".fynkel/editor_host";
 /// What the host's status file says (`<host>/status.json`, version 1).
 pub const STATUS_FILE: &str = "status.json";
 
+/// The editor asks for a hot restart by creating this file next to the
+/// status file (P3b: *Restart to Apply*, after it saved); it is removed as
+/// the restart is sent.
+pub const RESTART_REQUEST: &str = "restart.request";
+
 pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let mut project: Option<PathBuf> = None;
     let mut plain = false;
@@ -385,6 +390,20 @@ fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
         }
         // Hot reload: a change settles for 150 ms (an editor's save writes
         // more than once) before one reload covers it.
+        // The editor asked for a restart (it saved first).
+        if let Some(request) = host.map(|h| h.join(RESTART_REQUEST)) {
+            if state.app.is_some() && std::fs::remove_file(&request).is_ok() {
+                say("the editor asked for a restart → hot restart");
+                state.write_status("restarting", "", None, &[]);
+                state.request(
+                    &stdin,
+                    "app.restart",
+                    "restart",
+                    json!({"fullRestart": true, "pause": false, "reason": "restart"}),
+                    Vec::new(),
+                );
+            }
+        }
         if !watching || state.app.is_none() {
             continue;
         }
@@ -616,10 +635,25 @@ impl Supervisor {
                         say(&format!("the hot restart FAILED in {ms} ms: {message}"));
                         self.write_status("reloadFailed", &message, Some(ms), &files);
                     }
+                } else if method == "restart" {
+                    if ok {
+                        say(&format!("restarted in {ms} ms"));
+                        self.write_status("restarted", "", Some(ms), &files);
+                    } else {
+                        say(&format!("the hot restart FAILED in {ms} ms: {message}"));
+                        self.write_status("reloadFailed", &message, Some(ms), &files);
+                    }
                 } else if method == "app.restart" {
                     if ok {
                         say(&format!("reloaded in {ms} ms"));
                         self.write_status("reloaded", "", Some(ms), &files);
+                    } else if message.starts_with("Reload rejected") {
+                        // The code compiles, but a hot reload cannot apply
+                        // it: the editor offers a restart.
+                        say(&format!(
+                            "reload rejected in {ms} ms, a restart applies it: {message}"
+                        ));
+                        self.write_status("reloadRejected", &message, Some(ms), &files);
                     } else {
                         say(&format!("reload FAILED in {ms} ms: {message}"));
                         self.write_status("reloadFailed", &message, Some(ms), &files);
