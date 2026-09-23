@@ -388,6 +388,7 @@ class EditorShellState extends State<EditorShell> {
           gameSearchFocus: gameSearchFocus,
           onPlay: playProject,
           onStop: stopPlaying,
+          onMigrationPreview: () => showMigrationPreview(context, project!),
         );
       },
     ),

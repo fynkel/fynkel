@@ -167,6 +167,10 @@ void main() {
     expect(find.textContaining('scene/0-1/entities-keyed-by-id'), findsOneWidget);
     expect(find.textContaining('"formatVersion": 2'), findsOneWidget);
     expect(find.text('fynkel migrate ${dir.path}'), findsOneWidget);
+    // A lock from another build: the preview's command rewrites it too.
+    project.diagnostics = [diag('FYN-P0011', message: 'the lock says 6, this build is 7')];
+    await tester.pumpAndSettle();
+    expect(find.text('fynkel migrate ${dir.path} && fynkel project lock --project ${dir.path}'), findsOneWidget);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
 

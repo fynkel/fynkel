@@ -178,4 +178,89 @@ void main() {
     expect(find.text('No diagnostics. The project validates clean.'), findsOneWidget);
     expect(find.textContaining('0 errors, 0 warnings'), findsOneWidget);
   });
+
+  group('a project from an older build', () {
+    void outdate() {
+      project.diagnostics = [
+        ...project.diagnostics,
+        diag('FYN-D0016', message: 'formatVersion 1 is older than the current 2', document: '/g/fynkel.project.json'),
+        diag('FYN-P0011', message: '/cache/version: the lock says 6, this build is 7', document: '/g/fynkel.lock.json'),
+        diag(
+          'FYN-D0016',
+          message: 'formatVersion 3 is older than the current 4',
+          document: '/g/assets/prefabs/ball.prefab.json',
+        ),
+        diag(
+          'FYN-D0206',
+          message: 'unexpected property "layer"',
+          document: '/g/assets/prefabs/ball.prefab.json',
+          line: 83,
+        ),
+        diag(
+          'FYN-D0206',
+          message: 'unexpected property "layer"',
+          document: '/g/assets/prefabs/ball.prefab.json',
+          line: 135,
+        ),
+      ];
+      project.migrations = MigrationPreview.fromJson({
+        'outdated': 1,
+        'steps': <Object?>[],
+        'documents': [
+          {'path': '/g/assets/prefabs/ball.prefab.json', 'kind': 'prefab', 'from': 3, 'to': 4, 'ok': true},
+        ],
+      });
+    }
+
+    test('what follows from it is folded; everything else still lists', () {
+      outdate();
+      expect(model.upgradeCount, 5);
+      expect(model.outdatedDocuments, {'fynkel.project.json', 'assets/prefabs/ball.prefab.json'});
+      expect(model.lockDiffers, isTrue);
+      expect(model.entries.map((e) => e.diagnostic.code), ['FYN-D0206', 'FYN-D0206', 'FYN-D0301', 'FYN-D0900']);
+      expect(model.entries.any((e) => e.diagnostic.document?.contains('ball') ?? false), isFalse);
+      model.toggleUpgrade();
+      expect(model.entries.length, 4 + 5, reason: 'the two "layer" rows are on different lines: nothing collapses');
+      expect(model.countOf(Severity.error), 3 + 5, reason: 'the counts are the whole truth');
+    });
+
+    testWidgets('one strip says why, offers the preview and shows them on request', (tester) async {
+      outdate();
+      var previews = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ConsolePanel(model: model, onMigrationPreview: () => previews++),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('console.upgrade')), findsOneWidget);
+      expect(
+        find.textContaining('2 documents use an older format and the lock was written by another build'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('5 diagnostics follow from that'), findsOneWidget);
+      expect(find.textContaining('unexpected property'), findsNothing);
+      await tester.tap(find.byKey(const Key('console.upgrade.preview')));
+      expect(previews, 1);
+      await tester.tap(find.byKey(const Key('console.upgrade.toggle')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('unexpected property'), findsWidgets);
+      expect(find.text('Fold them'), findsOneWidget);
+
+      // Only the upgrade's diagnostics: the list says there is nothing else.
+      project.diagnostics = project.diagnostics.where((d) => model.isFromUpgrade(d)).toList();
+      model.toggleUpgrade();
+      await tester.pumpAndSettle();
+      expect(find.text('Nothing else to report.'), findsOneWidget);
+    });
+
+    test('a lock from another build alone points at `fynkel project lock`', () {
+      project.diagnostics = [diag('FYN-P0011', message: 'the lock says 6', document: '/g/fynkel.lock.json')];
+      expect(model.upgradeCount, 1);
+      expect(model.outdatedDocuments, isEmpty);
+      expect(model.entries, isEmpty);
+    });
+  });
 }

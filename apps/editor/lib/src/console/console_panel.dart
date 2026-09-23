@@ -3,6 +3,9 @@
 // collapsed repeats, copy, and a double-click (or Enter) that opens a scene
 // or prefab diagnostic in the editor (its entity selected) and any other
 // file's line in the configured IDE; both also have a button and a command.
+// A project from an older build folds what follows from that — documents
+// behind their format, what they report, the lock naming another build —
+// under one strip with the way out, instead of a wall of errors.
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
@@ -45,6 +48,13 @@ final class ConsoleModel extends ChangeNotifier {
   String query = '';
   final severities = {Severity.error, Severity.warning, Severity.info};
   bool collapse = true;
+
+  /// Whether the diagnostics that follow from an older build are listed
+  /// (off: folded under the upgrade strip).
+  bool showUpgrade = false;
+
+  static const outdatedCode = 'FYN-D0016';
+  static const lockCode = 'FYN-P0011';
   String? selectedKey;
 
   /// The last IDE launch's problem (cleared on success).
@@ -65,6 +75,36 @@ final class ConsoleModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void toggleUpgrade() {
+    showUpgrade = !showUpgrade;
+    notifyListeners();
+  }
+
+  /// The documents behind their kind's format (relative paths).
+  Set<String> get outdatedDocuments => {
+    for (final d in project.migrations?.documents ?? const <DocumentMigration>[]) project.relative(d.path),
+    for (final d in project.diagnostics)
+      if (d.code == outdatedCode && d.document != null) project.relative(d.document!),
+  };
+
+  /// Whether [d] follows from the project being from an older build: a
+  /// document behind its format (and anything it reports — it is checked
+  /// against the current schema), or the lock naming another build.
+  bool isFromUpgrade(Diagnostic d, [Set<String>? outdated]) {
+    if (d.code == outdatedCode || d.code == lockCode) return true;
+    final doc = d.document;
+    return doc != null && (outdated ?? outdatedDocuments).contains(project.relative(doc));
+  }
+
+  /// The diagnostics folded under the upgrade strip.
+  int get upgradeCount {
+    final outdated = outdatedDocuments;
+    return project.diagnostics.where((d) => isFromUpgrade(d, outdated)).length;
+  }
+
+  /// The lock names another build (`fynkel project lock` rewrites it).
+  bool get lockDiffers => project.diagnostics.any((d) => d.code == lockCode);
+
   void select(String? key) {
     selectedKey = key;
     notifyListeners();
@@ -74,8 +114,10 @@ final class ConsoleModel extends ChangeNotifier {
     final q = query.trim().toLowerCase();
     final counts = <String, int>{};
     final order = <String, Diagnostic>{};
+    final outdated = showUpgrade ? const <String>{} : outdatedDocuments;
     for (final d in project.diagnostics) {
       if (!severities.contains(d.severity)) continue;
+      if (!showUpgrade && isFromUpgrade(d, outdated)) continue;
       if (q.isNotEmpty && !_matches(d, q)) continue;
       final key = collapse ? ConsoleEntry.keyOf(d) : '${ConsoleEntry.keyOf(d)}#${counts.length}';
       counts[key] = (counts[key] ?? 0) + 1;
@@ -190,6 +232,7 @@ class ConsolePanel extends StatefulWidget {
     this.gameSearchFocus,
     this.onPlay,
     this.onStop,
+    this.onMigrationPreview,
   });
 
   /// The tabs, by index.
@@ -211,6 +254,9 @@ class ConsolePanel extends StatefulWidget {
   final FocusNode? gameSearchFocus;
   final VoidCallback? onPlay;
   final VoidCallback? onStop;
+
+  /// The upgrade strip's "Preview migration…".
+  final VoidCallback? onMigrationPreview;
 
   @override
   State<ConsolePanel> createState() => _ConsolePanelState();
@@ -359,11 +405,13 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
         final theme = Theme.of(context);
         final entries = model.entries;
         final project = model.project;
+        final upgrade = model.upgradeCount;
         return LayoutBuilder(
           builder: (context, box) => Column(
             children: [
               _toolbar(context, theme),
               const Divider(height: 1),
+              if (upgrade > 0) _upgradeStrip(context, theme, upgrade),
               Expanded(
                 child: entries.isEmpty
                     ? Center(
@@ -372,6 +420,8 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
                               ? 'Validating…'
                               : project.diagnostics.isEmpty
                               ? 'No diagnostics. The project validates clean.'
+                              : upgrade == project.diagnostics.length && !model.showUpgrade
+                              ? 'Nothing else to report.'
                               : 'Nothing matches the filter.',
                           style: theme.textTheme.bodyMedium?.copyWith(color: theme.disabledColor),
                         ),
@@ -405,6 +455,48 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
           ),
         );
       },
+    );
+  }
+
+  /// One strip for everything an older build explains, with the way out.
+  Widget _upgradeStrip(BuildContext context, ThemeData theme, int count) {
+    final t = context.tokens;
+    final docs = model.outdatedDocuments.length;
+    final causes = [
+      if (docs > 0) '$docs document${docs == 1 ? ' uses' : 's use'} an older format',
+      if (model.lockDiffers) 'the lock was written by another build',
+    ];
+    final fix = docs > 0
+        ? 'Preview the migration for the commands to run.'
+        : 'Run `fynkel project lock` to rewrite it.';
+    return Container(
+      key: const Key('console.upgrade'),
+      color: t.surfaceOf(t.warning, .12),
+      padding: const EdgeInsets.fromLTRB(10, 4, 4, 4),
+      child: Row(
+        children: [
+          Icon(FIcons.upgrade, size: t.icon, color: t.warning),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'This project is from an older build: ${causes.join(' and ')}. '
+              '$count diagnostic${count == 1 ? ' follows' : 's follow'} from that. $fix',
+              style: theme.textTheme.bodySmall?.copyWith(color: t.text),
+            ),
+          ),
+          if (docs > 0 && widget.onMigrationPreview != null)
+            TextButton(
+              key: const Key('console.upgrade.preview'),
+              onPressed: widget.onMigrationPreview,
+              child: const Text('Preview migration…'),
+            ),
+          TextButton(
+            key: const Key('console.upgrade.toggle'),
+            onPressed: model.toggleUpgrade,
+            child: Text(model.showUpgrade ? 'Fold them' : 'Show them'),
+          ),
+        ],
+      ),
     );
   }
 

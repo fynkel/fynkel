@@ -39,7 +39,10 @@ class _MigrationPreviewDialogState extends State<MigrationPreviewDialog> {
         final docs = preview?.documents ?? const <DocumentMigration>[];
         if (_selected >= docs.length) _selected = 0;
         final doc = docs.isEmpty ? null : docs[_selected];
-        final command = 'fynkel migrate ${widget.project.dir}';
+        // The lock names the build too: rewritten once the documents are.
+        final dir = widget.project.dir;
+        final lockDiffers = widget.project.diagnostics.any((d) => d.code == 'FYN-P0011');
+        final command = 'fynkel migrate $dir${lockDiffers ? ' && fynkel project lock --project $dir' : ''}';
         return AlertDialog(
           title: const Text('Migration preview'),
           content: SizedBox(
