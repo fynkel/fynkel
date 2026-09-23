@@ -30,7 +30,11 @@ void main() {
     final all = live.entities();
     expect(all, hasLength(7));
     expect(all.any((e) => e.spawned), isFalse);
-    expect(all.firstWhere((e) => e.id == robot).name, 'Robot');
+    final robotRow = all.firstWhere((e) => e.id == robot);
+    expect(robotRow.name, 'Robot');
+    expect(robotRow.types, contains('fynkel.MeshRenderer'));
+    expect(live.entity(robot).handle, robotRow.handle);
+    expect(world.attach(robotRow.handle).name, 'Robot', reason: "the handle is package:fynkel's entity");
     final crate = all.where((e) => e.parent == crateA).single;
     expect(crate.id, isNot(startsWith('runtime:')), reason: 'the id the cook derived for the instance');
     final tick = live.tick;

@@ -12,26 +12,33 @@ part of 'session.dart';
 final class LiveEntity {
   const LiveEntity({
     required this.id,
+    required this.handle,
     required this.name,
     required this.parent,
     required this.spawned,
     required this.layer,
     required this.childCount,
+    required this.types,
   });
 
   factory LiveEntity.fromJson(Map<String, Object?> j) => LiveEntity(
         id: j['id'] as String,
+        handle: (j['entity'] as num?)?.toInt() ?? 0,
         name: j['name'] as String? ?? '',
         parent: j['parent'] as String?,
         spawned: j['spawned'] == true,
         layer: (j['layer'] as num?)?.toInt() ?? 0,
         childCount: (j['children'] as num?)?.toInt() ?? 0,
+        types: [for (final t in j['types'] as List? ?? const []) t as String],
       );
 
   /// The authoring id when a loaded scene spawned it (a prefab instance's
   /// children carry the ids the cook derived), `runtime:<handle>` when the
   /// game did.
   final String id;
+
+  /// The runtime entity handle (what package:fynkel's `GameObject.entity` is).
+  final int handle;
   final String name;
   final String? parent;
 
@@ -39,6 +46,9 @@ final class LiveEntity {
   final bool spawned;
   final int layer;
   final int childCount;
+
+  /// The native component types it carries, in registry order.
+  final List<String> types;
 }
 
 /// One entity as the Inspector reads it: every native component as the
@@ -46,6 +56,7 @@ final class LiveEntity {
 final class LiveEntityState {
   const LiveEntityState({
     required this.id,
+    required this.handle,
     required this.name,
     required this.parent,
     required this.world,
@@ -54,6 +65,7 @@ final class LiveEntityState {
 
   factory LiveEntityState.fromJson(Map<String, Object?> j) => LiveEntityState(
         id: j['id'] as String,
+        handle: (j['entity'] as num?)?.toInt() ?? 0,
         name: j['name'] as String? ?? '',
         parent: j['parent'] as String?,
         world: _mapOf(j['world']),
@@ -64,6 +76,7 @@ final class LiveEntityState {
       );
 
   final String id;
+  final int handle;
   final String name;
   final String? parent;
   final Map<String, Object?> world;

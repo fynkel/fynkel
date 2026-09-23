@@ -589,12 +589,14 @@ FynkelStatus fynkel_authoring_preview_call(
 
 /// A live call on a RUNNING game's world (ADR-0021 P7, live Play mode) —
 /// not a preview: no session, the world is the game's. Kinds:
-/// - "entities" {} -> { tick, entities: [{ id, name, parent, spawned,
-/// layer, tags, children }] }, parents before children. `id` is the
+/// - "entities" {} -> { tick, entities: [{ id, entity, name, parent,
+/// spawned, layer, tags, children, types }] }, parents before children
+/// (`entity` the runtime handle, `children` a count, `types` the native
+/// component types). `id` is the
 /// authoring id for what a loaded scene spawned (a cooked prefab
 /// instance's children carry their derived ids), "runtime:<handle>" for
 /// what the game spawned or instantiated (`spawned` true);
-/// - "entity" { id } -> { id, name, parent, world, components: [{ type,
+/// - "entity" { id } -> { id, entity, name, parent, world, components: [{ type,
 /// data }] }, every native component as the scene document stores it;
 /// - "set" { id, type, data } replaces or adds a native component from its
 /// document JSON; "remove" { id, type }; "rename" { id, name }.
