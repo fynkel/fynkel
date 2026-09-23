@@ -416,7 +416,11 @@
           "type": "string",
           "nullable": false,
           "default": "Gate",
-          "description": "The entity carrying the `game.Gate` to open."
+          "kind": "entity",
+          "gizmo": {
+            "shape": "lineTo"
+          },
+          "description": "The entity carrying the `game.Gate` to open (the Scene view draws a line to it)."
         }
       ],
       "schema": {
@@ -438,9 +442,13 @@
           "target": {
             "type": "string",
             "default": "Gate",
-            "description": "The entity carrying the `game.Gate` to open.",
+            "description": "The entity carrying the `game.Gate` to open (the Scene view draws a line to it).",
             "x-fynkel": {
-              "type": "string"
+              "type": "string",
+              "kind": "entity",
+              "gizmo": {
+                "shape": "lineTo"
+              }
             }
           }
         },
