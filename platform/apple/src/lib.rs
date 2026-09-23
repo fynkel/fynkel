@@ -19,7 +19,8 @@ pub mod ring;
 use std::ffi::c_void;
 use std::time::Duration;
 
-use fynkel_core::Extract;
+use fynkel_core::components::{Camera as SceneCamera, ExposureMode, Projection};
+use fynkel_core::{Extract, ExtractCamera};
 use fynkel_native::FynkelWorld;
 use fynkel_render::{Assets, Camera, ExtractRenderer, FrameStats};
 use glam::Vec3;
@@ -30,6 +31,9 @@ pub use ring::{IoSurfaceRing, RingStats, SyncMode, TEXTURE_FORMAT};
 pub struct Viewport {
     ring: IoSurfaceRing,
     renderer: ExtractRenderer,
+    /// This viewport's own camera, drawn instead of the world's (the
+    /// editor's Scene view on a running game, ADR-0021 P7 L5).
+    view: Option<(glam::Mat4, SceneCamera)>,
 }
 
 impl Viewport {
@@ -41,7 +45,11 @@ impl Viewport {
     ) -> Result<Self, String> {
         let ring = IoSurfaceRing::new(width, height, buffer_count, sync_mode)?;
         let renderer = ExtractRenderer::new(ring.device(), TEXTURE_FORMAT, width, height);
-        Ok(Self { ring, renderer })
+        Ok(Self {
+            ring,
+            renderer,
+            view: None,
+        })
     }
 
     pub fn ring(&self) -> &IoSurfaceRing {
@@ -54,6 +62,16 @@ impl Viewport {
 
     pub fn set_camera(&mut self, camera: Camera) {
         self.renderer.camera = camera;
+    }
+
+    /// Draws every frame through `view` (a camera at `world`) instead of
+    /// the world's active camera; `None` hands the picture back to it.
+    pub fn set_view(&mut self, view: Option<(glam::Mat4, SceneCamera)>) {
+        self.view = view;
+    }
+
+    pub fn view(&self) -> Option<(glam::Mat4, SceneCamera)> {
+        self.view
     }
 
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
@@ -70,7 +88,7 @@ impl Viewport {
     }
 
     pub fn render_timed(&mut self, extract: &Extract, extract_us: u32) -> i32 {
-        let Viewport { ring, renderer } = self;
+        let Viewport { ring, renderer, .. } = self;
         let timed_before = renderer.stats().gpu_timed;
         let t0 = std::time::Instant::now();
         renderer.prepare(ring.device(), ring.queue(), extract);
@@ -260,8 +278,9 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// `fynkel_apple_viewport_debug_lines` and `fynkel_apple_viewport_read_frame`,
 /// the editor's overlays and its Save Frame — M4-06; 5: `gpuAo` in the
 /// stats — R2; 6: `fynkel_apple_viewport_overlay`, the gizmo overlay —
-/// ADR-0019, item 9f).
-pub const APPLE_ABI_VERSION: u32 = 6;
+/// ADR-0019, item 9f; 7: `fynkel_apple_viewport_set_view`, a viewport's
+/// own camera over any world — ADR-0021 P7 L5).
+pub const APPLE_ABI_VERSION: u32 = 7;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -371,7 +390,14 @@ pub unsafe extern "C" fn fynkel_apple_viewport_render(
         v.renderer.set_assets(Some(assets.clone()));
     }
     let t0 = std::time::Instant::now();
-    let extract = w.core().extract();
+    let mut extract = w.core().extract();
+    if let Some((world, camera)) = v.view {
+        extract.camera = Some(ExtractCamera {
+            record: u32::MAX,
+            world,
+            camera,
+        });
+    }
     let extract_us = t0.elapsed().as_micros() as u32;
     v.render_timed(&extract, extract_us)
 }
@@ -389,6 +415,81 @@ pub unsafe extern "C" fn fynkel_apple_viewport_set_camera(
             v.set_camera(cam);
         }
     }
+}
+
+/// A viewport's own camera (`fynkel_apple_viewport_set_view`): the scene
+/// `Camera` component's projection fields.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FynkelAppleViewCamera {
+    /// 0 perspective, 1 orthographic.
+    pub projection: u32,
+    pub fov_y: f32,
+    pub ortho_height: f32,
+    pub near: f32,
+    pub far: f32,
+    /// 0 auto, 1 manual.
+    pub exposure_mode: u32,
+    pub exposure: f32,
+    pub culling_mask: u32,
+}
+
+/// Draws this viewport through its own camera — at `world` (sixteen
+/// floats, column-major) with `camera`'s projection — instead of the
+/// world's active one, for every world it renders (the editor's Scene view
+/// on a running game, which must not touch the game's camera). `world`
+/// NULL clears it. Returns 0, or -1 for a NULL viewport, a NULL camera
+/// with a world, or values that cannot draw (non-finite, `near <= 0`,
+/// `far <= near`, a projection or exposure mode out of range).
+///
+/// # Safety
+/// `vp` must be a live viewport; `world` NULL or readable for 16 floats;
+/// `camera` NULL or valid.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_set_view(
+    vp: *mut Viewport,
+    world: *const f32,
+    camera: *const FynkelAppleViewCamera,
+) -> i32 {
+    let Some(v) = vp.as_mut() else { return -1 };
+    if world.is_null() {
+        v.set_view(None);
+        return 0;
+    }
+    let Some(c) = camera.as_ref() else { return -1 };
+    let m = glam::Mat4::from_cols_slice(std::slice::from_raw_parts(world, 16));
+    let projection = match c.projection {
+        0 => Projection::Perspective,
+        1 => Projection::Orthographic,
+        _ => return -1,
+    };
+    let exposure_mode = match c.exposure_mode {
+        0 => ExposureMode::Auto,
+        1 => ExposureMode::Manual,
+        _ => return -1,
+    };
+    let finite = m.is_finite()
+        && [c.fov_y, c.ortho_height, c.near, c.far, c.exposure]
+            .iter()
+            .all(|f| f.is_finite());
+    if !finite || c.near <= 0.0 || c.far <= c.near {
+        return -1;
+    }
+    v.set_view(Some((
+        m,
+        SceneCamera {
+            projection,
+            fov_y: c.fov_y,
+            ortho_height: c.ortho_height,
+            near: c.near,
+            far: c.far,
+            priority: 0,
+            exposure_mode,
+            exposure: c.exposure,
+            culling_mask: c.culling_mask,
+        },
+    )));
+    0
 }
 
 /// Points the viewport's renderer at a cooked asset cache directory (the

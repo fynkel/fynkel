@@ -1,9 +1,11 @@
-/* Fynkel macOS viewport ABI v6 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v7 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
  * editor's overlays and Save Frame, M4-06); v5 gpuAo (R2); v6
- * fynkel_apple_viewport_overlay (the gizmo overlay, ADR-0019). */
+ * fynkel_apple_viewport_overlay (the gizmo overlay, ADR-0019); v7
+ * fynkel_apple_viewport_set_view (a viewport's own camera over any world:
+ * the editor's Scene view on a running game, ADR-0021 P7 L5). */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
 
@@ -14,7 +16,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 6
+#define FYNKEL_APPLE_ABI_VERSION 7
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -102,6 +104,26 @@ uint32_t fynkel_apple_viewport_buffer_count(const FynkelAppleViewport *vp);
 const void *fynkel_apple_viewport_iosurface(const FynkelAppleViewport *vp, uint32_t index);
 int32_t fynkel_apple_viewport_render(FynkelAppleViewport *vp, const FynkelWorld *world);
 void fynkel_apple_viewport_set_camera(FynkelAppleViewport *vp, const FynkelAppleCamera *camera);
+
+/* A viewport's own camera: the scene Camera component's projection. */
+typedef struct {
+  uint32_t projection;    /* 0 perspective, 1 orthographic */
+  float fov_y;            /* radians */
+  float ortho_height;     /* metres */
+  float near_clip;
+  float far_clip;
+  uint32_t exposure_mode; /* 0 auto, 1 manual */
+  float exposure;         /* EV100 (manual) */
+  uint32_t culling_mask;  /* layer bits drawn */
+} FynkelAppleViewCamera;
+
+/* Draws every frame of this viewport through its own camera — at `world`
+ * (16 floats, column-major) with `camera`'s projection — instead of the
+ * rendered world's active camera; `world` NULL clears it. Returns 0, or -1
+ * for a NULL viewport, a NULL camera with a world, or values that cannot
+ * draw. Nothing in the world changes. Host-loop thread. */
+int32_t fynkel_apple_viewport_set_view(FynkelAppleViewport *vp, const float *world,
+                                       const FynkelAppleViewCamera *camera);
 void fynkel_apple_viewport_set_acquire_wait_us(const FynkelAppleViewport *vp, uint32_t us);
 void fynkel_apple_viewport_set_frame_ready_callback(const FynkelAppleViewport *vp,
                                                     FynkelAppleFrameReadyFn func, void *userdata);
