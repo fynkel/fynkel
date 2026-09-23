@@ -117,6 +117,7 @@ fn a_live_spawn_is_there_at_once_and_joins_the_scene_under_its_id() {
         entities: vec![EntityDescription {
             id: uuid(2),
             name: "Root".into(),
+            active: true,
             parent: None,
             children: vec![],
             components: vec![ComponentValue::Transform(Transform::from_position(Vec3::X))],

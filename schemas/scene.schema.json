@@ -492,7 +492,7 @@
     },
     "override": {
       "type": "object",
-      "description": "One explicit operation on the instance, addressed by prefab-local ids (or ids introduced by an earlier addObject/addComponent). `setField` with a null value sets null; `unsetField` removes the field.",
+      "description": "One explicit operation on the instance, addressed by prefab-local ids (or ids introduced by an earlier addObject/addComponent). `setField` with a null value sets null; `unsetField` removes the field; `setActive` sets the entity's own active flag.",
       "properties": {
         "op": {
           "enum": [
@@ -501,7 +501,8 @@
             "addComponent",
             "removeComponent",
             "addObject",
-            "removeObject"
+            "removeObject",
+            "setActive"
           ]
         },
         "entity": {
@@ -514,7 +515,9 @@
           "type": "string",
           "minLength": 1
         },
-        "value": {},
+        "value": {
+          "description": "setField: the new value; setActive: a boolean."
+        },
         "type": {
           "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/typeId"
         },
@@ -631,6 +634,25 @@
               "parent"
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "const": "setActive"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "type": "boolean"
+              }
+            }
+          }
         }
       ],
       "patternProperties": {
@@ -644,6 +666,10 @@
         "name": {
           "type": "string",
           "maxLength": 256
+        },
+        "active": {
+          "type": "boolean",
+          "description": "The entity's own active flag (absent = true). An entity is active in the hierarchy when it and every ancestor are; an inactive subtree is not drawn, simulated or updated."
         },
         "parent": {
           "oneOf": [

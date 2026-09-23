@@ -904,6 +904,10 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                     touched.retain(|(en, _), _| !removed.contains(en));
                     Ok(())
                 }
+                OverrideOp::SetActive { value, .. } => {
+                    work.entity_mut(entity_id).unwrap().active = *value;
+                    Ok(())
+                }
             };
             if let Err(d) = result {
                 diagnostics.push(d);
@@ -1007,15 +1011,19 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                     )
                 })
                 .collect();
+            let mut members = vec![("name".into(), Node::string(w.name.clone()))];
+            if !w.active {
+                members.push(("active".into(), Node::synthetic(Value::Bool(false))));
+            }
+            members.extend([
+                ("parent".into(), parent),
+                ("children".into(), Node::synthetic(Value::Array(children))),
+                ("components".into(), Node::object(components)),
+            ]);
             new_members.push(Member {
                 key: map_entity(w.id).to_string(),
                 key_span: Span::default(),
-                value: Node::object(vec![
-                    ("name".into(), Node::string(w.name.clone())),
-                    ("parent".into(), parent),
-                    ("children".into(), Node::synthetic(Value::Array(children))),
-                    ("components".into(), Node::object(components)),
-                ]),
+                value: Node::object(members),
             });
         }
         let entities = root
@@ -1100,6 +1108,7 @@ impl Working {
         self.entities.push(Entity {
             id,
             name: name.to_string(),
+            active: true,
             parent,
             children: Vec::new(),
             components,

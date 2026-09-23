@@ -24,7 +24,7 @@ impl AuthoringSession {
     /// { anchor, instance, asset: { asset, sub }, expanded,
     ///   prefab: { id, name, path, kind: prefab|source|rig, open, handle, readOnly } | null,
     ///   diagnostics: [...],                       // about this instance
-    ///   entities: [ { id, local, name, parent, children: [id], added,
+    ///   entities: [ { id, local, name, active, activeOverridden, parent, children: [id], added,
     ///                 components: { <id>: { id, local, type, version, data, added, overridden: [field] } } } ],
     ///   overrides: [ { index, op, entity, entityId, entityName, component?, componentId?, componentType?, field?, value?, pointer } ] }
     /// ```
@@ -32,7 +32,8 @@ impl AuthoringSession {
     /// `entities` are in the expansion's document order, ids are the derived
     /// scene ids and `local` the prefab's; a root's `parent` is the anchor.
     /// `overridden` lists the `setField`/`unsetField` fields of a
-    /// component (the Inspector's bold), `added` marks an `addComponent`
+    /// component (the Inspector's bold), `activeOverridden` a `setActive`
+    /// on the entity, `added` marks an `addComponent`
     /// or `addObject`. A prefab that is not available (`FYN-D0401`) or an
     /// instance whose overrides do not apply is `expanded: false` with
     /// the diagnostics and no entities — the anchor keeps its data. Not an
@@ -126,6 +127,8 @@ impl AuthoringSession {
                     "id": sid.to_string(),
                     "local": local.to_string(),
                     "name": e.name,
+                    "active": e.active,
+                    "activeOverridden": false,
                     "parent": e.parent.map(|p| p.to_string()),
                     "children": e.children.iter().map(|c| c.to_string()).collect::<Vec<_>>(),
                     "added": false,
@@ -202,6 +205,11 @@ impl AuthoringSession {
                                 e["components"][cid.to_string()]["added"] = json!(true);
                             }
                         }
+                    });
+                }
+                OverrideOp::SetActive { .. } => {
+                    mark(&mut entities, local_e, &|e: &mut Value| {
+                        e["activeOverridden"] = json!(true);
                     });
                 }
                 OverrideOp::RemoveObject { .. } => {

@@ -96,6 +96,12 @@ pub enum Command {
         id: Uuid,
         name: String,
     },
+    /// Sets the entity's own `active` flag (`"active": false`; `true`
+    /// removes the key).
+    SetObjectActive {
+        id: Uuid,
+        active: bool,
+    },
     ReparentObject {
         id: Uuid,
         parent: Option<Uuid>,
@@ -205,6 +211,7 @@ impl Command {
             Command::CreateObject { .. } => "createObject",
             Command::DeleteObject { .. } => "deleteObject",
             Command::RenameObject { .. } => "renameObject",
+            Command::SetObjectActive { .. } => "setObjectActive",
             Command::ReparentObject { .. } => "reparentObject",
             Command::AddComponent { .. } => "addComponent",
             Command::RemoveComponent { .. } => "removeComponent",
@@ -302,6 +309,13 @@ impl Command {
             "renameObject" => Command::RenameObject {
                 id: uuid("id")?,
                 name: string("name")?,
+            },
+            "setObjectActive" => Command::SetObjectActive {
+                id: uuid("id")?,
+                active: v
+                    .get("active")
+                    .and_then(J::as_bool)
+                    .ok_or_else(|| invalid(format!("{name}: \"active\" must be a boolean")))?,
             },
             "reparentObject" => Command::ReparentObject {
                 id: uuid("id")?,
@@ -405,6 +419,9 @@ impl Command {
             }
             Command::DeleteObject { id } => json!({ "id": id.to_string() }),
             Command::RenameObject { id, name } => json!({ "id": id.to_string(), "name": name }),
+            Command::SetObjectActive { id, active } => {
+                json!({ "id": id.to_string(), "active": active })
+            }
             Command::ReparentObject { id, parent, index } => {
                 json!({ "id": id.to_string(), "parent": id_or_null(parent), "index": index })
             }
@@ -1419,6 +1436,35 @@ impl Cx<'_> {
             Command::RenameObject { id, name } => {
                 let p = self.entity_pointer(*id)?;
                 self.set_member(&p, "name", Node::string(name.clone()));
+                vec![*id]
+            }
+            Command::SetObjectActive { id, active } => {
+                let p = self.entity_pointer(*id)?;
+                let present = self.root.pointer(&format!("{p}/active")).is_some();
+                if !*active {
+                    // Next to the name, where a person writes it.
+                    let index = self
+                        .root
+                        .pointer(&p)
+                        .and_then(Node::as_object)
+                        .and_then(|m| m.iter().position(|m| m.key == "name"))
+                        .map_or(0, |i| i + 1);
+                    if present {
+                        self.set_member(&p, "active", Node::synthetic(Value::Bool(false)));
+                    } else {
+                        self.edits.push(Edit::InsertMember {
+                            parent: p,
+                            index,
+                            key: "active".into(),
+                            value: Node::synthetic(Value::Bool(false)),
+                        });
+                    }
+                } else if present {
+                    self.edits.push(Edit::RemoveMember {
+                        parent: p,
+                        key: "active".into(),
+                    });
+                }
                 vec![*id]
             }
             Command::ReparentObject { id, parent, index } => self.reparent(*id, *parent, *index)?,
@@ -2453,6 +2499,7 @@ fn override_target(op: &crate::scene::OverrideOp) -> String {
         O::AddComponent { entity, component } => format!("component:{entity}:{}", component.id),
         O::RemoveComponent { entity, component } => format!("component:{entity}:{component}"),
         O::AddObject { entity, .. } | O::RemoveObject { entity } => format!("object:{entity}"),
+        O::SetActive { entity, .. } => format!("active:{entity}"),
     }
 }
 

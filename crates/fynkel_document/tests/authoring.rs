@@ -736,6 +736,127 @@ fn unpack(editor: &mut Editor, lib: &PrefabLibrary, entity: &str) -> Applied {
 }
 
 #[test]
+fn set_object_active_writes_the_flag_next_to_the_name_and_undoes_exactly() {
+    let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
+    let s = schemas();
+    let set = |active| Command::SetObjectActive {
+        id: u(KID1),
+        active,
+    };
+    // Active already: nothing to write.
+    apply(&mut editor, vec![set(true)]);
+    assert_eq!(text(&editor), original);
+
+    apply(&mut editor, vec![set(false)]);
+    let sc = scene(&editor);
+    assert!(!sc.entity(u(KID1)).unwrap().active);
+    assert!(sc.entity(u(ROOT)).unwrap().active);
+    let keys: Vec<String> = editor
+        .document()
+        .root
+        .pointer(&format!("/entities/{KID1}"))
+        .and_then(Node::as_object)
+        .unwrap()
+        .iter()
+        .map(|m| m.key.clone())
+        .collect();
+    assert_eq!(keys[..2], ["name".to_string(), "active".to_string()]);
+    assert!(scene(&editor).validate(&s).is_empty());
+
+    // Setting it again is a no-op; true removes the key.
+    apply(&mut editor, vec![set(false)]);
+    apply(&mut editor, vec![set(true)]);
+    assert_eq!(text(&editor), original);
+    assert!(editor.undo().is_ok());
+    assert!(!scene(&editor).entity(u(KID1)).unwrap().active);
+    while editor.undo().is_ok() {}
+    assert_eq!(text(&editor), original);
+
+    let r = editor.apply(
+        Request::new(vec![Command::SetObjectActive {
+            id: u("dddddddd-0000-4000-8000-000000000004"),
+            active: false,
+        }]),
+        &s,
+    );
+    assert!(!r.ok);
+    let err = Command::from_json(&json!({"command": "setObjectActive", "id": KID1, "active": 0}))
+        .unwrap_err();
+    assert!(
+        err.message.contains("\"active\" must be a boolean"),
+        "{err}"
+    );
+}
+
+#[test]
+fn set_active_overrides_expand_replace_and_validate() {
+    let (mut editor, _) = open("prefab/instances_ok.scene.json");
+    let lib = library();
+    let s = schemas();
+    let barrel = "10000000-0000-4000-8000-0000000000b2";
+    let set = |value: serde_json::Value| Command::SetPrefabOverride {
+        entity: u(TURRET_A),
+        r#override: Node::from_serde(&json!({"op": "setActive", "entity": barrel, "value": value})),
+    };
+    let overrides = |editor: &Editor| {
+        scene(editor)
+            .entity(u(TURRET_A))
+            .unwrap()
+            .prefab
+            .as_ref()
+            .unwrap()
+            .overrides
+            .clone()
+    };
+    let before = overrides(&editor).len();
+    apply(&mut editor, vec![set(json!(false))]);
+    apply(&mut editor, vec![set(json!(false))]);
+    assert_eq!(
+        overrides(&editor).len(),
+        before + 1,
+        "replaced, not appended"
+    );
+    assert_eq!(
+        overrides(&editor).last().unwrap().op,
+        fynkel_document::scene::OverrideOp::SetActive {
+            entity: u(barrel),
+            value: false
+        }
+    );
+
+    // The expansion carries the flag; the rest of the instance stays active.
+    let x = expand(&editor.scene(), &lib, &s);
+    assert!(!x.has_errors(), "{:#?}", x.diagnostics);
+    let a = x
+        .instances
+        .iter()
+        .find(|i| i.anchor == u(TURRET_A))
+        .unwrap();
+    let out = x.scene();
+    assert!(!out.entity(a.entity(u(barrel)).unwrap()).unwrap().active);
+    let inactive = out.entities.iter().filter(|e| !e.active).count();
+    assert_eq!(inactive, 1);
+    assert!(out.validate(&s).is_empty());
+
+    // A non-boolean value does not parse; an unknown target does not expand.
+    let r = editor.apply(Request::new(vec![set(json!("no"))]), &s);
+    assert!(!r.ok);
+    apply(
+        &mut editor,
+        vec![Command::SetPrefabOverride {
+            entity: u(TURRET_A),
+            r#override: Node::from_serde(&json!({
+                "op": "setActive",
+                "entity": "10000000-0000-4000-8000-0000000000ff",
+                "value": false
+            })),
+        }],
+    );
+    let x = expand(&editor.scene(), &lib, &s);
+    assert_eq!(x.diagnostics[0].code.0, "FYN-D0403");
+}
+
+#[test]
 fn unpack_prefab_writes_the_expansion_in_place() {
     let (mut editor, original) = open("prefab/instances_ok.scene.json");
     let lib = library();
@@ -1040,6 +1161,10 @@ fn commands_round_trip_through_json() {
             id: u(ROOT),
             name: "x".into(),
         },
+        Command::SetObjectActive {
+            id: u(ROOT),
+            active: false,
+        },
         Command::ReparentObject {
             id: u(ROOT),
             parent: None,
@@ -1129,6 +1254,7 @@ fn commands_round_trip_through_json() {
             "createObject",
             "deleteObject",
             "renameObject",
+            "setObjectActive",
             "reparentObject",
             "addComponent",
             "removeComponent",

@@ -412,6 +412,7 @@ fn prefab(id: Uuid, dynamic: bool) -> SceneDescription {
         entities: vec![EntityDescription {
             id: Uuid::from_bytes(0x77u128.to_be_bytes()),
             name: "Ember".into(),
+            active: true,
             parent: None,
             children: vec![],
             components,

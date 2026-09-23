@@ -145,6 +145,8 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
     assert_eq!(e["parent"], CRATE_A);
     assert_eq!(e["children"], json!([]));
     assert_eq!(e["added"], false);
+    assert_eq!(e["active"], true);
+    assert_eq!(e["activeOverridden"], false);
     let renderer = &e["components"][&renderer_id];
     assert_eq!(renderer["type"], "fynkel.MeshRenderer");
     assert_eq!(renderer["local"], CRATE_LOCAL_RENDERER);
@@ -206,7 +208,9 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
                           "restitution": 0.0, "is_sensor": false, "mask": 4294967295u32 } } },
             { "command": "setPrefabOverride", "entity": CRATE_A, "override": {
                 "op": "addObject", "entity": "c0000000-0000-4000-8000-0000000000ab", "name": "Lid",
-                "parent": CRATE_LOCAL, "components": {} } }
+                "parent": CRATE_LOCAL, "components": {} } },
+            { "command": "setPrefabOverride", "entity": CRATE_A, "override": {
+                "op": "setActive", "entity": "c0000000-0000-4000-8000-0000000000ab", "value": false } }
         ]),
     );
     let v = instance(&s, h, CRATE_A);
@@ -234,8 +238,13 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
     );
     let lid = &v["entities"][1];
     assert_eq!(lid["added"], true);
+    assert_eq!(lid["active"], false);
+    assert_eq!(lid["activeOverridden"], true);
+    assert_eq!(e["activeOverridden"], false);
+    assert_eq!(v["overrides"][4]["op"], "setActive");
+    assert_eq!(v["overrides"][4]["entityName"], "Lid");
     assert_eq!(lid["parent"], crate_id);
-    assert_eq!(v["overrides"].as_array().unwrap().len(), 4);
+    assert_eq!(v["overrides"].as_array().unwrap().len(), 5);
     assert_eq!(v["overrides"][2]["componentId"], sensor);
     assert_eq!(v["overrides"][2]["componentType"], "fynkel.Collider");
     assert_eq!(v["overrides"][3]["entityName"], "Lid");

@@ -408,6 +408,10 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
         .collect();
     let mut entity_properties = json!({
         "name": {"type": "string", "maxLength": 256},
+        "active": {
+            "type": "boolean",
+            "description": "The entity's own active flag (absent = true). An entity is active in the hierarchy when it and every ancestor are; an inactive subtree is not drawn, simulated or updated.",
+        },
         "parent": {"oneOf": [uuid, {"type": "null"}]},
         "children": {
             "type": "array",
@@ -462,13 +466,13 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
     });
     defs["override"] = json!({
         "type": "object",
-        "description": "One explicit operation on the instance, addressed by prefab-local ids (or ids introduced by an earlier addObject/addComponent). `setField` with a null value sets null; `unsetField` removes the field.",
+        "description": "One explicit operation on the instance, addressed by prefab-local ids (or ids introduced by an earlier addObject/addComponent). `setField` with a null value sets null; `unsetField` removes the field; `setActive` sets the entity's own active flag.",
         "properties": {
-            "op": {"enum": ["setField", "unsetField", "addComponent", "removeComponent", "addObject", "removeObject"]},
+            "op": {"enum": ["setField", "unsetField", "addComponent", "removeComponent", "addObject", "removeObject", "setActive"]},
             "entity": uuid,
             "component": uuid,
             "field": {"type": "string", "minLength": 1},
-            "value": {},
+            "value": {"description": "setField: the new value; setActive: a boolean."},
             "type": type_id,
             "version": {"type": "integer", "minimum": 1},
             "data": {"type": "object"},
@@ -487,6 +491,7 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
             {"if": {"properties": {"op": {"const": "addComponent"}}}, "then": {"required": ["component", "type", "version", "data"]}},
             {"if": {"properties": {"op": {"const": "removeComponent"}}}, "then": {"required": ["component"]}},
             {"if": {"properties": {"op": {"const": "addObject"}}}, "then": {"required": ["name", "parent"]}},
+            {"if": {"properties": {"op": {"const": "setActive"}}}, "then": {"required": ["value"], "properties": {"value": {"type": "boolean"}}}},
         ],
         "patternProperties": {"^x-": true},
         "additionalProperties": false,

@@ -59,7 +59,7 @@ session.dispose();
   revision), `undo` / `redo` → `Replayed`, `save({path})`, `reload`, `close`,
   `root()` (the document as JSON), `inspect()`, `validate()`, `changes`.
 - `Command`: a builder per §11.1 command (`createObject`, `deleteObject`,
-  `renameObject`, `reparentObject`, `duplicateObject`, `addComponent`,
+  `renameObject`, `setObjectActive`, `reparentObject`, `duplicateObject`, `addComponent`,
   `removeComponent`, `setField`, `unsetField`, `assignAsset`,
   `instantiatePrefab`, `setPrefabOverride`, `revertPrefabOverride`,
   `setDocumentField`, `unsetDocumentField`, `createMaterial`,

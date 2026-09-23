@@ -48,6 +48,9 @@ pub struct Component {
 pub struct Entity {
     pub id: Uuid,
     pub name: String,
+    /// The entity's own flag (`"active"`, absent = true); active in the
+    /// hierarchy when it and every ancestor are active.
+    pub active: bool,
     pub parent: Option<Uuid>,
     /// As authored (may be inconsistent; validation says so).
     pub children: Vec<Uuid>,
@@ -127,6 +130,11 @@ pub enum OverrideOp {
     RemoveObject {
         entity: Uuid,
     },
+    /// Sets the entity's own `active` flag.
+    SetActive {
+        entity: Uuid,
+        value: bool,
+    },
 }
 
 impl OverrideOp {
@@ -138,6 +146,7 @@ impl OverrideOp {
             OverrideOp::RemoveComponent { .. } => "removeComponent",
             OverrideOp::AddObject { .. } => "addObject",
             OverrideOp::RemoveObject { .. } => "removeObject",
+            OverrideOp::SetActive { .. } => "setActive",
         }
     }
 
@@ -149,7 +158,8 @@ impl OverrideOp {
             | OverrideOp::AddComponent { entity, .. }
             | OverrideOp::RemoveComponent { entity, .. }
             | OverrideOp::AddObject { entity, .. }
-            | OverrideOp::RemoveObject { entity } => *entity,
+            | OverrideOp::RemoveObject { entity }
+            | OverrideOp::SetActive { entity, .. } => *entity,
         }
     }
 }
@@ -742,6 +752,19 @@ fn read_entity(
             }
         }
     }
+    let active = match node.get("active") {
+        None => true,
+        Some(a) => match a.value {
+            Value::Bool(b) => b,
+            _ => {
+                diags.push(anchor(
+                    Diagnostic::error(Code::SCENE_MALFORMED_ENTRY, "active must be a boolean"),
+                    &format!("{pointer}/active"),
+                ));
+                true
+            }
+        },
+    };
     let components = read_components(node.get("components"), pointer, diags, anchor);
     let prefab = node
         .get("prefab")
@@ -749,6 +772,7 @@ fn read_entity(
     Some(Entity {
         id,
         name,
+        active,
         parent,
         children,
         components,
@@ -961,6 +985,13 @@ pub(crate) fn read_override(
             }
         }
         "removeObject" => OverrideOp::RemoveObject { entity },
+        "setActive" => match node.get("value").map(|v| &v.value) {
+            Some(Value::Bool(value)) => OverrideOp::SetActive {
+                entity,
+                value: *value,
+            },
+            _ => return fail("setActive needs a boolean value", pointer),
+        },
         other => return fail(&format!("unknown op {other:?}"), &format!("{pointer}/op")),
     })
 }
@@ -988,6 +1019,9 @@ pub fn inspect_json(scene: &Scene) -> serde_json::Value {
             })).collect::<Vec<_>>(),
             "children": children,
         });
+        if !e.active {
+            v["active"] = serde_json::json!(false);
+        }
         if let Some(p) = &e.prefab {
             v["prefab"] = serde_json::json!({
                 "asset": p.describe(),
@@ -1025,7 +1059,7 @@ pub fn inspect_text(scene: &Scene) -> String {
     fn walk(scene: &Scene, e: &Entity, depth: usize, out: &mut String) {
         let types: Vec<&str> = e.components.iter().map(|c| c.type_id.as_str()).collect();
         out.push_str(&format!(
-            "{}{} ({}){}{}\n",
+            "{}{} ({}){}{}{}\n",
             "  ".repeat(depth),
             if e.name.is_empty() {
                 "<unnamed>"
@@ -1033,6 +1067,7 @@ pub fn inspect_text(scene: &Scene) -> String {
                 &e.name
             },
             e.id,
+            if e.active { "" } else { "  (inactive)" },
             if types.is_empty() {
                 String::new()
             } else {

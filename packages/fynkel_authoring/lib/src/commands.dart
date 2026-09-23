@@ -39,6 +39,11 @@ final class Command {
   static Map<String, Object?> renameObject(String id, String name) =>
       {'command': 'renameObject', 'id': id, 'name': name};
 
+  /// Sets the object's own active flag (`false` hides the whole subtree
+  /// at runtime; `true` removes the key).
+  static Map<String, Object?> setObjectActive(String id, bool active) =>
+      {'command': 'setObjectActive', 'id': id, 'active': active};
+
   /// `parent` null moves the object to the root.
   static Map<String, Object?> reparentObject(String id, {String? parent, int? index}) =>
       {'command': 'reparentObject', 'id': id, 'parent': parent, 'index': ?index};
@@ -152,6 +157,7 @@ final class Command {
     'createObject',
     'deleteObject',
     'renameObject',
+    'setObjectActive',
     'reparentObject',
     'duplicateObject',
     'addComponent',

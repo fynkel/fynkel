@@ -17,6 +17,7 @@ fn entity(n: u8, parent: Option<u8>, children: &[u8], at: Vec3) -> EntityDescrip
     EntityDescription {
         id: id(n),
         name: format!("e{n}"),
+        active: true,
         parent: parent.map(id),
         children: children.iter().map(|c| id(*c)).collect(),
         components: vec![ComponentValue::Transform(Transform::from_position(at))],

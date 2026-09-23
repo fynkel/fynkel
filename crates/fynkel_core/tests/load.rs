@@ -21,6 +21,7 @@ fn entity(
     EntityDescription {
         id: id(n),
         name: format!("e{n}"),
+        active: true,
         parent: parent.map(id),
         children: children.iter().map(|c| id(*c)).collect(),
         components,

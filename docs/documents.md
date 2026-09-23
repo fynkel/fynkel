@@ -110,6 +110,7 @@ reported at its exact field. Body:
 "entities": {
   "<entity uuid>": {
     "name": "Player",
+    "active": false,
     "parent": null | "<entity uuid>",
     "children": ["<entity uuid>", ...],
     "components": {
@@ -118,6 +119,14 @@ reported at its exact field. Body:
   }
 }
 ```
+
+`active` is the entity's own flag (Unity's `activeSelf`). It is optional:
+absent means `true`, and the editor writes it only when it is `false`.
+An entity is **active in the hierarchy** when it and every ancestor are.
+An inactive subtree keeps its ids, components and transforms but is not
+drawn, simulated or updated
+([design/set-active.md](design/set-active.md)). A value that is not a
+boolean is `FYN-D0209` at `…/active` and reads as `true`.
 
 `fynkel_document::Scene::from_document` builds a lenient view (malformed
 entries are skipped and reported, never fatal) and `Scene::validate` adds the
@@ -327,6 +336,7 @@ op list addressed by **prefab-local** ids:
 | `removeComponent` | `entity`, `component` | |
 | `addObject` | `entity`, `parent`, `name`, `components` | `parent` is a prefab-local entity or absent (root) |
 | `removeObject` | `entity` | removes the subtree |
+| `setActive` | `entity`, `value` | sets the entity's own `active` flag (a boolean) |
 
 Array indices, display names and deep merges are not override targets.
 Two anchors sharing an `instance` id is `D0405`.
@@ -461,6 +471,7 @@ pointer into it such as `/position/1`):
 | `createObject` | `id?`, `name`, `parent?`, `index?`, `components[]` | new entity `{ name, parent, children: [], components }`, appended to (or inserted at `index` of) the parent's `children`, or the prefab's `roots` |
 | `deleteObject` | `id` | removes the entity and its subtree, detaches it from its parent / `roots` |
 | `renameObject` | `id`, `name` | |
+| `setObjectActive` | `id`, `active` | `false` writes `"active": false` right after the name; `true` removes the key (nothing to write when it is absent) |
 | `reparentObject` | `id`, `parent?`, `index?` | moves the entity (`FYN-E0006` if `parent` is the entity or below it); `null` makes it a root |
 | `addComponent` | `entity`, `component: { id?, type, version?, data? }` | `version` 1 and empty `data` by default; `FYN-E0010` if the id exists |
 | `removeComponent` | `entity`, `component` | |
@@ -468,7 +479,7 @@ pointer into it such as `/position/1`):
 | `unsetField` | `entity`, `component`, `field` | removes the member (distinct from setting `null`) |
 | `assignAsset` | `entity`, `component`, `field`, `asset: { asset, sub? }` | `setField` with an `assetRef` |
 | `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]` | `createObject` plus `prefab: { asset, instance, overrides: [] }`; scene documents only |
-| `setPrefabOverride` | `entity`, `override` (a prefab-model op object) | replaces the override with the same target (field for `setField`/`unsetField`, component for `addComponent`/`removeComponent`, object for `addObject`/`removeObject`), else appends |
+| `setPrefabOverride` | `entity`, `override` (a prefab-model op object) | replaces the override with the same target (field for `setField`/`unsetField`, component for `addComponent`/`removeComponent`, object for `addObject`/`removeObject`, the entity's flag for `setActive`), else appends |
 | `revertPrefabOverride` | `entity`, `index?` | removes one override, or all of them |
 | `unpackPrefab` | `entity` | replaces the instance by its expansion, in place: the anchor loses `prefab` and gains the instance roots as trailing children, the expanded entities (the prefab's with the overrides applied, under the ids the runtime derives) are inserted right after the anchor in `entities` — the document then reads exactly like `expand`'s; needs the prefab library (`Editor::apply_with_prefabs`), an instance that does not expand is refused (`FYN-E0004` with the `D040x` in `related`), not an instance `FYN-E0008`; one undo step (M4-07) |
 | `duplicateObject` | `id`, `newId?`, `name?`, `index?` | deep-copies the subtree with fresh entity, component and prefab-instance ids (every reference inside the copy remapped), placed right after the original or at `index`; the copy's root is the first affected id; a taken `newId` is `FYN-E0010`; one undo step (M4-01) |

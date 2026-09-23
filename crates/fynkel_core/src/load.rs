@@ -26,6 +26,9 @@ use crate::world::{Diagnostic, Name, World};
 pub struct EntityDescription {
     pub id: Uuid,
     pub name: String,
+    /// The entity's own flag (activeSelf); the subtree under an inactive
+    /// entity is inactive in the hierarchy.
+    pub active: bool,
     pub parent: Option<Uuid>,
     /// Ordered; every child's `parent` must be this entity.
     pub children: Vec<Uuid>,

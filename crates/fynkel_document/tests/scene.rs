@@ -78,3 +78,32 @@ fn scene_view_is_lenient_and_ordered() {
     let diags = scene.validate(&SchemaSet::embedded());
     assert!(diags.iter().any(|d| d.code.as_str() == "FYN-D0202"));
 }
+
+#[test]
+fn active_is_optional_and_boolean() {
+    let text = r#"{
+  "formatVersion": 4,
+  "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968330",
+  "name": "Active",
+  "entities": {
+    "aaaaaaaa-0000-4000-8000-000000000001": { "name": "On", "parent": null, "children": [], "components": {} },
+    "bbbbbbbb-0000-4000-8000-000000000002": { "name": "Off", "active": false, "parent": null, "children": [], "components": {} },
+    "cccccccc-0000-4000-8000-000000000003": { "name": "Bad", "active": "no", "parent": null, "children": [], "components": {} }
+  }
+}"#;
+    let doc = Document::parse(DocumentKind::Scene, None, text).unwrap();
+    let scene = Scene::from_document(doc);
+    let active: Vec<bool> = scene.entities.iter().map(|e| e.active).collect();
+    assert_eq!(active, [true, false, true]);
+    let read = scene.read_diagnostics();
+    assert_eq!(read.len(), 1);
+    assert_eq!(
+        read[0].pointer.as_deref(),
+        Some("/entities/cccccccc-0000-4000-8000-000000000003/active")
+    );
+    let json = fynkel_document::scene::inspect_json(&scene);
+    assert_eq!(json["roots"][1]["active"], false);
+    assert!(json["roots"][0].get("active").is_none());
+    assert!(fynkel_document::scene::inspect_text(&scene)
+        .contains("Off (bbbbbbbb-0000-4000-8000-000000000002)  (inactive)"));
+}

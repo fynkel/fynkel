@@ -111,6 +111,7 @@ pub fn describe(scene: &Scene, schemas: &SchemaSet) -> DescribedScene {
         entities.push(EntityDescription {
             id: to_uuid(&e.id),
             name: e.name.clone(),
+            active: e.active,
             parent: e.parent.as_ref().map(to_uuid),
             children: e.children.iter().map(to_uuid).collect(),
             components,
