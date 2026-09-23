@@ -1305,6 +1305,12 @@ The capture for R3a and R3b together follows as its own commit.
 
 ## 6. Verdict and next steps
 
+**The order from here is `docs/roadmap.md`** (agreed 2026-09-23 after a
+full foundation review): Phase 1 foundation fixes (stable sub-asset ids,
+`SetActive`, editor/cook scale, automatic sidecars, housekeeping), then
+closing M4, the extensibility and data-model ADRs, rendering, M5, M6.
+This section stays the log of what is done.
+
 M3 is closed with a GO (`m3-gate-report.md`, 2026-09-22) carrying two
 named exceptions that are decisions, not failures: the repository stays
 private (item 17 done thin — license, `LICENSE`, `CONTRIBUTING.md`, CI on
