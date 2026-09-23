@@ -102,6 +102,7 @@ impl World {
         let h = self.ecs.hecs();
         for (rot, t, parent) in h
             .query::<(&Rotator, &mut Transform, Option<&Parent>)>()
+            .without::<&scene::Inactive>()
             .iter()
         {
             count += 1;
@@ -130,7 +131,11 @@ impl World {
                 }
             }
         }
-        for (_, wt) in h.query::<(&Rotator, &mut WorldTransform)>().iter() {
+        for (_, wt) in h
+            .query::<(&Rotator, &mut WorldTransform)>()
+            .without::<&scene::Inactive>()
+            .iter()
+        {
             wt.dirty = true;
         }
         count
@@ -151,6 +156,7 @@ impl World {
                 &mut Transform,
                 Option<&Parent>,
             )>()
+            .without::<&scene::Inactive>()
             .iter()
         {
             count += 1;
@@ -173,7 +179,11 @@ impl World {
             t.position += offset - run.offset;
             run.offset = offset;
         }
-        for (_, wt) in h.query::<(&Oscillate, &mut WorldTransform)>().iter() {
+        for (_, wt) in h
+            .query::<(&Oscillate, &mut WorldTransform)>()
+            .without::<&scene::Inactive>()
+            .iter()
+        {
             wt.dirty = true;
         }
         count
@@ -188,7 +198,11 @@ impl World {
         let mut count = 0;
         {
             let h = self.ecs.hecs();
-            for (handle, life) in h.query::<(&Handle, &mut LifetimeDespawn)>().iter() {
+            for (handle, life) in h
+                .query::<(&Handle, &mut LifetimeDespawn)>()
+                .without::<&scene::Inactive>()
+                .iter()
+            {
                 count += 1;
                 life.seconds = (life.seconds - dt).max(0.0);
                 if life.seconds <= 0.0 {
@@ -222,6 +236,7 @@ impl World {
             let h = self.ecs.hecs();
             for (handle, em, run, wt) in h
                 .query::<(&Handle, &Emitter, &mut EmitterRun, &WorldTransform)>()
+                .without::<&scene::Inactive>()
                 .iter()
             {
                 count += 1;
@@ -328,7 +343,11 @@ impl World {
         let mut count = 0;
         {
             let h = self.ecs.hecs();
-            for (handle, follow, wt) in h.query::<(&Handle, &Follow, &WorldTransform)>().iter() {
+            for (handle, follow, wt) in h
+                .query::<(&Handle, &Follow, &WorldTransform)>()
+                .without::<&scene::Inactive>()
+                .iter()
+            {
                 count += 1;
                 let entity = handle.0;
                 let Some(target) = self.resolve_named(entity, &follow.target) else {
@@ -376,6 +395,7 @@ impl World {
             let h = self.ecs.hecs();
             for (handle, look, wt) in h
                 .query::<(&Handle, &LookAtCamera, &WorldTransform)>()
+                .without::<&scene::Inactive>()
                 .iter()
             {
                 count += 1;
@@ -405,7 +425,11 @@ impl World {
     fn active_camera_position(&self) -> Option<Vec3> {
         let h = self.ecs.hecs();
         let mut best: Option<(i32, Entity, Vec3)> = None;
-        for (handle, cam, wt) in h.query::<(&Handle, &Camera, &WorldTransform)>().iter() {
+        for (handle, cam, wt) in h
+            .query::<(&Handle, &Camera, &WorldTransform)>()
+            .without::<&scene::Inactive>()
+            .iter()
+        {
             let candidate = (cam.priority, handle.0, wt.matrix.w_axis.truncate());
             let better = match best {
                 None => true,

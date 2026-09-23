@@ -15,7 +15,7 @@ use fynkel_audio::{
     AudioClip, AudioListener, AudioSource, PlayError, PlayParams, VoiceId, MAX_PITCH, MIN_PITCH,
 };
 use fynkel_contracts::{AssetRef, ComponentId, DiagnosticCode, Entity, Tick};
-use fynkel_ecs::internal::Handle;
+use fynkel_ecs::internal::{hecs, Handle};
 
 use super::{Diagnostic, World};
 use crate::command::{AudioOp, Lane};
@@ -252,7 +252,11 @@ impl World {
 
         {
             let h = self.ecs.hecs();
-            for (handle, l) in h.query::<(&Handle, &AudioListener)>().iter() {
+            for (handle, l) in h
+                .query::<(&Handle, &AudioListener)>()
+                .without::<&fynkel_scene::Inactive>()
+                .iter()
+            {
                 let better = match listener {
                     None => true,
                     Some((e, _)) => handle.0 < e,
@@ -261,12 +265,36 @@ impl World {
                     listener = Some((handle.0, l.volume));
                 }
             }
-            for (handle, source, run) in h
-                .query::<(&Handle, &mut AudioSource, Option<&mut AudioRun>)>()
+            for (handle, source, run, inactive) in h
+                .query::<(
+                    &Handle,
+                    &mut AudioSource,
+                    Option<&mut AudioRun>,
+                    hecs::Satisfies<&fynkel_scene::Inactive>,
+                )>()
                 .iter()
             {
                 count += 1;
                 let entity = handle.0;
+                if inactive {
+                    // Not active in the hierarchy: silent. A looping
+                    // source wants to play again when it comes back; a
+                    // one-shot is over.
+                    if let Some(run) = run {
+                        if let Some(v) = run.voice.take() {
+                            work.push(Reconcile {
+                                entity,
+                                start: false,
+                                stop: Some(v),
+                                set_volume: None,
+                                set_pitch: None,
+                                set_looping: None,
+                            });
+                            source.playing = source.looping;
+                        }
+                    }
+                    continue;
+                }
                 let Some(run) = run else {
                     // First sight of the source: its run-state is added
                     // below, then it is reconciled next tick — unless it

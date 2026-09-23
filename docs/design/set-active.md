@@ -46,9 +46,11 @@ Nothing, as in Unity:
 
 - **Not drawn:** no mesh, light, camera, volume or particles from the
   subtree (`World::extract` skips it; the editor's Scene view follows).
-- **Not simulated:** its rigid bodies and colliders are disabled in
-  Rapier (`set_enabled(false)`: no contacts, no queries hit them, the
-  body keeps its pose and velocity), characters do not move; animators,
+- **Not simulated:** its rigid bodies, colliders and characters leave
+  the physics world (no contacts, no queries hit them; a body command
+  sent to it is dropped, not rejected) and come back **at rest** from
+  their transform when reactivated — Unity resets a deactivated body's
+  velocity the same way; animators,
   movers (rotate, oscillate, follow, look-at, camera rigs), lifetimes and
   emitters do not tick; audio sources stop their voice (a looping source
   starts again when reactivated, as `playOnAwake`-like sources do).
@@ -75,9 +77,13 @@ Nothing, as in Unity:
 
 - ECS markers in `fynkel_scene`: `InactiveSelf` (the flag) and `Inactive`
   (derived: not active in the hierarchy). The world recomputes `Inactive`
-  after the commands of a tick that changed a flag or the hierarchy
-  (spawn, reparent, instantiate) — a DFS from the roots, cheap next to
-  `propagate`. Every system query takes `Without<Inactive>`.
+  (`scene::refresh_active`) after the commands of a tick that changed a
+  flag or the hierarchy (spawn under a parent, reparent), after a load or
+  an instantiate, and after `apply_now` — a DFS from the roots, cheap next
+  to `propagate`, and nothing at all while no entity is inactive. Every
+  system query takes `without::<Inactive>()`; `World::extract` skips it.
+  The editor's preview syncs the flag like a name, and neither the
+  preview nor the live channel picks an inactive entity.
 - Command `SetActive { entity, active }` (wire kind 13), allowed on the
   simulation lane. The entities query (`QUERY_ENTITIES`) gains an
   `active` byte (activeSelf) so Dart's entity table knows the flag of

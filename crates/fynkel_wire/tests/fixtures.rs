@@ -478,6 +478,7 @@ fn fixtures_match_generated_codecs() {
             name: "Lamp".into(),
             layer: 2,
             tags: 0x8000_0005,
+            active: false,
         },
     );
     // M3-12.
@@ -692,6 +693,14 @@ fn fixtures_match_generated_codecs() {
             weight: 0.75,
             priority: -3,
             enabled: true,
+        },
+    );
+    // SetActive A2.
+    check(
+        "SetActiveCommand",
+        &SetActiveCommand {
+            entity: e(4, 2),
+            active: false,
         },
     );
 }

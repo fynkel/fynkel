@@ -169,6 +169,7 @@ fn an_unchanged_table_is_not_sent_again() {
     for change in [
         json!(["rename", { "id": uid(4), "name": "Floor" }]),
         json!(["set", { "id": uid(4), "type": "fynkel.PointLight", "data": light }]),
+        json!(["setActive", { "id": uid(4), "active": false }]),
     ] {
         assert!(
             call(&mut w, change[0].as_str().unwrap(), change[1].clone())["ok"]
@@ -252,6 +253,26 @@ fn a_write_shows_at_once_without_a_tick() {
 
     let now = call(&mut w, "entity", json!({ "id": uid(3) }));
     assert_eq!(now["name"], json!("Lamp"));
+    assert_eq!(now["activeSelf"], json!(true));
+    // Deactivating the parent: the child's own flag stays, the hierarchy's
+    // goes; a non-boolean is refused.
+    let parent = now["parent"].as_str().unwrap().to_string();
+    assert_eq!(
+        call(
+            &mut w,
+            "setActive",
+            json!({ "id": parent, "active": false })
+        )["ok"],
+        json!(true)
+    );
+    let off = call(&mut w, "entity", json!({ "id": uid(3) }));
+    assert_eq!(off["activeSelf"], json!(true));
+    assert_eq!(off["activeInHierarchy"], json!(false));
+    assert!(live::call(&mut w, "setActive", &json!({ "id": parent, "active": 1 })).is_err());
+    assert_eq!(
+        call(&mut w, "setActive", json!({ "id": parent, "active": true }))["ok"],
+        json!(true)
+    );
     assert_eq!(now["components"][1]["data"]["intensity"], json!(42.0));
     assert_eq!(
         now["world"]["position"],

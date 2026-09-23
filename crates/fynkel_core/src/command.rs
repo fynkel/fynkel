@@ -53,6 +53,14 @@ pub enum Command {
         entity: Entity,
         name: String,
     },
+    /// Sets the entity's own active flag (Unity's `SetActive`): the
+    /// subtree under an inactive entity is not drawn, simulated, animated
+    /// or heard; it keeps its components and transforms. Simulation lane
+    /// only.
+    SetActive {
+        entity: Entity,
+        active: bool,
+    },
     /// Adds or replaces one built-in component. A `Transform` value behaves
     /// exactly like `SetTransform`. Scene loading uses this same path.
     SetComponent {
@@ -186,6 +194,7 @@ impl Command {
             Command::Destroy(e) => Some(*e),
             Command::SetTransform { entity, .. }
             | Command::SetName { entity, .. }
+            | Command::SetActive { entity, .. }
             | Command::SetComponent { entity, .. }
             | Command::RemoveComponent { entity, .. }
             | Command::Body { entity, .. }

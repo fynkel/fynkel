@@ -278,6 +278,37 @@ fn incremental_sync_matches_a_fresh_load_after_every_transaction_kind() {
     let r = check(&mut s, &mut w, &mut p, "renameObject");
     assert_eq!((r.updated, r.steps), (1, 1));
 
+    // setObjectActive: one SetActive; the post's subtree goes with it and
+    // is never picked.
+    let post_id = Uuid::parse_str(&post).unwrap();
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "setObjectActive", "id": post, "active": false }]),
+    );
+    let r = check(&mut s, &mut w, &mut p, "setObjectActive");
+    assert_eq!((r.updated, r.steps), (1, 1));
+    let bulb = p.entity(bulb_id).unwrap();
+    assert!(!fynkel_scene::is_active_in_hierarchy(w.ecs(), bulb));
+    assert!(fynkel_scene::is_active_self(w.ecs(), bulb));
+    let at = p
+        .world_matrix(&w, post_id)
+        .unwrap()
+        .transform_point3(Vec3::ZERO);
+    let ray = Ray {
+        origin: at + Vec3::Z * 10.0,
+        dir: Vec3::NEG_Z,
+    };
+    assert!(p.pick(&w, None, &ray).iter().all(|h| h.id != post_id));
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "setObjectActive", "id": post, "active": true }]),
+    );
+    check(&mut s, &mut w, &mut p, "setObjectActive true");
+    assert!(fynkel_scene::is_active_in_hierarchy(w.ecs(), bulb));
+    assert!(p.pick(&w, None, &ray).iter().any(|h| h.id == post_id));
+
     // reparentObject with an index: the Robot under the Floor, first.
     apply(
         &mut s,
@@ -403,7 +434,7 @@ fn incremental_sync_matches_a_fresh_load_after_every_transaction_kind() {
         s.redo(h).unwrap();
         check(&mut s, &mut w, &mut p, &format!("redo {i}"));
     }
-    assert_eq!(p.syncs as u64, 15 + 2 * history);
+    assert_eq!(p.syncs as u64, 17 + 2 * history);
     assert_eq!(p.loads, 1, "never a fallback reload");
     let _ = (CAMERA, SUN);
 }

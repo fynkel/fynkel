@@ -542,6 +542,12 @@ impl Preview {
                             name: d.name.clone(),
                         });
                     }
+                    if scene::is_active_self(ecs, e) != d.active {
+                        out.push(Command::SetActive {
+                            entity: e,
+                            active: d.active,
+                        });
+                    }
                     let current_parent =
                         scene::parent_of(ecs, e).and_then(|p| self.by_entity.get(&p).copied());
                     let desired_parent = d.parent.map(to_uuid);
@@ -641,8 +647,8 @@ impl Preview {
 
     /// The runtime state keyed by authoring id in document order — the
     /// shape of `fynkel state dump --json` (`fynkel_headless`): name,
-    /// parent, children, local and world transforms, every built-in
-    /// component encoded as the document would.
+    /// the active flags, parent, children, local and world transforms,
+    /// every built-in component encoded as the document would.
     pub fn dump(&self, world: &World) -> Value {
         let ecs = world.ecs();
         let mut entities = Vec::new();
@@ -676,6 +682,8 @@ impl Preview {
             entities.push(json!({
                 "id": id.to_string(),
                 "name": name,
+                "activeSelf": scene::is_active_self(ecs, e),
+                "activeInHierarchy": scene::is_active_in_hierarchy(ecs, e),
                 "parent": parent,
                 "children": children,
                 "local": local.to_node().to_serde(),
@@ -825,7 +833,7 @@ impl Preview {
             let Some(&e) = self.ids.get(id) else {
                 continue;
             };
-            if hidden.contains(&e) {
+            if hidden.contains(&e) || !scene::is_active_in_hierarchy(world.ecs(), e) {
                 continue;
             }
             if let Some((distance, point, mesh)) = pick_entity(world, assets, ray, e) {
@@ -845,7 +853,8 @@ impl Preview {
     /// Marquee selection: the ids whose projected bounds (a mesh's
     /// world-space bounding box; an entity without one, its origin)
     /// overlap the rectangle `min..max` in NDC. An entity partly behind
-    /// the camera counts by its origin alone. Hidden entities never count.
+    /// the camera counts by its origin alone. Hidden and inactive entities
+    /// never count.
     pub fn pick_rect(
         &self,
         world: &World,
@@ -861,7 +870,7 @@ impl Preview {
             let Some(&e) = self.ids.get(id) else {
                 continue;
             };
-            if hidden.contains(&e) {
+            if hidden.contains(&e) || !scene::is_active_in_hierarchy(world.ecs(), e) {
                 continue;
             }
             if rect_hits(world, assets, view, e, min, max) {
@@ -899,10 +908,10 @@ impl Preview {
     }
 
     /// The icons of every light, camera and collider in the preview (the
-    /// hidden ones left out): a point light's range as three circles, a
-    /// spot's cone (outer angle, inner circle) to its range, a directional
-    /// light's arrows along its −Z, a camera's frustum to
-    /// [`CAMERA_OUTLINE_DEPTH`] past its near plane at `aspect`, a
+    /// hidden and the inactive ones left out): a point light's range as
+    /// three circles, a spot's cone (outer angle, inner circle) to its
+    /// range, a directional light's arrows along its −Z, a camera's
+    /// frustum to [`CAMERA_OUTLINE_DEPTH`] past its near plane at `aspect`, a
     /// collider's shape (box, sphere, capsule; a mesh collider its mesh's
     /// box) at its offset. Colours: lights their own colour, cameras
     /// white, colliders green. Colliders are drawn for the `selected` ids
@@ -925,7 +934,7 @@ impl Preview {
             let Some(&e) = self.ids.get(id) else {
                 continue;
             };
-            if hidden.contains(&e) || !ecs.contains(e) {
+            if hidden.contains(&e) || !ecs.contains(e) || !scene::is_active_in_hierarchy(ecs, e) {
                 continue;
             }
             icon_entity(world, assets, aspect, e, selected.contains(id), &mut out);

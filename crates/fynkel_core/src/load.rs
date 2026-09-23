@@ -298,6 +298,10 @@ impl World {
             }
             self.apply_loaded(e, c, tick);
         }
+        if parent.is_some() {
+            self.mark_active_dirty();
+            self.refresh_active();
+        }
         scene::propagate(self.ecs_mut());
         Ok((e, self.diagnostics()[first..].to_vec()))
     }
@@ -440,6 +444,10 @@ impl World {
             if !d.name.is_empty() {
                 let _ = self.ecs_mut().insert(e, Name::new(d.name.clone()));
             }
+            if !d.active {
+                let _ = scene::set_active(self.ecs_mut(), e, false);
+                self.mark_active_dirty();
+            }
             loaded.order.push((d.id, e));
             loaded.by_id.insert(d.id, e);
             loaded.by_entity.insert(e, d.id);
@@ -460,6 +468,11 @@ impl World {
                 }
             }
         }
+        if root_parent.is_some() {
+            // Under a parent that may be inactive itself.
+            self.mark_active_dirty();
+        }
+        self.refresh_active();
         if propagate {
             scene::propagate(self.ecs_mut());
         }

@@ -15,8 +15,8 @@
 //!   document.
 //!
 //! Every call is `(kind, args JSON) -> JSON`, like the session's `query`:
-//! `entities`, `entity`, `set`, `remove`, `rename`, `parent`, `destroy`,
-//! `spawn`, and for the Scene view
+//! `entities`, `entity`, `set`, `remove`, `rename`, `setActive`, `parent`,
+//! `destroy`, `spawn`, and for the Scene view
 //! on the running world (L5) `pick`, `pickRect`, `lines` and
 //! `worldMatrix` — the edit preview's own picking and overlays
 //! ([`crate::preview`]), over every live entity.
@@ -37,12 +37,13 @@ use crate::preview::{self, Line, Ray, View};
 /// The prefix of the id of an entity no loaded scene spawned.
 pub const RUNTIME_PREFIX: &str = "runtime:";
 
-pub const KINDS: [&str; 12] = [
+pub const KINDS: [&str; 13] = [
     "entities",
     "entity",
     "set",
     "remove",
     "rename",
+    "setActive",
     "parent",
     "destroy",
     "spawn",
@@ -193,6 +194,14 @@ pub fn call_with(
             let name = str_arg(args, "name")?.to_string();
             Ok(write(world, vec![Command::SetName { entity: e, name }]))
         }
+        "setActive" => {
+            let e = entity_arg(world, args)?;
+            let active = args
+                .get("active")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| vec![invalid("setActive: `active` must be a boolean")])?;
+            Ok(write(world, vec![Command::SetActive { entity: e, active }]))
+        }
         "parent" => {
             // The local transform is kept (the editor rewrites it when the
             // world pose should stay); `index` places it among its new
@@ -312,7 +321,7 @@ pub fn resolve(world: &World, id: &str) -> Option<Entity> {
 /// The answer carries a `revision` of the table (a hash of every row, this
 /// process only). Given `since` equal to it, the rows are left out
 /// (`"unchanged": true`): an editor polling a world where nothing was
-/// spawned, destroyed, renamed or re-parented pays for the walk, not for
+/// spawned, destroyed, renamed, re-parented or (de)activated pays for the walk, not for
 /// the JSON.
 fn entities(world: &World, since: Option<&str>) -> Value {
     use std::hash::{Hash, Hasher};
@@ -338,6 +347,8 @@ fn entities(world: &World, since: Option<&str>) -> Value {
         entity: Entity,
         name: String,
         parent: Option<String>,
+        active_self: bool,
+        active: bool,
         layer: u32,
         tags: Option<Tags>,
         children: usize,
@@ -354,6 +365,8 @@ fn entities(world: &World, since: Option<&str>) -> Value {
             entity: e,
             name: ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
             parent,
+            active_self: scene::is_active_self(ecs, e),
+            active: scene::is_active_in_hierarchy(ecs, e),
             layer: ecs.copy::<Layer>(e).map(|l| l.layer).unwrap_or(0),
             tags: ecs.copy::<Tags>(e).ok(),
             children: children.len(),
@@ -369,6 +382,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
             &row.name,
             &row.parent,
             row.layer,
+            (row.active_self, row.active),
         )
             .hash(&mut hasher);
         (row.tags.map(|t| t.bits), row.children, &row.types).hash(&mut hasher);
@@ -389,6 +403,8 @@ fn entities(world: &World, since: Option<&str>) -> Value {
                 "entity": r.entity.to_bits(),
                 "name": r.name,
                 "parent": r.parent,
+                "activeSelf": r.active_self,
+                "activeInHierarchy": r.active,
                 "spawned": r.id.starts_with(RUNTIME_PREFIX),
                 "layer": r.layer,
                 "tags": r.tags.map(|t| t.to_node().to_serde()).unwrap_or(Value::Null),
@@ -400,7 +416,7 @@ fn entities(world: &World, since: Option<&str>) -> Value {
     json!({ "tick": world.tick(), "revision": revision, "entities": out })
 }
 
-/// One entity as the Inspector reads it: name, parent, local and world
+/// One entity as the Inspector reads it: name, parent, active flags, local and world
 /// transforms, every native component as the document would store it.
 fn entity(world: &World, e: Entity) -> Value {
     let ecs = world.ecs();
@@ -419,15 +435,21 @@ fn entity(world: &World, e: Entity) -> Value {
         "entity": e.to_bits(),
         "name": ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
         "parent": scene::parent_of(ecs, e).map(|p| id_of(world, p)),
+        "activeSelf": scene::is_active_self(ecs, e),
+        "activeInHierarchy": scene::is_active_in_hierarchy(ecs, e),
         "world": world_t.to_node().to_serde(),
         "components": components,
     })
 }
 
-/// The entities a click or a marquee can meet: every live one (a game's
-/// world hides nothing from the editor; only an edit world can).
+/// The entities a click or a marquee can meet: every live one active in
+/// the hierarchy (a game's world hides nothing else from the editor; only
+/// an edit world can).
 fn pickable(world: &World) -> impl Iterator<Item = Entity> + '_ {
-    world.ecs().entities()
+    world
+        .ecs()
+        .entities()
+        .filter(|e| scene::is_active_in_hierarchy(world.ecs(), *e))
 }
 
 /// Every entity `ray` meets, nearest first, as the edit preview picks

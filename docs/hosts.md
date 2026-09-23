@@ -419,8 +419,9 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   `GameObject.findChild('Arm/Hand')`/`findDescendant(name)` and, since
   ADR-0020's L2, `World.findWithTag(tag)`/`findAllWithTag(tag)` read the
   hierarchy as the last tick left it from **one** `FYNKEL_QUERY_ENTITIES`
-  (8: an `EntityInfoRecord { entity, parent, name, layer, tags }` per live
-  entity, `layer`/`tags` 0 without a `fynkel.Layer`/`fynkel.Tags`)
+  (8: an `EntityInfoRecord { entity, parent, name, layer, tags, active }`
+  per live entity, `layer`/`tags` 0 without a `fynkel.Layer`/`fynkel.Tags`,
+  `active` the entity's own flag — `GameObject.activeSelf`, SetActive)
   per tick, cached in the SDK until the next step or load. A temp
   reference (`FynkelEntity` with generation 0 and the spawn's temp id in
   the slot bits, `Entity::temp(id)`) may stand for an entity spawned

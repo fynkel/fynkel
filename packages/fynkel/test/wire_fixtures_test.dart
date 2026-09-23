@@ -534,7 +534,7 @@ void main() {
   );
   check(
     'EntityInfoRecord',
-    EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp', layer: 2, tags: 0x80000005),
+    EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp', layer: 2, tags: 0x80000005, active: false),
     EntityInfoRecord.wireSize,
     EntityInfoRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -780,6 +780,14 @@ void main() {
     ),
     Volume.wireSize,
     Volume.decode,
+    (v, d, o, s) => v.encode(d, o, s),
+  );
+  // SetActive A2.
+  check(
+    'SetActiveCommand',
+    SetActiveCommand(entity: entity(4, 2), active: false),
+    SetActiveCommand.wireSize,
+    SetActiveCommand.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
 }

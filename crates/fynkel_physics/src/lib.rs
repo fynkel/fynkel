@@ -628,8 +628,8 @@ impl Physics {
         candidates.clear();
         changed.clear();
         {
-            // One pass over the archetypes: every entity with a physics
-            // component and a world transform, and — the fast path — which
+            // One pass over the archetypes: every active entity with a
+            // physics component and a world transform, and — the fast path — which
             // of them differ from their entry (new, a component changed,
             // the world matrix moved by gameplay). A resting or static
             // collider costs a few comparisons here and nothing below.
@@ -643,6 +643,9 @@ impl Physics {
                     Option<&CharacterController>,
                     Option<&Layer>,
                 )>()
+                // Not active in the hierarchy: out of the simulation (the
+                // entry goes, and comes back at rest when reactivated).
+                .without::<&fynkel_scene::Inactive>()
                 .iter()
             {
                 if rigid.is_none() && shape.is_none() && character.is_none() {
@@ -1091,6 +1094,11 @@ impl Physics {
                 kind,
                 message,
             };
+            if ecs.has::<fynkel_scene::Inactive>(entity) {
+                // Out of the simulation while inactive: nothing to move,
+                // and nothing wrong with asking (Unity drops it too).
+                continue;
+            }
             if !cmd.is_finite() {
                 self.rejections.push(reject(
                     RejectionKind::NotFinite,

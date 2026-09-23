@@ -279,6 +279,9 @@ pub struct World {
     /// The tick's spawns by temp id, what a temp reference
     /// (`Entity::temp`) in a later command of the same tick resolves to.
     spawned_this_tick: HashMap<u64, Entity>,
+    /// A spawn, reparent or active flag changed since the last
+    /// `scene::refresh_active`.
+    active_dirty: bool,
     /// Entities whose next tick must not interpolate from S[n] (their
     /// authoritative value came from a presentation override already shown).
     teleported: Vec<Entity>,
@@ -363,6 +366,7 @@ impl World {
             clock,
             staged: Vec::new(),
             spawned_this_tick: HashMap::new(),
+            active_dirty: false,
             teleported: Vec::new(),
             overrides: HashMap::new(),
             events: EventQueue::default(),
@@ -649,6 +653,7 @@ impl World {
                 moved.extend(target);
             }
         }
+        self.refresh_active();
         scene::propagate(&mut self.ecs);
         for e in moved {
             if self.ecs.contains(e) {
@@ -844,6 +849,7 @@ impl World {
             Command::Destroy(e) => resolve(e),
             Command::SetTransform { entity, .. }
             | Command::SetName { entity, .. }
+            | Command::SetActive { entity, .. }
             | Command::SetComponent { entity, .. }
             | Command::RemoveComponent { entity, .. }
             | Command::Body { entity, .. }
@@ -915,6 +921,7 @@ impl World {
                     let _ = self.ecs.insert(e, Name::new(n));
                 }
                 self.spawned_this_tick.insert(temp_id, e);
+                self.active_dirty |= parent.is_some();
                 self.events.push(Event {
                     tick,
                     payload: EventPayload::Spawned { temp_id, entity: e },
@@ -972,6 +979,7 @@ impl World {
                 };
                 match r {
                     Ok(()) => {
+                        self.active_dirty = true;
                         self.events.push(Event {
                             tick,
                             payload: EventPayload::ParentChanged { child, parent },
@@ -986,6 +994,18 @@ impl World {
                     return false;
                 }
                 self.ecs.insert(entity, Name::new(name)).is_ok()
+            }
+            Command::SetActive { entity, active } => {
+                if !self.check_entity(index, lane, entity, "set_active") {
+                    return false;
+                }
+                match scene::set_active(&mut self.ecs, entity, active) {
+                    Ok(changed) => {
+                        self.active_dirty |= changed;
+                        true
+                    }
+                    Err(err) => self.reject_scene(index, lane, entity, err),
+                }
             }
             Command::SetComponent {
                 entity,
@@ -1309,6 +1329,7 @@ impl World {
                 rejected += 1;
             }
         }
+        self.refresh_active();
         self.set_time(SystemKind::Commands, applied, micros(t0));
 
         // Animators pose their subtrees first among the pre-tick systems
@@ -1465,6 +1486,19 @@ impl World {
         }
     }
 
+    /// Brings the derived `Inactive` markers up to date after a spawn,
+    /// reparent or flag change (nothing to do otherwise).
+    pub(crate) fn refresh_active(&mut self) {
+        if std::mem::take(&mut self.active_dirty) {
+            scene::refresh_active(&mut self.ecs);
+        }
+    }
+
+    /// Marks the markers stale (a load spawned under a parent).
+    pub(crate) fn mark_active_dirty(&mut self) {
+        self.active_dirty = true;
+    }
+
     fn record_prev_world(&mut self) {
         let h = self.ecs.hecs_mut();
         for (wt, prev) in h.query_mut::<(&WorldTransform, &mut PrevWorld)>() {
@@ -1549,7 +1583,11 @@ impl World {
         let mut driven = 0;
         {
             let h = self.ecs.hecs();
-            for (handle, c) in h.query::<(&Handle, &CharacterController)>().iter() {
+            for (handle, c) in h
+                .query::<(&Handle, &CharacterController)>()
+                .without::<&scene::Inactive>()
+                .iter()
+            {
                 if c.move_action.is_empty() && c.jump_action.is_empty() {
                     continue;
                 }
@@ -1614,7 +1652,11 @@ impl World {
         let dt = self.config.fixed_dt;
         {
             let h = self.ecs.hecs();
-            for (handle, rig) in h.query::<(&Handle, &ThirdPersonCamera)>().iter() {
+            for (handle, rig) in h
+                .query::<(&Handle, &ThirdPersonCamera)>()
+                .without::<&scene::Inactive>()
+                .iter()
+            {
                 let entity = handle.0;
                 if rig.target.is_empty() {
                     continue;
@@ -1852,6 +1894,10 @@ impl World {
         let entities: Vec<Entity> = self.ecs.entities().collect();
         for e in entities {
             if !self.ecs.has::<WorldTransform>(e) {
+                continue;
+            }
+            if self.ecs.has::<scene::Inactive>(e) {
+                // Not active in the hierarchy: as absent as a hidden one.
                 continue;
             }
             if self.config.edit_mode && self.edit_hidden.contains(&e) {

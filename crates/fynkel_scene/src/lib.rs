@@ -11,6 +11,10 @@
 //! * [`Parent`] / [`Children`] — kept consistent by this module's functions;
 //!   never edit them directly.
 //!
+//! * [`InactiveSelf`] / [`Inactive`] — the entity's own active flag and
+//!   the derived "not active in the hierarchy" marker every runtime system
+//!   skips; [`set_active`] and [`refresh_active`] keep them right.
+//!
 //! Every mutation goes through `Hierarchy` functions so the dirty flag and
 //! links stay right; a system that writes `Transform` directly must call
 //! [`mark_dirty`].
@@ -140,6 +144,18 @@ impl Default for WorldTransform {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parent(pub Entity);
+
+/// The entity's own flag is off (Unity's `activeSelf == false`). Set
+/// through [`set_active`]; absent means active.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct InactiveSelf;
+
+/// Derived: the entity or an ancestor is inactive (not active in the
+/// hierarchy). Every runtime system skips an entity carrying it — not
+/// drawn, simulated, animated or heard. Maintained by [`refresh_active`];
+/// never insert it directly.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Inactive;
 
 /// Deterministic order: insertion order, adjustable with [`set_sibling_index`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -362,6 +378,84 @@ pub fn despawn_subtree(world: &mut World, root: Entity) -> Result<Vec<Entity>> {
         world.despawn(*e)?;
     }
     Ok(all)
+}
+
+/// Sets the entity's own active flag; `true` when it changed. The
+/// derived [`Inactive`] markers follow at the next [`refresh_active`].
+pub fn set_active(world: &mut World, entity: Entity, active: bool) -> Result<bool> {
+    if !world.contains(entity) {
+        return Err(EcsError::StaleEntity(entity).into());
+    }
+    let was = !world.has::<InactiveSelf>(entity);
+    if was == active {
+        return Ok(false);
+    }
+    if active {
+        world.remove::<InactiveSelf>(entity)?;
+    } else {
+        world.insert(entity, InactiveSelf)?;
+    }
+    Ok(true)
+}
+
+/// The entity's own flag (`activeSelf`).
+pub fn is_active_self(world: &World, entity: Entity) -> bool {
+    !world.has::<InactiveSelf>(entity)
+}
+
+/// Whether the entity and every ancestor are active, as of the last
+/// [`refresh_active`].
+pub fn is_active_in_hierarchy(world: &World, entity: Entity) -> bool {
+    !world.has::<Inactive>(entity)
+}
+
+/// Recomputes [`Inactive`] from the [`InactiveSelf`] flags and the
+/// hierarchy — after flags changed, entities were spawned or reparented.
+/// Returns how many entities changed state. Nothing to walk (no flag and
+/// no marker anywhere) costs two archetype checks.
+pub fn refresh_active(world: &mut World) -> usize {
+    let (any_self, any_derived) = {
+        let h = world.hecs();
+        (
+            h.query::<&InactiveSelf>().iter().next().is_some(),
+            h.query::<&Inactive>().iter().next().is_some(),
+        )
+    };
+    if !any_self && !any_derived {
+        return 0;
+    }
+    let mut changes: Vec<(hecs::Entity, bool)> = Vec::new();
+    {
+        let h = world.hecs();
+        let mut stack: Vec<(hecs::Entity, bool)> = h
+            .query::<hecs::Without<hecs::Entity, &Parent>>()
+            .iter()
+            .map(|e| (e, false))
+            .collect();
+        while let Some((raw, parent_inactive)) = stack.pop() {
+            let inactive = parent_inactive || h.satisfies::<&InactiveSelf>(raw);
+            let marked = h.satisfies::<&Inactive>(raw);
+            if inactive != marked {
+                changes.push((raw, inactive));
+            }
+            if let Ok(children) = h.get::<&Children>(raw) {
+                for &c in children.0.iter() {
+                    if let Some(craw) = world.raw(c) {
+                        stack.push((craw, inactive));
+                    }
+                }
+            }
+        }
+    }
+    let h = world.hecs_mut();
+    for &(raw, inactive) in &changes {
+        if inactive {
+            let _ = h.insert_one(raw, Inactive);
+        } else {
+            let _ = h.remove_one::<Inactive>(raw);
+        }
+    }
+    changes.len()
 }
 
 /// Recomputes world matrices for dirty subtrees. Returns how many entities

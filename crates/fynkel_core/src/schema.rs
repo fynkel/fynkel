@@ -41,6 +41,7 @@ pub enum CommandKind {
     Audio = 10,
     PlaySound = 11,
     AudioBus = 12,
+    SetActive = 13,
 }
 
 impl CommandKind {
@@ -58,6 +59,7 @@ impl CommandKind {
             10 => Self::Audio,
             11 => Self::PlaySound,
             12 => Self::AudioBus,
+            13 => Self::SetActive,
             _ => return None,
         })
     }
@@ -103,6 +105,16 @@ pub struct SetParentCommand {
 pub struct SetNameCommand {
     pub entity: Entity,
     pub name: String,
+}
+
+/// Sets the entity's own active flag (`GameObject.setActive`): an
+/// inactive subtree is not drawn, simulated, animated or heard.
+/// Simulation lane only.
+#[derive(Clone, Debug, PartialEq, Schema)]
+#[schema(kind = "command", id = 13, name = "fynkel.cmd.SetActive")]
+pub struct SetActiveCommand {
+    pub entity: Entity,
+    pub active: bool,
 }
 
 /// Inserts or replaces one native component (M3-07a): the body is this
@@ -542,8 +554,9 @@ pub struct ProjectedPointRecord {
 
 /// `FYNKEL_QUERY_ENTITIES` (M3-08b): one per live entity, entity order —
 /// its parent (`NULL` at the root), name (empty without one), layer index
-/// (0 without a `fynkel.Layer`) and tag bits (0 without a `fynkel.Tags`,
-/// ADR-0020). What `World.find`/`findAll`/`findChild`/`findWithTag` read,
+/// (0 without a `fynkel.Layer`), tag bits (0 without a `fynkel.Tags`,
+/// ADR-0020) and its own active flag (`activeSelf`; the hierarchy's is
+/// derived from the parents). What `World.find`/`findAll`/`findChild`/`findWithTag` read,
 /// one query per tick.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "record", name = "fynkel.rec.EntityInfo")]
@@ -553,6 +566,7 @@ pub struct EntityInfoRecord {
     pub name: String,
     pub layer: u32,
     pub tags: u32,
+    pub active: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Schema)]
@@ -832,6 +846,7 @@ pub const ALL: &[&RecordSchema] = &[
     &Volume::SCHEMA,
     &Layer::SCHEMA,
     &Tags::SCHEMA,
+    &SetActiveCommand::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

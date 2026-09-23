@@ -722,6 +722,7 @@ impl World {
                 .hecs()
                 .query::<&Handle>()
                 .with::<&Animator>()
+                .without::<&scene::Inactive>()
                 .iter()
                 .map(|h| (depth_of(&self.ecs, h.0), h.0)),
         );
@@ -1190,6 +1191,7 @@ impl World {
                 .hecs()
                 .query::<&Handle>()
                 .with::<&SkinComponent>()
+                .without::<&scene::Inactive>()
                 .iter()
                 .map(|h| h.0),
         );

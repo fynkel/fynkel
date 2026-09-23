@@ -90,6 +90,13 @@ fn decode_command(kind: u32, body: &[u8], tail: &[u8]) -> Result<Command, Diagno
                     name: c.name,
                 }
             }
+            CommandKind::SetActive => {
+                let c = SetActiveCommand::decode(body, tail).map_err(bad)?;
+                Command::SetActive {
+                    entity: c.entity,
+                    active: c.active,
+                }
+            }
             // The component's bytes follow the header record; a component
             // id the wire cannot carry as a value (`Name`, the hierarchy,
             // an id this build does not know) is an invalid payload.
@@ -572,9 +579,9 @@ pub fn query(
                 });
             }
         }
-        // Every live entity with its parent, name, layer and tags (M3-08b,
-        // ADR-0020), entity order: the hierarchy, the names and the tags
-        // in one call, for `find` and `findWithTag`.
+        // Every live entity with its parent, name, layer, tags and own
+        // active flag (M3-08b, ADR-0020), entity order: the hierarchy, the
+        // names and the tags in one call, for `find` and `findWithTag`.
         QUERY_ENTITIES => {
             for e in ecs.entities() {
                 let parent = fynkel_scene::parent_of(ecs, e).unwrap_or(Entity::NULL);
@@ -588,6 +595,7 @@ pub fn query(
                     name,
                     layer: ecs.copy::<fynkel_scene::Layer>(e).map_or(0, |l| l.layer),
                     tags: ecs.copy::<fynkel_scene::Tags>(e).map_or(0, |t| t.bits),
+                    active: fynkel_scene::is_active_self(ecs, e),
                 });
             }
         }
