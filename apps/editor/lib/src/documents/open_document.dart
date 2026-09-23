@@ -485,6 +485,27 @@ final class OpenDocument extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Component editing (item 9g) ─────────────────────────────────────
+
+  ({String entity, String type})? _editing;
+
+  /// The component type whose handles the Scene view shows on the lead
+  /// entity (the Inspector's Edit toggle); null when none — or when the
+  /// lead moved on, which ends the editing.
+  String? get editingType {
+    final e = _editing;
+    return e != null && e.entity == lead && selection.contains(lead) ? e.type : null;
+  }
+
+  /// Turns editing [type] on the lead entity on, or off with null.
+  void editComponent(String? type) {
+    final l = lead;
+    final next = type == null || l == null ? null : (entity: l, type: type);
+    if (next == _editing) return;
+    _editing = next;
+    notifyListeners();
+  }
+
   void clearSelection() {
     if (selection.isEmpty) return;
     selection.clear();

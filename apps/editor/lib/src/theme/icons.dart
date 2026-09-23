@@ -57,6 +57,7 @@ abstract final class FIcons {
   static const IconData doorFrontDoorOutlined = LucideIcons.doorOpen;
   static const IconData eco = LucideIcons.leaf;
   static const IconData editNote = LucideIcons.squarePen;
+  static const IconData editShape = LucideIcons.vectorSquare;
   static const IconData error = LucideIcons.circleX;
   static const IconData errorOutline = LucideIcons.circleAlert;
   static const IconData checkCircleOutline = LucideIcons.circleCheck;

@@ -1585,9 +1585,12 @@ The M3 backlog as it landed, for the record:
    test, axis/plane/ring/scale/radius constraints) and the tool registry
    (`SceneTool`/`SceneTools`; move, rotate, scale rebuilt on it, a
    combined transform tool on Y as the proof), the handles drawn through
-   the overlay at 80 pt; 302 editor tests. Next in 9g: component handles
-   (light range and angle, collider sizes, camera FOV) behind the
-   Inspector's Edit toggle, then the user's gate.
+   the overlay at 80 pt; component handles (`ComponentHandlers`: a
+   point/spot light's range, a spot's outer and inner angles, box, sphere
+   and capsule collider sizes, a camera's field of view or orthographic
+   height) behind the Inspector card's Edit toggle, in place of the
+   tool's gizmo, one transaction per drag (overrides on a derived
+   component); 312 editor tests. Next: the user's 9g gate.
    Next: the rest of 9g, 9h (game
    gizmos), then item 9 (Profiler, IDE navigation, `fynkel editor`,
    polish).

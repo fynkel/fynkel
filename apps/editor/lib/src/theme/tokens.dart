@@ -355,6 +355,9 @@ abstract final class GizmoTokens {
   /// Things the user drags: the move, rotate and scale handles.
   static const double handleWidth = 2.5;
 
+  /// A component handle's square dot (item 9g), a side in points.
+  static const double dotSize = 8.0;
+
   /// X, Y and Z of the transform handles and the orientation gizmo.
   static const axisColors = [Color(0xFFE5484D), Color(0xFF46A758), Color(0xFF3E63DD)];
 
@@ -364,6 +367,14 @@ abstract final class GizmoTokens {
   /// Handles that belong to no axis: the view-plane square, the uniform
   /// scale, the view ring.
   static const neutral = Color(0xFFDDDDDD);
+
+  /// Component handles (item 9g): a light's range and angles, a camera's
+  /// field of view.
+  static const componentHandle = Color(0xFFF5F5F5);
+
+  /// A collider's size handles and their outline: the green the world
+  /// draws colliders in.
+  static const colliderHandle = Color(0xFF4DE266);
 
   /// [c] as the overlay takes it: linear RGBA.
   static List<double> linear(Color c, {double? alpha}) {

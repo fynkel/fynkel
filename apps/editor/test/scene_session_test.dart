@@ -11,14 +11,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
+import 'package:fynkel_editor/src/inspector/inspector_model.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 import 'package:fynkel_editor/src/scene_view/editor_state.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:fynkel_editor/src/scene_view/png.dart';
 import 'package:fynkel_editor/src/scene_view/scene_math.dart';
 import 'package:fynkel_editor/src/scene_view/scene_view_model.dart';
 
-import 'documents_session_test.dart' show mainScene, robot, crateA, crateB, floor;
+import 'documents_session_test.dart' show camera, mainScene, robot, crateA, crateB, floor;
 import 'project_test.dart' show copyFixture;
 
 final class Stack {
@@ -292,6 +294,92 @@ void main() {
     expect(preview.dump(), still);
     final crateBWorld = preview.worldMatrices([crateB])[crateB]!;
     expect(matTranslation(crateBWorld), tab.tree[crateB]!.transform!.position.map((v) => v.toDouble()).toList());
+  });
+
+  test('component handles: Edit on a collider and a camera, one transaction per drag, undone to the start', () async {
+    final s = await Stack.open('component');
+    addTearDown(s.close);
+    final tab = s.tabs.openDocument(mainScene)!;
+    final st = s.model.current!;
+    expect(st.hasPreview, isTrue, reason: st.openError);
+    final history = tab.document.history, revision = tab.document.revision;
+    final inspector = InspectorModel(tabs: s.tabs, project: s.project);
+    addTearDown(inspector.dispose);
+
+    // Crate B's box collider: the Inspector offers Edit, the Scene view
+    // swaps the move gizmo for the collider's six faces.
+    tab.select(crateB);
+    s.model.tool = SceneTool.move;
+    final slot = inspector.slots.singleWhere((x) => x.type == 'fynkel.Collider');
+    expect(inspector.canEditInScene(slot), isTrue);
+    expect(inspector.canEditInScene(inspector.slots.singleWhere((x) => x.type == 'fynkel.RigidBody')), isFalse);
+    inspector.toggleEditInScene(slot);
+    expect(inspector.isEditingInScene(slot), isTrue);
+    expect(tab.editingType, 'fynkel.Collider');
+    s.model.frameSelected();
+    expect(s.model.editingLabel, 'Collider');
+    final ids = s.model.handles().map((h) => h.id).toSet();
+    expect(ids, isNot(contains('move.x')));
+    expect(ids, contains('size.+x'));
+
+    final grab = s.model.grabPoint('size.+x')!;
+    expect(s.model.handleAt(grab)?.id, 'size.+x');
+    expect(s.model.beginDrag('size.+x', grab), isTrue);
+    s.model.updateDrag(s.pixelOf([-2 + 0.5 + 0.4, 3, 0]));
+    expect(s.model.drag!.readout, startsWith('x '));
+    expect(tab.document.history, history, reason: 'nothing written while dragging');
+    final applied = s.model.endDrag();
+    expect(applied?.ok, isTrue, reason: s.model.notice);
+    expect(tab.document.history, history + 1, reason: 'one transaction');
+    final collider = (tab.document.entities([crateB]).entities[crateB]!['components'] as Map).values
+        .cast<Map>()
+        .singleWhere((c) => c['type'] == 'fynkel.Collider')['data'] as Map;
+    expect((collider['size'] as List)[0], closeTo(0.7, 0.02));
+    expect((collider['offset'] as List)[0], closeTo(0.2, 0.02));
+    expect((collider['size'] as List).sublist(1), [0.5, 0.5]);
+    expect(s.model.handles().map((h) => h.id), contains('size.+x'), reason: 'still editing after the drag');
+
+    // Another selection ends the editing; the gizmo is back.
+    tab.select(floor);
+    expect(tab.editingType, isNull);
+    expect(s.model.handles().map((h) => h.id), contains('move.x'));
+
+    // The camera's field of view.
+    tab.select(camera);
+    tab.editComponent('fynkel.Camera');
+    s.model.frameSelected();
+    st.camera.distance = 12;
+    final fov = s.model.grabPoint('fov.+y')!;
+    expect(s.model.beginDrag('fov.+y', fov), isTrue);
+    s.model.updateDrag(fov + const Offset(0, -40));
+    expect(s.model.endDrag()?.ok, isTrue, reason: s.model.notice);
+    expect(tab.document.history, history + 2);
+    final cam = (tab.document.entities([camera]).entities[camera]!['components'] as Map).values
+        .cast<Map>()
+        .singleWhere((c) => c['type'] == 'fynkel.Camera')['data'] as Map;
+    expect(cam['fov_y'] as num, greaterThan(1.0));
+
+    // A click on a handle that never moves writes nothing; Escape stops
+    // editing.
+    expect(s.model.beginDrag('fov.+y', s.model.grabPoint('fov.+y')!), isTrue);
+    expect(s.model.endDrag(), isNull);
+    expect(tab.document.history, history + 2);
+    const escape = KeyDownEvent(
+      physicalKey: PhysicalKeyboardKey.escape,
+      logicalKey: LogicalKeyboardKey.escape,
+      timeStamp: Duration.zero,
+    );
+    expect(s.model.handleKey(escape), KeyEventResult.handled);
+    expect(tab.editingType, isNull);
+    expect(tab.selection, {camera}, reason: 'the first Escape ends the editing, not the selection');
+
+    // Undo per drag, back to the document as it was.
+    expect(tab.undo(), isTrue);
+    expect(tab.undo(), isTrue);
+    expect(tab.document.history, history);
+    expect(tab.document.revision, revision);
+    expect(tab.document.dirty, isFalse);
+    expect(st.preview!.dump(), (st.preview!..reload()).dump());
   });
 
   test('the camera of the scene can be looked through and written back; the state file keeps the view', () async {

@@ -859,7 +859,33 @@ screen space: the first handle whose triangles contain the point
 (edge-on ones skipped), else the nearest line within 8 pt; a plane
 square seen edge-on is not offered. The tool's `edit` returns a
 `TransformEdit` — the delta, its pivot, the readout and the channel
-(move keeps rotation and scale exactly, rotate keeps scale). A drag
+(move keeps rotation and scale exactly, rotate keeps scale).
+
+**Component handles** (`scene_view/component_handles.dart`) are the same
+handles registered per component type (`ComponentHandles`, the
+`ComponentHandlers` registry): a point light's range (a dot at each end
+of its three circles), a spot light's range (at the cone's end) and outer
+and inner angles (on the two circles there — narrowing the outer cone
+past the inner one takes the inner along, the inner never passes the
+outer), a box collider's six faces (the opposite face stays put, so the
+offset moves by half; the entity's scale is honoured), a sphere
+collider's radius and a capsule's radius and half height (about the
+centre), a camera's field of view — or an orthographic camera's height —
+from the top and bottom of its frustum where the world draws it. A mesh
+collider has none. They show behind the component card's **Edit** toggle
+in the Inspector (`InspectorModel.toggleEditInScene`; offered when one
+entity is shown, it is the tab's lead and the document is writable),
+**in place of** the tool's gizmo, on the lead entity; the tab remembers
+the type (`OpenDocument.editingType`) and forgets it when the lead
+changes, a tool key is pressed or **Esc** is pressed (the first Esc; the
+next clears the selection). The dots are `GizmoTokens.dotSize` (8 pt)
+squares facing the camera; while a drag runs, the dragged shape is drawn
+thin in the handle's colour over the world's committed one. A drag
+writes nothing until release, then **one transaction** of `setField`s for
+the fields that changed (a derived component: `setField` overrides on
+its anchor); limits the runtime refuses are never produced (a range,
+radius or extent of at least 1 mm, angles and a field of view inside
+(0, π)). The status line says "editing Collider · Esc to stop". A drag
 (`beginDrag(handleId)` → `updateDrag` → `endDrag`) applies it to **every
 draggable target about the lead's pivot** (`delta × startWorld`, then
 back to the parent's space: `inverse(parentWorld) × newWorld`; move keeps
@@ -1606,7 +1632,7 @@ around the one step that causes it.
 | 9d | done 2026-09-23 (gate driven by the user) | One picker for asset and entity slots, Open Document, Add Component, Create Entity with Component and the palette (§ One picker). |
 | 9e | done 2026-09-23 (gate driven by the user) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
 | 9f | done 2026-09-23 (gate driven by the user) | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
-| 9g | in progress | Handles and Scene tools: the handle framework, the tool registry with move, rotate, scale and the combined transform tool drawn through the overlay (done); component handles next (§ The gizmo). |
+| 9g | built, gate pending | Handles and Scene tools: the handle framework, the tool registry with move, rotate, scale and the combined transform tool drawn through the overlay, and component handles — light range and angles, collider sizes, camera field of view — behind the Inspector's Edit toggle (§ The gizmo). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 

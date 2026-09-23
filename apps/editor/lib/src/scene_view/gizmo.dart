@@ -11,9 +11,16 @@ import 'scene_math.dart';
 
 /// What a handle looks like, in world space. [lines] and [triangles] are
 /// drawn and hit; [back] (the far half of a ring) is drawn faint and never
-/// hit.
+/// hit; [guides] (the shape a component handle edits: a light's range,
+/// a collider's box) are drawn thin and never hit.
 final class HandleShape {
-  const HandleShape({this.lines = const [], this.triangles = const [], this.back = const [], this.fill = 1});
+  const HandleShape({
+    this.lines = const [],
+    this.triangles = const [],
+    this.back = const [],
+    this.guides = const [],
+    this.fill = 1,
+  });
 
   /// Polylines.
   final List<List<Vec3>> lines;
@@ -21,6 +28,7 @@ final class HandleShape {
   /// Filled triangles, three points each.
   final List<List<Vec3>> triangles;
   final List<List<Vec3>> back;
+  final List<List<Vec3>> guides;
 
   /// The triangles' alpha relative to the handle's colour (a plane
   /// square is translucent, an arrow's cone opaque).
@@ -174,8 +182,9 @@ final class Handle {
   final HandleWidth width;
 }
 
-/// Which of the design tokens' widths a handle's lines take.
-enum HandleWidth { handle, line }
+/// Which of the design tokens' widths a handle's lines take: a dot is one
+/// short segment as wide as it is long (one primitive, no seam).
+enum HandleWidth { handle, line, dot }
 
 /// A handle projected to pixels for one frame: its polylines and
 /// triangles in physical pixels, for the hit test.

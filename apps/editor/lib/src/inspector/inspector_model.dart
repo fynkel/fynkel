@@ -31,6 +31,7 @@ import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
 import '../project/editor_project.dart';
 import '../project_browser/project_browser_model.dart' show AssetPreview;
+import '../scene_view/component_handles.dart' show ComponentHandlers;
 import 'codegen_check.dart';
 import 'field_spec.dart';
 import 'inspector_math.dart';
@@ -240,6 +241,29 @@ final class InspectorModel extends ChangeNotifier {
   /// Field errors by `${slot.key}/${field}`; the message stays until the field's next accepted edit.
   UnmodifiableMapView<String, String> get errors => UnmodifiableMapView(_errors);
   String? errorFor(ComponentSlot slot, String field) => _errors['${slot.key}/$field'];
+
+  // ── Edit in the Scene view (item 9g) ─────────────────────────────────────
+
+  /// Whether [slot] has handles the Scene view can show: one entity shown,
+  /// the tab's lead, a writable document, a type with registered handles
+  /// for its data (a mesh collider has none).
+  bool canEditInScene(ComponentSlot slot) {
+    final t = _tab, e = single;
+    return t != null &&
+        e != null &&
+        canEdit &&
+        t.lead == e.id &&
+        ComponentHandlers.supports(slot.type, slot.first.data);
+  }
+
+  /// The Scene view shows [slot]'s handles now.
+  bool isEditingInScene(ComponentSlot slot) => canEditInScene(slot) && _tab!.editingType == slot.type;
+
+  /// The Edit toggle: [slot]'s handles in the Scene view, or off again.
+  void toggleEditInScene(ComponentSlot slot) {
+    if (!canEditInScene(slot)) return;
+    _tab!.editComponent(isEditingInScene(slot) ? null : slot.type);
+  }
 
   // ── Wiring ──────────────────────────────────────────────────────────────
 

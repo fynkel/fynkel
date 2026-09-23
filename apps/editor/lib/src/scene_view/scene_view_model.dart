@@ -35,6 +35,7 @@ import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../inspector/prefab_actions.dart' as prefab;
 import '../project/editor_project.dart';
 import '../theme/tokens.dart' show GizmoTokens;
+import 'component_handles.dart';
 import 'editor_state.dart';
 import 'gizmo.dart';
 import 'scene_tools.dart';
@@ -154,6 +155,33 @@ final class GizmoTarget {
   late Trs current = startLocal;
 }
 
+/// The component the Scene view's handles edit (the Inspector's Edit
+/// toggle, item 9g): where it is, its data as the document holds it, the
+/// entity's world matrix and its handler.
+final class ComponentTarget {
+  const ComponentTarget({
+    required this.entityId,
+    required this.componentId,
+    required this.type,
+    required this.data,
+    required this.world,
+    required this.handler,
+    this.anchor,
+    this.entityLocal,
+    this.local,
+  });
+
+  final String entityId, componentId, type;
+  final Map<String, Object?> data;
+  final List<double> world;
+  final ComponentHandles handler;
+
+  /// A derived component of a prefab instance: the anchor its overrides
+  /// go on and the prefab-local ids they name.
+  final String? anchor, entityLocal, local;
+  bool get isDerived => anchor != null;
+}
+
 /// A handle drag in flight.
 final class GizmoDrag {
   GizmoDrag({
@@ -185,6 +213,12 @@ final class GizmoDrag {
   String readout = '';
 
   Iterable<String> get ids => targets.map((t) => t.id);
+
+  /// A component handle's drag: the component, the context at the start
+  /// and the fields the drag sets now.
+  ComponentTarget? component;
+  ComponentContext? componentContext;
+  Map<String, Object?> fields = const {};
 }
 
 /// How a pointer button is being dragged.
@@ -915,7 +949,13 @@ final class SceneViewModel extends ChangeNotifier {
       final base = h.id == active ? highlight : h.color;
       final dim = drag != null && h.id != active ? 0.35 : 1.0;
       List<double> alpha(double a) => [base[0], base[1], base[2], base[3] * a * dim];
-      final width = (h.width == HandleWidth.handle ? GizmoTokens.handleWidth : GizmoTokens.lineWidth) * pixelRatio;
+      final width =
+          switch (h.width) {
+            HandleWidth.handle => GizmoTokens.handleWidth,
+            HandleWidth.line => GizmoTokens.lineWidth,
+            HandleWidth.dot => GizmoTokens.dotSize,
+          } *
+          pixelRatio;
       final line = alpha(1);
       for (final l in h.shape.lines) {
         for (var i = 0; i + 1 < l.length; i++) {
@@ -926,6 +966,14 @@ final class SceneViewModel extends ChangeNotifier {
       for (final l in h.shape.back) {
         for (var i = 0; i + 1 < l.length; i++) {
           o.line(l[i], l[i + 1], back, width: GizmoTokens.lineWidth * pixelRatio, onTop: true);
+        }
+      }
+      if (drag?.component != null) {
+        final guide = [h.color[0], h.color[1], h.color[2], h.color[3]];
+        for (final l in h.shape.guides) {
+          for (var i = 0; i + 1 < l.length; i++) {
+            o.line(l[i], l[i + 1], guide, width: GizmoTokens.lineWidth * pixelRatio, onTop: true);
+          }
         }
       }
       final fill = alpha(h.shape.fill);
@@ -957,6 +1005,7 @@ final class SceneViewModel extends ChangeNotifier {
     final t = current;
     if (t == null || !t.hasPreview || !tool.hasGizmo || t.tab.selection.isEmpty) return null;
     if (t.tab.document.readOnly != null) return 'read-only: no gizmo';
+    if (componentTarget() != null) return null;
     if (_dragTargets(t).isNotEmpty) return null;
     final top = t.tab.tree.topmost(t.tab.selection);
     if (top.every(t.state.locked.contains)) return 'locked (L to unlock)';
@@ -999,6 +1048,13 @@ final class SceneViewModel extends ChangeNotifier {
   /// The tool's handles on the selection now (during a drag, the dragged
   /// tool's, following the pivot).
   List<Handle> handles() {
+    final ct = componentTarget();
+    if (ct != null) {
+      final d = drag;
+      final c = d?.componentContext ?? _componentContext(ct);
+      if (c == null) return const [];
+      return ct.handler.handles(d?.component == null ? c : c.withData({...ct.data, ...d!.fields}));
+    }
     final c = _context(gizmoFrame());
     if (c == null) return const [];
     return (drag?.tool ?? tool).handles(c);
@@ -1032,6 +1088,8 @@ final class SceneViewModel extends ChangeNotifier {
   /// Starts a drag on handle [id] from [px]; false when nothing is
   /// draggable or the tool has no such handle.
   bool beginDrag(String id, Offset px) {
+    final ct = componentTarget();
+    if (ct != null) return _beginComponentDrag(ct, id, px);
     final t = current;
     final frame = gizmoFrame();
     final c = _context(frame);
@@ -1087,7 +1145,6 @@ final class SceneViewModel extends ChangeNotifier {
     if (d == null || t == null || vp == null) return;
     if ((px - d.startPx).distance < 2 && !d.moved) return;
     d.moved = true;
-    final c = ToolContext(frame: d.frame, vp: vp, snap: snap, snapping: snap.enabled != invertSnap);
     final value = d.handle.constraint.solve(
       DragInput(
         startPx: d.startPx,
@@ -1098,6 +1155,16 @@ final class SceneViewModel extends ChangeNotifier {
         cameraForward: t.camera.forward,
       ),
     );
+    final component = d.component;
+    if (component != null) {
+      final e = value == null ? null : component.handler.edit(d.handle, value, d.componentContext!);
+      if (e == null) return;
+      d.fields = e.fields;
+      d.readout = e.readout;
+      _repaint();
+      return;
+    }
+    final c = ToolContext(frame: d.frame, vp: vp, snap: snap, snapping: snap.enabled != invertSnap);
     final edit = value == null ? null : d.tool.edit(d.handle, value, c);
     if (edit == null) return;
     d.readout = edit.readout;
@@ -1148,6 +1215,7 @@ final class SceneViewModel extends ChangeNotifier {
       notifyListeners();
       return null;
     }
+    if (d.component != null) return _endComponentDrag(t, d);
     final commands = <Map<String, Object?>>[];
     for (final target in d.targets) {
       if (!d.moved || target.current.sameAs(target.startLocal)) continue;
@@ -1201,13 +1269,163 @@ final class SceneViewModel extends ChangeNotifier {
     final t = current;
     drag = null;
     if (_mode == _Mode.gizmo) _mode = _Mode.none;
-    if (d != null && t != null && t.hasPreview) {
+    if (d != null && d.component == null && t != null && t.hasPreview) {
       try {
         t.preview!.restoreTransforms(d.ids);
       } on AuthoringException catch (_) {}
       views?.changed(this, t.preview);
     }
     _repaint();
+  }
+
+  // ── Component handles (item 9g) ─────────────────────────────────────
+
+  ({String key, ComponentTarget? target})? _componentCache;
+
+  /// The component the Inspector's Edit toggle is on, when the Scene view
+  /// can edit it: on the lead entity, unlocked and shown, in a writable
+  /// document, with handles for its data (not a mesh collider). Its data
+  /// is read once per document revision.
+  ComponentTarget? componentTarget() {
+    final t = current;
+    final type = t?.tab.editingType;
+    if (t == null || type == null || !t.hasPreview || t.tab.document.readOnly != null) return null;
+    final id = t.tab.lead!;
+    final handler = ComponentHandlers.of(type);
+    if (handler == null || t.state.locked.contains(id) || _hiddenAll(t).contains(id)) return null;
+    final key = '${t.tab.document.revision}|$id|$type';
+    var cached = _componentCache;
+    if (cached == null || cached.key != key) {
+      cached = _componentCache = (key: key, target: _readComponent(t, id, type, handler));
+    }
+    final target = cached.target;
+    if (target == null) return null;
+    final world = t.preview!.worldMatrices([id])[id];
+    if (world == null) return null;
+    return ComponentTarget(
+      entityId: target.entityId,
+      componentId: target.componentId,
+      type: type,
+      data: target.data,
+      world: world,
+      handler: handler,
+      anchor: target.anchor,
+      entityLocal: target.entityLocal,
+      local: target.local,
+    );
+  }
+
+  ComponentTarget? _readComponent(SceneTab t, String id, String type, ComponentHandles handler) {
+    final node = t.tab.tree[id];
+    if (node == null) return null;
+    if (node.isDerived) {
+      final de = t.tab.expansionOf(node.anchor!)?.entity(id);
+      if (de == null) return null;
+      for (final c in de.components.entries) {
+        if (c.value.type != type) continue;
+        final data = Map<String, Object?>.from(c.value.data);
+        if (!handler.supports(data)) return null;
+        return ComponentTarget(
+          entityId: id,
+          componentId: c.key,
+          type: type,
+          data: data,
+          world: identityMatrix,
+          handler: handler,
+          anchor: node.anchor,
+          entityLocal: de.local,
+          local: c.value.local,
+        );
+      }
+      return null;
+    }
+    try {
+      final components = t.tab.document.entities([id]).entities[id]?['components'];
+      if (components is! Map) return null;
+      for (final e in components.entries) {
+        final c = e.value;
+        if (c is! Map || c['type'] != type) continue;
+        final data = c['data'] is Map ? Map<String, Object?>.from(c['data'] as Map) : <String, Object?>{};
+        if (!handler.supports(data)) return null;
+        return ComponentTarget(
+          entityId: id,
+          componentId: e.key as String,
+          type: type,
+          data: data,
+          world: identityMatrix,
+          handler: handler,
+        );
+      }
+    } on AuthoringException catch (_) {}
+    return null;
+  }
+
+  ComponentContext? _componentContext(ComponentTarget ct) {
+    final vp = viewProjection;
+    if (vp == null) return null;
+    return ComponentContext(world: ct.world, data: ct.data, vp: vp, pixelRatio: pixelRatio, aspect: aspect);
+  }
+
+  bool _beginComponentDrag(ComponentTarget ct, String id, Offset px) {
+    final c = _componentContext(ct);
+    if (c == null || !canEdit) return false;
+    final handle = ct.handler.handles(c).where((h) => h.id == id).firstOrNull;
+    if (handle == null) return false;
+    final origin = c.vp.project(c.origin);
+    drag =
+        GizmoDrag(
+            tool: tool,
+            handle: handle,
+            startPx: px,
+            frame: GizmoFrame(pivot: c.origin, axes: GizmoFrame.worldAxes, size: 1),
+            pivotPx: origin == null ? px : Offset(origin[0], origin[1]),
+            targets: const [],
+          )
+          ..currentPivot = c.origin
+          ..component = ct
+          ..componentContext = c;
+    _mode = _Mode.gizmo;
+    notifyListeners();
+    return true;
+  }
+
+  /// A component handle's drag ends: the fields it changed, one
+  /// transaction (`setField`s, or `setField` overrides on a derived
+  /// component's anchor).
+  Applied? _endComponentDrag(SceneTab t, GizmoDrag d) {
+    final ct = d.component!;
+    final commands = <Map<String, Object?>>[
+      for (final e in d.fields.entries)
+        if (d.moved && '${ct.data[e.key]}' != '${e.value}')
+          ct.isDerived
+              ? Command.setPrefabOverrideOp(
+                  ct.anchor!,
+                  prefab.setFieldOverride(
+                    entity: ct.entityLocal ?? ct.entityId,
+                    component: ct.local ?? ct.componentId,
+                    data: ct.data,
+                    path: e.key,
+                    value: e.value,
+                  ),
+                )
+              : Command.setField(ct.entityId, ct.componentId, e.key, e.value),
+    ];
+    if (commands.isEmpty) {
+      _repaint();
+      return null;
+    }
+    final a = t.tab.transaction(commands);
+    notice = a == null || !a.ok ? (t.tab.lastError ?? 'The edit was refused') : null;
+    _repaint();
+    return a;
+  }
+
+  /// What the handles edit, for the status line ("Editing Collider").
+  String? get editingLabel {
+    final ct = componentTarget();
+    if (ct == null) return null;
+    final dot = ct.type.lastIndexOf('.');
+    return ct.type.substring(dot + 1);
   }
 
   // ── Picking ──────────────────────────────────────────────────────────
@@ -1554,6 +1772,8 @@ final class SceneViewModel extends ChangeNotifier {
     if (key == LogicalKeyboardKey.escape) {
       if (drag != null) {
         cancelDrag();
+      } else if (current?.tab.editingType != null) {
+        current!.tab.editComponent(null);
       } else if (marquee != null) {
         marquee = null;
         _mode = _Mode.none;
@@ -1595,6 +1815,8 @@ final class SceneViewModel extends ChangeNotifier {
   }
 
   KeyEventResult _set(SceneTool t) {
+    // Picking a tool ends a component's editing, as in Unity.
+    current?.tab.editComponent(null);
     tool = t;
     return KeyEventResult.handled;
   }

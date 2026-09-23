@@ -441,6 +441,46 @@ class _InspectorPanelState extends State<InspectorPanel> {
 
 // ── Component card ─────────────────────────────────────────────────────────
 
+/// The card's Edit toggle (item 9g): the component's handles in the Scene
+/// view — a light's range, a collider's size, a camera's field of view.
+class _EditInSceneButton extends StatelessWidget {
+  const _EditInSceneButton({required this.model, required this.slot});
+
+  final InspectorModel model;
+  final ComponentSlot slot;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final on = model.isEditingInScene(slot);
+    return Tooltip(
+      message: on ? 'Stop editing in the Scene view (Esc)' : 'Edit in the Scene view: drag its handles',
+      waitDuration: const Duration(milliseconds: 600),
+      child: InkWell(
+        key: ValueKey('card.editInScene.${slot.key}'),
+        borderRadius: BorderRadius.circular(4),
+        onTap: () => model.toggleEditInScene(slot),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          margin: const EdgeInsets.only(right: 2),
+          decoration: BoxDecoration(
+            color: on ? t.accent.withValues(alpha: 0.22) : null,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(FIcons.editShape, size: 13, color: on ? t.accent : t.textSecondary),
+              const SizedBox(width: 3),
+              Text('Edit', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: on ? t.accent : t.textSecondary)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ComponentCard extends StatelessWidget {
   const _ComponentCard({
     super.key,
@@ -505,6 +545,8 @@ class _ComponentCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (model.canEditInScene(slot))
+                      _EditInSceneButton(model: model, slot: slot),
                     if (spec.missingSchema)
                       Tooltip(
                         message: 'No schema for ${spec.type}: fields are shown as JSON. Run `fynkel codegen`.',
