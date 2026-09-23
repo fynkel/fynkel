@@ -12,7 +12,7 @@ import 'package:ffi/ffi.dart';
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 5;
+const viewportAbiVersion = 6;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -221,6 +221,18 @@ external int _setQuality(Pointer<Void> vp, Pointer<Uint8> name, int len);
   assetId: _asset,
 )
 external int _debugLines(Pointer<Void> vp, Pointer<Float> lines, int count);
+@Native<Int32 Function(Pointer<Void>, Pointer<Float>, Uint32, Pointer<Float>, Uint32, Pointer<Float>)>(
+  symbol: 'fynkel_apple_viewport_overlay',
+  assetId: _asset,
+)
+external int _overlay(
+  Pointer<Void> vp,
+  Pointer<Float> lines,
+  int lineCount,
+  Pointer<Float> triangles,
+  int triangleCount,
+  Pointer<Float> grid,
+);
 @Native<Int32 Function(Pointer<Void>, Int32, Pointer<Uint8>, Uint32)>(
   symbol: 'fynkel_apple_viewport_read_frame',
   assetId: _asset,
@@ -314,6 +326,33 @@ class ViewportNative {
     try {
       p.asTypedList(count * 10).setAll(0, lines);
       return _debugLines(vp, p, count);
+    } finally {
+      calloc.free(p);
+    }
+  }
+
+  /// Queues the next render's overlay (viewport ABI v6): [lines] twelve
+  /// floats each, [triangles] fourteen, [grid] eighteen or null (see
+  /// `ViewportOverlay`). Returns the lines + triangles queued (a non-finite
+  /// one is dropped). Every render empties it.
+  int overlay(Pointer<Void> vp, Float32List lines, Float32List triangles, Float32List? grid) {
+    final nl = lines.length ~/ 12, nt = triangles.length ~/ 14;
+    final total = nl * 12 + nt * 14 + (grid == null ? 0 : 18);
+    if (total == 0) return 0;
+    final p = calloc<Float>(total);
+    try {
+      final all = p.asTypedList(total)
+        ..setRange(0, nl * 12, lines)
+        ..setRange(nl * 12, nl * 12 + nt * 14, triangles);
+      if (grid != null) all.setRange(nl * 12 + nt * 14, total, grid);
+      return _overlay(
+        vp,
+        nl == 0 ? nullptr : p,
+        nl,
+        nt == 0 ? nullptr : p + nl * 12,
+        nt,
+        grid == null ? nullptr : p + nl * 12 + nt * 14,
+      );
     } finally {
       calloc.free(p);
     }

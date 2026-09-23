@@ -20,3 +20,4 @@ export 'src/projection_layer.dart';
 export 'src/touch_overlay.dart';
 export 'src/viewport.dart';
 export 'src/viewport_controller.dart';
+export 'src/viewport_overlay.dart';

@@ -52,7 +52,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 5);
+    expect(viewportAbiVersion, 6);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -85,6 +85,28 @@ void main() {
     ]);
     expect(controller.debugLines(lines), 1);
     expect(controller.debugLines(Float32List(0)), 0);
+    // The overlay (viewport ABI v6): lines with a width, triangles, the
+    // grid; a NaN one is dropped (the Rust test counts them in the frame).
+    final overlay = ViewportOverlay()
+      ..line([0, 0, 0], [1, 0, 0], [1, 0, 0, 1], width: 3)
+      ..line([0, 0, 0], [double.nan, 0, 0], [1, 0, 0, 1])
+      ..segments(Float32List.fromList([0, 0, 0, 0, 1, 0, 0, 1, 0, 1]), width: 2, onTop: true)
+      ..triangle([0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1, 0.5])
+      ..grid = const OverlayGrid();
+    expect(overlay.lineCount, 3);
+    expect(overlay.lines.sublist(12, 24).sublist(10), [1.5, 0]);
+    expect(overlay.lines.sublist(24, 36), [0, 0, 0, 0, 1, 0, 0, 1, 0, 1, 2, 1]);
+    expect(controller.overlay(overlay), 3);
+    expect(controller.overlay(ViewportOverlay()), 0);
+    // Past the first capacity, nothing lost.
+    final many = ViewportOverlay();
+    for (var i = 0; i < 200; i++) {
+      many.line([i.toDouble(), 0, 0], [i.toDouble(), 1, 0], [1, 1, 1, 1]);
+    }
+    expect(many.lines[199 * 12], 199);
+    expect(controller.overlay(many), 200);
+    many.clear();
+    expect(many.isEmpty, isTrue);
     final slot = controller.render(world);
     expect(slot, isNotNull);
     expect(slot, greaterThanOrEqualTo(0));

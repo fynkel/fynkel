@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 import 'package:fynkel/fynkel.dart';
 
 import 'viewport_native.dart';
+import 'viewport_overlay.dart';
 
 export 'viewport_native.dart' show ViewportStatsSnapshot, renderNoWorld, viewportAbiVersion;
 
@@ -310,14 +311,24 @@ class FynkelViewportController extends ChangeNotifier {
 
   /// Queues world-space line segments the next [render] draws on top of
   /// the scene — ten floats each, `ax ay az bx by bz r g b a` (metres;
-  /// linear RGBA), flat in [lines] — through the renderer's debug pass
-  /// (depth-tested, unlit; the editor's grid, gizmos and outlines). The
+  /// linear RGBA), flat in [lines] — as overlay lines 1.5 px wide that fade
+  /// behind the scene ([overlay] sets widths, triangles and a grid). The
   /// queue empties with every render: queue, then render, every frame.
   /// Returns the segments queued, or null when the viewport is not
   /// attached.
   int? debugLines(Float32List lines) {
     if (_state != ViewportState.attached) return null;
     return _native!.debugLines(_viewport, lines);
+  }
+
+  /// Queues [overlay] for the next [render] (ADR-0019): its lines,
+  /// triangles and ground grid draw after post, at the target's
+  /// resolution, never exposed or tone mapped — the editor's grid, gizmos
+  /// and handles. The queue empties with every render. Returns the lines +
+  /// triangles queued, or null when the viewport is not attached.
+  int? overlay(ViewportOverlay overlay) {
+    if (_state != ViewportState.attached) return null;
+    return _native!.overlay(_viewport, overlay.lines, overlay.triangles, overlay.grid?.pack());
   }
 
   /// The pixels of the frame a [render] returned as [slot]: tightly packed
