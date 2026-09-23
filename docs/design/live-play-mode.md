@@ -209,10 +209,10 @@ While the game runs in the Game view:
   puts them back before its transaction writes the end, as the edit
   preview does. Where it differs: delete is in (the note had rename and
   reparent only); a transaction stops at its first refusal and keeps
-  what went before (the world has no undo); create, duplicate, prefab
-  commands and undo are refused while the game runs; a removed script
-  goes at the world's next step and is hidden until then; a rename does
-  not reach `GameObject.name`, which is fixed at spawn in package:fynkel.
+  what went before (the world has no undo); prefab commands and undo are
+  refused while the game runs (create and duplicate were too, until the
+  gaps below); a removed script goes at the world's next step and is
+  hidden until then.
 - **L4 — Keep it.** Apply to Scene / Apply Field to Scene, prefab
   overrides included.
   **Done 2026-09-23** (`0a456d3`). The component menu's Apply to Scene
@@ -229,7 +229,8 @@ While the game runs in the Game view:
   numbers are written as the shortest decimal of their float; the
   default Transform the world gives an entity the scene has none for is
   not added. Removing a component, a rename, a new parent or a delete is
-  not applied (the menus are on what is there). Checked on the
+  not applied here (the menus are on what is there; the Hierarchy's
+  Apply to Scene, below, does those). Checked on the
   reference game's Playground one step in: of 497 components only those
   that moved (animation, physics, spinners, the oscillator) have
   anything to apply.
@@ -253,6 +254,26 @@ While the game runs in the Game view:
   JIT): the outline 0.05 ms a frame, with the icons (895 lines) 1.1 ms —
   the same call the edit Scene view makes, now every frame while the
   game runs.
+- **The gaps after L1–L5** (the user's ask, 2026-09-23: "finish the
+  gaps in play").
+  **Done 2026-09-23** (`2b5c65c` `World::spawn_now`, `ee2a7b2` the live
+  `spawn` call, `c286f8e` `LiveWorld.spawn`, `de764f2` `GameObject.name`
+  follows a rename, `9ab30ea` editor). Create Empty, Create with… and
+  Duplicate work while the game runs: the object is spawned at once under
+  a fresh authoring id in the scene it joins (native components with it,
+  scripts added right after), and the Hierarchy selects it. A rename
+  reaches the scripts' `GameObject.name`. The Hierarchy's row menu offers
+  Apply to Scene during Play for whole objects: name, parent, component
+  values, components added or removed during Play, children, and objects
+  made during Play (created under the same ids), in one transaction on
+  the scene's tab; a child deleted during Play is deleted with it, and
+  the Playing header offers "Apply N deletions to Scene" for the rest.
+  Only what the user did is applied: the game's own objects (`runtime:`),
+  its removals and its destroys are not, and a component the world does
+  not show (a script that did not load) is kept. A new order among the
+  same siblings is not applied. Checked on the reference game's
+  Playground 30 steps in: Apply on every root gives only position and
+  rotation writes for what moved (52), nothing else.
 
 Each step is usable on its own: after L2 you can watch the game's state,
 after L3 tune it live, after L4 keep what works.
