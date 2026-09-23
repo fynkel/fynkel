@@ -215,6 +215,24 @@ While the game runs in the Game view:
   not reach `GameObject.name`, which is fixed at spawn in package:fynkel.
 - **L4 — Keep it.** Apply to Scene / Apply Field to Scene, prefab
   overrides included.
+  **Done 2026-09-23** (`0a456d3`). The component menu's Apply to Scene
+  and a field row's right click (on its label) Apply Field to Scene,
+  offered while the Inspector shows the running game, for entities the
+  open scene has. One transaction on the scene's tab: only the keys that
+  differ (a key the scene leaves out compared with the type's default),
+  or an `addComponent` for a component the scene lacks; an entity of a
+  prefab instance gets `setField`/`addComponent` overrides on its anchor,
+  its expansion fetched when the scene's tree has not needed it yet.
+  Where it differs: numbers a millionth apart (of their size, above one)
+  are the same value — the world's floats and its renormalised
+  rotations otherwise make every component look changed — and native
+  numbers are written as the shortest decimal of their float; the
+  default Transform the world gives an entity the scene has none for is
+  not added. Removing a component, a rename, a new parent or a delete is
+  not applied (the menus are on what is there). Checked on the
+  reference game's Playground one step in: of 497 components only those
+  that moved (animation, physics, spinners, the oscillator) have
+  anything to apply.
 - **L5 — Fly around it.** The Scene view on the running world: the
   editor camera override, picking, gizmos.
   **Done 2026-09-23, ahead of L3 and L4** (the user's call after trying
