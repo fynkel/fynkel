@@ -489,6 +489,40 @@ Measured on mac-m3max-2026 at 1600×1104 physical, 24 satellites: 120 Hz
 frames, 60 fixed ticks/s, Dart simulate ≈ 0.02 ms, `render()` call ≈ 0.1 ms,
 present lag 0, no dropped frames.
 
+## The game's entry point and the editor's Play (ADR-0021)
+
+A game has one entry point, `lib/fynkel_game.dart`:
+`Widget buildGame(FynkelLaunch launch)` returns the game's whole app (its
+own `MaterialApp`, theme and navigator). Two hosts call it:
+
+- **A build.** `main.dart` is `runApp(buildGame(FynkelLaunch.fromEnvironment()))`.
+  `FynkelLaunch.fromEnvironment` takes the project from `FYNKEL_PROJECT`
+  (`--dart-define` or the environment, which `fynkel run` sets), else from
+  the working directory when it holds `fynkel.project.json`. It takes the
+  start scene from `FYNKEL_SCENE`.
+- **The editor's Play.** The editor mounts the same `buildGame` in its
+  Game view with the open project, the open scene and `inEditor: true`.
+
+`fynkel create` writes both files; the reference game uses them.
+
+`package:fynkel_flutter` also carries what a game asks of its host:
+
+- **`FynkelApplication.quit()`** (Unity's `Application.Quit`) exits the
+  process in a build and ends Play in the editor, which installs its own
+  `onQuit`. Games call it, never `exit()`. `FynkelApplication.inEditor`
+  says which host the game is in.
+- **`FynkelPlayScope` / `FynkelPlayControl`** carry the editor's Pause and
+  Step. Every `FynkelGameView` below the scope, through the game's own
+  `MaterialApp`, obeys them without game code:
+  - **Pause** mutes the loop and suspends the audio.
+  - **Step** runs one frame of the world's fixed step on the next Flutter
+    frame.
+
+  The game's own pause (`setPaused`, its pause menu) is independent of the
+  editor's: either one holds the loop.
+
+Tested in `packages/fynkel_flutter/test/application_test.dart`.
+
 ## The editor channel (M4-08)
 
 A game started by the editor reports what it is doing on **its own

@@ -11,6 +11,7 @@
 /// this machine.
 library;
 
+export 'src/application.dart';
 export 'src/bundled_cache.dart';
 export 'src/game_view.dart';
 export 'src/heap_probe.dart';

@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fynkel/fynkel.dart';
 
+import 'application.dart';
 import 'heap_probe.dart';
 import 'input_capture.dart';
 import 'percentiles.dart';
@@ -248,7 +249,9 @@ class FynkelGameView extends StatefulWidget {
   final Widget? overlay;
 
   /// Mute the ticker while the app is hidden/paused (the clock restarts on
-  /// resume so no catch-up burst of fixed ticks follows).
+  /// resume so no catch-up burst of fixed ticks follows). Independently,
+  /// a [FynkelPlayScope] above the view (the editor's Play, ADR-0021)
+  /// pauses it — loop and audio — and steps it one fixed step at a time.
   final bool pauseWhenHidden;
 
   /// Open the world's output device (`world.audio.open()`, M3-11) when
@@ -315,10 +318,16 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   // Reused per tick (a frame allocates no timers).
   final _simWatch = Stopwatch(), _renderWatch = Stopwatch();
 
-  /// Whether the loop is currently muted (hidden, or [setPaused]).
+  /// Whether the loop is currently muted (hidden, [setPaused], or the
+  /// editor's Pause).
   bool get paused => _ticker.muted;
   bool _pausedByUser = false;
   bool _hidden = false;
+
+  /// The editor's Pause ([FynkelPlayScope]): the loop and the audio stop.
+  bool get hostPaused => _hostPaused;
+  bool _hostPaused = false;
+  FynkelPlayControl? _play;
 
   /// Pause/resume the loop; the clock is re-primed on resume.
   void setPaused(bool v) {
@@ -329,8 +338,8 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   bool _openedAudio = false;
 
   void _applyMute() {
-    if (widget.audio) widget.world.audio.suspend(_hidden);
-    final mute = _pausedByUser || (widget.pauseWhenHidden && _hidden);
+    if (widget.audio) widget.world.audio.suspend(_hidden || _hostPaused);
+    final mute = _pausedByUser || _hostPaused || (widget.pauseWhenHidden && _hidden);
     if (_ticker.muted == mute) return;
     _ticker.muted = mute;
     if (mute) {
@@ -444,6 +453,25 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   void didChangeDependencies() {
     super.didChangeDependencies();
     _pixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+    // The editor's Pause and Step: this runs again whenever they change.
+    final play = _play = FynkelPlayScope.maybeOf(context);
+    final hostPaused = play?.paused ?? false;
+    if (hostPaused != _hostPaused) {
+      _hostPaused = hostPaused;
+      _applyMute();
+    }
+    if (play != null && _hostPaused && play.takeStep()) _scheduleStep();
+  }
+
+  /// One frame of the world's fixed step on the next Flutter frame (Step
+  /// while paused); further steps queued meanwhile follow one per frame.
+  void _scheduleStep() {
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      if (!mounted || !_hostPaused) return;
+      _frame(widget.world.fixedDt);
+      if (_play?.takeStep() ?? false) _scheduleStep();
+    });
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   @override
@@ -497,7 +525,6 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   }
 
   void _onTick(Duration elapsed) {
-    final world = widget.world;
     var dt = 0.0;
     if (_primed && _lastTick != null) {
       dt = (elapsed - _lastTick!).inMicroseconds / 1e6;
@@ -508,6 +535,12 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     }
     _lastTick = elapsed;
     _primed = true;
+    _frame(dt);
+  }
+
+  /// One frame of [dt] seconds: the world's frame, then the render.
+  void _frame(double dt) {
+    final world = widget.world;
     _frames++;
 
     final sim = _simWatch
