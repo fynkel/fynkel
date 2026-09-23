@@ -1606,5 +1606,5 @@ The M3 backlog as it landed, for the record:
    Follow and camera-rig targets; the reference game's `Switch.target` a
    line to its gate. Shared touches in `package:fynkel`,
    `package:fynkel_generator` and `package:fynkel_flutter`, each its own
-   commit; 321 editor tests. Next: the user's 9g gate, then
-   item 9 (Profiler, IDE navigation, `fynkel editor`, polish).
+   commit; 321 editor tests. **9g done** (the user's gate passed
+   2026-09-23). Next: item 9 (Profiler, IDE navigation, `fynkel editor`, polish).
