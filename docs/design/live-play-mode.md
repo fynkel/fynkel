@@ -182,6 +182,19 @@ While the game runs in the Game view:
 - **L2 — See it.** `PlayDocument`; the Hierarchy and Inspector switch
   during Play, read-only; selection carried both ways; the play-mode tint
   and the header. Measure the refresh cost.
+  **Done 2026-09-23** (`5f4fd33` authoring, `b2d5096` `LiveWorld`,
+  `5fabfa8` editor). Refresh on the reference game's Playground (180
+  entities once loaded, not 169), release native library, `flutter test`
+  JIT: median 0.14 ms with nothing selected, 0.19 ms with one entity,
+  0.26 ms with five. Where it differs from decision 5: the table is not
+  compared by bytes in Dart — sending it took ~0.6 ms alone — but hashed
+  by the world (`entities { since }` answers `unchanged` without rows), so
+  a refresh after a spawn, destroy, rename or re-parent still costs
+  ~0.8 ms; the poll runs while Play runs whether or not the panels are
+  visible, and at the same rate when paused. The measurement had no Dart
+  behaviours registered (their fields are read only for selected
+  entities). Also fixed on the way: a game that makes its world in
+  `initState` sent the Play log a record during a build.
 - **L3 — Change it.** Editing native components and behaviour fields,
   add/remove component, rename and reparent; at once when paused.
 - **L4 — Keep it.** Apply to Scene / Apply Field to Scene, prefab
