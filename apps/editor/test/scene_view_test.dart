@@ -15,7 +15,6 @@ import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/hierarchy/transform_math.dart';
 import 'package:fynkel_editor/src/inspector/field_widgets.dart' show AssetDragPayload;
 import 'package:fynkel_editor/src/scene_view/editor_state.dart';
-import 'package:fynkel_editor/src/scene_view/gizmo.dart';
 import 'package:fynkel_editor/src/scene_view/orientation_gizmo.dart';
 import 'package:fynkel_editor/src/scene_view/scene_math.dart';
 import 'package:fynkel_editor/src/scene_view/scene_panel.dart';
@@ -316,12 +315,11 @@ void main() {
       final st = r.open();
       r.model.tool = SceneTool.move;
       st.tab.select('floor');
-      final g = r.model.projectedGizmo()!;
-      final tip = g.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
-      expect(g.hitTest(tip), GizmoHandle.x);
+      final tip = r.model.grabPoint('move.x')!;
+      expect(r.model.handleAt(tip)?.id, 'move.x');
 
       final startPosition = st.tab.tree['floor']!.transform!.position;
-      expect(r.model.beginDrag(GizmoHandle.x, tip), isTrue);
+      expect(r.model.beginDrag('move.x', tip), isTrue);
       expect(r.model.drag, isNotNull);
       r.model.updateDrag(tip + const Offset(80, 0));
       // Previewed, not written.
@@ -359,8 +357,8 @@ void main() {
       r.model.tool = SceneTool.move;
       r.model.snap = r.model.snap.copyWith(enabled: true, move: 1);
       st.tab.select('floor');
-      var tip = r.model.projectedGizmo()!.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
-      r.model.beginDrag(GizmoHandle.x, tip);
+      var tip = r.model.grabPoint('move.x')!;
+      r.model.beginDrag('move.x', tip);
       r.model.updateDrag(tip + const Offset(70, 0));
       final x = r.preview.overrides['floor']!.position[0];
       expect(x, closeTo(x.roundToDouble(), 1e-9));
@@ -368,8 +366,8 @@ void main() {
       r.model.endDrag();
       expect(r.applies(), 1);
 
-      tip = r.model.projectedGizmo()!.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
-      r.model.beginDrag(GizmoHandle.x, tip);
+      tip = r.model.grabPoint('move.x')!;
+      r.model.beginDrag('move.x', tip);
       r.model.updateDrag(tip + const Offset(70, 0), invertSnap: true);
       final x2 = r.preview.overrides['floor']!.position[0];
       expect(x2, isNot(closeTo(x2.roundToDouble(), 1e-6)), reason: '⌘ turns snapping off for this drag');
@@ -377,8 +375,8 @@ void main() {
       expect(r.preview.overrides, isEmpty);
       expect(r.applies(), 1, reason: 'Escape writes nothing');
 
-      tip = r.model.projectedGizmo()!.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
-      r.model.beginDrag(GizmoHandle.x, tip);
+      tip = r.model.grabPoint('move.x')!;
+      r.model.beginDrag('move.x', tip);
       r.model.updateDrag(tip + const Offset(1, 0));
       expect(r.model.endDrag(), isNull);
       expect(r.applies(), 1, reason: 'a click on a handle writes nothing');
@@ -390,14 +388,13 @@ void main() {
       final st = r.open();
       st.tab.select('crate');
       r.model.tool = SceneTool.rotate;
-      var g = r.model.projectedGizmo()!;
-      final yRing = g.handles.singleWhere((h) => h.handle == GizmoHandle.y);
-      final grab = yRing.points[3];
-      expect(g.hitTest(grab), GizmoHandle.y);
-      r.model.beginDrag(GizmoHandle.y, grab);
+      var pivotPx = r.model.gizmoPivotPx!;
+      final grab = r.model.grabPoint('rotate.y')!;
+      expect(r.model.handleAt(grab)?.id, 'rotate.y');
+      r.model.beginDrag('rotate.y', grab);
       // Sweep a quarter turn around the projected pivot.
-      final rel = grab - g.pivot;
-      final rotated = g.pivot + Offset(-rel.dy, rel.dx);
+      final rel = grab - pivotPx;
+      final rotated = pivotPx + Offset(-rel.dy, rel.dx);
       r.model.updateDrag(rotated);
       expect(r.model.drag!.readout, endsWith('°'));
       final applied = r.model.endDrag()!;
@@ -410,9 +407,9 @@ void main() {
       expect(r.applies(), 1);
 
       r.model.tool = SceneTool.scale;
-      g = r.model.projectedGizmo()!;
-      r.model.beginDrag(GizmoHandle.center, g.pivot + const Offset(40, 0));
-      r.model.updateDrag(g.pivot + const Offset(80, 0));
+      pivotPx = r.model.gizmoPivotPx!;
+      r.model.beginDrag('scale.uniform', pivotPx + const Offset(40, 0));
+      r.model.updateDrag(pivotPx + const Offset(80, 0));
       expect(r.model.drag!.readout, startsWith('×'));
       expect(r.model.endDrag()!.ok, isTrue);
       final s = st.tab.tree['crate']!.transform!;
@@ -433,9 +430,8 @@ void main() {
       st.tab.select('arm', toggle: true); // below robot: the parent moves it
       r.editorState.scene(r.document.id).locked.add('floor');
       st.tab.select('floor', toggle: true);
-      final g = r.model.projectedGizmo()!;
-      final tip = g.handles.singleWhere((h) => h.handle == GizmoHandle.z).tip!;
-      r.model.beginDrag(GizmoHandle.z, tip);
+      final tip = r.model.grabPoint('move.z')!;
+      r.model.beginDrag('move.z', tip);
       expect(r.model.drag!.ids.toSet(), {'crate', 'robot'});
       r.model.updateDrag(tip + const Offset(0, -60));
       final a = r.model.endDrag()!;
@@ -500,10 +496,9 @@ void main() {
       expect(mesh.transformId, 'inst:t');
       st.tab.select('inst:mesh');
       expect(r.model.noGizmoReason, isNull, reason: 'a derived entity with a Transform has the gizmo');
-      expect(r.model.gizmoGeometry()!.pivot, [2, 1, 0], reason: 'the derived entity\'s world origin');
-      final g = r.model.projectedGizmo()!;
-      final tip = g.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
-      expect(r.model.beginDrag(GizmoHandle.x, tip), isTrue);
+      expect(r.model.gizmoFrame()!.pivot, [2, 1, 0], reason: 'the derived entity\'s world origin');
+      final tip = r.model.grabPoint('move.x')!;
+      expect(r.model.beginDrag('move.x', tip), isTrue);
       r.model.updateDrag(tip + const Offset(80, 0));
       expect(r.preview.overrides.keys, ['inst:mesh'], reason: 'previewed on the derived entity in the world');
       final previewed = r.preview.overrides['inst:mesh']!;
@@ -542,8 +537,8 @@ void main() {
       st.tab.select('floor');
       expect(r.model.canEdit, isFalse);
       expect(r.model.noGizmoReason, contains('read-only'));
-      expect(r.model.projectedGizmo(), isNull);
-      expect(r.model.beginDrag(GizmoHandle.x, const Offset(500, 400)), isFalse);
+      expect(r.model.handles(), isEmpty);
+      expect(r.model.beginDrag('move.x', const Offset(500, 400)), isFalse);
     });
   });
 
@@ -581,12 +576,12 @@ void main() {
       expect(r.editorState.scene(r.document.id).locked, {'floor'});
       expect(r.model.hitsAt(r.pixelOf('floor')), ['behind'], reason: 'the lock lets the click through to Behind');
       r.model.tool = SceneTool.move;
-      expect(r.model.gizmoGeometry(), isNull, reason: 'nothing draggable is selected');
+      expect(r.model.gizmoFrame(), isNull, reason: 'nothing draggable is selected');
       expect(r.model.noGizmoReason, contains('locked'));
       st.tab.select('crate', toggle: true);
-      expect(r.model.gizmoGeometry(), isNotNull);
+      expect(r.model.gizmoFrame(), isNotNull);
       expect(r.model.noGizmoReason, isNull);
-      expect(r.model.gizmoGeometry()!.pivot, [4, 0, 0], reason: 'the crate, not the locked floor');
+      expect(r.model.gizmoFrame()!.pivot, [4, 0, 0], reason: 'the crate, not the locked floor');
       r.model.toggleLockedSelection();
       expect(r.editorState.scene(r.document.id).locked, {'floor', 'crate'}, reason: 'not all were locked → lock all');
       r.model.toggleLockedSelection();
@@ -920,7 +915,7 @@ void main() {
       expect(st.camera.orthographic, isTrue);
       st.tab.select('crate');
       await tester.pump();
-      expect(r.model.projectedGizmo(), isNotNull);
+      expect(r.model.handles(), isNotEmpty);
       await tester.tap(find.byKey(const Key('scene.hide')));
       expect(r.model.isHidden('crate'), isTrue);
       await tester.pump(); // Show All is enabled only while something is hidden
@@ -942,7 +937,7 @@ void main() {
       st.tab.select('floor');
       r.model.tool = SceneTool.move;
       await tester.pump();
-      final tip = r.model.projectedGizmo()!.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
+      final tip = r.model.grabPoint('move.x')!;
       final gesture = await tester.startGesture(o + tip, kind: PointerDeviceKind.mouse);
       await tester.pump();
       expect(r.model.drag, isNotNull);

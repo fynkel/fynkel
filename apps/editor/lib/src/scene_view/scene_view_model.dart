@@ -37,6 +37,7 @@ import '../project/editor_project.dart';
 import '../theme/tokens.dart' show GizmoTokens;
 import 'editor_state.dart';
 import 'gizmo.dart';
+import 'scene_tools.dart';
 import 'png.dart';
 import 'scene_math.dart';
 
@@ -153,28 +154,24 @@ final class GizmoTarget {
   late Trs current = startLocal;
 }
 
-/// A gizmo drag in flight.
+/// A handle drag in flight.
 final class GizmoDrag {
   GizmoDrag({
     required this.tool,
     required this.handle,
     required this.startPx,
-    required this.pivot,
-    required this.axes,
-    required this.size,
-    required this.projected,
+    required this.frame,
+    required this.pivotPx,
     required this.targets,
   });
 
   final SceneTool tool;
-  final GizmoHandle handle;
+  final Handle handle;
   final Offset startPx;
 
-  /// The gizmo's frame at the drag's start.
-  final Vec3 pivot;
-  final List<Vec3> axes;
-  final double size;
-  final ProjectedGizmo projected;
+  /// The gizmo's frame at the drag's start, and its pivot's pixel.
+  final GizmoFrame frame;
+  final Offset pivotPx;
   final List<GizmoTarget> targets;
 
   /// The pivot now (moves with the lead).
@@ -248,8 +245,8 @@ final class SceneViewModel extends ChangeNotifier {
   /// The pointer's last position (physical pixels) for hover and keys.
   Offset? pointer;
 
-  /// The handle under the pointer.
-  GizmoHandle? hoverHandle;
+  /// The id of the handle under the pointer.
+  String? hoverHandle;
 
   /// The drag in flight.
   GizmoDrag? drag;
@@ -905,7 +902,37 @@ final class SceneViewModel extends ChangeNotifier {
       final l = t.preview!.lines(outline: outline, iconsAspect: showOverlays ? aspect : null);
       if (l.count > 0) o.segments(l.data, width: width);
     }
+    _drawHandles(o);
     return o;
+  }
+
+  /// The tool's handles, on top of everything: the dragged or hovered one
+  /// in the highlight colour, the others dimmed while a drag is on.
+  void _drawHandles(ViewportOverlay o) {
+    final active = drag?.handle.id ?? hoverHandle;
+    final highlight = GizmoTokens.linear(GizmoTokens.highlight);
+    for (final h in handles()) {
+      final base = h.id == active ? highlight : h.color;
+      final dim = drag != null && h.id != active ? 0.35 : 1.0;
+      List<double> alpha(double a) => [base[0], base[1], base[2], base[3] * a * dim];
+      final width = (h.width == HandleWidth.handle ? GizmoTokens.handleWidth : GizmoTokens.lineWidth) * pixelRatio;
+      final line = alpha(1);
+      for (final l in h.shape.lines) {
+        for (var i = 0; i + 1 < l.length; i++) {
+          o.line(l[i], l[i + 1], line, width: width, onTop: true);
+        }
+      }
+      final back = alpha(0.3);
+      for (final l in h.shape.back) {
+        for (var i = 0; i + 1 < l.length; i++) {
+          o.line(l[i], l[i + 1], back, width: GizmoTokens.lineWidth * pixelRatio, onTop: true);
+        }
+      }
+      final fill = alpha(h.shape.fill);
+      for (final t in h.shape.triangles) {
+        o.triangle(t[0], t[1], t[2], fill, onTop: true);
+      }
+    }
   }
 
   // ── Gizmo ────────────────────────────────────────────────────────────
@@ -928,7 +955,7 @@ final class SceneViewModel extends ChangeNotifier {
   /// explain (no selection, the select tool).
   String? get noGizmoReason {
     final t = current;
-    if (t == null || !t.hasPreview || tool == SceneTool.select || t.tab.selection.isEmpty) return null;
+    if (t == null || !t.hasPreview || !tool.hasGizmo || t.tab.selection.isEmpty) return null;
     if (t.tab.document.readOnly != null) return 'read-only: no gizmo';
     if (_dragTargets(t).isNotEmpty) return null;
     final top = t.tab.tree.topmost(t.tab.selection);
@@ -940,55 +967,78 @@ final class SceneViewModel extends ChangeNotifier {
   }
 
   /// The gizmo's frame for the selection now: pivot at the lead's origin,
-  /// world or local axes. Null when the tool is select, nothing draggable
-  /// is selected or the preview is gone.
-  GizmoGeometry? gizmoGeometry() {
+  /// world or local axes. Null when the tool has no gizmo, nothing
+  /// draggable is selected or the preview is gone.
+  GizmoFrame? gizmoFrame() {
     final t = current;
     final vp = viewProjection;
-    if (t == null || !t.hasPreview || vp == null || tool == SceneTool.select) return null;
+    if (t == null || !t.hasPreview || vp == null || !tool.hasGizmo) return null;
     if (t.tab.document.readOnly != null) return null; // nothing to drag into
     final d = drag;
-    if (d != null) {
-      return GizmoGeometry(tool: d.tool, pivot: d.currentPivot, axes: d.axes, size: d.size);
-    }
+    if (d != null) return GizmoFrame(pivot: d.currentPivot, axes: d.frame.axes, size: d.frame.size);
     final targets = _dragTargets(t);
     if (targets.isEmpty) return null;
     final lead = targets.first;
     final world = t.preview!.worldMatrices([lead])[lead];
     if (world == null) return null;
     final pivot = matTranslation(world);
-    final local = space == GizmoSpace.local || tool == SceneTool.scale;
-    final axes = local
-        ? matAxes(world)
-        : const [
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-          ];
-    return GizmoGeometry(
-      tool: tool,
+    final local = space == GizmoSpace.local || tool.alwaysLocal;
+    return GizmoFrame(
       pivot: pivot,
-      axes: axes,
-      size: vp.metresPerPixel(pivot) * GizmoGeometry.screenSize,
+      axes: local ? matAxes(world) : GizmoFrame.worldAxes,
+      size: vp.metresPerPixel(pivot) * GizmoFrame.screenSize * pixelRatio,
     );
   }
 
-  /// The gizmo on screen now.
-  ProjectedGizmo? projectedGizmo() {
-    final g = gizmoGeometry();
+  ToolContext? _context(GizmoFrame? frame, {bool snapping = false}) {
     final vp = viewProjection;
-    if (g == null || vp == null) return null;
-    return ProjectedGizmo.project(g, vp);
+    if (frame == null || vp == null) return null;
+    return ToolContext(frame: frame, vp: vp, snap: snap, snapping: snapping);
   }
 
-  /// Starts a drag on [handle] from [px]; false when nothing is draggable.
-  bool beginDrag(GizmoHandle handle, Offset px) {
-    final t = current;
-    final g = gizmoGeometry();
+  /// The tool's handles on the selection now (during a drag, the dragged
+  /// tool's, following the pivot).
+  List<Handle> handles() {
+    final c = _context(gizmoFrame());
+    if (c == null) return const [];
+    return (drag?.tool ?? tool).handles(c);
+  }
+
+  /// The pivot's pixel, when there is a gizmo.
+  Offset? get gizmoPivotPx {
+    final f = gizmoFrame();
+    final r = f == null ? null : viewProjection?.project(f.pivot);
+    return r == null ? null : Offset(r[0], r[1]);
+  }
+
+  /// The handle under [px] (physical pixels).
+  Handle? handleAt(Offset px) {
     final vp = viewProjection;
-    if (t == null || g == null || vp == null || !canEdit) return false;
-    final projected = ProjectedGizmo.project(g, vp);
-    if (projected == null) return false;
+    if (vp == null) return null;
+    return hitTestHandles([for (final h in handles()) ProjectedHandle(h, vp)], px, tolerance: 8 * pixelRatio);
+  }
+
+  /// The pixel where handle [id] is grabbed; null when it is not on screen.
+  Offset? grabPoint(String id) {
+    final vp = viewProjection;
+    for (final h in handles()) {
+      if (h.id != id) continue;
+      final r = vp?.project(h.grab);
+      return r == null ? null : Offset(r[0], r[1]);
+    }
+    return null;
+  }
+
+  /// Starts a drag on handle [id] from [px]; false when nothing is
+  /// draggable or the tool has no such handle.
+  bool beginDrag(String id, Offset px) {
+    final t = current;
+    final frame = gizmoFrame();
+    final c = _context(frame);
+    if (t == null || frame == null || c == null || !canEdit) return false;
+    final handle = tool.handles(c).where((h) => h.id == id).firstOrNull;
+    final pivot = c.vp.project(frame.pivot);
+    if (handle == null || pivot == null) return false;
     final ids = _dragTargets(t);
     final matrices = t.preview!.worldMatrices([...ids, for (final id in ids) ?t.tab.tree[id]?.parent]);
     final targets = <GizmoTarget>[];
@@ -1014,23 +1064,22 @@ final class SceneViewModel extends ChangeNotifier {
     }
     if (targets.isEmpty) return false;
     drag = GizmoDrag(
-      tool: g.tool,
+      tool: tool,
       handle: handle,
       startPx: px,
-      pivot: g.pivot,
-      axes: g.axes,
-      size: g.size,
-      projected: projected,
+      frame: frame,
+      pivotPx: Offset(pivot[0], pivot[1]),
       targets: targets,
-    )..currentPivot = List.of(g.pivot);
+    )..currentPivot = List.of(frame.pivot);
     _mode = _Mode.gizmo;
     notifyListeners();
     return true;
   }
 
-  /// The pointer moved to [px] during a drag: the targets' transforms are
-  /// previewed in the world (no document change). [invertSnap] (⌘ held)
-  /// flips the snap setting for this move.
+  /// The pointer moved to [px] during a drag: the handle's constraint
+  /// reads the motion, the tool turns it into an edit, and the targets'
+  /// transforms are previewed in the world (no document change).
+  /// [invertSnap] (⌘ held) flips the snap setting for this move.
   void updateDrag(Offset px, {bool invertSnap = false}) {
     final d = drag;
     final t = current;
@@ -1038,124 +1087,40 @@ final class SceneViewModel extends ChangeNotifier {
     if (d == null || t == null || vp == null) return;
     if ((px - d.startPx).distance < 2 && !d.moved) return;
     d.moved = true;
-    final snapping = snap.enabled != invertSnap;
-    final r0 = vp.rayAt(d.startPx.dx, d.startPx.dy);
-    final r1 = vp.rayAt(px.dx, px.dy);
-    final camForward = t.camera.forward;
-    List<double>? delta; // the rigid/scale transform about the pivot, as a matrix
-    switch (d.tool) {
-      case SceneTool.select:
-        return;
-      case SceneTool.move:
-        Vec3 move;
-        if (d.handle.isAxis) {
-          final axis = d.axes[d.handle.axisIndex];
-          final s0 = r0.closestOnLine(d.pivot, axis);
-          final s1 = r1.closestOnLine(d.pivot, axis);
-          if (s0 == null || s1 == null) return;
-          var s = s1 - s0;
-          if (snapping) s = snapTo(s, snap.move);
-          move = vScale(axis, s);
-          d.readout = '${_fmt(s)} m';
-        } else {
-          final normal = d.handle.isPlane ? d.axes[d.handle.planeNormalIndex] : camForward;
-          final h0 = r0.hitPlane(d.pivot, normal);
-          final h1 = r1.hitPlane(d.pivot, normal);
-          if (h0 == null || h1 == null) return;
-          move = vSub(h1, h0);
-          if (snapping) {
-            if (d.handle.isPlane) {
-              final (a, b) = d.handle.planeAxes;
-              final sa = snapTo(vDot(move, d.axes[a]), snap.move);
-              final sb = snapTo(vDot(move, d.axes[b]), snap.move);
-              move = vAdd(vScale(d.axes[a], sa), vScale(d.axes[b], sb));
-            } else {
-              move = [for (final v in move) snapTo(v, snap.move)];
-            }
-          }
-          d.readout = '${_fmt(vLength(move))} m';
-        }
-        delta = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, move[0], move[1], move[2], 1];
-        d.currentPivot = vAdd(d.pivot, move);
-      case SceneTool.rotate:
-        final pivotPx = d.projected.pivot;
-        final a0 = math.atan2(d.startPx.dy - pivotPx.dy, d.startPx.dx - pivotPx.dx);
-        final a1 = math.atan2(px.dy - pivotPx.dy, px.dx - pivotPx.dx);
-        var angle = a1 - a0;
-        while (angle > math.pi) {
-          angle -= 2 * math.pi;
-        }
-        while (angle < -math.pi) {
-          angle += 2 * math.pi;
-        }
-        Vec3 axis;
-        if (d.handle.isAxis) {
-          axis = d.axes[d.handle.axisIndex];
-          // Screen angles grow clockwise (y down); a positive rotation
-          // about an axis pointing at the camera looks counter-clockwise.
-          if (d.projected.axisDepth[d.handle.axisIndex]) angle = -angle;
-        } else {
-          axis = camForward;
-        }
-        if (snapping) angle = snapTo(angle, snap.angle * math.pi / 180);
-        d.readout = '${_fmt(angle * 180 / math.pi)}°';
-        final q = quatFromAxisAngle(axis, angle);
-        final r = quatToMatrix(q);
-        delta = matMul(_translation(d.pivot), matMul(r, _translation(vScale(d.pivot, -1))));
-        d.currentPivot = List.of(d.pivot);
-      case SceneTool.scale:
-        List<double> f;
-        if (d.handle.isAxis) {
-          final axis = d.axes[d.handle.axisIndex];
-          final s0 = r0.closestOnLine(d.pivot, axis);
-          final s1 = r1.closestOnLine(d.pivot, axis);
-          if (s0 == null || s1 == null) return;
-          var factor = 1 + (s1 - s0) / d.size;
-          if (snapping) factor = snapTo(factor, snap.scale);
-          factor = math.max(factor, 0.001);
-          f = [1, 1, 1];
-          f[d.handle.axisIndex] = factor;
-          d.readout = '×${_fmt(factor)}';
-        } else {
-          final pivotPx = d.projected.pivot;
-          final l0 = (d.startPx - pivotPx).distance;
-          final l1 = (px - pivotPx).distance;
-          var factor = l0 < 1 ? 1.0 : l1 / l0;
-          if (snapping) factor = snapTo(factor, snap.scale);
-          factor = math.max(factor, 0.001);
-          f = [factor, factor, factor];
-          d.readout = '×${_fmt(factor)}';
-        }
-        // Scale along the gizmo axes about the pivot: A·diag(f)·Aᵀ.
-        final a = d.axes;
-        final s = List<double>.filled(16, 0);
-        for (var r = 0; r < 3; r++) {
-          for (var c = 0; c < 3; c++) {
-            var v = 0.0;
-            for (var k = 0; k < 3; k++) {
-              v += a[k][r] * f[k] * a[k][c];
-            }
-            s[c * 4 + r] = v;
-          }
-        }
-        s[15] = 1;
-        delta = matMul(_translation(d.pivot), matMul(s, _translation(vScale(d.pivot, -1))));
-        d.currentPivot = List.of(d.pivot);
-    }
+    final c = ToolContext(frame: d.frame, vp: vp, snap: snap, snapping: snap.enabled != invertSnap);
+    final value = d.handle.constraint.solve(
+      DragInput(
+        startPx: d.startPx,
+        px: px,
+        startRay: vp.rayAt(d.startPx.dx, d.startPx.dy),
+        ray: vp.rayAt(px.dx, px.dy),
+        pivotPx: d.pivotPx,
+        cameraForward: t.camera.forward,
+      ),
+    );
+    final edit = value == null ? null : d.tool.edit(d.handle, value, c);
+    if (edit == null) return;
+    d.readout = edit.readout;
+    d.currentPivot = edit.pivot;
+    final delta = edit.delta;
     final previews = <PreviewTransform>[];
     for (final target in d.targets) {
       final newWorld = matMul(delta, target.startWorld);
       final local = Trs.fromMatrix(matMul(matInverseAffine(target.parentWorld), newWorld));
       // A pure move keeps the rotation and scale bits exactly (no
       // decomposition noise on what did not change).
-      final trs = switch (d.tool) {
-        SceneTool.move => Trs(
+      final trs = switch (edit.channel) {
+        TransformChannel.move => Trs(
           position: local.position,
           rotation: target.startLocal.rotation,
           scale: target.startLocal.scale,
         ),
-        SceneTool.rotate => Trs(position: local.position, rotation: local.rotation, scale: target.startLocal.scale),
-        _ => local,
+        TransformChannel.rotate => Trs(
+          position: local.position,
+          rotation: local.rotation,
+          scale: target.startLocal.scale,
+        ),
+        TransformChannel.scale => local,
       };
       target.current = trs;
       previews.add(PreviewTransform(id: target.id, position: trs.position, rotation: trs.rotation, scale: trs.scale));
@@ -1167,13 +1132,6 @@ final class SceneViewModel extends ChangeNotifier {
     }
     views?.changed(this, t.preview);
     _repaint();
-  }
-
-  static List<double> _translation(Vec3 v) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1];
-
-  static String _fmt(double v) {
-    final r = (v * 1000).roundToDouble() / 1000;
-    return r == r.roundToDouble() ? r.toInt().toString() : r.toStringAsFixed(r.abs() < 0.1 ? 3 : 2);
   }
 
   /// The drag ends: the previewed transforms become one transaction of
@@ -1390,8 +1348,8 @@ final class SceneViewModel extends ChangeNotifier {
       _mode = _Mode.look;
       _startFly();
     } else if (e.buttons == kPrimaryMouseButton) {
-      final handle = projectedGizmo()?.hitTest(px);
-      if (handle != null && canEdit && beginDrag(handle, px)) {
+      final handle = handleAt(px);
+      if (handle != null && canEdit && beginDrag(handle.id, px)) {
         _mode = _Mode.gizmo;
       } else {
         _mode = _Mode.click;
@@ -1463,7 +1421,7 @@ final class SceneViewModel extends ChangeNotifier {
 
   void pointerHover(PointerHoverEvent e, Offset px) {
     pointer = px;
-    final h = drag == null ? projectedGizmo()?.hitTest(px) : null;
+    final h = drag == null ? handleAt(px)?.id : null;
     if (h != hoverHandle) {
       hoverHandle = h;
       notifyListeners();
@@ -1605,10 +1563,8 @@ final class SceneViewModel extends ChangeNotifier {
       }
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.keyQ) return _set(SceneTool.select);
-    if (key == LogicalKeyboardKey.keyW) return _set(SceneTool.move);
-    if (key == LogicalKeyboardKey.keyE) return _set(SceneTool.rotate);
-    if (key == LogicalKeyboardKey.keyR) return _set(SceneTool.scale);
+    final keyed = SceneTools.byKey(key);
+    if (keyed != null) return _set(keyed);
     if (key == LogicalKeyboardKey.keyX) {
       toggleSpace();
       return KeyEventResult.handled;

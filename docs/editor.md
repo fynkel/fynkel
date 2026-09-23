@@ -199,7 +199,7 @@ run, Escape closes.
 | `inspector.openScript` | Edit | ⌥⌘↩ | the selected entity's first behaviour's source in the IDE |
 | `prefab.applyOverrides` / `prefab.revertOverrides` / `prefab.unpack` / `prefab.open` / `prefab.selectAsset` | Edit | ⇧⌥⌘A / ⇧⌥⌘U / ⇧⌥⌘X / ⇧⌥⌘D / ⇧⌥⌘L | prefab mode on the selected instance (§ Prefab mode): apply the overrides to the prefab (two transactions, two documents), revert them all, unpack, open the prefab's tab, select its asset |
 | `inspector.checkCodegen` | Project | ⇧⌘G | run `fynkel codegen --check --project <dir> --json` in the background; the Inspector banner shows the result |
-| `scene.tool.select` / `scene.tool.move` / `scene.tool.rotate` / `scene.tool.scale` | Edit | ⌘1 / ⌘2 / ⌘3 / ⌘4 | the Scene view's tool (Q W E R in the viewport) |
+| `scene.tool.<id>` — `select` / `move` / `rotate` / `scale` / `transform` | Edit | ⌘1 / ⌘2 / ⌘3 / ⌘4 / ⌘6 | the Scene view's tool (Q W E R Y in the viewport); one command per registered tool, ⌘6 on for tools past the fourth (⌘5 is the projection) |
 | `scene.toggleSpace` | Edit | ⌘L | gizmo axes world ↔ local (X in the viewport; scale is always local) |
 | `scene.toggleSnap` | Edit | ⌥⌘G | snapping on/off (the steps: long-press the snap button) |
 | `scene.toggleHidden` | Edit | ⇧⌘H | hide / show the selection's subtrees in the Scene view (H) — editor-only, never in the document |
@@ -798,9 +798,11 @@ the world (`preview.lines(outline:, iconsAspect:)`) so they are exact
 about what is there. Every line is `GizmoTokens.lineWidth` (1) logical
 pixels times the panel's pixel ratio, anti-aliased, and the part behind
 geometry is drawn at a quarter of its alpha instead of breaking off. The
-**gizmo** and the **marquee** are 2-D, painted
-by `_OverlayPainter` in logical pixels over the viewport from
-`ProjectedGizmo` (the same projection the hit test uses). The **stats
+**gizmo's handles** (item 9g) are drawn into the same overlay, on top
+(`GizmoTokens.handleWidth`, filled cones, cubes and plane squares; the
+hovered or dragged handle in `GizmoTokens.highlight`, the others dimmed
+while a drag runs). Only the **marquee** and the focus ring are still
+painted by `_OverlayPainter` in logical pixels. The **stats
 overlay** (⌘T) shows the picture's size and the model's own frame time,
 the world's counts (`entities` with `live`, `meshes`, `lights`, `hidden`;
 `tick`, `loads`, `syncs`, the tab's fallback reloads — the tick moves
@@ -826,19 +828,39 @@ its own.
 
 ### The gizmo
 
-Tools **Q** select, **W** move, **E** rotate, **R** scale (⌘1–⌘4 as
-commands); **X** toggles world/local axes (scale is always local);
+Tools **Q** select, **W** move, **E** rotate, **R** scale, **Y**
+transform (move, rotate and scale at once) (⌘1–⌘4, ⌘6 as commands);
+**X** toggles world/local axes (scale is always local);
 **⌥⌘G** toggles snapping, a long-press on the snap button edits the
 steps (move 0.5 m, angle 15°, scale 0.1 by default), ⌘ held during a
 drag inverts snapping for that drag. The gizmo sits at the **lead**
-entity's world origin at a constant 90 px, axes as lines with tips, three
-plane squares (move) and a centre square (move: screen-plane; scale:
-uniform), rings for rotate (grabbed on the stroke; the ring facing away
-flips its sign so a drag always turns the way the pointer goes). A drag
-(`beginDrag` → `updateDrag` → `endDrag`) computes one delta — a move
-along the axis line closest to the pointer ray, or on the plane the ray
-hits; a rotation from the pointer's angle about the projected pivot; a
-scale factor from the pointer's distance — applies it to **every
+entity's world origin at a constant 80 pt (`GizmoFrame.screenSize` ×
+the panel's pixel ratio).
+
+**Handles and tools (item 9g, ADR-0019 §2).** A tool is a registered
+object (`SceneTool` in `scene_view/scene_tools.dart`: id, label, icon,
+key, `alwaysLocal`, `hasGizmo`, `handles(ToolContext)` and
+`edit(handle, value, context)`); `SceneTools` holds the built-ins —
+`SelectTool`, `MoveTool`, `RotateTool`, `ScaleTool` and `TransformTool`,
+which is the other three composed (its edits are theirs) — and
+`register`/`unregister` more (a duplicate id throws; built-ins stay).
+The toolbar, the commands and the keys come from the registry, and
+`editor.json` stores the tool by id. A **handle** (`scene_view/gizmo.dart`)
+is a value: an id (`move.x`, `move.xy`, `move.view`, `rotate.z`,
+`rotate.view`, `scale.uniform`…), a world-space shape (lines, filled
+triangles, a faint back that is not hit), a colour, a grab point and a
+**drag constraint** that turns the pointer into a value —
+`AxisConstraint` (the axis line closest to the pointer ray),
+`PlaneConstraint` (a plane, or the view plane), `RingConstraint` (the
+angle about the projected pivot; a ring seen from behind flips so a drag
+turns the way the pointer goes), `ScreenScaleConstraint` (the pointer's
+distance from the pivot) and `RadiusConstraint`. The hit test is in
+screen space: the first handle whose triangles contain the point
+(edge-on ones skipped), else the nearest line within 8 pt; a plane
+square seen edge-on is not offered. The tool's `edit` returns a
+`TransformEdit` — the delta, its pivot, the readout and the channel
+(move keeps rotation and scale exactly, rotate keeps scale). A drag
+(`beginDrag(handleId)` → `updateDrag` → `endDrag`) applies it to **every
 draggable target about the lead's pivot** (`delta × startWorld`, then
 back to the parent's space: `inverse(parentWorld) × newWorld`; move keeps
 each target's rotation and scale, rotate keeps its scale) and previews
@@ -1584,6 +1606,7 @@ around the one step that causes it.
 | 9d | done 2026-09-23 (gate driven by the user) | One picker for asset and entity slots, Open Document, Add Component, Create Entity with Component and the palette (§ One picker). |
 | 9e | done 2026-09-23 (gate driven by the user) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
 | 9f | done 2026-09-23 (gate driven by the user) | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
+| 9g | in progress | Handles and Scene tools: the handle framework, the tool registry with move, rotate, scale and the combined transform tool drawn through the overlay (done); component handles next (§ The gizmo). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 

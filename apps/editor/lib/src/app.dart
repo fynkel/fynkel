@@ -1040,18 +1040,20 @@ class EditorShellState extends State<EditorShell> {
         run: widget.quit,
       ),
       // ── Scene view: tools and the editor-only flags (Edit menu, group 2) ──
-      for (final (i, tool, label, key) in const [
-        (0, SceneTool.select, 'Select Tool', LogicalKeyboardKey.digit1),
-        (1, SceneTool.move, 'Move Tool', LogicalKeyboardKey.digit2),
-        (2, SceneTool.rotate, 'Rotate Tool', LogicalKeyboardKey.digit3),
-        (3, SceneTool.scale, 'Scale Tool', LogicalKeyboardKey.digit4),
-      ])
+      for (final (i, tool) in SceneTools.all.indexed)
         EditorCommand(
-          id: 'scene.tool.${tool.name}',
-          baseLabel: label,
-          description: 'The Scene view\'s ${tool.name} tool (also ${'QWER'[i]} while the view has focus)',
+          id: 'scene.tool.${tool.id}',
+          baseLabel: '${tool.label} Tool',
+          description:
+              'The Scene view\'s ${tool.label.toLowerCase()} tool'
+              '${tool.key == null ? '' : ' (also ${tool.key!.keyLabel} while the view has focus)'}',
           menu: EditorMenu.edit,
-          shortcut: k(key),
+          // ⌘1…⌘4, then ⌘6… (⌘5 is the projection); past ⌘9, the key in
+          // the view and the palette only.
+          shortcut: switch (i < 4 ? i + 1 : i + 2) {
+            final n when n <= 9 => k(LogicalKeyboardKey(LogicalKeyboardKey.digit0.keyId + n)),
+            _ => null,
+          },
           group: 2,
           order: i,
           enabled: () => _hasView,

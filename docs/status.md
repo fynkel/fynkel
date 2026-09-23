@@ -1581,6 +1581,13 @@ The M3 backlog as it landed, for the record:
    Scene view's grid, outline and icons moved onto it; shared touches in
    `fynkel_render`, `platform/apple` and `package:fynkel_flutter`, each
    its own commit; 293 editor tests.
-   Next: 9g (handles and the tool registry), 9h (game
+   **9g in progress**: the handle framework (shapes, screen-space hit
+   test, axis/plane/ring/scale/radius constraints) and the tool registry
+   (`SceneTool`/`SceneTools`; move, rotate, scale rebuilt on it, a
+   combined transform tool on Y as the proof), the handles drawn through
+   the overlay at 80 pt; 302 editor tests. Next in 9g: component handles
+   (light range and angle, collider sizes, camera FOV) behind the
+   Inspector's Edit toggle, then the user's gate.
+   Next: the rest of 9g, 9h (game
    gizmos), then item 9 (Profiler, IDE navigation, `fynkel editor`,
    polish).

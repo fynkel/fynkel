@@ -15,7 +15,6 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../theme/icons.dart';
 import 'editor_state.dart';
-import 'gizmo.dart';
 import '../theme/tokens.dart';
 import 'orientation_gizmo.dart';
 import 'scene_view_model.dart';
@@ -351,20 +350,14 @@ class _ScenePanelState extends State<ScenePanel> {
   );
 
   Widget _toolGroup(ThemeData theme, bool live) {
-    const tools = [
-      (SceneTool.select, FIcons.nearMeOutlined, 'Select (Q)'),
-      (SceneTool.move, FIcons.openWith, 'Move (W)'),
-      (SceneTool.rotate, FIcons.rotateRight, 'Rotate (E)'),
-      (SceneTool.scale, FIcons.aspectRatio, 'Scale (R)'),
-    ];
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (final (tool, icon, tip) in tools)
+        for (final tool in SceneTools.all)
           _toggle(
-            key: 'scene.tool.${tool.name}',
-            icon: icon,
-            tooltip: tip,
+            key: 'scene.tool.${tool.id}',
+            icon: tool.icon,
+            tooltip: tool.key == null ? tool.label : '${tool.label} (${tool.key!.keyLabel})',
             on: model.tool == tool,
             enabled: live,
             onTap: () => model.tool = tool,
@@ -532,14 +525,12 @@ class _ScenePanelState extends State<ScenePanel> {
                   child: ColoredBox(color: theme.tokens.window, child: const SizedBox.expand()),
                 ),
               ),
-            // The gizmo and the marquee: 2D, on top, in logical pixels.
+            // The marquee and the focus ring (the handles are the
+            // renderer's overlay, drawn in the picture).
             IgnorePointer(
               child: CustomPaint(
                 key: const Key('scene.overlay'),
                 painter: _OverlayPainter(
-                  gizmo: model.projectedGizmo(),
-                  hover: model.hoverHandle,
-                  drag: model.drag,
                   marquee: model.marquee,
                   dpr: dpr,
                   focused: model.hasFocus,
@@ -672,7 +663,7 @@ class _ScenePanelState extends State<ScenePanel> {
       'pivot (${cam.pivot.map(_fmt2).join(', ')})  d ${_fmt2(cam.distance)}',
       if (sel > 0) '$sel selected',
       model.tool.name +
-          (model.tool == SceneTool.select ? '' : ' · ${model.space.name}') +
+          (!model.tool.hasGizmo ? '' : ' · ${model.space.name}') +
           (model.snap.enabled ? ' · snap' : ''),
       ?model.noGizmoReason,
     ].join('   ');
@@ -705,81 +696,17 @@ class _ScenePanelState extends State<ScenePanel> {
   static String _fmt2(double v) => v.abs() >= 100 ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
 }
 
-/// The gizmo (axes, planes, rings, the centre) and the marquee, from the
-/// model's projection, in logical pixels.
+/// The marquee and the focus ring, in logical pixels.
 class _OverlayPainter extends CustomPainter {
-  const _OverlayPainter({
-    required this.gizmo,
-    required this.hover,
-    required this.drag,
-    required this.marquee,
-    required this.dpr,
-    required this.focused,
-    required this.accent,
-  });
+  const _OverlayPainter({required this.marquee, required this.dpr, required this.focused, required this.accent});
 
-  final ProjectedGizmo? gizmo;
-  final GizmoHandle? hover;
-  final GizmoDrag? drag;
   final Rect? marquee;
   final double dpr;
   final bool focused;
   final Color accent;
 
-  static const axisColors = sceneAxisColors;
-  static const highlight = Color(0xFFFFD60A);
-
-  Color _colorOf(GizmoHandle h) {
-    final active = drag?.handle ?? hover;
-    if (active == h) return highlight;
-    if (h.isAxis) return axisColors[h.axisIndex];
-    if (h.isPlane) return axisColors[h.planeNormalIndex];
-    return const Color(0xFFE0E0E0);
-  }
-
   @override
   void paint(Canvas canvas, Size size) {
-    final g = gizmo;
-    if (g != null) {
-      for (final h in g.handles) {
-        if (h.points.length < 2) continue;
-        final color = _colorOf(h.handle);
-        final path = Path()..moveTo(h.points.first.dx / dpr, h.points.first.dy / dpr);
-        for (final p in h.points.skip(1)) {
-          path.lineTo(p.dx / dpr, p.dy / dpr);
-        }
-        if (h.closed) {
-          path.close();
-          canvas.drawPath(path, Paint()..color = color.withValues(alpha: h.handle == GizmoHandle.center ? 0.35 : 0.3));
-          canvas.drawPath(
-            path,
-            Paint()
-              ..color = color
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 1.5,
-          );
-        } else {
-          canvas.drawPath(
-            path,
-            Paint()
-              ..color = color
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = 2.5
-              ..strokeCap = StrokeCap.round,
-          );
-          final tip = h.tip;
-          if (tip != null) {
-            final t = tip / dpr;
-            if (g.tool == SceneTool.scale) {
-              canvas.drawRect(Rect.fromCenter(center: t, width: 8, height: 8), Paint()..color = color);
-            } else {
-              canvas.drawCircle(t, 4.5, Paint()..color = color);
-            }
-          }
-        }
-      }
-      canvas.drawCircle(g.pivot / dpr, 2.5, Paint()..color = const Color(0xFFFFFFFF));
-    }
     final m = marquee;
     if (m != null) {
       final r = Rect.fromLTRB(m.left / dpr, m.top / dpr, m.right / dpr, m.bottom / dpr);

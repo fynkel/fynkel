@@ -14,7 +14,6 @@ import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 import 'package:fynkel_editor/src/scene_view/editor_state.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel_editor/src/scene_view/gizmo.dart';
 import 'package:fynkel_editor/src/scene_view/png.dart';
 import 'package:fynkel_editor/src/scene_view/scene_math.dart';
 import 'package:fynkel_editor/src/scene_view/scene_view_model.dart';
@@ -149,7 +148,7 @@ void main() {
     // world places it at the origin and the gizmo has nothing to write.
     tab.select(robot);
     s.model.tool = SceneTool.move;
-    expect(s.model.projectedGizmo(), isNull);
+    expect(s.model.handles(), isEmpty);
     expect(s.model.noGizmoReason, contains('no Transform'));
     expect(preview.worldMatrices([robot])[robot], isNotNull);
 
@@ -158,10 +157,9 @@ void main() {
     s.model.frameSelected();
     st.camera.distance = 8; // 120 px ≈ 1.2 m at this distance
     final startWorld = preview.worldMatrices([crateA])[crateA]!;
-    final g = s.model.projectedGizmo()!;
-    final tip = g.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
-    expect(g.hitTest(tip), GizmoHandle.x);
-    expect(s.model.beginDrag(GizmoHandle.x, tip), isTrue);
+    final tip = s.model.grabPoint('move.x')!;
+    expect(s.model.handleAt(tip)?.id, 'move.x');
+    expect(s.model.beginDrag('move.x', tip), isTrue);
     s.model.updateDrag(tip + const Offset(120, 0));
     // Previewed in the world, not in the document.
     final previewed = preview.worldMatrices([crateA])[crateA]!;
@@ -210,9 +208,8 @@ void main() {
     st.camera.distance = 8;
     expect(s.model.noGizmoReason, isNull);
     final derivedStart = preview.worldMatrices([derived])[derived]!;
-    final dg = s.model.projectedGizmo()!;
-    final dtip = dg.handles.singleWhere((h) => h.handle == GizmoHandle.x).tip!;
-    expect(s.model.beginDrag(GizmoHandle.x, dtip), isTrue);
+    final dtip = s.model.grabPoint('move.x')!;
+    expect(s.model.beginDrag('move.x', dtip), isTrue);
     s.model.updateDrag(dtip + const Offset(120, 0));
     final derivedPreviewed = preview.worldMatrices([derived])[derived]!;
     expect(derivedPreviewed[12], greaterThan(derivedStart[12] + 0.5));
@@ -251,12 +248,11 @@ void main() {
     s.model.snap = s.model.snap.copyWith(enabled: true, angle: 15);
     tab.select(crateB);
     s.model.frameSelected();
-    final rg = s.model.projectedGizmo()!;
-    final ring = rg.handles.singleWhere((h) => h.handle == GizmoHandle.y);
-    final grab = ring.points[4];
-    expect(s.model.beginDrag(GizmoHandle.y, grab), isTrue);
-    final rel = grab - rg.pivot;
-    s.model.updateDrag(rg.pivot + Offset(-rel.dy, rel.dx));
+    final pivotPx = s.model.gizmoPivotPx!;
+    final grab = s.model.grabPoint('rotate.y')!;
+    expect(s.model.beginDrag('rotate.y', grab), isTrue);
+    final rel = grab - pivotPx;
+    s.model.updateDrag(pivotPx + Offset(-rel.dy, rel.dx));
     expect(s.model.drag!.readout, endsWith('°'));
     final rotated = s.model.endDrag()!;
     expect(rotated.ok, isTrue);

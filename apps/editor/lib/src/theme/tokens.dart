@@ -9,6 +9,8 @@
 // hairlines, small radii, and rows a mouse can hit but an eye can scan.
 // A field is *recessed* — darker than the panel it sits in, the way a
 // game editor's fields are, not lighter the way Material's are.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 /// How tall a list row is. The user picks one in the preferences; every
@@ -352,6 +354,22 @@ abstract final class GizmoTokens {
 
   /// Things the user drags: the move, rotate and scale handles.
   static const double handleWidth = 2.5;
+
+  /// X, Y and Z of the transform handles and the orientation gizmo.
+  static const axisColors = [Color(0xFFE5484D), Color(0xFF46A758), Color(0xFF3E63DD)];
+
+  /// A handle under the pointer or being dragged.
+  static const highlight = Color(0xFFFFD60A);
+
+  /// Handles that belong to no axis: the view-plane square, the uniform
+  /// scale, the view ring.
+  static const neutral = Color(0xFFDDDDDD);
+
+  /// [c] as the overlay takes it: linear RGBA.
+  static List<double> linear(Color c, {double? alpha}) {
+    double lin(double v) => v <= 0.04045 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();
+    return [lin(c.r), lin(c.g), lin(c.b), alpha ?? c.a];
+  }
 
   static const List<double> xAxis = [0.90, 0.25, 0.25, 0.8];
   static const List<double> yAxis = [0.35, 0.85, 0.35, 0.8];

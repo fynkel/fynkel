@@ -15,6 +15,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import 'scene_math.dart';
+import 'scene_tools.dart';
+
+export 'scene_tools.dart' show SceneTool, SceneTools;
 
 /// What the editor remembers about one scene or prefab document, by its id.
 final class SceneEditorState {
@@ -82,9 +85,6 @@ final class SceneEditorState {
   }
 }
 
-/// The gizmo tools.
-enum SceneTool { select, move, rotate, scale }
-
 /// The gizmo's frame.
 enum GizmoSpace { local, world }
 
@@ -125,7 +125,7 @@ final class SnapSettings {
 /// editor may not write into).
 final class EditorState extends ChangeNotifier {
   EditorState._(this.file, Map<String, Object?> json)
-    : tool = SceneTool.values.asNameMap()[json['tool']] ?? SceneTool.move,
+    : tool = SceneTools.byId(json['tool'] is String ? json['tool'] as String : null) ?? SceneTool.move,
       space = GizmoSpace.values.asNameMap()[json['space']] ?? GizmoSpace.world,
       snap = SnapSettings.fromJson(json['snap']),
       showGrid = json['grid'] != false,
@@ -249,7 +249,7 @@ final class EditorState extends ChangeNotifier {
 
   Map<String, Object?> toJson() => {
     'formatVersion': formatVersion,
-    'tool': tool.name,
+    'tool': tool.id,
     'space': space.name,
     'snap': snap.toJson(),
     'grid': showGrid,

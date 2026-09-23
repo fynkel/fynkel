@@ -17,7 +17,7 @@ import '../theme/tokens.dart';
 import 'scene_math.dart';
 
 /// The axis colours of the Scene view: X, Y, Z (the move gizmo's too).
-const sceneAxisColors = [Color(0xFFE5484D), Color(0xFF46A758), Color(0xFF3E63DD)];
+const sceneAxisColors = GizmoTokens.axisColors;
 
 /// One end of an axis as the gizmo draws it.
 final class GizmoAxisEnd {
