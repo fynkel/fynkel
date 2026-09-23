@@ -25,6 +25,7 @@ final class EditorCommand {
     required this.menu,
     required this.run,
     this.shortcut,
+    this.key,
     this.group = 0,
     this.order = 0,
     this.enabled,
@@ -48,6 +49,13 @@ final class EditorCommand {
   final EditorMenu menu;
   final SingleActivator? shortcut;
 
+  /// A bare key (no ⌘) that runs it from any panel, as the Scene view's
+  /// F or W do in Unity: after the focused panel's own keys (the
+  /// Hierarchy's arrows, the viewport's fly keys) and never while a text
+  /// field has focus. Not a native menu key equivalent — the menu bar
+  /// would take the letter from every text field before Flutter sees it.
+  final SingleActivator? key;
+
   /// Menu items are grouped; a divider separates groups.
   final int group;
   final int order;
@@ -69,9 +77,12 @@ final class EditorCommand {
 
 /// "Run the command with this id" — what the window's `Shortcuts` map to.
 final class CommandIntent extends Intent {
-  const CommandIntent(this.id);
+  const CommandIntent(this.id, {this.bare = false});
 
   final String id;
+
+  /// From the command's bare [EditorCommand.key]: typing wins over it.
+  final bool bare;
 }
 
 /// Runs a [CommandIntent]; disabled commands leave the key to whoever is
@@ -85,6 +96,7 @@ final class CommandAction extends Action<CommandIntent> {
   bool isEnabled(CommandIntent intent) {
     final c = registry.byId(intent.id);
     if (c == null) return false;
+    if (intent.bare && CommandRegistry.focusIsTextField) return false;
     return c.isEnabled || (c.textIntent != null && CommandRegistry.focusIsTextField);
   }
 
@@ -163,8 +175,10 @@ final class CommandRegistry extends ChangeNotifier {
 
   /// The `Shortcuts` map for the window: every shortcut → its command intent.
   Map<ShortcutActivator, Intent> get shortcutIntents => {
-    for (final c in _commands.values)
+    for (final c in _commands.values) ...{
       if (c.shortcut != null) c.shortcut!: CommandIntent(c.id),
+      if (c.key != null) c.key!: CommandIntent(c.id, bare: true),
+    },
   };
 
   /// Something a command depends on changed (a project opened, a panel hidden).
@@ -181,12 +195,12 @@ final class CommandRegistry extends ChangeNotifier {
     final seen = <String, String>{};
     final dups = <String>[];
     for (final c in _commands.values) {
-      final s = c.shortcut;
-      if (s == null) continue;
-      final key = shortcutLabel(s);
-      final other = seen[key];
-      if (other != null) dups.add('$key: $other and ${c.id}');
-      seen[key] = c.id;
+      for (final s in [c.shortcut, c.key].nonNulls) {
+        final key = shortcutLabel(s);
+        final other = seen[key];
+        if (other != null) dups.add('$key: $other and ${c.id}');
+        seen[key] = c.id;
+      }
     }
     return dups;
   }

@@ -437,6 +437,9 @@ class EditorShellState extends State<EditorShell> {
   void _registerCommands() {
     SingleActivator k(LogicalKeyboardKey key, {bool shift = false, bool alt = false, bool control = false}) =>
         SingleActivator(key, meta: true, shift: shift, alt: alt, control: control);
+    // A command's bare key: from any panel but a text field (a held key does not repeat it).
+    SingleActivator bare(LogicalKeyboardKey key, {bool shift = false}) =>
+        SingleActivator(key, shift: shift, includeRepeats: false);
     registry.registerAll([
       // ── Documents (Project menu, group 1) ──
       EditorCommand(
@@ -1046,7 +1049,7 @@ class EditorShellState extends State<EditorShell> {
           baseLabel: '${tool.label} Tool',
           description:
               'The Scene view\'s ${tool.label.toLowerCase()} tool'
-              '${tool.key == null ? '' : ' (also ${tool.key!.keyLabel} while the view has focus)'}',
+              '${tool.key == null ? '' : ' (also ${tool.key!.keyLabel} from any panel)'}',
           menu: EditorMenu.edit,
           // ⌘1…⌘4, then ⌘6… (⌘5 is the projection); past ⌘9, the key in
           // the view and the palette only.
@@ -1054,6 +1057,7 @@ class EditorShellState extends State<EditorShell> {
             final n when n <= 9 => k(LogicalKeyboardKey(LogicalKeyboardKey.digit0.keyId + n)),
             _ => null,
           },
+          key: tool.key == null ? null : bare(tool.key!),
           group: 2,
           order: i,
           enabled: () => _hasView,
@@ -1063,9 +1067,10 @@ class EditorShellState extends State<EditorShell> {
         id: 'scene.toggleSpace',
         baseLabel: 'Toggle Local / World Axes',
         labelBuilder: () => scene?.space == GizmoSpace.local ? 'Use World Axes' : 'Use Local Axes',
-        description: 'The gizmo\'s axes: the entity\'s own or the world\'s (X in the view)',
+        description: 'The gizmo\'s axes: the entity\'s own or the world\'s',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyL),
+        key: bare(LogicalKeyboardKey.keyX),
         group: 2,
         order: 4,
         enabled: () => _hasView,
@@ -1086,9 +1091,10 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'scene.toggleHidden',
         baseLabel: 'Hide / Show Selected',
-        description: 'Editor-only: out of the picture and of picking, never in the scene file (H in the view)',
+        description: 'Editor-only: out of the picture and of picking, never in the scene file',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyH, shift: true),
+        key: bare(LogicalKeyboardKey.keyH),
         group: 3,
         order: 0,
         enabled: () => _hasView && _hasSelection,
@@ -1099,6 +1105,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Show All Hidden',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyU, shift: true),
+        key: bare(LogicalKeyboardKey.keyH, shift: true),
         group: 3,
         order: 1,
         enabled: () => scene?.hasHidden ?? false,
@@ -1107,9 +1114,10 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'scene.toggleLocked',
         baseLabel: 'Lock / Unlock Selected',
-        description: 'Editor-only: a locked entity is not picked or dragged in the Scene view (L in the view)',
+        description: 'Editor-only: a locked entity is not picked or dragged in the Scene view',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyK),
+        key: bare(LogicalKeyboardKey.keyL),
         group: 3,
         order: 2,
         enabled: () => _hasView && _hasSelection,
@@ -1138,9 +1146,10 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'view.frameSelected',
         baseLabel: 'Frame Selected',
-        description: 'The camera swings to fit the selection (everything when nothing is selected); F in the view',
+        description: 'The camera swings to fit the selection (everything when nothing is selected)',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyF),
+        key: bare(LogicalKeyboardKey.keyF),
         group: 0,
         order: 0,
         enabled: () => _hasView,
@@ -1151,6 +1160,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Frame All',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyF, shift: true),
+        key: bare(LogicalKeyboardKey.keyF, shift: true),
         group: 0,
         order: 1,
         enabled: () => _hasView,
@@ -1162,6 +1172,7 @@ class EditorShellState extends State<EditorShell> {
         labelBuilder: () => scene?.camera?.orthographic ?? false ? 'Perspective' : 'Orthographic',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.digit5),
+        key: bare(LogicalKeyboardKey.digit5),
         group: 0,
         order: 2,
         enabled: () => _hasView,

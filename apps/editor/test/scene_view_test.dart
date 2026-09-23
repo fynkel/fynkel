@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
+import 'package:fynkel_editor/src/commands/commands.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/hierarchy/transform_math.dart';
@@ -899,7 +900,7 @@ void main() {
       await tester.pump(const Duration(seconds: 1)); // the camera's debounced save
     });
 
-    testWidgets('a tap selects, hotkeys switch tools and frame, Escape clears, ⌫ deletes', (tester) async {
+    testWidgets('a tap selects, Escape clears, ⌫ deletes; the scene keys are left to the window', (tester) async {
       final r = await pump(tester);
       final st = r.model.current!;
       final o = origin(tester);
@@ -910,32 +911,12 @@ void main() {
       expect(find.byKey(const Key('scene.status')), findsOneWidget);
       expect(find.textContaining('1 selected'), findsOneWidget);
 
+      // The tools, F, H, L, X and 5 are the registry's (from any panel —
+      // the shell test below); the view alone does not take them.
+      final tool = r.model.tool;
       await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
-      expect(r.model.tool, SceneTool.rotate);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
-      expect(r.model.tool, SceneTool.scale);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyQ);
-      expect(r.model.tool, SceneTool.select);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
-      expect(r.model.tool, SceneTool.move);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyX);
-      expect(r.model.space, GizmoSpace.local);
-      await tester.sendKeyEvent(LogicalKeyboardKey.digit5);
-      expect(st.camera.orthographic, isTrue);
       await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
-      expect(st.camera.pivot[0], closeTo(4, 1e-9), reason: 'framed the crate');
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
-      expect(r.model.isHidden('crate'), isTrue);
-      await tester.pump();
-      expect(find.byKey(const Key('scene.hiddenChip')), findsOneWidget);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyH);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      expect(r.model.hasHidden, isFalse);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
-      expect(r.model.isLocked('crate'), isTrue);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
-      expect(r.model.isLocked('crate'), isFalse);
+      expect(r.model.tool, tool);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       expect(st.tab.selection, isEmpty);
 
@@ -1119,6 +1100,80 @@ void main() {
       // The flags live in the editor's state file, never in the scene.
       expect(shell.editorState!.scene(doc.id).hidden, isEmpty);
       await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('the Scene view\'s bare keys work from any panel, never while typing in a field', (tester) async {
+      final project = FakeProject(dir: '/fake/game');
+      final doc = project.addDocument(scene());
+      await pumpLarge(
+        tester,
+        shellApp(prefs: Preferences.inMemory(), projects: {'/fake/game': project}, initialProject: '/fake/game'),
+      );
+      final shell = tester.state<EditorShellState>(find.byType(EditorShell));
+      shell.tabs!.openDocument(doc.id);
+      await tester.pumpAndSettle();
+      final sv = shell.scene!;
+      final st = sv.current!;
+      sv.setViewportSize(1000, 800);
+      Future<void> key(LogicalKeyboardKey k, {bool shift = false}) async {
+        if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyEvent(k);
+        if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.pump();
+      }
+
+      // Pick Far in the Hierarchy: the keyboard is there.
+      await tester.tap(find.byKey(const Key('hierarchy.name.far')));
+      await tester.pumpAndSettle();
+      expect(st.tab.selection.toList(), ['far']);
+      expect(sv.hasFocus, isFalse);
+      await key(LogicalKeyboardKey.keyF);
+      expect(st.camera.pivot[0], closeTo(20, 1e-9), reason: 'F from the Hierarchy frames Far');
+      await key(LogicalKeyboardKey.keyF, shift: true);
+      expect(st.camera.pivot[0], isNot(closeTo(20, 1e-9)), reason: '⇧F frames everything');
+
+      // A click on the Inspector's empty space: the panel has the keyboard,
+      // no field does.
+      final list = tester.getRect(find.byKey(const ValueKey('inspector.list')));
+      await tester.tapAt(list.bottomCenter - const Offset(0, 4));
+      await tester.pumpAndSettle();
+      expect(primaryFocus?.debugLabel, isNot('hierarchy.list'));
+      expect(CommandRegistry.focusIsTextField, isFalse);
+      await key(LogicalKeyboardKey.keyF);
+      expect(st.camera.pivot[0], closeTo(20, 1e-9), reason: 'F from the Inspector');
+      await key(LogicalKeyboardKey.keyE);
+      expect(sv.tool, SceneTool.rotate);
+      await key(LogicalKeyboardKey.keyR);
+      expect(sv.tool, SceneTool.scale);
+      await key(LogicalKeyboardKey.keyW);
+      expect(sv.tool, SceneTool.move);
+      await key(LogicalKeyboardKey.keyX);
+      expect(sv.space, GizmoSpace.local);
+      await key(LogicalKeyboardKey.digit5);
+      expect(st.camera.orthographic, isTrue);
+      await key(LogicalKeyboardKey.keyH);
+      expect(sv.isHidden('far'), isTrue);
+      await key(LogicalKeyboardKey.keyH, shift: true);
+      expect(sv.hasHidden, isFalse);
+      await key(LogicalKeyboardKey.keyL);
+      expect(sv.isLocked('far'), isTrue);
+      await key(LogicalKeyboardKey.keyL);
+      expect(sv.isLocked('far'), isFalse);
+
+      // Typing in a field: the letters are the field's.
+      await tester.tap(find.byKey(const ValueKey('inspector.name')));
+      await tester.pumpAndSettle();
+      expect(CommandRegistry.focusIsTextField, isTrue);
+      st.camera.orbit(40, 10);
+      final pivot = List.of(st.camera.pivot);
+      await key(LogicalKeyboardKey.keyF);
+      await key(LogicalKeyboardKey.keyQ);
+      await key(LogicalKeyboardKey.keyH);
+      expect(st.camera.pivot, pivot);
+      expect(sv.tool, SceneTool.move);
+      expect(sv.isHidden('far'), isFalse);
+      expect(doc.history, 0, reason: 'no key reached the document');
+      await tester.pump(const Duration(seconds: 1)); // the editor-state save timer
     });
   });
 }

@@ -450,6 +450,8 @@ final class SceneViewModel extends ChangeNotifier {
   SceneTool get tool => editorState.tool;
   set tool(SceneTool t) {
     if (drag != null) cancelDrag();
+    // Picking a tool ends a component's editing, as in Unity.
+    current?.tab.editComponent(null);
     editorState.tool = t;
     editorState.changed();
     _repaint();
@@ -1926,11 +1928,11 @@ final class SceneViewModel extends ChangeNotifier {
 
   // ── Keys (the panel's focus; bare hotkeys, no modifiers) ─────────────
 
-  /// The Scene view's own keys while it has focus: Q/W/E/R tools, X
-  /// local/world, F frame selected, ⇧F frame all, H hide/show, ⇧H show
-  /// all, L lock, 5 projection, Esc cancel/deselect, ⌫/⌦ delete, WASDQE
-  /// fly while the right button is held. Anything with ⌘ falls through to
-  /// the registry's shortcuts.
+  /// The Scene view's own keys while it has focus: Esc cancel/deselect,
+  /// ⌫/⌦ delete, WASDQE fly while the right button is held. The rest —
+  /// Q/W/E/R tools, X local/world, F / ⇧F frame, H / ⇧H hide, L lock, 5
+  /// projection — are the registry's bare keys and work from any panel;
+  /// they fall through to it, as anything with ⌘ does.
   KeyEventResult handleKey(KeyEvent e) {
     if (!hasView) return KeyEventResult.ignored;
     final key = e.logicalKey;
@@ -1949,7 +1951,6 @@ final class SceneViewModel extends ChangeNotifier {
       return KeyEventResult.handled;
     }
     if (e is KeyRepeatEvent) return KeyEventResult.ignored;
-    final shift = _shift;
     if (key == LogicalKeyboardKey.escape) {
       if (drag != null) {
         cancelDrag();
@@ -1964,28 +1965,6 @@ final class SceneViewModel extends ChangeNotifier {
       }
       return KeyEventResult.handled;
     }
-    final keyed = SceneTools.byKey(key);
-    if (keyed != null) return _set(keyed);
-    if (key == LogicalKeyboardKey.keyX) {
-      toggleSpace();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.keyF) {
-      shift ? frameAll() : frameSelected();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.keyH) {
-      shift ? showAll() : toggleHiddenSelection();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.keyL) {
-      toggleLockedSelection();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.digit5) {
-      toggleProjection();
-      return KeyEventResult.handled;
-    }
     if (key == LogicalKeyboardKey.backspace || key == LogicalKeyboardKey.delete) {
       if (current?.tab.selection.isNotEmpty ?? false) {
         hierarchy.delete();
@@ -1993,13 +1972,6 @@ final class SceneViewModel extends ChangeNotifier {
       }
     }
     return KeyEventResult.ignored;
-  }
-
-  KeyEventResult _set(SceneTool t) {
-    // Picking a tool ends a component's editing, as in Unity.
-    current?.tab.editComponent(null);
-    tool = t;
-    return KeyEventResult.handled;
   }
 
   // ── Stats ────────────────────────────────────────────────────────────

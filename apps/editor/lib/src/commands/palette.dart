@@ -31,11 +31,15 @@ Future<void> showCommandPalette(BuildContext context, CommandRegistry registry) 
           title: c.label,
           group: c.menu.title,
           enabled: c.isEnabled,
-          shortcut: c.shortcut == null ? null : CommandRegistry.shortcutLabel(c.shortcut!),
+          shortcut: switch (c.shortcut ?? c.key) {
+            final s? => CommandRegistry.shortcutLabel(s),
+            null => null,
+          },
           keywords: '${c.baseLabel} ${c.id}',
           facts: [
             ('Menu', c.menu.title),
             if (c.shortcut != null) ('Shortcut', CommandRegistry.shortcutLabel(c.shortcut!)),
+            if (c.key != null) ('Key', '${CommandRegistry.shortcutLabel(c.key!)} (any panel but a text field)'),
             if (!c.isEnabled) ('State', 'not available now'),
           ],
         ),
