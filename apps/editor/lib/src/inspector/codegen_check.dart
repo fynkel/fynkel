@@ -140,13 +140,24 @@ final class CodegenCheck extends ChangeNotifier {
     runs++;
     try {
       final r = await run(exe, arguments(), workingDirectory: projectDir);
+      if (_disposed) return;
       _read(r);
     } catch (e) {
+      if (_disposed) return;
       status = CodegenStatus.failed;
       error = 'could not run `fynkel codegen --check`: $e';
     }
     checkedAt = DateTime.now();
     notifyListeners();
+  }
+
+  /// The project closed while a check ran: its answer is dropped.
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   void _read(ProcessResult r) {

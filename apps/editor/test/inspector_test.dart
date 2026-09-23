@@ -6,6 +6,7 @@
 // document untouched, Add / Remove Component, prefab override revert,
 // committed drift, the CLI check, the maths, and the widgets: a drag on a
 // number is one transaction, an enum menu, a checkbox, the asset picker.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -835,6 +836,24 @@ void main() {
         expect(check.runs, 4);
       },
     );
+
+    test('a check still running when the project closes drops its answer', () async {
+      final dir = fakeProjectDir('codegen-closed');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File('${dir.path}/pubspec.yaml').writeAsStringSync('name: game\n');
+      final answer = Completer<ProcessResult>();
+      final check = CodegenCheck(
+        projectDir: dir.path,
+        run: (exe, args, {workingDirectory}) => answer.future,
+        cli: () => '/fake/fynkel',
+        repoRoot: () => null,
+      );
+      final running = check.check();
+      expect(check.status, CodegenStatus.running);
+      check.dispose();
+      answer.complete(ProcessResult(1, 0, '{"ok": true}', ''));
+      await running;
+    });
   });
 
   group('maths', () {
