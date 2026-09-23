@@ -7,7 +7,9 @@ import FlutterMacOS
 // traffic lights sit centred on the editor's bar. The editor asks for a drag or
 // a double-click on its bar's empty space over the `fynkel.editor/window`
 // channel, and hears when the window enters or leaves full screen (where the
-// traffic lights are gone and the bar starts at the left edge).
+// traffic lights are gone and the bar starts at the left edge). In full screen
+// the toolbar goes: AppKit would move it into a bar of its own, opaque (white
+// in light mode), over the editor's bar.
 class MainFlutterWindow: NSWindow {
   private var channel: FlutterMethodChannel?
 
@@ -59,7 +61,13 @@ class MainFlutterWindow: NSWindow {
     center.addObserver(
       forName: NSWindow.willEnterFullScreenNotification, object: self, queue: .main
     ) { [weak self] _ in
+      self?.toolbar?.isVisible = false
       self?.channel?.invokeMethod("fullScreen", arguments: true)
+    }
+    center.addObserver(
+      forName: NSWindow.willExitFullScreenNotification, object: self, queue: .main
+    ) { [weak self] _ in
+      self?.toolbar?.isVisible = true
     }
     center.addObserver(
       forName: NSWindow.didExitFullScreenNotification, object: self, queue: .main
