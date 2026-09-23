@@ -169,6 +169,16 @@ While the game runs in the Game view:
   their type. Tests: Rust (ids for loaded, instanced and spawned
   entities; JSON round trip of every native component; applyNow ticks
   nothing), Dart over the reference game in `flutter test`.
+  **Done 2026-09-23** (`1a77e15` core, `5e780f1` authoring + native,
+  `7ad4b3a` `LiveWorld`, `3b927ca` behaviours, `84c5606` play scope), with
+  three changes from the plan: every write (`set`, `remove`, `rename`)
+  applies at once through `World::apply_now`, so there is no separate
+  `applyNow` call; an instance the game makes at run time keeps no id map
+  (its entities are `runtime:<handle>`; only what a loaded scene spawned,
+  cooked prefab instances included, has authoring ids); a behaviour also
+  records the component id it was authored as (`authoredComponentId`),
+  which Apply to Scene needs. Still to do in L3: a paused Game view does
+  not redraw after a live write.
 - **L2 — See it.** `PlayDocument`; the Hierarchy and Inspector switch
   during Play, read-only; selection carried both ways; the play-mode tint
   and the header. Measure the refresh cost.
