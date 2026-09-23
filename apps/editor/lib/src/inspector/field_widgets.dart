@@ -19,6 +19,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -202,10 +203,16 @@ class _CommitText extends StatefulWidget {
     this.monospace = false,
     this.leading,
     this.trailing,
+    this.live,
   });
 
   /// The committed value in full; what an edit starts from.
   final String text;
+
+  /// A newer [text] and [display] pushed between builds (a running game's
+  /// value, during Play): shown at once unless the field is being edited,
+  /// without rebuilding anything.
+  final ValueListenable<({String text, String display})?>? live;
 
   /// A shorter form shown while the field is not being edited (a number's
   /// three decimals); [text] when null.
@@ -231,23 +238,50 @@ class _CommitTextState extends State<_CommitText> {
   bool _editing = false;
   bool _hover = false;
 
-  String get _shown => widget.display ?? widget.text;
+  /// The last [_CommitText.live] value since the widget was rebuilt.
+  ({String text, String display})? _pushed;
+
+  String get _text => _pushed?.text ?? widget.text;
+  String get _shown => _pushed?.display ?? widget.display ?? widget.text;
+
+  /// The single-line text field of the last build and what it was built
+  /// from. A new value reaches it through [_controller] alone, so a field
+  /// whose value moves many times a second (the running game's, during
+  /// Play) re-lays out its text without rebuilding the field.
+  TextField? _field;
+  Object? _fieldInputs;
 
   @override
   void initState() {
     super.initState();
     _focus.addListener(_onFocus);
+    widget.live?.addListener(_onLive);
   }
 
   @override
   void didUpdateWidget(covariant _CommitText old) {
     super.didUpdateWidget(old);
+    if (!identical(old.live, widget.live)) {
+      old.live?.removeListener(_onLive);
+      widget.live?.addListener(_onLive);
+    }
+    // The widget carries the newest value again.
+    _pushed = null;
     // A new committed value replaces the text unless the user is mid-edit.
     if (!_editing && _shown != _controller.text) _controller.text = _shown;
   }
 
+  void _onLive() {
+    final v = widget.live?.value;
+    if (v == null || !mounted) return;
+    _pushed = v;
+    // Never under the user's typing: the edit wins, as it does on a rebuild.
+    if (!_editing && _controller.text != v.display) _controller.text = v.display;
+  }
+
   @override
   void dispose() {
+    widget.live?.removeListener(_onLive);
     _focus.removeListener(_onFocus);
     _focus.dispose();
     _controller.dispose();
@@ -259,8 +293,8 @@ class _CommitTextState extends State<_CommitText> {
       _editing = true;
       // Editing starts from the full value, all of it selected.
       _controller.value = TextEditingValue(
-        text: widget.text,
-        selection: TextSelection(baseOffset: 0, extentOffset: widget.text.length),
+        text: _text,
+        selection: TextSelection(baseOffset: 0, extentOffset: _text.length),
       );
     } else if (_editing) {
       _commit();
@@ -270,7 +304,7 @@ class _CommitTextState extends State<_CommitText> {
 
   void _commit() {
     _editing = false;
-    if (_controller.text != widget.text) {
+    if (_controller.text != _text) {
       widget.onCommit(_controller.text);
     }
     // Whatever the outcome, show the committed value (a refusal keeps the old one).
@@ -306,7 +340,8 @@ class _CommitTextState extends State<_CommitText> {
       );
     }
     final textLeft = widget.leading == null ? 6.0 : 3.0;
-    final field = TextField(
+    final inputs = (widget.enabled, style, widget.hint, t.textDisabled, textLeft);
+    final field = _fieldInputs == inputs ? _field! : _field = TextField(
       controller: _controller,
       focusNode: _focus,
       enabled: widget.enabled,
@@ -328,6 +363,7 @@ class _CommitTextState extends State<_CommitText> {
         _focus.unfocus();
       },
     );
+    _fieldInputs = inputs;
     final edge = !widget.enabled
         ? t.line
         : _focus.hasFocus
@@ -460,10 +496,15 @@ class NumberField extends StatefulWidget {
     this.onApply,
     this.compact = false,
     this.onDragState,
+    this.live,
   });
 
   /// The committed value (null: unset / nullable).
   final num? value;
+
+  /// [value] as it moves between builds (a running game's, during Play):
+  /// the text follows it without a rebuild. Takes over from [value].
+  final ValueListenable<num?>? live;
   final bool mixed;
 
   /// The value the document holds (for int-ness); defaults to [value].
@@ -501,6 +542,42 @@ class _NumberFieldState extends State<NumberField> {
   double _dragStart = 0;
   double _dragAccum = 0;
 
+  /// [NumberField.live]'s value as the text field shows it.
+  final _shownLive = ValueNotifier<({String text, String display})?>(null);
+
+  num? get _value => widget.live != null ? widget.live!.value : widget.value;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.live?.addListener(_onLive);
+  }
+
+  @override
+  void didUpdateWidget(covariant NumberField old) {
+    super.didUpdateWidget(old);
+    if (old.live != widget.live) {
+      old.live?.removeListener(_onLive);
+      widget.live?.addListener(_onLive);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.live?.removeListener(_onLive);
+    _shownLive.dispose();
+    super.dispose();
+  }
+
+  void _onLive() {
+    if (!mounted || _preview != null) return; // a drag shows its own value
+    if (widget.slider) {
+      setState(() {}); // the slider's thumb moves too
+      return;
+    }
+    _shownLive.value = (text: _text, display: _display);
+  }
+
   bool get _showsDegrees => widget.angle;
 
   double _toShown(double stored) => _showsDegrees ? stored * 180 / math.pi : stored;
@@ -512,7 +589,7 @@ class _NumberFieldState extends State<NumberField> {
   String get _text {
     if (_preview != null) return formatNumber(_toShown(_preview!), integer: widget.integer, decimals: _decimals);
     if (widget.mixed) return '—';
-    final v = widget.value;
+    final v = _value;
     if (v == null) return '';
     return formatNumber(_toShown(v.toDouble()), integer: widget.integer, decimals: _decimals);
   }
@@ -520,7 +597,7 @@ class _NumberFieldState extends State<NumberField> {
   /// What the field shows until it is clicked: three decimals at most.
   String get _display {
     if (widget.mixed) return '—';
-    final v = _preview ?? widget.value?.toDouble();
+    final v = _preview ?? _value?.toDouble();
     if (v == null) return '';
     return formatNumberShort(_toShown(v), integer: widget.integer);
   }
@@ -537,7 +614,8 @@ class _NumberFieldState extends State<NumberField> {
   void _commitShown(double shown) {
     var stored = _toStored(shown);
     if (widget.integer) stored = stored.roundToDouble();
-    widget.onCommit(jsonNumber(stored, previous: widget.previous ?? widget.value, integer: widget.integer));
+    final previous = widget.live != null ? _value : widget.previous ?? widget.value;
+    widget.onCommit(jsonNumber(stored, previous: previous, integer: widget.integer));
   }
 
   void _onText(String text) {
@@ -550,9 +628,9 @@ class _NumberFieldState extends State<NumberField> {
   }
 
   void _dragStarted(DragStartDetails d) {
-    _dragStart = _toShown((widget.value ?? widget.min ?? 0).toDouble());
+    _dragStart = _toShown((_value ?? widget.min ?? 0).toDouble());
     _dragAccum = 0;
-    setState(() => _preview = widget.value?.toDouble() ?? (widget.min ?? 0).toDouble());
+    setState(() => _preview = _value?.toDouble() ?? (widget.min ?? 0).toDouble());
     widget.onDragState?.call(true);
   }
 
@@ -574,7 +652,7 @@ class _NumberFieldState extends State<NumberField> {
     setState(() => _preview = null);
     widget.onDragState?.call(false);
     if (p == null) return;
-    final before = widget.value?.toDouble();
+    final before = _value?.toDouble();
     if (before != null && (p - before).abs() < 1e-12) return;
     _commitShown(_toShown(p));
   }
@@ -604,6 +682,7 @@ class _NumberFieldState extends State<NumberField> {
       key: const ValueKey('number.text'),
       text: _text,
       display: _display,
+      live: widget.live == null ? null : _shownLive,
       enabled: widget.enabled,
       unit: shownUnit,
       leading: letter == null
@@ -636,7 +715,7 @@ class _NumberFieldState extends State<NumberField> {
     Widget control = text;
     final min = widget.min, max = widget.max;
     if (widget.slider && min != null && max != null) {
-      final current = (_preview ?? widget.value ?? min).toDouble().clamp(min.toDouble(), max.toDouble());
+      final current = (_preview ?? _value ?? min).toDouble().clamp(min.toDouble(), max.toDouble());
       control = Row(
         children: [
           Expanded(
@@ -865,9 +944,13 @@ class VecField extends StatelessWidget {
     this.max,
     this.integer = false,
     this.names = _axisNames,
+    this.live,
   });
 
   final List<num>? value;
+
+  /// [value] as it moves between builds (see [NumberField.live]).
+  final ValueListenable<Object?>? live;
   final int components;
 
   /// Per component: the selection disagrees.
@@ -900,12 +983,38 @@ class VecField extends StatelessWidget {
             min: min,
             max: max,
             integer: integer,
+            live: live == null ? null : _Component(live!, i),
             onCommit: (v) => onCommitComponent(i, v),
           ),
         ),
       ],
     ],
   );
+}
+
+/// Component [index] of a vector [source], as a listenable (equal for the
+/// same source and index, so a rebuild does not resubscribe).
+final class _Component implements ValueListenable<num?> {
+  const _Component(this.source, this.index);
+
+  final ValueListenable<Object?> source;
+  final int index;
+
+  @override
+  num? get value {
+    final v = source.value;
+    return v is List && index < v.length && v[index] is num ? v[index] as num : null;
+  }
+
+  @override
+  void addListener(VoidCallback listener) => source.addListener(listener);
+  @override
+  void removeListener(VoidCallback listener) => source.removeListener(listener);
+
+  @override
+  bool operator ==(Object other) => other is _Component && identical(other.source, source) && other.index == index;
+  @override
+  int get hashCode => Object.hash(identityHashCode(source), index);
 }
 
 /// A unit quaternion `[x, y, z, w]` edited as Euler degrees. Each axis
@@ -919,9 +1028,13 @@ class EulerField extends StatefulWidget {
     required this.onCommit,
     this.mixed = false,
     this.enabled = true,
+    this.live,
   });
 
   final List<num>? quaternion;
+
+  /// [quaternion] as it moves between builds (see [NumberField.live]).
+  final ValueListenable<Object?>? live;
   final bool mixed;
   final bool enabled;
   final void Function(List<double> quaternion) onCommit;
@@ -936,8 +1049,56 @@ class _EulerFieldState extends State<EulerField> {
   Euler? _shown;
   List<num>? _for;
 
+  /// The angles [EulerField.live] moved to, per axis.
+  final _axes = [for (var i = 0; i < 3; i++) ValueNotifier<num?>(null)];
+
+  List<num>? get _quaternion {
+    final live = widget.live;
+    if (live == null) return widget.quaternion;
+    final q = live.value;
+    return q is List && q.length == 4 ? [for (final v in q) v is num ? v : 0] : null;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.live?.addListener(_onLive);
+    _setAxes();
+  }
+
+  @override
+  void didUpdateWidget(covariant EulerField old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.live, widget.live)) {
+      old.live?.removeListener(_onLive);
+      widget.live?.addListener(_onLive);
+    }
+    _setAxes();
+  }
+
+  @override
+  void dispose() {
+    widget.live?.removeListener(_onLive);
+    for (final a in _axes) {
+      a.dispose();
+    }
+    super.dispose();
+  }
+
+  void _onLive() {
+    if (mounted) _setAxes();
+  }
+
+  void _setAxes() {
+    if (widget.live == null) return;
+    final e = _euler;
+    for (var i = 0; i < 3; i++) {
+      _axes[i].value = widget.mixed ? null : e[i];
+    }
+  }
+
   Euler get _euler {
-    final q = widget.quaternion;
+    final q = _quaternion;
     if (q == null || q.length != 4) return Euler.zero;
     if (_shown != null && _for != null && sameRotation(_for!, q, eps: 1e-9)) return _shown!;
     final e = Euler.fromQuaternion(q).clean;
@@ -972,6 +1133,7 @@ class _EulerFieldState extends State<EulerField> {
               enabled: widget.enabled,
               unit: '°',
               step: 1,
+              live: widget.live == null ? null : _axes[i],
               onCommit: (v) => _commit(i, v),
             ),
           ),

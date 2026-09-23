@@ -4,6 +4,7 @@
 // Inspector on it while Play runs, with the selection carried both ways.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -12,6 +13,7 @@ import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/documents/editor_document.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/inspector/inspector_model.dart';
+import 'package:fynkel_editor/src/inspector/field_widgets.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/live_play.dart';
@@ -19,6 +21,7 @@ import 'package:fynkel_editor/src/play/play_document.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelLaunch, FynkelPlayControl, FynkelPlayScope;
 
+import 'inspector_test.dart' show nativeSchemas;
 import 'support/fakes.dart';
 
 /// A running world in memory: rows, their native components, behaviours.
@@ -313,6 +316,90 @@ void main() {
     expect(field('fynkel.Transform#0.position'), isNot(same(position)));
     expect(inspector.slots[0].value('position'), [0, 2, 0]);
     play.dispose();
+  });
+
+  testWidgets('a moving value reaches its text box without a rebuild, never under the user\'s typing', (tester) async {
+    final project = FakeProject(dir: '/fake/game')..addDocument(scene());
+    project.schemas = nativeSchemas();
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    final inspector = InspectorModel(tabs: tabs, project: project);
+    addTearDown(inspector.dispose);
+    tabs.openDocument('main')!.setSelection(['robot']);
+    final live = running();
+    final play = LivePlay(tabs: tabs, backend: (_) => live);
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    play.follow(world);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SizedBox(width: 420, height: 1200, child: InspectorPanel(model: inspector))),
+      ),
+    );
+    Finder box(String field, String axis) => find.descendant(
+      of: find.descendant(of: find.byKey(ValueKey('field.fynkel.Transform#0.$field')), matching: find.byKey(ValueKey(axis))),
+      matching: find.byType(EditableText),
+    );
+    String text(String field, String axis) => tester.widget<EditableText>(box(field, axis)).controller.text;
+    final position = tester.widget(find.byKey(const ValueKey('field.fynkel.Transform#0.position')));
+    var told = 0;
+    inspector.addListener(() => told++);
+    final transform = live.native['robot']![0].data;
+
+    transform['position'] = [1.5, 2, 0];
+    transform['rotation'] = [0, 0.7071067811865476, 0, 0.7071067811865476];
+    play.document!.refresh();
+    await tester.pump();
+    expect(told, 0, reason: 'only followed values moved: the panel is not told');
+    expect(tester.widget(find.byKey(const ValueKey('field.fynkel.Transform#0.position'))), same(position));
+    expect(text('position', 'vec.0'), '1.5');
+    expect(text('position', 'vec.1'), '2');
+    expect(text('rotation', 'euler.1'), '90');
+
+    // A value no field follows (a new name) rebuilds as before.
+    live.rename('robot', 'Hero');
+    play.document!.refresh();
+    await tester.pump();
+    expect(told, 1);
+    expect(text('position', 'vec.0'), '1.5');
+    play.dispose();
+  });
+
+  testWidgets('a followed number never changes under the user\'s typing, and comes back on Escape', (tester) async {
+    final value = ValueNotifier<num?>(2);
+    addTearDown(value.dispose);
+    final commits = <Object>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 300, child: NumberField(value: 2, live: value, label: 'Y', onCommit: commits.add)),
+        ),
+      ),
+    );
+    final box = find.byType(EditableText);
+    String text() => tester.widget<EditableText>(box).controller.text;
+    value.value = 3.25;
+    await tester.pump();
+    expect(text(), '3.25');
+
+    await tester.tap(box);
+    await tester.pump();
+    await tester.enterText(box, '4');
+    value.value = 7;
+    await tester.pump();
+    expect(text(), '4', reason: 'the edit wins');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(text(), '7', reason: 'cancelled: the running value comes back');
+    expect(commits, isEmpty);
+
+    await tester.tap(box);
+    await tester.pump();
+    expect(text(), '7', reason: 'an edit starts from the newest value');
+    await tester.enterText(box, '5');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(commits, [5]);
   });
 
   testWidgets('Play tints the editor and the Hierarchy says it shows the running game; Stop ends both', (tester) async {

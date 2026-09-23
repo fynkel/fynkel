@@ -336,6 +336,7 @@ final class InspectorModel extends ChangeNotifier {
       };
       _liveValues?.addListener(_onLiveValues);
       _errors.clear();
+      _fieldValues.clear();
     }
     _refresh();
   }
@@ -358,6 +359,58 @@ final class InspectorModel extends ChangeNotifier {
       _refresh();
     } finally {
       _liveOnly = false;
+    }
+  }
+
+  /// The number, vector and rotation fields shown of the running game's
+  /// one selected entity, by slot key and path: what their editors listen
+  /// to between builds.
+  final _fieldValues = <String, Map<String, ValueNotifier<Object?>>>{};
+
+  /// [slot]'s value at [path] as it moves while the game runs, for a field
+  /// editor to follow without a rebuild; null unless the Inspector shows
+  /// one entity of the running game.
+  ValueListenable<Object?>? liveField(ComponentSlot slot, String path) {
+    if (_liveValues == null || !slot.single) return null;
+    return (_fieldValues[slot.key] ??= {}).putIfAbsent(path, () => ValueNotifier(slot.value(path)));
+  }
+
+  /// A live refresh whose only changes are values [liveField] carries:
+  /// [next] replaces the slots without telling the panel, and the fields
+  /// follow on their own. False when anything else changed (a name, a
+  /// component, a field nobody follows), for a rebuild.
+  bool _moveInPlace(List<EntityInfo> infos, List<ComponentSlot> next) {
+    if (!_liveOnly || next.length != _slots.length || infos.length != _entities.length) return false;
+    for (var i = 0; i < infos.length; i++) {
+      if (infos[i].id != _entities[i].id || infos[i].name != _entities[i].name) return false;
+    }
+    for (var i = 0; i < next.length; i++) {
+      final a = _slots[i], b = next[i];
+      if (identical(a, b)) continue;
+      if (a.key != b.key || !identical(a.spec, b.spec) || !a.single || !b.single) return false;
+      final x = a.first, y = b.first;
+      if (x.entityId != y.entityId || x.componentId != y.componentId || x.version != y.version) return false;
+      if (!setEquals(x.data.keys.toSet(), y.data.keys.toSet())) return false;
+      final followed = _fieldValues[a.key] ?? const {};
+      for (final k in y.data.keys) {
+        if (!deepEquals(x.data[k], y.data[k]) && !followed.containsKey(k)) return false;
+      }
+    }
+    return true;
+  }
+
+  /// Every followed field takes its value from the slots shown; the ones
+  /// no slot has any more are dropped.
+  void _pushFieldValues() {
+    if (_fieldValues.isEmpty) return;
+    final byKey = {for (final s in _slots) s.key: s};
+    _fieldValues.removeWhere((key, _) => byKey[key]?.single != true);
+    for (final MapEntry(key: key, value: fields) in _fieldValues.entries) {
+      final slot = byKey[key]!;
+      for (final MapEntry(key: path, value: n) in fields.entries) {
+        final v = slot.value(path);
+        if (!deepEquals(n.value, v)) n.value = v;
+      }
     }
   }
 
@@ -394,7 +447,10 @@ final class InspectorModel extends ChangeNotifier {
     if (pinned != null) pinned.retainWhere((id) => t.tree[id] != null);
     if (pinned != null && pinned.isEmpty) _lockedIds = null;
     final ids = List.of(_lockedIds ?? t.selection);
-    if (!listEquals(ids, _ids)) lastError = null;
+    if (!listEquals(ids, _ids)) {
+      lastError = null;
+      _fieldValues.clear();
+    }
     _ids = ids;
     _typesOn.clear();
     _layerOn.clear();
@@ -487,10 +543,17 @@ final class InspectorModel extends ChangeNotifier {
       if (c.type == 'fynkel.Layer') _layerOn.putIfAbsent(c.entityId, () => c);
       if (c.type == 'fynkel.Tags') _tagsOn.putIfAbsent(c.entityId, () => c);
     }
+    final next = _keepUnchanged(_pair(perEntity));
+    if (_moveInPlace(infos, next)) {
+      _slots = next;
+      _pushFieldValues();
+      return;
+    }
     _entities = infos;
-    _slots = _keepUnchanged(_pair(perEntity));
+    _slots = next;
     // Errors of slots that vanished go with them.
     _errors.removeWhere((k, _) => !_slots.any((s) => k.startsWith('${s.key}/')));
+    _pushFieldValues();
     notifyListeners();
   }
 

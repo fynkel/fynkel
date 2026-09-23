@@ -12,7 +12,7 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 import '../documents/editor_document.dart';
 
 final class LivePreview implements PreviewBackend {
-  LivePreview(this.live, {bool Function()? alive}) : _alive = alive;
+  LivePreview(this.live, {this.alive});
 
   final LiveWorld live;
 
@@ -20,14 +20,14 @@ final class LivePreview implements PreviewBackend {
   /// a microtask after the game tore its world down — after that frame's
   /// post-frame callbacks, where the Scene view draws — so the view asks
   /// here before every frame instead.
-  final bool Function()? _alive;
+  final bool Function()? alive;
   bool _closed = false;
   PreviewStats _stats = const PreviewStats.zero();
 
   @override
   int get worldAddress => isClosed ? 0 : live.worldAddress;
   @override
-  bool get isClosed => _closed || !(_alive?.call() ?? true);
+  bool get isClosed => _closed || !(alive?.call() ?? true);
   @override
   PreviewStats get stats => _stats;
   @override

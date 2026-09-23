@@ -12,6 +12,7 @@
 // prefab and Select prefab asset; a derived entity's fields show the
 // overridden ones bold with Revert and Apply arrows, and a banner names
 // the instance it belongs to.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -866,8 +867,10 @@ class _FieldEditor extends StatelessWidget {
     switch (spec.kind) {
       case FieldKind.number:
       case FieldKind.integer:
+        final live = model.liveField(slot, path);
         return NumberField(
           value: value is num ? value : null,
+          live: live == null ? null : _Number(live),
           previous: value,
           mixed: mixed,
           label: label,
@@ -926,6 +929,7 @@ class _FieldEditor extends StatelessWidget {
           unit: spec.unit,
           VecField(
             value: list,
+            live: model.liveField(slot, path),
             components: spec.components,
             mixed: [for (var i = 0; i < spec.components; i++) slot.isMixed('$path/$i')],
             enabled: _enabled,
@@ -952,6 +956,7 @@ class _FieldEditor extends StatelessWidget {
           error,
           EulerField(
             quaternion: q,
+            live: model.liveField(slot, path),
             mixed: mixed,
             enabled: _enabled,
             onCommit: (quat) => _commit(_numbersLike(quat, q)),
@@ -1510,4 +1515,27 @@ Future<void> showAddComponent(BuildContext context, InspectorModel model, {Rect?
   if (!model.addComponent(choice.value!) && model.lastError != null && context.mounted) {
     Notices.maybeOf(context)?.show(model.lastError!);
   }
+}
+
+/// A followed field's value as a number (see [InspectorModel.liveField]).
+final class _Number implements ValueListenable<num?> {
+  const _Number(this.source);
+
+  final ValueListenable<Object?> source;
+
+  @override
+  num? get value => switch (source.value) {
+    final num n => n,
+    _ => null,
+  };
+
+  @override
+  void addListener(VoidCallback listener) => source.addListener(listener);
+  @override
+  void removeListener(VoidCallback listener) => source.removeListener(listener);
+
+  @override
+  bool operator ==(Object other) => other is _Number && identical(other.source, source);
+  @override
+  int get hashCode => identityHashCode(source);
 }
