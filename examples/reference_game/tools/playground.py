@@ -97,6 +97,11 @@ NS = uuid.UUID("7c9b0b3e-8c0a-4f0e-9d2a-5a1b2c3d4e5f")  # the Playground's id na
 # and the character's `layer` say which, and `Scene.add` moves it there.
 DEFAULT, PROPS, PLAYER, TRIGGER = 1, 2, 4, 8
 ALL = 0xFFFFFFFF
+# The project's tags (fynkel.project.json `tags`), as the bits of an
+# object's `fynkel.Tags`: `Scene.add(tags=…)`. game.Collectible and
+# game.Switch answer only the object tagged `player`; the tests count the
+# coins by `pickup`.
+TAG_PLAYER, TAG_PICKUP = 1, 2
 LAYERED = ("fynkel.Collider", "fynkel.CharacterController")
 
 # ------------------------------------------------------------------ helpers
@@ -203,7 +208,7 @@ class Scene:
         self.key = key
         self.entities = {}
 
-    def add(self, name, components, parent=None, prefab=None):
+    def add(self, name, components, parent=None, prefab=None, tags=0):
         eid = uid(self.key, name)
         assert eid not in self.entities, f"duplicate entity name {name!r}"
         entity = {"name": name, "parent": parent, "children": [], "components": {}}
@@ -215,6 +220,8 @@ class Scene:
             entity["components"][uid(self.key, name, i, type_)] = {"type": type_, "version": 1, "data": data}
         if layer:
             entity["components"][uid(self.key, name, "layer")] = {"type": "fynkel.Layer", "version": 1, "data": {"layer": layer}}
+        if tags:
+            entity["components"][uid(self.key, name, "tags")] = {"type": "fynkel.Tags", "version": 1, "data": {"bits": tags}}
         if prefab is not None:
             entity["prefab"] = {"asset": {"asset": prefab}, "instance": uid(self.key, name, "instance")}
         if parent is not None:
@@ -373,6 +380,7 @@ def coin_prefab():
             # The pickup sound (M3-11), played fire-and-forget on the collect.
             behaviour("game.Collectible", pickup=SOUNDS["coin"]),
         ],
+        tags=TAG_PICKUP,
     )
     return p.document("prefab", PREFABS["coin"], {"roots": [root]})
 
@@ -506,6 +514,7 @@ def playground():
             ("fynkel.Animator", {"clip": {"asset": LOCOMOTION}, "speed": 1.0, "looping": True, "playing": True,
                                  "weight": 1.0, "additive": False, "root_motion": False}),
         ],
+        tags=TAG_PLAYER,
     )
     # The wave layer (M3-19c): a second animator on a descendant, additive,
     # paused on its first frame (the rest pose, so it adds nothing) until

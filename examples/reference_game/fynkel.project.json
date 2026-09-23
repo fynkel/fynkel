@@ -214,5 +214,9 @@
     "props",
     "player",
     "trigger"
+  ],
+  "tags": [
+    "player",
+    "pickup"
   ]
 }

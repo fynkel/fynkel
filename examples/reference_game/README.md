@@ -126,13 +126,22 @@ is heard, the voices count).
   stepVolume, pitch: …)`, the file by the marker's name), the `hit` on a
   death — the clips are authored in place, the controller moves the
   entity (`docs/animation.md`).
-- `lib/game/collectible.dart` — scores on `onZoneEnter('collect')`, plays the
+- Tags and layers (ADR-0020): `fynkel.project.json` declares the layers
+  `default`, `props`, `player` and `trigger` and the tags `player` and
+  `pickup`. The Player is on the `player` layer and carries the `player`
+  tag. Every coin is tagged `pickup`. The coins' and the switch's zones sit
+  on `trigger` with a `mask` of the `player` layer only, so props never
+  set them off. On top of that, the coins and the switch act only for the
+  object `world.findWithTag('player')` finds (`isPlayer` in `game.dart`).
+  The tests find the player and count the coins by tag.
+- `lib/game/collectible.dart` — scores on `onZoneEnter('collect')` when the
+  player enters (by tag), plays the
   exposed `pickup` clip once (fire and forget: the coin is gone a tick
   later), spawns the `burst` prefab at runtime (`world.instantiate`; six small bodies kicked
   apart with `applyImpulse`, gone by their `LifetimeDespawn`), destroys its
   own prefab instance (the anchor entity: `world.byEntity(gameObject.parent)`).
 - `lib/game/switch.dart` + `gate.dart` — the pad's `switch` zone shows a hint
-  (a `ProjectedAnchor` over the pad) while the player stands on it; `E`
+  (a `ProjectedAnchor` over the pad) while the player (by tag) stands on it; `E`
   opens the gate, which slides its static collider up over 1.2 s.
 - `lib/game/game.dart` — `Game`: the world, the flow (`play()`,
   `finish()`, `toMenu()`: scene transitions performed at the next frame;

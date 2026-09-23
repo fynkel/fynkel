@@ -1390,8 +1390,21 @@ camera's `culling_mask` is neither drawn nor casts a shadow
 point or spot light whose mask leaves the object's layer out is not
 assigned to it. The editor camera draws every layer. The sun's mask stays
 deferred. `shading.rs` covers all three cases in one pixel test. No wire
-format, fingerprint or cache version changed. Next is L5, the reference
-game.
+format, fingerprint or cache version changed.
+
+**L5 is done** (2026-09-23): the reference game uses tags and layers, the
+end-to-end proof. `fynkel.project.json` declares the tags `player` and
+`pickup`, and `tools/playground.py` tags the Player and the coin prefab
+(`Scene.add(tags=…)`). The coins' and the switch's zones were already on
+the `trigger` layer with a player-only mask after L1. The coins and the
+switch now also answer only the object `world.findWithTag('player')`
+finds. `game_test.dart` finds the player and the ten coins by tag, sees
+none left after the recorded route, and drops two balls into a coin. The
+first, a `props` ball, is kept out by the layer mask. The second sits on
+the `player` layer but has no tag, and the tag check keeps it out. With
+the tag check removed, that test fails. ADR-0020 is complete. The
+directional light's mask, the editor's per-layer Scene-view toggles and a
+collision matrix stay deferred, as the ADR says.
 
 The M3 backlog as it landed, for the record:
 

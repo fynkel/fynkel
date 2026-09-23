@@ -105,6 +105,13 @@
           "data": {
             "layer": 2
           }
+        },
+        "5402d2ba-46a7-551d-8043-c6afe584d580": {
+          "type": "fynkel.Tags",
+          "version": 1,
+          "data": {
+            "bits": 1
+          }
         }
       }
     },

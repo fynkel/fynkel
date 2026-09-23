@@ -5,8 +5,9 @@ import 'package:fynkel/fynkel.dart';
 import 'game.dart';
 import 'game_state.dart';
 
-/// A coin (assets/prefabs/coin.prefab.json): counts itself into the
-/// [GameState] at `start`, and when the player enters its `collect` zone
+/// A coin (assets/prefabs/coin.prefab.json, tagged `pickup`): counts itself
+/// into the [GameState] at `start`, and when the player (the object tagged
+/// `player`) enters its `collect` zone
 /// (a `fynkel.TriggerZone` with `once`) it scores, plays [pickup] once
 /// (M3-11: a fire-and-forget `world.audio.play` — the coin is gone a tick
 /// later, so no source on it could finish), leaves a burst of sparks
@@ -36,7 +37,7 @@ class Collectible extends Behaviour {
 
   @override
   void onZoneEnter(ZoneEvent event) {
-    if (event.event != 'collect' || collected) return;
+    if (event.event != 'collect' || collected || !isPlayer(world, event.other)) return;
     collected = true;
     state.collect();
     if (pickup != AssetRef.none) world.audio.play(pickup, volume: 0.7);

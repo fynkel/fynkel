@@ -45,6 +45,17 @@ const winDelay = 1.5;
 /// spawned at runtime by `Collectible`.
 const burstPrefab = '88641ff3-d525-5d0b-b21f-226ee8e246a8';
 
+/// The project's tags (fynkel.project.json `tags`, ADR-0020): the Player
+/// carries [playerTag], every coin [pickupTag].
+const playerTag = 'player';
+const pickupTag = 'pickup';
+
+/// Whether [entity] (a zone event's `other`) is the player: the object
+/// tagged [playerTag], as the last tick left the world. The zones' masks
+/// already admit only the `player` layer; the tag says which object on it
+/// is the one that plays.
+bool isPlayer(World world, int entity) => world.findWithTag(playerTag)?.entity == entity;
+
 class Game {
   Game._(this.world, this.report) {
     scenes.addListener(_onScene);

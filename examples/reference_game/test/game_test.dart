@@ -44,6 +44,7 @@ void main() {
     expect(game.report.behavioursAttached, 0, reason: 'the backdrop has no game logic');
     expect(game.state.screen.value, Screen.menu);
     expect(game.report.layersAndTags.layers, ['default', 'props', 'player', 'trigger']);
+    expect(game.report.layersAndTags.tags, ['player', 'pickup']);
     expect(
       game.report.inputActions.map((a) => a.name),
       containsAll(['move', 'look', 'jump', 'sprint', 'interact', 'restart']),
@@ -68,6 +69,66 @@ void main() {
     expect(game.state.total.value, 10);
     expect(game.state.collected.value, 0);
     expect(game.world.find('Sweeper')?.get<Oscillate>()?.frequency, 0.25);
+
+    // Tags and layers (ADR-0020): the player and the coins found by tag,
+    // the zones on the `trigger` layer that only the `player` layer meets.
+    final me = game.world.findWithTag(playerTag)!;
+    expect(me.behaviours.whereType<Player>(), hasLength(1));
+    expect(me.layer, 'player');
+    final coins = game.world.findAllWithTag(pickupTag);
+    expect(coins, hasLength(10));
+    for (final coin in coins) {
+      expect(coin.behaviours.whereType<Collectible>(), hasLength(1));
+      expect(coin.layer, 'trigger');
+      expect(coin.get<Collider>()!.mask, game.world.layerMask(['player']));
+    }
+    final pad = game.world.find('Switch')!;
+    expect(pad.layer, 'trigger');
+    expect(pad.hasTag(playerTag), isFalse);
+  });
+
+  test('only the player collects: a prop is kept out by the layer, an untagged body on the player layer by the tag', () {
+    final game = playing(projectDir);
+    addTearDown(game.dispose);
+    final coin = game.world.findAllWithTag(pickupTag).first;
+    final at = coin.worldTransform!.position;
+
+    GameObject drop(String name, String layer) => game.world.spawn(
+          name: name,
+          transform: Transform(position: Vec3(at.x, at.y + 2, at.z), rotation: Quat.identity, scale: const Vec3(1, 1, 1)),
+        )
+          ..add(const RigidBody(
+              bodyType: BodyType.dynamic, mass: 1, linearDamping: 0, angularDamping: 0, gravityScale: 1, ccd: false))
+          ..add(const Collider(
+              shape: ColliderShape.sphere,
+              size: Vec3(0.3, 0.3, 0.3),
+              offset: Vec3.zero,
+              friction: 0.5,
+              restitution: 0,
+              isSensor: false,
+              mask: 0xffffffff))
+          ..layer = layer;
+
+    // A ball on `props` falls into the coin: its zone's mask is the player
+    // layer only, so nothing happens.
+    final ball = drop('Stray ball', 'props');
+    for (var i = 0; i < 90; i++) {
+      game.frame(1 / 60);
+    }
+    // Resting on the floor inside the coin's pickup sphere.
+    bool inside(GameObject go) => (go.worldTransform!.position.y - at.y).abs() < 0.5;
+    expect(inside(ball), isTrue, reason: 'it came to rest inside the zone: ${ball.worldTransform!.position}');
+    expect(game.state.collected.value, 0);
+
+    // A body on the `player` layer enters the zone, but it is not the
+    // object tagged `player`: the coin stays.
+    final impostor = drop('Impostor', 'player');
+    for (var i = 0; i < 90; i++) {
+      game.frame(1 / 60);
+    }
+    expect(inside(impostor), isTrue, reason: '${impostor.worldTransform!.position}');
+    expect(game.state.collected.value, 0);
+    expect(game.world.findAllWithTag(pickupTag), hasLength(10));
   });
 
   test('the recorded route collects all ten coins', () {
@@ -103,6 +164,7 @@ void main() {
     expect(game.state.deaths.value, 0, reason: 'the route passes the sweeper and the lane unharmed');
     expect(bursts, 10);
     expect(game.world.behaviours.whereType<Collectible>(), isEmpty, reason: 'each coin destroyed its prefab instance');
+    expect(game.world.findAllWithTag(pickupTag), isEmpty, reason: 'no pickup left');
     expect(hinted, isTrue, reason: 'the switch prompted while the player stood on it');
     expect(gate.opened, isTrue);
     expect(player.jumps, 1);
