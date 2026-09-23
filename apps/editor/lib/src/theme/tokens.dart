@@ -376,6 +376,10 @@ abstract final class GizmoTokens {
   /// draws colliders in.
   static const colliderHandle = Color(0xFF4DE266);
 
+  /// Declared gizmos (`@Gizmo`, item 9h) without a colour of their own: a
+  /// light cyan, apart from the lights' white and the colliders' green.
+  static const declaredGizmo = Color(0xFF7FD4F0);
+
   /// [c] as the overlay takes it: linear RGBA.
   static List<double> linear(Color c, {double? alpha}) {
     double lin(double v) => v <= 0.04045 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();

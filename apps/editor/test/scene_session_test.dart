@@ -4,6 +4,7 @@
 // centre (prefab instances by their anchor); a gizmo drag is one undo step
 // and leaves the world equal to a fresh load; the editor-only hidden set
 // reaches the world and never the document; nothing ticks.
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -56,8 +57,9 @@ final class Stack {
   /// Where Save Frame writes (null: the dialog was cancelled).
   String? savePath;
 
-  static Future<Stack> open(String tag) async {
+  static Future<Stack> open(String tag, {void Function(Directory dir)? prepare}) async {
     final dir = copyFixture(tag);
+    prepare?.call(dir);
     final project = await SessionProject.open(dir.path, watch: false);
     return Stack(dir, project);
   }
@@ -380,6 +382,74 @@ void main() {
     expect(tab.document.revision, revision);
     expect(tab.document.dirty, isFalse);
     expect(st.preview!.dump(), (st.preview!..reload()).dump());
+  });
+
+  test('declared gizmos: the Robot\'s Spinner draws its @Gizmo fields and drags them, one transaction', () async {
+    // The fixture's Spinner, as if its class said `@Gizmo.radius(when:
+    // GizmoWhen.always)` on `speed` and `@Gizmo.direction()` on `axis`.
+    final s = await Stack.open(
+      'declared',
+      prepare: (dir) {
+        final f = File('${dir.path}/schemas/behaviours/game.Spinner.schema.json');
+        final schema = jsonDecode(f.readAsStringSync()) as Map<String, Object?>;
+        final props = schema['properties'] as Map<String, Object?>;
+        ((props['speed'] as Map)['x-fynkel'] as Map)['gizmo'] = {'shape': 'radius', 'when': 'always'};
+        ((props['axis'] as Map)['x-fynkel'] as Map)['gizmo'] = {'shape': 'direction'};
+        f.writeAsStringSync(jsonEncode(schema));
+      },
+    );
+    addTearDown(s.close);
+    final tab = s.tabs.openDocument(mainScene)!;
+    final st = s.model.current!;
+    expect(st.hasPreview, isTrue, reason: st.openError);
+    final history = tab.document.history, revision = tab.document.revision;
+    final gizmos = s.model.declaredGizmos('game.Spinner')!;
+    expect(gizmos.fields.map((f) => f.name), ['speed', 'axis']);
+    expect(s.model.declaredGizmos('fynkel.Emitter')!.fields.single.name, 'velocity', reason: 'a native hint');
+    expect(s.model.declaredGizmos('fynkel.Transform'), isNull);
+
+    // The always-on radius draws with nothing selected; selected, the axis
+    // arrow joins it.
+    tab.clearSelection();
+    s.editorState.showGrid = false;
+    s.editorState.showOverlays = false;
+    final idle = s.model.overlay(st).lineCount;
+    expect(idle, greaterThanOrEqualTo(3 * 64), reason: 'the speed sphere\'s three circles');
+    tab.select(robot);
+    s.model.frameSelected();
+    final selected = s.model.overlay(st).lineCount;
+    expect(selected, greaterThan(idle));
+
+    // Edit: the Inspector offers it; the handles are the declared ones.
+    final inspector = InspectorModel(tabs: s.tabs, project: s.project);
+    addTearDown(inspector.dispose);
+    final slot = inspector.slots.singleWhere((x) => x.type == 'game.Spinner');
+    expect(inspector.canEditInScene(slot), isTrue);
+    inspector.toggleEditInScene(slot);
+    expect(s.model.editingLabel, 'Spinner');
+    final ids = s.model.handles().map((h) => h.id).toSet();
+    expect(ids, containsAll(['axis.tip']));
+    expect(ids.where((id) => id.startsWith('speed.')), isNotEmpty);
+    final dot = ids.firstWhere((id) => id.startsWith('speed.'));
+    final grab = s.model.grabPoint(dot)!;
+    final pivot = s.model.grabPoint('axis.tip')!;
+    expect(s.model.beginDrag(dot, grab), isTrue);
+    // Outward, away from the entity's pixel (the tip sits on its axis).
+    final out = grab - s.pixelOf(matTranslation(st.preview!.worldMatrices([robot])[robot]!));
+    s.model.updateDrag(grab + out / out.distance * 30);
+    expect(s.model.drag!.readout, startsWith('Speed '));
+    expect(tab.document.history, history);
+    expect(s.model.endDrag()?.ok, isTrue, reason: s.model.notice);
+    expect(tab.document.history, history + 1, reason: 'one transaction');
+    final spinner = (tab.document.entities([robot]).entities[robot]!['components'] as Map).values
+        .cast<Map>()
+        .singleWhere((c) => c['type'] == 'game.Spinner')['data'] as Map;
+    expect(spinner['speed'] as num, greaterThan(2.5));
+    expect(s.model.grabPoint('axis.tip'), pivot, reason: 'the axis did not move');
+
+    expect(tab.undo(), isTrue);
+    expect(tab.document.history, history);
+    expect(tab.document.revision, revision);
   });
 
   test('the camera of the scene can be looked through and written back; the state file keeps the view', () async {

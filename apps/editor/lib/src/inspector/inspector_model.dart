@@ -32,7 +32,9 @@ import '../documents/open_document.dart';
 import '../project/editor_project.dart';
 import '../project_browser/project_browser_model.dart' show AssetPreview;
 import '../scene_view/component_handles.dart' show ComponentHandlers;
+import '../scene_view/declared_gizmos.dart' show DeclaredGizmos;
 import 'codegen_check.dart';
+import 'component_specs.dart';
 import 'field_spec.dart';
 import 'inspector_math.dart';
 import 'prefab_actions.dart' as prefab;
@@ -192,9 +194,7 @@ final class InspectorModel extends ChangeNotifier {
   List<EntityInfo> _entities = const [];
   List<ComponentSlot> _slots = const [];
   final _errors = <String, String>{};
-  Map<String, ComponentSpec>? _specs;
-  Map<String, TypeSchema>? _schemas;
-  Map<String, Map<String, Object?>>? _metadataByType;
+  late final _specs = ComponentSpecs(project);
 
   /// The last refusal that is not one field's (a rejected Add Component, a
   /// read-only document): shown under the cards until the selection changes,
@@ -246,14 +246,17 @@ final class InspectorModel extends ChangeNotifier {
 
   /// Whether [slot] has handles the Scene view can show: one entity shown,
   /// the tab's lead, a writable document, a type with registered handles
-  /// for its data (a mesh collider has none).
+  /// for its data (a mesh collider has none) or with a declared gizmo to
+  /// drag (`@Gizmo`, item 9h).
   bool canEditInScene(ComponentSlot slot) {
     final t = _tab, e = single;
     return t != null &&
         e != null &&
         canEdit &&
         t.lead == e.id &&
-        ComponentHandlers.supports(slot.type, slot.first.data);
+        (ComponentHandlers.of(slot.type) != null
+            ? ComponentHandlers.supports(slot.type, slot.first.data)
+            : DeclaredGizmos.of(slot.spec)?.draggable ?? false);
   }
 
   /// The Scene view shows [slot]'s handles now.
@@ -305,9 +308,7 @@ final class InspectorModel extends ChangeNotifier {
 
   void _onProject() {
     // Schemas or metadata may have changed on disk (the watcher rescanned).
-    _specs = null;
-    _schemas = null;
-    _metadataByType = null;
+    _specs.clear();
     _refresh();
   }
 
@@ -463,40 +464,11 @@ final class InspectorModel extends ChangeNotifier {
 
   // ── Specs ───────────────────────────────────────────────────────────────
 
-  Map<String, TypeSchema> get _schemaMap => _schemas ??= {for (final s in project.typeSchemas()) s.type: s};
-
-  Map<String, Map<String, Object?>> get _metadata => _metadataByType ??= {
-    for (final b in project.behaviourMetadata()?['behaviours'] as List? ?? const [])
-      if (b is Map) (b['id'] as String? ?? ''): Map<String, Object?>.from(b),
-  };
+  Map<String, TypeSchema> get _schemaMap => _specs.schemas;
 
   /// The spec of [type]: from its schema and, for a behaviour, the committed
   /// metadata; a type nobody knows gets an empty spec whose data shows as JSON.
-  ComponentSpec specFor(String type) {
-    final cache = _specs ??= {};
-    return cache.putIfAbsent(type, () {
-      final s = _schemaMap[type];
-      final meta = _metadata[type];
-      if (s == null && meta == null) {
-        return ComponentSpec(
-          type: type,
-          fields: const [],
-          isBehaviour: !type.startsWith('fynkel.'),
-          missingSchema: true,
-          additionalProperties: true,
-        );
-      }
-      // A behaviour whose schema file is missing still has its committed metadata's schema.
-      final schema = s?.schema ?? (meta?['schema'] is Map ? Map<String, Object?>.from(meta!['schema'] as Map) : null);
-      return parseComponentSpec(
-        type,
-        schema,
-        metadata: meta,
-        allowed: s?.allowed ?? true,
-        authored: s?.authored ?? true,
-      );
-    });
-  }
+  ComponentSpec specFor(String type) => _specs.of(type);
 
   /// The instant staleness signal: committed metadata vs schema files.
   List<CommittedDrift> get committedDrift => committedDrift_(project.behaviourMetadata(), {
@@ -520,7 +492,7 @@ final class InspectorModel extends ChangeNotifier {
       if (!seen.add(s.type)) continue;
       out.add(AddableType(type: s.type, spec: specFor(s.type)));
     }
-    for (final type in _metadata.keys) {
+    for (final type in _specs.metadata.keys) {
       if (type.isNotEmpty && seen.add(type)) out.add(AddableType(type: type, spec: specFor(type)));
     }
     out.retainWhere(

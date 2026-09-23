@@ -885,7 +885,39 @@ writes nothing until release, then **one transaction** of `setField`s for
 the fields that changed (a derived component: `setField` overrides on
 its anchor); limits the runtime refuses are never produced (a range,
 radius or extent of at least 1 mm, angles and a field of view inside
-(0, π)). The status line says "editing Collider · Esc to stop". A drag
+(0, π)). The status line says "editing Collider · Esc to stop".
+
+**Declared gizmos** (item 9h, ADR-0019 §3, `scene_view/declared_gizmos.dart`)
+are how game code gets the same without the editor running it: a
+behaviour puts `@Gizmo.radius()`, `box()`, `point()`, `direction()`,
+`cone(angle: 'field')`, `lineTo()` or `path()` on the `@Expose` field it
+draws (with `color: 0xAARRGGBB`, `when: GizmoWhen.always` and
+`space: GizmoSpace.world` as options), `fynkel codegen` writes a
+`gizmo` hint into the field's `x-fynkel` (docs/codegen.md), and the
+Inspector's spec parser reads it as `FieldSpec.gizmo`. Built-in
+components get theirs from `native_hints.dart`: an Emitter's `velocity`
+is a world-space direction, a Follow's or camera rig's `target` a line
+to the entity. The Scene view draws them in the overlay — for the
+selection, and for every shown carrier of a `when: always` field — in
+the field's colour or `GizmoTokens.declaredGizmo`, 1 pt and faded
+behind geometry like the rest: a radius as three circles, a box, a point
+as a small cross with a line from the entity, a direction as an arrow, a
+cone along −Z with its angle from a sibling field, a line to the entity
+a `lineTo` names (by name, as `world.find` does), a path as a polyline
+with a cross per point. A value is in the entity's space (moved, turned
+and scaled with it) unless the gizmo says `world`; a field the data
+leaves out draws at its schema default. When a type has no registered
+handles, its declared gizmos are its handles: the card's **Edit** toggle
+is offered when one of them can be dragged (a `lineTo` cannot), and a
+drag sets the field, clamped to the field's `min`/`max` (whole for an
+`int`), one transaction as above — a radius by its dots, a box's faces
+symmetrically about its centre, a point, a direction's tip or a path's
+points in the view's plane, a cone's length and its angle field. The
+specs come from `ComponentSpecs`, the Inspector's cache shared with the
+Scene view, cleared when the project rescans (a codegen run shows at
+once).
+
+A drag
 (`beginDrag(handleId)` → `updateDrag` → `endDrag`) applies it to **every
 draggable target about the lead's pivot** (`delta × startWorld`, then
 back to the parent's space: `inverse(parentWorld) × newWorld`; move keeps
@@ -1202,6 +1234,15 @@ the `started` record), a grace of three seconds, then SIGKILL to whatever
 of *that same list* is still alive. The list is taken **before** the
 first signal on purpose: once the root dies its children are reparented
 to launchd and no later walk would find them.
+
+### Gizmos in Play (item 9h)
+
+**Play ▸ Show Gizmos in Play** (⌥⇧G; `play.gizmos`, remembered in
+`.fynkel/editor.json` as `playGizmos`) starts the game with
+`FYNKEL_GIZMOS=1`, so a `FynkelGameView` with no `gizmos:` of its own
+draws what the game's behaviours draw through `Gizmos` in the game's
+window (docs/hosts.md § Flutter host). The Scene view never shows them:
+it is the edit-preview world, not the running game's (ADR-0019).
 
 ### Play saves first
 
@@ -1633,6 +1674,7 @@ around the one step that causes it.
 | 9e | done 2026-09-23 (gate driven by the user) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
 | 9f | done 2026-09-23 (gate driven by the user) | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
 | 9g | built, gate pending | Handles and Scene tools: the handle framework, the tool registry with move, rotate, scale and the combined transform tool drawn through the overlay, and component handles — light range and angles, collider sizes, camera field of view — behind the Inspector's Edit toggle (§ The gizmo). |
+| 9h | built, gate pending | Gizmos for game code: the runtime `Gizmos` API in the game's window (`FynkelGameView(gizmos:)`, Play's *Show Gizmos in Play*), and declarative `@Gizmo` fields drawn and dragged in the Scene view (§ The gizmo). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 

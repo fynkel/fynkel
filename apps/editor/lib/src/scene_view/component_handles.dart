@@ -156,12 +156,14 @@ HandleShape dot(ComponentContext c, Vec3 p, {List<List<Vec3>> guides = const []}
 const _signs = ['+', '-'];
 const _axisNames = ['x', 'y', 'z'];
 
-String _fmt(double v) {
+/// A readout's number: at most three decimals, none when whole.
+String fmtAmount(double v) {
   final r = (v * 1000).roundToDouble() / 1000;
   return r == r.roundToDouble() ? r.toInt().toString() : r.toStringAsFixed(r.abs() < 0.1 ? 3 : 2);
 }
 
-String _degrees(double radians) => '${_fmt(radians * 180 / math.pi)}°';
+/// Radians as a readout's degrees.
+String fmtDegrees(double radians) => '${fmtAmount(radians * 180 / math.pi)}°';
 
 /// Whether a dot along [dir] from a centre would sit on the centre itself
 /// as seen from the camera (it is not offered).
@@ -211,7 +213,7 @@ final class PointLightHandles extends ComponentHandles {
   FieldEdit? edit(Handle handle, DragValue value, ComponentContext c) {
     if (!handle.id.startsWith('range.')) return null;
     final r = math.max(_minLength, value.scalar);
-    return FieldEdit({'range': r}, 'range ${_fmt(r)} m');
+    return FieldEdit({'range': r}, 'range ${fmtAmount(r)} m');
   }
 }
 
@@ -277,16 +279,16 @@ final class SpotLightHandles extends ComponentHandles {
     final outer = c.number('outer_angle', 0.6), inner = c.number('inner_angle', 0.4);
     if (handle.id == 'range') {
       final r = math.max(_minLength, value.scalar);
-      return FieldEdit({'range': r}, 'range ${_fmt(r)} m');
+      return FieldEdit({'range': r}, 'range ${fmtAmount(r)} m');
     }
     final angle = math.atan2(value.scalar, range).clamp(_minLength, maxAngle);
     if (handle.id.startsWith('outer.')) {
       // Narrowing the outer cone past the inner one takes the inner along.
-      return FieldEdit({'outer_angle': angle, if (inner > angle) 'inner_angle': angle}, 'outer ${_degrees(angle)}');
+      return FieldEdit({'outer_angle': angle, if (inner > angle) 'inner_angle': angle}, 'outer ${fmtDegrees(angle)}');
     }
     if (handle.id.startsWith('inner.')) {
       final a = math.min(angle, outer);
-      return FieldEdit({'inner_angle': a}, 'inner ${_degrees(a)}');
+      return FieldEdit({'inner_angle': a}, 'inner ${fmtDegrees(a)}');
     }
     return null;
   }
@@ -457,18 +459,18 @@ final class ColliderHandles extends ComponentHandles {
         final offset = c.vector('offset', const [0, 0, 0]);
         final newSize = List.of(size)..[i] = half;
         final newOffset = List.of(offset)..[i] += sign * (half - size[i]);
-        return FieldEdit({'size': newSize, 'offset': newOffset}, '${_axisNames[i]} ${_fmt(2 * half * scale)} m');
+        return FieldEdit({'size': newSize, 'offset': newOffset}, '${_axisNames[i]} ${fmtAmount(2 * half * scale)} m');
       case 'sphere' when id.startsWith('radius.'):
         final r = math.max(_minLength, value.scalar / c.maxScale);
-        return FieldEdit({'size': List.of(size)..[0] = r}, 'radius ${_fmt(r * c.maxScale)} m');
+        return FieldEdit({'size': List.of(size)..[0] = r}, 'radius ${fmtAmount(r * c.maxScale)} m');
       case 'capsule' when id.startsWith('radius.'):
         final r = math.max(_minLength, value.scalar / c.maxScale);
-        return FieldEdit({'size': List.of(size)..[0] = r}, 'radius ${_fmt(r * c.maxScale)} m');
+        return FieldEdit({'size': List.of(size)..[0] = r}, 'radius ${fmtAmount(r * c.maxScale)} m');
       case 'capsule' when id.startsWith('height.'):
         // The dot sits on the cap: the half height is what is left after
         // the radius.
         final h = math.max(0.0, value.scalar / c.maxScale - size[0]);
-        return FieldEdit({'size': List.of(size)..[1] = h}, 'height ${_fmt(2 * (h + size[0]) * c.maxScale)} m');
+        return FieldEdit({'size': List.of(size)..[1] = h}, 'height ${fmtAmount(2 * (h + size[0]) * c.maxScale)} m');
     }
     return null;
   }
@@ -532,12 +534,12 @@ final class CameraHandles extends ComponentHandles {
   FieldEdit? edit(Handle handle, DragValue value, ComponentContext c) {
     if (handle.id.startsWith('height.')) {
       final h = math.max(_minLength, 2 * value.scalar);
-      return FieldEdit({'ortho_height': h}, 'height ${_fmt(h)} m');
+      return FieldEdit({'ortho_height': h}, 'height ${fmtAmount(h)} m');
     }
     if (!handle.id.startsWith('fov.')) return null;
     final near = math.max(1e-3, c.number('near', 0.1));
     final depth = math.min(c.number('far', 1000), near + outlineDepth);
     final fov = (2 * math.atan2(value.scalar, depth)).clamp(minFov, maxFov);
-    return FieldEdit({'fov_y': fov}, 'field of view ${_degrees(fov)}');
+    return FieldEdit({'fov_y': fov}, 'field of view ${fmtDegrees(fov)}');
   }
 }

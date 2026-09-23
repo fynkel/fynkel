@@ -31,11 +31,13 @@ import '../documents/editor_document.dart';
 import '../documents/open_document.dart';
 import '../hierarchy/hierarchy_model.dart';
 import '../hierarchy/transform_math.dart';
+import '../inspector/component_specs.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../inspector/prefab_actions.dart' as prefab;
 import '../project/editor_project.dart';
 import '../theme/tokens.dart' show GizmoTokens;
 import 'component_handles.dart';
+import 'declared_gizmos.dart';
 import 'editor_state.dart';
 import 'gizmo.dart';
 import 'scene_tools.dart';
@@ -403,6 +405,11 @@ final class SceneViewModel extends ChangeNotifier {
   }
 
   void _onProject() {
+    // Schemas or behaviour metadata may have changed (codegen ran).
+    _specs.clear();
+    _declared.clear();
+    _declaredCache = null;
+    _componentCache = null;
     if (project.assetsRevision != _assetsRevision) {
       _assetsRevision = project.assetsRevision;
       // Assets changed under the open previews: the cache is rebuilt so
@@ -936,8 +943,118 @@ final class SceneViewModel extends ChangeNotifier {
       final l = t.preview!.lines(outline: outline, iconsAspect: showOverlays ? aspect : null);
       if (l.count > 0) o.segments(l.data, width: width);
     }
+    _drawDeclared(o, t);
     _drawHandles(o);
     return o;
+  }
+
+  // ── Declared gizmos (item 9h) ───────────────────────────────────────
+
+  late final _specs = ComponentSpecs(project);
+  final _declared = <String, DeclaredGizmos?>{};
+
+  /// [type]'s declared gizmos (`@Gizmo`, or the native hints'), parsed
+  /// once per project scan; null when it declares none.
+  DeclaredGizmos? declaredGizmos(String type) => _declared.putIfAbsent(type, () => DeclaredGizmos.of(_specs.of(type)));
+
+  /// What the Edit toggle drags on [type]: its registered handles, else
+  /// its declared gizmos.
+  ComponentHandles? handlersFor(String type) => ComponentHandlers.of(type) ?? declaredGizmos(type);
+
+  ({String key, List<({String id, String type, Map<String, Object?> data})> items})? _declaredCache;
+
+  /// The components whose declared gizmos show: the selection's, and every
+  /// shown carrier's of a type with an always-on one. Read once per
+  /// document revision, selection and visibility.
+  List<({String id, String type, Map<String, Object?> data})> _declaredItems(SceneTab t, Set<String> hidden) {
+    final selection = t.tab.selection.toSet();
+    final key = '${t.tab.document.revision}|${selection.join(',')}|${hidden.join(',')}';
+    final cached = _declaredCache;
+    if (cached != null && cached.key == key) return cached.items;
+    final wanted = <String>[];
+    for (final node in t.tab.tree.nodes.values) {
+      if (hidden.contains(node.id)) continue;
+      final selected = selection.contains(node.id);
+      if (node.componentTypes.any((type) => declaredGizmos(type) != null && (selected || declaredGizmos(type)!.anyAlways))) {
+        wanted.add(node.id);
+      }
+    }
+    final items = <({String id, String type, Map<String, Object?> data})>[];
+    final own = <String>[];
+    for (final id in wanted) {
+      final node = t.tab.tree[id]!;
+      if (!node.isDerived) {
+        own.add(id);
+        continue;
+      }
+      final de = t.tab.expansionOf(node.anchor!)?.entity(id);
+      for (final c in de?.components.values ?? const <Never>[]) {
+        if (declaredGizmos(c.type) != null) items.add((id: id, type: c.type, data: Map<String, Object?>.from(c.data)));
+      }
+    }
+    if (own.isNotEmpty) {
+      try {
+        final entities = t.tab.document.entities(own).entities;
+        for (final id in own) {
+          final components = entities[id]?['components'];
+          if (components is! Map) continue;
+          for (final c in components.values) {
+            if (c is! Map || c['type'] is! String || declaredGizmos(c['type'] as String) == null) continue;
+            final data = c['data'] is Map ? Map<String, Object?>.from(c['data'] as Map) : <String, Object?>{};
+            items.add((id: id, type: c['type'] as String, data: data));
+          }
+        }
+      } on AuthoringException catch (_) {}
+    }
+    _declaredCache = (key: key, items: items);
+    return items;
+  }
+
+  /// The declared gizmos of the selection and of `when: always` carriers,
+  /// depth-faded like every gizmo; a component being dragged draws its
+  /// dragged values.
+  void _drawDeclared(ViewportOverlay o, SceneTab t) {
+    final vp = viewProjection;
+    if (vp == null) return;
+    final items = _declaredItems(t, _hiddenAll(t));
+    if (items.isEmpty) return;
+    final byName = <String, String>{};
+    for (final n in t.tab.tree.nodes.values) {
+      byName.putIfAbsent(n.name, () => n.id);
+    }
+    final targets = <String>{};
+    for (final item in items) {
+      for (final f in declaredGizmos(item.type)!.fields) {
+        final name = item.data[f.name];
+        if (f.gizmo!.shape == 'lineTo' && name is String) targets.addAll([?byName[name]]);
+      }
+    }
+    final matrices = t.preview!.worldMatrices([...{for (final i in items) i.id}, ...targets]);
+    final selection = t.tab.selection.toSet();
+    final d = drag;
+    final width = GizmoTokens.lineWidth * pixelRatio;
+    for (final item in items) {
+      final world = matrices[item.id];
+      if (world == null) continue;
+      final dragged = d?.component;
+      final data = dragged != null && dragged.entityId == item.id && dragged.type == item.type
+          ? {...item.data, ...d!.fields}
+          : item.data;
+      final c = ComponentContext(world: world, data: data, vp: vp, pixelRatio: pixelRatio, aspect: aspect);
+      final lines = declaredGizmos(item.type)!.lines(
+        c,
+        selected: selection.contains(item.id),
+        find: (name) {
+          final m = matrices[byName[name]];
+          return m == null ? null : matTranslation(m);
+        },
+      );
+      for (final l in lines) {
+        for (var i = 0; i + 1 < l.points.length; i++) {
+          o.line(l.points[i], l.points[i + 1], l.color, width: width);
+        }
+      }
+    }
   }
 
   /// The tool's handles, on top of everything: the dragged or hovered one
@@ -1291,7 +1408,7 @@ final class SceneViewModel extends ChangeNotifier {
     final type = t?.tab.editingType;
     if (t == null || type == null || !t.hasPreview || t.tab.document.readOnly != null) return null;
     final id = t.tab.lead!;
-    final handler = ComponentHandlers.of(type);
+    final handler = handlersFor(type);
     if (handler == null || t.state.locked.contains(id) || _hiddenAll(t).contains(id)) return null;
     final key = '${t.tab.document.revision}|$id|$type';
     var cached = _componentCache;

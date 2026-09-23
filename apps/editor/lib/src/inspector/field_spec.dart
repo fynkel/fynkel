@@ -79,6 +79,7 @@ final class FieldSpec {
     this.fixedLength,
     this.children = const [],
     this.declarationIndex = 0,
+    this.gizmo,
   });
 
   /// The key in the component's `data` (a nested field's key in its parent).
@@ -133,6 +134,9 @@ final class FieldSpec {
   /// Position in the schema's `properties` (the tie-breaker under `order`).
   final int declarationIndex;
 
+  /// Its declared Scene-view gizmo (`@Gizmo`, ADR-0019 §3), if any.
+  final GizmoHint? gizmo;
+
   /// The sibling [showIf] names, without the `!`.
   String? get showIfField {
     final s = showIf;
@@ -175,6 +179,48 @@ final class FieldSpec {
 
   @override
   String toString() => 'FieldSpec($name: $kind)';
+}
+
+/// A field's `gizmo` hint: what the Scene view draws for it and drags
+/// (`@Gizmo.radius()` and the rest, ADR-0019 §3; native components'
+/// through `native_hints.dart`).
+final class GizmoHint {
+  const GizmoHint({required this.shape, this.color, this.always = false, this.world = false, this.angle});
+
+  static const shapes = {'radius', 'box', 'point', 'direction', 'cone', 'lineTo', 'path'};
+
+  /// `radius`, `box`, `point`, `direction`, `cone`, `lineTo` or `path`.
+  final String shape;
+
+  /// `0xAARRGGBB`; null for the editor's gizmo colour.
+  final int? color;
+
+  /// Drawn on every entity carrying the component, not only the selection.
+  final bool always;
+
+  /// In world space, not the entity's.
+  final bool world;
+
+  /// A cone's sibling angle field (radians).
+  final String? angle;
+
+  /// Something to drag (a `lineTo` is only drawn).
+  bool get draggable => shape != 'lineTo';
+
+  /// Null when [v] is not a gizmo hint the editor knows.
+  static GizmoHint? parse(Object? v) {
+    if (v is! Map) return null;
+    final shape = v['shape'];
+    if (shape is! String || !shapes.contains(shape)) return null;
+    if (shape == 'cone' && v['angle'] is! String) return null;
+    return GizmoHint(
+      shape: shape,
+      color: (v['color'] as num?)?.toInt(),
+      always: v['when'] == 'always',
+      world: v['space'] == 'world',
+      angle: v['angle'] as String?,
+    );
+  }
 }
 
 /// One component type as the Inspector shows it.
@@ -533,6 +579,7 @@ FieldSpec _parseField(
     fixedLength: fixedLength,
     children: children,
     declarationIndex: index,
+    gizmo: GizmoHint.parse(hints['gizmo']),
   );
 }
 

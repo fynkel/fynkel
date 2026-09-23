@@ -1,7 +1,8 @@
 // Display hints for the built-in components (ADR-0018), keyed by type and
 // field, in the `x-fynkel` vocabulary the behaviour generator writes —
 // `label`, `tooltip`, `group`, `order`, `header`, `unit`, `kind`,
-// `readOnly`, `hidden`, `showIf`, `min`, `max`, `step`. The generated
+// `readOnly`, `hidden`, `showIf`, `min`, `max`, `step`, and ADR-0019's
+// `gizmo` (a Scene-view gizmo for the field, item 9h). The generated
 // component schemas carry types, bounds and descriptions but no display
 // hints yet (the Rust `#[fynkel(...)]` field attributes are the M3 stream's
 // shared-crate work); until they land, this table stands in underneath
@@ -152,7 +153,11 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'mask': {'kind': 'layerMask', 'group': 'Layers', 'order': 15},
   },
   'fynkel.ThirdPersonCamera': {
-    'target': {'kind': 'entity', 'order': 0},
+    'target': {
+      'kind': 'entity',
+      'order': 0,
+      'gizmo': {'shape': 'lineTo'},
+    },
     'pivot': {'unit': 'm', 'order': 1},
     'distance': {'unit': 'm', 'min': 0, 'group': 'Orbit', 'order': 2},
     'min_distance': {'unit': 'm', 'min': 0, 'group': 'Orbit', 'order': 3},
@@ -166,7 +171,11 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'mask': {'kind': 'layerMask', 'group': 'Collision', 'order': 11},
   },
   'fynkel.Follow': {
-    'target': {'kind': 'entity', 'order': 0},
+    'target': {
+      'kind': 'entity',
+      'order': 0,
+      'gizmo': {'shape': 'lineTo'},
+    },
     'offset': {'unit': 'm', 'order': 1},
     'smoothing': {'unit': '/s', 'min': 0, 'order': 2},
     'look_at': {'order': 3},
@@ -191,7 +200,12 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'rate': {'unit': '/s', 'min': 0, 'order': 1},
     'lifetime': {'unit': 's', 'min': 0, 'order': 2},
     'max_alive': {'label': 'Max alive', 'order': 3},
-    'velocity': {'unit': 'm/s', 'order': 4},
+    // Instances launch at it in world space (docs/catalogue.md).
+    'velocity': {
+      'unit': 'm/s',
+      'order': 4,
+      'gizmo': {'shape': 'direction', 'space': 'world'},
+    },
     'enabled': {'order': 5},
   },
   'fynkel.LifetimeDespawn': {

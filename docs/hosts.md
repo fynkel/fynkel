@@ -443,6 +443,18 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   one `key=value` line for a capture — instrumentation.md), and
   `overlay` is the HUD composited over the texture. The showcase and
   starter HUDs open with `fps N  frame p50 ms (p99)  render ms`.
+  `gizmos` (item 9h, ADR-0019 §3) turns on the game's own gizmos:
+  `World.showGizmos` installs a `GizmoBuffer` the world clears at the
+  start of every frame, behaviours draw into it through `Gizmos.line`,
+  `ray`, `wireCircle`, `wireSphere`, `wireBox`, `wireCapsule`, `arrow`
+  and `frustum` (with `Gizmos.withColor` / `withMatrix` scopes, or the
+  `color` and `matrix` setters, both reset each frame), and the view
+  hands the frame's lines to the renderer's overlay between
+  `World.frame` and `render` — drawn after post, faded where they pass
+  behind geometry. Null (the default) follows `FYNKEL_GIZMOS=1` in the
+  environment, what the editor's Play passes when *Show Gizmos in Play*
+  is on. Off, every call returns at once; in a release build
+  `Gizmos.compiled` is a `const false` and the calls compile to nothing.
 - `DartHeapProbe` — the C3 probe on its own: `connect()` (null without
   a service), `sample()` per window (heap in use/capacity/external, the
   bytes allocated since the last sample from the VM's `GC` timeline
