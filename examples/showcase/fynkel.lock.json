@@ -22,9 +22,9 @@
   },
   "importers": {
     "fynkel.audio": 2,
-    "fynkel.fbx": 2,
+    "fynkel.fbx": 3,
     "fynkel.file": 1,
-    "fynkel.gltf": 6,
+    "fynkel.gltf": 7,
     "fynkel.image": 1
   },
   "cache": {

@@ -208,6 +208,96 @@ impl Meta {
         out
     }
 
+    /// The model's material remaps (`settings.materials`,
+    /// `docs/design/material-remapping.md`): an embedded material's key →
+    /// the project material its renderers in the model's hierarchy use
+    /// instead, in document order. A nil reference means "the embedded
+    /// one" and is left out, as is an entry that is not an `assetRef`
+    /// ([`Meta::validate_remaps`] reports that).
+    pub fn material_remaps(&self) -> Vec<(String, AssetRef)> {
+        let Some(members) = self.settings.get("materials").and_then(Node::as_object) else {
+            return Vec::new();
+        };
+        members
+            .iter()
+            .filter_map(|m| Some((m.key.clone(), as_asset_ref(m.value.as_object()?)?)))
+            .collect()
+    }
+
+    /// The remap table's own rules: an object of `assetRef`s (`A0006`),
+    /// each naming a material document (`A0007`). A target the database
+    /// cannot resolve is left to [`AssetDatabase::check_references`]
+    /// (`A0004`/`A0005`).
+    pub fn validate_remaps(&self, db: &AssetDatabase) -> Vec<Diagnostic> {
+        let root = &self.document.root;
+        let mut out = Vec::new();
+        let Some(table) = self.settings.get("materials") else {
+            return out;
+        };
+        let Some(members) = table.as_object() else {
+            out.push(anchor(
+                root,
+                Diagnostic::error(
+                    Code::ASSET_MALFORMED_ENTRY,
+                    "settings.materials must be an object of embedded material key → material reference",
+                ),
+                "/settings/materials",
+            ));
+            return out;
+        };
+        for m in members {
+            let pointer = format!("/settings/materials/{}", crate::scene::escape(&m.key));
+            let nil = m.value.get("asset").and_then(Node::as_str)
+                == Some("00000000-0000-0000-0000-000000000000");
+            if nil {
+                continue;
+            }
+            let Some(r) = m.value.as_object().and_then(as_asset_ref) else {
+                out.push(anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::ASSET_MALFORMED_ENTRY,
+                        format!("the remap of {} is not an asset reference", m.key),
+                    )
+                    .with_suggestion("`{ \"asset\": <id of a .material.json> }`"),
+                    &pointer,
+                ));
+                continue;
+            };
+            let Ok(resolved) = db.resolve(&r) else {
+                continue;
+            };
+            let material = resolved.entry.kind == AssetKind::Document(DocumentKind::Material);
+            if !material || resolved.sub.is_some() {
+                let what = match &resolved.sub {
+                    Some((sub, _)) => format!("{}#{sub}", resolved.entry.path),
+                    None => format!("{} ({})", resolved.entry.path, resolved.entry.kind.name()),
+                };
+                out.push(anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::ASSET_WRONG_KIND,
+                        format!(
+                            "{} is remapped to {what}, which is not a material document",
+                            m.key
+                        ),
+                    )
+                    .with_id(r.to_string())
+                    .with_suggestion(
+                        "remap to a project .material.json (Extract Materials makes editable copies of the embedded ones)",
+                    ),
+                    &pointer,
+                ));
+            }
+        }
+        for d in &mut out {
+            if d.document.is_none() {
+                d.document = self.document.path.clone();
+            }
+        }
+        out
+    }
+
     /// The sidecar as a document, `sub_assets` written back in order.
     pub fn to_document(&self) -> Document {
         let mut doc = self.document.clone();

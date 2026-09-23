@@ -1173,7 +1173,7 @@ A model whose file is missing or does not import is reported and left
 with its documents as they are. The editor's migration preview shows the
 same plan.
 
-### glTF/GLB (`fynkel.gltf`, version 6)
+### glTF/GLB (`fynkel.gltf`, version 7)
 
 The importer reads glTF 2.0 `.gltf`/`.glb` through
 the `gltf` crate (no `import` feature: buffers and images are resolved by
@@ -1212,7 +1212,7 @@ parents) is `A0104`; the `Limits` — file 256 MiB, buffers 256 MiB total,
 are `A0101`; a file that is not glTF at all is `A0100`. Any error means no
 intermediate is produced.
 
-### FBX (`fynkel.fbx`, version 2)
+### FBX (`fynkel.fbx`, version 3)
 
 M3-19b. The importer reads binary and ASCII FBX (`.fbx`, 6100–7700)
 through `ufbx` (a single C file compiled into `fynkel_import`; nothing

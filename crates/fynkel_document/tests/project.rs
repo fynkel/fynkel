@@ -38,8 +38,8 @@ fn schemas() -> SchemaSet {
 }
 
 const IMPORTERS: &[(&str, u32)] = &[
-    ("fynkel.fbx", 2),
-    ("fynkel.gltf", 6),
+    ("fynkel.fbx", 3),
+    ("fynkel.gltf", 7),
     ("fynkel.image", 1),
     ("fynkel.audio", 2),
     ("fynkel.file", 1),
@@ -256,7 +256,7 @@ fn a_missing_lock_is_p0010_and_a_stale_lock_is_p0011_per_field() {
     let mut stale = expected_lock();
     stale.runtime.version = "0.0.0".to_string();
     stale.schema_fingerprint = "0x0000000000000000".to_string();
-    stale.importers.insert("fynkel.gltf".to_string(), 7);
+    stale.importers.insert("fynkel.gltf".to_string(), 99);
     stale.importers.remove("fynkel.file");
     stale.cache.container = 2;
     t.write(LOCK_FILE, &stale.to_text());
@@ -582,6 +582,47 @@ fn broken_references_and_documents_under_the_asset_root_fail_validate() {
     let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
     assert!(report.has_errors());
     assert_eq!(report.json()["ok"], false);
+}
+
+/// A model's material remap (`settings.materials`) is checked like any
+/// reference: a missing target is `A0004`, a target that is not a
+/// material document `A0007`; a remap to a project material is clean.
+#[test]
+fn material_remaps_validate_against_the_database() {
+    let t = Temp::new("remaps");
+    let sidecar = t.read("assets/models/robot.glb.meta.json");
+    let remap = |target: &str| {
+        sidecar.replace(
+            "\"settings\": {}",
+            &format!("\"settings\": {{ \"materials\": {{ \"material/Painted\": {{ \"asset\": \"{target}\" }} }} }}"),
+        )
+    };
+    assert_ne!(
+        remap("x"),
+        sidecar,
+        "the fixture sidecar has empty settings"
+    );
+    t.write(
+        "assets/models/robot.glb.meta.json",
+        &remap("c0000000-0000-4000-8000-000000000020"),
+    );
+    assert_eq!(t.codes(), Vec::<(String, Option<String>)>::new());
+    t.write(
+        "assets/models/robot.glb.meta.json",
+        &remap("c0000000-0000-4000-8000-000000000002"),
+    );
+    let codes = t.codes();
+    assert!(
+        codes.iter().any(|(c, p)| c == "FYN-A0007"
+            && p.as_deref() == Some("/settings/materials/material~1Painted")),
+        "{codes:?}"
+    );
+    t.write(
+        "assets/models/robot.glb.meta.json",
+        &remap("c0000000-0000-4000-8000-0000000000ee"),
+    );
+    let codes = t.codes();
+    assert!(codes.iter().any(|(c, _)| c == "FYN-A0004"), "{codes:?}");
 }
 
 /// M3-19a/19b: the Rig scene's `Imported` entity instances the Column

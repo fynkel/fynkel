@@ -123,7 +123,7 @@ fn the_new_extension_maps_to_the_importer() {
     );
     assert!(fynkel_import::IMPORTERS
         .iter()
-        .any(|(name, version)| *name == "fynkel.fbx" && *version == 2));
+        .any(|(name, version)| *name == "fynkel.fbx" && *version == 3));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     );
     let i = r.intermediate.as_ref().unwrap();
     assert_eq!(i.importer, "fynkel.fbx");
-    assert_eq!(i.importer_version, 2);
+    assert_eq!(i.importer_version, 3);
     assert_eq!(i.source, "rig.fbx");
     let (g, _) = import_fixture("rig.glb");
     let g = g.intermediate.unwrap();

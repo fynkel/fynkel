@@ -683,6 +683,8 @@ pub(crate) fn finish(
         rename_refs(&mut prefab, &asset.to_string(), &keys);
     }
 
+    remap_materials(&mut report, meta, &materials, &mut prefab);
+
     let mut sub_assets = Vec::new();
     for sub in meshes
         .iter()
@@ -759,6 +761,63 @@ pub(crate) fn finish(
         sub_assets,
         diagnostics: report.diagnostics,
         renames,
+    }
+}
+
+/// The sidecar's material remaps (`settings.materials`,
+/// `docs/design/material-remapping.md`): every `fynkel.MeshRenderer` in
+/// the model's hierarchy whose material is a remapped embedded material
+/// points at the project material instead. The embedded materials stay
+/// sub-assets; a remap for a key the file no longer has is a warning.
+fn remap_materials(
+    report: &mut Report,
+    meta: &Meta,
+    materials: &[MaterialData],
+    prefab: &mut Value,
+) {
+    let remaps = meta.material_remaps();
+    if remaps.is_empty() {
+        return;
+    }
+    let unknown: Vec<&str> = remaps
+        .iter()
+        .map(|(k, _)| k.as_str())
+        .filter(|k| !materials.iter().any(|m| m.sub_id == *k))
+        .collect();
+    if !unknown.is_empty() {
+        let current: Vec<&str> = materials.iter().map(|m| m.sub_id.as_str()).collect();
+        report.warn(
+            Code::IMPORT_SKIPPED,
+            format!(
+                "settings.materials remaps {}, which the file no longer has (its materials: {}); if a material was renamed in the modelling tool, move the remap to its new key",
+                unknown.join(", "),
+                if current.is_empty() { "none".to_string() } else { current.join(", ") }
+            ),
+        );
+    }
+    let own = meta.id().to_string();
+    let Some(entities) = prefab.get_mut("entities").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for entity in entities.values_mut() {
+        let Some(components) = entity.get_mut("components").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        for c in components.values_mut() {
+            if c.get("type").and_then(Value::as_str) != Some("fynkel.MeshRenderer") {
+                continue;
+            }
+            let Some(material) = c.pointer_mut("/data/material") else {
+                continue;
+            };
+            if material.get("asset").and_then(Value::as_str) != Some(own.as_str()) {
+                continue;
+            }
+            let sub = material.get("sub").and_then(Value::as_str).unwrap_or("");
+            if let Some((_, target)) = remaps.iter().find(|(k, _)| k == sub) {
+                *material = json!({ "asset": target.asset.to_string() });
+            }
+        }
     }
 }
 

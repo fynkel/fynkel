@@ -1249,7 +1249,17 @@ pub fn validate_project_with(
                     Err(diags) => report.diagnostics.extend(diags),
                 }
             }
-            AssetKind::Source { .. } => report.sources += 1,
+            AssetKind::Source { .. } => {
+                report.sources += 1;
+                // The scan validated the sidecar; its material remaps
+                // are references it did not check.
+                let sidecar = entry.sidecar(db.root()).expect("a source has a sidecar");
+                if let Ok(doc) = Document::read(&sidecar, Some(DocumentKind::Meta)) {
+                    report.diagnostics.extend(db.check_references(&doc));
+                    let meta = crate::asset::Meta::from_document(doc);
+                    report.diagnostics.extend(meta.validate_remaps(&db));
+                }
+            }
         }
     }
     // Imported hierarchies the scenes and prefabs instantiate (M3-19a):

@@ -794,7 +794,9 @@ fn prepare(
             let meta = match Document::read(&sidecar, Some(DocumentKind::Meta)) {
                 Ok(doc) => {
                     let meta = Meta::from_document(doc);
-                    let diags = meta.validate(schemas);
+                    let mut diags = meta.validate(schemas);
+                    diags.extend(meta.validate_remaps(db));
+                    diags.extend(db.check_references(&meta.document));
                     if has_errors(&diags) {
                         failed = true;
                     }
@@ -848,6 +850,21 @@ fn prepare(
                 .iter()
                 .find(|(name, _)| name == importer)
                 .map_or(*importer_version, |(_, v)| *v);
+            // A remapped material is loaded with the model (its hierarchy
+            // points at it) but is not a key input: the cooked model holds
+            // only its id, which the settings already cover — and a
+            // material extracted from the model points back at its images.
+            let runtime_dependencies: Vec<Uuid> = meta
+                .as_ref()
+                .map(|m| {
+                    m.material_remaps()
+                        .iter()
+                        .filter_map(|(_, r)| db.resolve(r).ok().map(|r| r.entry.id))
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect()
+                })
+                .unwrap_or_default();
             Prepared {
                 kind: importer.clone(),
                 version,
@@ -855,7 +872,7 @@ fn prepare(
                 extra_inputs,
                 settings,
                 dependencies: Vec::new(),
-                runtime_dependencies: Vec::new(),
+                runtime_dependencies,
                 input: match meta {
                     Some(meta) if !failed => Input::Source { meta, bytes },
                     _ => Input::None,

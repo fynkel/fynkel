@@ -119,6 +119,9 @@ impl Code {
     pub const ASSET_UNKNOWN_SUB: Code = Code("FYN-A0005");
     /// A sidecar entry the schema accepts but the database cannot use.
     pub const ASSET_MALFORMED_ENTRY: Code = Code("FYN-A0006");
+    /// An `assetRef` resolves, but to an asset of the wrong kind (a model's
+    /// material remap naming something that is not a material document).
+    pub const ASSET_WRONG_KIND: Code = Code("FYN-A0007");
 
     // Import (`FYN-A01##`, blueprint §19.2c items 10–12).
     /// The file is not what its extension says, or cannot be parsed.
