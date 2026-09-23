@@ -1318,14 +1318,21 @@ class AudioControl {
 }
 
 class GameObject {
-  GameObject._(this.world, this._tempId, this._initial, this.name) {
+  GameObject._(this.world, this._tempId, this._initial, this._name) {
     transform = TransformRef._(this);
   }
 
   final World world;
   final int _tempId;
   final Transform _initial;
-  final String name;
+  String _name;
+
+  /// The object's name: what it was spawned or found with, and what it
+  /// was renamed to through this handle since. Setting it renames the
+  /// entity (a `fynkel.Name` write for the next tick, read-your-writes
+  /// like [set]).
+  String get name => _name;
+  set name(String value) => set(gen.Name(value: value));
   int? _entity;
   bool _alive = true;
 
@@ -1640,6 +1647,7 @@ class GameObject {
     (_components ??= {})[codec.id] = value;
     final batch = presentation ? world._presentation : world._simulation;
     if (value is gen.Name) {
+      _name = value.value;
       batch.setName(gen.SetNameCommand(entity: e, name: value.value));
     } else {
       batch.setComponent(e, codec, value);

@@ -122,11 +122,18 @@ void main() {
     expect(sun.components.map((c) => c.runtimeType), [Transform, Name]);
     sun.set(const Name(value: 'Star'));
     expect(sun.get<Name>()!.value, 'Star');
+    expect(sun.name, 'Star', reason: 'the handle follows its own rename');
     sun.set(const PointLight(color: Vec3(1, 1, 1), intensity: 100, range: -1, cullingMask: 0xffffffff));
     expect(sun.get<PointLight>()!.range, -1, reason: 'staged, not validated yet');
     w.frame(1 / 60);
     expect(w.componentsOf(sun.entity).map((c) => c.runtimeType), [Transform, Name]);
     expect(w.nameOf(sun), 'Star');
+    sun.name = 'Sun again';
+    expect(sun.name, 'Sun again');
+    w.frame(1 / 60);
+    expect(w.nameOf(sun), 'Sun again', reason: 'setting the name renames the entity');
+    sun.name = 'Star';
+    w.frame(1 / 60);
     expect(sun.get<PointLight>(), isNull, reason: 'rejected: the read is the world\'s');
     expect(diagnostics.single.code, DiagnosticCode.invalidPayload);
     expect(diagnostics.single.message, contains('range'));
