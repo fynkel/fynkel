@@ -467,6 +467,28 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       _applyMute();
     }
     if (play != null && _hostPaused && play.takeStep()) _scheduleStep();
+    if (play != null && play.redraws != _redraws) {
+      _redraws = play.redraws;
+      if (_hostPaused) _scheduleRedraw();
+    }
+  }
+
+  /// The [FynkelPlayControl.redraws] this view drew last.
+  int _redraws = 0;
+
+  /// Pictures drawn for [FynkelPlayControl.redraw] (without a step).
+  @visibleForTesting
+  int redrawn = 0;
+
+  /// The world drawn again on the next Flutter frame, not stepped (a paused
+  /// world the editor changed).
+  void _scheduleRedraw() {
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      if (!mounted || !_hostPaused) return;
+      redrawn++;
+      _render(widget.world);
+    });
+    SchedulerBinding.instance.scheduleFrame();
   }
 
   /// One frame of the world's fixed step on the next Flutter frame (Step
@@ -573,7 +595,11 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       world.projection.update();
     }
     widget.onFrame?.call(dt, plan);
+    _render(world);
+  }
 
+  /// The world's picture as it is now, with its gizmo lines.
+  void _render(World world) {
     final c = controller;
     if (c.state == ViewportState.resizing) {
       _skipped++;

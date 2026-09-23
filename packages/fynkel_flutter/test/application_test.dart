@@ -84,6 +84,14 @@ void main() {
     expect(play.pendingSteps, 0);
     expect(world.audio.stats.suspended, opened, reason: 'stepping stays silent');
 
+    // A live edit while paused: drawn again, not stepped.
+    play.redraw();
+    await frames(2);
+    expect(view.currentState!.redrawn, 1);
+    expect(world.tick, pausedAt + 3, reason: 'a redraw is not a step');
+    await frames(3);
+    expect(view.currentState!.redrawn, 1, reason: 'once per redraw');
+
     play.paused = false;
     await frames(6);
     expect(world.tick, greaterThan(pausedAt + 3));
@@ -91,6 +99,9 @@ void main() {
     // Step means nothing while running.
     play.step();
     expect(play.pendingSteps, 0);
+    play.redraw();
+    await frames(2);
+    expect(view.currentState!.redrawn, 1, reason: 'a running view draws every frame anyway');
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();

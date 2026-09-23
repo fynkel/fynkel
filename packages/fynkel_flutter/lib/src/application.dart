@@ -112,6 +112,21 @@ class FynkelPlayControl extends ChangeNotifier {
     return true;
   }
 
+  int _redraws = 0;
+
+  /// Bumped by [redraw]: a paused view that has not drawn this one yet
+  /// draws its world again.
+  int get redraws => _redraws;
+
+  /// Draw every paused view's world again without stepping it — the
+  /// editor changed the world while the game is paused (live Play mode's
+  /// edits). A running view draws every frame anyway.
+  void redraw() {
+    if (!_paused) return;
+    _redraws++;
+    notifyListeners();
+  }
+
   final List<World> _worlds = [];
   final _Signal _worldsChanged = _Signal();
   bool _worldsNotifying = false;
