@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "1552f46f-8556-4a86-86f3-b9542649782c",
   "name": "rusted_normal.png",
   "importer": "fynkel.image",

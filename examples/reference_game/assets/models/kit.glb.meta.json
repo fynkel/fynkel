@@ -1,19 +1,19 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "1e98486c-6e27-48de-a128-44cc619c9e59",
   "name": "kit.glb",
   "importer": "fynkel.gltf",
   "importerVersion": 1,
   "settings": {},
   "subAssets": {
-    "mesh/0": "af4b6b8a-2008-50a5-aecb-f07ef062bfea",
-    "mesh/1": "4f92032b-eddd-587c-86c7-d1873eff1750",
-    "mesh/2": "041c96ea-7a3d-525b-ae0c-30a27e491f96",
-    "mesh/3": "b522a040-e8f5-513e-ad71-6c2ee6efd0ee",
-    "mesh/4": "e53545e4-e537-59e0-9623-10af56521172",
-    "mesh/5": "b804f27c-2d13-5231-a5cc-4d1bbd5ba209",
-    "mesh/6": "6db71420-382e-5f77-8056-1f0204245a92",
+    "mesh/cube": "af4b6b8a-2008-50a5-aecb-f07ef062bfea",
+    "mesh/capsule": "4f92032b-eddd-587c-86c7-d1873eff1750",
+    "mesh/sphere": "041c96ea-7a3d-525b-ae0c-30a27e491f96",
+    "mesh/coin": "b522a040-e8f5-513e-ad71-6c2ee6efd0ee",
+    "mesh/ramp": "e53545e4-e537-59e0-9623-10af56521172",
+    "mesh/cylinder": "b804f27c-2d13-5231-a5cc-4d1bbd5ba209",
+    "mesh/cone": "6db71420-382e-5f77-8056-1f0204245a92",
     "prefab": "69239ba8-9482-5e2c-8115-a3e2a2d72ed4"
   }
 }

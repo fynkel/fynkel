@@ -3,7 +3,7 @@
 so the repository carries no binary of unknown origin (blueprint §1.2:
 "imported glTF/GLB assets"; the importer is the one path meshes take).
 
-Seven meshes, one glTF mesh each (`mesh/<n>` sub-assets after
+Seven meshes, one glTF mesh each (`mesh/<name>` sub-assets after
 `fynkel import`), unit-sized so scenes scale them:
 
   0 cube      1 m box centred at the origin
@@ -244,7 +244,7 @@ def main():
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_bytes(pack(meshes))
     for i, m in enumerate(meshes):
-        print(f"mesh/{i} {m.name}: {len(m.positions)} vertices, {len(m.indices) // 3} triangles")
+        print(f"mesh/{m.name}: {len(m.positions)} vertices, {len(m.indices) // 3} triangles")
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
 
 

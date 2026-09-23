@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "079ad721-2be3-4ace-928a-066a6f07401e",
   "name": "step_right.ogg",
   "importer": "fynkel.audio",

@@ -37,7 +37,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/0"
+              "sub": "mesh/cube"
             },
             "material": {
               "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
@@ -130,7 +130,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/0"
+              "sub": "mesh/cube"
             },
             "material": {
               "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
@@ -223,7 +223,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/0"
+              "sub": "mesh/cube"
             },
             "material": {
               "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
@@ -316,7 +316,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/0"
+              "sub": "mesh/cube"
             },
             "material": {
               "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
@@ -409,7 +409,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/0"
+              "sub": "mesh/cube"
             },
             "material": {
               "asset": "11594507-794b-55f4-8c82-00d80d9b5403"
@@ -502,7 +502,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/0"
+              "sub": "mesh/cube"
             },
             "material": {
               "asset": "11594507-794b-55f4-8c82-00d80d9b5403"

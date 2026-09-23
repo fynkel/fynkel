@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "e48d5eb5-8081-434d-9ef1-350ebfe11bb8",
   "name": "music.ogg",
   "importer": "fynkel.audio",

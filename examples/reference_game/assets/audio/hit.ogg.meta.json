@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "8bb56b89-1cef-4ee9-9d27-1ef74b0d4a20",
   "name": "hit.ogg",
   "importer": "fynkel.audio",

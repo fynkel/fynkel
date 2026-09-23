@@ -37,7 +37,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/3"
+              "sub": "mesh/coin"
             },
             "material": {
               "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"

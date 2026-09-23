@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "52dfc80f-aed9-41f3-9862-d4378ec6c815",
   "name": "crate.png",
   "importer": "fynkel.image",

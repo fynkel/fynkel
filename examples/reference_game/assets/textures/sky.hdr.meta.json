@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "56bcbfdd-17a9-47bc-91ff-d2705c184742",
   "name": "sky.hdr",
   "importer": "fynkel.image",

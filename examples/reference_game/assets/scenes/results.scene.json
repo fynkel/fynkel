@@ -37,7 +37,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/0"
+              "sub": "mesh/cube"
             },
             "material": {
               "asset": "ce4f5e65-36b6-5085-b991-52d4a7bc3f7a"
@@ -82,7 +82,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/5"
+              "sub": "mesh/cylinder"
             },
             "material": {
               "asset": "0fce05eb-d23b-5b44-9b55-a6ba453beefc"
@@ -127,7 +127,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/5"
+              "sub": "mesh/cylinder"
             },
             "material": {
               "asset": "431b9ba6-3030-58ea-a5b1-bec5818fffe0"
@@ -172,7 +172,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/3"
+              "sub": "mesh/coin"
             },
             "material": {
               "asset": "d24742f7-bf1f-5060-8d58-deb2a1615d84"
@@ -230,7 +230,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/6"
+              "sub": "mesh/cone"
             },
             "material": {
               "asset": "431b9ba6-3030-58ea-a5b1-bec5818fffe0"
@@ -275,7 +275,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/6"
+              "sub": "mesh/cone"
             },
             "material": {
               "asset": "431b9ba6-3030-58ea-a5b1-bec5818fffe0"
@@ -320,7 +320,7 @@
           "data": {
             "mesh": {
               "asset": "1e98486c-6e27-48de-a128-44cc619c9e59",
-              "sub": "mesh/6"
+              "sub": "mesh/cone"
             },
             "material": {
               "asset": "431b9ba6-3030-58ea-a5b1-bec5818fffe0"

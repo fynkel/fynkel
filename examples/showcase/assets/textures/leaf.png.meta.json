@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "ecd17976-2be3-45e9-9205-63125dea989d",
   "name": "leaf.png",
   "importer": "fynkel.image",

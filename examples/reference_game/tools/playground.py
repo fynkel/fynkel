@@ -26,10 +26,9 @@ import Idle.fbx Walking.fbx "Fast Run.fbx" Jumping.fbx --rig hero` (the
 first file is the skeleton; the clips are named after the files, so
 rename the downloads or edit the document's `clips` to those four
 names; add `markers` for footsteps). `--hero <file.glb>` (M3-19a) still
-takes one glTF carrying the clips as its `anim/0..3` in that order —
-the order docs/animation.md's Blender recipe builds a Mixamo set in —
-imported first with `fynkel import <file.glb>` (an `anim/4` is the
-wave). Either way the character faces +Z as glTF characters do: the
+takes one glTF carrying clips named `idle`, `walk`, `run` and `jump`
+(`anim/<name>`; an optional `wave`), imported first with `fynkel import
+<file.glb>`. Either way the character faces +Z as glTF characters do: the
 Rig turns it to the game's -Z. The Visor stays with the box character.
 
 Layout (metres, +Y up, the player spawns at the origin facing -Z; the
@@ -140,7 +139,7 @@ def transform(position, rotation=IDENTITY, scale=(1, 1, 1)):
 
 
 def mesh_renderer(mesh, material, cast=True, receive=True, visible=True):
-    mesh_ref = {"asset": CHARACTER, "sub": "mesh/0"} if mesh == "character" else {"asset": KIT, "sub": f"mesh/{MESHES[mesh]}"}
+    mesh_ref = {"asset": CHARACTER, "sub": "mesh/Body"} if mesh == "character" else {"asset": KIT, "sub": f"mesh/{mesh}"}
     return (
         "fynkel.MeshRenderer",
         {
@@ -172,7 +171,7 @@ def collider(shape="box", size=(0.5, 0.5, 0.5), offset=(0, 0, 0), friction=0.6, 
 
 def mesh_collider(mesh, friction=0.6, layer=DEFAULT):
     c = collider(shape="mesh", friction=friction, layer=layer)
-    c[1]["mesh"] = {"asset": KIT, "sub": f"mesh/{MESHES[mesh]}"}
+    c[1]["mesh"] = {"asset": KIT, "sub": f"mesh/{mesh}"}
     return c
 
 
@@ -251,8 +250,9 @@ def write(path, doc):
 
 meta = json.loads((ASSETS / "models" / "kit.glb.meta.json").read_text())
 KIT = meta["id"]
-MESHES = {"cube": 0, "capsule": 1, "sphere": 2, "coin": 3, "ramp": 4, "cylinder": 5, "cone": 6}
-for m in MESHES.values():
+# Sub-assets are keyed by the parts' names (docs/design/stable-sub-asset-ids.md).
+MESHES = ("cube", "capsule", "sphere", "coin", "ramp", "cylinder", "cone")
+for m in MESHES:
     assert f"mesh/{m}" in meta["subAssets"], "run `fynkel import assets/models/kit.glb` first"
 
 # `--hero <name>.rig.json` or `--hero <file.glb>`: the Player wears that
@@ -279,11 +279,11 @@ else:
     else:
         character_meta = json.loads((ASSETS / "models" / "character.glb.meta.json").read_text())
     CHARACTER = character_meta["id"]
-    CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{i}"} for i, name in enumerate(CLIP_NAMES)}
-    WAVE = {"asset": CHARACTER, "sub": "anim/4"} if "anim/4" in character_meta["subAssets"] else None
-    for sub in (["prefab"] if HERO else ["mesh/0", "skin/0", "anim/4"]) + [c["sub"] for c in CLIPS.values()]:
+    CLIPS = {name: {"asset": CHARACTER, "sub": f"anim/{name}"} for name in CLIP_NAMES}
+    WAVE = {"asset": CHARACTER, "sub": "anim/wave"} if "anim/wave" in character_meta["subAssets"] else None
+    for sub in (["prefab"] if HERO else ["mesh/Body", "skin/Skeleton", "anim/wave"]) + [c["sub"] for c in CLIPS.values()]:
         assert sub in character_meta["subAssets"], (
-            f"{HERO.name} needs anim/0..3 (idle, walk, run, jump) and its prefab; the sidecar lists {sorted(character_meta['subAssets'])}"
+            f"{HERO.name} needs clips named idle, walk, run and jump and its prefab; the sidecar lists {sorted(character_meta['subAssets'])}"
             if HERO
             else "run `python3 tools/character.py && fynkel import assets/models/character.glb` first"
         )
@@ -534,7 +534,7 @@ def playground():
         # the model, so the entity tree and the skin's joint order agree.
         s.add(
             "Body",
-            [transform((0, 0, 0)), mesh_renderer("character", "player"), ("fynkel.Skin", {"skin": {"asset": CHARACTER, "sub": "skin/0"}, "skeleton": "hips"})],
+            [transform((0, 0, 0)), mesh_renderer("character", "player"), ("fynkel.Skin", {"skin": {"asset": CHARACTER, "sub": "skin/Skeleton"}, "skeleton": "hips"})],
             parent=player,
         )
         joints = {}

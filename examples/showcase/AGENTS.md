@@ -106,7 +106,7 @@ apply` mint them.
 Component types:
 
 - `fynkel.Transform` — position `[x,y,z]`, rotation quaternion `[x,y,z,w]`, scale. Every drawn entity has one.
-- `fynkel.MeshRenderer` — `mesh: { asset, sub: "mesh/<n>" }`, `material: { asset }`, `cast_shadows`, `receive_shadows` (the first `DirectionalLight` with `cast_shadows` casts one PCF shadow map), `visible`.
+- `fynkel.MeshRenderer` — `mesh: { asset, sub: "mesh/<name>" }`, `material: { asset }`, `cast_shadows`, `receive_shadows` (the first `DirectionalLight` with `cast_shadows` casts one PCF shadow map), `visible`.
 - `fynkel.Camera` — `projection`, `fov_y` (radians), `ortho_height`, `near`, `far`, `priority`, `exposure_mode` (`auto` meters the sun; `manual` uses `exposure`, EV100).
 - `fynkel.DirectionalLight` (`intensity` in lux), `fynkel.PointLight` / `fynkel.SpotLight` (`intensity` in candela, `range` in metres; spot `inner_angle` / `outer_angle` in radians) — `color` is linear RGB.
 - `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply. A `sky` that is a **`.hdr`** file lights the scene as well as backing it (E1: the cook prefilters it into an irradiance and a specular cube and `mesh.wgsl` samples them; `fynkel render` says `sky + ibl`), and `ambient_*` is then unused; every other image is a backdrop over the constant ambient. This project's `tools/sky.py` writes `assets/textures/sky.hdr`.
@@ -116,7 +116,7 @@ Component types:
 - `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `mask` (its layer is its object's).
 - `fynkel.ThirdPersonCamera` — on the camera entity: `target` (the followed entity's name), `pivot` (offset from the target's origin), `distance`, `min_distance`, `yaw`/`pitch` (radians, written back each tick), `min_pitch`/`max_pitch`, `look_action` (axis2d turning it at `sensitivity` rad/s per unit), `collision_radius` (a sphere cast from the pivot pulls the camera in before walls; 0 disables), `mask`. Placed after the tick's transforms; its own `Transform` is overwritten.
 - `fynkel.Rotator` / `fynkel.Oscillate` / `fynkel.Follow` / `fynkel.LookAtCamera` / `fynkel.LifetimeDespawn` / `fynkel.Emitter` — the native catalogue (below): motion, following, billboards, timed despawn and spawning at a rate with no Dart code.
-- `fynkel.Animator` — `clip: { asset, sub: "anim/<n>" }`, `speed`, `looping`, `playing`: plays the clip over the named entities under this one (see "Animation"). `fynkel.Skin` — next to a skinned `MeshRenderer`: `skin: { asset, sub: "skin/<s>" }`, `skeleton` (the name of the joint root entity, found under the tree's root; empty: the root itself).
+- `fynkel.Animator` — `clip: { asset, sub: "anim/<name>" }`, `speed`, `looping`, `playing`: plays the clip over the named entities under this one (see "Animation"). `fynkel.Skin` — next to a skinned `MeshRenderer`: `skin: { asset, sub: "skin/<name>" }`, `skeleton` (the name of the joint root entity, found under the tree's root; empty: the root itself).
 - `game.*` — this project's behaviours (Dart classes in `lib/game/`); `data` holds the `@Expose` fields, validated by `schemas/behaviours/<id>.schema.json`.
 
 Exact fields and defaults: `fynkel schema describe fynkel.Camera --json` for
@@ -259,7 +259,7 @@ The pattern with sprint and a double jump is
 
 ## Animation (clips over named entities; a skinned character)
 
-`fynkel import` keeps a glTF's animations (`anim/<n>`), skins (`skin/<s>`)
+`fynkel import` keeps a glTF's animations (`anim/<name>`), skins (`skin/<name>`)
 and skinned meshes (`JOINTS_0`/`WEIGHTS_0`). A clip keys *named nodes*
 under the entity that carries the `fynkel.Animator` — a bone, a door and
 a lamp are the same thing to it — so a skeleton is ordinary entities: the
@@ -269,7 +269,7 @@ character) instances the file's node hierarchy — `prefab: { asset:
 own nodes: `Character` → `Body` with `fynkel.Skin { skin, skeleton:
 "hips" }` and the joints `hips` → `spine` → `head`, the arms and the legs
 in their bind pose; the suit is a `setField` override on the body's
-renderer (`node/1/renderer`, `material`). Its animator loops `anim/2`
+renderer (`node/Character/Body/renderer`, `material`). Its animator loops `anim/run`
 (run) in place — clips are authored in place, whatever moves the entity
 moves it, unless the `Animator` opts into `rootMotion` (the root's planar
 travel and yaw taken out of the pose and fed to a `CharacterController`

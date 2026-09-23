@@ -103,13 +103,13 @@ SCENE_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-0000000005ce")
 SPARK_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000fab1")
 BLEND_ID = uuid.UUID("5b6a1c2e-0000-4000-8000-00000000b1e0")
 CHARACTER = json.loads((REFERENCE / "assets/models/character.glb.meta.json").read_text())["id"]  # the box character
-CUBE_GLB = "f74c43aa-7e0b-4a48-a124-ef002a901e34"   # showcase cube.glb (mesh/0)
-ROBOT_GLB = "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1"  # showcase robot.glb (mesh/0 cube, mesh/1/0 pyramid, mesh/1/1 quad)
+CUBE_GLB = "f74c43aa-7e0b-4a48-a124-ef002a901e34"   # showcase cube.glb (mesh/Cube)
+ROBOT_GLB = "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1"  # showcase robot.glb (mesh/Cube, mesh/PyramidAndQuad/0 pyramid, …/1 quad)
 
 MESHES = {
-    "cube": {"asset": CUBE_GLB, "sub": "mesh/0"},
-    "pyramid": {"asset": ROBOT_GLB, "sub": "mesh/1/0"},
-    "quad": {"asset": ROBOT_GLB, "sub": "mesh/1/1"},
+    "cube": {"asset": CUBE_GLB, "sub": "mesh/Cube"},
+    "pyramid": {"asset": ROBOT_GLB, "sub": "mesh/PyramidAndQuad/0"},
+    "quad": {"asset": ROBOT_GLB, "sub": "mesh/PyramidAndQuad/1"},
 }
 
 # name → (base colour, metallic, roughness, extra fields)
@@ -236,9 +236,9 @@ def locomotion_blend():
     """The box character's idle, walk and run along `speed` (item 19c)."""
     return {"$schema": "https://fynkel.dev/schemas/blend.schema.json", "formatVersion": 1,
             "id": str(BLEND_ID), "name": "Locomotion", "parameter": "speed",
-            "points": [{"at": 0.0, "clip": {"asset": CHARACTER, "sub": "anim/0"}},
-                       {"at": 4.0, "clip": {"asset": CHARACTER, "sub": "anim/1"}},
-                       {"at": 7.0, "clip": {"asset": CHARACTER, "sub": "anim/2"}}],
+            "points": [{"at": 0.0, "clip": {"asset": CHARACTER, "sub": "anim/idle"}},
+                       {"at": 4.0, "clip": {"asset": CHARACTER, "sub": "anim/walk"}},
+                       {"at": 7.0, "clip": {"asset": CHARACTER, "sub": "anim/run"}}],
             "sync": "phase"}
 
 
@@ -371,17 +371,17 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
         # Fox test's), the skinned Body and the joints from the same table
         # the model was built from; every fourth rig waves on a loop.
         x, z = place(i); i += 1
-        clip = [{"asset": CHARACTER, "sub": "anim/1"}, {"asset": CHARACTER, "sub": "anim/2"}, {"asset": str(BLEND_ID)}][n % 3]
+        clip = [{"asset": CHARACTER, "sub": "anim/walk"}, {"asset": CHARACTER, "sub": "anim/run"}, {"asset": str(BLEND_ID)}][n % 3]
         rig = add(f"Rig {n:03}", [transform((x, 0.0, z), quat_axis_angle((0, 1, 0), rng.uniform(0, math.tau))),
                                   animator(clip, speed=rng.uniform(0.8, 1.25))])
         add("Body", [transform((0, 0, 0)), {"type": "fynkel.MeshRenderer", "version": 1, "data": {
-                         "mesh": {"asset": CHARACTER, "sub": "mesh/0"}, "material": {"asset": uid("material/rig")},
+                         "mesh": {"asset": CHARACTER, "sub": "mesh/Body"}, "material": {"asset": uid("material/rig")},
                          "cast_shadows": True, "receive_shadows": True, "visible": True}},
-                     {"type": "fynkel.Skin", "version": 1, "data": {"skin": {"asset": CHARACTER, "sub": "skin/0"}, "skeleton": "hips"}}],
+                     {"type": "fynkel.Skin", "version": 1, "data": {"skin": {"asset": CHARACTER, "sub": "skin/Skeleton"}, "skeleton": "hips"}}],
             key=f"Rig {n:03}/Body", parent=rig)
         joints = {}
         for name, parent, local, _, _ in SKELETON:
-            wave = [animator({"asset": CHARACTER, "sub": "anim/4"}, speed=rng.uniform(0.8, 1.25), additive=True)] if name == "spine" and n % 4 == 0 else []
+            wave = [animator({"asset": CHARACTER, "sub": "anim/wave"}, speed=rng.uniform(0.8, 1.25), additive=True)] if name == "spine" and n % 4 == 0 else []
             joints[name] = add(name, [transform(local)] + wave, key=f"Rig {n:03}/{name}", parent=joints[parent] if parent else rig)
     # The many-lights variant (E1 light culling): lamps on their own
     # jittered grid over the field, drawn from a second stream so the

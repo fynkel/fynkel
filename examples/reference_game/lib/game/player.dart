@@ -60,7 +60,7 @@ class Player extends Behaviour {
   @Expose(min: 0, step: 0.05)
   double blend = 0.15;
 
-  /// The jump, played once over the locomotion: `anim/3` of the box
+  /// The jump, played once over the locomotion: `anim/jump` of the box
   /// character, `anim/jump` of a rig document (`--hero` sets it), so the
   /// model can be swapped without touching the code.
   @Expose()

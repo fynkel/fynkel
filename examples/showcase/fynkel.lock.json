@@ -12,7 +12,7 @@
   "documents": {
     "blend": 1,
     "material": 2,
-    "meta": 1,
+    "meta": 2,
     "prefab": 4,
     "project": 2,
     "rig": 1,
@@ -22,9 +22,9 @@
   },
   "importers": {
     "fynkel.audio": 2,
-    "fynkel.fbx": 1,
+    "fynkel.fbx": 2,
     "fynkel.file": 1,
-    "fynkel.gltf": 5,
+    "fynkel.gltf": 6,
     "fynkel.image": 1
   },
   "cache": {

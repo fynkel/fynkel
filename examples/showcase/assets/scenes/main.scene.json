@@ -250,7 +250,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "21e2c746-1c49-5cd0-8204-a6a28942f6b5"
@@ -295,7 +295,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "778281e3-d2bd-5a87-89e7-b853710354c6"
@@ -383,7 +383,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "e0db342f-de9d-5a2c-bdaa-20fa4f3ec47b"
@@ -428,7 +428,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "778281e3-d2bd-5a87-89e7-b853710354c6"
@@ -473,7 +473,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "74be3aea-fd34-5796-9263-86f7e35f1688"
@@ -518,7 +518,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "e00e2adf-a76c-5051-ae3b-c3af289aa33d"
@@ -563,7 +563,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "e00e2adf-a76c-5051-ae3b-c3af289aa33d"
@@ -608,7 +608,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "778281e3-d2bd-5a87-89e7-b853710354c6"
@@ -653,7 +653,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "778281e3-d2bd-5a87-89e7-b853710354c6"
@@ -698,7 +698,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "778281e3-d2bd-5a87-89e7-b853710354c6"
@@ -743,7 +743,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "778281e3-d2bd-5a87-89e7-b853710354c6"
@@ -788,7 +788,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "778281e3-d2bd-5a87-89e7-b853710354c6"
@@ -878,11 +878,11 @@
           "data": {
             "mesh": {
               "asset": "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1",
-              "sub": "material/0"
+              "sub": "material/Painted"
             },
             "cast_shadows": true,
             "receive_shadows": true,
@@ -924,7 +924,7 @@
           "data": {
             "mesh": {
               "asset": "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "7277c6be-6abd-59cd-baa0-e7d8d751d642"
@@ -969,11 +969,11 @@
           "data": {
             "mesh": {
               "asset": "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1",
-              "sub": "mesh/1/0"
+              "sub": "mesh/PyramidAndQuad/0"
             },
             "material": {
               "asset": "0b89f746-0ebe-4a88-b91f-e632b7c7e9e1",
-              "sub": "material/1"
+              "sub": "material/Glass"
             },
             "cast_shadows": true,
             "receive_shadows": true,
@@ -1015,7 +1015,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "798b8b83-4528-5f97-92dc-4f5a3db41144"
@@ -1060,7 +1060,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "798b8b83-4528-5f97-92dc-4f5a3db41144"
@@ -1105,7 +1105,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "798b8b83-4528-5f97-92dc-4f5a3db41144"
@@ -1150,7 +1150,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "798b8b83-4528-5f97-92dc-4f5a3db41144"
@@ -1195,7 +1195,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "798b8b83-4528-5f97-92dc-4f5a3db41144"
@@ -1240,7 +1240,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "592e1f1e-6ee1-5377-84f8-0b76823c96ef"
@@ -1285,7 +1285,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "f8495363-c3df-5a03-90ce-252226704098"
@@ -1330,7 +1330,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "c21e63fc-57c1-5f74-ad26-5d73c155a719"
@@ -1375,7 +1375,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "4423ce05-5501-5d45-8f0b-85e274ed7bb1"
@@ -1420,7 +1420,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "e5a5051e-afdc-5ea5-bd68-cdb9bc13f8f4"
@@ -1465,7 +1465,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "c21e63fc-57c1-5f74-ad26-5d73c155a719"
@@ -1510,7 +1510,7 @@
           "data": {
             "mesh": {
               "asset": "f74c43aa-7e0b-4a48-a124-ef002a901e34",
-              "sub": "mesh/0"
+              "sub": "mesh/Cube"
             },
             "material": {
               "asset": "a5f2375e-d315-56d6-a58f-5190a9a2afac"
@@ -1555,7 +1555,7 @@
           "data": {
             "clip": {
               "asset": "b81d30e0-81e2-466d-9066-0eed7151d8b3",
-              "sub": "anim/2"
+              "sub": "anim/run"
             },
             "speed": 1.0,
             "looping": true,
@@ -1575,8 +1575,8 @@
         "overrides": [
           {
             "op": "setField",
-            "entity": "f89f19b4-182a-59ce-bb7b-f9df5431b31b",
-            "component": "be91b33b-7089-5192-99df-9a8b7508412e",
+            "entity": "b4c3e511-104d-5f52-9277-cc933077d866",
+            "component": "daa8241e-594f-55f4-a5b1-fc2dc05ac961",
             "field": "material",
             "value": {
               "asset": "0605f86c-548f-5a17-83a4-d07f21f52896"

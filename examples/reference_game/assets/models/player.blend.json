@@ -10,21 +10,21 @@
       "at": 0.0,
       "clip": {
         "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
-        "sub": "anim/0"
+        "sub": "anim/idle"
       }
     },
     {
       "at": 4.0,
       "clip": {
         "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
-        "sub": "anim/1"
+        "sub": "anim/walk"
       }
     },
     {
       "at": 7.0,
       "clip": {
         "asset": "88cdcdde-ee1f-40c4-8ae4-b5e6ad6ba3e6",
-        "sub": "anim/2"
+        "sub": "anim/run"
       }
     }
   ],

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Writes assets/models/character.glb — the reference game's rigged
 player (M3-19), generated so the repository carries no binary of unknown
-origin. `fynkel import` turns it into `mesh/0` (the skinned body),
-`skin/0` (the skeleton) and the clips `anim/0..3`; tools/playground.py
+origin. `fynkel import` turns it into `mesh/Body` (the skinned body),
+`skin/Skeleton` (the skeleton) and the clips `anim/<name>`; tools/playground.py
 authors the skeleton's entities under the Player from SKELETON below, so
 the same table is the source of both.
 
@@ -25,11 +25,11 @@ matrix of the skinning path (`docs/animation.md`) is still exercised.
 Clips, authored in place (blueprint item 19 (d): no root motion — the
 `CharacterController` moves the entity, the clips only pose the joints):
 
-  anim/0 idle   2.0 s loop   the torso breathes, the head nods a little
-  anim/1 walk   1.0 s loop   two steps: legs ±30°, arms opposite ±25°, a hip bob
-  anim/2 run    0.6 s loop   legs ±50°, bent knees, arms ±45° with bent elbows, a lean
-  anim/3 jump   0.8 s once   a crouch, the arms thrown up, the legs tucked, a landing
-  anim/4 wave   1.2 s once   the right arm raised and waved, back to rest (an
+  anim/idle     2.0 s loop   the torso breathes, the head nods a little
+  anim/walk     1.0 s loop   two steps: legs ±30°, arms opposite ±25°, a hip bob
+  anim/run      0.6 s loop   legs ±50°, bent knees, arms ±45° with bent elbows, a lean
+  anim/jump     0.8 s once   a crouch, the arms thrown up, the legs tucked, a landing
+  anim/wave     1.2 s once   the right arm raised and waved, back to rest (an
                              additive layer's clip: it keys the arm alone and
                              starts and ends on the rest pose, so it adds
                              nothing before and after; M3-19c)
@@ -71,7 +71,7 @@ SKELETON = [
     ("shin_r", "thigh_r", (0.0, -0.46, 0.0), (0.14, 0.46, 0.15), (0.0, -0.23, 0.0)),
 ]
 
-# The clips as `anim/<n>`: name, duration, loop, and channels — joint,
+# The clips as `anim/<name>`: name, duration, loop, and channels — joint,
 # path, list of (time, value) with rotations given as (axis, degrees).
 CLIPS = ["idle", "walk", "run", "jump", "wave"]
 
@@ -329,10 +329,10 @@ def main():
     OUT.parent.mkdir(parents=True, exist_ok=True)
     data, vertices, triangles = pack()
     OUT.write_bytes(data)
-    print(f"mesh/0 Body: {vertices} vertices, {triangles} triangles, {len(SKELETON)} joints")
+    print(f"mesh/Body: {vertices} vertices, {triangles} triangles, {len(SKELETON)} joints")
     for i, clip in enumerate(CLIPS):
         markers = clip_markers(clip) or []
-        print(f"anim/{i} {clip}: {clip_duration(clip)} s, {len(clip_channels(clip))} channels" + (f", markers {' '.join(m['name'] + '@' + str(m['at']) for m in markers)}" if markers else ""))
+        print(f"anim/{clip}: {clip_duration(clip)} s, {len(clip_channels(clip))} channels" + (f", markers {' '.join(m['name'] + '@' + str(m['at']) for m in markers)}" if markers else ""))
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
 
 
