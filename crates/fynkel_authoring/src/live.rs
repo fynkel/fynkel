@@ -15,7 +15,8 @@
 //!   document.
 //!
 //! Every call is `(kind, args JSON) -> JSON`, like the session's `query`:
-//! `entities`, `entity`, `set`, `remove`, `rename`, and for the Scene view
+//! `entities`, `entity`, `set`, `remove`, `rename`, `parent`, `destroy`,
+//! and for the Scene view
 //! on the running world (L5) `pick`, `pickRect`, `lines` and
 //! `worldMatrix` — the edit preview's own picking and overlays
 //! ([`crate::preview`]), over every live entity.
@@ -36,12 +37,14 @@ use crate::preview::{self, Line, Ray, View};
 /// The prefix of the id of an entity no loaded scene spawned.
 pub const RUNTIME_PREFIX: &str = "runtime:";
 
-pub const KINDS: [&str; 9] = [
+pub const KINDS: [&str; 11] = [
     "entities",
     "entity",
     "set",
     "remove",
     "rename",
+    "parent",
+    "destroy",
     "pick",
     "pickRect",
     "lines",
@@ -188,6 +191,43 @@ pub fn call_with(
             let e = entity_arg(world, args)?;
             let name = str_arg(args, "name")?.to_string();
             Ok(write(world, vec![Command::SetName { entity: e, name }]))
+        }
+        "parent" => {
+            // The local transform is kept (the editor rewrites it when the
+            // world pose should stay); `index` places it among its new
+            // siblings, last when absent. A root keeps the world's order.
+            let e = entity_arg(world, args)?;
+            let parent = match args.get("parent") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(id)) => Some(resolve(world, id).ok_or_else(|| {
+                    vec![invalid(format!("parent: no live entity {id}")).with_id(id.clone())]
+                })?),
+                Some(_) => return Err(vec![invalid("`parent` must be an entity id or null")]),
+            };
+            let index = match args.get("index") {
+                None | Some(Value::Null) => None,
+                Some(v) => Some(
+                    v.as_u64()
+                        .ok_or_else(|| vec![invalid("`index` must be a non-negative integer")])?
+                        as usize,
+                ),
+            };
+            let r = write(
+                world,
+                vec![Command::SetParent {
+                    child: e,
+                    parent,
+                    keep_world: false,
+                }],
+            );
+            if let (Some(i), Some(true)) = (index, r["ok"].as_bool()) {
+                let _ = scene::set_sibling_index(world.ecs_mut(), e, i);
+            }
+            Ok(r)
+        }
+        "destroy" => {
+            let e = entity_arg(world, args)?;
+            Ok(write(world, vec![Command::Destroy(e)]))
         }
         _ => Err(vec![invalid(format!(
             "unknown live call `{kind}`; one of {}",

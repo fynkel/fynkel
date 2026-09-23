@@ -1174,7 +1174,7 @@ fn transform_of(v: &Value) -> Result<Transform, Vec<Diagnostic>> {
 
 /// A live call on a running game's world (ADR-0021 P7, live Play mode;
 /// [`fynkel_authoring::live`]): `entities`, `entity`, `set`, `remove`,
-/// `rename`, and the Scene view's `pick`, `pickRect`, `lines` and
+/// `rename`, `parent`, `destroy`, and the Scene view's `pick`, `pickRect`, `lines` and
 /// `worldMatrix` (meshes read from the cache this world loaded). No
 /// session: the world is the game's, and the call reads it
 /// and changes it in the scene document's terms, writing at once without

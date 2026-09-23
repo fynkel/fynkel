@@ -400,6 +400,9 @@ FynkelStatus fynkel_authoring_preview_call(FynkelAuthoringSession* session,
  *   data }] }, every native component as the scene document stores it;
  * - "set" { id, type, data } replaces or adds a native component from its
  *   document JSON; "remove" { id, type }; "rename" { id, name };
+ *   "parent" { id, parent: id | null, index? } moves it (its local
+ *   transform kept; `index` among the new siblings, last when absent);
+ *   "destroy" { id } destroys it and its subtree;
  * - for the Scene view on the running world, the preview's own picking
  *   and overlays over every live entity (meshes read from the cache the
  *   world loaded): "pick" { ray: { origin, dir } } or { view, ndc } ->

@@ -272,6 +272,53 @@ fn a_write_shows_at_once_without_a_tick() {
     assert_eq!(w.tick(), tick);
 }
 
+#[test]
+fn entities_move_between_parents_and_go_at_once() {
+    let mut w = running();
+    let tick = w.tick();
+    // e4 (a root at −1) under e1 (at 10), first among its children: its
+    // local transform is kept, so it lands at 9.
+    let r = call(
+        &mut w,
+        "parent",
+        json!({ "id": uid(4), "parent": uid(1), "index": 0 }),
+    );
+    assert_eq!(r["ok"], json!(true), "{r}");
+    let rows = call(&mut w, "entities", json!({}))["entities"].clone();
+    let ids: Vec<&str> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, [uid(1), uid(4), uid(3), uid(2)]);
+    let e4 = call(&mut w, "entity", json!({ "id": uid(4) }));
+    assert_eq!(e4["parent"], json!(uid(1)));
+    assert_eq!(e4["world"]["position"], json!([9.0, 0.0, 0.0]));
+
+    // Back to the root; then a subtree destroyed.
+    let r = call(&mut w, "parent", json!({ "id": uid(4), "parent": null }));
+    assert_eq!(r["ok"], json!(true), "{r}");
+    assert_eq!(
+        call(&mut w, "entity", json!({ "id": uid(4) }))["parent"],
+        Value::Null
+    );
+    let r = call(&mut w, "destroy", json!({ "id": uid(1) }));
+    assert_eq!(r["ok"], json!(true), "{r}");
+    let rows = call(&mut w, "entities", json!({}))["entities"].clone();
+    assert_eq!(
+        rows.as_array().unwrap().len(),
+        1,
+        "e1 went with its children: {rows}"
+    );
+    assert_eq!(w.tick(), tick, "none of it steps the world");
+
+    // A cycle is the world's to refuse.
+    let mut w = running();
+    let r = call(&mut w, "parent", json!({ "id": uid(1), "parent": uid(2) }));
+    assert_eq!(r["ok"], json!(false), "{r}");
+}
+
 /// A Scene view camera at `x` on the X axis, 5 m back, looking down −Z.
 fn view_at(x: f32) -> Value {
     let m = glam::Mat4::from_translation(Vec3::new(x, 0.0, 5.0));
@@ -400,6 +447,11 @@ fn bad_calls_are_refused() {
     )
     .contains("near"));
     assert!(err(&mut w, "worldMatrix", json!({ "ids": 3 })).contains("`ids`"));
+    assert!(
+        err(&mut w, "parent", json!({ "id": uid(4), "parent": uid(77) }))
+            .contains("no live entity")
+    );
+    assert!(err(&mut w, "parent", json!({ "id": uid(4), "index": -1 })).contains("`index`"));
     // The world refuses what it would refuse from a game.
     let r = call(
         &mut w,
