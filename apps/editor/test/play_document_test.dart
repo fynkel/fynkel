@@ -470,6 +470,17 @@ void main() {
     expect(backend.live.entity(id).name, 'Crate');
     expect(box.name, 'Crate', reason: "the scripts' handle has the new name");
 
+    // The active checkbox switches it off in the world; the scripts see it at the next tick.
+    expect(doc.apply([Command.setObjectActive(id, false)]).ok, isTrue);
+    expect(backend.live.entity(id).activeSelf, isFalse);
+    doc.refresh();
+    expect(doc.entities([id]).entities[id]!['active'], false);
+    world.step();
+    expect(box.activeSelf || box.activeInHierarchy, isFalse);
+    expect(doc.apply([Command.setObjectActive(id, true)]).ok, isTrue);
+    doc.refresh();
+    expect(doc.entities([id]).entities[id]!.containsKey('active'), isFalse);
+
     // Made while it runs, with a script-less Transform, and duplicated.
     final a = doc.apply([Command.createObject(name: 'Lamp', parent: id)]);
     expect(a.ok, isTrue);

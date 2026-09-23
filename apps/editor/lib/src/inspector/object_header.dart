@@ -1,14 +1,71 @@
-// The object header's layer and tags (ADR-0020): the entity's
-// `fynkel.Layer` as a dropdown of the project's layers and its
-// `fynkel.Tags` as chips with a menu of the project's tags — never as two
-// component cards with numbers in them. Several selected entities show a
-// mixed layer as `—` and a tag only some of them carry as a dim chip.
+// The object header's active checkbox (docs/design/set-active.md § 5,
+// Unity's): the entity's own `active`, a prefab instance's as a
+// `setActive` override — marked, with Revert. And its layer and tags
+// (ADR-0020): the entity's `fynkel.Layer` as a dropdown of the project's
+// layers and its `fynkel.Tags` as chips with a menu of the project's tags
+// — never as two component cards with numbers in them. Several selected
+// entities show a mixed layer as `—` and a tag only some of them carry as
+// a dim chip.
 import 'package:flutter/material.dart';
 
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'field_widgets.dart';
 import 'inspector_model.dart';
+
+/// The checkbox before the header's name: the selection's own active
+/// flag (a dash when the selected entities disagree).
+class ActiveToggle extends StatelessWidget {
+  const ActiveToggle({super.key, required this.model});
+
+  final InspectorModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final value = model.active;
+    final overridden = model.activeOverridden;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          decoration: overridden
+              ? BoxDecoration(
+                  border: Border(left: BorderSide(color: t.accent, width: 2)),
+                )
+              : null,
+          child: Tooltip(
+            message: overridden
+                ? 'Active — overridden on this prefab instance'
+                : 'Active: off hides the object and its children and stops their scripts',
+            waitDuration: const Duration(milliseconds: 500),
+            child: SizedBox(
+              width: 22,
+              height: t.fieldHeight,
+              child: Checkbox(
+                key: const ValueKey('inspector.active'),
+                tristate: value == null,
+                value: value,
+                onChanged: model.canEdit ? (_) => model.setActive(value != true) : null,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ),
+        ),
+        if (overridden && model.canEdit)
+          IconButton(
+            key: const ValueKey('inspector.active.revert'),
+            tooltip: 'Revert override — back to the prefab\'s value',
+            icon: const Icon(FIcons.undo, size: 13),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+            onPressed: model.revertActive,
+          ),
+      ],
+    );
+  }
+}
 
 /// The Layer and Tags rows under the header's name.
 class LayerTagsRows extends StatelessWidget {

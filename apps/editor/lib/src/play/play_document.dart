@@ -2,8 +2,8 @@
 // game's world as an `EditorDocument`, so the Hierarchy and the Inspector
 // show it with the panels, rows, cards and field widgets they use for a
 // scene. Edits go to the running world at once (L3) — a field, a
-// component added or removed, a rename, a new parent, a delete, a new or
-// duplicated object — and no document is touched: Stop drops it all,
+// component added or removed, a rename, the active checkbox, a new
+// parent, a delete, a new or duplicated object — and no document is touched: Stop drops it all,
 // unless Apply to Scene kept it (L4, `apply_to_scene.dart`).
 //
 // Entities are named by their authoring ids (what a loaded scene spawned,
@@ -71,7 +71,7 @@ abstract class LiveBackend {
   /// there is none.
   PreviewBackend? openPreview();
 
-  /// A native write: `set`, `remove`, `rename`, `parent` or `destroy` with
+  /// A native write: `set`, `remove`, `rename`, `setActive`, `parent` or `destroy` with
   /// [LiveWorld]'s arguments.
   List<String> write(String kind, Map<String, Object?> args) => throw _notWritable(kind);
 
@@ -142,6 +142,7 @@ final class WorldLiveBackend extends LiveBackend {
       'set' => live.set(id, args['type'] as String, (args['data'] as Map).cast()),
       'remove' => live.remove(id, args['type'] as String),
       'rename' => _rename(id, args['name'] as String),
+      'setActive' => live.setActive(id, args['active'] as bool),
       'parent' => live.reparent(id, args['parent'] as String?, index: args['index'] as int?),
       'destroy' => live.destroy(id),
       _ => throw ArgumentError.value(kind, 'kind'),
@@ -412,6 +413,10 @@ final class PlayDocument extends EditorDocument {
         final id = entityOf('id');
         touched.add(id);
         return backend.write('rename', {'id': id, 'name': c['name'] as String? ?? ''});
+      case 'setObjectActive':
+        final id = entityOf('id');
+        touched.add(id);
+        return backend.write('setActive', {'id': id, 'active': c['active'] == true});
       case 'reparentObject':
         final id = entityOf('id');
         final parent = c['parent'] as String?;
@@ -666,7 +671,7 @@ final class PlayDocument extends EditorDocument {
     }
     final next = {
       for (final r in rows)
-        r.id: jsonEncode([r.name, r.parent, children[r.id] ?? const [], r.types, r.layer]),
+        r.id: jsonEncode([r.name, r.parent, children[r.id] ?? const [], r.types, r.layer, r.activeSelf]),
     };
     final affected = <String>[
       for (final e in next.entries)
@@ -741,6 +746,7 @@ final class PlayDocument extends EditorDocument {
     _refs[id] = refs;
     final doc = <String, Object?>{
       'name': state.name,
+      if (!state.activeSelf) 'active': false,
       'parent': ?row.parent,
       'children': List<String>.of(_children[id] ?? const []),
       'components': components,

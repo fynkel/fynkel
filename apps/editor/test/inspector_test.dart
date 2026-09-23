@@ -1596,5 +1596,34 @@ void main() {
       expect(find.byKey(const ValueKey('card.fynkel.Layer#0')), findsNothing);
       expect(find.byKey(const ValueKey('card.fynkel.Tags#0')), findsNothing);
     });
+
+    testWidgets('the header checkbox switches the object off and on, one undo step each', (tester) async {
+      final r = rig();
+      final tab = r.tabs.openDocument('main')!;
+      tab.select('a');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(width: 420, height: 900, child: InspectorPanel(model: r.model)),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Checkbox box() => tester.widget<Checkbox>(find.byKey(const ValueKey('inspector.active')));
+      expect(box().value, isTrue);
+      final before = r.doc.history;
+      await tester.tap(find.byKey(const ValueKey('inspector.active')));
+      await tester.pumpAndSettle();
+      expect(box().value, isFalse);
+      expect(r.doc.entities(['a']).entities['a']!['active'], false);
+      expect(r.doc.history - before, 1);
+      await tester.tap(find.byKey(const ValueKey('inspector.active')));
+      await tester.pumpAndSettle();
+      expect(box().value, isTrue);
+      expect(r.doc.entities(['a']).entities['a']!.containsKey('active'), isFalse);
+    });
   });
 }

@@ -27,6 +27,11 @@ final class HierarchyNode {
   List<String> children = const [];
   List<String> componentTypes = const [];
 
+  /// The entity's own active flag (`"active": false` in the document, a
+  /// derived entity's with the overrides applied); see
+  /// [HierarchyTree.activeInHierarchy] for what the row shows.
+  bool active = true;
+
   /// The `fynkel.Transform` component's id and data, when the entity has one.
   String? transformId;
 
@@ -57,6 +62,7 @@ final class HierarchyNode {
 
   void read(Map<String, Object?> e) {
     name = e['name'] as String? ?? '';
+    active = e['active'] != false;
     parent = e['parent'] as String?;
     children = [
       for (final c in e['children'] as List? ?? const [])
@@ -100,6 +106,7 @@ final class HierarchyNode {
   /// override on the anchor, never a write to the prefab.
   void readExpanded(ExpandedEntity e, {required String anchor}) {
     name = e.name;
+    active = e.active;
     parent = e.parent;
     children = List.of(e.children);
     this.anchor = anchor;
@@ -109,7 +116,7 @@ final class HierarchyNode {
     transformLocal = null;
     transform = null;
     final types = <String>[];
-    var overridden = 0;
+    var overridden = e.activeOverridden ? 1 : 0;
     for (final c in e.components.values) {
       types.add(c.type);
       overridden += c.overridden.length;
@@ -272,6 +279,18 @@ final class HierarchyTree extends ChangeNotifier {
   }
 
   bool contains(String id) => this[id] != null;
+
+  /// [id] and every ancestor active (Unity's `activeInHierarchy`): a row
+  /// under an inactive parent is greyed like the parent.
+  bool activeInHierarchy(String id) {
+    for (String? at = id; at != null;) {
+      final n = nodes[at];
+      if (n == null) return true;
+      if (!n.active) return false;
+      at = n.parent;
+    }
+    return true;
+  }
 
   /// Reads the whole document (`entities` by id, `roots` when the kind has them).
   void build(Map<String, Object?> root, {List<String>? roots}) {

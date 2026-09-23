@@ -13,10 +13,10 @@
 // shortest decimal that is its float (0.1).
 //
 // Whole objects apply too (the Hierarchy's Apply to Scene): a running
-// object's name, parent and components, and its children the same way —
-// an object made during Play is created in the scene under its id, a
-// component removed during Play is removed, a child deleted during Play is
-// deleted. What the game itself made (a `runtime:` id) is not applied, nor
+// object's name, active flag, parent and components, and its children the
+// same way — an object made during Play is created in the scene under its
+// id, a component removed during Play is removed, a child deleted during
+// Play is deleted. What the game itself made (a `runtime:` id) is not applied, nor
 // what it removed or destroyed: only the user's own removals and deletes
 // are. A new order among the same siblings is not applied.
 import 'dart:math' as math;
@@ -268,6 +268,8 @@ List<Map<String, Object?>> applyObjectsToSceneCommands(
     if (!node.isDerived) {
       final name = e['name'] as String? ?? '';
       if (name != node.name) commands.add(Command.renameObject(id, name));
+      final active = e['active'] != false;
+      if (active != node.active) commands.add(Command.setObjectActive(id, active));
       final parent = e['parent'] as String?;
       if (parent != node.parent) {
         if (parent != null && (sceneNodeOf(scene, parent)?.isDerived ?? true) && !creating.contains(parent)) {

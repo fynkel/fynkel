@@ -334,6 +334,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
           children: [
             Row(
               children: [
+                ActiveToggle(model: model),
+                const SizedBox(width: 2),
                 Icon(
                   single.prefab != null ? FIcons.widgetsOutlined : FIcons.categoryOutlined,
                   size: t.icon,
@@ -385,6 +387,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
         children: [
           Row(
             children: [
+              ActiveToggle(model: model),
+              const SizedBox(width: 2),
               Icon(FIcons.selectAll, size: t.icon, color: t.textSecondary),
               const SizedBox(width: 6),
               Expanded(

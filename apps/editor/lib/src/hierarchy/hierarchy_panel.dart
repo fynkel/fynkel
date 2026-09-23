@@ -534,6 +534,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       model: model,
       row: row,
       selected: selected,
+      inactive: !tree.activeInHierarchy(n.id),
       renaming: renaming,
       renameController: renaming ? _renameController(n) : null,
       errors: tree.errors[n.id] ?? const [],
@@ -726,6 +727,7 @@ class _HierarchyRowWidget extends StatefulWidget {
     required this.model,
     required this.row,
     required this.selected,
+    this.inactive = false,
     required this.renaming,
     required this.renameController,
     required this.errors,
@@ -740,6 +742,9 @@ class _HierarchyRowWidget extends StatefulWidget {
   final HierarchyModel model;
   final HierarchyRow row;
   final bool selected;
+
+  /// Not active in the hierarchy: the row is greyed, as in Unity.
+  final bool inactive;
   final bool renaming;
   final TextEditingController? renameController;
   final List<Diagnostic> errors;
@@ -864,7 +869,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
             size: 13,
             color: widget.selected
                 ? onRowDim
-                : row.matches
+                : row.matches && !widget.inactive
                 ? t.textSecondary
                 : t.textDisabled,
           ),
@@ -899,8 +904,8 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: widget.selected
-                          ? onRow
-                          : row.matches
+                          ? (widget.inactive ? onRowDim : onRow)
+                          : row.matches && !widget.inactive
                           ? (n.isDerived && !n.added ? t.textSecondary : t.text)
                           : t.textDisabled,
                       fontStyle: n.name.isEmpty || n.isDerived ? FontStyle.italic : null,

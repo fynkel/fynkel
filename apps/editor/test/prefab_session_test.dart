@@ -316,4 +316,51 @@ void main() {
     expect(s.tabs.openDocument('$texture#prefab'), isNull);
     expect(s.tabs.openError, contains('FYN-D0401'));
   });
+
+  test(
+    'the active checkbox: a scene object writes `active`, a derived one a setActive override that reverts',
+    () async {
+      final s = await Session.open('active_checkbox');
+      final tab = s.tabs.openDocument(mainScene)!;
+      const robot = 'c0000000-0000-4000-8000-0000000000e1';
+
+      // A scene object: one undo step, `"active": false` in the document, greyed.
+      tab.select(robot);
+      expect(s.inspector.active, isTrue);
+      expect(s.inspector.setActive(false), isTrue, reason: '${s.inspector.lastError}');
+      expect(tab.document.entities([robot]).entities[robot]!['active'], false);
+      expect(s.inspector.active, isFalse);
+      expect(tab.tree[robot]!.active, isFalse);
+      expect(tab.tree.activeInHierarchy(robot), isFalse);
+      expect(tab.undo(), isTrue);
+      expect(tab.document.entities([robot]).entities[robot]!.containsKey('active'), isFalse);
+      expect(s.inspector.active, isTrue);
+
+      // Crate A off: its derived child is greyed with it but keeps its own flag.
+      s.hierarchy.expand(crateA);
+      final derived = tab.expansionOf(crateA)!.entities.single;
+      tab.select(crateA);
+      expect(s.inspector.setActive(false), isTrue);
+      expect(tab.tree[derived.id]!.active, isTrue);
+      expect(tab.tree.activeInHierarchy(derived.id), isFalse);
+      expect(tab.undo(), isTrue);
+
+      // The derived child: an override on the anchor, marked, and Revert drops it.
+      final before = s.inspectedOverrides(mainScene, crateA).length;
+      tab.select(derived.id);
+      expect(s.inspector.active, isTrue);
+      expect(s.inspector.activeOverridden, isFalse);
+      expect(s.inspector.setActive(false), isTrue, reason: '${s.inspector.lastError}');
+      final overrides = s.inspectedOverrides(mainScene, crateA);
+      expect(overrides, hasLength(before + 1));
+      expect(overrides.last, {'op': 'setActive', 'entity': derived.local, 'value': false});
+      expect(s.inspector.active, isFalse);
+      expect(s.inspector.activeOverridden, isTrue);
+      expect(tab.tree[derived.id]!.active, isFalse);
+      expect(s.inspector.revertActive(), isTrue, reason: '${s.inspector.lastError}');
+      expect(s.inspectedOverrides(mainScene, crateA), hasLength(before));
+      expect(s.inspector.active, isTrue);
+      expect(s.inspector.activeOverridden, isFalse);
+    },
+  );
 }

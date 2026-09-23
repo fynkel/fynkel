@@ -163,19 +163,29 @@ final class EntityInfo {
     this.prefab,
     this.expansion,
     this.anchor,
+    this.local,
     this.added = false,
+    this.active = true,
+    this.activeOverridden = false,
   });
 
   final String id;
   final String name;
   final PrefabInstanceInfo? prefab;
 
+  /// The entity's own active flag (Unity's `activeSelf`), and for a
+  /// derived entity whether a `setActive` override set it.
+  final bool active;
+  final bool activeOverridden;
+
   /// For an anchor: its expansion (the prefab it comes from, the annotated
   /// overrides, why it did not expand); null when the query failed.
   final PrefabExpansion? expansion;
 
-  /// For a derived entity: its instance's anchor, and whether an override added it.
+  /// For a derived entity: its instance's anchor, its prefab-local id
+  /// (what overrides address), and whether an override added it.
   final String? anchor;
+  final String? local;
   final bool added;
 
   bool get isDerived => anchor != null;
@@ -383,7 +393,8 @@ final class InspectorModel extends ChangeNotifier {
   bool _moveInPlace(List<EntityInfo> infos, List<ComponentSlot> next) {
     if (!_liveOnly || next.length != _slots.length || infos.length != _entities.length) return false;
     for (var i = 0; i < infos.length; i++) {
-      if (infos[i].id != _entities[i].id || infos[i].name != _entities[i].name) return false;
+      final a = infos[i], b = _entities[i];
+      if (a.id != b.id || a.name != b.name || a.active != b.active) return false;
     }
     for (var i = 0; i < next.length; i++) {
       final a = _slots[i], b = next[i];
@@ -488,7 +499,17 @@ final class InspectorModel extends ChangeNotifier {
         final x = t.expansionOf(node.anchor!);
         final de = x?.entity(id);
         if (x == null || de == null) continue; // the expansion changed under us; the tab prunes next
-        infos.add(EntityInfo(id: id, name: de.name, anchor: node.anchor, added: de.added));
+        infos.add(
+          EntityInfo(
+            id: id,
+            name: de.name,
+            anchor: node.anchor,
+            local: de.local,
+            added: de.added,
+            active: de.active,
+            activeOverridden: de.activeOverridden,
+          ),
+        );
         final types = _typesOn[id] = <String>{};
         perEntity.add([
           for (final c in de.components.entries)
@@ -515,6 +536,7 @@ final class InspectorModel extends ChangeNotifier {
         EntityInfo(
           id: id,
           name: e['name'] as String? ?? '',
+          active: e['active'] != false,
           prefab: p,
           expansion: p == null ? null : t.expansionOf(id),
         ),
@@ -1283,6 +1305,54 @@ final class InspectorModel extends ChangeNotifier {
       return a?.ok ?? false;
     }
     final a = _run([Command.renameObject(e.id, name.trim())]);
+    notifyListeners();
+    return a?.ok ?? false;
+  }
+
+  /// The selection's own active flag (the header's checkbox); null when
+  /// the selected entities disagree.
+  bool? get active {
+    if (_entities.isEmpty) return null;
+    final first = _entities.first.active;
+    return _entities.every((e) => e.active == first) ? first : null;
+  }
+
+  /// A `setActive` override set the flag of a selected derived entity.
+  bool get activeOverridden => _entities.any((e) => e.activeOverridden);
+
+  /// Switches the selected entities on or off, one undo step: the
+  /// document's `active` for its own entities, a `setActive` override on
+  /// the anchor for a prefab instance's (docs/design/set-active.md § 5).
+  bool setActive(bool value) {
+    final commands = [
+      for (final e in _entities)
+        if (e.active != value)
+          e.isDerived
+              ? Command.setPrefabOverrideOp(e.anchor!, {'op': 'setActive', 'entity': e.local, 'value': value})
+              : Command.setObjectActive(e.id, value),
+    ];
+    final a = _run(commands);
+    notifyListeners();
+    return a?.ok ?? false;
+  }
+
+  /// Revert override on the checkbox: drops the `setActive` overrides of
+  /// the selected derived entities.
+  bool revertActive() {
+    final t = _tab;
+    if (t == null) return false;
+    final per = <String, List<int>>{};
+    for (final e in _entities) {
+      if (!e.activeOverridden) continue;
+      for (final o in t.expansionOf(e.anchor!)?.overrides ?? const <ExpansionOverride>[]) {
+        if (o.op == 'setActive' && o.entityId == e.id) (per[e.anchor!] ??= []).add(o.index);
+      }
+    }
+    final commands = [
+      for (final e in per.entries)
+        for (final i in (e.value..sort((a, b) => b.compareTo(a)))) Command.revertPrefabOverride(e.key, index: i),
+    ];
+    final a = _run(commands);
     notifyListeners();
     return a?.ok ?? false;
   }

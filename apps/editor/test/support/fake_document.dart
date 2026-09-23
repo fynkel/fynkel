@@ -1,7 +1,7 @@
 // An in-memory document for the tabs and Hierarchy tests: a small
 // interpreter for the commands the Hierarchy uses (createObject,
-// deleteObject, renameObject, reparentObject, duplicateObject, setField,
-// addComponent) and the Inspector uses (setField by JSON pointer,
+// deleteObject, renameObject, setObjectActive, reparentObject,
+// duplicateObject, setField, addComponent) and the Inspector uses (setField by JSON pointer,
 // unsetField, assignAsset, removeComponent, setPrefabOverride,
 // revertPrefabOverride, unpackPrefab; `reject` stands in for the crate's
 // validation) with snapshots for undo/redo, content-hash revisions, the
@@ -465,6 +465,16 @@ final class FakeDocument extends EditorDocument {
         final e = _entities[id];
         if (e == null) return _Result.error('no entity $id');
         e['name'] = c['name'];
+        return _Result([id]);
+      case 'setObjectActive':
+        final id = c['id'] as String;
+        final e = _entities[id];
+        if (e == null) return _Result.error('no entity $id');
+        if (c['active'] == false) {
+          e['active'] = false;
+        } else {
+          e.remove('active');
+        }
         return _Result([id]);
       case 'reparentObject':
         final id = c['id'] as String;
