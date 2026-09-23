@@ -56,6 +56,10 @@ void main() {
       () => live.entity('runtime:1'),
       throwsA(isA<AuthoringException>().having((e) => e.status, 'status', AuthoringStatus.invalidArgument)),
     );
+    expect(live.reparent(sun, robot, index: 0), isEmpty);
+    expect(live.entity(sun).parent, robot);
+    expect(live.destroy(robot), isEmpty);
+    expect(live.entities().where((e) => e.id == robot || e.id == sun), isEmpty, reason: 'the subtree went');
     expect(() => LiveWorld(0), throwsArgumentError);
     expect(File('${dir.path}/$mainScene').readAsStringSync(), contains('"Robot"'), reason: 'no document is touched');
   });

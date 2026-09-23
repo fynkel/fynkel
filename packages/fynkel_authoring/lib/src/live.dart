@@ -138,6 +138,14 @@ final class LiveWorld {
 
   List<String> rename(String id, String name) => _write('rename', {'id': id, 'name': name});
 
+  /// Moves [id] under [parent] (null: a root) at [index] among its new
+  /// siblings (last when null); its local transform is kept.
+  List<String> reparent(String id, String? parent, {int? index}) =>
+      _write('parent', {'id': id, 'parent': parent, 'index': ?index});
+
+  /// Destroys [id] and its subtree.
+  List<String> destroy(String id) => _write('destroy', {'id': id});
+
   // ── The Scene view on the running world (L5) ──────────────────────────
   // The edit preview's picking and overlays, over every live entity, each
   // named by its own id (a running prefab instance has no anchor).
