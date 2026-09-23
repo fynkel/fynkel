@@ -30,6 +30,7 @@ pub mod gltf;
 pub(crate) mod graph;
 pub mod image;
 pub mod intermediate;
+pub mod keys_migration;
 pub mod rig;
 pub mod subkey;
 pub mod tangents;

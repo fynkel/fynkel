@@ -87,7 +87,7 @@ fn a_fresh_project_validates_and_runs_headlessly() {
         &std::fs::read_to_string(dir.join("assets/models/cube.glb.meta.json")).unwrap(),
     )
     .unwrap();
-    assert!(meta["subAssets"]["mesh/0"].is_string());
+    assert!(meta["subAssets"]["mesh/Cube"].is_string());
     let scene = std::fs::read_to_string(dir.join("assets/scenes/main.scene.json")).unwrap();
     assert!(scene.contains(meta["id"].as_str().unwrap()));
     assert!(scene.contains("\"game.Spinner\""));

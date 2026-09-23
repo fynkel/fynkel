@@ -47,7 +47,7 @@ pub use codec::{DocumentCodec, FieldError};
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
 pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
-pub use migrate::{migrate, Migrated, Migration, Migrations};
+pub use migrate::{migrate, migrate_with, Migrated, Migration, Migrations, Rewrite};
 pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
 pub use project::{
     validate_project, validate_project_with, Lock, NoSourcePrefabs, Project, ProjectReport,
@@ -150,11 +150,12 @@ impl DocumentKind {
     /// (M3-19c): `fynkel.Animator` carries `weight`/`additive`/`root_motion`;
     /// 4 (ADR-0020): a collider's layer is its object's `fynkel.Layer`, and
     /// cameras and point/spot lights carry `culling_mask`. Project 2
-    /// (ADR-0020): `layers` and `tags` at the top level.
+    /// (ADR-0020): `layers` and `tags` at the top level. Meta 2 (stable
+    /// sub-asset ids): a model's sub-asset keys are the parts' names.
     pub const fn supported_format_version(self) -> u32 {
         match self {
             DocumentKind::Scene | DocumentKind::Prefab => 4,
-            DocumentKind::Project => 2,
+            DocumentKind::Project | DocumentKind::Meta => 2,
             DocumentKind::Material => 2,
             _ => 1,
         }

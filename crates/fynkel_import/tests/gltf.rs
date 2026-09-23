@@ -50,13 +50,20 @@ fn robot_imports_meshes_materials_images_and_a_prefab() {
 
     // Meshes: one per triangle primitive; a multi-primitive mesh gets `/p`.
     let subs: Vec<&str> = i.meshes.iter().map(|m| m.sub_id.as_str()).collect();
-    assert_eq!(subs, ["mesh/0", "mesh/1/0", "mesh/1/1"]);
+    assert_eq!(
+        subs,
+        [
+            "mesh/Cube",
+            "mesh/PyramidAndQuad/0",
+            "mesh/PyramidAndQuad/1"
+        ]
+    );
     let cube = &i.meshes[0];
     assert_eq!(cube.name, "Cube");
     assert_eq!(cube.vertices.len(), 24);
     assert_eq!(cube.indices.len(), 36);
     assert_eq!(cube.triangle_count(), 12);
-    assert_eq!(cube.material.as_deref(), Some("material/0"));
+    assert_eq!(cube.material.as_deref(), Some("material/Painted"));
     assert_eq!(cube.bounds_min, [-0.5, -0.5, -0.5]);
     assert_eq!(cube.bounds_max, [0.5, 0.5, 0.5]);
     assert_eq!(cube.vertices[0].normal, [0.0, 0.0, 1.0]);
@@ -68,7 +75,7 @@ fn robot_imports_meshes_materials_images_and_a_prefab() {
     assert_eq!(pyramid.name, "PyramidAndQuad[0]");
     assert_eq!(pyramid.vertices.len(), 12);
     assert_eq!(pyramid.indices, (0..12).collect::<Vec<u32>>());
-    assert_eq!(pyramid.material.as_deref(), Some("material/1"));
+    assert_eq!(pyramid.material.as_deref(), Some("material/Glass"));
     for tri in pyramid.vertices.chunks(3) {
         let n = tri[0].normal;
         let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
@@ -90,11 +97,11 @@ fn robot_imports_meshes_materials_images_and_a_prefab() {
     let names: Vec<&str> = i.materials.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(names, ["Painted", "Glass"]);
     assert_eq!(i.images.len(), 2);
-    assert_eq!(i.images[0].sub_id, "image/0");
+    assert_eq!(i.images[0].sub_id, "image/paint");
     assert_eq!(i.images[0].mime_type, "image/png");
     assert!(i.images[0].bytes.starts_with(b"\x89PNG"));
     assert_eq!(i.images[0].color_space, ColorSpace::Srgb);
-    assert_eq!(i.images[1].sub_id, "image/0/linear");
+    assert_eq!(i.images[1].sub_id, "image/paint/linear");
     assert_eq!(i.images[1].color_space, ColorSpace::Linear);
     assert_eq!(i.images[1].bytes, i.images[0].bytes);
 
@@ -102,18 +109,18 @@ fn robot_imports_meshes_materials_images_and_a_prefab() {
     let asset = Uuid::parse_str(ROBOT_ID).unwrap();
     assert_eq!(meta.id(), asset);
     let expected: Vec<(String, Uuid)> = [
-        "mesh/0",
-        "mesh/1/0",
-        "mesh/1/1",
-        "material/0",
-        "material/1",
-        "image/0",
-        "image/0/linear",
+        "mesh/Cube",
+        "mesh/PyramidAndQuad/0",
+        "mesh/PyramidAndQuad/1",
+        "material/Painted",
+        "material/Glass",
+        "image/paint",
+        "image/paint/linear",
         "prefab",
     ]
     .iter()
     .map(|s| {
-        let id = if *s == "material/1" {
+        let id = if *s == "material/Glass" {
             Uuid::parse_str(GLASS_ID).unwrap()
         } else {
             derive_sub_id(asset, s)
@@ -149,7 +156,7 @@ fn robot_material_documents_validate_against_the_pbr_manifest() {
     assert_eq!(painted["shader"], "fynkel.pbr@1");
     assert_eq!(
         painted["id"],
-        derive_sub_id(Uuid::parse_str(ROBOT_ID).unwrap(), "material/0").to_string()
+        derive_sub_id(Uuid::parse_str(ROBOT_ID).unwrap(), "material/Painted").to_string()
     );
     assert_eq!(painted["formatVersion"], 2);
     assert_eq!(
@@ -162,8 +169,8 @@ fn robot_material_documents_validate_against_the_pbr_manifest() {
     assert_eq!(painted["normal_scale"], 0.5);
     assert_eq!(painted["occlusion_strength"], 0.8);
     assert_eq!(painted["base_color_texture"]["asset"], ROBOT_ID);
-    assert_eq!(painted["base_color_texture"]["sub"], "image/0");
-    assert_eq!(painted["emissive_texture"]["sub"], "image/0");
+    assert_eq!(painted["base_color_texture"]["sub"], "image/paint");
+    assert_eq!(painted["emissive_texture"]["sub"], "image/paint");
     // The data slots read the linear copy of the same image.
     for slot in [
         "normal_texture",
@@ -171,7 +178,7 @@ fn robot_material_documents_validate_against_the_pbr_manifest() {
         "occlusion_texture",
     ] {
         assert_eq!(painted[slot]["asset"], ROBOT_ID, "{slot}");
-        assert_eq!(painted[slot]["sub"], "image/0/linear", "{slot}");
+        assert_eq!(painted[slot]["sub"], "image/paint/linear", "{slot}");
     }
     assert!(painted.get("alpha_mode").is_none());
     assert!(painted.get("parameters").is_none() && painted.get("textures").is_none());
@@ -217,7 +224,15 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
     let (r, _) = import_fixture("robot.glb");
     let i = r.intermediate.unwrap();
     let asset = Uuid::parse_str(ROBOT_ID).unwrap();
-    let node = |n: usize| derive_sub_id(asset, &format!("node/{n}")).to_string();
+    // Node ids derive from name paths: nodes 0–4 of the file.
+    let paths = [
+        "Robot",
+        "Robot/Body",
+        "Robot/Body/Head",
+        "Robot/Antenna",
+        "Ground",
+    ];
+    let node = |n: usize| derive_sub_id(asset, &format!("node/{}", paths[n])).to_string();
     let p = i.prefab.as_ref().unwrap();
     assert_eq!(p["name"], "Robot");
     assert_eq!(p["id"], derive_sub_id(asset, "prefab").to_string());
@@ -270,8 +285,11 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
         serde_json::json!([1.0, 2.0, 1.0])
     );
     assert_eq!(body_components[1]["type"], "fynkel.MeshRenderer");
-    assert_eq!(body_components[1]["data"]["mesh"]["sub"], "mesh/0");
-    assert_eq!(body_components[1]["data"]["material"]["sub"], "material/0");
+    assert_eq!(body_components[1]["data"]["mesh"]["sub"], "mesh/Cube");
+    assert_eq!(
+        body_components[1]["data"]["material"]["sub"],
+        "material/Painted"
+    );
 
     let head = &entities[&node(2)];
     let head_transform = head["components"]
@@ -312,7 +330,7 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
         .values()
         .nth(1)
         .unwrap();
-    assert_eq!(renderer["data"]["mesh"]["sub"], "mesh/1/1");
+    assert_eq!(renderer["data"]["mesh"]["sub"], "mesh/PyramidAndQuad/1");
     assert_eq!(
         renderer["data"]["material"]["asset"],
         Uuid::nil().to_string()
@@ -466,7 +484,7 @@ fn non_triangle_primitives_are_skipped_with_a_warning() {
     assert!(r.diagnostics[0].message.contains("TriangleStrip"));
     let i = r.intermediate.unwrap();
     let subs: Vec<&str> = i.meshes.iter().map(|m| m.sub_id.as_str()).collect();
-    assert_eq!(subs, ["mesh/0/1"]);
+    assert_eq!(subs, ["mesh/Strip/1"]);
     assert_eq!(i.meshes[0].triangle_count(), 4);
     // One primitive survived, so the node carries the renderer itself (the
     // sub id keeps its `/1`, since that is what the file calls it).
@@ -478,7 +496,7 @@ fn non_triangle_primitives_are_skipped_with_a_warning() {
         .values()
         .nth(1)
         .unwrap();
-    assert_eq!(renderer["data"]["mesh"]["sub"], "mesh/0/1");
+    assert_eq!(renderer["data"]["mesh"]["sub"], "mesh/Strip/1");
 }
 
 #[test]
@@ -598,7 +616,7 @@ fn rig_imports_skin_weights_skins_and_animations() {
 
     // Skin weights: one per vertex, normalized, u8 joints widened.
     let body = &i.meshes[0];
-    assert_eq!(body.sub_id, "mesh/0");
+    assert_eq!(body.sub_id, "mesh/Body");
     assert!(body.is_skinned());
     assert_eq!(body.skin.len(), body.vertices.len());
     assert_eq!(body.skin[0].joints, [0, 0, 0, 0]);
@@ -612,7 +630,7 @@ fn rig_imports_skin_weights_skins_and_animations() {
     // inverse bind matrices, rest pose.
     assert_eq!(i.skins.len(), 1);
     let skin = &i.skins[0];
-    assert_eq!(skin.sub_id, "skin/0");
+    assert_eq!(skin.sub_id, "skin/Skin");
     assert_eq!(skin.name, "Skin");
     assert_eq!(skin.payload.skeleton, "hips");
     let names: Vec<&str> = skin
@@ -632,7 +650,7 @@ fn rig_imports_skin_weights_skins_and_animations() {
     // The clips: channels by node name, interpolation kept, duration.
     assert_eq!(i.animations.len(), 2);
     let wave = &i.animations[0];
-    assert_eq!(wave.sub_id, "anim/0");
+    assert_eq!(wave.sub_id, "anim/wave");
     assert_eq!(wave.name, "wave");
     assert_eq!(wave.payload.duration, 1.0);
     assert_eq!(wave.payload.channels.len(), 3);
@@ -661,16 +679,31 @@ fn rig_imports_skin_weights_skins_and_animations() {
     let subs: Vec<&str> = i.sub_assets.iter().map(|(k, _)| k.as_str()).collect();
     assert_eq!(
         subs,
-        ["mesh/0", "mesh/1", "skin/0", "anim/0", "anim/1", "prefab"]
+        [
+            "mesh/Body",
+            "mesh/Prop",
+            "skin/Skin",
+            "anim/wave",
+            "anim/bob",
+            "prefab"
+        ]
     );
     let asset = Uuid::parse_str(RIG_ID).unwrap();
-    assert_eq!(i.sub_assets[2].1, derive_sub_id(asset, "skin/0"));
+    assert_eq!(i.sub_assets[2].1, derive_sub_id(asset, "skin/Skin"));
 
     // The prefab: `fynkel.Skin` next to the Body's renderer, none on the prop.
     let p = i.prefab.as_ref().unwrap();
     let entities = p["entities"].as_object().unwrap();
     assert_eq!(entities.len(), 6);
-    let node = |n: usize| derive_sub_id(asset, &format!("node/{n}")).to_string();
+    let paths = [
+        "Rig",
+        "Rig/Body",
+        "Rig/hips",
+        "Rig/hips/spine",
+        "Rig/hips/spine/head",
+        "Rig/Prop",
+    ];
+    let node = |n: usize| derive_sub_id(asset, &format!("node/{}", paths[n])).to_string();
     let body = &entities[&node(1)];
     let components: Vec<&serde_json::Value> =
         body["components"].as_object().unwrap().values().collect();
@@ -678,12 +711,12 @@ fn rig_imports_skin_weights_skins_and_animations() {
     assert_eq!(components[1]["type"], "fynkel.MeshRenderer");
     assert_eq!(components[2]["type"], "fynkel.Skin");
     assert_eq!(components[2]["data"]["skin"]["asset"], RIG_ID);
-    assert_eq!(components[2]["data"]["skin"]["sub"], "skin/0");
+    assert_eq!(components[2]["data"]["skin"]["sub"], "skin/Skin");
     assert_eq!(components[2]["data"]["skeleton"], "hips");
     assert!(body["components"]
         .as_object()
         .unwrap()
-        .contains_key(&derive_sub_id(asset, "node/1/skin").to_string()));
+        .contains_key(&derive_sub_id(asset, "node/Rig/Body/skin").to_string()));
     let prop = &entities[&node(5)];
     assert_eq!(prop["components"].as_object().unwrap().len(), 2);
     let names: Vec<&str> = entities

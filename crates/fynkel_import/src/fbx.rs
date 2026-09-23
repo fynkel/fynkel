@@ -58,7 +58,9 @@ use crate::subkey::Keys;
 use crate::{read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::FBX_IMPORTER;
-pub const IMPORTER_VERSION: u32 = 1;
+/// 2: sub-asset keys are the parts' names once the sidecar is at
+/// `formatVersion` 2 (`subkey`).
+pub const IMPORTER_VERSION: u32 = 2;
 
 struct Ctx<'a> {
     path: &'a Path,

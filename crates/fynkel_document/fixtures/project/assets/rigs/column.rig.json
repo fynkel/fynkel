@@ -4,15 +4,29 @@
   "id": "c0000000-0000-4000-8000-000000000050",
   "name": "Column",
   "description": "The three-joint column of rig.glb with its two clips under game names (M3-19b): the scene's Imported entity instances the rig, not the file.",
-  "skeleton": { "asset": "c0000000-0000-4000-8000-000000000005" },
+  "skeleton": {
+    "asset": "c0000000-0000-4000-8000-000000000005"
+  },
   "clips": {
-    "wave": { "asset": "c0000000-0000-4000-8000-000000000005", "sub": "anim/0" },
-    "bob": { "asset": "c0000000-0000-4000-8000-000000000005", "sub": "anim/1" }
+    "wave": {
+      "asset": "c0000000-0000-4000-8000-000000000005",
+      "sub": "anim/wave"
+    },
+    "bob": {
+      "asset": "c0000000-0000-4000-8000-000000000005",
+      "sub": "anim/bob"
+    }
   },
   "markers": {
     "wave": [
-      { "at": 0.25, "name": "peak" },
-      { "at": 0.75, "name": "trough" }
+      {
+        "at": 0.25,
+        "name": "peak"
+      },
+      {
+        "at": 0.75,
+        "name": "trough"
+      }
     ]
   }
 }

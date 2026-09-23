@@ -64,7 +64,7 @@ void main() {
     final mesh = robot.get<MeshRenderer>();
     expect(mesh, isNotNull);
     expect(mesh!.visible, isTrue);
-    expect(mesh.mesh.sub, 'mesh/0');
+    expect(mesh.mesh.sub, 'mesh/Cube');
     expect(mesh.material.asset, 'c0000000-0000-4000-8000-000000000020');
     expect(robot.has<MeshRenderer>(), isTrue);
     expect(robot.has<Camera>(), isFalse);

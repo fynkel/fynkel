@@ -268,7 +268,9 @@ fn prefabs_describe_from_their_chunk() {
     let wave = assets
         .clip(&AssetRef::with_sub(id(COLUMN), "anim/wave"))
         .unwrap_or_else(|d| panic!("{d}"));
-    let source = assets.clip(&AssetRef::with_sub(id(RIG), "anim/0")).unwrap();
+    let source = assets
+        .clip(&AssetRef::with_sub(id(RIG), "anim/wave"))
+        .unwrap();
     assert_eq!(wave.duration, source.duration);
     assert_eq!(wave.channels.len(), source.channels.len());
     assert_eq!(
@@ -329,7 +331,7 @@ fn prefabs_describe_from_their_chunk() {
 fn payloads_load_by_reference_and_residency_evicts() {
     let cooked = Cooked::new("residency");
     let assets = Assets::open(&cooked.0).unwrap();
-    let robot_mesh = AssetRef::with_sub(id(ROBOT), "mesh/0");
+    let robot_mesh = AssetRef::with_sub(id(ROBOT), "mesh/Cube");
     let mesh = assets.mesh(&robot_mesh).unwrap_or_else(|d| panic!("{d}"));
     assert!(!mesh.vertices.is_empty());
     let again = assets.mesh(&robot_mesh).unwrap();

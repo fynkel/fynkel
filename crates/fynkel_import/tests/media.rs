@@ -32,7 +32,7 @@ fn meta_with_settings(path: &Path, settings: &str) -> Meta {
         DocumentKind::Meta,
         None,
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{}","name":"x","importer":"{}","importerVersion":1,"settings":{settings},"subAssets":{{}}}}"#,
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{}","name":"x","importer":"{}","importerVersion":1,"settings":{settings},"subAssets":{{}}}}"#,
             meta.id(),
             meta.importer
         ),

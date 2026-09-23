@@ -823,13 +823,34 @@ fn prepare(
             } else {
                 Vec::new()
             };
+            // What the import reads from the sidecar besides the file: its
+            // settings, its key scheme (`subkey`) and the sub-asset ids it
+            // writes into the cooked documents.
             let settings = meta
                 .as_ref()
-                .map(|m| json::write(&m.settings))
+                .map(|m| {
+                    let subs: Vec<String> = m
+                        .sub_assets
+                        .iter()
+                        .map(|(k, id)| format!("{k}={id}"))
+                        .collect();
+                    format!(
+                        "{}\nformatVersion={}\n{}",
+                        json::write(&m.settings),
+                        m.document.envelope.format_version,
+                        subs.join("\n")
+                    )
+                })
                 .unwrap_or_else(|| "{}".to_string());
+            // The importer's own version: a sidecar records the version that
+            // last wrote its settings, not the code that imports it now.
+            let version = crate::IMPORTERS
+                .iter()
+                .find(|(name, _)| name == importer)
+                .map_or(*importer_version, |(_, v)| *v);
             Prepared {
                 kind: importer.clone(),
-                version: *importer_version,
+                version,
                 source,
                 extra_inputs,
                 settings,

@@ -13,8 +13,8 @@ import 'package:test/test.dart';
 
 const rigScene = 'c0000000-0000-4000-8000-000000000034';
 const rigAsset = 'c0000000-0000-4000-8000-000000000005';
-const wave = AssetRef(rigAsset, sub: 'anim/0');
-const bob = AssetRef(rigAsset, sub: 'anim/1');
+const wave = AssetRef(rigAsset, sub: 'anim/wave');
+const bob = AssetRef(rigAsset, sub: 'anim/bob');
 // The Column rig document (M3-19b): rig.glb as the skeleton, `wave` and
 // `bob` named.
 const columnRig = 'c0000000-0000-4000-8000-000000000050';
@@ -90,7 +90,7 @@ void main() {
     expect(
       body.get<Skin>(),
       const Skin(
-        skin: AssetRef(rigAsset, sub: 'skin/0'),
+        skin: AssetRef(rigAsset, sub: 'skin/Skin'),
         skeleton: 'hips',
       ),
     );
@@ -167,8 +167,8 @@ void main() {
     final spine = hips.findChild('spine')!;
     final head = spine.findChild('head')!;
     w.frame(1 / 60);
-    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/0'), skeleton: 'hips'));
-    expect(body.get<MeshRenderer>()!.mesh, const AssetRef(rigAsset, sub: 'mesh/0'));
+    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/Skin'), skeleton: 'hips'));
+    expect(body.get<MeshRenderer>()!.mesh, const AssetRef(rigAsset, sub: 'mesh/Body'));
     expect(head.worldTransform!.position, const Vec3(3, 1, 0), reason: 'bind pose under the anchor');
 
     // The instance has no animator of its own (a glTF names clips, not
@@ -188,7 +188,7 @@ void main() {
 
     // Not a prefab: a wrong sub is an ArgumentError before the call, a
     // texture has no hierarchy (FynkelInstantiateError).
-    expect(() => w.instantiate(const AssetRef(rigAsset, sub: 'mesh/0')), throwsArgumentError);
+    expect(() => w.instantiate(const AssetRef(rigAsset, sub: 'mesh/Body')), throwsArgumentError);
     expect(
       () => w.instantiate(const AssetRef('c0000000-0000-4000-8000-000000000010', sub: World.importedPrefabSub)),
       throwsA(isA<FynkelInstantiateError>()),
@@ -219,11 +219,11 @@ void main() {
     final hips = root.findChild('hips')!;
     final head = hips.findChild('spine')!.findChild('head')!;
     w.frame(1 / 60);
-    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/0'), skeleton: 'hips'),
+    expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/Skin'), skeleton: 'hips'),
         reason: 'meshes and skins stay the skeleton source\'s');
 
     // The clips are the rig's, by name: `anim/wave` poses the joints like
-    // the source's `anim/0`; `anim/bob` moves the Prop.
+    // the source's `anim/wave`; `anim/bob` moves the Prop.
     statue.add(const Animator(
         clip: AssetRef(columnRig, sub: 'anim/wave'),
         speed: 1,
@@ -306,11 +306,11 @@ void main() {
     while (w.tick < 123) {
       w.frame(1 / 60);
     }
-    expect(listener.ended, ['anim/1']);
+    expect(listener.ended, ['anim/bob']);
     for (var i = 0; i < 35; i++) {
       w.frame(1 / 60);
     }
-    expect(listener.ended, ['anim/1', 'anim/1']);
+    expect(listener.ended, ['anim/bob', 'anim/bob']);
     expect(prop.animation.state!.playing, isFalse);
   });
 

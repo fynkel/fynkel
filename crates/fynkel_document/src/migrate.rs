@@ -76,6 +76,13 @@ impl Migrations {
             description: "the collision layers became the project's layers (ADR-0020): physics.layers moves to the top-level layers, unchanged, so every bit keeps its meaning",
             apply: project_layers_1_to_2,
         });
+        m.add(Migration {
+            kind: DocumentKind::Meta,
+            from: 1,
+            name: "name-keys",
+            description: "sub-asset keys come from the part's name in the file, not its position (mesh/ramp, not mesh/5; docs/design/stable-sub-asset-ids.md); a model's sidecar is migrated with its file and every document pointing into it, the others only change version",
+            apply: meta_name_keys_1_to_2,
+        });
         for kind in [DocumentKind::Scene, DocumentKind::Prefab] {
             m.add(Migration {
                 kind,
@@ -207,10 +214,33 @@ pub fn backup_path(path: &Path) -> PathBuf {
     path.with_file_name(name)
 }
 
+/// A change that needs more than the document itself — another file, the
+/// whole project — applied before the per-kind steps (the stable
+/// sub-asset keys: a model's sidecar and the documents pointing into it).
+/// `apply` returns whether it changed anything; it may move the
+/// document's `formatVersion` (root and envelope both), and the steps
+/// then continue from there.
+pub struct Rewrite<'a> {
+    pub name: String,
+    pub description: String,
+    pub apply: &'a dyn Fn(&mut Document) -> Result<bool, String>,
+}
+
 /// Brings `doc` to its kind's current `formatVersion`. The result is
 /// validated against `schemas`; a step that fails, a missing step, or an
 /// invalid result leaves `document` as the original and reports why.
 pub fn migrate(doc: &Document, migrations: &Migrations, schemas: &SchemaSet) -> Migrated {
+    migrate_with(doc, migrations, schemas, None)
+}
+
+/// [`migrate`] with a [`Rewrite`] first. A rewrite that changes the
+/// document counts as an applied step even when the version is current.
+pub fn migrate_with(
+    doc: &Document,
+    migrations: &Migrations,
+    schemas: &SchemaSet,
+    rewrite: Option<&Rewrite>,
+) -> Migrated {
     let from = doc.envelope.format_version;
     let to = doc.kind.supported_format_version();
     let shown = doc.path.clone();
@@ -242,10 +272,33 @@ pub fn migrate(doc: &Document, migrations: &Migrations, schemas: &SchemaSet) -> 
             ),
         )]);
     }
-    if from == to {
+    let mut out = doc.clone();
+    let mut applied = Vec::new();
+    if let Some(rewrite) = rewrite {
+        match (rewrite.apply)(&mut out) {
+            Ok(true) => applied.push(Applied {
+                from,
+                to: out.envelope.format_version,
+                name: rewrite.name.clone(),
+                description: rewrite.description.clone(),
+            }),
+            Ok(false) => {}
+            Err(msg) => {
+                return unchanged(vec![with_doc(
+                    Diagnostic::error(
+                        Code::MIGRATION_FAILED,
+                        format!("{} failed: {msg}", rewrite.name),
+                    )
+                    .with_pointer(""),
+                )]);
+            }
+        }
+    }
+    let from_steps = out.envelope.format_version;
+    if from_steps == to && applied.is_empty() {
         return unchanged(Vec::new());
     }
-    let chain = match migrations.path(doc.kind, from, to) {
+    let chain = match migrations.path(doc.kind, from_steps, to) {
         Ok(chain) => chain,
         Err(stuck) => {
             return unchanged(vec![with_doc(anchor(
@@ -272,8 +325,6 @@ pub fn migrate(doc: &Document, migrations: &Migrations, schemas: &SchemaSet) -> 
         Ok(t) => t,
         Err(d) => return unchanged(vec![with_doc(d)]),
     };
-    let mut out = doc.clone();
-    let mut applied = Vec::new();
     for step in chain {
         if let Err(msg) = (step.apply)(&mut out.root) {
             return unchanged(vec![with_doc(
@@ -558,6 +609,20 @@ fn for_each_component_data(
         }
     }
     Ok(())
+}
+
+/// `meta/1-2/name-keys`: nothing moves in a sidecar whose importer names
+/// no parts. A model's (`fynkel.gltf`, `fynkel.fbx`) keys are renamed from
+/// its file by the project rewrite (`fynkel_import::keys_migration`), which
+/// moves the version itself; reaching this step means that rewrite could
+/// not run.
+fn meta_name_keys_1_to_2(root: &mut Node) -> Result<(), String> {
+    match root.get("importer").and_then(Node::as_str) {
+        Some(importer @ ("fynkel.gltf" | "fynkel.fbx")) => Err(format!(
+            "a {importer} sidecar's sub-asset keys are renamed from its model file, together with every document that points into it: run `fynkel migrate` on the project's directory (the model file must be readable)"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// Scene/prefab 1 → 2 (M3-04, renderer V1 exposure): every

@@ -38,8 +38,8 @@ fn schemas() -> SchemaSet {
 }
 
 const IMPORTERS: &[(&str, u32)] = &[
-    ("fynkel.fbx", 1),
-    ("fynkel.gltf", 5),
+    ("fynkel.fbx", 2),
+    ("fynkel.gltf", 6),
     ("fynkel.image", 1),
     ("fynkel.audio", 2),
     ("fynkel.file", 1),
@@ -661,7 +661,7 @@ fn imported_hierarchies_instantiate_like_prefabs() {
             .unwrap()
             .as_str(),
         Some("c0000000-0000-4000-8000-000000000020"),
-        "the setField override on node/5/renderer applied"
+        "the setField override on node/Rig/Prop/renderer applied"
     );
 
     // The rig's prefab is the skeleton file's under the rig's own
@@ -691,7 +691,7 @@ fn imported_hierarchies_instantiate_like_prefabs() {
     t.write(RIG_SCENE, &serde_json::to_string_pretty(&v).unwrap());
     assert_eq!(t.codes(), [("FYN-D0401".to_string(), Some(at.to_string()))]);
     v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["asset"] =
-        serde_json::json!({ "asset": RIG, "sub": "mesh/0" });
+        serde_json::json!({ "asset": RIG, "sub": "mesh/Body" });
     t.write(RIG_SCENE, &serde_json::to_string_pretty(&v).unwrap());
     assert_eq!(t.codes(), [("FYN-D0401".to_string(), Some(at.to_string()))]);
     v["entities"]["c0000000-0000-4000-8000-0000000004e8"]["prefab"]["asset"] =
@@ -809,7 +809,7 @@ fn rig_documents_validate_against_the_database() {
         [skeleton("/skeleton"), instance.clone()]
     );
     assert_eq!(
-        edit(&|v| v["skeleton"] = serde_json::json!({ "asset": RIG, "sub": "mesh/0" })),
+        edit(&|v| v["skeleton"] = serde_json::json!({ "asset": RIG, "sub": "mesh/Body" })),
         [skeleton("/skeleton"), instance.clone()]
     );
     assert_eq!(
@@ -824,7 +824,7 @@ fn rig_documents_validate_against_the_database() {
         [("FYN-D0501".to_string(), Some("/clips/wave".to_string()))]
     );
     assert_eq!(
-        edit(&|v| v["clips"]["wave"] = serde_json::json!({ "asset": RIG, "sub": "mesh/0" })),
+        edit(&|v| v["clips"]["wave"] = serde_json::json!({ "asset": RIG, "sub": "mesh/Body" })),
         [("FYN-D0501".to_string(), Some("/clips/wave".to_string()))]
     );
     assert_eq!(
@@ -988,14 +988,14 @@ fn blend_documents_validate_against_the_database() {
     // model's own clip (fine: a model's `anim/<n>` is a clip too), or a
     // nil id.
     let codes =
-        edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": RIG, "sub": "mesh/0" }));
+        edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": RIG, "sub": "mesh/Body" }));
     assert_eq!(codes_of(&codes), [d("FYN-D0601", "/points/1/clip")]);
     let codes = edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": COLUMN }));
     assert_eq!(codes_of(&codes), [d("FYN-D0601", "/points/1/clip")]);
     let codes = edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": SWATCH }));
     assert_eq!(codes_of(&codes), [d("FYN-D0601", "/points/1/clip")]);
     let codes =
-        edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": RIG, "sub": "anim/1" }));
+        edit(&|v| v["points"][1]["clip"] = serde_json::json!({ "asset": RIG, "sub": "anim/bob" }));
     assert!(codes.is_empty(), "{codes:?}");
     let codes = edit(&|v| {
         v["points"][1]["clip"] =

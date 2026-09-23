@@ -1,12 +1,12 @@
 {
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "b0000000-0000-4000-8000-000000000010",
   "name": "robot.glb",
   "importer": "fynkel.gltf",
   "importerVersion": 1,
   "settings": {},
   "subAssets": {
-    "material/1": "b0000000-0000-4000-8000-000000000011"
+    "material/Glass": "b0000000-0000-4000-8000-000000000011"
   }
 }

@@ -227,7 +227,7 @@ fn editing_import_settings_invalidates_the_same_set() {
     p.write(
         "textures/swatch.png.meta.json",
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{SWATCH}","name":"swatch.png","importer":"fynkel.image","importerVersion":1,"settings":{{"colorSpace":"linear"}},"subAssets":{{}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{SWATCH}","name":"swatch.png","importer":"fynkel.image","importerVersion":1,"settings":{{"colorSpace":"linear"}},"subAssets":{{}}}}"#
         ),
     );
     let second = p.cook();
@@ -262,7 +262,7 @@ fn a_streamed_sound_cooks_to_a_strm_chunk() {
     p.write(
         "audio/tone.wav.meta.json",
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{TONE}","name":"tone.wav","importer":"fynkel.audio","importerVersion":2,"settings":{{"stream":true}},"subAssets":{{}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{TONE}","name":"tone.wav","importer":"fynkel.audio","importerVersion":2,"settings":{{"stream":true}},"subAssets":{{}}}}"#
         ),
     );
     let second = p.cook();
@@ -303,7 +303,7 @@ fn an_hdr_image_cooks_its_texture_and_environment() {
     p.write(
         "textures/sky.hdr.meta.json",
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{SKY}","name":"sky.hdr","importer":"fynkel.image","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{SKY}","name":"sky.hdr","importer":"fynkel.image","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
         ),
     );
     let r = p.cook();
@@ -487,7 +487,7 @@ fn containers_read_back_with_bounded_decoding() {
     assert_eq!(meta["profile"], "dev");
     assert_eq!(meta["key"], robot.key.unwrap().hex());
     assert_eq!(
-        meta["subAssets"]["mesh/0"],
+        meta["subAssets"]["mesh/Cube"],
         "cbac6df1-3f63-5f74-89cb-152ae43389d9"
     );
     let chunks = meta["chunks"].as_array().unwrap();
@@ -507,15 +507,15 @@ fn containers_read_back_with_bounded_decoding() {
         names,
         [
             "",
-            "mesh/0",
-            "mesh/1/0",
-            "mesh/1/1",
-            "material/0",
-            "material/0",
-            "material/1",
-            "material/1",
-            "image/0",
-            "image/0/linear",
+            "mesh/Cube",
+            "mesh/PyramidAndQuad/0",
+            "mesh/PyramidAndQuad/1",
+            "material/Painted",
+            "material/Painted",
+            "material/Glass",
+            "material/Glass",
+            "image/paint",
+            "image/paint/linear",
             "prefab"
         ]
     );
@@ -554,7 +554,7 @@ fn containers_read_back_with_bounded_decoding() {
     assert_eq!(painted.emissive_strength, 3.0);
     assert_eq!(
         painted.normal_texture.as_ref().unwrap().sub,
-        "image/0/linear"
+        "image/paint/linear"
     );
     assert_eq!(
         chunks[5]["textures"],
@@ -748,10 +748,10 @@ fn a_sidecar_behind_its_import_warns_and_a_broken_source_fails() {
     p.write(
         "models/robot.glb.meta.json",
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{ROBOT}","name":"robot.glb","importer":"fynkel.gltf","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{ROBOT}","name":"robot.glb","importer":"fynkel.gltf","importerVersion":1,"settings":{{}},"subAssets":{{}}}}"#
         ),
     );
-    // The scene's `mesh/0` reference no longer resolves against the sidecar.
+    // The scene's `mesh/Cube` reference no longer resolves against the sidecar.
     let r = p.cook();
     assert_eq!(status(&r, ROBOT), Status::Cooked);
     assert_eq!(status(&r, MAIN), Status::Failed);
@@ -764,8 +764,8 @@ fn a_sidecar_behind_its_import_warns_and_a_broken_source_fails() {
     let c = Container::parse(&bytes).unwrap();
     let meta: serde_json::Value = serde_json::from_slice(c.meta(1 << 20).unwrap()).unwrap();
     assert_eq!(
-        meta["subAssets"]["mesh/0"],
-        "cbac6df1-3f63-5f74-89cb-152ae43389d9"
+        meta["subAssets"]["mesh/Cube"],
+        fynkel_import::derive_sub_id(id(ROBOT), "mesh/Cube").to_string()
     );
 
     // A truncated source fails its own asset; the rest cook.
@@ -949,7 +949,7 @@ fn an_fbx_source_cooks_like_a_gltf_one() {
         &format!(
             r#"{{
   "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "{RIG}",
   "name": "rig.fbx",
   "importer": "fynkel.fbx",
@@ -984,7 +984,15 @@ fn an_fbx_source_cooks_like_a_gltf_one() {
         .collect();
     assert_eq!(
         subs,
-        ["", "mesh/0", "mesh/1", "skin/0", "anim/0", "anim/1", "prefab"]
+        [
+            "",
+            "mesh/Body",
+            "mesh/Prop",
+            "skin/Rig",
+            "anim/bob",
+            "anim/wave",
+            "prefab"
+        ]
     );
     assert_eq!(meta["chunks"][3]["joints"], 3);
     assert_eq!(meta["chunks"][4]["name"], "bob");
@@ -1016,7 +1024,7 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
     let sidecar = |name: &str, asset: &str, importer: &str, settings: &str| {
         let file = p.assets().join("models").join(name);
         let text = format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{asset}","name":"{name}","importer":"{importer}","importerVersion":1,"settings":{settings},"subAssets":{{}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{asset}","name":"{name}","importer":"{importer}","importerVersion":1,"settings":{settings},"subAssets":{{}}}}"#
         );
         let mut meta = fynkel_document::Meta::from_document(
             fynkel_document::Document::parse(fynkel_document::DocumentKind::Meta, None, &text)
@@ -1038,13 +1046,13 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
             r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{skeleton}"}},"clips":{{{clips}}}}}"#
         )
     };
-    // The glTF's wave (anim/0) and the FBX's bob (anim/0) and wave (anim/1).
+    // The glTF's wave and the FBX's bob and wave.
     p.write(
         "rigs/hero.rig.json",
         &rig_doc(
             GLB,
             &format!(
-                r#""wave":{{"asset":"{GLB}","sub":"anim/0"}},"bob":{{"asset":"{FBX}","sub":"anim/0"}},"wave_fbx":{{"asset":"{FBX}","sub":"anim/1"}}"#
+                r#""wave":{{"asset":"{GLB}","sub":"anim/wave"}},"bob":{{"asset":"{FBX}","sub":"anim/bob"}},"wave_fbx":{{"asset":"{FBX}","sub":"anim/wave"}}"#
             ),
         ),
     );
@@ -1082,7 +1090,7 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
     assert_eq!(chunks[2]["id"], derived("prefab"));
     assert_eq!(chunks[3]["id"], derived("anim/wave"));
     assert_eq!(chunks[3]["channels"], 3);
-    assert_eq!(chunks[3]["source"], "models/rig.glb#anim/0");
+    assert_eq!(chunks[3]["source"], "models/rig.glb#anim/wave");
     // The FBX clips are baked over every node (M3-19b part 1), and every
     // node name of the FBX twin exists in the glTF hierarchy: nothing
     // dropped, nothing missing.
@@ -1099,10 +1107,10 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
             .map(|c| c["channels"].clone())
             .unwrap()
     };
-    assert_eq!(chunks[4]["channels"], fbx_channels("anim/0"));
-    assert_eq!(chunks[4]["source"], "models/rig.fbx#anim/0");
+    assert_eq!(chunks[4]["channels"], fbx_channels("anim/bob"));
+    assert_eq!(chunks[4]["source"], "models/rig.fbx#anim/bob");
     assert_eq!(chunks[4]["dropped"], serde_json::json!([]));
-    assert_eq!(chunks[5]["channels"], fbx_channels("anim/1"));
+    assert_eq!(chunks[5]["channels"], fbx_channels("anim/wave"));
     assert_eq!(chunks[5]["dropped"], serde_json::json!([]));
     assert_eq!(
         meta["subAssets"]["anim/bob"],
@@ -1150,7 +1158,7 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
         "rigs/hero.rig.json",
         &rig_doc(
             GLB,
-            &format!(r#""wave":{{"asset":"{GLB}","sub":"anim/0"}}"#),
+            &format!(r#""wave":{{"asset":"{GLB}","sub":"anim/wave"}}"#),
         ),
     );
     let r = p.cook();
@@ -1167,7 +1175,7 @@ fn a_rig_document_cooks_its_skeleton_and_clips() {
         "rigs/hero.rig.json",
         &rig_doc(
             ROBOT,
-            &format!(r#""wave":{{"asset":"{GLB}","sub":"anim/0"}}"#),
+            &format!(r#""wave":{{"asset":"{GLB}","sub":"anim/wave"}}"#),
         ),
     );
     let mut scene: serde_json::Value = serde_json::from_str(
@@ -1228,7 +1236,7 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
     .unwrap();
     let file = p.assets().join("models/rig.glb");
     let text = format!(
-        r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":1,"id":"{GLB}","name":"rig.glb","importer":"fynkel.gltf","importerVersion":{},"settings":{{}},"subAssets":{{}}}}"#,
+        r#"{{"$schema":"https://fynkel.dev/schemas/meta.schema.json","formatVersion":2,"id":"{GLB}","name":"rig.glb","importer":"fynkel.gltf","importerVersion":{},"settings":{{}},"subAssets":{{}}}}"#,
         fynkel_import::gltf::IMPORTER_VERSION
     );
     let mut meta = fynkel_document::Meta::from_document(
@@ -1245,7 +1253,7 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
     p.write(
         "rigs/hero.rig.json",
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{GLB}"}},"clips":{{"wave":{{"asset":"{GLB}","sub":"anim/0"}},"bob":{{"asset":"{GLB}","sub":"anim/1"}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{GLB}"}},"clips":{{"wave":{{"asset":"{GLB}","sub":"anim/wave"}},"bob":{{"asset":"{GLB}","sub":"anim/bob"}}}}}}"#
         ),
     );
     let blend_doc = |points: &str| {
@@ -1257,7 +1265,7 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
     p.write(
         "rigs/energy.blend.json",
         &blend_doc(&format!(
-            r#"{{"at":0,"clip":{{"asset":"{HERO}","sub":"anim/bob"}}}},{{"at":2.5,"clip":{{"asset":"{GLB}","sub":"anim/1"}}}}"#
+            r#"{{"at":0,"clip":{{"asset":"{HERO}","sub":"anim/bob"}}}},{{"at":2.5,"clip":{{"asset":"{GLB}","sub":"anim/bob"}}}}"#
         )),
     );
     let r = p.cook();
@@ -1286,7 +1294,7 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
     p.write(
         "rigs/hero.rig.json",
         &format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{GLB}"}},"clips":{{"wave":{{"asset":"{GLB}","sub":"anim/0"}},"bob":{{"asset":"{GLB}","sub":"anim/1"}}}},"markers":{{"bob":[{{"at":0.5,"name":"thud"}}]}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/rig.schema.json","formatVersion":1,"id":"{HERO}","name":"Hero","skeleton":{{"asset":"{GLB}"}},"clips":{{"wave":{{"asset":"{GLB}","sub":"anim/wave"}},"bob":{{"asset":"{GLB}","sub":"anim/bob"}}}},"markers":{{"bob":[{{"at":0.5,"name":"thud"}}]}}}}"#
         ),
     );
     let r = p.cook();
@@ -1315,7 +1323,7 @@ fn a_blend_space_cooks_as_its_document_and_depends_on_its_clips() {
     p.write(
         "rigs/energy.blend.json",
         &blend_doc(&format!(
-            r#"{{"at":0,"clip":{{"asset":"{GLB}","sub":"mesh/0"}}}}"#
+            r#"{{"at":0,"clip":{{"asset":"{GLB}","sub":"mesh/Body"}}}}"#
         )),
     );
     let mut scene: serde_json::Value = serde_json::from_str(

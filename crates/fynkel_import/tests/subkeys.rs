@@ -1,8 +1,8 @@
 //! Stable sub-asset keys (`docs/design/stable-sub-asset-ids.md`, S1): with
 //! a name-key sidecar, reordering a file's meshes, materials, clips and
-//! nodes keeps every key, uuid and prefab id on the same part; with a
-//! position-key sidecar nothing changes, and the renames a migration needs
-//! are reported.
+//! nodes keeps every key, uuid and prefab id on the same part; a
+//! position-key sidecar (not yet migrated) keeps position keys and reports
+//! the renames the migration needs.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -25,14 +25,12 @@ fn scratch() -> PathBuf {
     dir
 }
 
-/// A sidecar for `source` with a fixed id, in the position-key format
-/// (today's) or the name-key one.
+/// A sidecar for `source` with a fixed id, in the name-key format (the
+/// current one) or the position-key one a migration starts from.
 fn meta(source: &Path, name_keys: bool) -> Meta {
     let mut meta = Meta::new(source);
     meta.document.envelope.id = Uuid::parse_str("c0000000-0000-4000-8000-000000000001").unwrap();
-    if name_keys {
-        meta.document.envelope.format_version = NAME_KEYS_FORMAT;
-    }
+    meta.document.envelope.format_version = if name_keys { NAME_KEYS_FORMAT } else { 1 };
     meta
 }
 

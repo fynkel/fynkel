@@ -698,7 +698,7 @@ impl Lab {
         std::fs::copy(from, self.dir.join("assets/textures/sky.hdr")).unwrap();
         let meta = json!({
             "$schema": "https://fynkel.dev/schemas/meta.schema.json",
-            "formatVersion": 1,
+            "formatVersion": 2,
             "id": SKY_HDR,
             "name": "sky.hdr",
             "importer": "fynkel.image",
@@ -754,7 +754,7 @@ impl Lab {
                 json!({ "name": format!("Cube {i}"), "parent": null, "children": [], "components": {
                     format!("c0000000-0000-4000-8000-0000000000d{i:x}"): transform(cube.position, Quat::IDENTITY, cube.scale),
                     format!("c0000000-0000-4000-8000-0000000000b{i:x}"): { "type": "fynkel.MeshRenderer", "version": 1, "data": {
-                        "mesh": { "asset": ROBOT_MESH, "sub": "mesh/0" },
+                        "mesh": { "asset": ROBOT_MESH, "sub": "mesh/Cube" },
                         "material": { "asset": cube.material.to_string() },
                         "cast_shadows": cube.cast_shadows, "receive_shadows": cube.receive_shadows, "visible": true } } } }),
             );

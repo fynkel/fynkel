@@ -13,7 +13,10 @@ use std::process::ExitCode;
 
 use fynkel_document::migrate::migrated_json;
 use fynkel_document::{
-    diagnostics_json, has_errors, migrate, Diagnostic, Document, DocumentKind, Migrations,
+    diagnostics_json, has_errors, Diagnostic, Document, DocumentKind, Migrations,
+};
+use fynkel_import::keys_migration::{
+    document_files, is_outdated_model_sidecar, migrate_documents, Planned,
 };
 
 pub fn usage() -> ExitCode {
@@ -81,36 +84,67 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let mut files = Vec::new();
     for p in &opts.paths {
         if p.is_dir() {
-            let mut found = Vec::new();
-            if let Err(e) = collect(p, &mut found) {
-                diags.push(
+            match document_files(p) {
+                Ok(found) => files.extend(found),
+                Err(e) => diags.push(
                     Diagnostic::error(
                         fynkel_document::Code::IO,
                         format!("cannot read directory: {e}"),
                     )
                     .with_document(p.display().to_string()),
-                );
+                ),
             }
-            found.sort();
-            files.extend(found);
         } else {
             files.push(p.clone());
         }
     }
+    // A model's sidecar moves to name keys together with every document
+    // pointing into it: its whole project comes along.
+    let mut projects: Vec<PathBuf> = Vec::new();
+    for path in &files {
+        let outdated = Document::read(path, None)
+            .map(|d| is_outdated_model_sidecar(&d))
+            .unwrap_or(false);
+        if let Some(dir) = outdated.then(|| project_dir(path)).flatten() {
+            if !projects.contains(&dir) {
+                projects.push(dir);
+            }
+        }
+    }
+    for dir in &projects {
+        if let Ok(found) = document_files(dir) {
+            let before = files.len();
+            let known: std::collections::HashSet<PathBuf> = files
+                .iter()
+                .filter_map(|f| std::fs::canonicalize(f).ok())
+                .collect();
+            let fresh: Vec<PathBuf> = found
+                .into_iter()
+                .filter(|f| std::fs::canonicalize(f).is_ok_and(|c| !known.contains(&c)))
+                .collect();
+            files.extend(fresh);
+            if files.len() > before && !opts.json {
+                eprintln!(
+                    "fynkel migrate: a model sidecar moves to name keys with its project; {} more document(s) of {} included",
+                    files.len() - before,
+                    dir.display()
+                );
+            }
+        }
+    }
 
+    // One entry per file, however it was spelled: a second write would
+    // replace the `.bak` with the migrated text.
+    let mut seen = std::collections::HashSet::new();
+    files.retain(|f| seen.insert(std::fs::canonicalize(f).unwrap_or_else(|_| f.clone())));
+
+    let (planned, plan_diags) = migrate_documents(&files, &migrations, &schemas);
+    diags.extend(plan_diags);
     let mut reports = Vec::new();
     let mut changed = 0usize;
-    for path in &files {
+    for Planned { path, migrated: m } in &planned {
         let shown = path.display().to_string();
-        let doc = match Document::read(path, None) {
-            Ok(d) => d,
-            Err(d) => {
-                diags.extend(d);
-                continue;
-            }
-        };
-        let m = migrate(&doc, &migrations, &schemas);
-        let mut report = migrated_json(&m);
+        let mut report = migrated_json(m);
         report["path"] = shown.clone().into();
         report["written"] = false.into();
         if m.has_errors() {
@@ -219,23 +253,12 @@ fn list(opts: &Opts, migrations: &Migrations) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        let hidden = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with('.'));
-        if hidden {
-            continue;
-        }
-        if path.is_dir() {
-            collect(&path, out)?;
-        } else if DocumentKind::from_path(&path).is_some() {
-            out.push(path);
-        }
-    }
-    Ok(())
+/// The directory holding `fynkel.project.json` above `path`, if any.
+fn project_dir(path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .skip(1)
+        .find(|d| d.join("fynkel.project.json").is_file())
+        .map(Path::to_path_buf)
 }
 
 fn finish(diags: &[Diagnostic], json: bool) -> ExitCode {

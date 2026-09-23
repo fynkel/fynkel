@@ -123,7 +123,7 @@ fn the_new_extension_maps_to_the_importer() {
     );
     assert!(fynkel_import::IMPORTERS
         .iter()
-        .any(|(name, version)| *name == "fynkel.fbx" && *version == 1));
+        .any(|(name, version)| *name == "fynkel.fbx" && *version == 2));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     );
     let i = r.intermediate.as_ref().unwrap();
     assert_eq!(i.importer, "fynkel.fbx");
-    assert_eq!(i.importer_version, 1);
+    assert_eq!(i.importer_version, 2);
     assert_eq!(i.source, "rig.fbx");
     let (g, _) = import_fixture("rig.glb");
     let g = g.intermediate.unwrap();
@@ -147,7 +147,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     // bounds and, per position, its weights.
     let body = i.meshes.iter().find(|m| m.name == "Body").unwrap();
     let gbody = g.meshes.iter().find(|m| m.name == "Body").unwrap();
-    assert_eq!(body.sub_id, "mesh/0");
+    assert_eq!(body.sub_id, "mesh/Body");
     assert_eq!(body.vertices.len(), 16);
     assert_eq!(body.triangle_count(), 24);
     assert!(close(&body.bounds_min, &gbody.bounds_min, 1e-5));
@@ -192,7 +192,7 @@ fn rig_fbx_matches_the_gltf_rig() {
         }
     }
     let prop = i.meshes.iter().find(|m| m.name == "Prop").unwrap();
-    assert_eq!(prop.sub_id, "mesh/1");
+    assert_eq!(prop.sub_id, "mesh/Prop");
     assert_eq!(prop.vertices.len(), 24);
     assert!(!prop.is_skinned());
 
@@ -201,7 +201,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     assert_eq!(i.skins.len(), 1);
     let skin = &i.skins[0];
     let gskin = &g.skins[0];
-    assert_eq!(skin.sub_id, "skin/0");
+    assert_eq!(skin.sub_id, "skin/Rig");
     assert_eq!(skin.payload.skeleton, "hips");
     let names: Vec<&str> = skin
         .payload
@@ -252,8 +252,8 @@ fn rig_fbx_matches_the_gltf_rig() {
         .map(|a| (a.name.as_str(), a.payload.duration))
         .collect();
     assert_eq!(clips, [("bob", 2.0), ("wave", 1.0)]);
-    assert_eq!(i.animations[0].sub_id, "anim/0");
-    assert_eq!(i.animations[1].sub_id, "anim/1");
+    assert_eq!(i.animations[0].sub_id, "anim/bob");
+    assert_eq!(i.animations[1].sub_id, "anim/wave");
     let spine = channel(i, "wave", "spine", ANIM_PROPERTY_ROTATION);
     assert_eq!(spine.interpolation, ANIM_INTERPOLATION_LINEAR);
     assert_eq!(spine.times[0], 0.0);
@@ -302,9 +302,16 @@ fn rig_fbx_matches_the_gltf_rig() {
     let subs: Vec<&str> = i.sub_assets.iter().map(|(k, _)| k.as_str()).collect();
     assert_eq!(
         subs,
-        ["mesh/0", "mesh/1", "skin/0", "anim/0", "anim/1", "prefab"]
+        [
+            "mesh/Body",
+            "mesh/Prop",
+            "skin/Rig",
+            "anim/bob",
+            "anim/wave",
+            "prefab"
+        ]
     );
-    assert_eq!(i.sub_assets[2].1, derive_sub_id(meta.id(), "skin/0"));
+    assert_eq!(i.sub_assets[2].1, derive_sub_id(meta.id(), "skin/Rig"));
 
     // The prefab: the same entities, `fynkel.Skin` next to the Body's
     // renderer naming the skin and the hips, none on the Prop; it validates.
@@ -322,13 +329,13 @@ fn rig_fbx_matches_the_gltf_rig() {
         body["components"].as_object().unwrap().values().collect();
     assert_eq!(components.len(), 3);
     assert_eq!(components[1]["type"], "fynkel.MeshRenderer");
-    assert_eq!(components[1]["data"]["mesh"]["sub"], "mesh/0");
+    assert_eq!(components[1]["data"]["mesh"]["sub"], "mesh/Body");
     assert_eq!(components[2]["type"], "fynkel.Skin");
     assert_eq!(
         components[2]["data"]["skin"]["asset"],
         meta.id().to_string()
     );
-    assert_eq!(components[2]["data"]["skin"]["sub"], "skin/0");
+    assert_eq!(components[2]["data"]["skin"]["sub"], "skin/Rig");
     assert_eq!(components[2]["data"]["skeleton"], "hips");
     let prop = entities.values().find(|e| e["name"] == "Prop").unwrap();
     assert_eq!(prop["components"].as_object().unwrap().len(), 2);
@@ -370,7 +377,14 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     // Meshes: the two-material mesh becomes one part per material slot
     // (Blender gives the quad a default material), the cube its own.
     let subs: Vec<&str> = i.meshes.iter().map(|m| m.sub_id.as_str()).collect();
-    assert_eq!(subs, ["mesh/0/0", "mesh/0/1", "mesh/1"]);
+    assert_eq!(
+        subs,
+        [
+            "mesh/PyramidAndQuad/0",
+            "mesh/PyramidAndQuad/1",
+            "mesh/Cube"
+        ]
+    );
     let cube = i.meshes.iter().find(|m| m.name == "Cube").unwrap();
     let gcube = g.meshes.iter().find(|m| m.name == "Cube").unwrap();
     assert_eq!(cube.vertices.len(), 24, "welded back to the glTF's 24");
@@ -401,16 +415,16 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     assert_eq!(
         materials,
         [
-            ("material/0", "Glass"),
-            ("material/1", "DefaultMaterial"),
-            ("material/2", "Painted")
+            ("material/Glass", "Glass"),
+            ("material/DefaultMaterial", "DefaultMaterial"),
+            ("material/Painted", "Painted")
         ]
     );
-    assert_eq!(cube.material.as_deref(), Some("material/2"));
+    assert_eq!(cube.material.as_deref(), Some("material/Painted"));
     let pyramid = &i.meshes[0];
     assert_eq!(pyramid.name, "PyramidAndQuad[0]");
     assert_eq!(pyramid.triangle_count(), 4);
-    assert_eq!(pyramid.material.as_deref(), Some("material/0"));
+    assert_eq!(pyramid.material.as_deref(), Some("material/Glass"));
     let quad = &i.meshes[1];
     assert_eq!(quad.name, "PyramidAndQuad[1]");
     assert_eq!(quad.triangle_count(), 2);
@@ -419,7 +433,11 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
         4,
         "the quad's corners share their colour"
     );
-    let gquad = g.meshes.iter().find(|m| m.sub_id == "mesh/1/1").unwrap();
+    let gquad = g
+        .meshes
+        .iter()
+        .find(|m| m.sub_id == "mesh/PyramidAndQuad/1")
+        .unwrap();
     for v in &quad.vertices {
         let gv = gquad
             .vertices
@@ -441,7 +459,7 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     assert_eq!(glass["shader"], "fynkel.pbr@1");
     assert_eq!(
         glass["id"],
-        derive_sub_id(meta.id(), "material/0").to_string()
+        derive_sub_id(meta.id(), "material/Glass").to_string()
     );
     assert_eq!(glass["base_color"][3], 1.0);
     assert_eq!(glass["metallic"], 0.0);
@@ -449,7 +467,7 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     assert_eq!(glass["emissive"], serde_json::json!([0.0, 0.0, 0.0]));
     let painted = &i.materials[2].document;
     assert_eq!(painted["normal_texture"]["asset"], meta.id().to_string());
-    assert_eq!(painted["normal_texture"]["sub"], "image/0");
+    assert_eq!(painted["normal_texture"]["sub"], "image/paint");
     assert!(painted.get("base_color_texture").is_none());
     let schemas = SchemaSet::embedded();
     let shaders = ShaderLibrary::builtin();
@@ -465,7 +483,7 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     // only, so it is linear.
     assert_eq!(i.images.len(), 1);
     let image = &i.images[0];
-    assert_eq!(image.sub_id, "image/0");
+    assert_eq!(image.sub_id, "image/paint");
     assert_eq!(image.name, "paint");
     assert_eq!(image.mime_type, "image/png");
     assert_eq!(image.color_space, ColorSpace::Linear);
@@ -507,13 +525,13 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     assert_eq!(
         subs,
         [
-            "mesh/0/0",
-            "mesh/0/1",
-            "mesh/1",
-            "material/0",
-            "material/1",
-            "material/2",
-            "image/0",
+            "mesh/PyramidAndQuad/0",
+            "mesh/PyramidAndQuad/1",
+            "mesh/Cube",
+            "material/Glass",
+            "material/DefaultMaterial",
+            "material/Painted",
+            "image/paint",
             "prefab"
         ]
     );

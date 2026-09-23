@@ -40,6 +40,7 @@ fn builtin_steps_chain_to_the_current_version() {
         ids,
         [
             "material/1-2/pbr-fields",
+            "meta/1-2/name-keys",
             "prefab/1-2/camera-exposure",
             "prefab/2-3/animator-layers",
             "prefab/3-4/object-layers",

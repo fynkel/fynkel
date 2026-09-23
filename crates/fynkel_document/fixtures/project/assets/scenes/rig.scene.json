@@ -127,7 +127,7 @@
           "data": {
             "clip": {
               "asset": "c0000000-0000-4000-8000-000000000005",
-              "sub": "anim/0"
+              "sub": "anim/wave"
             },
             "speed": 1.0,
             "looping": true,
@@ -172,7 +172,7 @@
           "data": {
             "mesh": {
               "asset": "c0000000-0000-4000-8000-000000000005",
-              "sub": "mesh/0"
+              "sub": "mesh/Body"
             },
             "material": {
               "asset": "c0000000-0000-4000-8000-000000000020"
@@ -188,7 +188,7 @@
           "data": {
             "skin": {
               "asset": "c0000000-0000-4000-8000-000000000005",
-              "sub": "skin/0"
+              "sub": "skin/Skin"
             },
             "skeleton": "hips"
           }
@@ -319,7 +319,7 @@
           "data": {
             "mesh": {
               "asset": "c0000000-0000-4000-8000-000000000005",
-              "sub": "mesh/1"
+              "sub": "mesh/Prop"
             },
             "material": {
               "asset": "c0000000-0000-4000-8000-000000000020"
@@ -335,7 +335,7 @@
           "data": {
             "clip": {
               "asset": "c0000000-0000-4000-8000-000000000005",
-              "sub": "anim/1"
+              "sub": "anim/bob"
             },
             "speed": 1.0,
             "looping": false,
@@ -400,8 +400,8 @@
         "overrides": [
           {
             "op": "setField",
-            "entity": "5bf482c0-2ff4-59a3-8a67-7f3921943558",
-            "component": "503fb3de-206e-58d8-9917-5cb01341af98",
+            "entity": "737c5f3c-4ea0-526f-81ac-5001b7b392ed",
+            "component": "0be253b8-fe89-544d-bb63-ae78d1a53cb2",
             "field": "material",
             "value": {
               "asset": "c0000000-0000-4000-8000-000000000020"

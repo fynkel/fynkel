@@ -13,8 +13,8 @@ use fynkel_contracts::{AssetRef, Code, Diagnostic};
 use fynkel_document::asset::{asset_refs, entry_json, sidecar_path, source_path};
 use fynkel_document::migrate::migrated_json;
 use fynkel_document::{
-    diagnostics_json, migrate, AssetDatabase, AssetKind, Document, DocumentKind, Lock, Migrations,
-    Project, SchemaSet, ShaderLibrary, ShaderManifest,
+    diagnostics_json, AssetDatabase, AssetKind, Document, DocumentKind, Lock, Migrations, Project,
+    SchemaSet, ShaderLibrary, ShaderManifest,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -387,30 +387,35 @@ impl OpenProject {
             .collect()
     }
 
-    /// `fynkel migrate --dry-run --json` over every document of the asset
-    /// database, without writing anything: the documents behind their
-    /// kind's `formatVersion`, the steps each would take, the unified diff
-    /// and the diagnostics of a step that cannot run. Documents that fail
-    /// to read are validation's business and are skipped here.
+    /// `fynkel migrate --dry-run --json` over every document under the
+    /// asset root, without writing anything: the documents behind their
+    /// kind's `formatVersion` (or pointing into a model whose sidecar moves
+    /// to name keys), the steps each would take, the unified diff and the
+    /// diagnostics of a step that cannot run. The files are read from disk,
+    /// not the asset database: a sidecar behind its format is not in it.
+    /// Documents that fail to read are validation's business and are
+    /// skipped here.
     pub fn migrations_json(&self) -> Value {
         let migrations = Migrations::builtin();
         let root = self.assets_dir();
+        let files = fynkel_import::keys_migration::document_files(&root).unwrap_or_default();
+        let (planned, _) =
+            fynkel_import::keys_migration::migrate_documents(&files, &migrations, &self.schemas);
         let mut documents = Vec::new();
-        for e in self.assets.entries() {
-            let AssetKind::Document(kind) = e.kind else {
-                continue;
-            };
-            let path = e.file(&root);
-            let Ok(doc) = Document::read(&path, Some(kind)) else {
-                continue;
-            };
-            if !doc.is_outdated() {
+        for p in planned {
+            let m = &p.migrated;
+            if !m.changed() && !m.has_errors() {
                 continue;
             }
-            let m = migrate(&doc, &migrations, &self.schemas);
-            let mut v = migrated_json(&m);
-            v["path"] = path.display().to_string().into();
-            v["name"] = e.name.clone().into();
+            let mut v = migrated_json(m);
+            v["path"] = p.path.display().to_string().into();
+            v["name"] = p
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&p.path)
+                .display()
+                .to_string()
+                .into();
             v["ok"] = (!m.has_errors()).into();
             v["diagnostics"] = diagnostics_json(&m.diagnostics);
             documents.push(v);

@@ -657,6 +657,7 @@ fn migrate_dry_runs_then_writes_with_backup() {
     assert_eq!(v["current"]["prefab"], 4);
     assert_eq!(v["current"]["project"], 2);
     assert_eq!(v["current"]["material"], 2);
+    assert_eq!(v["current"]["meta"], 2);
     let names: Vec<&str> = v["steps"]
         .as_array()
         .unwrap()
@@ -667,6 +668,7 @@ fn migrate_dry_runs_then_writes_with_backup() {
         names,
         [
             "material/1-2/pbr-fields",
+            "meta/1-2/name-keys",
             "prefab/1-2/camera-exposure",
             "prefab/2-3/animator-layers",
             "prefab/3-4/object-layers",
@@ -851,10 +853,10 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
     assert_eq!(sidecar["importer"], "fynkel.gltf");
     let subs = sidecar["subAssets"].as_object().unwrap();
     assert_eq!(subs.len(), 8);
-    assert!(subs.contains_key("mesh/0") && subs.contains_key("prefab"));
+    assert!(subs.contains_key("mesh/Cube") && subs.contains_key("prefab"));
     // The robot's metallic-roughness image is also its base colour: it is
     // imported twice, once per colour space.
-    assert!(subs.contains_key("image/0") && subs.contains_key("image/0/linear"));
+    assert!(subs.contains_key("image/paint") && subs.contains_key("image/paint/linear"));
 
     // Re-importing is a no-op for the sidecar and reproduces the bytes.
     let out = run(&[
@@ -877,7 +879,7 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
         "--json",
         "--assets",
         assets.to_str().unwrap(),
-        &format!("{id}#mesh/0"),
+        &format!("{id}#mesh/Cube"),
     ]);
     assert!(
         out.status.success(),
@@ -885,7 +887,7 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["resolved"][0]["sub"]["id"], "mesh/0");
+    assert_eq!(v["resolved"][0]["sub"]["id"], "mesh/Cube");
 
     // An external buffer is refused (exit 1, FYN-A0102) and nothing is written.
     std::fs::copy(
@@ -1596,9 +1598,9 @@ fn khronos_rigs_instance_from_the_source_alone() {
 
     // (model, clip to play, a joint the clip moves, joints, prefab entities)
     let rigs = [
-        ("Fox", "anim/2", "b_Neck_04", 24, 26),
-        ("CesiumMan", "anim/0", "Skeleton_arm_joint_L__3_", 19, 22),
-        ("RiggedFigure", "anim/0", "arm_joint_L_3", 19, 22),
+        ("Fox", "anim/Run", "b_Neck_04", 24, 26),
+        ("CesiumMan", "anim/#0", "Skeleton_arm_joint_L__3_", 19, 22),
+        ("RiggedFigure", "anim/#0", "arm_joint_L_3", 19, 22),
     ];
     let mut files = Vec::new();
     for (model, ..) in &rigs {
@@ -1878,7 +1880,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     assert_eq!(doc["id"], rig_id.as_str());
     assert_eq!(doc["name"], "fox");
     assert_eq!(doc["skeleton"]["asset"], v["files"][0]["id"]);
-    assert_eq!(doc["clips"]["run"]["sub"], "anim/2");
+    assert_eq!(doc["clips"]["run"]["sub"], "anim/Run");
     let written = std::fs::read_to_string(&rig_path).unwrap();
 
     // A dry run over an existing rig keeps its id and touches nothing.
