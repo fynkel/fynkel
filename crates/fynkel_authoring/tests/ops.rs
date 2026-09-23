@@ -588,6 +588,145 @@ fn import_settings_are_written_to_the_sidecar_and_reimport_checks_them() {
     assert_clean(&s);
 }
 
+/// Material remapping (`docs/design/material-remapping.md`): a remap is
+/// an import setting (a wrong target refused), and Extract Materials
+/// writes the embedded materials as documents next to the model and
+/// remaps them in one step of the asset history.
+#[test]
+fn remaps_are_settings_and_extract_materials_is_one_step() {
+    let copy = Copy::new("remap");
+    let mut s = open(&copy);
+    let sidecar = "assets/models/robot.glb.meta.json";
+    let original = copy.read(sidecar);
+
+    // A remap to the project material is a setting like any other…
+    ok(s.operate(
+        "setImportSettings",
+        &json!({ "asset": ROBOT, "settings": { "materials": { "material/Painted": { "asset": RUSTED } } } }),
+    ));
+    assert!(copy.read(sidecar).contains(RUSTED));
+    assert_clean(&s);
+    // …and one to something that is not a material document is refused.
+    let d = refused(
+        s.operate(
+            "setImportSettings",
+            &json!({ "asset": ROBOT, "settings": { "materials": { "material/Painted": { "asset": SWATCH } } } }),
+        ),
+        "FYN-T0003",
+    );
+    assert!(
+        d.related.iter().any(|r| r.code.as_str() == "FYN-A0007"),
+        "{d:#?}"
+    );
+    ok(s.operate("undoAsset", &json!({})));
+    assert_eq!(copy.read(sidecar), original);
+
+    // Extract: every embedded material becomes a document under
+    // models/Materials, remapped.
+    let v = ok(s.operate("extractMaterials", &json!({ "asset": ROBOT })));
+    assert_eq!(v["label"], "Extract Materials of robot.glb");
+    let materials = v["materials"].as_array().unwrap().clone();
+    let keys: Vec<&str> = materials
+        .iter()
+        .map(|m| m["key"].as_str().unwrap())
+        .collect();
+    let embedded: Vec<String> = s
+        .project()
+        .unwrap()
+        .assets
+        .get(id(ROBOT))
+        .unwrap()
+        .sub_assets
+        .keys()
+        .filter(|k| k.starts_with("material/"))
+        .cloned()
+        .collect();
+    assert!(!keys.is_empty());
+    assert_eq!(keys.len(), embedded.len(), "{keys:?} vs {embedded:?}");
+    for m in &materials {
+        let path = PathBuf::from(m["path"].as_str().unwrap());
+        assert_eq!(path.parent().unwrap(), copy.path("assets/models/Materials"));
+        let doc = Document::read(&path, Some(DocumentKind::Material)).unwrap();
+        assert_eq!(doc.envelope.id.to_string(), m["id"].as_str().unwrap());
+        assert!(doc
+            .root
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap()
+            .starts_with("Extracted from robot.glb"));
+        assert_eq!(
+            v["settings"]["materials"][m["key"].as_str().unwrap()]["asset"],
+            m["id"]
+        );
+    }
+    assert_clean(&s);
+
+    // Everything is remapped now: a second extract has nothing to do.
+    refused(
+        s.operate("extractMaterials", &json!({ "asset": ROBOT })),
+        "FYN-T0003",
+    );
+    // Not a model.
+    refused(
+        s.operate("extractMaterials", &json!({ "asset": SWATCH })),
+        "FYN-T0003",
+    );
+
+    // One undo removes the documents and restores the sidecar; redo
+    // brings both back.
+    ok(s.operate("undoAsset", &json!({})));
+    assert_eq!(copy.read(sidecar), original);
+    for m in &materials {
+        assert!(!Path::new(m["path"].as_str().unwrap()).exists());
+    }
+    assert_clean(&s);
+    ok(s.operate("redoAsset", &json!({})));
+    for m in &materials {
+        assert!(Path::new(m["path"].as_str().unwrap()).exists());
+    }
+    assert!(copy
+        .read(sidecar)
+        .contains(materials[0]["id"].as_str().unwrap()));
+    assert_clean(&s);
+
+    // A second model extracting into the same folder never overwrites:
+    // taken names get " 2". (The robot again, its remaps cleared.)
+    ok(s.operate(
+        "setImportSettings",
+        &json!({ "asset": ROBOT, "settings": {} }),
+    ));
+    let again = ok(s.operate("extractMaterials", &json!({ "asset": ROBOT })));
+    for (m, first) in again["materials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(&materials)
+    {
+        let first = first["path"]
+            .as_str()
+            .unwrap()
+            .trim_end_matches(".material.json");
+        assert_eq!(
+            m["path"].as_str().unwrap(),
+            format!("{first} 2.material.json")
+        );
+    }
+    assert_clean(&s);
+
+    // An edited extracted material stops the undo before anything moves.
+    let edited = PathBuf::from(again["materials"][0]["path"].as_str().unwrap());
+    let text = std::fs::read_to_string(&edited).unwrap();
+    std::fs::write(
+        &edited,
+        text.replace("Extracted from", "Edited, extracted from"),
+    )
+    .unwrap();
+    let before = copy.read(sidecar);
+    refused(s.operate("undoAsset", &json!({})), "FYN-T0003");
+    assert_eq!(copy.read(sidecar), before);
+    assert!(edited.exists());
+}
+
 #[test]
 fn asset_detail_describes_every_kind() {
     let copy = Copy::new("detail");

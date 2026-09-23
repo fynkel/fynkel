@@ -638,6 +638,143 @@ fn asset_commands_list_resolve_and_init() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `fynkel asset remap` / `extract-materials`
+/// (`docs/design/material-remapping.md`) on a copy of the import corpus.
+#[test]
+fn asset_remap_and_extract_materials_edit_the_models_sidecar() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-remap-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&root.join("crates/fynkel_import/fixtures/project"), &dir);
+    let assets = dir.join("assets");
+    let run = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(args)
+            .arg("--assets")
+            .arg(&assets)
+            .arg("--root")
+            .arg(&root)
+            .current_dir(&dir)
+            .output()
+            .unwrap()
+    };
+    let json = |out: &std::process::Output| -> serde_json::Value {
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{e}: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            )
+        })
+    };
+    let sidecar = assets.join("models/robot.glb.meta.json");
+    let original = std::fs::read_to_string(&sidecar).unwrap();
+
+    // By file, to a material by file; then back to the embedded one.
+    let out = run(&[
+        "asset",
+        "remap",
+        "--json",
+        "assets/models/robot.glb",
+        "material/Painted",
+        "assets/materials/rusted.material.json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert_eq!(
+        json(&out)["settings"]["materials"]["material/Painted"]["asset"],
+        "c0000000-0000-4000-8000-000000000020"
+    );
+    let out = run(&[
+        "asset",
+        "remap",
+        "c0000000-0000-4000-8000-000000000001",
+        "material/Painted",
+        "none",
+    ]);
+    assert!(out.status.success());
+    assert_eq!(std::fs::read_to_string(&sidecar).unwrap(), original);
+
+    // Refusals: a key the model lacks (the keys it has are named), a
+    // target that is not a material.
+    let out = run(&[
+        "asset",
+        "remap",
+        "--json",
+        "assets/models/robot.glb",
+        "material/Chrome",
+        "none",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let v = json(&out);
+    assert_eq!(v["diagnostics"][0]["code"], "FYN-A0005");
+    assert!(v["diagnostics"][0]["suggestion"]
+        .as_str()
+        .unwrap()
+        .contains("material/Glass"));
+    let out = run(&[
+        "asset",
+        "remap",
+        "--json",
+        "assets/models/robot.glb",
+        "material/Painted",
+        "assets/textures/swatch.png",
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(json(&out)["diagnostics"][0]["code"], "FYN-A0007");
+
+    // Extract: documents in models/Materials, each remapped.
+    let out = run(&[
+        "asset",
+        "extract-materials",
+        "--json",
+        "assets/models/robot.glb",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v = json(&out);
+    let materials = v["materials"].as_array().unwrap();
+    assert_eq!(materials.len(), 2);
+    let meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&sidecar).unwrap()).unwrap();
+    for m in materials {
+        let path = PathBuf::from(m["path"].as_str().unwrap());
+        assert!(
+            path.starts_with(assets.join("models/Materials")),
+            "{path:?}"
+        );
+        assert!(path.is_file());
+        assert_eq!(
+            meta["settings"]["materials"][m["key"].as_str().unwrap()]["asset"],
+            m["id"]
+        );
+    }
+    // The project still validates and cooks with the copies.
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["cook", "--json", "--assets"])
+        .arg(&assets)
+        .arg("--cache")
+        .arg(dir.join("cache"))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // Nothing left to extract.
+    let out = run(&["asset", "extract-materials", "assets/models/robot.glb"]);
+    assert_eq!(out.status.code(), Some(1));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn migrate_dry_runs_then_writes_with_backup() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

@@ -25,6 +25,7 @@ pub mod audio;
 pub mod cache;
 pub mod cook;
 pub mod environment;
+pub mod extract;
 pub mod fbx;
 pub mod gltf;
 pub(crate) mod graph;

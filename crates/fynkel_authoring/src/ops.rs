@@ -31,6 +31,7 @@ pub const OPERATIONS: &[&str] = &[
     "renameAsset",
     "deleteAsset",
     "setImportSettings",
+    "extractMaterials",
     "reimport",
     "undoAsset",
     "redoAsset",
@@ -74,6 +75,10 @@ pub enum AssetOp {
     /// Files rewritten in place (`setLayersAndTags`: the project file and
     /// the scenes and prefabs whose layers or tags moved).
     Rewrote { files: Vec<FileRewrite> },
+    /// Several operations as one step (`extractMaterials`: the new
+    /// materials, then the model's remaps), undone in reverse; `id` is
+    /// the asset the step is about.
+    Group { ops: Vec<AssetOp>, id: Uuid },
 }
 
 /// One file's text before and after an operation rewrote it.
@@ -273,6 +278,7 @@ impl AuthoringSession {
             "renameAsset" => self.rename_asset(args).map_err(one),
             "deleteAsset" => self.delete_asset(args),
             "setImportSettings" => self.set_import_settings(args),
+            "extractMaterials" => self.extract_materials(args),
             "reimport" => self.reimport(args).map_err(one),
             "undoAsset" => self.undo_asset().map_err(one),
             "redoAsset" => self.redo_asset().map_err(one),
@@ -658,7 +664,10 @@ impl AuthoringSession {
         meta.settings = Node::from_serde(&settings);
         let doc = meta.to_document();
         let checked = Meta::from_document(doc.clone());
-        let diags = checked.validate(&self.project().unwrap().schemas);
+        let project = self.project().unwrap();
+        let mut diags = checked.validate(&project.schemas);
+        diags.extend(checked.validate_remaps(&project.assets));
+        diags.extend(project.assets.check_references(&doc));
         if fynkel_contracts::has_errors(&diags) {
             let mut d = invalid(format!("{OP}: the sidecar would not validate"))
                 .with_document(sidecar.display().to_string());
@@ -691,6 +700,122 @@ impl AuthoringSession {
             &label,
             Some(id),
             json!({ "sidecar": sidecar.display().to_string(), "settings": settings }),
+        ))
+    }
+
+    // ---------------------------------------------- extract materials
+
+    /// `extractMaterials { asset, folder? }`: writes each embedded material
+    /// of the model `asset` that is not remapped yet as an editable
+    /// `<name>.material.json` (a fresh id, the imported values, its
+    /// textures still the model's images) into `folder` (relative to the
+    /// asset root; `Materials/` next to the model by default), and remaps
+    /// the model to them — one step on the asset history
+    /// (`docs/design/material-remapping.md` §5). Refused when the model
+    /// does not import or every material is remapped already.
+    fn extract_materials(&mut self, args: &Value) -> Result<Value, Vec<Diagnostic>> {
+        const OP: &str = "extractMaterials";
+        let one = |d: Diagnostic| vec![d];
+        let id = uuid_arg(args, "asset", OP).map_err(one)?;
+        let (sidecar, mut meta) = self.sidecar_of(id, OP)?;
+        let project = self.project().unwrap();
+        let entry = project.entry(id).map_err(one)?;
+        if !fynkel_document::rig::is_model(&entry.kind) {
+            return Err(one(invalid(format!(
+                "{OP}: {} is not an imported model (glTF, FBX)",
+                entry.path
+            ))));
+        }
+        let Some(source) = fynkel_document::asset::source_path(&sidecar) else {
+            return Err(one(io(&sidecar, format!("{OP}: not a sidecar name"))));
+        };
+        let folder = match args.get("folder").and_then(Value::as_str) {
+            Some(f) if !f.is_empty() => project.inside_assets(f, OP).map_err(one)?,
+            _ => fynkel_import::extract::default_folder(&source),
+        };
+        let extracted = fynkel_import::extract::extract_materials(
+            &source,
+            &meta,
+            &folder,
+            &fynkel_import::Limits::default(),
+        )
+        .map_err(|diags| {
+            let mut d = invalid(format!("{OP}: {} does not import", file_name(&source)));
+            for e in diags
+                .into_iter()
+                .filter(|d| d.severity == fynkel_contracts::Severity::Error)
+            {
+                d = d.with_related(e);
+            }
+            vec![d]
+        })?;
+        if extracted.is_empty() {
+            return Err(one(invalid(format!(
+                "{OP}: every embedded material of {} is remapped already",
+                file_name(&source)
+            ))
+            .with_suggestion("clear a remap to extract that material again")));
+        }
+        std::fs::create_dir_all(&folder)
+            .map_err(|e| one(io(&folder, format!("{OP}: cannot create the folder: {e}"))))?;
+        let mut ops = Vec::new();
+        let mut written: Vec<PathBuf> = Vec::new();
+        for e in &extracted {
+            if let Err(err) = std::fs::write(&e.path, &e.text) {
+                for w in &written {
+                    let _ = std::fs::remove_file(w);
+                }
+                return Err(one(io(&e.path, format!("{OP}: cannot write: {err}"))));
+            }
+            let path = e.path.canonicalize().unwrap_or(e.path.clone());
+            written.push(path.clone());
+            ops.push(AssetOp::Created {
+                path,
+                id: e.id,
+                text: e.text.clone(),
+            });
+        }
+        let before = meta.settings.to_serde();
+        for e in &extracted {
+            meta.set_material_remap(&e.key, Some(e.id));
+        }
+        let after = meta.settings.to_serde();
+        let text = meta.to_document().write().map_err(one)?;
+        if let Err(err) = std::fs::write(&sidecar, text) {
+            for w in &written {
+                let _ = std::fs::remove_file(w);
+            }
+            return Err(one(io(
+                &sidecar,
+                format!("{OP}: cannot write the sidecar: {err}"),
+            )));
+        }
+        ops.push(AssetOp::Settings {
+            sidecar: sidecar.clone(),
+            id,
+            before,
+            after: after.clone(),
+        });
+        let mut touched = written.clone();
+        touched.push(sidecar.clone());
+        self.project_mut().unwrap().rescan(&touched);
+        let label = format!("Extract Materials of {}", file_name(&source));
+        self.assets_history.push(Done {
+            op: AssetOp::Group { ops, id },
+            label: label.clone(),
+        });
+        let materials: Vec<Value> = extracted
+            .iter()
+            .zip(&written)
+            .map(|(e, path)| {
+                json!({ "key": e.key, "id": e.id.to_string(), "path": path.display().to_string() })
+            })
+            .collect();
+        Ok(self.finish(
+            OP,
+            &label,
+            Some(id),
+            json!({ "sidecar": sidecar.display().to_string(), "settings": after, "materials": materials }),
         ))
     }
 
@@ -907,6 +1032,43 @@ impl AuthoringSession {
             AssetOp::Rewrote { files } => {
                 self.reload_after = self.write_rewrites(files, inverse, op)?;
                 Ok(None)
+            }
+            AssetOp::Group { ops, id } => {
+                // Undo refuses up front when a created file was edited
+                // since, so a group is never left half undone.
+                if inverse {
+                    for o in ops {
+                        if let AssetOp::Created { path, text, .. } = o {
+                            if std::fs::read_to_string(path).is_ok_and(|t| t != *text) {
+                                return Err(invalid(format!(
+                                    "{op}: {} was edited since it was created; delete it yourself if you mean to",
+                                    file_name(path)
+                                ))
+                                .with_document(path.display().to_string()));
+                            }
+                        }
+                    }
+                    for o in ops.iter().rev() {
+                        self.replay(
+                            &Done {
+                                op: o.clone(),
+                                label: done.label.clone(),
+                            },
+                            true,
+                        )?;
+                    }
+                } else {
+                    for o in ops {
+                        self.replay(
+                            &Done {
+                                op: o.clone(),
+                                label: done.label.clone(),
+                            },
+                            false,
+                        )?;
+                    }
+                }
+                Ok(Some(*id))
             }
         }
     }

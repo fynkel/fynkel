@@ -224,6 +224,34 @@ impl Meta {
             .collect()
     }
 
+    /// Sets `settings.materials[key]` to the material document `target`,
+    /// or removes the remap (`None`); a table left empty is removed.
+    pub fn set_material_remap(&mut self, key: &str, target: Option<Uuid>) {
+        let mut settings = self.settings.to_serde();
+        let Some(obj) = settings.as_object_mut() else {
+            return;
+        };
+        let mut table = match obj.remove("materials") {
+            Some(serde_json::Value::Object(t)) => t,
+            _ => serde_json::Map::new(),
+        };
+        match target {
+            Some(id) => {
+                table.insert(
+                    key.to_string(),
+                    serde_json::json!({ "asset": id.to_string() }),
+                );
+            }
+            None => {
+                table.remove(key);
+            }
+        }
+        if !table.is_empty() {
+            obj.insert("materials".into(), serde_json::Value::Object(table));
+        }
+        self.settings = Node::from_serde(&settings);
+    }
+
     /// The remap table's own rules: an object of `assetRef`s (`A0006`),
     /// each naming a material document (`A0007`). A target the database
     /// cannot resolve is left to [`AssetDatabase::check_references`]
