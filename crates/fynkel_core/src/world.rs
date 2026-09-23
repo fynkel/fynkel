@@ -615,6 +615,50 @@ impl World {
         }
     }
 
+    /// Applies `commands` now, at the current tick, without stepping: the
+    /// editor's live Play mode (ADR-0021 P7) changing a running — possibly
+    /// paused — game. Each command goes through the simulation lane's
+    /// checks, transforms are propagated, and what moved is not
+    /// interpolated from where it was. No system runs, the tick does not
+    /// advance, no event is emitted for the edit itself. `Spawn` is refused
+    /// (a live edit changes what exists; it does not create). Returns the
+    /// rejections, which are also in [`World::diagnostics`].
+    pub fn apply_now(&mut self, commands: Vec<Command>) -> Vec<Diagnostic> {
+        if self.poisoned {
+            return Vec::new();
+        }
+        let first = self.diagnostics.len();
+        let tick = self.clock.tick();
+        let mut moved = Vec::new();
+        for (i, cmd) in commands.into_iter().enumerate() {
+            let index = i as u32;
+            if matches!(cmd, Command::Spawn { .. }) {
+                self.reject(
+                    index,
+                    Lane::Simulation,
+                    DiagnosticCode::INVALID_PAYLOAD,
+                    Entity::NULL,
+                    ComponentId::NONE,
+                    "apply_now does not spawn",
+                );
+                continue;
+            }
+            let target = cmd.target();
+            if self.apply_simulation(index, cmd, tick) {
+                moved.extend(target);
+            }
+        }
+        scene::propagate(&mut self.ecs);
+        for e in moved {
+            if self.ecs.contains(e) {
+                self.overrides.remove(&e);
+                self.teleported.push(e);
+            }
+        }
+        self.apply_teleports();
+        self.diagnostics[first..].to_vec()
+    }
+
     fn reject(
         &mut self,
         index: u32,
