@@ -56,6 +56,7 @@ impl Settings {
 pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
     let shown = path.display().to_string();
     let fail = |d: Diagnostic| Imported {
+        renames: Default::default(),
         intermediate: None,
         sub_assets: meta.sub_assets.clone(),
         diagnostics: vec![if d.document.is_none() {
@@ -121,6 +122,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         );
     }
     Imported {
+        renames: Default::default(),
         intermediate: Some(intermediate),
         sub_assets: Vec::new(),
         diagnostics,

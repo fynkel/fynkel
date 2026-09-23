@@ -51,6 +51,7 @@ use crate::graph::{
 use crate::intermediate::{
     AnimationData, ColorSpace, ImageData, MaterialData, MeshData, SkinData, Vertex,
 };
+use crate::subkey::Keys;
 use crate::{read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
@@ -424,6 +425,40 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         );
     }
 
+    // Every part's source name, for its name key (`subkey`).
+    let mut keys = Keys::default();
+    keys.kind(
+        "image",
+        doc.images().map(|i| {
+            let name = i.name().map(str::to_string).or_else(|| match i.source() {
+                gltf::image::Source::Uri { uri, .. } if !uri.starts_with("data:") => {
+                    Path::new(&percent_decode(uri))
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                }
+                _ => None,
+            });
+            (i.index().to_string(), name)
+        }),
+    );
+    let index_of = |i: Option<usize>| i.unwrap_or(0).to_string();
+    keys.kind(
+        "material",
+        doc.materials().map(|m| (index_of(m.index()), m.name())),
+    );
+    keys.kind(
+        "mesh",
+        doc.meshes().map(|m| (m.index().to_string(), m.name())),
+    );
+    keys.kind(
+        "skin",
+        doc.skins().map(|s| (s.index().to_string(), s.name())),
+    );
+    keys.kind(
+        "anim",
+        doc.animations().map(|a| (a.index().to_string(), a.name())),
+    );
+
     // Nodes → prefab.
     let graph = source_graph(doc, &file_stem(path), &mesh_subs);
     let prefab = prefab_document(
@@ -435,7 +470,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         &skins,
         meta,
     );
-    let Some(prefab) = prefab else {
+    let Some((prefab, prefab_ids)) = prefab else {
         return fail(ctx);
     };
     if ctx.has_errors() {
@@ -455,6 +490,8 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             skins,
             animations,
             prefab,
+            prefab_ids,
+            keys,
         },
     )
 }
@@ -494,6 +531,7 @@ fn source_graph(doc: &gltf::Document, stem: &str, mesh_subs: &[MeshSubs]) -> Sou
             SourceNode {
                 index: node.index(),
                 name: node_name(&node),
+                named: node.name().is_some(),
                 translation,
                 rotation,
                 scale,

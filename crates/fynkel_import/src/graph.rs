@@ -70,6 +70,7 @@ impl Report {
     pub fn fail(self, meta: &Meta) -> Imported {
         Imported {
             intermediate: None,
+            renames: Default::default(),
             sub_assets: meta.sub_assets.clone(),
             diagnostics: self.diagnostics,
         }
@@ -285,6 +286,9 @@ impl AnimatedNames {
 pub(crate) struct SourceNode {
     pub index: usize,
     pub name: String,
+    /// False when `name` is the importer's stand-in (`node<n>`): the
+    /// node's key keeps its position then (`node/#<n>`).
+    pub named: bool,
     pub translation: [f32; 3],
     pub rotation: [f32; 4],
     pub scale: [f32; 3],
@@ -304,7 +308,8 @@ pub(crate) struct SourceGraph {
 /// The imported primitives of one source mesh: `(sub_id, name)` each.
 pub(crate) type MeshSubs = Vec<(String, String)>;
 
-/// The node graph as a prefab document body (`id` patched by [`finish`]).
+/// The node graph as a prefab document body (`id` patched by [`finish`]),
+/// and the derived ids that differ between position and name keys.
 pub(crate) fn prefab_document(
     report: &mut Report,
     limits: &Limits,
@@ -313,7 +318,7 @@ pub(crate) fn prefab_document(
     meshes: &[MeshData],
     skins: &[SkinData],
     meta: &Meta,
-) -> Option<Value> {
+) -> Option<(Value, Vec<(Uuid, Uuid)>)> {
     let asset = meta.id();
     if graph.nodes.len() > limits.max_nodes {
         report.error(
@@ -327,7 +332,27 @@ pub(crate) fn prefab_document(
         return None;
     }
 
-    let entity_id = |node: usize| derive_sub_id(asset, &format!("node/{node}")).to_string();
+    // Every derived id goes through `derive`: `node/<i>…` names the node by
+    // position, its name path (`subkey::node_paths`) by name; the sidecar
+    // decides which one the document carries, and both are recorded.
+    let names: Vec<Option<&str>> = graph
+        .nodes
+        .iter()
+        .map(|n| n.named.then_some(n.name.as_str()))
+        .collect();
+    let children: Vec<Vec<usize>> = graph.nodes.iter().map(|n| n.children.clone()).collect();
+    let paths = crate::subkey::node_paths(&names, &children, &graph.roots);
+    let by_name = crate::subkey::uses_name_keys(meta);
+    let moved = std::cell::RefCell::new(Vec::<(Uuid, Uuid)>::new());
+    let derive = |node: usize, rest: &str| -> String {
+        let old = derive_sub_id(asset, &format!("node/{node}{rest}"));
+        let new = derive_sub_id(asset, &format!("{}{rest}", paths[node]));
+        if old != new {
+            moved.borrow_mut().push((old, new));
+        }
+        if by_name { new } else { old }.to_string()
+    };
+    let entity_id = |node: usize| derive(node, "");
     let material_of = |sub: &str| -> Option<String> {
         meshes
             .iter()
@@ -370,7 +395,7 @@ pub(crate) fn prefab_document(
         let skin = node_skin(report, node, mesh_subs, meshes, skins)?;
 
         let mut components: Vec<(String, Value)> = vec![(
-            derive_sub_id(asset, &format!("node/{}/transform", node.index)).to_string(),
+            derive(node.index, "/transform"),
             transform_component(node.translation, node.rotation, node.scale),
         )];
         let mut children: Vec<String> = Vec::new();
@@ -379,47 +404,30 @@ pub(crate) fn prefab_document(
             let subs = &mesh_subs[mesh];
             if subs.len() == 1 {
                 components.push((
-                    derive_sub_id(asset, &format!("node/{}/renderer", node.index)).to_string(),
+                    derive(node.index, "/renderer"),
                     renderer_component(meta, &subs[0].0, material_of(&subs[0].0)),
                 ));
                 if let Some(skin) = skin {
-                    components.push((
-                        derive_sub_id(asset, &format!("node/{}/skin", node.index)).to_string(),
-                        skin_component(meta, skin),
-                    ));
+                    components.push((derive(node.index, "/skin"), skin_component(meta, skin)));
                 }
             } else {
                 for (p, (sub, sub_name)) in subs.iter().enumerate() {
-                    let child_id =
-                        derive_sub_id(asset, &format!("node/{}/primitive/{p}", node.index))
-                            .to_string();
+                    let child_id = derive(node.index, &format!("/primitive/{p}"));
                     children.push(child_id.clone());
                     let mut prim_components: Vec<(String, Value)> = vec![
                         (
-                            derive_sub_id(
-                                asset,
-                                &format!("node/{}/primitive/{p}/transform", node.index),
-                            )
-                            .to_string(),
+                            derive(node.index, &format!("/primitive/{p}/transform")),
                             transform_component([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]),
                         ),
                         (
-                            derive_sub_id(
-                                asset,
-                                &format!("node/{}/primitive/{p}/renderer", node.index),
-                            )
-                            .to_string(),
+                            derive(node.index, &format!("/primitive/{p}/renderer")),
                             renderer_component(meta, sub, material_of(sub)),
                         ),
                     ];
                     if let Some(skin) = skin {
                         if meshes.iter().any(|m| &m.sub_id == sub && m.is_skinned()) {
                             prim_components.push((
-                                derive_sub_id(
-                                    asset,
-                                    &format!("node/{}/primitive/{p}/skin", node.index),
-                                )
-                                .to_string(),
+                                derive(node.index, &format!("/primitive/{p}/skin")),
                                 skin_component(meta, skin),
                             ));
                         }
@@ -462,7 +470,7 @@ pub(crate) fn prefab_document(
     }
     prefab.insert("entities".into(), Value::Object(ents));
     prefab.insert("roots".into(), json!(root_ids));
-    Some(Value::Object(prefab))
+    Some((Value::Object(prefab), moved.into_inner()))
 }
 
 fn report_file(report: &Report) -> String {
@@ -602,6 +610,10 @@ pub(crate) struct Produced {
     pub skins: Vec<SkinData>,
     pub animations: Vec<AnimationData>,
     pub prefab: Value,
+    /// The prefab's derived ids that differ by key scheme ([`prefab_document`]).
+    pub prefab_ids: Vec<(Uuid, Uuid)>,
+    /// Position → name for every part the importer registered.
+    pub keys: crate::subkey::Keys,
 }
 
 /// The tail of a scene import: every sub-asset gets its id (the sidecar's
@@ -617,14 +629,60 @@ pub(crate) fn finish(
     produced: Produced,
 ) -> Imported {
     let Produced {
-        meshes,
+        mut meshes,
         mut materials,
-        images,
-        skins,
-        animations,
+        mut images,
+        mut skins,
+        mut animations,
         mut prefab,
+        prefab_ids,
+        keys,
     } = produced;
     let asset = meta.id();
+
+    // Position keys → name keys (`subkey`): always recorded for `fynkel
+    // migrate`, applied when the sidecar has moved to name keys.
+    let renames = crate::subkey::Renames {
+        subs: meshes
+            .iter()
+            .map(|m| m.sub_id.as_str())
+            .chain(materials.iter().map(|m| m.sub_id.as_str()))
+            .chain(images.iter().map(|i| i.sub_id.as_str()))
+            .chain(skins.iter().map(|s| s.sub_id.as_str()))
+            .chain(animations.iter().map(|a| a.sub_id.as_str()))
+            .map(|old| (old.to_string(), keys.rename(old)))
+            .filter(|(old, new)| old != new)
+            .collect(),
+        ids: prefab_ids,
+    };
+    if crate::subkey::uses_name_keys(meta) && !renames.subs.is_empty() {
+        let rename = |key: &mut String| *key = keys.rename(key);
+        for m in &mut meshes {
+            rename(&mut m.sub_id);
+            if let Some(material) = &mut m.material {
+                rename(material);
+            }
+        }
+        for m in &mut materials {
+            let old = m.sub_id.clone();
+            rename(&mut m.sub_id);
+            if let Some(Value::String(d)) = m.document.get_mut("description") {
+                *d = d.replace(&format!("({old})"), &format!("({})", m.sub_id));
+            }
+            rename_refs(&mut m.document, &asset.to_string(), &keys);
+        }
+        for i in &mut images {
+            rename(&mut i.sub_id);
+        }
+        for s in &mut skins {
+            rename(&mut s.sub_id);
+        }
+        for a in &mut animations {
+            rename(&mut a.sub_id);
+        }
+        rename_refs(&mut prefab, &asset.to_string(), &keys);
+    }
+
     let mut sub_assets = Vec::new();
     for sub in meshes
         .iter()
@@ -650,13 +708,26 @@ pub(crate) fn finish(
         .map(|(k, _)| k.as_str())
         .collect();
     if !dropped.is_empty() {
-        report.warn(
-            Code::IMPORT_SKIPPED,
-            format!(
-                "sidecar sub-asset(s) no longer produced by the file: {} (references to them will not resolve)",
-                dropped.join(", ")
-            ),
+        // One key gone and another of the same kind new is almost always a
+        // rename in the modelling tool: name the new ones, never guess.
+        let kind = |k: &str| k.split('/').next().unwrap_or("").to_string();
+        let appeared: Vec<&str> = sub_assets
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .filter(|k| !meta.sub_assets.iter().any(|(s, _)| s == k))
+            .filter(|k| dropped.iter().any(|d| kind(d) == kind(k)))
+            .collect();
+        let mut msg = format!(
+            "sidecar sub-asset(s) no longer produced by the file: {} (references to them will not resolve)",
+            dropped.join(", ")
         );
+        if !appeared.is_empty() {
+            msg.push_str(&format!(
+                "; new in this import: {} — if a part was renamed in the modelling tool, point its references at the new key",
+                appeared.join(", ")
+            ));
+        }
+        report.warn(Code::IMPORT_SKIPPED, msg);
     }
     let lookup = |sub: &str| -> Uuid {
         sub_assets
@@ -687,5 +758,29 @@ pub(crate) fn finish(
         }),
         sub_assets,
         diagnostics: report.diagnostics,
+        renames,
+    }
+}
+
+/// Renames the `sub` of every reference into this file (`asset` equal to
+/// `own`) inside an imported document.
+fn rename_refs(value: &mut Value, own: &str, keys: &crate::subkey::Keys) {
+    match value {
+        Value::Object(map) => {
+            if map.get("asset").and_then(Value::as_str) == Some(own) {
+                if let Some(Value::String(sub)) = map.get_mut("sub") {
+                    *sub = keys.rename(sub);
+                }
+            }
+            for v in map.values_mut() {
+                rename_refs(v, own, keys);
+            }
+        }
+        Value::Array(items) => {
+            for v in items {
+                rename_refs(v, own, keys);
+            }
+        }
+        _ => {}
     }
 }

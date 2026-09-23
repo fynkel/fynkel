@@ -31,6 +31,7 @@ pub(crate) mod graph;
 pub mod image;
 pub mod intermediate;
 pub mod rig;
+pub mod subkey;
 pub mod tangents;
 
 pub use cache::{Cache, CacheKey, KeyInputs, Manifest, CACHE_VERSION};
@@ -122,6 +123,11 @@ pub struct Imported {
     /// Sub-asset id → uuid, in intermediate order; replaces `Meta::sub_assets`.
     pub sub_assets: Vec<(String, uuid::Uuid)>,
     pub diagnostics: Vec<Diagnostic>,
+    /// Position key → name key for every sub-asset and derived entity id
+    /// of a scene import (`subkey`), whichever scheme the sidecar uses —
+    /// what `fynkel migrate` rewrites references with. Empty for the
+    /// single-asset importers.
+    pub renames: subkey::Renames,
 }
 
 impl Imported {
@@ -147,6 +153,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         other => Imported {
             intermediate: None,
             sub_assets: meta.sub_assets.clone(),
+            renames: Default::default(),
             diagnostics: vec![Diagnostic::error(
                 fynkel_contracts::Code::IMPORT_UNSUPPORTED,
                 format!("no importer for {other}"),

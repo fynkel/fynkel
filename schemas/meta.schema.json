@@ -35,8 +35,8 @@
   "$defs": {
     "subId": {
       "type": "string",
-      "description": "Importer-defined path-like id of a sub-asset, such as mesh/Body or material/0.",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9_./ -]{0,127}$"
+      "description": "Importer-defined path-like id of a sub-asset, such as mesh/Body or anim/walk: the part's kind and its name in the source file (docs/design/stable-sub-asset-ids.md). `#3` stands for an unnamed part at position 3, `~2` for the second part with the same name.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_./ #~-]{0,127}$"
     }
   }
 }

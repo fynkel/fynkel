@@ -54,6 +54,7 @@ use crate::graph::{
 use crate::intermediate::{
     AnimationData, ColorSpace, ImageData, MaterialData, MeshData, SkinData, Vertex,
 };
+use crate::subkey::Keys;
 use crate::{read_source, Imported, Limits};
 
 pub const IMPORTER: &str = fynkel_document::asset::FBX_IMPORTER;
@@ -66,6 +67,8 @@ struct Ctx<'a> {
     allow_external_files: bool,
     /// Textures already warned about (one warning per texture, not per use).
     warned_textures: Vec<u32>,
+    /// `(position, stack name)` of every kept clip, for its name key.
+    anim_names: Vec<(String, Option<String>)>,
 }
 
 impl Ctx<'_> {
@@ -108,6 +111,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             .and_then(|n| n.as_bool())
             .unwrap_or(false),
         warned_textures: Vec::new(),
+        anim_names: Vec::new(),
     };
     let fail = |ctx: Ctx| ctx.report.fail(meta);
 
@@ -238,6 +242,36 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         return fail(ctx);
     };
 
+    // Every part's source name, for its name key (`subkey`).
+    let mut keys = Keys::default();
+    let element = |e: &ufbx::Element| {
+        (
+            e.typed_id.to_string(),
+            (!e.name.is_empty()).then(|| e.name.to_string()),
+        )
+    };
+    keys.kind(
+        "image",
+        scene.textures.iter().map(|t| {
+            let stem = Path::new(relative_or_name(t))
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .filter(|s| !s.is_empty());
+            let (position, name) = element(&t.element);
+            (position, stem.or(name))
+        }),
+    );
+    keys.kind(
+        "material",
+        scene.materials.iter().map(|m| element(&m.element)),
+    );
+    keys.kind("mesh", scene.meshes.iter().map(|m| element(&m.element)));
+    keys.kind(
+        "skin",
+        scene.skin_deformers.iter().map(|s| element(&s.element)),
+    );
+    keys.kind("anim", std::mem::take(&mut ctx.anim_names));
+
     // Nodes → prefab.
     let graph = source_graph(&scene, &file_stem(path), &mesh_subs);
     let prefab = prefab_document(
@@ -249,7 +283,7 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
         &skins,
         meta,
     );
-    let Some(prefab) = prefab else {
+    let Some((prefab, prefab_ids)) = prefab else {
         return fail(ctx);
     };
     if ctx.report.has_errors() {
@@ -269,6 +303,8 @@ pub fn import(path: &Path, meta: &Meta, limits: &Limits) -> Imported {
             skins,
             animations,
             prefab,
+            prefab_ids,
+            keys,
         },
     )
 }
@@ -338,6 +374,7 @@ fn source_graph(scene: &ufbx::Scene, stem: &str, mesh_subs: &[MeshSubs]) -> Sour
             SourceNode {
                 index: node.element.typed_id as usize,
                 name: node_name(node),
+                named: !node.element.name.is_empty(),
                 translation: v3(t.translation),
                 rotation: quat(t.rotation),
                 scale: v3(t.scale),
@@ -676,6 +713,10 @@ fn import_animations(ctx: &mut Ctx, scene: &ufbx::Scene) -> Result<Vec<Animation
         let a = animations.len();
         let sub_id = format!("anim/{a}");
         let name = named(stack_name, "anim", a as u32);
+        ctx.anim_names.push((
+            a.to_string(),
+            (!stack_name.is_empty()).then(|| stack_name.to_string()),
+        ));
         let mut channels = Vec::new();
         let mut duration = 0.0f32;
         for node in baked.nodes.iter() {

@@ -1,6 +1,7 @@
 # Stable sub-asset ids — design note
 
-**Status:** For review (2026-09-23). Roadmap Phase 1 item 1
+**Status:** Accepted (2026-09-23; the user took all three recommendations:
+renames break loudly, `~2`/`#3` markers, explicit migration). Roadmap Phase 1 item 1
 (`docs/roadmap.md`).
 **Related:** ADR-0006 (asset identity: sidecars, references by id),
 `docs/documents.md` § Prefab documents (overrides address prefab-local
@@ -33,7 +34,7 @@ so it follows the position too.
 The reference game already references `mesh/0`–`mesh/6`, `anim/0`–`anim/4`
 and `skin/0` about 230 times.
 
-## Decision (proposed)
+## Decision
 
 ### 1. Keys come from names
 
@@ -117,23 +118,22 @@ reported; its documents are untouched.
 ## Steps
 
 1. **S1 — Keys.** `fynkel_import::subkey` (naming, sanitising, `#`, `~`),
-   used by both importers and `graph.rs`; the schema pattern; importer
-   versions. Tests: reorder meshes/materials/clips/nodes in a glTF and an
+   used by both importers and `graph.rs`; the schema pattern. An import
+   through a sidecar at `formatVersion` 2 uses name keys; today's sidecars
+   (1) keep position keys, so nothing changes until S2, and every import
+   reports the renames (`Imported::renames`: sub keys and the prefab's
+   derived ids) the migration needs. Tests: reorder meshes/materials/clips/nodes in a glTF and an
    FBX fixture, reimport, every key and uuid stays on the same part;
    duplicates, unnamed, bad characters, long names.
-2. **S2 — Migration.** The old→new table from one parse; sidecar and
+   **Done** (2026-09-23): `crates/fynkel_import/src/subkey.rs`,
+   `tests/subkeys.rs` (reordered glTF, GLB and FBX fixtures).
+2. **S2 — Migration.** Sidecar `formatVersion` 2 becomes current and the
+   importer versions move (`fynkel.gltf` 5 → 6, `fynkel.fbx` 1 → 2) —
+   together, since only then does an import's output change. The old→new
+   table from one parse; sidecar and
    document rewrite in `fynkel_document`/`fynkel_import`; `fynkel migrate`
    runs it; the `FYN-A…` warning. Tests: the reference game's
    fixtures before/after, overrides on an imported prefab survive.
 3. **S3 — Apply.** Migrate the reference game, the showcase, the starter
    template and the fixtures; the editor's migration preview; docs
    (`documents.md`, ADR-0006 consequence line).
-
-## Questions for review
-
-1. Rename in the modelling tool **breaks loudly** instead of being guessed.
-   Unity does the same; agree?
-2. `~2` for duplicates and `#3` for unnamed — fine, or prefer another
-   marker?
-3. Migration runs through `fynkel migrate` and the editor's migration
-   preview (explicit), not silently on import. Agree?
