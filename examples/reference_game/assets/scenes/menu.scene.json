@@ -1339,10 +1339,61 @@
               0.65,
               0.9
             ],
-            "ambient_intensity": 1600.0,
-            "sky": null,
-            "sky_intensity": 0.0,
+            "ambient_intensity": 600.0,
+            "sky": {
+              "asset": "56bcbfdd-17a9-47bc-91ff-d2705c184742"
+            },
+            "sky_intensity": 1500.0,
             "sky_rotation": 0.0
+          }
+        }
+      }
+    },
+    "207526ff-4c33-5a98-abfb-ec55147da20e": {
+      "name": "Global Volume",
+      "parent": null,
+      "children": [],
+      "components": {
+        "d99ad2e3-9572-5f92-8c30-322c6b2ba04d": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "6f15bc42-7916-5362-9fc6-21e7a4f2acec": {
+          "type": "fynkel.Volume",
+          "version": 1,
+          "data": {
+            "profile": {
+              "asset": "18c591c1-2780-53fe-9c45-a12624e20599"
+            },
+            "shape": "global",
+            "size": [
+              10.0,
+              10.0,
+              10.0
+            ],
+            "radius": 5.0,
+            "blend_distance": 1.0,
+            "weight": 1.0,
+            "priority": 0,
+            "enabled": true
           }
         }
       }

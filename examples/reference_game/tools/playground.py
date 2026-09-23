@@ -335,6 +335,14 @@ MATERIALS = {name: uid("material", name) for name in MATERIAL_DOCS}
 
 PREFABS = {name: uid("prefab", name) for name in ("coin", "ball", "burst")}
 SCENE_ID = uid("scene", "playground")
+# The look (R3a/R3b): tools/sky.py's sky and the volume profile.
+SKY = json.loads((ASSETS / "textures" / "sky.hdr.meta.json").read_text())["id"]
+SKY_INTENSITY = 1500.0
+AMBIENT = 600.0
+LOOK_ID = uid("volume", "look")
+LOOK_AO = {"radius": 0.8, "intensity": 1.5}
+LOOK_BLOOM = {"intensity": 0.8, "threshold": 0.8, "scatter": 0.7}
+
 MENU_ID = uid("scene", "menu")  # fynkel.project.json's startupScene
 RESULTS_ID = uid("scene", "results")
 
@@ -556,9 +564,7 @@ def playground():
             ("fynkel.AudioSource", {"clip": SOUNDS["music"], "bus": "music", "volume": 0.5, "pitch": 1.0, "looping": True, "playing": True, "priority": 10}),
         ],
     )
-    sun = quat_mul(quat_axis_angle((0, 1, 0), math.radians(35)), quat_axis_angle((1, 0, 0), math.radians(-52)))
-    s.add("Sun", [transform((0, 20, 0), sun), ("fynkel.DirectionalLight", {"color": [1.0, 0.95, 0.85], "intensity": 9000.0, "cast_shadows": True})])
-    s.add("Environment", [("fynkel.Environment", {"ambient_color": [0.55, 0.65, 0.9], "ambient_intensity": 1600.0, "sky": None, "sky_intensity": 0.0, "sky_rotation": 0.0})])
+    sun_and_sky(s)
 
     # --- the arena ---------------------------------------------------------
     static("Floor", "cube", "floor", (0, -0.5, 0), scale=(2 * ARENA, 1, 2 * ARENA), cast=False)
@@ -702,9 +708,32 @@ def music(s, volume):
 
 
 def sun_and_sky(s):
+    """The sun, the sky (tools/sky.py, its disc where the sun shines
+    from) lighting the scene through image-based lighting, and the Global
+    Volume carrying the game's look (assets/volumes/look.volume.json:
+    ambient occlusion and bloom, R3a/R3b)."""
     sun = quat_mul(quat_axis_angle((0, 1, 0), math.radians(35)), quat_axis_angle((1, 0, 0), math.radians(-52)))
     s.add("Sun", [transform((0, 20, 0), sun), ("fynkel.DirectionalLight", {"color": [1.0, 0.95, 0.85], "intensity": 9000.0, "cast_shadows": True})])
-    s.add("Environment", [("fynkel.Environment", {"ambient_color": [0.55, 0.65, 0.9], "ambient_intensity": 1600.0, "sky": None, "sky_intensity": 0.0, "sky_rotation": 0.0})])
+    s.add("Environment", [("fynkel.Environment", {"ambient_color": [0.55, 0.65, 0.9], "ambient_intensity": AMBIENT, "sky": {"asset": SKY}, "sky_intensity": SKY_INTENSITY, "sky_rotation": 0.0})])
+    s.add(
+        "Global Volume",
+        [
+            transform((0, 0, 0)),
+            ("fynkel.Volume", {"profile": {"asset": LOOK_ID}, "shape": "global", "size": [10.0, 10.0, 10.0], "radius": 5.0, "blend_distance": 1.0, "weight": 1.0, "priority": 0, "enabled": True}),
+        ],
+    )
+
+
+def look_volume():
+    """The volume profile every scene's Global Volume names."""
+    return {
+        "$schema": "https://fynkel.dev/schemas/volume.schema.json",
+        "formatVersion": 1,
+        "id": LOOK_ID,
+        "name": "Game Look",
+        "ambientOcclusion": LOOK_AO,
+        "bloom": LOOK_BLOOM,
+    }
 
 
 def camera(s, pivot, pitch, dist, parent=None):
@@ -793,6 +822,7 @@ def material_docs():
 
 def main():
     material_docs()
+    write(ASSETS / "volumes" / "look.volume.json", look_volume())
     write(ASSETS / "prefabs" / "coin.prefab.json", coin_prefab())
     write(ASSETS / "prefabs" / "ball.prefab.json", ball_prefab())
     write(ASSETS / "prefabs" / "burst.prefab.json", burst_prefab())

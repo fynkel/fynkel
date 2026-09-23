@@ -101,7 +101,7 @@
         "renderScale": 0.75
       },
       "medium": {
-        "shadowResolution": 1024,
+        "shadowResolution": 2048,
         "msaa": 4
       },
       "high": {
