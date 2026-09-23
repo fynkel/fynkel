@@ -1170,6 +1170,71 @@ fn transform_of(v: &Value) -> Result<Transform, Vec<Diagnostic>> {
     })
 }
 
+// ------------------------------------------------------------ live worlds
+
+/// A live call on a running game's world (ADR-0021 P7, live Play mode;
+/// [`fynkel_authoring::live`]): `entities`, `entity`, `set`, `remove`,
+/// `rename`. No session: the world is the game's, and the call reads it
+/// and changes it in the scene document's terms, writing at once without
+/// a tick. `out_view` gets the JSON result, `{ "ok": true, ... }` or
+/// `{ "ok": false, "rejected" | "diagnostics": [...] }`, valid until the
+/// next query or mutating call on the world.
+///
+/// # Safety
+/// `world` live or NULL; `kind_utf8` readable for `kind_len` bytes;
+/// `args_json_utf8` readable for `args_len` bytes, or NULL with `args_len`
+/// 0 for no arguments; `out_view` may be NULL.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_live_call(
+    world: *mut FynkelWorld,
+    kind_utf8: *const u8,
+    kind_len: u32,
+    args_json_utf8: *const u8,
+    args_len: u32,
+    out_view: *mut FynkelBufferView,
+) -> Status {
+    let parsed = kind_and_args("live", kind_utf8, kind_len, args_json_utf8, args_len);
+    let status = crate::guarded(world, |w| {
+        w.stats.query_calls += 1;
+        let (value, status) = match parsed
+            .and_then(|(kind, args)| fynkel_authoring::live::call(&mut w.inner, &kind, &args))
+        {
+            Ok(mut v) => {
+                let refused = v.get("ok") == Some(&Value::Bool(false));
+                if v.get("ok").is_none() {
+                    v["ok"] = Value::Bool(true);
+                }
+                let status = if refused {
+                    Status::CommandsRejected
+                } else {
+                    Status::Ok
+                };
+                (v, status)
+            }
+            Err(diagnostics) => (
+                json!({
+                    "ok": false,
+                    "diagnostics": diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
+                }),
+                status_for(&diagnostics),
+            ),
+        };
+        w.query_buf.clear();
+        serde_json::to_writer(&mut w.query_buf, &value).expect("JSON into a Vec");
+        w.stats.bytes_out += w.query_buf.len() as u64;
+        status
+    });
+    if let Some(out) = out_view.as_mut() {
+        *out = match (status, world.as_ref()) {
+            (Status::Ok | Status::CommandsRejected | Status::InvalidArgument, Some(w)) => {
+                FynkelBufferView::of(&w.query_buf)
+            }
+            _ => FynkelBufferView::empty(),
+        };
+    }
+    status
+}
+
 /// # Safety
 /// `session` live or NULL (an empty view).
 #[no_mangle]

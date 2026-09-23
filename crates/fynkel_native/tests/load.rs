@@ -756,3 +756,87 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
     assert_eq!(jump["rebound"], false);
     assert_eq!(jump["bindings"].as_array().unwrap().len(), 3);
 }
+
+/// Live Play mode (ADR-0021 P7): the running world answers in the scene
+/// document's terms — its ids, including the ones the cook derived for a
+/// prefab instance's children — and takes a write at once.
+#[cfg(feature = "authoring")]
+#[test]
+fn a_running_world_answers_live_calls_in_document_terms() {
+    fn live(w: *mut FynkelWorld, kind: &str, args: &str) -> (Status, serde_json::Value) {
+        let mut view = FynkelBufferView {
+            data: ptr::null(),
+            length: 0,
+        };
+        let status = unsafe {
+            fynkel_native::authoring::fynkel_world_live_call(
+                w,
+                kind.as_ptr(),
+                kind.len() as u32,
+                args.as_ptr(),
+                args.len() as u32,
+                &mut view,
+            )
+        };
+        if view.data.is_null() {
+            return (status, serde_json::Value::Null);
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(view.data, view.length as usize) };
+        (status, serde_json::from_slice(bytes).unwrap())
+    }
+
+    let cooked = Cooked::new("live");
+    let host = Host::new();
+    assert_eq!(host.load_project(&cooked.text()), Status::Ok);
+    assert_eq!(host.step(), Status::Ok);
+
+    let (status, table) = live(host.w, "entities", "{}");
+    assert_eq!(status, Status::Ok, "{table}");
+    let rows = table["entities"].as_array().unwrap();
+    assert_eq!(rows.len(), 7);
+    let authored: Vec<String> = (0xe0..=0xe5)
+        .map(|n| format!("c0000000-0000-4000-8000-0000000000{n:x}"))
+        .collect();
+    for r in rows {
+        let id = r["id"].as_str().unwrap();
+        assert!(
+            !id.starts_with("runtime:"),
+            "every entity came from the scene: {r}"
+        );
+        if !authored.iter().any(|a| a == id) {
+            assert_eq!(
+                r["parent"], "c0000000-0000-4000-8000-0000000000e2",
+                "the crate the Crate A instance expands to"
+            );
+        }
+    }
+
+    let robot = "c0000000-0000-4000-8000-0000000000e1";
+    let (status, r) = live(
+        host.w,
+        "rename",
+        &format!(r#"{{"id":"{robot}","name":"Hero"}}"#),
+    );
+    assert_eq!(status, Status::Ok, "{r}");
+    let (_, e) = live(host.w, "entity", &format!(r#"{{"id":"{robot}"}}"#));
+    assert_eq!(e["name"], "Hero");
+    assert_eq!(e["components"][0]["type"], "fynkel.Transform");
+
+    let (status, r) = live(
+        host.w,
+        "remove",
+        &format!(r#"{{"id":"{robot}","type":"fynkel.Camera"}}"#),
+    );
+    assert_eq!(status, Status::CommandsRejected, "the world refuses: {r}");
+    assert_eq!(r["ok"], false);
+    let (status, r) = live(host.w, "fly", "{}");
+    assert_eq!(status, Status::InvalidArgument);
+    assert_eq!(r["diagnostics"][0]["code"], "FYN-T0003");
+    let (status, _) = live(host.w, "entities", "[]");
+    assert_eq!(status, Status::InvalidArgument, "args must be an object");
+    let (status, r) = live(ptr::null_mut(), "entities", "{}");
+    assert_eq!(
+        (status, r),
+        (Status::InvalidArgument, serde_json::Value::Null)
+    );
+}

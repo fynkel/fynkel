@@ -22,6 +22,7 @@
 
 pub mod instance;
 pub mod layers;
+pub mod live;
 pub mod ops;
 pub mod preview;
 pub mod project;

@@ -1,0 +1,247 @@
+//! Live Play mode's calls (ADR-0021 P7 L1): a running world read and
+//! changed in the scene document's terms — authoring ids for what a scene
+//! loaded, `runtime:` ids for what the game made, components as document
+//! JSON, writes applied at once without a tick.
+
+use fynkel_authoring::live::{self, RUNTIME_PREFIX};
+use fynkel_core::components::{Camera, ComponentValue, PointLight};
+use fynkel_core::*;
+use glam::Vec3;
+use serde_json::{json, Value};
+
+fn id(n: u8) -> Uuid {
+    let mut b = [0u8; 16];
+    b[15] = n;
+    b[6] = 0x40;
+    b[8] = 0x80;
+    Uuid(b)
+}
+
+fn entity(
+    n: u8,
+    parent: Option<u8>,
+    children: &[u8],
+    components: Vec<ComponentValue>,
+) -> EntityDescription {
+    EntityDescription {
+        id: id(n),
+        name: format!("e{n}"),
+        parent: parent.map(id),
+        children: children.iter().map(|c| id(*c)).collect(),
+        components,
+    }
+}
+
+fn at(x: f32) -> ComponentValue {
+    ComponentValue::Transform(Transform::from_position(Vec3::new(x, 0.0, 0.0)))
+}
+
+fn scene() -> SceneDescription {
+    SceneDescription {
+        id: id(99),
+        name: "Test".into(),
+        entities: vec![
+            entity(1, None, &[3, 2], vec![at(10.0)]),
+            entity(
+                2,
+                Some(1),
+                &[],
+                vec![at(1.0), ComponentValue::Camera(Camera::default())],
+            ),
+            entity(
+                3,
+                Some(1),
+                &[],
+                vec![at(0.0), ComponentValue::PointLight(PointLight::default())],
+            ),
+            entity(4, None, &[], vec![at(-1.0)]),
+        ],
+    }
+}
+
+fn running() -> World {
+    let mut w = World::new(WorldConfig::default());
+    w.load_scene(&scene()).unwrap();
+    assert_eq!(w.step().status, Status::Ok);
+    w
+}
+
+fn call(w: &mut World, kind: &str, args: Value) -> Value {
+    live::call(w, kind, &args).unwrap_or_else(|d| panic!("{kind}: {d:?}"))
+}
+
+fn uid(n: u8) -> String {
+    uuid::Uuid::from_bytes(id(n).0).to_string()
+}
+
+#[test]
+fn entities_carry_authoring_ids_and_the_games_own_are_runtime() {
+    let mut w = running();
+    let prefab = SceneDescription {
+        id: id(50),
+        name: "Coin".into(),
+        entities: vec![entity(51, None, &[], vec![at(0.0)])],
+    };
+    w.instantiate(&prefab, "Coin", Transform::default(), None)
+        .unwrap();
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Spawn {
+            temp_id: 1,
+            transform: Transform::default(),
+            parent: None,
+            name: Some("Bullet".into()),
+        }],
+    );
+    assert_eq!(w.step().status, Status::Ok);
+
+    let table = call(&mut w, "entities", json!({}));
+    let rows = table["entities"].as_array().unwrap();
+    let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        &ids[..4],
+        [uid(1), uid(3), uid(2), uid(4)],
+        "document order, parents first"
+    );
+    assert_eq!(rows[1]["parent"], json!(uid(1)));
+    assert_eq!(rows[0]["children"], json!(2));
+    assert_eq!(rows[0]["spawned"], json!(false));
+    let names: Vec<&str> = rows[4..]
+        .iter()
+        .map(|r| r["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["Coin", "e51", "Bullet"],
+        "an instance root, its prefab's entity, a spawn"
+    );
+    for r in &rows[4..] {
+        assert!(r["id"].as_str().unwrap().starts_with(RUNTIME_PREFIX), "{r}");
+        assert_eq!(r["spawned"], json!(true));
+        // A runtime id resolves back to its entity.
+        let one = call(&mut w, "entity", json!({ "id": r["id"] }));
+        assert_eq!(one["name"], r["name"]);
+    }
+}
+
+#[test]
+fn components_read_as_the_document_and_write_back_unchanged() {
+    let mut w = running();
+    for n in 1..=4 {
+        let before = call(&mut w, "entity", json!({ "id": uid(n) }));
+        for c in before["components"].as_array().unwrap() {
+            let r = call(
+                &mut w,
+                "set",
+                json!({ "id": uid(n), "type": c["type"], "data": c["data"] }),
+            );
+            assert_eq!(r["ok"], json!(true), "{r}");
+        }
+        let after = call(&mut w, "entity", json!({ "id": uid(n) }));
+        assert_eq!(before, after, "a round trip of e{n} changes nothing");
+    }
+    let camera = call(&mut w, "entity", json!({ "id": uid(2) }));
+    let types: Vec<&str> = camera["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(types, ["fynkel.Transform", "fynkel.Camera"]);
+}
+
+#[test]
+fn a_write_shows_at_once_without_a_tick() {
+    let mut w = running();
+    let tick = w.tick();
+    let light = call(&mut w, "entity", json!({ "id": uid(3) }));
+    let mut data = light["components"][1]["data"].clone();
+    data["intensity"] = json!(42.0);
+    assert_eq!(
+        call(
+            &mut w,
+            "set",
+            json!({ "id": uid(3), "type": "fynkel.PointLight", "data": data })
+        )["ok"],
+        json!(true)
+    );
+    let mut t = light["components"][0]["data"].clone();
+    t["position"] = json!([0.0, 5.0, 0.0]);
+    assert_eq!(
+        call(
+            &mut w,
+            "set",
+            json!({ "id": uid(3), "type": "fynkel.Transform", "data": t })
+        )["ok"],
+        json!(true)
+    );
+    assert_eq!(
+        call(&mut w, "rename", json!({ "id": uid(3), "name": "Lamp" }))["ok"],
+        json!(true)
+    );
+
+    let now = call(&mut w, "entity", json!({ "id": uid(3) }));
+    assert_eq!(now["name"], json!("Lamp"));
+    assert_eq!(now["components"][1]["data"]["intensity"], json!(42.0));
+    assert_eq!(
+        now["world"]["position"],
+        json!([10.0, 5.0, 0.0]),
+        "propagated under its parent"
+    );
+    assert_eq!(w.tick(), tick);
+
+    assert_eq!(
+        call(
+            &mut w,
+            "remove",
+            json!({ "id": uid(3), "type": "fynkel.PointLight" })
+        )["ok"],
+        json!(true)
+    );
+    let now = call(&mut w, "entity", json!({ "id": uid(3) }));
+    assert_eq!(now["components"].as_array().unwrap().len(), 1);
+    assert_eq!(w.tick(), tick);
+}
+
+#[test]
+fn bad_calls_are_refused() {
+    let mut w = running();
+    let err = |w: &mut World, kind: &str, args: Value| {
+        live::call(w, kind, &args).unwrap_err()[0].message.clone()
+    };
+    assert!(err(&mut w, "entity", json!({ "id": uid(77) })).contains("no live entity"));
+    assert!(err(&mut w, "entity", json!({ "id": "runtime:12345" })).contains("no live entity"));
+    assert!(err(
+        &mut w,
+        "set",
+        json!({ "id": uid(1), "type": "game.Health", "data": {} })
+    )
+    .contains("not a native component"));
+    assert!(err(
+        &mut w,
+        "set",
+        json!({ "id": uid(3), "type": "fynkel.PointLight", "data": { "intensity": "bright" } })
+    )
+    .contains("fynkel.PointLight"));
+    assert!(err(
+        &mut w,
+        "remove",
+        json!({ "id": uid(1), "type": "fynkel.Transform" })
+    )
+    .contains("keeps its Transform"));
+    assert!(err(&mut w, "fly", json!({})).contains("unknown live call"));
+    // The world refuses what it would refuse from a game.
+    let r = call(
+        &mut w,
+        "remove",
+        json!({ "id": uid(1), "type": "fynkel.Camera" }),
+    );
+    assert_eq!(r["ok"], json!(false), "{r}");
+    assert!(
+        r["rejected"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Camera"),
+        "{r}"
+    );
+}
