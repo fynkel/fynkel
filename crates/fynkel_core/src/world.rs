@@ -169,6 +169,11 @@ pub struct ExtractRecord {
     pub world: Mat4,
     /// True when a presentation override replaced interpolation this frame.
     pub overridden: bool,
+    /// The bit of the entity's `fynkel.Layer` (ADR-0020; `1`, `default`,
+    /// without one): a camera whose `culling_mask` lacks it neither draws
+    /// the object nor lets it cast a shadow, and a point or spot light
+    /// whose mask lacks it does not light it.
+    pub layer_bit: u32,
 }
 
 /// A visible `MeshRenderer`: `record` indexes [`Extract::records`].
@@ -1815,6 +1820,7 @@ impl World {
                 entity: e,
                 world,
                 overridden,
+                layer_bit: self.ecs.copy::<Layer>(e).map_or(1, |l| l.bit().max(1)),
             });
             if let Ok(m) = self.ecs.get::<MeshRenderer>(e) {
                 if m.visible {

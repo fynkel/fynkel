@@ -365,6 +365,10 @@ fn extract_resolves_renderable_components_against_records() {
             priority: 5,
             ..Camera::default()
         }));
+    // The mesh's entity on layer 3 (ADR-0020); the others on default.
+    s.entities[1]
+        .components
+        .push(ComponentValue::Layer(scene::Layer { layer: 3 }));
     let loaded = world.load_scene(&s).unwrap();
     let ex = world.extract();
     assert_eq!(ex.records.len(), 4);
@@ -374,6 +378,12 @@ fn extract_resolves_renderable_components_against_records() {
     };
     assert_eq!(ex.meshes.len(), 1, "invisible renderers are not extracted");
     assert_eq!(ex.meshes[0].record, record_of(1));
+    assert_eq!(ex.records[record_of(1) as usize].layer_bit, 1 << 3);
+    assert_eq!(
+        ex.records[record_of(4) as usize].layer_bit,
+        1,
+        "no Layer: default"
+    );
     assert_eq!(ex.meshes[0].mesh.sub, "mesh/0");
     assert_eq!(ex.meshes[0].material.asset, id(51));
     let cam = ex.camera.unwrap();

@@ -209,6 +209,7 @@ pub fn run(args: &[String]) -> ExitCode {
                 "steps": opts.steps,
                 "instances": stats.instances,
                 "culled": stats.culled,
+                "layerHidden": stats.layer_hidden,
                 "draws": stats.draws,
                 "skinned": stats.skinned,
                 "joints": stats.joints,

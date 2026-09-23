@@ -319,6 +319,9 @@ pub struct FrameStats {
     /// Instances outside the camera frustum, not drawn in the scene (they
     /// may still cast into the shadow map).
     pub culled: u32,
+    /// Records the scene camera's `culling_mask` leaves out (ADR-0020):
+    /// neither drawn nor casting a shadow.
+    pub layer_hidden: u32,
     /// Cooked meshes among the records (before culling).
     pub meshes: u32,
     pub placeholders: u32,
@@ -1751,7 +1754,8 @@ impl ExtractRenderer {
 
         // Point and spot lights: every one of them, culled to the view
         // and assigned per object below.
-        let mut lights: Vec<(f32, GpuLight)> =
+        // Each with its `culling_mask` (ADR-0020): the layers it lights.
+        let mut lights: Vec<(f32, GpuLight, u32)> =
             Vec::with_capacity(extract.point_lights.len() + extract.spot_lights.len());
         for l in &extract.point_lights {
             lights.push((
@@ -1763,6 +1767,7 @@ impl ExtractRenderer {
                         .to_array(),
                     ..GpuLight::default()
                 },
+                l.light.culling_mask,
             ));
         }
         for l in &extract.spot_lights {
@@ -1785,6 +1790,7 @@ impl ExtractRenderer {
                         .to_array(),
                     params: [cos_inner, 0.0, 0.0, 0.0],
                 },
+                l.light.culling_mask,
             ));
         }
         // The sun's shadow fit depends only on the camera, so it comes
@@ -1799,7 +1805,7 @@ impl ExtractRenderer {
         // enters the pool — exact, not an approximation, and it is why
         // `frustum_culling` does not gate this. The nearest to the camera
         // fill the pool when more than `LIGHT_POOL` still reach the view.
-        lights.retain(|(_, l)| {
+        lights.retain(|(_, l, _)| {
             camera_frustum.intersects(&Sphere {
                 center: Vec3::new(l.position[0], l.position[1], l.position[2]),
                 radius: l.position[3],
@@ -1808,9 +1814,17 @@ impl ExtractRenderer {
         lights.sort_by(|a, b| a.0.total_cmp(&b.0));
         let n_lights = lights.len().min(LIGHT_POOL);
         let mut packed = [GpuLight::default(); LIGHT_POOL];
-        for (slot, (_, l)) in packed.iter_mut().zip(lights.iter()) {
-            *slot = *l;
+        let mut light_masks = [u32::MAX; LIGHT_POOL];
+        for (i, (_, l, mask)) in lights.iter().take(LIGHT_POOL).enumerate() {
+            packed[i] = *l;
+            light_masks[i] = *mask;
         }
+        // The layers the frame's camera draws; the host's own camera (no
+        // scene camera) and the editor's draw every layer.
+        let camera_mask = extract
+            .camera
+            .as_ref()
+            .map_or(u32::MAX, |c| c.camera.culling_mask);
         stats.lights = n_lights as u32;
         stats.lights_dropped = (lights.len() - n_lights) as u32;
 
@@ -1833,6 +1847,11 @@ impl ExtractRenderer {
         let cube_bounds = self.cube.bounds;
         let mut caster_bounds: Option<Sphere> = None;
         for (ri, r) in extract.records.iter().enumerate() {
+            if r.layer_bit & camera_mask == 0 {
+                // Not this camera's layers: no draw, no shadow, no light list.
+                stats.layer_hidden += 1;
+                continue;
+            }
             let (key, double_sided, instance, casts, blend, bounds) =
                 match mesh_of_record.get(&(ri as u32)) {
                     Some(&mi) => {
@@ -1943,8 +1962,13 @@ impl ExtractRenderer {
             // unlit material ignores every light.
             let mut light_list = [0u32; 4];
             if in_view && n_lights > 0 && instance.flags[1] < 0.5 {
-                let (list, count, overflow) =
-                    assign_lights(&packed[..n_lights], &sphere, &mut self.light_scratch);
+                let (list, count, overflow) = assign_lights(
+                    &packed[..n_lights],
+                    &light_masks[..n_lights],
+                    r.layer_bit,
+                    &sphere,
+                    &mut self.light_scratch,
+                );
                 light_list = list;
                 stats.lights_max_per_object = stats.lights_max_per_object.max(count as u32);
                 stats.lights_overflow += overflow as u32;
@@ -2999,11 +3023,18 @@ type Grouped = (Instance, Visibility, [u32; 4]);
 /// nothing moves.
 fn assign_lights(
     pool: &[GpuLight],
+    masks: &[u32],
+    layer_bit: u32,
     sphere: &Sphere,
     scratch: &mut Vec<(f32, u8)>,
 ) -> ([u32; 4], usize, bool) {
     scratch.clear();
     for (i, l) in pool.iter().enumerate() {
+        // A light whose `culling_mask` leaves the object's layer out
+        // (ADR-0020) does not light it.
+        if masks[i] & layer_bit == 0 {
+            continue;
+        }
         let center = Vec3::new(l.position[0], l.position[1], l.position[2]);
         let range = l.position[3];
         // How far the light is from the nearest point of the bounds.

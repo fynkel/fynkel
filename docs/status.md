@@ -1381,8 +1381,17 @@ masks (prefab overrides included). It is refused while such a document
 has unsaved edits, and it is undone with the asset history. The **Tags
 and Layers** dialog (`Edit Layers…` / `Edit Tags…` in the header's menus)
 edits both lists (add, rename, reorder, remove) and applies them as that
-one operation. The open documents it rewrote are re-read. Next is L3
-(renderer masks), then L5.
+one operation. The open documents it rewrote are re-read.
+
+**L3 is done** (2026-09-23): the renderer reads the masks. The extract's
+records carry their entity's layer bit. An object outside the scene
+camera's `culling_mask` is neither drawn nor casts a shadow
+(`FrameStats::layer_hidden`, `layerHidden` in `fynkel render --json`). A
+point or spot light whose mask leaves the object's layer out is not
+assigned to it. The editor camera draws every layer. The sun's mask stays
+deferred. `shading.rs` covers all three cases in one pixel test. No wire
+format, fingerprint or cache version changed. Next is L5, the reference
+game.
 
 The M3 backlog as it landed, for the record:
 

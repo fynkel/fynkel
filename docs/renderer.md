@@ -589,7 +589,9 @@ Two passes, both on the CPU in `prepare`:
    windowed inverse square at the nearest point of the bounds, times the
    light's brightest channel. The strongest `MAX_LIGHTS` win; the list is
    the pool indices, one per byte. Shadow-only instances and unlit
-   materials get no list — neither is shaded by a punctual light.
+   materials get no list — neither is shaded by a punctual light. A light
+   whose `culling_mask` lacks the object's layer bit is skipped here
+   (ADR-0020), so the mask costs nothing on the GPU.
 
 `FrameStats`: `lights` (the pool), `lights_dropped`, `lights_max_per_object`
 and `lights_overflow` (instances that had more than eight on them);
@@ -607,7 +609,23 @@ runs once a frame. A cluster grid buys nothing at this budget; it becomes
 the answer when the *pool* has to grow, not when the scene does.
 
 One sun (the first `DirectionalLight`), the only light that casts a
-shadow, and it is not part of any of this — every object sees it.
+shadow, and it is not part of any of this — every object sees it (its
+mask is deferred by ADR-0020).
+
+## Layer masks (ADR-0020, L3)
+
+Each `ExtractRecord` carries `layer_bit`, the bit of its entity's
+`fynkel.Layer`. It is `1` (`default`) when the entity has none. The scene
+camera's `culling_mask` is tested first in `prepare`'s record loop. A
+record outside it is skipped before anything else: it is not drawn, it
+does not cast into the shadow map, and it gets no light list. Placeholders
+and missing-mesh cubes are skipped the same way. `FrameStats::layer_hidden`
+counts these records, and `fynkel render --json` prints it as
+`layerHidden`. The host's own camera (a scene without a `Camera`) and the
+editor's camera draw every layer. Point and spot light masks apply only in
+the per-object assignment above. The debug lines, the overlay, the
+editor's outlines and icons, and picking do not go through the record
+loop, so no mask applies to them.
 
 ## Uniform layout
 

@@ -44,6 +44,7 @@ fn record(slot: u32, world: Mat4) -> ExtractRecord {
         entity: Entity::from_bits(slot as u64 + 1),
         world,
         overridden: false,
+        layer_bit: 1,
     }
 }
 
@@ -369,6 +370,97 @@ fn each_object_is_lit_by_the_lights_that_reach_it() {
         right_green > right_red + 20.0,
         "the right cube is lit by its own light, not left black ({right_green} vs {right_red})"
     );
+}
+
+#[test]
+fn layer_masks_hide_objects_from_the_camera_and_from_lights() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    // Two cubes three metres either side, the right one on layer 1; one
+    // white light between them in front, reaching both.
+    let eye = Vec3::new(0.0, 0.0, 12.0);
+    let mut e = Extract::default();
+    e.records.push(record(0, Mat4::from_translation(eye)));
+    e.records
+        .push(record(1, Mat4::from_translation(Vec3::new(-3.0, 0.0, 0.0))));
+    let mut right = record(2, Mat4::from_translation(Vec3::new(3.0, 0.0, 0.0)));
+    right.layer_bit = 1 << 1;
+    e.records.push(right);
+    e.camera = Some(ExtractCamera {
+        record: 0,
+        world: Mat4::from_translation(eye),
+        camera: Camera::default(),
+    });
+    e.environment = Some(environment(Vec3::ONE, 0.0));
+    manual(&mut e, 4.0);
+    e.point_lights.push(ExtractPointLight {
+        record: 0,
+        position: Vec3::new(0.0, 0.0, 2.0),
+        light: PointLight {
+            color: Vec3::ONE,
+            intensity: 800.0,
+            range: 8.0,
+            culling_mask: u32::MAX,
+        },
+    });
+    let half = |px: &[[u8; 4]], left: bool| {
+        let (mut sum, mut n) = (0.0, 0);
+        for y in 0..H {
+            for x in 0..W {
+                let p = px[(y * W + x) as usize];
+                if is_background(p) || (x < W / 2) != left {
+                    continue;
+                }
+                sum += luminance(p);
+                n += 1;
+            }
+        }
+        (sum / n.max(1) as f32, n)
+    };
+
+    // Everything: both cubes drawn and lit alike.
+    let px = render_offscreen(&device, &queue, &mut r, &e);
+    let ((left, left_n), (right, right_n)) = (half(&px, true), half(&px, false));
+    assert!(
+        left_n > 80 && right_n > 80,
+        "both drawn ({left_n}, {right_n})"
+    );
+    assert!((left - right).abs() < 10.0, "lit alike ({left} vs {right})");
+    assert_eq!(r.stats().layer_hidden, 0);
+
+    // The light leaves layer 1 out: the right cube is drawn, unlit.
+    e.point_lights[0].light.culling_mask = !(1 << 1);
+    let px = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&px, "layer-light-mask");
+    let ((left_lit, _), (right_unlit, right_n)) = (half(&px, true), half(&px, false));
+    assert!(right_n > 80, "still drawn ({right_n})");
+    assert!(
+        right_unlit < left_lit * 0.3,
+        "the masked light does not light it ({right_unlit} vs {left_lit})"
+    );
+
+    // The camera leaves layer 1 out: the right cube is not drawn.
+    e.point_lights[0].light.culling_mask = u32::MAX;
+    e.camera.as_mut().unwrap().camera.culling_mask = 1;
+    let px = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&px, "layer-camera-mask");
+    let ((_, left_n), (_, right_n)) = (half(&px, true), half(&px, false));
+    assert!(left_n > 80, "the default layer is drawn ({left_n})");
+    assert_eq!(right_n, 0, "layer 1 is not drawn");
+    assert_eq!(r.stats().layer_hidden, 1);
+
+    // Nor does it cast a shadow in that camera's frame.
+    let mut sun = sun(Vec3::new(0.3, -1.0, -0.2), 10_000.0);
+    sun.light.cast_shadows = true;
+    e.directional_lights.push(sun);
+    e.camera.as_mut().unwrap().camera.culling_mask = u32::MAX;
+    render_offscreen(&device, &queue, &mut r, &e);
+    let casters = r.stats().shadow_casters;
+    e.camera.as_mut().unwrap().camera.culling_mask = 1;
+    render_offscreen(&device, &queue, &mut r, &e);
+    assert_eq!(r.stats().shadow_casters, casters - 1, "{:?}", r.stats());
 }
 
 #[test]
