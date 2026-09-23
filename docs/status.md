@@ -1333,6 +1333,16 @@ game-defined data asset, a `ScriptableObject`-like `@DataAsset`) and the
 shader assets the user asked for. M4 continues on its branch (item 16 below); M5
 opens when M4 closes.
 
+**Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
+R3b capture waits for a quiet machine: several tags and one engine-wide
+layer per object, as the optional components `fynkel.Tags` and
+`fynkel.Layer`; physics membership from the object's layer (the
+colliders' own `layer` bits migrated away), camera and point/spot light
+culling masks, the Dart API by name (`hasTag`, `findWithTag`, `layer`),
+and the editor's object header and Tags and Layers settings. The steps
+are L1 (documents and migrations), L2 (runtime and Dart), L3 (renderer
+masks), L4 (editor) and L5 (the reference game), each its own commit.
+
 The M3 backlog as it landed, for the record:
 
 1. ~~**`package:fynkel_flutter`** (D1)~~ — done (M3-01): the viewport widget
