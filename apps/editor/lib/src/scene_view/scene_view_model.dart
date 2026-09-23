@@ -575,6 +575,7 @@ final class SceneViewModel extends ChangeNotifier {
 
   /// F: frame the selection (everything when nothing is selected).
   void frameSelected() {
+    _stopCoast();
     final t = current;
     if (t == null) return;
     final sel = t.tab.selection.where((id) => !t.state.hidden.contains(id)).toList();
@@ -590,6 +591,7 @@ final class SceneViewModel extends ChangeNotifier {
 
   /// ⇧F: frame every visible entity.
   void frameAll() {
+    _stopCoast();
     final t = current;
     if (t == null) return;
     final hidden = _hiddenAll(t);
@@ -1668,6 +1670,7 @@ final class SceneViewModel extends ChangeNotifier {
   bool get _shiftHeld => HardwareKeyboard.instance.isShiftPressed;
 
   void pointerDown(PointerDownEvent e, Offset px) {
+    _stopCoast();
     if (!hasView) return;
     pointer = px;
     _last = px;
@@ -1767,12 +1770,14 @@ final class SceneViewModel extends ChangeNotifier {
   void pointerSignal(PointerSignalEvent e, Offset px) {
     if (e is! PointerScrollEvent || !hasView) return;
     pointer = px;
+    _stopCoast();
     _scroll(e.scrollDelta);
   }
 
-  /// A scroll of [delta] (a wheel's direction: +y is away from the user).
-  void _scroll(Offset delta) {
-    if (_shiftHeld) {
+  /// A scroll of [delta] (a wheel's direction: +y is away from the user);
+  /// [panning] defaults to ⇧ held now.
+  void _scroll(Offset delta, {bool? panning}) {
+    if (panning ?? _shiftHeld) {
       pan(-delta.dx, -delta.dy);
     } else {
       dolly(-delta.dy / 40);
@@ -1785,14 +1790,30 @@ final class SceneViewModel extends ChangeNotifier {
   // arrive as one pan-zoom gesture whose pan and scale are totals since it
   // began. A scroll dollies (⇧ pans) exactly as the wheel does; a pinch
   // dollies by its own ratio — spread the fingers and the view comes closer.
+  //
+  // Flutter drops the system's momentum events, so the scroll coasts here:
+  // the fingers' velocity at lift-off keeps scrolling and decays, as a
+  // scrolled list does. Touching the trackpad again, a wheel or a click
+  // stops it.
 
   Offset _gesturePan = Offset.zero;
   double _gestureScale = 1;
+  final _gestureSamples = <(Duration, Offset)>[];
+  Timer? _coastTimer;
+
+  /// The coast's decay per second (UIScrollView's normal rate) and the
+  /// speed, in logical pixels per second, where it stops.
+  static const _coastDecay = 2.0;
+  static const _coastStop = 20.0;
 
   void panZoomStart(PointerPanZoomStartEvent e, Offset px) {
     pointer = px;
+    _stopCoast();
     _gesturePan = Offset.zero;
     _gestureScale = 1;
+    _gestureSamples
+      ..clear()
+      ..add((e.timeStamp, Offset.zero));
   }
 
   void panZoomUpdate(PointerPanZoomUpdateEvent e, Offset px) {
@@ -1802,19 +1823,62 @@ final class SceneViewModel extends ChangeNotifier {
     final ratio = e.scale / _gestureScale;
     _gesturePan = e.pan;
     _gestureScale = e.scale;
+    _gestureSamples.add((e.timeStamp, e.pan));
+    // The velocity reads the last 100 ms.
+    while (_gestureSamples.length > 2 && e.timeStamp - _gestureSamples.first.$1 > const Duration(milliseconds: 100)) {
+      _gestureSamples.removeAt(0);
+    }
     if (ratio.isFinite && ratio > 0 && ratio != 1) dolly(math.log(ratio) * 10);
     // A finger movement is the opposite of the scroll it makes.
     if (pan != Offset.zero) _scroll(-pan);
   }
 
   void panZoomEnd(PointerPanZoomEndEvent e, Offset px) {
+    final pinched = _gestureScale != 1;
+    final v = _liftVelocity(e.timeStamp);
     _gesturePan = Offset.zero;
     _gestureScale = 1;
+    _gestureSamples.clear();
+    // A pinch lands where the fingers leave it.
+    if (!pinched && hasView && v.distance > _coastStop) _coast(-v, panning: _shiftHeld);
+  }
+
+  /// The fingers' velocity (logical pixels per second) over the last
+  /// samples; zero when they rested before lifting.
+  Offset _liftVelocity(Duration end) {
+    if (_gestureSamples.length < 2) return Offset.zero;
+    final (t1, p1) = _gestureSamples.last;
+    if (end - t1 > const Duration(milliseconds: 50)) return Offset.zero;
+    final (t0, p0) = _gestureSamples.first;
+    final dt = (t1 - t0).inMicroseconds / 1e6;
+    return dt > 0 ? (p1 - p0) / dt : Offset.zero;
+  }
+
+  /// Keep scrolling at [velocity] (logical pixels per second, a scroll's
+  /// direction), decaying; [panning] holds the mode the gesture ended in.
+  void _coast(Offset velocity, {required bool panning}) {
+    _stopCoast();
+    var v = velocity;
+    const dt = 0.016; // a tick, as the fly's
+    _coastTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
+      if (!hasView || v.distance < _coastStop) {
+        _stopCoast();
+        return;
+      }
+      _scroll(v * dt, panning: panning);
+      v *= math.exp(-_coastDecay * dt);
+    });
+  }
+
+  void _stopCoast() {
+    _coastTimer?.cancel();
+    _coastTimer = null;
   }
 
   void _cancelInteraction() {
     if (drag != null) cancelDrag();
     _stopFly();
+    _stopCoast();
     _mode = _Mode.none;
     marquee = null;
     hoverHandle = null;
@@ -1961,6 +2025,7 @@ final class SceneViewModel extends ChangeNotifier {
     _disposed = true;
     views?._views.remove(this);
     _stopFly();
+    _stopCoast();
     tabs.removeListener(_onTabs);
     project.removeListener(_onProject);
     editorState.removeListener(notifyListeners);

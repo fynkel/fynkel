@@ -59,6 +59,34 @@ void main() {
       expect(vDot(vNormalize(moved), f).abs(), lessThan(1e-6));
     });
 
+    test('a perspective dolly zooms through its pivot instead of stalling; orthographic stops', () {
+      final c = EditorCamera.initial();
+      final pos0 = c.position;
+      final f = c.forward;
+      var last = 0.0;
+      for (var i = 0; i < 100; i++) {
+        c.dolly(5);
+        final travelled = vDot(vSub(c.position, pos0), f);
+        expect(travelled, greaterThan(last), reason: 'every notch still moves the camera forward');
+        last = travelled;
+      }
+      expect(c.distance, closeTo(EditorCamera.throughDistance, 1e-9));
+      expect(last, greaterThan(20), reason: 'it walked well past the start pivot 10 m ahead');
+      // Pulling back from there is an ordinary dolly out.
+      final pivot = List.of(c.pivot);
+      c.dolly(-5);
+      expectVec(c.pivot, pivot);
+      expect(c.distance, greaterThan(EditorCamera.throughDistance));
+
+      final o = EditorCamera.initial()..orthographic = true;
+      final p0 = List.of(o.pivot);
+      for (var i = 0; i < 100; i++) {
+        o.dolly(5);
+      }
+      expectVec(o.pivot, p0);
+      expect(o.distance, EditorCamera.minDistance);
+    });
+
     test('frame puts the box in view and focus centres it', () {
       final c = EditorCamera.initial();
       c.frame([10, 0, 10], [12, 2, 12]);

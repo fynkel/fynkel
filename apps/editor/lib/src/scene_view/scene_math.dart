@@ -273,11 +273,26 @@ final class EditorCamera {
   }
 
   /// Move towards (positive) or away from the pivot; one wheel notch is
-  /// about 10 %.
+  /// about 10 %. A perspective view never stalls at its pivot: inside
+  /// [throughDistance] the camera keeps its pace and pushes the pivot ahead
+  /// of it (Unity's zoom-through), so scrolling in walks through the scene.
   void dolly(double steps) {
     _unalign();
-    distance = math.max(minDistance, distance * math.exp(-steps * 0.1));
+    final next = distance * math.exp(-steps * 0.1);
+    final floor = math.min(throughDistance, distance);
+    if (orthographic || steps <= 0 || next >= floor) {
+      distance = math.max(minDistance, next);
+      return;
+    }
+    // The steps left once the distance reaches the floor move at the
+    // floor's pace: 10 % of it per notch.
+    final beyond = steps - math.log(distance / floor) / 0.1;
+    distance = floor;
+    pivot = vAdd(pivot, vScale(forward, floor * 0.1 * beyond));
   }
+
+  /// Where a perspective dolly stops closing on the pivot and pushes it.
+  static const throughDistance = 0.5;
 
   /// Fly: move the camera (and its pivot) by metres in its own axes.
   void fly(double forwardM, double rightM, double upM) {

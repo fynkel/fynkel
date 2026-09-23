@@ -4,6 +4,7 @@
 // editor-only hidden/locked flags, the camera commands, the hotkeys and
 // the prefab drop. The real world is covered by scene_session_test.dart.
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -305,6 +306,60 @@ void main() {
       r.model.panZoomEnd(const PointerPanZoomEndEvent(position: px), px);
       expect(st.camera.distance, closeTo(d1, 1e-9));
       expect(st.cameraVersion, greaterThan(1));
+    });
+  });
+
+  test('a trackpad scroll keeps coasting after the fingers lift, decays, and a touch stops it', () {
+    fakeAsync((async) {
+      final r = Rig();
+      final st = r.open();
+      const px = Offset(800, 450);
+      // A quick flick: 10 px every 10 ms, the page moving down (the view comes closer).
+      r.model.panZoomStart(const PointerPanZoomStartEvent(position: px), px);
+      for (var i = 1; i <= 8; i++) {
+        r.model.panZoomUpdate(
+          PointerPanZoomUpdateEvent(
+            timeStamp: Duration(milliseconds: 10 * i),
+            position: px,
+            pan: Offset(0, 10.0 * i),
+          ),
+          px,
+        );
+      }
+      r.model.panZoomEnd(const PointerPanZoomEndEvent(timeStamp: Duration(milliseconds: 80), position: px), px);
+      final lifted = st.camera.distance;
+      async.elapse(const Duration(milliseconds: 100));
+      final coasting = st.camera.distance;
+      expect(coasting, lessThan(lifted), reason: 'still dollying in after the lift');
+      async.elapse(const Duration(seconds: 5));
+      final settled = st.camera.distance;
+      async.elapse(const Duration(milliseconds: 500));
+      expect(st.camera.distance, settled, reason: 'the coast decays and stops');
+
+      // A new touch stops a coast at once.
+      r.model.panZoomStart(const PointerPanZoomStartEvent(position: px), px);
+      for (var i = 1; i <= 8; i++) {
+        r.model.panZoomUpdate(
+          PointerPanZoomUpdateEvent(
+            timeStamp: Duration(seconds: 10, milliseconds: 10 * i),
+            position: px,
+            pan: Offset(0, -10.0 * i),
+          ),
+          px,
+        );
+      }
+      r.model.panZoomEnd(
+        const PointerPanZoomEndEvent(timeStamp: Duration(seconds: 10, milliseconds: 80), position: px),
+        px,
+      );
+      async.elapse(const Duration(milliseconds: 50));
+      r.model.panZoomStart(const PointerPanZoomStartEvent(position: px), px);
+      final held = st.camera.distance;
+      async.elapse(const Duration(milliseconds: 500));
+      expect(st.camera.distance, held);
+      r.model.panZoomEnd(const PointerPanZoomEndEvent(position: px), px);
+      r.dispose();
+      async.flushTimers();
     });
   });
 
