@@ -11,6 +11,7 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../commands/commands.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
+import '../play/play_document.dart' show PlayDocument;
 import '../theme/icons.dart';
 import '../theme/lock_button.dart';
 import '../theme/panel_focus.dart';
@@ -177,7 +178,18 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
               style: theme.textTheme.bodySmall?.copyWith(color: t.textSecondary),
             ),
           ),
-        if (tab.document.readOnly != null)
+        if (tab.document is PlayDocument)
+          Container(
+            key: const Key('hierarchy.playing'),
+            width: double.infinity,
+            color: t.header,
+            padding: EdgeInsets.symmetric(horizontal: t.pad, vertical: 3),
+            child: Text(
+              'Playing — the running game, as it is now',
+              style: theme.textTheme.bodySmall?.copyWith(color: t.accent),
+            ),
+          )
+        else if (tab.document.readOnly != null)
           Container(
             key: const Key('hierarchy.readOnly'),
             width: double.infinity,

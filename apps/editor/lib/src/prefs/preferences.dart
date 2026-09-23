@@ -63,6 +63,7 @@ final class Preferences extends ChangeNotifier {
       fynkelRoot = _blankToNull(json['fynkelRoot'] as String?),
       flutterCommand = json['flutterCommand'] as String? ?? 'flutter',
       zoomToPointer = json['zoomToPointer'] as bool? ?? true,
+      playModeTint = json['playModeTint'] as bool? ?? true,
       _recents = [
         for (final r in json['recents'] as List? ?? const [])
           if (r is Map<String, Object?>) RecentProject.fromJson(r),
@@ -118,6 +119,10 @@ final class Preferences extends ChangeNotifier {
   /// off, about the view's centre (Unity's default).
   bool zoomToPointer;
 
+  /// The editor is tinted while the game plays in it (ADR-0021 P7), as
+  /// Unity's is: what is changed then does not stay.
+  bool playModeTint;
+
   List<RecentProject> _recents;
   List<RecentProject> get recents => List.unmodifiable(_recents);
 
@@ -129,6 +134,7 @@ final class Preferences extends ChangeNotifier {
   void setFynkelCli(String? path) => _update(() => fynkelCli = _blankToNull(path));
   void setFynkelRoot(String? path) => _update(() => fynkelRoot = _blankToNull(path));
   void setZoomToPointer(bool on) => _update(() => zoomToPointer = on);
+  void setPlayModeTint(bool on) => _update(() => playModeTint = on);
   void setFlutterCommand(String c) => _update(() => flutterCommand = c.trim().isEmpty ? 'flutter' : c.trim());
 
   void addRecent(String dir, String name, {DateTime? now}) => _update(() {
@@ -154,6 +160,7 @@ final class Preferences extends ChangeNotifier {
     'fynkelRoot': fynkelRoot,
     'flutterCommand': flutterCommand,
     'zoomToPointer': zoomToPointer,
+    'playModeTint': playModeTint,
     'recents': [for (final r in _recents) r.toJson()],
   };
 

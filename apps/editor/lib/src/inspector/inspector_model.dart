@@ -299,8 +299,8 @@ final class InspectorModel extends ChangeNotifier {
 
   void _onTabs() {
     // A locked Inspector stays on its tab until that tab closes.
-    if (locked && !tabs.open.contains(_tab)) _lockedIds = null;
-    final t = locked ? _tab : tabs.focused;
+    if (locked && !tabs.open.contains(_tab) && !identical(_tab, tabs.live)) _lockedIds = null;
+    final t = locked ? _tab : tabs.shown;
     if (t != _tab) {
       _tab?.removeListener(_onTab);
       _tab = t;

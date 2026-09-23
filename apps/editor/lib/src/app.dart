@@ -6,6 +6,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:path/path.dart' as p;
@@ -32,6 +33,7 @@ import 'play/game_console.dart';
 import 'play/game_panel.dart';
 import 'play/game_preview.dart';
 import 'play/game_record.dart';
+import 'play/live_play.dart';
 import 'play/play_prompt.dart';
 import 'play/play_session.dart';
 import 'prefs/preferences.dart';
@@ -53,6 +55,7 @@ import 'shell/workspace.dart';
 import 'theme/focus_ring.dart';
 import 'theme/icons.dart';
 import 'theme/theme.dart';
+import 'theme/tokens.dart' show FynkelTokens;
 
 const editorVersion = '0.1.0';
 
@@ -295,6 +298,25 @@ class EditorShellState extends State<EditorShell> {
   /// The Game view between runs: the active camera's picture (P4b).
   GamePreview? _gamePreview;
 
+  /// Live Play mode (ADR-0021 P7): the Hierarchy and the Inspector on the
+  /// running game's world while it runs.
+  LivePlay? _livePlay;
+
+  void _onPlayWorlds() {
+    final t = tabs;
+    if (!identical(_livePlay?.tabs, t)) {
+      _livePlay?.dispose();
+      _livePlay = t == null ? null : LivePlay(tabs: t);
+    }
+    final run = gameRun;
+    final running = run != null && run.running;
+    _livePlay?.follow(running ? run.control.world : null);
+    // The play-mode tint wraps the window: build again when Play starts or ends.
+    if (running != _playing && mounted) setState(() => _playing = running);
+  }
+
+  bool _playing = false;
+
   void _onCodeReload() {
     final r = codeReload?.last;
     if (r == null) return;
@@ -348,6 +370,31 @@ class EditorShellState extends State<EditorShell> {
     }
   }
 
+  /// Game records that came in while a frame was building (a game makes
+  /// its world in `initState`, and the world's first record comes at once):
+  /// held, in order, until the build is over — the Play log notifies.
+  List<String>? _heldRecords;
+
+  void _receiveRecord(String line) {
+    final held = _heldRecords;
+    if (held != null) {
+      held.add(line);
+      return;
+    }
+    if (SchedulerBinding.instance.schedulerPhase != SchedulerPhase.persistentCallbacks) {
+      play?.receive(line);
+      return;
+    }
+    _heldRecords = [line];
+    scheduleMicrotask(() {
+      final lines = _heldRecords ?? const <String>[];
+      _heldRecords = null;
+      for (final l in lines) {
+        play?.receive(l);
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -358,9 +405,11 @@ class EditorShellState extends State<EditorShell> {
     if (game != null) {
       gameRun = GameRun(
         game: game,
-        onRecord: (line) => play?.receive(line),
+        onRecord: _receiveRecord,
         onQuit: () => unawaited(stopPlaying()),
       )..addListener(registry.refresh);
+      gameRun!.addListener(_onPlayWorlds);
+      gameRun!.control.worldsChanged.addListener(_onPlayWorlds);
     }
     _panels = PanelRegistry(_panelSpecs());
     _registerCommands();
@@ -383,6 +432,7 @@ class EditorShellState extends State<EditorShell> {
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
     codeReload?.dispose();
+    _livePlay?.dispose();
     gameRun?.dispose();
     workspace?.dispose();
     _disposeCopies();
@@ -2007,6 +2057,7 @@ class EditorShellState extends State<EditorShell> {
     final session = play;
     final run = gameRun;
     if (run != null && run.running) {
+      _livePlay?.follow(null);
       run.stop();
       session?.endInEditor();
       if (mounted) registry.refresh();
@@ -2638,7 +2689,7 @@ class EditorShellState extends State<EditorShell> {
   @override
   Widget build(BuildContext context) {
     final p0 = project;
-    final Widget body;
+    Widget body;
     if ((p0 == null || workspace == null) && _startingOn != null) {
       body = OpeningScreen(dir: _startingOn!, prefs: widget.prefs);
     } else if (p0 == null || workspace == null) {
@@ -2687,6 +2738,16 @@ class EditorShellState extends State<EditorShell> {
         layoutNotice: _layoutNotice,
         onDismissNotice: () => setState(() => _layoutNotice = null),
       );
+      if ((gameRun?.running ?? false) && widget.prefs.playModeTint) {
+        // Play mode's tint (ADR-0021 P7): the editor's surfaces, not the
+        // game's picture.
+        final theme = Theme.of(context);
+        body = Theme(
+          key: const Key('shell.playTint'),
+          data: fynkelTheme(brightness: theme.brightness, density: widget.prefs.density, tint: FynkelTokens.playTint),
+          child: body,
+        );
+      }
     }
     return ListenableBuilder(
       listenable: registry,

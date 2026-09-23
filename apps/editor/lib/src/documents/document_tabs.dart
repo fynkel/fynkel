@@ -28,6 +28,22 @@ final class DocumentTabs extends ChangeNotifier {
   String? openError;
 
   OpenDocument? get focused => _focused;
+
+  OpenDocument? _live;
+
+  /// The running game while Play is up (ADR-0021 P7): not a tab — it is
+  /// never saved, closed or cycled through — but what the Hierarchy and
+  /// the Inspector show ([shown]). The shell sets it and disposes it.
+  OpenDocument? get live => _live;
+  set live(OpenDocument? tab) {
+    if (identical(tab, _live)) return;
+    _live = tab;
+    notifyListeners();
+  }
+
+  /// What the Hierarchy and the Inspector follow: the running game during
+  /// Play, the focused tab otherwise.
+  OpenDocument? get shown => _live ?? _focused;
   bool get isEmpty => open.isEmpty;
   bool get anyDirty => open.any((d) => d.dirty);
   List<OpenDocument> get dirtyDocuments => [
@@ -161,6 +177,9 @@ final class DocumentTabs extends ChangeNotifier {
     }
     open.clear();
     _focused = null;
+    _live?.close();
+    _live?.dispose();
+    _live = null;
     super.dispose();
   }
 }

@@ -25,8 +25,8 @@ const _tabular = [FontFeature.tabularFigures()];
 
 /// Builds the editor's theme. [density] decides every row height through
 /// the tokens; [brightness] picks one of the two palettes.
-ThemeData fynkelTheme({required Brightness brightness, EditorDensity density = EditorDensity.standard}) {
-  final t = FynkelTokens.of(brightness, density);
+ThemeData fynkelTheme({required Brightness brightness, EditorDensity density = EditorDensity.standard, Color? tint}) {
+  final t = FynkelTokens.of(brightness, density, tint);
   // Every role the UI reads is spelled out, including the container roles:
   // a panel that asks for `colorScheme.surfaceContainerHighest` must land
   // on a token, not on whatever Material would have derived from a seed.

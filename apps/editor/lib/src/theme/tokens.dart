@@ -244,16 +244,28 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
     axisZ: Color(0xFF2C5FD8),
   );
 
-  factory FynkelTokens.of(Brightness brightness, [EditorDensity density = EditorDensity.standard]) {
+  /// Play mode's tint (ADR-0021 P7): the editor's surfaces lean towards it
+  /// while the game runs, so a change made then is never mistaken for one
+  /// that stays. Violet, to stay clear of the selection's blue.
+  static const playTint = Color(0xFF7C5CD6);
+
+  /// How far the surfaces lean towards [playTint].
+  static const playTintAmount = 0.10;
+
+  /// [tint], when given, blends the surfaces (window, panels, headers,
+  /// fields, popups) towards it by [playTintAmount]; text, accents and
+  /// diagnostics keep their colours.
+  factory FynkelTokens.of(Brightness brightness, [EditorDensity density = EditorDensity.standard, Color? tint]) {
     final p = brightness == Brightness.dark ? _darkPalette : _lightPalette;
+    Color s(Color c) => tint == null ? c : Color.lerp(c, tint, playTintAmount)!;
     return FynkelTokens(
       brightness: brightness,
       density: density,
-      window: p.window,
-      panel: p.panel,
-      header: p.header,
-      field: p.field,
-      popup: p.popup,
+      window: s(p.window),
+      panel: s(p.panel),
+      header: s(p.header),
+      field: s(p.field),
+      popup: s(p.popup),
       line: p.line,
       lineStrong: p.lineStrong,
       text: p.text,

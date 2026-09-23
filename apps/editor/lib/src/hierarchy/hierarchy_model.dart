@@ -35,7 +35,7 @@ final class DropTarget {
 final class HierarchyModel extends ChangeNotifier {
   HierarchyModel({required this.tabs, required this.project}) {
     tabs.addListener(_onTabs);
-    _tab = tabs.focused;
+    _tab = tabs.shown;
     _tab?.addListener(_onTab);
   }
 
@@ -87,8 +87,8 @@ final class HierarchyModel extends ChangeNotifier {
   }
 
   void _onTabs() {
-    if (_pinned != null && !tabs.open.contains(_pinned)) _pinned = null;
-    final f = _pinned ?? tabs.focused;
+    if (_pinned != null && !tabs.open.contains(_pinned) && !identical(_pinned, tabs.live)) _pinned = null;
+    final f = _pinned ?? tabs.shown;
     if (f != _tab) {
       _tab?.removeListener(_onTab);
       _tab = f;

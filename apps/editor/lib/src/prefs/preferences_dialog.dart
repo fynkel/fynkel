@@ -115,6 +115,18 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
                   onChanged: (v) => prefs.setZoomToPointer(v ?? true),
                 ),
                 const SizedBox(height: 16),
+                Text('Play', style: theme.textTheme.titleSmall),
+                CheckboxListTile(
+                  key: const Key('prefs.playModeTint'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text('Tint the editor while the game plays'),
+                  subtitle: const Text('A reminder that changes made to the running game are lost on Stop.'),
+                  value: prefs.playModeTint,
+                  onChanged: (v) => prefs.setPlayModeTint(v ?? true),
+                ),
+                const SizedBox(height: 16),
                 Text('IDE command', style: theme.textTheme.titleSmall),
                 Text(
                   'Console rows open here. {file}, {line} and {column} are substituted.',
