@@ -7,6 +7,11 @@
 //
 // Rules the driver keeps: `start` runs once, before the first active
 // gameplay callback; a disabled behaviour receives no gameplay callbacks;
+// a behaviour is live only while it is enabled and its object is active in
+// the hierarchy (`GameObject.setActive`, docs/design/set-active.md) —
+// `onCreate` waits for the object's first active tick, `onDisable` runs
+// children first and `onEnable` parents first, and `onDestroy` only follows
+// an `onCreate`;
 // lifecycle transitions (create, enable, disable, destroy) happen only at
 // safe boundaries — the start of a callback phase — never in the middle of
 // another behaviour's callback; callback order is deterministic: by
@@ -277,7 +282,8 @@ abstract class Behaviour {
   AudioControl get audio => gameObject.audio;
 
   /// Desired state. Setting it queues `onEnable`/`onDisable` for the next
-  /// safe boundary; [isActive] says what the driver has applied.
+  /// safe boundary; [isActive] says what the driver has applied (enabled
+  /// and the object active in the hierarchy).
   bool get enabled => _enabled;
   set enabled(bool value) {
     if (_enabled == value) return;
@@ -544,10 +550,24 @@ class _BehaviourSystem {
     _dirty = true;
   }
 
-  /// Applies pending lifecycle transitions in callback order. Called at the
-  /// start of every callback phase and after the world resolves spawns and
-  /// destroys.
+  /// Applies pending lifecycle transitions. Called at the start of every
+  /// callback phase and after the world resolves spawns and destroys.
+  ///
+  /// A behaviour is live when it is enabled and its object is active in
+  /// the hierarchy (docs/design/set-active.md): `onDisable` runs children
+  /// first, then `onCreate`/`onEnable` parents first, each group in
+  /// callback order within a depth. `onCreate` waits until the object is
+  /// spawned and first active in the hierarchy.
   void settle() {
+    // Activity changes show in the world's entity table: a new table (a
+    // tick changed the structure, a load, a live edit) is a settle.
+    if (_all.isNotEmpty) {
+      final t = world._entities;
+      if (!identical(t, _table)) {
+        _table = t;
+        _dirty = true;
+      }
+    }
     if (!_dirty) return;
     _dirty = false;
     final n = _all.length;
@@ -568,28 +588,70 @@ class _BehaviourSystem {
         if (b._created) b.onDestroy();
         continue;
       }
+      // A pending spawn resolves at the next tick.
+      if (go.isPending) {
+        if (!b._created) _dirty = true;
+        continue;
+      }
+      final live = go.activeInHierarchy;
       if (!b._created) {
-        // onCreate waits for the object: a pending spawn resolves at the
-        // next tick and its behaviours are created right after.
-        if (go.isPending) {
-          _dirty = true;
-          continue;
-        }
-        b._created = true;
-        b.onCreate();
+        if (live) _enabling.add(b);
+      } else if ((b._enabled && live) != b._active) {
+        (b._active ? _disabling : _enabling).add(b);
       }
-      if (b._enabled != b._active) {
-        b._active = b._enabled;
-        if (b._active) {
+    }
+    _scratch.fillRange(0, n, null);
+    if (_disabling.isNotEmpty) {
+      if (_disabling.length > 1) _disabling.sort(_childrenFirst);
+      for (final b in _disabling) {
+        if (!b._active || b._destroyed) continue;
+        b._active = false;
+        b.onDisable();
+      }
+      _disabling.clear();
+    }
+    if (_enabling.isNotEmpty) {
+      if (_enabling.length > 1) _enabling.sort(_byDepth);
+      for (final b in _enabling) {
+        if (b._destroyed) continue;
+        if (!b._created) {
+          b._created = true;
+          b.onCreate();
+        }
+        if (b._enabled && !b._active && !b._destroyRequested) {
+          b._active = true;
           b.onEnable();
-        } else {
-          b.onDisable();
         }
       }
+      _enabling.clear();
     }
     // A callback may have attached or toggled something: those wait for
     // the next boundary (already flagged dirty by the mutation).
-    _scratch.fillRange(0, n, null);
+  }
+
+  /// The entity table the last settle saw.
+  Object? _table;
+
+  /// This settle's transitions (kept between settles: no allocation).
+  final List<Behaviour> _enabling = [], _disabling = [];
+
+  /// Parents before children, then callback order.
+  int _byDepth(Behaviour a, Behaviour b) {
+    final da = _depth(a), db = _depth(b);
+    if (da != db) return da - db;
+    return _before(a, b) ? -1 : (_before(b, a) ? 1 : 0);
+  }
+
+  /// Children before parents, then callback order.
+  int _childrenFirst(Behaviour a, Behaviour b) {
+    final da = _depth(a), db = _depth(b);
+    if (da != db) return db - da;
+    return _before(a, b) ? -1 : (_before(b, a) ? 1 : 0);
+  }
+
+  int _depth(Behaviour b) {
+    final e = b._gameObject!._entity;
+    return e == null ? 0 : world._entities.depthOf(e);
   }
 
   void _copyScratch() {

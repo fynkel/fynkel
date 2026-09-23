@@ -1364,6 +1364,7 @@ class GameObject {
   int _presentMask = 0;
 
   void _clearOverlay() {
+    _requestedActive = null;
     _overlay = null;
     _stagedValid = false;
     _components?.clear();
@@ -1458,6 +1459,43 @@ class GameObject {
 
   List<int> get children => world.childrenOf(this);
   int? get parent => world.parentOf(this);
+
+  /// This object's own active flag (Unity's `activeSelf`): what the scene
+  /// authored, or what [setActive] asked for — read-your-writes, like
+  /// [name]. An inactive parent does not change it; see
+  /// [activeInHierarchy].
+  bool get activeSelf {
+    final r = _requestedActive;
+    if (r != null) return r;
+    final e = _entity;
+    if (e == null || !_alive) return true;
+    return world._entities.activeSelf(e);
+  }
+
+  bool? _requestedActive;
+
+  /// Whether the object is live in the world: it and every ancestor
+  /// active, as the last tick left it (a [setActive] shows here after the
+  /// next tick). False while pending and once destroyed. An object that is
+  /// not active in the hierarchy is not drawn, simulated or heard, and its
+  /// behaviours are disabled.
+  bool get activeInHierarchy {
+    final e = _entity;
+    if (e == null || !_alive) return false;
+    return world._entities.activeInHierarchy(e);
+  }
+
+  /// Switches this object — and with it its subtree — on or off at the
+  /// next tick (`fynkel.cmd.SetActive`, docs/design/set-active.md). The
+  /// children keep their own flags: reactivating the parent brings back
+  /// exactly the ones that were active. Its behaviours get `onDisable` /
+  /// `onEnable` once the tick applies it.
+  void setActive(bool active) {
+    final e = _simulationEntity('setActive');
+    world._simulation.setActive(gen.SetActiveCommand(entity: e, active: active));
+    world._simulationTargets.add(this);
+    _requestedActive = active;
+  }
 
   /// The direct child named [name] (scene order), or null; a `/` walks
   /// down: `findChild('Arm/Hand')` is the `Hand` under the `Arm` under
@@ -1930,7 +1968,8 @@ class _WorldTime implements TimeService {
 /// The world's entities, parents, names and tags as one query (M3-08b,
 /// ADR-0020); built lazily per tick by [World.find] and friends.
 class _EntityTable {
-  _EntityTable._(this._parents, this._names, this._byName, this._children, this._tagged, this._tagBits, this._raw);
+  _EntityTable._(
+      this._parents, this._names, this._byName, this._children, this._tagged, this._tagBits, this._inactive, this._raw);
 
   factory _EntityTable.decode(WireBuffer b) {
     final parents = <int, int>{};
@@ -1939,6 +1978,7 @@ class _EntityTable {
     final children = <int, List<int>>{};
     final tagged = <int>[];
     final tagBits = <int>[];
+    final inactive = <int>{};
     final size = gen.EntityInfoRecord.wireSize;
     for (var i = 0; i < b.recordCount; i++) {
       final r = gen.EntityInfoRecord.decode(b.records, i * size, b.tail);
@@ -1954,8 +1994,9 @@ class _EntityTable {
         tagged.add(r.entity);
         tagBits.add(r.tags);
       }
+      if (!r.active) inactive.add(r.entity);
     }
-    return _EntityTable._(parents, names, byName, children, tagged, tagBits, Uint8List.fromList(b.bytes));
+    return _EntityTable._(parents, names, byName, children, tagged, tagBits, inactive, Uint8List.fromList(b.bytes));
   }
 
   final Map<int, int> _parents;
@@ -1966,6 +2007,9 @@ class _EntityTable {
   /// The entities with at least one tag, entity order, and their bits.
   final List<int> _tagged;
   final List<int> _tagBits;
+
+  /// The entities whose own flag is off (`activeSelf` false).
+  final Set<int> _inactive;
 
   /// The query bytes this table was decoded from.
   final Uint8List _raw;
@@ -1994,6 +2038,26 @@ class _EntityTable {
   String? nameOf(int entity) => _names[entity];
   int? parentOf(int entity) => _parents[entity];
   List<int> childrenOf(int parent) => _children[parent] ?? const [];
+
+  bool activeSelf(int entity) => !_inactive.contains(entity);
+
+  /// [entity] and every ancestor active; no walk while nothing is inactive.
+  bool activeInHierarchy(int entity) {
+    if (_inactive.isEmpty) return true;
+    for (int? e = entity; e != null; e = _parents[e]) {
+      if (_inactive.contains(e)) return false;
+    }
+    return true;
+  }
+
+  /// The number of ancestors of [entity].
+  int depthOf(int entity) {
+    var d = 0;
+    for (var e = _parents[entity]; e != null; e = _parents[e]) {
+      d++;
+    }
+    return d;
+  }
 
   int? firstTagged(int bit) {
     for (var i = 0; i < _tagged.length; i++) {

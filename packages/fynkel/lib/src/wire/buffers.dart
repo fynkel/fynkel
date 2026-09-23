@@ -182,6 +182,7 @@ class CommandBatch {
 
   void setParent(SetParentCommand c) => command(SetParentCommand.commandKind, SetParentCommand.wireSize, c);
   void setName(SetNameCommand c) => command(SetNameCommand.commandKind, SetNameCommand.wireSize, c);
+  void setActive(SetActiveCommand c) => command(SetActiveCommand.commandKind, SetActiveCommand.wireSize, c);
 
   /// Inserts or replaces a native component (M3-07a): the
   /// `SetComponentCommand` header then the component's own bytes, one
