@@ -55,12 +55,14 @@ use wgpu::util::DeviceExt;
 pub mod culling;
 pub mod debug;
 pub mod exposure;
+pub mod overlay;
 pub mod quality;
 pub mod shadow;
 
 pub use culling::{Frustum, Sphere};
 pub use debug::{DebugDraw, DebugVertex};
 pub use fynkel_assets::{Assets, EnvironmentPayload, PbrMaterial, QualityProfile};
+pub use overlay::{Grid, Overlay, OverlayLine, OverlayTriangle};
 pub use quality::{Quality, QualityStatus};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -342,8 +344,13 @@ pub struct FrameStats {
     /// Cascades drawn into that map's 2×2 atlas (0 when no shadow was
     /// drawn); each one is `shadow_map / 2` on a side.
     pub shadow_cascades: u32,
-    /// Debug lines drawn.
+    /// Lines the overlay drew: the [`Overlay`] queue's and the
+    /// [`DebugDraw`] queue's (ADR-0019).
     pub debug_lines: u32,
+    /// Triangles the overlay drew.
+    pub overlay_triangles: u32,
+    /// Whether the overlay drew the ground grid.
+    pub grid: bool,
     /// Whether the frame ran the ambient-occlusion stage (R2).
     pub ambient_occlusion: bool,
     /// Whether the frame ran the bloom stage (R3b).
@@ -666,8 +673,6 @@ struct Pipelines {
     bloom_prefilter: wgpu::RenderPipeline,
     bloom_down: wgpu::RenderPipeline,
     bloom_up: wgpu::RenderPipeline,
-    /// Debug lines.
-    debug: wgpu::RenderPipeline,
     post: wgpu::RenderPipeline,
     /// LDR at render scale → the target.
     present: wgpu::RenderPipeline,
@@ -821,9 +826,10 @@ pub struct ExtractRenderer {
     light_list_buffer: wgpu::Buffer,
     light_list_capacity: u32,
     debug: DebugDraw,
-    debug_buffer: wgpu::Buffer,
-    debug_capacity: u32,
-    debug_vertices: u32,
+    /// Gizmos and handles for the next frame, and the pass that draws
+    /// them after post (ADR-0019).
+    overlay: Overlay,
+    overlay_pass: overlay::OverlayPass,
     attachments: Attachments,
     shadow_map: ShadowMap,
     /// The shadow map holds this frame's sun: the shadow pass runs and the
@@ -923,8 +929,7 @@ impl ExtractRenderer {
         });
         let instance_capacity = 64;
         let instance_buffer = create_instance_buffer(device, instance_capacity);
-        let debug_capacity = 256;
-        let debug_buffer = create_debug_buffer(device, debug_capacity);
+        let overlay_pass = overlay::OverlayPass::new(device, format, quality.msaa);
 
         let uniform_entry = |binding, visibility| wgpu::BindGroupLayoutEntry {
             binding,
@@ -1229,9 +1234,8 @@ impl ExtractRenderer {
             light_list_buffer,
             light_list_capacity,
             debug: DebugDraw::default(),
-            debug_buffer,
-            debug_capacity,
-            debug_vertices: 0,
+            overlay: Overlay::default(),
+            overlay_pass,
             attachments,
             shadow_map,
             shadow_active: false,
@@ -1331,6 +1335,12 @@ impl ExtractRenderer {
         &mut self.debug
     }
 
+    /// Gizmos, handles and the ground grid to draw over the next frame
+    /// (cleared by `prepare` once uploaded; ADR-0019).
+    pub fn overlay(&mut self) -> &mut Overlay {
+        &mut self.overlay
+    }
+
     // ----------------------------------------------------------- quality
 
     /// Selects the project's quality profile by name (`None`: the
@@ -1422,8 +1432,10 @@ impl ExtractRenderer {
         let old = self.quality;
         self.quality = wanted;
         if wanted.msaa != self.pipelines.sample_count {
-            // The AO passes read the depth as the sample count stores it.
+            // The AO passes and the overlay read the depth as the sample
+            // count stores it.
             self.ao_layout = create_ao_layout(device, wanted.msaa);
+            self.overlay_pass.rebuild(device, self.format, wanted.msaa);
             self.pipelines = create_pipelines(
                 device,
                 self.format,
@@ -2188,22 +2200,26 @@ impl ExtractRenderer {
         };
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&u));
 
-        // Debug lines: uploaded, then the queue is cleared for the next
-        // frame.
-        let vertices = self.debug.vertices();
-        self.debug_vertices = vertices.len() as u32;
-        if self.debug_vertices > self.debug_capacity {
-            self.debug_capacity = self
-                .debug_vertices
-                .next_power_of_two()
-                .max(self.debug_capacity * 2);
-            self.debug_buffer = create_debug_buffer(device, self.debug_capacity);
-        }
-        if self.debug_vertices > 0 {
-            queue.write_buffer(&self.debug_buffer, 0, bytemuck::cast_slice(vertices));
-        }
-        stats.debug_lines = self.debug_vertices / 2;
-        self.debug.clear();
+        // The overlay (ADR-0019): its queue and the debug lines, uploaded
+        // and cleared for the next frame.
+        self.overlay_pass.prepare(
+            device,
+            queue,
+            &mut self.overlay,
+            &mut self.debug,
+            overlay::OverlayFrame {
+                view_proj,
+                camera_pos,
+                target: (self.width, self.height),
+                depth_view: &self.attachments.depth_view,
+                depth: (self.attachments.width, self.attachments.height),
+                encode_srgb: self.pipelines.encode_srgb,
+            },
+        );
+        let counts = self.overlay_pass.counts();
+        stats.debug_lines = counts.lines;
+        stats.overlay_triangles = counts.triangles;
+        stats.grid = counts.grid;
 
         stats.gpu_bytes = self.gpu_bytes();
         stats.prepare_us = prepare_start.elapsed().as_micros() as u32;
@@ -2237,7 +2253,7 @@ impl ExtractRenderer {
             + self.shadow_map.bytes()
             + self.instance_buffer.size()
             + self.joint_buffer.size()
-            + self.debug_buffer.size()
+            + self.overlay_pass.bytes()
             + self.uniform_buffer.size()
             + self.shadow_uniform_buffer.size()
             + self.post_buffer.size()
@@ -2305,6 +2321,9 @@ impl ExtractRenderer {
                 self.timestamps(3),
             );
         }
+        // Gizmos and handles over the finished frame, at the target's
+        // resolution (ADR-0019; not timed).
+        self.overlay_pass.draw(encoder, target);
         self.stats.encode_us = encode_start.elapsed().as_micros() as u32;
     }
 
@@ -2610,7 +2629,12 @@ impl ExtractRenderer {
                     } else {
                         wgpu::LoadOp::Clear(1.0)
                     },
-                    store: wgpu::StoreOp::Discard,
+                    // The overlay reads it after post (ADR-0019).
+                    store: if self.overlay_pass.active() {
+                        wgpu::StoreOp::Store
+                    } else {
+                        wgpu::StoreOp::Discard
+                    },
                 }),
                 stencil_ops: None,
             }),
@@ -2666,11 +2690,6 @@ impl ExtractRenderer {
                 bind_mesh(&mut pass, mesh, t.key.skinned);
                 pass.draw_indexed(0..mesh.index_count, 0, t.index..t.index + 1);
             }
-        }
-        if self.debug_vertices > 0 {
-            pass.set_pipeline(&self.pipelines.debug);
-            pass.set_vertex_buffer(0, self.debug_buffer.slice(..));
-            pass.draw(0..self.debug_vertices, 0..1);
         }
     }
 
@@ -3097,7 +3116,9 @@ impl Pipelines {
     }
 
     const fn count() -> usize {
-        23
+        // The twenty-two below plus the overlay's grid, lines and
+        // triangles (`overlay::OverlayPass`, ADR-0019).
+        25
     }
 }
 
@@ -3126,12 +3147,13 @@ struct AttachmentLayouts<'a> {
     bloom: &'a wgpu::BindGroupLayout,
 }
 
-/// The twenty-three pipeline variants (`docs/renderer.md`) for one sample
-/// count: mesh (cull back), mesh double-sided (cull none), transparent
+/// Twenty-two of the pipeline variants (`docs/renderer.md`) for one sample
+/// count — the overlay's three (grid, lines, triangles) live with its pass
+/// in `overlay.rs`: mesh (cull back), mesh double-sided (cull none), transparent
 /// (blend, cull back), transparent double-sided, the same four skinned
 /// (`vs_skinned`, a third vertex buffer of joint weights and the palette
 /// storage buffer at group 2), sky, shadow, shadow skinned, the four
-/// camera depth prepass twins, SSAO, the AO blur, debug lines,
+/// camera depth prepass twins, SSAO, the AO blur, bloom's three,
 /// post, present. Nothing else is ever created; a quality switch to
 /// another sample count rebuilds this set.
 fn create_pipelines(
@@ -3161,7 +3183,6 @@ fn create_pipelines(
     };
     let mesh_shader = module("fynkel mesh shader", include_str!("shaders/mesh.wgsl"));
     let sky_shader = module("fynkel sky shader", include_str!("shaders/sky.wgsl"));
-    let debug_shader = module("fynkel debug shader", include_str!("shaders/debug.wgsl"));
     let post_shader = module("fynkel post shader", include_str!("shaders/post.wgsl"));
     let bloom_shader = module("fynkel bloom shader", include_str!("shaders/bloom.wgsl"));
     let present_shader = module(
@@ -3206,11 +3227,6 @@ fn create_pipelines(
     let single_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("fynkel single-texture pl"),
         bind_group_layouts: &[Some(frame_layout), Some(single_layout)],
-        ..Default::default()
-    });
-    let debug_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("fynkel debug pl"),
-        bind_group_layouts: &[Some(frame_layout)],
         ..Default::default()
     });
     let post_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -3452,41 +3468,6 @@ fn create_pipelines(
         color: scatter,
         alpha: scatter,
     };
-    let debug = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("fynkel debug pipeline"),
-        layout: Some(&debug_pl),
-        vertex: wgpu::VertexState {
-            module: &debug_shader,
-            entry_point: Some("vs_main"),
-            compilation_options: Default::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<DebugVertex>() as u64,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
-            })],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &debug_shader,
-            entry_point: Some("fs_main"),
-            compilation_options: Default::default(),
-            targets: &hdr_target,
-        }),
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::LineList,
-            cull_mode: None,
-            ..Default::default()
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: DEPTH_FORMAT,
-            depth_write_enabled: Some(false),
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
-            stencil: Default::default(),
-            bias: Default::default(),
-        }),
-        multisample,
-        multiview_mask: None,
-        cache: None,
-    });
     let fullscreen = |label,
                       layout: &wgpu::PipelineLayout,
                       shader: &wgpu::ShaderModule,
@@ -3661,7 +3642,6 @@ fn create_pipelines(
             wgpu::BlendState::REPLACE,
         ),
         bloom_up: bloom_pipeline("fynkel bloom up pipeline", "fs_up", bloom_scatter),
-        debug,
         post,
         present,
         sample_count,
@@ -3680,15 +3660,6 @@ fn create_material_sampler(device: &wgpu::Device, anisotropy: u32) -> wgpu::Samp
         mipmap_filter: wgpu::MipmapFilterMode::Linear,
         anisotropy_clamp: anisotropy.clamp(1, 16) as u16,
         ..Default::default()
-    })
-}
-
-fn create_debug_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
-    device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("fynkel debug lines"),
-        size: capacity as u64 * std::mem::size_of::<DebugVertex>() as u64,
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
     })
 }
 

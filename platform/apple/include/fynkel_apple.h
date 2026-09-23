@@ -1,8 +1,9 @@
-/* Fynkel macOS viewport ABI v4 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v6 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
- * editor's overlays and Save Frame, M4-06). */
+ * editor's overlays and Save Frame, M4-06); v5 gpuAo (R2); v6
+ * fynkel_apple_viewport_overlay (the gizmo overlay, ADR-0019). */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
 
@@ -13,7 +14,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 5
+#define FYNKEL_APPLE_ABI_VERSION 6
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -126,6 +127,18 @@ int32_t fynkel_apple_viewport_set_quality(FynkelAppleViewport *vp,
  * segments queued (a non-finite segment is dropped), -1 for NULL. */
 int32_t fynkel_apple_viewport_debug_lines(FynkelAppleViewport *vp,
                                           const float *lines, uint32_t count);
+/* Queues the NEXT render's overlay (ADR-0019): drawn after post at the
+ * target's resolution, never exposed. lines: 12 floats each — ax ay az bx by
+ * bz r g b a width on_top (metres; linear RGBA; width in target pixels;
+ * on_top != 0 draws over the scene instead of fading behind it). triangles:
+ * 14 each — ax ay az bx by bz cx cy cz r g b a on_top. grid: NULL or 18
+ * floats — minor, major, X-axis, Z-axis RGBA, cell (0 adaptive), fade (0
+ * adaptive). Cleared by every render. Returns lines + triangles queued (a
+ * non-finite one is dropped), -1 for NULL. */
+int32_t fynkel_apple_viewport_overlay(FynkelAppleViewport *vp,
+                                      const float *lines, uint32_t line_count,
+                                      const float *triangles, uint32_t triangle_count,
+                                      const float *grid);
 /* Copies the frame in ring slot `slot` (a render's return value) into `out`
  * as tightly packed RGBA8, top row first: width * height * 4 bytes at the
  * viewport's size. Blocks until the GPU is idle — a screenshot, never a

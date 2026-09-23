@@ -258,8 +258,10 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// Viewport ABI version; bumped with `include/fynkel_apple.h` (3: the
 /// M3-16 instrumentation fields of `FynkelAppleViewportStats`; 4:
 /// `fynkel_apple_viewport_debug_lines` and `fynkel_apple_viewport_read_frame`,
-/// the editor's overlays and its Save Frame — M4-06).
-pub const APPLE_ABI_VERSION: u32 = 5;
+/// the editor's overlays and its Save Frame — M4-06; 5: `gpuAo` in the
+/// stats — R2; 6: `fynkel_apple_viewport_overlay`, the gizmo overlay —
+/// ADR-0019, item 9f).
+pub const APPLE_ABI_VERSION: u32 = 6;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -517,6 +519,95 @@ pub unsafe extern "C" fn fynkel_apple_viewport_debug_lines(
             [l[6], l[7], l[8], l[9]],
         );
         queued += 1;
+    }
+    queued
+}
+
+/// Queues the NEXT render's overlay (ADR-0019): gizmos and handles drawn
+/// after the post pass at the target's resolution, never exposed or tone
+/// mapped. `lines`: twelve `f32` each — `ax ay az bx by bz r g b a width
+/// on_top` (metres; linear, display-referred RGBA; width in target pixels;
+/// `on_top` non-zero to draw over the scene instead of fading behind it).
+/// `triangles`: fourteen each — `ax ay az bx by bz cx cy cz r g b a
+/// on_top`. `grid`: NULL, or eighteen floats — minor, major, X-axis and
+/// Z-axis RGBA, then the cell (0: adaptive) and the fade distance (0:
+/// adaptive) — to draw the ground grid. Everything is cleared by the
+/// render. Returns the lines plus triangles queued (a primitive with a
+/// non-finite value is dropped), -1 for a NULL viewport or a NULL array
+/// with a non-zero count.
+///
+/// # Safety
+/// `vp` must be a live viewport; `lines` readable for `line_count * 12`
+/// floats and `triangles` for `triangle_count * 14` (or NULL with a zero
+/// count); `grid` NULL or readable for 18 floats.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_overlay(
+    vp: *mut Viewport,
+    lines: *const f32,
+    line_count: u32,
+    triangles: *const f32,
+    triangle_count: u32,
+    grid: *const f32,
+) -> i32 {
+    let Some(v) = vp.as_mut() else { return -1 };
+    if (line_count > 0 && lines.is_null()) || (triangle_count > 0 && triangles.is_null()) {
+        return -1;
+    }
+    let overlay = v.renderer.overlay();
+    let v3 = |f: &[f32]| glam::Vec3::new(f[0], f[1], f[2]);
+    let flags = |f: f32| {
+        if f != 0.0 {
+            fynkel_render::overlay::ON_TOP
+        } else {
+            0
+        }
+    };
+    let mut queued = 0;
+    if line_count > 0 {
+        for l in std::slice::from_raw_parts(lines, line_count as usize * 12).chunks_exact(12) {
+            if l.iter().any(|f| !f.is_finite()) {
+                continue;
+            }
+            overlay.push_line(
+                v3(&l[0..3]),
+                v3(&l[3..6]),
+                [l[6], l[7], l[8], l[9]],
+                l[10],
+                flags(l[11]),
+            );
+            queued += 1;
+        }
+    }
+    if triangle_count > 0 {
+        for t in
+            std::slice::from_raw_parts(triangles, triangle_count as usize * 14).chunks_exact(14)
+        {
+            if t.iter().any(|f| !f.is_finite()) {
+                continue;
+            }
+            overlay.push_triangle(
+                v3(&t[0..3]),
+                v3(&t[3..6]),
+                v3(&t[6..9]),
+                [t[9], t[10], t[11], t[12]],
+                flags(t[13]),
+            );
+            queued += 1;
+        }
+    }
+    if !grid.is_null() {
+        let g = std::slice::from_raw_parts(grid, 18);
+        if g.iter().all(|f| f.is_finite()) {
+            let rgba = |i: usize| [g[i], g[i + 1], g[i + 2], g[i + 3]];
+            overlay.grid(fynkel_render::Grid {
+                minor: rgba(0),
+                major: rgba(4),
+                x_axis: rgba(8),
+                z_axis: rgba(12),
+                cell: g[16],
+                fade: g[17],
+            });
+        }
     }
     queued
 }

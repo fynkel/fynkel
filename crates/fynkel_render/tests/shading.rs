@@ -16,8 +16,8 @@ use fynkel_core::{
 };
 use fynkel_import::{cook_project, CookOptions};
 use fynkel_render::{
-    clear_rgba8, exposure, headless_device, render_offscreen, Assets, ExtractRenderer, Quality,
-    LIGHT_POOL, MAX_LIGHTS, PIPELINE_VARIANTS,
+    clear_rgba8, exposure, headless_device, render_offscreen, Assets, ExtractRenderer, Grid,
+    Quality, LIGHT_POOL, MAX_LIGHTS, PIPELINE_VARIANTS,
 };
 use glam::{Mat4, Quat, Vec3};
 use serde_json::{json, Value};
@@ -472,7 +472,7 @@ fn orthographic_camera_has_no_perspective() {
 
 #[test]
 fn a_fixed_set_of_pipelines() {
-    assert_eq!(PIPELINE_VARIANTS, 23);
+    assert_eq!(PIPELINE_VARIANTS, 25);
 }
 
 // ------------------------------------------------------------ materials
@@ -1776,6 +1776,252 @@ fn debug_lines_draw_on_top_and_are_depth_tested() {
     dump(&boxed, "debug-aabb");
     assert_eq!(r.stats().debug_lines, 12);
     assert!(red(&boxed) > 30, "{}", red(&boxed));
+}
+
+// --------------------------------------------- the overlay (ADR-0019, 9f)
+
+fn pure(p: [u8; 4], c: usize) -> bool {
+    (0..3).all(|i| if i == c { p[i] > 250 } else { p[i] < 6 })
+}
+
+fn changed(a: &[[u8; 4]], b: &[[u8; 4]]) -> usize {
+    a.iter().zip(b).filter(|(x, y)| x != y).count()
+}
+
+/// A camera at `eye` pitched down by `pitch` radians, and no cube.
+fn looking_down(eye: Vec3, pitch: f32) -> Extract {
+    let world = Mat4::from_rotation_translation(Quat::from_rotation_x(-pitch), eye);
+    let mut e = Extract::default();
+    e.records.push(record(0, world));
+    e.camera = Some(ExtractCamera {
+        record: 0,
+        world,
+        camera: Camera::default(),
+    });
+    e
+}
+
+#[test]
+fn overlay_lines_have_a_width_and_anti_aliased_edges() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    // Nothing but the background: the line is the only thing drawn.
+    let e = looking_down(Vec3::new(0.0, 0.0, 4.0), 0.0);
+    let plain = render_offscreen(&device, &queue, &mut r, &e);
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let (a, b) = (Vec3::new(-3.0, 0.3, 0.0), Vec3::new(3.0, 0.3, 0.0));
+    r.overlay().line(a, b, red, 1.5);
+    let thin = render_offscreen(&device, &queue, &mut r, &e);
+    assert_eq!(r.stats().debug_lines, 1);
+    r.overlay().line(a, b, red, 6.0);
+    let thick = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&thick, "overlay-thick");
+    let (n_thin, n_thick) = (changed(&plain, &thin), changed(&plain, &thick));
+    // 1.5 px plus the fringe covers about three rows, 6 px about seven.
+    assert!(n_thick > n_thin * 2, "{n_thick} vs {n_thin}");
+    // Solid in the middle, blended at the edges — neither a hard
+    // staircase nor a blur.
+    let solid = thick.iter().filter(|p| pure(**p, 0)).count();
+    let edge = thick
+        .iter()
+        .zip(&plain)
+        .filter(|(p, q)| p != q && !pure(**p, 0))
+        .count();
+    assert!(solid > W as usize * 3, "{solid}");
+    assert!(edge >= W as usize, "{edge}");
+    // Per frame, like the debug queue.
+    assert_eq!(render_offscreen(&device, &queue, &mut r, &e), plain);
+}
+
+#[test]
+fn overlay_lines_fade_behind_the_scene_unless_on_top() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    let mut e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    e.directional_lights
+        .push(sun(Vec3::new(-0.3, -1.0, -0.5), 10_000.0));
+    let plain = render_offscreen(&device, &queue, &mut r, &e);
+    let centre = (H / 2 * W + W / 2) as usize;
+    let edge = (H / 2 * W + 4) as usize;
+    // Through the cube: in front of the background at the ends, behind the
+    // cube's front face in the middle.
+    let (a, b) = (Vec3::new(-3.0, 0.0, 0.0), Vec3::new(3.0, 0.0, 0.0));
+    r.overlay().line(a, b, [1.0, 0.0, 0.0, 1.0], 4.0);
+    let faded = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&faded, "overlay-occluded");
+    assert!(pure(faded[edge], 0), "{:?}", faded[edge]);
+    let (p, q) = (faded[centre], plain[centre]);
+    assert!(p[0] > q[0] + 20, "tinted: {p:?} over {q:?}");
+    assert!(p[1] > 20 && p[2] > 20, "not drawn solid: {p:?}");
+    r.overlay().line_on_top(a, b, [1.0, 0.0, 0.0, 1.0], 4.0);
+    let on_top = render_offscreen(&device, &queue, &mut r, &e);
+    assert!(pure(on_top[centre], 0), "{:?}", on_top[centre]);
+    // A line lying on the cube's front face (z = 0.5) is in front of it:
+    // no z-fighting, solid from end to end.
+    r.overlay().line(
+        Vec3::new(-0.4, 0.0, 0.5),
+        Vec3::new(0.4, 0.0, 0.5),
+        [1.0, 0.0, 0.0, 1.0],
+        4.0,
+    );
+    let on_face = render_offscreen(&device, &queue, &mut r, &e);
+    assert!(pure(on_face[centre], 0), "{:?}", on_face[centre]);
+}
+
+#[test]
+fn the_overlay_ignores_exposure_and_msaa() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let line = |r: &mut ExtractRenderer| {
+        r.overlay().line(
+            Vec3::new(-3.0, 1.0, 0.0),
+            Vec3::new(3.0, 1.0, 0.0),
+            [0.2, 0.6, 1.0, 1.0],
+            3.0,
+        );
+    };
+    let mut frames = Vec::new();
+    for (msaa, ev) in [(1, 8.0), (4, 8.0), (4, 16.0)] {
+        let mut r = renderer(&device);
+        r.set_quality(Quality {
+            msaa,
+            ..Quality::default()
+        });
+        let camera = Camera {
+            exposure_mode: ExposureMode::Manual,
+            exposure: ev,
+            ..Default::default()
+        };
+        let e = cube_scene(Vec3::new(0.0, 0.0, 4.0), camera);
+        line(&mut r);
+        let px = render_offscreen(&device, &queue, &mut r, &e);
+        // The line's own pixels (well away from the cube).
+        let band: Vec<[u8; 4]> = (0..H)
+            .flat_map(|y| (0..16).map(move |x| (y * W + x) as usize))
+            .map(|i| px[i])
+            .collect();
+        frames.push(band);
+    }
+    assert_eq!(frames[0], frames[1], "MSAA changes nothing");
+    assert_eq!(frames[1], frames[2], "exposure changes nothing");
+    assert!(
+        frames[0]
+            .iter()
+            .any(|p| p[..3] == [51, 153, 255] || (p[2] == 255 && p[1] > 150)),
+        "the line's own colour"
+    );
+}
+
+#[test]
+fn overlay_triangles_are_filled_and_anti_aliased() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    let e = looking_down(Vec3::new(0.0, 0.0, 4.0), 0.0);
+    let plain = render_offscreen(&device, &queue, &mut r, &e);
+    r.overlay().triangle_on_top(
+        Vec3::new(-1.0, -1.0, 0.0),
+        Vec3::new(1.0, -1.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        [0.0, 1.0, 0.0, 1.0],
+    );
+    let tri = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&tri, "overlay-triangle");
+    assert_eq!(r.stats().overlay_triangles, 1);
+    let solid = tri.iter().filter(|p| pure(**p, 1)).count();
+    let edge = tri
+        .iter()
+        .zip(&plain)
+        .filter(|(p, q)| p != q && !pure(**p, 1))
+        .count();
+    assert!(solid > 1000, "{solid}");
+    assert!(
+        edge > 60 && edge < solid / 4,
+        "{edge} edge pixels, {solid} solid"
+    );
+}
+
+#[test]
+fn the_ground_grid_lies_on_a_floor_without_fighting_it() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    // A 40 m floor whose top is at `top`, seen from 2 m up, pitched down.
+    let scene = |top: f32| {
+        let mut e = looking_down(Vec3::new(0.0, 2.0, 6.0), 0.35);
+        e.records.push(record(
+            1,
+            Mat4::from_scale_rotation_translation(
+                Vec3::new(40.0, 1.0, 40.0),
+                Quat::IDENTITY,
+                Vec3::new(0.0, top - 0.5, 0.0),
+            ),
+        ));
+        e.environment = Some(environment(Vec3::ONE, 20_000.0));
+        e
+    };
+    let floor = scene(0.0);
+    let plain = render_offscreen(&device, &queue, &mut r, &floor);
+    r.overlay().grid(Grid::default());
+    let grid = render_offscreen(&device, &queue, &mut r, &floor);
+    dump(&grid, "overlay-grid");
+    assert!(r.stats().grid);
+    let on_floor = changed(&plain, &grid);
+    assert!(on_floor > 500, "the grid shows on the floor: {on_floor}");
+    // The same grid a millimetre above a floor sunk below the plane:
+    // nearly the same pixels. Z-fighting would scatter them.
+    let below = scene(-0.001);
+    let plain_below = render_offscreen(&device, &queue, &mut r, &below);
+    r.overlay().grid(Grid::default());
+    let grid_below = render_offscreen(&device, &queue, &mut r, &below);
+    let lines_on: Vec<bool> = plain.iter().zip(&grid).map(|(a, b)| a != b).collect();
+    let lines_below: Vec<bool> = plain_below
+        .iter()
+        .zip(&grid_below)
+        .map(|(a, b)| a != b)
+        .collect();
+    let disagree = lines_on
+        .iter()
+        .zip(&lines_below)
+        .filter(|(a, b)| a != b)
+        .count();
+    assert!(
+        disagree * 20 < on_floor,
+        "{disagree} of {on_floor} pixels disagree"
+    );
+    // A floor 20 cm above the plane hides it.
+    let above = scene(0.2);
+    let plain_above = render_offscreen(&device, &queue, &mut r, &above);
+    r.overlay().grid(Grid::default());
+    let hidden = render_offscreen(&device, &queue, &mut r, &above);
+    // (Past the floor's far edge nothing covers the plane, and the grid
+    // rightly shows there: only the floor's own pixels are counted.)
+    let through = plain_above
+        .iter()
+        .zip(&hidden)
+        .filter(|(a, b)| !is_background(**a) && a != b)
+        .count();
+    assert_eq!(through, 0, "hidden under the floor");
+    // It thins out toward the horizon: the bottom rows carry more of it
+    // than the rows just under the horizon.
+    let density = |rows: std::ops::Range<u32>| {
+        let n = rows.len() as f32 * W as f32;
+        rows.flat_map(|y| (0..W).map(move |x| (y * W + x) as usize))
+            .filter(|&i| lines_on[i])
+            .count() as f32
+            / n
+    };
+    let horizon = H as f32 / 2.0 - (0.35f32.tan() / (30f32.to_radians().tan())) * H as f32 / 2.0;
+    let near = density(H * 3 / 4..H);
+    let far = density(horizon as u32 + 1..horizon as u32 + 6);
+    assert!(near > far, "near {near} vs far {far}");
 }
 
 /// M3-16: the instrumentation. Pass timestamps come back two or three

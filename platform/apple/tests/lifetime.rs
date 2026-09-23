@@ -53,8 +53,10 @@ fn viewport_lifetimes_do_not_grow_the_process() {
     // Warm up until the process plateaus: each lifetime builds the
     // renderer's pipelines, and Metal's caches settle over the first few
     // dozen (R3b's three bloom pipelines pushed ten past it — 240
-    // lifetimes grow no more than 60, so it is slack, not a leak).
-    for _ in 0..30 {
+    // lifetimes grow no more than 60, so it is slack, not a leak; item
+    // 9f's three overlay pipelines pushed it again, and 240 still grow
+    // 2.5–3.9 MiB, as 60 do).
+    for _ in 0..60 {
         cycle(&world);
     }
     let baseline = resident_bytes();
