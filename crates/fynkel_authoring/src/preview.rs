@@ -52,7 +52,7 @@ pub const ICON_RADIUS: f32 = 0.25;
 /// `far` is 1 km by default — unreadable as an icon).
 pub const CAMERA_OUTLINE_DEPTH: f32 = 4.0;
 /// Segments of every outline circle.
-const CIRCLE_SEGMENTS: usize = 32;
+const CIRCLE_SEGMENTS: usize = 64;
 /// Sync rounds before the preview gives up on the incremental path. Each
 /// round spawns one more level of new hierarchy; no document is this deep.
 const MAX_SYNC_ROUNDS: u32 = 64;

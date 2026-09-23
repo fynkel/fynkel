@@ -346,8 +346,9 @@ extension FynkelTokensOf on BuildContext {
 /// the view model, which has no `BuildContext`. Widths are logical pixels;
 /// colours linear RGBA, as the renderer's overlay takes them.
 abstract final class GizmoTokens {
-  /// Annotations nobody drags: outlines, icons, light ranges.
-  static const double lineWidth = 1.5;
+  /// Annotations nobody drags: outlines, icons, light ranges. One point
+  /// (two pixels on a Retina display): 1.5 read as heavy at the 9f gate.
+  static const double lineWidth = 1.0;
 
   /// Things the user drags: the move, rotate and scale handles.
   static const double handleWidth = 2.5;

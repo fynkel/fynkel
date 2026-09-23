@@ -701,9 +701,9 @@ void main() {
       final o = r.model.overlay(st);
       expect(o.grid, isNotNull, reason: 'a shader grid, not line segments');
       expect(o.grid!.xAxis, GizmoTokens.xAxis);
-      // The Y axis: up from the origin, 1.5 logical px on a 2× display.
+      // The Y axis: up from the origin, 1 logical px on a 2× display.
       expect(o.lineCount, 1);
-      final want = [0, 0, 0, 0, st.camera.distance * 2, 0, ...GizmoTokens.yAxis, 3, 0];
+      final want = [0, 0, 0, 0, st.camera.distance * 2, 0, ...GizmoTokens.yAxis, 2, 0];
       expect(o.lines.sublist(0, 12), [for (final v in want) closeTo(v, 1e-4)]);
       r.model.toggleGrid();
       final off = r.model.overlay(st);

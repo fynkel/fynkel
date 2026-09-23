@@ -792,7 +792,7 @@ collider (its shape, green) — ⌘I; the **selection outline** — each
 selected entity's mesh bounds as twelve orange edges, a cross for an
 entity without a mesh, an anchor's whole instance. All three come from
 the world (`preview.lines(outline:, iconsAspect:)`) so they are exact
-about what is there. Every line is `GizmoTokens.lineWidth` (1.5) logical
+about what is there. Every line is `GizmoTokens.lineWidth` (1) logical
 pixels times the panel's pixel ratio, anti-aliased, and the part behind
 geometry is drawn at a quarter of its alpha instead of breaking off. The
 **gizmo** and the **marquee** are 2-D, painted
