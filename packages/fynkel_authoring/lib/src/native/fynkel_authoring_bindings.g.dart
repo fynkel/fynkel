@@ -587,6 +587,61 @@ FynkelStatus fynkel_authoring_preview_call(
   ),
 );
 
+/// A live call on a RUNNING game's world (ADR-0021 P7, live Play mode) —
+/// not a preview: no session, the world is the game's. Kinds:
+/// - "entities" {} -> { tick, entities: [{ id, name, parent, spawned,
+/// layer, tags, children }] }, parents before children. `id` is the
+/// authoring id for what a loaded scene spawned (a cooked prefab
+/// instance's children carry their derived ids), "runtime:<handle>" for
+/// what the game spawned or instantiated (`spawned` true);
+/// - "entity" { id } -> { id, name, parent, world, components: [{ type,
+/// data }] }, every native component as the scene document stores it;
+/// - "set" { id, type, data } replaces or adds a native component from its
+/// document JSON; "remove" { id, type }; "rename" { id, name }.
+/// A write applies at once, at the current tick, without stepping (it
+/// shows while paused; no system runs). `out_view` gets the JSON result,
+/// valid until the next query or mutating call on the world. The world
+/// refusing a write is FYNKEL_STATUS_COMMANDS_REJECTED with { "ok": false,
+/// "rejected": [{ code, message }] }; a malformed call, an unknown kind,
+/// entity or component type is FYNKEL_STATUS_INVALID_ARGUMENT with
+/// { "ok": false, "diagnostics": [...] } (FYN-T0003).
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+    ffi.Pointer<FynkelBufferView>,
+  )
+>(symbol: 'fynkel_world_live_call')
+external int _fynkel_world_live_call(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> kind_utf8,
+  int kind_len,
+  ffi.Pointer<ffi.Uint8> args_json_utf8,
+  int args_len,
+  ffi.Pointer<FynkelBufferView> out_view,
+);
+
+FynkelStatus fynkel_world_live_call(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> kind_utf8,
+  int kind_len,
+  ffi.Pointer<ffi.Uint8> args_json_utf8,
+  int args_len,
+  ffi.Pointer<FynkelBufferView> out_view,
+) => FynkelStatus.fromValue(
+  _fynkel_world_live_call(
+    world,
+    kind_utf8,
+    kind_len,
+    args_json_utf8,
+    args_len,
+    out_view,
+  ),
+);
+
 /// UTF-8 JSON of the last call on this session (empty before any, or for
 /// NULL). Valid until the next call on the session.
 @ffi.Native<FynkelBufferView Function(ffi.Pointer<FynkelAuthoringSession>)>()

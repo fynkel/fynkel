@@ -15,6 +15,8 @@ headers:
 functions:
   include:
     - 'fynkel_authoring_.*'
+    # Live Play mode (ADR-0021 P7): a call on a running game's world.
+    - 'fynkel_world_live_call'
 structs:
   include:
     - FynkelBufferView

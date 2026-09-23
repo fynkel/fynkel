@@ -17,6 +17,7 @@ import 'diagnostic.dart';
 import 'models.dart';
 import 'native/fynkel_authoring_bindings.g.dart' as n;
 
+part 'live.dart';
 part 'preview.dart';
 
 /// The authoring ABI version this package was written against.
