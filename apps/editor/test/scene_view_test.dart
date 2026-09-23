@@ -423,12 +423,15 @@ void main() {
       expect(st.tab, same(live));
       expect(st.preview, same(world));
       expect(st.camera, same(camera), reason: 'the Scene view keeps its camera when Play starts');
-      expect(r.model.canEdit, isFalse, reason: 'nothing in the running game is dragged (L3)');
+      expect(r.model.canEdit, isTrue, reason: 'the running game is dragged (L3)');
 
       r.model.click(r.pixelOf('crate'));
       expect(live.selection.toList(), ['crate']);
       expect(scene.tab.selection, isEmpty, reason: "the scene's selection is the scene's");
-      expect(r.model.beginDrag('move.x', r.pixelOf('crate')), isFalse);
+      r.model.tool = SceneTool.move;
+      expect(r.model.beginDrag('move.x', r.model.grabPoint('move.x')!), isTrue);
+      r.model.cancelDrag();
+      expect(world.calls, contains('restoreTransforms'));
 
       r.tabs.live = null;
       expect(r.model.current, same(scene));
@@ -1258,7 +1261,7 @@ PointerUpEvent _up(Offset p) => PointerUpEvent(position: p, kind: PointerDeviceK
 
 /// A running copy of [scene]: its entities under their own ids, [world]
 /// as the picture.
-final class _SceneLive implements LiveBackend {
+final class _SceneLive extends LiveBackend {
   _SceneLive(this.scene, this.world);
 
   final FakeDocument scene;
@@ -1283,7 +1286,18 @@ final class _SceneLive implements LiveBackend {
   List<LiveEntity>? changedEntities() => null;
 
   @override
-  LiveEntityState entity(String id) => LiveEntityState(id: id, handle: id.hashCode, name: id, parent: null, world: const {}, components: const []);
+  LiveEntityState entity(String id) => LiveEntityState(
+    id: id,
+    handle: id.hashCode,
+    name: id,
+    parent: null,
+    world: const {},
+    components: [
+      for (final c in ((scene.entitiesView[id]?['components'] as Map?) ?? const {}).values)
+        if ((c as Map)['type'] == 'fynkel.Transform')
+          (type: 'fynkel.Transform', data: (c['data'] as Map).cast<String, Object?>()),
+    ],
+  );
 
   @override
   List<LiveBehaviour> behaviours(int handle) => const [];

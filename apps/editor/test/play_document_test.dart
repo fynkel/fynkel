@@ -16,6 +16,7 @@ import 'package:fynkel_editor/src/inspector/inspector_model.dart';
 import 'package:fynkel_editor/src/inspector/field_widgets.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
+import 'package:fynkel_editor/src/play/live_preview.dart';
 import 'package:fynkel_editor/src/play/live_play.dart';
 import 'package:fynkel_editor/src/play/play_document.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
@@ -25,7 +26,7 @@ import 'inspector_test.dart' show nativeSchemas;
 import 'support/fakes.dart';
 
 /// A running world in memory: rows, their native components, behaviours.
-final class FakeLive implements LiveBackend {
+final class FakeLive extends LiveBackend {
   final rows = <LiveEntity>[];
   final native = <String, List<({String type, Map<String, Object?> data})>>{};
   final scripts = <int, List<LiveBehaviour>>{};
@@ -92,6 +93,73 @@ final class FakeLive implements LiveBackend {
 
   @override
   List<LiveBehaviour> behaviours(int handle) => scripts[handle] ?? const [];
+
+  /// Every write, as `kind id` (L3).
+  final writes = <String>[];
+
+  /// What the next write answers (the world's refusals).
+  List<String> refuse = const [];
+
+  @override
+  List<String> write(String kind, Map<String, Object?> args) {
+    final id = args['id'] as String;
+    writes.add('$kind $id');
+    if (refuse.isNotEmpty) return refuse;
+    final i = rows.indexWhere((r) => r.id == id);
+    final r = rows[i];
+    LiveEntity row({String? name, String? parent, List<String>? types}) => LiveEntity(
+      id: r.id,
+      handle: r.handle,
+      name: name ?? r.name,
+      parent: args.containsKey('parent') ? parent : r.parent,
+      spawned: r.spawned,
+      layer: r.layer,
+      childCount: r.childCount,
+      types: types ?? r.types,
+    );
+    switch (kind) {
+      case 'set':
+        final type = args['type'] as String;
+        final data = (args['data'] as Map).cast<String, Object?>();
+        final list = native[id]!..removeWhere((c) => c.type == type);
+        list.add((type: type, data: data));
+        rows[i] = row(types: [for (final c in list) c.type]);
+      case 'remove':
+        final list = native[id]!..removeWhere((c) => c.type == args['type']);
+        rows[i] = row(types: [for (final c in list) c.type]);
+      case 'rename':
+        rename(id, args['name'] as String);
+      case 'parent':
+        rows[i] = row(parent: args['parent'] as String?);
+      case 'destroy':
+        rows.removeWhere((e) => e.id == id || e.parent == id);
+    }
+    return const [];
+  }
+
+  @override
+  List<String> setBehaviourField(Object instance, String field, Object? value) {
+    writes.add('setBehaviourField $field');
+    (instance as Map<String, Object?>)[field] = value;
+    return const [];
+  }
+
+  @override
+  List<String> addBehaviour(int handle, String type, {int? version, Map<String, Object?> data = const {}}) {
+    writes.add('addBehaviour $handle $type');
+    final fields = {...data};
+    (scripts[handle] ??= []).add(LiveBehaviour(type: type, data: fields, instance: fields));
+    return const [];
+  }
+
+  @override
+  List<String> removeBehaviour(Object instance) {
+    writes.add('removeBehaviour');
+    for (final list in scripts.values) {
+      list.removeWhere((b) => identical(b.instance, instance));
+    }
+    return const [];
+  }
 }
 
 FakeDocument scene() => FakeDocument(
@@ -110,13 +178,16 @@ FakeDocument scene() => FakeDocument(
   roots: ['robot', 'floor'],
 );
 
-FakeLive running() => FakeLive()
-  ..add('robot', 'Robot', handle: 7, types: ['fynkel.Transform', 'fynkel.PointLight'])
-  ..add('floor', 'Floor')
-  ..add('runtime:99', 'Bullet', handle: 99)
-  ..scripts[7] = [
-    const LiveBehaviour(type: 'game.Spinner', data: {'speed': 2.5}, authoredComponentId: 'spin'),
-  ];
+FakeLive running() {
+  final spinner = <String, Object?>{'speed': 2.5};
+  return FakeLive()
+    ..add('robot', 'Robot', handle: 7, types: ['fynkel.Transform', 'fynkel.PointLight'])
+    ..add('floor', 'Floor')
+    ..add('runtime:99', 'Bullet', handle: 99)
+    ..scripts[7] = [
+      LiveBehaviour(type: 'game.Spinner', data: spinner, authoredComponentId: 'spin', instance: spinner),
+    ];
+}
 
 /// A game that shows a (real, empty) world the way `FynkelGameView` does:
 /// registered with the editor's play scope.
@@ -156,7 +227,7 @@ void main() {
     final doc = PlayDocument(backend: live, scene: scene(), interval: const Duration(days: 1));
     addTearDown(doc.dispose);
     expect(doc.roots(), ['robot', 'floor', 'runtime:99']);
-    expect(doc.readOnly, isNotNull, reason: 'L2 shows; editing is L3');
+    expect(doc.readOnly, isNull, reason: 'the running game is edited (L3)');
     expect(doc.dirty, isFalse);
 
     final robot = doc.entities(['robot']).entities['robot']!;
@@ -166,7 +237,90 @@ void main() {
     final bullet = doc.entities(['runtime:99']).entities['runtime:99']!;
     expect((bullet['components'] as Map).keys, ['runtime:99/fynkel.Transform']);
     expect(doc.entities(['gone']).entities['gone'], isNull);
-    expect(doc.apply([]).ok, isFalse);
+  });
+
+  test('edits go to the running world at once: fields, components, names, parents, deletes (L3)', () {
+    final live = running();
+    var written = 0;
+    final doc = PlayDocument(backend: live, scene: scene(), written: () => written++, interval: const Duration(days: 1));
+    addTearDown(doc.dispose);
+    Map<String, Object?> components(String id) => doc.entities([id]).entities[id]!['components'] as Map<String, Object?>;
+    Object? data(String id, String component) => (components(id)[component] as Map)['data'];
+
+    final revision = doc.revision;
+    var a = doc.apply([Command.setField('robot', 't', '/position/1', 3)]);
+    expect(a.ok, isTrue);
+    expect(live.writes, ['set robot']);
+    expect((data('robot', 't') as Map)['position'], [0, 3, 0], reason: 'a pointer writes into the value');
+    expect((data('robot', 't') as Map)['scale'], [1, 1, 1], reason: 'the rest is kept');
+    expect(doc.revision, isNot(revision));
+    expect(doc.lastEdit!.affectedIds, contains('robot'));
+    expect(written, 1, reason: 'a paused Game view draws the write');
+
+    expect(doc.apply([Command.setField('robot', 'spin', 'speed', 9)]).ok, isTrue);
+    expect(live.writes.last, 'setBehaviourField speed');
+    expect(data('robot', 'spin'), {'speed': 9});
+
+    doc.apply([
+      Command.addComponent('floor', {'type': 'fynkel.PointLight', 'version': 1, 'data': {'range': 4}}),
+      Command.addComponent('floor', {'type': 'game.Spinner', 'version': 2, 'data': {'speed': 1}}),
+    ]);
+    expect(live.writes.sublist(live.writes.length - 2), ['set floor', 'addBehaviour 2 game.Spinner']);
+    expect(components('floor').keys, containsAll(['floor/fynkel.PointLight', 'floor/game.Spinner']));
+    doc.apply([Command.removeComponent('robot', 'light'), Command.removeComponent('robot', 'spin')]);
+    expect(live.writes.sublist(live.writes.length - 2), ['remove robot', 'removeBehaviour']);
+    expect(components('robot').keys, ['t']);
+
+    doc.apply([Command.renameObject('robot', 'Hero')]);
+    expect(doc.entities(['robot']).entities['robot']!['name'], 'Hero');
+    doc.apply([Command.reparentObject('runtime:99', parent: 'robot', index: 0)]);
+    expect(live.writes.last, 'parent runtime:99');
+    expect(doc.roots(), ['robot', 'floor']);
+    expect(doc.entities(['robot']).entities['robot']!['children'], ['runtime:99']);
+    expect(doc.lastEdit!.affectedIds, containsAll(['runtime:99', 'robot']));
+    doc.apply([Command.deleteObject('robot')]);
+    expect(doc.roots(), ['floor']);
+    expect(doc.entities(['runtime:99']).entities['runtime:99'], isNull, reason: 'its subtree went with it');
+
+    final writes = live.writes.length;
+    a = doc.apply([Command.createObject(name: 'New')]);
+    expect(a.ok, isFalse, reason: 'not while the game runs (yet)');
+    expect(doc.apply([Command.renameObject('robot', 'x')]).ok, isFalse, reason: 'gone');
+    expect(doc.apply([Command.setField('floor', 'nope', 'x', 1)]).ok, isFalse);
+    expect(live.writes.length, writes);
+    live.refuse = ['no'];
+    a = doc.apply([Command.renameObject('floor', 'x'), Command.renameObject('floor', 'y')]);
+    expect(a.ok, isFalse);
+    expect(a.diagnostics.single.message, 'no');
+    expect(live.writes.length, writes + 1, reason: 'the first refusal stops the rest');
+  });
+
+  test('a real running world takes a field, and a gizmo drag moves it and puts it back (L3)', () {
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    world.spawn(name: 'Box');
+    world.step();
+    final backend = WorldLiveBackend(world);
+    var written = 0;
+    final doc = PlayDocument(backend: backend, written: () => written++, interval: const Duration(days: 1));
+    addTearDown(doc.dispose);
+    final id = doc.roots().single;
+    final transform = (doc.entities([id]).entities[id]!['components'] as Map).keys.single as String;
+    expect(doc.apply([Command.setField(id, transform, '/position/0', 5)]).ok, isTrue);
+    List<Object?> position() => backend.live.entity(id).component('fynkel.Transform')!['position']! as List<Object?>;
+    expect(position().first, 5);
+    expect(written, 1);
+
+    final preview = doc.openPreview() as LivePreview;
+    preview.setTransforms([
+      PreviewTransform(id: id, position: const [1, 2, 3], rotation: const [0, 0, 0, 1], scale: const [1, 1, 1]),
+    ]);
+    expect(position(), [1, 2, 3]);
+    preview.restoreTransforms([id]);
+    expect(position(), [5, 0, 0], reason: 'the drag puts it back; its transaction writes the end');
+    expect(written, 3);
+    expect(doc.apply([Command.renameObject(id, 'Crate')]).ok, isTrue);
+    expect(backend.live.entity(id).name, 'Crate');
   });
 
   test('a refresh reports only what changed; a watched entity\'s moving values go to `values` alone', () {
@@ -226,7 +380,7 @@ void main() {
     final shown = tabs.live!;
     expect(hierarchy.tab, same(shown));
     expect(inspector.tab, same(shown));
-    expect(hierarchy.canEdit, isFalse);
+    expect(hierarchy.canEdit, isTrue, reason: 'the running game is edited (L3)');
     expect(tabs.focused, same(main), reason: 'the scene tab is still the focused tab');
     expect(shown.selection, {'robot'}, reason: 'the selection came along');
     expect(hierarchy.tree!.contains('runtime:99'), isTrue);

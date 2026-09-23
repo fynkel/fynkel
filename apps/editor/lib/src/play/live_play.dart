@@ -13,10 +13,14 @@ import '../documents/open_document.dart';
 import 'play_document.dart';
 
 final class LivePlay {
-  LivePlay({required this.tabs, LiveBackend Function(fynkel.World world)? backend})
+  LivePlay({required this.tabs, LiveBackend Function(fynkel.World world)? backend, this.written})
     : _backend = backend ?? WorldLiveBackend.new;
 
   final DocumentTabs tabs;
+
+  /// Called after an edit wrote the running world (the app redraws a
+  /// paused Game view: `FynkelPlayControl.redraw`).
+  final void Function()? written;
   final LiveBackend Function(fynkel.World world) _backend;
 
   fynkel.World? _world;
@@ -39,7 +43,7 @@ final class LivePlay {
   void _begin(fynkel.World world) {
     final focused = tabs.focused;
     final scene = focused != null && focused.kind == 'scene' ? focused : null;
-    final doc = PlayDocument(backend: _backend(world), scene: scene?.document);
+    final doc = PlayDocument(backend: _backend(world), scene: scene?.document, written: written);
     final live = OpenDocument(doc, project: tabs.project);
     doc.watched = () => live.selection;
     final wanted = [...?scene?.selection];

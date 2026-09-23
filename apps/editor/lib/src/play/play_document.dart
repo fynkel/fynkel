@@ -1,7 +1,8 @@
 // Live Play mode (ADR-0021 P7, docs/design/live-play-mode.md): the running
 // game's world as an `EditorDocument`, so the Hierarchy and the Inspector
 // show it with the panels, rows, cards and field widgets they use for a
-// scene. The world is read, never written through here yet (L3), and no
+// scene. Edits go to the running world at once (L3) — a field, a
+// component added or removed, a rename, a new parent, a delete — and no
 // document is touched: Stop drops it all.
 //
 // Entities are named by their authoring ids (what a loaded scene spawned,
@@ -29,7 +30,13 @@ import 'live_preview.dart';
 
 /// A script component of a running entity, as the document stores one.
 final class LiveBehaviour {
-  const LiveBehaviour({required this.type, required this.data, this.version = 1, this.authoredComponentId});
+  const LiveBehaviour({
+    required this.type,
+    required this.data,
+    this.version = 1,
+    this.authoredComponentId,
+    this.instance,
+  });
 
   final String type;
   final int version;
@@ -37,10 +44,16 @@ final class LiveBehaviour {
 
   /// The scene component it was loaded from, if one was.
   final String? authoredComponentId;
+
+  /// The behaviour itself, for the writes ([LiveBackend.setBehaviourField],
+  /// [LiveBackend.removeBehaviour]).
+  final Object? instance;
 }
 
-/// What a [PlayDocument] reads: the running world (and its script
-/// components). [WorldLiveBackend] is the real one; widget tests use a fake.
+/// What a [PlayDocument] reads and writes: the running world (and its
+/// script components). [WorldLiveBackend] is the real one; widget tests use
+/// a fake. The writes answer the world's refusals (empty when it applied)
+/// and throw an [AuthoringException] when the call itself failed.
 abstract class LiveBackend {
   List<LiveEntity> entities();
 
@@ -55,10 +68,26 @@ abstract class LiveBackend {
   /// The world for the Scene view to draw and pick in (L5); null when
   /// there is none.
   PreviewBackend? openPreview();
+
+  /// A native write: `set`, `remove`, `rename`, `parent` or `destroy` with
+  /// [LiveWorld]'s arguments.
+  List<String> write(String kind, Map<String, Object?> args) => throw _notWritable(kind);
+
+  List<String> setBehaviourField(Object instance, String field, Object? value) => throw _notWritable('setField');
+
+  List<String> addBehaviour(int handle, String type, {int? version, Map<String, Object?> data = const {}}) =>
+      throw _notWritable('addComponent');
+
+  List<String> removeBehaviour(Object instance) => throw _notWritable('removeComponent');
+
+  static AuthoringException _notWritable(String what) =>
+      AuthoringException('live $what', AuthoringStatus.invalidArgument, [
+        Diagnostic(code: 'FYN-T0003', severity: Severity.error, message: '$what: this world is not written'),
+      ]);
 }
 
 /// A package:fynkel world the game is running.
-final class WorldLiveBackend implements LiveBackend {
+final class WorldLiveBackend extends LiveBackend {
   WorldLiveBackend(this.world) : live = LiveWorld(world.native.handleAddress);
 
   final fynkel.World world;
@@ -73,25 +102,81 @@ final class WorldLiveBackend implements LiveBackend {
   @override
   LiveEntityState entity(String id) => live.entity(id);
 
+  /// Removed behaviours go at the world's next step; until then (a paused
+  /// game) they are not shown.
+  final Set<fynkel.Behaviour> _removed = Set.identity();
+
   @override
   List<LiveBehaviour> behaviours(int handle) => [
     for (final b in world.behaviours)
-      if (!b.isDestroyed && !b.gameObject.isPending && b.gameObject.entity == handle)
+      if (!b.isDestroyed && !_removed.contains(b) && !b.gameObject.isPending && b.gameObject.entity == handle)
         if (b.behaviourType case final type?)
           LiveBehaviour(
             type: type.id,
             version: type.version,
             data: {for (final f in type.fields) f.name: f.get(b)},
             authoredComponentId: b.authoredComponentId,
+            instance: b,
           ),
   ];
 
   @override
   PreviewBackend openPreview() => LivePreview(live, alive: () => !world.native.isDisposed);
+
+  @override
+  List<String> write(String kind, Map<String, Object?> args) {
+    final id = args['id'] as String;
+    return switch (kind) {
+      'set' => live.set(id, args['type'] as String, (args['data'] as Map).cast()),
+      'remove' => live.remove(id, args['type'] as String),
+      'rename' => live.rename(id, args['name'] as String),
+      'parent' => live.reparent(id, args['parent'] as String?, index: args['index'] as int?),
+      'destroy' => live.destroy(id),
+      _ => throw ArgumentError.value(kind, 'kind'),
+    };
+  }
+
+  @override
+  List<String> setBehaviourField(Object instance, String field, Object? value) {
+    final b = instance as fynkel.Behaviour;
+    final f = b.behaviourType?.fields.where((f) => f.name == field).firstOrNull;
+    if (f == null) return ['${b.behaviourType?.id ?? b.runtimeType} has no field $field'];
+    try {
+      f.set(b, value);
+    } on Object catch (e) {
+      return ['$field: $e'];
+    }
+    return const [];
+  }
+
+  @override
+  List<String> addBehaviour(int handle, String type, {int? version, Map<String, Object?> data = const {}}) {
+    final go = world.byEntity(handle);
+    if (go == null) return ['no game object for entity $handle'];
+    try {
+      go.addBehaviourFromData(type, fields: data, version: version);
+    } on Object catch (e) {
+      return ['$type: $e'];
+    }
+    return const [];
+  }
+
+  @override
+  List<String> removeBehaviour(Object instance) {
+    final b = instance as fynkel.Behaviour;
+    b.destroy();
+    _removed.add(b);
+    return const [];
+  }
 }
 
 final class PlayDocument extends EditorDocument {
-  PlayDocument({required this.backend, this.scene, Duration interval = const Duration(milliseconds: 100)}) {
+  PlayDocument({
+    required this.backend,
+    this.scene,
+    this.written,
+    Duration interval = const Duration(milliseconds: 100),
+  }) {
     _read(backend.entities());
     _poll = Timer.periodic(interval, (_) => refresh());
   }
@@ -104,6 +189,10 @@ final class PlayDocument extends EditorDocument {
 
   /// The ids to re-read whole on every refresh (the Inspector's selection).
   Iterable<String> Function()? watched;
+
+  /// Called after every write to the world (a paused Game view draws it
+  /// again: `FynkelPlayControl.redraw`).
+  final void Function()? written;
 
   Timer? _poll;
   bool _closed = false;
@@ -118,6 +207,9 @@ final class PlayDocument extends EditorDocument {
 
   /// The last whole read of an entity, as the document stores it, by id.
   final Map<String, Map<String, Object?>> _full = {};
+
+  /// What each component id of that read is in the world, by entity id.
+  final Map<String, Map<String, _ComponentRef>> _refs = {};
   final Map<String, String> _fullJson = {};
 
   /// Bumped when a watched entity's values changed and no row did (the
@@ -155,7 +247,7 @@ final class PlayDocument extends EditorDocument {
   @override
   int get history => 0;
   @override
-  String? get readOnly => 'The running game is shown as it is; editing it is not there yet.';
+  String? get readOnly => null;
   @override
   String? get sub => null;
   @override
@@ -192,13 +284,143 @@ final class PlayDocument extends EditorDocument {
     'readOnly': readOnly,
   });
 
+  /// Applies [commands] to the running world, in order, each at once
+  /// (L3). The first refusal stops the rest; what went before it stays —
+  /// the world has no undo — and is shown.
   @override
-  Applied apply(List<Map<String, Object?>> commands, {String? baseRevision}) => Applied.fromJson({
+  Applied apply(List<Map<String, Object?>> commands, {String? baseRevision}) {
+    if (_closed) return _rejection('The game stopped.');
+    final touched = <String>{};
+    String? refused;
+    try {
+      for (final c in commands) {
+        final problems = _applyOne(c, touched);
+        if (problems.isNotEmpty) {
+          refused = problems.join('; ');
+          break;
+        }
+      }
+    } on AuthoringException catch (e) {
+      refused = e.diagnostics.isEmpty ? '$e' : e.diagnostics.map((d) => d.message).join('; ');
+    } on FormatException catch (e) {
+      refused = e.message;
+    } on RangeError catch (e) {
+      refused = '$e';
+    }
+    if (touched.isNotEmpty) _afterWrite(touched);
+    if (refused != null) return _rejection(refused);
+    return Applied.fromJson({'ok': true, 'revision': revision});
+  }
+
+  Applied _rejection(String message) => Applied.fromJson({
     'ok': false,
+    'revision': revision,
     'diagnostics': [
-      {'code': 'FYN-E0007', 'severity': 'error', 'message': readOnly},
+      {'code': 'FYN-E0007', 'severity': 'error', 'message': message},
     ],
   });
+
+  /// One command on the world; answers its refusals. [touched] gets the
+  /// entities it wrote (before the write: a refused one may have half
+  /// happened).
+  List<String> _applyOne(Map<String, Object?> c, Set<String> touched) {
+    final command = c['command'];
+    String entityOf(String key) {
+      final id = c[key];
+      if (id is! String || !_byId.containsKey(id)) throw _gone(id);
+      return id;
+    }
+
+    switch (command) {
+      case 'setField' || 'unsetField' || 'assignAsset':
+        final id = entityOf('entity');
+        final ref = _component(id, c['component']);
+        final field = c['field'] as String;
+        final value = switch (command) {
+          'assignAsset' => c['asset'],
+          'unsetField' => ref.defaultOf(field),
+          _ => c['value'],
+        };
+        final data = _written(ref.data, field, value, unset: command == 'unsetField' && ref.instance == null);
+        touched.add(id);
+        final instance = ref.instance;
+        if (instance == null) return backend.write('set', {'id': id, 'type': ref.type, 'data': data});
+        final name = _segments(field).first;
+        return backend.setBehaviourField(instance, name, data[name]);
+      case 'addComponent':
+        final id = entityOf('entity');
+        final spec = (c['component'] as Map).cast<String, Object?>();
+        final type = spec['type'] as String;
+        final data = (spec['data'] as Map?)?.cast<String, Object?>() ?? const {};
+        touched.add(id);
+        if (_isNative(type)) return backend.write('set', {'id': id, 'type': type, 'data': data});
+        return backend.addBehaviour(_byId[id]!.handle, type, version: spec['version'] as int?, data: data);
+      case 'removeComponent':
+        final id = entityOf('entity');
+        final ref = _component(id, c['component']);
+        touched.add(id);
+        final instance = ref.instance;
+        return instance == null
+            ? backend.write('remove', {'id': id, 'type': ref.type})
+            : backend.removeBehaviour(instance);
+      case 'renameObject':
+        final id = entityOf('id');
+        touched.add(id);
+        return backend.write('rename', {'id': id, 'name': c['name'] as String? ?? ''});
+      case 'reparentObject':
+        final id = entityOf('id');
+        final parent = c['parent'] as String?;
+        if (parent != null && !_byId.containsKey(parent)) throw _gone(parent);
+        touched.addAll([id, ?_byId[id]!.parent, ?parent]);
+        return backend.write('parent', {'id': id, 'parent': parent, 'index': ?c['index']});
+      case 'deleteObject':
+        final id = entityOf('id');
+        touched.addAll([id, ?_byId[id]!.parent]);
+        return backend.write('destroy', {'id': id});
+      default:
+        return ['$command is not there while the game runs'];
+    }
+  }
+
+  /// Whether [type] is one of the world's own components (the rest are
+  /// scripts).
+  bool _isNative(String type) => type.startsWith('fynkel.');
+
+  AuthoringException _gone(Object? id) => AuthoringException('play', AuthoringStatus.invalidArgument, [
+    Diagnostic(code: 'FYN-E0007', severity: Severity.error, message: '$id is not in the running game'),
+  ]);
+
+  /// [id]'s component [component] as last read.
+  _ComponentRef _component(String id, Object? component) {
+    _document(id);
+    final ref = _refs[id]?[component];
+    if (ref == null) {
+      throw AuthoringException('play', AuthoringStatus.invalidArgument, [
+        Diagnostic(code: 'FYN-E0007', severity: Severity.error, message: '$component is not on $id'),
+      ]);
+    }
+    return ref;
+  }
+
+  /// The world after a write: its table read again, the written entities
+  /// re-read, one `applied` edit for the tab and the Inspector.
+  void _afterWrite(Set<String> touched) {
+    final List<String> changed;
+    try {
+      changed = _read(backend.entities());
+    } on AuthoringException {
+      return;
+    }
+    final affected = {...touched, ...changed};
+    for (final id in affected) {
+      _full.remove(id);
+      _fullJson.remove(id);
+    }
+    _revision++;
+    _lastEdit = DocumentEdit(DocumentChangeKind.applied, affectedIds: affected.toList());
+    notifyListeners();
+    written?.call();
+  }
 
   @override
   Replayed undo() => throw _refused('undo');
@@ -221,7 +443,9 @@ final class PlayDocument extends EditorDocument {
     final open = _preview;
     if (open != null && !open.isClosed) return open;
     if (_closed) throw _refused('openPreview');
-    return _preview = backend.openPreview() ?? (throw _refused('openPreview'));
+    final preview = backend.openPreview() ?? (throw _refused('openPreview'));
+    if (preview is LivePreview) preview.written = written;
+    return _preview = preview;
   }
 
   PreviewBackend? _preview;
@@ -318,6 +542,7 @@ final class PlayDocument extends EditorDocument {
       if (!next.containsKey(id)) {
         _full.remove(id);
         _fullJson.remove(id);
+        _refs.remove(id);
       }
     }
     _rows = next;
@@ -366,12 +591,18 @@ final class PlayDocument extends EditorDocument {
     }
     final ids = _SceneComponentIds(id, _sceneIds(id));
     final components = <String, Object?>{};
+    final refs = <String, _ComponentRef>{};
     for (final c in state.components) {
-      components[ids.forType(c.type)] = {'type': c.type, 'version': 1, 'data': c.data};
+      final cid = ids.forType(c.type);
+      components[cid] = {'type': c.type, 'version': 1, 'data': c.data};
+      refs[cid] = _ComponentRef(c.type, c.data);
     }
     for (final b in backend.behaviours(row.handle)) {
-      components[b.authoredComponentId ?? ids.forType(b.type)] = {'type': b.type, 'version': b.version, 'data': b.data};
+      final cid = b.authoredComponentId ?? ids.forType(b.type);
+      components[cid] = {'type': b.type, 'version': b.version, 'data': b.data};
+      refs[cid] = _ComponentRef(b.type, b.data, instance: b.instance);
     }
+    _refs[id] = refs;
     final doc = <String, Object?>{
       'name': state.name,
       'parent': ?row.parent,
@@ -382,6 +613,57 @@ final class PlayDocument extends EditorDocument {
     _fullJson[id] = jsonEncode(doc);
     return doc;
   }
+}
+
+/// A component of a running entity as last read: a native one (no
+/// [instance]) or a script.
+final class _ComponentRef {
+  const _ComponentRef(this.type, this.data, {this.instance});
+
+  final String type;
+  final Map<String, Object?> data;
+  final Object? instance;
+
+  /// A script field's default (what `unsetField` writes back).
+  Object? defaultOf(String field) {
+    final b = instance;
+    if (b is! fynkel.Behaviour) return null;
+    final name = _segments(field).first;
+    return b.behaviourType?.fields.where((f) => f.name == name).firstOrNull?.defaultValue;
+  }
+}
+
+/// A field name or a JSON pointer (`/position/1`) as its segments.
+List<String> _segments(String field) => field.startsWith('/')
+    ? [for (final s in field.substring(1).split('/')) s.replaceAll('~1', '/').replaceAll('~0', '~')]
+    : [field];
+
+/// A copy of [data] with [value] at [field] (removed with [unset]).
+Map<String, Object?> _written(Map<String, Object?> data, String field, Object? value, {bool unset = false}) {
+  final copy = (jsonDecode(jsonEncode(data)) as Map).cast<String, Object?>();
+  final path = _segments(field);
+  Object? at = copy;
+  for (final s in path.take(path.length - 1)) {
+    at = switch (at) {
+      Map() => at[s],
+      List() => at[int.parse(s)],
+      _ => throw FormatException('$field: no $s in ${jsonEncode(data)}'),
+    };
+  }
+  final last = path.last;
+  switch (at) {
+    case Map():
+      if (unset) {
+        at.remove(last);
+      } else {
+        at[last] = value;
+      }
+    case List():
+      at[int.parse(last)] = value;
+    default:
+      throw FormatException('$field: no $last in ${jsonEncode(data)}');
+  }
+  return copy;
 }
 
 /// The open scene's component ids for one entity, by type, in order; an

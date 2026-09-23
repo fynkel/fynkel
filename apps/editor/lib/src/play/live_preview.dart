@@ -3,8 +3,10 @@
 // outlines its selection with the code it uses for a scene's edit
 // preview. The world is the game's: the Scene view never sets its camera
 // on it (the viewport carries its own, `FynkelViewportController.view`),
-// hides nothing in it and does not step it; a drag's transform preview,
-// a resync, a reload or a recook have no meaning here and are refused.
+// hides nothing in it and does not step it. A gizmo drag moves the live
+// Transforms (L3) and puts them back before the drag's transaction
+// writes the result; a resync, a reload or a recook have no meaning here
+// and are refused.
 import 'dart:async';
 
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -21,6 +23,12 @@ final class LivePreview implements PreviewBackend {
   /// post-frame callbacks, where the Scene view draws — so the view asks
   /// here before every frame instead.
   final bool Function()? alive;
+  /// Called after the drag wrote the world (a paused Game view draws it
+  /// again).
+  void Function()? written;
+
+  /// The Transforms a drag moved, as they were before it.
+  final Map<String, Map<String, Object?>> _before = {};
   bool _closed = false;
   PreviewStats _stats = const PreviewStats.zero();
 
@@ -58,9 +66,33 @@ final class LivePreview implements PreviewBackend {
   Map<String, List<double>> worldMatrices(Iterable<String> ids) => live.worldMatrices(ids);
 
   @override
-  void setTransforms(Iterable<PreviewTransform> transforms) => throw _refused('setTransforms');
+  void setTransforms(Iterable<PreviewTransform> transforms) {
+    for (final t in transforms) {
+      final before = _before[t.id] ??= live.entity(t.id).component(_transform) ?? const {};
+      _set(t.id, {...before, 'position': t.position, 'rotation': t.rotation, 'scale': t.scale});
+    }
+    written?.call();
+  }
+
   @override
-  void restoreTransforms(Iterable<String> ids) => throw _refused('restoreTransforms');
+  void restoreTransforms(Iterable<String> ids) {
+    for (final id in ids) {
+      final before = _before.remove(id);
+      if (before != null) _set(id, before);
+    }
+    written?.call();
+  }
+
+  static const _transform = 'fynkel.Transform';
+
+  void _set(String id, Map<String, Object?> data) {
+    final refused = live.set(id, _transform, data);
+    if (refused.isNotEmpty) {
+      throw AuthoringException('live set', AuthoringStatus.invalidArgument, [
+        for (final m in refused) Diagnostic(code: 'FYN-T0003', severity: Severity.error, message: m),
+      ]);
+    }
+  }
   @override
   PreviewSyncReport resync() => throw _refused('resync');
   @override

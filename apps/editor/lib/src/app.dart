@@ -306,7 +306,7 @@ class EditorShellState extends State<EditorShell> {
     final t = tabs;
     if (!identical(_livePlay?.tabs, t)) {
       _livePlay?.dispose();
-      _livePlay = t == null ? null : LivePlay(tabs: t);
+      _livePlay = t == null ? null : LivePlay(tabs: t, written: () => gameRun?.control.redraw());
     }
     final run = gameRun;
     final running = run != null && run.running;
