@@ -13,6 +13,7 @@ import 'package:fynkel_editor/src/env/tools.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/play_session.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
+import 'package:fynkel_editor/src/project/editor_handover.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
 
@@ -628,6 +629,8 @@ Widget shellApp({
   Future<Toolchain> Function(Preferences prefs)? detectToolchain,
   String? codeReloadStatus,
   EditorGame? game,
+  StartEditorProcess? startEditor,
+  bool Function(String dir)? isGame,
 }) {
   return FynkelEditorApp(
     key: key,
@@ -655,6 +658,9 @@ Widget shellApp({
     initialProject: initialProject,
     codeReloadStatus: codeReloadStatus,
     game: game,
+    // No handover unless a test asks for one: nothing starts an editor.
+    startEditor: startEditor,
+    isGame: isGame ?? (_) => false,
   );
 }
 

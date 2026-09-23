@@ -35,6 +35,7 @@ import 'play/play_prompt.dart';
 import 'play/play_session.dart';
 import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
+import 'project/editor_handover.dart';
 import 'project/editor_project.dart';
 import 'project/migration_dialog.dart';
 import 'project_browser/project_browser_model.dart';
@@ -88,6 +89,8 @@ class FynkelEditorApp extends StatelessWidget {
     this.sceneViewport = true,
     this.game,
     this.codeReloadStatus,
+    this.startEditor = startDetachedEditor,
+    this.isGame = isGameProject,
   });
 
   final Preferences prefs;
@@ -99,6 +102,11 @@ class FynkelEditorApp extends StatelessWidget {
   /// The project's game when this is its project editor (ADR-0021, built
   /// by `fynkel editor <dir>`); null in the plain editor.
   final EditorGame? game;
+
+  /// Starts a game project's own editor when one is opened (P3c); null
+  /// opens every project here.
+  final StartEditorProcess? startEditor;
+  final bool Function(String dir) isGame;
 
   /// Where `fynkel editor` reports hot reloads; null: `FYNKEL_EDITOR_STATUS`.
   final String? codeReloadStatus;
@@ -153,6 +161,8 @@ class FynkelEditorApp extends StatelessWidget {
             initialProject: initialProject,
             game: game,
             codeReloadStatus: codeReloadStatus ?? CodeReloadStatus.environmentPath,
+            startEditor: startEditor,
+            isGame: isGame,
           ),
         );
       },
@@ -177,6 +187,8 @@ class EditorShell extends StatefulWidget {
     this.sceneViewport = true,
     this.game,
     this.codeReloadStatus,
+    this.startEditor,
+    this.isGame = isGameProject,
   });
 
   final Preferences prefs;
@@ -185,6 +197,8 @@ class EditorShell extends StatefulWidget {
   final ChooseDirectory chooseDirectory;
   final ChooseSavePath chooseSavePath;
   final EditorGame? game;
+  final StartEditorProcess? startEditor;
+  final bool Function(String dir) isGame;
   final String? codeReloadStatus;
   final bool sceneViewport;
   final Future<Toolchain> Function(Preferences prefs) detectToolchain;
@@ -311,7 +325,8 @@ class EditorShellState extends State<EditorShell> {
     final initial = widget.initialProject;
     if (initial != null) {
       detected.then((_) {
-        if (mounted) openProjectDir(initial);
+        // The project it was started on stays here (`fynkel editor` chose).
+        if (mounted) openProjectDir(initial, handOver: false);
       });
     }
   }
@@ -1579,8 +1594,21 @@ class EditorShellState extends State<EditorShell> {
     if (created != null) await openProjectDir(created);
   }
 
-  Future<void> openProjectDir(String dir) async {
+  /// Opens [dir] here — or, for a game project that is not this editor's
+  /// own, in the project's editor, where Play runs inside ([handOver], P3c).
+  Future<void> openProjectDir(String dir, {bool handOver = true}) async {
     if (_opening) return;
+    if (handOver && _handsOver(dir)) {
+      _opening = true;
+      var openHere = false;
+      try {
+        openHere = await _handOver(dir);
+      } finally {
+        _opening = false;
+      }
+      if (openHere && mounted) await openProjectDir(dir, handOver: false);
+      return;
+    }
     _opening = true;
     try {
       final opened = await widget.openProject(dir);
@@ -1869,6 +1897,46 @@ class EditorShellState extends State<EditorShell> {
     }
     final id = record.id;
     if (id != null && opened.assetExists(id)) revealInProject(id);
+  }
+
+  bool _handsOver(String dir) {
+    if (widget.startEditor == null || !widget.isGame(dir)) return false;
+    final own = widget.game?.projectDir;
+    return own == null || !p.equals(p.canonicalize(own), p.canonicalize(dir));
+  }
+
+  /// Hands [dir] over to its project editor; true: open it here instead.
+  /// This editor quits once the other is up.
+  Future<bool> _handOver(String dir) async {
+    final tc = toolchain;
+    final cli = tc?.fynkelCli, root = tc?.fynkelRoot, flutter = tc?.flutter;
+    if (cli == null || root == null || flutter == null) {
+      notices.show(
+        'Opened in this editor: playing inside the editor needs the Fynkel CLI, the checkout and Flutter '
+        '(the launcher\'s checks say what is missing).',
+      );
+      return true;
+    }
+    await stopPlaying();
+    for (final tab in List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[])) {
+      if (!await closeTab(tab)) return false;
+    }
+    workspace?.save();
+    if (!mounted) return false;
+    final handover = EditorHandover(dir: dir, cli: cli, root: root, flutter: flutter, start: widget.startEditor!);
+    unawaited(handover.begin());
+    final outcome = await showHandoverDialog(context, handover, name: p.basename(dir));
+    handover.dispose();
+    switch (outcome) {
+      case HandoverOutcome.handedOver:
+        // The project editor adds it to the recent projects as it opens.
+        widget.quit();
+        return false;
+      case HandoverOutcome.openHere:
+        return true;
+      case HandoverOutcome.cancelled:
+        return false;
+    }
   }
 
   /// Closes the project; every dirty tab gets its save prompt first, and a

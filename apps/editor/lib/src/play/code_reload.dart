@@ -14,7 +14,14 @@ import 'package:flutter/foundation.dart';
 /// One line of the status file (version 1).
 @immutable
 class CodeReload {
-  const CodeReload({required this.seq, required this.state, this.message, this.ms, this.files = const []});
+  const CodeReload({
+    required this.seq,
+    required this.state,
+    this.message,
+    this.ms,
+    this.files = const [],
+    this.pid,
+  });
 
   factory CodeReload.fromJson(Map<String, Object?> json) => CodeReload(
     seq: (json['seq'] as num?)?.toInt() ?? 0,
@@ -22,13 +29,14 @@ class CodeReload {
     message: json['message'] as String?,
     ms: (json['ms'] as num?)?.toInt(),
     files: [for (final f in json['files'] as List? ?? const []) '$f'],
+    pid: (json['pid'] as num?)?.toInt(),
   );
 
   /// Grows with every write; a new value is a new event.
   final int seq;
 
-  /// `starting`, `running`, `reloading`, `reloaded`, `reloadFailed`,
-  /// `failed`, `exited`.
+  /// `building` (a handover, P3c), `starting`, `running`, `reloading`,
+  /// `reloaded`, `reloadFailed`, `failed`, `exited`.
   final String state;
 
   /// Why a reload failed (the compiler's or the VM's words).
@@ -37,6 +45,9 @@ class CodeReload {
 
   /// The files the reload was for, relative to the project.
   final List<String> files;
+
+  /// The `fynkel editor` process that wrote it.
+  final int? pid;
 
   bool get failed => state == 'reloadFailed';
 }

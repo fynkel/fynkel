@@ -1393,7 +1393,7 @@ report, `FynkelGameView`'s stats — a `print` in a behaviour is an
 stdin, no commands, ADR-0016); the per-frame graphs — item 9's Profiler
 reads the same `stats` records.
 
-## The project editor: `fynkel editor` (ADR-0021 P3a)
+## The project editor: `fynkel editor` (ADR-0021 P3a, P3c)
 
 `fynkel editor [dir]` opens a project in **its project editor**: an
 editor built with the project's game compiled in, so Play (P4) can run
@@ -1427,6 +1427,39 @@ the game inside the editor, and a save in `lib/` hot reloads it.
 - A project whose code does not compile cannot build its project editor.
   The command prints the build's last lines and suggests `--plain`.
 - `FYNKEL_EDITOR_TRACE=1` echoes every line `flutter run` prints.
+
+### Opening a project hands it over (P3c)
+
+Opening a game project from the launcher, **File → Open**, **Open
+Recent** or **New Project** hands it over to its project editor, as Unity
+Hub opens a project in its editor. You can start with `fynkel editor` (no
+directory) and pick projects from there.
+
+- The editor starts `fynkel editor <dir> --handover` detached, with its
+  output in `.fynkel/editor_host/editor.log`. It shows *Opening <name>…*
+  with Flutter's progress (the first build of a project's editor takes
+  about half a minute to a minute; later opens are quick) and quits once
+  the project editor is up.
+- Before it does, Play stops, and dirty documents get their save prompt.
+  Cancel on the prompt, or on the *Opening* dialog, keeps you here (Cancel
+  on the dialog also ends the build and everything it started).
+- A build that fails shows why (the compiler's errors) and the log's
+  path. **Open Without the Game** opens the project in this editor
+  anyway; Play then runs it as its own app.
+- `--handover` writes every step to `status.json` from the first moment:
+  `building` (with Flutter's progress as `message`), `starting`,
+  `running`, or `failed` with why. A project that is not a game fails
+  there instead of opening the plain editor.
+- A project that is not a game (no `pubspec.yaml` or no
+  `lib/fynkel_game.dart`) opens in whichever editor you are in, as before,
+  and so does the project editor's own project. The project that
+  `fynkel editor <dir>` was started on is never handed over.
+- Without the Fynkel CLI, the checkout or Flutter (the launcher's checks),
+  a game project opens here, with a notice saying why.
+
+`cargo install --path apps/cli` puts `fynkel` on `PATH`; the installed
+copy finds the checkout it was built from, so `fynkel editor` works from
+any directory. Install again after pulling CLI changes.
 
 A hot reload keeps the editor's state (open documents, undo). A change
 that a hot reload cannot apply, such as a new field on a const class,
