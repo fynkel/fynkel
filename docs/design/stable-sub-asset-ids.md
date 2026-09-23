@@ -86,17 +86,24 @@ every document that points into it, as one project operation:
    every node.
 2. **Sidecar:** each `subAssets` entry is renamed old key → new key with
    **the same uuid**, so references by uuid (and the cooked data) keep
-   pointing at the same part. `importerVersion` is bumped.
+   pointing at the same part. The sidecar's `formatVersion` becomes 2
+   (its `importerVersion` is left as written: the cook key uses the
+   running importer's version).
 3. **Documents** (scenes, prefabs, materials, rigs, blends, volumes —
    anything `AssetDatabase::check_refs` walks): every `{ asset: <model>,
    sub: <old> }` becomes `{ asset, sub: <new> }`. Prefab instances of
-   the model's hierarchy (`sub: "prefab"`) get their override targets
-   (`entity`, `component`, `parent`) rewritten from the old node-derived
-   uuids to the new ones.
+   the model's hierarchy (`sub: "prefab"`), of a rig built on it (a rig's
+   prefab keeps its skeleton's ids) and of any prefab nesting either get
+   their override targets (`entity`, `component`, `parent`) rewritten
+   from the old node-derived uuids to the new ones, derived through each
+   instance on the way.
 4. Written with the usual backups (`Migrated::write_with_backup`); the
    editor offers it through the existing migration preview when it opens a
    project with old sidecars. `fynkel validate` reports an unmigrated
-   sidecar (a new `FYN-A…` warning) with the command to run.
+   sidecar with the command to run. *(As built: the existing `FYN-D0016`
+   — a document behind its format, an error naming `fynkel migrate` —
+   already does this, and `fynkel migrate` given one file widens to the
+   project when a model sidecar is outdated, so no new code was added.)*
 
 The migration maps positions **in the file as it is now**. That is exactly
 what the old keys meant: they always referred to the current file's
@@ -132,8 +139,21 @@ reported; its documents are untouched.
    together, since only then does an import's output change. The old→new
    table from one parse; sidecar and
    document rewrite in `fynkel_document`/`fynkel_import`; `fynkel migrate`
-   runs it; the `FYN-A…` warning. Tests: the reference game's
-   fixtures before/after, overrides on an imported prefab survive.
+   runs it. Tests: the reference game's fixtures before/after, overrides
+   on an imported prefab survive.
+   **Done** (2026-09-23): `fynkel_document::migrate::Rewrite` (a
+   project-level pre-step) and the `meta/1-2/name-keys` step, which refuses
+   a model sidecar on its own; `fynkel_import::keys_migration` (the plan
+   over a project's files); `fynkel migrate` widening to the project;
+   the cook key carrying the sidecar's format and keys;
+   `tests/keys_migration.rs` (keys renamed with their uuids, references,
+   overrides direct, through a rig and through a nested prefab, a second
+   run a no-op, a missing model reported).
 3. **S3 — Apply.** Migrate the reference game, the showcase, the starter
    template and the fixtures; the editor's migration preview; docs
    (`documents.md`, ADR-0006 consequence line).
+   **Done** (2026-09-23): every project and fixture migrated (the
+   reference game's generators write the same bytes the migration did),
+   `benchmarks/stress/generate.py` and the starter template on name
+   keys, the editor's preview planned over the asset root's files,
+   documents.md § Sub-asset keys, the ADR-0006 consequence.

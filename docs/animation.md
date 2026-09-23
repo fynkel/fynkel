@@ -25,7 +25,7 @@ the character controller or the transform.
 | the systems | `crates/fynkel_core/src/world/animation.rs` | `run_animation` in the pre-tick slot: every `fynkel.Animator`'s clock, clip or blend space, crossfade, markers, root motion and pose write (ancestors first, so a child animator is a layer); every `fynkel.Skin`'s joint lookup; `skin_palette` for the extract |
 | the components | `fynkel.Animator` (id 21), `fynkel.Skin` (22) | ordinary native components (`docs/codegen.md`): authored, validated, generated into every codec, reachable from Dart on the M3-07a path |
 | the blend document | `<name>.blend.json` — `schemas/blend.schema.json`, `crates/fynkel_document/src/blend.rs`, `DocumentKind::Blend` (`docs/documents.md` § Blend spaces) | `{ parameter, points: [{ at, clip }], sync: "phase" }`; validated (`FYN-D0600`–`D0602`), cooked as a JSON document chunk depending on its clips' carriers, registered by the asset store with its clips (`Assets::blend`, `register_clip`) |
-| the import | `crates/fynkel_import/src/gltf.rs` (importer version 5), `fbx.rs`, the rig document (`docs/documents.md`) | glTF skins → `skin/<s>`, animations → `anim/<a>` (with their `extras.markers`), `JOINTS_0`/`WEIGHTS_0` → a skinned `mesh/<n>`; the prefab gets the `fynkel.Skin`; a rig's `markers` join its clips at cook |
+| the import | `crates/fynkel_import/src/gltf.rs` (importer version 6), `fbx.rs`, the rig document (`docs/documents.md`) | glTF skins → `skin/<name>`, animations → `anim/<name>` (with their `extras.markers`), `JOINTS_0`/`WEIGHTS_0` → a skinned `mesh/<n>`; the prefab gets the `fynkel.Skin`; a rig's `markers` join its clips at cook |
 | the cache | `crates/fynkel_cooked/src/payload.rs` | `SKIN` and `ANIM` chunks (an `ANIM` carries its markers after the channels); a skinned `MESH` carries a trailing `SkinWeight` section |
 | the renderer | `crates/fynkel_render` (`docs/renderer.md`) | the skinned vertex path: a joint palette storage buffer and `vs_skinned` in five pipeline variants |
 | the wire | `fynkel.cmd.Animate` (kind 9), `fynkel.ev.AnimationEnded` (9), `fynkel.ev.AnimationMarker` (10), `fynkel.rec.AnimatorState`, `FYNKEL_QUERY_ANIMATOR` (11) | play/crossfade/stop/pause/resume/speed/time/weight/parameter; the one-shot's end; a marker crossed; the state read-back |
@@ -85,8 +85,8 @@ interpolated world matrices like any other entity's. At most
 
 | Component | id | Fields | Rule |
 | --- | --- | --- | --- |
-| `fynkel.Animator` | 21 | `clip` (an `anim/<a>` asset ref, or a blend document's id with no sub — § Blend spaces; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the named nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
-| `fynkel.Skin` | 22 | `skin` (a `skin/<s>` asset ref), `skeleton` (the name of the joint root entity; empty: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by name under `skeleton`, itself found by name from the entity's tree root |
+| `fynkel.Animator` | 21 | `clip` (an `anim/<name>` asset ref, or a blend document's id with no sub — § Blend spaces; nil plays nothing), `speed` (finite; negative plays backwards), `looping`, `playing`, `weight` (0…1, default 1), `additive` (default false), `root_motion` (default false) | plays `clip` over the named nodes under this entity; a second animator on a descendant is a layer over its ancestors' pose (§ Layers); `speed` non-finite or `weight` outside 0…1 is `INVALID_PAYLOAD` (`FYN-H0008` at `fynkel validate`) |
+| `fynkel.Skin` | 22 | `skin` (a `skin/<name>` asset ref), `skeleton` (the name of the joint root entity; empty: the tree's root) | next to the `fynkel.MeshRenderer` of a skinned mesh: the joints are found by name under `skeleton`, itself found by name from the entity's tree root |
 
 Both are ordinary native components: authored in a scene or prefab,
 validated, listed in `fynkel.project.json` → `components`, `get<Animator>()`
@@ -204,15 +204,15 @@ A **blend space** is a document, `<name>.blend.json` (`DocumentKind::Blend`,
   "id": "…", "name": "Player locomotion",
   "parameter": "speed",
   "points": [
-    { "at": 0, "clip": { "asset": "<character>", "sub": "anim/0" } },
-    { "at": 4, "clip": { "asset": "<character>", "sub": "anim/1" } },
-    { "at": 7, "clip": { "asset": "<character>", "sub": "anim/2" } }
+    { "at": 0, "clip": { "asset": "<character>", "sub": "anim/idle" } },
+    { "at": 4, "clip": { "asset": "<character>", "sub": "anim/walk" } },
+    { "at": 7, "clip": { "asset": "<character>", "sub": "anim/run" } }
   ],
   "sync": "phase"
 }
 ```
 
-One named **parameter**; 1 to 16 **points**, each a clip (an `anim/<a>`
+One named **parameter**; 1 to 16 **points**, each a clip (an `anim/<name>`
 of a rig document or a model source) at a strictly increasing `at`
 (`FYN-D0600` otherwise, `D0601` for a clip that is not one, `D0602` for
 a malformed entry); `sync` is `phase` (the only mode: 1D and phase-sync
@@ -289,7 +289,7 @@ A clip carries named times. Authored in the rig document —
 — or in a glTF animation's `extras`: `{ "markers": [ { "at": 0.12,
 "name": "footstep" } ] }` (a Blender custom property, or a line in the
 exported `.gltf`); the importer (`fynkel.gltf` version 5) keeps them on
-the `anim/<a>` and the cook merges the rig's into the retargeted clip
+the `anim/<name>` and the cook merges the rig's into the retargeted clip
 (sorted; one past the clip's end is dropped with `FYN-D0502`; a
 malformed entry is `A0104`). `fynkel rig inspect` counts them per clip.
 The `ANIM` payload stores them after the channels (`marker_count`, then
@@ -360,7 +360,7 @@ The native layer (`fynkel_native`) registers from the cache, before the
 batch is applied, any clip or blend space a `play`/`crossfade` names that
 the loaded scene never did (a space with every point's clip), and the
 clip or skin of an `Animator`/`Skin` a behaviour `set`s — so a behaviour
-plays `anim/3` of a character whose scene only authored `anim/0` without
+plays `anim/jump` of a character whose scene only authored `anim/idle` without
 listing every clip somewhere; a clip the cache cannot read stays
 unregistered and the animator reports `CLIP_UNAVAILABLE` at the tick.
 
@@ -391,14 +391,14 @@ keeps what a rigged source carries:
   appends the 24-byte weights *after* the indices, so a static mesh's
   bytes are unchanged and a loader tells the two apart by length
   (`MeshPayload::is_skinned`); a joint index past the skin is `A0104`.
-- every glTF skin becomes `skin/<s>` (`SkinData`, cooked as a `SKIN`
+- every glTF skin becomes `skin/<name>` (`SkinData`, cooked as a `SKIN`
   chunk): the joints in the skin's order, each by node name with its
   parent when the parent is a joint of the same skin, its inverse bind
   matrix and its rest pose (the node's TRS), and the skeleton root's
   name (the skin's `skeleton` node, else empty). Two joints of one skin
   sharing a name is an import error (`A0104`; targets resolve by name),
   more than `max_joints` = 256 is `A0101`.
-- every glTF animation becomes `anim/<a>` (`AnimationData`, cooked as an
+- every glTF animation becomes `anim/<name>` (`AnimationData`, cooked as an
   `ANIM` chunk): its translation/rotation/scale channels targeting nodes
   by name, step/linear/cubic-spline as authored (a cubic spline keeps its
   in-tangent, value, out-tangent triples), and the duration (the last
@@ -407,7 +407,7 @@ keeps what a rigged source carries:
   in the file is warned about (`A0105`). The animation's `extras.markers`
   become the clip's markers (§ Markers; a malformed entry is `A0104`).
 - the prefab puts a **`fynkel.Skin`** next to the `fynkel.MeshRenderer`
-  of a node that has a skin (`skin/<s>`, `skeleton` = the root's name);
+  of a node that has a skin (`skin/<name>`, `skeleton` = the root's name);
   a skin on a node without a skinned mesh, or a skinned mesh on a node
   without a skin, is a warning and the mesh draws in its bind pose.
 
@@ -454,7 +454,7 @@ The reference game's Player, cut down (`examples/reference_game/lib/game/player.
 
 ```dart
 class Player extends Behaviour {
-  @Expose() AssetRef jumpClip = AssetRef.none;       // the scene tells it: anim/3, or a rig's anim/jump
+  @Expose() AssetRef jumpClip = AssetRef.none;       // the scene tells it: the model's or a rig's anim/jump
   @Expose() String waveLayer = 'spine';              // the entity carrying the wave layer's animator
   late AssetRef locomotion;                          // the blend space the scene's animator started on
   bool inJump = false;
@@ -595,7 +595,7 @@ its skinned meshes, its joints, its `Skin`s, as `fynkel import` derived
 them (documents.md § Prefab documents › Imported hierarchies) — and an
 `Animator` on that entity finds the joints by name below it. `fynkel
 validate` imports the file in memory to check the instance and its
-overrides (a material swap on `node/<i>/renderer`, a turn on the root's
+overrides (a material swap on `node/<path>/renderer`, a turn on the root's
 transform), the cook expands the scene against the cooked source's
 `prefab` chunk, the runtime spawns the same hierarchy from
 `World.instantiate(AssetRef(glb, sub: 'prefab'))` (hosts.md § Prefabs at
@@ -604,7 +604,7 @@ editable `.prefab.json` for the cases that want hand-edited ids. Four
 downloads with the Blender recipe above become a playable character
 with `examples/reference_game/tools/playground.py --hero
 assets/models/hero.glb` (the Player's `Rig` child instances the file,
-turned to face -Z; the clips are its `anim/0..3` as idle, walk, run,
+turned to face -Z; its clips are named idle, walk, run and
 jump; opt-in, never committed — rerun without `--hero` before a commit).
 The same path was proven on rigs nobody here made: the Khronos `Fox`
 (24 joints, Survey/Walk/Run), `CesiumMan` and `RiggedFigure` (19 joints
@@ -623,12 +623,12 @@ it is: `fynkel asset init Walking.fbx` and the file imports with no
 diagnostics — `ufbx` converts the centimetres and axes, so the prefab's
 root is plain (no 0.01 scale, no Z-up turn); two skinned meshes welded
 to 15 901 and 12 473 vertices, skins of 64/65 `mixamorig:` clusters with
-`mixamorig:Hips` as the skeleton, one clip `anim/0` named `"mixamo.com"`
+`mixamorig:Hips` as the skeleton, one clip `anim/mixamo.com` (the stack's name)
 of 0.967 s (52 moving nodes; the empty `Take 001` stack gives no clip),
 the red default material. The four downloads (Idle, Walking, Fast Run,
 Jumping) each validate, cook, run headless (74 entities, 2 skins over
 129 joints, 0 diagnostics) and render posed and upright from a scene
-whose `Hero` carries an `Animator` on `anim/0` and instances
+whose `Hero` carries an `Animator` on `anim/mixamo.com` and instances
 `{ asset: <fbx id>, sub: "prefab" }` on a `Rig` child turned to face
 −Z — the same scene shape as the glTF path. The Blender recipe above is
 no longer needed for import; what a game still wants is one name per
@@ -653,10 +653,10 @@ says which file is the character and what each clip is called:
 
 ```sh
 fynkel import Idle.fbx Walking.fbx "Fast Run.fbx" Jumping.fbx --rig hero
-#   idle      Idle.fbx#anim/0      1.97 s  156/156 channel(s)
-#   walking   Walking.fbx#anim/0   0.97 s  156/156 channel(s)
-#   fast_run  Fast Run.fbx#anim/0  0.53 s  156/156 channel(s)
-#   jumping   Jumping.fbx#anim/0   1.90 s  156/156 channel(s)
+#   idle      Idle.fbx#anim/mixamo.com      1.97 s  156/156 channel(s)
+#   walking   Walking.fbx#anim/mixamo.com   0.97 s  156/156 channel(s)
+#   fast_run  Fast Run.fbx#anim/mixamo.com  0.53 s  156/156 channel(s)
+#   jumping   Jumping.fbx#anim/mixamo.com   1.90 s  156/156 channel(s)
 # hero.rig.json: created (4 clip(s), skeleton Idle.fbx)
 ```
 
@@ -706,7 +706,7 @@ the Player's `Animator` on it; `game.Player` sets `speed` every tick from
 the controller's planar velocity (so a wall stops the stride with the
 player), plays the jump once over the space and crossfades back on
 landing, plays the **wave layer** — a second, additive `Animator` on the
-`spine` joint (the character's `anim/4`, keying the right arm alone,
+`spine` joint (the character's `anim/wave`, keying the right arm alone,
 paused on its first frame so it adds nothing at rest) — on the `wave`
 action, and counts the walk's and the run's `step_l`/`step_r` markers
 (`tools/character.py` writes them into the glTF's `extras`) into the

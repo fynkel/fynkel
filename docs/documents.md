@@ -149,7 +149,7 @@ with its expected diagnostics.
 
 Component `data` follows the field types of `docs/codegen.md`: vectors are
 number arrays, enums are the lowerCamel variant name (`"projection":
-"perspective"`), asset references are `{ "asset": "<uuid>", "sub": "mesh/0" }`
+"perspective"`), asset references are `{ "asset": "<uuid>", "sub": "mesh/Cube" }`
 with `sub` omitted for the asset itself — never a path. Built-in authored
 components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
 `fynkel.DirectionalLight`, `fynkel.PointLight`, `fynkel.SpotLight`,
@@ -370,10 +370,10 @@ runtime and `fynkel state dump` prints them.
 **Imported hierarchies** (M3-19a): a source the glTF importer read has its
 node tree as the `prefab` sub-asset (§ Import › glTF/GLB: one entity per
 node with `Transform`, `MeshRenderer` and `Skin`, ids UUID v5 of the asset
-id and `node/<i>`, components `node/<i>/transform|renderer|skin`), and
+id and `node/<name path>`, components `node/<path>/transform|renderer|skin`), and
 `prefab: { asset: <source id>, sub: "prefab" }` instances it like a prefab
 document — the same expansion, derivation, overrides (`setField` on
-`node/<i>/renderer` swaps a material, on the root's transform turns the
+`node/<path>/renderer` swaps a material, on the root's transform turns the
 model), nesting (a prefab document may instance an import), `D040x`
 diagnostics and `fynkel scene inspect --expand`. The library keys such
 prefabs by `(source, "prefab")` (`PrefabLibrary::add_imported`,
@@ -521,7 +521,7 @@ window, never running game code and never reading a cooked cache
   read-only prefab document: `kind` `prefab`, `sub` `"prefab"`, `path` the
   source file, `relativePath` with `#prefab` appended, `readOnly` naming
   the source; every transaction on it is `FYN-E0007`. A texture's or any
-  other sub is `FYN-D0401`. Its entities carry the derived `node/<i>` ids
+  other sub is `FYN-D0401`. Its entities carry the derived `node/<path>` ids
   the runtime uses, so an override written against the instance addresses
   the same ids the tab shows.
 - **Writes inside a transaction** (`createMaterial`, `saveDocument`) take a
@@ -863,16 +863,16 @@ named by the game, each from whichever file carries it:
 { "$schema": "https://fynkel.dev/schemas/rig.schema.json", "formatVersion": 1,
   "id": "…", "name": "hero",
   "skeleton": { "asset": "<Idle.fbx>" },
-  "clips": { "idle": { "asset": "<Idle.fbx>", "sub": "anim/0" },
-             "walk": { "asset": "<Walking.fbx>", "sub": "anim/0" },
-             "run":  { "asset": "<Fast Run.fbx>", "sub": "anim/0" },
-             "jump": { "asset": "<Jumping.fbx>", "sub": "anim/0" } },
+  "clips": { "idle": { "asset": "<Idle.fbx>", "sub": "anim/mixamo.com" },
+             "walk": { "asset": "<Walking.fbx>", "sub": "anim/mixamo.com" },
+             "run":  { "asset": "<Fast Run.fbx>", "sub": "anim/mixamo.com" },
+             "jump": { "asset": "<Jumping.fbx>", "sub": "anim/mixamo.com" } },
   "markers": { "walk": [ { "at": 0.12, "name": "footstep" }, { "at": 0.61, "name": "footstep" } ] } }
 ```
 
 `skeleton.asset` names a source that imports as a model with a node
 hierarchy (`fynkel.gltf`, `fynkel.fbx`; no `sub`), whose meshes, skins
-and joints *are* the character; each clip is an `anim/<n>` of any such
+and joints *are* the character; each clip is an `anim/<name>` of any such
 source (the skeleton's own file included). Clip names are identifiers
 (`[A-Za-z_][A-Za-z0-9_]{0,63}`). The rig is an asset like any document
 (`fynkel_document::Rig`): the asset database lists its **sub-assets** —
@@ -895,7 +895,7 @@ through the same `PrefabLibrary` path as `<source>#prefab` (§ Prefab
 documents › Imported hierarchies): the skeleton's hierarchy is imported
 and **adopted** under the rig's `prefab` sub uuid as its document id and
 the rig's name (`Rig::adopt_prefab`); the entity and component ids stay
-the skeleton file's (`node/<i>` of the *source* id), so overrides
+the skeleton file's (`node/<path>` of the *source* id), so overrides
 written against the file keep working and a scene can move from
 `<fbx>#prefab` to `<rig>#prefab` by changing the asset.
 
@@ -916,7 +916,7 @@ the clip keeps its duration. The rig's `markers` (M3-19c: `<clip name>`
 is `D0502`) join the source clip's own markers in the cooked `ANIM`,
 sorted by time; one past the clip's end is dropped with a `D0502`
 warning at cook. `fynkel rig inspect` counts them per clip. The `ANIM`
-info carries `channels`, `seconds`, `source` (`<path>#anim/<n>`),
+info carries `channels`, `seconds`, `source` (`<path>#anim/<name>`),
 `dropped` and `markers`. Runtime
 dependencies are the skeleton only (the index and META
 `dependencies`), while the cache key covers every clip source: editing
@@ -956,9 +956,9 @@ named parameter, played by a `fynkel.Animator` like one clip
 { "$schema": "https://fynkel.dev/schemas/blend.schema.json", "formatVersion": 1,
   "id": "…", "name": "Player locomotion",
   "parameter": "speed",
-  "points": [ { "at": 0, "clip": { "asset": "<character>", "sub": "anim/0" } },
-              { "at": 4, "clip": { "asset": "<character>", "sub": "anim/1" } },
-              { "at": 7, "clip": { "asset": "<character>", "sub": "anim/2" } } ],
+  "points": [ { "at": 0, "clip": { "asset": "<character>", "sub": "anim/idle" } },
+              { "at": 4, "clip": { "asset": "<character>", "sub": "anim/walk" } },
+              { "at": 7, "clip": { "asset": "<character>", "sub": "anim/run" } } ],
   "sync": "phase" }
 ```
 
@@ -1100,7 +1100,7 @@ Besides the envelope (`name` defaults to the file name) it holds
 `fynkel.fbx`, `fynkel.image`, `fynkel.audio`, `fynkel.file` for anything
 else),
 `importerVersion`, importer-defined `settings`, and `subAssets` — sub-asset
-id (`mesh/Body`, `material/0`; the `sub` of an `assetRef`) → that
+id (`mesh/Body`, `material/Painted`; the `sub` of an `assetRef`) → that
 sub-asset's own stable uuid, written on first import and kept across
 re-imports. Documents (`.scene.json`, `.prefab.json`, `.material.json`,
 `.shader.json`, `.rig.json`) are their own identity and have no sidecar;
@@ -1136,7 +1136,44 @@ It is development-only, never runs in a shipped game, and serializes to
 bytes deterministically — the same source, settings and sidecar give the
 same bytes on every machine, so it can be hashed, cached and diffed.
 
-### glTF/GLB (`fynkel.gltf`, version 5)
+### Sub-asset keys
+
+A model's sub-asset keys come from the **names** of its parts
+(`docs/design/stable-sub-asset-ids.md`; sidecar `formatVersion` 2,
+`fynkel.gltf` 6, `fynkel.fbx` 2), so reordering meshes, materials or clips
+in the modelling tool keeps every reference on the same part:
+
+- `mesh/<name>` (several primitives or material parts: `mesh/<name>/<p>`),
+  `material/<name>`, `image/<name>` (else the image URI's or texture file's
+  stem; `image/<name>/linear` for a dual-use copy), `skin/<name>`,
+  `anim/<name>`; imported-prefab ids derive from `node/<name path>`
+  (`node/Hero/mixamorig_Hips/…`), never a `sub`.
+- A name is kept to letters, digits, `_ . space -`; anything else becomes
+  `_` (`mixamorig:Hips` → `mixamorig_Hips`). An unnamed part keeps its
+  position behind `#` (`anim/#0`); a name met again in the same kind (or
+  among siblings, for nodes) gets `~2`, `~3` in file order
+  (`mesh/Cube~2`); a name past 80 characters is cut and gets `~` and a
+  hash. `#` and `~` never survive sanitising, so a marker cannot collide
+  with a name.
+- **Renaming** a part in the modelling tool breaks its references loudly:
+  the old key is reported as no longer produced (`A0105`, naming the keys
+  that appeared in the same import) and every reference to it is `A0005`.
+  Nothing is remapped by guesswork.
+
+A sidecar at `formatVersion` 1 keyed parts by position (`mesh/5`,
+`anim/0`, `node/12`). It is behind its format (`D0016`) until `fynkel
+migrate` moves the project: it imports each such model once, renames the
+sidecar's keys **keeping their uuids**, renames every `{ asset: <model>,
+sub }` in the project, and moves every override target derived from a node
+position — on an instance of the model's hierarchy, of a rig built on it,
+or of a prefab nesting either — to the id the name path derives
+(`meta/1-2/name-keys`; `fynkel_import::keys_migration`). Given one
+document of such a project, `fynkel migrate` widens to the whole project.
+A model whose file is missing or does not import is reported and left
+with its documents as they are. The editor's migration preview shows the
+same plan.
+
+### glTF/GLB (`fynkel.gltf`, version 6)
 
 The importer reads glTF 2.0 `.gltf`/`.glb` through
 the `gltf` crate (no `import` feature: buffers and images are resolved by
@@ -1144,13 +1181,13 @@ Fynkel, never by the crate) and produces, per file:
 
 | Sub-asset id | What | Notes |
 | --- | --- | --- |
-| `mesh/<n>` (one primitive) or `mesh/<n>/<p>` | one mesh per **triangle** primitive | fixed 72-byte vertex: position, normal, tangent(4), uv0, uv1, colour(4); `u32` indices; bounds. Missing normals → unwelded with flat face normals (per spec); missing tangents → zero in the intermediate (the cook generates them, below); missing colour → white. Points/lines/strips/fans are skipped with `FYN-A0105`. |
-| `material/<m>` | a `fynkel.pbr@1` material document (the current formatVersion) | `base_color`, `metallic`, `roughness`, `emissive`, `emissive_strength` (`KHR_materials_emissive_strength`), `normal_scale`, `occlusion_strength`, `alpha_mode`/`alpha_cutoff`, `double_sided`; the five `<slot>_texture` references bound to `{ asset: <this asset>, sub: "image/<i>" }` (or `image/<i>/linear`, below). A slot that samples `TEXCOORD_1` or a non-default sampler (nearest filtering, clamp/mirror wrap) is imported without that setting and warned about once (`FYN-A0105`): the PBR model has one UV set and one sampler. Validates like a hand-written one. |
-| `image/<i>` | the encoded bytes (PNG/JPEG) with their MIME type and **colour space** | sRGB when a colour slot (`base_color`, `emissive`) uses it, linear when only data slots (`normal`, `metallic_roughness`, `occlusion`) do, sRGB when unused |
-| `image/<i>/linear` | a linear copy of a **dual-use** image | when one image feeds both a colour and a data slot it is imported twice; the data slots point at the linear copy, so every texture reaches the cache in the colour space its slot needs |
-| `prefab` | the default scene's node hierarchy as a prefab document (the current formatVersion; importer version 3 = prefab formatVersion 2) | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive; a node whose mesh has a skin carries a `fynkel.Skin { skin: skin/<s>, skeleton }` next to the renderer (M3-19). Entities are named after their nodes (`node<i>` when unnamed) — the names are what clips and skins target. Entity and component ids are UUID v5 of the asset id and `node/<i>`, `node/<i>/transform`, `node/<i>/renderer`, `node/<i>/skin`, `node/<i>/primitive/<p>[/transform|/renderer]`. |
-| `skin/<s>` (M3-19, [animation.md](animation.md)) | one per glTF skin | the joints in the skin's order, each by node name with its parent when that is a joint of the same skin, its inverse bind matrix and its rest pose; the skeleton root's name. Two joints sharing a name is `A0104`, more than `max_joints` (256) is `A0101`. A primitive with `JOINTS_0`/`WEIGHTS_0` is a **skinned mesh**: its `mesh/<n>` carries one normalized `SkinWeight` (4 × `u16` joint, 4 × `f32` weight) per vertex, a joint index past the skin is `A0104`. |
-| `anim/<a>` (M3-19) | one per glTF animation | its translation/rotation/scale channels targeting nodes by name, step/linear/cubic-spline as authored, the duration; morph-weight channels skipped (`A0105`), a target name that is not unique in the file warned about (`A0105`). The animation's `extras` may carry `{ "markers": [ { "at": <seconds>, "name": "<name>" } ] }` (M3-19c, importer version 5): kept on the clip, sorted; an entry without a finite `at` in `[0, duration]` or a non-empty `name`, or a `markers` that is not an array, is `A0104`. |
+| `mesh/<name>` (one primitive) or `mesh/<name>/<p>` | one mesh per **triangle** primitive | fixed 72-byte vertex: position, normal, tangent(4), uv0, uv1, colour(4); `u32` indices; bounds. Missing normals → unwelded with flat face normals (per spec); missing tangents → zero in the intermediate (the cook generates them, below); missing colour → white. Points/lines/strips/fans are skipped with `FYN-A0105`. |
+| `material/<name>` | a `fynkel.pbr@1` material document (the current formatVersion) | `base_color`, `metallic`, `roughness`, `emissive`, `emissive_strength` (`KHR_materials_emissive_strength`), `normal_scale`, `occlusion_strength`, `alpha_mode`/`alpha_cutoff`, `double_sided`; the five `<slot>_texture` references bound to `{ asset: <this asset>, sub: "image/<name>" }` (or `image/<name>/linear`, below). A slot that samples `TEXCOORD_1` or a non-default sampler (nearest filtering, clamp/mirror wrap) is imported without that setting and warned about once (`FYN-A0105`): the PBR model has one UV set and one sampler. Validates like a hand-written one. |
+| `image/<name>` | the encoded bytes (PNG/JPEG) with their MIME type and **colour space** | sRGB when a colour slot (`base_color`, `emissive`) uses it, linear when only data slots (`normal`, `metallic_roughness`, `occlusion`) do, sRGB when unused |
+| `image/<name>/linear` | a linear copy of a **dual-use** image | when one image feeds both a colour and a data slot it is imported twice; the data slots point at the linear copy, so every texture reaches the cache in the colour space its slot needs |
+| `prefab` | the default scene's node hierarchy as a prefab document (the current formatVersion; importer version 3 = prefab formatVersion 2) | one entity per node with a `fynkel.Transform` (decomposed TRS, matrices included); a node with a single-primitive mesh carries a `fynkel.MeshRenderer` (`mesh` and `material` are `assetRef`s into this asset; a primitive without a material gets the nil ref = engine default); a multi-primitive mesh gets one child entity per primitive; a node whose mesh has a skin carries a `fynkel.Skin { skin: skin/<name>, skeleton }` next to the renderer (M3-19). Entities are named after their nodes (`node<i>` when unnamed) — the names are what clips and skins target. Entity and component ids are UUID v5 of the asset id and `node/<path>`, `node/<path>/transform`, `node/<path>/renderer`, `node/<path>/skin`, `node/<path>/primitive/<p>[/transform|/renderer]`, where `<path>` is the node's name path from its root (§ Sub-asset keys). |
+| `skin/<name>` (M3-19, [animation.md](animation.md)) | one per glTF skin | the joints in the skin's order, each by node name with its parent when that is a joint of the same skin, its inverse bind matrix and its rest pose; the skeleton root's name. Two joints sharing a name is `A0104`, more than `max_joints` (256) is `A0101`. A primitive with `JOINTS_0`/`WEIGHTS_0` is a **skinned mesh**: its `mesh/<name>` carries one normalized `SkinWeight` (4 × `u16` joint, 4 × `f32` weight) per vertex, a joint index past the skin is `A0104`. |
+| `anim/<name>` (M3-19) | one per glTF animation | its translation/rotation/scale channels targeting nodes by name, step/linear/cubic-spline as authored, the duration; morph-weight channels skipped (`A0105`), a target name that is not unique in the file warned about (`A0105`). The animation's `extras` may carry `{ "markers": [ { "at": <seconds>, "name": "<name>" } ] }` (M3-19c, importer version 5): kept on the clip, sorted; an entry without a finite `at` in `[0, duration]` or a non-empty `name`, or a `markers` that is not an array, is `A0104`. |
 
 Morph targets and cameras are skipped with `A0105` warnings; a skin on
 a node without a skinned mesh, or a skinned mesh on a node without a
@@ -1175,7 +1212,7 @@ parents) is `A0104`; the `Limits` — file 256 MiB, buffers 256 MiB total,
 are `A0101`; a file that is not glTF at all is `A0100`. Any error means no
 intermediate is produced.
 
-### FBX (`fynkel.fbx`, version 1)
+### FBX (`fynkel.fbx`, version 2)
 
 M3-19b. The importer reads binary and ASCII FBX (`.fbx`, 6100–7700)
 through `ufbx` (a single C file compiled into `fynkel_import`; nothing
@@ -1206,12 +1243,12 @@ vertex, normal, UVs, tangent and colour are welded back into one vertex
 
 | Sub-asset id | What | Notes |
 | --- | --- | --- |
-| `mesh/<id>` (one material) or `mesh/<id>/<p>` (one per material part) | one mesh per polygon mesh, triangulated by `ufbx`, per material | `<id>` is the mesh's typed id in the file (stable across re-exports that do not add meshes). Same 72-byte vertex as glTF; the mesh's own `material/<m>`; point and line faces skipped (`A0105`), a mesh without polygons skipped (`A0105`). A mesh with a skin deformer is a **skinned mesh**: the four heaviest weights per vertex, normalized, joint = the cluster's index in the skin; a vertex no cluster touches is bound to joint 0 with weight 1. Blend-shape deformers are skipped (`A0105`), a second skin deformer on a mesh is ignored (`A0105`). |
-| `material/<m>` | a `fynkel.pbr@1` material document | from `ufbx`'s PBR view of the material — a classic Phong/Lambert material maps diffuse → `base_color`, shininess → `roughness`, emissive; a real PBR material (Maya Standard Surface, 3ds Max Physical, Blender Principled) keeps its own values. Emission colour × factor; anything past 1 becomes `emissive_strength` (white at 3 → `[1, 1, 1]` at 3, like `KHR_materials_emissive_strength`). Opacity below 1 (or an opacity texture) → `alpha_mode: blend`; double-sided from the material's feature flag. Textures are bound for `base_color`, `normal`, `occlusion` and `emissive` slots only; a roughness, metalness or opacity texture is reported (`A0105`) and left unbound — the PBR model reads roughness and metallic from one packed `metallic_roughness_texture` and opacity from the base colour's alpha, both set on the material document afterwards. Clamped wrap or a UV transform on a texture is warned about once per texture (`A0105`, the sampler is the default); layered and procedural textures are skipped. Validates like a hand-written material. |
-| `image/<t>` | the **embedded** bytes of a file texture bound by a slot, colour space by use as in glTF (`image/<t>/linear` for a dual-use image) | `<t>` is the texture's typed id. PNG and JPEG only (sniffed, `A0103` otherwise; `max_image_bytes` → `A0101`). A texture that is not embedded is refused with `A0102` unless the sidecar says `"allowExternalFiles": true`, and then it is read from the plain relative path the file names (`\` → `/`; a drive, scheme, absolute path or `..` is `A0102`) next to the source — the same boundary as glTF. Textures no slot binds are not imported. |
-| `skin/<s>` | one per skin deformer | the joints in **cluster order**, each named after its bone node with its parent when that bone is in the same skin, `inverse_bind` = the cluster's `geometry_to_bone` (checked against the bind pose on Mixamo and Blender files), rest pose = the bone's local TRS; the skeleton root = the one joint whose parent is not in the skin (`""` when there are several). A cluster bound to no bone or two joints sharing a name is `A0104`; more than `max_joints` is `A0101`. |
-| `anim/<n>` | one per **animation stack**, in file order, named after the stack (`"mixamo.com"`, `"Take 001"`, Blender's action/NLA-track name) | baked by `ufbx` at the file's frame rate (`trim_start_time`: the clip starts at 0; key reduction on) into translation/rotation/scale channels targeting nodes by name, linear interpolation, duration = the last key; channels that do not move keep one key. A stack that animates nothing (Mixamo's empty `Take 001`) produces no clip and no warning. A target name that is not unique in the file is `A0105`. Clip names are what the file says — the rig document (§ Rig documents) is where a game names its clips (`walk`, `idle`, …) and matches them across files by bone name. |
-| `prefab` | the node hierarchy under the scene root as a prefab document, the glTF layout | entity ids from `node/<typed id>`; the file's root node is not an entity, its children are the prefab's roots; a mesh node carries `fynkel.MeshRenderer` (a multi-material mesh gets one child per part, `<name>[<p>]`) and, when skinned, `fynkel.Skin { skin, skeleton }`; the prefab is named after the file stem. Blender's FBX exporter writes its armature convention as a −90° X turn on the armature node and +90° X on the root bone: world poses are what was authored, the local numbers differ from the glTF export of the same rig. |
+| `mesh/<name>` (one material) or `mesh/<name>/<p>` (one per material part) | one mesh per polygon mesh, triangulated by `ufbx`, per material | `<name>` is the mesh element's name (§ Sub-asset keys). Same 72-byte vertex as glTF; the mesh's own `material/<name>`; point and line faces skipped (`A0105`), a mesh without polygons skipped (`A0105`). A mesh with a skin deformer is a **skinned mesh**: the four heaviest weights per vertex, normalized, joint = the cluster's index in the skin; a vertex no cluster touches is bound to joint 0 with weight 1. Blend-shape deformers are skipped (`A0105`), a second skin deformer on a mesh is ignored (`A0105`). |
+| `material/<name>` | a `fynkel.pbr@1` material document | from `ufbx`'s PBR view of the material — a classic Phong/Lambert material maps diffuse → `base_color`, shininess → `roughness`, emissive; a real PBR material (Maya Standard Surface, 3ds Max Physical, Blender Principled) keeps its own values. Emission colour × factor; anything past 1 becomes `emissive_strength` (white at 3 → `[1, 1, 1]` at 3, like `KHR_materials_emissive_strength`). Opacity below 1 (or an opacity texture) → `alpha_mode: blend`; double-sided from the material's feature flag. Textures are bound for `base_color`, `normal`, `occlusion` and `emissive` slots only; a roughness, metalness or opacity texture is reported (`A0105`) and left unbound — the PBR model reads roughness and metallic from one packed `metallic_roughness_texture` and opacity from the base colour's alpha, both set on the material document afterwards. Clamped wrap or a UV transform on a texture is warned about once per texture (`A0105`, the sampler is the default); layered and procedural textures are skipped. Validates like a hand-written material. |
+| `image/<name>` | the **embedded** bytes of a file texture bound by a slot, colour space by use as in glTF (`image/<name>/linear` for a dual-use image) | `<name>` is the texture file's stem, else the texture's name. PNG and JPEG only (sniffed, `A0103` otherwise; `max_image_bytes` → `A0101`). A texture that is not embedded is refused with `A0102` unless the sidecar says `"allowExternalFiles": true`, and then it is read from the plain relative path the file names (`\` → `/`; a drive, scheme, absolute path or `..` is `A0102`) next to the source — the same boundary as glTF. Textures no slot binds are not imported. |
+| `skin/<name>` | one per skin deformer | the joints in **cluster order**, each named after its bone node with its parent when that bone is in the same skin, `inverse_bind` = the cluster's `geometry_to_bone` (checked against the bind pose on Mixamo and Blender files), rest pose = the bone's local TRS; the skeleton root = the one joint whose parent is not in the skin (`""` when there are several). A cluster bound to no bone or two joints sharing a name is `A0104`; more than `max_joints` is `A0101`. |
+| `anim/<name>` | one per **animation stack**, in file order, named after the stack (`"mixamo.com"`, `"Take 001"`, Blender's action/NLA-track name) | baked by `ufbx` at the file's frame rate (`trim_start_time`: the clip starts at 0; key reduction on) into translation/rotation/scale channels targeting nodes by name, linear interpolation, duration = the last key; channels that do not move keep one key. A stack that animates nothing (Mixamo's empty `Take 001`) produces no clip and no warning. A target name that is not unique in the file is `A0105`. Clip names are what the file says — the rig document (§ Rig documents) is where a game names its clips (`walk`, `idle`, …) and matches them across files by bone name. |
+| `prefab` | the node hierarchy under the scene root as a prefab document, the glTF layout | entity ids from `node/<name path>`; the file's root node is not an entity, its children are the prefab's roots; a mesh node carries `fynkel.MeshRenderer` (a multi-material mesh gets one child per part, `<name>[<p>]`) and, when skinned, `fynkel.Skin { skin, skeleton }`; the prefab is named after the file stem. Blender's FBX exporter writes its armature convention as a −90° X turn on the armature node and +90° X on the root bone: world poses are what was authored, the local numbers differ from the glTF export of the same rig. |
 
 Cameras, lights, NURBS/procedural surfaces and curves are skipped
 (`A0105`, counted). A file that is not FBX at all (or a version `ufbx`
@@ -1736,7 +1773,7 @@ on the Body, a Prop under a one-shot "bob", a Camera, Sun) over
 written by `rig.py`) — the headless, render and Dart gates of item 19 —
 and `fynkel.Animator`/`fynkel.Skin` in the registry; since M3-19b a
 rig document, Column (`assets/rigs/column.rig.json`, id `…0050`: the
-skeleton `rig.glb`, clips `wave` = `anim/0` and `bob` = `anim/1`) that
+skeleton `rig.glb`, clips `wave` = `anim/wave` and `bob` = `anim/bob`) that
 the Rig scene's `Imported` entity instances as `{ …0050, sub: "prefab" }`
 under an `Animator` on `anim/wave`; since M3-19c a blend space, Column
 energy (`assets/rigs/column.blend.json`, id `…0051`: `energy` 0 = the

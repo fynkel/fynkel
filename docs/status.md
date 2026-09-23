@@ -1694,3 +1694,20 @@ The M3 backlog as it landed, for the record:
    hands a project over to its editor, opens are fast when nothing native
    changed, and the separate process lives on as **Build and Run**. Next:
    P7, live Play mode — its design note first.
+18. **Stable sub-asset ids (roadmap Phase 1 item 1) — done 2026-09-23.**
+   A model's sub-asset keys are its parts' names (`mesh/Cube`,
+   `anim/walk`, `skin/Skeleton`; `#3` for an unnamed part, `~2` for a
+   repeated name), and imported-prefab ids derive from node name paths, so
+   reordering parts in the modelling tool keeps every reference; renaming
+   one breaks its references loudly (`docs/design/stable-sub-asset-ids.md`,
+   documents.md § Sub-asset keys). Sidecar `formatVersion` 2, `fynkel.gltf`
+   6, `fynkel.fbx` 2. `fynkel migrate` moves a project
+   (`meta/1-2/name-keys`): each outdated model imported once, the
+   sidecar's keys renamed keeping their uuids, every reference renamed,
+   and override targets on a model's hierarchy — direct, through a rig or
+   through a nested prefab — moved to the name-derived ids. The editor's
+   migration preview shows the same plan. The cook key now carries the
+   sidecar's `formatVersion` and sub-asset keys, so a migrated model never
+   reuses a stale import. Every project, fixture, the starter template
+   and `benchmarks/stress/generate.py` are migrated. The cooked format and
+   the fingerprint are unchanged. Next: Phase 1 item 2 (`SetActive`).

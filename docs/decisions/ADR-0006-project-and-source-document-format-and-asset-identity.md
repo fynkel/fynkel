@@ -24,3 +24,5 @@ Scenes, prefabs, materials, and project files must be diffable, validatable, and
 ## Consequences
 
 Every asset move must carry its sidecar; the CLI and editor enforce this. Merge conflicts are per-asset rather than in one manifest.
+
+A model's sub-asset keys (the `sub` of a reference) are its parts' names, not their positions in the file (sidecar `formatVersion` 2, 2026-09-23; `docs/design/stable-sub-asset-ids.md`): reordering parts in the modelling tool keeps every reference, renaming one breaks its references loudly. Older sidecars move with `fynkel migrate`, which keeps each sub-asset's uuid.

@@ -18,7 +18,7 @@ Apply to Scene (`docs/design/live-play-mode.md`).
    animations and nodes are keyed by name, not by position in the file,
    so reordering them in the modelling tool keeps every reference.
    Existing sidecars and documents are migrated. Design:
-   `docs/design/stable-sub-asset-ids.md`.
+   `docs/design/stable-sub-asset-ids.md`. **Done 2026-09-23.**
 2. **`SetActive` / `activeInHierarchy`.** An inactive object and its
    subtree are not drawn, not simulated and run no behaviours
    (`onDisable`/`onEnable` fire); a checkbox in the Inspector header, a

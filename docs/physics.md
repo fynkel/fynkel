@@ -34,7 +34,7 @@ sections below.
 | --- | --- | --- |
 | `shape` | `box` | `box` (`size` = half extents), `sphere` (`size.x` = radius), `capsule` (along local Y: `size.x` radius, `size.y` half height of the cylinder), `mesh` (the triangles of `mesh`) |
 | `size` | (0.5, 0.5, 0.5) | metres, scaled by the entity's world scale |
-| `mesh` | — | the cooked mesh sub-asset (`mesh/<n>`) for `shape: mesh`; static only, at most 32 768 triangles (`MAX_MESH_COLLIDER_TRIANGLES`) |
+| `mesh` | — | the cooked mesh sub-asset (`mesh/<name>`) for `shape: mesh`; static only, at most 32 768 triangles (`MAX_MESH_COLLIDER_TRIANGLES`) |
 | `offset` | 0 | local translation of the shape from the entity's origin |
 | `friction` | 0.5 | Coulomb coefficient, `>= 0` |
 | `restitution` | 0 | bounciness `0..=1` |

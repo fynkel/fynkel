@@ -688,7 +688,7 @@ revealed), any other document in the browser.
 
 The Inspector's asset fields were `DragTarget<AssetDragPayload>` since
 item 4 and accept a payload of their kind (a `texture` field takes an
-image, a `mesh` field a `#mesh/0`). The **Hierarchy** now takes a
+image, a `mesh` field a `#mesh/Cube`). The **Hierarchy** now takes a
 `prefab` — a prefab document or an imported model's `#prefab` — onto a
 row (a child of it) or the empty area (a new root): one
 `instantiatePrefab` transaction with the instance named after the file,
@@ -1068,7 +1068,7 @@ one fetch per anchor, cached until a transaction touches the anchor or
 the prefab document changes — an open prefab tab's unsaved edits show at
 once in every scene that instances it, through `DocumentTabs`'
 prefab-change broadcast). Derived ids are the runtime's derived ids
-(`node/<i>` for an imported hierarchy), so a Console diagnostic about an
+(`node/<path>` for an imported hierarchy), so a Console diagnostic about an
 expanded entity selects its row — opening the instance on the way
 (`HierarchyTree.locate`).
 
@@ -1162,7 +1162,7 @@ An instance of `<model>#prefab` or `<rig>#prefab` expands like any other
 hierarchy the importer derives — `openDocument("<id>#prefab")`, a tab
 labelled `hero.glb › prefab` / `column.rig.json › prefab` — as a
 **read-only prefab document** (`state.sub == "prefab"`, the banner names
-the source): its entities carry the derived `node/<i>` ids, so an
+the source): its entities carry the derived `node/<path>` ids, so an
 override written in the scene addresses exactly the rows this tab shows.
 The Inspector's asset page lists the source's parts; the `prefab` part's
 own page has an **Open** button for the same tab. Overrides on such an instance work in full
@@ -1716,7 +1716,7 @@ target:
 | --- | --- | --- |
 | `InspectEntities` | the Hierarchy, the Scene view | the entity page (the components, as since item 4) |
 | `InspectAsset(id)` | the Project panel, *Show in Inspector* | `AssetPage` |
-| `InspectAsset(id, sub: 'mesh/0')` | a part row on an asset page | `SubAssetPage` |
+| `InspectAsset(id, sub: 'mesh/Cube')` | a part row on an asset page | `SubAssetPage` |
 | `InspectFolder(rel)` | a folder in the Project panel | `FolderPage` |
 
 Selecting in one place moves the Inspector there, and so does coming back
