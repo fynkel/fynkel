@@ -400,7 +400,7 @@ void main() {
     tab.select(floor);
     final overlay = s.model.overlay(st);
     expect(overlay.grid, isNotNull);
-    expect(overlay.lineCount, greaterThan(1), reason: 'the Y axis and the floor\'s outline');
+    expect(overlay.lineCount, greaterThan(1), reason: 'the floor\'s outline');
     s.savePath = s.dir.path;
     final overlaid = await s.model.saveFrame();
     expect(overlaid, '${s.dir.path}/main-320x200.png', reason: '${s.model.notice}');

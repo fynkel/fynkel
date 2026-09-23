@@ -1568,7 +1568,10 @@ The M3 backlog as it landed, for the record:
    with their own state and padlocks, brought back after a restart;
    still no shared crate touched (the Scene view's copies set their own
    camera on the one preview world); 293 editor tests.
-   **9f built 2026-09-23, gate pending** (ADR-0019, the user's call of
+   **9f done 2026-09-23** (gate driven by the user on a copy of the
+   reference game; its judgements applied: 1 pt lines, 64-segment
+   circles, colliders for the selection only, no Y axis, an unselected
+   camera faint) (ADR-0019, the user's call of
    2026-09-23 after 9e's gate: gizmos "pixelated and not clean") — the
    renderer's overlay pass after post (anti-aliased lines with a width,
    faded behind the scene, flat triangles, the analytic ground grid; the
@@ -1578,6 +1581,6 @@ The M3 backlog as it landed, for the record:
    Scene view's grid, outline and icons moved onto it; shared touches in
    `fynkel_render`, `platform/apple` and `package:fynkel_flutter`, each
    its own commit; 293 editor tests.
-   Next: 9f's gate, then 9g (handles and the tool registry), 9h (game
+   Next: 9g (handles and the tool registry), 9h (game
    gizmos), then item 9 (Profiler, IDE navigation, `fynkel editor`,
    polish).

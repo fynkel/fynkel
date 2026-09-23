@@ -891,17 +891,14 @@ final class SceneViewModel extends ChangeNotifier {
 
   final _overlay = ViewportOverlay();
 
-  /// The overlay of a frame (ADR-0019): the renderer's ground grid and the
-  /// Y axis (when shown), the selection outline, the icons (when shown).
+  /// The overlay of a frame (ADR-0019): the renderer's ground grid (when
+  /// shown), the selection outline, the icons (when shown; colliders only
+  /// for the selection, an unselected camera faint).
   /// Rebuilt into one reused buffer every frame.
   ViewportOverlay overlay(SceneTab t) {
     final o = _overlay..clear();
     final width = GizmoTokens.lineWidth * pixelRatio;
-    if (showGrid) {
-      o.grid = const OverlayGrid(xAxis: GizmoTokens.xAxis, zAxis: GizmoTokens.zAxis);
-      final up = math.max(t.camera.distance, 0.5) * 2;
-      o.line(const [0, 0, 0], [0, up, 0], GizmoTokens.yAxis, width: width);
-    }
+    if (showGrid) o.grid = const OverlayGrid(xAxis: GizmoTokens.xAxis, zAxis: GizmoTokens.zAxis);
     final hidden = _hiddenAll(t);
     final outline = t.tab.selection.where((id) => !hidden.contains(id)).toList();
     if (outline.isNotEmpty || showOverlays) {

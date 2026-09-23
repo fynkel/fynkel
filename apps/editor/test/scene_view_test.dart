@@ -701,14 +701,17 @@ void main() {
       final o = r.model.overlay(st);
       expect(o.grid, isNotNull, reason: 'a shader grid, not line segments');
       expect(o.grid!.xAxis, GizmoTokens.xAxis);
-      // The Y axis: up from the origin, 1 logical px on a 2× display.
-      expect(o.lineCount, 1);
-      final want = [0, 0, 0, 0, st.camera.distance * 2, 0, ...GizmoTokens.yAxis, 2, 0];
-      expect(o.lines.sublist(0, 12), [for (final v in want) closeTo(v, 1e-4)]);
+      expect(o.lineCount, 0, reason: 'no Y axis: the grid carries X and Z');
+      // The icons' lines: 1 logical px on a 2× display.
+      r.model.toggleOverlays();
+      final icons = r.model.overlay(st);
+      expect(icons.lineCount, greaterThan(0));
+      expect(icons.lines[10], 2);
+      r.model.toggleOverlays();
       r.model.toggleGrid();
       final off = r.model.overlay(st);
       expect(off.grid, isNull);
-      expect(off.lineCount, 0, reason: 'no Y axis without the grid');
+      expect(off.lineCount, 0);
     });
   });
 

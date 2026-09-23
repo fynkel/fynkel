@@ -786,9 +786,12 @@ cleared by every render): the **grid**, the renderer's analytic one on
 y = 0 (power-of-ten cells from the camera's height and each pixel's
 footprint, three levels cross-fading, faded with distance and at grazing
 angles, hidden under a floor instead of fighting it), its X and Z axes
-red and blue, and the **Y axis** up from the origin in green — ⌘G; the **icons** of every light (its colour: point range
-circles, spot cone, directional arrows), camera (frustum to 4 m) and
-collider (its shape, green) — ⌘I; the **selection outline** — each
+red and blue (no Y axis: a line up from the origin only cut through the
+scene) — ⌘G; the **icons** of every light (its colour: point range
+circles, spot cone, directional arrows) and camera (frustum to 4 m, at a
+third of its alpha unless selected), and the collider of each *selected*
+entity (its shape, green — as Unity does; every wall of a level collides)
+— ⌘I; the **selection outline** — each
 selected entity's mesh bounds as twelve orange edges, a cross for an
 entity without a mesh, an anchor's whole instance. All three come from
 the world (`preview.lines(outline:, iconsAspect:)`) so they are exact
@@ -1580,7 +1583,7 @@ around the one step that causes it.
 | 9c | done 2026-09-23 (gate driven by the user) | One Inspector for whatever was selected last — entities, an asset, a part, a folder — with the Asset panel's content as its pages, import settings applied or reverted from a pinned bar, the lock, and document kinds' sections registered by kind (§ One Inspector). |
 | 9d | done 2026-09-23 (gate driven by the user) | One picker for asset and entity slots, Open Document, Add Component, Create Entity with Component and the palette (§ One picker). |
 | 9e | done 2026-09-23 (gate driven by the user) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
-| 9f | built 2026-09-23, gate pending | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
+| 9f | done 2026-09-23 (gate driven by the user) | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 
