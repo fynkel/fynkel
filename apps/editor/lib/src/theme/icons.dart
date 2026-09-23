@@ -103,6 +103,7 @@ abstract final class FIcons {
   static const IconData pets = LucideIcons.pawPrint;
   static const IconData photoCameraFrontOutlined = LucideIcons.camera;
   static const IconData playArrow = LucideIcons.play;
+  static const IconData pause = LucideIcons.pause;
   static const IconData psychology = LucideIcons.brain;
   static const IconData public = LucideIcons.globe;
   static const IconData queryStats = LucideIcons.chartNoAxesCombined;
@@ -118,6 +119,7 @@ abstract final class FIcons {
   static const IconData settings = LucideIcons.settings;
   static const IconData shield = LucideIcons.shield;
   static const IconData shoppingCart = LucideIcons.shoppingCart;
+  static const IconData skipForward = LucideIcons.stepForward;
   static const IconData smartToy = LucideIcons.bot;
   static const IconData speed = LucideIcons.gauge;
   static const IconData sportsBasketballOutlined = LucideIcons.circleDot;

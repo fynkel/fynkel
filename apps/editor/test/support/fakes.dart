@@ -10,6 +10,7 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/editor_document.dart';
 import 'package:fynkel_editor/src/env/tools.dart';
+import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/play_session.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
@@ -626,6 +627,7 @@ Widget shellApp({
   bool sceneViewport = false,
   Future<Toolchain> Function(Preferences prefs)? detectToolchain,
   String? codeReloadStatus,
+  EditorGame? game,
 }) {
   return FynkelEditorApp(
     key: key,
@@ -652,6 +654,7 @@ Widget shellApp({
     quit: quit ?? () {},
     initialProject: initialProject,
     codeReloadStatus: codeReloadStatus,
+    game: game,
   );
 }
 

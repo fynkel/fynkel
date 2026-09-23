@@ -109,12 +109,13 @@ final class PanelRegistry {
   /// The §22.2 panel set and its default placement.
   static const hierarchy = 'hierarchy';
   static const scene = 'scene';
+  static const game = 'game';
   static const inspector = 'inspector';
   static const project = 'project';
   static const console = 'console';
   static const profiler = 'profiler';
   static const animation = 'animation';
-  static const defaultOrder = [hierarchy, scene, inspector, project, console, profiler, animation];
+  static const defaultOrder = [hierarchy, scene, inspector, project, console, profiler, animation, game];
 
   /// Panels that existed once and are gone. A saved layout that still names
   /// one loads without it (and is saved again without it) instead of being
@@ -268,7 +269,14 @@ final class Workspace extends ChangeNotifier {
     ];
     return DockingRow([
       it(PanelRegistry.hierarchy, weight: .2),
-      DockingColumn([it(PanelRegistry.scene, weight: .7), DockingTabs(bottom, weight: .3)], weight: .6),
+      DockingColumn([
+        // Scene and Game side by side as tabs, as in Unity (ADR-0021).
+        if (registry.byId(PanelRegistry.game) != null)
+          DockingTabs([it(PanelRegistry.scene), it(PanelRegistry.game)], weight: .7)
+        else
+          it(PanelRegistry.scene, weight: .7),
+        DockingTabs(bottom, weight: .3),
+      ], weight: .6),
       it(PanelRegistry.inspector, weight: .2),
     ]);
   }

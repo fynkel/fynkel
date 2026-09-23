@@ -143,7 +143,7 @@ void main() {
     expect(again.layout.hierarchy(nameInfo: true), defaultShape);
   });
 
-  testWidgets('the shell shows all seven panels, keeps them alive, and the layout survives a restart', (tester) async {
+  testWidgets('the shell shows all eight panels, keeps them alive, and the layout survives a restart', (tester) async {
     final store = MemoryLayoutStore();
     final prefs = Preferences.inMemory();
     var project = FakeProject(dir: '/fake/game');
@@ -151,7 +151,7 @@ void main() {
       tester,
       shellApp(prefs: prefs, store: store, projects: {'/fake/game': project}, initialProject: '/fake/game'),
     );
-    for (final title in ['Hierarchy', 'Scene', 'Inspector', 'Project', 'Console', 'Profiler', 'Animation']) {
+    for (final title in ['Hierarchy', 'Scene', 'Game', 'Inspector', 'Project', 'Console', 'Profiler', 'Animation']) {
       expect(find.text(title, skipOffstage: false), findsWidgets, reason: '$title tab');
     }
     expect(find.byKey(const Key('hierarchy.openDocument'), skipOffstage: false), findsOneWidget); // Hierarchy, no tab
@@ -167,7 +167,7 @@ void main() {
     await tester.pumpAndSettle();
     final saved = store.read()!;
     final shape = shell.workspace!.layout.hierarchy(nameInfo: true);
-    expect(saved.selected, ['console']);
+    expect(saved.selected, ['scene', 'console'], reason: 'Scene in front of Game, Console in the bottom tabs');
     expect(saved.layout, isNot(contains('profiler')));
 
     // A tab close through the docking UI hides the panel and saves.

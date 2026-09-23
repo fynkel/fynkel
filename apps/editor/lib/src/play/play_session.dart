@@ -9,6 +9,12 @@
 // The editor never loads the game's code and never writes a document for
 // it: a crash, or a `kill -9` from the outside, ends in an exit code on the
 // toolbar and leaves every document exactly as it was.
+//
+// ADR-0021: in a project editor the game runs inside the editor instead
+// (the Game view). The session then has no process: [beginInEditor] and
+// [endInEditor] frame the run, and the game's editor-channel records
+// arrive in-process through [receive] — the same records, the same
+// Console, the same toolbar.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -140,6 +146,9 @@ final class PlaySession extends ChangeNotifier {
   StreamSubscription<String>? _err;
   bool _stopRequested = false;
 
+  /// The run is inside the editor (the Game view), not a process.
+  bool inEditor = false;
+
   bool get isActive => state == PlayState.starting || state == PlayState.running || state == PlayState.stopping;
 
   /// True when the last run ended by itself with a non-zero code — a crash,
@@ -198,6 +207,7 @@ final class PlaySession extends ChangeNotifier {
     failure = null;
     exitCode = null;
     gamePid = null;
+    inEditor = false;
     startedGame = false;
     lastStats = null;
     scene = null;
@@ -256,6 +266,45 @@ final class PlaySession extends ChangeNotifier {
       );
     }
     await exited;
+  }
+
+  /// A run inside the editor begins: the Game view has mounted the game.
+  void beginInEditor({String? scene}) {
+    if (isActive) return;
+    records.clear();
+    droppedRecords = 0;
+    failure = null;
+    exitCode = null;
+    pid = null;
+    gamePid = null;
+    lastStats = null;
+    this.scene = scene;
+    editedWhilePlaying = false;
+    _stopRequested = false;
+    inEditor = true;
+    startedGame = true;
+    state = PlayState.running;
+    startedAt = DateTime.now();
+    endedAt = null;
+    _add(GameRecord.editor('Play in the editor', state: 'started'));
+    notifyListeners();
+  }
+
+  /// One editor-channel line from the game running in this isolate.
+  void receive(String line) {
+    if (!inEditor || !isActive) return;
+    _line(line);
+  }
+
+  /// The run inside the editor is over: Stop, or the game's Quit.
+  void endInEditor() {
+    if (!inEditor || !isActive) return;
+    _stopRequested = true;
+    exitCode = 0;
+    state = PlayState.exited;
+    endedAt = DateTime.now();
+    _add(GameRecord.editor('the game stopped', state: 'exited'));
+    notifyListeners();
   }
 
   /// Empties the Game tab (the run, if any, keeps going).

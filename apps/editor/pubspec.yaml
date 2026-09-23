@@ -18,6 +18,10 @@ dependencies:
   # game host uses, here over the edit-preview world (viewport ABI v4).
   fynkel_flutter:
     path: ../../packages/fynkel_flutter
+  # The in-editor Play (ADR-0021): the game's editor-channel records come
+  # in-process (`EditorChannel.debugUse`) into the Console's Game tab.
+  fynkel:
+    path: ../../packages/fynkel
   # The docking workspace (blueprint §19.2e item 2; ADR-0016 resolutions record the spike).
   docking: ^1.16.2
   # The launcher's directory chooser (Open project, New project's parent directory).

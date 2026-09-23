@@ -96,7 +96,7 @@ final class CommandAction extends Action<CommandIntent> {
   bool isEnabled(CommandIntent intent) {
     final c = registry.byId(intent.id);
     if (c == null) return false;
-    if (intent.bare && CommandRegistry.focusIsTextField) return false;
+    if (intent.bare && CommandRegistry.focusOwnsBareKeys) return false;
     return c.isEnabled || (c.textIntent != null && CommandRegistry.focusIsTextField);
   }
 
@@ -105,6 +105,16 @@ final class CommandAction extends Action<CommandIntent> {
     registry.execute(intent.id);
     return null;
   }
+}
+
+/// A region whose keys are its own — the Game view while the game plays:
+/// with the focus inside it the editor's bare keys ([EditorCommand.key])
+/// do nothing, exactly as while typing. ⌘-shortcuts still reach the editor.
+class KeyboardOwner extends InheritedWidget {
+  const KeyboardOwner({super.key, required super.child});
+
+  @override
+  bool updateShouldNotify(KeyboardOwner oldWidget) => false;
 }
 
 final class CommandRegistry extends ChangeNotifier {
@@ -171,6 +181,13 @@ final class CommandRegistry extends ChangeNotifier {
     final ctx = primaryFocus?.context;
     if (ctx == null) return false;
     return ctx.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  /// Whether the focus is where bare keys are someone else's: a text
+  /// field, or a [KeyboardOwner] (the playing game).
+  static bool get focusOwnsBareKeys {
+    if (focusIsTextField) return true;
+    return primaryFocus?.context?.getInheritedWidgetOfExactType<KeyboardOwner>() != null;
   }
 
   /// The `Shortcuts` map for the window: every shortcut → its command intent.

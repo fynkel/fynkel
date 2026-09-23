@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
 import '../inspector/codegen_check.dart';
+import '../play/game_panel.dart';
 import '../play/play_session.dart';
 import '../prefs/preferences.dart';
 import '../project/editor_project.dart';
@@ -40,6 +41,7 @@ class MainWindow extends StatelessWidget {
     this.onPlay,
     this.onReplay,
     this.onStop,
+    this.gameRun,
     this.layoutNotice,
     this.onDismissNotice,
   });
@@ -60,6 +62,10 @@ class MainWindow extends StatelessWidget {
   /// banner only ever shows while one is — so the banner needs its own.
   final VoidCallback? onReplay;
   final VoidCallback? onStop;
+
+  /// The in-editor Play (ADR-0021), when the game is compiled in: the
+  /// title bar then has Pause and Step beside Play, as Unity's toolbar.
+  final GameRun? gameRun;
   final VoidCallback onClose;
   final VoidCallback onRevalidate;
 
@@ -517,10 +523,13 @@ class MainWindow extends StatelessWidget {
   Widget _playControls(BuildContext context, ThemeData theme) {
     final t = context.tokens;
     final session = play!;
+    final run = gameRun;
     return ListenableBuilder(
-      listenable: session,
+      listenable: Listenable.merge([session, ?run]),
       builder: (context, _) {
         final active = session.isActive;
+        final paused = run?.paused ?? false;
+        final inEditor = run?.running ?? false;
         final busy = session.state == PlayState.starting || session.state == PlayState.stopping;
         return Container(
           height: 28,
@@ -541,6 +550,27 @@ class MainWindow extends StatelessWidget {
                 icon: Icon(active ? FIcons.stop : FIcons.playArrow, color: active ? t.error : t.accent),
                 onPressed: session.state == PlayState.stopping ? null : (active ? onStop : onPlay),
               ),
+              if (run != null) ...[
+                IconButton(
+                  key: const Key('window.pause'),
+                  tooltip: paused ? 'Resume (⌃⌘P)' : 'Pause (⌃⌘P)',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 30, height: 26),
+                  iconSize: 15,
+                  isSelected: paused,
+                  icon: Icon(FIcons.pause, color: !inEditor ? t.textDisabled : (paused ? t.accent : t.text)),
+                  onPressed: inEditor ? run.togglePause : null,
+                ),
+                IconButton(
+                  key: const Key('window.step'),
+                  tooltip: 'Step one frame (⌃⌥⌘P)',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 30, height: 26),
+                  iconSize: 15,
+                  icon: Icon(FIcons.skipForward, color: inEditor ? t.text : t.textDisabled),
+                  onPressed: inEditor ? run.step : null,
+                ),
+              ],
               if (session.state != PlayState.idle) ...[
                 Container(width: 1, height: 14, color: t.line),
                 InkWell(
@@ -564,12 +594,12 @@ class MainWindow extends StatelessWidget {
                         else if (active)
                           Padding(
                             padding: const EdgeInsets.only(right: 6),
-                            child: Icon(FIcons.circle, size: 7, color: t.ok),
+                            child: Icon(FIcons.circle, size: 7, color: paused ? t.textSecondary : t.ok),
                           ),
                         ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 220),
                           child: Text(
-                            session.statusText,
+                            paused ? 'Paused' : session.statusText,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(

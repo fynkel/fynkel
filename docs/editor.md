@@ -1432,6 +1432,43 @@ that a hot reload cannot apply, such as a new field on a const class,
 needs a restart, and a restart would drop unsaved edits. Offering a
 restart that saves first, and restoring the open tabs after it, is P3b.
 
+## The Game view: Play in the editor (ADR-0021 P4)
+
+In a project editor (`fynkel editor <dir>`), **Play runs the game inside
+the editor**, in the **Game** panel. The panel is a tab beside Scene in the
+default layout (⌥⌘8 shows or hides it), as in Unity. The Scene view stays
+the editor camera and its tools.
+
+- **Play (⌘P):** brings `.fynkel/cache` up to date with the files. When a
+  Scene view is open it cooks in process (⌃⇧⌘R's cook); otherwise it runs
+  `fynkel cook --project <dir>`. A failed cook does not play and says why.
+  Play then mounts the game's `buildGame(FynkelLaunch(projectDir, startScene,
+  inEditor: true))` in the Game view. It starts in the scene open in the
+  editor, brings the Game view to the front and gives it the keyboard.
+  Dirty documents still get the save prompt, because the game reads files
+  (P5 plays from memory).
+- **Pause (⌃⌘P):** stops the game's loop and its audio. **Step (⌃⌥⌘P)**
+  pauses and runs one fixed step. Both are in the title bar beside
+  Play/Stop and in the Play menu. They reach every `FynkelGameView` of the
+  game through `FynkelPlayScope`, so a game needs no code for them.
+- **Stop (⌘.):** unmounts the game. It disposes its world, so nothing of
+  the run survives. The game's own Quit (`FynkelApplication.quit`) does
+  the same and never closes the editor.
+- **Keyboard:** while the game has the keyboard, the editor's bare keys
+  (Q W E R, F, H, …) do nothing (`KeyboardOwner`), as while typing.
+  ⌘-shortcuts still work. Click the Scene view to take the keyboard back.
+- **Console:** the game's editor-channel records (`Diagnostics.log`,
+  diagnostics, stats) come in process to the Console's Game tab
+  (`EditorChannel.debugUse`), the same rows as a process run.
+- **Code changes:** a save in `lib/` hot reloads the running game (P3a).
+  A document edited during the run shows the "changes apply on the next
+  Play" banner, as before.
+- **The plain editor** (no game compiled in) has the same panel, which says
+  so. Play there still runs the game as its own app (`fynkel run`).
+
+Not yet: a live picture of the active camera in the Game view between runs
+(P4b), and playing unsaved documents (P5).
+
 ## The look (item 9a)
 
 The editor is meant to read like a tool — Unity's density, Rider's

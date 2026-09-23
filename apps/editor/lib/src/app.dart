@@ -28,6 +28,7 @@ import 'picker/picker.dart';
 import 'play/code_reload.dart';
 import 'play/editor_game.dart';
 import 'play/game_console.dart';
+import 'play/game_panel.dart';
 import 'play/game_record.dart';
 import 'play/play_prompt.dart';
 import 'play/play_session.dart';
@@ -267,6 +268,10 @@ class EditorShellState extends State<EditorShell> {
   /// `fynkel editor`'s hot reloads (ADR-0021): each outcome is a notice.
   CodeReloadStatus? codeReload;
 
+  /// Play inside the editor, in the Game view (ADR-0021 P4) — only when
+  /// the project's game is compiled into this editor (`fynkel editor`).
+  GameRun? gameRun;
+
   void _onCodeReload() {
     final r = codeReload?.last;
     if (r == null) return;
@@ -285,6 +290,14 @@ class EditorShellState extends State<EditorShell> {
     ide = IdeLauncher(widget.prefs);
     final status = widget.codeReloadStatus;
     if (status != null) codeReload = CodeReloadStatus(status)..addListener(_onCodeReload);
+    final game = widget.game;
+    if (game != null) {
+      gameRun = GameRun(
+        game: game,
+        onRecord: (line) => play?.receive(line),
+        onQuit: () => unawaited(stopPlaying()),
+      )..addListener(registry.refresh);
+    }
     _panels = PanelRegistry(_panelSpecs());
     _registerCommands();
     widget.prefs.addListener(_onPrefsChanged);
@@ -303,6 +316,7 @@ class EditorShellState extends State<EditorShell> {
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
     codeReload?.dispose();
+    gameRun?.dispose();
     workspace?.dispose();
     _disposeCopies();
     editorState?.dispose();
@@ -365,6 +379,14 @@ class EditorShellState extends State<EditorShell> {
         if (s == null) return const SizedBox.shrink();
         return ScenePanel(model: s, showViewport: widget.sceneViewport);
       },
+    ),
+    PanelSpec(
+      id: PanelRegistry.game,
+      title: 'Game',
+      icon: FIcons.sportsEsports,
+      fullTitle: 'Game View',
+      home: PanelHome.center,
+      builder: (_, _) => GamePanel(run: gameRun),
     ),
     PanelSpec(
       id: PanelRegistry.inspector,
@@ -1309,7 +1331,7 @@ class EditorShellState extends State<EditorShell> {
         id: 'play.start',
         baseLabel: 'Play',
         labelBuilder: () => play?.isActive ?? false ? 'Playing…' : 'Play',
-        description: 'Run the project as its own app (`fynkel run`) and show what it says in the Console',
+        description: 'Run the game: in the Game view in a project editor (`fynkel editor`), else as its own app (`fynkel run`)',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyP),
         group: 0,
@@ -1327,6 +1349,29 @@ class EditorShellState extends State<EditorShell> {
         order: 1,
         enabled: () => play?.isActive ?? false,
         run: stopPlaying,
+      ),
+      EditorCommand(
+        id: 'play.pause',
+        baseLabel: 'Pause',
+        labelBuilder: () => gameRun?.paused ?? false ? 'Resume' : 'Pause',
+        description: 'Pause or resume the game in the Game view — its loop and its audio',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyP, control: true),
+        group: 0,
+        order: 3,
+        enabled: () => gameRun?.running ?? false,
+        run: () => gameRun?.togglePause(),
+      ),
+      EditorCommand(
+        id: 'play.step',
+        baseLabel: 'Step',
+        description: 'Pause the game and run one fixed step',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyP, control: true, alt: true),
+        group: 0,
+        order: 4,
+        enabled: () => gameRun?.running ?? false,
+        run: () => gameRun?.step(),
       ),
       EditorCommand(
         id: 'play.gizmos',
@@ -1680,6 +1725,11 @@ class EditorShellState extends State<EditorShell> {
       }
       if (!mounted) return;
     }
+    final run = gameRun;
+    if (run != null) {
+      await _playInEditor(opened, session, run);
+      return;
+    }
     showGameConsole();
     _playEditBaseline = _editSignature();
     await session.play();
@@ -1712,8 +1762,53 @@ class EditorShellState extends State<EditorShell> {
     registry.refresh();
   }
 
+  /// Play in the Game view (ADR-0021): the cache is cooked from the files
+  /// on disk, then the game is mounted playing the open scene, the Game
+  /// view comes to the front and gets the keyboard.
+  Future<void> _playInEditor(EditorProject opened, PlaySession session, GameRun run) async {
+    final tab = _focusedTab;
+    final sceneId = tab != null && tab.kind == 'scene' ? tab.document.id : null;
+    final cooked = await _cookForPlay(opened);
+    if (!mounted) return;
+    if (cooked != null) {
+      _showError('Play could not cook the project: $cooked');
+      return;
+    }
+    workspace?.show(PanelRegistry.game);
+    _playEditBaseline = _editSignature();
+    run.start(projectDir: opened.dir, startScene: sceneId);
+    session.beginInEditor(scene: tab?.kind == 'scene' ? tab!.document.name : null);
+    run.focusNode.requestFocus();
+    _noteEditDuringPlay();
+    registry.refresh();
+  }
+
+  /// Brings `.fynkel/cache` up to date with the files: in process through
+  /// the Scene view's preview when one is open, else `fynkel cook`. Null
+  /// when it worked, else why not.
+  Future<String?> _cookForPlay(EditorProject opened) async {
+    final sv = scene;
+    if (sv != null && sv.current?.hasPreview == true) {
+      sv.recook();
+      return null;
+    }
+    final cli = toolchain?.fynkelCli;
+    if (cli == null) return 'the `fynkel` CLI was not found';
+    final r = await widget.run(cli, ['cook', '--project', opened.dir], workingDirectory: opened.dir);
+    if (r.exitCode == 0) return null;
+    final err = '${r.stderr}'.trim();
+    return err.isEmpty ? '`fynkel cook` exited with code ${r.exitCode}' : err;
+  }
+
   Future<void> stopPlaying() async {
     final session = play;
+    final run = gameRun;
+    if (run != null && run.running) {
+      run.stop();
+      session?.endInEditor();
+      if (mounted) registry.refresh();
+      return;
+    }
     if (session == null || !session.isActive) return;
     await session.stop();
     if (mounted) registry.refresh();
@@ -2313,6 +2408,7 @@ class EditorShellState extends State<EditorShell> {
         onPlay: playProject,
         onReplay: replayProject,
         onStop: stopPlaying,
+        gameRun: gameRun,
         onClose: closeProject,
         onRevalidate: p0.revalidate,
         onReveal: () => registry.execute('project.reveal'),
