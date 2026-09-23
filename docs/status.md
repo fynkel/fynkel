@@ -1591,7 +1591,7 @@ The M3 backlog as it landed, for the record:
    height) behind the Inspector card's Edit toggle, in place of the
    tool's gizmo, one transaction per drag (overrides on a derived
    component); 312 editor tests. Next: the user's 9g gate.
-   **9h built** (gate pending): the runtime `Gizmos` API in
+   **9h done** (gate driven by the user, 2026-09-23): the runtime `Gizmos` API in
    `package:fynkel` (a `GizmoBuffer` the world clears each frame, on
    through `World.showGizmos`; lines, rays, circles, spheres, boxes,
    capsules, arrows, frusta; colour and matrix scopes; a `const` no-op in
@@ -1606,5 +1606,5 @@ The M3 backlog as it landed, for the record:
    Follow and camera-rig targets; the reference game's `Switch.target` a
    line to its gate. Shared touches in `package:fynkel`,
    `package:fynkel_generator` and `package:fynkel_flutter`, each its own
-   commit; 321 editor tests. Next: the user's 9g and 9h gates, then
+   commit; 321 editor tests. Next: the user's 9g gate, then
    item 9 (Profiler, IDE navigation, `fynkel editor`, polish).

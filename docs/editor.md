@@ -1674,7 +1674,7 @@ around the one step that causes it.
 | 9e | done 2026-09-23 (gate driven by the user) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
 | 9f | done 2026-09-23 (gate driven by the user) | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
 | 9g | built, gate pending | Handles and Scene tools: the handle framework, the tool registry with move, rotate, scale and the combined transform tool drawn through the overlay, and component handles — light range and angles, collider sizes, camera field of view — behind the Inspector's Edit toggle (§ The gizmo). |
-| 9h | built, gate pending | Gizmos for game code: the runtime `Gizmos` API in the game's window (`FynkelGameView(gizmos:)`, Play's *Show Gizmos in Play*), and declarative `@Gizmo` fields drawn and dragged in the Scene view (§ The gizmo). |
+| 9h | done 2026-09-23 (gate driven by the user) | Gizmos for game code: the runtime `Gizmos` API in the game's window (`FynkelGameView(gizmos:)`, Play's *Show Gizmos in Play*), and declarative `@Gizmo` fields drawn and dragged in the Scene view (§ The gizmo). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 
