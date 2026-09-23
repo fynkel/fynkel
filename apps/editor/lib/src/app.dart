@@ -24,6 +24,7 @@ import 'inspector/inspector_model.dart';
 import 'inspector/inspector_panel.dart';
 import 'inspector/prefab_actions.dart' as prefab;
 import 'launcher/launcher.dart';
+import 'launcher/opening_screen.dart';
 import 'picker/picker.dart';
 import 'play/code_reload.dart';
 import 'play/editor_game.dart';
@@ -280,6 +281,10 @@ class EditorShellState extends State<EditorShell> {
   final notices = Notices();
   bool _opening = false;
 
+  /// The project this editor was started on, until its open is over: the
+  /// window says *Opening …* meanwhile, not the launcher.
+  String? _startingOn;
+
   /// `fynkel editor`'s hot reloads (ADR-0021): each outcome is a notice.
   CodeReloadStatus? codeReload;
 
@@ -365,9 +370,11 @@ class EditorShellState extends State<EditorShell> {
     // the codegen check, which needs the CLI the detection is still finding.
     final initial = widget.initialProject;
     if (initial != null) {
-      detected.then((_) {
+      _startingOn = initial;
+      detected.then((_) async {
         // The project it was started on stays here (`fynkel editor` chose).
-        if (mounted) openProjectDir(initial, handOver: false);
+        if (mounted) await openProjectDir(initial, handOver: false);
+        if (mounted) setState(() => _startingOn = null);
       });
     }
   }
@@ -2584,7 +2591,9 @@ class EditorShellState extends State<EditorShell> {
   Widget build(BuildContext context) {
     final p0 = project;
     final Widget body;
-    if (p0 == null || workspace == null) {
+    if ((p0 == null || workspace == null) && _startingOn != null) {
+      body = OpeningScreen(dir: _startingOn!, prefs: widget.prefs);
+    } else if (p0 == null || workspace == null) {
       body = LauncherScreen(
         prefs: widget.prefs,
         toolchain: toolchain,

@@ -130,4 +130,21 @@ void main() {
     final plain = tester.state<EditorShellState>(find.byType(EditorShell));
     expect(plain.registry.byId('play.restart')!.isEnabled, isFalse);
   });
+
+  testWidgets('an editor started on a project says Opening, not the launcher, until it is open', (tester) async {
+    await tester.pumpWidget(shellApp(prefs: prefs, projects: {dir: project()}, initialProject: dir));
+    expect(find.byKey(const Key('opening')), findsOneWidget);
+    expect(find.text('Recent projects'), findsNothing);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('opening')), findsNothing);
+    expect(tester.state<EditorShellState>(find.byType(EditorShell)).project, isNotNull);
+  });
+
+  testWidgets('a start project that does not open leaves the launcher', (tester) async {
+    await tester.pumpWidget(shellApp(prefs: prefs, initialProject: dir));
+    expect(find.byKey(const Key('opening')), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('opening')), findsNothing);
+    expect(find.text('Recent projects'), findsOneWidget);
+  });
 }
