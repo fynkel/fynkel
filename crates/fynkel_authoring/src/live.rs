@@ -36,7 +36,7 @@ pub const KINDS: [&str; 5] = ["entities", "entity", "set", "remove", "rename"];
 /// (unknown kind or entity, bad JSON) is an `Err`.
 pub fn call(world: &mut World, kind: &str, args: &Value) -> Result<Value, Vec<Diagnostic>> {
     match kind {
-        "entities" => Ok(entities(world)),
+        "entities" => Ok(entities(world, args.get("since").and_then(Value::as_str))),
         "entity" => {
             let e = entity_arg(world, args)?;
             Ok(entity(world, e))
@@ -118,7 +118,15 @@ pub fn resolve(world: &World, id: &str) -> Option<Entity> {
 
 /// Every entity, parents before children: the loaded scenes' roots in
 /// document order, then the rest by handle; children in sibling order.
-fn entities(world: &World) -> Value {
+///
+/// The answer carries a `revision` of the table (a hash of every row, this
+/// process only). Given `since` equal to it, the rows are left out
+/// (`"unchanged": true`): an editor polling a world where nothing was
+/// spawned, destroyed, renamed or re-parented pays for the walk, not for
+/// the JSON.
+fn entities(world: &World, since: Option<&str>) -> Value {
+    use std::hash::{Hash, Hasher};
+
     let ecs = world.ecs();
     let mut roots: Vec<Entity> = Vec::new();
     for s in world.loaded_scenes() {
@@ -135,32 +143,71 @@ fn entities(world: &World) -> Value {
     rest.sort();
     roots.extend(rest);
 
-    let mut out = Vec::new();
+    struct Row {
+        id: String,
+        entity: Entity,
+        name: String,
+        parent: Option<String>,
+        layer: u32,
+        tags: Option<Tags>,
+        children: usize,
+        types: Vec<&'static str>,
+    }
+    let mut rows = Vec::new();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
     let mut stack: Vec<(Entity, Option<String>)> =
         roots.into_iter().rev().map(|e| (e, None)).collect();
     while let Some((e, parent)) = stack.pop() {
         let id = id_of(world, e);
         let children = scene::children_of(ecs, e);
-        let types: Vec<&str> = ComponentValue::all_of(world, e)
-            .iter()
-            .filter_map(|c| c.id().name())
-            .collect();
-        out.push(json!({
-            "id": id,
-            "entity": e.to_bits(),
-            "name": ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
-            "parent": parent,
-            "spawned": id.starts_with(RUNTIME_PREFIX),
-            "layer": ecs.copy::<Layer>(e).map(|l| l.layer).unwrap_or(0),
-            "tags": ecs.get::<Tags>(e).map(|t| t.to_node().to_serde()).unwrap_or(Value::Null),
-            "children": children.len(),
-            "types": types,
-        }));
+        let row = Row {
+            entity: e,
+            name: ecs.copy::<Name>(e).map(|n| n.value).unwrap_or_default(),
+            parent,
+            layer: ecs.copy::<Layer>(e).map(|l| l.layer).unwrap_or(0),
+            tags: ecs.copy::<Tags>(e).ok(),
+            children: children.len(),
+            types: ComponentValue::all_of(world, e)
+                .iter()
+                .filter_map(|c| c.id().name())
+                .collect(),
+            id,
+        };
+        (
+            &row.id,
+            row.entity.to_bits(),
+            &row.name,
+            &row.parent,
+            row.layer,
+        )
+            .hash(&mut hasher);
+        (row.tags.map(|t| t.bits), row.children, &row.types).hash(&mut hasher);
         for c in children.into_iter().rev() {
-            stack.push((c, Some(id.clone())));
+            stack.push((c, Some(row.id.clone())));
         }
+        rows.push(row);
     }
-    json!({ "tick": world.tick(), "entities": out })
+    let revision = format!("{:016x}", hasher.finish());
+    if since == Some(revision.as_str()) {
+        return json!({ "tick": world.tick(), "revision": revision, "unchanged": true });
+    }
+    let out: Vec<Value> = rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "entity": r.entity.to_bits(),
+                "name": r.name,
+                "parent": r.parent,
+                "spawned": r.id.starts_with(RUNTIME_PREFIX),
+                "layer": r.layer,
+                "tags": r.tags.map(|t| t.to_node().to_serde()).unwrap_or(Value::Null),
+                "children": r.children,
+                "types": r.types,
+            })
+        })
+        .collect();
+    json!({ "tick": world.tick(), "revision": revision, "entities": out })
 }
 
 /// One entity as the Inspector reads it: name, parent, local and world

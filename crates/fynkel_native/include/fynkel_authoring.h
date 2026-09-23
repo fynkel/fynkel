@@ -387,10 +387,12 @@ FynkelStatus fynkel_authoring_preview_call(FynkelAuthoringSession* session,
 
 /* A live call on a RUNNING game's world (ADR-0021 P7, live Play mode) —
  * not a preview: no session, the world is the game's. Kinds:
- * - "entities" {} -> { tick, entities: [{ id, entity, name, parent,
- *   spawned, layer, tags, children, types }] }, parents before children
- *   (`entity` the runtime handle, `children` a count, `types` the native
- *   component types). `id` is the
+ * - "entities" { since? } -> { tick, revision, entities: [{ id, entity,
+ *   name, parent, spawned, layer, tags, children, types }] }, parents
+ *   before children (`entity` the runtime handle, `children` a count,
+ *   `types` the native component types). `revision` hashes the rows (this
+ *   process only); given `since` equal to it the answer is { tick,
+ *   revision, unchanged: true } without them. `id` is the
  *   authoring id for what a loaded scene spawned (a cooked prefab
  *   instance's children carry their derived ids), "runtime:<handle>" for
  *   what the game spawned or instantiated (`spawned` true);

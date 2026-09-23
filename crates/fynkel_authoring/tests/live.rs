@@ -135,6 +135,65 @@ fn entities_carry_authoring_ids_and_the_games_own_are_runtime() {
 }
 
 #[test]
+fn an_unchanged_table_is_not_sent_again() {
+    let mut w = running();
+    let first = call(&mut w, "entities", json!({}));
+    let revision = first["revision"].as_str().unwrap().to_string();
+    assert_eq!(first["entities"].as_array().unwrap().len(), 4);
+
+    // Values moving (a transform) is not a change of the table.
+    assert!(call(
+        &mut w,
+        "set",
+        json!({ "id": uid(4), "type": "fynkel.Transform",
+        "data": { "position": [5, 0, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] } })
+    )["ok"]
+        .as_bool()
+        .unwrap());
+    assert_eq!(w.step().status, Status::Ok);
+    let same = call(&mut w, "entities", json!({ "since": revision }));
+    assert_eq!(same["unchanged"], true);
+    assert_eq!(same["revision"], revision.as_str());
+    assert!(same.get("entities").is_none());
+
+    // A rename, a new component, a spawn: each is.
+    let light = call(&mut w, "entity", json!({ "id": uid(3) }))["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["type"] == "fynkel.PointLight")
+        .unwrap()["data"]
+        .clone();
+    let mut last = revision;
+    for change in [
+        json!(["rename", { "id": uid(4), "name": "Floor" }]),
+        json!(["set", { "id": uid(4), "type": "fynkel.PointLight", "data": light }]),
+    ] {
+        assert!(
+            call(&mut w, change[0].as_str().unwrap(), change[1].clone())["ok"]
+                .as_bool()
+                .unwrap()
+        );
+        let next = call(&mut w, "entities", json!({ "since": last }));
+        assert!(next.get("unchanged").is_none(), "{change}");
+        assert_eq!(next["entities"].as_array().unwrap().len(), 4);
+        last = next["revision"].as_str().unwrap().to_string();
+    }
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Spawn {
+            temp_id: 1,
+            transform: Transform::default(),
+            parent: None,
+            name: Some("Bullet".into()),
+        }],
+    );
+    assert_eq!(w.step().status, Status::Ok);
+    let grown = call(&mut w, "entities", json!({ "since": last }));
+    assert_eq!(grown["entities"].as_array().unwrap().len(), 5);
+}
+
+#[test]
 fn components_read_as_the_document_and_write_back_unchanged() {
     let mut w = running();
     for n in 1..=4 {
