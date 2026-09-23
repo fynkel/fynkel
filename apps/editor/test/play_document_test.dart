@@ -156,6 +156,26 @@ final class FakeLive extends LiveBackend {
   }
 
   @override
+  ({String id, List<String> refused}) spawn({
+    required String name,
+    String? parent,
+    int? index,
+    List<Map<String, Object?>> components = const [],
+    String? authoringId,
+  }) {
+    final id = authoringId ?? 'runtime:${100 + rows.length}';
+    writes.add('spawn $id');
+    final types = {'fynkel.Transform', for (final c in components) c['type'] as String}.toList();
+    add(id, name, parent: parent, types: types);
+    for (final c in components) {
+      native[id]!
+        ..removeWhere((x) => x.type == c['type'])
+        ..add((type: c['type'] as String, data: (c['data'] as Map).cast<String, Object?>()));
+    }
+    return (id: id, refused: const []);
+  }
+
+  @override
   List<String> removeBehaviour(Object instance) {
     writes.add('removeBehaviour');
     for (final list in scripts.values) {
@@ -286,8 +306,8 @@ void main() {
     expect(doc.entities(['runtime:99']).entities['runtime:99'], isNull, reason: 'its subtree went with it');
 
     final writes = live.writes.length;
-    a = doc.apply([Command.createObject(name: 'New')]);
-    expect(a.ok, isFalse, reason: 'not while the game runs (yet)');
+    a = doc.apply([Command.setPrefabOverrideOp('floor', const {'op': 'removeObject', 'entity': 'x'})]);
+    expect(a.ok, isFalse, reason: 'no prefab overrides while the game runs');
     expect(doc.apply([Command.renameObject('robot', 'x')]).ok, isFalse, reason: 'gone');
     expect(doc.apply([Command.setField('floor', 'nope', 'x', 1)]).ok, isFalse);
     expect(live.writes.length, writes);
@@ -296,6 +316,115 @@ void main() {
     expect(a.ok, isFalse);
     expect(a.diagnostics.single.message, 'no');
     expect(live.writes.length, writes + 1, reason: 'the first refusal stops the rest');
+  });
+
+  test('objects are made while the game runs: created, and duplicated with their scripts', () {
+    final live = running();
+    final doc = PlayDocument(backend: live, scene: scene(), interval: const Duration(days: 1));
+    addTearDown(doc.dispose);
+    var a = doc.apply([
+      Command.createObject(
+        id: 'lamp',
+        name: 'Lamp',
+        parent: 'floor',
+        components: [
+          {
+            'type': 'fynkel.Transform',
+            'version': 1,
+            'data': {
+              'position': [0, 1, 0],
+              'rotation': [0, 0, 0, 1],
+              'scale': [1, 1, 1],
+            },
+          },
+          {'type': 'game.Spinner', 'version': 1, 'data': {'speed': 3}},
+        ],
+      ),
+    ]);
+    expect(a.ok, isTrue);
+    expect(a.mutations.single.affectedIds, ['lamp'], reason: 'the Hierarchy selects what it made');
+    expect(live.writes.first, 'spawn lamp');
+    expect(live.writes.last, startsWith('addBehaviour'));
+    expect(doc.entities(['floor']).entities['floor']!['children'], ['lamp']);
+    final lamp = doc.entities(['lamp']).entities['lamp']!['components'] as Map;
+    expect([for (final c in lamp.values) (c as Map)['type']], ['fynkel.Transform', 'game.Spinner']);
+
+    a = doc.apply([Command.duplicateObject('robot')]);
+    expect(a.ok, isTrue);
+    final copy = a.mutations.single.affectedIds.single;
+    expect(copy, isNot('robot'));
+    final copied = doc.entities([copy]).entities[copy]!;
+    expect(copied['name'], 'Robot', reason: "a copy keeps its original's name, as in the scene");
+    expect([for (final c in (copied['components'] as Map).values) (c as Map)['type']], [
+      'fynkel.Transform',
+      'fynkel.PointLight',
+      'game.Spinner',
+    ]);
+    expect(doc.createdHere, {'lamp', copy});
+
+    doc.apply([Command.deleteObject('floor'), Command.deleteObject('runtime:99')]);
+    expect(doc.deletedHere, {'floor'}, reason: "the game's own objects are not the scene's to delete");
+    expect(doc.has('lamp'), isFalse);
+  });
+
+  test('Apply to Scene from the Hierarchy keeps what was made, renamed, moved, removed and deleted', () {
+    final project = FakeProject(dir: '/fake/game')..addDocument(scene());
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    final hierarchy = HierarchyModel(tabs: tabs, project: project);
+    addTearDown(hierarchy.dispose);
+    final main = tabs.openDocument('main')!;
+    final live = running();
+    final play = LivePlay(tabs: tabs, backend: (_) => live);
+    addTearDown(play.dispose);
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    play.follow(world);
+    final doc = play.document!;
+    expect(hierarchy.showsPlay, isTrue);
+
+    expect(
+      doc.apply([
+        Command.renameObject('robot', 'Hero'),
+        Command.removeComponent('robot', 'light'),
+        Command.createObject(
+          id: 'lamp',
+          name: 'Lamp',
+          parent: 'robot',
+          components: [
+            {'type': 'fynkel.PointLight', 'version': 1, 'data': {'range': 4}},
+          ],
+        ),
+        Command.deleteObject('floor'),
+      ]).ok,
+      isTrue,
+    );
+    Map<String, Object?>? inScene(String id) => main.document.entities([id]).entities[id]?.cast<String, Object?>();
+    List<Object?> types(String id) => [for (final c in (inScene(id)!['components'] as Map).values) (c as Map)['type']];
+
+    tabs.live!.setSelection(['robot']);
+    expect(hierarchy.applyToScene(), isTrue, reason: tabs.live!.lastError);
+    expect(inScene('robot')!['name'], 'Hero');
+    expect(types('robot'), isNot(contains('fynkel.PointLight')), reason: 'removed during Play');
+    expect(types('robot'), contains('game.Spinner'), reason: 'its script, added');
+    expect(inScene('robot')!['children'], ['lamp'], reason: 'made during Play, under its id');
+    expect(inScene('lamp')!['name'], 'Lamp');
+    expect(types('lamp'), containsAll(['fynkel.Transform', 'fynkel.PointLight']));
+    expect(main.document.dirty, isTrue);
+    expect(hierarchy.applyToScene(), isFalse);
+    expect(tabs.live!.lastError, contains('Nothing to apply'));
+
+    // A deletion is applied from the Playing header.
+    expect(inScene('floor'), isNotNull, reason: 'a root deleted during Play is not below what was applied');
+    expect(hierarchy.deletionsToApply, 1);
+    expect(hierarchy.applyDeletionsToScene(), isTrue);
+    expect(inScene('floor'), isNull);
+    expect(hierarchy.deletionsToApply, 0);
+
+    tabs.live!.setSelection(['runtime:99']);
+    expect(hierarchy.applyToScene(), isFalse);
+    expect(tabs.live!.lastError, contains('game made'));
+    play.follow(null);
   });
 
   test('a real running world takes a field, and a gizmo drag moves it and puts it back (L3)', () {
@@ -322,8 +451,20 @@ void main() {
     preview.restoreTransforms([id]);
     expect(position(), [5, 0, 0], reason: 'the drag puts it back; its transaction writes the end');
     expect(written, 3);
+    final box = world.attach(backend.live.entity(id).handle);
     expect(doc.apply([Command.renameObject(id, 'Crate')]).ok, isTrue);
     expect(backend.live.entity(id).name, 'Crate');
+    expect(box.name, 'Crate', reason: "the scripts' handle has the new name");
+
+    // Made while it runs, with a script-less Transform, and duplicated.
+    final a = doc.apply([Command.createObject(name: 'Lamp', parent: id)]);
+    expect(a.ok, isTrue);
+    final lamp = a.mutations.single.affectedIds.single;
+    expect(backend.live.entity(lamp).parent, id);
+    final d = doc.apply([Command.duplicateObject(id)]);
+    expect(d.ok, isTrue);
+    expect(d.mutations.single.affectedIds, hasLength(2), reason: 'the copy and its child');
+    expect(doc.roots(), hasLength(2));
   });
 
   test('a refresh reports only what changed; a watched entity\'s moving values go to `values` alone', () {

@@ -2,8 +2,9 @@
 // game's world as an `EditorDocument`, so the Hierarchy and the Inspector
 // show it with the panels, rows, cards and field widgets they use for a
 // scene. Edits go to the running world at once (L3) — a field, a
-// component added or removed, a rename, a new parent, a delete — and no
-// document is touched: Stop drops it all.
+// component added or removed, a rename, a new parent, a delete, a new or
+// duplicated object — and no document is touched: Stop drops it all,
+// unless Apply to Scene kept it (L4, `apply_to_scene.dart`).
 //
 // Entities are named by their authoring ids (what a loaded scene spawned,
 // a cooked prefab instance's children included) or `runtime:<handle>`
@@ -26,6 +27,7 @@ import 'package:fynkel/fynkel.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../documents/editor_document.dart';
+import '../inspector/prefab_actions.dart' show newUuid;
 import 'live_preview.dart';
 
 /// A script component of a running entity, as the document stores one.
@@ -80,6 +82,16 @@ abstract class LiveBackend {
 
   List<String> removeBehaviour(Object instance) => throw _notWritable('removeComponent');
 
+  /// Makes an entity at once ([LiveWorld.spawn]): answers its id and the
+  /// components the world refused.
+  ({String id, List<String> refused}) spawn({
+    required String name,
+    String? parent,
+    int? index,
+    List<Map<String, Object?>> components = const [],
+    String? authoringId,
+  }) => throw _notWritable('createObject');
+
   static AuthoringException _notWritable(String what) =>
       AuthoringException('live $what', AuthoringStatus.invalidArgument, [
         Diagnostic(code: 'FYN-T0003', severity: Severity.error, message: '$what: this world is not written'),
@@ -129,12 +141,28 @@ final class WorldLiveBackend extends LiveBackend {
     return switch (kind) {
       'set' => live.set(id, args['type'] as String, (args['data'] as Map).cast()),
       'remove' => live.remove(id, args['type'] as String),
-      'rename' => live.rename(id, args['name'] as String),
+      'rename' => _rename(id, args['name'] as String),
       'parent' => live.reparent(id, args['parent'] as String?, index: args['index'] as int?),
       'destroy' => live.destroy(id),
       _ => throw ArgumentError.value(kind, 'kind'),
     };
   }
+
+  /// A rename reaches the scripts' handle too (`GameObject.name`).
+  List<String> _rename(String id, String name) {
+    final refused = live.rename(id, name);
+    if (refused.isEmpty) world.byEntity(live.entity(id).handle)?.name = name;
+    return refused;
+  }
+
+  @override
+  ({String id, List<String> refused}) spawn({
+    required String name,
+    String? parent,
+    int? index,
+    List<Map<String, Object?>> components = const [],
+    String? authoringId,
+  }) => live.spawn(name: name, parent: parent, index: index, components: components, authoringId: authoringId);
 
   @override
   List<String> setBehaviourField(Object instance, String field, Object? value) {
@@ -151,8 +179,8 @@ final class WorldLiveBackend extends LiveBackend {
 
   @override
   List<String> addBehaviour(int handle, String type, {int? version, Map<String, Object?> data = const {}}) {
-    final go = world.byEntity(handle);
-    if (go == null) return ['no game object for entity $handle'];
+    // An entity no script has touched yet gets its handle now.
+    final go = world.byEntity(handle) ?? world.attach(handle);
     try {
       go.addBehaviourFromData(type, fields: data, version: version);
     } on Object catch (e) {
@@ -193,6 +221,19 @@ final class PlayDocument extends EditorDocument {
   /// Called after every write to the world (a paused Game view draws it
   /// again: `FynkelPlayControl.redraw`).
   final void Function()? written;
+
+  /// The objects made here during Play (created or duplicated), and the
+  /// ones deleted here — what Apply to Scene may keep (the game's own
+  /// spawns and destroys are not in these).
+  final Set<String> createdHere = {};
+  final Set<String> deletedHere = {};
+
+  /// The components removed here during Play, by entity (their ids as
+  /// the scene has them).
+  final Map<String, Set<String>> removedHere = {};
+
+  /// Whether [id] is in the running world now.
+  bool has(String id) => _byId.containsKey(id);
 
   Timer? _poll;
   bool _closed = false;
@@ -291,10 +332,11 @@ final class PlayDocument extends EditorDocument {
   Applied apply(List<Map<String, Object?>> commands, {String? baseRevision}) {
     if (_closed) return _rejection('The game stopped.');
     final touched = <String>{};
+    final mutations = <Map<String, Object?>>[];
     String? refused;
     try {
       for (final c in commands) {
-        final problems = _applyOne(c, touched);
+        final problems = _applyOne(c, touched, mutations);
         if (problems.isNotEmpty) {
           refused = problems.join('; ');
           break;
@@ -309,7 +351,7 @@ final class PlayDocument extends EditorDocument {
     }
     if (touched.isNotEmpty) _afterWrite(touched);
     if (refused != null) return _rejection(refused);
-    return Applied.fromJson({'ok': true, 'revision': revision});
+    return Applied.fromJson({'ok': true, 'revision': revision, 'mutations': mutations});
   }
 
   Applied _rejection(String message) => Applied.fromJson({
@@ -322,8 +364,9 @@ final class PlayDocument extends EditorDocument {
 
   /// One command on the world; answers its refusals. [touched] gets the
   /// entities it wrote (before the write: a refused one may have half
-  /// happened).
-  List<String> _applyOne(Map<String, Object?> c, Set<String> touched) {
+  /// happened); [mutations] the objects a create or a duplicate made, as a
+  /// document's transaction reports them.
+  List<String> _applyOne(Map<String, Object?> c, Set<String> touched, List<Map<String, Object?>> mutations) {
     final command = c['command'];
     String entityOf(String key) {
       final id = c[key];
@@ -360,9 +403,11 @@ final class PlayDocument extends EditorDocument {
         final ref = _component(id, c['component']);
         touched.add(id);
         final instance = ref.instance;
-        return instance == null
+        final refused = instance == null
             ? backend.write('remove', {'id': id, 'type': ref.type})
             : backend.removeBehaviour(instance);
+        if (refused.isEmpty) (removedHere[id] ??= {}).add(c['component'] as String);
+        return refused;
       case 'renameObject':
         final id = entityOf('id');
         touched.add(id);
@@ -376,10 +421,101 @@ final class PlayDocument extends EditorDocument {
       case 'deleteObject':
         final id = entityOf('id');
         touched.addAll([id, ?_byId[id]!.parent]);
-        return backend.write('destroy', {'id': id});
+        final refused = backend.write('destroy', {'id': id});
+        if (refused.isEmpty && !id.startsWith('runtime:')) deletedHere.add(id);
+        return refused;
+      case 'createObject':
+        final parent = c['parent'] as String?;
+        if (parent != null && !_byId.containsKey(parent)) throw _gone(parent);
+        final r = _spawn(
+          name: c['name'] as String? ?? '',
+          parent: parent,
+          index: c['index'] as int?,
+          id: c['id'] as String? ?? newUuid(),
+          components: [for (final x in c['components'] as List? ?? const []) (x as Map).cast<String, Object?>()],
+        );
+        touched.addAll([r.id, ?parent]);
+        mutations.add({'command': 'createObject', 'ok': true, 'affectedIds': [r.id]});
+        return r.refused;
+      case 'duplicateObject':
+        // The subtree copied with fresh ids, the copy right after the
+        // original (the document's rule), scripts included.
+        final id = entityOf('id');
+        final row = _byId[id]!;
+        final siblings = row.parent == null ? _roots : (_children[row.parent] ?? const <String>[]);
+        final made = <String>[];
+        final refused = <String>[];
+        void copy(String source, String? parent, {String? newId, String? name, int? index}) {
+          _full.remove(source); // its values now, not as last shown
+          final doc = _document(source);
+          if (doc == null) return;
+          final r = _spawn(
+            name: name ?? doc['name'] as String? ?? '',
+            parent: parent,
+            index: index,
+            id: newId ?? newUuid(),
+            components: [
+              for (final v in (doc['components'] as Map? ?? const {}).values) (v as Map).cast<String, Object?>(),
+            ],
+          );
+          made.add(r.id);
+          refused.addAll(r.refused);
+          for (final child in List.of(_children[source] ?? const <String>[])) {
+            copy(child, r.id);
+          }
+        }
+
+        copy(
+          id,
+          row.parent,
+          newId: c['newId'] as String?,
+          name: c['name'] as String?,
+          index: c['index'] as int? ?? siblings.indexOf(id) + 1,
+        );
+        touched.addAll([...made, ?row.parent]);
+        mutations.add({'command': 'duplicateObject', 'ok': true, 'affectedIds': made});
+        return refused;
       default:
         return ['$command is not there while the game runs'];
     }
+  }
+
+  /// Makes one object: its native components with it, its scripts added
+  /// right after.
+  ({String id, List<String> refused}) _spawn({
+    required String name,
+    required String? parent,
+    required int? index,
+    required String id,
+    required List<Map<String, Object?>> components,
+  }) {
+    final r = backend.spawn(
+      name: name,
+      parent: parent,
+      index: index,
+      authoringId: id,
+      components: [
+        for (final c in components)
+          if (_isNative(c['type'] as String? ?? '')) {'type': c['type'], 'data': c['data'] ?? const <String, Object?>{}},
+      ],
+    );
+    createdHere.add(r.id);
+    final refused = [...r.refused];
+    final scripts = components.where((c) => !_isNative(c['type'] as String? ?? '')).toList();
+    if (scripts.isNotEmpty) {
+      final handle = backend.entity(r.id).handle;
+      for (final s in scripts) {
+        refused.addAll(
+          backend.addBehaviour(
+            handle,
+            s['type'] as String,
+            version: s['version'] as int?,
+            data: (s['data'] as Map?)?.cast<String, Object?>() ?? const {},
+          ),
+        );
+      }
+    }
+    return (id: r.id, refused: refused);
   }
 
   /// Whether [type] is one of the world's own components (the rest are

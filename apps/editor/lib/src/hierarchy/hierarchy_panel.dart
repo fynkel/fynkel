@@ -184,9 +184,31 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             width: double.infinity,
             color: t.header,
             padding: EdgeInsets.symmetric(horizontal: t.pad, vertical: 3),
-            child: Text(
-              'Playing — the running game, as it is now',
-              style: theme.textTheme.bodySmall?.copyWith(color: t.accent),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Playing — the running game, as it is now',
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(color: t.accent),
+                  ),
+                ),
+                if (model.deletionsToApply case final n when n > 0)
+                  TextButton(
+                    key: const Key('hierarchy.applyDeletions'),
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.symmetric(horizontal: t.pad),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: model.applyDeletionsToScene,
+                    child: Text(
+                      n == 1 ? 'Apply 1 deletion to Scene' : 'Apply $n deletions to Scene',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+              ],
             ),
           )
         else if (tab.document.readOnly != null)
@@ -611,6 +633,14 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
               child: Text('${c.label}${c.shortcut == null ? '' : '  ${CommandRegistry.shortcutLabel(c.shortcut!)}'}'),
             ),
         ],
+        if (model.showsPlay) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            key: const Key('hierarchy.menu.applyToScene'),
+            value: 'applyToScene',
+            child: Text(many ? 'Apply Selection to Scene' : 'Apply to Scene'),
+          ),
+        ],
         const PopupMenuDivider(),
         PopupMenuItem(value: 'copyId', child: Text('Copy id  ${id.length > 13 ? '${id.substring(0, 13)}…' : id}')),
         if (n.isPrefabInstance) PopupMenuItem(value: 'copyPrefab', child: Text('Copy prefab asset id')),
@@ -627,6 +657,8 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
         model.createEmpty(parent: id);
       case 'moveToRoot':
         model.moveToRoot();
+      case 'applyToScene':
+        model.applyToScene();
       case 'toggle':
         model.toggle(id);
       case 'copyId':

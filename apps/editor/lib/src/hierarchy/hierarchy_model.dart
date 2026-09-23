@@ -16,7 +16,10 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
+import '../inspector/component_specs.dart';
 import '../inspector/prefab_actions.dart' as prefab;
+import '../play/apply_to_scene.dart';
+import '../play/play_document.dart';
 import '../project/editor_project.dart';
 import 'hierarchy_tree.dart';
 import 'transform_math.dart';
@@ -228,6 +231,84 @@ final class HierarchyModel extends ChangeNotifier {
       }
     }
     notifyListeners();
+  }
+
+  // ── Apply to Scene (ADR-0021 P7) ─────────────────────────────────────
+
+  /// The running game, while the Hierarchy shows it.
+  PlayDocument? get _play => _tab?.document is PlayDocument ? _tab!.document as PlayDocument : null;
+
+  /// Whether the Hierarchy shows the running game (Apply to Scene is
+  /// offered then).
+  bool get showsPlay => _play != null;
+
+  /// Apply to Scene: the selected running objects — their names, parents,
+  /// components and children, what was made during Play created — written
+  /// into the scene the game was started from, as one transaction on its
+  /// tab. A problem is shown on the running game's tab.
+  bool applyToScene([Iterable<String>? ids]) {
+    final t = _tab, play = _play;
+    if (t == null || play == null) return false;
+    final targets = (ids ?? t.selection).toList();
+    if (targets.isEmpty) return false;
+    return _applyToScene(t, play, () {
+      final specs = ComponentSpecs(project);
+      Map<String, Object?> defaultsOf(String type) {
+        final spec = specs.of(type);
+        return (spec.isBehaviour ? spec.schemaDefaults() : project.componentDefaults(type)) ?? const {};
+      }
+
+      return applyObjectsToSceneCommands(playSceneTab(tabs, play)!, play, targets, defaultsOf: defaultsOf);
+    });
+  }
+
+  /// The objects deleted during Play that the scene still has.
+  int get deletionsToApply {
+    final play = _play;
+    final scene = play == null ? null : playSceneTab(tabs, play);
+    if (play == null || scene == null || play.deletedHere.isEmpty) return 0;
+    return deletionsToSceneCommands(scene, play).ids.length;
+  }
+
+  /// Apply to Scene for what was deleted during Play.
+  bool applyDeletionsToScene() {
+    final t = _tab, play = _play;
+    if (t == null || play == null) return false;
+    List<String> done = const [];
+    final ok = _applyToScene(t, play, () {
+      final d = deletionsToSceneCommands(playSceneTab(tabs, play)!, play);
+      done = d.ids;
+      return d.commands;
+    });
+    if (ok) play.deletedHere.removeAll(done);
+    notifyListeners();
+    return ok;
+  }
+
+  bool _applyToScene(OpenDocument t, PlayDocument play, List<Map<String, Object?>> Function() commands) {
+    final scene = playSceneTab(tabs, play);
+    String? why;
+    if (scene == null) {
+      why = 'The scene the game was started from is not open.';
+    } else if (scene.document.readOnly != null) {
+      why = 'The scene is read-only.';
+    } else {
+      try {
+        final c = commands();
+        if (c.isEmpty) {
+          why = 'Nothing to apply: the scene has these objects as they run.';
+        } else {
+          final a = scene.transaction(c);
+          if (a == null || !a.ok) why = scene.lastError ?? 'The scene refused it.';
+        }
+      } on StateError catch (e) {
+        why = e.message;
+      }
+    }
+    t.lastError = why;
+    t.keepEditing();
+    notifyListeners();
+    return why == null;
   }
 
   // ── Operations (each one transaction) ────────────────────────────────

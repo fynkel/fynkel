@@ -1205,9 +1205,7 @@ final class InspectorModel extends ChangeNotifier {
   /// Inspector shows the running game.
   OpenDocument? get playScene {
     final doc = _tab?.document;
-    if (doc is! PlayDocument) return null;
-    final scene = doc.scene;
-    return scene == null ? null : tabs.open.where((t) => identical(t.document, scene)).firstOrNull;
+    return doc is PlayDocument ? playSceneTab(tabs, doc) : null;
   }
 
   /// Why the slot's running values cannot be applied to the scene, or null.

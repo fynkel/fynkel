@@ -11,15 +11,25 @@
 // to six decimals comes back a digit off): two numbers a millionth apart
 // are the same value here, and a native number is written as the
 // shortest decimal that is its float (0.1).
+//
+// Whole objects apply too (the Hierarchy's Apply to Scene): a running
+// object's name, parent and components, and its children the same way —
+// an object made during Play is created in the scene under its id, a
+// component removed during Play is removed, a child deleted during Play is
+// deleted. What the game itself made (a `runtime:` id) is not applied, nor
+// what it removed or destroyed: only the user's own removals and deletes
+// are. A new order among the same siblings is not applied.
 import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
 import '../hierarchy/hierarchy_tree.dart' show HierarchyNode;
 import '../inspector/inspector_model.dart' show topLevelKey;
 import '../inspector/prefab_actions.dart' as prefab;
+import 'play_document.dart';
 
 /// One running component to apply: on [entity], the [index]-th component
 /// of [type] (the Inspector's slot position), with its live [data].
@@ -129,6 +139,197 @@ List<Map<String, Object?>> applyToSceneCommands(
     }
   }
   return commands;
+}
+
+/// The open tab of the scene [play] was started from, or null.
+OpenDocument? playSceneTab(DocumentTabs tabs, PlayDocument play) {
+  final scene = play.scene;
+  return scene == null ? null : tabs.open.where((t) => identical(t.document, scene)).firstOrNull;
+}
+
+/// The commands that write the running objects [ids] (and their children)
+/// into [scene]: names, parents, components; an object made during Play
+/// is created, a component or child removed during Play is removed.
+/// [defaultsOf] gives a type's values for keys the scene leaves out.
+/// Throws a [StateError] naming why it cannot.
+List<Map<String, Object?>> applyObjectsToSceneCommands(
+  OpenDocument scene,
+  PlayDocument play,
+  Iterable<String> ids, {
+  required Map<String, Object?> Function(String type) defaultsOf,
+}) {
+  final commands = <Map<String, Object?>>[];
+  Map<String, Object?> live(String id) {
+    final e = play.entities([id]).entities[id];
+    if (e == null) throw StateError('It is gone from the running game.');
+    return e.cast<String, Object?>();
+  }
+
+  List<String> childrenOf(Map<String, Object?> e) => [for (final c in e['children'] as List? ?? const []) c as String];
+
+  // Where [id] goes among [parent]'s children in the scene: after its
+  // running siblings the scene has (or that this apply creates).
+  final creating = <String>{};
+  int indexAmong(String id, String? parent) {
+    final siblings = parent == null ? play.roots() : childrenOf(live(parent));
+    var i = 0;
+    for (final s in siblings) {
+      if (s == id) break;
+      if (creating.contains(s) || !(sceneNodeOf(scene, s)?.isDerived ?? true)) i++;
+    }
+    return i;
+  }
+
+  List<({String type, int version, Map<String, Object?> data})> componentsOf(Map<String, Object?> e) => [
+    for (final c in (e['components'] as Map? ?? const {}).values)
+      if (c is Map)
+        (
+          type: c['type'] as String,
+          version: (c['version'] as num?)?.toInt() ?? 1,
+          data: (c['data'] as Map? ?? const {}).cast<String, Object?>(),
+        ),
+  ];
+
+  // create → visit → sync → create: declared ahead.
+  late final void Function(String id, HierarchyNode node) visit;
+
+  void create(String id, String? parent, {int? index}) {
+    final e = live(id);
+    creating.add(id);
+    commands.add(
+      Command.createObject(
+        id: id,
+        name: e['name'] as String? ?? '',
+        parent: parent,
+        index: index,
+        components: [
+          for (final c in componentsOf(e))
+            {
+              'type': c.type,
+              'version': c.version,
+              'data': c.type.startsWith('fynkel.') ? shortestFloats(c.data) : c.data,
+            },
+        ],
+      ),
+    );
+    for (final child in childrenOf(e)) {
+      final n = sceneNodeOf(scene, child);
+      if (n != null) {
+        visit(child, n); // moved under the new object during Play
+      } else if (play.createdHere.contains(child)) {
+        create(child, id);
+      }
+    }
+  }
+
+  void sync(String id, HierarchyNode node) {
+    final e = live(id);
+    final comps = componentsOf(e);
+    final seen = <String, int>{};
+    for (final c in comps) {
+      final index = seen[c.type] = (seen[c.type] ?? -1) + 1;
+      commands.addAll(
+        applyToSceneCommands(
+          scene,
+          (entity: id, type: c.type, version: c.version, index: index, data: c.data),
+          defaults: defaultsOf(c.type),
+        ),
+      );
+    }
+    for (final child in childrenOf(e)) {
+      if (child.startsWith('runtime:')) continue;
+      final n = sceneNodeOf(scene, child);
+      if (n == null) {
+        if (!node.isDerived && play.createdHere.contains(child)) create(child, id, index: indexAmong(child, id));
+      } else {
+        visit(child, n);
+      }
+    }
+    // A prefab instance's entities get their components' values only:
+    // its structure is the prefab's.
+    if (node.isDerived) return;
+
+    // Only what was removed here: a component the world does not show (a
+    // script that did not load) stays.
+    final running = (e['components'] as Map? ?? const {}).keys.toSet();
+    final sceneComponents = (scene.document.entities([id]).entities[id]?['components'] as Map? ?? const {}).keys;
+    for (final c in sceneComponents) {
+      if ((play.removedHere[id]?.contains(c) ?? false) && !running.contains(c)) {
+        commands.add(Command.removeComponent(id, c as String));
+      }
+    }
+    for (final child in node.children) {
+      if (play.deletedHere.contains(child) && !play.has(child)) commands.add(Command.deleteObject(child));
+    }
+  }
+
+  visit = (id, node) {
+    final e = live(id);
+    if (!node.isDerived) {
+      final name = e['name'] as String? ?? '';
+      if (name != node.name) commands.add(Command.renameObject(id, name));
+      final parent = e['parent'] as String?;
+      if (parent != node.parent) {
+        if (parent != null && (sceneNodeOf(scene, parent)?.isDerived ?? true) && !creating.contains(parent)) {
+          throw StateError('Its parent is not in the scene: apply the parent first.');
+        }
+        commands.add(Command.reparentObject(id, parent: parent, index: indexAmong(id, parent)));
+      }
+    }
+    sync(id, node);
+  };
+
+  // The topmost of [ids] in the running tree: the rest come with them.
+  final selected = ids.toSet();
+  bool underSelected(String id) {
+    for (var p = live(id)['parent'] as String?; p != null; p = live(p)['parent'] as String?) {
+      if (selected.contains(p)) return true;
+    }
+    return false;
+  }
+
+  for (final id in selected) {
+    if (id.startsWith('runtime:')) throw StateError('The game made it; it is not in the scene.');
+    if (underSelected(id)) continue;
+    final node = sceneNodeOf(scene, id);
+    if (node != null) {
+      visit(id, node);
+      continue;
+    }
+    if (!play.createdHere.contains(id)) throw StateError('It is not in the scene: the game made it.');
+    // Made during Play: created where it runs (its parent must be in the
+    // scene, or be made by this apply).
+    final parent = live(id)['parent'] as String?;
+    if (parent != null && (sceneNodeOf(scene, parent)?.isDerived ?? true) && !creating.contains(parent)) {
+      throw StateError('Its parent is not in the scene: apply the parent first.');
+    }
+    create(id, parent, index: indexAmong(id, parent));
+  }
+  return commands;
+}
+
+/// The commands that delete from [scene] what was deleted during Play:
+/// a document entity, or an entity of a prefab instance (a `removeObject`
+/// override). Answers them with the ids they delete.
+({List<Map<String, Object?>> commands, List<String> ids}) deletionsToSceneCommands(
+  OpenDocument scene,
+  PlayDocument play,
+) {
+  final pending = [for (final id in play.deletedHere) if (!play.has(id) && sceneNodeOf(scene, id) != null) id];
+  final commands = <Map<String, Object?>>[];
+  final ids = <String>[];
+  for (final id in scene.tree.topmost(pending)) {
+    final n = scene.tree[id]!;
+    if (!n.isDerived) {
+      commands.add(Command.deleteObject(id));
+    } else {
+      final e = scene.expansionOf(n.anchor!)?.entity(id);
+      if (e == null || e.added) continue;
+      commands.add(Command.setPrefabOverrideOp(n.anchor!, prefab.removeObjectOverride(e)));
+    }
+    ids.add(id);
+  }
+  return (commands: commands, ids: ids);
 }
 
 /// Whether [a] and [b] are the same JSON value, numbers a millionth apart
