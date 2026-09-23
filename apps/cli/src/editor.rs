@@ -37,7 +37,7 @@ use crate::editor_launch;
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel editor [<project dir>] [--plain] [--handover] [--flutter <path>]\n                                               the editor with the project's game compiled in (Play runs inside it; hot reload on save);\n                                               --plain (or no project) runs the editor without a game;\n                                               --handover: started by an editor that hands the project over (it follows status.json)"
+        "usage:\n  fynkel editor [<project dir>] [--plain] [--handover] [--window-frame x,y,w,h] [--flutter <path>]\n                                               the editor with the project's game compiled in (Play runs inside it; hot reload on save);\n                                               --plain (or no project) runs the editor without a game;\n                                               --handover: started by an editor that hands the project over (it follows status.json)"
     );
     ExitCode::from(2)
 }
@@ -58,6 +58,7 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let mut plain = false;
     let mut handover = false;
     let mut flutter: Option<PathBuf> = None;
+    let mut window_frame: Option<String> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -67,6 +68,15 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                 i += 1;
                 match args.get(i) {
                     Some(f) => flutter = Some(PathBuf::from(f)),
+                    None => return usage(),
+                }
+            }
+            // The handing-over editor's window, "x,y,w,h": this one opens
+            // in its place (MainFlutterWindow.swift).
+            "--window-frame" => {
+                i += 1;
+                match args.get(i) {
+                    Some(f) => window_frame = Some(f.clone()),
                     None => return usage(),
                 }
             }
@@ -149,6 +159,10 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     }
     // Always set: an editor started from another must not read that one's.
     env.push(("FYNKEL_EDITOR_UPDATING", editor_launch::updating_file(&cwd)));
+    env.push((
+        "FYNKEL_WINDOW_FRAME",
+        PathBuf::from(window_frame.unwrap_or_default()),
+    ));
     editor_launch::set_updating(&cwd, None);
 
     // Nothing native changed since the last build: launch the built app
