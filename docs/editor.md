@@ -779,18 +779,23 @@ movement, flushed on close.
 
 ### What is drawn over the world
 
-Debug lines (`FynkelViewportController.debugLines`, ten floats a segment,
-drawn by the renderer's depth-tested unlit debug pass, cleared by every
-render): the **grid** on y = 0 at an adaptive power-of-ten step near a
-twentieth of the camera distance, 40 × 40 cells around the pivot, every
-tenth line brighter, the **world axes** through the origin (X red, Y
-green, Z blue) — ⌘G; the **icons** of every light (its colour: point range
+The renderer's overlay (item 9f, ADR-0019; `SceneViewModel.overlay` builds
+one `ViewportOverlay` a frame for `FynkelViewportController.overlay`,
+drawn after post at the picture's own resolution — never exposed — and
+cleared by every render): the **grid**, the renderer's analytic one on
+y = 0 (power-of-ten cells from the camera's height and each pixel's
+footprint, three levels cross-fading, faded with distance and at grazing
+angles, hidden under a floor instead of fighting it), its X and Z axes
+red and blue, and the **Y axis** up from the origin in green — ⌘G; the **icons** of every light (its colour: point range
 circles, spot cone, directional arrows), camera (frustum to 4 m) and
 collider (its shape, green) — ⌘I; the **selection outline** — each
 selected entity's mesh bounds as twelve orange edges, a cross for an
 entity without a mesh, an anchor's whole instance. All three come from
 the world (`preview.lines(outline:, iconsAspect:)`) so they are exact
-about what is there. The **gizmo** and the **marquee** are 2-D, painted
+about what is there. Every line is `GizmoTokens.lineWidth` (1.5) logical
+pixels times the panel's pixel ratio, anti-aliased, and the part behind
+geometry is drawn at a quarter of its alpha instead of breaking off. The
+**gizmo** and the **marquee** are 2-D, painted
 by `_OverlayPainter` in logical pixels over the viewport from
 `ProjectedGizmo` (the same projection the hit test uses). The **stats
 overlay** (⌘T) shows the picture's size and the model's own frame time,
@@ -1575,6 +1580,7 @@ around the one step that causes it.
 | 9c | done 2026-09-23 (gate driven by the user) | One Inspector for whatever was selected last — entities, an asset, a part, a folder — with the Asset panel's content as its pages, import settings applied or reverted from a pinned bar, the lock, and document kinds' sections registered by kind (§ One Inspector). |
 | 9d | done 2026-09-23 (gate driven by the user) | One picker for asset and entity slots, Open Document, Add Component, Create Entity with Component and the palette (§ One picker). |
 | 9e | done 2026-09-23 (gate driven by the user) | Panel tabs with the × on hover and a right-click menu, trackpad scroll and pinch in the Scene view, the orientation gizmo, and copies of the Hierarchy, Scene view, Inspector and Project browser with their own state and padlocks (§ Panel tabs, copies and the orientation gizmo). |
+| 9f | built 2026-09-23, gate pending | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 
@@ -1592,7 +1598,7 @@ cd packages/fynkel && dart test test/editor_channel_test.dart  # the channel its
 FYNKEL_SCENE_FRAME_OUT=/tmp/main-320x200.png flutter test test/scene_session_test.dart --name viewport   # keeps the clean 320×200 frame of the fixture's Main through its camera …
 cargo run -q -p fynkel_cli --bin fynkel -- render --project <fixture copy> --scene c0000000-0000-4000-8000-000000000030 --out /tmp/cli.png --size 320x200   # … to compare with this: 0 differing pixels (2026-09-22)
 cargo test -p fynkel_authoring --test preview        # the edit-preview world: load, the incremental sync == a fresh load after every transaction kind, picking, outlines, hidden, the anchor map
-cd packages/fynkel_flutter && flutter test          # viewport ABI v4: debug lines and read_frame on the real renderer
+cd packages/fynkel_flutter && flutter test          # viewport ABI v6: debug lines, the overlay (ViewportOverlay) and read_frame on the real renderer
 cargo test -p fynkel_authoring --test prefab_mode    # M4-07: the instance query live against an open prefab, apply as two transactions, unpackPrefab, imported hierarchies read-only, the broken cases left alone
 cargo test -p fynkel_document --test authoring        # unpackPrefab and apply_with_prefabs (the shared touch)
 cargo test -p fynkel_authoring --test ops            # the asset operations, and the 2 000-asset tree: a full scan against one change's rescan (< 50 ms)

@@ -46,7 +46,7 @@ without an `Environment` component uses `Environment::default()` (white
 ## Passes
 
 The chain is `shadow → depth prepass → ambient occlusion → AO blur →
-opaque → transparent → bloom → post → presentation`, every pass with
+opaque → transparent → bloom → post → presentation → overlay`, every pass with
 fixed inputs and outputs; the opaque and transparent stages share one
 render pass because they share the attachments. The three passes before
 the opaque one are the ambient-occlusion stage (R2) and run only while
@@ -61,10 +61,11 @@ Without them the chain is exactly what it was, down to the bits.
 | **ambient occlusion** | the frame uniform alone, the stored depth | `AO_FORMAT` (`R8Unorm`) at the internal size | the same |
 | **AO blur** | the frame uniform, the depth, the AO target | a second `R8Unorm` — what the opaque pass samples | the same |
 | **opaque** | frame uniforms, shadow map, the AO target, material maps | HDR colour (`HDR_FORMAT` `Rgba16Float`, `msaa` samples) + `Depth32Float`, the colour cleared to transparent black and the depth **loaded** from the prepass (cleared when the stage did not run); at MSAA 4 the colour resolves into the single-sample HDR texture and the samples are discarded | always |
-| **transparent** | the same, plus the depth just written (read-only) | the same colour attachment, blended | `blend` instances or debug lines queued |
+| **transparent** | the same, plus the depth just written (read-only) | the same colour attachment, blended | `blend` instances queued |
 | **bloom** | the resolved HDR texture, the frame uniform | `BLOOM_FORMAT` (`Rgba16Float`) chain at half the internal size, up to `BLOOM_LEVELS` (6) mips: a prefilter into level 0, a downsample into each next level, a blended upsample back into each finer one | bloom on in the quality profile, the resolved intensity > 0 |
 | **post** | resolved HDR texture, bloom level 0, frame + post uniforms | the host's target — or the LDR intermediate (target format, internal size) when `render_scale ≠ 1` | always |
 | **presentation** | LDR intermediate | the host's target, bilinear | `render_scale ≠ 1` |
+| **overlay** | overlay uniforms (`view_proj`, its inverse, the camera), the scene depth (`msaa` samples) | the host's target, loaded and blended | a grid, a line or a triangle queued (item 9f, § The overlay) |
 
 1. **Shadow**: the sun's orthographic view (`src/shadow.rs`, below) is
    rendered depth-only, no face culling, depth bias constant 2 / slope 2,
@@ -87,8 +88,7 @@ Without them the chain is exactly what it was, down to the bits.
    distance of its origin from the camera (whatever the record order),
    one `draw_indexed` each, depth tested and not written, blended
    `SrcAlpha / OneMinusSrcAlpha` (colour) and `One / OneMinusSrcAlpha`
-   (alpha, so the coverage accumulates). Then the **debug lines**
-   (`LineList`, depth `LessEqual` without write, no lighting).
+   (alpha, so the coverage accumulates).
 5. **Post**: exposure → ACES (Stephen Hill's fit of the RRT + sRGB ODT) →
    sRGB encode unless the target format is an sRGB format (then the
    hardware encodes). The HDR alpha channel is a tag with coverage:
@@ -97,12 +97,14 @@ Without them the chain is exactly what it was, down to the bits.
    premultiplied by coverage (a multisample resolve at a silhouette, a
    blend material over the background) → `aces(rgb / coverage × exposure)`
    composited over the clear colour by `coverage`; `> 1.5` display-referred
-   (unlit magenta cube, debug lines: alpha 2 × coverage) → clamped and
+   (the unlit magenta cube: alpha 2 × coverage) → clamped and
    encoded only. At coverage 1 the result is bit-identical to V1 (a).
    With bloom (§ Bloom) its level 0 is added to the exposed radiance
    before ACES, and screen-blended over the uncovered part of a pixel.
 6. **Presentation**: only with a render scale, a bilinear fullscreen copy
    of the LDR intermediate to the target size.
+7. **Overlay**: the grid, then the lines, then the triangles, straight
+   into the host's target at its own resolution (§ The overlay).
 
 ### Shadows (`src/shadow.rs`, `shaders/shadow.wgsl`)
 
@@ -307,8 +309,8 @@ R3a did, and the stage does not run.
    at 1024 so a single hot texel cannot become a square, averaged with
    Karis weights `1 / (1 + luma)` (the fireflies of a specular highlight
    do not flicker the glow). Background texels (alpha 0) and
-   display-referred ones (alpha > 1.5: debug lines, the unlit magenta
-   cube) contribute nothing. Then a soft-knee threshold: `threshold`
+   display-referred ones (alpha > 1.5: the unlit magenta cube)
+   contribute nothing. Then a soft-knee threshold: `threshold`
    with a knee of half of it, so brightness enters the glow over a band
    instead of at an edge.
 2. **Downsample**, level by level down to 2 texels on the short side
@@ -432,15 +434,52 @@ Apple viewport's `fynkel_apple_viewport_set_quality`,
 `FynkelViewportController.quality` (the `fynkel create` starter cycles it
 on **Q**).
 
-### Debug primitives (`src/debug.rs`)
+### The overlay (`src/overlay.rs`, `shaders/overlay.wgsl`, item 9f)
 
-`ExtractRenderer::debug()` is a `DebugDraw` queue of world-space
-coloured lines — `line`, `aabb` (twelve edges), `axes` — that `prepare`
-uploads and clears, so a host queues what it wants drawn between frames.
-They draw at the end of the transparent stage, depth tested against the
-scene and never written, in display-referred colour (`[1, 0, 0, 1]` is
-pure red whatever the exposure). Physics shapes come with the physics
-item.
+What is drawn *over* the picture — the editor's grid, outlines, icons and
+handles, a game's debug drawing — goes through `ExtractRenderer::overlay()`
+(ADR-0019 §1), an `Overlay` queue that `prepare` uploads and clears. It
+draws **after** post and presentation, into the host's target at the
+target's resolution, so it is never exposed, tone mapped, bloomed or
+resolved through MSAA coverage: `[1, 0, 0, 1]` is pure red whatever the
+camera, the profile or the sample count. Colours are linear and alpha is
+real (`SrcAlpha / OneMinusSrcAlpha`); the pass encodes to sRGB itself
+when the target is not an sRGB format.
+
+- **Lines** (`push_line(a, b, colour, width, flags)`) are instanced
+  screen-space quads: each end is projected, clipped against the near
+  plane, and the segment widened by half its `width` in target pixels
+  plus one, with a one-pixel analytic edge (`smoothstep` on the distance
+  from the centre line), so a 1.5 px line is smooth at every angle.
+- **Triangles** (`push_triangle(a, b, c, colour, flags)`) are flat and
+  unlit; each vertex is pushed out two pixels and the fragment fades by
+  its screen-space distance to the three edges, so their edges are
+  anti-aliased like the lines'.
+- **The ground grid** (`grid(Grid)`) is one fullscreen triangle that
+  intersects each pixel's view ray with `y = 0`. The cell is a power of
+  ten chosen from the larger of the pixel's footprint and the camera's
+  height (so it neither shimmers far away nor turns to a carpet up
+  close), three levels (minor, ×10 major, ×100) cross-fading as the
+  camera moves, lines by screen-space derivatives (no moiré), faded with
+  distance and at grazing angles, and the X and Z axes in their colours.
+  It reads the scene depth and never writes it, so it does not z-fight a
+  floor at `y = 0`: under a floor it is hidden.
+- **Occlusion.** Every primitive compares its distance from the camera
+  with the scene's, reconstructed from the depth attachment (the farthest
+  of its MSAA samples, so an edge never hides what is behind it) through `inv_view_proj`, with a tolerance of
+  ×1.001 + 2 mm. What is behind the scene is drawn at `OCCLUDED_ALPHA`
+  (0.25) of its alpha, not dropped; `ON_TOP` opts a primitive out (the
+  handles). While the overlay has something to draw the scene pass
+  stores its depth instead of discarding it.
+
+`ExtractRenderer::debug()` keeps its `DebugDraw` API — `line`, `aabb`
+(twelve edges), `axes` — and is now a client of the overlay: its lines
+join the frame's at `DEBUG_LINE_WIDTH` (1.5 px), occluded-faded. The
+Apple viewport takes the overlay as `fynkel_apple_viewport_overlay`
+(ABI v6) and `package:fynkel_flutter` as `ViewportOverlay` /
+`FynkelViewportController.overlay`. `FrameStats` counts `debug_lines`
+(every overlay line), `overlay_triangles` and `grid`. Physics shapes
+come with the physics item.
 
 Placeholder cubes (entities without a `MeshRenderer`, when
 `placeholders` is on) are lit like a rough white dielectric in their
@@ -666,7 +705,7 @@ full table.
 
 ## Pipelines and caches — the variant cap
 
-Exactly **twenty-three** render pipelines exist, all created in `new`
+Exactly **twenty-five** render pipelines exist, all created in `new`
 (`PIPELINE_VARIANTS`) and rebuilt as a set only when the sample count
 changes; nothing is compiled at draw time:
 
@@ -685,9 +724,9 @@ changes; nothing is compiled at draw time:
 | `ao`, `ao_blur` | `R8Unorm` | 1 | none | none | — | |
 | `bloom_prefilter`, `bloom_down` | `Rgba16Float` | 1 | none | none | — | (R3b, § Bloom) |
 | `bloom_up` | the same | 1 | none | none | constant (scatter) | |
-| `debug` | HDR | msaa | none | read, `LessEqual` | — | |
 | `post` | host format | 1 | none | none | — | |
 | `present` | host format | 1 | none | none | — | |
+| overlay `grid`, `lines`, `triangles` | host format | 1 | none | none (the scene depth is a texture) | src-alpha | `vs_grid`, `vs_line`, `vs_triangle` (item 9f, § The overlay) |
 
 Material features (maps present or not, mask, blend, unlit) are data —
 instance flags and fallback textures — not variants. A new variant needs
@@ -771,8 +810,13 @@ materials compositing back to front whatever the record order, MSAA 4
 blending silhouette edges (and 8 ≡ 4, 2 ≡ 1), render scale 0.5 / 0.75 /
 2 presenting at the target size (and back to native pixel-identical),
 the fixture project's `low` / `medium` / `high` profiles switching at
-runtime (an unknown name refused, the override), debug lines on top and
-depth tested; from V1 (c): frustum culling dropping four off-screen cubes
+runtime (an unknown name refused, the override), debug lines drawn and
+depth tested; from item 9f: overlay lines widening with their width and
+anti-aliased at the edge, fading behind the scene unless `ON_TOP`, the
+same pixels at EV 0 and EV 6 and at MSAA 1 and 4, filled triangles with
+anti-aliased edges, and the grid on a floor at `y = 0` (the same as a
+floor a millimetre below), hidden under one 20 cm above, and denser near
+the camera than far; from V1 (c): frustum culling dropping four off-screen cubes
 (one of them still casting its shadow into the view) with the picture
 identical to `frustum_culling = false`. `tests/offscreen.rs` counts a
 40 × 25 grid of placeholders as drawn + culled = 1 000 in one draw.
