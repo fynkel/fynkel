@@ -15,27 +15,126 @@
 //!   document.
 //!
 //! Every call is `(kind, args JSON) -> JSON`, like the session's `query`:
-//! `entities`, `entity`, `set`, `remove`, `rename`.
+//! `entities`, `entity`, `set`, `remove`, `rename`, and for the Scene view
+//! on the running world (L5) `pick`, `pickRect`, `lines` and
+//! `worldMatrix` — the edit preview's own picking and overlays
+//! ([`crate::preview`]), over every live entity.
 
+use fynkel_assets::Assets;
 use fynkel_contracts::{Code, ComponentId, Diagnostic, Entity};
-use fynkel_core::components::ComponentValue;
+use fynkel_core::components::{Camera, ComponentValue, Projection};
 use fynkel_core::{Command, Name, World};
 use fynkel_document::generated::{decode_component, encode_component};
 use fynkel_document::{DocumentCodec, Node};
 use fynkel_scene::{self as scene, Layer, Tags, Transform};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use serde_json::{json, Value};
 use uuid::Uuid;
+
+use crate::preview::{self, Line, Ray, View};
 
 /// The prefix of the id of an entity no loaded scene spawned.
 pub const RUNTIME_PREFIX: &str = "runtime:";
 
-pub const KINDS: [&str; 5] = ["entities", "entity", "set", "remove", "rename"];
+pub const KINDS: [&str; 9] = [
+    "entities",
+    "entity",
+    "set",
+    "remove",
+    "rename",
+    "pick",
+    "pickRect",
+    "lines",
+    "worldMatrix",
+];
+
+/// The selection outline's colour when a `lines` call gives none (the
+/// edit preview's).
+const OUTLINE_COLOR: Vec4 = Vec4::new(1.0, 0.6, 0.0, 1.0);
 
 /// Runs one live call on `world`. A refused write is `{ "ok": false,
 /// "rejected": [...] }` with the world's own diagnostics; a malformed call
 /// (unknown kind or entity, bad JSON) is an `Err`.
 pub fn call(world: &mut World, kind: &str, args: &Value) -> Result<Value, Vec<Diagnostic>> {
+    call_with(world, None, kind, args)
+}
+
+/// [`call`], with the assets the world draws from: picking and outlines
+/// test meshes by their triangles and bounds (without, every entity is an
+/// icon sphere).
+pub fn call_with(
+    world: &mut World,
+    assets: Option<&Assets>,
+    kind: &str,
+    args: &Value,
+) -> Result<Value, Vec<Diagnostic>> {
     match kind {
+        "pick" => {
+            let ray = if args.get("ndc").is_some() {
+                view_arg(args)?.ray(vec2_arg(args, "ndc")?)
+            } else {
+                let ray = args
+                    .get("ray")
+                    .ok_or_else(|| vec![invalid("pick: needs `ray` or `view` + `ndc`")])?;
+                Ray {
+                    origin: vec3_arg(ray, "origin")?,
+                    dir: vec3_arg(ray, "dir")?.normalize_or(Vec3::NEG_Z),
+                }
+            };
+            Ok(pick(world, assets, &ray))
+        }
+        "pickRect" => {
+            let view = view_arg(args)?;
+            let (a, b) = (vec2_arg(args, "min")?, vec2_arg(args, "max")?);
+            let (min, max) = (a.min(b), a.max(b));
+            let ids: Vec<String> = pickable(world)
+                .filter(|e| preview::rect_hits(world, assets, &view, *e, min, max))
+                .map(|e| id_of(world, e))
+                .collect();
+            Ok(json!({ "ids": ids }))
+        }
+        "lines" => {
+            let mut out: Vec<Line> = Vec::new();
+            let mut selected: Vec<Entity> = Vec::new();
+            if let Some(o) = args.get("outline").filter(|o| !o.is_null()) {
+                let color = match o.get("color").filter(|c| !c.is_null()) {
+                    Some(c) => {
+                        let f = floats(c, "outline.color", 4)?;
+                        Vec4::new(f[0], f[1], f[2], f[3])
+                    }
+                    None => OUTLINE_COLOR,
+                };
+                // An entity gone since the selection was made draws nothing.
+                selected = ids_arg(o)?
+                    .iter()
+                    .filter_map(|id| resolve(world, id))
+                    .collect();
+                for e in &selected {
+                    preview::outline_entity(world, assets, *e, color, &mut out);
+                }
+            }
+            if let Some(i) = args.get("icons").filter(|i| !i.is_null()) {
+                let aspect = f32_arg(i, "aspect")?;
+                for e in pickable(world) {
+                    let is_selected = selected.contains(&e);
+                    preview::icon_entity(world, assets, aspect, e, is_selected, &mut out);
+                }
+            }
+            Ok(json!({
+                "count": out.len(),
+                "lines": out.iter().map(Line::json).collect::<Vec<_>>(),
+            }))
+        }
+        "worldMatrix" => {
+            let mut matrices = serde_json::Map::new();
+            for id in ids_arg(args)? {
+                let m = resolve(world, &id).and_then(|e| scene::world_matrix(world.ecs(), e).ok());
+                if let Some(m) = m {
+                    matrices.insert(id, json!(m.to_cols_array()));
+                }
+            }
+            Ok(json!({ "matrices": matrices }))
+        }
         "entities" => Ok(entities(world, args.get("since").and_then(Value::as_str))),
         "entity" => {
             let e = entity_arg(world, args)?;
@@ -234,6 +333,40 @@ fn entity(world: &World, e: Entity) -> Value {
     })
 }
 
+/// The entities a click or a marquee can meet: every live one (a game's
+/// world hides nothing from the editor; only an edit world can).
+fn pickable(world: &World) -> impl Iterator<Item = Entity> + '_ {
+    world.ecs().entities()
+}
+
+/// Every entity `ray` meets, nearest first, as the edit preview picks
+/// (a mesh by its triangles, anything else by an icon sphere) — each
+/// entity itself: a running prefab instance has no anchor to stand for it.
+fn pick(world: &World, assets: Option<&Assets>, ray: &Ray) -> Value {
+    let mut hits: Vec<(Entity, f32, Vec3, bool)> = pickable(world)
+        .filter_map(|e| {
+            preview::pick_entity(world, assets, ray, e).map(|(d, p, mesh)| (e, d, p, mesh))
+        })
+        .collect();
+    hits.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+    let hits: Vec<Value> = hits
+        .into_iter()
+        .map(|(e, distance, point, mesh)| {
+            json!({
+                "id": id_of(world, e),
+                "entity": e.to_bits(),
+                "distance": distance,
+                "point": point.to_array(),
+                "mesh": mesh,
+            })
+        })
+        .collect();
+    json!({
+        "ray": { "origin": ray.origin.to_array(), "dir": ray.dir.to_array() },
+        "hits": hits,
+    })
+}
+
 fn write(world: &mut World, commands: Vec<Command>) -> Value {
     let rejected = world.apply_now(commands);
     if rejected.is_empty() {
@@ -269,4 +402,86 @@ fn str_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, Vec<Diagnostic>> {
 
 fn invalid(message: impl Into<String>) -> Diagnostic {
     Diagnostic::error(Code::SESSION_INVALID_REQUEST, message)
+}
+
+fn ids_arg(args: &Value) -> Result<Vec<String>, Vec<Diagnostic>> {
+    args.get("ids")
+        .and_then(Value::as_array)
+        .and_then(|a| a.iter().map(|v| v.as_str().map(str::to_string)).collect())
+        .ok_or_else(|| vec![invalid("`ids` must be an array of entity ids")])
+}
+
+fn floats(v: &Value, what: &str, n: usize) -> Result<Vec<f32>, Vec<Diagnostic>> {
+    v.as_array()
+        .filter(|a| a.len() == n)
+        .and_then(|a| {
+            a.iter()
+                .map(|f| f.as_f64().map(|f| f as f32).filter(|f| f.is_finite()))
+                .collect::<Option<Vec<f32>>>()
+        })
+        .ok_or_else(|| vec![invalid(format!("`{what}` must be {n} finite numbers"))])
+}
+
+fn field<'a>(args: &'a Value, key: &str) -> Result<&'a Value, Vec<Diagnostic>> {
+    args.get(key)
+        .filter(|v| !v.is_null())
+        .ok_or_else(|| vec![invalid(format!("`{key}` is required"))])
+}
+
+fn f32_arg(args: &Value, key: &str) -> Result<f32, Vec<Diagnostic>> {
+    Ok(floats(&json!([field(args, key)?]), key, 1)?[0])
+}
+
+fn vec2_arg(args: &Value, key: &str) -> Result<Vec2, Vec<Diagnostic>> {
+    let f = floats(field(args, key)?, key, 2)?;
+    Ok(Vec2::new(f[0], f[1]))
+}
+
+fn vec3_arg(args: &Value, key: &str) -> Result<Vec3, Vec<Diagnostic>> {
+    let f = floats(field(args, key)?, key, 3)?;
+    Ok(Vec3::new(f[0], f[1], f[2]))
+}
+
+/// `view`: the Scene view's camera — `world` (16 floats, column-major),
+/// `aspect`, and `projection` ("perspective" | "orthographic"), `fovY`
+/// (radians), `orthoHeight`, `near`, `far`, each defaulting to
+/// `Camera::default()`'s. The same shape as the edit preview's.
+fn view_arg(args: &Value) -> Result<View, Vec<Diagnostic>> {
+    let view = field(args, "view")?;
+    let world = floats(field(view, "world")?, "view.world", 16)?;
+    let mut camera = Camera::default();
+    match view.get("projection").and_then(Value::as_str) {
+        None => {}
+        Some("perspective") => camera.projection = Projection::Perspective,
+        Some("orthographic") => camera.projection = Projection::Orthographic,
+        Some(_) => {
+            return Err(vec![invalid(
+                "`view.projection` must be 'perspective' or 'orthographic'",
+            )])
+        }
+    }
+    for (key, slot) in [
+        ("fovY", &mut camera.fov_y),
+        ("orthoHeight", &mut camera.ortho_height),
+        ("near", &mut camera.near),
+        ("far", &mut camera.far),
+    ] {
+        if view.get(key).is_some_and(|v| !v.is_null()) {
+            *slot = f32_arg(view, key)?;
+        }
+    }
+    if camera.near <= 0.0
+        || camera.far <= camera.near
+        || camera.fov_y <= 0.0
+        || camera.ortho_height <= 0.0
+    {
+        return Err(vec![invalid(
+            "`view` needs 0 < near < far, fovY > 0 and orthoHeight > 0",
+        )]);
+    }
+    Ok(View {
+        world: Mat4::from_cols_array(&world.try_into().expect("16 floats")),
+        camera,
+        aspect: f32_arg(view, "aspect")?,
+    })
 }

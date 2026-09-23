@@ -828,50 +828,14 @@ impl Preview {
             if hidden.contains(&e) {
                 continue;
             }
-            let Ok(m) = scene::world_matrix(world.ecs(), e) else {
-                continue;
-            };
-            match mesh_of(world, assets, e) {
-                Some(mesh) => {
-                    let sphere = bounds_sphere(&mesh, &m);
-                    if ray.hit_sphere(sphere.0, sphere.1).is_none() {
-                        continue;
-                    }
-                    let local = ray.transformed(&m.inverse());
-                    let mut best: Option<f32> = None;
-                    for tri in mesh.indices.chunks_exact(3) {
-                        let a = Vec3::from(mesh.vertices[tri[0] as usize].position);
-                        let b = Vec3::from(mesh.vertices[tri[1] as usize].position);
-                        let c = Vec3::from(mesh.vertices[tri[2] as usize].position);
-                        if let Some(t) = local.hit_triangle(a, b, c) {
-                            if best.is_none_or(|b| t < b) {
-                                best = Some(t);
-                            }
-                        }
-                    }
-                    if let Some(t) = best {
-                        let point = m.transform_point3(local.origin + local.dir * t);
-                        hits.push(Hit {
-                            id: *id,
-                            entity: e,
-                            distance: (point - ray.origin).dot(ray.dir),
-                            point,
-                            mesh: true,
-                        });
-                    }
-                }
-                None => {
-                    let center = m.transform_point3(Vec3::ZERO);
-                    if let Some(t) = ray.hit_sphere(center, ICON_RADIUS) {
-                        hits.push(Hit {
-                            id: *id,
-                            entity: e,
-                            distance: t,
-                            point: ray.origin + ray.dir * t,
-                            mesh: false,
-                        });
-                    }
-                }
+            if let Some((distance, point, mesh)) = pick_entity(world, assets, ray, e) {
+                hits.push(Hit {
+                    id: *id,
+                    entity: e,
+                    distance,
+                    point,
+                    mesh,
+                });
             }
         }
         hits.sort_by(|a, b| a.distance.total_cmp(&b.distance));
@@ -900,29 +864,7 @@ impl Preview {
             if hidden.contains(&e) {
                 continue;
             }
-            let Ok(m) = scene::world_matrix(world.ecs(), e) else {
-                continue;
-            };
-            let corners: Vec<Vec3> = match mesh_of(world, assets, e) {
-                Some(mesh) => {
-                    aabb_corners(Vec3::from(mesh.bounds_min), Vec3::from(mesh.bounds_max))
-                        .iter()
-                        .map(|c| m.transform_point3(*c))
-                        .collect()
-                }
-                None => vec![m.transform_point3(Vec3::ZERO)],
-            };
-            let projected: Option<Vec<Vec2>> = corners.iter().map(|c| view.project(*c)).collect();
-            let points = match projected {
-                Some(p) => p,
-                None => match view.project(m.transform_point3(Vec3::ZERO)) {
-                    Some(p) => vec![p],
-                    None => continue,
-                },
-            };
-            let lo = points.iter().fold(Vec2::splat(f32::MAX), |a, p| a.min(*p));
-            let hi = points.iter().fold(Vec2::splat(f32::MIN), |a, p| a.max(*p));
-            if lo.x <= max.x && hi.x >= min.x && lo.y <= max.y && hi.y >= min.y {
+            if rect_hits(world, assets, view, e, min, max) {
                 let id = self.anchor_of(*id);
                 if !out.contains(&id) {
                     out.push(id);
@@ -951,19 +893,7 @@ impl Preview {
             let Some(&e) = self.ids.get(id) else {
                 continue;
             };
-            let Ok(m) = scene::world_matrix(world.ecs(), e) else {
-                continue;
-            };
-            match mesh_of(world, assets, e) {
-                Some(mesh) => box_lines(
-                    &m,
-                    Vec3::from(mesh.bounds_min),
-                    Vec3::from(mesh.bounds_max),
-                    color,
-                    &mut out,
-                ),
-                None => cross_lines(m.transform_point3(Vec3::ZERO), ICON_RADIUS, color, &mut out),
-            }
+            outline_entity(world, assets, e, color, &mut out);
         }
         out
     }
@@ -998,71 +928,78 @@ impl Preview {
             if hidden.contains(&e) || !ecs.contains(e) {
                 continue;
             }
-            let Ok(m) = scene::world_matrix(ecs, e) else {
-                continue;
-            };
-            let origin = m.transform_point3(Vec3::ZERO);
-            let rigid = rigid_of(&m);
-            if let Ok(l) = ecs.copy::<fynkel_core::components::PointLight>(e) {
-                let color = l.color.extend(1.0);
-                for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
-                    circle_lines(origin, axis, l.range, color, &mut out);
-                }
-            }
-            if let Ok(l) = ecs.copy::<fynkel_core::components::SpotLight>(e) {
-                let color = l.color.extend(1.0);
-                let forward = rigid.transform_vector3(Vec3::NEG_Z);
-                let end = origin + forward * l.range;
-                let outer = l.range * l.outer_angle.tan();
-                let inner = l.range * l.inner_angle.tan();
-                circle_lines(end, forward, outer, color, &mut out);
-                circle_lines(
-                    end,
-                    forward,
-                    inner,
-                    color * Vec4::new(1.0, 1.0, 1.0, 0.5),
-                    &mut out,
-                );
-                for dir in [Vec3::X, Vec3::NEG_X, Vec3::Y, Vec3::NEG_Y] {
-                    let rim = end + rigid.transform_vector3(dir) * outer;
-                    out.push(Line {
-                        a: origin,
-                        b: rim,
-                        color,
-                    });
-                }
-            }
-            if let Ok(l) = ecs.copy::<fynkel_core::components::DirectionalLight>(e) {
-                let color = l.color.extend(1.0);
-                let forward = rigid.transform_vector3(Vec3::NEG_Z);
-                for dir in [Vec3::ZERO, Vec3::X, Vec3::NEG_X, Vec3::Y, Vec3::NEG_Y] {
-                    let start = origin + rigid.transform_vector3(dir) * 0.2;
-                    arrow_lines(start, start + forward, &rigid, color, &mut out);
-                }
-                circle_lines(origin, forward, 0.2, color, &mut out);
-            }
-            let is_selected = selected.contains(id);
-            if let Ok(c) = ecs.copy::<Camera>(e) {
-                let alpha = if is_selected {
-                    1.0
-                } else {
-                    UNSELECTED_CAMERA_ALPHA
-                };
-                camera_lines(
-                    &rigid,
-                    &c,
-                    aspect,
-                    Vec4::new(1.0, 1.0, 1.0, alpha),
-                    &mut out,
-                );
-            }
-            if is_selected {
-                if let Ok(c) = ecs.get::<Collider>(e) {
-                    collider_lines(&m, &c, assets, Vec4::new(0.2, 1.0, 0.3, 1.0), &mut out);
-                }
-            }
+            icon_entity(world, assets, aspect, e, selected.contains(id), &mut out);
         }
         out
+    }
+}
+
+/// `e`'s icons (see [`Preview::icon_lines`]); its collider only when
+/// `is_selected`.
+pub(crate) fn icon_entity(
+    world: &World,
+    assets: Option<&Assets>,
+    aspect: f32,
+    e: Entity,
+    is_selected: bool,
+    out: &mut Vec<Line>,
+) {
+    let ecs = world.ecs();
+    let Ok(m) = scene::world_matrix(ecs, e) else {
+        return;
+    };
+    let origin = m.transform_point3(Vec3::ZERO);
+    let rigid = rigid_of(&m);
+    if let Ok(l) = ecs.copy::<fynkel_core::components::PointLight>(e) {
+        let color = l.color.extend(1.0);
+        for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+            circle_lines(origin, axis, l.range, color, out);
+        }
+    }
+    if let Ok(l) = ecs.copy::<fynkel_core::components::SpotLight>(e) {
+        let color = l.color.extend(1.0);
+        let forward = rigid.transform_vector3(Vec3::NEG_Z);
+        let end = origin + forward * l.range;
+        let outer = l.range * l.outer_angle.tan();
+        let inner = l.range * l.inner_angle.tan();
+        circle_lines(end, forward, outer, color, out);
+        circle_lines(
+            end,
+            forward,
+            inner,
+            color * Vec4::new(1.0, 1.0, 1.0, 0.5),
+            out,
+        );
+        for dir in [Vec3::X, Vec3::NEG_X, Vec3::Y, Vec3::NEG_Y] {
+            let rim = end + rigid.transform_vector3(dir) * outer;
+            out.push(Line {
+                a: origin,
+                b: rim,
+                color,
+            });
+        }
+    }
+    if let Ok(l) = ecs.copy::<fynkel_core::components::DirectionalLight>(e) {
+        let color = l.color.extend(1.0);
+        let forward = rigid.transform_vector3(Vec3::NEG_Z);
+        for dir in [Vec3::ZERO, Vec3::X, Vec3::NEG_X, Vec3::Y, Vec3::NEG_Y] {
+            let start = origin + rigid.transform_vector3(dir) * 0.2;
+            arrow_lines(start, start + forward, &rigid, color, out);
+        }
+        circle_lines(origin, forward, 0.2, color, out);
+    }
+    if let Ok(c) = ecs.copy::<Camera>(e) {
+        let alpha = if is_selected {
+            1.0
+        } else {
+            UNSELECTED_CAMERA_ALPHA
+        };
+        camera_lines(&rigid, &c, aspect, Vec4::new(1.0, 1.0, 1.0, alpha), out);
+    }
+    if is_selected {
+        if let Ok(c) = ecs.get::<Collider>(e) {
+            collider_lines(&m, &c, assets, Vec4::new(0.2, 1.0, 0.3, 1.0), out);
+        }
     }
 }
 
@@ -1085,6 +1022,98 @@ fn unknown_entity(id: Uuid) -> Diagnostic {
     .with_suggestion(
         "the preview holds the document's entities after the last sync; resync or reload",
     )
+}
+
+/// Where `ray` meets `e` (see [`Preview::pick`]): distance, point, and
+/// whether a mesh triangle was hit.
+pub(crate) fn pick_entity(
+    world: &World,
+    assets: Option<&Assets>,
+    ray: &Ray,
+    e: Entity,
+) -> Option<(f32, Vec3, bool)> {
+    let m = scene::world_matrix(world.ecs(), e).ok()?;
+    match mesh_of(world, assets, e) {
+        Some(mesh) => {
+            let sphere = bounds_sphere(&mesh, &m);
+            ray.hit_sphere(sphere.0, sphere.1)?;
+            let local = ray.transformed(&m.inverse());
+            let mut best: Option<f32> = None;
+            for tri in mesh.indices.chunks_exact(3) {
+                let a = Vec3::from(mesh.vertices[tri[0] as usize].position);
+                let b = Vec3::from(mesh.vertices[tri[1] as usize].position);
+                let c = Vec3::from(mesh.vertices[tri[2] as usize].position);
+                if let Some(t) = local.hit_triangle(a, b, c) {
+                    if best.is_none_or(|b| t < b) {
+                        best = Some(t);
+                    }
+                }
+            }
+            let point = m.transform_point3(local.origin + local.dir * best?);
+            Some(((point - ray.origin).dot(ray.dir), point, true))
+        }
+        None => {
+            let center = m.transform_point3(Vec3::ZERO);
+            let t = ray.hit_sphere(center, ICON_RADIUS)?;
+            Some((t, ray.origin + ray.dir * t, false))
+        }
+    }
+}
+
+/// Whether `e`'s projected bounds overlap `min..max` in NDC (see
+/// [`Preview::pick_rect`]; `min` ≤ `max`).
+pub(crate) fn rect_hits(
+    world: &World,
+    assets: Option<&Assets>,
+    view: &View,
+    e: Entity,
+    min: Vec2,
+    max: Vec2,
+) -> bool {
+    let Ok(m) = scene::world_matrix(world.ecs(), e) else {
+        return false;
+    };
+    let corners: Vec<Vec3> = match mesh_of(world, assets, e) {
+        Some(mesh) => aabb_corners(Vec3::from(mesh.bounds_min), Vec3::from(mesh.bounds_max))
+            .iter()
+            .map(|c| m.transform_point3(*c))
+            .collect(),
+        None => vec![m.transform_point3(Vec3::ZERO)],
+    };
+    let projected: Option<Vec<Vec2>> = corners.iter().map(|c| view.project(*c)).collect();
+    let points = match projected {
+        Some(p) => p,
+        None => match view.project(m.transform_point3(Vec3::ZERO)) {
+            Some(p) => vec![p],
+            None => return false,
+        },
+    };
+    let lo = points.iter().fold(Vec2::splat(f32::MAX), |a, p| a.min(*p));
+    let hi = points.iter().fold(Vec2::splat(f32::MIN), |a, p| a.max(*p));
+    lo.x <= max.x && hi.x >= min.x && lo.y <= max.y && hi.y >= min.y
+}
+
+/// `e`'s selection outline (see [`Preview::outline_lines`]).
+pub(crate) fn outline_entity(
+    world: &World,
+    assets: Option<&Assets>,
+    e: Entity,
+    color: Vec4,
+    out: &mut Vec<Line>,
+) {
+    let Ok(m) = scene::world_matrix(world.ecs(), e) else {
+        return;
+    };
+    match mesh_of(world, assets, e) {
+        Some(mesh) => box_lines(
+            &m,
+            Vec3::from(mesh.bounds_min),
+            Vec3::from(mesh.bounds_max),
+            color,
+            out,
+        ),
+        None => cross_lines(m.transform_point3(Vec3::ZERO), ICON_RADIUS, color, out),
+    }
 }
 
 /// The visible mesh an entity draws, read from the assets.

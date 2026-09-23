@@ -399,7 +399,16 @@ FynkelStatus fynkel_authoring_preview_call(FynkelAuthoringSession* session,
  * - "entity" { id } -> { id, entity, name, parent, world, components: [{ type,
  *   data }] }, every native component as the scene document stores it;
  * - "set" { id, type, data } replaces or adds a native component from its
- *   document JSON; "remove" { id, type }; "rename" { id, name }.
+ *   document JSON; "remove" { id, type }; "rename" { id, name };
+ * - for the Scene view on the running world, the preview's own picking
+ *   and overlays over every live entity (meshes read from the cache the
+ *   world loaded): "pick" { ray: { origin, dir } } or { view, ndc } ->
+ *   { ray, hits: [{ id, entity, distance, point, mesh }] } nearest first,
+ *   each entity itself (a running prefab instance has no anchor);
+ *   "pickRect" { view, min, max } -> { ids }; "lines" { outline?: { ids,
+ *   color? }, icons?: { aspect } } -> { count, lines } (an id no longer
+ *   alive draws nothing); "worldMatrix" { ids } -> { matrices: { id:
+ *   16 floats } } for the ids still alive. `view` is the preview's shape.
  * A write applies at once, at the current tick, without stepping (it
  * shows while paused; no system runs). `out_view` gets the JSON result,
  * valid until the next query or mutating call on the world. The world

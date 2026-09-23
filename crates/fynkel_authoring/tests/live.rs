@@ -272,6 +272,91 @@ fn a_write_shows_at_once_without_a_tick() {
     assert_eq!(w.tick(), tick);
 }
 
+/// A Scene view camera at `x` on the X axis, 5 m back, looking down −Z.
+fn view_at(x: f32) -> Value {
+    let m = glam::Mat4::from_translation(Vec3::new(x, 0.0, 5.0));
+    json!({ "world": m.to_cols_array(), "aspect": 1.0, "projection": "perspective" })
+}
+
+#[test]
+fn the_scene_view_picks_and_outlines_the_running_world() {
+    let mut w = running();
+    w.submit(
+        Lane::Simulation,
+        vec![Command::Spawn {
+            temp_id: 1,
+            transform: Transform::from_position(Vec3::new(-5.0, 0.0, 0.0)),
+            parent: None,
+            name: Some("Bullet".into()),
+        }],
+    );
+    assert_eq!(w.step().status, Status::Ok);
+
+    // No assets: every entity is an icon sphere at its origin.
+    let hit = call(
+        &mut w,
+        "pick",
+        json!({ "ray": { "origin": [-1, 0, 5], "dir": [0, 0, -1] } }),
+    );
+    let hits = hit["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "{hit}");
+    assert_eq!(hits[0]["id"], json!(uid(4)));
+    assert_eq!(hits[0]["mesh"], json!(false));
+    let through = call(
+        &mut w,
+        "pick",
+        json!({ "view": view_at(-1.0), "ndc": [0, 0] }),
+    );
+    // The same ray, from the near plane instead.
+    assert_eq!(through["hits"][0]["id"], hits[0]["id"]);
+    assert_eq!(through["hits"][0]["point"], hits[0]["point"]);
+    let spawned = call(
+        &mut w,
+        "pick",
+        json!({ "view": view_at(-5.0), "ndc": [0, 0] }),
+    );
+    let bullet = spawned["hits"][0]["id"].as_str().unwrap().to_string();
+    assert!(bullet.starts_with(RUNTIME_PREFIX), "{spawned}");
+    // Under its parent at 10: e3 sits at 10, e2 at 11.
+    let nested = call(
+        &mut w,
+        "pick",
+        json!({ "view": view_at(11.0), "ndc": [0, 0] }),
+    );
+    assert_eq!(nested["hits"][0]["id"], json!(uid(2)));
+
+    let rect = call(
+        &mut w,
+        "pickRect",
+        json!({ "view": view_at(-1.0), "min": [0.1, 0.1], "max": [-0.1, -0.1] }),
+    );
+    assert_eq!(rect["ids"], json!([uid(4)]));
+
+    let matrices = call(
+        &mut w,
+        "worldMatrix",
+        json!({ "ids": [uid(2), bullet, uid(77)] }),
+    );
+    let m = matrices["matrices"].as_object().unwrap();
+    assert_eq!(m.len(), 2, "an id no longer alive is left out");
+    assert_eq!(m[&uid(2)][12], json!(11.0));
+    assert_eq!(m[&bullet][12], json!(-5.0));
+
+    let outline = |w: &mut World, ids: Value| {
+        call(w, "lines", json!({ "outline": { "ids": ids } }))["count"]
+            .as_u64()
+            .unwrap()
+    };
+    let one = outline(&mut w, json!([uid(4)]));
+    assert!(one > 0);
+    assert_eq!(outline(&mut w, json!([uid(4), bullet])), one * 2);
+    assert_eq!(outline(&mut w, json!([uid(77)])), 0);
+    // Icons: the camera's frustum and the light's range, for everyone.
+    let icons = call(&mut w, "lines", json!({ "icons": { "aspect": 1.5 } }));
+    assert!(icons["count"].as_u64().unwrap() > 0, "{icons}");
+    assert_eq!(w.tick(), 2, "none of it steps the world");
+}
+
 #[test]
 fn bad_calls_are_refused() {
     let mut w = running();
@@ -299,6 +384,22 @@ fn bad_calls_are_refused() {
     )
     .contains("keeps its Transform"));
     assert!(err(&mut w, "fly", json!({})).contains("unknown live call"));
+    assert!(err(&mut w, "pick", json!({})).contains("`ray` or `view`"));
+    assert!(err(
+        &mut w,
+        "pick",
+        json!({ "view": { "world": [1, 0], "aspect": 1 }, "ndc": [0, 0] })
+    )
+    .contains("view.world"));
+    let mut near = view_at(0.0);
+    near["near"] = json!(0.0);
+    assert!(err(
+        &mut w,
+        "pickRect",
+        json!({ "view": near, "min": [0, 0], "max": [1, 1] })
+    )
+    .contains("near"));
+    assert!(err(&mut w, "worldMatrix", json!({ "ids": 3 })).contains("`ids`"));
     // The world refuses what it would refuse from a game.
     let r = call(
         &mut w,

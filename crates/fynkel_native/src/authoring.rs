@@ -1174,7 +1174,9 @@ fn transform_of(v: &Value) -> Result<Transform, Vec<Diagnostic>> {
 
 /// A live call on a running game's world (ADR-0021 P7, live Play mode;
 /// [`fynkel_authoring::live`]): `entities`, `entity`, `set`, `remove`,
-/// `rename`. No session: the world is the game's, and the call reads it
+/// `rename`, and the Scene view's `pick`, `pickRect`, `lines` and
+/// `worldMatrix` (meshes read from the cache this world loaded). No
+/// session: the world is the game's, and the call reads it
 /// and changes it in the scene document's terms, writing at once without
 /// a tick. `out_view` gets the JSON result, `{ "ok": true, ... }` or
 /// `{ "ok": false, "rejected" | "diagnostics": [...] }`, valid until the
@@ -1196,9 +1198,9 @@ pub unsafe extern "C" fn fynkel_world_live_call(
     let parsed = kind_and_args("live", kind_utf8, kind_len, args_json_utf8, args_len);
     let status = crate::guarded(world, |w| {
         w.stats.query_calls += 1;
-        let (value, status) = match parsed
-            .and_then(|(kind, args)| fynkel_authoring::live::call(&mut w.inner, &kind, &args))
-        {
+        let (value, status) = match parsed.and_then(|(kind, args)| {
+            fynkel_authoring::live::call_with(&mut w.inner, w.assets.as_ref(), &kind, &args)
+        }) {
             Ok(mut v) => {
                 let refused = v.get("ok") == Some(&Value::Bool(false));
                 if v.get("ok").is_none() {
