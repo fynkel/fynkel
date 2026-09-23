@@ -123,6 +123,13 @@ final class ComponentSlot {
   String toString() => 'ComponentSlot($key × ${instances.length})';
 }
 
+/// The components the Inspector draws in the object header rather than as
+/// cards (ADR-0020): the object's layer and its tags.
+const headerTypes = {'fynkel.Layer', 'fynkel.Tags'};
+
+/// Whether every, none or only some of the selected entities carry a tag.
+enum TagState { all, none, mixed }
+
 /// A selected entity's header data.
 final class EntityInfo {
   const EntityInfo({
@@ -230,6 +237,9 @@ final class InspectorModel extends ChangeNotifier {
   /// Component types per selected entity id (a slot needs every entity; this is each one's own list).
   final Map<String, Set<String>> _typesOn = {};
 
+  /// Each selected entity's `fynkel.Layer` and `fynkel.Tags` (absent when it has none).
+  final Map<String, ComponentInstance> _layerOn = {}, _tagsOn = {};
+
   /// The selected entities that already hold a component of [type] — the
   /// document allows one per type per entity (`FYN-D0204`), so Add Component
   /// greys these out and [addComponent] refuses before asking the crate.
@@ -330,6 +340,8 @@ final class InspectorModel extends ChangeNotifier {
     if (!listEquals(ids, _ids)) lastError = null;
     _ids = ids;
     _typesOn.clear();
+    _layerOn.clear();
+    _tagsOn.clear();
     if (_ids.isEmpty || tooMany) {
       _entities = const [];
       _slots = const [];
@@ -414,6 +426,10 @@ final class InspectorModel extends ChangeNotifier {
       }
       perEntity.add(comps);
     }
+    for (final c in perEntity.expand((l) => l)) {
+      if (c.type == 'fynkel.Layer') _layerOn.putIfAbsent(c.entityId, () => c);
+      if (c.type == 'fynkel.Tags') _tagsOn.putIfAbsent(c.entityId, () => c);
+    }
     _entities = infos;
     _slots = _pair(perEntity);
     // Errors of slots that vanished go with them.
@@ -444,6 +460,7 @@ final class InspectorModel extends ChangeNotifier {
     final out = <ComponentSlot>[];
     final counts = <String, int>{};
     for (final c in perEntity.first) {
+      if (headerTypes.contains(c.type)) continue;
       final index = counts[c.type] ?? 0;
       counts[c.type] = index + 1;
       final instances = <ComponentInstance>[c];
@@ -488,7 +505,7 @@ final class InspectorModel extends ChangeNotifier {
     final seen = <String>{};
     for (final s in _schemaMap.values) {
       if (!s.isBehaviour && !s.authored) continue;
-      if (!s.allowed) continue;
+      if (!s.allowed || headerTypes.contains(s.type)) continue;
       if (!seen.add(s.type)) continue;
       out.add(AddableType(type: s.type, spec: specFor(s.type)));
     }
@@ -863,23 +880,123 @@ final class InspectorModel extends ChangeNotifier {
       }
       data = d;
     }
-    final t = _tab!;
+    final commands = [for (final e in _entities) ?_addCommand(e, type, spec.version ?? 1, data)];
+    final a = _run(commands);
+    notifyListeners();
+    return a?.ok ?? false;
+  }
+
+  /// Adds a [type] component with [data] to [e]: an `addComponent`, or an
+  /// `addComponent` override on a derived entity's anchor (null when its
+  /// expansion is gone).
+  Map<String, Object?>? _addCommand(EntityInfo e, String type, int version, Map<String, Object?> data) {
+    if (!e.isDerived) return Command.addComponent(e.id, {'type': type, 'version': version, 'data': _copyJson(data)});
+    final local = _tab!.expansionOf(e.anchor!)?.entity(e.id)?.local;
+    if (local == null) return null;
+    return Command.setPrefabOverrideOp(
+      e.anchor!,
+      prefab.addComponentOverride(entity: local, type: type, version: version, data: data),
+    );
+  }
+
+  // ── The object header: layer and tags (ADR-0020) ────────────────────────
+
+  /// The project's layer names (index `i` = layer `i`).
+  List<String> get layerNames => project.layerNames();
+
+  /// The project's tag names (index `i` = bit `i` of a tag set).
+  List<String> get tagNames => project.tagNames();
+
+  /// [entityId]'s layer index (0 without a `fynkel.Layer`).
+  int layerOf(String entityId) => (_layerOn[entityId]?.data['layer'] as num?)?.toInt() ?? 0;
+
+  /// [entityId]'s tag bits (0 without a `fynkel.Tags`).
+  int tagBitsOf(String entityId) => (_tagsOn[entityId]?.data['bits'] as num?)?.toInt() ?? 0;
+
+  /// The selection's layer index, or null when the entities disagree.
+  int? get layer {
+    if (_entities.isEmpty) return null;
+    final first = layerOf(_entities.first.id);
+    return _entities.every((e) => layerOf(e.id) == first) ? first : null;
+  }
+
+  /// Whether the selected entities carry tag [index].
+  TagState tagState(int index) {
+    final bit = 1 << index;
+    final n = _entities.where((e) => tagBitsOf(e.id) & bit != 0).length;
+    return n == 0 ? TagState.none : (n == _entities.length ? TagState.all : TagState.mixed);
+  }
+
+  /// The tag indices any selected entity carries, ascending (a bit past the
+  /// project's list included, so it can be seen and taken off).
+  List<int> get tagsInUse {
+    final any = _entities.fold(0, (bits, e) => bits | tagBitsOf(e.id));
+    return [
+      for (var i = 0; i < 32; i++)
+        if (any & (1 << i) != 0) i,
+    ];
+  }
+
+  /// Puts every selected entity on layer [index], one transaction: a
+  /// `setField` of its `fynkel.Layer`, or the component added when it has
+  /// none (and [index] is not the default).
+  bool setLayer(int index) {
+    if (!canEdit) return false;
+    final layers = layerNames;
+    if (index < 0 || index >= layers.length) {
+      return _refuseHeader('FYN-H0012: layer $index is not declared: the project\'s layers are [${layers.join(', ')}]');
+    }
     final commands = <Map<String, Object?>>[];
     for (final e in _entities) {
-      if (e.isDerived) {
-        final local = t.expansionOf(e.anchor!)?.entity(e.id)?.local;
-        if (local == null) continue;
-        commands.add(
-          Command.setPrefabOverrideOp(
-            e.anchor!,
-            prefab.addComponentOverride(entity: local, type: type, version: spec.version ?? 1, data: data),
-          ),
-        );
-      } else {
-        commands.add(Command.addComponent(e.id, {'type': type, 'version': spec.version ?? 1, 'data': _copyJson(data)}));
+      final i = _layerOn[e.id];
+      if (i != null) {
+        if (layerOf(e.id) != index) commands.add(_setFieldCommand(i, 'layer', index));
+      } else if (index != 0) {
+        final command = _addCommand(e, 'fynkel.Layer', specFor('fynkel.Layer').version ?? 1, {'layer': index});
+        if (command != null) commands.add(command);
       }
     }
+    return _commitHeader(commands);
+  }
+
+  /// Gives every selected entity tag [index] ([on]) or takes it off, one
+  /// transaction; the others' tags stay.
+  bool setTag(int index, bool on) {
+    if (!canEdit) return false;
+    final tags = tagNames;
+    if (on && (index < 0 || index >= tags.length)) {
+      return _refuseHeader('FYN-H0012: tag $index is not declared: the project\'s tags are [${tags.join(', ')}]');
+    }
+    final bit = 1 << index;
+    final commands = <Map<String, Object?>>[];
+    for (final e in _entities) {
+      final bits = tagBitsOf(e.id);
+      final next = on ? bits | bit : bits & ~bit;
+      if (next == bits) continue;
+      final i = _tagsOn[e.id];
+      if (i != null) {
+        commands.add(_setFieldCommand(i, 'bits', next));
+      } else {
+        final command = _addCommand(e, 'fynkel.Tags', specFor('fynkel.Tags').version ?? 1, {'bits': next});
+        if (command != null) commands.add(command);
+      }
+    }
+    return _commitHeader(commands);
+  }
+
+  /// A header value the project does not declare: refused before any
+  /// command, as the crate does not check the project's lists at apply
+  /// (`fynkel validate` does).
+  bool _refuseHeader(String message) {
+    lastError = message;
+    notifyListeners();
+    return false;
+  }
+
+  bool _commitHeader(List<Map<String, Object?>> commands) {
+    if (commands.isEmpty) return true;
     final a = _run(commands);
+    if (a != null && !a.ok) lastError = describeRejection(a);
     notifyListeners();
     return a?.ok ?? false;
   }

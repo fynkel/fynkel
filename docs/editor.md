@@ -497,6 +497,22 @@ accepted transaction from anywhere (a Hierarchy rename counts), or with its
 ×. The gate found all three: a second Transform was offered, refused with
 the bare summary, and the summary never cleared.
 
+**Layer and tags in the header** (ADR-0020, L4). Under the name (or the
+multi-selection line) the header has a **Layer** row, a dropdown of the
+project's `layers`, and a **Tags** row, the object's tags as chips with a
+× each and a `+` menu of the project's `tags` (check = every selected
+entity has it, dash = some do). `object_header.dart` draws them. They are
+`fynkel.Layer` and `fynkel.Tags`, which never get a card and are not in
+Add Component (`headerTypes`). `InspectorModel.setLayer`/`setTag` write
+them in one transaction for the whole selection: a `setField` where the
+component exists, an `addComponent` (or its override on a derived entity)
+where it does not. A layer set to `default` on an object without the
+component writes nothing. Several entities with different layers show `—`,
+and a tag only some carry shows as a dim chip. An index the project does
+not declare is refused before any command with `FYN-H0012`, because the
+crate does not check the project's lists at apply (`fynkel validate`
+does).
+
 **The codegen banner.** Two signals, cheapest first: *committed drift* —
 the metadata's inline schemas compared with the `schemas/behaviours/`
 files the session loaded (instant, no process; `committedDrift`) — and the

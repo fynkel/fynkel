@@ -285,14 +285,23 @@ abstract class EditorProject extends ChangeNotifier {
   /// The project file's `layers` (bit `i` = layer `i`, ADR-0020), or the
   /// default `["default"]`.
   List<String> layerNames() {
+    final layers = _projectList('layers');
+    return layers == null || layers.isEmpty ? const ['default'] : layers;
+  }
+
+  /// The project file's `tags` (bit `i` of an object's tag set, ADR-0020),
+  /// or none.
+  List<String> tagNames() => _projectList('tags') ?? const [];
+
+  List<String>? _projectList(String key) {
     try {
       final decoded = jsonDecode(File(p.join(dir, 'fynkel.project.json')).readAsStringSync());
-      final layers = decoded is Map ? decoded['layers'] : null;
-      if (layers is List && layers.isNotEmpty) return [for (final l in layers) l.toString()];
+      final list = decoded is Map ? decoded[key] : null;
+      if (list is List) return [for (final l in list) l.toString()];
     } catch (_) {
-      // A missing or malformed project file: the validation reports it; the mask shows bit numbers.
+      // A missing or malformed project file: the validation reports it; the fields show bit numbers.
     }
-    return const ['default'];
+    return null;
   }
 
   /// The revision of a document file on disk now, or null when it cannot be read.

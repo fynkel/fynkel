@@ -129,6 +129,37 @@ void main() {
     expect(tab.document.validate().where((d) => d.severity == Severity.error), isEmpty);
   });
 
+  test('fixture project: the header writes fynkel.Layer and fynkel.Tags; an undeclared one is refused', () async {
+    final dir = copyFixture('inspector_layers');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final project = await SessionProject.open(dir.path, watch: false);
+    addTearDown(project.close);
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    final model = InspectorModel(tabs: tabs, project: project);
+    addTearDown(model.dispose);
+    expect(project.layerNames(), ['default', 'props']);
+    expect(project.tagNames(), isEmpty);
+
+    final tab = tabs.openDocument(mainScene)!;
+    tab.select(robot);
+    expect(model.layer, 0);
+    expect(model.setLayer(1), isTrue, reason: '${model.lastError}');
+    expect(model.layer, 1);
+    final components = tab.document.entities([robot]).entities[robot]!['components'] as Map;
+    expect(components.values.where((c) => (c as Map)['type'] == 'fynkel.Layer').single['data'], {'layer': 1});
+    expect(model.slots.map((s) => s.type), isNot(contains('fynkel.Layer')));
+
+    // The project declares no tags and no layer 3: the crate's validation refuses both.
+    final revision = tab.document.revision;
+    expect(model.setTag(0, true), isFalse);
+    expect(model.lastError, contains('FYN-H0012'));
+    expect(model.setLayer(3), isFalse);
+    expect(model.lastError, contains('FYN-H0012'));
+    expect(tab.document.revision, revision);
+    expect(model.layer, 1);
+  });
+
   test(
     'fixture project: a minimum violation and an unknown asset are refused and leave the document untouched',
     () async {

@@ -1,5 +1,5 @@
 // The Inspector panel (blueprint §19.2e item 4): the selection's header
-// (name, id, count), the "run `fynkel codegen`" banner, one collapsible
+// (name, id, count; the layer and tags, ADR-0020), the "run `fynkel codegen`" banner, one collapsible
 // card per component slot with its fields grouped by the `group`/`header`
 // hints and filtered by `showIf`, the card menu (Remove, Reset to defaults,
 // Open script, Copy type), the prefab instance's override list with Revert,
@@ -32,6 +32,7 @@ import 'inspector_math.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'inspector_model.dart';
+import 'object_header.dart';
 
 class InspectorPanel extends StatefulWidget {
   const InspectorPanel({
@@ -323,6 +324,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 ),
               ],
             ),
+            LayerTagsRows(model: model),
           ],
         ),
       );
@@ -334,19 +336,25 @@ class _InspectorPanelState extends State<InspectorPanel> {
         border: Border(bottom: t.hairline),
       ),
       padding: EdgeInsets.fromLTRB(t.pad, 5, t.pad, 5),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(FIcons.selectAll, size: t.icon, color: t.textSecondary),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              '$n entities — ${model.entities.map((e) => e.name).take(3).join(', ')}${n > 3 ? ', …' : ''}',
-              key: const ValueKey('inspector.multi'),
-              style: theme.textTheme.bodySmall,
-              overflow: TextOverflow.ellipsis,
-            ),
+          Row(
+            children: [
+              Icon(FIcons.selectAll, size: t.icon, color: t.textSecondary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '$n entities — ${model.entities.map((e) => e.name).take(3).join(', ')}${n > 3 ? ', …' : ''}',
+                  key: const ValueKey('inspector.multi'),
+                  style: theme.textTheme.bodySmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (widget.selection != null) InspectorLockButton(selection: widget.selection!),
+            ],
           ),
-          if (widget.selection != null) InspectorLockButton(selection: widget.selection!),
+          LayerTagsRows(model: model),
         ],
       ),
     );
@@ -472,7 +480,10 @@ class _EditInSceneButton extends StatelessWidget {
             children: [
               Icon(FIcons.editShape, size: 13, color: on ? t.accent : t.textSecondary),
               const SizedBox(width: 3),
-              Text('Edit', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: on ? t.accent : t.textSecondary)),
+              Text(
+                'Edit',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(color: on ? t.accent : t.textSecondary),
+              ),
             ],
           ),
         ),
@@ -545,8 +556,7 @@ class _ComponentCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    if (model.canEditInScene(slot))
-                      _EditInSceneButton(model: model, slot: slot),
+                    if (model.canEditInScene(slot)) _EditInSceneButton(model: model, slot: slot),
                     if (spec.missingSchema)
                       Tooltip(
                         message: 'No schema for ${spec.type}: fields are shown as JSON. Run `fynkel codegen`.',

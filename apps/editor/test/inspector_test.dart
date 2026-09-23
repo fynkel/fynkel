@@ -1447,4 +1447,135 @@ void main() {
       expect(inField('fynkel.Transform#0', 'rotation', find.text('90')), findsOneWidget);
     });
   });
+
+  group('object header (ADR-0020)', () {
+    void declare(FakeProject project) => File('${project.dir}/fynkel.project.json').writeAsStringSync(
+      jsonEncode({
+        'name': 'x',
+        'layers': ['default', 'player', 'props'],
+        'tags': ['pickup', 'enemy', 'boss'],
+      }),
+    );
+
+    /// The component of [type] on [entity] in the document, or null.
+    Map<String, Object?>? componentOf(FakeDocument doc, String entity, String type) {
+      final components = doc.entities([entity]).entities[entity]!['components'] as Map;
+      for (final c in components.values) {
+        if ((c as Map)['type'] == type) return Map<String, Object?>.from(c['data'] as Map);
+      }
+      return null;
+    }
+
+    test('layer and tags are header values, not cards; edits add the component once, then set it', () {
+      final r = rig();
+      declare(r.project);
+      final tab = r.tabs.openDocument('main')!;
+      tab.select('a');
+      expect(r.model.layer, 0);
+      expect(r.model.tagsInUse, isEmpty);
+      expect(
+        r.model.addableTypes().map((t) => t.type),
+        isNot(anyOf(contains('fynkel.Layer'), contains('fynkel.Tags'))),
+      );
+
+      final before = r.doc.history;
+      expect(r.model.setLayer(2), isTrue);
+      expect(componentOf(r.doc, 'a', 'fynkel.Layer'), {'layer': 2});
+      expect(r.model.layer, 2);
+      expect(r.model.slots.map((s) => s.type), isNot(contains('fynkel.Layer')));
+      expect(r.model.setLayer(1), isTrue);
+      expect(componentOf(r.doc, 'a', 'fynkel.Layer'), {'layer': 1});
+
+      expect(r.model.setTag(1, true), isTrue);
+      expect(r.model.setTag(0, true), isTrue);
+      expect(componentOf(r.doc, 'a', 'fynkel.Tags'), {'bits': 3});
+      expect(r.model.tagsInUse, [0, 1]);
+      expect(r.model.setTag(1, false), isTrue);
+      expect(componentOf(r.doc, 'a', 'fynkel.Tags'), {'bits': 1});
+      expect(r.model.slots.map((s) => s.type), isNot(contains('fynkel.Tags')));
+      expect(r.doc.history - before, 5, reason: 'one transaction per edit');
+      // Nothing to change is no transaction.
+      expect(r.model.setLayer(1), isTrue);
+      expect(r.model.setTag(0, true), isTrue);
+      expect(r.doc.history - before, 5);
+    });
+
+    test('several entities: a mixed layer and a mixed tag, set together in one transaction', () {
+      final r = rig();
+      declare(r.project);
+      final tab = r.tabs.openDocument('main')!;
+      tab.select('a');
+      r.model.setLayer(2);
+      r.model.setTag(0, true);
+      tab.select('b', toggle: true);
+      expect(r.model.entities.length, 2);
+      expect(r.model.layer, isNull);
+      expect(r.model.tagState(0), TagState.mixed);
+      expect(r.model.tagState(1), TagState.none);
+      final before = r.doc.history;
+      expect(r.model.setLayer(1), isTrue);
+      expect(r.doc.history - before, 1);
+      expect(
+        [componentOf(r.doc, 'a', 'fynkel.Layer'), componentOf(r.doc, 'b', 'fynkel.Layer')],
+        [
+          {'layer': 1},
+          {'layer': 1},
+        ],
+      );
+      expect(r.model.setTag(0, true), isTrue);
+      expect(r.model.tagState(0), TagState.all);
+      expect(componentOf(r.doc, 'b', 'fynkel.Tags'), {'bits': 1});
+    });
+
+    testWidgets('the header shows the layer by name and the tags as chips', (tester) async {
+      final r = rig();
+      declare(r.project);
+      final tab = r.tabs.openDocument('main')!;
+      tab.select('a');
+      tester.view.physicalSize = const Size(1000, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(width: 420, height: 1200, child: InspectorPanel(model: r.model)),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Add tag'), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const ValueKey('layer.summary'))).data, 'default');
+
+      await tester.tap(find.byKey(const ValueKey('layer.summary')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('layer.2')));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(find.byKey(const ValueKey('layer.summary'))).data, 'props');
+      expect(componentOf(r.doc, 'a', 'fynkel.Layer'), {'layer': 2});
+
+      await tester.tap(find.byKey(const ValueKey('tag.add')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('tag.2')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tag.chip.2')), findsOneWidget);
+      expect(find.text('boss'), findsOneWidget);
+      expect(find.text('Add tag'), findsNothing);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('tag.chip.2')),
+          matching: find.byKey(const ValueKey('tag.remove')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('tag.chip.2')), findsNothing);
+      expect(componentOf(r.doc, 'a', 'fynkel.Tags'), {'bits': 0});
+      // No Layer or Tags card.
+      expect(find.byKey(const ValueKey('card.fynkel.Layer#0')), findsNothing);
+      expect(find.byKey(const ValueKey('card.fynkel.Tags#0')), findsNothing);
+    });
+  });
 }
