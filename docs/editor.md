@@ -1437,8 +1437,14 @@ the game inside the editor, and a save in `lib/` hot reloads it.
   is up in about 0.3 s instead of 11–20 s. `flutter attach` then connects
   in the background (hot reload is on about 2 s later). If the Dart code
   changed since the build, one hot restart (under a second) brings it
-  up to date. A native change, or an app that does not start, means a
-  full `flutter run` build, as before. The plain editor attaches only
+  up to date. Until then the window says *Loading code changes…* and
+  takes no clicks or keys: the restart starts the editor over, so
+  anything done in the old code would be lost (`FYNKEL_EDITOR_UPDATING`
+  names the file that says so). Once that editor quits, the command
+  rebuilds its app (`flutter build macos --debug`, 10–20 s, the window
+  already gone), so the next open starts on the current code. A native
+  change, or an app that does not start, means a full `flutter run`
+  build, as before. The plain editor attaches only
   when its code needs that restart. `FYNKEL_LAUNCH_TRACE=<dir>` writes
   the files each fingerprint covered.
 - A project whose code does not compile cannot build its project editor.
