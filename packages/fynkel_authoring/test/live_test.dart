@@ -60,6 +60,27 @@ void main() {
     expect(live.entity(sun).parent, robot);
     expect(live.destroy(robot), isEmpty);
     expect(live.entities().where((e) => e.id == robot || e.id == sun), isEmpty, reason: 'the subtree went');
+
+    const made = '0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9';
+    final lamp = live.spawn(
+      name: 'Lamp',
+      authoringId: made,
+      components: [
+        {
+          'type': 'fynkel.Transform',
+          'data': {
+            'position': [0, 3, 0],
+            'rotation': [0, 0, 0, 1],
+            'scale': [1, 1, 1],
+          },
+        },
+      ],
+    );
+    expect(lamp.id, made);
+    expect(lamp.refused, isEmpty);
+    expect(live.entity(made).name, 'Lamp');
+    expect(live.entity(made).component('fynkel.Transform')!['position'], [0, 3, 0]);
+    expect(live.spawn(name: 'Loose').id, startsWith('runtime:'));
     expect(() => LiveWorld(0), throwsArgumentError);
     expect(File('${dir.path}/$mainScene').readAsStringSync(), contains('"Robot"'), reason: 'no document is touched');
   });

@@ -146,6 +146,34 @@ final class LiveWorld {
   /// Destroys [id] and its subtree.
   List<String> destroy(String id) => _write('destroy', {'id': id});
 
+  /// Makes an entity at once: [name], under [parent] (null: a root) at
+  /// [index] (last when null), with the native [components] (`{type,
+  /// data}`, a `fynkel.Transform` among them as its local transform). With
+  /// an [authoringId] it joins a loaded scene — [scene], its parent's, else
+  /// the first — under that id. Answers its id and the components the
+  /// world refused (the entity stays without them).
+  ({String id, List<String> refused}) spawn({
+    String name = '',
+    String? parent,
+    int? index,
+    List<Map<String, Object?>> components = const [],
+    String? authoringId,
+    String? scene,
+  }) {
+    final r = _live('spawn', {
+      'name': name,
+      'parent': parent,
+      'index': ?index,
+      'components': components,
+      'id': ?authoringId,
+      'scene': ?scene,
+    }, rejectedIsResult: true);
+    return (
+      id: r['id'] as String,
+      refused: [for (final d in r['rejected'] as List? ?? const []) '${_mapOf(d)['message']}'],
+    );
+  }
+
   // ── The Scene view on the running world (L5) ──────────────────────────
   // The edit preview's picking and overlays, over every live entity, each
   // named by its own id (a running prefab instance has no anchor).
