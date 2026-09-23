@@ -236,6 +236,40 @@ void main() {
     await tester.sendEventToBinding(pad.panZoomEnd());
     expect(seen, ['start', 'update', 'end']);
   });
+
+  testWidgets('gizmos: a behaviour\'s Gizmos reach the viewport\'s overlay when the view asks', (tester) async {
+    final world = World.create();
+    addTearDown(world.dispose);
+    final controller = FynkelViewportController(placeholders: false);
+    addTearDown(controller.dispose);
+    world.spawn().addBehaviour(_Sphere());
+    final key = GlobalKey<FynkelGameViewState>();
+    Widget view(bool? gizmos) => MaterialApp(
+          home: SizedBox(
+            width: 100,
+            height: 50,
+            child: FynkelGameView(key: key, world: world, controller: controller, gizmos: gizmos),
+          ),
+        );
+    await tester.pumpWidget(view(null));
+    await tester.pump();
+    await tester.pump();
+    expect(controller.state, ViewportState.attached, reason: '${controller.error}');
+    expect(world.showGizmos, isFalse, reason: 'off without FYNKEL_GIZMOS');
+    await tester.pump(const Duration(microseconds: 16667));
+    expect(key.currentState!.gizmoLinesQueued, isNull);
+
+    await tester.pumpWidget(view(true));
+    expect(world.showGizmos, isTrue);
+    await tester.pump(const Duration(microseconds: 16667));
+    await tester.pump(const Duration(microseconds: 16667));
+    expect(key.currentState!.gizmoLinesQueued, 96, reason: 'the sphere\'s three circles');
+
+    await tester.pumpWidget(view(false));
+    expect(world.showGizmos, isFalse);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
 }
 
 String _panZoomPhase(PointerEvent e) => switch (e) {
@@ -244,3 +278,8 @@ String _panZoomPhase(PointerEvent e) => switch (e) {
   PointerPanZoomEndEvent() => 'end',
   _ => '${e.runtimeType}',
 };
+
+class _Sphere extends Behaviour {
+  @override
+  void update(UpdateContext context) => Gizmos.wireSphere(Vec3.zero, 1);
+}

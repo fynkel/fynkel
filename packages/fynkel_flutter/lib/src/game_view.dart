@@ -5,6 +5,7 @@
 // a HUD or a benchmark capture.
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -15,6 +16,7 @@ import 'input_capture.dart';
 import 'percentiles.dart';
 import 'viewport.dart';
 import 'viewport_controller.dart';
+import 'viewport_overlay.dart';
 
 export 'percentiles.dart' show MsPercentiles;
 
@@ -201,6 +203,7 @@ class FynkelGameView extends StatefulWidget {
     this.onPointerEvent,
     this.placeholder,
     this.profileDartHeap = false,
+    this.gizmos,
   });
 
   /// The world this view simulates and draws. The view does not own it.
@@ -234,6 +237,12 @@ class FynkelGameView extends StatefulWidget {
   /// stay null. The sample is a few JSON-RPC round trips per window,
   /// never on the frame.
   final bool profileDartHeap;
+
+  /// Draw the world's [Gizmos] over the picture (ADR-0019 §3): true or
+  /// false; null follows the environment — on when `FYNKEL_GIZMOS=1`, what
+  /// the editor's Play passes when its Gizmos toggle is on. Debug and
+  /// profile builds only: in release [Gizmos] compiles to nothing.
+  final bool? gizmos;
 
   /// Widgets drawn over the viewport (the HUD).
   final Widget? overlay;
@@ -372,6 +381,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     controller.addListener(_onViewportChanged);
     FynkelInputChannel.attach(input);
     if (widget.audio && !widget.world.audio.isOpen) _openedAudio = widget.world.audio.open();
+    _applyGizmos();
     _ticker = createTicker(_onTick)..start();
     if (_wantsStats) {
       _statsTimer = Timer.periodic(widget.statsInterval, (_) => _report());
@@ -417,9 +427,29 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     _timingsInstalled = wanted;
   }
 
+  /// Whether this view draws gizmos ([FynkelGameView.gizmos]).
+  bool get gizmosOn =>
+      Gizmos.compiled && (widget.gizmos ?? Platform.environment['FYNKEL_GIZMOS'] == '1');
+
+  void _applyGizmos() => widget.world.showGizmos = gizmosOn;
+
+  final _gizmoOverlay = ViewportOverlay();
+
+  /// The gizmo lines the last frame handed the viewport (tests).
+  @visibleForTesting
+  int? gizmoLinesQueued;
+  double _pixelRatio = 1;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _pixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
+  }
+
   @override
   void didUpdateWidget(FynkelGameView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.gizmos != widget.gizmos || oldWidget.world != widget.world) _applyGizmos();
     if (oldWidget.controller != widget.controller) {
       (oldWidget.controller ?? _owned)?.removeListener(_onViewportChanged);
       if (widget.controller != null) {
@@ -506,6 +536,13 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
       return;
     }
     if (c.state != ViewportState.attached) return;
+    final gizmos = world.gizmos;
+    if (gizmos != null && !gizmos.isEmpty) {
+      // One point wide, faded behind geometry: the editor's gizmo lines.
+      gizmoLinesQueued = c.overlay(_gizmoOverlay
+        ..clear()
+        ..segments(gizmos.lines, width: _pixelRatio));
+    }
     final sw = _renderWatch
       ..reset()
       ..start();
