@@ -202,6 +202,8 @@ final class ExpandedEntity {
         parent = json['parent'] as String?,
         children = _strings(json['children']),
         added = json['added'] == true,
+        active = json['active'] != false,
+        activeOverridden = json['activeOverridden'] == true,
         components = {
           for (final c in _map(json['components']).entries) c.key: ExpandedComponent.fromJson(_map(c.value)),
         };
@@ -217,6 +219,11 @@ final class ExpandedEntity {
 
   /// Added by an `addObject` override.
   final bool added;
+
+  /// The entity's own active flag with the overrides applied, and whether
+  /// a `setActive` override set it (the Inspector's bold).
+  final bool active;
+  final bool activeOverridden;
 
   /// By derived component id.
   final Map<String, ExpandedComponent> components;

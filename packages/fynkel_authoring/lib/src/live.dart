@@ -19,6 +19,8 @@ final class LiveEntity {
     required this.layer,
     required this.childCount,
     required this.types,
+    this.activeSelf = true,
+    this.activeInHierarchy = true,
   });
 
   factory LiveEntity.fromJson(Map<String, Object?> j) => LiveEntity(
@@ -30,6 +32,8 @@ final class LiveEntity {
         layer: (j['layer'] as num?)?.toInt() ?? 0,
         childCount: (j['children'] as num?)?.toInt() ?? 0,
         types: [for (final t in j['types'] as List? ?? const []) t as String],
+        activeSelf: j['activeSelf'] != false,
+        activeInHierarchy: j['activeInHierarchy'] != false,
       );
 
   /// The authoring id when a loaded scene spawned it (a prefab instance's
@@ -49,6 +53,10 @@ final class LiveEntity {
 
   /// The native component types it carries, in registry order.
   final List<String> types;
+
+  /// Its own active flag, and whether it and every ancestor are active.
+  final bool activeSelf;
+  final bool activeInHierarchy;
 }
 
 /// One entity as the Inspector reads it: every native component as the
@@ -61,6 +69,8 @@ final class LiveEntityState {
     required this.parent,
     required this.world,
     required this.components,
+    this.activeSelf = true,
+    this.activeInHierarchy = true,
   });
 
   factory LiveEntityState.fromJson(Map<String, Object?> j) => LiveEntityState(
@@ -69,6 +79,8 @@ final class LiveEntityState {
         name: j['name'] as String? ?? '',
         parent: j['parent'] as String?,
         world: _mapOf(j['world']),
+        activeSelf: j['activeSelf'] != false,
+        activeInHierarchy: j['activeInHierarchy'] != false,
         components: [
           for (final c in j['components'] as List? ?? const [])
             (type: _mapOf(c)['type'] as String, data: _mapOf(_mapOf(c)['data'])),
@@ -81,6 +93,8 @@ final class LiveEntityState {
   final String? parent;
   final Map<String, Object?> world;
   final List<({String type, Map<String, Object?> data})> components;
+  final bool activeSelf;
+  final bool activeInHierarchy;
 
   Map<String, Object?>? component(String type) {
     for (final c in components) {
@@ -105,8 +119,9 @@ final class LiveWorld {
 
   /// The table's revision at the last [entities] or [changedEntities]
   /// read (a hash of every row; it changes when an entity is spawned,
-  /// destroyed, renamed, re-parented, re-layered or re-tagged or gains or
-  /// loses a native component — not when a value moves).
+  /// destroyed, renamed, re-parented, re-layered, re-tagged or switched
+  /// on or off or gains or loses a native component — not when a value
+  /// moves).
   String? revision;
 
   /// Every entity, parents before children: the loaded scenes' roots in
@@ -137,6 +152,9 @@ final class LiveWorld {
   List<String> remove(String id, String type) => _write('remove', {'id': id, 'type': type});
 
   List<String> rename(String id, String name) => _write('rename', {'id': id, 'name': name});
+
+  /// Switches [id] — and its subtree — on or off (its own active flag).
+  List<String> setActive(String id, bool active) => _write('setActive', {'id': id, 'active': active});
 
   /// Moves [id] under [parent] (null: a root) at [index] among its new
   /// siblings (last when null); its local transform is kept.

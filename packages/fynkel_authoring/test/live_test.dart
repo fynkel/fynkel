@@ -50,6 +50,16 @@ void main() {
     expect(live.changedEntities()!.firstWhere((e) => e.id == robot).name, 'Hero');
     expect(live.tick, tick + 1, reason: 'a live edit runs no tick');
 
+    // Switching an instance off takes its subtree along; the child's own flag stays.
+    expect(live.setActive(crateA, false), isEmpty);
+    expect(live.entity(crateA).activeSelf, isFalse);
+    final rows = live.changedEntities()!;
+    final off = rows.firstWhere((e) => e.parent == crateA);
+    expect(off.activeSelf, isTrue);
+    expect(off.activeInHierarchy, isFalse);
+    expect(live.setActive(crateA, true), isEmpty);
+    expect(live.entity(off.id).activeInHierarchy, isTrue);
+
     // The world refuses what it would from a game; a bad call throws.
     expect(live.remove(robot, 'fynkel.Camera'), isNotEmpty);
     expect(
