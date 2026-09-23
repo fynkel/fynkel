@@ -1,6 +1,6 @@
 # ADR-0016: Editor architecture authoring service edit preview Play process docking
 
-**Status:** Accepted  
+**Status:** Accepted; its Play decision superseded by ADR-0021 (2026-09-23: Play runs in the editor, the separate process becomes Build and Run)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
