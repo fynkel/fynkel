@@ -96,4 +96,4 @@ One commit each (or a short series), each with its tests, on `main`:
   - the keyboard going to the Game view while playing.
 - **P5** — Play from memory: the play cache cooked from the open documents, the recovery copy, and no save prompt.
 - **P6** — Build and Run: today's process path under its new name. `docs/editor.md` and `docs/status.md` are brought up to date, and the spike branch is deleted.
-- **P7** — Live Play mode (8): its own design note first.
+- **P7** — Live Play mode (8): its own design note first — `docs/design/live-play-mode.md`, accepted 2026-09-23, steps L1–L5.

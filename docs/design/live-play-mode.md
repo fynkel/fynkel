@@ -1,8 +1,8 @@
 # Live Play mode (ADR-0021 P7) — design note
 
-**Status:** Draft for the user's review (2026-09-23). When accepted, its
-decisions go into an ADR (or an ADR-0021 amendment) and its steps L1–L5
-become the backlog.
+**Status:** Accepted (2026-09-23, the user: "let's go with that order",
+taking the three recommendations below). Its steps L1–L5 are the P7
+backlog.
 **Related:** ADR-0021 §8 ("nothing a run does ever writes a document,
 except an explicit apply to source"), ADR-0016 (authoring service,
 edit-preview world), ADR-0008 (one isolate steps the world), ADR-0011
@@ -191,12 +191,11 @@ after L3 tune it live, after L4 keep what works.
 - Recording and scrubbing a run (a later "timeline" idea).
 - Custom inspectors from game code (ADR-0018's open question).
 
-## Questions for the user
+## The user's answers (2026-09-23)
 
-1. **The tint**: Unity tints the whole editor while playing. Tint
-   everything, only the title bar, or nothing by default?
-2. **Apply to Scene**: is writing to the scene document during Play
-   (the tab goes dirty at once) what you want, or should applied values
-   wait and land when you press Stop?
-3. **Order**: L1–L4 first and the Scene view on the running world (L5)
-   after, or L5 earlier?
+1. **The tint**: the whole editor, a subtle colour, which can be turned
+   off in Preferences.
+2. **Apply to Scene** writes the scene document at once; its tab goes
+   dirty during Play.
+3. **Order**: L1–L4 first, the Scene view on the running world (L5)
+   last.
