@@ -625,10 +625,18 @@ void main() {
       final shell = tester.state<EditorShellState>(find.byType(EditorShell));
       expect(find.byKey(const Key('window.playState')), findsNothing); // nothing has run
 
+      // Show Gizmos in Play (item 9h): the run's environment asks the game
+      // view for them; the choice is remembered in editor.json.
+      expect(shell.registry.byId('play.gizmos')!.label, 'Show Gizmos in Play');
+      shell.registry.execute('play.gizmos');
+      expect(shell.registry.byId('play.gizmos')!.label, 'Hide Gizmos in Play');
+      expect(File('${dir.path}/.fynkel/editor.json').readAsStringSync(), contains('"playGizmos": true'));
+
       shell.registry.execute('play.start');
       await pumpLines(tester);
       expect(launcher.calls.single.$2, ['run', '--project', dir.path, '-d', defaultPlayDevice()]);
       expect(launcher.calls.single.$4!['FYNKEL_EDITOR_CHANNEL'], 'stdio');
+      expect(launcher.calls.single.$4!['FYNKEL_GIZMOS'], '1');
       expect(shell.consoleTab.value, ConsolePanel.gameTab);
       expect(find.text('Starting…'), findsOneWidget);
       expect(shell.registry.byId('play.start')!.label, 'Playing…');

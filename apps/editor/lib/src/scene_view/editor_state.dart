@@ -131,6 +131,7 @@ final class EditorState extends ChangeNotifier {
       showGrid = json['grid'] != false,
       showOverlays = json['overlays'] != false,
       showStats = json['stats'] == true,
+      playGizmos = json['playGizmos'] == true,
       _scenes = {
         if (json['scenes'] is Map)
           for (final e in (json['scenes'] as Map).entries)
@@ -181,6 +182,9 @@ final class EditorState extends ChangeNotifier {
   GizmoSpace space;
   SnapSettings snap;
   bool showGrid, showOverlays, showStats;
+
+  /// Play runs the game with its `Gizmos` drawn (item 9h).
+  bool playGizmos;
 
   /// The state of a document, created on first use.
   SceneEditorState scene(String documentId) => _scenes.putIfAbsent(documentId, SceneEditorState.new);
@@ -255,6 +259,7 @@ final class EditorState extends ChangeNotifier {
     'grid': showGrid,
     'overlays': showOverlays,
     'stats': showStats,
+    if (playGizmos) 'playGizmos': true,
     'scenes': {for (final e in _scenes.entries) e.key: e.value.toJson()},
     if (_panels.isNotEmpty) 'panels': _panels,
   };

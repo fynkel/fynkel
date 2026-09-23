@@ -1282,6 +1282,19 @@ class EditorShellState extends State<EditorShell> {
         run: stopPlaying,
       ),
       EditorCommand(
+        id: 'play.gizmos',
+        baseLabel: 'Show Gizmos in Play',
+        labelBuilder: () => editorState?.playGizmos ?? false ? 'Hide Gizmos in Play' : 'Show Gizmos in Play',
+        description:
+            'The next Play draws the game\'s `Gizmos` calls in its window (`FYNKEL_GIZMOS=1`; debug and profile builds)',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyG, shift: true, alt: true),
+        group: 0,
+        order: 2,
+        enabled: () => _hasProject,
+        run: togglePlayGizmos,
+      ),
+      EditorCommand(
         id: 'play.showConsole',
         baseLabel: 'Game Console',
         description: 'The Console\'s Game tab: the running game\'s logs, diagnostics and state',
@@ -1499,6 +1512,7 @@ class EditorShellState extends State<EditorShell> {
         repoRoot: () => toolchain?.fynkelRoot,
       );
       final es = EditorState.load(opened.dir);
+      ps.gizmos = es.playGizmos;
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
       ps.addListener(registry.refresh);
@@ -1639,6 +1653,16 @@ class EditorShellState extends State<EditorShell> {
       if (!mounted) return;
     }
     await playProject();
+  }
+
+  /// Play with or without the game's gizmos (remembered in editor.json).
+  void togglePlayGizmos() {
+    final es = editorState, ps = play;
+    if (es == null || ps == null) return;
+    es.playGizmos = !es.playGizmos;
+    ps.gizmos = es.playGizmos;
+    es.changed();
+    registry.refresh();
   }
 
   Future<void> stopPlaying() async {

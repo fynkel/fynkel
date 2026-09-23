@@ -90,6 +90,10 @@ final class PlaySession extends ChangeNotifier {
   final Map<String, String> environment;
   final Duration stopGrace;
 
+  /// The game draws its `Gizmos` (item 9h): `FYNKEL_GIZMOS=1` in the next
+  /// run's environment, which `FynkelGameView` follows.
+  bool gizmos = false;
+
   /// The Game tab keeps this many rows; older ones are dropped (the count
   /// is shown, so nothing disappears silently).
   final int maxRecords;
@@ -214,7 +218,7 @@ final class PlaySession extends ChangeNotifier {
         executable,
         arguments,
         workingDirectory: projectDir,
-        environment: {...environment, 'FYNKEL_EDITOR_CHANNEL': 'stdio'},
+        environment: {...environment, 'FYNKEL_EDITOR_CHANNEL': 'stdio', if (gizmos) 'FYNKEL_GIZMOS': '1'},
       );
     } catch (e) {
       failure = 'could not start `$executable`: $e';
