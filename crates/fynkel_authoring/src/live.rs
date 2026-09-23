@@ -16,7 +16,7 @@
 //!
 //! Every call is `(kind, args JSON) -> JSON`, like the session's `query`:
 //! `entities`, `entity`, `set`, `remove`, `rename`, `parent`, `destroy`,
-//! and for the Scene view
+//! `spawn`, and for the Scene view
 //! on the running world (L5) `pick`, `pickRect`, `lines` and
 //! `worldMatrix` — the edit preview's own picking and overlays
 //! ([`crate::preview`]), over every live entity.
@@ -37,7 +37,7 @@ use crate::preview::{self, Line, Ray, View};
 /// The prefix of the id of an entity no loaded scene spawned.
 pub const RUNTIME_PREFIX: &str = "runtime:";
 
-pub const KINDS: [&str; 11] = [
+pub const KINDS: [&str; 12] = [
     "entities",
     "entity",
     "set",
@@ -45,6 +45,7 @@ pub const KINDS: [&str; 11] = [
     "rename",
     "parent",
     "destroy",
+    "spawn",
     "pick",
     "pickRect",
     "lines",
@@ -197,21 +198,8 @@ pub fn call_with(
             // world pose should stay); `index` places it among its new
             // siblings, last when absent. A root keeps the world's order.
             let e = entity_arg(world, args)?;
-            let parent = match args.get("parent") {
-                None | Some(Value::Null) => None,
-                Some(Value::String(id)) => Some(resolve(world, id).ok_or_else(|| {
-                    vec![invalid(format!("parent: no live entity {id}")).with_id(id.clone())]
-                })?),
-                Some(_) => return Err(vec![invalid("`parent` must be an entity id or null")]),
-            };
-            let index = match args.get("index") {
-                None | Some(Value::Null) => None,
-                Some(v) => Some(
-                    v.as_u64()
-                        .ok_or_else(|| vec![invalid("`index` must be a non-negative integer")])?
-                        as usize,
-                ),
-            };
+            let parent = parent_arg(world, args)?;
+            let index = index_arg(args)?;
             let r = write(
                 world,
                 vec![Command::SetParent {
@@ -228,6 +216,69 @@ pub fn call_with(
         "destroy" => {
             let e = entity_arg(world, args)?;
             Ok(write(world, vec![Command::Destroy(e)]))
+        }
+        "spawn" => {
+            // A new entity at once ([`World::spawn_now`]): `name`,
+            // `parent` (null: a root) at `index` (last when absent), the
+            // native `components` as `[{type, data}]` (a Transform among
+            // them is its local transform). With an `id` it joins a loaded
+            // scene under that authoring id — `scene`'s, else its
+            // parent's, else the first loaded one — and is named by it.
+            let name = args.get("name").and_then(Value::as_str).unwrap_or("");
+            let parent = parent_arg(world, args)?;
+            let index = index_arg(args)?;
+            let mut transform = Transform::IDENTITY;
+            let mut components = Vec::new();
+            for c in args
+                .get("components")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+            {
+                let type_id = str_arg(c, "type")?;
+                let data = c.get("data").cloned().unwrap_or_else(|| json!({}));
+                match decode_component(type_id, &Node::from_serde(&data)) {
+                    None => {
+                        return Err(vec![invalid(format!(
+                            "spawn: {type_id} is not a native component"
+                        ))])
+                    }
+                    Some(Err(e)) => {
+                        return Err(vec![invalid(format!(
+                            "spawn: {type_id}{}: {}",
+                            e.pointer, e.message
+                        ))])
+                    }
+                    Some(Ok(ComponentValue::Transform(t))) => transform = t,
+                    Some(Ok(v)) => components.push(v),
+                }
+            }
+            let authoring = match args.get("id") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(id)) => {
+                    let id = uuid_of(id).ok_or_else(|| vec![invalid("`id` must be a UUID")])?;
+                    let scene = match args.get("scene").and_then(Value::as_str) {
+                        Some(s) => Some(
+                            uuid_of(s).ok_or_else(|| vec![invalid("`scene` must be a UUID")])?,
+                        ),
+                        None => parent
+                            .and_then(|p| world.scene_of(p))
+                            .or_else(|| world.loaded_scenes().first())
+                            .map(|s| s.id),
+                    };
+                    scene.map(|scene| (scene, id))
+                }
+                Some(_) => return Err(vec![invalid("`id` must be a UUID string")]),
+            };
+            let (e, rejected) = world
+                .spawn_now(name, transform, parent, components, authoring)
+                .map_err(|e| vec![invalid(format!("spawn: {e}"))])?;
+            if let Some(i) = index {
+                let _ = scene::set_sibling_index(world.ecs_mut(), e, i);
+            }
+            let mut r = rejections(&rejected);
+            r["id"] = json!(id_of(world, e));
+            Ok(r)
         }
         _ => Err(vec![invalid(format!(
             "unknown live call `{kind}`; one of {}",
@@ -408,7 +459,10 @@ fn pick(world: &World, assets: Option<&Assets>, ray: &Ray) -> Value {
 }
 
 fn write(world: &mut World, commands: Vec<Command>) -> Value {
-    let rejected = world.apply_now(commands);
+    rejections(&world.apply_now(commands))
+}
+
+fn rejections(rejected: &[fynkel_core::Diagnostic]) -> Value {
     if rejected.is_empty() {
         return json!({ "ok": true });
     }
@@ -438,6 +492,31 @@ fn str_arg<'a>(args: &'a Value, key: &str) -> Result<&'a str, Vec<Diagnostic>> {
     args.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| vec![invalid(format!("`{key}` must be a string"))])
+}
+
+/// `parent`: a live entity id, or null/absent for a root.
+fn parent_arg(world: &World, args: &Value) -> Result<Option<Entity>, Vec<Diagnostic>> {
+    match args.get("parent") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(id)) => resolve(world, id).map(Some).ok_or_else(|| {
+            vec![invalid(format!("parent: no live entity {id}")).with_id(id.clone())]
+        }),
+        Some(_) => Err(vec![invalid("`parent` must be an entity id or null")]),
+    }
+}
+
+fn index_arg(args: &Value) -> Result<Option<usize>, Vec<Diagnostic>> {
+    match args.get("index") {
+        None | Some(Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .map(|i| Some(i as usize))
+            .ok_or_else(|| vec![invalid("`index` must be a non-negative integer")]),
+    }
+}
+
+fn uuid_of(s: &str) -> Option<fynkel_contracts::Uuid> {
+    Some(fynkel_contracts::Uuid(*Uuid::parse_str(s).ok()?.as_bytes()))
 }
 
 fn invalid(message: impl Into<String>) -> Diagnostic {

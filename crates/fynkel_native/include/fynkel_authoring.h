@@ -402,7 +402,10 @@ FynkelStatus fynkel_authoring_preview_call(FynkelAuthoringSession* session,
  *   document JSON; "remove" { id, type }; "rename" { id, name };
  *   "parent" { id, parent: id | null, index? } moves it (its local
  *   transform kept; `index` among the new siblings, last when absent);
- *   "destroy" { id } destroys it and its subtree;
+ *   "destroy" { id } destroys it and its subtree; "spawn" { name?, parent?:
+ *   id | null, index?, components: [{ type, data }], id?, scene? } makes
+ *   an entity at once -> { ok, id } (with an `id` it joins a loaded scene
+ *   under that authoring id: `scene`'s, its parent's, else the first);
  * - for the Scene view on the running world, the preview's own picking
  *   and overlays over every live entity (meshes read from the cache the
  *   world loaded): "pick" { ray: { origin, dir } } or { view, ndc } ->

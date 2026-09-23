@@ -319,6 +319,60 @@ fn entities_move_between_parents_and_go_at_once() {
     assert_eq!(r["ok"], json!(false), "{r}");
 }
 
+#[test]
+fn an_entity_made_live_is_there_at_once_under_its_authoring_id() {
+    let mut w = running();
+    let tick = w.tick();
+    let r = call(
+        &mut w,
+        "spawn",
+        json!({
+            "id": uid(9),
+            "name": "Lamp",
+            "parent": uid(1),
+            "index": 0,
+            "components": [
+                { "type": "fynkel.Transform", "data": { "position": [0.0, 2.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0] } },
+                { "type": "fynkel.PointLight", "data": { "color": [1.0, 1.0, 1.0], "intensity": 4.0, "range": 5.0, "culling_mask": 1 } },
+            ],
+        }),
+    );
+    assert_eq!(r["ok"], json!(true), "{r}");
+    assert_eq!(r["id"], json!(uid(9)), "named by the id it was given");
+    let lamp = call(&mut w, "entity", json!({ "id": uid(9) }));
+    assert_eq!(lamp["name"], json!("Lamp"));
+    assert_eq!(lamp["parent"], json!(uid(1)));
+    assert_eq!(lamp["world"]["position"], json!([10.0, 2.0, 0.0]));
+    let light = lamp["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["type"] == "fynkel.PointLight")
+        .unwrap();
+    assert_eq!(light["data"]["intensity"], json!(4.0));
+    let rows = call(&mut w, "entities", json!({}))["entities"].clone();
+    let first_child = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["parent"] == json!(uid(1)))
+        .unwrap();
+    assert_eq!(first_child["id"], json!(uid(9)), "first among its siblings");
+    assert_eq!(w.tick(), tick, "nothing steps");
+
+    // Without an id it is the game's kind of entity; an id in use and a
+    // component that is not native are refused.
+    let r = call(&mut w, "spawn", json!({ "name": "Loose" }));
+    assert!(r["id"].as_str().unwrap().starts_with(RUNTIME_PREFIX), "{r}");
+    assert!(live::call(&mut w, "spawn", &json!({ "id": uid(9) })).is_err());
+    assert!(live::call(
+        &mut w,
+        "spawn",
+        &json!({ "components": [{ "type": "game.Spinner", "data": {} }] })
+    )
+    .is_err());
+}
+
 /// A Scene view camera at `x` on the X axis, 5 m back, looking down −Z.
 fn view_at(x: f32) -> Value {
     let m = glam::Mat4::from_translation(Vec3::new(x, 0.0, 5.0));
