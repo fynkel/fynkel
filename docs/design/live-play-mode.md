@@ -201,6 +201,24 @@ While the game runs in the Game view:
   overrides included.
 - **L5 — Fly around it.** The Scene view on the running world: the
   editor camera override, picking, gizmos.
+  **Done 2026-09-23, ahead of L3 and L4** (the user's call after trying
+  L2: the Scene view not showing the game was the first thing missed).
+  `7660eb8` platform (viewport ABI v7: `fynkel_apple_viewport_set_view`,
+  a viewport's own camera over any world), `c41f1e9`
+  `FynkelViewportController.view`, `f69011f` the live `pick`, `pickRect`,
+  `lines` and `worldMatrix` calls (the preview's per-entity code, shared),
+  `69e3962` `LiveWorld`, `8c4ec1f` editor. During Play the Scene view
+  draws the game's world every frame through its own camera — the
+  scene's, kept from before Play — and a click or marquee selects in the
+  running game, outlined, with the icons. Where it differs from decision
+  9: `set_edit_camera` stays as it is (the per-viewport camera is added,
+  nothing retired); a hit names the entity itself, since a running prefab
+  instance has no anchor to stand for it; the editor's hidden flags do
+  not hide anything in the game's world; gizmo handles show but do not
+  drag until L3. Cost on the Playground (180 entities, release native,
+  JIT): the outline 0.05 ms a frame, with the icons (895 lines) 1.1 ms —
+  the same call the edit Scene view makes, now every frame while the
+  game runs.
 
 Each step is usable on its own: after L2 you can watch the game's state,
 after L3 tune it live, after L4 keep what works.
@@ -221,4 +239,4 @@ after L3 tune it live, after L4 keep what works.
 2. **Apply to Scene** writes the scene document at once; its tab goes
    dirty during Play.
 3. **Order**: L1–L4 first, the Scene view on the running world (L5)
-   last.
+   last. Changed after L2 (same day): L5 next, then L3, then L4.
