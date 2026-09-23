@@ -14,8 +14,6 @@
 // `GameState.screen` follows the loads, so the app's overlay (the title,
 // the HUD, the results) switches on it without asking the engine.
 
-import 'dart:io';
-
 import 'package:fynkel/fynkel.dart';
 
 import '../generated/behaviours.g.dart';
@@ -165,17 +163,4 @@ Future<LoadReport> restartRun(World world) {
 Future<LoadReport> finishRun(World world) {
   world.context.service<GameState>().finish();
   return world.scenes.transition(resultsScene);
-}
-
-/// The project directory this process should load: `FYNKEL_PROJECT`
-/// (`--dart-define` or environment variable; `fynkel run` sets it), else the
-/// working directory when it holds `fynkel.project.json`.
-String? projectDirectory() {
-  const defined = String.fromEnvironment('FYNKEL_PROJECT');
-  if (defined.isNotEmpty) return defined;
-  final env = Platform.environment['FYNKEL_PROJECT'];
-  if (env != null && env.isNotEmpty) return env;
-  final cwd = Directory.current.path;
-  if (File('$cwd/fynkel.project.json').existsSync()) return cwd;
-  return null;
 }

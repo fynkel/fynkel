@@ -44,13 +44,17 @@ import 'package:flutter/services.dart';
 import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SceneState, SettingsStore, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
+import 'fynkel_game.dart';
 import 'game/game.dart';
 import 'game/game_state.dart';
 import 'ui/hud.dart';
 import 'ui/menu.dart';
 import 'ui/settings.dart';
 
-void main() => runApp(const GameApp());
+/// A build: the project and start scene from the environment
+/// (`FynkelLaunch.fromEnvironment`); the editor's Play calls [buildGame]
+/// itself with the open project and scene (ADR-0021).
+void main() => runApp(buildGame(FynkelLaunch.fromEnvironment()));
 
 /// `FYNKEL_CAPTURE=1` in the environment: a benchmark run — the game skips
 /// the Menu for the Playground and prints its stats window to stdout
@@ -58,20 +62,28 @@ void main() => runApp(const GameApp());
 final bool capturing = (Platform.environment['FYNKEL_CAPTURE'] ?? '').isNotEmpty;
 
 class GameApp extends StatelessWidget {
-  const GameApp({super.key});
+  const GameApp({super.key, this.launch = const FynkelLaunch()});
+
+  /// Where to start (see [GamePage.launch]).
+  final FynkelLaunch launch;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Fynkel Reference Game',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true),
-      home: const GamePage(),
+      home: GamePage(launch: launch),
     );
   }
 }
 
 class GamePage extends StatefulWidget {
-  const GamePage({super.key});
+  const GamePage({super.key, this.launch = const FynkelLaunch()});
+
+  /// The project to load and the scene to start in: from the environment
+  /// in a build, the open project and scene in the editor's Play.
+  final FynkelLaunch launch;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -189,10 +201,11 @@ class _GamePageState extends State<GamePage> {
 
   Future<void> _start() async {
     try {
-      final dir = projectDirectory();
+      final launch = widget.launch;
+      final dir = launch.projectDir;
       final settings = SettingsStore.defaultPath('Fynkel Reference Game');
       if (dir != null && Directory(dir).existsSync()) {
-        _game = Game.load(dir, settingsPath: settings);
+        _game = Game.load(dir, cacheDir: launch.cacheDir, settingsPath: settings);
       } else {
         // Not on the machine that holds the project (a device): the cache
         // the app bundles, or nothing to show.
@@ -211,6 +224,14 @@ class _GamePageState extends State<GamePage> {
       // A capture run skips the Menu: the Playground loads at the first
       // frame, as Play would.
       if (capturing) _game!.play();
+      // The editor's Play (or FYNKEL_SCENE): the open scene instead of the
+      // Menu — the Playground as a fresh run, anything else as it is.
+      final start = launch.startScene;
+      if (start == playgroundScene) {
+        _game!.play();
+      } else if (start != null && start != _game!.scenes.current) {
+        _game!.scenes.transition(start);
+      }
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.

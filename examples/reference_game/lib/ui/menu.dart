@@ -36,7 +36,7 @@ class MenuScreen extends StatelessWidget {
         const SizedBox(height: 24),
         MenuButton(game: game, label: 'Play', primary: true, onPressed: game.play),
         MenuButton(game: game, label: 'Settings', onPressed: onSettings),
-        if (canQuit) MenuButton(game: game, label: 'Quit', onPressed: () => exit(0)),
+        if (canQuit) MenuButton(game: game, label: 'Quit', onPressed: FynkelApplication.quit),
       ],
     );
   }
