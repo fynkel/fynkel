@@ -34,6 +34,7 @@ pub const OPERATIONS: &[&str] = &[
     "reimport",
     "undoAsset",
     "redoAsset",
+    "setLayersAndTags",
 ];
 
 /// Where deleted assets go, under the project directory (git-ignored by
@@ -70,6 +71,17 @@ pub enum AssetOp {
         before: Value,
         after: Value,
     },
+    /// Files rewritten in place (`setLayersAndTags`: the project file and
+    /// the scenes and prefabs whose layers or tags moved).
+    Rewrote { files: Vec<FileRewrite> },
+}
+
+/// One file's text before and after an operation rewrote it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FileRewrite {
+    pub path: PathBuf,
+    pub before: String,
+    pub after: String,
 }
 
 /// A history entry: the operation and what the Edit menu calls it.
@@ -115,7 +127,7 @@ impl AssetHistory {
         })
     }
 
-    fn push(&mut self, done: Done) {
+    pub(crate) fn push(&mut self, done: Done) {
         self.undo.push(done);
         self.redo.clear();
     }
@@ -125,7 +137,7 @@ fn invalid(message: impl Into<String>) -> Diagnostic {
     Diagnostic::error(Code::SESSION_INVALID_REQUEST, message)
 }
 
-fn io(path: &Path, message: impl Into<String>) -> Diagnostic {
+pub(crate) fn io(path: &Path, message: impl Into<String>) -> Diagnostic {
     Diagnostic::error(Code::SESSION_IO, message).with_document(path.display().to_string())
 }
 
@@ -264,6 +276,7 @@ impl AuthoringSession {
             "reimport" => self.reimport(args).map_err(one),
             "undoAsset" => self.undo_asset().map_err(one),
             "redoAsset" => self.redo_asset().map_err(one),
+            crate::layers::OP => self.set_layers_and_tags(args).map_err(one),
             other => Err(one(Diagnostic::error(
                 Code::SESSION_UNKNOWN_QUERY,
                 format!("unknown operation {other:?}"),
@@ -277,7 +290,15 @@ impl AuthoringSession {
         &self.assets_history
     }
 
-    fn finish(&mut self, op: &str, label: &str, id: Option<Uuid>, mut extra: Value) -> Value {
+    /// The result of an operation; `reload` lists the open documents it
+    /// rewrote on disk (the client re-reads them).
+    pub(crate) fn finish(
+        &mut self,
+        op: &str,
+        label: &str,
+        id: Option<Uuid>,
+        mut extra: Value,
+    ) -> Value {
         let project = self.project().expect("operate needs a project");
         let entry = id
             .and_then(|id| project.assets.get(id))
@@ -293,6 +314,7 @@ impl AuthoringSession {
             "canRedo": self.assets_history.can_redo(),
             "undoLabel": self.assets_history.undo_label(),
             "redoLabel": self.assets_history.redo_label(),
+            "reload": std::mem::take(&mut self.reload_after),
         });
         if let (Some(v), Some(e)) = (v.as_object_mut(), extra.as_object_mut()) {
             v.append(e);
@@ -881,6 +903,10 @@ impl AuthoringSession {
                     .unwrap()
                     .rescan(std::slice::from_ref(sidecar));
                 Ok(Some(*id))
+            }
+            AssetOp::Rewrote { files } => {
+                self.reload_after = self.write_rewrites(files, inverse, op)?;
+                Ok(None)
             }
         }
     }

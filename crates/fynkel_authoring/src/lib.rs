@@ -21,6 +21,7 @@
 #![allow(clippy::result_large_err)] // `Diagnostic` is the workspace's error type
 
 pub mod instance;
+pub mod layers;
 pub mod ops;
 pub mod preview;
 pub mod project;
@@ -100,6 +101,9 @@ pub struct AuthoringSession {
     next_handle: Handle,
     /// The asset operations' own undo/redo (`ops`), per project.
     assets_history: AssetHistory,
+    /// Open documents the last asset operation rewrote on disk, for its
+    /// result's `reload`.
+    reload_after: Vec<Handle>,
 }
 
 impl AuthoringSession {
@@ -109,6 +113,7 @@ impl AuthoringSession {
             documents: BTreeMap::new(),
             next_handle: 1,
             assets_history: AssetHistory::default(),
+            reload_after: Vec::new(),
         }
     }
 

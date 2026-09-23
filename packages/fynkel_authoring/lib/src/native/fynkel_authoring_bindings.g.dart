@@ -366,6 +366,14 @@ FynkelStatus fynkel_authoring_query(
 /// settings; updates subAssets when they
 /// changed; { ok: false, diagnostics }
 /// when the importer refused; not undoable
+/// setLayersAndTags   layers, tags, layersFrom?,  replaces the project's lists (ADR-0020);
+/// tagsFrom?                   `*From[i]` = the old index entry i comes
+/// from or null (absent: by index); a
+/// reorder or removal rewrites every scene
+/// and prefab (indices, bits, masks,
+/// overrides); refused while such a document
+/// has unsaved edits; `reload` lists the
+/// open documents the client re-reads
 /// undoAsset / redoAsset                          the asset history
 /// Result: { "ok", "op", "label", "entry", "assetCount", "canUndo", "canRedo",
 /// "undoLabel", "redoLabel", ...per operation }. FYNKEL_STATUS_INVALID_ARGUMENT

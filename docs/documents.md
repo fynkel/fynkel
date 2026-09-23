@@ -604,7 +604,20 @@ window, never running game code and never reading a cooked cache
   importer in memory with the sidecar's settings and answers `{ ok,
   summary, subAssets, sidecarWritten }` — `ok: false` with the importer's
   diagnostics and nothing written when it refuses — bringing `subAssets`
-  up to date (existing ids kept). `undoAsset` / `redoAsset` replay the
+  up to date (existing ids kept). `setLayersAndTags { layers, tags,
+  layersFrom?, tagsFrom? }` (ADR-0020, `src/layers.rs`) replaces the
+  project's lists; `layersFrom[i]`/`tagsFrom[i]` name the old index new
+  entry `i` comes from (null: a new entry; absent: the lists line up by
+  index, i.e. renames and additions, which write the project file only).
+  A reorder or a removal rewrites every scene and prefab so each object
+  keeps its meaning — `fynkel.Layer` indices (a removed layer becomes
+  `default`), `fynkel.Tags` bits (a removed tag's bit is dropped), every
+  layer mask (the native `mask`/`culling_mask` fields and behaviour fields
+  hinted `layerMask`; "Everything" stays everything and gains new
+  entries) and the same values inside prefab overrides — and is refused,
+  with nothing written, while such a document has unsaved edits; the
+  result's `reload` lists the handles of the clean open documents it
+  rewrote. `undoAsset` / `redoAsset` replay the
   **asset history**, an undo stack of its own (a document's ⌘Z never moves
   a file): created documents are removed and re-written byte-for-byte,
   moves reversed, trashed files brought back, settings restored;
