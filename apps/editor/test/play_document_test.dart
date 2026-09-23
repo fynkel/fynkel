@@ -9,6 +9,7 @@ import 'package:fynkel/fynkel.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
+import 'package:fynkel_editor/src/documents/editor_document.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/inspector/inspector_model.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
@@ -75,6 +76,9 @@ final class FakeLive implements LiveBackend {
 
   @override
   List<LiveEntity>? changedEntities() => entities();
+
+  @override
+  PreviewBackend? openPreview() => null;
 
   @override
   LiveEntityState entity(String id) {

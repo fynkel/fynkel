@@ -34,6 +34,8 @@ import '../hierarchy/transform_math.dart';
 import '../inspector/component_specs.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../inspector/prefab_actions.dart' as prefab;
+import '../play/live_preview.dart';
+import '../play/play_document.dart';
 import '../project/editor_project.dart';
 import '../theme/tokens.dart' show GizmoTokens;
 import 'component_handles.dart';
@@ -325,13 +327,18 @@ final class SceneViewModel extends ChangeNotifier {
 
   // ── Tabs ─────────────────────────────────────────────────────────────
 
-  /// The focused tab's Scene view, opening its preview on first use; null
-  /// without a focused tab.
+  /// The focused tab's Scene view — the running game's during Play
+  /// (ADR-0021 P7 L5), as the Hierarchy shows it — opening its preview on
+  /// first use; null without a focused tab.
   SceneTab? get current {
-    final f = tabs.focused;
+    final f = tabs.shown;
     if (f == null) return null;
     return _sceneTabOf(f);
   }
+
+  /// The Scene view draws the running game (Play): continuously, through
+  /// its own camera on the viewport, and nothing in it can be dragged.
+  bool get isLive => current?.preview is LivePreview;
 
   SceneTab _sceneTabOf(OpenDocument tab) {
     final existing = _sceneTabs[tab];
@@ -339,7 +346,11 @@ final class SceneViewModel extends ChangeNotifier {
       if (!existing.hasPreview && existing.openError == null) _openPreview(existing);
       return existing;
     }
-    final st = SceneTab(tab, editorState.scene(tab.document.id), view: view);
+    // The running game keeps the scene's camera and flags (Unity's Scene
+    // view does not move when Play starts).
+    final doc = tab.document;
+    final stateId = doc is PlayDocument ? (doc.scene?.id ?? doc.id) : doc.id;
+    final st = SceneTab(tab, editorState.scene(stateId), view: view);
     _sceneTabs[tab] = st;
     _openPreview(st);
     return st;
@@ -387,12 +398,12 @@ final class SceneViewModel extends ChangeNotifier {
   void _onTabs() {
     // Tabs that closed take their preview with them.
     for (final t in List.of(_sceneTabs.keys)) {
-      if (!tabs.open.contains(t)) {
+      if (!tabs.open.contains(t) && t != tabs.live) {
         _sceneTabs.remove(t)!.dispose();
         editorState.flush();
       }
     }
-    final f = tabs.focused;
+    final f = tabs.shown;
     if (f != _listening) {
       _listening?.removeListener(_onTab);
       _listening = f;
@@ -435,7 +446,9 @@ final class SceneViewModel extends ChangeNotifier {
       // the picture shows the new mesh or texture — once, by the first
       // Scene view copy to hear of it.
       final t = current;
-      if (t != null && t.hasPreview && (views?.claimRecook(_assetsRevision) ?? true)) _recook(t, announce: false);
+      if (t != null && t.hasPreview && !isLive && (views?.claimRecook(_assetsRevision) ?? true)) {
+        _recook(t, announce: false);
+      }
     }
     _repaint();
   }
@@ -934,10 +947,27 @@ final class SceneViewModel extends ChangeNotifier {
     }
     final p = t.preview!;
     final started = DateTime.now();
+    final live = p is LivePreview;
     try {
-      if (!t.cameraApplied) {
-        p.setCamera(t.camera.toPreview());
-        _worldCamera[p] = (t, t.cameraVersion);
+      if (live) {
+        // The game's world keeps its camera; the viewport has its own.
+        final c = t.camera.toPreview();
+        controller.view = ViewportView(
+          world: c.world,
+          orthographic: c.orthographic,
+          fovY: c.fovY,
+          orthoHeight: c.orthoHeight,
+          near: c.near,
+          far: c.far,
+          manualExposure: c.manualExposure != null,
+          exposure: c.manualExposure ?? 12,
+        );
+      } else {
+        if (controller.view != null) controller.view = null;
+        if (!t.cameraApplied) {
+          p.setCamera(t.camera.toPreview());
+          _worldCamera[p] = (t, t.cameraVersion);
+        }
       }
       _applyHidden(t);
       controller.overlay(overlay(t));
@@ -953,6 +983,8 @@ final class SceneViewModel extends ChangeNotifier {
       t.lastSlot = slot;
       t.frames++;
       lastFrameMs = DateTime.now().difference(started).inMicroseconds / 1000;
+      // The game moves on its own: draw it again next frame.
+      if (live) requestFrame();
       return slot;
     } on AuthoringException catch (e) {
       notice = 'Preview: $e';

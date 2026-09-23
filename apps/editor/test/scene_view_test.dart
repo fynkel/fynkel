@@ -13,9 +13,12 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/commands/commands.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
+import 'package:fynkel_editor/src/documents/editor_document.dart';
+import 'package:fynkel_editor/src/documents/open_document.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/hierarchy/transform_math.dart';
 import 'package:fynkel_editor/src/inspector/field_widgets.dart' show AssetDragPayload;
+import 'package:fynkel_editor/src/play/play_document.dart';
 import 'package:fynkel_editor/src/scene_view/editor_state.dart';
 import 'package:fynkel_editor/src/scene_view/orientation_gizmo.dart';
 import 'package:fynkel_editor/src/scene_view/scene_math.dart';
@@ -400,6 +403,37 @@ void main() {
       r.model.panZoomEnd(const PointerPanZoomEndEvent(position: px), px);
       r.dispose();
       async.flushTimers();
+    });
+  });
+
+  group('the running game (ADR-0021 P7 L5)', () {
+    test("during Play the Scene view is the game's, through the scene's camera; clicks select in it", () {
+      final r = Rig();
+      addTearDown(r.dispose);
+      final scene = r.open();
+      final camera = scene.camera;
+      // The game's world: the fake world of the same scene (the running
+      // copy has its ids).
+      final world = FakePreviewBackend(r.document);
+      final play = PlayDocument(backend: _SceneLive(r.document, world), scene: r.document);
+      final live = OpenDocument(play, project: r.project);
+      r.tabs.live = live;
+
+      final st = r.model.current!;
+      expect(st.tab, same(live));
+      expect(st.preview, same(world));
+      expect(st.camera, same(camera), reason: 'the Scene view keeps its camera when Play starts');
+      expect(r.model.canEdit, isFalse, reason: 'nothing in the running game is dragged (L3)');
+
+      r.model.click(r.pixelOf('crate'));
+      expect(live.selection.toList(), ['crate']);
+      expect(scene.tab.selection, isEmpty, reason: "the scene's selection is the scene's");
+      expect(r.model.beginDrag('move.x', r.pixelOf('crate')), isFalse);
+
+      r.tabs.live = null;
+      expect(r.model.current, same(scene));
+      expect(world.calls, contains('close'), reason: "Stop closes the game's view of the world");
+      play.dispose();
     });
   });
 
@@ -1221,3 +1255,39 @@ PointerDownEvent _down(Offset p, int buttons) =>
     PointerDownEvent(position: p, buttons: buttons, kind: PointerDeviceKind.mouse);
 PointerMoveEvent _move(Offset p) => PointerMoveEvent(position: p, kind: PointerDeviceKind.mouse);
 PointerUpEvent _up(Offset p) => PointerUpEvent(position: p, kind: PointerDeviceKind.mouse);
+
+/// A running copy of [scene]: its entities under their own ids, [world]
+/// as the picture.
+final class _SceneLive implements LiveBackend {
+  _SceneLive(this.scene, this.world);
+
+  final FakeDocument scene;
+  final PreviewBackend world;
+
+  @override
+  List<LiveEntity> entities() => [
+    for (final e in scene.entitiesView.entries)
+      LiveEntity(
+        id: e.key,
+        handle: e.key.hashCode,
+        name: '${e.value['name']}',
+        parent: e.value['parent'] as String?,
+        spawned: false,
+        layer: 0,
+        childCount: 0,
+        types: const ['fynkel.Transform'],
+      ),
+  ];
+
+  @override
+  List<LiveEntity>? changedEntities() => null;
+
+  @override
+  LiveEntityState entity(String id) => LiveEntityState(id: id, handle: id.hashCode, name: id, parent: null, world: const {}, components: const []);
+
+  @override
+  List<LiveBehaviour> behaviours(int handle) => const [];
+
+  @override
+  PreviewBackend openPreview() => world;
+}

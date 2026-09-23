@@ -25,6 +25,7 @@ import 'package:fynkel/fynkel.dart' as fynkel;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../documents/editor_document.dart';
+import 'live_preview.dart';
 
 /// A script component of a running entity, as the document stores one.
 final class LiveBehaviour {
@@ -50,6 +51,10 @@ abstract class LiveBackend {
 
   /// The script components on the entity with runtime [handle].
   List<LiveBehaviour> behaviours(int handle);
+
+  /// The world for the Scene view to draw and pick in (L5); null when
+  /// there is none.
+  PreviewBackend? openPreview();
 }
 
 /// A package:fynkel world the game is running.
@@ -80,6 +85,9 @@ final class WorldLiveBackend implements LiveBackend {
             authoredComponentId: b.authoredComponentId,
           ),
   ];
+
+  @override
+  PreviewBackend openPreview() => LivePreview(live, alive: () => !world.native.isDisposed);
 }
 
 final class PlayDocument extends EditorDocument {
@@ -206,10 +214,19 @@ final class PlayDocument extends EditorDocument {
   Map<String, Object?> inspect() => root();
   @override
   PrefabExpansion instance(String anchor) => throw _refused('instance');
+  /// The running world for the Scene view (L5): opened once, closed with
+  /// the document (the world itself is the game's).
   @override
-  PreviewBackend openPreview() => throw _refused('openPreview');
+  PreviewBackend openPreview() {
+    final open = _preview;
+    if (open != null && !open.isClosed) return open;
+    if (_closed) throw _refused('openPreview');
+    return _preview = backend.openPreview() ?? (throw _refused('openPreview'));
+  }
+
+  PreviewBackend? _preview;
   @override
-  PreviewBackend? get preview => null;
+  PreviewBackend? get preview => _preview;
 
   AuthoringException _refused(String what) => AuthoringException('play $what', AuthoringStatus.invalidArgument, [
     Diagnostic(code: 'FYN-T0003', severity: Severity.error, message: '$what: not on the running game'),
@@ -220,6 +237,7 @@ final class PlayDocument extends EditorDocument {
     _poll?.cancel();
     _poll = null;
     _closed = true;
+    _preview?.close();
   }
 
   @override
