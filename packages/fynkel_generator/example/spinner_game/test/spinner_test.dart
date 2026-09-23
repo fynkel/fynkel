@@ -27,7 +27,7 @@ void main() {
   });
 
   test('generated registration covers every @FynkelBehaviour class', () {
-    expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Spinner']);
+    expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Patrol', 'game.Spinner']);
     expect(gameSpinnerType.version, 1);
     expect(gameBlinkerType.version, 2);
     expect(gameSpinnerType.fields.map((f) => f.name), ['axis', 'showcase', 'speed', 'spinning']);
@@ -71,6 +71,36 @@ void main() {
     expect(() => registry.instantiate('game.Spinner', fields: {'axis': [1, 2]}), throwsA(isA<BehaviourDataError>()));
     expect(() => registry.instantiate('game.Spinner', fields: {'nope': 1}), throwsA(isA<BehaviourDataError>()));
     expect(() => registry.instantiate('game.Spinner', version: 2), throwsA(isA<BehaviourDataError>()));
+  });
+
+  test('a List<Vec3> field (a @Gizmo.path) round-trips', () {
+    final registry = BehaviourRegistry()..registerAll(behaviourTypes);
+    final waypoints = gamePatrolType.field('waypoints')!;
+    expect(waypoints.type, 'vec3List');
+    expect(waypoints.defaultValue, [
+      [0.0, 0.0, 0.0],
+      [4.0, 0.0, 0.0],
+      [4.0, 0.0, -4.0],
+    ]);
+    final p = registry.instantiate('game.Patrol', fields: {
+      'waypoints': [
+        [1, 2, 3],
+        [0, 0, 0],
+      ],
+    }) as Patrol;
+    expect(p.waypoints, [const Vec3(1, 2, 3), Vec3.zero]);
+    expect(waypoints.get(p), [
+      [1.0, 2.0, 3.0],
+      [0.0, 0.0, 0.0],
+    ]);
+    expect(
+      () => registry.instantiate('game.Patrol', fields: {
+        'waypoints': [
+          [1, 2],
+        ],
+      }),
+      throwsA(isA<BehaviourDataError>()),
+    );
   });
 
   test('a scene component instantiates the compiled class with its field set', () {

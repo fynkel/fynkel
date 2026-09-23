@@ -4,6 +4,8 @@
 /// `schemas/behaviours/`.
 library;
 
+import 'dart:math' as math;
+
 import 'package:fynkel/fynkel.dart';
 
 /// Rotates its object about [axis] at [speed] radians per second.
@@ -48,4 +50,46 @@ class Blinker extends Behaviour {
 
   @override
   void fixedUpdate(FixedUpdateContext context) => ticks++;
+}
+
+/// Walks its object along [waypoints] (local to where it started) at
+/// [speed], and counts as arrived within [reach] of each.
+///
+/// The `@Gizmo` annotations are ADR-0019's declarative gizmos: the editor
+/// draws the path and the reach sphere from the generated metadata, and
+/// drags them as handles.
+@FynkelBehaviour(id: 'game.Patrol', icon: 'route', category: 'Motion')
+class Patrol extends Behaviour {
+  /// The points to visit, in order, then back to the first.
+  @Expose()
+  @Gizmo.path(color: 0xFFFFC107)
+  List<Vec3> waypoints = [Vec3.zero, Vec3(4, 0, 0), Vec3(4, 0, -4)];
+
+  /// Metres from a waypoint that count as reaching it.
+  @Expose(min: 0.01, step: 0.1, unit: 'm')
+  @Gizmo.radius(when: GizmoWhen.always)
+  double reach = 0.5;
+
+  /// Metres per second.
+  @Expose(min: 0, step: 0.1, unit: 'm/s')
+  double speed = 2;
+
+  int next = 0;
+  late Vec3 _origin;
+
+  @override
+  void start() => _origin = transform.position;
+
+  @override
+  void fixedUpdate(FixedUpdateContext context) {
+    if (waypoints.isEmpty) return;
+    next %= waypoints.length;
+    final target = _origin + waypoints[next];
+    final to = target - transform.position;
+    if (to.length <= reach) {
+      next++;
+      return;
+    }
+    transform.position += to.normalized * math.min(speed * context.dt, to.length);
+  }
 }

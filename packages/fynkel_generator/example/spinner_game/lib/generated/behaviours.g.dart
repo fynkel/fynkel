@@ -14,6 +14,44 @@ final BehaviourType gameBlinkerType = BehaviourType(
   fields: const [],
 );
 
+/// `game.Patrol` v1 → [_lib0.Patrol].
+final BehaviourType gamePatrolType = BehaviourType(
+  id: 'game.Patrol',
+  version: 1,
+  create: _lib0.Patrol.new,
+  fields: [
+    BehaviourField(
+      name: 'reach',
+      type: 'number',
+      defaultValue: 0.5,
+      min: 0.01,
+      step: 0.1,
+      get: (b) => (b as _lib0.Patrol).reach,
+      set: (b, v) => (b as _lib0.Patrol).reach = _double(v),
+    ),
+    BehaviourField(
+      name: 'speed',
+      type: 'number',
+      defaultValue: 2.0,
+      min: 0,
+      step: 0.1,
+      get: (b) => (b as _lib0.Patrol).speed,
+      set: (b, v) => (b as _lib0.Patrol).speed = _double(v),
+    ),
+    BehaviourField(
+      name: 'waypoints',
+      type: 'vec3List',
+      defaultValue: const [
+        const [0.0, 0.0, 0.0],
+        const [4.0, 0.0, 0.0],
+        const [4.0, 0.0, -4.0],
+      ],
+      get: (b) => _vec3ListJson((b as _lib0.Patrol).waypoints),
+      set: (b, v) => (b as _lib0.Patrol).waypoints = _vec3List(v),
+    ),
+  ],
+);
+
 /// `game.Spinner` v1 → [_lib0.Spinner].
 final BehaviourType gameSpinnerType = BehaviourType(
   id: 'game.Spinner',
@@ -55,7 +93,11 @@ final BehaviourType gameSpinnerType = BehaviourType(
 );
 
 /// Every `@FynkelBehaviour` type of package `spinner_game`, by id.
-final List<BehaviourType> behaviourTypes = List.unmodifiable([gameBlinkerType, gameSpinnerType]);
+final List<BehaviourType> behaviourTypes = List.unmodifiable([
+  gameBlinkerType,
+  gamePatrolType,
+  gameSpinnerType,
+]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {
@@ -74,6 +116,14 @@ Vec3 _vec3(Object? v) {
 }
 
 List<double>? _vec3Json(Vec3? v) => v == null ? null : [v.x, v.y, v.z];
+
+List<Vec3> _vec3List(Object? v) => [for (final p in v as List) _vec3(p)];
+
+List<List<double>>? _vec3ListJson(List<Vec3>? v) => v == null
+    ? null
+    : [
+        for (final p in v) [p.x, p.y, p.z],
+      ];
 
 AssetRef _assetRef(Object? v) {
   final m = v as Map;

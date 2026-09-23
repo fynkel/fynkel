@@ -21,6 +21,7 @@ const String jsonOutput = 'lib/generated/behaviours.g.json';
 
 const _behaviourAnnotation = TypeChecker.typeNamedLiterally('FynkelBehaviour', inPackage: 'fynkel');
 const _exposeAnnotation = TypeChecker.typeNamedLiterally('Expose', inPackage: 'fynkel');
+const _gizmoAnnotation = TypeChecker.typeNamedLiterally('Gizmo', inPackage: 'fynkel');
 const _behaviourBase = TypeChecker.typeNamedLiterally('Behaviour', inPackage: 'fynkel');
 
 /// Aggregates the package's `@FynkelBehaviour` classes into
@@ -128,13 +129,24 @@ Future<BehaviourClass> _readClass(Resolver resolver, LibraryElement library, Ann
   for (InterfaceElement? cls = element; cls != null && !_behaviourBase.isExactly(cls); cls = cls.supertype?.element) {
     for (final f in cls.fields) {
       final annotation = _exposeAnnotation.firstAnnotationOf(f);
-      if (annotation == null) continue;
+      if (annotation == null) {
+        if (_gizmoAnnotation.hasAnnotationOf(f)) {
+          throw BehaviourGenerationError('@Gizmo needs @Expose on the same field', library: libraryUri, member: '$name.${f.name}');
+        }
+        continue;
+      }
       final fieldName = f.name ?? '';
       if (!seen.add(fieldName)) continue;
       fields.add(await _readField(resolver, f, ConstantReader(annotation), libraryUri, '$name.$fieldName'));
     }
   }
   fields.sort((a, b) => a.name.compareTo(b.name));
+  for (final f in fields) {
+    final gizmo = f.gizmo;
+    if (gizmo == null) continue;
+    final problem = gizmoProblem(gizmo, f, fields);
+    if (problem != null) throw BehaviourGenerationError(problem, library: libraryUri, member: '$name.${f.name}');
+  }
   for (final f in fields) {
     final showIf = f.showIf;
     if (showIf == null) continue;
@@ -215,6 +227,25 @@ Future<ExposedField> _readField(
     if (problem != null) throw BehaviourGenerationError('@Expose: $problem', library: libraryUri, member: member);
   }
   final order = expose.peek('order');
+  final gizmoAnnotation = _gizmoAnnotation.firstAnnotationOf(f);
+  GizmoSpec? gizmo;
+  if (gizmoAnnotation != null) {
+    final g = ConstantReader(gizmoAnnotation);
+    String option(String name, List<String> values, String fallback) {
+      final v = g.peek(name);
+      final index = v == null || v.isNull ? null : v.objectValue.getField('index')?.toIntValue();
+      return index == null ? fallback : values[index];
+    }
+
+    final color = g.peek('color');
+    gizmo = GizmoSpec(
+      shape: g.read('shape').stringValue,
+      color: color == null || color.isNull ? null : color.intValue,
+      when: option('when', const ['selected', 'always'], 'selected'),
+      space: option('space', const ['local', 'world'], 'local'),
+      angle: g.peek('angle')?.stringValue,
+    );
+  }
   return ExposedField(
     name: fieldName,
     kind: kind,
@@ -234,6 +265,7 @@ Future<ExposedField> _readField(
     readOnly: expose.peek('readOnly')?.boolValue ?? false,
     hidden: expose.peek('hidden')?.boolValue ?? false,
     showIf: expose.peek('showIf')?.stringValue,
+    gizmo: gizmo,
     doc: _doc(f.documentationComment),
   );
 }
@@ -251,7 +283,7 @@ FieldKind? _kindOf(DartType type) {
   final name = element.name;
   if (name == null) return null;
   final lib = element.library.uri;
-  if (lib.isScheme('dart') && lib.path == 'core') {
+  if (lib.isScheme('dart') && lib.path == 'core' && name != 'List') {
     return switch (name) {
       'double' => FieldKind.number,
       'int' => FieldKind.integer,
@@ -259,6 +291,11 @@ FieldKind? _kindOf(DartType type) {
       'String' => FieldKind.string,
       _ => null,
     };
+  }
+  if (lib.isScheme('dart') && lib.path == 'core' && name == 'List') {
+    final item = type.typeArguments.single;
+    if (item.nullabilitySuffix == NullabilitySuffix.none && _kindOf(item) == FieldKind.vec3) return FieldKind.vec3List;
+    return null;
   }
   if (lib.isScheme('package') && lib.pathSegments.first == 'fynkel') {
     return switch (name) {
@@ -307,6 +344,16 @@ _Literal? _literal(Expression e, FieldKind kind) {
       });
     case FieldKind.assetRef:
       return _assetRef(e);
+    case FieldKind.vec3List:
+      if (e is! ListLiteral) return null;
+      final points = <Object?>[];
+      for (final element in e.elements) {
+        if (element is! Expression) return null;
+        final p = _literal(element, FieldKind.vec3);
+        if (p == null || p.value == null) return null;
+        points.add(p.value);
+      }
+      return _Literal(points);
   }
 }
 
@@ -326,10 +373,21 @@ _Literal? _vector(Expression e, String type, int arity, Map<String, List<double>
     final c = constants[e.identifier.name];
     return c == null ? null : _Literal(c);
   }
+  // Unresolved, `Vec3(1, 2, 3)` without `const`/`new` parses as a call.
+  String? ctor;
+  ArgumentList? arguments;
   if (e is InstanceCreationExpression && e.constructorName.type.name.lexeme == type) {
-    final ctor = e.constructorName.name?.name;
+    ctor = e.constructorName.name?.name;
+    arguments = e.argumentList;
+  } else if (e is MethodInvocation && e.target == null && e.methodName.name == type) {
+    arguments = e.argumentList;
+  } else if (e is MethodInvocation && e.target is SimpleIdentifier && (e.target as SimpleIdentifier).name == type) {
+    ctor = e.methodName.name;
+    arguments = e.argumentList;
+  }
+  if (arguments != null) {
     final args = <num>[];
-    for (final a in e.argumentList.arguments) {
+    for (final a in arguments.arguments) {
       if (a is! Expression) return null;
       final n = _number(a);
       if (n == null) return null;

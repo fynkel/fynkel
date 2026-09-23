@@ -191,6 +191,65 @@ void main() {
     expect(exposeKindProblem('button', FieldKind.number), contains('unknown kind'));
   });
 
+  test('@Gizmo reaches x-fynkel beside the hints; a List<Vec3> is an array of triples', () {
+    const radius = ExposedField(name: 'reach', kind: FieldKind.number, gizmo: GizmoSpec(shape: 'radius'));
+    const path = ExposedField(
+      name: 'waypoints',
+      kind: FieldKind.vec3List,
+      defaultValue: [
+        [0.0, 0.0, 0.0],
+      ],
+      hasDefault: true,
+      gizmo: GizmoSpec(shape: 'path', color: 0xFFFF0000, when: 'always', space: 'world'),
+    );
+    const cone = ExposedField(name: 'length', kind: FieldKind.number, gizmo: GizmoSpec(shape: 'cone', angle: 'spread'));
+    const spread = ExposedField(name: 'spread', kind: FieldKind.number);
+    const patrol = BehaviourClass(
+      id: 'game.Patrol',
+      version: 1,
+      className: 'Patrol',
+      libraryUri: 'package:demo/patrol.dart',
+      fields: [cone, radius, spread, path],
+    );
+    final p = schemaFor(patrol)['properties'] as Map<String, Object?>;
+    expect((p['reach'] as Map)['x-fynkel'], {
+      'type': 'number',
+      'gizmo': {'shape': 'radius'},
+    });
+    expect((p['length'] as Map)['x-fynkel'], {
+      'type': 'number',
+      'gizmo': {'shape': 'cone', 'angle': 'spread'},
+    });
+    final w = p['waypoints'] as Map;
+    expect(w['type'], 'array');
+    expect(w['items'], {
+      'type': 'array',
+      'items': {'type': 'number'},
+      'minItems': 3,
+      'maxItems': 3,
+    });
+    expect(w['x-fynkel'], {
+      'type': 'vec3List',
+      'gizmo': {'shape': 'path', 'color': 0xFFFF0000, 'when': 'always', 'space': 'world'},
+    });
+    final src = emitDart('demo', [patrol]);
+    expect(src, contains('(b as _lib0.Patrol).waypoints = _vec3List(v)'));
+    expect(src, contains('get: (b) => _vec3ListJson((b as _lib0.Patrol).waypoints)'));
+    expect(src, contains('Vec3 _vec3(Object? v)'));
+    expect(src, isNot(contains('_vec3Json(')), reason: 'no Vec3 field');
+    expect(src, matches(RegExp(r'defaultValue: const \[\s*const \[0\.0, 0\.0, 0\.0\],?\s*\]')));
+
+    const fields = [cone, radius, spread, path];
+    for (final f in [cone, radius, path]) {
+      expect(gizmoProblem(f.gizmo!, f, fields), isNull);
+    }
+    expect(gizmoProblem(const GizmoSpec(shape: 'radius'), path, fields), contains('double'));
+    expect(gizmoProblem(const GizmoSpec(shape: 'box'), radius, fields), contains('Vec3'));
+    expect(gizmoProblem(const GizmoSpec(shape: 'lineTo'), radius, fields), contains('String'));
+    expect(gizmoProblem(const GizmoSpec(shape: 'cone', angle: 'nope'), cone, fields), contains("angle 'nope'"));
+    expect(gizmoProblem(const GizmoSpec(shape: 'cone', angle: 'length'), cone, fields), contains('another'));
+  });
+
   test('emitJson: metadata plus schema per type, sorted, JSON-parseable', () {
     final text = emitJson('demo', [spinner, blinker]);
     final doc = jsonDecode(text) as Map<String, Object?>;

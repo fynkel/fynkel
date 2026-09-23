@@ -131,15 +131,22 @@ int _int(Object? v) {
   return d.toInt();
 }''');
   }
-  if (kinds.contains(FieldKind.vec3)) {
+  if (kinds.contains(FieldKind.vec3) || kinds.contains(FieldKind.vec3List)) {
     helpers.add('''
 Vec3 _vec3(Object? v) {
   final l = (v as List).cast<num>();
   if (l.length != 3) throw FormatException('expected [x, y, z], got \${l.length} items');
   return Vec3(l[0].toDouble(), l[1].toDouble(), l[2].toDouble());
-}
+}''');
+  }
+  if (kinds.contains(FieldKind.vec3)) {
+    helpers.add('List<double>? _vec3Json(Vec3? v) => v == null ? null : [v.x, v.y, v.z];');
+  }
+  if (kinds.contains(FieldKind.vec3List)) {
+    helpers.add('''
+List<Vec3> _vec3List(Object? v) => [for (final p in v as List) _vec3(p)];
 
-List<double>? _vec3Json(Vec3? v) => v == null ? null : [v.x, v.y, v.z];''');
+List<List<double>>? _vec3ListJson(List<Vec3>? v) => v == null ? null : [for (final p in v) [p.x, p.y, p.z]];''');
   }
   if (kinds.contains(FieldKind.quat)) {
     helpers.add('''
@@ -181,6 +188,7 @@ String _getter(ExposedField f, String cls) {
     FieldKind.vec3 => '_vec3Json($read)',
     FieldKind.quat => '_quatJson($read)',
     FieldKind.assetRef => '_assetRefJson($read)',
+    FieldKind.vec3List => '_vec3ListJson($read)',
     _ => read,
   };
 }
@@ -194,6 +202,7 @@ String _setter(ExposedField f) {
     FieldKind.vec3 => '_vec3',
     FieldKind.quat => '_quat',
     FieldKind.assetRef => '_assetRef',
+    FieldKind.vec3List => '_vec3List',
   };
   if (f.nullable) return '_orNull(v, $convert)';
   return switch (f.kind) {
@@ -272,6 +281,14 @@ Map<String, Object?> _propertySchema(ExposedField f) {
       s['items'] = {'type': 'number'};
       s['minItems'] = n;
       s['maxItems'] = n;
+    case FieldKind.vec3List:
+      s['type'] = f.nullable ? ['array', 'null'] : 'array';
+      s['items'] = {
+        'type': 'array',
+        'items': {'type': 'number'},
+        'minItems': 3,
+        'maxItems': 3,
+      };
     case FieldKind.assetRef:
       final ref = {r'$ref': '$envelopeSchemaId#/\$defs/assetRef'};
       if (f.nullable) {

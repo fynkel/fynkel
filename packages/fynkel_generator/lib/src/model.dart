@@ -26,7 +26,10 @@ enum FieldKind {
 
   /// `AssetRef` ↔ `{ "asset": uuid, "sub"?: string }` (`assetRef`), the
   /// envelope's `$defs/assetRef`.
-  assetRef('assetRef');
+  assetRef('assetRef'),
+
+  /// `List<Vec3>` ↔ `[[x, y, z], …]` (`vec3List`): a path's points.
+  vec3List('vec3List');
 
   const FieldKind(this.typeName);
 
@@ -42,6 +45,7 @@ enum FieldKind {
         FieldKind.vec3 => 'Vec3',
         FieldKind.quat => 'Quat',
         FieldKind.assetRef => 'AssetRef',
+        FieldKind.vec3List => 'List<Vec3>',
       };
 
   static FieldKind? fromDartType(String name) {
@@ -73,6 +77,7 @@ class ExposedField {
     this.readOnly = false,
     this.hidden = false,
     this.showIf,
+    this.gizmo,
     this.doc,
   });
 
@@ -106,6 +111,9 @@ class ExposedField {
   final bool hidden;
   final String? showIf;
 
+  /// Its `@Gizmo` (ADR-0019 §3), if any.
+  final GizmoSpec? gizmo;
+
   /// The field's doc comment, first paragraph, without `///`.
   final String? doc;
 
@@ -125,7 +133,69 @@ class ExposedField {
         if (readOnly) 'readOnly': true,
         if (hidden) 'hidden': true,
         if (showIf != null) 'showIf': showIf,
+        if (gizmo != null) 'gizmo': gizmo!.json,
       };
+}
+
+/// A field's `@Gizmo`: the shape, and the options that differ from the
+/// defaults (`when: selected`, `space: local`, the editor's colour).
+class GizmoSpec {
+  const GizmoSpec({required this.shape, this.color, this.when = 'selected', this.space = 'local', this.angle});
+
+  static const shapes = ['radius', 'box', 'point', 'direction', 'cone', 'lineTo', 'path'];
+
+  final String shape;
+
+  /// `0xAARRGGBB`.
+  final int? color;
+  final String when;
+  final String space;
+
+  /// The cone's sibling angle field.
+  final String? angle;
+
+  Map<String, Object?> get json => {
+        'shape': shape,
+        if (angle != null) 'angle': angle,
+        if (color != null) 'color': color,
+        if (when != 'selected') 'when': when,
+        if (space != 'local' && shape != 'lineTo') 'space': space,
+      };
+}
+
+/// Checks a `@Gizmo` against its field and the class's other fields;
+/// returns the problem, or null when it fits.
+String? gizmoProblem(GizmoSpec g, ExposedField field, List<ExposedField> siblings) {
+  final t = field.kind;
+  final fits = switch (g.shape) {
+    'radius' => t == FieldKind.number || t == FieldKind.integer,
+    'box' || 'point' || 'direction' => t == FieldKind.vec3,
+    'cone' => t == FieldKind.number,
+    'lineTo' => t == FieldKind.string,
+    'path' => t == FieldKind.vec3List,
+    _ => false,
+  };
+  if (!fits) {
+    final need = switch (g.shape) {
+      'radius' => 'a double or int',
+      'box' || 'point' || 'direction' => 'a Vec3',
+      'cone' => 'a double (the length)',
+      'lineTo' => 'a String (an entity name)',
+      'path' => 'a List<Vec3>',
+      _ => 'nothing',
+    };
+    return '@Gizmo.${g.shape} needs $need field';
+  }
+  if (g.shape == 'cone') {
+    ExposedField? angle;
+    for (final s in siblings) {
+      if (s.name == g.angle && s.name != field.name) angle = s;
+    }
+    if (angle == null || angle.kind != FieldKind.number) {
+      return "@Gizmo.cone angle '${g.angle}' must name another @Expose double field of the class (radians)";
+    }
+  }
+  return null;
 }
 
 /// The asset kinds `@Expose(kind: 'asset(<kind>)')` accepts.
