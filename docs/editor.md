@@ -1463,6 +1463,13 @@ directory) and pick projects from there.
   with Flutter's progress and quits once the project editor is up. The
   first build of a project's editor takes 15–30 s; later opens skip the
   build and take well under a second (see *Opening without a build*).
+- The project editor opens **in the launcher's place**: the same position
+  and size (`--window-frame x,y,w,h`, which `fynkel editor` hands the app
+  as `FYNKEL_WINDOW_FRAME`; applied again once the window is on screen,
+  since Stage Manager places new windows itself). From full screen it
+  opens where it last did. As in Unity, the launcher (the Hub) and a
+  project's editor are separate apps: the project editor has the game
+  compiled in, and a running app cannot take in another project's code.
 - Before it does, Play stops, and dirty documents get their save prompt.
   Cancel on the prompt, or on the *Opening* dialog, keeps you here (Cancel
   on the dialog also ends the build and everything it started).

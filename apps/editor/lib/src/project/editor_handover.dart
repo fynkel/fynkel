@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:path/path.dart' as p;
 
 import '../play/code_reload.dart';
@@ -43,6 +44,22 @@ void killEditorProcess(int pid) {
   );
 }
 
+/// This window's frame, `[x, y, w, h]` in screen points (origin bottom
+/// left): the project editor opens in its place, so the handover looks like
+/// this window turning into it. Null in full screen, or without the runner.
+Future<List<double>?> currentWindowFrame() async {
+  try {
+    final f = await const MethodChannel(
+      'fynkel.editor/window',
+    ).invokeListMethod<num>('frame').timeout(const Duration(milliseconds: 300));
+    return f == null || f.length != 4 ? null : [for (final v in f) v.toDouble()];
+  } on Object {
+    // No runner (a test: no answer at all), or one without "frame": the
+    // editor opens where it did.
+    return null;
+  }
+}
+
 enum HandoverState { building, running, failed, cancelled }
 
 /// One handover: the process started and what its status file says.
@@ -54,6 +71,7 @@ final class EditorHandover extends ChangeNotifier {
     required this.flutter,
     required this.start,
     this.kill = killEditorProcess,
+    this.windowFrame = currentWindowFrame,
     this.interval = const Duration(milliseconds: 300),
   });
 
@@ -63,7 +81,9 @@ final class EditorHandover extends ChangeNotifier {
   final String flutter;
   final StartEditorProcess start;
   final void Function(int pid) kill;
+  final Future<List<double>?> Function() windowFrame;
   final Duration interval;
+  List<double>? _frame;
 
   String get _host => p.join(dir, '.fynkel', 'editor_host');
   String get statusPath => p.join(_host, 'status.json');
@@ -76,12 +96,22 @@ final class EditorHandover extends ChangeNotifier {
   int? pid;
   CodeReloadStatus? _status;
 
-  List<String> get arguments => ['editor', dir, '--handover', '--root', root, '--flutter', flutter];
+  List<String> get arguments => [
+    'editor',
+    dir,
+    '--handover',
+    '--root',
+    root,
+    '--flutter',
+    flutter,
+    if (_frame case final f?) ...['--window-frame', f.map((v) => v.round()).join(',')],
+  ];
 
   /// Starts the project editor and follows it.
   Future<void> begin() async {
     try {
       Directory(_host).createSync(recursive: true);
+      _frame = await windowFrame();
       pid = await start(cli, arguments, log: logPath);
     } on Object catch (e) {
       _set(HandoverState.failed, 'Could not start `fynkel editor`: $e');
@@ -207,8 +237,9 @@ class _HandoverDialogState extends State<_HandoverDialog> {
           children: [
             if (!failed) ...[
               const Text(
-                'Building its editor, with the game compiled in, so Play runs inside it. '
-                'The first time takes about a minute; later opens are quick. This window closes when it is up.',
+                'Starting its editor, with the game compiled in, so Play runs inside it. '
+                'The first time builds it (15–30 s); later opens take about a second. '
+                'The project editor opens in this window\'s place.',
               ),
               const SizedBox(height: 12),
               const LinearProgressIndicator(),

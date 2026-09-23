@@ -56,6 +56,7 @@ void main() {
       root: '/x/root',
       flutter: '/x/flutter',
       interval: const Duration(milliseconds: 10),
+      windowFrame: () async => [120, 80.4, 1400, 900],
       start: (exe, args, {required log}) async {
         started.add([exe, ...args, log]);
         return 4242;
@@ -73,6 +74,9 @@ void main() {
       '/x/root',
       '--flutter',
       '/x/flutter',
+      // The project editor opens where this window is.
+      '--window-frame',
+      '120,80,1400,900',
       p.join(dir, '.fynkel', 'editor_host', 'editor.log'),
     ]);
     await Future<void>.delayed(const Duration(milliseconds: 40));
@@ -108,7 +112,10 @@ void main() {
       final shell = tester.state<EditorShellState>(find.byType(EditorShell));
       var done = false;
       unawaited(shell.openProjectDir(dir).then((_) => done = true));
-      await tester.pump();
+      // The window's frame is asked for first (the runner's channel).
+      for (var i = 0; i < 10 && started.isEmpty; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
       await tester.pump();
       expect(started.single.take(3), ['editor', dir, '--handover']);
       expect(find.text('Opening coins…'), findsOneWidget);
@@ -126,19 +133,26 @@ void main() {
     });
 
     testWidgets('a build that fails says why; Open Without the Game opens it here', (tester) async {
+      final started = <List<String>>[];
       await pumpLarge(
         tester,
         shellApp(
           prefs: prefs,
           projects: {dir: FakeProject(dir: dir)},
           isGame: isGameProject,
-          startEditor: (exe, args, {required log}) async => 4242,
+          startEditor: (exe, args, {required log}) async {
+            started.add(args);
+            return 4242;
+          },
         ),
       );
       final shell = tester.state<EditorShellState>(find.byType(EditorShell));
       var done = false;
       unawaited(shell.openProjectDir(dir).then((_) => done = true));
-      await tester.pump();
+      // The window's frame is asked for first (the runner's channel).
+      for (var i = 0; i < 10 && started.isEmpty; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
       await tester.pump();
       await tester.runAsync(() async => _status(dir, 2, 'failed', message: "lib/main.dart:3: Error: Expected ';'"));
       await tester.pump(const Duration(milliseconds: 400));

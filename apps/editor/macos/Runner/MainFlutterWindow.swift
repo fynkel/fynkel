@@ -17,7 +17,15 @@ class MainFlutterWindow: NSWindow {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
     self.contentViewController = flutterViewController
-    self.setFrame(windowFrame, display: true)
+    let handedOver = Self.handedOverFrame()
+    self.setFrame(handedOver ?? windowFrame, display: true)
+    if let frame = handedOver {
+      // Again once on screen: Stage Manager places a new window itself.
+      DispatchQueue.main.async { [weak self] in self?.setFrame(frame, display: true) }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+        self?.setFrame(frame, display: true)
+      }
+    }
 
     titlebarAppearsTransparent = true
     titleVisibility = .hidden
@@ -43,6 +51,14 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "isFullScreen":
         result(self.styleMask.contains(.fullScreen))
+      case "frame":
+        // For a handover: the project editor opens where this window is.
+        if self.styleMask.contains(.fullScreen) {
+          result(nil)
+        } else {
+          let f = self.frame
+          result([f.origin.x, f.origin.y, f.size.width, f.size.height])
+        }
       case "startDrag":
         if let event = NSApp.currentEvent {
           self.performDrag(with: event)
@@ -76,6 +92,19 @@ class MainFlutterWindow: NSWindow {
     }
 
     super.awakeFromNib()
+  }
+
+  /// The frame of the editor that handed a project over to this one
+  /// (`FYNKEL_WINDOW_FRAME` = "x,y,w,h", screen points, origin bottom
+  /// left), so the new window takes the old one's place (ADR-0021 P3c).
+  /// Ignored unless it is on a screen.
+  private static func handedOverFrame() -> NSRect? {
+    guard let spec = ProcessInfo.processInfo.environment["FYNKEL_WINDOW_FRAME"] else { return nil }
+    let v = spec.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+    guard v.count == 4, v[2] >= 200, v[3] >= 150 else { return nil }
+    let frame = NSRect(x: v[0], y: v[1], width: v[2], height: v[3])
+    guard NSScreen.screens.contains(where: { $0.visibleFrame.intersects(frame) }) else { return nil }
+    return frame
   }
 
   /// What a double-click on a title bar does, per System Settings → Desktop &
