@@ -69,6 +69,7 @@ const FILES: &[TemplateFile] = &[
     text!("AGENTS.md", "AGENTS.md.tmpl"),
     text!("fynkel.project.json", "fynkel.project.json.tmpl"),
     text!("lib/main.dart", "lib/main.dart.tmpl"),
+    text!("lib/fynkel_game.dart", "lib/fynkel_game.dart"),
     text!("lib/game/game.dart", "lib/game/game.dart.tmpl"),
     text!("lib/game/spinner.dart", "lib/game/spinner.dart"),
     text!("lib/game/mover.dart", "lib/game/mover.dart"),

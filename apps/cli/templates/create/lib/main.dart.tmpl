@@ -27,6 +27,11 @@
 // World labels: a `ProjectionLayer` pins `WorldLabel`s to the Cube and the
 // Crate through the world's bounded projection view (one call per frame,
 // no rebuilds).
+// One entry point (ADR-0021): `main` runs lib/fynkel_game.dart's
+// `buildGame` with the launch from the environment; the editor's Play
+// mounts the same `buildGame` in its Game view with the open project and
+// scene. Quit with `FynkelApplication.quit()`, never `exit()`: in the
+// editor it ends Play instead of closing the editor.
 
 import 'dart:io';
 
@@ -35,6 +40,7 @@ import 'package:flutter/services.dart';
 import 'package:fynkel/fynkel.dart' show FramePlan, FynkelLoadError, SettingsStore, SystemKind, SystemTime, Vec2, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
+import 'fynkel_game.dart';
 import 'game/game.dart';
 import 'game/hud_model.dart';
 import 'game/spinner.dart';
@@ -42,23 +48,31 @@ import 'game/spinner.dart';
 /// `FYNKEL_CAPTURE=1` prints the stats line once a second (benchmarks).
 final bool capturing = (Platform.environment['FYNKEL_CAPTURE'] ?? '').isNotEmpty;
 
-void main() => runApp(const GameApp());
+void main() => runApp(buildGame(FynkelLaunch.fromEnvironment()));
 
 class GameApp extends StatelessWidget {
-  const GameApp({super.key});
+  const GameApp({super.key, this.launch = const FynkelLaunch()});
+
+  /// Where to start (see [GamePage.launch]).
+  final FynkelLaunch launch;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: '{{title}}',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData.dark(useMaterial3: true),
-      home: const GamePage(),
+      home: GamePage(launch: launch),
     );
   }
 }
 
 class GamePage extends StatefulWidget {
-  const GamePage({super.key});
+  const GamePage({super.key, this.launch = const FynkelLaunch()});
+
+  /// The project to load and the scene to start in: from the environment
+  /// in a build, the open project and scene in the editor's Play.
+  final FynkelLaunch launch;
 
   @override
   State<GamePage> createState() => _GamePageState();
@@ -117,10 +131,11 @@ class _GamePageState extends State<GamePage> {
 
   Future<void> _start() async {
     try {
-      final dir = projectDirectory();
+      final launch = widget.launch;
+      final dir = launch.projectDir;
       final settings = SettingsStore.defaultPath('{{title}}');
       if (dir != null && Directory(dir).existsSync()) {
-        _game = Game.load(dir, settingsPath: settings);
+        _game = Game.load(dir, cacheDir: launch.cacheDir, settingsPath: settings);
       } else {
         // Not on the machine that holds the project (a device): the cache
         // the app bundles, or nothing to show.
@@ -135,6 +150,10 @@ class _GamePageState extends State<GamePage> {
         }
         _game = Game.load(dir ?? '(bundled)', cacheDir: cache, settingsPath: settings);
       }
+      // The editor's Play (or FYNKEL_SCENE): the open scene instead of the
+      // startup scene, loaded at the first frame.
+      final start = launch.startScene;
+      if (start != null && start != _game!.scenes.current) _game!.scenes.transition(start);
       // The viewport draws from the world's asset store (the cooked cache
       // the scene came from); scene entities without a mesh stay invisible
       // (placeholders off) as they will in the shipped game.

@@ -1488,7 +1488,8 @@ my_game/
   AGENTS.md  README.md         layout, every command, the validate → codegen → build → test loop, do/don't
   lib/main.dart                the app: `FynkelGameView` over the project's cooked cache (loop + viewport) with a HUD overlay; FYNKEL_PROJECT on this machine, the bundled cache on a device — `FynkelInputCapture` feeds the world (keys, mouse, gamepad), `TouchOverlay.fromActions` on phones, the `pause` action pauses the loop
   fynkel_cache/README.md       keep file: the cook stages the cache here and pubspec.yaml bundles the directory as assets (the rest git-ignored)
-  lib/game/game.dart           `Game.load(dir)`: World, `registerBehaviours(world.registry)`, `loadProject`; `projectDirectory()`
+  lib/fynkel_game.dart         `buildGame(FynkelLaunch)`: the one entry point — main.dart runs it with `FynkelLaunch.fromEnvironment()`, the editor's Play mounts it (ADR-0021)
+  lib/game/game.dart           `Game.load(dir)`: World, `registerBehaviours(world.registry)`, `loadProject`
   lib/game/spinner.dart        `@FynkelBehaviour(id: 'game.Spinner')` with `@Expose` speed/axis
   lib/game/mover.dart          `game.Mover`: walks the cube with `Input.action2D('move')`, hops on `Input.pressed('jump')` (input.md)
   lib/generated/               behaviours.g.dart + .g.json, exactly what `fynkel codegen --project .` emits

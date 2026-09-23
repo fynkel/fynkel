@@ -52,6 +52,7 @@ fn a_fresh_project_validates_and_runs_headlessly() {
         "AGENTS.md",
         "README.md",
         "lib/main.dart",
+        "lib/fynkel_game.dart",
         "lib/game/game.dart",
         "lib/game/spinner.dart",
         "lib/generated/behaviours.g.dart",
