@@ -133,7 +133,8 @@ what the read-only test drives. Documents behind their kind's
 Project → Migration Preview… ⌥⌘M): per document the kind and
 `vFrom → vTo`, the steps `fynkel migrate` would apply (id and description),
 the unified diff, any diagnostics, and the command to run
-(`fynkel migrate <dir>`, with a Copy button). It comes from the session's
+(`fynkel migrate <dir>`, followed by `&& fynkel project lock --project <dir>`
+when the lock names another build too; with a Copy button). It comes from the session's
 `migrations` query and **writes nothing** — the editor never migrates on
 its own; `fynkel migrate` keeps `<file>.bak`.
 
@@ -251,12 +252,20 @@ its detail (document, pointer, suggestion, related). Double-click, Enter or
 `{column}` filled in (presets for VS Code, Cursor, Zed and
 IntelliJ/Android Studio; any template works); a failing IDE launch is
 shown in the panel, not swallowed. Copy puts the selected line (or every
-visible line) on the clipboard.
+visible line) on the clipboard. A project from an older build does not
+bury the list: what follows from that — `FYN-D0016` documents behind their
+format, whatever those documents report (they are checked against the
+current schema), `FYN-P0011` lock mismatches — is folded under one strip
+("This project is from an older build: N documents use an older format
+and the lock was written by another build. M diagnostics follow from
+that.") with **Preview migration…** and **Show them**; every other
+diagnostic lists as usual and the counts stay whole.
 
 **Preferences** (`lib/src/prefs/preferences.dart`;
 `~/Library/Application Support/Fynkel Editor/preferences.json` on macOS,
 `$XDG_CONFIG_HOME/fynkel-editor/` elsewhere): theme (system/light/dark),
-the IDE command, the CLI, checkout and Flutter paths when detection is not
+density, whether a Scene view scroll or pinch zooms toward the pointer
+(on) or the view's centre, the IDE command, the CLI, checkout and Flutter paths when detection is not
 enough, Recent (with Clear), Reset layout. Saved on change; the launcher's
 checks re-run when a tool path changes.
 
@@ -783,12 +792,20 @@ follow; the matrices are the runtime's own (`perspectiveMatrix` and
 0..1 depth), so the picture through the editor camera and the picture
 through the scene camera differ only by the camera. Mouse: **⌥-drag
 orbit**, **⌥⇧-drag or middle-drag pan** (the pivot slides in the view
-plane, one pixel one pixel), **⌥-right-drag or scroll dolly** (never
-through the pivot; `minDistance` 5 cm; ⇧-scroll pans), and on a
+plane, one pixel one pixel), **⌥-right-drag or scroll dolly** (⇧-scroll
+pans; inside `throughDistance` 0.5 m a perspective dolly keeps its pace
+and pushes the pivot ahead — Unity's zoom-through — instead of stalling;
+a scroll or a pinch scales about the point under the pointer on the
+pivot's plane, so it stays under the pointer, and the zoom-through
+follows the pointer's ray — the preference turns that off for the
+centre; ⌥-right-drag stays on the centre), and on a
 trackpad **two-finger scroll or pinch dolly** — macOS sends both as one
 pan-zoom gesture, not as wheel events, so the panel listens for it
 (`panZoomStart/Update/End`: the scroll part dollies exactly as the wheel
-does, a pinch by its own ratio, spread fingers bringing the view closer),
+does, a pinch by its own ratio, spread fingers bringing the view closer;
+Flutter drops the system's momentum events, so the scroll coasts on the
+fingers' lift-off velocity, decaying at 2/s, until a touch, a wheel, a
+click or a frame stops it),
 **right-drag look + WASDQE fly**
 (a 16 ms timer while the button is down; ⇧ four times faster; the speed
 scales with the distance). Keys: **F** frames the selection (its outline
@@ -1008,9 +1025,13 @@ says when the grid, icons or an outline are in the picture).
 ### Commands
 
 Every command below is first-class (menu entry, palette entry, shortcut,
-stable id); the ones that write do so in exactly one transaction. Scene
-hotkeys without modifiers (Q W E R X F H L 5 Esc ⌫ WASDQE) belong to the
-viewport's focus node and never fire in a text field.
+stable id); the ones that write do so in exactly one transaction. The
+scene keys without modifiers (Q W E R, X, F / ⇧F, H / ⇧H, L, 5) are the
+commands' bare keys (`EditorCommand.key`): they work from any panel — the
+Hierarchy, the Inspector's empty space, the Project browser — after that
+panel's own keys, never while a text field has focus, and are not native
+menu key equivalents (the menu bar would take the letter from every
+field). Esc, ⌫ and WASDQE stay the viewport's own.
 
 ### What item 6 does not do
 
