@@ -177,8 +177,8 @@ While the game runs in the Game view:
   (its entities are `runtime:<handle>`; only what a loaded scene spawned,
   cooked prefab instances included, has authoring ids); a behaviour also
   records the component id it was authored as (`authoredComponentId`),
-  which Apply to Scene needs. Still to do in L3: a paused Game view does
-  not redraw after a live write.
+  which Apply to Scene needs. A paused Game view not redrawing after a
+  live write was left to L3 (done there).
 - **L2 — See it.** `PlayDocument`; the Hierarchy and Inspector switch
   during Play, read-only; selection carried both ways; the play-mode tint
   and the header. Measure the refresh cost.
@@ -197,6 +197,22 @@ While the game runs in the Game view:
   `initState` sent the Play log a record during a build.
 - **L3 — Change it.** Editing native components and behaviour fields,
   add/remove component, rename and reparent; at once when paused.
+  **Done 2026-09-23** (`a354783` `FynkelPlayControl.redraw`, `d8b7213`
+  the live `parent` and `destroy` calls, `ad5bb1e` `LiveWorld`, `f88f4c2`
+  editor). The play document takes the editor's own commands — `setField`
+  (a name or a pointer), `unsetField`, `assignAsset`, `addComponent`,
+  `removeComponent`, `renameObject`, `reparentObject` (with its index; the
+  Hierarchy's `setField`s keep the world pose), `deleteObject` (the
+  subtree goes) — and writes each to the world at once; scripts through
+  their field setters, `addBehaviourFromData` and `destroy`. Every write
+  redraws a paused Game view. A gizmo drag moves the live Transforms and
+  puts them back before its transaction writes the end, as the edit
+  preview does. Where it differs: delete is in (the note had rename and
+  reparent only); a transaction stops at its first refusal and keeps
+  what went before (the world has no undo); create, duplicate, prefab
+  commands and undo are refused while the game runs; a removed script
+  goes at the world's next step and is hidden until then; a rename does
+  not reach `GameObject.name`, which is fixed at spawn in package:fynkel.
 - **L4 — Keep it.** Apply to Scene / Apply Field to Scene, prefab
   overrides included.
 - **L5 — Fly around it.** The Scene view on the running world: the
@@ -214,8 +230,8 @@ While the game runs in the Game view:
   9: `set_edit_camera` stays as it is (the per-viewport camera is added,
   nothing retired); a hit names the entity itself, since a running prefab
   instance has no anchor to stand for it; the editor's hidden flags do
-  not hide anything in the game's world; gizmo handles show but do not
-  drag until L3. Cost on the Playground (180 entities, release native,
+  not hide anything in the game's world; gizmo handles showed but did
+  not drag until L3. Cost on the Playground (180 entities, release native,
   JIT): the outline 0.05 ms a frame, with the icons (895 lines) 1.1 ms —
   the same call the edit Scene view makes, now every frame while the
   game runs.
