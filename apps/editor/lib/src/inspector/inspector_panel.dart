@@ -506,6 +506,45 @@ class _InspectorPanelState extends State<InspectorPanel> {
 
 /// The card's Edit toggle (item 9g): the component's handles in the Scene
 /// view — a light's range, a collider's size, a camera's field of view.
+/// During Play: a right click on a field row (its label — a text box keeps
+/// its own menu) offers Apply Field to Scene (ADR-0021 P7 L4).
+class _ApplyFieldMenu extends StatelessWidget {
+  const _ApplyFieldMenu({required this.model, required this.slot, required this.field, required this.child});
+
+  final InspectorModel model;
+  final ComponentSlot slot;
+  final String field;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    behavior: HitTestBehavior.translucent,
+    onSecondaryTapUp: (d) async {
+      final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+      final at = overlay.globalToLocal(d.globalPosition);
+      final why = model.cannotApplyToScene(slot);
+      final v = await showMenu<String>(
+        context: context,
+        popUpAnimationStyle: AnimationStyle.noAnimation,
+        position: RelativeRect.fromRect(at & const Size(1, 1), Offset.zero & overlay.size),
+        items: [
+          PopupMenuItem(
+            value: 'apply',
+            enabled: why == null,
+            height: 28,
+            child: Tooltip(
+              message: why ?? 'Write this running value into the scene (its tab goes unsaved)',
+              child: const Text('Apply Field to Scene'),
+            ),
+          ),
+        ],
+      );
+      if (v == 'apply') model.applyToScene(slot, field: field);
+    },
+    child: child,
+  );
+}
+
 class _EditInSceneButton extends StatelessWidget {
   const _EditInSceneButton({required this.model, required this.slot});
 
@@ -640,6 +679,19 @@ class _ComponentCard extends StatelessWidget {
                         if (spec.isBehaviour)
                           const PopupMenuItem(value: 'open', height: 28, child: Text('Open Script')),
                         const PopupMenuItem(value: 'copyType', height: 28, child: Text('Copy Type Name')),
+                        if (model.showsPlay) ...[
+                          const PopupMenuDivider(),
+                          PopupMenuItem(
+                            value: 'applyToScene',
+                            enabled: model.cannotApplyToScene(slot) == null,
+                            height: 28,
+                            child: Tooltip(
+                              message: model.cannotApplyToScene(slot) ??
+                                  'Write these running values into the scene (its tab goes unsaved)',
+                              child: const Text('Apply to Scene'),
+                            ),
+                          ),
+                        ],
                         const PopupMenuDivider(),
                         PopupMenuItem(
                           value: 'remove',
@@ -670,6 +722,8 @@ class _ComponentCard extends StatelessWidget {
         model.removeComponent(slot);
       case 'reset':
         model.resetToDefaults(slot);
+      case 'applyToScene':
+        model.applyToScene(slot);
       case 'copyType':
         await Clipboard.setData(ClipboardData(text: slot.type));
       case 'open':
@@ -690,7 +744,8 @@ class _ComponentCard extends StatelessWidget {
     if (old != null && old.generation == model.generation && old.mixed == mixed && deepEquals(old.value, value)) {
       return old.widget;
     }
-    final w = RepaintBoundary(key: ValueKey('field.${slot.key}.$name'), child: build());
+    final row = model.showsPlay ? _ApplyFieldMenu(model: model, slot: slot, field: name, child: build()) : build();
+    final w = RepaintBoundary(key: ValueKey('field.${slot.key}.$name'), child: row);
     kept?[k] = (generation: model.generation, value: value, mixed: mixed, widget: w);
     return w;
   }

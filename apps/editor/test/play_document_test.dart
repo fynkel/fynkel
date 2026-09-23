@@ -4,6 +4,7 @@
 // Inspector on it while Play runs, with the selection carried both ways.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' as fynkel;
@@ -15,6 +16,7 @@ import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
 import 'package:fynkel_editor/src/inspector/inspector_model.dart';
 import 'package:fynkel_editor/src/inspector/field_widgets.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
+import 'package:fynkel_editor/src/play/apply_to_scene.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/live_preview.dart';
 import 'package:fynkel_editor/src/play/live_play.dart';
@@ -23,6 +25,7 @@ import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelLaunch, FynkelPlayControl, FynkelPlayScope;
 
 import 'inspector_test.dart' show nativeSchemas;
+import 'prefab_mode_test.dart' as prefab_fixtures;
 import 'support/fakes.dart';
 
 /// A running world in memory: rows, their native components, behaviours.
@@ -359,6 +362,130 @@ void main() {
     expect(doc.lastEdit!.affectedIds, ['runtime:99']);
     expect(doc.roots(), isNot(contains('runtime:99')));
     expect(doc.refreshes, 4);
+  });
+
+  test("Apply to Scene counts a float's noise as the same value and writes the shortest decimal", () {
+    const f = 0.10000000149011612; // 0.1 as a float, read back as a double
+    expect(sameValue(f, 0.1), isTrue);
+    expect(sameValue([f, 1, 2], [0.1, 1.0, 2]), isTrue);
+    expect(sameValue({'a': f}, {'a': 0.1}), isTrue);
+    expect(sameValue(-0.174108, -0.17410813), isTrue, reason: 'a renormalised rotation');
+    expect(sameValue(0.5, 0.49998248), isFalse, reason: 'a body that settled moved');
+    expect(sameValue(1000000.0, 1000000.5), isTrue);
+    expect(sameValue(0.1, 0.2), isFalse);
+    expect(sameValue([1, 2], [1, 2, 3]), isFalse);
+    expect(shortestFloats([f, 1.2000000476837158, 3, -0.5]), [0.1, 1.2, 3, -0.5]);
+    expect(shortestFloats({'a': 1.0, 'b': 'x'}), {'a': 1.0, 'b': 'x'});
+  });
+
+  testWidgets('Apply to Scene writes the running values into the scene tab: a field, a component, one added (L4)', (
+    tester,
+  ) async {
+    final project = FakeProject(dir: '/fake/game')..addDocument(scene());
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    final inspector = InspectorModel(tabs: tabs, project: project);
+    addTearDown(inspector.dispose);
+    final main = tabs.openDocument('main')!..setSelection(['robot']);
+    final live = running();
+    final play = LivePlay(tabs: tabs, backend: (_) => live);
+    addTearDown(play.dispose);
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    play.follow(world);
+    expect(inspector.showsPlay, isTrue);
+    expect(inspector.playScene, same(main));
+
+    // The game moved the robot (a float's noise on x) and scaled it.
+    live.write('set', {
+      'id': 'robot',
+      'type': 'fynkel.Transform',
+      'data': {
+        'position': [1.100000023841858, 2, 0],
+        'rotation': [0, 0, 0, 1],
+        'scale': [2, 2, 2],
+      },
+    });
+    play.document!.refresh();
+    ComponentSlot slot(String type) => inspector.slots.firstWhere((s) => s.type == type);
+    Map<String, Object?> sceneComponents() =>
+        main.document.entities(['robot']).entities['robot']!['components'] as Map<String, Object?>;
+    Object? sceneData(String id) => (sceneComponents()[id] as Map)['data'];
+
+    expect(inspector.cannotApplyToScene(slot('fynkel.Transform')), isNull);
+    expect(inspector.applyToScene(slot('fynkel.Transform'), field: 'position'), isTrue);
+    expect(main.document.dirty, isTrue, reason: 'the scene tab goes unsaved');
+    expect((sceneData('t') as Map)['position'], [1.1, 2, 0], reason: 'the shortest decimal of the float');
+    expect((sceneData('t') as Map)['scale'], [1, 1, 1], reason: 'Apply Field writes that field alone');
+
+    expect(inspector.applyToScene(slot('fynkel.Transform')), isTrue);
+    expect((sceneData('t') as Map)['scale'], [2, 2, 2]);
+    expect(inspector.applyToScene(slot('fynkel.Transform')), isFalse);
+    expect(inspector.lastError, contains('Nothing to apply'));
+
+    // A script component the scene does not have is added with its values.
+    expect(inspector.applyToScene(slot('game.Spinner')), isTrue);
+    final added = sceneComponents().values.whereType<Map>().where((c) => c['type'] == 'game.Spinner').single;
+    expect(added['data'], {'speed': 2.5});
+    expect(main.document.canUndo, isTrue, reason: 'an ordinary transaction');
+
+    // What the game made is not in the scene.
+    tabs.live!.setSelection(['runtime:99']);
+    expect(inspector.cannotApplyToScene(slot('fynkel.Transform')), contains('game made'));
+
+    // The card menu and a field's right click offer it during Play.
+    tabs.live!.setSelection(['robot']);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: InspectorPanel(model: inspector))));
+    await tester.tap(find.byKey(const ValueKey('card.menu.fynkel.Transform#0')));
+    await tester.pumpAndSettle();
+    expect(find.text('Apply to Scene'), findsOneWidget);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Position').first, buttons: kSecondaryButton);
+    await tester.pumpAndSettle();
+    expect(find.text('Apply Field to Scene'), findsOneWidget);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
+    play.follow(null);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('Apply to Scene on an entity of a prefab instance writes an override on the instance (L4)', () {
+    final project = FakeProject(dir: '/fake/game')..schemas = prefab_fixtures.nativeSchemas();
+    project.addDocument(prefab_fixtures.cratePrefab());
+    final sceneDoc = project.addDocument(prefab_fixtures.scene());
+    final tabs = DocumentTabs(project: project);
+    addTearDown(tabs.dispose);
+    final inspector = InspectorModel(tabs: tabs, project: project);
+    addTearDown(inspector.dispose);
+    tabs.openDocument('main');
+    final live = FakeLive()..add('i1:mesh', 'Mesh', handle: 5, types: ['fynkel.Transform', 'fynkel.Light']);
+    live.write('set', {
+      'id': 'i1:mesh',
+      'type': 'fynkel.Light',
+      'data': {
+        'kind': 'point',
+        'color': [1, 1, 1],
+        'intensity': 7,
+      },
+    });
+    final play = LivePlay(tabs: tabs, backend: (_) => live);
+    addTearDown(play.dispose);
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    play.follow(world);
+    tabs.live!.setSelection(['i1:mesh']);
+
+    final light = inspector.slots.firstWhere((s) => s.type == 'fynkel.Light');
+    expect(inspector.cannotApplyToScene(light), isNull, reason: "found through its instance's expansion");
+    expect(inspector.applyToScene(light, field: 'intensity'), isTrue);
+    final overrides = (sceneDoc.entitiesView['inst']!['prefab'] as Map)['overrides'] as List;
+    expect(
+      overrides.where((o) => (o as Map)['field'] == 'intensity').single,
+      {'op': 'setField', 'entity': 'mesh', 'component': 'l', 'field': 'intensity', 'value': 7},
+    );
+    expect(inspector.applyToScene(light), isFalse, reason: 'the rest is as the scene has it');
+    play.follow(null);
   });
 
   testWidgets('during Play the Hierarchy and the Inspector show the running game; Stop brings the scene back', (

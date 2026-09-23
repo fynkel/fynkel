@@ -29,6 +29,7 @@ import 'package:path/path.dart' as p;
 
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
+import '../play/apply_to_scene.dart';
 import '../play/play_document.dart' show PlayDocument;
 import '../project/editor_project.dart';
 import '../project_browser/project_browser_model.dart' show AssetPreview;
@@ -1192,6 +1193,75 @@ final class InspectorModel extends ChangeNotifier {
     if (a?.ok ?? false) _errors.removeWhere((k, _) => k.startsWith('${slot.key}/'));
     notifyListeners();
     return a?.ok ?? false;
+  }
+
+  // ── Apply to Scene (ADR-0021 P7 L4) ─────────────────────────────────────
+
+  /// Whether the Inspector shows the running game (Apply to Scene is
+  /// offered then).
+  bool get showsPlay => _tab?.document is PlayDocument;
+
+  /// The open tab of the scene the game was started from, while the
+  /// Inspector shows the running game.
+  OpenDocument? get playScene {
+    final doc = _tab?.document;
+    if (doc is! PlayDocument) return null;
+    final scene = doc.scene;
+    return scene == null ? null : tabs.open.where((t) => identical(t.document, scene)).firstOrNull;
+  }
+
+  /// Why the slot's running values cannot be applied to the scene, or null.
+  String? cannotApplyToScene(ComponentSlot slot) {
+    final scene = playScene;
+    if (scene == null) return 'The scene the game was started from is not open.';
+    if (scene.document.readOnly != null) return 'The scene is read-only.';
+    for (final i in slot.instances) {
+      if (sceneNodeOf(scene, i.entityId) == null) return 'The game made this object; it is not in the scene.';
+    }
+    return null;
+  }
+
+  /// Apply to Scene: the slot's running values (all of them, or only
+  /// [field]'s top-level key) written into the scene the game was started
+  /// from — one transaction on its tab, which goes dirty. Only what
+  /// differs from the scene is written.
+  bool applyToScene(ComponentSlot slot, {String? field}) {
+    final scene = playScene;
+    final errorKey = field == null ? null : '${slot.key}/${_topLevel(field)}';
+    String? why = cannotApplyToScene(slot);
+    final commands = <Map<String, Object?>>[];
+    if (why == null) {
+      final defaults = (slot.spec.isBehaviour ? slot.spec.schemaDefaults() : project.componentDefaults(slot.type)) ?? {};
+      try {
+        for (final i in slot.instances) {
+          commands.addAll(
+            applyToSceneCommands(
+              scene!,
+              (entity: i.entityId, type: slot.type, version: i.version, index: slot.index, data: i.data),
+              defaults: defaults,
+              field: field,
+            ),
+          );
+        }
+      } on StateError catch (e) {
+        why = e.message;
+      }
+    }
+    if (why == null && commands.isEmpty) why = 'Nothing to apply: the scene has these values.';
+    if (why == null) {
+      final a = scene!.transaction(commands);
+      if (a == null || !a.ok) why = scene.lastError ?? 'The scene refused it.';
+    }
+    // A field's problem shows under the field, a component's above the cards.
+    if (errorKey == null) {
+      lastError = why;
+    } else if (why == null) {
+      _errors.remove(errorKey);
+    } else {
+      _errors[errorKey] = why;
+    }
+    notifyListeners();
+    return why == null;
   }
 
   /// Renames the single selected entity. A derived entity is named by its
