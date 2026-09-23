@@ -49,10 +49,19 @@ import 'scene_math.dart';
 /// when another one drew last.
 final _worldCamera = Expando<(SceneTab, int)>('scene.worldCamera');
 
+/// Someone other than a Scene view (the Game view's camera preview,
+/// ADR-0021) set [preview]'s camera: every view sets its own again before
+/// its next frame.
+void releaseWorldCamera(PreviewBackend preview) => _worldCamera[preview] = null;
+
 /// The Scene view copies of one project (item 9e).
 final class SceneViews {
   final _views = <SceneViewModel>{};
   int? _recookedAt;
+
+  /// Told of every change a view makes to a world (null: every world) —
+  /// the Game view's camera preview draws again.
+  final worldListeners = <void Function(PreviewBackend? preview)>{};
 
   /// A view changed [preview]'s world (null: every world): the others
   /// showing it draw again. [reset] when the world was rebuilt, so its
@@ -60,6 +69,9 @@ final class SceneViews {
   void changed(SceneViewModel from, PreviewBackend? preview, {bool reset = false}) {
     for (final v in List.of(_views)) {
       if (v != from) v._worldChanged(preview, reset: reset);
+    }
+    for (final l in List.of(worldListeners)) {
+      l(preview);
     }
   }
 

@@ -29,6 +29,7 @@ import 'play/code_reload.dart';
 import 'play/editor_game.dart';
 import 'play/game_console.dart';
 import 'play/game_panel.dart';
+import 'play/game_preview.dart';
 import 'play/game_record.dart';
 import 'play/play_prompt.dart';
 import 'play/play_session.dart';
@@ -272,6 +273,9 @@ class EditorShellState extends State<EditorShell> {
   /// the project's game is compiled into this editor (`fynkel editor`).
   GameRun? gameRun;
 
+  /// The Game view between runs: the active camera's picture (P4b).
+  GamePreview? _gamePreview;
+
   void _onCodeReload() {
     final r = codeReload?.last;
     if (r == null) return;
@@ -386,7 +390,7 @@ class EditorShellState extends State<EditorShell> {
       icon: FIcons.sportsEsports,
       fullTitle: 'Game View',
       home: PanelHome.center,
-      builder: (_, _) => GamePanel(run: gameRun),
+      builder: (_, _) => GamePanel(run: gameRun, preview: _gamePreview, showViewport: widget.sceneViewport),
     ),
     PanelSpec(
       id: PanelRegistry.inspector,
@@ -1617,6 +1621,7 @@ class EditorShellState extends State<EditorShell> {
       editorState = es;
       _sceneOps = h;
       _sceneViews = SceneViews();
+      _gamePreview = GamePreview(tabs: t, scene: () => scene, views: _sceneViews);
       // The first copies, then any other the saved layout has.
       for (final base in _creationOrder) {
         _newCopyModel(base);
@@ -2300,6 +2305,8 @@ class EditorShellState extends State<EditorShell> {
   /// Every copy's models, the Scene views first (they use the Hierarchy
   /// operations) — the project is closing.
   void _disposeCopies() {
+    _gamePreview?.dispose();
+    _gamePreview = null;
     for (final sv in _scenes.values) {
       sv.dispose();
     }

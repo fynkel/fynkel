@@ -1466,8 +1466,20 @@ the editor camera and its tools.
 - **The plain editor** (no game compiled in) has the same panel, which says
   so. Play there still runs the game as its own app (`fynkel run`).
 
-Not yet: a live picture of the active camera in the Game view between runs
-(P4b), and playing unsaved documents (P5).
+- **Between runs** the Game view shows what the scene's active camera
+  sees, live (P4b). The active camera is the runtime's rule: the enabled
+  `fynkel.Camera` with the highest `priority`, the first in the document on
+  a tie. The picture is the Scene view's preview world of the focused
+  scene, drawn through that camera in its own viewport with no grid, gizmos
+  or icons. It redraws when a view changes the world (an edit, a drag, a
+  reload), when another document comes forward, and when the panel resizes.
+  A hidden Game tab draws nothing and catches up when shown. A camera a
+  script moves at start-up is shown where the scene puts it. A scene
+  without a camera says so, and so does the plain editor, where Play opens
+  its own window. The caption names the camera.
+
+Not yet: playing unsaved documents (P5). The preview ignores a camera's
+`culling_mask`, and the editor's hidden entities stay hidden in it.
 
 ## The look (item 9a)
 

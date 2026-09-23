@@ -18,6 +18,7 @@ import '../commands/commands.dart' show KeyboardOwner;
 import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'editor_game.dart';
+import 'game_preview.dart';
 
 /// One project's in-editor Play: whether the game is mounted, paused, and
 /// what it was launched with.
@@ -106,34 +107,29 @@ final class GameRun extends ChangeNotifier {
   }
 }
 
-/// The Game panel: the running game, or what Play will do.
+/// The Game panel: the running game, or — between runs — what the scene's
+/// active camera sees.
 class GamePanel extends StatelessWidget {
-  const GamePanel({super.key, required this.run});
+  const GamePanel({super.key, required this.run, this.preview, this.showViewport = true});
 
   /// Null in the plain editor (no game compiled in).
   final GameRun? run;
 
+  /// The camera's picture between runs; null before a project is open.
+  final GamePreview? preview;
+
+  /// False in widget tests (no Metal texture).
+  final bool showViewport;
+
   @override
   Widget build(BuildContext context) {
     final run = this.run;
-    if (run == null) {
-      return const _Idle(
-        title: 'The game runs in its own window',
-        detail:
-            'This editor was started without the project\'s game. Open the project with '
-            '`fynkel editor <dir>` to play it here, with Pause, Step and hot reload.',
-      );
-    }
+    if (run == null) return _between(context, playsHere: false);
     return ListenableBuilder(
       listenable: run,
       builder: (context, _) {
         final launch = run.launch;
-        if (launch == null) {
-          return const _Idle(
-            title: 'Press Play (⌘P)',
-            detail: 'The game runs here, starting in the scene open in the editor.',
-          );
-        }
+        if (launch == null) return _between(context, playsHere: true);
         return ColoredBox(
           color: Colors.black,
           child: KeyboardOwner(
@@ -144,6 +140,58 @@ class GamePanel extends StatelessWidget {
                 control: run.control,
                 child: KeyedSubtree(key: ValueKey(run.runs), child: run.game.build(launch)),
               ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _between(BuildContext context, {required bool playsHere}) {
+    final title = playsHere ? 'Press Play (⌘P)' : 'The game runs in its own window';
+    final hint = playsHere
+        ? 'The game runs here, starting in the scene open in the editor.'
+        : 'This editor was started without the project\'s game. Open the project with '
+              '`fynkel editor <dir>` to play it here, with Pause, Step and hot reload.';
+    final preview = this.preview;
+    if (preview == null) return _Idle(title: title, detail: hint);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        GamePreviewView(
+          preview: preview,
+          showViewport: showViewport,
+          placeholder: (message) => _Idle(title: title, detail: '$message\n\n$hint'),
+        ),
+        Positioned(left: 8, bottom: 6, child: _Caption(preview: preview, playsHere: playsHere)),
+      ],
+    );
+  }
+}
+
+/// "Main Camera · ⌘P plays here" under the picture.
+class _Caption extends StatelessWidget {
+  const _Caption({required this.preview, required this.playsHere});
+
+  final GamePreview preview;
+  final bool playsHere;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return ListenableBuilder(
+      listenable: preview,
+      builder: (context, _) {
+        final cam = preview.camera;
+        if (cam == null || preview.message != null) return const SizedBox.shrink();
+        return DecoratedBox(
+          decoration: BoxDecoration(color: t.window.withValues(alpha: .75), borderRadius: BorderRadius.circular(4)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            child: Text(
+              '${cam.name.isEmpty ? 'Camera' : cam.name} · ${playsHere ? '⌘P plays here' : 'Play opens its own window'}',
+              key: const Key('game.caption'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: t.textSecondary),
             ),
           ),
         );

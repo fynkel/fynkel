@@ -14,6 +14,7 @@ import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/commands/commands.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/game_panel.dart';
+import 'package:fynkel_editor/src/play/game_preview.dart';
 import 'package:fynkel_editor/src/play/play_session.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
@@ -43,6 +44,29 @@ class _Game extends StatelessWidget {
     );
   }
 }
+
+Map<String, Object?> _camera(int priority, {bool enabled = true}) => {
+  'type': 'fynkel.Camera',
+  'version': 1,
+  if (!enabled) 'enabled': false,
+  'data': {'projection': 'perspective', 'fov_y': 0.9, 'near': 0.2, 'far': 80, 'priority': priority},
+};
+
+/// A scene with three cameras: the highest priority wins, a disabled one
+/// never does.
+FakeDocument _scene() => FakeDocument(
+  path: '/fake/game/assets/scenes/main.scene.json',
+  id: 'main',
+  name: 'Main',
+  relativePath: 'scenes/main.scene.json',
+  entities: {
+    'low': FakeDocument.entity('Low Camera', position: [0, 1, 5], components: {'c': _camera(0)}),
+    'main': FakeDocument.entity('Main Camera', position: [0, 3, 12], components: {'c': _camera(2)}),
+    'tie': FakeDocument.entity('Tied Camera', position: [0, 3, 12], components: {'c': _camera(2)}),
+    'off': FakeDocument.entity('Off Camera', components: {'c': _camera(9, enabled: false)}),
+    'floor': FakeDocument.entity('Floor'),
+  },
+);
 
 EditorGame _game() => EditorGame(name: 'fake_game', projectDir: '/fake/game', build: _Game.new);
 
@@ -154,6 +178,48 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(shell.gameRun!.running, isFalse);
+    });
+
+    testWidgets('between runs the Game view shows what the active camera sees', (tester) async {
+      final project = FakeProject(dir: '/fake/game');
+      final doc = project.addDocument(_scene());
+      await pumpLarge(
+        tester,
+        shellApp(
+          prefs: prefs,
+          store: store,
+          projects: {'/fake/game': project},
+          initialProject: '/fake/game',
+          runner: runner,
+          game: _game(),
+        ),
+      );
+      final shell = tester.state<EditorShellState>(find.byType(EditorShell));
+      shell.openDocument(doc.id);
+      await tester.pumpAndSettle();
+      shell.workspace!.show(PanelRegistry.game);
+      await tester.pumpAndSettle();
+      final tab = shell.tabs!.focused!;
+      expect(activeCamera(tab)!.name, 'Main Camera', reason: 'highest priority, first on a tie, never a disabled one');
+      expect(find.text('Main Camera · ⌘P plays here'), findsOneWidget);
+
+      // Play replaces the picture with the game; Stop brings it back.
+      shell.registry.execute('play.start');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('game.caption')), findsNothing);
+      shell.registry.execute('play.stop');
+      await tester.pumpAndSettle();
+      expect(find.text('Main Camera · ⌘P plays here'), findsOneWidget);
+
+      // Without a camera the view says so.
+      shell.hierarchy!.select('low');
+      for (final id in ['main', 'tie', 'off']) {
+        shell.hierarchy!.select(id, toggle: true);
+      }
+      shell.registry.execute('hierarchy.delete');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Main has no camera'), findsOneWidget);
+      expect(find.byKey(const Key('game.caption')), findsNothing);
     });
 
     testWidgets('a cook that fails does not play', (tester) async {
