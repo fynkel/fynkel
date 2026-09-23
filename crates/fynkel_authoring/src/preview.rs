@@ -51,6 +51,8 @@ pub const ICON_RADIUS: f32 = 0.25;
 /// How far past its near plane a camera's frustum outline reaches (its
 /// `far` is 1 km by default — unreadable as an icon).
 pub const CAMERA_OUTLINE_DEPTH: f32 = 4.0;
+/// The alpha of the frustum of a camera that is not selected.
+pub const UNSELECTED_CAMERA_ALPHA: f32 = 0.35;
 /// Segments of every outline circle.
 const CIRCLE_SEGMENTS: usize = 64;
 /// Sync rounds before the preview gives up on the incremental path. Each
@@ -973,10 +975,21 @@ impl Preview {
     /// [`CAMERA_OUTLINE_DEPTH`] past its near plane at `aspect`, a
     /// collider's shape (box, sphere, capsule; a mesh collider its mesh's
     /// box) at its offset. Colours: lights their own colour, cameras
-    /// white, colliders green.
-    pub fn icon_lines(&self, world: &World, assets: Option<&Assets>, aspect: f32) -> Vec<Line> {
+    /// white, colliders green. Colliders are drawn for the `selected` ids
+    /// only (with their anchored instances), as Unity does — a level whose
+    /// every wall collides would otherwise be traced in green — and a
+    /// camera that is not selected draws its frustum at a third of its
+    /// alpha.
+    pub fn icon_lines(
+        &self,
+        world: &World,
+        assets: Option<&Assets>,
+        aspect: f32,
+        selected: &[Uuid],
+    ) -> Vec<Line> {
         let ecs = world.ecs();
         let hidden: HashSet<Entity> = world.edit_hidden().collect();
+        let selected: HashSet<Uuid> = self.with_anchored(selected).into_iter().collect();
         let mut out = Vec::new();
         for id in &self.order {
             let Some(&e) = self.ids.get(id) else {
@@ -1028,11 +1041,25 @@ impl Preview {
                 }
                 circle_lines(origin, forward, 0.2, color, &mut out);
             }
+            let is_selected = selected.contains(id);
             if let Ok(c) = ecs.copy::<Camera>(e) {
-                camera_lines(&rigid, &c, aspect, Vec4::ONE, &mut out);
+                let alpha = if is_selected {
+                    1.0
+                } else {
+                    UNSELECTED_CAMERA_ALPHA
+                };
+                camera_lines(
+                    &rigid,
+                    &c,
+                    aspect,
+                    Vec4::new(1.0, 1.0, 1.0, alpha),
+                    &mut out,
+                );
             }
-            if let Ok(c) = ecs.get::<Collider>(e) {
-                collider_lines(&m, &c, assets, Vec4::new(0.2, 1.0, 0.3, 1.0), &mut out);
+            if is_selected {
+                if let Ok(c) = ecs.get::<Collider>(e) {
+                    collider_lines(&m, &c, assets, Vec4::new(0.2, 1.0, 0.3, 1.0), &mut out);
+                }
             }
         }
         out

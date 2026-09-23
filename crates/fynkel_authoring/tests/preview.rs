@@ -10,7 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use fynkel_assets::Assets;
-use fynkel_authoring::preview::ICON_RADIUS;
+use fynkel_authoring::preview::{ICON_RADIUS, UNSELECTED_CAMERA_ALPHA};
 use fynkel_authoring::{AuthoringSession, Handle, Preview, Ray, View};
 use fynkel_core::components::{Camera, Projection};
 use fynkel_core::{SceneDescription, World, WorldConfig};
@@ -715,10 +715,26 @@ fn the_marquee_the_outlines_and_the_icons() {
     assert_eq!(lines[0].json().as_array().unwrap().len(), 10);
     // Icons: the camera's frustum and the sun's arrows are there; hidden
     // entities are left out.
-    let icons = p.icon_lines(&w, Some(&assets), 16.0 / 9.0);
+    let camera = Uuid::parse_str(CAMERA).unwrap();
+    let icons = p.icon_lines(&w, Some(&assets), 16.0 / 9.0, &[]);
     assert!(icons.len() > 20, "{}", icons.len());
-    p.set_hidden(&mut w, &[Uuid::parse_str(CAMERA).unwrap(), sun]);
-    let fewer = p.icon_lines(&w, Some(&assets), 16.0 / 9.0);
+    // A camera that is not selected draws its frustum faint; selected, at
+    // full alpha.
+    let faint = icons
+        .iter()
+        .filter(|l| l.color.w == UNSELECTED_CAMERA_ALPHA)
+        .count();
+    assert!(faint > 0);
+    let chosen = p.icon_lines(&w, Some(&assets), 16.0 / 9.0, &[camera]);
+    assert_eq!(chosen.len(), icons.len());
+    assert!(chosen.iter().all(|l| l.color.w != UNSELECTED_CAMERA_ALPHA));
+    // Colliders only for the selection: the floor's box appears when the
+    // floor is selected.
+    let floor = Uuid::parse_str(FLOOR).unwrap();
+    let with_floor = p.icon_lines(&w, Some(&assets), 16.0 / 9.0, &[floor]);
+    assert_eq!(with_floor.len(), icons.len() + 12);
+    p.set_hidden(&mut w, &[camera, sun]);
+    let fewer = p.icon_lines(&w, Some(&assets), 16.0 / 9.0, &[]);
     assert!(fewer.len() < icons.len());
     let stats = p.stats(&w);
     assert_eq!(stats["hidden"], 2);

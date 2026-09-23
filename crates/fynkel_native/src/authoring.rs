@@ -872,6 +872,10 @@ fn preview_call(
             };
             let slot = s.slot(handle)?;
             let mut lines = Vec::new();
+            let selected = outline
+                .as_ref()
+                .map(|(ids, _)| ids.clone())
+                .unwrap_or_default();
             if let Some((ids, color)) = outline {
                 lines.extend(slot.preview.outline_lines(
                     slot.world.core(),
@@ -885,6 +889,7 @@ fn preview_call(
                     slot.world.core(),
                     slot.world.assets(),
                     aspect,
+                    &selected,
                 ));
             }
             Ok(json!({
