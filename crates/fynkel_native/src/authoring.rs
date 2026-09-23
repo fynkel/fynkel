@@ -117,7 +117,7 @@ impl FynkelAuthoringSession {
         if let Some(a) = &self.assets {
             return Ok((a.clone(), None));
         }
-        let (assets, report) = self.cook()?;
+        let (assets, report) = self.cook(false)?;
         Ok((assets, Some(report)))
     }
 
@@ -125,14 +125,22 @@ impl FynkelAuthoringSession {
     /// reopened: every preview's world points at the new store. The cook
     /// report is returned even when some assets failed (the preview draws
     /// the others); a cache that cannot be opened at all is refused.
-    fn cook(&mut self) -> Result<(Assets, Value), Vec<Diagnostic>> {
+    /// [live]: the documents with unsaved edits cook as the editor holds
+    /// them, their files untouched (Play, ADR-0021 P5).
+    fn cook(&mut self, live: bool) -> Result<(Assets, Value), Vec<Diagnostic>> {
         let project = self.inner.project().ok_or_else(|| {
             one(Diagnostic::error(
                 Code::SESSION_NO_PROJECT,
                 "preview: no project is open",
             ))
         })?;
-        let report = project.cook();
+        let report = if live {
+            let texts = self.inner.unsaved_texts();
+            project.write_recovery(&texts);
+            project.cook_live(texts)
+        } else {
+            project.cook()
+        };
         let assets = Assets::open(&project.cache_dir()).map_err(one)?;
         self.assets = Some(assets.clone());
         for slot in self.previews.values_mut() {
@@ -970,7 +978,8 @@ fn preview_call(
         }
         "recook" => {
             s.slot(handle)?;
-            let (assets, cook) = s.cook()?;
+            let live = args.get("live").and_then(Value::as_bool).unwrap_or(false);
+            let (assets, cook) = s.cook(live)?;
             let mut previews = Vec::with_capacity(s.previews.len());
             for (h, slot) in s.previews.iter_mut() {
                 let mut entry = json!({ "handle": *h });

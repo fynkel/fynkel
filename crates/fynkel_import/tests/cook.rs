@@ -412,6 +412,47 @@ fn editing_a_document_invalidates_it_and_its_dependents_only() {
 }
 
 #[test]
+fn a_live_document_cooks_its_text_and_leaves_the_file_alone() {
+    // ADR-0021 P5: Play cooks the editor's unsaved documents as they are.
+    let p = Project::new("live-doc");
+    let first = p.cook();
+    assert!(all(&first, Status::Cooked));
+    let path = p.assets().join("materials/rusted.material.json");
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    let edited = on_disk.replace("\"roughness\": 0.65", "\"roughness\": 0.9");
+    assert_ne!(edited, on_disk);
+    let live = CookOptions {
+        live: [(path.canonicalize().unwrap(), edited)]
+            .into_iter()
+            .collect(),
+        ..CookOptions::default()
+    };
+    let played = p.cook_with(&live);
+    assert_eq!(
+        statuses(&played),
+        [
+            (ROBOT, Status::Cached),
+            (SWATCH, Status::Cached),
+            (TONE, Status::Cached),
+            (NOTES, Status::Cached),
+            (RUSTED, Status::Cooked),
+            (MAIN, Status::Cooked),
+        ]
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        on_disk,
+        "the file is not written"
+    );
+    // The next cook from disk sees the file again: the first keys, cached.
+    let again = p.cook();
+    assert!(all(&again, Status::Cached), "{:?}", statuses(&again));
+    for (a, b) in first.assets.iter().zip(&again.assets) {
+        assert_eq!(a.key, b.key);
+    }
+}
+
+#[test]
 fn the_profile_is_part_of_the_key() {
     let p = Project::new("profile");
     let dev = p.cook();

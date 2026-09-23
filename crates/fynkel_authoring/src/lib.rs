@@ -145,6 +145,21 @@ impl AuthoringSession {
         self.project.as_mut()
     }
 
+    /// The text of every open document with unsaved edits, by its path —
+    /// what [`OpenProject::cook_live`] cooks in place of the files when
+    /// Play runs what the editor holds (ADR-0021 P5). An imported
+    /// hierarchy (read-only, derived) is never among them.
+    pub fn unsaved_texts(&self) -> std::collections::HashMap<PathBuf, String> {
+        self.documents
+            .values()
+            .filter(|d| d.sub.is_none() && d.editor.is_dirty())
+            .filter_map(|d| {
+                let text = d.editor.document().write().ok()?;
+                Some((d.path.clone(), text))
+            })
+            .collect()
+    }
+
     fn require_project(&self) -> Result<&OpenProject, Diagnostic> {
         self.project.as_ref().ok_or_else(|| {
             Diagnostic::error(Code::SESSION_NO_PROJECT, "no project is open")

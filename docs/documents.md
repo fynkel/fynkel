@@ -751,7 +751,9 @@ next sync).
   it), `hidden`, `pick` (`view` + `ndc`, or a `ray`), `pickRect`, `lines`
   (`outline` ids and colour, `iconsAspect`), `worldMatrix`,
   `setTransforms`, `restoreTransforms`, `resync`, `reload`, `recook` (cook
-  again, point every preview at the new store, reload each), `dump`,
+  again, point every preview at the new store, reload each; with
+  `live: true` unsaved documents cook as held, their files untouched, and a
+  recovery copy goes to `.fynkel/recovery/` — ADR-0021 P5), `dump`,
   `stats`. `close_document` reports `previewClosed`.
 - **Dart.** `DocumentHandle.openPreview()` →
   `ScenePreview` (`worldAddress` for `FynkelViewportController.

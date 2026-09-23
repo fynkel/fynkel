@@ -62,6 +62,12 @@ pub struct CookOptions {
     /// a host can find the startup scene without the project file (M3-03:
     /// hosts read the cache only). `None` cooks a bare asset root.
     pub project: Option<CookProject>,
+    /// Documents to cook as this text instead of their file, by canonical
+    /// path — the editor's unsaved documents when Play cooks what the
+    /// editor holds (ADR-0021 P5). The file is neither read nor written;
+    /// the key hashes the text, so the next cook from disk sees the file
+    /// again as a change.
+    pub live: HashMap<PathBuf, String>,
 }
 
 /// What the cache index says about its project.
@@ -91,6 +97,7 @@ impl Default for CookOptions {
             limits: Limits::default(),
             force: false,
             project: None,
+            live: HashMap::new(),
         }
     }
 }
@@ -252,7 +259,7 @@ pub fn cook(
     // 1. Inputs and dependencies for every asset.
     let prepared: Vec<Prepared> = entries
         .iter()
-        .map(|e| prepare(db, schemas, e, &mut diagnostics))
+        .map(|e| prepare(db, schemas, e, &opts.live, &mut diagnostics))
         .collect();
 
     // 2. Dependency order: Tarjan's strongly connected components come
@@ -695,6 +702,7 @@ fn prepare(
     db: &AssetDatabase,
     schemas: &SchemaSet,
     entry: &AssetEntry,
+    live: &HashMap<PathBuf, String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Prepared {
     let file = entry.file(db.root());
@@ -708,10 +716,14 @@ fn prepare(
             let mut dependencies = BTreeSet::new();
             let mut input = Input::None;
             let mut source = hash_bytes(b"");
-            match std::fs::read(&file) {
-                Ok(bytes) => {
-                    source = hash_bytes(&bytes);
-                    match Document::read(&file, Some(*kind)) {
+            let text = match live.get(&file.canonicalize().unwrap_or_else(|_| file.clone())) {
+                Some(text) => Ok(text.clone()),
+                None => std::fs::read_to_string(&file),
+            };
+            match text {
+                Ok(text) => {
+                    source = hash_bytes(text.as_bytes());
+                    match Document::parse(*kind, Some(&shown), &text) {
                         Ok(doc) => {
                             let diags = doc.validate(schemas);
                             if has_errors(&diags) {

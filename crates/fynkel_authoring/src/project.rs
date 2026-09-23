@@ -166,6 +166,16 @@ impl OpenProject {
     /// failed assets is a report whose `has_errors()` says so — the
     /// preview draws the others.
     pub fn cook(&self) -> fynkel_import::CookReport {
+        self.cook_live(std::collections::HashMap::new())
+    }
+
+    /// [`cook`](Self::cook) with some documents cooked as the given text
+    /// instead of their file (canonical path → text): the editor's unsaved
+    /// documents, when Play cooks what the editor holds (ADR-0021 P5).
+    pub fn cook_live(
+        &self,
+        live: std::collections::HashMap<PathBuf, String>,
+    ) -> fynkel_import::CookReport {
         let startup_scene = self
             .project
             .startup_scene
@@ -181,6 +191,7 @@ impl OpenProject {
                 physics: self.project.physics.clone(),
                 layers_and_tags: self.project.layers_and_tags.clone(),
             }),
+            live,
             ..fynkel_import::CookOptions::default()
         };
         fynkel_import::cook(
@@ -189,6 +200,32 @@ impl OpenProject {
             &fynkel_import::Cache::at(&self.cache_dir()),
             &opts,
         )
+    }
+
+    /// Writes [texts] (canonical path → the editor's unsaved text) under
+    /// `.fynkel/recovery/`, at their paths relative to the project, after
+    /// emptying it: the copy a Play keeps of the work it runs unsaved, so
+    /// a game that hangs the editor cannot lose it (ADR-0021 P5). A file
+    /// outside the project keeps its name only. Returns how many were
+    /// written; a failure to write is not Play's failure.
+    pub fn write_recovery(&self, texts: &std::collections::HashMap<PathBuf, String>) -> usize {
+        let root = self.dir.join(".fynkel").join("recovery");
+        let _ = std::fs::remove_dir_all(&root);
+        let mut written = 0;
+        for (path, text) in texts {
+            let rel = path
+                .strip_prefix(&self.dir)
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|_| PathBuf::from(path.file_name().unwrap_or_default()));
+            let target = root.join(rel);
+            if let Some(parent) = target.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if std::fs::write(&target, text).is_ok() {
+                written += 1;
+            }
+        }
+        written
     }
 
     /// The shader library a material document is validated against: the

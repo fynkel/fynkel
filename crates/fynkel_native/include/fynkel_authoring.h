@@ -363,10 +363,12 @@ const FynkelWorld* fynkel_authoring_preview_world(const FynkelAuthoringSession* 
  *   reload                              the fallback and the user's Reload: the world
  *                                       emptied and the document loaded fresh →
  *                                       "stats", "diagnostics"
- *   recook                              project-wide: cooks the project again, reopens
+ *   recook [live]                       project-wide: cooks the project again, reopens
  *                                       the cache, points every preview's world at it
  *                                       and reloads each → "cook", "previews": [{
- *                                       handle, stats, diagnostics }]
+ *                                       handle, stats, diagnostics }]; `live: true`
+ *                                       cooks the documents with unsaved edits as they
+ *                                       are, their files untouched (Play)
  *   dump                                the world as `fynkel state dump` prints it, in
  *                                       document order (the gate's incremental-vs-fresh
  *                                       comparison) → "dump": { document, entityCount,
