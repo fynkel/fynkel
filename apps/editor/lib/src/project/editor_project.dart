@@ -253,7 +253,7 @@ abstract class EditorProject extends ChangeNotifier {
   AssetHistory assetHistory();
 
   /// An asset operation through the session (`newDocument`, `renameAsset`,
-  /// `deleteAsset`, `setImportSettings`, `reimport`, `setLayersAndTags`,
+  /// `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
   /// `undoAsset`, `redoAsset`) — one history step each, the database re-read
   /// incrementally. Throws `AuthoringException` when refused; nothing was
   /// touched then.
@@ -267,6 +267,12 @@ abstract class EditorProject extends ChangeNotifier {
   OperationResult setImportSettings(String id, Map<String, Object?> settings) =>
       operate('setImportSettings', {'asset': id, 'settings': settings});
   OperationResult reimport(String id) => operate('reimport', {'asset': id});
+
+  /// A model's embedded materials written as `.material.json` documents
+  /// (`Materials/` next to it, or [folder]) and remapped to them — one
+  /// step on the asset history (`docs/design/material-remapping.md`).
+  OperationResult extractMaterials(String id, {String? folder}) =>
+      operate('extractMaterials', {'asset': id, 'folder': ?folder});
   OperationResult undoAsset() => operate('undoAsset');
   OperationResult redoAsset() => operate('redoAsset');
 

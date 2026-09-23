@@ -683,9 +683,10 @@ void main() {
   group('Inspector asset pages', () {
     Future<(FakeProject, ProjectBrowserModel, EditorSelection, List<String>, List<(String, String?)>)> pumpAsset(
       WidgetTester tester,
-      String lead,
-    ) async {
-      final project = fakeProject();
+      String lead, {
+      FakeProject? given,
+    }) async {
+      final project = given ?? fakeProject();
       final model = ProjectBrowserModel(project: project);
       final tabs = DocumentTabs(project: project);
       final inspector = InspectorModel(tabs: tabs, project: project);
@@ -769,6 +770,59 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('The importer refused'), findsOneWidget);
       expect(find.textContaining('must be srgb or linear'), findsOneWidget);
+    });
+
+    testWidgets('a model: materials remapped from the Materials section; Extract Materials is one step', (tester) async {
+      final given = fakeProject();
+      final at = given.assetEntries.indexWhere((e) => e.id == robot);
+      given.assetEntries[at] = const AssetEntry(
+        id: robot,
+        path: 'models/robot.glb',
+        name: 'robot',
+        kind: 'source',
+        importer: 'fynkel.gltf',
+        subAssets: {'mesh/0': 'u-mesh', 'material/Painted': 'u-painted', 'material/Glass': 'u-glass', 'prefab': 'u-prefab'},
+      );
+      final (project, model, _, _, _) = await pumpAsset(tester, robot, given: given);
+      expect(find.text('MATERIALS'), findsOneWidget);
+      expect(find.byKey(const Key('asset.materials.material/Painted')), findsOneWidget);
+      expect(find.byKey(const Key('asset.materials.material/Glass')), findsOneWidget);
+      expect(find.text('None (embedded)'), findsNWidgets(2));
+
+      // Remap Painted to the project material through the picker: a draft
+      // like any setting, applied with a reimport.
+      await tester.tap(find.descendant(of: find.byKey(const Key('asset.materials.material/Painted')), matching: find.byIcon(FIcons.pick)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('rusted').last);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('inspector.applyBar')), findsOneWidget);
+      expect(
+        tester.widget<PageAction>(find.byKey(const Key('asset.extractMaterials'))).onPressed,
+        isNull,
+        reason: 'not while the settings have unapplied changes',
+      );
+      await tester.tap(find.byKey(const Key('asset.applySettings')));
+      await tester.pumpAndSettle();
+      expect(project.settings[robot], {
+        'materials': {
+          'material/Painted': {'asset': rusted},
+        },
+      });
+
+      // Extract writes the one left (Glass) and remaps it; one undo step.
+      await tester.tap(find.byKey(const Key('asset.extractMaterials')));
+      await tester.pumpAndSettle();
+      expect(project.operations.map((o) => o.$1).toList(), ['setImportSettings', 'reimport', 'extractMaterials', 'reimport']);
+      final remaps = project.settings[robot]!['materials']! as Map;
+      expect(remaps.keys, ['material/Painted', 'material/Glass']);
+      final glass = model.entries.singleWhere((e) => e.path == 'models/Materials/Glass.material.json');
+      expect(remaps['material/Glass'], {'asset': glass.id});
+      expect(find.text('Every material is remapped.'), findsOneWidget);
+      expect(tester.widget<PageAction>(find.byKey(const Key('asset.extractMaterials'))).onPressed, isNull);
+      expect(model.history.undoLabel, 'Extract Materials of robot.glb');
+      model.undo();
+      await tester.pumpAndSettle();
+      expect(model.entries.any((e) => e.path == 'models/Materials/Glass.material.json'), isFalse);
     });
 
     testWidgets('settings JSON that does not parse keeps Apply off and says why', (tester) async {

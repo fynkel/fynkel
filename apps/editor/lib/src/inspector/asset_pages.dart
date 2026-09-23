@@ -4,7 +4,9 @@
 // * an asset: its picture, what it is, the facts row, Open / Reveal /
 //   Reimport / Delete; a source's import settings (edited here, written
 //   through the session with Apply and Reimport on the bar pinned to the
-//   bottom); its parts (click one to inspect it, drag it onto a field); a
+//   bottom); a model's Materials (each embedded material remapped to a
+//   project material, or Extract Materials); its parts (click one to
+//   inspect it, drag it onto a field); a
 //   material's factors; a document's summary; and every document that uses
 //   it (a click opens the document at the field);
 // * a part of a source (`mesh/0`, `anim/1`): what it is, the file it comes
@@ -441,6 +443,7 @@ class _AssetPageState extends State<AssetPage> {
                   ],
                 ),
                 if (draft != null) _importSettings(context, e, d, draft),
+                if (draft != null && _isModel(e)) _materials(context, e, d, draft),
                 if (e.isSource) _parts(context, e, d),
                 ...AssetDocumentSections.of(context, e, d),
                 _UsedBy(dependents: d.dependents, onOpenReference: widget.onOpenReference),
@@ -622,6 +625,109 @@ class _AssetPageState extends State<AssetPage> {
           ),
         ),
         if (_reimport != null && _reimportFor == e.id) _reimportResult(context, _reimport!),
+      ],
+    );
+  }
+
+  static bool _isModel(AssetEntry e) => e.importer == 'fynkel.gltf' || e.importer == 'fynkel.fbx';
+
+  /// `settings.materials` of the draft: embedded key → `{ asset }`.
+  Map<String, Object?> _remaps(Map<String, Object?> draft) {
+    final m = draft['materials'];
+    return m is Map ? {for (final e in m.entries) e.key as String: e.value} : {};
+  }
+
+  void _setRemap(String key, Map<String, Object?>? ref) {
+    final table = _remaps(_draft);
+    if (ref == null || ref['asset'] == null) {
+      table.remove(key);
+    } else {
+      table[key] = {'asset': ref['asset']};
+    }
+    _set('materials', table.isEmpty ? null : table);
+  }
+
+  void _extract(AssetEntry e) {
+    final r = model.extractMaterials(e.id);
+    if (r == null) return;
+    final n = (r.json['materials'] as List?)?.length ?? 0;
+    Notices.maybeOf(context)?.show('Extracted $n material${n == 1 ? '' : 's'} to ${p.dirname(e.path) == '.' ? '' : '${p.dirname(e.path)}/'}Materials');
+    _draftFor = null;
+    _runReimport(e.id);
+  }
+
+  /// A model's embedded materials, one row each: the project material it
+  /// is remapped to, or None (the embedded one). The rows edit the draft
+  /// like every import setting; Extract Materials writes editable copies
+  /// and remaps them in one undoable step.
+  Widget _materials(BuildContext context, AssetEntry e, AssetDetail d, Map<String, Object?> draft) {
+    final t = context.tokens;
+    final theme = Theme.of(context);
+    final keys = [for (final k in d.subAssets.keys) if (k.startsWith('material/')) k];
+    final remaps = _remaps(draft);
+    String describe(Map<String, Object?>? ref) {
+      if (ref == null || ref['asset'] == null) return 'None (embedded)';
+      final id = ref['asset'] as String;
+      final target = model.entry(id);
+      return target == null ? id : target.name;
+    }
+
+    List<AssetEntry> candidates() => [
+      for (final a in model.entries)
+        if (!a.isSource && a.document == 'material') a,
+    ];
+    final unmapped = keys.where((k) => !remaps.containsKey(k)).length;
+    return InspectorSection(
+      title: 'Materials',
+      children: [
+        if (keys.isEmpty)
+          Text(
+            'The file has no materials.',
+            style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
+          )
+        else ...[
+          for (final k in keys)
+            FieldRow(
+              label: k.substring('material/'.length),
+              child: AssetField(
+                key: Key('asset.materials.$k'),
+                value: switch (remaps[k]) {
+                  final Map<Object?, Object?> m => {for (final x in m.entries) x.key as String: x.value},
+                  _ => null,
+                },
+                kind: 'material',
+                nullable: true,
+                subject: k,
+                enabled: model.canEdit,
+                describe: describe,
+                candidates: candidates,
+                thumbnail: (a, size) => AssetPreviewWidget(preview: model.preview(a), size: size),
+                onCommit: (ref) => _setRemap(k, ref),
+              ),
+            ),
+          _help(
+            context,
+            'None draws the material the file carries. A project material replaces it in every instance of the model; an instance\'s own override still wins.',
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: PageAction(
+                key: const Key('asset.extractMaterials'),
+                icon: FIcons.unarchiveOutlined,
+                label: 'Extract Materials',
+                onPressed: model.canEdit && unmapped > 0 && !_dirty(d) ? () => _extract(e) : null,
+              ),
+            ),
+          ),
+          _help(
+            context,
+            unmapped == 0
+                ? 'Every material is remapped.'
+                : 'Writes the $unmapped embedded material${unmapped == 1 ? '' : 's'} as editable documents in Materials/ next to the model and remaps ${unmapped == 1 ? 'it' : 'them'}.',
+          ),
+        ],
       ],
     );
   }

@@ -204,7 +204,7 @@ void main() {
 
       // 3. An unknown asset: refused editor-side with FYN-A0004 (the crate does not resolve assets at apply).
       final mesh = model.slots.singleWhere((s) => s.type == 'fynkel.MeshRenderer');
-      expect(project.assetExists('c0000000-0000-4000-8000-000000000001', sub: 'mesh/0'), isTrue);
+      expect(project.assetExists('c0000000-0000-4000-8000-000000000001', sub: 'mesh/Cube'), isTrue);
       expect(project.assetExists('c0000000-0000-4000-8000-0000000000ff'), isFalse);
       expect(
         model.setField(mesh, 'mesh', {'asset': 'c0000000-0000-4000-8000-0000000000ff'}, spec: mesh.spec.field('mesh')),

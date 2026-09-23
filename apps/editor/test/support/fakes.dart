@@ -430,6 +430,48 @@ final class FakeProject extends EditorProject {
         _redo.clear();
         _undo.add((label, () => settings[id] = before));
         return _done(kind, label, e, {'settings': next, 'sidecar': '${e.path}.meta.json'});
+      case 'extractMaterials':
+        final id = args['asset'] as String;
+        final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
+        if (e.importer != 'fynkel.gltf' && e.importer != 'fynkel.fbx') {
+          _refuse('FYN-T0003', 'extractMaterials: ${e.path} is not an imported model');
+        }
+        final before = settings[id] ?? const <String, Object?>{};
+        final table = Map<String, Object?>.from((before['materials'] as Map?) ?? const {});
+        final folder = e.path.contains('/') ? '${e.path.substring(0, e.path.lastIndexOf('/'))}/Materials' : 'Materials';
+        final created = <AssetEntry>[];
+        for (final key in e.subAssets.keys) {
+          if (!key.startsWith('material/') || table.containsKey(key)) continue;
+          final name = key.substring('material/'.length);
+          final m = AssetEntry(
+            id: 'new-${++_fresh}'.padRight(36, '0'),
+            path: '$folder/$name.material.json',
+            name: name,
+            kind: 'document',
+            document: 'material',
+          );
+          created.add(m);
+          table[key] = {'asset': m.id};
+        }
+        if (created.isEmpty) _refuse('FYN-T0003', 'extractMaterials: every embedded material is remapped already');
+        assetEntries.addAll(created);
+        settings[id] = {...before, 'materials': table};
+        final label = 'Extract Materials of ${e.path.split('/').last}';
+        _redo.clear();
+        _undo.add((
+          label,
+          () {
+            assetEntries.removeWhere((x) => created.any((c) => c.id == x.id));
+            settings[id] = before;
+          },
+        ));
+        return _done(kind, label, e, {
+          'settings': settings[id],
+          'materials': [
+            for (final m in created)
+              {'key': 'material/${m.name}', 'id': m.id, 'path': assetFile(m.path)},
+          ],
+        });
       case 'reimport':
         final id = args['asset'] as String;
         final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');
