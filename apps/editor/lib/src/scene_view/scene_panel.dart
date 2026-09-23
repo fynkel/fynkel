@@ -492,6 +492,7 @@ class _ScenePanelState extends State<ScenePanel> {
           // The layout size stands in for the ring's until the viewport
           // attaches (tests, the first frame).
           final w = constraints.maxWidth * dpr, h = constraints.maxHeight * dpr;
+          model.pixelRatio = dpr;
           if (!model.controller.isAttached) {
             WidgetsBinding.instance.addPostFrameCallback((_) => model.setViewportSize(w, h));
           }

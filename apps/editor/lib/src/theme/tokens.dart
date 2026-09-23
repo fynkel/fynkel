@@ -341,3 +341,18 @@ extension FynkelTokensOf on BuildContext {
   /// and metrics from here; a literal colour in a panel is a bug.
   FynkelTokens get tokens => Theme.of(this).extension<FynkelTokens>() ?? FynkelTokens.of(Brightness.dark);
 }
+
+/// The Scene view's gizmo metrics and axis colours (ADR-0019 §4), used by
+/// the view model, which has no `BuildContext`. Widths are logical pixels;
+/// colours linear RGBA, as the renderer's overlay takes them.
+abstract final class GizmoTokens {
+  /// Annotations nobody drags: outlines, icons, light ranges.
+  static const double lineWidth = 1.5;
+
+  /// Things the user drags: the move, rotate and scale handles.
+  static const double handleWidth = 2.5;
+
+  static const List<double> xAxis = [0.90, 0.25, 0.25, 0.8];
+  static const List<double> yAxis = [0.35, 0.85, 0.35, 0.8];
+  static const List<double> zAxis = [0.25, 0.45, 0.95, 0.8];
+}

@@ -20,6 +20,7 @@ import 'package:fynkel_editor/src/scene_view/orientation_gizmo.dart';
 import 'package:fynkel_editor/src/scene_view/scene_math.dart';
 import 'package:fynkel_editor/src/scene_view/scene_panel.dart';
 import 'package:fynkel_editor/src/scene_view/scene_view_model.dart';
+import 'package:fynkel_editor/src/theme/tokens.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 
 import 'support/fakes.dart';
@@ -690,13 +691,24 @@ void main() {
       expect(r.model.notice, contains('not attached'));
     });
 
-    test('the grid follows the camera distance in decades', () {
-      final near = SceneViewModel.gridLines(EditorCamera(distance: 5));
-      final far = SceneViewModel.gridLines(EditorCamera(distance: 500));
-      expect(near.length % 10, 0);
-      expect(near.length, far.length, reason: 'the same number of lines at every scale');
-      // The first line's extent grows with the step.
-      expect(far[0].abs(), greaterThan(near[0].abs() * 10));
+    test('the grid is the renderer\'s, and overlay widths are logical pixels times the ratio', () {
+      final r = Rig();
+      addTearDown(r.dispose);
+      final st = r.open();
+      if (!r.model.showGrid) r.model.toggleGrid();
+      if (r.model.showOverlays) r.model.toggleOverlays();
+      r.model.pixelRatio = 2;
+      final o = r.model.overlay(st);
+      expect(o.grid, isNotNull, reason: 'a shader grid, not line segments');
+      expect(o.grid!.xAxis, GizmoTokens.xAxis);
+      // The Y axis: up from the origin, 1.5 logical px on a 2× display.
+      expect(o.lineCount, 1);
+      final want = [0, 0, 0, 0, st.camera.distance * 2, 0, ...GizmoTokens.yAxis, 3, 0];
+      expect(o.lines.sublist(0, 12), [for (final v in want) closeTo(v, 1e-4)]);
+      r.model.toggleGrid();
+      final off = r.model.overlay(st);
+      expect(off.grid, isNull);
+      expect(off.lineCount, 0, reason: 'no Y axis without the grid');
     });
   });
 

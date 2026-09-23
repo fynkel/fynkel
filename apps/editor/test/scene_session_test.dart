@@ -370,7 +370,7 @@ void main() {
     tab.clearSelection();
     if (s.model.showGrid) s.model.toggleGrid();
     if (s.model.showOverlays) s.model.toggleOverlays();
-    expect(s.model.debugLines(st), isEmpty);
+    expect(s.model.overlay(st).isEmpty, isTrue);
     // The mocked host never acquires frames, so the ring (3 slots) allows
     // three renders in this test: the capture and two saves.
     final pixels = s.model.captureFrame()!;
@@ -394,11 +394,13 @@ void main() {
     // Save Frame: cancelled = nothing rendered or written.
     expect(await s.model.saveFrame(), isNull);
     expect(st.frames, 1);
-    // With the grid and the outline on, the debug lines go in and the
+    // With the grid and the outline on, the overlay goes in and the
     // notice says the frame is not a clean one.
     s.model.toggleGrid();
     tab.select(floor);
-    expect(s.model.debugLines(st).length, greaterThan(120));
+    final overlay = s.model.overlay(st);
+    expect(overlay.grid, isNotNull);
+    expect(overlay.lineCount, greaterThan(1), reason: 'the Y axis and the floor\'s outline');
     s.savePath = s.dir.path;
     final overlaid = await s.model.saveFrame();
     expect(overlaid, '${s.dir.path}/main-320x200.png', reason: '${s.model.notice}');

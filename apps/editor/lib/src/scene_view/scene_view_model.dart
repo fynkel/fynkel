@@ -34,6 +34,7 @@ import '../hierarchy/transform_math.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../inspector/prefab_actions.dart' as prefab;
 import '../project/editor_project.dart';
+import '../theme/tokens.dart' show GizmoTokens;
 import 'editor_state.dart';
 import 'gizmo.dart';
 import 'png.dart';
@@ -862,7 +863,7 @@ final class SceneViewModel extends ChangeNotifier {
         _worldCamera[p] = (t, t.cameraVersion);
       }
       _applyHidden(t);
-      controller.debugLines(debugLines(t));
+      controller.overlay(overlay(t));
       final slot = controller.renderHandle(p.worldAddress);
       // A resize in flight refuses the frame (the ring is being rebuilt).
       // The editor draws on demand, so without asking again this frame
@@ -883,54 +884,31 @@ final class SceneViewModel extends ChangeNotifier {
     }
   }
 
-  /// The debug lines of a frame: the grid and axes (when shown), the
-  /// selection outline, the icons (when shown).
-  Float32List debugLines(SceneTab t) {
-    final parts = <Float32List>[];
-    if (showGrid) parts.add(gridLines(t.camera));
+  /// Logical-to-physical pixels of the panel the picture is in (its
+  /// panel sets it on layout): overlay widths are the design tokens'
+  /// logical pixels times this.
+  double pixelRatio = 1;
+
+  final _overlay = ViewportOverlay();
+
+  /// The overlay of a frame (ADR-0019): the renderer's ground grid and the
+  /// Y axis (when shown), the selection outline, the icons (when shown).
+  /// Rebuilt into one reused buffer every frame.
+  ViewportOverlay overlay(SceneTab t) {
+    final o = _overlay..clear();
+    final width = GizmoTokens.lineWidth * pixelRatio;
+    if (showGrid) {
+      o.grid = const OverlayGrid(xAxis: GizmoTokens.xAxis, zAxis: GizmoTokens.zAxis);
+      final up = math.max(t.camera.distance, 0.5) * 2;
+      o.line(const [0, 0, 0], [0, up, 0], GizmoTokens.yAxis, width: width);
+    }
     final hidden = _hiddenAll(t);
     final outline = t.tab.selection.where((id) => !hidden.contains(id)).toList();
     if (outline.isNotEmpty || showOverlays) {
       final l = t.preview!.lines(outline: outline, iconsAspect: showOverlays ? aspect : null);
-      if (l.count > 0) parts.add(l.data);
+      if (l.count > 0) o.segments(l.data, width: width);
     }
-    final total = parts.fold(0, (n, p) => n + p.length);
-    final out = Float32List(total);
-    var o = 0;
-    for (final p in parts) {
-      out.setAll(o, p);
-      o += p.length;
-    }
-    return out;
-  }
-
-  /// The ground grid at an adaptive spacing (a power of ten near a
-  /// twentieth of the camera's distance), 40 × 40 cells around the pivot,
-  /// every tenth line brighter, plus the world axes through the origin:
-  /// X red, Y green, Z blue.
-  static Float32List gridLines(EditorCamera camera) {
-    final d = math.max(camera.distance, 0.5);
-    final step = math.pow(10, (math.log(d / 20) / math.ln10).floor()).toDouble();
-    final n = 20;
-    final cx = (camera.pivot[0] / (step * 10)).round() * step * 10;
-    final cz = (camera.pivot[2] / (step * 10)).round() * step * 10;
-    final lines = <double>[];
-    void add(Vec3 a, Vec3 b, List<double> c) => lines.addAll([...a, ...b, ...c]);
-    const minor = [0.35, 0.36, 0.4, 0.35];
-    const major = [0.5, 0.52, 0.58, 0.7];
-    for (var i = -n; i <= n; i++) {
-      final x = cx + i * step, z = cz + i * step;
-      final isMajor = ((cx / step).round() + i) % 10 == 0;
-      final c = isMajor ? major : minor;
-      if (x != 0) add([x, 0, cz - n * step], [x, 0, cz + n * step], c);
-      final isMajorZ = ((cz / step).round() + i) % 10 == 0;
-      if (z != 0) add([cx - n * step, 0, z], [cx + n * step, 0, z], isMajorZ ? major : minor);
-    }
-    final ext = n * step;
-    add([-ext + cx, 0, 0], [ext + cx, 0, 0], const [0.9, 0.25, 0.25, 1]);
-    add([0, 0, -ext + cz], [0, 0, ext + cz], const [0.3, 0.5, 1.0, 1]);
-    add([0, 0, 0], [0, ext, 0], const [0.35, 0.85, 0.35, 1]);
-    return Float32List.fromList(lines);
+    return o;
   }
 
   // ── Gizmo ────────────────────────────────────────────────────────────
