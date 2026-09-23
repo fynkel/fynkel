@@ -59,4 +59,42 @@ void main() {
     expect(() => LiveWorld(0), throwsArgumentError);
     expect(File('${dir.path}/$mainScene').readAsStringSync(), contains('"Robot"'), reason: 'no document is touched');
   });
+
+  test('LiveWorld picks and outlines the running world for the Scene view', () {
+    final dir = copyFixture('live-pick');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    session.openProject(dir.path);
+    final preview = session.openDocument(mainScene).openPreview();
+    expect(preview.cook!.ok, isTrue);
+
+    final world = fynkel.World.create();
+    addTearDown(world.dispose);
+    world.loadProject(dir.path);
+    world.step();
+    final live = LiveWorld(world.native.handleAddress);
+
+    // The robot's centre, as the edit preview would pick it: through its
+    // mesh (the world's own cache), from the same ray.
+    final m = live.worldMatrices([robot, 'runtime:1'])[robot]!;
+    expect(live.worldMatrices(['runtime:1']), isEmpty);
+    final centre = [m[12], m[13], m[14]];
+    final from = [centre[0], centre[1] + 20, centre[2]];
+    final down = [0.0, -1.0, 0.0];
+    final hits = live.pickRay(from, down).hits;
+    final edits = preview.pickRay(from, down).hits;
+    expect([for (final h in hits) h.id], [for (final h in edits) h.id], reason: 'the same picking as the edit preview');
+    final hit = hits.firstWhere((h) => h.id == robot);
+    expect(hit.mesh, isTrue, reason: 'the mesh came from the cache the world loaded');
+    expect(hit.point, edits.firstWhere((h) => h.id == robot).point);
+
+    final outline = live.lines(outline: [robot]);
+    expect(outline.count, preview.lines(outline: [robot]).count);
+    expect(live.lines(iconsAspect: 1.5).count, greaterThan(0), reason: "the sun's arrows at least");
+    expect(live.pickRect(const PreviewCamera(world: _lookingDown), 1, [-1, -1], [1, 1]), contains(robot));
+  });
 }
+
+/// A camera 50 m up, looking straight down.
+const _lookingDown = <double>[1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 50, 0, 1];

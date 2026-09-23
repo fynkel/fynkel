@@ -138,6 +138,40 @@ final class LiveWorld {
 
   List<String> rename(String id, String name) => _write('rename', {'id': id, 'name': name});
 
+  // ── The Scene view on the running world (L5) ──────────────────────────
+  // The edit preview's picking and overlays, over every live entity, each
+  // named by its own id (a running prefab instance has no anchor).
+
+  /// Every entity under the pixel at [ndc] seen through [camera], nearest
+  /// first.
+  PreviewPick pick(PreviewCamera camera, double aspect, List<double> ndc) =>
+      PreviewPick.fromJson(call('pick', {'view': camera.viewJson(aspect), 'ndc': ndc}));
+
+  /// Every entity along the ray from [origin] in [dir] (world space).
+  PreviewPick pickRay(List<double> origin, List<double> dir) =>
+      PreviewPick.fromJson(call('pick', {'ray': {'origin': origin, 'dir': dir}}));
+
+  /// The entities whose projected bounds overlap the NDC rectangle [min]…
+  /// [max].
+  List<String> pickRect(PreviewCamera camera, double aspect, List<double> min, List<double> max) =>
+      _strings(call('pickRect', {'view': camera.viewJson(aspect), 'min': min, 'max': max})['ids']);
+
+  /// The selection outline of [outline] (an id no longer alive draws
+  /// nothing) and, with [iconsAspect], every light's, camera's and
+  /// selected collider's icon.
+  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect}) =>
+      PreviewLines.fromJson(call('lines', {
+        if (outline.isNotEmpty) 'outline': {'ids': outline.toList(), 'color': ?outlineColor},
+        if (iconsAspect != null) 'icons': {'aspect': iconsAspect},
+      }));
+
+  /// The world matrices (16 floats, column-major) of the [ids] still
+  /// alive.
+  Map<String, List<double>> worldMatrices(Iterable<String> ids) => {
+        for (final e in _mapOf(call('worldMatrix', {'ids': ids.toList()})['matrices']).entries)
+          e.key: [for (final x in e.value as List? ?? const []) (x as num).toDouble()],
+      };
+
   List<String> _write(String kind, Map<String, Object?> args) {
     final r = _live(kind, args, rejectedIsResult: true);
     return [for (final d in r['rejected'] as List? ?? const []) '${_mapOf(d)['message']}'];
