@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show EditorChannel;
+import 'package:fynkel_authoring/fynkel_authoring.dart' show Command;
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/commands/commands.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
@@ -178,6 +179,39 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
       await tester.pumpAndSettle();
       expect(shell.gameRun!.running, isFalse);
+    });
+
+    testWidgets('Play runs unsaved edits without a prompt and leaves the document dirty (P5)', (tester) async {
+      final project = FakeProject(dir: '/fake/game');
+      final doc = project.addDocument(_scene());
+      await pumpLarge(
+        tester,
+        shellApp(
+          prefs: prefs,
+          store: store,
+          projects: {'/fake/game': project},
+          initialProject: '/fake/game',
+          runner: runner,
+          game: _game(),
+        ),
+      );
+      final shell = tester.state<EditorShellState>(find.byType(EditorShell));
+      shell.openDocument(doc.id);
+      await tester.pumpAndSettle();
+      doc.apply([Command.renameObject('floor', 'Ground')]);
+      await tester.pumpAndSettle();
+      expect(shell.tabs!.focused!.dirty, isTrue);
+
+      shell.registry.execute('play.start');
+      await tester.pumpAndSettle();
+      expect(find.text('Save changes before playing?'), findsNothing);
+      expect(shell.gameRun!.running, isTrue);
+      expect(doc.fakePreview!.lastRecookLive, isTrue, reason: 'cooked as the editor holds it');
+      expect(runner.calls.where((c) => c.$2.contains('cook')), isEmpty, reason: 'no cook from the files');
+      expect(shell.tabs!.focused!.dirty, isTrue, reason: 'nothing was saved');
+      expect(find.textContaining('game in /fake/game at main'), findsOneWidget, reason: 'the open scene plays');
+      shell.registry.execute('play.stop');
+      await tester.pumpAndSettle();
     });
 
     testWidgets('between runs the Game view shows what the active camera sees', (tester) async {

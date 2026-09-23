@@ -402,9 +402,13 @@ final class FakePreviewBackend implements PreviewBackend {
     return _stats();
   }
 
+  /// Whether the last recook was Play's (the unsaved documents as held).
+  bool? lastRecookLive;
+
   @override
-  CookReport recook() {
+  CookReport recook({bool live = false}) {
     _check('recook');
+    lastRecookLive = live;
     return cook = CookReport.fromJson({'ok': true, 'profile': 'desktop', 'cached': 0, 'cooked': 0, 'failed': 0});
   }
 

@@ -1299,7 +1299,8 @@ it is the edit-preview world, not the running game's (ADR-0019).
 
 ### Play saves first
 
-The game reads files from disk, so anything unsaved is not in the run.
+A game run as its own app reads files from disk, so anything unsaved is
+not in the run (Play in the Game view plays unsaved edits; see below).
 With dirty tabs, Play asks: **Save and Play**, **Play Without Saving**,
 or Cancel (`play_prompt.dart`, `dialog.playSave`). A project that has
 **errors** never plays — `fynkel run` would refuse it anyway: the Console
@@ -1445,8 +1446,13 @@ the editor camera and its tools.
   Play then mounts the game's `buildGame(FynkelLaunch(projectDir, startScene,
   inEditor: true))` in the Game view. It starts in the scene open in the
   editor, brings the Game view to the front and gives it the keyboard.
-  Dirty documents still get the save prompt, because the game reads files
-  (P5 plays from memory).
+- **Unsaved edits play (P5):** with a Scene view open, Play cooks the
+  documents as the editor holds them (`recook` with `live: true`), so there
+  is no save prompt and nothing is written to the documents' files; they
+  stay dirty. The unsaved text of each dirty document is also written to
+  `.fynkel/recovery/<path>` (replaced on every Play), so a crash during the
+  run loses nothing. Without a Scene view open, Play cooks the files and
+  asks to save first, as a process run does.
 - **Pause (⌃⌘P):** stops the game's loop and its audio. **Step (⌃⌥⌘P)**
   pauses and runs one fixed step. Both are in the title bar beside
   Play/Stop and in the Play menu. They reach every `FynkelGameView` of the
@@ -1478,7 +1484,7 @@ the editor camera and its tools.
   without a camera says so, and so does the plain editor, where Play opens
   its own window. The caption names the camera.
 
-Not yet: playing unsaved documents (P5). The preview ignores a camera's
+Not yet: the preview ignores a camera's
 `culling_mask`, and the editor's hidden entities stay hidden in it.
 
 ## The look (item 9a)

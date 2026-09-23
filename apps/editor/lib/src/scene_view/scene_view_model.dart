@@ -819,18 +819,21 @@ final class SceneViewModel extends ChangeNotifier {
   }
 
   /// ⌃⇧⌘R: `fynkel cook` in process, the cache reopened, every preview
-  /// reloaded.
-  void recook() {
+  /// reloaded. Play passes [live] (the unsaved documents cook as held,
+  /// ADR-0021 P5) and no [announce]. Null when nothing could cook (no
+  /// preview, or the cook threw — [notice] says why).
+  CookReport? recook({bool live = false, bool announce = true}) {
     final t = current;
-    if (t == null || !t.hasPreview) return;
-    _recook(t, announce: true);
+    if (t == null || !t.hasPreview) return null;
+    final r = _recook(t, announce: announce, live: live);
     _repaint();
+    return r;
   }
 
-  void _recook(SceneTab t, {required bool announce}) {
+  CookReport? _recook(SceneTab t, {required bool announce, bool live = false}) {
     if (drag != null) cancelDrag();
     try {
-      final r = t.preview!.recook();
+      final r = t.preview!.recook(live: live);
       for (final st in _sceneTabs.values) {
         st.hiddenDirty = true;
         if (st.preview case final p?) _worldCamera[p] = null;
@@ -841,8 +844,10 @@ final class SceneViewModel extends ChangeNotifier {
             ? 'Cache rebuilt: ${r.cooked} cooked, ${r.cached} cached'
             : 'Cache rebuilt with ${r.failed} failure(s): ${r.cooked} cooked, ${r.cached} cached';
       }
+      return r;
     } on AuthoringException catch (e) {
       notice = 'Rebuild failed: $e';
+      return null;
     }
   }
 

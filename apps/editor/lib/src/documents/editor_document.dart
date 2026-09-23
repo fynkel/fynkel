@@ -128,7 +128,8 @@ abstract class PreviewBackend {
   void restoreTransforms(Iterable<String> ids);
   PreviewSyncReport resync();
   PreviewStats reload();
-  CookReport recook();
+  /// [live]: unsaved documents cook as the editor holds them (Play).
+  CookReport recook({bool live = false});
   Map<String, Object?> dump();
   PreviewStats refreshStats();
   void close();
@@ -177,7 +178,7 @@ final class SessionPreview implements PreviewBackend {
   @override
   PreviewStats reload() => preview.reload();
   @override
-  CookReport recook() => preview.recook();
+  CookReport recook({bool live = false}) => preview.recook(live: live);
   @override
   Map<String, Object?> dump() => preview.dump();
   @override

@@ -1715,7 +1715,12 @@ class EditorShellState extends State<EditorShell> {
       return;
     }
     final dirty = List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[]);
-    if (dirty.isNotEmpty) {
+    // In the Game view Play runs what the editor holds — unsaved edits
+    // included, the files left alone (ADR-0021 P5) — whenever it can cook
+    // in process (a Scene view has its preview open). The prompt is the
+    // separate process's: it reads files.
+    final playsWhatIsHeld = gameRun != null && (scene?.current?.hasPreview ?? false);
+    if (dirty.isNotEmpty && !playsWhatIsHeld) {
       final choice = await showPlaySavePrompt(context, dirty);
       if (!mounted) return;
       switch (choice) {
@@ -1788,13 +1793,17 @@ class EditorShellState extends State<EditorShell> {
     registry.refresh();
   }
 
-  /// Brings `.fynkel/cache` up to date with the files: in process through
-  /// the Scene view's preview when one is open, else `fynkel cook`. Null
-  /// when it worked, else why not.
+  /// Brings `.fynkel/cache` up to date for Play. In process through the
+  /// Scene view's preview when one is open, with every unsaved document
+  /// as the editor holds it (a copy of each goes to `.fynkel/recovery/`
+  /// first; the files are untouched); else `fynkel cook` from the files.
+  /// Null when it worked, else why not.
   Future<String?> _cookForPlay(EditorProject opened) async {
     final sv = scene;
     if (sv != null && sv.current?.hasPreview == true) {
-      sv.recook();
+      final r = sv.recook(live: true, announce: false);
+      if (r == null) return sv.notice ?? 'the cook did not run';
+      if (!r.ok) return '${r.failed} asset(s) failed to cook — ⌃⇧⌘R in the Scene view shows the report';
       return null;
     }
     final cli = toolchain?.fynkelCli;
