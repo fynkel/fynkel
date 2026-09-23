@@ -38,6 +38,8 @@ void main() {
     final crate = all.where((e) => e.parent == crateA).single;
     expect(crate.id, isNot(startsWith('runtime:')), reason: 'the id the cook derived for the instance');
     final tick = live.tick;
+    world.step();
+    expect(live.changedEntities(), isNull, reason: 'nothing spawned, renamed or moved in the table');
 
     final sunNow = live.entity(sun);
     final light = sunNow.component('fynkel.DirectionalLight')!;
@@ -45,8 +47,8 @@ void main() {
     expect(live.rename(robot, 'Hero'), isEmpty);
     expect(live.entity(sun).component('fynkel.DirectionalLight')!['intensity'], 9.5);
     expect(live.entity(robot).name, 'Hero');
-    live.entities();
-    expect(live.tick, tick, reason: 'a live edit runs no tick');
+    expect(live.changedEntities()!.firstWhere((e) => e.id == robot).name, 'Hero');
+    expect(live.tick, tick + 1, reason: 'a live edit runs no tick');
 
     // The world refuses what it would from a game; a bad call throws.
     expect(live.remove(robot, 'fynkel.Camera'), isNotEmpty);

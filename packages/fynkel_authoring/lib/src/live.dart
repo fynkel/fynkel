@@ -103,11 +103,25 @@ final class LiveWorld {
   /// The running world's tick at the last [entities] read.
   int tick = 0;
 
+  /// The table's revision at the last [entities] or [changedEntities]
+  /// read (a hash of every row; it changes when an entity is spawned,
+  /// destroyed, renamed, re-parented, re-layered or re-tagged or gains or
+  /// loses a native component — not when a value moves).
+  String? revision;
+
   /// Every entity, parents before children: the loaded scenes' roots in
   /// document order, then what the game made; children in sibling order.
-  List<LiveEntity> entities() {
-    final r = call('entities');
+  List<LiveEntity> entities() => _entities(null)!;
+
+  /// [entities], or null when the table is the one [revision] names: the
+  /// rows are not built or sent then, which is what makes polling cheap.
+  List<LiveEntity>? changedEntities() => _entities(revision);
+
+  List<LiveEntity>? _entities(String? since) {
+    final r = call('entities', {'since': ?since});
     tick = (r['tick'] as num?)?.toInt() ?? tick;
+    revision = r['revision'] as String?;
+    if (r['unchanged'] == true) return null;
     return [for (final e in r['entities'] as List? ?? const []) LiveEntity.fromJson(_mapOf(e))];
   }
 
