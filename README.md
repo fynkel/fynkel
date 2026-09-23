@@ -15,7 +15,7 @@ Requirements: Rust (`rustup`), Flutter (its `dart` on `PATH`), Xcode with
 the macOS and iOS platforms; versions in `docs/toolchain.md`.
 
 ```sh
-cargo install --path apps/cli        # the `fynkel` CLI (tests find it on PATH, or through FYNKEL_CLI)
+cargo install --path apps/cli        # the `fynkel` CLI, usable from any directory (tests find it on PATH, or through FYNKEL_CLI)
 
 cd examples/reference_game           # the Tier 1 reference game (its README)
 fynkel validate                      # documents, references, lock
@@ -25,6 +25,7 @@ fynkel render --scene assets/scenes/playground.scene.json --out /tmp/playground.
 flutter test                         # the Dart side against the real runtime (cooks first)
 fynkel run                           # validate, cook, flutter run on this Mac; -d <iphone> for a device
 fynkel editor .                      # the project editor: the game compiled in, hot reload on save
+fynkel editor                        # the editor's launcher: a game project you open there opens in its project editor
 
 fynkel create my_game && cd my_game  # a new project: the starter, with AGENTS.md as the tour
 ```

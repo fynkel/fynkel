@@ -16,6 +16,12 @@
 //! Without a directory, with `--plain`, or for a project that is not a
 //! Dart package with `lib/fynkel_game.dart`, it runs the plain editor
 //! (`apps/editor`, no game compiled in).
+//!
+//! `--handover` (P3c): an editor that opens a game project starts this and
+//! hands over to it. The editor follows the project's `status.json`
+//! (`building` with Flutter's progress, then `running`, when it quits, or
+//! `failed` with why), so every failure is written there, and a project
+//! that is not a game fails instead of opening in the plain editor.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -29,7 +35,7 @@ use serde_json::{json, Value};
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel editor [<project dir>] [--plain] [--flutter <path>]\n                                               the editor with the project's game compiled in (Play runs inside it; hot reload on save);\n                                               --plain (or no project) runs the editor without a game"
+        "usage:\n  fynkel editor [<project dir>] [--plain] [--handover] [--flutter <path>]\n                                               the editor with the project's game compiled in (Play runs inside it; hot reload on save);\n                                               --plain (or no project) runs the editor without a game;\n                                               --handover: started by an editor that hands the project over (it follows status.json)"
     );
     ExitCode::from(2)
 }
@@ -43,11 +49,13 @@ pub const STATUS_FILE: &str = "status.json";
 pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let mut project: Option<PathBuf> = None;
     let mut plain = false;
+    let mut handover = false;
     let mut flutter: Option<PathBuf> = None;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--plain" => plain = true,
+            "--handover" => handover = true,
             "--flutter" => {
                 i += 1;
                 match args.get(i) {
@@ -83,16 +91,36 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     };
     let editor = root.join("apps").join("editor");
 
+    // An editor handing over reads what happens in the status file, from
+    // the first moment: every early failure lands there too.
+    let early = project
+        .as_ref()
+        .filter(|_| handover && !plain)
+        .map(|d| d.join(HOST_DIR).join(STATUS_FILE));
+    let mut seq = 0;
+    if let Some(path) = &early {
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        seq += 1;
+        write_status_file(path, seq, "building", "", None, &[]);
+    }
+    let fail = |seq: u64, message: &str| {
+        eprintln!("fynkel editor: {message}");
+        if let Some(path) = &early {
+            write_status_file(path, seq + 1, "failed", message, None, &[]);
+        }
+        ExitCode::from(1)
+    };
+
     // The project editor, or why not.
     let host = match (&project, plain) {
         (Some(dir), false) => match game_package(dir) {
             Ok(name) => match generate_host(dir, &name, &editor) {
                 Ok(host) => Some(host),
-                Err(e) => {
-                    eprintln!("fynkel editor: {e}");
-                    return ExitCode::from(1);
-                }
+                Err(e) => return fail(seq, &e),
             },
+            Err(why) if handover => return fail(seq, &why),
             Err(why) => {
                 say(&format!(
                     "{why}; opening it in the plain editor (Play runs it as its own app)"
@@ -114,17 +142,16 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         match pub_get {
             Ok(o) if o.status.success() => {}
             Ok(o) => {
-                eprintln!(
-                    "fynkel editor: `flutter pub get` failed in {}:\n{}",
-                    cwd.display(),
-                    String::from_utf8_lossy(&o.stderr)
+                return fail(
+                    seq,
+                    &format!(
+                        "`flutter pub get` failed in {}:\n{}",
+                        cwd.display(),
+                        String::from_utf8_lossy(&o.stderr)
+                    ),
                 );
-                return ExitCode::from(1);
             }
-            Err(e) => {
-                eprintln!("fynkel editor: cannot run {}: {e}", flutter.display());
-                return ExitCode::from(2);
-            }
+            Err(e) => return fail(seq, &format!("cannot run {}: {e}", flutter.display())),
         }
     }
     say(&match (&project, &host) {
@@ -152,12 +179,15 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => {
-            eprintln!("fynkel editor: cannot run {}: {e}", flutter.display());
-            return ExitCode::from(2);
-        }
+        Err(e) => return fail(seq, &format!("cannot run {}: {e}", flutter.display())),
     };
-    supervise(&mut child, project.as_deref(), host.as_deref(), started)
+    supervise(
+        &mut child,
+        project.as_deref(),
+        host.as_deref(),
+        started,
+        seq,
+    )
 }
 
 /// Runs until the editor exits: relays what matters, hot reloads on save.
@@ -166,6 +196,7 @@ fn supervise(
     project: Option<&Path>,
     host: Option<&Path>,
     started: Instant,
+    seq: u64,
 ) -> ExitCode {
     let (tx, rx) = mpsc::channel::<Line>();
     let stdout = child.stdout.take().expect("piped");
@@ -191,7 +222,7 @@ fn supervise(
         app: None,
         next_id: 1,
         pending: BTreeMap::new(),
-        seq: 0,
+        seq,
         status: host.map(|h| h.join(STATUS_FILE)),
         tail: Vec::new(),
         ready: false,
@@ -366,6 +397,7 @@ impl Supervisor {
                                 self.keep(format!("[flutter] {m}"));
                                 if !self.ready {
                                     say(m);
+                                    self.write_status("building", m, None, &[]);
                                 }
                             }
                         }
@@ -401,34 +433,46 @@ impl Supervisor {
         }
     }
 
-    /// `<host>/status.json`, written whole and renamed into place.
+    /// The next event in the status file.
     fn write_status(&mut self, state: &str, message: &str, ms: Option<u64>, files: &[String]) {
         let Some(path) = &self.status else { return };
         self.seq += 1;
-        let at = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        let mut body = json!({
-            "version": 1,
-            "seq": self.seq,
-            "state": state,
-            "pid": std::process::id(),
-            "at": at,
-        });
-        if !message.is_empty() {
-            body["message"] = json!(message);
-        }
-        if let Some(ms) = ms {
-            body["ms"] = json!(ms);
-        }
-        if !files.is_empty() {
-            body["files"] = json!(files);
-        }
-        let tmp = path.with_extension("json.tmp");
-        if std::fs::write(&tmp, format!("{body:#}\n")).is_ok() {
-            let _ = std::fs::rename(&tmp, path);
-        }
+        write_status_file(path, self.seq, state, message, ms, files);
+    }
+}
+
+/// `<host>/status.json`, written whole and renamed into place.
+fn write_status_file(
+    path: &Path,
+    seq: u64,
+    state: &str,
+    message: &str,
+    ms: Option<u64>,
+    files: &[String],
+) {
+    let at = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let mut body = json!({
+        "version": 1,
+        "seq": seq,
+        "state": state,
+        "pid": std::process::id(),
+        "at": at,
+    });
+    if !message.is_empty() {
+        body["message"] = json!(message);
+    }
+    if let Some(ms) = ms {
+        body["ms"] = json!(ms);
+    }
+    if !files.is_empty() {
+        body["files"] = json!(files);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, format!("{body:#}\n")).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
     }
 }
 

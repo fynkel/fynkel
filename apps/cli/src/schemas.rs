@@ -23,8 +23,10 @@ pub fn load(root: Option<&Path>, explicit: Option<&Path>) -> Result<SchemaSet, D
 
 /// The Fynkel repository root: `explicit`, else the Cargo workspace above
 /// the working directory, else the one above this executable (a `cargo run`
-/// or `cargo install --path` build keeps that relation). `None` outside the
-/// repository: commands then use the embedded schemas, and `fynkel codegen`
+/// build keeps that relation, and so does a symlink to it on `PATH`, which
+/// is followed), else the checkout it was built from, when it is still
+/// there (a `cargo install --path apps/cli` copy, run from anywhere). `None`
+/// otherwise: commands then use the embedded schemas, and `fynkel codegen`
 /// asks for `--root`.
 pub fn repo_root(explicit: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(p) = explicit {
@@ -36,8 +38,10 @@ pub fn repo_root(explicit: Option<PathBuf>) -> Option<PathBuf> {
     from_cwd.or_else(|| {
         std::env::current_exe()
             .ok()
+            .map(|exe| exe.canonicalize().unwrap_or(exe))
             .and_then(|exe| exe.parent().map(Path::to_path_buf))
             .and_then(|d| find_workspace(&d))
+            .or_else(|| find_workspace(Path::new(env!("CARGO_MANIFEST_DIR"))))
     })
 }
 
