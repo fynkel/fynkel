@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/project.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "3263c596-2c7d-4bca-94fb-618982e3fdb4",
   "name": "Fynkel Showcase",
   "startupScene": {

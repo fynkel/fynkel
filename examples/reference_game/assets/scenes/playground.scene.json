@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "bca5eecb-c8d8-58fe-825c-5fce41819bf1",
   "name": "Playground",
   "entities": {
@@ -56,7 +56,6 @@
             "turn_speed": 10.0,
             "move_action": "move",
             "jump_action": "jump",
-            "layer": 4,
             "mask": 4294967295
           }
         },
@@ -98,6 +97,13 @@
             "weight": 1.0,
             "additive": false,
             "root_motion": false
+          }
+        },
+        "7a362a77-50f5-503e-a56f-79e8fe521152": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 2
           }
         }
       }
@@ -594,7 +600,8 @@
             "far": 120.0,
             "priority": 0,
             "exposure_mode": "auto",
-            "exposure": 12.0
+            "exposure": 12.0,
+            "culling_mask": 4294967295
           }
         },
         "ec2d05e0-c6af-587a-95bb-02122339cf2a": {
@@ -849,7 +856,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -917,7 +923,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -985,7 +990,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1053,7 +1057,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1121,7 +1124,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1189,7 +1191,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1257,7 +1258,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1325,7 +1325,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1393,7 +1392,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1461,7 +1459,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1529,7 +1526,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1597,7 +1593,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1665,7 +1660,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1733,7 +1727,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1801,7 +1794,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1869,7 +1861,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -1937,7 +1928,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2005,7 +1995,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2073,7 +2062,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2141,7 +2129,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2209,7 +2196,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2277,7 +2263,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2345,7 +2330,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2413,7 +2397,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2481,7 +2464,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2549,7 +2531,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2617,7 +2598,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2685,7 +2665,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2753,7 +2732,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2821,7 +2799,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2889,7 +2866,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -2957,7 +2933,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -3025,7 +3000,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -3093,7 +3067,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -3226,7 +3199,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -3293,7 +3267,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -3426,7 +3399,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -3493,7 +3467,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -3626,7 +3599,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -3693,7 +3667,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -3826,7 +3799,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -3893,7 +3867,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4006,7 +3979,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4119,7 +4091,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4232,7 +4203,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4345,7 +4315,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4413,7 +4382,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4481,7 +4449,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4549,7 +4516,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4617,7 +4583,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4685,7 +4650,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4753,7 +4717,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4821,7 +4784,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4889,7 +4851,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -4957,7 +4918,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5025,7 +4985,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5093,7 +5052,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5161,7 +5119,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5319,7 +5276,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5477,7 +5433,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5635,7 +5590,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5793,7 +5747,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -5951,7 +5904,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -6109,7 +6061,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -6267,7 +6218,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -6785,7 +6735,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7006,7 +6955,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7074,7 +7022,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7212,7 +7159,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7280,7 +7226,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7350,7 +7295,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         },
@@ -7417,7 +7361,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": true,
-            "layer": 8,
             "mask": 4
           }
         },
@@ -7427,6 +7370,13 @@
           "data": {
             "event": "hazard",
             "once": false
+          }
+        },
+        "1060e12d-6c01-5d51-af3b-007e40056b41": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
           }
         }
       }
@@ -7528,7 +7478,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7596,7 +7545,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7664,7 +7612,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7849,7 +7796,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -7952,7 +7898,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -8020,7 +7965,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -8088,7 +8032,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -8156,7 +8099,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         },
@@ -8232,7 +8174,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": true,
-            "layer": 8,
             "mask": 4
           }
         },
@@ -8249,6 +8190,13 @@
           "version": 1,
           "data": {
             "target": "Gate"
+          }
+        },
+        "7cc55c3f-c44d-59a9-8c45-fee925839f57": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
           }
         }
       }
@@ -8362,8 +8310,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "bd7993e0-7ee6-553d-8e1f-d93d1219d43e": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -8442,8 +8396,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "7e65f9b1-7808-5c1a-b864-fafa3d5fc6aa": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -8522,8 +8482,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "15749957-f786-563f-a8be-1e3739e59e6d": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -8602,8 +8568,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "50113038-acdf-5e5c-b8af-df323d1c6154": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -8682,8 +8654,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "c51a39f4-7402-537e-8943-026c2455c99e": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -8762,8 +8740,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "013519ce-753c-5d2d-aae9-df8e6f7565d2": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -8842,8 +8826,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "608b9002-ab50-5c49-9097-48cf955db8ca": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -8922,8 +8912,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "9c16b78f-c8cd-5345-b739-db0e0e8f8f7d": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9002,8 +8998,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "53e511e9-835f-5b6c-bbb6-2ca8c15cee32": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9082,8 +9084,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "948b4cbd-8072-5e09-8d3b-7a8a9d1b71bd": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9162,8 +9170,14 @@
             "friction": 0.5,
             "restitution": 0.3,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "77344981-556f-50ae-aabe-ecb31e0024e8": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9242,8 +9256,14 @@
             "friction": 0.5,
             "restitution": 0.3,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "07fdd77c-527f-5f55-8450-559af9b1d2ab": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9322,8 +9342,14 @@
             "friction": 0.5,
             "restitution": 0.3,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "f7511352-ea3b-5851-b233-53fa118f5573": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9402,8 +9428,14 @@
             "friction": 0.5,
             "restitution": 0.3,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "e909e689-5912-5eb7-ac5e-9957ff471267": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9482,8 +9514,14 @@
             "friction": 0.5,
             "restitution": 0.3,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "eae19320-1894-5582-943c-120961241673": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9562,8 +9600,14 @@
             "friction": 0.5,
             "restitution": 0.3,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "88d62da8-a134-5591-aadd-2f9fe60669db": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9642,8 +9686,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "a4fc41b4-fd3f-5d75-9c07-5b4cbbc6187f": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9722,8 +9772,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "9ce79158-4c56-5919-a70d-30d751ac14af": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9802,8 +9858,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "67f551a1-692c-5356-8cd0-6cf240e89e68": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9882,8 +9944,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "c4a105e9-d563-58c5-bc5a-57521f699970": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -9962,8 +10030,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "b3ad935f-cc42-5c9b-98da-2d7f842d68eb": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -10042,8 +10116,14 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "13f329f1-7eae-57c5-8b63-d0345f7a7481": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }

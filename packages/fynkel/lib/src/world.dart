@@ -18,6 +18,7 @@ import 'editor_channel.dart';
 import 'events.dart';
 import 'gizmos.dart';
 import 'input.dart';
+import 'layers.dart';
 import 'native/bridge.dart';
 import 'physics.dart';
 import 'settings.dart';
@@ -115,9 +116,13 @@ class World {
     store.attach(this);
   }
 
-  /// The physics settings of the last `loadProject` (gravity, layer names);
-  /// the defaults before a load. [layerMask] reads the names.
+  /// The physics settings of the last `loadProject` (gravity); the
+  /// defaults before a load.
   PhysicsSettings physics = const PhysicsSettings();
+
+  /// The project's layers and tags from the last `loadProject` (ADR-0020);
+  /// `default` and no tags before a load. [layerMask] reads the names.
+  LayersAndTags layersAndTags = const LayersAndTags();
 
   /// The audio engine (M3-11): `audio.open()` for the device, `audio.play`
   /// for a fire-and-forget sound, `audio.setBus` / `applySettings` for the
@@ -684,11 +689,12 @@ class World {
 
   // ---------------------------------------------------------------- physics (M3-08)
 
-  /// The collision mask of the named project layers (`physics.layers`);
-  /// throws on a name the project does not declare.
+  /// The mask of the named project layers (the project's `layers`, for a
+  /// collider's `mask` or a query's); throws on a name the project does not
+  /// declare.
   int layerMask(Iterable<String> names) {
-    final m = physics.mask(names);
-    if (m == null) throw ArgumentError('unknown physics layer in $names; the project declares ${physics.layers}');
+    final m = layersAndTags.mask(names);
+    if (m == null) throw ArgumentError('unknown layer in $names; the project declares ${layersAndTags.layers}');
     return m;
   }
 
@@ -888,7 +894,10 @@ class World {
       case FynkelStatus.FYNKEL_STATUS_OK:
         input.invalidate();
         _entityTable = null;
-        if (op == 'loadProject') physics = report.physics;
+        if (op == 'loadProject') {
+          physics = report.physics;
+          layersAndTags = report.layersAndTags;
+        }
         if (op != 'bindActions') _loadedScenes = report.scenes;
         report = _attachAuthoredBehaviours(report);
         if (EditorChannel.enabled) _loadedForEditor(report, op);

@@ -6,7 +6,7 @@ character controller and the third-person camera rig, below).
 `fynkel_physics` is the `RigidBody`/`Collider`/`CharacterController`
 components plus a Rapier adapter the core steps inside the fixed tick. Rapier never leaks: a body is addressed by its
 entity, shapes are metres, masses kilograms, layers are names from the
-project file, and everything a game does goes through the same
+project file (an object's layer is its own, ADR-0020 — not the collider's), and everything a game does goes through the same
 commands, queries and events every other native system uses.
 
 ## Components
@@ -39,7 +39,7 @@ sections below.
 | `friction` | 0.5 | Coulomb coefficient, `>= 0` |
 | `restitution` | 0 | bounciness `0..=1` |
 | `isSensor` | false | reports trigger events, applies no forces |
-| `layer` / `mask` | 1 / all | membership bits and the bits it collides with — both sides must agree; bit `i` is `physics.layers[i]` |
+| `mask` | all | the layers it collides with; bit `i` is the project's `layers[i]`. Its own layer is its entity's `fynkel.Layer` (absent = 0, `default`; ADR-0020): two colliders touch when each one's mask has the other's layer |
 
 `fynkel validate` checks what the schema cannot: `FYN-H0001` a body
 value the runtime would reject (mass, damping), `H0002` a collider value
@@ -56,14 +56,21 @@ a mesh the cache does not hold, or one above the limit, is
 ## The project file
 
 ```json
-"physics": { "gravity": [0, -9.81, 0], "layers": ["default", "props"] }
+"layers": ["default", "props"],
+"physics": { "gravity": [0, -9.81, 0] }
 ```
 
-Defaults when absent: gravity `[0, -9.81, 0]`, layers `["default"]`. At
-most 32 unique, non-empty names (`FYN-P0013`, at `/physics/layers/<i>` or
-`/physics/gravity`). The cook copies the block into the cache index; the
-world applies it on load (`LoadReport.physics`, `world.physics` in Dart:
-`gravity`, `layers`, `meshColliders` registered, `mask(names)`);
+Gravity defaults to `[0, -9.81, 0]` (`FYN-P0013` when not finite, at
+`/physics/gravity`). The layer names are the project's, not physics'
+(ADR-0020, project `formatVersion` 2 moved `physics.layers` to the top
+level): at most 32 unique, non-empty names, `default` first (`FYN-P0014`),
+default `["default"]`. An object's layer is its `fynkel.Layer`; its
+colliders and its character capsule collide as that layer (Rapier's
+membership is `1 << layer`), and changing the component at run time
+regroups them in the same tick. The cook copies the blocks into the cache
+index; the world applies them on load (`LoadReport.physics` and
+`world.physics` in Dart: `gravity`, `meshColliders` registered;
+`LoadReport.layersAndTags` and `world.layersAndTags`: the names);
 `world.layerMask(['props'])` turns names into bits and throws on a name
 the project does not declare.
 
@@ -154,7 +161,7 @@ with the default `center` the origin is at the feet.
 | `speed` / `jumpSpeed` | 4 / 5 | m/s, what the action driver walks and jumps at |
 | `turnSpeed` | 10 | rad/s, how fast the entity turns to face its motion (0 never turns) |
 | `moveAction` / `jumpAction` | "" | named: the runtime drives the character from these actions (below) |
-| `layer` / `mask` | 1 / all | as a collider's |
+| `mask` | all | as a collider's (the capsule's layer is its entity's) |
 
 Commands (`fynkel.cmd.Body` ops on the simulation lane, `MISSING_COMPONENT`
 12 without a controller, `INVALID_PAYLOAD` 12 when not finite; a body

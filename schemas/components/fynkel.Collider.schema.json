@@ -59,17 +59,11 @@
       "type": "boolean",
       "description": "A sensor reports trigger events and applies no forces."
     },
-    "layer": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 4294967295,
-      "description": "Membership bits (bit `i` = layer `i` of the project's `physics.layers`); default layer 0."
-    },
     "mask": {
       "type": "integer",
       "minimum": 0,
       "maximum": 4294967295,
-      "description": "Which layers this collider collides with (both sides must agree)."
+      "description": "Which layers this collider collides with (bit `i` = the project's `layers[i]`; both sides must agree). Its own layer is its entity's `fynkel.Layer` (ADR-0020)."
     }
   },
   "required": [
@@ -79,7 +73,6 @@
     "friction",
     "restitution",
     "is_sensor",
-    "layer",
     "mask"
   ],
   "additionalProperties": false,

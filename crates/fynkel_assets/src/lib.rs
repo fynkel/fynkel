@@ -46,7 +46,7 @@ pub use fynkel_core::material::PbrMaterial;
 use fynkel_core::volume::VolumeProfile;
 use fynkel_core::AudioClip;
 use fynkel_core::SceneDescription;
-pub use fynkel_document::project::{PhysicsSettings, Quality, QualityProfile};
+pub use fynkel_document::project::{LayersAndTags, PhysicsSettings, Quality, QualityProfile};
 pub use fynkel_document::AuthoredBehaviour;
 use fynkel_document::{describe, Document, DocumentKind, Scene, SchemaSet};
 use fynkel_wire::material::decode_material;
@@ -72,6 +72,8 @@ pub struct ProjectInfo {
     pub input_actions: Vec<ActionSpec>,
     /// The project's `physics` block as cooked (defaults when absent).
     pub physics: PhysicsSettings,
+    /// The project's `layers` and `tags` as cooked (ADR-0020).
+    pub layers_and_tags: LayersAndTags,
 }
 
 /// One asset as the index lists it.
@@ -191,6 +193,7 @@ impl CacheIndex {
                 })
                 .collect(),
             physics: PhysicsSettings::from_json(&p["physics"]),
+            layers_and_tags: LayersAndTags::from_json(&serde_json::Value::Object(p.clone())),
         });
         Ok(CacheIndex {
             root: cache_dir.to_path_buf(),

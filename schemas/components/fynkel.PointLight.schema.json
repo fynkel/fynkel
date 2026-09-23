@@ -22,12 +22,19 @@
     "range": {
       "type": "number",
       "description": "Metres; no contribution beyond this distance."
+    },
+    "culling_mask": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "The layers this light lights (ADR-0020); all by default."
     }
   },
   "required": [
     "color",
     "intensity",
-    "range"
+    "range",
+    "culling_mask"
   ],
   "additionalProperties": false,
   "x-fynkel": {

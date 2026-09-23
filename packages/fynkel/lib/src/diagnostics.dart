@@ -4,6 +4,7 @@
 import '../generated/schema.g.dart' as gen;
 import 'animation.dart';
 import 'audio.dart';
+import 'layers.dart';
 import 'physics.dart';
 
 /// True in debug mode (asserts enabled), false in profile/release.
@@ -401,6 +402,7 @@ class LoadReport {
     this.residency = const ResidencyStats(),
     this.inputActions = const [],
     this.physics = const PhysicsSettings(),
+    this.layersAndTags = const LayersAndTags(),
     this.animation = const AnimationAssets(),
     this.audio = const AudioAssets(),
     this.mode,
@@ -441,6 +443,7 @@ class LoadReport {
         for (final a in (input?['actions'] as List?) ?? const []) BoundAction.fromJson((a as Map).cast<String, Object?>()),
       ],
       physics: physics == null ? const PhysicsSettings() : PhysicsSettings.fromJson(physics),
+      layersAndTags: LayersAndTags.fromJson(j),
       animation: animation == null ? const AnimationAssets() : AnimationAssets.fromJson(animation),
       audio: audio == null ? const AudioAssets() : AudioAssets.fromJson(audio),
       mode: j['mode'] as String?,
@@ -505,9 +508,13 @@ class LoadReport {
   /// empty for a `loadScene` of a cache without a project).
   final List<BoundAction> inputActions;
 
-  /// The project's physics settings as applied (gravity, layer names, mesh
-  /// colliders registered); defaults for a `loadScene`.
+  /// The project's physics settings as applied (gravity, mesh colliders
+  /// registered); defaults for a `loadScene`.
   final PhysicsSettings physics;
+
+  /// The project's `layers` and `tags` (ADR-0020); `default` and no tags
+  /// for a `loadScene`.
+  final LayersAndTags layersAndTags;
 
   /// The clips and skins registered from the cache for the scene's
   /// `Animator`s and `Skin`s (M3-19).
@@ -545,6 +552,7 @@ class LoadReport {
         residency: residency,
         inputActions: inputActions,
         physics: physics,
+        layersAndTags: layersAndTags,
         animation: animation,
         audio: audio,
         mode: mode,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "{{scene_id}}",
   "name": "Main",
   "entities": {
@@ -29,7 +29,8 @@
             "far": 100.0,
             "priority": 0,
             "exposure_mode": "auto",
-            "exposure": 12.0
+            "exposure": 12.0,
+            "culling_mask": 4294967295
           }
         },
         "{{c_camera_listener}}": {
@@ -119,7 +120,6 @@
             "friction": 0.5,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         },
@@ -200,7 +200,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -259,8 +258,14 @@
             "friction": 0.5,
             "restitution": 0.1,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "{{c_crate_layer}}": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }

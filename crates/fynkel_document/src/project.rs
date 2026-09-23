@@ -159,28 +159,25 @@ pub struct Target {
     pub profile: String,
 }
 
-/// The `physics` block (M3-08): world gravity and the named collision
-/// layers (`fynkel.Collider.layer`/`mask` bit `i` is `layers[i]`).
+/// The `physics` block (M3-08): world gravity. The layers a collider's
+/// `mask` names are the project's own `layers` (ADR-0020).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PhysicsSettings {
     /// Metres per second squared.
     pub gravity: [f32; 3],
-    /// At most 32 unique names; absent layers are addressed by bit.
-    pub layers: Vec<String>,
 }
 
 impl Default for PhysicsSettings {
     fn default() -> Self {
         Self {
             gravity: [0.0, -9.81, 0.0],
-            layers: vec!["default".to_string()],
         }
     }
 }
 
 impl PhysicsSettings {
     pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({ "gravity": self.gravity, "layers": self.layers })
+        serde_json::json!({ "gravity": self.gravity })
     }
 
     pub fn from_json(v: &serde_json::Value) -> Self {
@@ -196,16 +193,31 @@ impl PhysicsSettings {
                 g
             })
             .unwrap_or(d.gravity);
-        let layers = v["layers"]
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or(d.layers);
-        Self { gravity, layers }
+        Self { gravity }
     }
+}
+
+/// The project's layers and tags (ADR-0020): `layers[i]` is layer `i`
+/// (bit `i` of a mask, at most 32, `layers[0]` is `default`), `tags[i]`
+/// bit `i` of a `fynkel.Tags` (at most 32).
+#[derive(Clone, Debug, PartialEq)]
+pub struct LayersAndTags {
+    pub layers: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+impl Default for LayersAndTags {
+    fn default() -> Self {
+        Self {
+            layers: vec!["default".to_string()],
+            tags: Vec::new(),
+        }
+    }
+}
+
+impl LayersAndTags {
+    pub const MAX_LAYERS: usize = 32;
+    pub const MAX_TAGS: usize = 32;
 
     /// The bit mask of the named layers; an unknown name is `None`.
     pub fn mask(&self, names: &[&str]) -> Option<u32> {
@@ -215,6 +227,40 @@ impl PhysicsSettings {
             mask |= 1u32 << i;
         }
         Some(mask)
+    }
+
+    pub fn layer(&self, name: &str) -> Option<u32> {
+        self.layers.iter().position(|l| l == name).map(|i| i as u32)
+    }
+
+    /// The bit set of the named tags; an unknown name is `None`.
+    pub fn tag_bits(&self, names: &[&str]) -> Option<u32> {
+        let mut bits = 0;
+        for n in names {
+            let i = self.tags.iter().position(|t| t == n)?;
+            bits |= 1u32 << i;
+        }
+        Some(bits)
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({ "layers": self.layers, "tags": self.tags })
+    }
+
+    /// Reads `{ "layers": [...], "tags": [...] }` (either may be absent).
+    pub fn from_json(v: &serde_json::Value) -> Self {
+        let d = Self::default();
+        let names = |key: &str| {
+            v[key].as_array().map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect::<Vec<_>>()
+            })
+        };
+        Self {
+            layers: names("layers").unwrap_or(d.layers),
+            tags: names("tags").unwrap_or(d.tags),
+        }
     }
 }
 
@@ -229,6 +275,8 @@ pub struct Project {
     pub quality: Option<Quality>,
     /// `physics` block or the defaults (M3-08).
     pub physics: PhysicsSettings,
+    /// `layers` and `tags`, or the defaults (ADR-0020).
+    pub layers_and_tags: LayersAndTags,
     /// `None` = every built-in component type.
     pub components: Option<Vec<ComponentEntry>>,
     pub targets: Vec<Target>,
@@ -354,19 +402,26 @@ impl Project {
                     ),
                 }
             }
-            if let Some(l) = get("layers") {
-                match l.as_array() {
-                    Some(items) => {
-                        physics.layers = items
-                            .iter()
-                            .filter_map(|x| x.as_str().map(str::to_string))
-                            .collect();
-                        if physics.layers.len() != items.len() {
-                            malformed("/physics/layers", "layers must be strings", &mut diags);
-                        }
+        }
+
+        let mut layers_and_tags = LayersAndTags::default();
+        for (key, list) in [
+            ("layers", &mut layers_and_tags.layers),
+            ("tags", &mut layers_and_tags.tags),
+        ] {
+            let Some(l) = root.get(key) else { continue };
+            let pointer = format!("/{key}");
+            match l.as_array() {
+                Some(items) => {
+                    *list = items
+                        .iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect();
+                    if list.len() != items.len() {
+                        malformed(&pointer, &format!("{key} must be strings"), &mut diags);
                     }
-                    None => malformed("/physics/layers", "layers must be an array", &mut diags),
                 }
+                None => malformed(&pointer, &format!("{key} must be an array"), &mut diags),
             }
         }
 
@@ -475,6 +530,7 @@ impl Project {
             input_actions,
             quality,
             physics,
+            layers_and_tags,
             components,
             targets,
             read_diagnostics: diags,
@@ -629,46 +685,60 @@ impl Project {
                 }
             }
         }
-        // Physics (M3-08): a layer is one bit of a 32-bit mask.
-        if root.get("physics").is_some() {
-            if self.physics.layers.len() > 32 {
-                out.push(anchor(
+        // Layers and tags (ADR-0020): a layer is one bit of a 32-bit mask,
+        // a tag one bit of a 32-bit set; layer 0 is `default`.
+        let lt = &self.layers_and_tags;
+        for (key, list, max) in [
+            ("layers", &lt.layers, LayersAndTags::MAX_LAYERS),
+            ("tags", &lt.tags, LayersAndTags::MAX_TAGS),
+        ] {
+            if root.get(key).is_none() {
+                continue;
+            }
+            let error = |message: String, pointer: String| {
+                anchor(
                     root,
-                    Diagnostic::error(
-                        Code::PROJECT_PHYSICS,
-                        format!(
-                            "physics.layers has {} names; a collision mask has 32 bits",
-                            self.physics.layers.len()
-                        ),
-                    ),
-                    "/physics/layers",
+                    Diagnostic::error(Code::PROJECT_LAYERS_TAGS, message),
+                    &pointer,
+                )
+            };
+            if list.len() > max {
+                out.push(error(
+                    format!("{key} has {} names; at most {max}", list.len()),
+                    format!("/{key}"),
                 ));
             }
-            for (i, name) in self.physics.layers.iter().enumerate() {
+            for (i, name) in list.iter().enumerate() {
                 if name.is_empty() {
-                    out.push(anchor(
-                        root,
-                        Diagnostic::error(Code::PROJECT_PHYSICS, "a layer name is empty"),
-                        &format!("/physics/layers/{i}"),
+                    out.push(error(
+                        format!("a name in {key} is empty"),
+                        format!("/{key}/{i}"),
                     ));
-                } else if self.physics.layers[..i].contains(name) {
-                    out.push(anchor(
-                        root,
-                        Diagnostic::error(
-                            Code::PROJECT_PHYSICS,
-                            format!("layer {name:?} is listed twice"),
-                        ),
-                        &format!("/physics/layers/{i}"),
+                } else if list[..i].contains(name) {
+                    out.push(error(
+                        format!("{name:?} is listed twice in {key}"),
+                        format!("/{key}/{i}"),
                     ));
                 }
             }
-            if self.physics.gravity.iter().any(|g| !g.is_finite()) {
-                out.push(anchor(
-                    root,
-                    Diagnostic::error(Code::PROJECT_PHYSICS, "gravity must be finite"),
-                    "/physics/gravity",
-                ));
-            }
+        }
+        if root.get("layers").is_some() && lt.layers.first().map(String::as_str) != Some("default")
+        {
+            out.push(anchor(
+                root,
+                Diagnostic::error(
+                    Code::PROJECT_LAYERS_TAGS,
+                    "layers must start with \"default\" (layer 0)",
+                ),
+                "/layers",
+            ));
+        }
+        if root.get("physics").is_some() && self.physics.gravity.iter().any(|g| !g.is_finite()) {
+            out.push(anchor(
+                root,
+                Diagnostic::error(Code::PROJECT_PHYSICS, "gravity must be finite"),
+                "/physics/gravity",
+            ));
         }
         out
     }
@@ -751,6 +821,11 @@ impl Project {
 
     /// True when `type_id` may appear in this project's documents.
     pub fn allows_component(&self, type_id: &str) -> bool {
+        // An object's layer and tags are properties of every object, not a
+        // feature a project opts into (ADR-0020).
+        if matches!(type_id, "fynkel.Layer" | "fynkel.Tags") {
+            return true;
+        }
         match &self.components {
             None => true,
             Some(entries) => entries.iter().any(|e| e.type_id == type_id),
@@ -1237,6 +1312,13 @@ pub fn validate_project_with(
                     &mut unregistered,
                     &mut report.diagnostics,
                 );
+                layers_and_tags_check(
+                    &project,
+                    &scene.entities,
+                    &path,
+                    &scene.document.root,
+                    &mut report.diagnostics,
+                );
             }
             DocumentKind::Prefab => {
                 let prefab = Prefab::from_document(doc);
@@ -1247,6 +1329,13 @@ pub fn validate_project_with(
                     &path,
                     &prefab.document.root,
                     &mut unregistered,
+                    &mut report.diagnostics,
+                );
+                layers_and_tags_check(
+                    &project,
+                    &prefab.entities,
+                    &path,
+                    &prefab.document.root,
                     &mut report.diagnostics,
                 );
             }
@@ -1285,6 +1374,69 @@ pub fn validate_project_with(
 
 /// One `FYN-P0004` warning per (document, type) for component types the
 /// registry does not list.
+/// Every `fynkel.Layer` names a layer and every `fynkel.Tags` bit a tag
+/// the project declares (ADR-0020, `FYN-H0012`).
+fn layers_and_tags_check(
+    project: &Project,
+    entities: &[crate::scene::Entity],
+    path: &Option<String>,
+    root: &Node,
+    out: &mut Vec<Diagnostic>,
+) {
+    let lt = &project.layers_and_tags;
+    for e in entities {
+        for c in &e.components {
+            let problem = match c.type_id.as_str() {
+                "fynkel.Layer" => c
+                    .data
+                    .get("layer")
+                    .and_then(Node::as_i64)
+                    .filter(|&l| l >= 0 && l as usize >= lt.layers.len())
+                    .map(|l| {
+                        (
+                            "layer",
+                            format!(
+                                "layer {l} is not declared: the project's layers are [{}]",
+                                lt.layers.join(", ")
+                            ),
+                        )
+                    }),
+                "fynkel.Tags" => c
+                    .data
+                    .get("bits")
+                    .and_then(Node::as_i64)
+                    .map(|b| b as u64)
+                    .filter(|&b| lt.tags.len() < 64 && b >> lt.tags.len() != 0)
+                    .map(|b| {
+                        (
+                            "bits",
+                            format!(
+                                "tag bit {} is not declared: the project's tags are [{}]",
+                                63 - (b >> lt.tags.len() << lt.tags.len()).leading_zeros(),
+                                lt.tags.join(", ")
+                            ),
+                        )
+                    }),
+                _ => None,
+            };
+            let Some((field, message)) = problem else {
+                continue;
+            };
+            let mut d = anchor(
+                root,
+                Diagnostic::error(Code::UNDECLARED_LAYER_OR_TAG, message)
+                    .with_id(c.id.to_string())
+                    .with_suggestion(format!(
+                        "declare it under `layers`/`tags` in {PROJECT_FILE}"
+                    )),
+                &format!("{}/data/{field}", c.pointer),
+            );
+            d.document = path.clone();
+            out.push(d);
+        }
+    }
+}
+
 fn registry_check(
     project: &Project,
     entities: &[crate::scene::Entity],
@@ -1354,6 +1506,8 @@ pub fn describe_json(
         })).collect::<Vec<_>>(),
         "quality": project.quality.as_ref().map(Quality::to_json),
         "physics": project.physics.to_json(),
+        "layers": project.layers_and_tags.layers,
+        "tags": project.layers_and_tags.tags,
         "components": project.components.as_ref().map(|list| list.iter().map(|c| serde_json::json!({
             "type": c.type_id, "kind": c.kind, "version": c.version,
         })).collect::<Vec<_>>()),
@@ -1414,11 +1568,13 @@ pub fn describe_text(project: &Project, db: Option<&AssetDatabase>, lock: Option
         None => out.push_str("  quality: engine defaults\n"),
     }
     out.push_str(&format!(
-        "  physics: gravity [{}, {}, {}], layers [{}]\n",
-        project.physics.gravity[0],
-        project.physics.gravity[1],
-        project.physics.gravity[2],
-        project.physics.layers.join(", ")
+        "  physics: gravity [{}, {}, {}]\n",
+        project.physics.gravity[0], project.physics.gravity[1], project.physics.gravity[2],
+    ));
+    out.push_str(&format!(
+        "  layers: [{}]; tags: [{}]\n",
+        project.layers_and_tags.layers.join(", "),
+        project.layers_and_tags.tags.join(", ")
     ));
     match &project.components {
         Some(list) => out.push_str(&format!(

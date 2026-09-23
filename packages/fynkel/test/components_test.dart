@@ -23,7 +23,7 @@ class Blinker extends Behaviour {
       set(mesh.copyWith(visible: false));
       expect(get<MeshRenderer>()!.visible, isFalse, reason: 'read-your-writes');
     } else if (ticks == 1) {
-      set(const PointLight(color: Vec3(1, 0.5, 0.25), intensity: 800, range: 12));
+      set(const PointLight(color: Vec3(1, 0.5, 0.25), intensity: 800, range: 12, cullingMask: 0xffffffff));
     } else if (ticks == 2) {
       set(get<PointLight>()!.copyWith(intensity: 1600));
     }
@@ -122,7 +122,7 @@ void main() {
     expect(sun.components.map((c) => c.runtimeType), [Transform, Name]);
     sun.set(const Name(value: 'Star'));
     expect(sun.get<Name>()!.value, 'Star');
-    sun.set(const PointLight(color: Vec3(1, 1, 1), intensity: 100, range: -1));
+    sun.set(const PointLight(color: Vec3(1, 1, 1), intensity: 100, range: -1, cullingMask: 0xffffffff));
     expect(sun.get<PointLight>()!.range, -1, reason: 'staged, not validated yet');
     w.frame(1 / 60);
     expect(w.componentsOf(sun.entity).map((c) => c.runtimeType), [Transform, Name]);
@@ -146,7 +146,7 @@ void main() {
   test('a spawned object takes components in the tick of its spawn; the presentation lane applies now', () {
     final w = loaded();
     final lamp = w.spawn(name: 'Lamp')
-      ..add(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4))
+      ..add(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4, cullingMask: 0xffffffff))
       ..set(const Name(value: 'Lamp 2'));
     expect(lamp.isPending, isTrue);
     expect(lamp.get<PointLight>()!.intensity, 50, reason: 'read-your-writes before the spawn');
@@ -178,7 +178,7 @@ void main() {
     final entity = lamp.entity;
     lamp.destroy();
     w.frame(1 / 60);
-    expect(() => lamp.set(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4)), throwsStateError);
+    expect(() => lamp.set(const PointLight(color: Vec3(0, 1, 0), intensity: 50, range: 4, cullingMask: 0xffffffff)), throwsStateError);
     expect(w.componentsOf(entity), isEmpty, reason: 'a destroyed entity has nothing');
   });
 

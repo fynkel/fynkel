@@ -59,7 +59,7 @@ pub use fynkel_physics::{
     self as physics, BodyCommand, BodyType, CharacterController, CharacterState, Collider,
     ColliderShape, Contact, Physics, PhysicsEvent, RigidBody,
 };
-pub use fynkel_scene::Transform;
+pub use fynkel_scene::{Layer, Tags, Transform};
 pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase};
 pub use load::{
     EntityDescription, LoadError, LoadMode, LoadedScene, SceneDescription, UnloadedScene,

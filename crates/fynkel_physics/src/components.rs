@@ -95,10 +95,9 @@ pub struct Collider {
     pub restitution: f32,
     /// A sensor reports trigger events and applies no forces.
     pub is_sensor: bool,
-    /// Membership bits (bit `i` = layer `i` of the project's
-    /// `physics.layers`); default layer 0.
-    pub layer: u32,
-    /// Which layers this collider collides with (both sides must agree).
+    /// Which layers this collider collides with (bit `i` = the project's
+    /// `layers[i]`; both sides must agree). Its own layer is its entity's
+    /// `fynkel.Layer` (ADR-0020).
     pub mask: u32,
 }
 
@@ -112,7 +111,6 @@ impl Default for Collider {
             friction: 0.5,
             restitution: 0.0,
             is_sensor: false,
-            layer: 1,
             mask: u32::MAX,
         }
     }
@@ -202,7 +200,7 @@ impl Collider {
 /// sliding and the effective velocity are held state
 /// (`characterState()`). Its own kinematic capsule replaces any
 /// `RigidBody`/`Collider` on the entity (`FYN-H0006`), collides by
-/// `layer`/`mask`, reports contact and trigger events and pushes dynamic
+/// its object's `fynkel.Layer` and its `mask`, reports contact and trigger events and pushes dynamic
 /// bodies as a body of `mass` kilograms would.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "component", id = 12, name = "fynkel.CharacterController")]
@@ -244,10 +242,9 @@ pub struct CharacterController {
     /// A button action whose press jumps when grounded; empty leaves it
     /// to `jump` commands.
     pub jump_action: String,
-    /// Membership bits (bit `i` = layer `i` of the project's
-    /// `physics.layers`); default layer 0.
-    pub layer: u32,
-    /// Which layers the capsule collides with and walks on.
+    /// Which layers the capsule collides with and walks on (bit `i` = the
+    /// project's `layers[i]`); its own layer is its entity's `fynkel.Layer`
+    /// (ADR-0020).
     pub mask: u32,
 }
 
@@ -268,7 +265,6 @@ impl Default for CharacterController {
             turn_speed: 10.0,
             move_action: String::new(),
             jump_action: String::new(),
-            layer: 1,
             mask: u32::MAX,
         }
     }
@@ -331,10 +327,10 @@ mod tests {
         assert_eq!(s.name, "fynkel.CharacterController");
         // radius @0, height @4, center 12 @8, skin @20, slope @24, step @28,
         // snap @32, gravity @36, mass @40, speed @44, jump @48, turn @52,
-        // move_action (u32,u32) @56, jump_action @64, layer @72, mask @76 → 80.
+        // move_action (u32,u32) @56, jump_action @64, mask @72 → 80.
         assert_eq!(
             s.offsets(),
-            vec![0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 64, 72, 76]
+            vec![0, 4, 8, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 64, 72]
         );
         assert_eq!(s.wire_size(), 80);
         assert!(s.has_strings());
@@ -377,10 +373,10 @@ mod tests {
         assert_eq!(RigidBody::SCHEMA.wire_size(), 24);
         assert_eq!(Collider::SCHEMA.id, 11);
         // shape @0, size 12 @4, mesh 24 @16, offset 12 @40, friction @52,
-        // restitution @56, is_sensor @60, layer @64, mask @68 → 72.
+        // restitution @56, is_sensor @60, mask @64 → 72.
         assert_eq!(
             Collider::SCHEMA.offsets(),
-            vec![0, 4, 16, 40, 52, 56, 60, 64, 68]
+            vec![0, 4, 16, 40, 52, 56, 60, 64]
         );
         assert_eq!(Collider::SCHEMA.wire_size(), 72);
         assert!(matches!(

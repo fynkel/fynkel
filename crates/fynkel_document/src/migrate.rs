@@ -69,6 +69,13 @@ impl Migrations {
             description: "fynkel.pbr@1 materials carry the PbrMaterial fields (base_color, metallic, …, <slot>_texture) instead of parameters/textures maps; alphaMode/alphaCutoff become alpha_mode/alpha_cutoff, cull becomes double_sided, castShadows/receiveShadows moved to fynkel.MeshRenderer",
             apply: material_1_to_2,
         });
+        m.add(Migration {
+            kind: DocumentKind::Project,
+            from: 1,
+            name: "layers",
+            description: "the collision layers became the project's layers (ADR-0020): physics.layers moves to the top-level layers, unchanged, so every bit keeps its meaning",
+            apply: project_layers_1_to_2,
+        });
         for kind in [DocumentKind::Scene, DocumentKind::Prefab] {
             m.add(Migration {
                 kind,
@@ -83,6 +90,13 @@ impl Migrations {
                 name: "animator-layers",
                 description: "fynkel.Animator gained weight, additive and root_motion (M3-19c); every animator gets the defaults 1 / false / false",
                 apply: animator_layers_2_to_3,
+            });
+            m.add(Migration {
+                kind,
+                from: 3,
+                name: "object-layers",
+                description: "a collider's layer became its object's (ADR-0020): fynkel.Collider and fynkel.CharacterController lose `layer`, an entity whose colliders were not on layer 0 gains a fynkel.Layer (the lowest bit when several), and fynkel.Camera, fynkel.PointLight and fynkel.SpotLight gain culling_mask (all layers)",
+                apply: object_layers_3_to_4,
             });
         }
         m
@@ -560,4 +574,171 @@ fn camera_exposure_1_to_2(root: &mut Node) -> Result<(), String> {
             data.set("exposure", Node::float(12.0));
         }
     })
+}
+
+/// The components whose `layer` bits moved to the object (ADR-0020).
+const LAYERED: [&str; 2] = ["fynkel.Collider", "fynkel.CharacterController"];
+/// The components that gained `culling_mask` (ADR-0020).
+const CULLING: [&str; 3] = ["fynkel.Camera", "fynkel.PointLight", "fynkel.SpotLight"];
+
+/// Scene/prefab 3 → 4 (ADR-0020, tags and layers): a collider's `layer`
+/// membership bits become its object's `fynkel.Layer` — the index of the
+/// lowest set bit, and no component at all for layer 0 (the default) —
+/// and `fynkel.Camera`, `fynkel.PointLight` and `fynkel.SpotLight` gain
+/// `culling_mask: 4294967295` (every layer). The new component's id is
+/// derived from the entity's (UUID v5), so migrating twice, or a prefab
+/// and its copies, gives the same id. The same rewrite applies to the
+/// `data` of an `addComponent` override; a `setField`/`unsetField` of a
+/// collider's `layer` cannot be carried over (the override does not name
+/// its component's type), so it fails the migration with its pointer.
+fn object_layers_3_to_4(root: &mut Node) -> Result<(), String> {
+    let Some(entities) = root.get_mut("entities") else {
+        return Ok(());
+    };
+    let entities = entities
+        .as_object_mut()
+        .ok_or("/entities: expected an object")?;
+    for entity in entities.iter_mut() {
+        let at = format!("/entities/{}", entity.key);
+        let mut bits: Option<u32> = None;
+        if let Some(components) = entity
+            .value
+            .get_mut("components")
+            .and_then(Node::as_object_mut)
+        {
+            for c in components.iter_mut() {
+                let ty = c
+                    .value
+                    .get("type")
+                    .and_then(Node::as_str)
+                    .map(str::to_string);
+                if let (Some(ty), Some(data)) = (ty, c.value.get_mut("data")) {
+                    rewrite_data(&ty, data, &mut bits);
+                }
+            }
+            if let Some(layer) = bits.and_then(lowest_layer) {
+                let id = crate::parse_uuid(&entity.key).map_err(|e| format!("{at}: {e}"))?;
+                components.push(Member {
+                    key: layer_component_id(id).to_string(),
+                    key_span: Default::default(),
+                    value: layer_component(layer),
+                });
+            }
+        }
+        let Some(overrides) = entity
+            .value
+            .get_mut("prefab")
+            .and_then(|p| p.get_mut("overrides"))
+            .and_then(Node::as_array_mut)
+        else {
+            continue;
+        };
+        let mut out = Vec::with_capacity(overrides.len());
+        for (i, o) in std::mem::take(overrides).into_iter().enumerate() {
+            let op = o
+                .get("op")
+                .and_then(Node::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let field = o.get("field").and_then(Node::as_str).unwrap_or_default();
+            if (op == "setField" || op == "unsetField") && field == "layer" {
+                return Err(format!(
+                    "{at}/prefab/overrides/{i}: a `{op}` of a collider's `layer` has no equivalent after ADR-0020 (the layer is the object's now: give the entity a fynkel.Layer override instead)"
+                ));
+            }
+            let mut o = o;
+            let mut added = None;
+            if op == "addComponent" {
+                let ty = o.get("type").and_then(Node::as_str).map(str::to_string);
+                let mut bits = None;
+                if let (Some(ty), Some(data)) = (ty, o.get_mut("data")) {
+                    rewrite_data(&ty, data, &mut bits);
+                }
+                if let Some(layer) = bits.and_then(lowest_layer) {
+                    let component = o
+                        .get("component")
+                        .and_then(Node::as_str)
+                        .and_then(|c| crate::parse_uuid(c).ok())
+                        .ok_or_else(|| {
+                            format!("{at}/prefab/overrides/{i}/component: expected a UUID")
+                        })?;
+                    let target = o.get("entity").cloned().unwrap_or_else(|| Node::string(""));
+                    added = Some(Node::object(vec![
+                        ("op".into(), Node::string("addComponent")),
+                        ("entity".into(), target),
+                        (
+                            "component".into(),
+                            Node::string(layer_component_id(component).to_string()),
+                        ),
+                        ("type".into(), Node::string("fynkel.Layer")),
+                        ("version".into(), Node::integer(1)),
+                        (
+                            "data".into(),
+                            Node::object(vec![("layer".into(), Node::integer(layer as i64))]),
+                        ),
+                    ]));
+                }
+            }
+            out.push(o);
+            out.extend(added);
+        }
+        *overrides = out;
+    }
+    Ok(())
+}
+
+/// Strips a collider's `layer` into `bits` (OR-ed across the entity's
+/// colliders) and gives a camera or light its `culling_mask`.
+fn rewrite_data(ty: &str, data: &mut Node, bits: &mut Option<u32>) {
+    if LAYERED.contains(&ty) {
+        if let Some(members) = data.as_object_mut() {
+            if let Some(i) = members.iter().position(|m| m.key == "layer") {
+                let m = members.remove(i);
+                let b = m.value.as_i64().unwrap_or(1) as u32;
+                *bits = Some(bits.unwrap_or(0) | b);
+            }
+        }
+    } else if CULLING.contains(&ty) && data.get("culling_mask").is_none() {
+        data.set("culling_mask", Node::integer(u32::MAX as i64));
+    }
+}
+
+/// The layer index of the lowest set bit; `None` for layer 0 (the
+/// default, which needs no component) or no bits at all.
+fn lowest_layer(bits: u32) -> Option<u32> {
+    (bits != 0 && bits & 1 == 0).then(|| bits.trailing_zeros())
+}
+
+/// The id of the `fynkel.Layer` the migration gives `owner` (an entity, or
+/// the component an `addComponent` override adds).
+fn layer_component_id(owner: uuid::Uuid) -> uuid::Uuid {
+    uuid::Uuid::new_v5(&owner, b"fynkel.Layer")
+}
+
+fn layer_component(layer: u32) -> Node {
+    Node::object(vec![
+        ("type".into(), Node::string("fynkel.Layer")),
+        ("version".into(), Node::integer(1)),
+        (
+            "data".into(),
+            Node::object(vec![("layer".into(), Node::integer(layer as i64))]),
+        ),
+    ])
+}
+
+/// Project 1 → 2 (ADR-0020): `physics.layers` moves to the top level as
+/// `layers`, in the same order (bit `i` keeps its meaning). A project
+/// without it keeps the default `["default"]` and gets no member.
+fn project_layers_1_to_2(root: &mut Node) -> Result<(), String> {
+    let Some(physics) = root.get_mut("physics").and_then(Node::as_object_mut) else {
+        return Ok(());
+    };
+    let Some(i) = physics.iter().position(|m| m.key == "layers") else {
+        return Ok(());
+    };
+    let layers = physics.remove(i).value;
+    if root.get("layers").is_none() {
+        root.set("layers", layers);
+    }
+    Ok(())
 }

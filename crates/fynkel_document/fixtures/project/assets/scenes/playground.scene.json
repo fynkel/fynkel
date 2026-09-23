@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "c0000000-0000-4000-8000-000000000031",
   "name": "Playground",
   "entities": {
@@ -42,7 +42,8 @@
             "far": 100.0,
             "priority": 0,
             "exposure_mode": "auto",
-            "exposure": 12.0
+            "exposure": 12.0,
+            "culling_mask": 4294967295
           }
         },
         "c0000000-0000-4000-8000-0000000001c2": {
@@ -118,7 +119,6 @@
             "turn_speed": 10.0,
             "move_action": "move",
             "jump_action": "jump",
-            "layer": 1,
             "mask": 4294967295
           }
         },
@@ -186,7 +186,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }
@@ -238,7 +237,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": false,
-            "layer": 1,
             "mask": 4294967295
           }
         }

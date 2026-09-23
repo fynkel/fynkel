@@ -51,6 +51,12 @@
     "exposure": {
       "type": "number",
       "description": "EV100 when `exposure_mode` is `manual` (12 ≈ a 10 000 lux sun; +1 halves the brightness)."
+    },
+    "culling_mask": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "The layers this camera draws (bit `i` = the project's `layers[i]`, ADR-0020); an object on a layer outside it is neither drawn nor casts a shadow in this camera's frame."
     }
   },
   "required": [
@@ -61,14 +67,15 @@
     "far",
     "priority",
     "exposure_mode",
-    "exposure"
+    "exposure",
+    "culling_mask"
   ],
   "additionalProperties": false,
   "x-fynkel": {
     "kind": "component",
     "id": 5,
     "rust": "fynkel_core::components::Camera",
-    "wireSize": 32,
+    "wireSize": 40,
     "authored": true
   }
 }

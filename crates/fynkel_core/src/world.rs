@@ -36,7 +36,7 @@ use fynkel_physics::{
     BodyCommand, CharacterController, Collider, Physics, PhysicsEvent, QueryKind, QuerySpec,
     RejectionKind, RigidBody,
 };
-use fynkel_scene::{self as scene, Parent, SceneError, Transform, WorldTransform};
+use fynkel_scene::{self as scene, Layer, Parent, SceneError, Tags, Transform, WorldTransform};
 use fynkel_schema_derive::Schema;
 use glam::{Mat4, Quat, Vec3};
 
@@ -983,6 +983,8 @@ impl World {
                     }
                     ComponentId::AUDIO_LISTENER => self.ecs.remove::<AudioListener>(entity).is_ok(),
                     ComponentId::VOLUME => self.ecs.remove::<Volume>(entity).is_ok(),
+                    ComponentId::LAYER => self.ecs.remove::<Layer>(entity).is_ok(),
+                    ComponentId::TAGS => self.ecs.remove::<Tags>(entity).is_ok(),
                     ComponentId::TRANSFORM | ComponentId::HIERARCHY | ComponentId::NAME => {
                         return self.reject(
                             index,
@@ -1147,6 +1149,8 @@ impl World {
             ComponentValue::AudioSource(v) => self.ecs.insert(entity, v),
             ComponentValue::AudioListener(v) => self.ecs.insert(entity, v),
             ComponentValue::Volume(v) => self.ecs.insert(entity, v),
+            ComponentValue::Layer(v) => self.ecs.insert(entity, v),
+            ComponentValue::Tags(v) => self.ecs.insert(entity, v),
         };
         r.is_ok()
     }

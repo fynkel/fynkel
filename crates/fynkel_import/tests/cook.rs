@@ -639,7 +639,7 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     let b = "c0000000-0000-4000-8000-0000000000b0";
     let scene = |own: &str, other: &str| {
         format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":3,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":4,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
         )
     };
     p.write("scenes/a.scene.json", &scene(a, b));

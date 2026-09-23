@@ -242,7 +242,7 @@ void main() {
     File(path).writeAsStringSync(
       jsonEncode({
         r'$schema': 'https://fynkel.dev/schemas/scene.schema.json',
-        'formatVersion': 3,
+        'formatVersion': 4,
         'id': 'b0000000-0000-4000-8000-ffffffffffff',
         'name': 'Big',
         'entities': entities,

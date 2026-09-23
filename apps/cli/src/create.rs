@@ -337,6 +337,7 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         "c_crate_mesh",
         "c_crate_body",
         "c_crate_collider",
+        "c_crate_layer",
     ] {
         vars.push((key.into(), Uuid::new_v4().to_string()));
     }

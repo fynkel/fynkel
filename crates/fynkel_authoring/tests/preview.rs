@@ -245,7 +245,7 @@ fn incremental_sync_matches_a_fresh_load_after_every_transaction_kind() {
         json!([
             { "command": "createObject", "name": "Bulb", "parent": post, "components": [
                 { "type": "fynkel.Transform", "data": { "position": [0, 2.5, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] } },
-                { "type": "fynkel.PointLight", "data": { "color": [1, 0.9, 0.7], "intensity": 800, "range": 6 } }
+                { "type": "fynkel.PointLight", "data": { "color": [1, 0.9, 0.7], "intensity": 800, "range": 6, "culling_mask": 4294967295u32 } }
             ] },
             { "command": "createObject", "name": "Shade", "parent": post },
         ]),
@@ -307,7 +307,7 @@ fn incremental_sync_matches_a_fresh_load_after_every_transaction_kind() {
     let added = apply(
         &mut s,
         h,
-        json!([{ "command": "addComponent", "entity": FLOOR, "component": { "type": "fynkel.PointLight", "data": { "color": [1, 1, 1], "intensity": 100, "range": 3 } } }]),
+        json!([{ "command": "addComponent", "entity": FLOOR, "component": { "type": "fynkel.PointLight", "data": { "color": [1, 1, 1], "intensity": 100, "range": 3, "culling_mask": 4294967295u32 } } }]),
     );
     let light_component = added["mutations"][0]["affectedIds"]
         .as_array()

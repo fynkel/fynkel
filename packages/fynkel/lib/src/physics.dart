@@ -15,7 +15,6 @@ export '../generated/schema.g.dart' show BodyOp, BodyType, Collider, ColliderSha
 class PhysicsSettings {
   const PhysicsSettings({
     this.gravity = const Vec3(0, -9.81, 0),
-    this.layers = const ['default'],
     this.meshColliders = 0,
     this.prefabs = 0,
   });
@@ -24,7 +23,6 @@ class PhysicsSettings {
     final g = (j['gravity'] as List?)?.cast<num>();
     return PhysicsSettings(
       gravity: g == null || g.length != 3 ? const Vec3(0, -9.81, 0) : Vec3(g[0].toDouble(), g[1].toDouble(), g[2].toDouble()),
-      layers: [for (final l in (j['layers'] as List?) ?? const ['default']) l as String],
       meshColliders: (j['meshColliders'] as num?)?.toInt() ?? 0,
       prefabs: (j['prefabs'] as num?)?.toInt() ?? 0,
     );
@@ -33,25 +31,11 @@ class PhysicsSettings {
   /// Metres per second squared.
   final Vec3 gravity;
 
-  /// Layer names, bit `i` of a collider's `layer`/`mask` is `layers[i]`.
-  final List<String> layers;
-
   /// Mesh colliders registered from the scene's cooked meshes.
   final int meshColliders;
 
   /// Prefabs registered for the scene's `Emitter`s (M3-10).
   final int prefabs;
-
-  /// The bit mask of the named layers, or null when a name is unknown.
-  int? mask(Iterable<String> names) {
-    var bits = 0;
-    for (final n in names) {
-      final i = layers.indexOf(n);
-      if (i < 0) return null;
-      bits |= 1 << i;
-    }
-    return bits;
-  }
 }
 
 /// A rigid body's motion as the last step left it (`GameObject.bodyState`).

@@ -55,7 +55,7 @@ fn scene_fixtures_report_exact_semantics() {
 #[test]
 fn scene_view_is_lenient_and_ordered() {
     let text = r#"{
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968330",
   "name": "Lenient",
   "entities": {

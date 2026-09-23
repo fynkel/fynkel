@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "3a56fbbd-b340-41ca-ac2b-b5603d1dc0da",
   "name": "Showcase",
   "entities": {
@@ -42,7 +42,8 @@
             "far": 100.0,
             "priority": 0,
             "exposure_mode": "auto",
-            "exposure": 12.0
+            "exposure": 12.0,
+            "culling_mask": 4294967295
           }
         },
         "174c45cb-c11d-5943-bc0f-4358dddc219d": {
@@ -167,7 +168,8 @@
             "intensity": 25000.0,
             "range": 16.0,
             "inner_angle": 0.3,
-            "outer_angle": 0.55
+            "outer_angle": 0.55,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -209,7 +211,8 @@
               0.25
             ],
             "intensity": 1500.0,
-            "range": 10.0
+            "range": 10.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -341,7 +344,8 @@
               1.0
             ],
             "intensity": 1500.0,
-            "range": 10.0
+            "range": 10.0,
+            "culling_mask": 4294967295
           }
         }
       }

@@ -232,11 +232,13 @@ fn occlusion_is_an_explicit_policy_by_collider_mask() {
         &mut w,
         10,
         Transform::from_position(Vec3::new(0.0, 0.0, 2.5)),
-        vec![ComponentValue::Collider(Collider {
-            size: Vec3::new(4.0, 4.0, 0.2),
-            layer: 0b10,
-            ..Collider::default()
-        })],
+        vec![
+            ComponentValue::Collider(Collider {
+                size: Vec3::new(4.0, 4.0, 0.2),
+                ..Collider::default()
+            }),
+            ComponentValue::Layer(Layer { layer: 1 }),
+        ],
     );
     let target = spawn(
         &mut w,
@@ -244,7 +246,6 @@ fn occlusion_is_an_explicit_policy_by_collider_mask() {
         Transform::from_position(Vec3::ZERO),
         vec![ComponentValue::Collider(Collider {
             size: Vec3::new(0.5, 0.5, 0.5),
-            layer: 0b1,
             ..Collider::default()
         })],
     );

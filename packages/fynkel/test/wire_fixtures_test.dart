@@ -10,7 +10,7 @@ import 'package:fynkel/generated/schema.g.dart';
 import 'package:fynkel/math.dart';
 import 'package:fynkel/src/asset_ref.dart';
 import 'package:fynkel/src/wire/support.dart';
-import 'package:test/test.dart';
+import 'package:test/test.dart' hide Tags;
 
 Directory fixtureDir() {
   var dir = Directory.current;
@@ -199,6 +199,7 @@ void main() {
       priority: -1,
       exposureMode: ExposureMode.manual,
       exposure: 13.5,
+      cullingMask: 0xfffffff7,
     ),
     Camera.wireSize,
     Camera.decode,
@@ -213,14 +214,15 @@ void main() {
   );
   check(
     'PointLight',
-    const PointLight(color: Vec3(0.2, 0.4, 1.0), intensity: 800.0, range: 12.5),
+    const PointLight(color: Vec3(0.2, 0.4, 1.0), intensity: 800.0, range: 12.5, cullingMask: 11),
     PointLight.wireSize,
     PointLight.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
   check(
     'SpotLight',
-    const SpotLight(color: Vec3(1.0, 0.9, 0.8), intensity: 1500.0, range: 15.0, innerAngle: 0.4, outerAngle: 0.6),
+    const SpotLight(
+        color: Vec3(1.0, 0.9, 0.8), intensity: 1500.0, range: 15.0, innerAngle: 0.4, outerAngle: 0.6, cullingMask: 0xfffffffe),
     SpotLight.wireSize,
     SpotLight.decode,
     (v, d, o, s) => v.encode(d, o, s),
@@ -359,7 +361,6 @@ void main() {
       friction: 0.6,
       restitution: 0.1,
       isSensor: true,
-      layer: 2,
       mask: 0xfffffffd,
     ),
     Collider.wireSize,
@@ -440,7 +441,6 @@ void main() {
       turnSpeed: 8,
       moveAction: 'move',
       jumpAction: 'jump',
-      layer: 4,
       mask: 0xfffffffb,
     ),
     CharacterController.wireSize,
@@ -474,6 +474,8 @@ void main() {
     CharacterStateRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),
   );
+  check('Layer', const Layer(layer: 3), Layer.wireSize, Layer.decode, (v, d, o, s) => v.encode(d, o, s));
+  check('Tags', const Tags(bits: 0x80000005), Tags.wireSize, Tags.decode, (v, d, o, s) => v.encode(d, o, s));
   check(
     'Rotator',
     const Rotator(axis: Vec3(0, 1, 0), speed: 1.5, space: MotionSpace.world),

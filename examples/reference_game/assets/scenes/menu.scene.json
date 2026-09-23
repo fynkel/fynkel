@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "65905281-dc97-58ac-8d21-f5fbbac251a9",
   "name": "Menu",
   "entities": {
@@ -788,7 +788,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -920,7 +921,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -1052,7 +1054,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -1184,7 +1187,8 @@
               0.35
             ],
             "intensity": 1800.0,
-            "range": 14.0
+            "range": 14.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -1271,7 +1275,8 @@
             "far": 120.0,
             "priority": 0,
             "exposure_mode": "auto",
-            "exposure": 12.0
+            "exposure": 12.0,
+            "culling_mask": 4294967295
           }
         },
         "69446ff2-6086-5625-aea2-219d76e65a84": {

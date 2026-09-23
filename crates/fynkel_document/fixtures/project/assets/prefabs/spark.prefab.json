@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "c0000000-0000-4000-8000-000000000041",
   "name": "Spark",
   "entities": {
@@ -62,8 +62,14 @@
             "friction": 0.5,
             "restitution": 0.3,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "3a7e307e-e092-5956-8abe-d1bad540c72e": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }

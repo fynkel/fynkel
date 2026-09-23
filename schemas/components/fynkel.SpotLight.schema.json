@@ -30,6 +30,12 @@
     "outer_angle": {
       "type": "number",
       "description": "Half-angle in radians beyond which the light is zero, `>= inner_angle`."
+    },
+    "culling_mask": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295,
+      "description": "The layers this light lights (ADR-0020); all by default."
     }
   },
   "required": [
@@ -37,7 +43,8 @@
     "intensity",
     "range",
     "inner_angle",
-    "outer_angle"
+    "outer_angle",
+    "culling_mask"
   ],
   "additionalProperties": false,
   "x-fynkel": {

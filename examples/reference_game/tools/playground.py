@@ -91,9 +91,13 @@ ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets"
 NS = uuid.UUID("7c9b0b3e-8c0a-4f0e-9d2a-5a1b2c3d4e5f")  # the Playground's id namespace
 
-# Physics layers (fynkel.project.json `physics.layers`), as bits.
+# The project's layers (fynkel.project.json `layers`, ADR-0020), as the
+# bits a collider's `mask` or a camera's `culling_mask` names. An object's
+# own layer is its `fynkel.Layer` (the bit's index): `collider(layer=…)`
+# and the character's `layer` say which, and `Scene.add` moves it there.
 DEFAULT, PROPS, PLAYER, TRIGGER = 1, 2, 4, 8
 ALL = 0xFFFFFFFF
+LAYERED = ("fynkel.Collider", "fynkel.CharacterController")
 
 # ------------------------------------------------------------------ helpers
 
@@ -186,7 +190,7 @@ def trigger_zone(event, once=False):
 
 
 def point_light(color, intensity, range_):
-    return ("fynkel.PointLight", {"color": r6(color), "intensity": intensity, "range": range_})
+    return ("fynkel.PointLight", {"color": r6(color), "intensity": intensity, "range": range_, "culling_mask": ALL})
 
 
 def behaviour(type_, **data):
@@ -203,8 +207,14 @@ class Scene:
         eid = uid(self.key, name)
         assert eid not in self.entities, f"duplicate entity name {name!r}"
         entity = {"name": name, "parent": parent, "children": [], "components": {}}
+        layer = 0
         for i, (type_, data) in enumerate(components):
+            if type_ in LAYERED and "layer" in data:
+                data = dict(data)
+                layer = max(layer, data.pop("layer").bit_length() - 1)
             entity["components"][uid(self.key, name, i, type_)] = {"type": type_, "version": 1, "data": data}
+        if layer:
+            entity["components"][uid(self.key, name, "layer")] = {"type": "fynkel.Layer", "version": 1, "data": {"layer": layer}}
         if prefab is not None:
             entity["prefab"] = {"asset": {"asset": prefab}, "instance": uid(self.key, name, "instance")}
         if parent is not None:
@@ -215,7 +225,7 @@ class Scene:
     def document(self, kind, id_, extra=None):
         doc = {
             "$schema": f"https://fynkel.dev/schemas/{kind}.schema.json",
-            "formatVersion": 3,
+            "formatVersion": 4,
             "id": id_,
             "name": self.name,
             "entities": self.entities,
@@ -531,7 +541,7 @@ def playground():
         "Camera",
         [
             transform((0, 1.5 + dist * math.sin(pitch), dist * math.cos(pitch)), quat_axis_angle((1, 0, 0), -pitch)),
-            ("fynkel.Camera", {"projection": "perspective", "fov_y": 0.95, "ortho_height": 10.0, "near": 0.1, "far": 120.0, "priority": 0, "exposure_mode": "auto", "exposure": 12.0}),
+            ("fynkel.Camera", {"projection": "perspective", "fov_y": 0.95, "ortho_height": 10.0, "near": 0.1, "far": 120.0, "priority": 0, "exposure_mode": "auto", "exposure": 12.0, "culling_mask": ALL}),
             (
                 "fynkel.ThirdPersonCamera",
                 {
@@ -743,7 +753,7 @@ def camera(s, pivot, pitch, dist, parent=None):
         "Camera",
         [
             transform((pivot[0], pivot[1] + dist * math.sin(pitch), pivot[2] + dist * math.cos(pitch)), quat_axis_angle((1, 0, 0), -pitch)),
-            ("fynkel.Camera", {"projection": "perspective", "fov_y": 0.95, "ortho_height": 10.0, "near": 0.1, "far": 120.0, "priority": 0, "exposure_mode": "auto", "exposure": 12.0}),
+            ("fynkel.Camera", {"projection": "perspective", "fov_y": 0.95, "ortho_height": 10.0, "near": 0.1, "far": 120.0, "priority": 0, "exposure_mode": "auto", "exposure": 12.0, "culling_mask": ALL}),
             ("fynkel.AudioListener", {"volume": 1.0}),
         ],
         parent=parent,

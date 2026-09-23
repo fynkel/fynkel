@@ -179,6 +179,7 @@ impl OpenProject {
                 quality: self.project.quality.clone(),
                 input_actions: self.project.input_actions.clone(),
                 physics: self.project.physics.clone(),
+                layers_and_tags: self.project.layers_and_tags.clone(),
             }),
             ..fynkel_import::CookOptions::default()
         };

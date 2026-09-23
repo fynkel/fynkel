@@ -124,7 +124,7 @@ void main() {
     // a light on it; the sun's light removed.
     final twin = game.world.spawn(name: 'Twin', transform: cube.localTransform.copyWith(position: const Vec3(2, 0, 0)))
       ..add(mesh)
-      ..add(const PointLight(color: Vec3(1, 0.6, 0.2), intensity: 400, range: 8));
+      ..add(const PointLight(color: Vec3(1, 0.6, 0.2), intensity: 400, range: 8, cullingMask: 0xffffffff));
     sun.remove<DirectionalLight>();
     game.frame(1 / 60); // spawns
     game.frame(1 / 60); // applies the twin's components
@@ -169,7 +169,7 @@ void main() {
     final crate = world.attach(world.allEntities().firstWhere((e) => world.nameOfEntity(e) == 'Crate'));
     final landings = crate.addBehaviour(_Landings());
     final cube = world.behaviours.whereType<Mover>().single.gameObject;
-    expect(game.report.physics.layers, ['default', 'props']);
+    expect(game.report.layersAndTags.layers, ['default', 'props']);
 
     for (var i = 0; i < 180; i++) {
       game.frame(1 / 60);

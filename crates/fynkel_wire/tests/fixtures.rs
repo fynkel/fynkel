@@ -18,8 +18,9 @@ use fynkel_core::material::{AlphaMode, PbrMaterial};
 use fynkel_core::schema::*;
 use fynkel_core::{
     Animator, AudioBus, AudioListener, AudioSource, BodyType, CharacterController, Collider,
-    ColliderShape, Emitter, Follow, LifetimeDespawn, LookAtCamera, MotionSpace, Name, Oscillate,
-    RigidBody, Rotator, Settings, Skin, ThirdPersonCamera, TriggerZone, Volume, VolumeShape,
+    ColliderShape, Emitter, Follow, Layer, LifetimeDespawn, LookAtCamera, MotionSpace, Name,
+    Oscillate, RigidBody, Rotator, Settings, Skin, Tags, ThirdPersonCamera, TriggerZone, Volume,
+    VolumeShape,
 };
 use fynkel_scene::Transform;
 use fynkel_wire::{StringTable, WireRecord, SCHEMA_FINGERPRINT};
@@ -186,6 +187,7 @@ fn fixtures_match_generated_codecs() {
             priority: -1,
             exposure_mode: ExposureMode::Manual,
             exposure: 13.5,
+            culling_mask: 0xffff_fff7,
         },
     );
     check(
@@ -202,6 +204,7 @@ fn fixtures_match_generated_codecs() {
             color: Vec3::new(0.2, 0.4, 1.0),
             intensity: 800.0,
             range: 12.5,
+            culling_mask: 0b1011,
         },
     );
     check(
@@ -232,6 +235,7 @@ fn fixtures_match_generated_codecs() {
             range: 15.0,
             inner_angle: 0.4,
             outer_angle: 0.6,
+            culling_mask: 0xffff_fffe,
         },
     );
     check(
@@ -322,7 +326,6 @@ fn fixtures_match_generated_codecs() {
             friction: 0.6,
             restitution: 0.1,
             is_sensor: true,
-            layer: 2,
             mask: 0xffff_fffd,
         },
     );
@@ -388,7 +391,6 @@ fn fixtures_match_generated_codecs() {
             turn_speed: 8.0,
             move_action: "move".into(),
             jump_action: "jump".into(),
-            layer: 4,
             mask: 0xffff_fffb,
         },
     );
@@ -418,6 +420,8 @@ fn fixtures_match_generated_codecs() {
             velocity: Vec3::new(0.0, 0.0, -4.0),
         },
     );
+    check("Layer", &Layer { layer: 3 });
+    check("Tags", &Tags { bits: 0x8000_0005 });
     check(
         "Rotator",
         &Rotator {

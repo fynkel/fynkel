@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "4f8e7eb0-6298-59ad-9ccb-639ade69c42f",
   "name": "Coin",
   "entities": {
@@ -79,7 +79,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": true,
-            "layer": 8,
             "mask": 4
           }
         },
@@ -98,6 +97,13 @@
             "pickup": {
               "asset": "12be2075-102a-4ace-ac56-ad55c13d3e01"
             }
+          }
+        },
+        "92468352-9e99-5db7-bd8f-caea78174be0": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
           }
         }
       }

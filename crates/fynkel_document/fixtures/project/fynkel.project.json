@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/project.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "d0000000-0000-4000-8000-000000000001",
   "name": "Fixture Game",
   "startupScene": {
@@ -67,10 +67,6 @@
       0,
       -9.81,
       0
-    ],
-    "layers": [
-      "default",
-      "props"
     ]
   },
   "components": {
@@ -161,5 +157,9 @@
     "android": {
       "enabled": false
     }
-  }
+  },
+  "layers": [
+    "default",
+    "props"
+  ]
 }

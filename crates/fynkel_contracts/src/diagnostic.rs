@@ -162,9 +162,11 @@ impl Code {
     pub const LOCK_MISMATCH: Code = Code("FYN-P0011");
     /// The lock file is not valid (JSON, schema).
     pub const LOCK_MALFORMED: Code = Code("FYN-P0012");
-    /// `physics.layers` has more than 32 names, a duplicate, or an empty
-    /// name; `physics.gravity` is not three finite numbers (M3-08).
+    /// `physics.gravity` is not three finite numbers (M3-08).
     pub const PROJECT_PHYSICS: Code = Code("FYN-P0013");
+    /// `layers` has more than 32 names or does not start with `default`,
+    /// `tags` more than 32; a name is empty or listed twice (ADR-0020).
+    pub const PROJECT_LAYERS_TAGS: Code = Code("FYN-P0014");
 
     // Physics (`FYN-H`, blueprint §9, §19.2d item 8): scene rules the
     // component schemas cannot express.
@@ -203,6 +205,9 @@ impl Code {
     /// `0..=1`, a non-positive size or radius, a negative blend distance;
     /// R3a).
     pub const VOLUME_VALUE: Code = Code("FYN-H0011");
+    /// A `fynkel.Layer` or `fynkel.Tags` that names a layer or tag the
+    /// project does not declare (ADR-0020).
+    pub const UNDECLARED_LAYER_OR_TAG: Code = Code("FYN-H0012");
 
     // Editing (`FYN-E`, blueprint §11.1, §19.2c item 14): authoring commands.
     /// The transaction's base revision is not the document's current one.

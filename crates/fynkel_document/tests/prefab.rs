@@ -265,7 +265,7 @@ fn nested_prefabs_flatten_and_cycles_are_refused() {
     // problems).
     let scene_json = r#"{
       "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-      "formatVersion": 3,
+      "formatVersion": 4,
       "id": "20000000-0000-4000-8000-000000000077",
       "name": "Nesting",
       "entities": {

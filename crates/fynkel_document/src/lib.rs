@@ -147,10 +147,14 @@ impl DocumentKind {
     /// Material 2 (M3-02): the `fynkel.PbrMaterial` fields replaced the
     /// `parameters`/`textures` maps for `fynkel.pbr@1`. Scene and prefab 2
     /// (M3-04): `fynkel.Camera` carries `exposure_mode`/`exposure`; 3
-    /// (M3-19c): `fynkel.Animator` carries `weight`/`additive`/`root_motion`.
+    /// (M3-19c): `fynkel.Animator` carries `weight`/`additive`/`root_motion`;
+    /// 4 (ADR-0020): a collider's layer is its object's `fynkel.Layer`, and
+    /// cameras and point/spot lights carry `culling_mask`. Project 2
+    /// (ADR-0020): `layers` and `tags` at the top level.
     pub const fn supported_format_version(self) -> u32 {
         match self {
-            DocumentKind::Scene | DocumentKind::Prefab => 3,
+            DocumentKind::Scene | DocumentKind::Prefab => 4,
+            DocumentKind::Project => 2,
             DocumentKind::Material => 2,
             _ => 1,
         }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "26ab61df-fda0-55ef-b68b-aafac1611f58",
   "name": "Ball",
   "entities": {
@@ -80,8 +80,14 @@
             "friction": 0.4,
             "restitution": 0.2,
             "is_sensor": false,
-            "layer": 2,
             "mask": 4294967295
+          }
+        },
+        "ddcbd453-2f02-572c-860f-84dab2f2517b": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -132,7 +138,6 @@
             "friction": 0.6,
             "restitution": 0.0,
             "is_sensor": true,
-            "layer": 8,
             "mask": 4
           }
         },
@@ -142,6 +147,13 @@
           "data": {
             "event": "hazard",
             "once": false
+          }
+        },
+        "373242d5-1c5c-506f-9e98-9e7f44a9f6c1": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
           }
         }
       }

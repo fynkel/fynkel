@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968330",
   "name": "UnknownChild",
   "entities": {

@@ -337,7 +337,9 @@ void main() {
       expect(mesh.field('mesh')!.assetKind, 'mesh');
       expect(mesh.field('material')!.assetKind, 'material');
       final collider = specs['fynkel.Collider']!;
-      expect(collider.field('layer')!.kind, FieldKind.layerMask);
+      expect(collider.field('mask')!.kind, FieldKind.layerMask);
+      expect(collider.field('layer'), isNull);
+      expect(camera.field('culling_mask')!.kind, FieldKind.layerMask);
       expect(collider.field('mesh')!.nullable, isTrue);
       expect(collider.field('restitution')!.slider, isTrue);
       expect(specs['fynkel.Skin']!.field('skeleton')!.kind, FieldKind.entity);
@@ -1358,9 +1360,7 @@ void main() {
       File('${r.project.dir}/fynkel.project.json').writeAsStringSync(
         jsonEncode({
           'name': 'x',
-          'physics': {
-            'layers': ['default', 'player', 'props'],
-          },
+          'layers': ['default', 'player', 'props'],
         }),
       );
       r.doc.reject = null;
@@ -1381,8 +1381,7 @@ void main() {
               'friction': 0.5,
               'restitution': 0.0,
               'is_sensor': false,
-              'layer': 2,
-              'mask': 4294967295,
+              'mask': 2,
             },
           },
         },
@@ -1402,14 +1401,13 @@ void main() {
       ]);
       tab.select('cam');
       await pumpPanel(tester, r.model);
-      expect(inField('fynkel.Collider#0', 'layer', find.text('player')), findsOneWidget);
-      expect(inField('fynkel.Collider#0', 'mask', find.text('Everything')), findsOneWidget);
-      await tester.tap(inField('fynkel.Collider#0', 'layer', find.byKey(const ValueKey('layerMask.summary'))));
+      expect(inField('fynkel.Collider#0', 'mask', find.text('player')), findsOneWidget);
+      await tester.tap(inField('fynkel.Collider#0', 'mask', find.byKey(const ValueKey('layerMask.summary'))));
       await tester.pumpAndSettle();
       await tester.tap(find.ancestor(of: find.text('props'), matching: find.byType(CheckedPopupMenuItem<int>)));
       await tester.pumpAndSettle();
-      expect(r.model.slots.singleWhere((s) => s.type == 'fynkel.Collider').value('layer'), 6);
-      expect(inField('fynkel.Collider#0', 'layer', find.text('player, props')), findsOneWidget);
+      expect(r.model.slots.singleWhere((s) => s.type == 'fynkel.Collider').value('mask'), 6);
+      expect(inField('fynkel.Collider#0', 'mask', find.text('player, props')), findsOneWidget);
 
       // Colour: the hex field commits linear values, ints kept where the document had them.
       expect(inField('fynkel.DirectionalLight#0', 'color', find.text('#FFBC00')), findsOneWidget);

@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "88641ff3-d525-5d0b-b21f-226ee8e246a8",
   "name": "Burst",
   "entities": {
@@ -78,7 +78,6 @@
             "friction": 0.3,
             "restitution": 0.4,
             "is_sensor": false,
-            "layer": 2,
             "mask": 1
           }
         },
@@ -87,6 +86,13 @@
           "version": 1,
           "data": {
             "seconds": 1.2
+          }
+        },
+        "ae9d48d0-d81d-5e36-942e-2acb173d9d3f": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -165,7 +171,6 @@
             "friction": 0.3,
             "restitution": 0.4,
             "is_sensor": false,
-            "layer": 2,
             "mask": 1
           }
         },
@@ -174,6 +179,13 @@
           "version": 1,
           "data": {
             "seconds": 1.2
+          }
+        },
+        "b7f6b387-83e6-57f3-b78a-0d80c018f781": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -252,7 +264,6 @@
             "friction": 0.3,
             "restitution": 0.4,
             "is_sensor": false,
-            "layer": 2,
             "mask": 1
           }
         },
@@ -261,6 +272,13 @@
           "version": 1,
           "data": {
             "seconds": 1.2
+          }
+        },
+        "ffb471e3-e763-56ca-bbb4-83316b8d8e01": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -339,7 +357,6 @@
             "friction": 0.3,
             "restitution": 0.4,
             "is_sensor": false,
-            "layer": 2,
             "mask": 1
           }
         },
@@ -348,6 +365,13 @@
           "version": 1,
           "data": {
             "seconds": 1.2
+          }
+        },
+        "bc37e60e-7c97-5b34-befc-811c93c4b957": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -426,7 +450,6 @@
             "friction": 0.3,
             "restitution": 0.4,
             "is_sensor": false,
-            "layer": 2,
             "mask": 1
           }
         },
@@ -435,6 +458,13 @@
           "version": 1,
           "data": {
             "seconds": 1.2
+          }
+        },
+        "093d1693-80bc-560d-af82-3cfa7ece096b": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }
@@ -513,7 +543,6 @@
             "friction": 0.3,
             "restitution": 0.4,
             "is_sensor": false,
-            "layer": 2,
             "mask": 1
           }
         },
@@ -522,6 +551,13 @@
           "version": 1,
           "data": {
             "seconds": 1.2
+          }
+        },
+        "8cc4acaa-35d5-5bcd-a723-2abd081bfa52": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
           }
         }
       }

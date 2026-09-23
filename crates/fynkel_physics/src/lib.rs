@@ -43,7 +43,7 @@ use std::sync::Mutex;
 use fynkel_contracts::{AssetRef, Entity};
 use fynkel_ecs::internal::Handle;
 use fynkel_ecs::World as Ecs;
-use fynkel_scene::{self as scene, Transform, WorldTransform};
+use fynkel_scene::{self as scene, Layer, Transform, WorldTransform};
 use glam::Mat4;
 use rapier3d::control::{
     CharacterAutostep, CharacterCollision, CharacterLength, KinematicCharacterController,
@@ -273,6 +273,8 @@ struct Entry {
     character: Option<CharacterController>,
     /// World scale the shape was built with.
     scale: Vec3,
+    /// The object's layer bit (`fynkel.Layer`) the collider was built with.
+    layer: u32,
     /// The entity's world matrix as recorded after the last propagate; a
     /// different matrix at sync means the entity was moved by a command.
     last_world: Mat4,
@@ -285,6 +287,8 @@ struct NewEntry {
     rigid: Option<RigidBody>,
     shape: Option<Collider>,
     character: Option<CharacterController>,
+    /// The object's layer bit.
+    layer: u32,
 }
 
 /// The moving state of a character entry.
@@ -352,10 +356,11 @@ fn pose(position: Vec3, rotation: Quat) -> Pose {
     Pose::from_parts(position, rotation)
 }
 
-fn groups(c: &Collider) -> InteractionGroups {
+/// A collider's groups: its object's layer bit (ADR-0020) and its mask.
+fn groups(layer: u32, mask: u32) -> InteractionGroups {
     InteractionGroups::new(
-        Group::from_bits_retain(c.layer),
-        Group::from_bits_retain(c.mask),
+        Group::from_bits_retain(layer),
+        Group::from_bits_retain(mask),
         InteractionTestMode::And,
     )
 }
@@ -629,13 +634,14 @@ impl Physics {
             // the world matrix moved by gameplay). A resting or static
             // collider costs a few comparisons here and nothing below.
             let h = ecs.hecs();
-            for (handle, wt, rigid, shape, character) in h
+            for (handle, wt, rigid, shape, character, layer) in h
                 .query::<(
                     &Handle,
                     &WorldTransform,
                     Option<&RigidBody>,
                     Option<&Collider>,
                     Option<&CharacterController>,
+                    Option<&Layer>,
                 )>()
                 .iter()
             {
@@ -655,6 +661,7 @@ impl Physics {
                             .zip(character)
                             .is_none_or(|(a, b)| a == b)
                         && entry.rigid == rigid.copied()
+                        && entry.layer == layer.copied().unwrap_or_default().bit()
                         && entry.last_world == wt.matrix
                 });
                 if !same {
@@ -687,6 +694,7 @@ impl Physics {
             let rigid = ecs.copy::<RigidBody>(entity).ok();
             let shape = ecs.get::<Collider>(entity).ok();
             let character = ecs.get::<CharacterController>(entity).ok();
+            let layer = ecs.copy::<Layer>(entity).unwrap_or_default().bit();
             let existing = self.entries.get(&entity);
             // A character's capsule follows its every field; its body and
             // collider components are ignored, so their changes are only
@@ -694,7 +702,8 @@ impl Physics {
             let structural = match existing {
                 None => true,
                 Some(entry) => {
-                    entry.rigid.is_some() != rigid.is_some()
+                    entry.layer != layer
+                        || entry.rigid.is_some() != rigid.is_some()
                         || entry.shape.is_some() != shape.is_some()
                         || entry.character.is_some() != character.is_some()
                         || entry
@@ -727,6 +736,7 @@ impl Physics {
                         rigid,
                         shape,
                         character,
+                        layer,
                     },
                     position,
                     rotation,
@@ -815,10 +825,11 @@ impl Physics {
             rigid,
             shape,
             character,
+            layer,
         } = new;
         if let Some(c) = character {
             self.create_character(
-                ecs, entity, c, rigid, shape, position, rotation, scale, world,
+                ecs, entity, c, rigid, shape, layer, position, rotation, scale, world,
             );
             return;
         }
@@ -844,6 +855,7 @@ impl Physics {
             shape: shape.clone(),
             character: None,
             scale,
+            layer,
             last_world: world,
             reported: false,
         };
@@ -865,7 +877,7 @@ impl Physics {
                         .friction(c.friction)
                         .restitution(c.restitution)
                         .sensor(c.is_sensor)
-                        .collision_groups(groups(c))
+                        .collision_groups(groups(layer, c.mask))
                         .active_events(ActiveEvents::COLLISION_EVENTS)
                         .active_collision_types(types)
                         .density(0.0)
@@ -922,6 +934,7 @@ impl Physics {
         c: CharacterController,
         rigid: Option<RigidBody>,
         shape: Option<Collider>,
+        layer: u32,
         position: Vec3,
         rotation: Quat,
         scale: Vec3,
@@ -940,11 +953,7 @@ impl Physics {
             ColliderBuilder::new(capsule)
                 .translation(c.center * scale)
                 .friction(0.0)
-                .collision_groups(InteractionGroups::new(
-                    Group::from_bits_retain(c.layer),
-                    Group::from_bits_retain(c.mask),
-                    InteractionTestMode::And,
-                ))
+                .collision_groups(groups(layer, c.mask))
                 .active_events(ActiveEvents::COLLISION_EVENTS)
                 .density(0.0)
                 .user_data(user),
@@ -1003,6 +1012,7 @@ impl Physics {
                 shape,
                 character: Some(c),
                 scale,
+                layer,
                 last_world: world,
                 reported,
             },
@@ -1284,11 +1294,7 @@ impl Physics {
             let filter = QueryFilter::new()
                 .exclude_rigid_body(body)
                 .exclude_sensors()
-                .groups(InteractionGroups::new(
-                    Group::from_bits_retain(spec.layer),
-                    Group::from_bits_retain(spec.mask),
-                    InteractionTestMode::And,
-                ));
+                .groups(groups(entry.layer, spec.mask));
             run.collisions.clear();
             let collisions = &mut run.collisions;
             let moved = {
@@ -2053,7 +2059,6 @@ mod tests {
             None,
             Some(Collider {
                 size: Vec3::new(10.0, 0.5, 10.0),
-                layer: 1,
                 ..Collider::default()
             }),
         );
@@ -2063,7 +2068,6 @@ mod tests {
             None,
             Some(Collider {
                 size: Vec3::new(3.0, 3.0, 0.5),
-                layer: 2,
                 ..Collider::default()
             }),
         );
@@ -2074,10 +2078,13 @@ mod tests {
             Some(Collider {
                 size: Vec3::splat(0.5),
                 is_sensor: true,
-                layer: 2,
                 ..Collider::default()
             }),
         );
+        // The floor stays on layer 0 (no component); the wall and the
+        // sensor go on layer 1 — a collider's membership is its object's.
+        ecs.insert(wall, Layer { layer: 1 }).unwrap();
+        ecs.insert(sensor, Layer { layer: 1 }).unwrap();
         tick(&mut p, &mut ecs, &none);
         let q = QuerySpec {
             kind: QueryKind::Raycast,
@@ -2172,11 +2179,11 @@ mod tests {
             Some(Collider {
                 shape: ColliderShape::Sphere,
                 size: Vec3::new(0.25, 0.0, 0.0),
-                layer: 4,
                 mask: 1,
                 ..Collider::default()
             }),
         );
+        ecs.insert(ball, Layer { layer: 2 }).unwrap();
         p.queue(0, ball, BodyCommand::SetLinearVelocity(-Vec3::Z * 10.0));
         for _ in 0..30 {
             tick(&mut p, &mut ecs, &none);
@@ -2186,6 +2193,23 @@ mod tests {
             t.position.z < -6.0,
             "passed through the wall: {:?}",
             t.position
+        );
+        // Moving an object to another layer at run time rebuilds its
+        // collider's groups: the sensor on layer 0 now answers a bit-0 ray.
+        ecs.insert(sensor, Layer { layer: 0 }).unwrap();
+        tick(&mut p, &mut ecs, &none);
+        hits.clear();
+        p.query(
+            &QuerySpec {
+                mask: 1,
+                hit_sensors: true,
+                ..q
+            },
+            &mut hits,
+        );
+        assert_eq!(
+            hits.iter().map(|h| h.entity).collect::<Vec<_>>(),
+            vec![sensor]
         );
         let mut lines = Vec::new();
         p.debug_lines(&mut lines);

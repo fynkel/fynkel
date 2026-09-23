@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "c0000000-0000-4000-8000-000000000042",
   "name": "Coin",
   "entities": {
@@ -66,7 +66,6 @@
             "friction": 0.0,
             "restitution": 0.0,
             "is_sensor": true,
-            "layer": 1,
             "mask": 4294967295
           }
         },

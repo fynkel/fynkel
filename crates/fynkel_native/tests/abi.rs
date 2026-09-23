@@ -447,6 +447,7 @@ fn component_commands_and_query() {
         color: Vec3::new(1.0, 0.5, 0.25),
         intensity: 800.0,
         range: 12.0,
+        culling_mask: u32::MAX,
     };
     let renderer = MeshRenderer {
         mesh: fynkel_contracts::AssetRef::with_sub(
@@ -1353,9 +1354,15 @@ fn projection_of_world_anchors() {
             wall,
             &ComponentValue::Collider(Collider {
                 size: Vec3::new(4.0, 4.0, 0.2),
-                layer: 0b10,
                 ..Collider::default()
             }),
+        ),
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            wall,
+            &ComponentValue::Layer(fynkel_core::Layer { layer: 1 }),
         ),
     );
     let (_, r) = h.step();

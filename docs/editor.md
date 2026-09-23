@@ -462,7 +462,7 @@ reports an edit **once per gesture**:
 | `color` | a swatch (linear → sRGB for display) with the hex next to it; the picker is HSV + hex + alpha for four components; values are written linear |
 | `assetRef` | the asset's name, `…` opens a **searchable picker** filtered by `asset(<kind>)` (a source offers its matching sub-assets; an audio source is offered whole as a `sound` — `AudioSource.clip` takes no sub), Clear when nullable, and a `DragTarget<AssetDragPayload>` for the Project browser's rows (item 5) |
 | `entity` | a name field with a menu of the document's entity names |
-| `layerMask` | a check-list of the project's `physics.layers` (Everything / Nothing), the number beside it |
+| `layerMask` | a check-list of the project's `layers` (Everything / Nothing), the number beside it — a collider's `mask` ("Collides with"), a camera's or light's `culling_mask` |
 | array, object | rows per item / per child, add and remove; `any` and keys the schema does not list fall back to JSON text |
 
 Numbers round-trip **byte-exactly**: a field that held `1` stays an `int`,

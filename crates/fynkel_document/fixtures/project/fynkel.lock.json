@@ -8,15 +8,15 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0xc2e5042968b9bde5",
+  "schemaFingerprint": "0x17859a02e41b113a",
   "documents": {
     "blend": 1,
     "material": 2,
     "meta": 1,
-    "prefab": 3,
-    "project": 1,
+    "prefab": 4,
+    "project": 2,
     "rig": 1,
-    "scene": 3,
+    "scene": 4,
     "shader": 1,
     "volume": 1
   },
@@ -28,7 +28,7 @@
     "fynkel.image": 1
   },
   "cache": {
-    "version": 6,
+    "version": 7,
     "container": 1
   }
 }

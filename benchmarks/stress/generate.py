@@ -164,10 +164,15 @@ def mesh_renderer(mesh, material, cast=True, receive=True):
         "cast_shadows": cast, "receive_shadows": receive, "visible": True}}
 
 
-def collider(size=(0.5, 0.5, 0.5), friction=0.6, layer=1):
+def collider(size=(0.5, 0.5, 0.5), friction=0.6):
     return {"type": "fynkel.Collider", "version": 1, "data": {
         "shape": "box", "size": list(size), "mesh": None, "offset": [0.0, 0.0, 0.0],
-        "friction": friction, "restitution": 0.05, "is_sensor": False, "layer": layer, "mask": 4294967295}}
+        "friction": friction, "restitution": 0.05, "is_sensor": False, "mask": 4294967295}}
+
+
+def layer(index):
+    """The object's layer (ADR-0020): an index into the project's `layers`."""
+    return {"type": "fynkel.Layer", "version": 1, "data": {"layer": index}}
 
 
 def rigid_body(mass):
@@ -192,13 +197,14 @@ def look_at_camera():
 
 def point_light(color, intensity, range_m):
     return {"type": "fynkel.PointLight", "version": 1, "data": {
-        "color": r6(color), "intensity": round(intensity, 3), "range": round(range_m, 3)}}
+        "color": r6(color), "intensity": round(intensity, 3), "range": round(range_m, 3),
+        "culling_mask": 4294967295}}
 
 
 def spot_light(color, intensity, range_m, inner, outer):
     return {"type": "fynkel.SpotLight", "version": 1, "data": {
         "color": r6(color), "intensity": round(intensity, 3), "range": round(range_m, 3),
-        "inner_angle": round(inner, 4), "outer_angle": round(outer, 4)}}
+        "inner_angle": round(inner, 4), "outer_angle": round(outer, 4), "culling_mask": 4294967295}}
 
 
 def follow(target, offset, smoothing):
@@ -239,8 +245,8 @@ def locomotion_blend():
 def spark_prefab():
     """A small dynamic cube the Fountain emits (item 10)."""
     k, v = entity("Spark", [transform((0, 0, 0), scale=(0.3, 0.3, 0.3)), mesh_renderer("cube", "body"),
-                            rigid_body(mass=0.1), collider(friction=0.5, layer=2)])
-    return {"$schema": "https://fynkel.dev/schemas/prefab.schema.json", "formatVersion": 3,
+                            rigid_body(mass=0.1), collider(friction=0.5), layer(1)])
+    return {"$schema": "https://fynkel.dev/schemas/prefab.schema.json", "formatVersion": 4,
             "id": str(SPARK_ID), "name": "Spark", "roots": [k], "entities": {k: v}}
 
 
@@ -258,11 +264,12 @@ def project_doc():
               "fynkel.Follow", "fynkel.LookAtCamera", "fynkel.LifetimeDespawn", "fynkel.Emitter",
               "fynkel.TriggerZone", "fynkel.Animator", "fynkel.Skin"]
     return {
-        "$schema": "https://fynkel.dev/schemas/project.schema.json", "formatVersion": 1,
+        "$schema": "https://fynkel.dev/schemas/project.schema.json", "formatVersion": 2,
         "id": str(PROJECT_ID), "name": "Fynkel Stress", "startupScene": {"asset": str(SCENE_ID)},
         "assets": "assets",
         "inputActions": {"move": {"type": "axis2d", "bindings": ["keyboard:WASD", "gamepad:leftStick", "touch:overlay/stick"]}},
-        "physics": {"gravity": [0.0, -9.81, 0.0], "layers": ["default", "bodies"]},
+        "layers": ["default", "bodies"],
+        "physics": {"gravity": [0.0, -9.81, 0.0]},
         "quality": {"default": "medium", "profiles": {
             "low": {"shadows": False, "msaa": 1, "renderScale": 0.75, "anisotropy": 1},
             "medium": {"shadowResolution": 2048, "msaa": 4},
@@ -293,7 +300,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
     camera = [transform(eye, quat_axis_angle((1, 0, 0), pitch)),
               {"type": "fynkel.Camera", "version": 1, "data": {
                   "projection": "perspective", "fov_y": 1.0, "ortho_height": 10.0, "near": 0.1, "far": 200.0,
-                  "priority": 0, "exposure_mode": "auto", "exposure": 12.0}}]
+                  "priority": 0, "exposure_mode": "auto", "exposure": 12.0, "culling_mask": 4294967295}}]
     if orbit:
         camera.append({"type": "game.Orbit", "version": 1, "data": {
             "target": [0.0, 0.0, 0.0], "radius": eye[2], "height": eye[1], "speed": 0.08, "phase": 0.0}})
@@ -347,7 +354,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
         x, z = place(i); i += 1
         s = rng.uniform(0.5, 0.9)
         add(f"Body {n:03}", [transform((x, 3.0 + rng.uniform(0, 4), z), quat_axis_angle((0, 1, 0), rng.uniform(0, math.tau)), (s, s, s)),
-                              mesh_renderer("cube", "body"), rigid_body(mass=s ** 3 * 2.0), collider(friction=0.5, layer=2)])
+                              mesh_renderer("cube", "body"), rigid_body(mass=s ** 3 * 2.0), collider(friction=0.5), layer(1)])
     for n in range(n_behaviours):
         x, z = place(i); i += 1
         components = [transform((x, 0.5, z), quat_axis_angle((0, 1, 0), rng.uniform(0, math.tau)), (0.8, 0.8, 0.8)),
@@ -374,8 +381,8 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
             key=f"Rig {n:03}/Body", parent=rig)
         joints = {}
         for name, parent, local, _, _ in SKELETON:
-            layer = [animator({"asset": CHARACTER, "sub": "anim/4"}, speed=rng.uniform(0.8, 1.25), additive=True)] if name == "spine" and n % 4 == 0 else []
-            joints[name] = add(name, [transform(local)] + layer, key=f"Rig {n:03}/{name}", parent=joints[parent] if parent else rig)
+            wave = [animator({"asset": CHARACTER, "sub": "anim/4"}, speed=rng.uniform(0.8, 1.25), additive=True)] if name == "spine" and n % 4 == 0 else []
+            joints[name] = add(name, [transform(local)] + wave, key=f"Rig {n:03}/{name}", parent=joints[parent] if parent else rig)
     # The many-lights variant (E1 light culling): lamps on their own
     # jittered grid over the field, drawn from a second stream so the
     # objects above are placed exactly as they are without them. Three in
@@ -397,7 +404,7 @@ def scene_doc(n_static, n_bodies, n_behaviours, n_rigs, seed, orbit=False, mover
             light = point_light(hue, lrng.uniform(200, 320), 8.0)
             rot = (0, 0, 0, 1)
         add(f"Lamp {n:03}", [transform((x, lrng.uniform(2.5, 4.5), z), rot), light])
-    return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 3,
+    return {"$schema": "https://fynkel.dev/schemas/scene.schema.json", "formatVersion": 4,
             "id": str(SCENE_ID), "name": "Stress", "entities": entities}
 
 

@@ -282,13 +282,12 @@ abstract class EditorProject extends ChangeNotifier {
     return false;
   }
 
-  /// The project file's `physics.layers` (bit `i` = layer `i`), or the
+  /// The project file's `layers` (bit `i` = layer `i`, ADR-0020), or the
   /// default `["default"]`.
-  List<String> physicsLayers() {
+  List<String> layerNames() {
     try {
       final decoded = jsonDecode(File(p.join(dir, 'fynkel.project.json')).readAsStringSync());
-      final physics = decoded is Map ? decoded['physics'] : null;
-      final layers = physics is Map ? physics['layers'] : null;
+      final layers = decoded is Map ? decoded['layers'] : null;
       if (layers is List && layers.isNotEmpty) return [for (final l in layers) l.toString()];
     } catch (_) {
       // A missing or malformed project file: the validation reports it; the mask shows bit numbers.

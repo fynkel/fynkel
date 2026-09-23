@@ -41,6 +41,10 @@ impl ComponentId {
     /// A post-processing volume (R3a): a profile of look overrides, global
     /// or blended in by the camera's distance to a box or a sphere.
     pub const VOLUME: ComponentId = ComponentId(25);
+    /// The object's layer and tags (ADR-0020): an index into the project's
+    /// `layers`, a bit set over its `tags`.
+    pub const LAYER: ComponentId = ComponentId(26);
+    pub const TAGS: ComponentId = ComponentId(27);
 
     pub const fn name(self) -> Option<&'static str> {
         match self.0 {
@@ -69,6 +73,8 @@ impl ComponentId {
             23 => Some("fynkel.AudioSource"),
             24 => Some("fynkel.AudioListener"),
             25 => Some("fynkel.Volume"),
+            26 => Some("fynkel.Layer"),
+            27 => Some("fynkel.Tags"),
             _ => None,
         }
     }

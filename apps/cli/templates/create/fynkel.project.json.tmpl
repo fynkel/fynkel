@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/project.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "{{project_id}}",
   "name": "{{title}}",
   "startupScene": {
@@ -34,9 +34,10 @@
       ]
     }
   },
+  "layers": ["default", "props"],
+  "tags": [],
   "physics": {
-    "gravity": [0, -9.81, 0],
-    "layers": ["default", "props"]
+    "gravity": [0, -9.81, 0]
   },
   "quality": {
     "default": "medium",

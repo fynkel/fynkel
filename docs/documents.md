@@ -141,6 +141,7 @@ semantic rules on top of the schema pass:
 | `FYN-H0008` | catalogue rules (M3-10): a `fynkel.Rotator`/`Oscillate`/`Follow`/`LifetimeDespawn`/`Emitter` value the runtime would reject (a zero or non-finite axis, a negative amplitude, frequency, smoothing, seconds, rate or lifetime, a non-finite offset or velocity; since M3-19 a `fynkel.Animator` with a non-finite speed, `docs/animation.md`) — the same `validate()` the tick runs (`docs/catalogue.md`) |
 | `FYN-H0010` | audio rules (M3-11, [audio.md](audio.md)): a `fynkel.AudioSource` or `fynkel.AudioListener` value the runtime would reject with `INVALID_PAYLOAD` — a `volume` outside `0..=1`, a `pitch` outside `0.05..=8` (the components' own `validate()`) |
 | `FYN-H0011` | volume rules (R3a, [renderer.md](renderer.md) § Volumes): a `fynkel.Volume` value the runtime would reject — a `weight` outside `0..=1`, a `size` or `radius` that is not finite and positive, a negative `blend_distance` |
+| `FYN-H0012` | layers and tags (ADR-0020): a `fynkel.Layer` whose `layer` the project's `layers` does not declare, or a `fynkel.Tags` with a bit past the project's `tags` — at the component's field, with the project's list in the message; a `layer` of 32 or more is `H0012` too, from the component's own `validate()` (the tick's `INVALID_PAYLOAD`) |
 
 Component schemas carry `x-fynkel.authored`; `#[schema(authored = false)]`
 marks runtime-only records. `fixtures/scene/` holds one document per rule
@@ -153,10 +154,18 @@ with `sub` omitted for the asset itself — never a path. Built-in authored
 components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
 `fynkel.DirectionalLight`, `fynkel.PointLight`, `fynkel.SpotLight`,
 `fynkel.Environment` (`fixtures/valid/training_room.scene.json` uses all of
-them). Scenes and prefabs are **formatVersion 3** since M3-19c:
-`fynkel.Animator` gained `weight`, `additive` and `root_motion` (the
-animator-layers migration below fills the defaults in;
-[animation.md](animation.md)). FormatVersion 2 (M3-04) added
+them). Scenes and prefabs are **formatVersion 4** since ADR-0020 (tags
+and layers): every object may carry `fynkel.Layer { layer }` (the index
+of one of the project's `layers`; absent is 0, `default`) and
+`fynkel.Tags { bits }` (bit `i` is the project's `tags[i]`; absent is no
+tag) — optional authored components like any other, always allowed by a
+component registry; `fynkel.Collider` and `fynkel.CharacterController`
+lost `layer` (the collider collides as its object's layer) and
+`fynkel.Camera`, `fynkel.PointLight` and `fynkel.SpotLight` gained
+`culling_mask` (the object-layers migration below). FormatVersion 3
+(M3-19c): `fynkel.Animator` gained `weight`, `additive` and
+`root_motion` (the animator-layers migration below fills the defaults
+in; [animation.md](animation.md)). FormatVersion 2 (M3-04) added
 `fynkel.Camera`'s `exposure_mode` (`auto` | `manual`) and `exposure`
 (EV100; the camera-exposure migration), `SpotLight` (candela, range,
 inner/outer cone angles in radians) and `Environment` (constant ambient
@@ -1044,6 +1053,23 @@ Built-in steps (`fynkel migrate --list`):
   `additive: false`, `root_motion: false` — where it lacks them (a
   document that already carries some keeps them); other components are
   untouched.
+- **scene 3 → 4** `scene/3-4/object-layers` and **prefab 3 → 4**
+  `prefab/3-4/object-layers` (ADR-0020;
+  `fixtures/migrate/v3_arena.scene.json` → `.migrated.json`): a
+  `fynkel.Collider`'s or `fynkel.CharacterController`'s `layer` bits
+  leave the component and become its entity's `fynkel.Layer` — the index
+  of the lowest set bit (when an entity's colliders disagree, or one has
+  several bits, the lowest wins), and no component for bit 0 (the
+  default layer); the component's id is UUID v5 of the entity's with the
+  name `fynkel.Layer`, so a re-run and every copy agree. Cameras and point
+  and spot lights gain `culling_mask: 4294967295` (every layer) unless
+  they have one. The `data` of an `addComponent` override is rewritten the
+  same way (a `fynkel.Layer` override follows it); a `setField` or
+  `unsetField` of `layer` has no equivalent and fails the step (`D0018`,
+  with the override's pointer).
+- **project 1 → 2** `project/1-2/layers` (ADR-0020): `physics.layers`
+  moves to the top-level `layers` unchanged, so every bit keeps its
+  meaning; a project without it keeps the default.
 
 New steps follow the same shape when a format changes: add the
 `Migration`, bump the kind's version, keep the fixture pair. Until a
@@ -1387,14 +1413,16 @@ re-exports them.
 `fynkel.project.json` (`fynkel_document::project`, `project.schema.json`,
 hand-written like the material and shader schemas) is the one file that
 makes a directory a project. It is a document (envelope, strict JSON,
-`formatVersion` 1, `DocumentKind::Project`) and holds:
+`formatVersion` 2 since ADR-0020, `DocumentKind::Project`) and holds:
 
 | Member | Meaning |
 | --- | --- |
 | `startupScene` | `{ asset }` — required; must resolve to a scene document in the asset database |
 | `assets` | The asset root, relative to the project directory (default `assets`; no `..`, no absolute path) |
 | `inputActions` | The game's actions (§5.1, [input.md](input.md)): `name → { type: button \| axis1d \| axis2d, description?, bindings: ["<device>:<control>", …] }` — `keyboard:WASD`, `keyboard:Space`, `mouse:delta*0.0025` (an axis control takes a `*<factor>` scale, M3-14), `gamepad:leftStick`, `touch:overlay/jump`, …; every binding is checked against the runtime's grammar (`FYN-P0009`). The cook copies the block into the cache index; the runtime compiles it into the world's binding table when the project loads (M3-07) |
-| `physics` | `{ gravity: [x, y, z], layers: [name, …] }` ([physics.md](physics.md), M3-08): the world's gravity (default `[0, -9.81, 0]`) and up to 32 unique collision layer names (bit `i` of a collider's `layer`/`mask`; default `["default"]`) — `FYN-P0013` on more than 32, an empty or duplicate name, or a non-finite gravity. The cook copies the block into the cache index; the world applies it when the project loads |
+| `layers` | The project's layers (ADR-0020): up to 32 unique, non-empty names, `"default"` first; index `i` is bit `i` of every layer mask (a collider's `mask`, a camera's or light's `culling_mask`, a raycast's) and the value of a `fynkel.Layer` (default `["default"]`) — `FYN-P0014` on more than 32, an empty or duplicate name, or a first entry that is not `default`. Scenes and prefabs naming an index past the list are `FYN-H0012` |
+| `tags` | The project's tags (ADR-0020): up to 32 unique, non-empty names; bit `i` of a `fynkel.Tags` is `tags[i]` (default `[]`) — `FYN-P0014` like `layers`, `FYN-H0012` for a bit past the list |
+| `physics` | `{ gravity: [x, y, z] }` ([physics.md](physics.md), M3-08): the world's gravity (default `[0, -9.81, 0]`) — `FYN-P0013` when not finite. The cook copies the block into the cache index; the world applies it when the project loads. (`physics.layers` of `formatVersion` 1 is the top-level `layers` now.) |
 | `quality` | `{ default, profiles: { name → { shadows, shadowResolution, ambientOcclusion, bloom, msaa, renderScale, anisotropy, textureMaxSize } } }`; `default` must name a profile; unset fields take the schema defaults (shadows on, 2048, ambient occlusion on, bloom allowed, MSAA 4, scale 1, anisotropy 8, 4096). The cook copies the block into the cache index and the renderer reads it there (`docs/renderer.md` — MSAA runs at 1 or 4, the other values are clamped; `ambientOcclusion` is R2's screen-space occlusion, `bloom` whether R3b's bloom may run — a volume gives it its strength); `textureMaxSize` is for the cook |
 | `components` | The component registry: `typeId → { kind: native \| behaviour, version?, description? }`. Absent means every built-in is allowed. A `native` entry this build does not have is an error; a scene or prefab using a type the registry leaves out is a warning (once per document and type) |
 | `targets` | `macos \| ios \| android \| windows \| linux \| web → { enabled (default true), profile (default dev) }`; all disabled is a warning |
@@ -1429,8 +1457,8 @@ profile, `P0006` (warning) no enabled target, `P0007` asset root escapes the
 project or is missing, `P0008` malformed entry, `P0009` an input binding
 the runtime grammar rejects (at `/inputActions/<name>/bindings/<i>`,
 [input.md](input.md)), `P0010` no lock, `P0011` lock mismatch, `P0012`
-malformed lock, `P0013` a `physics` block the runtime cannot apply (layers,
-gravity).
+malformed lock, `P0013` a `physics` block the runtime cannot apply (a
+non-finite gravity), `P0014` the project's `layers` or `tags` (ADR-0020).
 
 ## New projects: `fynkel create`
 
@@ -1669,7 +1697,8 @@ the lock this build writes — `FYNKEL_UPDATE_FIXTURES=1 cargo test -p
 fynkel_document --test project` refreshes it — and an asset tree with a
 scene, a prefab instance, a glTF mesh, a texture and a material; since
 M3-08 the scene also has a static Floor collider and a dynamic Crate B that
-lands on it, with `physics.layers` `["default", "props"]`; since M3-09 a
+lands on it, with the project's `layers` `["default", "props"]` (Crate B
+on `props` through its `fynkel.Layer`); since M3-09 a
 second scene, Playground (`assets/scenes/playground.scene.json`, id
 `…0031`: Floor, a 0.8 m Platform, a Player with a
 `fynkel.CharacterController` driven by the `move`/`jump` actions, a

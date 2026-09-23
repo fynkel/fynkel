@@ -70,6 +70,57 @@ impl Default for Transform {
     }
 }
 
+/// The object's layer (ADR-0020): an index into the project's `layers`
+/// (at most 32), used by physics (a collider's membership is
+/// `1 << layer`), by cameras' and lights' culling masks and by queries.
+/// An entity without one is on layer 0, `default`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Schema)]
+#[schema(kind = "component", id = 26, name = "fynkel.Layer")]
+pub struct Layer {
+    /// `0..32`: the project's `layers[layer]`.
+    pub layer: u32,
+}
+
+impl Layer {
+    /// Layers are bits of a `u32` mask.
+    pub const COUNT: u32 = 32;
+
+    /// This layer's bit in a mask (`0` for an index out of range, which
+    /// validation rejects before it gets here).
+    pub fn bit(self) -> u32 {
+        1u32.checked_shl(self.layer).unwrap_or(0)
+    }
+
+    pub fn validate(&self) -> core::result::Result<(), String> {
+        if self.layer >= Self::COUNT {
+            return Err(format!(
+                "layer must be below {}, got {}",
+                Self::COUNT,
+                self.layer
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// The object's tags (ADR-0020): bit `i` is the project's `tags[i]` (at
+/// most 32 — a document number stays exact, and a web client can hold the
+/// set). An entity without one has no tags.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Schema)]
+#[schema(kind = "component", id = 27, name = "fynkel.Tags")]
+pub struct Tags {
+    /// Bit `i` set: the object carries the project's `tags[i]`.
+    pub bits: u32,
+}
+
+impl Tags {
+    pub const COUNT: u32 = 32;
+
+    pub fn has(self, index: u32) -> bool {
+        index < Self::COUNT && self.bits & (1u32 << index) != 0
+    }
+}
+
 /// Cached world matrix. `dirty` means the local transform or an ancestor
 /// changed since the last [`propagate`].
 #[derive(Clone, Copy, Debug, PartialEq)]

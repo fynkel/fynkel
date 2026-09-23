@@ -459,10 +459,9 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     assert_eq!(r["input"]["bindingErrors"].as_array().unwrap().len(), 0);
     // The project's physics block reaches the world (M3-08).
     assert_eq!(r["physics"]["gravity"][1].as_f64().unwrap() as f32, -9.81);
-    assert_eq!(
-        r["physics"]["layers"],
-        serde_json::json!(["default", "props"])
-    );
+    assert_eq!(r["layers"], serde_json::json!(["default", "props"]));
+    assert_eq!(r["tags"], serde_json::json!([]));
+    assert!(r["physics"].get("layers").is_none());
     assert_eq!(r["physics"]["meshColliders"], 0);
     assert_eq!(r["physics"]["diagnostics"], serde_json::json!([]));
 

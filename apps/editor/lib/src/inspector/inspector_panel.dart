@@ -925,7 +925,7 @@ class _FieldEditor extends StatelessWidget {
           error,
           LayerMaskField(
             value: value is num ? value.toInt() : null,
-            layers: model.project.physicsLayers(),
+            layers: model.project.layerNames(),
             mixed: mixed,
             enabled: _enabled,
             onCommit: _commit,

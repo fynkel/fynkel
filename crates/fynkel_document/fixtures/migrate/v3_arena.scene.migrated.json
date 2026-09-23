@@ -1,0 +1,399 @@
+{
+  "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+  "formatVersion": 4,
+  "id": "b0000000-0000-4000-8000-000000000007",
+  "name": "Arena",
+  "entities": {
+    "b0000000-0000-4000-8000-0000000000e1": {
+      "name": "Ground",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c1": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000c2": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              1,
+              1,
+              1
+            ],
+            "mesh": null,
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e2": {
+      "name": "Wall",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c3": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000c4": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              1,
+              1,
+              1
+            ],
+            "mesh": null,
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": false,
+            "mask": 4294967295
+          }
+        },
+        "8ad4afe9-7910-5af7-b3d8-e4775a5aa764": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 1
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e3": {
+      "name": "Player",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c5": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000c6": {
+          "type": "fynkel.CharacterController",
+          "version": 1,
+          "data": {
+            "radius": 0.3,
+            "height": 1.8,
+            "center": [
+              0,
+              0.9,
+              0
+            ],
+            "skin_width": 0.02,
+            "max_slope": 0.785,
+            "max_step_height": 0.3,
+            "snap_to_ground": 0.2,
+            "gravity_scale": 1.0,
+            "mass": 70.0,
+            "speed": 4.0,
+            "jump_speed": 5.0,
+            "turn_speed": 10.0,
+            "move_action": "move",
+            "jump_action": "jump",
+            "mask": 4294967291
+          }
+        },
+        "b1212673-0ec6-53db-ab08-e1430f69e6cf": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 2
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e7": {
+      "name": "Sensor",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000ce": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000c7": {
+          "type": "fynkel.Collider",
+          "version": 1,
+          "data": {
+            "shape": "box",
+            "size": [
+              1,
+              1,
+              1
+            ],
+            "mesh": null,
+            "offset": [
+              0,
+              0,
+              0
+            ],
+            "friction": 0.5,
+            "restitution": 0.0,
+            "is_sensor": true,
+            "mask": 4294967295
+          }
+        },
+        "f99b9ba8-dc15-5237-928e-8cf2fcc51b98": {
+          "type": "fynkel.Layer",
+          "version": 1,
+          "data": {
+            "layer": 3
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e4": {
+      "name": "Camera",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000c8": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000c9": {
+          "type": "fynkel.Camera",
+          "version": 1,
+          "data": {
+            "projection": "perspective",
+            "fov_y": 1.0,
+            "ortho_height": 10.0,
+            "near": 0.1,
+            "far": 500.0,
+            "priority": 0,
+            "exposure_mode": "auto",
+            "exposure": 12.0,
+            "culling_mask": 4294967295
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e5": {
+      "name": "Lamps",
+      "parent": null,
+      "children": [],
+      "components": {
+        "b0000000-0000-4000-8000-0000000000ca": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0,
+              0,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1,
+              1,
+              1
+            ]
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000cb": {
+          "type": "fynkel.PointLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1,
+              1,
+              1
+            ],
+            "intensity": 100.0,
+            "range": 5.0,
+            "culling_mask": 4294967295
+          }
+        },
+        "b0000000-0000-4000-8000-0000000000cc": {
+          "type": "fynkel.SpotLight",
+          "version": 1,
+          "data": {
+            "color": [
+              1,
+              1,
+              1
+            ],
+            "intensity": 100.0,
+            "range": 5.0,
+            "inner_angle": 0.3,
+            "outer_angle": 0.5,
+            "culling_mask": 6
+          }
+        }
+      }
+    },
+    "b0000000-0000-4000-8000-0000000000e6": {
+      "name": "Crate",
+      "parent": null,
+      "children": [],
+      "components": {},
+      "prefab": {
+        "asset": {
+          "asset": "b0000000-0000-4000-8000-0000000000a2"
+        },
+        "instance": "b0000000-0000-4000-8000-0000000000f1",
+        "overrides": [
+          {
+            "op": "setField",
+            "entity": "10000000-0000-4000-8000-0000000000e1",
+            "component": "10000000-0000-4000-8000-0000000000c1",
+            "field": "position",
+            "value": [
+              0,
+              1,
+              0
+            ]
+          },
+          {
+            "op": "addComponent",
+            "entity": "10000000-0000-4000-8000-0000000000e1",
+            "component": "b0000000-0000-4000-8000-0000000000cd",
+            "type": "fynkel.Collider",
+            "version": 1,
+            "data": {
+              "shape": "box",
+              "size": [
+                1,
+                1,
+                1
+              ],
+              "mesh": null,
+              "offset": [
+                0,
+                0,
+                0
+              ],
+              "friction": 0.5,
+              "restitution": 0.0,
+              "is_sensor": false,
+              "mask": 4294967295
+            }
+          },
+          {
+            "op": "addComponent",
+            "entity": "10000000-0000-4000-8000-0000000000e1",
+            "component": "b5f95639-b1dd-52f5-ae70-5b0b5fd5958d",
+            "type": "fynkel.Layer",
+            "version": 1,
+            "data": {
+              "layer": 3
+            }
+          }
+        ]
+      }
+    }
+  }
+}

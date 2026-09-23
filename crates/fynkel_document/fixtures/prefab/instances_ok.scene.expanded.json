@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "20000000-0000-4000-8000-000000000001",
   "name": "Two turrets",
   "entities": {
@@ -121,7 +121,8 @@
               0.2
             ],
             "intensity": 3.0,
-            "range": 4.0
+            "range": 4.0,
+            "culling_mask": 4294967295
           }
         }
       }

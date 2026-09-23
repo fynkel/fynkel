@@ -24,7 +24,8 @@ use uuid::Uuid;
 
 /// Bump to invalidate every cached object (a change in how keys or
 /// chunks are computed that the other versions do not capture).
-pub const CACHE_VERSION: u32 = 6;
+/// 7: ADR-0020 (imported prefabs are `formatVersion` 4, the object layer).
+pub const CACHE_VERSION: u32 = 7;
 
 /// A BLAKE3 hash, shown as 64 hex characters.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

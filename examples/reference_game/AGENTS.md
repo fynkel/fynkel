@@ -13,7 +13,7 @@ documents validated against JSON Schemas. The project is a normal Dart
 package: `flutter`, `dart` and `git` work as usual.
 
 ```text
-fynkel.project.json     the project: startup scene, asset root, input actions, physics (gravity, layers), quality, component registry, targets
+fynkel.project.json     the project: startup scene, asset root, input actions, layers and tags, physics (gravity), quality, component registry, targets
 fynkel.lock.json        runtime/tool/schema versions this project was created with (never edit by hand: `fynkel project lock`)
 pubspec.yaml            Flutter app; depends on package:fynkel (SDK), package:fynkel_flutter (viewport + loop) and fynkel_generator (dev)
 lib/main.dart           the app: loads the project, FynkelGameView (frame loop + 3D viewport) with the screens over it, chosen by GameState.screen: the title (lib/ui/menu.dart), the HUD (lib/ui/hud.dart), the pause menu, the settings panel (lib/ui/settings.dart: volumes, mute, quality, key rebinding), the results
@@ -105,8 +105,8 @@ Component types:
 - `fynkel.Environment` — `ambient_color` × `ambient_intensity` (lux), optional equirectangular `sky` texture with `sky_intensity` (nits) and `sky_rotation`. At most one per scene; without it the defaults apply.
 - `fynkel.Volume` — the frame's *look* by where the camera is (R3a): `profile` names a `<name>.volume.json` (`fynkel document new volume <name>`; blocks `ambientOcclusion { radius, intensity }` (R3a) and `bloom { intensity, threshold, scatter, tint }` (R3b; off until a volume gives it an intensity), every field optional — present overrides, absent inherits), `shape` `global` | `box` (`size`) | `sphere` (`radius`), `blend_distance` (metres of fade outside the shape), `weight` 0…1, `priority` (higher wins). A volume shapes what the quality profile has on; it never turns on what the profile has off.
 - `fynkel.RigidBody` — `body_type` `static` | `dynamic` | `kinematic`, `mass` (kg, dynamic), `linear_damping`, `angular_damping`, `gravity_scale`, `ccd`. Physics owns a dynamic body's transform; a kinematic one follows the transform your behaviour writes (the Gate's slab is static geometry moved the same way) and pushes dynamic bodies.
-- `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `layer`/`mask` (bits of `physics.layers`). Alone it is static geometry (the starter's Floor); with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
-- `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `layer`/`mask`.
+- `fynkel.Collider` — `shape` `box` (`size` = half extents) | `sphere` (`size[0]` = radius) | `capsule` | `mesh` (`mesh` sub-asset, static only), `offset`, `friction`, `restitution`, `is_sensor` (trigger events, no forces), `mask` (the layers it collides with: bits of the project's `layers`; the collider's own layer is its object's `fynkel.Layer`). Alone it is static geometry (the starter's Floor); with a `RigidBody` it is that body's shape. Scaled by the entity's scale.
+- `fynkel.CharacterController` — a kinematic capsule walked by gameplay (no `RigidBody`/`Collider` next to it: `FYN-H0006`): `radius`, `height`, `center` (the origin is at the feet by default), `skin_width`, `max_slope` (radians; steeper slides), `max_step_height`, `snap_to_ground`, `gravity_scale`, `mass` (what it pushes dynamic bodies with), `speed`, `jump_speed`, `turn_speed` (faces its motion), `move_action`/`jump_action` (named: the runtime walks it from those actions in the frame of the `ThirdPersonCamera` that targets it, jumping on the press while grounded; empty: your behaviour sends `move(v)`/`jump()`), `mask` (its layer is its object's).
 - `fynkel.ThirdPersonCamera` — on the camera entity: `target` (the followed entity's name), `pivot` (offset from the target's origin), `distance`, `min_distance`, `yaw`/`pitch` (radians, written back each tick), `min_pitch`/`max_pitch`, `look_action` (axis2d turning it at `sensitivity` rad/s per unit), `collision_radius` (a sphere cast from the pivot pulls the camera in before walls; 0 disables), `mask`. Placed after the tick's transforms; its own `Transform` is overwritten.
 - `fynkel.Rotator` / `fynkel.Oscillate` / `fynkel.Follow` / `fynkel.LookAtCamera` / `fynkel.LifetimeDespawn` / `fynkel.Emitter` — the native catalogue (below): motion, following, billboards, timed despawn and spawning at a rate with no Dart code.
 - `fynkel.Animator` — `clip: { asset, sub: "anim/<n>" }` (or `{ asset: <blend document> }`), `speed`, `looping`, `playing`, `weight`, `additive`, `root_motion`: plays the clip (or blend space) over the named entities under this one; on a descendant of another animator it is a layer (see "Animation"). `fynkel.Skin` — next to a skinned `MeshRenderer`: `skin: { asset, sub: "skin/<s>" }`, `skeleton` (the name of the joint root entity, found under the tree's root; empty: the root itself).
@@ -201,9 +201,12 @@ world.spawn(name: 'Twin', transform: t)..add(mesh)..add(light);   // lands in th
 
 ## Physics (Rapier, native; the Dart side sends commands and reads state)
 
-`fynkel.project.json` → `physics`: `gravity` `[x,y,z]` and `layers` (up
-to 32 names; `world.layerMask(['props'])` turns names into collider
-`layer`/`mask` bits). Bodies and colliders are components (above); a
+`fynkel.project.json` → `physics`: `gravity` `[x,y,z]`. The project's
+top-level `layers` (up to 32 names, `default` first) and `tags` (up to 32)
+belong to every object: an object's layer is its `fynkel.Layer` (absent =
+`default`), and its colliders collide as that layer;
+`world.layerMask(['props'])` turns names into a collider's `mask` or a
+raycast's. Bodies and colliders are components (above); a
 behaviour on a dynamic body drives it with forces, never by writing its
 transform (a simulation-lane transform write is a teleport, a presentation
 write is rejected `FYN-…physics_owned`):

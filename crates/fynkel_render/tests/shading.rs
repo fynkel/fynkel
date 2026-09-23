@@ -201,6 +201,7 @@ fn no_light_is_black_and_a_point_light_lights_its_side() {
             color: Vec3::ONE,
             intensity,
             range,
+            culling_mask: u32::MAX,
         },
     };
     e.point_lights
@@ -310,6 +311,7 @@ fn each_object_is_lit_by_the_lights_that_reach_it() {
             color,
             intensity: 400.0,
             range: 4.0,
+            culling_mask: u32::MAX,
         },
     };
     for i in 0..8 {
@@ -387,6 +389,7 @@ fn spot_light_lights_only_inside_its_cone() {
             range: 20.0,
             inner_angle: 15f32.to_radians(),
             outer_angle: 25f32.to_radians(),
+            culling_mask: u32::MAX,
         },
     };
     // Aimed at the cube (down -Z from in front of it).
@@ -637,7 +640,7 @@ impl Lab {
                 "c0000000-0000-4000-8000-0000000000c0": transform(eye, Quat::IDENTITY, Vec3::ONE),
                 "c0000000-0000-4000-8000-0000000000c9": { "type": "fynkel.Camera", "version": 1, "data": {
                     "projection": "perspective", "fov_y": 1.0, "ortho_height": 10.0, "near": 0.1, "far": 100.0,
-                    "priority": 0, "exposure_mode": "manual", "exposure": 12.0 } } } }),
+                    "priority": 0, "exposure_mode": "manual", "exposure": 12.0, "culling_mask": 4294967295u32 } } } }),
         );
         if sun {
             // From in front (the camera's side), a little above and to
@@ -666,7 +669,7 @@ impl Lab {
         }
         let scene = json!({
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 3,
+            "formatVersion": 4,
             "id": "c0000000-0000-4000-8000-000000000030",
             "name": "Lab",
             "entities": entities,

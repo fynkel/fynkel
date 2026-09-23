@@ -58,7 +58,7 @@ void main() {
     expect(project.isReadOnly, isFalse);
   });
 
-  testWidgets('a misspelt field is listed in the Console at scenes/main.scene.json:82:13', (tester) async {
+  testWidgets('a misspelt field is listed in the Console at scenes/main.scene.json:83:13', (tester) async {
     final dir = copyFixture('broken');
     addTearDown(() => dir.deleteSync(recursive: true));
     final scene = File('${dir.path}/assets/scenes/main.scene.json');
@@ -68,8 +68,9 @@ void main() {
     addTearDown(project.close);
 
     final d = project.diagnostics.singleWhere((d) => d.code == 'FYN-D0206');
-    // M3-11 put an AudioSource on the Robot ahead of the Spinner: line 75 → 82.
-    expect(d.line, 82);
+    // M3-11 put an AudioSource on the Robot ahead of the Spinner: line 75 → 82;
+    // ADR-0020 gave the Camera its culling mask: 83.
+    expect(d.line, 83);
     expect(d.column, 13);
     expect(d.pointer, endsWith('/data/speeed'));
     expect(project.relative(d.document!), 'assets/scenes/main.scene.json');
@@ -88,14 +89,14 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('assets/scenes/main.scene.json:82:13'), findsOneWidget);
+    expect(find.text('assets/scenes/main.scene.json:83:13'), findsOneWidget);
     expect(find.text('FYN-D0206'), findsOneWidget);
     expect(find.textContaining('1 errors, 1 warnings'), findsOneWidget);
     await tester.tap(find.text('FYN-D0206'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.open')));
     await tester.pumpAndSettle();
-    expect(opened.single, (d.document, 82, 13));
+    expect(opened.single, (d.document, 83, 13));
   });
 
   test('a lock from a newer Fynkel opens read-only with the reason', () async {
@@ -124,7 +125,7 @@ void main() {
     final doc = project.migrations!.documents.single;
     expect(project.relative(doc.path), 'assets/scenes/training.scene.json');
     expect(doc.from, 0);
-    expect(doc.to, 3); // scenes are at formatVersion 3 since M3-19c
+    expect(doc.to, 4); // scenes are at formatVersion 4 since ADR-0020
     expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
     expect(doc.diff, contains('formatVersion'));
     expect(project.diagnostics.map((d) => d.code), contains('FYN-D0016'));

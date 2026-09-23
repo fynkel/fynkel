@@ -527,6 +527,7 @@ fn physics_value_rules(
         | "fynkel.Animator" => Code::CATALOGUE_VALUE,
         "fynkel.AudioSource" | "fynkel.AudioListener" => Code::AUDIO_VALUE,
         "fynkel.Volume" => Code::VOLUME_VALUE,
+        "fynkel.Layer" => Code::UNDECLARED_LAYER_OR_TAG,
         _ => return,
     };
     let Some(Ok(value)) = crate::generated::decode_component(&c.type_id, &c.data) else {
@@ -547,6 +548,7 @@ fn physics_value_rules(
         ComponentValue::AudioSource(k) => k.validate(),
         ComponentValue::AudioListener(k) => k.validate(),
         ComponentValue::Volume(k) => k.validate(),
+        ComponentValue::Layer(k) => k.validate(),
         _ => Ok(()),
     };
     if let Err(msg) = result {

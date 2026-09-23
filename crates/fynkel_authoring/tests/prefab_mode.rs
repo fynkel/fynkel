@@ -203,7 +203,7 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
                 "op": "addComponent", "entity": CRATE_LOCAL, "component": "c0000000-0000-4000-8000-0000000000aa",
                 "type": "fynkel.Collider", "version": 1,
                 "data": { "shape": "box", "size": [1, 1, 1], "mesh": null, "offset": [0, 0, 0], "friction": 0.5,
-                          "restitution": 0.0, "is_sensor": false, "layer": 1, "mask": 4294967295u32 } } },
+                          "restitution": 0.0, "is_sensor": false, "mask": 4294967295u32 } } },
             { "command": "setPrefabOverride", "entity": CRATE_A, "override": {
                 "op": "addObject", "entity": "c0000000-0000-4000-8000-0000000000ab", "name": "Lid",
                 "parent": CRATE_LOCAL, "components": {} } }

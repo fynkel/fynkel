@@ -1340,8 +1340,26 @@ layer per object, as the optional components `fynkel.Tags` and
 colliders' own `layer` bits migrated away), camera and point/spot light
 culling masks, the Dart API by name (`hasTag`, `findWithTag`, `layer`),
 and the editor's object header and Tags and Layers settings. The steps
-are L1 (documents and migrations), L2 (runtime and Dart), L3 (renderer
-masks), L4 (editor) and L5 (the reference game), each its own commit.
+are L1 (the format and physics membership), L2 (the Dart API), L3
+(renderer masks), L4 (editor) and L5 (the reference game), each its own
+commit.
+
+**L1 is done** (2026-09-23): the project's top-level `layers` and `tags`
+(project `formatVersion` 2, `project/1-2/layers`; `FYN-P0014`),
+`fynkel.Layer` (26) and `fynkel.Tags` (27) with `FYN-H0012` for an index
+the project does not declare, scene and prefab `formatVersion` 4
+(`scene|prefab/3-4/object-layers`: a collider's `layer` bits become its
+entity's `fynkel.Layer`, lowest bit wins; cameras and point/spot lights
+gain `culling_mask`, not yet read by the renderer — L3), Rapier's
+membership from the object's layer, regrouped in the tick the layer
+changes; the load report's `layers`/`tags` (Dart `LoadReport.layersAndTags`,
+`world.layersAndTags`, `world.layerMask` reading them; `Layer`/`Tags`
+exported); the editor's layer-mask field reads the new list and hints
+`culling_mask`. Fingerprint `0x17859a02e41b113a`, cache version 7
+(imported prefabs are version 4). Every document in the repository
+migrated with `fynkel migrate` (the `fixtures/migrate` inputs stay old on
+purpose); the starter template and `benchmarks/stress/generate.py` write
+the new format.
 
 The M3 backlog as it landed, for the record:
 

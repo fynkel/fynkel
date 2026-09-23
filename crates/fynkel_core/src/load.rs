@@ -558,6 +558,12 @@ impl ComponentValue {
         if let Ok(v) = ecs.get::<crate::components::Volume>(entity) {
             out.push(ComponentValue::Volume(v.clone()));
         }
+        if let Ok(v) = ecs.copy::<fynkel_scene::Layer>(entity) {
+            out.push(ComponentValue::Layer(v));
+        }
+        if let Ok(v) = ecs.copy::<fynkel_scene::Tags>(entity) {
+            out.push(ComponentValue::Tags(v));
+        }
         out
     }
 }

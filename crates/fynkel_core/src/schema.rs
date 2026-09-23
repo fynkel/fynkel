@@ -12,7 +12,7 @@ use fynkel_audio::{AudioBus, AudioListener, AudioSource};
 use fynkel_contracts::schema::{fingerprint, RecordSchema};
 use fynkel_contracts::{AssetRef, Entity, HasSchema};
 use fynkel_physics::{CharacterController, Collider, ColliderShape, RigidBody};
-use fynkel_scene::Transform;
+use fynkel_scene::{Layer, Tags, Transform};
 use fynkel_schema_derive::Schema;
 use glam::{Quat, Vec3};
 
@@ -826,6 +826,8 @@ pub const ALL: &[&RecordSchema] = &[
     &AudioStateRecord::SCHEMA,
     &AudioStatsRecord::SCHEMA,
     &Volume::SCHEMA,
+    &Layer::SCHEMA,
+    &Tags::SCHEMA,
 ];
 
 /// Derived, never hand-maintained (ADR-0012). Generated code embeds this

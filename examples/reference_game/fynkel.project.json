@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/project.schema.json",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "id": "a39bb8b0-ce7e-45b1-a48c-30d958c493f5",
   "name": "Fynkel Reference Game",
   "startupScene": {
@@ -84,12 +84,6 @@
       0,
       -9.81,
       0
-    ],
-    "layers": [
-      "default",
-      "props",
-      "player",
-      "trigger"
     ]
   },
   "quality": {
@@ -214,5 +208,11 @@
     "android": {
       "enabled": false
     }
-  }
+  },
+  "layers": [
+    "default",
+    "props",
+    "player",
+    "trigger"
+  ]
 }

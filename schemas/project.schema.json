@@ -30,7 +30,25 @@
     },
     "physics": {
       "$ref": "#/$defs/physics",
-      "description": "World gravity and the named collision layers (blueprint §9, M3-08). Absent means gravity [0, -9.81, 0] and one layer, `default`."
+      "description": "World gravity (blueprint §9, M3-08). Absent means [0, -9.81, 0]."
+    },
+    "layers": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "prefixItems": [{ "const": "default" }],
+      "default": ["default"],
+      "description": "The objects' layers (ADR-0020), one per bit of a mask (bit i = layers[i]): a `fynkel.Layer` names one, colliders' `mask`, cameras' and lights' `culling_mask` and queries name several. Layer 0 is always `default`; `World.layerMask(names)` turns names into a mask."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "maxItems": 32,
+      "uniqueItems": true,
+      "default": [],
+      "description": "The objects' tags (ADR-0020): a `fynkel.Tags` carries any of them as bit i = tags[i]; `GameObject.hasTag(name)` and `World.findWithTag(name)` look them up by name."
     },
     "components": {
       "type": "object",
@@ -60,14 +78,6 @@
           "maxItems": 3,
           "default": [0, -9.81, 0],
           "description": "Metres per second squared."
-        },
-        "layers": {
-          "type": "array",
-          "items": { "type": "string", "minLength": 1 },
-          "maxItems": 32,
-          "uniqueItems": true,
-          "default": ["default"],
-          "description": "Collision layer names, one per bit of `fynkel.Collider.layer`/`mask` (bit i = layers[i]); `World.layerMask(names)` turns names into a mask."
         }
       },
       "additionalProperties": false

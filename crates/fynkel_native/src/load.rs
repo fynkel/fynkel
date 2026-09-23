@@ -141,6 +141,12 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
     let cache = cache_json(&assets);
     // Physics (M3-08): the project's gravity, and every mesh collider's
     // mesh registered before the first step builds the colliders.
+    // The project's layers and tags (ADR-0020): what `GameObject.layer`
+    // and `hasTag` resolve names against.
+    let layers_and_tags = assets
+        .project()
+        .map(|p| p.layers_and_tags.clone())
+        .unwrap_or_default();
     let (physics, animation, audio) = {
         let core = w.core_mut();
         if let Some(p) = assets.project() {
@@ -163,7 +169,6 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
         (
             json!({
                 "gravity": [gravity.x, gravity.y, gravity.z],
-                "layers": assets.project().map(|p| p.physics.layers.clone()).unwrap_or_default(),
                 "meshColliders": meshes,
                 "prefabs": prefabs,
                 "diagnostics": diags.iter().map(diagnostic_json).collect::<Vec<_>>(),
@@ -207,6 +212,8 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
                     "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
                     "input": input,
                     "physics": physics,
+                    "layers": layers_and_tags.layers,
+                    "tags": layers_and_tags.tags,
                     "animation": animation,
                     "audio": audio,
                 }),

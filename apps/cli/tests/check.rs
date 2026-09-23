@@ -51,7 +51,7 @@ fn behaviour_generator_output_is_up_to_date() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("up to date (2 behaviour types)"),
+        stdout.contains("up to date (3 behaviour types)"),
         "{stdout}"
     );
     // A check never leaves the tree modified.
@@ -131,7 +131,7 @@ fn test_headless_reports_json() {
 /// asset references.
 const SECOND_SCENE: &str = r#"{
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "Second",
   "entities": {
@@ -155,7 +155,7 @@ const SECOND_SCENE: &str = r#"{
         },
         "818dc3dc-a9ee-4355-908f-58e20a60ce31": {
           "type": "fynkel.Camera", "version": 1,
-          "data": { "projection": "perspective", "fov_y": 1.0, "ortho_height": 10, "near": 0.1, "far": 1000, "priority": 0, "exposure_mode": "auto", "exposure": 12.0 }
+          "data": { "projection": "perspective", "fov_y": 1.0, "ortho_height": 10, "near": 0.1, "far": 1000, "priority": 0, "exposure_mode": "auto", "exposure": 12.0, "culling_mask": 4294967295 }
         }
       }
     }
@@ -653,15 +653,30 @@ fn migrate_dry_runs_then_writes_with_backup() {
     let out = run(&["migrate", "--list", "--json"]);
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["current"]["scene"], 3);
-    assert_eq!(v["current"]["prefab"], 3);
+    assert_eq!(v["current"]["scene"], 4);
+    assert_eq!(v["current"]["prefab"], 4);
+    assert_eq!(v["current"]["project"], 2);
     assert_eq!(v["current"]["material"], 2);
-    assert_eq!(v["steps"][0]["name"], "material/1-2/pbr-fields");
-    assert_eq!(v["steps"][1]["name"], "prefab/1-2/camera-exposure");
-    assert_eq!(v["steps"][2]["name"], "prefab/2-3/animator-layers");
-    assert_eq!(v["steps"][3]["name"], "scene/0-1/entities-keyed-by-id");
-    assert_eq!(v["steps"][4]["name"], "scene/1-2/camera-exposure");
-    assert_eq!(v["steps"][5]["name"], "scene/2-3/animator-layers");
+    let names: Vec<&str> = v["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "material/1-2/pbr-fields",
+            "prefab/1-2/camera-exposure",
+            "prefab/2-3/animator-layers",
+            "prefab/3-4/object-layers",
+            "project/1-2/layers",
+            "scene/0-1/entities-keyed-by-id",
+            "scene/1-2/camera-exposure",
+            "scene/2-3/animator-layers",
+            "scene/3-4/object-layers"
+        ]
+    );
 
     let dir = std::env::temp_dir().join(format!("fynkel-cli-migrate-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -702,17 +717,18 @@ fn migrate_dry_runs_then_writes_with_backup() {
         .unwrap()
         .contains("+  \"base_color_texture\": {"));
     assert_eq!(docs[2]["from"], 0);
-    assert_eq!(docs[2]["to"], 3);
+    assert_eq!(docs[2]["to"], 4);
     assert_eq!(
         docs[2]["applied"][0]["name"],
         "scene/0-1/entities-keyed-by-id"
     );
     assert_eq!(docs[2]["applied"][1]["name"], "scene/1-2/camera-exposure");
     assert_eq!(docs[2]["applied"][2]["name"], "scene/2-3/animator-layers");
+    assert_eq!(docs[2]["applied"][3]["name"], "scene/3-4/object-layers");
     assert!(docs[2]["diff"]
         .as_str()
         .unwrap()
-        .contains("+  \"formatVersion\": 3,"));
+        .contains("+  \"formatVersion\": 4,"));
     assert_eq!(docs[2]["written"], false);
     assert_eq!(std::fs::read(&scene).unwrap(), original);
     assert!(!dir.join("scenes/room.scene.json.bak").exists());
@@ -1634,7 +1650,7 @@ fn khronos_rigs_instance_from_the_source_alone() {
         let scale = if *model == "Fox" { 0.01 } else { 1.0 };
         let scene = serde_json::json!({
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 3,
+            "formatVersion": 4,
             "id": scene_id,
             "name": model,
             "entities": {
@@ -1954,7 +1970,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     let scene_id = "c0000000-0000-4000-8000-000000000038";
     let scene = serde_json::json!({
         "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-        "formatVersion": 3,
+        "formatVersion": 4,
         "id": scene_id,
         "name": "Fox",
         "entities": {

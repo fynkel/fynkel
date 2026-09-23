@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968330",
   "name": "TrainingRoom",
   "entities": {
@@ -89,7 +89,8 @@
             "far": 1000,
             "priority": 0,
             "exposure_mode": "auto",
-            "exposure": 12.0
+            "exposure": 12.0,
+            "culling_mask": 4294967295
           }
         }
       }
@@ -173,7 +174,8 @@
               1
             ],
             "intensity": 800,
-            "range": 12.5
+            "range": 12.5,
+            "culling_mask": 4294967295
           }
         },
         "818dc3dc-a9ee-4355-908f-58e20a60ce52": {
@@ -188,7 +190,8 @@
             "intensity": 1500,
             "range": 15,
             "inner_angle": 0.4,
-            "outer_angle": 0.6
+            "outer_angle": 0.6,
+            "culling_mask": 4294967295
           }
         }
       }

@@ -36,6 +36,7 @@ export 'generated/schema.g.dart'
         Environment,
         ExposureMode,
         Follow,
+        Layer,
         LifetimeDespawn,
         LookAtCamera,
         MeshRenderer,
@@ -60,6 +61,7 @@ export 'generated/schema.g.dart'
         SpotLight,
         SystemKind,
         SystemTimeRecord,
+        Tags,
         ThirdPersonCamera,
         TriggerZone,
         Volume,
@@ -76,6 +78,7 @@ export 'src/editor_channel.dart';
 export 'src/events.dart';
 export 'src/gizmos.dart';
 export 'src/input.dart';
+export 'src/layers.dart';
 export 'src/model.dart';
 export 'src/physics.dart' show BodyState, CharacterState, PhysicsHit, PhysicsSettings;
 export 'src/systems.dart';

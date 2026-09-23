@@ -924,6 +924,8 @@ pub fn component_default(type_id: &str) -> Option<Node> {
             <::fynkel_audio::components::AudioListener as Default>::default().to_node()
         }
         "fynkel.Volume" => <::fynkel_core::components::Volume as Default>::default().to_node(),
+        "fynkel.Layer" => <::fynkel_scene::Layer as Default>::default().to_node(),
+        "fynkel.Tags" => <::fynkel_scene::Tags as Default>::default().to_node(),
         _ => return None,
     })
 }

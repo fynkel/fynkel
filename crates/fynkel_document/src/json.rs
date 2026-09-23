@@ -124,6 +124,13 @@ impl Node {
         }
     }
 
+    pub fn as_array_mut(&mut self) -> Option<&mut Vec<Node>> {
+        match &mut self.value {
+            Value::Array(a) => Some(a),
+            _ => None,
+        }
+    }
+
     pub fn as_str(&self) -> Option<&str> {
         match &self.value {
             Value::String(s) => Some(s),

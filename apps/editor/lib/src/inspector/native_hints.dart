@@ -41,6 +41,7 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'priority': {'group': 'Output', 'order': 5},
     'exposure_mode': {'group': 'Exposure', 'order': 6},
     'exposure': {'label': 'Exposure (EV100)', 'group': 'Exposure', 'order': 7, 'step': 0.1},
+    'culling_mask': {'kind': 'layerMask', 'label': 'Culling mask', 'group': 'Output', 'order': 8},
   },
   'fynkel.DirectionalLight': {
     'color': {'kind': 'color', 'order': 0},
@@ -51,6 +52,7 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'color': {'kind': 'color', 'order': 0},
     'intensity': {'unit': 'cd', 'min': 0, 'order': 1},
     'range': {'unit': 'm', 'min': 0, 'order': 2},
+    'culling_mask': {'kind': 'layerMask', 'label': 'Culling mask', 'order': 3},
   },
   'fynkel.SpotLight': {
     'color': {'kind': 'color', 'order': 0},
@@ -58,6 +60,7 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'range': {'unit': 'm', 'min': 0, 'order': 2},
     'inner_angle': {'kind': 'angle', 'unit': 'deg', 'min': 0, 'max': 1.5707963, 'group': 'Cone', 'order': 3},
     'outer_angle': {'kind': 'angle', 'unit': 'deg', 'min': 0, 'max': 1.5707963, 'group': 'Cone', 'order': 4},
+    'culling_mask': {'kind': 'layerMask', 'label': 'Culling mask', 'order': 5},
   },
   // Audio (M3-11): the clip is the whole source (a `.wav`/`.ogg`, no sub-asset).
   'fynkel.AudioSource': {
@@ -131,8 +134,7 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'friction': {'min': 0, 'step': 0.05, 'group': 'Material', 'order': 4},
     'restitution': {'kind': 'slider', 'min': 0, 'max': 1, 'step': 0.01, 'group': 'Material', 'order': 5},
     'is_sensor': {'label': 'Sensor', 'order': 6},
-    'layer': {'kind': 'layerMask', 'group': 'Layers', 'order': 7},
-    'mask': {'kind': 'layerMask', 'group': 'Layers', 'order': 8},
+    'mask': {'kind': 'layerMask', 'label': 'Collides with', 'order': 7},
   },
   'fynkel.CharacterController': {
     'radius': {'unit': 'm', 'min': 0, 'group': 'Capsule', 'order': 0},
@@ -149,8 +151,7 @@ const Map<String, Map<String, Map<String, Object?>>> nativeFieldHints = {
     'turn_speed': {'unit': 'rad/s', 'min': 0, 'group': 'Driver', 'order': 11},
     'move_action': {'group': 'Driver', 'order': 12},
     'jump_action': {'group': 'Driver', 'order': 13},
-    'layer': {'kind': 'layerMask', 'group': 'Layers', 'order': 14},
-    'mask': {'kind': 'layerMask', 'group': 'Layers', 'order': 15},
+    'mask': {'kind': 'layerMask', 'label': 'Collides with', 'order': 14},
   },
   'fynkel.ThirdPersonCamera': {
     'target': {

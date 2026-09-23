@@ -119,13 +119,13 @@ void main() {
     tab.select(floor);
     final collider = model.slots.singleWhere((s) => s.type == 'fynkel.Collider');
     expect(model.setField(collider, 'friction', 0.75, spec: collider.spec.field('friction')), isTrue);
-    expect(model.setField(collider, 'layer', 3, spec: collider.spec.field('layer')), isTrue);
+    expect(model.setField(collider, 'mask', 3, spec: collider.spec.field('mask')), isTrue);
     expect(tab.save(), isTrue);
     final saved = jsonDecode(File('${dir.path}/assets/scenes/main.scene.json').readAsStringSync()) as Map;
     final floorComponents = ((saved['entities'] as Map)[floor] as Map)['components'] as Map;
     final savedCollider = floorComponents.values.singleWhere((c) => c['type'] == 'fynkel.Collider') as Map;
     expect(savedCollider['data']['friction'], 0.75);
-    expect(savedCollider['data']['layer'], 3);
+    expect(savedCollider['data']['mask'], 3);
     expect(tab.document.validate().where((d) => d.severity == Severity.error), isEmpty);
   });
 

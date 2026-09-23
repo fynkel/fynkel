@@ -43,7 +43,7 @@ void main() {
     expect(game.report.sceneName, 'Menu');
     expect(game.report.behavioursAttached, 0, reason: 'the backdrop has no game logic');
     expect(game.state.screen.value, Screen.menu);
-    expect(game.report.physics.layers, ['default', 'props', 'player', 'trigger']);
+    expect(game.report.layersAndTags.layers, ['default', 'props', 'player', 'trigger']);
     expect(
       game.report.inputActions.map((a) => a.name),
       containsAll(['move', 'look', 'jump', 'sprint', 'interact', 'restart']),

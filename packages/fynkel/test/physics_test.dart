@@ -74,7 +74,6 @@ void main() {
         friction: 0.6,
         restitution: 0,
         isSensor: false,
-        layer: 1,
         mask: 0xffffffff,
       ),
     );
@@ -86,7 +85,6 @@ void main() {
     friction: 0.5,
     restitution: 0,
     isSensor: false,
-    layer: 1,
     mask: 0xffffffff,
   );
   // f32-exact values so the read-back compares equal.
@@ -273,8 +271,9 @@ void main() {
     w.onLoadDiagnostics = (_) {};
     final report = w.loadProject(fixture, cacheDir: cache);
     expect(report.physics.gravity.y, closeTo(-9.81, 1e-5));
-    expect(w.physics.layers, ['default', 'props']);
-    expect(report.physics.layers, ['default', 'props']);
+    expect(w.layersAndTags.layers, ['default', 'props']);
+    expect(report.layersAndTags.layers, ['default', 'props']);
+    expect(report.layersAndTags.tags, isEmpty);
     expect(w.layerMask(['props']), 2);
     expect(w.layerMask(['default', 'props']), 3);
     expect(() => w.layerMask(['ghosts']), throwsArgumentError);
@@ -283,7 +282,7 @@ void main() {
       w.frame(1 / 60);
     }
     expect(crate.localTransform.position.y, closeTo(0.5, 0.05));
-    expect(crate.get<Collider>()!.layer, 2);
+    expect(crate.get<Layer>()!.layer, 1);
     expect(w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['props']))!.entity, crate.entity);
     expect(
       w.raycast(const Vec3(-2, 5, 0), const Vec3(0, -1, 0), mask: w.layerMask(['default']))!.entity,

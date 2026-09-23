@@ -9,7 +9,7 @@
 use fynkel_audio::{AudioListener, AudioSource};
 use fynkel_contracts::{AssetRef, ComponentId};
 use fynkel_physics::{CharacterController, Collider, RigidBody};
-use fynkel_scene::Transform;
+use fynkel_scene::{Layer, Tags, Transform};
 use fynkel_schema_derive::Schema;
 use glam::Vec3;
 
@@ -54,6 +54,10 @@ pub struct Camera {
     /// EV100 when `exposure_mode` is `manual` (12 ≈ a 10 000 lux sun;
     /// +1 halves the brightness).
     pub exposure: f32,
+    /// The layers this camera draws (bit `i` = the project's `layers[i]`,
+    /// ADR-0020); an object on a layer outside it is neither drawn nor
+    /// casts a shadow in this camera's frame.
+    pub culling_mask: u32,
 }
 
 impl Default for Camera {
@@ -67,6 +71,7 @@ impl Default for Camera {
             priority: 0,
             exposure_mode: ExposureMode::Auto,
             exposure: 12.0,
+            culling_mask: u32::MAX,
         }
     }
 }
@@ -129,6 +134,8 @@ pub struct PointLight {
     pub intensity: f32,
     /// Metres; no contribution beyond this distance.
     pub range: f32,
+    /// The layers this light lights (ADR-0020); all by default.
+    pub culling_mask: u32,
 }
 
 impl Default for PointLight {
@@ -137,6 +144,7 @@ impl Default for PointLight {
             color: Vec3::ONE,
             intensity: 800.0,
             range: 10.0,
+            culling_mask: u32::MAX,
         }
     }
 }
@@ -155,6 +163,8 @@ pub struct SpotLight {
     pub inner_angle: f32,
     /// Half-angle in radians beyond which the light is zero, `>= inner_angle`.
     pub outer_angle: f32,
+    /// The layers this light lights (ADR-0020); all by default.
+    pub culling_mask: u32,
 }
 
 impl Default for SpotLight {
@@ -165,6 +175,7 @@ impl Default for SpotLight {
             range: 15.0,
             inner_angle: 25f32.to_radians(),
             outer_angle: 35f32.to_radians(),
+            culling_mask: u32::MAX,
         }
     }
 }
@@ -302,9 +313,9 @@ mod tests {
         );
         assert_eq!(
             Camera::SCHEMA.canonical(),
-            "component:5:fynkel.Camera[projection:fynkel.Projection{perspective|orthographic},fov_y:f32,ortho_height:f32,near:f32,far:f32,priority:i32,exposure_mode:fynkel.ExposureMode{auto|manual},exposure:f32]"
+            "component:5:fynkel.Camera[projection:fynkel.Projection{perspective|orthographic},fov_y:f32,ortho_height:f32,near:f32,far:f32,priority:i32,exposure_mode:fynkel.ExposureMode{auto|manual},exposure:f32,culling_mask:u32]"
         );
-        assert_eq!(Camera::SCHEMA.wire_size(), 32);
+        assert_eq!(Camera::SCHEMA.wire_size(), 40);
     }
 
     #[test]
@@ -892,6 +903,9 @@ pub enum ComponentValue {
     AudioListener(AudioListener),
     /// Post-processing (R3a).
     Volume(Volume),
+    /// The object's layer and tags (ADR-0020).
+    Layer(Layer),
+    Tags(Tags),
 }
 
 impl ComponentValue {
@@ -920,6 +934,8 @@ impl ComponentValue {
             ComponentValue::AudioSource(_) => ComponentId::AUDIO_SOURCE,
             ComponentValue::AudioListener(_) => ComponentId::AUDIO_LISTENER,
             ComponentValue::Volume(_) => ComponentId::VOLUME,
+            ComponentValue::Layer(_) => ComponentId::LAYER,
+            ComponentValue::Tags(_) => ComponentId::TAGS,
         }
     }
 
@@ -1038,6 +1054,8 @@ impl ComponentValue {
             ComponentValue::AudioSource(c) => c.validate()?,
             ComponentValue::AudioListener(c) => c.validate()?,
             ComponentValue::Volume(c) => c.validate()?,
+            ComponentValue::Layer(c) => c.validate()?,
+            ComponentValue::Tags(_) => {}
         }
         Ok(())
     }

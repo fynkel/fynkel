@@ -187,9 +187,9 @@ anchor, by collider mask**:
   geometry**. A name over a character stays readable through a wall.
 * `occlusionMask != 0`: the world casts a ray from the camera eye to the
   point (`Physics::query` Raycast, the anchor's own entity excluded,
-  sensors ignored) and sets `OCCLUDED` when a collider on those layers is
+  sensors ignored) and sets `OCCLUDED` when a collider whose object is on those layers is
   hit before the point. `world.layerMask(['walls'])` builds the mask from
-  the project's physics layers. Position is unaffected — a host may fade an
+  the project's `layers`. Position is unaffected — a host may fade an
   occluded label instead of hiding it.
 
 Occlusion is by colliders, not by rendered meshes: a wall without a

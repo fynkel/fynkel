@@ -42,9 +42,12 @@ fn builtin_steps_chain_to_the_current_version() {
             "material/1-2/pbr-fields",
             "prefab/1-2/camera-exposure",
             "prefab/2-3/animator-layers",
+            "prefab/3-4/object-layers",
+            "project/1-2/layers",
             "scene/0-1/entities-keyed-by-id",
             "scene/1-2/camera-exposure",
-            "scene/2-3/animator-layers"
+            "scene/2-3/animator-layers",
+            "scene/3-4/object-layers"
         ]
     );
 }
@@ -64,15 +67,17 @@ fn v0_scene_migrates_to_v1_exactly() {
     let m = migrate(&doc, &Migrations::builtin(), &schemas);
     assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
     assert!(m.changed());
-    // Three steps chain: 0 → 1 (keyed entities), 1 → 2 (camera exposure)
-    // and 2 → 3 (animator layers) — the last two have nothing to do here,
-    // the scene has no camera and no animator.
-    assert_eq!((m.from, m.to), (0, 3));
-    assert_eq!(m.applied.len(), 3);
+    // Four steps chain: 0 → 1 (keyed entities), 1 → 2 (camera exposure),
+    // 2 → 3 (animator layers) and 3 → 4 (object layers) — the middle two
+    // have nothing to do here, the scene has no camera and no animator; the
+    // last gives the light its culling mask.
+    assert_eq!((m.from, m.to), (0, 4));
+    assert_eq!(m.applied.len(), 4);
     assert_eq!(m.applied[0].name, "scene/0-1/entities-keyed-by-id");
     assert_eq!(m.applied[1].name, "scene/1-2/camera-exposure");
     assert_eq!(m.applied[2].name, "scene/2-3/animator-layers");
-    assert_eq!(m.document.envelope.format_version, 3);
+    assert_eq!(m.applied[3].name, "scene/3-4/object-layers");
+    assert_eq!(m.document.envelope.format_version, 4);
     assert!(!m.document.is_outdated());
 
     let text = m.document.write().unwrap();
@@ -88,7 +93,7 @@ fn v0_scene_migrates_to_v1_exactly() {
     assert!(m.diff.contains("(formatVersion 0)\n+++ "));
     assert!(m
         .diff
-        .contains("-  \"formatVersion\": 0,\n+  \"formatVersion\": 3,"));
+        .contains("-  \"formatVersion\": 0,\n+  \"formatVersion\": 4,"));
     assert!(m.diff.contains("-  \"entities\": [\n-    {\n-      \"id\": \"b0000000-0000-4000-8000-0000000000e1\",\n+  \"entities\": {\n+    \"b0000000-0000-4000-8000-0000000000e1\": {"));
 
     // Order kept, ids became keys, everything else untouched; the result
@@ -196,10 +201,11 @@ fn v1_scene_with_a_camera_migrates_to_v2_exactly() {
     assert!(doc.is_outdated());
     let m = migrate(&doc, &Migrations::builtin(), &schemas);
     assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
-    assert_eq!((m.from, m.to), (1, 3));
-    assert_eq!(m.applied.len(), 2);
+    assert_eq!((m.from, m.to), (1, 4));
+    assert_eq!(m.applied.len(), 3);
     assert_eq!(m.applied[0].name, "scene/1-2/camera-exposure");
     assert_eq!(m.applied[1].name, "scene/2-3/animator-layers");
+    assert_eq!(m.applied[2].name, "scene/3-4/object-layers");
 
     let text = m.document.write().unwrap();
     let expected_path = fixtures().join("v1_lookout.scene.migrated.json");
@@ -211,7 +217,7 @@ fn v1_scene_with_a_camera_migrates_to_v2_exactly() {
     // Every camera gained the two defaults after `priority`; the light and
     // the camera that already had a manual exposure are untouched.
     assert!(
-        m.diff.contains("-            \"priority\": 0\n+            \"priority\": 0,\n+            \"exposure_mode\": \"auto\",\n+            \"exposure\": 12.0\n"),
+        m.diff.contains("-            \"priority\": 0\n+            \"priority\": 0,\n+            \"exposure_mode\": \"auto\",\n+            \"exposure\": 12.0,\n+            \"culling_mask\": 4294967295\n"),
         "{}",
         m.diff
     );
@@ -232,9 +238,10 @@ fn v2_scene_with_animators_migrates_to_v3_exactly() {
     assert!(doc.is_outdated());
     let m = migrate(&doc, &Migrations::builtin(), &schemas);
     assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
-    assert_eq!((m.from, m.to), (2, 3));
-    assert_eq!(m.applied.len(), 1);
+    assert_eq!((m.from, m.to), (2, 4));
+    assert_eq!(m.applied.len(), 2);
     assert_eq!(m.applied[0].name, "scene/2-3/animator-layers");
+    assert_eq!(m.applied[1].name, "scene/3-4/object-layers");
 
     let text = m.document.write().unwrap();
     let expected_path = fixtures().join("v2_dancer.scene.migrated.json");
@@ -255,6 +262,149 @@ fn v2_scene_with_animators_migrates_to_v3_exactly() {
     assert!(scene.validate(&schemas).is_empty());
     assert!(!describe(&scene, &SchemaSet::embedded()).has_errors());
 
+    let again = migrate(&m.document, &Migrations::builtin(), &schemas);
+    assert!(!again.changed());
+}
+
+#[test]
+fn v3_scene_with_collider_layers_migrates_to_v4_exactly() {
+    let schemas = schemas();
+    let path = fixtures().join("v3_arena.scene.json");
+    let doc = Document::read(&path, None).unwrap();
+    assert!(doc.is_outdated());
+    let m = migrate(&doc, &Migrations::builtin(), &schemas);
+    assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
+    assert_eq!((m.from, m.to), (3, 4));
+    assert_eq!(m.applied.len(), 1);
+    assert_eq!(m.applied[0].name, "scene/3-4/object-layers");
+
+    let text = m.document.write().unwrap();
+    let expected_path = fixtures().join("v3_arena.scene.migrated.json");
+    let expected = std::fs::read_to_string(&expected_path).unwrap_or_default();
+    if text != expected {
+        std::fs::write(expected_path.with_extension("actual.json"), &text).unwrap();
+    }
+    assert_eq!(text, expected, "see the .actual.json next to the fixture");
+    assert!(
+        m.diff.contains("-            \"layer\": 2,\n"),
+        "{}",
+        m.diff
+    );
+
+    let scene = Scene::from_document(m.document.clone());
+    let d = scene.validate(&schemas);
+    assert!(d.is_empty(), "{d:#?}");
+    let layer = |name: &str| {
+        let e = scene.entities.iter().find(|e| e.name == name).unwrap();
+        e.component_of("fynkel.Layer")
+            .map(|c| c.data.get("layer").and_then(|n| n.as_i64()).unwrap())
+    };
+    // Bit 0 is the default layer: no component. The wall's bit 1 is layer
+    // 1, the player's controller bit 2 layer 2; of the sensor's bits 3 and
+    // 4 the lowest wins.
+    assert_eq!(layer("Ground"), None);
+    assert_eq!(layer("Wall"), Some(1));
+    assert_eq!(layer("Player"), Some(2));
+    assert_eq!(layer("Sensor"), Some(3));
+    // The same id on a second run and for every copy of the entity.
+    let wall = scene.entities.iter().find(|e| e.name == "Wall").unwrap();
+    assert_eq!(
+        wall.component_of("fynkel.Layer").unwrap().id.to_string(),
+        uuid::Uuid::new_v5(&wall.id, b"fynkel.Layer").to_string()
+    );
+    // Every camera and light gained `culling_mask` (all layers), and the
+    // spot light that had one kept it.
+    for (ty, mask) in [
+        ("fynkel.Camera", u32::MAX as i64),
+        ("fynkel.PointLight", u32::MAX as i64),
+        ("fynkel.SpotLight", 6),
+    ] {
+        let c = scene
+            .entities
+            .iter()
+            .find_map(|e| e.component_of(ty))
+            .unwrap();
+        assert_eq!(
+            c.data.get("culling_mask").and_then(|n| n.as_i64()),
+            Some(mask),
+            "{ty}"
+        );
+    }
+    // The added collider lost its bits to an added fynkel.Layer right after it.
+    let overrides = m
+        .document
+        .root
+        .get("entities")
+        .and_then(|e| e.get("b0000000-0000-4000-8000-0000000000e6"))
+        .and_then(|e| e.get("prefab"))
+        .and_then(|p| p.get("overrides"))
+        .and_then(|o| o.as_array())
+        .unwrap();
+    assert_eq!(overrides.len(), 3);
+    assert_eq!(
+        overrides[2].get("type").and_then(|n| n.as_str()),
+        Some("fynkel.Layer")
+    );
+    assert_eq!(
+        overrides[2]
+            .get("data")
+            .and_then(|d| d.get("layer"))
+            .and_then(|n| n.as_i64()),
+        Some(3)
+    );
+    assert!(!describe(&scene, &SchemaSet::embedded()).has_errors());
+
+    let again = migrate(&m.document, &Migrations::builtin(), &schemas);
+    assert!(!again.changed());
+
+    // A `setField` of a collider's `layer` has no equivalent: the
+    // migration fails with the override's pointer and nothing changes.
+    let text = std::fs::read_to_string(&path).unwrap().replace(
+        "\"field\": \"position\",\n            \"value\": [\n              0,\n              1,\n              0\n            ]",
+        "\"field\": \"layer\",\n            \"value\": 2",
+    );
+    assert!(text.contains("\"field\": \"layer\""));
+    let doc = Document::parse(DocumentKind::Scene, Some("arena.scene.json"), &text).unwrap();
+    let m = migrate(&doc, &Migrations::builtin(), &schemas);
+    assert!(!m.changed());
+    assert_eq!(m.diagnostics[0].code.as_str(), "FYN-D0018");
+    assert!(
+        m.diagnostics[0]
+            .message
+            .contains("/entities/b0000000-0000-4000-8000-0000000000e6/prefab/overrides/0"),
+        "{}",
+        m.diagnostics[0].message
+    );
+}
+
+#[test]
+fn v1_project_moves_its_physics_layers_to_the_top_level() {
+    let schemas = schemas();
+    // The fixture project as a v1 tool wrote it: the layers under physics.
+    let mut v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(fixtures().join("../project/fynkel.project.json")).unwrap(),
+    )
+    .unwrap();
+    let layers = v.as_object_mut().unwrap().remove("layers").unwrap();
+    assert_eq!(layers, serde_json::json!(["default", "props"]));
+    v["formatVersion"] = 1.into();
+    v["physics"]["layers"] = layers;
+    let text = serde_json::to_string_pretty(&v).unwrap();
+    let doc = Document::parse(DocumentKind::Project, Some("fynkel.project.json"), &text).unwrap();
+    let m = migrate(&doc, &Migrations::builtin(), &schemas);
+    assert!(m.diagnostics.is_empty(), "{:#?}", m.diagnostics);
+    assert_eq!((m.from, m.to), (1, 2));
+    assert_eq!(m.applied[0].name, "project/1-2/layers");
+    let root = &m.document.root;
+    assert!(root.get("physics").and_then(|p| p.get("layers")).is_none());
+    let layers: Vec<&str> = root
+        .get("layers")
+        .and_then(|l| l.as_array())
+        .unwrap()
+        .iter()
+        .filter_map(|n| n.as_str())
+        .collect();
+    assert_eq!(layers, ["default", "props"]);
     let again = migrate(&m.document, &Migrations::builtin(), &schemas);
     assert!(!again.changed());
 }
@@ -285,7 +435,7 @@ fn failures_leave_the_document_untouched() {
 
     // A step whose output the schema rejects is reported and discarded.
     let mut reg = Migrations::empty();
-    for from in [1, 2] {
+    for from in [1, 2, 3] {
         reg.add(
             Migrations::builtin()
                 .step(DocumentKind::Scene, from)

@@ -58,7 +58,6 @@ void main() {
         friction: 0.6,
         restitution: 0,
         isSensor: false,
-        layer: 1,
         mask: 0xffffffff,
       ),
     );
@@ -79,7 +78,6 @@ void main() {
     turnSpeed: 10,
     moveAction: '',
     jumpAction: '',
-    layer: 1,
     mask: 0xffffffff,
   );
 
