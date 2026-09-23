@@ -612,6 +612,10 @@ final class OperationResult {
 
   /// The id of a created asset.
   String? get id => json['id'] as String? ?? (entry?['id'] as String?);
+
+  /// The open documents the operation rewrote on disk (handles), which
+  /// the session re-reads (`setLayersAndTags` and its undo/redo).
+  List<int> get reload => [for (final h in json['reload'] as List? ?? const []) (h as num).toInt()];
 }
 
 /// The `assetDetail` query: one asset and what the Asset panel shows of it.

@@ -117,7 +117,7 @@ void main() {
     var a = ok([
       Command.createObject(id: lamp, name: 'Lamp', components: [
         componentSpec('fynkel.Transform', id: lampTransform, data: transform([0, 3, 0])),
-        componentSpec('fynkel.PointLight', id: lampLight, data: {'color': [1, 0.9, 0.8], 'intensity': 2, 'range': 5}),
+        componentSpec('fynkel.PointLight', id: lampLight, data: {'color': [1, 0.9, 0.8], 'intensity': 2, 'range': 5, 'culling_mask': 0xffffffff}),
       ]),
     ]);
     expect(a.baseRevision, rev0);
@@ -888,14 +888,64 @@ void main() {
     final doc = preview.documents.single;
     expect(doc.kind, 'scene');
     expect(doc.from, 0);
-    expect(doc.to, 3, reason: 'scenes are at formatVersion 3 (M3-19c): three steps');
+    expect(doc.to, 4, reason: 'scenes are at formatVersion 4 (ADR-0020): four steps');
     expect(doc.ok, isTrue);
     expect(doc.path, target.path);
     expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
-    expect(doc.applied.map((a) => a.from), [0, 1, 2]);
+    expect(doc.applied.map((a) => a.from), [0, 1, 2, 3]);
     expect(doc.diff, contains('formatVersion'));
     expect(target.readAsStringSync(), before, reason: 'a preview writes nothing');
     expect(session.validateProject().diagnostics.map((d) => d.code), contains('FYN-D0016'));
+  });
+
+  test('setLayersAndTags renames in the project file, reorders through the documents and re-reads the open ones', () {
+    final dir = copyFixture('layers');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    final events = <AuthoringEvent>[];
+    session.events.listen(events.add);
+    session.openProject(dir.path);
+    final main = session.openDocument(mainScene);
+    int crateBLayer() {
+      final components = (entities(main)[crateB] as Map)['components'] as Map;
+      final layer = components.values.firstWhere((c) => (c as Map)['type'] == 'fynkel.Layer') as Map;
+      return ((layer['data'] as Map)['layer'] as num).toInt();
+    }
+
+    expect(crateBLayer(), 1);
+    final project = File('${dir.path}/fynkel.project.json');
+
+    // A rename and a new tag: the project file only, nothing to re-read.
+    final renamed = session.setLayersAndTags(layers: ['default', 'crates'], tags: ['pickup']);
+    expect(renamed.label, 'Edit Tags and Layers');
+    expect(renamed.reload, isEmpty);
+    expect((jsonDecode(project.readAsStringSync()) as Map)['layers'], ['default', 'crates']);
+    expect(events.whereType<DocumentChanged>().where((e) => e.kind == DocumentChangeKind.reloaded), isEmpty);
+
+    // A layer inserted before `crates`: Crate B follows it to index 2 and
+    // the open scene is re-read.
+    final moved = session.setLayersAndTags(
+      layers: ['default', 'ghosts', 'crates'],
+      layersFrom: [0, null, 1],
+      tags: ['pickup'],
+    );
+    expect(moved.reload, [main.handle]);
+    expect(events.whereType<DocumentChanged>().last.kind, DocumentChangeKind.reloaded);
+    expect(crateBLayer(), 2);
+    expect(main.state.dirty, isFalse);
+
+    session.undoAsset();
+    expect(crateBLayer(), 1, reason: 'the undo rewrites the file back and re-reads it');
+
+    // An unsaved edit protects the document: refused, nothing written.
+    main.apply([Command.renameObject(floor, 'Ground')]);
+    final text = project.readAsStringSync();
+    expect(
+      () => session.setLayersAndTags(layers: ['default', 'ghosts', 'crates'], layersFrom: [0, null, 1], tags: ['pickup']),
+      throwsA(isA<AuthoringException>().having((e) => e.diagnostics.single.code, 'code', 'FYN-T0003')),
+    );
+    expect(project.readAsStringSync(), text);
   });
 }
 

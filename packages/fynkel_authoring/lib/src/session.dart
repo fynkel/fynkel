@@ -245,11 +245,12 @@ final class AuthoringSession implements Finalizable {
       _kindAndArgs('query $kind', kind, args, n.fynkel_authoring_query)['result'];
 
   /// An asset operation by [kind] — `newDocument`, `renameAsset`,
-  /// `deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`,
-  /// `redoAsset` — with its arguments (see `fynkel_authoring.h`). The
-  /// session re-reads only the touched paths; an [AssetsChanged] event
-  /// carries the result, and an open document the operation moved gets a
-  /// [DocumentChanged] of kind `moved`. Throws [AuthoringException] when
+  /// `deleteAsset`, `setImportSettings`, `reimport`, `setLayersAndTags`,
+  /// `undoAsset`, `redoAsset` — with its arguments (see
+  /// `fynkel_authoring.h`). The session re-reads only the touched paths;
+  /// an [AssetsChanged] event carries the result, an open document the
+  /// operation moved gets a [DocumentChanged] of kind `moved`, and one it
+  /// rewrote (the result's `reload`) is re-read with a `reloaded` change. Throws [AuthoringException] when
   /// the operation is refused (`invalidArgument` with FYN-T0003 and the
   /// reason — a delete's dependents in `related`; `loadFailed` for an
   /// unknown asset or an I/O failure; `commandsRejected` with nothing to
@@ -266,6 +267,9 @@ final class AuthoringSession implements Finalizable {
     if (_project != null) {
       refreshProject();
       _relocateOpenDocuments();
+      for (final h in r.reload) {
+        _documents[h]?.reload();
+      }
       _events.add(AssetsChanged(RescanReport.fromJson({'assetCount': r.assetCount, 'scanned': const []}), operation: r));
     }
     _publishPreviews(json);
@@ -297,6 +301,24 @@ final class AuthoringSession implements Finalizable {
   /// Runs the source through its importer with the sidecar's settings;
   /// `ok` false with the importer's diagnostics when it refused.
   OperationResult reimport(String id) => operate('reimport', {'asset': id});
+
+  /// Replaces the project's `layers` and `tags` (ADR-0020). [layersFrom]
+  /// and [tagsFrom] give, for each new entry, the old index it comes from
+  /// (null: a new entry); omitted, the lists line up by index — renames
+  /// and additions, which write the project file only. A reorder or a
+  /// removal rewrites every scene and prefab that uses them (refused while
+  /// one of them is open with unsaved edits) and re-reads the open ones.
+  OperationResult setLayersAndTags({
+    required List<String> layers,
+    required List<String> tags,
+    List<int?>? layersFrom,
+    List<int?>? tagsFrom,
+  }) => operate('setLayersAndTags', {
+    'layers': layers,
+    'tags': tags,
+    'layersFrom': ?layersFrom,
+    'tagsFrom': ?tagsFrom,
+  });
 
   /// The asset history's undo and redo.
   OperationResult undoAsset() => operate('undoAsset');
