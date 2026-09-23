@@ -1124,7 +1124,9 @@ reference — the project-wide check in `fynkel validate` (M2-13) builds on
 it. Codes: source file without a sidecar `FYN-A0001`, sidecar without a
 source `A0002`, duplicate id (across documents, sidecars and sub-assets;
 the first path wins) `A0003`, unknown asset `A0004`, unknown sub-asset
-`A0005`, malformed sidecar entry `A0006`.
+`A0005`, malformed sidecar entry `A0006`, a reference to an asset of the
+wrong kind (a model's material remap naming something that is not a
+material document, § Material remaps) `A0007`.
 
 ## Import
 
@@ -1212,6 +1214,45 @@ parents) is `A0104`; the `Limits` — file 256 MiB, buffers 256 MiB total,
 are `A0101`; a file that is not glTF at all is `A0100`. Any error means no
 intermediate is produced.
 
+#### Material remaps (`settings.materials`)
+
+Both model importers (glTF from version 7, FBX from version 3) read a
+remap table from the sidecar (`docs/design/material-remapping.md`):
+
+```json
+"settings": {
+  "materials": {
+    "material/Painted": { "asset": "<id of metal_red.material.json>" }
+  }
+}
+```
+
+- Keyed by the embedded material's key; the value is an `assetRef` to a
+  **material document**. A nil reference means "the embedded one".
+- Every `fynkel.MeshRenderer` in the model's `prefab` whose material is a
+  remapped key points at the project material instead, so every instance
+  of the model draws it; an instance's own override still wins. A
+  reference that names `{ asset: <model>, sub: "material/Painted" }`
+  itself is left alone, and the embedded material stays a sub-asset.
+- The targets are the model's **runtime** dependencies (loaded with it),
+  not key inputs: the cooked model holds only their ids, which the
+  settings already cover, so editing a remapped material recooks that
+  material alone.
+- A target that is not a material document (another kind, or a sub-asset
+  such as another embedded material) is `A0007`, one that does not
+  resolve `A0004`, an entry that is not an `assetRef` `A0006` — all
+  errors on the sidecar, from `fynkel validate` and the cook, and the
+  model does not cook. A key the file no longer has (the material was
+  renamed or deleted in the modelling tool) is an `A0105` warning naming
+  the file's current material keys.
+- **Extract Materials** (the editor's asset page, `fynkel asset
+  extract-materials <model> [--to <dir>]`) writes each embedded material
+  that is not remapped yet as an editable `<name>.material.json` —
+  a fresh id, the imported values, its textures still the model's
+  `image/…` sub-assets — into `Materials/` next to the model (a taken name
+  gets ` 2`, ` 3`, …) and remaps it. `fynkel asset remap <model> <key>
+  <material|none>` sets or clears one remap.
+
 ### FBX (`fynkel.fbx`, version 3)
 
 M3-19b. The importer reads binary and ASCII FBX (`.fbx`, 6100–7700)
@@ -1254,7 +1295,8 @@ Cameras, lights, NURBS/procedural surfaces and curves are skipped
 (`A0105`, counted). A file that is not FBX at all (or a version `ufbx`
 does not read) is `A0100` with `ufbx`'s reason; the node graph limits
 (`max_nodes`, `max_node_depth`), vertex and image limits are `A0101`. The
-sidecar's `settings` are `allowExternalFiles` only. Sub-asset ids and
+sidecar's `settings` are `allowExternalFiles` and `materials` (§ Material
+remaps, above). Sub-asset ids and
 their uuids follow the glTF rules above (`subAssets` in the sidecar,
 UUID v5 otherwise, dropped ids reported).
 

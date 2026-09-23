@@ -1740,6 +1740,14 @@ applied yet.
   up the apply bar with **Revert** (`asset.revertSettings`) and **Apply and
   Reimport** (`asset.applySettings`: the sidecar through the session, one
   asset-history step, then the reimport, its summary or refusal shown);
+  a model's **Materials** — one row per embedded material
+  (`asset.materials.<key>`), a material field whose None is the embedded
+  one and whose picker lists the project's material documents, editing
+  the draft like any setting, and **Extract Materials**
+  (`asset.extractMaterials`: the embedded materials not remapped yet
+  written as documents into `Materials/` next to the model and remapped,
+  one asset-history step, then the reimport; off while the settings have
+  unapplied changes) — `documents.md` § Material remaps;
   **Parts** (click one to inspect it, drag one onto a field); the document
   kind's own sections; **Used by**, each row opening the referencing
   document at the field.

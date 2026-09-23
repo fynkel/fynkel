@@ -1711,3 +1711,16 @@ The M3 backlog as it landed, for the record:
    reuses a stale import. Every project, fixture, the starter template
    and `benchmarks/stress/generate.py` are migrated. The cooked format and
    the fingerprint are unchanged. Next: Phase 1 item 2 (`SetActive`).
+19. **Material remapping (roadmap Phase 1, next to item 1) — done
+   2026-09-24.** A model's sidecar `settings.materials` maps an embedded
+   material's key to a project material document; the renderers of its
+   hierarchy draw that material in every instance (an instance's override
+   still wins; explicit references to the embedded material and the
+   embedded sub-assets are untouched). The targets are runtime
+   dependencies, not key inputs. New `FYN-A0007` for a target that is not
+   a material document. `fynkel.gltf` 7, `fynkel.fbx` 3. Editor: a
+   Materials section on a model's asset page and Extract Materials (one
+   asset-history step); CLI: `fynkel asset remap` and `fynkel asset
+   extract-materials` (`docs/design/material-remapping.md`, documents.md
+   § Material remaps). Cooked format and fingerprint unchanged. Next:
+   Phase 1 item 2 (`SetActive`).

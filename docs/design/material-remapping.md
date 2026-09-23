@@ -104,8 +104,9 @@ one row per embedded material:
   like any `assetRef` field; it edits the settings draft, so **Apply and
   Reimport**, **Revert** and the asset history's undo work as for every
   other import setting;
-- **Extract Materials…** — writes each embedded material out as an
-  editable `<name>.material.json` (a fresh id, the same values) into a
+- **Extract Materials** — writes each embedded material that is not
+  remapped yet out as an editable `<name>.material.json` (a fresh id, the
+  same values) into a
   `Materials/` folder next to the model, and remaps every one to its
   copy, as one undoable asset-history step. A name already taken in
   that folder gets ` 2`, ` 3`, … (`Painted 2.material.json`), so models
@@ -141,5 +142,9 @@ and scripts.
 2. **M2 — Editor and CLI.** The Materials section, Extract Materials, the
    two CLI commands. Tests: remap, revert and undo through the asset
    history; extract writes valid documents and remaps them in one step.
+   **Done** (`extractMaterials` in `fynkel_authoring` over
+   `fynkel_import::extract`, `remaps_are_settings_and_extract_materials_is_one_step`,
+   `asset_remap_and_extract_materials_edit_the_models_sidecar`, the editor's
+   `a model: materials remapped from the Materials section…`).
 3. **M3 — Docs.** `documents.md` § Import (the setting), `editor.md`,
-   the template's `AGENTS.md`.
+   the template's `AGENTS.md`. **Done.**

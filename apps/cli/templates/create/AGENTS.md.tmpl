@@ -68,6 +68,8 @@ fynkel material inspect|validate <path>                  a material against its 
 fynkel document new <kind> <name> [--out <path>]         a fresh, valid, empty document (scene, prefab, material, ...)
 fynkel document format <path>... [--check]               canonical formatting
 fynkel asset list | resolve <uuid>[#sub] | init <file>   the asset database (ids come from sidecars and documents)
+fynkel asset remap <model> <key> <material|none>         draw a model's embedded material with a project material
+fynkel asset extract-materials <model>                   the model's materials as editable .material.json files, remapped
 fynkel import <file>...                                  (re)import sources; fills sidecar sub-asset ids
 fynkel cook [--force] [--prune]                          cook the project's assets into .fynkel/cache (scenes expanded, prefabs applied) and stage them into fynkel_cache/ for the app bundle
 fynkel codegen --project . [--check]                     behaviour registration + schemas from @FynkelBehaviour classes

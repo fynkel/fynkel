@@ -19,6 +19,10 @@ Apply to Scene (`docs/design/live-play-mode.md`).
    so reordering them in the modelling tool keeps every reference.
    Existing sidecars and documents are migrated. Design:
    `docs/design/stable-sub-asset-ids.md`. **Done 2026-09-23.**
+   - **Material remapping** (added 2026-09-24, next to item 1 because
+     it extends the same sidecar): a model's embedded materials remapped
+     to project materials in its import settings, and Extract Materials.
+     Design: `docs/design/material-remapping.md`. **Done 2026-09-24.**
 2. **`SetActive` / `activeInHierarchy`.** An inactive object and its
    subtree are not drawn, not simulated and run no behaviours
    (`onDisable`/`onEnable` fire); a checkbox in the Inspector header, a
