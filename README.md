@@ -24,6 +24,7 @@ fynkel test --headless --scene assets/scenes/playground.scene.json --input test/
 fynkel render --scene assets/scenes/playground.scene.json --out /tmp/playground.png --size 1280x720 --steps 40
 flutter test                         # the Dart side against the real runtime (cooks first)
 fynkel run                           # validate, cook, flutter run on this Mac; -d <iphone> for a device
+fynkel editor .                      # the project editor: the game compiled in, hot reload on save
 
 fynkel create my_game && cd my_game  # a new project: the starter, with AGENTS.md as the tour
 ```

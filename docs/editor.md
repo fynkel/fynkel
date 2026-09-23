@@ -1392,6 +1392,46 @@ report, `FynkelGameView`'s stats — a `print` in a behaviour is an
 stdin, no commands, ADR-0016); the per-frame graphs — item 9's Profiler
 reads the same `stats` records.
 
+## The project editor: `fynkel editor` (ADR-0021 P3a)
+
+`fynkel editor [dir]` opens a project in **its project editor**: an
+editor built with the project's game compiled in, so Play (P4) can run
+the game inside the editor, and a save in `lib/` hot reloads it.
+
+- The command generates `<project>/.fynkel/editor_host/` (a `.gitignore`
+  of `*`): a Flutter app whose `main` is
+  `runFynkelEditor(args, game: EditorGame(build: buildGame))` from
+  `package:fynkel_editor`, depending on `apps/editor` and on the project
+  by path, with `apps/editor/macos` copied in. It rewrites only files
+  whose bytes changed, so the second start reuses the first build.
+- A project opens this way when it has a `pubspec.yaml` and
+  `lib/fynkel_game.dart` (`Widget buildGame(FynkelLaunch)`, which
+  `fynkel create` writes). Without them, or with `--plain`, the command
+  runs the plain editor (`apps/editor`) with the directory.
+- It runs `flutter run -d macos --machine` (a debug JIT build: hot
+  reload works, the frame rate is a debug build's) with `FYNKEL_ROOT`,
+  `FYNKEL_CLI` and `FYNKEL_EDITOR_STATUS` in the environment. `--flutter
+  <path>` or `FYNKEL_FLUTTER` pick the SDK; otherwise it comes from PATH.
+- It watches `lib/**.dart` (a stat every 250 ms, the content read only
+  for files whose time changed). When a change has settled for 150 ms, it
+  asks for a hot reload. A file rewritten with the bytes it had is not a
+  change: the editor's `fynkel codegen --check` at open rewrites the
+  generated files and then puts them back.
+- Each outcome goes to `status.json` next to the host (version 1: `seq`,
+  `state` — `starting`, `running`, `reloading`, `reloaded`,
+  `reloadFailed`, `failed`, `exited` — `message`, `ms`, `files`). The
+  editor follows it (`CodeReloadStatus`) and shows a notice: *Code
+  reloaded in N ms* or *Code did not reload*, with the compiler's errors
+  (paths relative to the project). The terminal gets the same lines.
+- A project whose code does not compile cannot build its project editor.
+  The command prints the build's last lines and suggests `--plain`.
+- `FYNKEL_EDITOR_TRACE=1` echoes every line `flutter run` prints.
+
+A hot reload keeps the editor's state (open documents, undo). A change
+that a hot reload cannot apply, such as a new field on a const class,
+needs a restart, and a restart would drop unsaved edits. Offering a
+restart that saves first, and restoring the open tabs after it, is P3b.
+
 ## The look (item 9a)
 
 The editor is meant to read like a tool — Unity's density, Rider's
