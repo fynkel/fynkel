@@ -262,12 +262,13 @@ final class HierarchyModel extends ChangeNotifier {
     });
   }
 
-  /// The objects deleted during Play that the scene still has.
-  int get deletionsToApply {
+  /// The names of the objects deleted during Play that the scene still
+  /// has.
+  List<String> get deletionsToApply {
     final play = _play;
     final scene = play == null ? null : playSceneTab(tabs, play);
-    if (play == null || scene == null || play.deletedHere.isEmpty) return 0;
-    return deletionsToSceneCommands(scene, play).ids.length;
+    if (play == null || scene == null || play.deletedHere.isEmpty) return const [];
+    return [for (final id in deletionsToSceneCommands(scene, play).ids) scene.tree[id]?.name ?? id];
   }
 
   /// Apply to Scene for what was deleted during Play.

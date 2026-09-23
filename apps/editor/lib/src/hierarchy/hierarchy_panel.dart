@@ -184,28 +184,43 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             width: double.infinity,
             color: t.header,
             padding: EdgeInsets.symmetric(horizontal: t.pad, vertical: 3),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(
-                    'Playing — the running game, as it is now',
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(color: t.accent),
-                  ),
+                Text(
+                  'Playing — the running game, as it is now',
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(color: t.accent),
                 ),
-                if (model.deletionsToApply case final n when n > 0)
-                  TextButton(
-                    key: const Key('hierarchy.applyDeletions'),
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.symmetric(horizontal: t.pad),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    onPressed: model.applyDeletionsToScene,
-                    child: Text(
-                      n == 1 ? 'Apply 1 deletion to Scene' : 'Apply $n deletions to Scene',
-                      style: theme.textTheme.bodySmall,
+                // What was deleted during Play goes on Stop unless applied.
+                if (model.deletionsToApply case final names when names.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 2),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Tooltip(
+                            message: names.join('\n'),
+                            child: Text(
+                              names.length == 1 ? 'Deleted: ${names.single}' : '${names.length} objects deleted',
+                              key: const Key('hierarchy.deletions'),
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
+                        ),
+                        FilledButton.tonal(
+                          key: const Key('hierarchy.applyDeletions'),
+                          style: FilledButton.styleFrom(
+                            padding: EdgeInsets.symmetric(horizontal: t.pad),
+                            minimumSize: const Size(0, 24),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: model.applyDeletionsToScene,
+                          child: Text('Apply to Scene', style: theme.textTheme.bodySmall),
+                        ),
+                      ],
                     ),
                   ),
               ],

@@ -13,6 +13,7 @@ import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/document_tabs.dart';
 import 'package:fynkel_editor/src/documents/editor_document.dart';
 import 'package:fynkel_editor/src/hierarchy/hierarchy_model.dart';
+import 'package:fynkel_editor/src/hierarchy/hierarchy_panel.dart';
 import 'package:fynkel_editor/src/inspector/inspector_model.dart';
 import 'package:fynkel_editor/src/inspector/field_widgets.dart';
 import 'package:fynkel_editor/src/inspector/inspector_panel.dart';
@@ -367,7 +368,9 @@ void main() {
     expect(doc.has('lamp'), isFalse);
   });
 
-  test('Apply to Scene from the Hierarchy keeps what was made, renamed, moved, removed and deleted', () {
+  testWidgets('Apply to Scene from the Hierarchy keeps what was made, renamed, moved, removed and deleted', (
+    tester,
+  ) async {
     final project = FakeProject(dir: '/fake/game')..addDocument(scene());
     final tabs = DocumentTabs(project: project);
     addTearDown(tabs.dispose);
@@ -414,17 +417,28 @@ void main() {
     expect(hierarchy.applyToScene(), isFalse);
     expect(tabs.live!.lastError, contains('Nothing to apply'));
 
-    // A deletion is applied from the Playing header.
+    // A deletion is applied from the Playing header: its own row, a button.
     expect(inScene('floor'), isNotNull, reason: 'a root deleted during Play is not below what was applied');
-    expect(hierarchy.deletionsToApply, 1);
-    expect(hierarchy.applyDeletionsToScene(), isTrue);
+    expect(hierarchy.deletionsToApply, ['Floor']);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(width: 260, child: HierarchyPanel(model: hierarchy, onOpenDocument: () {})),
+        ),
+      ),
+    );
+    expect(find.text('Deleted: Floor'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('hierarchy.applyDeletions')));
+    await tester.pump();
     expect(inScene('floor'), isNull);
-    expect(hierarchy.deletionsToApply, 0);
+    expect(hierarchy.deletionsToApply, isEmpty);
+    expect(find.byKey(const Key('hierarchy.applyDeletions')), findsNothing);
 
     tabs.live!.setSelection(['runtime:99']);
     expect(hierarchy.applyToScene(), isFalse);
     expect(tabs.live!.lastError, contains('game made'));
     play.follow(null);
+    await tester.pumpWidget(const SizedBox());
   });
 
   test('a real running world takes a field, and a gizmo drag moves it and puts it back (L3)', () {
