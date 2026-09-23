@@ -189,6 +189,29 @@ pub fn write_stamp(app: &Path, stamp: &Stamp) {
     let _ = std::fs::write(path, format!("{body:#}\n"));
 }
 
+/// While a launched app runs older Dart code than the files, its window
+/// is covered ("Loading code changes…") until the hot restart that brings
+/// it up to date: whatever was done in the old code would be lost. The
+/// app finds this file through `FYNKEL_EDITOR_UPDATING`: `stale` from
+/// launch, `restarting` once the restart is asked for (the restarted code
+/// reads that and shows nothing), gone when it is over.
+pub fn updating_file(app: &Path) -> PathBuf {
+    app.join("build").join("fynkel_updating")
+}
+
+/// Writes [updating_file] (`Some`) or removes it (`None`).
+pub fn set_updating(app: &Path, state: Option<&str>) {
+    let path = updating_file(app);
+    match state {
+        Some(s) => {
+            let _ = std::fs::write(path, s);
+        }
+        None => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 /// The debug app `flutter run` built under `app`, if there is one.
 pub fn built_app(app: &Path) -> Option<PathBuf> {
     let products = app.join("build/macos/Build/Products/Debug");

@@ -147,6 +147,9 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     if let Some(h) = &host {
         env.push(("FYNKEL_EDITOR_STATUS", h.join(STATUS_FILE)));
     }
+    // Always set: an editor started from another must not read that one's.
+    env.push(("FYNKEL_EDITOR_UPDATING", editor_launch::updating_file(&cwd)));
+    editor_launch::set_updating(&cwd, None);
 
     // Nothing native changed since the last build: launch the built app
     // and attach, no build (editor_launch.rs).
@@ -161,13 +164,16 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     if let (Some(built), Some(app_exe)) = (built, editor_launch::built_app(&cwd)) {
         let args: Vec<&Path> = project.as_deref().into_iter().collect();
         let env: Vec<(&str, &Path)> = env.iter().map(|(k, v)| (*k, v.as_path())).collect();
+        let stale = built.dart != stamp.dart;
+        if stale {
+            editor_launch::set_updating(&cwd, Some("stale"));
+        }
         match editor_launch::launch(&app_exe, &cwd, &args, &env, Duration::from_secs(30)) {
             Ok((app, uri, lines)) => {
                 say(&format!(
                     "opened the built editor in {:.1} s (nothing native changed)",
                     started.elapsed().as_secs_f64()
                 ));
-                let stale = built.dart != stamp.dart;
                 // The plain editor needs Flutter only to bring its code up
                 // to date; a project editor, for hot reload on save.
                 let tool = if host.is_some() || stale {
@@ -183,6 +189,7 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                             say(&format!(
                                 "hot reload is off: cannot run flutter attach: {e}"
                             ));
+                            editor_launch::set_updating(&cwd, None);
                             None
                         }
                     }
@@ -199,10 +206,19 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                         app: Some((app, lines)),
                         restart: stale,
                         stamp: None,
+                        app_dir: &cwd,
+                        refresh: stale.then(|| editor_launch::Recording {
+                            inputs: inputs.clone(),
+                            dart: stamp.dart.clone(),
+                        }),
+                        flutter: &flutter,
                     },
                 );
             }
-            Err(why) => say(&format!("{why}; building it instead")),
+            Err(why) => {
+                editor_launch::set_updating(&cwd, None);
+                say(&format!("{why}; building it instead"))
+            }
         }
     }
 
@@ -263,6 +279,9 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                 inputs,
                 dart: stamp.dart,
             }),
+            app_dir: &cwd,
+            refresh: None,
+            flutter: &flutter,
         },
     )
 }
@@ -281,6 +300,12 @@ struct Session<'a> {
     restart: bool,
     /// After a build: what it was built from, recorded once it is up.
     stamp: Option<editor_launch::Recording>,
+    /// The Flutter app's directory ([editor_launch::updating_file]).
+    app_dir: &'a Path,
+    /// A launched app older than the code: once it has quit, rebuild it so
+    /// the next open starts on the current code (no catch-up restart).
+    refresh: Option<editor_launch::Recording>,
+    flutter: &'a Path,
 }
 
 /// Runs until the editor exits: relays what matters, hot reloads on save.
@@ -293,6 +318,9 @@ fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
         app,
         restart,
         stamp,
+        app_dir,
+        refresh,
+        flutter,
     } = session;
     let (tx, rx) = mpsc::channel::<Line>();
     let (mut app, app_lines) = match app {
@@ -336,6 +364,7 @@ fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
         restart_due: false,
         restart,
         stamp,
+        app_dir: app_dir.to_path_buf(),
     };
     if direct {
         state.ready = true;
@@ -373,6 +402,7 @@ fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
                     say("hot reload is off: flutter attach ended (the editor keeps running)");
                 }
                 state.app = None;
+                editor_launch::set_updating(app_dir, None);
             }
             Ok(Line::Closed) | Ok(Line::AppClosed) => closed = true,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -380,6 +410,7 @@ fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
         }
         if std::mem::take(&mut state.restart_due) {
             say("the code changed since this editor was built → hot restart");
+            editor_launch::set_updating(app_dir, Some("restarting"));
             state.request(
                 &stdin,
                 "app.restart",
@@ -441,6 +472,7 @@ fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
         }
         None => tool.as_mut().expect("a build has its tool").wait(),
     };
+    editor_launch::set_updating(app_dir, None);
     let code = status.as_ref().ok().and_then(|s| s.code()).unwrap_or(1);
     if !state.ready {
         eprintln!(
@@ -461,7 +493,35 @@ fn supervise(tool: Option<Child>, session: Session) -> ExitCode {
         return ExitCode::from(1);
     }
     state.write_status("exited", "", None, &[]);
+    if let Some(recording) = refresh {
+        refresh_build(flutter, app_dir, recording);
+    }
     ExitCode::from(code.clamp(0, 255) as u8)
+}
+
+/// Rebuilds the editor's app after a run that had to catch its code up,
+/// with the window already gone, and records what it was built from. The
+/// next open then launches current code directly. A failed build leaves
+/// the old record: that open catches up again, as this one did.
+fn refresh_build(flutter: &Path, app_dir: &Path, recording: editor_launch::Recording) {
+    say("updating the built editor for the next open …");
+    let at = Instant::now();
+    let out = Command::new(flutter)
+        .args(["build", "macos", "--debug"])
+        .current_dir(app_dir)
+        .stdin(Stdio::null())
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            recording.finish();
+            say(&format!("updated in {:.1} s", at.elapsed().as_secs_f64()));
+        }
+        Ok(o) => say(&format!(
+            "could not update the built editor (the next open catches up again):\n{}",
+            String::from_utf8_lossy(&o.stderr).trim_end()
+        )),
+        Err(e) => say(&format!("could not run {}: {e}", flutter.display())),
+    }
 }
 
 /// Relays a Flutter tool's stdout and stderr, in order per stream.
@@ -520,6 +580,7 @@ struct Supervisor {
     restart_due: bool,
     /// After a build: what it was built from, written once it is up.
     stamp: Option<editor_launch::Recording>,
+    app_dir: PathBuf,
 }
 
 impl Supervisor {
@@ -629,6 +690,7 @@ impl Supervisor {
                     message = errors;
                 }
                 if method == "stale" {
+                    editor_launch::set_updating(&self.app_dir, None);
                     if ok {
                         say(&format!("up to date in {ms} ms"));
                     } else {
