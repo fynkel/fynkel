@@ -219,6 +219,19 @@ abstract class Behaviour {
   bool _started = false;
   bool _destroyRequested = false;
   bool _destroyed = false;
+  BehaviourType? _type;
+  String? _authoredComponent;
+
+  /// The registered type this behaviour was built from by
+  /// [BehaviourRegistry.instantiate] (a scene's, or
+  /// [GameObject.addBehaviourFromData]); null for one the game constructed
+  /// itself. The editor's live Play mode reads and writes the fields
+  /// through it (ADR-0021 P7).
+  BehaviourType? get behaviourType => _type;
+
+  /// The id of the component in the scene (or prefab) document this
+  /// behaviour was loaded from; null when no document authored it.
+  String? get authoredComponentId => _authoredComponent;
 
   /// The object this behaviour is attached to; throws before attachment.
   GameObject get gameObject {
@@ -470,7 +483,7 @@ class BehaviourRegistry {
     if (version != null && version > type.version) {
       throw BehaviourDataError(id, 'authored version $version is newer than the registered ${type.version}');
     }
-    final b = type.create();
+    final b = type.create().._type = type;
     for (final entry in fields.entries) {
       final f = type.field(entry.key);
       if (f == null) throw BehaviourDataError(id, 'unknown field', field: entry.key);

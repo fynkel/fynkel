@@ -340,6 +340,9 @@ void main() {
     expect(s.speed, 2.5);
     expect(go.behaviour<Spinner>(), same(s));
     expect(spinnerType.field('speed')!.get(s), 2.5);
+    expect(s.behaviourType, same(spinnerType), reason: 'the editor reads its fields through it (ADR-0021 P7)');
+    expect(s.authoredComponentId, isNull, reason: 'no document authored it');
+    expect(Spinner().behaviourType, isNull, reason: 'constructed by the game');
     expect((go.addBehaviourFromData('game.Spinner') as Spinner).speed, 1.0, reason: 'defaults kept');
 
     expect(
@@ -393,6 +396,31 @@ void main() {
     expect(log.first, 'onCreate');
     w.frame(1 / 60);
     expect(go.worldTransform, isNotNull, reason: 'subscribed on attach');
+  });
+
+  test('a behaviour loaded from a scene knows its type and its authored component', () {
+    final fixture = Directory('../../crates/fynkel_document/fixtures/project').absolute.path;
+    final cache = Directory.systemTemp.createTempSync('fynkel-behaviour-cache-').path;
+    addTearDown(() => Directory(cache).deleteSync(recursive: true));
+    cookProject(fixture, cacheDir: cache);
+    // The fixture's Spinner also authors an `axis`.
+    final type = BehaviourType(
+      id: 'game.Spinner',
+      create: Spinner.new,
+      fields: [
+        ...spinnerType.fields,
+        BehaviourField(name: 'axis', type: 'vec3', get: (_) => null, set: (_, _) {}),
+      ],
+    );
+    final w = world(registry: BehaviourRegistry()..register(type));
+    addTearDown(w.dispose);
+    w.loadProject(fixture, cacheDir: cache);
+    final spinners = [
+      for (final e in w.allEntities()) ...w.attach(e).behavioursOf<Spinner>(),
+    ];
+    expect(spinners, hasLength(1), reason: "the Robot's game.Spinner");
+    expect(spinners.single.behaviourType, same(type));
+    expect(spinners.single.authoredComponentId, 'c0000000-0000-4000-8000-0000000000c2');
   });
 }
 

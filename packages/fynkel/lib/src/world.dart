@@ -1015,7 +1015,8 @@ class World {
         continue;
       }
       try {
-        attach(b.entity).addBehaviourFromData(b.type, fields: b.data, version: b.version);
+        attach(b.entity).addBehaviourFromData(b.type, fields: b.data, version: b.version)._authoredComponent =
+            b.component.isEmpty ? null : b.component;
         attached++;
       } on BehaviourDataError catch (e) {
         extra.add(LoadDiagnostic(
