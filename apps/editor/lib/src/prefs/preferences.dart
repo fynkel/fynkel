@@ -62,6 +62,7 @@ final class Preferences extends ChangeNotifier {
       fynkelCli = _blankToNull(json['fynkelCli'] as String?),
       fynkelRoot = _blankToNull(json['fynkelRoot'] as String?),
       flutterCommand = json['flutterCommand'] as String? ?? 'flutter',
+      zoomToPointer = json['zoomToPointer'] as bool? ?? true,
       _recents = [
         for (final r in json['recents'] as List? ?? const [])
           if (r is Map<String, Object?>) RecentProject.fromJson(r),
@@ -113,6 +114,10 @@ final class Preferences extends ChangeNotifier {
   String? fynkelRoot;
   String flutterCommand;
 
+  /// A Scene view scroll or pinch zooms about the point under the pointer;
+  /// off, about the view's centre (Unity's default).
+  bool zoomToPointer;
+
   List<RecentProject> _recents;
   List<RecentProject> get recents => List.unmodifiable(_recents);
 
@@ -123,6 +128,7 @@ final class Preferences extends ChangeNotifier {
   void setIdeCommand(String c) => _update(() => ideCommand = c.trim().isEmpty ? IdePreset.presets.first.command : c);
   void setFynkelCli(String? path) => _update(() => fynkelCli = _blankToNull(path));
   void setFynkelRoot(String? path) => _update(() => fynkelRoot = _blankToNull(path));
+  void setZoomToPointer(bool on) => _update(() => zoomToPointer = on);
   void setFlutterCommand(String c) => _update(() => flutterCommand = c.trim().isEmpty ? 'flutter' : c.trim());
 
   void addRecent(String dir, String name, {DateTime? now}) => _update(() {
@@ -147,6 +153,7 @@ final class Preferences extends ChangeNotifier {
     'fynkelCli': fynkelCli,
     'fynkelRoot': fynkelRoot,
     'flutterCommand': flutterCommand,
+    'zoomToPointer': zoomToPointer,
     'recents': [for (final r in _recents) r.toJson()],
   };
 

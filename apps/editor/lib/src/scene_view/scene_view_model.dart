@@ -237,7 +237,9 @@ final class SceneViewModel extends ChangeNotifier {
     this.chooseSavePath,
     this.view = SceneEditorState.firstView,
     this.views,
-  }) : controller = controller ?? FynkelViewportController(placeholders: false) {
+    bool Function()? zoomToPointer,
+  }) : controller = controller ?? FynkelViewportController(placeholders: false),
+       zoomToPointer = zoomToPointer ?? _on {
     views?._views.add(this);
     tabs.addListener(_onTabs);
     project.addListener(_onProject);
@@ -258,6 +260,11 @@ final class SceneViewModel extends ChangeNotifier {
 
   /// The project's Scene view copies, when there can be more than one.
   final SceneViews? views;
+
+  /// Whether a scroll or a pinch zooms about the point under the pointer
+  /// (the preference) rather than the view's centre.
+  final bool Function() zoomToPointer;
+  static bool _on() => true;
 
   /// The one native viewport; it renders the focused tab's world.
   final FynkelViewportController controller;
@@ -526,6 +533,17 @@ final class SceneViewModel extends ChangeNotifier {
 
   void dolly(double steps) {
     camera?.dolly(steps);
+    _cameraChanged();
+  }
+
+  /// A scroll's or a pinch's dolly: about the point under the pointer, on
+  /// the pivot's plane, when the preference says so.
+  void _dollyAtPointer(double steps) {
+    final c = camera, vp = viewProjection, px = pointer;
+    final toward = c == null || vp == null || px == null || !zoomToPointer()
+        ? null
+        : vp.rayAt(px.dx, px.dy).hitPlane(c.pivot, c.forward);
+    camera?.dolly(steps, toward: toward);
     _cameraChanged();
   }
 
@@ -1782,7 +1800,7 @@ final class SceneViewModel extends ChangeNotifier {
     if (panning ?? _shiftHeld) {
       pan(-delta.dx, -delta.dy);
     } else {
-      dolly(-delta.dy / 40);
+      _dollyAtPointer(-delta.dy / 40);
     }
   }
 
@@ -1830,7 +1848,7 @@ final class SceneViewModel extends ChangeNotifier {
     while (_gestureSamples.length > 2 && e.timeStamp - _gestureSamples.first.$1 > const Duration(milliseconds: 100)) {
       _gestureSamples.removeAt(0);
     }
-    if (ratio.isFinite && ratio > 0 && ratio != 1) dolly(math.log(ratio) * 10);
+    if (ratio.isFinite && ratio > 0 && ratio != 1) _dollyAtPointer(math.log(ratio) * 10);
     // A finger movement is the opposite of the scroll it makes.
     if (pan != Offset.zero) _scroll(-pan);
   }

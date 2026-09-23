@@ -276,19 +276,34 @@ final class EditorCamera {
   /// about 10 %. A perspective view never stalls at its pivot: inside
   /// [throughDistance] the camera keeps its pace and pushes the pivot ahead
   /// of it (Unity's zoom-through), so scrolling in walks through the scene.
-  void dolly(double steps) {
+  ///
+  /// With [toward] (a point on the pivot's plane, facing the camera — the
+  /// one under the pointer) the view scales about it, so it stays under the
+  /// pointer, and the zoom-through follows the pointer's ray.
+  void dolly(double steps, {Vec3? toward}) {
     _unalign();
+    final before = distance;
     final next = distance * math.exp(-steps * 0.1);
     final floor = math.min(throughDistance, distance);
     if (orthographic || steps <= 0 || next >= floor) {
       distance = math.max(minDistance, next);
+      _scaleAbout(toward, distance / before);
       return;
     }
+    final along = toward == null ? forward : vNormalize(vSub(toward, position));
+    distance = floor;
+    _scaleAbout(toward, floor / before);
     // The steps left once the distance reaches the floor move at the
     // floor's pace: 10 % of it per notch.
-    final beyond = steps - math.log(distance / floor) / 0.1;
-    distance = floor;
-    pivot = vAdd(pivot, vScale(forward, floor * 0.1 * beyond));
+    final beyond = steps - math.log(before / floor) / 0.1;
+    pivot = vAdd(pivot, vScale(along, floor * 0.1 * beyond));
+  }
+
+  /// The pivot scaled about [point] by [k] with the distance: the camera
+  /// moves along the line from [point], which keeps its place on screen.
+  void _scaleAbout(Vec3? point, double k) {
+    if (point == null || k == 1) return;
+    pivot = vAdd(point, vScale(vSub(pivot, point), k));
   }
 
   /// Where a perspective dolly stops closing on the pivot and pushes it.

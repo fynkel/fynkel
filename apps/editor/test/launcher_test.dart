@@ -275,6 +275,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(prefs.theme, EditorTheme.dark);
     expect(Theme.of(tester.element(find.byKey(const Key('prefs.theme')))).brightness, Brightness.dark);
+    expect(prefs.zoomToPointer, isTrue);
+    await tester.tap(find.byKey(const Key('prefs.zoomToPointer')));
+    await tester.pumpAndSettle();
+    expect(prefs.zoomToPointer, isFalse);
+    expect(prefs.toJson()['zoomToPointer'], isFalse);
     await tester.enterText(find.byKey(const Key('prefs.ide')), 'code -g {file}:{line}:{column}');
     await tester.tap(find.byKey(const Key('prefs.save')));
     await tester.pumpAndSettle();

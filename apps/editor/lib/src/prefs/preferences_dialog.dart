@@ -103,6 +103,18 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
                   onSelectionChanged: (s) => prefs.setDensity(s.first),
                 ),
                 const SizedBox(height: 16),
+                Text('Scene view', style: theme.textTheme.titleSmall),
+                CheckboxListTile(
+                  key: const Key('prefs.zoomToPointer'),
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text('Scroll and pinch zoom toward the pointer'),
+                  subtitle: const Text('Off: toward the centre of the view.'),
+                  value: prefs.zoomToPointer,
+                  onChanged: (v) => prefs.setZoomToPointer(v ?? true),
+                ),
+                const SizedBox(height: 16),
                 Text('IDE command', style: theme.textTheme.titleSmall),
                 Text(
                   'Console rows open here. {file}, {line} and {column} are substituted.',

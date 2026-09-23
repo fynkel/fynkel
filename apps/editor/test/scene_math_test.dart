@@ -87,6 +87,31 @@ void main() {
       expect(o.distance, EditorCamera.minDistance);
     });
 
+    test('a dolly toward a point keeps it under the pointer — in, out, through the pivot and orthographic', () {
+      for (final ortho in [false, true]) {
+        final c = EditorCamera.initial()..orthographic = ortho;
+        const w = 1200.0, h = 800.0, px = [900.0, 250.0];
+        final p = ViewProjection(c, w, h).rayAt(px[0], px[1]).hitPlane(c.pivot, c.forward)!;
+        for (final steps in [5.0, 5.0, -8.0, 40.0, 40.0]) {
+          c.dolly(steps, toward: p);
+          if (!ortho && c.distance == EditorCamera.throughDistance) break; // walked up to it and on
+          final at = ViewProjection(c, w, h).project(p);
+          expect(at, isNotNull);
+          expect(at![0], closeTo(px[0], 1e-6), reason: 'ortho $ortho, $steps');
+          expect(at[1], closeTo(px[1], 1e-6), reason: 'ortho $ortho, $steps');
+        }
+      }
+      // Through the pivot, the camera walks along the pointer's ray.
+      final c = EditorCamera.initial()..distance = EditorCamera.throughDistance;
+      final ray = ViewProjection(c, 1200, 800).rayAt(900, 250);
+      final p = ray.hitPlane(c.pivot, c.forward)!;
+      final from = c.position;
+      c.dolly(20, toward: p);
+      final moved = vNormalize(vSub(c.position, from));
+      expect(vDot(moved, ray.dir), closeTo(1, 1e-9));
+      expect(c.distance, EditorCamera.throughDistance);
+    });
+
     test('frame puts the box in view and focus centres it', () {
       final c = EditorCamera.initial();
       c.frame([10, 0, 10], [12, 2, 12]);

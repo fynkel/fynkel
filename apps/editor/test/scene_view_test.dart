@@ -310,6 +310,45 @@ void main() {
     });
   });
 
+  test('a wheel or a pinch zooms toward the point under the pointer; the preference turns it off', () {
+    final r = Rig();
+    addTearDown(r.dispose);
+    final st = r.open();
+    const px = Offset(1200, 300);
+    final vp = r.model.viewProjection!;
+    final p = vp.rayAt(px.dx, px.dy).hitPlane(st.camera.pivot, st.camera.forward)!;
+    r.model.pointerSignal(PointerScrollEvent(position: px, scrollDelta: const Offset(0, -80)), px);
+    final at = r.model.viewProjection!.project(p)!;
+    expect(at[0], closeTo(px.dx, 1e-6));
+    expect(at[1], closeTo(px.dy, 1e-6));
+    r.model.panZoomStart(const PointerPanZoomStartEvent(position: px), px);
+    r.model.panZoomUpdate(const PointerPanZoomUpdateEvent(position: px, scale: 1.5), px);
+    r.model.panZoomEnd(const PointerPanZoomEndEvent(position: px), px);
+    final pinched = r.model.viewProjection!.project(p)!;
+    expect(pinched[0], closeTo(px.dx, 1e-6));
+
+    var toPointer = false;
+    final off = Rig();
+    addTearDown(off.dispose);
+    final model = SceneViewModel(
+      tabs: off.tabs,
+      project: off.project,
+      hierarchy: off.hierarchy,
+      editorState: off.editorState,
+      zoomToPointer: () => toPointer,
+    );
+    addTearDown(model.dispose);
+    off.tabs.openDocument(off.document.id);
+    model.setViewportSize(1600, 900);
+    final cam = model.current!.camera;
+    final pivot = List.of(cam.pivot);
+    model.pointerSignal(PointerScrollEvent(position: px, scrollDelta: const Offset(0, -80)), px);
+    expect(cam.pivot, pivot, reason: 'toward the centre: the pivot stays');
+    toPointer = true;
+    model.pointerSignal(PointerScrollEvent(position: px, scrollDelta: const Offset(0, -80)), px);
+    expect(cam.pivot, isNot(pivot));
+  });
+
   test('a trackpad scroll keeps coasting after the fingers lift, decays, and a touch stops it', () {
     fakeAsync((async) {
       final r = Rig();

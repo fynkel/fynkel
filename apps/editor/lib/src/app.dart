@@ -2082,6 +2082,7 @@ class EditorShellState extends State<EditorShell> {
           chooseSavePath: widget.chooseSavePath,
           view: id,
           views: _sceneViews,
+          zoomToPointer: () => widget.prefs.zoomToPointer,
         );
         sv.addListener(registry.refresh);
         _scenes[id] = sv;
