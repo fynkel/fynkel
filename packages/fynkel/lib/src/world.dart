@@ -16,6 +16,7 @@ import 'context.dart';
 import 'diagnostics.dart';
 import 'editor_channel.dart';
 import 'events.dart';
+import 'gizmos.dart';
 import 'input.dart';
 import 'native/bridge.dart';
 import 'physics.dart';
@@ -171,6 +172,23 @@ class World {
   /// deadline) always go to [onDiagnostics]. Defaults to [isDebugMode].
   bool throwOnDiagnostics = isDebugMode;
 
+  /// This frame's [Gizmos] lines, when they are on ([showGizmos]); null
+  /// otherwise — and always in a release build. The world clears it at the
+  /// start of every frame; the view draws it after [frame].
+  GizmoBuffer? get gizmos => Gizmos.compiled ? context.serviceOrNull<GizmoBuffer>() : null;
+
+  /// Turns [Gizmos] on or off for this world's context (off by default;
+  /// ignored in a release build).
+  bool get showGizmos => gizmos != null;
+  set showGizmos(bool on) {
+    if (!Gizmos.compiled) return;
+    if (on && gizmos == null) {
+      context.install<GizmoBuffer>(GizmoBuffer());
+    } else if (!on) {
+      context.uninstall<GizmoBuffer>();
+    }
+  }
+
   int get tick => _native.tick;
   double get alpha => _native.alpha;
   bool get isPoisoned => _native.isPoisoned;
@@ -206,6 +224,7 @@ class World {
   /// Starts a host frame; run [step] `plan.steps` times, then presentation
   /// writes, then extract/render.
   FramePlan beginFrame(double dtSeconds) {
+    if (Gizmos.compiled) gizmos?.clear();
     _presentation.clear();
     _presentationTargets.clear();
     _frameCount++;

@@ -74,6 +74,7 @@ export 'math.dart';
 export 'src/diagnostics.dart';
 export 'src/editor_channel.dart';
 export 'src/events.dart';
+export 'src/gizmos.dart';
 export 'src/input.dart';
 export 'src/model.dart';
 export 'src/physics.dart' show BodyState, CharacterState, PhysicsHit, PhysicsSettings;

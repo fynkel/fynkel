@@ -81,6 +81,9 @@ class GameContext {
 
   T? serviceOrNull<T extends Object>() => _services[T] as T?;
 
+  /// Removes the service of type [T] (none installed: nothing happens).
+  void uninstall<T extends Object>() => _services.remove(T);
+
   bool has<T extends Object>() => _services.containsKey(T);
 
   static final List<GameContext> _stack = [];
