@@ -46,6 +46,37 @@ class ViewportCameraSpec {
   final double fovYDegrees, near, far;
 }
 
+/// A viewport's own camera ([FynkelViewportController.view]): where it
+/// stands and the scene `Camera` component's projection. The editor's
+/// Scene view looks at a running game through one, leaving the game's
+/// cameras alone.
+class ViewportView {
+  const ViewportView({
+    required this.world,
+    this.orthographic = false,
+    this.fovY = 1.0471975511965976,
+    this.orthoHeight = 10,
+    this.near = 0.1,
+    this.far = 1000,
+    this.manualExposure = false,
+    this.exposure = 12,
+    this.cullingMask = 0xFFFFFFFF,
+  });
+
+  /// The camera's world matrix, 16 floats, column-major.
+  final List<double> world;
+  final bool orthographic;
+
+  /// Radians.
+  final double fovY;
+  final double orthoHeight, near, far;
+  final bool manualExposure;
+
+  /// EV100, when [manualExposure].
+  final double exposure;
+  final int cullingMask;
+}
+
 /// Counters Swift keeps per texture (`copyPixelBuffer` traffic), reset on read.
 class ViewportPlatformStats {
   const ViewportPlatformStats({
@@ -105,6 +136,8 @@ class FynkelViewportController extends ChangeNotifier {
   String? _quality;
   bool _qualityOk = true;
   ViewportCameraSpec? _camera;
+  ViewportView? _view;
+  bool _viewOk = true;
   Future<void>? _detaching;
 
   ViewportState get state => _state;
@@ -171,6 +204,35 @@ class FynkelViewportController extends ChangeNotifier {
     }
   }
 
+  /// This viewport's own camera, drawn instead of the world's active one
+  /// for every world it renders (viewport ABI v7); null gives the picture
+  /// back to the world. The world itself is not touched.
+  ViewportView? get view => _view;
+  set view(ViewportView? v) {
+    _view = v;
+    if (_viewport != nullptr) _applyView();
+  }
+
+  /// False when the last [view] had values that cannot draw (the previous
+  /// one stays).
+  bool get viewOk => _viewOk;
+
+  void _applyView() {
+    final v = _view;
+    _viewOk = _native!.setView(
+      _viewport,
+      v?.world,
+      orthographic: v?.orthographic ?? false,
+      fovY: v?.fovY ?? 1.0471975511965976,
+      orthoHeight: v?.orthoHeight ?? 10,
+      near: v?.near ?? 0.1,
+      far: v?.far ?? 1000,
+      manualExposure: v?.manualExposure ?? false,
+      exposure: v?.exposure ?? 12,
+      cullingMask: v?.cullingMask ?? 0xFFFFFFFF,
+    );
+  }
+
   void _applyCamera(ViewportCameraSpec c) => _native!.setCamera(
     _viewport,
     eye: [c.eye.x, c.eye.y, c.eye.z],
@@ -228,6 +290,7 @@ class FynkelViewportController extends ChangeNotifier {
       if (cam != null) {
         _applyCamera(cam);
       }
+      if (_view != null) _applyView();
       final id = await _channel.invokeMethod<int>('registerTexture', {
         'ctx': vp.address,
         'acquireFn': native.acquireFnAddress,

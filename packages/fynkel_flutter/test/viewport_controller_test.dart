@@ -52,7 +52,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 6);
+    expect(viewportAbiVersion, 7);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -107,6 +107,17 @@ void main() {
     expect(controller.overlay(many), 200);
     many.clear();
     expect(many.isEmpty, isTrue);
+    // A viewport's own camera (viewport ABI v7): it draws, a value that
+    // cannot is refused (the last good one stays), null clears; the Rust
+    // test `view.rs` checks the picture.
+    controller.view = const ViewportView(world: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 5, 1]);
+    expect(controller.viewOk, isTrue);
+    controller.view = const ViewportView(world: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 5, 1], near: 0);
+    expect(controller.viewOk, isFalse);
+    controller.view = const ViewportView(world: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 5, 1], orthographic: true);
+    expect(controller.viewOk, isTrue);
+    controller.view = null;
+    expect(controller.viewOk, isTrue);
     final slot = controller.render(world);
     expect(slot, isNotNull);
     expect(slot, greaterThanOrEqualTo(0));

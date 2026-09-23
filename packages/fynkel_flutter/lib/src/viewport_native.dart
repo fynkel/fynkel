@@ -12,7 +12,7 @@ import 'package:ffi/ffi.dart';
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 6;
+const viewportAbiVersion = 7;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -166,6 +166,26 @@ final class ViewportCamera extends Struct {
   external double far;
 }
 
+/// `FynkelAppleViewCamera` (viewport ABI v7).
+final class ViewCamera extends Struct {
+  @Uint32()
+  external int projection;
+  @Float()
+  external double fovY;
+  @Float()
+  external double orthoHeight;
+  @Float()
+  external double near;
+  @Float()
+  external double far;
+  @Uint32()
+  external int exposureMode;
+  @Float()
+  external double exposure;
+  @Uint32()
+  external int cullingMask;
+}
+
 // The viewport symbols are `@Native` externals on the same code asset as
 // the engine bindings: package:fynkel's build hook ships one dylib that
 // exports both ABIs (platform/apple), so nothing is dlopen-ed here.
@@ -190,6 +210,11 @@ external int _render(Pointer<Void> vp, Pointer<Void> world);
   assetId: _asset,
 )
 external void _setCamera(Pointer<Void> vp, Pointer<ViewportCamera> camera);
+@Native<Int32 Function(Pointer<Void>, Pointer<Float>, Pointer<ViewCamera>)>(
+  symbol: 'fynkel_apple_viewport_set_view',
+  assetId: _asset,
+)
+external int _setView(Pointer<Void> vp, Pointer<Float> world, Pointer<ViewCamera> camera);
 @Native<Void Function(Pointer<Void>, Uint32)>(symbol: 'fynkel_apple_viewport_set_acquire_wait_us', assetId: _asset)
 external void _setAcquireWait(Pointer<Void> vp, int us);
 @Native<Void Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>(
@@ -293,6 +318,44 @@ class ViewportNative {
       c.ref.far = far;
       _setCamera(vp, c);
     } finally {
+      calloc.free(c);
+    }
+  }
+
+  /// The viewport's own camera (v7): at [world] (16 floats, column-major)
+  /// instead of the rendered world's active camera; null clears. False
+  /// when the values cannot draw.
+  bool setView(
+    Pointer<Void> vp,
+    List<double>? world, {
+    bool orthographic = false,
+    double fovY = 1.0471975511965976,
+    double orthoHeight = 10,
+    double near = 0.1,
+    double far = 1000,
+    bool manualExposure = false,
+    double exposure = 12,
+    int cullingMask = 0xFFFFFFFF,
+  }) {
+    if (world == null) return _setView(vp, nullptr, nullptr) == 0;
+    final m = calloc<Float>(16);
+    final c = calloc<ViewCamera>();
+    try {
+      for (var i = 0; i < 16; i++) {
+        m[i] = world[i];
+      }
+      c.ref
+        ..projection = orthographic ? 1 : 0
+        ..fovY = fovY
+        ..orthoHeight = orthoHeight
+        ..near = near
+        ..far = far
+        ..exposureMode = manualExposure ? 1 : 0
+        ..exposure = exposure
+        ..cullingMask = cullingMask;
+      return _setView(vp, m, c) == 0;
+    } finally {
+      calloc.free(m);
       calloc.free(c);
     }
   }
