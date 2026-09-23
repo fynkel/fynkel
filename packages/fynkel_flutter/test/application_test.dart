@@ -96,6 +96,36 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('a Game view registers the world it shows with the play scope (ADR-0021 P7)', (tester) async {
+    final a = World.create();
+    addTearDown(a.dispose);
+    final b = World.create();
+    addTearDown(b.dispose);
+    final controller = FynkelViewportController(placeholders: false);
+    addTearDown(controller.dispose);
+    final play = FynkelPlayControl();
+    addTearDown(play.dispose);
+    var changes = 0;
+    play.worldsChanged.addListener(() => changes++);
+
+    Widget tree(World w) => FynkelPlayScope(
+      control: play,
+      child: MaterialApp(home: FynkelGameView(world: w, controller: controller)),
+    );
+    await tester.pumpWidget(tree(a));
+    expect(play.world, same(a));
+    await tester.pump();
+    expect(changes, 1, reason: 'told after the build, not during it');
+
+    await tester.pumpWidget(tree(b));
+    expect(play.worlds, [b], reason: 'the view shows another world');
+    await tester.pumpWidget(const SizedBox());
+    expect(play.worlds, isEmpty);
+    expect(play.world, isNull);
+    await tester.pump();
+    expect(changes, greaterThanOrEqualTo(2));
+  });
+
   testWidgets('the game\'s own pause (setPaused) and the editor\'s are independent', (tester) async {
     final world = World.create();
     addTearDown(world.dispose);

@@ -454,7 +454,13 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
     super.didChangeDependencies();
     _pixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1;
     // The editor's Pause and Step: this runs again whenever they change.
-    final play = _play = FynkelPlayScope.maybeOf(context);
+    final play = FynkelPlayScope.maybeOf(context);
+    if (!identical(play, _play)) {
+      // The editor's live Play mode finds the world through the scope.
+      _play?.detach(widget.world);
+      play?.attach(widget.world);
+      _play = play;
+    }
     final hostPaused = play?.paused ?? false;
     if (hostPaused != _hostPaused) {
       _hostPaused = hostPaused;
@@ -478,6 +484,10 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   void didUpdateWidget(FynkelGameView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.gizmos != widget.gizmos || oldWidget.world != widget.world) _applyGizmos();
+    if (oldWidget.world != widget.world) {
+      _play?.detach(oldWidget.world);
+      _play?.attach(widget.world);
+    }
     if (oldWidget.controller != widget.controller) {
       (oldWidget.controller ?? _owned)?.removeListener(_onViewportChanged);
       if (widget.controller != null) {
@@ -510,6 +520,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _play?.detach(widget.world);
     if (_openedAudio) widget.world.audio.close();
     _ticker.dispose();
     _statsTimer?.cancel();

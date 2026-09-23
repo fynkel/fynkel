@@ -9,9 +9,11 @@
 // with [FynkelLaunch.fromEnvironment], the editor's Play with the open
 // project and scene.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
+import 'package:fynkel/fynkel.dart' show World;
 
 /// Where the game starts: given by its `main` in a build, by the editor's
 /// Play inside the editor.
@@ -79,7 +81,9 @@ abstract final class FynkelApplication {
 
 /// The editor's Pause and Step for the games below a [FynkelPlayScope]. A
 /// paused `FynkelGameView` runs no frames and suspends its audio; [step]
-/// runs one frame of the world's fixed step while paused.
+/// runs one frame of the world's fixed step while paused. Each view also
+/// registers the world it shows ([worlds]) for the editor's live Play
+/// mode.
 class FynkelPlayControl extends ChangeNotifier {
   bool _paused = false;
   int _steps = 0;
@@ -107,6 +111,56 @@ class FynkelPlayControl extends ChangeNotifier {
     _steps--;
     return true;
   }
+
+  final List<World> _worlds = [];
+  final _Signal _worldsChanged = _Signal();
+  bool _worldsNotifying = false;
+  bool _disposed = false;
+
+  /// The worlds the `FynkelGameView`s below the scope show, in the order
+  /// they appeared — what the editor's live Play mode reads and changes
+  /// (ADR-0021 P7). A world is here from its view's first build until the
+  /// view goes or shows another world; the game still owns it.
+  List<World> get worlds => List.unmodifiable(_worlds);
+
+  /// The first of [worlds]: the one live Play mode shows.
+  World? get world => _worlds.isEmpty ? null : _worlds.first;
+
+  /// Fires after [worlds] changed — in a microtask, as views register while
+  /// the tree builds and unregister while it is torn down.
+  Listenable get worldsChanged => _worldsChanged;
+
+  /// A view shows [world] (`FynkelGameView` calls it).
+  void attach(World world) {
+    if (_worlds.contains(world)) return;
+    _worlds.add(world);
+    _notifyWorlds();
+  }
+
+  /// A view no longer shows [world].
+  void detach(World world) {
+    if (_worlds.remove(world)) _notifyWorlds();
+  }
+
+  void _notifyWorlds() {
+    if (_worldsNotifying) return;
+    _worldsNotifying = true;
+    scheduleMicrotask(() {
+      _worldsNotifying = false;
+      if (!_disposed) _worldsChanged.fire();
+    });
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _worldsChanged.dispose();
+    super.dispose();
+  }
+}
+
+class _Signal extends ChangeNotifier {
+  void fire() => notifyListeners();
 }
 
 /// Puts a [FynkelPlayControl] over a game (the editor's Game view).
