@@ -126,9 +126,11 @@ final class ScenePreview {
   /// Cooks the project again (`fynkel cook` in process), reopens the cache
   /// and reloads every preview of the session over it — after a source or
   /// material changed on disk. Project-wide; the report is returned and
-  /// kept in [cook].
-  CookReport recook() {
-    final r = _call('recook');
+  /// kept in [cook]. [live]: the documents with unsaved edits cook as
+  /// the editor holds them, their files untouched — what Play runs
+  /// (ADR-0021 P5).
+  CookReport recook({bool live = false}) {
+    final r = _call('recook', {if (live) 'live': true});
     final report = CookReport.fromJson(_mapOf(r['cook']));
     for (final entry in r['previews'] as List? ?? const []) {
       final e = _mapOf(entry);

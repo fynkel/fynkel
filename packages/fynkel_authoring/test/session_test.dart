@@ -687,6 +687,17 @@ void main() {
     expect(preview.stats.loads, 3);
     expect(preview.worldAddress, address);
 
+    // Play's recook (ADR-0021 P5): the unsaved scene cooks as held, a
+    // recovery copy is written, and the file is left alone.
+    final file = File(scene.state.path);
+    final onDiskText = file.readAsStringSync();
+    expect(scene.apply([Command.setField(floor, floorTransform, 'position', [0, -2.5, 0])]).ok, isTrue);
+    expect(preview.recook(live: true).ok, isTrue);
+    expect(file.readAsStringSync(), onDiskText);
+    final recovery = File('${dir.path}/.fynkel/recovery/$mainScene');
+    expect(recovery.readAsStringSync(), contains('-2.5'));
+    scene.undo();
+
     // Refusals: a material has no preview; a bad argument; an unknown id.
     final material = session.openDocument(rusted);
     expect(

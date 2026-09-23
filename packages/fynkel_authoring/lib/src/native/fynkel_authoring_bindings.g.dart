@@ -488,10 +488,18 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_preview_world(
 /// arguments (an object, or NULL with 0). Vectors are JSON arrays of
 /// numbers; a matrix is 16 numbers column-major; ids are UUID strings; a
 /// `view` is { world: [16], aspect, projection?: "perspective" |
-/// "orthographic", fovY? (radians), orthoHeight?, near?, far? } — the
-/// camera fields default to the engine's Camera defaults. Every result
-/// carries "ok" and "handle".
-/// camera          world, projection?, fovY?, orthoHeight?, near?, far?
+/// "orthographic", fovY? (radians), orthoHeight?, near?, far?,
+/// exposureMode?: "auto" | "manual", exposure? (EV100) } — the camera
+/// fields default to the engine's Camera defaults. Every result carries
+/// "ok" and "handle". The world holds the document *expanded*: a prefab
+/// instance's inner entities have derived ids the document does not
+/// list, so `pick`, `pickRect`, `hidden` and `lines.outline` speak in
+/// document entities — a hit inside an instance answers as the entity
+/// that carries the instance (its anchor, once), hiding or outlining an
+/// anchor hides or outlines its whole instance. `worldMatrix`,
+/// `setTransforms` and `dump` take and give the ids as they are.
+/// camera          world, projection?, fovY?, orthoHeight?, near?, far?,
+/// exposureMode?, exposure?
 /// the editor camera the picture is drawn through,
 /// in the scene camera's place (never a game camera)
 /// hidden          ids                 exactly these entities and their descendants left
@@ -527,10 +535,12 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_preview_world(
 /// reload                              the fallback and the user's Reload: the world
 /// emptied and the document loaded fresh →
 /// "stats", "diagnostics"
-/// recook                              project-wide: cooks the project again, reopens
+/// recook [live]                       project-wide: cooks the project again, reopens
 /// the cache, points every preview's world at it
 /// and reloads each → "cook", "previews": [{
-/// handle, stats, diagnostics }]
+/// handle, stats, diagnostics }]; `live: true`
+/// cooks the documents with unsaved edits as they
+/// are, their files untouched (Play)
 /// dump                                the world as `fynkel state dump` prints it, in
 /// document order (the gate's incremental-vs-fresh
 /// comparison) → "dump": { document, entityCount,
