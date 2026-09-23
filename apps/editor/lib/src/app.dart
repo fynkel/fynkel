@@ -1402,13 +1402,28 @@ class EditorShellState extends State<EditorShell> {
         id: 'play.start',
         baseLabel: 'Play',
         labelBuilder: () => play?.isActive ?? false ? 'Playing…' : 'Play',
-        description: 'Run the game: in the Game view in a project editor (`fynkel editor`), else as its own app (`fynkel run`)',
+        description:
+            'Run the game in the Game view (a project editor, `fynkel editor`); the plain editor has no game '
+            'compiled in and builds and runs it as its own app',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyP),
         group: 0,
         order: 0,
         enabled: () => _hasProject && !(play?.isActive ?? false),
         run: playProject,
+      ),
+      EditorCommand(
+        id: 'play.buildAndRun',
+        baseLabel: 'Build and Run',
+        description:
+            'Run the game as its own app in its own window (`fynkel run`): release-like speed, or a crash that '
+            'must not take the editor down. It plays the saved files',
+        menu: EditorMenu.play,
+        shortcut: k(LogicalKeyboardKey.keyB),
+        group: 0,
+        order: 5,
+        enabled: () => _hasProject && !(play?.isActive ?? false),
+        run: buildAndRun,
       ),
       EditorCommand(
         id: 'play.stop',
@@ -1839,22 +1854,17 @@ class EditorShellState extends State<EditorShell> {
 
   // ── Play ────────────────────────────────────────────────────────────────
 
-  /// Runs the project in its own process (ADR-0016). A project with errors
+  /// Play: in the Game view when the game is compiled into this editor
+  /// (ADR-0021), else as its own app ([buildAndRun]). A project with errors
   /// never runs — `fynkel run` would refuse it anyway, and the Console is
-  /// where the reasons are. Dirty documents get the save prompt first: the
-  /// game reads files, not the editor's memory.
+  /// where the reasons are.
   Future<void> playProject() async {
+    if (gameRun == null) return buildAndRun();
     final opened = project;
     final session = play;
     if (opened == null || session == null || session.isActive) return;
-    if (opened.errorCount > 0) {
-      showGameConsole(project: true);
-      _showError(
-        'The project has ${opened.errorCount} error${opened.errorCount == 1 ? '' : 's'}; `fynkel run` refuses to '
-        'run it. The Console\'s Project tab lists them — double-click a row to go to it.',
-      );
-      return;
-    }
+    if (_refusesErrors(opened)) return;
+    _lastRunBuilt = false;
     final dirty = List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[]);
     // In the Game view Play runs what the editor holds — unsaved edits
     // included, the files left alone (ADR-0021 P5) — whenever it can cook
@@ -1877,9 +1887,47 @@ class EditorShellState extends State<EditorShell> {
       if (!mounted) return;
     }
     final run = gameRun;
-    if (run != null) {
-      await _playInEditor(opened, session, run);
-      return;
+    if (run != null) await _playInEditor(opened, session, run);
+  }
+
+  /// Whether the last run was [buildAndRun] (Play again repeats it).
+  bool _lastRunBuilt = false;
+
+  bool _refusesErrors(EditorProject opened) {
+    if (opened.errorCount == 0) return false;
+    showGameConsole(project: true);
+    _showError(
+      'The project has ${opened.errorCount} error${opened.errorCount == 1 ? '' : 's'}; `fynkel run` refuses to '
+      'run it. The Console\'s Project tab lists them — double-click a row to go to it.',
+    );
+    return true;
+  }
+
+  /// Build and Run (ADR-0021 P6, ADR-0016): the game as its own app in its
+  /// own window, through `fynkel run` — for release-like speed, or a crash
+  /// that must not take the editor down. It reads files, not the editor's
+  /// memory, so dirty documents get the save prompt first.
+  Future<void> buildAndRun() async {
+    final opened = project;
+    final session = play;
+    if (opened == null || session == null || session.isActive) return;
+    if (_refusesErrors(opened)) return;
+    _lastRunBuilt = true;
+    final dirty = List.of(tabs?.dirtyDocuments ?? const <OpenDocument>[]);
+    if (dirty.isNotEmpty) {
+      final choice = await showPlaySavePrompt(context, dirty);
+      if (!mounted) return;
+      switch (choice) {
+        case PlaySaveChoice.cancel:
+          return;
+        case PlaySaveChoice.save:
+          for (final tab in dirty) {
+            if (!await saveTab(tab)) return;
+          }
+        case PlaySaveChoice.playAnyway:
+          break;
+      }
+      if (!mounted) return;
     }
     showGameConsole();
     _playEditBaseline = _editSignature();
@@ -1900,7 +1948,7 @@ class EditorShellState extends State<EditorShell> {
       await stopPlaying();
       if (!mounted) return;
     }
-    await playProject();
+    await (_lastRunBuilt ? buildAndRun() : playProject());
   }
 
   /// Play with or without the game's gizmos (remembered in editor.json).

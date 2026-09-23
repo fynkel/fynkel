@@ -1205,11 +1205,15 @@ for an authored copy); picking a derived entity *in the picture* (a hit
 inside an instance selects the anchor, item 6 — select the inner row in
 the Hierarchy instead, then the gizmo is there).
 
-## Play and the game Console (M4-08)
+## Build and Run and the game Console (M4-08, ADR-0021 P6)
 
-Explained simply: **Play** runs your game the way a player would get it —
-a separate app in its own window, built by the same `fynkel run` you use
-from a terminal. The editor does not run any of it: it starts the
+Since ADR-0021, **Play** runs the game inside a project editor (§ The
+Game view). This section is **Play → Build and Run** (⌘B, as in Unity):
+the game the way a player would get it — a separate app in its own
+window, built by the same `fynkel run` you use from a terminal. Use it
+for release-like speed, or for a crash that must not take the editor
+down. In the plain editor, which has no game compiled in, Play is Build
+and Run. The editor does not run any of it: it starts the
 program, listens to what the program says, and shows that in the
 Console's new **Game** tab. **Stop** kills it. If the game crashes, or
 somebody kills it from outside, the editor says so with the exit code and
@@ -1297,11 +1301,11 @@ draws what the game's behaviours draw through `Gizmos` in the game's
 window (docs/hosts.md § Flutter host). The Scene view never shows them:
 it is the edit-preview world, not the running game's (ADR-0019).
 
-### Play saves first
+### Build and Run saves first
 
 A game run as its own app reads files from disk, so anything unsaved is
 not in the run (Play in the Game view plays unsaved edits; see below).
-With dirty tabs, Play asks: **Save and Play**, **Play Without Saving**,
+With dirty tabs, Build and Run asks: **Save and Play**, **Play Without Saving**,
 or Cancel (`play_prompt.dart`, `dialog.playSave`). A project that has
 **errors** never plays — `fynkel run` would refuse it anyway: the Console
 comes up on its **Project** tab with the count, and double-clicking a row
@@ -1371,7 +1375,8 @@ path no game ever sends.
 
 | Id | Menu | Shortcut | Does |
 | --- | --- | --- | --- |
-| `play.start` | Play | ⌘P | saves what is dirty (after asking), then runs the project; the label reads *Playing…* while a run is up |
+| `play.start` | Play | ⌘P | plays in the Game view in a project editor; in the plain editor, Build and Run; the label reads *Playing…* while a run is up |
+| `play.buildAndRun` | Play | ⌘B | saves what is dirty (after asking), then runs the project as its own app; **Play again** in the edited-during-play banner repeats whichever ran |
 | `play.stop` | Play | ⌘. | SIGTERM then SIGKILL to the game and everything it started |
 | `play.showConsole` | Play | ⌥⌘J | the Console with the Game tab in front |
 | `play.clearConsole` | Play | ⇧⌘K | empties the Game tab (the run, if any, keeps going) |
@@ -1554,7 +1559,10 @@ the editor camera and its tools.
   A document edited during the run shows the "changes apply on the next
   Play" banner, as before.
 - **The plain editor** (no game compiled in) has the same panel, which says
-  so. Play there still runs the game as its own app (`fynkel run`).
+  so. Play there is Build and Run: the game as its own app (`fynkel run`).
+- **Build and Run** (⌘B) is always there too, in a project editor as well:
+  the saved files as their own app, for release-like speed or a crash that
+  must not take the editor down (§ Build and Run and the game Console).
 
 - **Between runs** the Game view shows what the scene's active camera
   sees, live (P4b). The active camera is the runtime's rule: the enabled
@@ -1640,7 +1648,7 @@ tab row (`MainWindow._titleBar`, 38 px, key `window.titleBar`):
   conflict and error badges, and **+** (`tabs.open`) opening the Open
   Document picker under itself.
 - **Play** in the middle of the window: ▶ / ■ and the run's state, a click
-  on the state showing the Game tab (§ Play and the game Console).
+  on the state showing the Game tab (§ Build and Run and the game Console).
 - **The codegen state** (`window.codegen`): nothing until the project has
   been checked, an icon when the generated code is current, *Run codegen*
   when it is stale or the committed metadata has drifted, *Codegen check

@@ -36,7 +36,7 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 100); // 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply
+    expect(commands.length, 101); // 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run
     for (final c in commands) {
       expect(c.shortcut, isNotNull, reason: '${c.id} has no shortcut');
       expect(c.id, matches(RegExp(r'^[a-z]+(\.[a-zA-Z]+)+$')), reason: '${c.id} is not a dotted id');
@@ -104,6 +104,7 @@ void main() {
         'view.recook',
         'view.saveFrame',
         'play.start',
+        'play.buildAndRun',
         'play.stop',
         'play.showConsole',
         'play.clearConsole',

@@ -214,6 +214,54 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets('Build and Run runs the saved files as their own app, even in a project editor (P6)', (tester) async {
+      final project = FakeProject(dir: '/fake/game');
+      final doc = project.addDocument(_scene());
+      final launcher = FakePlayLauncher();
+      await pumpLarge(
+        tester,
+        shellApp(
+          prefs: prefs,
+          store: store,
+          projects: {'/fake/game': project},
+          initialProject: '/fake/game',
+          runner: runner,
+          game: _game(),
+          startPlayProcess: launcher.call,
+        ),
+      );
+      final shell = tester.state<EditorShellState>(find.byType(EditorShell));
+      shell.openDocument(doc.id);
+      await tester.pumpAndSettle();
+      doc.apply([Command.renameObject('floor', 'Ground')]);
+      await tester.pumpAndSettle();
+
+      expect(shell.registry.byId('play.buildAndRun')!.label, 'Build and Run');
+      shell.registry.execute('play.buildAndRun');
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('dialog.playSave')), findsOneWidget, reason: 'its own app reads the files');
+      await tester.tap(find.byKey(const Key('playSave.save')));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump();
+      }
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(shell.tabs!.focused!.dirty, isFalse);
+      expect(launcher.calls.single.$2.take(3), ['run', '--project', '/fake/game']);
+      expect(shell.gameRun!.running, isFalse, reason: 'not in the Game view');
+      expect(shell.play!.inEditor, isFalse);
+      expect(shell.registry.byId('play.buildAndRun')!.enabled!(), isFalse, reason: 'one run at a time');
+
+      expect(shell.play!.isActive, isTrue);
+
+      await tester.runAsync(() async => launcher.last.exitWith(0));
+      for (var i = 0; i < 6; i++) {
+        await tester.pump();
+      }
+      await tester.pump(const Duration(seconds: 1));
+      expect(shell.play!.isActive, isFalse);
+      expect(shell.registry.byId('play.buildAndRun')!.enabled!(), isTrue);
+    });
+
     testWidgets('between runs the Game view shows what the active camera sees', (tester) async {
       final project = FakeProject(dir: '/fake/game');
       final doc = project.addDocument(_scene());
