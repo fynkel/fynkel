@@ -541,14 +541,18 @@ pub struct ProjectedPointRecord {
 }
 
 /// `FYNKEL_QUERY_ENTITIES` (M3-08b): one per live entity, entity order —
-/// its parent (`NULL` at the root) and name (empty without one). What
-/// `World.find`/`findAll`/`findChild` read, one query per tick.
+/// its parent (`NULL` at the root), name (empty without one), layer index
+/// (0 without a `fynkel.Layer`) and tag bits (0 without a `fynkel.Tags`,
+/// ADR-0020). What `World.find`/`findAll`/`findChild`/`findWithTag` read,
+/// one query per tick.
 #[derive(Clone, Debug, PartialEq, Schema)]
 #[schema(kind = "record", name = "fynkel.rec.EntityInfo")]
 pub struct EntityInfoRecord {
     pub entity: Entity,
     pub parent: Entity,
     pub name: String,
+    pub layer: u32,
+    pub tags: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Schema)]

@@ -534,7 +534,7 @@ void main() {
   );
   check(
     'EntityInfoRecord',
-    EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp'),
+    EntityInfoRecord(entity: entity(4, 2), parent: entity(1, 1), name: 'Lamp', layer: 2, tags: 0x80000005),
     EntityInfoRecord.wireSize,
     EntityInfoRecord.decode,
     (v, d, o, s) => v.encode(d, o, s),

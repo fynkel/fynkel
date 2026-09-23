@@ -476,6 +476,8 @@ fn fixtures_match_generated_codecs() {
             entity: e(4, 2),
             parent: e(1, 1),
             name: "Lamp".into(),
+            layer: 2,
+            tags: 0x8000_0005,
         },
     );
     // M3-12.

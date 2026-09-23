@@ -572,8 +572,9 @@ pub fn query(
                 });
             }
         }
-        // Every live entity with its parent and name (M3-08b), entity
-        // order: the hierarchy and the names in one call, for `find`.
+        // Every live entity with its parent, name, layer and tags (M3-08b,
+        // ADR-0020), entity order: the hierarchy, the names and the tags
+        // in one call, for `find` and `findWithTag`.
         QUERY_ENTITIES => {
             for e in ecs.entities() {
                 let parent = fynkel_scene::parent_of(ecs, e).unwrap_or(Entity::NULL);
@@ -585,6 +586,8 @@ pub fn query(
                     entity: e,
                     parent,
                     name,
+                    layer: ecs.copy::<fynkel_scene::Layer>(e).map_or(0, |l| l.layer),
+                    tags: ecs.copy::<fynkel_scene::Tags>(e).map_or(0, |t| t.bits),
                 });
             }
         }

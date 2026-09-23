@@ -1361,6 +1361,17 @@ migrated with `fynkel migrate` (the `fixtures/migrate` inputs stay old on
 purpose); the starter template and `benchmarks/stress/generate.py` write
 the new format.
 
+**L2 is done** (2026-09-23): the Dart API speaks names.
+`GameObject.layer` (get and set), `tags`, `hasTag`, `addTag` and
+`removeTag` go through `fynkel.Layer`/`fynkel.Tags` with read-your-writes
+like any component. `World.findWithTag`/`findAllWithTag` read the per-tick
+entity table: `EntityInfoRecord` now carries `layer` and `tags`, so a
+lookup costs no extra query. An undeclared name throws, listing the
+project's names. `test/layers_test.dart` covers it, including an object
+moved to another layer at run time leaving one raycast group for the
+other. Fingerprint `0xa5c456a220cc42d8`. The cache version is unchanged
+(no cooked format moved).
+
 The M3 backlog as it landed, for the record:
 
 1. ~~**`package:fynkel_flutter`** (D1)~~ — done (M3-01): the viewport widget

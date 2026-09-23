@@ -72,7 +72,9 @@ index; the world applies them on load (`LoadReport.physics` and
 `world.physics` in Dart: `gravity`, `meshColliders` registered;
 `LoadReport.layersAndTags` and `world.layersAndTags`: the names);
 `world.layerMask(['props'])` turns names into bits and throws on a name
-the project does not declare.
+the project does not declare. Gameplay moves an object with
+`go.layer = 'props'` (a `fynkel.Layer` write for the next tick; `go.layer`
+reads the name back, `default` without the component).
 
 ## The step (§5.1)
 

@@ -350,6 +350,7 @@ Values the runtime would reject are `FYN-H0008` at `fynkel validate`
 final player = world.find('Player');                // by name, as the last tick left it
 final hand = player?.findChild('Arm/Hand');         // a path of direct children; findDescendant(name) searches deep
 for (final coin in world.findAll('Coin')) { … }     // every entity with that name
+final coin = world.findWithTag('pickup');           // by a project tag; findAllWithTag for every one
 final box = world.spawn(name: 'Box', transform: t, parent: player)
   ..add(const RigidBody(bodyType: BodyType.dynamic, mass: 2, …))
   ..add(const Collider(shape: ColliderShape.box, size: Vec3.one, …))
@@ -358,8 +359,15 @@ final turret = world.instantiate(turretPrefab, transform: t, name: 'Turret');
 turret.findChild('Barrel');                          // the prefab's entities are its children
 ```
 
-- `find`/`findAll`/`findChild`/`findDescendant` read one entity table per
-  tick; a rename or reparent staged this tick shows up next tick.
+- `find`/`findAll`/`findChild`/`findDescendant`/`findWithTag`/
+  `findAllWithTag` read one entity table per tick; a rename, reparent or
+  tag change staged this tick shows up next tick.
+- Tags and the layer speak the project's names (`tags`, `layers` in
+  `fynkel.project.json`): `go.tags` (a copy), `go.hasTag('pickup')`,
+  `go.addTag('pickup')`, `go.removeTag('pickup')`, `go.layer` (`default`
+  without a `fynkel.Layer`) and `go.layer = 'props'` — writes for the next
+  tick, readable now; the colliders regroup in that tick. A name the
+  project does not declare throws, listing the ones it does.
 - A freshly spawned object can be configured — components, transform,
   parent, body commands, children — in the same `fixedUpdate`; everything
   lands in the spawn's tick.

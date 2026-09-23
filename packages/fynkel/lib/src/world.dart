@@ -620,6 +620,38 @@ class World {
   /// Every entity named [name], scene order (see [find]).
   List<GameObject> findAll(String name) => [for (final e in _entities.allNamed(name)) attach(e, name: name)];
 
+  /// The first entity carrying the project tag [tag] (entity order), as a
+  /// [GameObject] (see [find]: the world as the last tick left it, from the
+  /// same per-tick table, so no extra query). Null when none has it;
+  /// throws on a tag the project does not declare (ADR-0020).
+  GameObject? findWithTag(String tag) {
+    final t = _entities;
+    final e = t.firstTagged(_tagBit(tag));
+    return e == null ? null : attach(e, name: t.nameOf(e) ?? '');
+  }
+
+  /// Every entity carrying the project tag [tag], entity order (see
+  /// [findWithTag]).
+  List<GameObject> findAllWithTag(String tag) {
+    final t = _entities;
+    return [for (final e in t.allTagged(_tagBit(tag))) attach(e, name: t.nameOf(e) ?? '')];
+  }
+
+  /// The bit of the project tag [tag]; throws naming the project's list.
+  int _tagBit(String tag) {
+    final bits = layersAndTags.tagBits([tag]);
+    if (bits == null) throw ArgumentError('unknown tag "$tag"; the project declares ${layersAndTags.tags}');
+    return bits;
+  }
+
+  /// The index of the project layer [layer]; throws naming the project's
+  /// list.
+  int _layerIndex(String layer) {
+    final i = layersAndTags.layer(layer);
+    if (i == null) throw ArgumentError('unknown layer "$layer"; the project declares ${layersAndTags.layers}');
+    return i;
+  }
+
   /// The entities under [parent] (direct children in scene order), from
   /// the per-tick table rather than a query per node.
   List<int> _childrenFromTable(int parent) => _entities.childrenOf(parent);
@@ -1453,6 +1485,52 @@ class GameObject {
     return null;
   }
 
+  // ------------------------------------------------ layer and tags (ADR-0020)
+
+  /// The object's layer, one of the project's `layers` (`default` without
+  /// a `fynkel.Layer`). Read-your-writes like [get]. Setting it is a
+  /// `fynkel.Layer` write for the next tick — its colliders change
+  /// collision groups in that tick; an unknown name throws.
+  String get layer {
+    final i = get<gen.Layer>()?.layer ?? 0;
+    final layers = world.layersAndTags.layers;
+    return i < layers.length ? layers[i] : '#$i';
+  }
+
+  set layer(String name) => set(gen.Layer(layer: world._layerIndex(name)));
+
+  /// The object's tags, in the project's `tags` order. Read-your-writes
+  /// like [get]; the set is a copy — change the object with [addTag] and
+  /// [removeTag].
+  Set<String> get tags {
+    final bits = _tagBitsNow;
+    final names = world.layersAndTags.tags;
+    return {
+      for (var i = 0; i < 32; i++)
+        if (bits & (1 << i) != 0) i < names.length ? names[i] : '#$i',
+    };
+  }
+
+  /// Whether the object carries [tag]; throws on a tag the project does
+  /// not declare.
+  bool hasTag(String tag) => _tagBitsNow & world._tagBit(tag) != 0;
+
+  /// Gives the object [tag] at the next tick (readable now); nothing when
+  /// it has it already. Throws on a tag the project does not declare.
+  void addTag(String tag) {
+    final bits = _tagBitsNow, bit = world._tagBit(tag);
+    if (bits & bit == 0) set(gen.Tags(bits: bits | bit));
+  }
+
+  /// Takes [tag] from the object at the next tick (readable now); nothing
+  /// when it lacks it. Throws on a tag the project does not declare.
+  void removeTag(String tag) {
+    final bits = _tagBitsNow, bit = world._tagBit(tag);
+    if (bits & bit != 0) set(gen.Tags(bits: bits & ~bit));
+  }
+
+  int get _tagBitsNow => get<gen.Tags>()?.bits ?? 0;
+
   // ------------------------------------------------ native components (M3-07a)
 
   static gen.ComponentCodec _codecOf(Type t) {
@@ -1840,16 +1918,18 @@ class _WorldTime implements TimeService {
   double get alpha => world.alpha;
 }
 
-/// The world's entities, parents and names as one query (M3-08b); built
-/// lazily per tick by [World.find] and friends.
+/// The world's entities, parents, names and tags as one query (M3-08b,
+/// ADR-0020); built lazily per tick by [World.find] and friends.
 class _EntityTable {
-  _EntityTable._(this._parents, this._names, this._byName, this._children, this._raw);
+  _EntityTable._(this._parents, this._names, this._byName, this._children, this._tagged, this._tagBits, this._raw);
 
   factory _EntityTable.decode(WireBuffer b) {
     final parents = <int, int>{};
     final names = <int, String>{};
     final byName = <String, List<int>>{};
     final children = <int, List<int>>{};
+    final tagged = <int>[];
+    final tagBits = <int>[];
     final size = gen.EntityInfoRecord.wireSize;
     for (var i = 0; i < b.recordCount; i++) {
       final r = gen.EntityInfoRecord.decode(b.records, i * size, b.tail);
@@ -1861,14 +1941,22 @@ class _EntityTable {
         names[r.entity] = r.name;
         (byName[r.name] ??= []).add(r.entity);
       }
+      if (r.tags != 0) {
+        tagged.add(r.entity);
+        tagBits.add(r.tags);
+      }
     }
-    return _EntityTable._(parents, names, byName, children, Uint8List.fromList(b.bytes));
+    return _EntityTable._(parents, names, byName, children, tagged, tagBits, Uint8List.fromList(b.bytes));
   }
 
   final Map<int, int> _parents;
   final Map<int, String> _names;
   final Map<String, List<int>> _byName;
   final Map<int, List<int>> _children;
+
+  /// The entities with at least one tag, entity order, and their bits.
+  final List<int> _tagged;
+  final List<int> _tagBits;
 
   /// The query bytes this table was decoded from.
   final Uint8List _raw;
@@ -1897,6 +1985,18 @@ class _EntityTable {
   String? nameOf(int entity) => _names[entity];
   int? parentOf(int entity) => _parents[entity];
   List<int> childrenOf(int parent) => _children[parent] ?? const [];
+
+  int? firstTagged(int bit) {
+    for (var i = 0; i < _tagged.length; i++) {
+      if (_tagBits[i] & bit != 0) return _tagged[i];
+    }
+    return null;
+  }
+
+  List<int> allTagged(int bit) => [
+        for (var i = 0; i < _tagged.length; i++)
+          if (_tagBits[i] & bit != 0) _tagged[i],
+      ];
 }
 
 /// Where one [World.frame] spent its time (M3-16, blueprint §15.4), in

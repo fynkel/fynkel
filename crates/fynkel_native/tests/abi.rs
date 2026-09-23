@@ -381,6 +381,21 @@ fn hierarchy_queries() {
             }
         )],
     );
+    // Its layer and tags ride along (ADR-0020); absent components are 0.
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            c1,
+            &fynkel_core::components::ComponentValue::Layer(fynkel_core::Layer { layer: 3 }),
+        ),
+    );
+    h.submit(
+        Lane::Simulation,
+        &set_component(
+            c1,
+            &fynkel_core::components::ComponentValue::Tags(fynkel_core::Tags { bits: 0b101 }),
+        ),
+    );
     h.step();
     let (s, n, body, tail) = h.query(bridge::QUERY_ENTITIES, Entity::NULL);
     assert_eq!((s, n), (Status::Ok, 3));
@@ -393,7 +408,9 @@ fn hierarchy_queries() {
         (Entity::NULL, "")
     );
     assert_eq!((row(c1).parent, row(c1).name.as_str()), (root, "Left"));
+    assert_eq!((row(c1).layer, row(c1).tags), (3, 0b101));
     assert_eq!(row(c2).parent, root);
+    assert_eq!((row(c2).layer, row(c2).tags), (0, 0));
     let (s, _, _, _) = h.query(999, root);
     assert_eq!(s, Status::InvalidArgument);
     let (_, n, _, _) = h.query(bridge::QUERY_TRANSFORM, Entity::NULL);
