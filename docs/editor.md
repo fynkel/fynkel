@@ -513,6 +513,22 @@ not declare is refused before any command with `FYN-H0012`, because the
 crate does not check the project's lists at apply (`fynkel validate`
 does).
 
+**Tags and Layers** (`project/tags_and_layers_dialog.dart`). The layer
+menu's **Edit Layers…** and the tag menu's **Edit Tags…** open one dialog
+with both lists side by side. Each row is a name field with move up, move
+down and remove, and **Add layer** / **Add tag** sits under each list (32
+at most). `default` is layer 0 and is fixed. `ListDraft` keeps track of
+the old index each entry comes from. Apply sends `setLayersAndTags` with
+`layersFrom`/`tagsFrom` (`EditorProject.setLayersAndTags`). Apply is
+disabled while nothing changed, and while a name is empty or appears
+twice. A rename or an addition only writes `fynkel.project.json`. A move
+or a removal shows a warning first, because it rewrites every scene and
+prefab that uses the entries: objects on a removed layer go to `default`,
+a removed tag is taken off, masks follow. It is refused (the reason shown
+in the dialog) while one of those documents has unsaved edits. The open
+documents it rewrote are re-read, and ⌥⌘Z (the asset undo) puts
+everything back.
+
 **The codegen banner.** Two signals, cheapest first: *committed drift* —
 the metadata's inline schemas compared with the `schemas/behaviours/`
 files the session loaded (instant, no process; `committedDrift`) — and the

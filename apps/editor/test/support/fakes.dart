@@ -1,6 +1,7 @@
 // Fakes for the shell tests: a project without the native runtime, a
 // toolchain, a process runner, a directory chooser.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -452,6 +453,23 @@ final class FakeProject extends EditorProject {
           'sidecarWritten': false,
           ...assetHistory().json,
         });
+      case 'setLayersAndTags':
+        // The project file's lists only (the fake has no documents on disk
+        // to rewrite); its undo writes the file back.
+        final file = File('$dir/fynkel.project.json');
+        final before = file.existsSync() ? file.readAsStringSync() : '{}';
+        final json = Map<String, Object?>.from(jsonDecode(before) as Map)
+          ..['layers'] = args['layers']
+          ..['tags'] = args['tags'];
+        final after = jsonEncode(json);
+        if (after == jsonEncode(jsonDecode(before))) {
+          _refuse('FYN-T0003', 'setLayersAndTags: the lists are what the project already has');
+        }
+        file.writeAsStringSync(after);
+        const label = 'Edit Tags and Layers';
+        _redo.clear();
+        _undo.add((label, () => file.writeAsStringSync(before)));
+        return _done(kind, label, null, {'layers': args['layers'], 'tags': args['tags'], 'reload': const []});
       case 'undoAsset' || 'redoAsset':
         final from = kind == 'undoAsset' ? _undo : _redo;
         if (from.isEmpty) {

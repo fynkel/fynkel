@@ -1372,6 +1372,18 @@ moved to another layer at run time leaving one raycast group for the
 other. Fingerprint `0xa5c456a220cc42d8`. The cache version is unchanged
 (no cooked format moved).
 
+**L4 is done** (2026-09-23): the editor. The Inspector's object header
+shows the layer as a dropdown and the tags as chips (`f9dc499`). The
+authoring service has `setLayersAndTags` (`45db70b`): renames and
+additions write the project file only, while a reorder or a removal
+rewrites every scene and prefab so each object keeps its layer, tags and
+masks (prefab overrides included). It is refused while such a document
+has unsaved edits, and it is undone with the asset history. The **Tags
+and Layers** dialog (`Edit Layers…` / `Edit Tags…` in the header's menus)
+edits both lists (add, rename, reorder, remove) and applies them as that
+one operation. The open documents it rewrote are re-read. Next is L3
+(renderer masks), then L5.
+
 The M3 backlog as it landed, for the record:
 
 1. ~~**`package:fynkel_flutter`** (D1)~~ — done (M3-01): the viewport widget

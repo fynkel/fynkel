@@ -253,8 +253,8 @@ abstract class EditorProject extends ChangeNotifier {
   AssetHistory assetHistory();
 
   /// An asset operation through the session (`newDocument`, `renameAsset`,
-  /// `deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`,
-  /// `redoAsset`) — one history step each, the database re-read
+  /// `deleteAsset`, `setImportSettings`, `reimport`, `setLayersAndTags`,
+  /// `undoAsset`, `redoAsset`) — one history step each, the database re-read
   /// incrementally. Throws `AuthoringException` when refused; nothing was
   /// touched then.
   OperationResult operate(String kind, [Map<String, Object?> args = const {}]);
@@ -269,6 +269,16 @@ abstract class EditorProject extends ChangeNotifier {
   OperationResult reimport(String id) => operate('reimport', {'asset': id});
   OperationResult undoAsset() => operate('undoAsset');
   OperationResult redoAsset() => operate('redoAsset');
+
+  /// The project's layers and tags replaced (ADR-0020); `*From[i]` is the
+  /// old index new entry `i` comes from (null: new). A reorder or a
+  /// removal rewrites the scenes and prefabs that use them.
+  OperationResult setLayersAndTags({
+    required List<String> layers,
+    required List<String> tags,
+    List<int?>? layersFrom,
+    List<int?>? tagsFrom,
+  }) => operate('setLayersAndTags', {'layers': layers, 'tags': tags, 'layersFrom': ?layersFrom, 'tagsFrom': ?tagsFrom});
 
   /// The absolute path of an asset-root-relative [path].
   String assetFile(String path) => p.join(assetsDir, p.joinAll(path.split('/')));

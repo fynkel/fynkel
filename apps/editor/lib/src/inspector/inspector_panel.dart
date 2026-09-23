@@ -33,6 +33,7 @@ import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'inspector_model.dart';
 import 'object_header.dart';
+import '../project/tags_and_layers_dialog.dart';
 
 class InspectorPanel extends StatefulWidget {
   const InspectorPanel({
@@ -324,7 +325,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 ),
               ],
             ),
-            LayerTagsRows(model: model),
+            _layerTags(context),
           ],
         ),
       );
@@ -354,13 +355,24 @@ class _InspectorPanelState extends State<InspectorPanel> {
               if (widget.selection != null) InspectorLockButton(selection: widget.selection!),
             ],
           ),
-          LayerTagsRows(model: model),
+          _layerTags(context),
         ],
       ),
     );
   }
 
   /// The codegen banner: committed drift (instant) or the CLI check's answer.
+  /// The header's Layer and Tags rows; their menus' "Edit…" entries open
+  /// the project's Tags and Layers.
+  Widget _layerTags(BuildContext context) {
+    final model = widget.model;
+    return LayerTagsRows(
+      model: model,
+      onEditLayers: () => showTagsAndLayersDialog(context, model.project),
+      onEditTags: () => showTagsAndLayersDialog(context, model.project, focus: TagsAndLayersFocus.tags),
+    );
+  }
+
   Widget? _banner(BuildContext context) {
     final theme = Theme.of(context);
     final drift = model.hasMetadata ? model.committedDrift : const <CommittedDrift>[];
