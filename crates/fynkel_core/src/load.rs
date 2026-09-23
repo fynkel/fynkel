@@ -20,7 +20,7 @@ use crate::components::{
     Skin, ThirdPersonCamera, TriggerZone,
 };
 use crate::event::EventPayload;
-use crate::world::{Name, World};
+use crate::world::{Diagnostic, Name, World};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EntityDescription {
@@ -231,6 +231,72 @@ impl World {
         };
         let scene = self.scenes.remove(i);
         Ok(self.take_down(scene))
+    }
+
+    /// Spawns one entity now, at the current tick, the way a scene load
+    /// does — the editor's live Play mode (ADR-0021 P7) creating an object
+    /// in a running, possibly paused, game: `name`, a local `transform`,
+    /// last among `parent`'s children, then `components` through the
+    /// simulation lane's checks. No system runs and no event is emitted
+    /// (a load emits none per entity either). With `authoring` =
+    /// `(scene, id)` the entity joins the loaded scene `scene` under the
+    /// authoring id `id`, as if that scene had spawned it. Returns the
+    /// entity and its rejected components (also in
+    /// [`World::diagnostics`]); a component that fails leaves the entity.
+    pub fn spawn_now(
+        &mut self,
+        name: &str,
+        transform: Transform,
+        parent: Option<Entity>,
+        components: Vec<ComponentValue>,
+        authoring: Option<(Uuid, Uuid)>,
+    ) -> Result<(Entity, Vec<Diagnostic>), LoadError> {
+        if self.is_poisoned() {
+            return Err(LoadError::Poisoned);
+        }
+        let scene_index = match authoring {
+            None => None,
+            Some((scene, id)) => {
+                let i = self
+                    .scenes
+                    .iter()
+                    .position(|s| s.id == scene)
+                    .ok_or(LoadError::NotLoaded(scene))?;
+                if self.scenes.iter().any(|s| s.by_id.contains_key(&id)) {
+                    return Err(LoadError::DuplicateEntity(id));
+                }
+                Some((i, id))
+            }
+        };
+        if let Some(p) = parent {
+            if !self.ecs().contains(p) {
+                return Err(LoadError::UnknownAnchorParent(p));
+            }
+        }
+        if !transform.is_finite() {
+            return Err(LoadError::AnchorTransform);
+        }
+        let e = scene::spawn(self.ecs_mut(), transform, parent)
+            .map_err(|_| LoadError::Spawn(authoring.map(|a| a.1).unwrap_or(Uuid::NIL)))?;
+        if !name.is_empty() {
+            let _ = self.ecs_mut().insert(e, Name::new(name.to_owned()));
+        }
+        if let Some((i, id)) = scene_index {
+            let s = &mut self.scenes[i];
+            s.order.push((id, e));
+            s.by_id.insert(id, e);
+            s.by_entity.insert(e, id);
+        }
+        let first = self.diagnostics().len();
+        let tick = self.tick();
+        for c in components {
+            if matches!(c, ComponentValue::Transform(_)) {
+                continue;
+            }
+            self.apply_loaded(e, c, tick);
+        }
+        scene::propagate(self.ecs_mut());
+        Ok((e, self.diagnostics()[first..].to_vec()))
     }
 
     /// Every loaded scene, in load order.

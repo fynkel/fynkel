@@ -103,3 +103,79 @@ fn a_bad_live_edit_is_refused_and_changes_nothing() {
     assert_eq!(world_pos(&w, e), Vec3::ZERO);
     assert_eq!(w.ecs().len(), 1, "nothing spawned");
 }
+
+fn uuid(n: u8) -> Uuid {
+    Uuid([n; 16])
+}
+
+#[test]
+fn a_live_spawn_is_there_at_once_and_joins_the_scene_under_its_id() {
+    let mut w = World::new(WorldConfig::default());
+    let scene = SceneDescription {
+        id: uuid(1),
+        name: "Main".into(),
+        entities: vec![EntityDescription {
+            id: uuid(2),
+            name: "Root".into(),
+            parent: None,
+            children: vec![],
+            components: vec![ComponentValue::Transform(Transform::from_position(Vec3::X))],
+        }],
+    };
+    w.load_scene(&scene).unwrap();
+    w.drain_events();
+    let root = w.loaded_scenes()[0].handle_of(uuid(2)).unwrap();
+    let tick = w.tick();
+
+    let (e, rejected) = w
+        .spawn_now(
+            "Lamp",
+            Transform::from_position(Vec3::Y),
+            Some(root),
+            vec![ComponentValue::PointLight(PointLight {
+                intensity: 3.0,
+                ..PointLight::default()
+            })],
+            Some((uuid(1), uuid(3))),
+        )
+        .unwrap();
+    assert!(rejected.is_empty(), "{rejected:?}");
+    assert_eq!(w.tick(), tick, "nothing ticks");
+    assert!(w.drain_events().is_empty(), "no event for the edit");
+    assert_eq!(
+        world_pos(&w, e),
+        Vec3::new(1.0, 1.0, 0.0),
+        "propagated under its parent"
+    );
+    assert_eq!(w.ecs().copy::<PointLight>(e).unwrap().intensity, 3.0);
+    assert_eq!(w.loaded_scenes()[0].handle_of(uuid(3)), Some(e));
+    assert_eq!(w.scene_of(e).map(|s| s.id), Some(uuid(1)));
+
+    assert_eq!(
+        w.spawn_now(
+            "Again",
+            Transform::default(),
+            None,
+            vec![],
+            Some((uuid(1), uuid(3)))
+        )
+        .unwrap_err(),
+        LoadError::DuplicateEntity(uuid(3))
+    );
+    assert_eq!(
+        w.spawn_now(
+            "Nowhere",
+            Transform::default(),
+            None,
+            vec![],
+            Some((uuid(9), uuid(4)))
+        )
+        .unwrap_err(),
+        LoadError::NotLoaded(uuid(9))
+    );
+    let (runtime, _) = w
+        .spawn_now("", Transform::default(), None, vec![], None)
+        .unwrap();
+    assert!(w.scene_of(runtime).is_none());
+    assert_eq!(w.ecs().len(), 3);
+}

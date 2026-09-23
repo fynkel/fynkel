@@ -621,7 +621,8 @@ impl World {
     /// checks, transforms are propagated, and what moved is not
     /// interpolated from where it was. No system runs, the tick does not
     /// advance, no event is emitted for the edit itself. `Spawn` is refused
-    /// (a live edit changes what exists; it does not create). Returns the
+    /// (its temp id answers through a step's event; a live creation is
+    /// [`World::spawn_now`]). Returns the
     /// rejections, which are also in [`World::diagnostics`].
     pub fn apply_now(&mut self, commands: Vec<Command>) -> Vec<Diagnostic> {
         if self.poisoned {
