@@ -275,7 +275,7 @@ impl AuthoringSession {
                 "open the project with the Fynkel that wrote its lock",
             )));
         }
-        match kind {
+        let done = match kind {
             "newDocument" => self.new_document(args).map_err(one),
             "renameAsset" => self.rename_asset(args).map_err(one),
             "deleteAsset" => self.delete_asset(args),
@@ -292,7 +292,9 @@ impl AuthoringSession {
                 format!("unknown operation {other:?}"),
             )
             .with_suggestion(format!("one of: {}", OPERATIONS.join(", "))))),
-        }
+        }?;
+        self.log(serde_json::json!({ "op": "asset", "kind": kind, "args": args }));
+        Ok(done)
     }
 
     /// The asset history (`assetHistory` query).

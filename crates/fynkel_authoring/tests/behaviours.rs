@@ -169,7 +169,10 @@ fn reload_behaviours_reads_regenerated_metadata_and_writes_nothing() {
         .iter()
         .find(|b| b["type"] == "game.Spinner")
         .unwrap();
-    assert_eq!(spinner["schema"]["properties"]["speed2"]["default"], 5.0, "{spinner}");
+    assert_eq!(
+        spinner["schema"]["properties"]["speed2"]["default"], 5.0,
+        "{spinner}"
+    );
     let metadata = s.project().unwrap().metadata.clone().unwrap();
     assert_eq!(metadata["behaviours"][0]["fields"][0]["name"], "speed2");
     assert_eq!(copy.read("fynkel.project.json"), project_file);

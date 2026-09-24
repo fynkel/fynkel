@@ -927,3 +927,73 @@ fn defaults_cover_every_authored_component() {
         ["FYN-T0003"]
     );
 }
+
+/// The authoring log (blueprint §19.2e item 10): the opening, each
+/// committed transaction with its commands, undo, redo, save and an asset
+/// operation, one JSON line each — and replaying its commands on another
+/// copy writes the same bytes.
+#[test]
+fn every_change_of_a_session_is_in_the_authoring_log_and_replays() {
+    let copy = Copy::new("log");
+    let mut s = open(&copy);
+    let h = s.open_document(RIG_SCENE).unwrap();
+    let camera = "c0000000-0000-4000-8000-0000000004e0";
+    let rename = |name: &str| json!([{ "command": "renameObject", "id": camera, "name": name }]);
+    assert_eq!(s.apply_json(h, &rename("Eye")).unwrap()["ok"], true);
+    assert_eq!(s.apply_json(h, &rename("Lens")).unwrap()["ok"], true);
+    // Refused: nothing changed, nothing written.
+    let refused = s
+        .apply_json(
+            h,
+            &json!([{ "command": "renameObject", "id": "c0000000-0000-4000-8000-00000000ffff", "name": "X" }]),
+        )
+        .unwrap();
+    assert_eq!(refused["ok"], false);
+    s.undo(h).unwrap();
+    s.redo(h).unwrap();
+    s.undo(h).unwrap();
+    s.save(h, None).unwrap();
+    s.operate(
+        "newDocument",
+        &json!({ "kind": "scene", "path": "scenes/lobby" }),
+    )
+    .unwrap();
+
+    let log = copy.read(fynkel_authoring::LOG_FILE);
+    let lines: Vec<Value> = log
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let ops: Vec<&str> = lines.iter().map(|l| l["op"].as_str().unwrap()).collect();
+    assert_eq!(
+        ops,
+        ["open", "apply", "apply", "undo", "redo", "undo", "save", "asset"]
+    );
+    let session = lines[0]["session"].as_str().unwrap();
+    assert!(lines.iter().all(|l| l["session"] == session && l["v"] == 1));
+    assert_eq!(lines[1]["document"], RIG_SCENE);
+    assert_eq!(lines[1]["commands"][0]["command"], "renameObject");
+    assert_eq!(lines[1]["commands"][0]["name"], "Eye");
+    assert_eq!(lines[1]["affectedIds"][0][0], camera);
+    assert_eq!(lines[3]["transactionId"], lines[2]["transactionId"]);
+    assert_eq!(lines[3]["commands"], json!(["renameObject"]));
+    assert_eq!(lines[6]["document"], RIG_SCENE);
+    assert_eq!(lines[7]["kind"], "newDocument");
+    assert_eq!(lines[7]["args"]["path"], "scenes/lobby");
+
+    // Replayed on a fresh copy, the log writes the same scene.
+    let other = Copy::new("log-replay");
+    let mut r = open(&other);
+    let rh = r.open_document(RIG_SCENE).unwrap();
+    for line in &lines[1..7] {
+        match line["op"].as_str().unwrap() {
+            "apply" => assert_eq!(r.apply_json(rh, &line["commands"]).unwrap()["ok"], true),
+            "undo" => drop(r.undo(rh).unwrap()),
+            "redo" => drop(r.redo(rh).unwrap()),
+            "save" => drop(r.save(rh, None).unwrap()),
+            op => panic!("{op}"),
+        }
+    }
+    assert_eq!(other.read(RIG_SCENE), copy.read(RIG_SCENE));
+    assert!(copy.read(RIG_SCENE).contains("\"Eye\""));
+}

@@ -24,6 +24,7 @@ pub mod behaviours;
 pub mod instance;
 pub mod layers;
 pub mod live;
+pub mod log;
 pub mod ops;
 pub mod preview;
 pub mod project;
@@ -40,6 +41,7 @@ use fynkel_document::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+pub use log::LOG_FILE;
 pub use ops::{AssetHistory, AssetOp, Done, OPERATIONS, TRASH_DIR};
 pub use preview::{Hit, Line, Preview, Ray, SyncReport, View};
 pub use project::{OpenProject, Reference, METADATA_FILE};
@@ -107,6 +109,8 @@ pub struct AuthoringSession {
     /// Open documents the last asset operation rewrote on disk, for its
     /// result's `reload`.
     reload_after: Vec<Handle>,
+    /// This opening of the project in the authoring log ([`log`]).
+    log_session: Uuid,
 }
 
 impl AuthoringSession {
@@ -117,6 +121,7 @@ impl AuthoringSession {
             next_handle: 1,
             assets_history: AssetHistory::default(),
             reload_after: Vec::new(),
+            log_session: Uuid::nil(),
         }
     }
 
@@ -129,6 +134,8 @@ impl AuthoringSession {
         self.close_project();
         let project = OpenProject::open(dir)?;
         self.project = Some(project);
+        self.log_session = Uuid::new_v4();
+        self.log(json!({ "op": "open" }));
         Ok(self.project.as_ref().unwrap())
     }
 
@@ -161,6 +168,22 @@ impl AuthoringSession {
                 Some((d.path.clone(), text))
             })
             .collect()
+    }
+
+    /// Appends one entry to the open project's authoring log ([`log`]).
+    pub(crate) fn log(&self, entry: Value) {
+        if let Some(project) = &self.project {
+            log::append(&project.dir, self.log_session, entry);
+        }
+    }
+
+    /// `path` as the log names it: relative to the project when inside it.
+    fn logged_path(&self, path: &Path) -> String {
+        let project = self.project.as_ref().map(|p| p.dir.as_path());
+        match project.and_then(|dir| path.strip_prefix(dir).ok()) {
+            Some(rel) => rel.to_string_lossy().replace('\\', "/"),
+            None => path.display().to_string(),
+        }
     }
 
     fn require_project(&self) -> Result<&OpenProject, Diagnostic> {
@@ -536,9 +559,30 @@ impl AuthoringSession {
                 _ => {}
             }
         }
+        let commands: Vec<Value> = request
+            .commands
+            .iter()
+            .map(|r| r.command.to_json())
+            .collect();
         let applied = doc
             .editor
             .apply_with_prefabs(request, &project.schemas, &library);
+        if applied.ok {
+            let path = doc.path.clone();
+            self.log(json!({
+                "op": "apply",
+                "document": self.logged_path(&path),
+                "transactionId": applied.transaction_id.to_string(),
+                "baseRevision": applied.base_revision.as_str(),
+                "revision": applied.revision.as_str(),
+                "commands": commands,
+                "affectedIds": applied
+                    .mutations
+                    .iter()
+                    .map(|m| m.affected_ids.iter().map(|u| u.to_string()).collect::<Vec<_>>())
+                    .collect::<Vec<_>>(),
+            }));
+        }
         if applied.ok && !written.is_empty() {
             let written: Vec<PathBuf> = written
                 .into_iter()
@@ -566,12 +610,26 @@ impl AuthoringSession {
 
     pub fn undo(&mut self, handle: Handle) -> Result<Transaction, Diagnostic> {
         self.writable(handle)?;
-        self.documents.get_mut(&handle).unwrap().editor.undo()
+        let t = self.documents.get_mut(&handle).unwrap().editor.undo()?;
+        self.log_history("undo", handle, &t);
+        Ok(t)
     }
 
     pub fn redo(&mut self, handle: Handle) -> Result<Transaction, Diagnostic> {
         self.writable(handle)?;
-        self.documents.get_mut(&handle).unwrap().editor.redo()
+        let t = self.documents.get_mut(&handle).unwrap().editor.redo()?;
+        self.log_history("redo", handle, &t);
+        Ok(t)
+    }
+
+    fn log_history(&self, op: &str, handle: Handle, t: &Transaction) {
+        let path = self.documents[&handle].path.clone();
+        self.log(json!({
+            "op": op,
+            "document": self.logged_path(&path),
+            "transactionId": t.id.to_string(),
+            "commands": t.mutations.iter().map(|m| m.command).collect::<Vec<_>>(),
+        }));
     }
 
     /// The JSON of an undo or redo: the transaction replayed and the
@@ -612,6 +670,7 @@ impl AuthoringSession {
             .as_mut()
             .unwrap()
             .rescan(std::slice::from_ref(&written));
+        self.log(json!({ "op": "save", "document": self.logged_path(&written) }));
         Ok(written)
     }
 
