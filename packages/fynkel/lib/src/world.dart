@@ -197,7 +197,7 @@ class World {
   static void reportBehaviourError(BehaviourError e) {
     if (EditorChannel.enabled) {
       EditorChannel.error(e.message, stack: e.stack.toString(), tick: e.tick);
-    } else if (!identical(Zone.current, Zone.root)) {
+    } else if (!Zone.current.inSameErrorZone(Zone.root)) {
       Zone.current.handleUncaughtError(e.error, e.stack);
     } else {
       print('${e.message}\n${e.stack}');

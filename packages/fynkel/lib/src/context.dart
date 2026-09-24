@@ -5,6 +5,8 @@
 // callback — never through hidden process-global state, so a test can run
 // gameplay code against a `TestGameContext` with its own clock.
 
+import 'dart:async' show Zone, ZoneDelegate, ZoneSpecification;
+
 import 'editor_channel.dart';
 import 'input.dart';
 import 'settings.dart';
@@ -103,13 +105,42 @@ class GameContext {
 
   /// Runs [body] with this context current (nested runs restore the outer
   /// one), so `Time.delta` and friends resolve to it.
+  ///
+  /// Under an editor ([EditorChannel.enabled]) the body also runs in a zone
+  /// that turns `print` into a Console row with its stack (source
+  /// `print`) — Play in the editor runs the game in the editor's own
+  /// process, where stdout reaches no Console.
   R run<R>(R Function() body) {
     _stack.add(this);
     try {
-      return body();
+      return EditorChannel.enabled ? _printZone().run(body) : body();
     } finally {
       _stack.removeLast();
     }
+  }
+
+  static Zone? _zone, _zoneParent;
+
+  /// One zone per parent zone (a steady frame forks nothing).
+  static Zone _printZone() {
+    final current = Zone.current;
+    if (identical(current, _zone)) return current;
+    if (!identical(current, _zoneParent)) {
+      _zoneParent = current;
+      _zone = current.fork(specification: const ZoneSpecification(print: _print));
+    }
+    return _zone!;
+  }
+
+  static void _print(Zone self, ZoneDelegate parent, Zone zone, String line) {
+    if (!EditorChannel.enabled) return parent.print(zone, line);
+    EditorChannel.send('log', {
+      'tick': current?.time.tick,
+      'source': 'print',
+      'severity': 'info',
+      'message': line,
+      'stack': StackTrace.current.toString(),
+    });
   }
 }
 
@@ -180,7 +211,51 @@ abstract final class Time {
 abstract final class Diagnostics {
   static void log(String message, {String source = 'game'}) {
     final context = GameContext.require('Diagnostics.log');
-    if (EditorChannel.enabled) EditorChannel.log(message, source: source, tick: context.time.tick);
+    if (EditorChannel.enabled) {
+      EditorChannel.send('log', {
+        'tick': context.time.tick,
+        'source': source,
+        'severity': 'info',
+        'message': message,
+        'stack': StackTrace.current.toString(),
+      });
+    }
     context.diagnostics.log(message, source: source);
+  }
+}
+
+/// Unity's `Debug.Log` family: a Console row at the level asked for, with
+/// the caller's stack — the row shows the calling line and a double-click
+/// opens it in the IDE. Works in and outside a callback (the tick is the
+/// current context's, when there is one). Without an editor the line goes
+/// to the current context's [DiagnosticsService] (`print` by default; a
+/// test's [RecordingDiagnostics]), prefixed by its level.
+abstract final class Debug {
+  static void log(Object? message) => _send('info', '$message', StackTrace.current);
+  static void logWarning(Object? message) => _send('warning', '$message', StackTrace.current);
+  static void logError(Object? message) => _send('error', '$message', StackTrace.current);
+
+  /// An error you caught, with its own stack (the red row of an exception).
+  static void logException(Object error, [StackTrace? stack]) {
+    final context = GameContext.current;
+    if (EditorChannel.enabled) {
+      EditorChannel.error('$error', stack: (stack ?? StackTrace.current).toString(), tick: context?.time.tick);
+    }
+    (context?.diagnostics ?? const PrintDiagnostics()).log('error: $error', source: 'game');
+  }
+
+  static void _send(String severity, String message, StackTrace stack) {
+    final context = GameContext.current;
+    if (EditorChannel.enabled) {
+      EditorChannel.send('log', {
+        'tick': context?.time.tick,
+        'source': 'game',
+        'severity': severity,
+        'message': message,
+        'stack': stack.toString(),
+      });
+    }
+    (context?.diagnostics ?? const PrintDiagnostics())
+        .log(severity == 'info' ? message : '$severity: $message', source: 'game');
   }
 }
