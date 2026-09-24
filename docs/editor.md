@@ -235,6 +235,7 @@ run, Escape closes.
 | `view.saveFrame` | View | ⌥⌘X | one frame of the viewport as a PNG at its physical size (the pixel gate's tool) |
 | `assets.undo` / `assets.redo` | Edit | ⌥⌘Z / ⇧⌥⌘Z | undo / redo the last **asset operation** (its own history; the label names it: "Undo Rename coin.prefab.json → gold.prefab.json") |
 | `assets.newScene` / `assets.newPrefab` / `assets.newMaterial` | Project | ⇧⌥⌘S / ⇧⌥⌘P / ⇧⌥⌘M | a new document in the Project browser's folder (`New Scene`, `New Scene 2`, …), selected and renaming at once |
+| `assets.newVolume` | Project | — | New Volume Profile (Unity's Create → Volume Profile): the starting look of `Document::new` — ambient occlusion on, bloom at intensity 0 — renaming at once; also in the + menu and the folder and asset menus |
 | `assets.newFolder` | Project | ⇧⌥⌘F | a new folder there (`New Folder`), renaming at once |
 | `assets.open` | Project | ⇧⌥⌘O | the selected scene or prefab into a tab; any other asset into the Inspector |
 | `assets.rename` | Project | ⇧⌥⌘R | rename the selected asset in place (the sidecar moves with it; the id survives) |

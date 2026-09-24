@@ -69,7 +69,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Undo | ⌘Z, one history | 🟡 its own ⌥⌘Z history; empty-folder create/delete not undoable |
 | Drag files in from Finder | imports | ❌ (changes on disk do import) |
 | Model sub-assets | expand in the browser, draggable | ❌ only in the Inspector's asset page |
-| Create → Volume Profile, Physics Material | | ❌ |
+| Create → Volume Profile, Physics Material | | 🔧 Volume Profile (`682f953`, `adb5146`); Physics Material ❌ — no such asset: friction and restitution are the Collider's own fields, and an asset would need an ADR (Tier 3) |
 | Find References In Scene | | ❌ |
 
 ## Tier 2 — the look and the code
@@ -102,6 +102,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Prefab variants, Unpack Completely, a prefab from an object holding instances | | ❌ |
 | Overrides dropdown, blue margin bar | | 🟡 bold labels + a list at the bottom |
 | Multi-scene Hierarchy | | ❌ one document per Hierarchy |
+| Physics Material asset | shared friction/bounciness, combine modes | ❌ per-Collider fields; needs an ADR |
 | Grid thumbnails, zoom slider | | ❌ list only |
 
 ## On purpose
@@ -133,3 +134,5 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 - 2026-09-24: the colour picker is live (`ff6611e` preview `setComponents`,
   `6b8ffe7`, `7edb455`) — `inspector_parity_test.dart` checks the world's
   light colour while picking, Cancel, and one undo on OK.
+- 2026-09-24: New Volume Profile (`682f953`, `adb5146`) —
+  `project_parity_test.dart` makes one from + and renames it.

@@ -625,7 +625,7 @@ window, never running game code and never reading a cooked cache
 - **`operate(kind, args)`** (M4-05, `crates/fynkel_authoring/src/ops.rs`)
   is `query`'s mutating twin: the session's own changes to the **asset
   tree**, next to the per-document transactions. `newDocument { kind:
-  scene|prefab|material, path, name?, shader? }` writes `Document::new`
+  scene|prefab|material|volume, path, name?, shader? }` writes `Document::new`
   under the asset root (the kind's suffix added when missing; the PBR
   shader by default; refused when the file or another kind's file of that
   name exists). `renameAsset { asset, path }` moves a document, or a source
