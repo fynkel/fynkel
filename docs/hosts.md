@@ -422,7 +422,12 @@ Since M3-01 all of that lives in **`package:fynkel_flutter`**
   (8: an `EntityInfoRecord { entity, parent, name, layer, tags, active }`
   per live entity, `layer`/`tags` 0 without a `fynkel.Layer`/`fynkel.Tags`,
   `active` the entity's own flag — `GameObject.activeSelf`, SetActive)
-  per tick, cached in the SDK until the next step or load. A temp
+  per tick, cached in the SDK until the next step or load;
+  `GameObject.activeInHierarchy` walks its parents, and while behaviours
+  exist the driver reads it once per tick (a changed table re-checks which
+  behaviours are live). `GameObject.setActive(bool)` is
+  `FYNKEL_COMMAND_SET_ACTIVE` (13: `SetActiveCommand { entity, active }`,
+  simulation lane). A temp
   reference (`FynkelEntity` with generation 0 and the spawn's temp id in
   the slot bits, `Entity::temp(id)`) may stand for an entity spawned
   **earlier in the same tick's simulation batch** in any command's entity

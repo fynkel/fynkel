@@ -1724,3 +1724,19 @@ The M3 backlog as it landed, for the record:
    extract-materials` (`docs/design/material-remapping.md`, documents.md
    § Material remaps). Cooked format and fingerprint unchanged. Next:
    Phase 1 item 2 (`SetActive`).
+20. **SetActive / activeInHierarchy (roadmap Phase 1 item 2) — done
+   2026-09-24.** An entity may carry `"active": false` (absent = true, no
+   format bump); a prefab instance overrides it with the `setActive` op;
+   the authoring command is `setObjectActive`. At runtime an inactive
+   subtree is not drawn, simulated, animated or heard (`fynkel_scene`'s
+   `InactiveSelf`/`Inactive` markers, every system filtered; a body leaves
+   the physics world and returns at rest; a looping source resumes). New
+   wire command `SetActive` (kind 13), `EntityInfo.active`, fingerprint
+   `0xa6bee88bec527d9b`. Dart: `GameObject.setActive`, `activeSelf`,
+   `activeInHierarchy`; a behaviour is live only while enabled and active
+   in the hierarchy (deferred `onCreate`, `onDisable` children first,
+   `onEnable` parents first). Editor: the Inspector header's checkbox
+   (with override Revert on a prefab instance), a greyed Hierarchy
+   subtree, live Play and Apply to Scene. Design:
+   `docs/design/set-active.md`. Next: Phase 1 item 3 (editor and cook
+   scale).

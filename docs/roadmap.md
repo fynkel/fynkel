@@ -26,7 +26,8 @@ Apply to Scene (`docs/design/live-play-mode.md`).
 2. **`SetActive` / `activeInHierarchy`.** An inactive object and its
    subtree are not drawn, not simulated and run no behaviours
    (`onDisable`/`onEnable` fire); a checkbox in the Inspector header, a
-   greyed row in the Hierarchy.
+   greyed row in the Hierarchy. Design: `docs/design/set-active.md`.
+   **Done 2026-09-24.**
 3. **Editor and cook scale.** The quadratic reference prune on refresh
    (`fynkel_authoring/src/project.rs`), `by_path` as a map, a
    size+mtime check before the cook re-reads and re-hashes a source,

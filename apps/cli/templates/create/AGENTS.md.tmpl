@@ -174,6 +174,7 @@ class PlayerController extends Behaviour {
 ```
 
 - Lifecycle: `onCreate → onEnable → start → fixedUpdate / afterPhysics / update / lateUpdate → onDisable → onDestroy`. Simulation goes in `fixedUpdate` (fixed `context.dt`); presentation-only work in `update`.
+- A behaviour runs only while `enabled` and its object is active in the hierarchy. `go.setActive(false)` switches the object and its subtree off at the next tick — not drawn, not simulated, no sound, behaviours get `onDisable` (children first); `setActive(true)` brings back exactly the children that were active (`onEnable`, parents first; a body returns at rest). `go.activeSelf` is the object's own flag (reads your write at once), `go.activeInHierarchy` includes the parents (after the tick). An object loaded or spawned inactive runs `onCreate` only when first activated.
 - Exposed field types: `double`, `int`, `bool`, `String`, `Vec3`, `Quat`, `AssetRef`, each optionally nullable; literal initializers become defaults.
 - After adding/changing a behaviour class or an `@Expose` field: `fynkel codegen --project .`, then commit `lib/generated/` and `schemas/behaviours/`. Register a new type in `fynkel.project.json` → `components` too (`"game.X": { "kind": "behaviour", "version": 1 }`).
 - A scene component of a type that is not registered at runtime loads with warning `FYN-B0001`; data a field rejects is `FYN-B0002`. Neither stops the scene.

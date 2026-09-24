@@ -351,7 +351,10 @@ records for undo, and can save — the editor never edits JSON by hand.
   parent), Esc clears (then clears the filter). Rows show a **prefab
   badge** for instances (with the override count) and an **error badge**
   with the entity's diagnostics (from `validate` plus the project report,
-  by id or by `/entities/<id>` pointer).
+  by id or by `/entities/<id>` pointer). An object that is **not active
+  in the hierarchy** — its own `active` off, or an ancestor's — is
+  greyed like Unity's (`HierarchyTree.activeInHierarchy`; a derived
+  entity reads its flag from the expansion).
 - **Operations — one transaction each** (`HierarchyModel`): rename in
   place (double-click, ⌘R, Enter; Enter or focus loss commits, Esc
   cancels, an unchanged or empty name is not a transaction), Duplicate
@@ -481,8 +484,12 @@ own value and saving changes no bytes (`inspector_session_test.dart`).
 
 ### The panel (`inspector_panel.dart`)
 
-Header with the name (editable) and id (copy), or "N entities — …" for a
-multi-selection (above 200 entities a count only). One collapsible card per
+Header with the **active checkbox** (`inspector.active`, Unity's; a
+dash when the selection disagrees), the name (editable) and id (copy), or
+"N entities — …" for a multi-selection (above 200 entities a count
+only). The checkbox is one transaction for the whole selection:
+`setObjectActive` on a document entity, a `setActive` override on the
+anchor for a derived one (docs/design/set-active.md). One collapsible card per
 slot with the type's icon (the `icon` hint or a per-type default), its
 description as a tooltip, the field rows in groups, and a menu: **Reset to
 Defaults**, **Open Script** (a behaviour: `package:<pkg>/<path>` from the
@@ -1109,7 +1116,9 @@ override model — so editing `position.x` overrides `position`);
 and Remove Component (the revert of the override that added it, or a
 `removeComponent` override) follow the same rule, and multi-object
 editing folds them per key. The prefab's own entities cannot be renamed
-here either (the name field is disabled).
+here either (the name field is disabled). The header's active checkbox
+writes a `setActive` override; when one is set the checkbox carries the
+accent bar and a **Revert** button (`inspector.active.revert`).
 
 The anchor's **Prefab instance** section (item 4) grew into the mode's
 control panel: the prefab's name and kind ("imported hierarchy,

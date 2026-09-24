@@ -1,8 +1,8 @@
 # SetActive / activeInHierarchy — design note
 
-**Status:** Accepted (2026-09-24; roadmap Phase 1 item 2; Unity's
-`GameObject.SetActive` is the reference, per the project's standing
-"default to Unity" rule).
+**Status:** Done 2026-09-24 (A1–A5). Accepted 2026-09-24 (roadmap
+Phase 1 item 2; Unity's `GameObject.SetActive` is the reference, per the
+project's standing "default to Unity" rule).
 **Related:** `docs/documents.md` § Scene documents and § Prefab overrides,
 `crates/fynkel_scene` (hierarchy, `propagate`), `crates/fynkel_core/src/world.rs`
 (`step`, `extract`), `crates/fynkel_physics`, `packages/fynkel/lib/src/behaviour.dart`
@@ -113,7 +113,11 @@ Nothing, as in Unity:
    query. Tests per system.
 3. **A3 — Dart API.** `activeSelf`/`activeInHierarchy`/`setActive`,
    behaviour lifecycle (deferred `onCreate`, ordered `onEnable`/
-   `onDisable`). Tests in `packages/fynkel`.
+   `onDisable`). Tests in `packages/fynkel`. The behaviour driver's
+   settle compares the world's entity table with the one it last saw, so
+   an activity change from any source (a Dart command, a load, the
+   editor's live call) is noticed at the next callback phase after the
+   tick that applied it.
 4. **A4 — Editor.** Checkbox, greyed Hierarchy, Scene view, overrides,
    live Play.
 5. **A5 — Docs.** documents.md, the Dart API docs, editor.md, template
