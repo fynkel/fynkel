@@ -1832,3 +1832,18 @@ The M3 backlog as it landed, for the record:
    excepted: they are the docking package's). A keyboard-only walkthrough
    is a widget test. The command, menu and panel words are in one table,
    `lib/src/l10n/strings.dart`. The words inside the panels are not yet.
+
+29. **The M4 gate report (item 10, 2026-09-24) — pending the user's
+   rebuild.** `docs/m4-gate-report.md`: five of the six gate rows pass;
+   the sixth is the user's own rebuild of the start area, with its
+   checklist in the report. Writing it found two gaps, both closed:
+   - There was no authoring log. The session now writes every change —
+     each transaction's commands, undo, redo, save, asset operations — to
+     `.fynkel/authoring.log`, and a log replayed on a copy writes the
+     same bytes.
+   - The startup scene could only be changed by editing
+     `fynkel.project.json`. A scene's context menu now has **Set as
+     Startup Scene**.
+   Warm `fynkel editor` open on the reference game: the built app launches in 0.2 s,
+   hot reload on at 2.0–2.5 s. This file's header and §6 are rewritten
+   when the verdict is in.
