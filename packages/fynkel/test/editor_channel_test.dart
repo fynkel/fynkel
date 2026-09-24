@@ -100,6 +100,17 @@ void main() {
     expect(log['tick'], 7);
   });
 
+  test('an uncaught error is an error log record with its stack', () {
+    EditorChannel.error('Bad state: no player', stack: '#0      Player.update (package:game/game/player.dart:42:7)', tick: 3);
+    final r = records(lines).single;
+    expect(r['fynkel'], 'log');
+    expect(r['source'], 'exception');
+    expect(r['severity'], 'error');
+    expect(r['message'], 'Bad state: no player');
+    expect(r['stack'], contains('player.dart:42:7'));
+    expect(r['tick'], 3);
+  });
+
   test('with the channel off nothing is written and the sequence stands still', () {
     EditorChannel.debugUse(enabled: false, sink: lines.add);
     final w = World.create(library: lib, fixedDt: 1 / 60, maxStepsPerFrame: 8);

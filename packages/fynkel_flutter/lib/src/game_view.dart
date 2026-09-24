@@ -12,6 +12,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:fynkel/fynkel.dart';
 
 import 'application.dart';
+import 'error_report.dart';
 import 'heap_probe.dart';
 import 'input_capture.dart';
 import 'percentiles.dart';
@@ -386,6 +387,7 @@ class FynkelGameViewState extends State<FynkelGameView> with SingleTickerProvide
   @override
   void initState() {
     super.initState();
+    ChannelErrorReporting.install();
     WidgetsBinding.instance.addObserver(this);
     controller.addListener(_onViewportChanged);
     FynkelInputChannel.attach(input);

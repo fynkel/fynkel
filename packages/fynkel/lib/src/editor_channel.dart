@@ -9,6 +9,8 @@
 // counter, so the editor sees a dropped line):
 //
 //   { "fynkel": "log",        "tick": 42, "source": "game", "severity": "info", "message": "…" }
+//   { "fynkel": "log",        "source": "exception", "severity": "error", "message": "…",
+//     "stack": "#0      Player.update (package:game/game/player.dart:42:7)\n…" }
 //   { "fynkel": "diagnostic", "tick": 42, "code": "FYN-R0003", "severity": "error",
 //     "message": "…", "document": "assets/scenes/main.scene.json", "pointer": "/entities/…",
 //     "id": "<authoring id>", "line": 12, "column": 5, "suggestion": "…", "related": [ … ] }
@@ -70,6 +72,12 @@ abstract final class EditorChannel {
   /// A game log line: `Diagnostics.log`, the engine's own notes.
   static void log(String message, {String source = 'game', String severity = 'info', int? tick}) =>
       send('log', {'tick': tick, 'source': source, 'severity': severity, 'message': message});
+
+  /// An uncaught error of the game (a behaviour that threw), with its
+  /// Dart [stack]: a `log` record of source `exception`, so the editor can
+  /// open the game's own frames in the IDE.
+  static void error(String message, {String? stack, int? tick}) =>
+      send('log', {'tick': tick, 'source': 'exception', 'severity': 'error', 'message': message, 'stack': stack});
 
   /// A §14.2 diagnostic record. [related] are the same maps, one level deep.
   static void diagnostic({
