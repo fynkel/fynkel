@@ -1468,12 +1468,35 @@ final class InspectorModel extends ChangeNotifier {
 
   bool canMove(ComponentSlot slot, int delta) => _moveTarget(slot, delta) != null;
 
+  /// A card that can move: one object's, its own (not a prefab's part), not
+  /// the Transform, outside Play.
+  bool canDrag(ComponentSlot slot) =>
+      canEdit && !showsPlay && slot.single && !slot.anyDerived && slot.type != 'fynkel.Transform';
+
+  /// Whether [slot]'s card can be dropped on [target]'s, taking its place.
+  bool canMoveTo(ComponentSlot slot, ComponentSlot target) =>
+      slot.key != target.key && canDrag(slot) && canDrag(target) && slotIndex(slot) >= 0 && slotIndex(target) >= 0;
+
+  /// [slot]'s place among the cards, or -1.
+  int slotIndex(ComponentSlot slot) => _slots.indexWhere((s) => s.key == slot.key);
+
+  /// Unity's drag to reorder: [slot] takes [target]'s place (after it when
+  /// moving down, before it when moving up) — one undo step.
+  bool moveComponentTo(ComponentSlot slot, ComponentSlot target) {
+    if (!canMoveTo(slot, target)) return false;
+    return _moveTo(slot, _slots[slotIndex(target)]);
+  }
+
   /// Moves [slot] one card up (`-1`) or down (`+1`): a `moveComponent` to
   /// its neighbour's place in the entity's components — one undo step.
   bool moveComponent(ComponentSlot slot, int delta) {
     final other = _moveTarget(slot, delta);
+    return other != null && _moveTo(slot, other);
+  }
+
+  bool _moveTo(ComponentSlot slot, ComponentSlot other) {
     final t = _tab;
-    if (other == null || t == null) return false;
+    if (t == null) return false;
     final entity = slot.first.entityId;
     final components = t.document.entities([entity]).entities[entity]?['components'];
     if (components is! Map) return false;

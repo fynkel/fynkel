@@ -639,6 +639,13 @@ class _EditInSceneButton extends StatelessWidget {
 
 typedef _KeptField = ({int generation, Object? value, bool mixed, Widget widget});
 
+/// A component card's header being dragged.
+final class _CardDrag {
+  const _CardDrag(this.slot);
+
+  final ComponentSlot slot;
+}
+
 class _ComponentCard extends StatelessWidget {
   const _ComponentCard({
     super.key,
@@ -671,7 +678,9 @@ class _ComponentCard extends StatelessWidget {
     return SliverMainAxisGroup(
       slivers: [
         PinnedHeaderSliver(
-          child: Material(
+          child: _reorder(
+            context,
+            Material(
             color: t.header,
             child: InkWell(
               onTap: onToggle,
@@ -855,12 +864,55 @@ class _ComponentCard extends StatelessWidget {
               ),
             ),
           ),
+          ),
         ),
         if (!collapsed)
           SliverToBoxAdapter(
             child: Padding(padding: EdgeInsets.fromLTRB(t.pad, 4, t.pad, 8), child: _fields(context)),
           ),
       ],
+    );
+  }
+
+  /// Unity's drag to reorder: the header drags onto another card's header,
+  /// taking its place (a line shows where), as Move Up / Move Down do.
+  Widget _reorder(BuildContext context, Widget header) {
+    final t = context.tokens;
+    final draggable = Draggable<_CardDrag>(
+      data: _CardDrag(slot),
+      maxSimultaneousDrags: model.canDrag(slot) ? 1 : 0,
+      feedback: Material(
+        color: t.header,
+        elevation: 4,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Text(slot.spec.title, style: Theme.of(context).textTheme.bodySmall),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.5, child: header),
+      child: header,
+    );
+    return DragTarget<_CardDrag>(
+      onWillAcceptWithDetails: (d) => model.canMoveTo(d.data.slot, slot),
+      onAcceptWithDetails: (d) => model.moveComponentTo(d.data.slot, slot),
+      builder: (context, candidates, _) {
+        final from = candidates.firstOrNull?.slot;
+        if (from == null) return draggable;
+        // Moving down lands after this card, moving up before it.
+        final after = model.slotIndex(from) < model.slotIndex(slot);
+        return Stack(
+          children: [
+            draggable,
+            Positioned(
+              left: 0,
+              right: 0,
+              top: after ? null : 0,
+              bottom: after ? 0 : null,
+              child: Container(key: ValueKey('card.dropLine.${slot.key}'), height: 2, color: t.accent),
+            ),
+          ],
+        );
+      },
     );
   }
 
