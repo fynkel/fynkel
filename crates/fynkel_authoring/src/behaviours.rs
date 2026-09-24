@@ -12,6 +12,12 @@
 //!   (`lib/generated/behaviours.g.json`), the project's schemas
 //!   (`schemas/behaviours/`) and the schema sources, which are read only
 //!   when a project opens. Open documents keep their handles and edits.
+//!
+//! `reloadBehaviours {}` is the second half alone: after `fynkel codegen`
+//! regenerated the metadata of types that exist already (a field added or
+//! changed — the editor runs it when a script is saved, as Unity recompiles),
+//! the session reads the metadata and schemas again. Nothing is written;
+//! it answers `{ types }`, the behaviour ids the metadata names.
 
 use fynkel_contracts::{Code, Diagnostic};
 use fynkel_document::Node;
@@ -21,6 +27,7 @@ use crate::ops::{io, AssetOp, Done, FileRewrite};
 use crate::{AuthoringSession, OpenProject};
 
 pub const OP: &str = "registerBehaviour";
+pub const RELOAD_OP: &str = "reloadBehaviours";
 
 /// Whether `id` can name a behaviour type: `namespace.Name`, letters,
 /// digits and `_` in each dot-separated part.
@@ -81,13 +88,7 @@ impl AuthoringSession {
                 label: label.clone(),
             });
         } else {
-            let reopened = OpenProject::open(&dir).map_err(|diags| {
-                diags
-                    .into_iter()
-                    .next()
-                    .unwrap_or_else(|| invalid("the project no longer opens".into()))
-            })?;
-            self.project = Some(reopened);
+            self.reopen(OP)?;
         }
         let known = self
             .project()
@@ -102,6 +103,44 @@ impl AuthoringSession {
             None,
             json!({ "id": id, "registered": registered, "inMetadata": known }),
         ))
+    }
+
+    pub(crate) fn reload_behaviours(&mut self) -> Result<Value, Diagnostic> {
+        self.reopen(RELOAD_OP)?;
+        let types: Vec<Value> = self
+            .project()
+            .unwrap()
+            .metadata
+            .as_ref()
+            .and_then(|m| m["behaviours"].as_array())
+            .map(|list| list.iter().map(|b| b["id"].clone()).collect())
+            .unwrap_or_default();
+        Ok(self.finish(
+            RELOAD_OP,
+            "Reload Behaviours",
+            None,
+            json!({ "types": types }),
+        ))
+    }
+
+    /// Reads the project again (metadata, schemas, schema sources); open
+    /// documents keep their handles and edits.
+    fn reopen(&mut self, op: &str) -> Result<(), Diagnostic> {
+        let dir = self
+            .project()
+            .expect("operate checked the project")
+            .dir
+            .clone();
+        let reopened = OpenProject::open(&dir).map_err(|diags| {
+            diags.into_iter().next().unwrap_or_else(|| {
+                Diagnostic::error(
+                    Code::SESSION_INVALID_REQUEST,
+                    format!("{op}: the project no longer opens"),
+                )
+            })
+        })?;
+        self.project = Some(reopened);
+        Ok(())
     }
 }
 

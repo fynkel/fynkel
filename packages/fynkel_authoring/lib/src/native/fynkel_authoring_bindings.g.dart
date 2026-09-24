@@ -380,6 +380,10 @@ FynkelStatus fynkel_authoring_query(
 /// (when missing; undoable) and re-reads
 /// the metadata and schemas; answers
 /// { id, registered, inMetadata }
+/// reloadBehaviours                               after `fynkel codegen` regenerated the
+/// metadata (a script saved): re-reads the
+/// metadata and schemas; writes nothing;
+/// answers { types }
 /// undoAsset / redoAsset                         the asset history
 /// Result: { "ok", "op", "label", "entry", "assetCount", "canUndo", "canRedo",
 /// "undoLabel", "redoLabel", ...per operation }. FYNKEL_STATUS_INVALID_ARGUMENT

@@ -136,3 +136,25 @@ fn a_new_behaviour_is_registered_once_and_its_metadata_read_at_once() {
         .unwrap_err();
     assert!(refused[0].message.contains("namespace.Name"), "{refused:?}");
 }
+
+#[test]
+fn reload_behaviours_reads_regenerated_metadata_and_writes_nothing() {
+    let copy = Copy::new("reload");
+    let mut s = open(&copy);
+    let project_file = copy.read("fynkel.project.json");
+    std::fs::create_dir_all(copy.dir.join("lib/generated")).unwrap();
+    std::fs::write(
+        copy.dir.join("lib/generated/behaviours.g.json"),
+        json!({ "behaviours": [{ "id": "game.Spinner", "version": 1, "class": "Spinner",
+            "fields": [{ "name": "speed2", "type": "number" }] }] })
+        .to_string(),
+    )
+    .unwrap();
+
+    let v = ok(s.operate("reloadBehaviours", &json!({})));
+    assert_eq!(v["types"], json!(["game.Spinner"]), "{v}");
+    let metadata = s.project().unwrap().metadata.clone().unwrap();
+    assert_eq!(metadata["behaviours"][0]["fields"][0]["name"], "speed2");
+    assert_eq!(copy.read("fynkel.project.json"), project_file);
+    assert_eq!(v["canUndo"], false);
+}

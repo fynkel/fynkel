@@ -37,6 +37,7 @@ pub const OPERATIONS: &[&str] = &[
     "redoAsset",
     "setLayersAndTags",
     "registerBehaviour",
+    "reloadBehaviours",
 ];
 
 /// Where deleted assets go, under the project directory (git-ignored by
@@ -285,6 +286,7 @@ impl AuthoringSession {
             "redoAsset" => self.redo_asset().map_err(one),
             crate::layers::OP => self.set_layers_and_tags(args).map_err(one),
             crate::behaviours::OP => self.register_behaviour(args).map_err(one),
+            crate::behaviours::RELOAD_OP => self.reload_behaviours().map_err(one),
             other => Err(one(Diagnostic::error(
                 Code::SESSION_UNKNOWN_QUERY,
                 format!("unknown operation {other:?}"),

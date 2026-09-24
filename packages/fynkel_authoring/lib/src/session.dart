@@ -247,7 +247,7 @@ final class AuthoringSession implements Finalizable {
 
   /// An asset operation by [kind] — `newDocument`, `renameAsset`,
   /// `deleteAsset`, `setImportSettings`, `reimport`, `setLayersAndTags`,
-  /// `registerBehaviour`, `undoAsset`, `redoAsset` — with its arguments (see
+  /// `registerBehaviour`, `reloadBehaviours`, `undoAsset`, `redoAsset` — with its arguments (see
   /// `fynkel_authoring.h`). The session re-reads only the touched paths;
   /// an [AssetsChanged] event carries the result, an open document the
   /// operation moved gets a [DocumentChanged] of kind `moved`, and one it
