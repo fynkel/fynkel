@@ -8,7 +8,7 @@ import 'package:{{package}}/game/mover.dart' as _lib0;
 import 'package:{{package}}/game/spinner.dart' as _lib1;
 
 /// `game.Mover` v1 → [_lib0.Mover].
-final BehaviourType gameMoverType = BehaviourType(
+BehaviourType get gameMoverType => BehaviourType(
   id: 'game.Mover',
   version: 1,
   create: _lib0.Mover.new,
@@ -45,7 +45,7 @@ final BehaviourType gameMoverType = BehaviourType(
 );
 
 /// `game.Spinner` v1 → [_lib1.Spinner].
-final BehaviourType gameSpinnerType = BehaviourType(
+BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
   create: _lib1.Spinner.new,
@@ -71,7 +71,7 @@ final BehaviourType gameSpinnerType = BehaviourType(
 );
 
 /// Every `@FynkelBehaviour` type of package `{{package}}`, by id.
-final List<BehaviourType> behaviourTypes = List.unmodifiable([gameMoverType, gameSpinnerType]);
+List<BehaviourType> get behaviourTypes => List.unmodifiable([gameMoverType, gameSpinnerType]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {

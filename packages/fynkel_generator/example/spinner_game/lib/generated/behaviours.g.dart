@@ -7,15 +7,11 @@ import 'package:fynkel/fynkel.dart';
 import 'package:spinner_game/spinner.dart' as _lib0;
 
 /// `game.Blinker` v2 → [_lib0.Blinker].
-final BehaviourType gameBlinkerType = BehaviourType(
-  id: 'game.Blinker',
-  version: 2,
-  create: _lib0.Blinker.new,
-  fields: const [],
-);
+BehaviourType get gameBlinkerType =>
+    BehaviourType(id: 'game.Blinker', version: 2, create: _lib0.Blinker.new, fields: const []);
 
 /// `game.Patrol` v1 → [_lib0.Patrol].
-final BehaviourType gamePatrolType = BehaviourType(
+BehaviourType get gamePatrolType => BehaviourType(
   id: 'game.Patrol',
   version: 1,
   create: _lib0.Patrol.new,
@@ -53,7 +49,7 @@ final BehaviourType gamePatrolType = BehaviourType(
 );
 
 /// `game.Spinner` v1 → [_lib0.Spinner].
-final BehaviourType gameSpinnerType = BehaviourType(
+BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
   create: _lib0.Spinner.new,
@@ -93,11 +89,8 @@ final BehaviourType gameSpinnerType = BehaviourType(
 );
 
 /// Every `@FynkelBehaviour` type of package `spinner_game`, by id.
-final List<BehaviourType> behaviourTypes = List.unmodifiable([
-  gameBlinkerType,
-  gamePatrolType,
-  gameSpinnerType,
-]);
+List<BehaviourType> get behaviourTypes =>
+    List.unmodifiable([gameBlinkerType, gamePatrolType, gameSpinnerType]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {

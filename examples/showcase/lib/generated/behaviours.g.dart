@@ -8,7 +8,7 @@ import 'package:showcase/game/orbit.dart' as _lib0;
 import 'package:showcase/game/spinner.dart' as _lib1;
 
 /// `game.Orbit` v1 → [_lib0.Orbit].
-final BehaviourType gameOrbitType = BehaviourType(
+BehaviourType get gameOrbitType => BehaviourType(
   id: 'game.Orbit',
   version: 1,
   create: _lib0.Orbit.new,
@@ -62,7 +62,7 @@ final BehaviourType gameOrbitType = BehaviourType(
 );
 
 /// `game.Spinner` v1 → [_lib1.Spinner].
-final BehaviourType gameSpinnerType = BehaviourType(
+BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
   create: _lib1.Spinner.new,
@@ -88,7 +88,7 @@ final BehaviourType gameSpinnerType = BehaviourType(
 );
 
 /// Every `@FynkelBehaviour` type of package `showcase`, by id.
-final List<BehaviourType> behaviourTypes = List.unmodifiable([gameOrbitType, gameSpinnerType]);
+List<BehaviourType> get behaviourTypes => List.unmodifiable([gameOrbitType, gameSpinnerType]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {

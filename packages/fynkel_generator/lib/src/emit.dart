@@ -73,10 +73,13 @@ String emitDart(String package, List<BehaviourClass> classes) {
     o.writeln("import '$lib' as ${prefix[lib]};");
   }
   o.writeln();
+  // Getters, not top-level finals: a hot reload keeps a final that was
+  // already read, so a behaviour added (or a field changed) since the
+  // editor started would never register; a getter is evaluated again.
   for (final c in sorted) {
     final cls = '${prefix[c.libraryUri]}.${c.className}';
     o.writeln('/// `${c.id}` v${c.version} → [$cls].');
-    o.writeln('final BehaviourType ${names[c.id]} = BehaviourType(');
+    o.writeln('BehaviourType get ${names[c.id]} => BehaviourType(');
     o.writeln("  id: '${_dartString(c.id)}',");
     o.writeln('  version: ${c.version},');
     o.writeln('  create: $cls.new,');
@@ -104,7 +107,7 @@ String emitDart(String package, List<BehaviourClass> classes) {
     o.writeln();
   }
   o.writeln('/// Every `@FynkelBehaviour` type of package `$package`, by id.');
-  o.writeln('final List<BehaviourType> behaviourTypes = List.unmodifiable([');
+  o.writeln('List<BehaviourType> get behaviourTypes => List.unmodifiable([');
   for (final c in sorted) {
     o.writeln('  ${names[c.id]},');
   }

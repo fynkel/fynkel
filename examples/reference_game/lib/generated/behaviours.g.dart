@@ -10,7 +10,7 @@ import 'package:reference_game/game/player.dart' as _lib2;
 import 'package:reference_game/game/switch.dart' as _lib3;
 
 /// `game.Collectible` v1 → [_lib0.Collectible].
-final BehaviourType gameCollectibleType = BehaviourType(
+BehaviourType get gameCollectibleType => BehaviourType(
   id: 'game.Collectible',
   version: 1,
   create: _lib0.Collectible.new,
@@ -34,7 +34,7 @@ final BehaviourType gameCollectibleType = BehaviourType(
 );
 
 /// `game.Gate` v1 → [_lib1.Gate].
-final BehaviourType gameGateType = BehaviourType(
+BehaviourType get gameGateType => BehaviourType(
   id: 'game.Gate',
   version: 1,
   create: _lib1.Gate.new,
@@ -61,7 +61,7 @@ final BehaviourType gameGateType = BehaviourType(
 );
 
 /// `game.Player` v1 → [_lib2.Player].
-final BehaviourType gamePlayerType = BehaviourType(
+BehaviourType get gamePlayerType => BehaviourType(
   id: 'game.Player',
   version: 1,
   create: _lib2.Player.new,
@@ -173,7 +173,7 @@ final BehaviourType gamePlayerType = BehaviourType(
 );
 
 /// `game.Switch` v1 → [_lib3.Switch].
-final BehaviourType gameSwitchType = BehaviourType(
+BehaviourType get gameSwitchType => BehaviourType(
   id: 'game.Switch',
   version: 1,
   create: _lib3.Switch.new,
@@ -196,12 +196,8 @@ final BehaviourType gameSwitchType = BehaviourType(
 );
 
 /// Every `@FynkelBehaviour` type of package `reference_game`, by id.
-final List<BehaviourType> behaviourTypes = List.unmodifiable([
-  gameCollectibleType,
-  gameGateType,
-  gamePlayerType,
-  gameSwitchType,
-]);
+List<BehaviourType> get behaviourTypes =>
+    List.unmodifiable([gameCollectibleType, gameGateType, gamePlayerType, gameSwitchType]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {
