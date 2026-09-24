@@ -121,6 +121,19 @@ final class ScenePreview {
     _call('restoreComponents', {'ids': ids.toList()});
   }
 
+  /// The Inspector's live edit of a material document: [data] (its
+  /// `fynkel.pbr@1` fields) drawn in place of the cooked material
+  /// [material] in every open preview, the file untouched. The save's
+  /// recook brings the cache to the same values.
+  void setMaterial(String material, Map<String, Object?> data) {
+    _call('setMaterial', {'material': material, 'data': data});
+  }
+
+  /// The cooked [material] again (a cancelled edit).
+  void restoreMaterial(String material) {
+    _call('restoreMaterial', {'material': material});
+  }
+
   /// The incremental sync now (a no-op when the world already matches the
   /// document).
   PreviewSyncReport resync() {

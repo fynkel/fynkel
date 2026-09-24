@@ -549,6 +549,16 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_preview_world(
 /// stays clean) → "count"
 /// restoreTransforms ids               the transforms back to the document's (a
 /// cancelled drag) → "count"
+/// setComponents   components: [{ id, type, data }]
+/// the Inspector's live edit: each built-in
+/// component's whole data set in the world only
+/// (a behaviour skipped) → "count"
+/// restoreComponents ids               the components back to the document's (a
+/// cancelled edit) → "count"
+/// setMaterial     material, data      project-wide: a material document's fields
+/// drawn in place of the cooked material by every
+/// preview's store, the file untouched → "stores"
+/// restoreMaterial material            the cooked material again → "stores"
 /// resync                              the incremental sync now (a no-op when the
 /// world already matches) → the sync report +
 /// "stats"

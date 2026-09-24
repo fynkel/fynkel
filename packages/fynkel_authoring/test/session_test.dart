@@ -686,6 +686,15 @@ void main() {
     expect(preview.worldMatrices([robot])[robot]![12], m[12]);
     expect(preview.resync().isNoOp, isTrue);
 
+    // The Inspector's live material: the file untouched, bad data refused.
+    const rusted = 'c0000000-0000-4000-8000-000000000020';
+    final rustedFile = File('${dir.path}/assets/materials/rusted.material.json');
+    final rustedBytes = rustedFile.readAsStringSync();
+    preview.setMaterial(rusted, {'shader': 'fynkel.pbr@1', 'metallic': 0.9});
+    expect(rustedFile.readAsStringSync(), rustedBytes);
+    preview.restoreMaterial(rusted);
+    expect(() => preview.setMaterial(rusted, {'metallic': 'shiny'}), throwsA(isA<AuthoringException>()));
+
     // Recook rebuilds the cache and reloads every preview over it; the
     // world pointer stays.
     final address = preview.worldAddress;
