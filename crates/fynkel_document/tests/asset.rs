@@ -290,6 +290,10 @@ type Snapshot = Vec<(String, String, String, Vec<(String, String)>)>;
 
 /// The entries and the resolution of every id, as a full scan sees them.
 fn snapshot(db: &AssetDatabase) -> Snapshot {
+    // The path index agrees with the entries after every update.
+    for e in db.entries() {
+        assert_eq!(db.by_path(&e.path).map(|f| f.id), Some(e.id), "{}", e.path);
+    }
     db.entries()
         .iter()
         .map(|e| {
@@ -348,6 +352,7 @@ fn update_re_reads_only_the_named_files_and_agrees_with_a_full_scan() {
     );
     assert!(diags.is_empty(), "{diags:#?}");
     assert_eq!(db.get(id(ROBOT)).unwrap().path, "models/props/bot.glb");
+    assert!(db.by_path("models/robot.glb").is_none());
     assert_eq!(
         db.resolve(&AssetRef::new(cid(BODY))).unwrap().entry.path,
         "models/props/bot.glb"
@@ -398,6 +403,7 @@ fn update_re_reads_only_the_named_files_and_agrees_with_a_full_scan() {
     let diags = db.update(&[dir.join("textures/rust.png")], &schemas);
     assert!(diags.is_empty(), "{diags:#?}");
     assert_eq!(db.get(id(RUST)).unwrap().path, "textures/copy.png");
+    assert!(db.by_path("textures/rust.png").is_none());
     assert_eq!(snapshot(&db), snapshot(&full(&dir)));
 
     // A whole folder goes: naming the (now missing) directory drops what it held.

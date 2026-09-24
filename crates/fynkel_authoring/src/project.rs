@@ -6,7 +6,7 @@
 //! committed behaviour metadata and the raw schema sources the Inspector
 //! reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
@@ -506,13 +506,15 @@ impl OpenProject {
     /// shader manifests — all of them, or the ones at the given relative
     /// paths (their previous entries dropped first).
     fn index_documents(&mut self, only: Option<&[String]>) {
+        let only: Option<HashSet<&str>> = only.map(|p| p.iter().map(String::as_str).collect());
+        let only = only.as_ref();
         match only {
             None => {
                 self.references.clear();
                 self.shader_docs.clear();
             }
             Some(paths) => {
-                self.references.retain(|r| !paths.contains(&r.path));
+                self.references.retain(|r| !paths.contains(r.path.as_str()));
                 let shader_paths: Vec<Option<String>> = self
                     .shader_docs
                     .iter()
@@ -526,7 +528,7 @@ impl OpenProject {
                 self.shader_docs.retain(|_| {
                     let keep = shader_paths[i]
                         .as_ref()
-                        .is_none_or(|rel| !paths.contains(rel));
+                        .is_none_or(|rel| !paths.contains(rel.as_str()));
                     i += 1;
                     keep
                 });
@@ -541,7 +543,7 @@ impl OpenProject {
                 AssetKind::Document(k) => Some((e.id, e.path.clone(), *k)),
                 AssetKind::Source { .. } => None,
             })
-            .filter(|(_, path, _)| only.is_none_or(|paths| paths.contains(path)))
+            .filter(|(_, path, _)| only.is_none_or(|paths| paths.contains(path.as_str())))
             .collect();
         for (id, path, kind) in entries {
             let Ok(doc) = Document::read(&root.join(&path), Some(kind)) else {

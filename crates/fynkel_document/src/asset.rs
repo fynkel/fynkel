@@ -9,7 +9,7 @@
 //! and "does this `assetRef` resolve". Moving an asset means moving the file
 //! together with its sidecar: the id, and every reference to it, survive.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
@@ -413,6 +413,9 @@ pub struct AssetDatabase {
     /// Sorted by path.
     entries: Vec<AssetEntry>,
     by_id: HashMap<Uuid, usize>,
+    /// Entry path → index, so [`AssetDatabase::by_path`] is not a walk of
+    /// every entry (the editor asks it once per reference on a refresh).
+    by_path: HashMap<String, usize>,
     /// Sub-asset uuid → (entry, sub id).
     subs: HashMap<Uuid, (usize, String)>,
     /// Files a duplicate id kept out (`FYN-A0003`), re-read by
@@ -468,7 +471,7 @@ impl AssetDatabase {
             .canonicalize()
             .unwrap_or_else(|_| self.root.clone());
         let mut files: Vec<PathBuf> = Vec::new();
-        let mut drop_paths: Vec<String> = Vec::new();
+        let mut drop_paths: HashSet<String> = HashSet::new();
         let mut drop_prefixes: Vec<String> = Vec::new();
         for p in paths {
             let abs = if p.is_absolute() {
@@ -493,7 +496,7 @@ impl AssetDatabase {
                 Some(source) => (source, abs.clone()),
                 None => (abs.clone(), sidecar_path(&abs)),
             };
-            drop_paths.push(relative(&root, &source));
+            drop_paths.insert(relative(&root, &source));
             if !abs.exists() {
                 // A directory that is gone reports as a path with no file.
                 drop_prefixes.push(format!("{rel}/"));
@@ -509,7 +512,7 @@ impl AssetDatabase {
         files.sort();
         files.dedup();
         for f in &files {
-            drop_paths.push(relative(
+            drop_paths.insert(relative(
                 &root,
                 &source_path(f).unwrap_or_else(|| f.clone()),
             ));
@@ -532,9 +535,11 @@ impl AssetDatabase {
 
     fn reindex(&mut self) {
         self.by_id.clear();
+        self.by_path.clear();
         self.subs.clear();
         for (i, e) in self.entries.iter().enumerate() {
             self.by_id.insert(e.id, i);
+            self.by_path.insert(e.path.clone(), i);
             for (sub, id) in &e.sub_assets {
                 self.subs.insert(*id, (i, sub.clone()));
             }
@@ -684,6 +689,7 @@ impl AssetDatabase {
                 }
             }
         }
+        self.by_path.insert(entry.path.clone(), index);
         self.entries.push(entry);
     }
 
@@ -719,7 +725,7 @@ impl AssetDatabase {
 
     /// The entry for a path relative to the root (`/`-separated).
     pub fn by_path(&self, path: &str) -> Option<&AssetEntry> {
-        self.entries.iter().find(|e| e.path == path)
+        self.by_path.get(path).map(|i| &self.entries[*i])
     }
 
     /// Resolves a reference: the asset by id, then `sub` against its
