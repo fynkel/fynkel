@@ -808,7 +808,8 @@ next sync).
 - **Queries.** `pick(ray)` — a mesh through its bounding sphere then its
   triangles (two-sided), anything else through a 25 cm sphere
   (`ICON_RADIUS`) at its origin, nearest first, hits mapped to anchors;
-  `pick_rect` — the entities whose projected bounds overlap a rectangle;
+  a hit's `object` stays the entity the ray met (a material drop goes
+  onto it); `pick_rect` — the entities whose projected bounds overlap a rectangle;
   `outline_lines` — twelve edges of a mesh's bounds, a cross for the rest,
   an anchor's whole instance; `icon_lines` — lights in their colour (range
   circles, cone, arrows), cameras (their frustum to `CAMERA_OUTLINE_DEPTH`

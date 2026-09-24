@@ -77,7 +77,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | | Unity | Fynkel |
 |---|---|---|
 | Material Inspector | edit colour, maps, emission (HDR colour + intensity); preview sphere; live in the Scene view | 🔧 `dcd42ba`, `27f122f` (saved at once, live while picking or dragging, ⌘Z in the Inspector); no preview sphere yet; a custom-shader material stays read-only |
-| Drop a material on an object | assigns it | ❌ |
+| Drop a material on an object | assigns it | 🔧 `6203b47`, `b6ee085` (Hierarchy row or Scene view; drawn while hovering; an override inside a prefab instance) |
 | Volume profile Inspector | Add Override, a checkbox per field | ❌ read-only |
 | Model import settings | scale, normals, animation… | 🟡 external files + material remap only; unapplied changes dropped without asking |
 | `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | ❌ local setters only (`localPosition` semantics); read-only world transform |
@@ -152,3 +152,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   clears the Base Map, undoes all four with ⌘Z and redoes one; a second
   test picks a Base Color (live, Cancel writes nothing, OK once). Every
   Inspector slider is live now, a component's included.
+- 2026-09-24: a material dropped on an object (`6203b47` the pick's
+  `object`, `b6ee085`) — the parity tests drop one on the Robot's row, on
+  Crate A's (an override) and on the Sun's (refused), and drag one over
+  the Scene view: the Robot draws with it while hovering, the drop is one
+  undo step.

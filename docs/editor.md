@@ -847,10 +847,20 @@ and for every other kind (`HierarchyModel.canDropAsset`). The **Scene
 view** (item 6) takes the same payload onto its picture — the instance
 lands where the pointer's ray hits (§ The Scene view › Prefab drop).
 
+**A material dropped on an object** (Unity parity, Tier 2, 2026-09-24)
+becomes its MeshRenderer's material: onto a Hierarchy row (the whole row
+lights up; refused on an object without a MeshRenderer), or onto the
+Scene view's picture, where it goes onto the nearest mesh under the
+pointer — inside a prefab instance the child the ray met (the pick's
+`object`). While it hovers over the picture that object draws with it
+(`hoverMaterial` → `setComponents`, nothing written; leaving puts it
+back). The drop is one transaction — `setField`, or a `setField`
+override on the instance for an object a prefab puts there
+(`HierarchyModel.assignMaterial`) — and the selection stays.
+
 What item 5 does **not** do: material preview spheres and mesh
-thumbnails (not in M4), a material editor panel (the session edits
-material fields since item 1 — `setDocumentField` on a material handle —
-but no panel shows them yet; the Inspector's asset page lists them read-only).
+thumbnails (not in M4). The material editor came with the Unity parity
+pass (§ The material Inspector).
 
 ## The Scene view (M4-06)
 
