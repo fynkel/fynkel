@@ -321,3 +321,76 @@ fn codegen_that_fails_puts_the_generated_files_back() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[cfg(unix)]
+#[test]
+fn codegen_watch_reports_each_build_and_puts_the_files_back_when_it_ends() {
+    use std::io::{BufRead, BufReader};
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+    let dir = fresh("codegen-watch");
+    std::fs::create_dir_all(dir.join("lib/generated")).unwrap();
+    std::fs::create_dir_all(dir.join(".dart_tool")).unwrap();
+    std::fs::write(dir.join("pubspec.yaml"), "name: g\n").unwrap();
+    std::fs::write(dir.join(".dart_tool/package_config.json"), "{}").unwrap();
+    // build_runner watch, faked: one good build, then — once `break` exists
+    // — a failed one that deletes the outputs, as build_runner does.
+    let dart = dir.join("fake-dart");
+    std::fs::write(
+        &dart,
+        r#"#!/bin/sh
+echo '// dart' > lib/generated/behaviours.g.dart
+echo '{"behaviours":[{"id":"game.A","schema":{"type":"object"}}]}' > lib/generated/behaviours.g.json
+echo '  Built with build_runner/aot in 1s; wrote 2 outputs.'
+while [ ! -f break ]; do sleep 0.05; done
+echo 'Starting build #2.'
+rm -f lib/generated/behaviours.g.dart lib/generated/behaviours.g.json
+echo 'E fynkel_generator:behaviours on lib/$lib$:'
+echo '  12:3: Expected an identifier.'
+echo '  0s fynkel_generator:behaviours on 1 input: 1 no-op'
+echo '  Failed to build with build_runner/aot in 0s; wrote 0 outputs.'
+while true; do sleep 0.05; done
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&dart, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["codegen", "--watch", "--project", "."])
+        .env("FYNKEL_DART", &dart)
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("run fynkel");
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut next = || -> serde_json::Value {
+        serde_json::from_str(&lines.next().expect("a line").unwrap()).unwrap()
+    };
+    assert_eq!(next()["event"], "building");
+    let built = next();
+    assert_eq!(built["event"], "built");
+    assert_eq!(built["status"], "written");
+    assert_eq!(built["types"], 1);
+    assert!(dir.join("schemas/behaviours/game.A.schema.json").is_file());
+
+    std::fs::write(dir.join("break"), "").unwrap();
+    assert_eq!(next()["event"], "building");
+    let failed = next();
+    assert_eq!(failed["event"], "failed");
+    assert_eq!(
+        failed["error"],
+        "E fynkel_generator:behaviours on lib/$lib$:\n12:3: Expected an identifier."
+    );
+    assert!(!dir.join("lib/generated/behaviours.g.dart").exists());
+
+    // The editor quits: stdin closes, the watch ends, the last good files return.
+    drop(child.stdin.take());
+    assert!(child.wait().unwrap().success());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("lib/generated/behaviours.g.dart")).unwrap(),
+        "// dart\n"
+    );
+    assert!(dir.join("lib/generated/behaviours.g.json").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}
