@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'harness.dart';
 
 const rusted = 'c0000000-0000-4000-8000-000000000020';
+const robot = 'c0000000-0000-4000-8000-0000000000e1';
+const crateA = 'c0000000-0000-4000-8000-0000000000e2';
 
 void main() {
   Future<Editor> onRusted(WidgetTester tester) async {
@@ -93,6 +95,90 @@ void main() {
     expect(scene.document.history, 0, reason: 'the scene had nothing to undo');
     await e.press(LogicalKeyboardKey.keyZ, command: true, shift: true);
     expect(saved(e)['metallic'], 0.8, reason: '⇧⌘Z redoes');
+  });
+
+  /// A second material, Blue, shown in the Project's materials folder.
+  Future<(Editor, String)> withBlue(WidgetTester tester) async {
+    final e = await Editor.open(tester);
+    final blue = e.shell.project!.newDocument('material', 'materials/blue.material.json', name: 'Blue').id!;
+    e.shell.browser!.setFolder('materials');
+    await tester.pumpAndSettle();
+    return (e, blue);
+  }
+
+  Map<String, Object?> entity(Editor e, String id) =>
+      (e.shell.tabs!.focused!.document.root()['entities'] as Map)[id] as Map<String, Object?>;
+
+  Object? robotMaterial(Editor e) => [
+    for (final c in (entity(e, robot)['components'] as Map).values)
+      if ((c as Map)['type'] == 'fynkel.MeshRenderer') (c['data'] as Map)['material'],
+  ].single;
+
+  List<Object?> crateOverrides(Editor e) => [
+    for (final o in ((entity(e, crateA)['prefab'] as Map)['overrides'] as List))
+      if ((o as Map)['field'] == 'material') o['value'],
+  ];
+
+  testWidgets('a material dropped on a Hierarchy row goes onto its MeshRenderer — an override on a prefab instance', (
+    tester,
+  ) async {
+    final (e, blue) = await withBlue(tester);
+    final row = find.byKey(Key('project.asset.$blue'));
+    await e.drag(row, tester.getCenter(e.row('Robot')));
+    expect(robotMaterial(e), {'asset': blue});
+    expect(e.selectedNames, isEmpty, reason: 'the selection stays');
+
+    await e.drag(row, tester.getCenter(e.row('Crate A')));
+    expect(crateOverrides(e), [
+      {'asset': blue},
+    ], reason: 'the instance keeps its prefab, with an override');
+
+    // Not onto something without a renderer: the Sun keeps its components.
+    final sunBefore = entity(e, 'c0000000-0000-4000-8000-0000000000e3');
+    await e.drag(row, tester.getCenter(e.row('Sun')));
+    expect(entity(e, 'c0000000-0000-4000-8000-0000000000e3'), sunBefore);
+    expect(e.shell.tabs!.focused!.document.history, 2);
+  });
+
+  testWidgets('a material dragged over the Scene view draws on the object under the pointer; the drop assigns it', (
+    tester,
+  ) async {
+    final (e, blue) = await withBlue(tester);
+    final sv = e.shell.scene!;
+    await e.click(e.row('Robot'));
+    sv.frameSelected();
+    await tester.pumpAndSettle();
+    final world = sv.current!.preview!;
+    final m = world.worldMatrices([robot])[robot]!;
+    final px = sv.viewProjection!.project([m[12], m[13], m[14]])!;
+    final picture = find.byWidgetPredicate((w) => w.key is GlobalKey && '${w.key}'.contains('scene.picture'));
+    final at = tester.getTopLeft(picture) + Offset(px[0], px[1]);
+
+    Object? drawnMaterial() {
+      final entities = (world.dump()['entities'] as List).cast<Map<String, Object?>>();
+      final comps = (entities.singleWhere((x) => x['id'] == robot)['components'] as List).cast<Map<String, Object?>>();
+      return (comps.singleWhere((c) => c['type'] == 'fynkel.MeshRenderer')['data'] as Map)['material'];
+    }
+
+    // Hovering: drawn with Blue, nothing written.
+    final g = await tester.startGesture(tester.getCenter(find.byKey(Key('project.asset.$blue'))));
+    await tester.pump(const Duration(milliseconds: 50));
+    await g.moveBy(const Offset(20, 0));
+    await tester.pump(const Duration(milliseconds: 50));
+    await g.moveTo(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    await g.moveTo(at + const Offset(1, 0));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect((drawnMaterial() as Map)['asset'], blue, reason: 'the hover preview');
+    expect(robotMaterial(e), {'asset': rusted});
+
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(robotMaterial(e), {'asset': blue});
+    expect(e.shell.tabs!.focused!.document.history, 1, reason: 'one undo step');
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(robotMaterial(e), {'asset': rusted});
+    expect((drawnMaterial() as Map)['asset'], rusted);
   });
 
   testWidgets('the Base Color picker lights the Scene view while picking; Cancel writes nothing, OK writes once', (

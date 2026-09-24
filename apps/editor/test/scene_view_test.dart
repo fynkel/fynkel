@@ -849,7 +849,9 @@ void main() {
       final st = r.open();
       const payload = AssetDragPayload(id: 'prefab-crate', kind: 'prefab', name: 'crate.prefab.json');
       expect(r.model.canDropAsset(payload), isTrue);
-      expect(r.model.canDropAsset(const AssetDragPayload(id: 'm', kind: 'material', name: 'm.material.json')), isFalse);
+      // A material is taken too: it goes onto the object under the pointer (material_parity_test).
+      expect(r.model.canDropAsset(const AssetDragPayload(id: 'm', kind: 'material', name: 'm.material.json')), isTrue);
+      expect(r.model.canDropAsset(const AssetDragPayload(id: 't', kind: 'texture', name: 't.png')), isFalse);
 
       final onCrate = r.model.dropPoint(r.pixelOf('crate'))!;
       expect(onCrate[2], closeTo(0.5, 1e-6), reason: 'the near face of the unit cube');

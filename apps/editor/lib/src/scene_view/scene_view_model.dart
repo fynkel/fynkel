@@ -1765,7 +1765,64 @@ final class SceneViewModel extends ChangeNotifier {
 
   bool canDropAsset(AssetDragPayload d) =>
       hasView &&
-      hierarchy.canDropAsset(d.toRef(), d.kind, DropTarget(parent: null, index: hierarchy.tree?.roots.length ?? 0));
+      (d.kind == 'material'
+          ? hierarchy.canEdit
+          : hierarchy.canDropAsset(d.toRef(), d.kind, DropTarget(parent: null, index: hierarchy.tree?.roots.length ?? 0)));
+
+  // ── Material drop (Unity parity, Tier 2) ─────────────────────────────
+
+  /// The object a material hovering over the picture draws on now.
+  String? materialHover;
+
+  /// The object a material dropped at [px] goes onto: the nearest mesh
+  /// under the pointer — inside a prefab instance, the child the ray met
+  /// — when it has a MeshRenderer; null over anything else.
+  String? materialTargetAt(Offset px) {
+    final t = current;
+    if (t == null || !t.hasPreview || viewportWidth <= 0) return null;
+    final ndc = [px.dx / viewportWidth * 2 - 1, 1 - px.dy / viewportHeight * 2];
+    final hidden = _hiddenAll(t);
+    for (final h in t.preview!.pick(t.camera.toPreview(), aspect, ndc).hits) {
+      if (t.state.locked.contains(h.id) || hidden.contains(h.id)) continue;
+      if (!h.mesh) continue;
+      return hierarchy.canAssignMaterial('material', h.object) ? h.object : null;
+    }
+    return null;
+  }
+
+  /// A material dragged over the picture: the object under [px] draws
+  /// with it, nothing written (Unity's hover preview); null (the drag
+  /// left, or dropped) puts the object back.
+  void hoverMaterial(AssetDragPayload? d, Offset? px) {
+    final t = current;
+    final target = d == null || px == null || d.kind != 'material' ? null : materialTargetAt(px);
+    if (target == materialHover || t == null) return;
+    final before = materialHover;
+    if (before != null) previewComponents(t.tab, _meshRenderer, null, [before]);
+    materialHover = target;
+    final data = target == null ? null : hierarchy.meshRendererOf(target);
+    if (target != null && data != null) {
+      previewComponents(t.tab, _meshRenderer, {
+        target: {...data, 'material': d!.toRef()},
+      }, [target]);
+    }
+    _repaint();
+  }
+
+  /// Drops a material at [px] onto the object under it: one transaction
+  /// (an override inside a prefab instance). False over nothing that
+  /// draws a mesh.
+  bool dropMaterial(AssetDragPayload d, Offset px) {
+    hoverMaterial(null, null);
+    final target = materialTargetAt(px);
+    if (target == null) return false;
+    final ok = hierarchy.assignMaterial(d.toRef(), target);
+    if (ok) notice = null;
+    _repaint();
+    return ok;
+  }
+
+  static const _meshRenderer = 'fynkel.MeshRenderer';
 
   /// Where a drop at [px] lands: the nearest mesh hit, else the ground
   /// plane (y = 0), else 5 m along the ray; snapped when snapping is on.

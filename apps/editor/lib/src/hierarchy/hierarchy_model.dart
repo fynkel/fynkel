@@ -899,6 +899,72 @@ final class HierarchyModel extends ChangeNotifier {
     return true;
   }
 
+  // ── A material dropped on an object (Unity parity, Tier 2) ─────────────
+
+  /// Whether a dragged asset of [kind] dropped on [id] assigns a material:
+  /// a material onto an object with a MeshRenderer, in an editable document.
+  bool canAssignMaterial(String kind, String id) => kind == 'material' && canEdit && _renderer(id) != null;
+
+  /// Unity's material drop: [ref] becomes the material of [id]'s
+  /// MeshRenderer — one `setField`, or an override on the instance when
+  /// the object comes from a prefab. The selection stays.
+  bool assignMaterial(Map<String, Object?> ref, String id) {
+    final r = _renderer(id);
+    if (r == null || !canEdit) return false;
+    final value = {'asset': ref['asset'], if (ref['sub'] is String && (ref['sub'] as String).isNotEmpty) 'sub': ref['sub']};
+    final anchor = r.anchor;
+    final a = _run([
+      anchor == null
+          ? Command.setField(id, r.component, 'material', value)
+          : Command.setPrefabOverrideOp(
+              anchor,
+              prefab.setFieldOverride(entity: r.entityLocal!, component: r.local ?? r.component, data: r.data, path: 'material', value: value),
+            ),
+    ]);
+    return a != null && a.ok;
+  }
+
+  /// [id]'s MeshRenderer data as the object has it (null: none).
+  Map<String, Object?>? meshRendererOf(String id) => _renderer(id)?.data;
+
+  /// [id]'s MeshRenderer: its component id and data, and for an object a
+  /// prefab puts there (an instance or one of its children) the anchor
+  /// and the prefab-local ids its override names.
+  ({String component, Map<String, Object?> data, String? anchor, String? entityLocal, String? local})? _renderer(String id) {
+    final t = _tab;
+    final n = t?.tree[id];
+    if (t == null || n == null) return null;
+    final anchor = n.isDerived ? n.anchor : (n.isPrefabInstance ? id : null);
+    if (anchor != null) {
+      final x = t.expansionOf(anchor);
+      final de = x?.entity(id);
+      if (de == null) return null;
+      for (final c in de.components.entries) {
+        if (c.value.type == _meshRenderer) {
+          return (component: c.key, data: Map<String, Object?>.from(c.value.data), anchor: anchor, entityLocal: de.local, local: c.value.local);
+        }
+      }
+      return null;
+    }
+    final Map<String, Object?>? e;
+    try {
+      e = t.document.entities([id]).entities[id];
+    } on AuthoringException {
+      return null;
+    }
+    final comps = e?['components'];
+    if (comps is! Map) return null;
+    for (final c in comps.entries) {
+      final v = c.value;
+      if (v is Map && v['type'] == _meshRenderer) {
+        return (component: c.key as String, data: v['data'] is Map ? Map<String, Object?>.from(v['data'] as Map) : <String, Object?>{}, anchor: null, entityLocal: null, local: null);
+      }
+    }
+    return null;
+  }
+
+  static const _meshRenderer = 'fynkel.MeshRenderer';
+
   /// Whether [ids] may be dropped at [target]: not onto themselves or
   /// their own descendants; prefab-instance children are not in the document.
   /// Whether the roots can be ordered by a drop: a scene's roots follow the

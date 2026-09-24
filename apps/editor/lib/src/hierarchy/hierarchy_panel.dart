@@ -1025,22 +1025,31 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
 
     if (widget.renaming) return interactive;
 
+    // A material goes onto the object (Unity's material drop), anywhere on the row.
+    _Zone? assetZone(DragTargetDetails<AssetDragPayload> d) {
+      if (d.data.kind == 'material') return model.canAssignMaterial(d.data.kind, row.id) ? _Zone.onto : null;
+      final z = _zoneAt(d.offset);
+      return model.canDropAsset(d.data.toRef(), d.data.kind, _target(z)) ? z : null;
+    }
+
     return DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) {
-        final z = _zoneAt(d.offset);
-        final ok = model.canDropAsset(d.data.toRef(), d.data.kind, _target(z));
-        setState(() => _zone = ok ? z : null);
-        return ok;
+        final z = assetZone(d);
+        setState(() => _zone = z);
+        return z != null;
       },
       onMove: (d) {
-        final z = _zoneAt(d.offset);
-        final next = model.canDropAsset(d.data.toRef(), d.data.kind, _target(z)) ? z : null;
+        final next = assetZone(d);
         if (next != _zone) setState(() => _zone = next);
       },
       onLeave: (_) => setState(() => _zone = null),
       onAcceptWithDetails: (d) {
-        final z = _zoneAt(d.offset);
         setState(() => _zone = null);
+        if (d.data.kind == 'material') {
+          model.assignMaterial(d.data.toRef(), row.id);
+          return;
+        }
+        final z = _zoneAt(d.offset);
         model.instantiatePrefab(d.data.toRef(), name: prefabInstanceName(d.data.name), target: _target(z));
       },
       builder: (context, _, _) => DragTarget<List<String>>(

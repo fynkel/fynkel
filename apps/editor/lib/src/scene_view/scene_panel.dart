@@ -471,15 +471,27 @@ class _ScenePanelState extends State<ScenePanel> {
 
   Widget _view(BuildContext context, ThemeData theme, SceneTab tab) {
     final dpr = MediaQuery.devicePixelRatioOf(context);
+    // `offset` is the pointer: the browsers anchor their drag feedback at
+    // the pointer (`pointerDragAnchorStrategy`).
+    Offset? px(Offset offset) {
+      final box = _pictureKey.currentContext?.findRenderObject() as RenderBox?;
+      return box == null ? null : box.globalToLocal(offset) * dpr;
+    }
+
     return DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) => model.canDropAsset(d.data),
+      onMove: (d) {
+        if (d.data.kind == 'material') model.hoverMaterial(d.data, px(d.offset));
+      },
+      onLeave: (_) => model.hoverMaterial(null, null),
       onAcceptWithDetails: (d) {
-        // `d.offset` is the pointer: the browsers anchor their drag
-        // feedback at the pointer (`pointerDragAnchorStrategy`).
-        final box = _pictureKey.currentContext?.findRenderObject() as RenderBox?;
-        if (box == null) return;
-        final local = box.globalToLocal(d.offset);
-        model.dropPrefab(d.data, local * dpr);
+        final at = px(d.offset);
+        if (at == null) return;
+        if (d.data.kind == 'material') {
+          model.dropMaterial(d.data, at);
+        } else {
+          model.dropPrefab(d.data, at);
+        }
       },
       builder: (context, candidates, _) => LayoutBuilder(
         key: _pictureKey,
