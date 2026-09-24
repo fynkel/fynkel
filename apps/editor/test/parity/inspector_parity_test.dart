@@ -129,4 +129,24 @@ void main() {
     final tab = e.shell.tabs!.focused!;
     expect(tab.document.history, 1, reason: 'one undo step');
   });
+
+  testWidgets('clicking an asset field pings the asset in the Project; the selection stays', (tester) async {
+    final e = await Editor.open(tester);
+    await e.click(e.row('Robot'));
+    const rusted = 'c0000000-0000-4000-8000-000000000020';
+    final material = find.byWidgetPredicate(
+      (w) =>
+          w is Text &&
+          w.key == const ValueKey('asset.name') &&
+          (w.textSpan?.toPlainText() ?? '').toLowerCase().contains('rusted'),
+    );
+    expect(material, findsOneWidget);
+    await e.click(material);
+    final browser = e.shell.browser!;
+    expect(browser.pinged, rusted);
+    expect(browser.selection, isEmpty, reason: 'a ping selects nothing');
+    expect(find.byKey(const Key('project.asset.$rusted')), findsOneWidget, reason: 'its folder is shown');
+    expect(e.selectedNames, ['Robot'], reason: 'the Inspector keeps the object');
+    expect(find.byKey(const ValueKey('assetPicker.search')), findsNothing, reason: 'no picker');
+  });
 }

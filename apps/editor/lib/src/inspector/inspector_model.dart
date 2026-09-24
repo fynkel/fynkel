@@ -269,6 +269,10 @@ final class InspectorModel extends ChangeNotifier {
   /// by the shell); null when no browser is around.
   void Function(String assetId, String? sub)? revealAsset;
 
+  /// Unity's ping: the asset outlined in the Project browser, nothing
+  /// selected (set by the shell).
+  void Function(String assetId)? pingAsset;
+
   /// An asset's picture for the asset slots and their picker (a texture's
   /// pixels, a material's swatch), from the Project browser (wired by the
   /// shell); null draws the kind's icon.

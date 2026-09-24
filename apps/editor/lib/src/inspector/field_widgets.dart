@@ -1461,10 +1461,16 @@ class AssetField extends StatefulWidget {
     this.mixed = false,
     this.nullable = false,
     this.enabled = true,
+    this.onPing,
   });
 
   final Map<String, Object?>? value;
   final String Function(Map<String, Object?>? ref) describe;
+
+  /// A click on the asset's name: Unity's ping (the asset outlined in the
+  /// Project browser). Without it — or with nothing assigned — the click
+  /// opens the picker, as the ⊙ button does.
+  final void Function(String assetId)? onPing;
 
   /// The assets the picker lists (already filtered by [kind]).
   final List<AssetEntry> Function() candidates;
@@ -1645,7 +1651,10 @@ class _AssetFieldState extends State<AssetField> {
                   cursor: widget.enabled ? SystemMouseCursors.click : MouseCursor.defer,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: widget.enabled ? _pick : null,
+                    onTap: switch ((widget.onPing, value?['asset'], widget.mixed)) {
+                      (final ping?, final String id, false) => () => ping(id),
+                      _ => widget.enabled ? _pick : null,
+                    },
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: Text.rich(

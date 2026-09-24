@@ -70,6 +70,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
   final _listFocus = FocusNode(debugLabel: 'project.list');
   int _seenSearchRequests = 0;
   DeleteRefusal? _shownRefusal;
+  final _listScroll = ScrollController();
+  int _seenScrollRequests = 0;
   List<String>? _shownConfirm;
   TextEditingController? _rename;
   String? _renameTarget;
@@ -101,6 +103,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     _search.dispose();
     if (_ownSearchFocus) _searchFocus.dispose();
     _listFocus.dispose();
+    _listScroll.dispose();
     _rename?.dispose();
     super.dispose();
   }
@@ -112,6 +115,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _searchFocus.requestFocus());
     }
     if (_search.text != model.query) _search.text = model.query;
+    if (model.scrollRequests != _seenScrollRequests) {
+      _seenScrollRequests = model.scrollRequests;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToShown());
+    }
     final refusal = model.pendingDelete;
     if (refusal != null && !identical(refusal, _shownRefusal)) {
       _shownRefusal = refusal;
@@ -142,6 +149,20 @@ class _ProjectPanelState extends State<ProjectPanel> {
       }
     }
     setState(() {});
+  }
+
+  /// The pinged asset (else the lead) scrolled into the list's view.
+  void _scrollToShown() {
+    if (!mounted || !_listScroll.hasClients) return;
+    final id = model.pinged ?? model.lead;
+    final i = model.visibleAssets.indexWhere((e) => e.id == id);
+    if (i < 0) return;
+    final row = projectRowHeight(context);
+    final top = (model.visibleFolders.length + i) * row;
+    final pos = _listScroll.position;
+    if (top < pos.pixels || top + row > pos.pixels + pos.viewportDimension) {
+      _listScroll.jumpTo((top - pos.viewportDimension / 2 + row / 2).clamp(0, pos.maxScrollExtent));
+    }
   }
 
   // ── Actions ───────────────────────────────────────────────────────────
@@ -700,6 +721,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
               )
             : ListView.builder(
                 key: const Key('project.list'),
+                controller: _listScroll,
                 itemCount: folders.length + assets.length,
                 itemExtent: projectRowHeight(context),
                 itemBuilder: (context, i) => i < folders.length
@@ -1127,6 +1149,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       entry: e,
       selected: model.isSelected(e.id),
       lead: model.lead == e.id,
+      pinged: model.pinged == e.id,
       showPath: model.view == BrowserView.list || model.filtering,
       columns: columns,
       renaming: renaming,
@@ -1360,6 +1383,7 @@ class _AssetRow extends StatelessWidget {
     required this.entry,
     required this.selected,
     required this.lead,
+    this.pinged = false,
     required this.showPath,
     required this.columns,
     required this.renaming,
@@ -1380,6 +1404,9 @@ class _AssetRow extends StatelessWidget {
   final AssetEntry entry;
   final bool selected;
   final bool lead;
+
+  /// Outlined by a ping (an asset field clicked in the Inspector).
+  final bool pinged;
   final bool showPath;
 
   /// Contents and Size too (a wide enough panel).
@@ -1408,7 +1435,10 @@ class _AssetRow extends StatelessWidget {
     final content = Container(
       height: projectRowHeight(context),
       padding: const EdgeInsets.only(left: 6),
-      color: selected ? (lead ? fill : t.surfaceOf(fill, .7)) : null,
+      decoration: BoxDecoration(
+        color: selected ? (lead ? fill : t.surfaceOf(fill, .7)) : (pinged ? t.surfaceOf(t.accent, .18) : null),
+        border: pinged ? Border.all(color: t.accent, width: 1.5) : null,
+      ),
       child: Row(
         children: [
           AssetPreviewWidget(preview: model.preview(e), size: t.row - 2),

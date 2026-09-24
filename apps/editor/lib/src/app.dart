@@ -2269,6 +2269,16 @@ class EditorShellState extends State<EditorShell> {
     _browsers[id]?.reveal(assetId);
   }
 
+  /// Unity's ping from an asset field: the asset outlined in the Project
+  /// browser (the copy [revealInProject] would use), nothing selected.
+  void pingInProject(String assetId) {
+    final ws = workspace;
+    if (ws == null) return;
+    final id = _unlockedCopy(PanelRegistry.project);
+    ws.show(id);
+    _browsers[id]?.ping(assetId);
+  }
+
   /// The copy of [base] an explicit request goes to: the one used last that
   /// is not locked, shown if hidden; else a new copy.
   String _unlockedCopy(String base) {
@@ -2508,6 +2518,7 @@ class EditorShellState extends State<EditorShell> {
       case PanelRegistry.inspector:
         final ins = InspectorModel(tabs: t, project: opened, codegen: codegen!, openInIde: ide.open);
         ins.revealAsset = (asset, sub) => revealInProject(asset);
+        ins.pingAsset = pingInProject;
         // A Transform value dragged in the Inspector moves in every Scene view.
         ins.previewTransforms = (tab, locals, ids) {
           for (final sv in _scenes.values) {

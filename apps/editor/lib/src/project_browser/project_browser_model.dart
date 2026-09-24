@@ -373,6 +373,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
 
   void select(String id, {bool toggle = false, bool range = false}) {
     _sync();
+    pinged = null;
     if (!_byId.containsKey(id)) return;
     if (range && lead != null) {
       final rows = visibleAssets.map((e) => e.id).toList();
@@ -405,6 +406,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   }
 
   void clearSelection() {
+    pinged = null;
     if (selection.isEmpty && lead == null) return;
     selection.clear();
     lead = null;
@@ -440,7 +442,26 @@ final class ProjectBrowserModel extends ChangeNotifier {
     inScripts = false;
     if (view == BrowserView.folders && !filtering) folder = _folderOf(e);
     select(id);
+    scrollRequests++;
   }
+
+  /// Unity's ping: [id] shown in its folder and outlined, the selection
+  /// (and so the Inspector) left alone; the next click clears it.
+  void ping(String id) {
+    final e = entry(id);
+    if (e == null) return;
+    inScripts = false;
+    if (view == BrowserView.folders && !filtering) folder = _folderOf(e);
+    pinged = id;
+    scrollRequests++;
+    notifyListeners();
+  }
+
+  /// The asset [ping] outlined, until the next selection change.
+  String? pinged;
+
+  /// Bumped when the panel should scroll [pinged] or the lead into view.
+  int scrollRequests = 0;
 
   // ── The padlock (item 9e) ────────────────────────────────────────────
 

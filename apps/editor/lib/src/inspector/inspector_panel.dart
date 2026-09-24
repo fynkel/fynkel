@@ -1153,6 +1153,7 @@ class _FieldEditor extends StatelessWidget {
               final preview? => (e, size) => AssetPreviewWidget(preview: preview(e), size: size),
               null => null,
             },
+            onPing: model.pingAsset,
             onCommit: _commit,
           ),
         );
