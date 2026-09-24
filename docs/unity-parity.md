@@ -82,7 +82,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Model import settings | scale, normals, animation… | 🔧 `41190a1`, `c3e7d3e` (Scale Factor, Normals Import / Calculate + Smoothing Angle, Import Animation; leaving with unapplied settings asks Apply / Revert); 🟡 no Rig or Animation tab beyond that (clips are split by the rig document), no mesh compression / read-write / lightmap UVs |
 | `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | 🔧 `2e0183f` (`position` / `rotation` are world, `localPosition` / `localRotation` / `localScale`, `translate` / `rotate` / `rotateAround` / `lookAt` with `Space.self` / `Space.world`, `forward` / `right` / `up`, `eulerAngles` in degrees, `transformPoint` and friends); 🟡 Euler order is the Inspector's X-then-Y-then-Z, not Unity's Z-X-Y |
 | One script throwing | only that script stops | 🔧 `faf648d` (every callback on its own; the Console gets the message and the stack; called again next frame) |
-| Coroutines / `Invoke` | | ❌ |
+| Coroutines / `Invoke` | | 🔧 `b92178e` (`startCoroutine` over a `sync*` generator; `WaitForSeconds`, `WaitUntil`, `WaitWhile`, `WaitForFixedUpdate`, nested routines; `invoke`, `invokeRepeating`, `cancelInvoke`; Unity's lifetimes) |
 | `Input.GetKey` | raw keys | ❌ declared actions only; an undeclared one reads false silently |
 | `Debug.Log` | Console, click to the line | 🟡 info only, no source link; `print` not captured |
 | Inspector fields | public fields; GameObject/component/colour/enum references | 🟡 `@Expose` only; no object references, enums or colours |
@@ -189,3 +189,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   leaves the behaviours before and after it running every frame, a
   throwing `onCreate` / `start` is reported once, and the channel record
   carries the message and the stack.
+- 2026-09-24: coroutines and Invoke (`b92178e`) —
+  `packages/fynkel/test/coroutine_test.dart` checks where a coroutine runs
+  in the frame (after `update`, before `lateUpdate`), each wait's frame,
+  `invokeRepeating`'s calls, and that a disabled behaviour keeps its
+  routines while an inactive object or a destroyed behaviour stops them.
