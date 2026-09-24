@@ -85,7 +85,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Coroutines / `Invoke` | | 🔧 `b92178e` (`startCoroutine` over a `sync*` generator; `WaitForSeconds`, `WaitUntil`, `WaitWhile`, `WaitForFixedUpdate`, nested routines; `invoke`, `invokeRepeating`, `cancelInvoke`; Unity's lifetimes) |
 | `Input.GetKey` | raw keys | 🔧 `6b25b52` (ADR-0024: `getKey` / `getKeyDown` / `getKeyUp`, `getMouseButton…`, `anyKey`, with the actions' tick rules; an undeclared action warns once in the Console) |
 | `Debug.Log` | Console, click to the line | 🔧 `9bdf3d6` (`Debug.log` / `logWarning` / `logError` / `logException` with the caller's stack: the row shows the line, ↩ opens it; `print` in game code is a Console row) |
-| Inspector fields | public fields; GameObject/component/colour/enum references | 🟡 `@Expose` only; no object references, enums or colours |
+| Inspector fields | public fields; GameObject/component/colour/enum references | 🔧 `46c091a`, `de1de2c`, `962d30a` (ADR-0018 amended: `GameObject?` and script-typed fields — `None (Type)`, drop a Hierarchy row, ⊙, ×, `Missing` — resolved at load whatever the attach order, a prefab instance's to its own copies; Dart enums as a dropdown; colours were already `@Expose(kind: 'color')`); 🟡 fields still need `@Expose` (no implicit public fields), no asset-typed fields beyond `AssetRef`, no `List` of references |
 | A failed hot reload | blocks Play, errors in the Console | 🟡 a toast; old code keeps running |
 | Drag a script onto an object | adds it | ❌ |
 
@@ -205,3 +205,15 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   the channel into the Game tab: each at its level, the warning located at
   its calling line, ↩ opening that line; `packages/fynkel/test/debug_log_test.dart`
   covers every level from a behaviour.
+- 2026-09-24: object fields and enums (`46c091a` crates, `de1de2c` SDK +
+  generator, `962d30a` editor; ADR-0018 amended) —
+  `object_field_parity_test.dart` drops Hierarchy rows on a Turret's
+  `GameObject` and `Spinner` fields (the crate without a Spinner is
+  refused), saves `{entity}` / `{entity, component}`, undoes one, picks
+  through ⊙ (only the Robot has a Spinner), clears with ×, and shows
+  `Missing` after the target is deleted;
+  `packages/fynkel/test/object_fields_test.dart` loads such a scene over
+  the real library (the script attached after the one referencing it
+  still resolves; a gone target is None with `FYN-B0003`) and
+  instantiates a prefab twice (each reaches its own child); the prefab
+  expansion test checks the derived component id.

@@ -52,6 +52,34 @@ a field no schema has). The `asset(<kind>)` kinds grew `clip`, `skin` and
 `rig` (the sub-asset kinds the importers produce) beyond the six listed
 above.
 
+## Amendment (2026-09-24, Unity parity pass): object fields and enums
+
+Under the parity pass's standing rule ("default to Unity's concepts"; not
+yet confirmed by the user), `@Expose` takes three more field types, so a
+script's Inspector has Unity's object field and enum dropdown:
+
+- **A Dart `enum`** (`type: enum`): stored as the value's name, the
+  schema's `enum` lists the names, the Inspector draws its dropdown.
+- **`GameObject?`** (`type: gameObject`): stored as `{ "entity": id }`.
+- **A `@FynkelBehaviour` class, nullable** (`type: behaviour`,
+  `x-fynkel.behaviour: <type id>`): stored as `{ "entity": id,
+  "component": id }`, that script on that object.
+
+A reference must be nullable: it is None until one is picked and again
+when its object is deleted. The Inspector shows `None (Type)`, the
+object's name, or `Missing (Type)` for an id no longer in the document
+(kept in the file, as Unity keeps it). A Hierarchy row dropped on the
+field assigns it (a script field refuses an object without that script);
+⊙ lists the candidates; × clears. At runtime the world resolves the
+references after every behaviour of a load is attached, against that
+load (the native report maps each referenced authoring id to its spawned
+handle), so the order scripts attach in does not matter and a prefab
+instance's references reach its own copies; prefab expansion derives
+the component ids inside component data as it already derived the entity
+ids. A target that is gone leaves the field null with the load warning
+`FYN-B0003`. The older `kind: 'entity'` hint (a `String` holding a name)
+stays for the `lineTo` gizmo and existing data.
+
 ## Consequences
 
 - Adding a display hint is one annotation plus regeneration; a project's Inspector is fully described in a committed JSON file that agents can read and write.
