@@ -43,6 +43,7 @@ use fynkel_core::animation::{
 };
 use fynkel_core::input::{ActionKind, ActionSpec};
 pub use fynkel_core::material::PbrMaterial;
+use fynkel_core::physics::PhysicsMaterial;
 use fynkel_core::volume::VolumeProfile;
 use fynkel_core::AudioClip;
 use fynkel_core::SceneDescription;
@@ -347,6 +348,7 @@ struct Store {
     clips: HashMap<AssetRef, Arc<Clip>>,
     blends: HashMap<AssetRef, Arc<BlendSpace>>,
     volumes: HashMap<AssetRef, VolumeProfile>,
+    physics_materials: HashMap<AssetRef, PhysicsMaterial>,
     skins: HashMap<AssetRef, Arc<Skin>>,
     sounds: HashMap<AssetRef, Arc<AudioClip>>,
     /// Residency counts by asset id (`retain` increments, release
@@ -421,6 +423,7 @@ impl Assets {
                 clips: HashMap::new(),
                 blends: HashMap::new(),
                 volumes: HashMap::new(),
+                physics_materials: HashMap::new(),
                 skins: HashMap::new(),
                 sounds: HashMap::new(),
                 counts: HashMap::new(),
@@ -552,6 +555,12 @@ impl Assets {
     /// (the store's, or the adapter's reason as `FYN-R0007`) and the
     /// collider is skipped at the step
     /// (`MESH_UNAVAILABLE`).
+    ///
+    /// Every collider's physics material (ADR-0025) is registered too,
+    /// read from the store each time — so a reload after the document was
+    /// edited and recooked gives the live colliders its new values. One
+    /// that cannot be read is a diagnostic (the store's) and the collider
+    /// keeps its own friction and restitution.
     pub fn register_mesh_colliders(
         &self,
         scene: &SceneDescription,
@@ -562,11 +571,28 @@ impl Assets {
         let mut registered = 0;
         let mut diags = Vec::new();
         let mut seen = HashSet::new();
+        let mut seen_materials = HashSet::new();
         for e in &scene.entities {
             for c in &e.components {
                 let ComponentValue::Collider(c) = c else {
                     continue;
                 };
+                if let Some(key) = c.material.as_ref().filter(|k| !k.asset.is_nil()) {
+                    if seen_materials.insert(key.clone()) {
+                        match self.physics_material(key).and_then(|m| {
+                            physics.register_material(key.clone(), m).map_err(|msg| {
+                                Diagnostic::error(
+                                    Code::RUNTIME_PAYLOAD_MALFORMED,
+                                    format!("physics material {key}: {msg}"),
+                                )
+                                .with_id(key.to_string())
+                            })
+                        }) {
+                            Ok(()) => {}
+                            Err(d) => diags.push(d),
+                        }
+                    }
+                }
                 if c.shape != ColliderShape::Mesh {
                     continue;
                 }
@@ -819,6 +845,7 @@ impl Assets {
         s.clips.retain(|r, _| !gone.contains(&r.asset));
         s.blends.retain(|r, _| !gone.contains(&r.asset));
         s.volumes.retain(|r, _| !gone.contains(&r.asset));
+        s.physics_materials.retain(|r, _| !gone.contains(&r.asset));
         s.skins.retain(|r, _| !gone.contains(&r.asset));
         s.sounds.retain(|r, _| !gone.contains(&r.asset));
         s.metas.retain(|id, _| !gone.contains(id));
@@ -835,6 +862,7 @@ impl Assets {
         s.clips.clear();
         s.blends.clear();
         s.volumes.clear();
+        s.physics_materials.clear();
         s.skins.clear();
         s.metas.clear();
         s.evictions += 1;
@@ -1093,6 +1121,48 @@ impl Assets {
         let profile = volume.profile;
         self.lock().volumes.insert(r.clone(), profile);
         Ok(profile)
+    }
+
+    /// The cooked physics material (ADR-0025: the document's JSON chunk)
+    /// as physics' `PhysicsMaterial`. The cook checked the document
+    /// against the schema, so this only reads it.
+    pub fn physics_material(&self, r: &AssetRef) -> Result<PhysicsMaterial, Diagnostic> {
+        if let Some(m) = self.lock().physics_materials.get(r) {
+            return Ok(*m);
+        }
+        let (entry, meta) = {
+            let mut s = self.lock();
+            let entry = s
+                .index
+                .object(r.asset)
+                .map_err(|d| d.with_pointer(r.sub.clone()))?
+                .clone();
+            let meta = s.meta(&entry)?;
+            (entry, meta)
+        };
+        if entry.kind != "document/physics_material" || !r.sub.is_empty() {
+            return Err(Diagnostic::error(
+                Code::RUNTIME_CHUNK_MISSING,
+                format!(
+                    "{}: {r} is a {} asset, not a physics material",
+                    entry.path, entry.kind
+                ),
+            )
+            .with_id(r.asset.to_string()));
+        }
+        let bytes = self.read_chunk(&entry, &meta, KIND_JSON, "")?;
+        let text = String::from_utf8(bytes).map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let doc = Document::parse(DocumentKind::PhysicsMaterial, Some(&entry.path), &text)
+            .map_err(|_| self.malformed_entry(&entry, "JSON"))?;
+        let view = fynkel_document::PhysicsMaterialDocument::from_document(doc);
+        if let Some(d) = view.read_diagnostics().first() {
+            let mut m = self.malformed_entry(&entry, "JSON");
+            m.message = format!("{}: {}", m.message, d.message);
+            return Err(m);
+        }
+        let material = view.material;
+        self.lock().physics_materials.insert(r.clone(), material);
+        Ok(material)
     }
 
     /// The cooked skin (a `SKIN` chunk, `skin/<s>`) as the core's `Skin`,

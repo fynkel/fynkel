@@ -256,6 +256,32 @@ fn new_documents_are_valid_named_after_their_file_and_undo_removes_them() {
     )
     .unwrap();
     assert_eq!(look.envelope.name, "look");
+    // A physics material (Unity's Create → Physics Material, ADR-0025),
+    // Unity's default material spelled out.
+    let v = ok(s.operate(
+        "newDocument",
+        &json!({ "kind": "physics_material", "path": "physics/ice" }),
+    ));
+    assert_eq!(v["entry"]["document"], "physics_material");
+    assert_eq!(v["label"], "New physics_material ice.physicsmaterial.json");
+    let ice = Document::read(
+        &copy.path("assets/physics/ice.physicsmaterial.json"),
+        Some(DocumentKind::PhysicsMaterial),
+    )
+    .unwrap();
+    assert_eq!(ice.envelope.name, "ice");
+    assert_eq!(
+        fynkel_document::PhysicsMaterialDocument::from_document(ice).material,
+        fynkel_core::physics::PhysicsMaterial::default()
+    );
+    let d = refused(
+        s.operate(
+            "newDocument",
+            &json!({ "kind": "physics_material", "path": "physics/ice.material.json" }),
+        ),
+        "FYN-T0003",
+    );
+    assert!(d.message.contains("material document"), "{}", d.message);
     assert_clean(&s);
 }
 

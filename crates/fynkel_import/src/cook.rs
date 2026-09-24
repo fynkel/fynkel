@@ -1061,6 +1061,17 @@ fn cook_one(
                     return None;
                 }
             }
+            // A physics material (ADR-0025) likewise, for the physics
+            // world to read at load.
+            if doc.kind == DocumentKind::PhysicsMaterial {
+                let material = fynkel_document::PhysicsMaterialDocument::from_document(doc.clone());
+                let checked = material.validate(schemas);
+                let bad = has_errors(&checked);
+                diagnostics.extend(checked);
+                if bad {
+                    return None;
+                }
+            }
             chunks.push(ChunkPlan {
                 kind: KIND_JSON,
                 name: entry.name.clone(),

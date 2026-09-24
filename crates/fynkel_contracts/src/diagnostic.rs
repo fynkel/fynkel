@@ -106,6 +106,11 @@ impl Code {
     /// A field the schema accepts but the renderer cannot use (a value
     /// that is not a finite number, a block that is not an object).
     pub const VOLUME_MALFORMED_ENTRY: Code = Code("FYN-D0700");
+    // Documents (FYN-D): physics materials (ADR-0025;
+    // `fynkel_document::physics_material`).
+    /// A field the schema accepts but physics cannot use (a value that is
+    /// not a finite number, a combine rule that is not one of the four).
+    pub const PHYSICS_MATERIAL_MALFORMED_ENTRY: Code = Code("FYN-D0800");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
 

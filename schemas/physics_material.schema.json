@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/physics_material.schema.json",
+  "title": "Fynkel physics material",
+  "description": "`<name>.physicsmaterial.json` (ADR-0025, `docs/physics.md` § Physics materials): the friction and bounciness every `fynkel.Collider` whose `material` names this document collides with, and how they combine with the other collider's — Unity's Physics Material. Every field is optional; an absent one takes Unity's default. A collider without a material uses its own `friction` and `restitution`, averaged.",
+  "type": "object",
+  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "properties": {
+    "friction": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.6,
+      "description": "The Coulomb friction coefficient, static and sliding alike (Rapier has one): 0 is ice, 1 is rubber on concrete."
+    },
+    "bounciness": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 0,
+      "description": "Restitution: 0 stops dead on impact, 1 bounces back as fast as it came."
+    },
+    "friction_combine": {
+      "$ref": "#/$defs/combine",
+      "description": "How this friction and the other collider's become the contact's."
+    },
+    "bounce_combine": {
+      "$ref": "#/$defs/combine",
+      "description": "How this bounciness and the other collider's (its material's, or its own `restitution`) become the contact's."
+    }
+  },
+  "$defs": {
+    "combine": {
+      "type": "string",
+      "enum": ["average", "minimum", "multiply", "maximum"],
+      "default": "average",
+      "description": "`average` (a + b) / 2, `minimum` min(a, b), `multiply` a × b, `maximum` max(a, b). When the two colliders' rules differ, the later one in this list wins (a collider without a material averages)."
+    }
+  },
+  "patternProperties": { "^x-": true },
+  "unevaluatedProperties": false
+}

@@ -89,9 +89,14 @@ pub struct Collider {
     pub mesh: Option<AssetRef>,
     /// Local translation of the shape from the entity's origin, metres.
     pub offset: Vec3,
-    /// Coulomb friction coefficient, `>= 0` (0.5 is rubber on concrete).
+    /// A `.physicsmaterial.json` (ADR-0025): its friction, bounciness and
+    /// combine rules replace `friction` and `restitution`. None: those two
+    /// apply, averaged with the other collider's.
+    pub material: Option<AssetRef>,
+    /// Coulomb friction coefficient, `>= 0` (0.5 is rubber on concrete);
+    /// ignored when `material` names one.
     pub friction: f32,
-    /// Bounciness `0..=1`.
+    /// Bounciness `0..=1`; ignored when `material` names one.
     pub restitution: f32,
     /// A sensor reports trigger events and applies no forces.
     pub is_sensor: bool,
@@ -108,6 +113,7 @@ impl Default for Collider {
             size: Vec3::splat(0.5),
             mesh: None,
             offset: Vec3::ZERO,
+            material: None,
             friction: 0.5,
             restitution: 0.0,
             is_sensor: false,
@@ -372,17 +378,20 @@ mod tests {
         assert_eq!(RigidBody::SCHEMA.offsets(), vec![0, 4, 8, 12, 16, 20]);
         assert_eq!(RigidBody::SCHEMA.wire_size(), 24);
         assert_eq!(Collider::SCHEMA.id, 11);
-        // shape @0, size 12 @4, mesh 24 @16, offset 12 @40, friction @52,
-        // restitution @56, is_sensor @60, mask @64 → 72.
+        // shape @0, size 12 @4, mesh 24 @16, offset 12 @40, material 24
+        // @56 (ADR-0025; an asset ref aligns to 8), friction @80,
+        // restitution @84, is_sensor @88, mask @92 → 96.
         assert_eq!(
             Collider::SCHEMA.offsets(),
-            vec![0, 4, 16, 40, 52, 56, 60, 64]
+            vec![0, 4, 16, 40, 56, 80, 84, 88, 92]
         );
-        assert_eq!(Collider::SCHEMA.wire_size(), 72);
-        assert!(matches!(
-            Collider::SCHEMA.fields[2].ty,
-            FieldType::OptionalAssetRef
-        ));
+        assert_eq!(Collider::SCHEMA.wire_size(), 96);
+        for i in [2, 4] {
+            assert!(matches!(
+                Collider::SCHEMA.fields[i].ty,
+                FieldType::OptionalAssetRef
+            ));
+        }
         assert_eq!(BodyType::ENUM.variants, &["static", "dynamic", "kinematic"]);
         assert_eq!(
             ColliderShape::ENUM.variants,

@@ -27,6 +27,7 @@ pub mod json;
 pub mod material;
 pub mod migrate;
 pub mod one_root;
+pub mod physics_material;
 pub mod prefab;
 pub mod project;
 pub mod rig;
@@ -49,6 +50,7 @@ pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
 pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
 pub use migrate::{migrate, migrate_with, Migrated, Migration, Migrations, Rewrite};
+pub use physics_material::PhysicsMaterialDocument;
 pub use prefab::{expand, Expanded, Prefab, PrefabLibrary};
 pub use project::{
     validate_project, validate_project_with, Lock, NoSourcePrefabs, Project, ProjectReport,
@@ -76,10 +78,13 @@ pub enum DocumentKind {
     Blend,
     /// `.volume.json`: a post-processing profile (R3a).
     Volume,
+    /// `.physicsmaterial.json`: friction and bounciness colliders share
+    /// (ADR-0025).
+    PhysicsMaterial,
 }
 
 impl DocumentKind {
-    pub const ALL: [DocumentKind; 9] = [
+    pub const ALL: [DocumentKind; 10] = [
         DocumentKind::Scene,
         DocumentKind::Prefab,
         DocumentKind::Material,
@@ -89,6 +94,7 @@ impl DocumentKind {
         DocumentKind::Rig,
         DocumentKind::Blend,
         DocumentKind::Volume,
+        DocumentKind::PhysicsMaterial,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -102,6 +108,7 @@ impl DocumentKind {
             DocumentKind::Rig => "rig",
             DocumentKind::Blend => "blend",
             DocumentKind::Volume => "volume",
+            DocumentKind::PhysicsMaterial => "physics_material",
         }
     }
 
@@ -117,6 +124,7 @@ impl DocumentKind {
             DocumentKind::Rig => ".rig.json",
             DocumentKind::Blend => ".blend.json",
             DocumentKind::Volume => ".volume.json",
+            DocumentKind::PhysicsMaterial => ".physicsmaterial.json",
         }
     }
 
@@ -290,6 +298,23 @@ impl Document {
                             ])),
                         ),
                     ]),
+                ));
+            }
+            DocumentKind::PhysicsMaterial => {
+                // Unity's default material, spelled out (every field is
+                // optional; an absent one takes the same default).
+                let m = fynkel_physics::PhysicsMaterial::default();
+                // The f32's shortest text, so the file reads 0.6.
+                let short = |v: f32| Node::float(v.to_string().parse().unwrap_or(v as f64));
+                members.push(("friction".into(), short(m.friction)));
+                members.push(("bounciness".into(), short(m.bounciness)));
+                members.push((
+                    "friction_combine".into(),
+                    Node::string(m.friction_combine.name()),
+                ));
+                members.push((
+                    "bounce_combine".into(),
+                    Node::string(m.bounce_combine.name()),
                 ));
             }
             _ => {}

@@ -232,7 +232,8 @@ FynkelStatus fynkel_authoring_query(FynkelAuthoringSession* session,
  * on the session's asset history, an undo/redo stack of its own (a
  * document's undo never moves a file). Paths are relative to the asset
  * root (or absolute inside it). `args_json_utf8` is a JSON object.
- *   newDocument        kind, path, name?, shader?   a scene, prefab, material or volume
+ *   newDocument        kind, path, name?, shader?   a scene, prefab, material, volume
+ *                                                  or physics_material
  *                                                  as `Document::new` (kind's suffix
  *                                                  added when missing; name defaults to the
  *                                                  file's stem; a material's shader

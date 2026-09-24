@@ -36,6 +36,7 @@
 //! state beyond Rapier's own working sets.
 
 pub mod components;
+pub mod material;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Mutex;
@@ -53,6 +54,7 @@ use rapier3d::prelude::*;
 
 pub use components::{BodyType, CharacterController, Collider, ColliderShape, RigidBody};
 pub use glam::{Quat, Vec3};
+pub use material::{CombineRule, PhysicsMaterial};
 
 /// How far below a character's skin the ground may be for it to count as
 /// grounded, metres.
@@ -176,6 +178,10 @@ pub enum RejectionKind {
     /// A `CharacterController` next to a `RigidBody` or `Collider`: the
     /// character's own capsule is used and they are ignored.
     CharacterWithBody,
+    /// A collider naming a physics material that is not registered (not
+    /// cooked, or not a physics material): the collider's own `friction`
+    /// and `restitution` apply until it is (ADR-0025).
+    MaterialUnavailable,
 }
 
 /// A rejected body command (`index` is the command's batch index) or a
@@ -375,6 +381,8 @@ pub struct Physics {
     by_collider: HashMap<ColliderHandle, Entity>,
     retired: Vec<ColliderHandle>,
     meshes: HashMap<AssetRef, (Vec<Vec3>, Vec<[u32; 3]>)>,
+    /// Physics materials by reference (ADR-0025), registered by the loader.
+    materials: HashMap<AssetRef, PhysicsMaterial>,
     pending: Vec<(u32, Entity, BodyCommand)>,
     /// Root motion the animators extracted this tick (M3-19c): a world
     /// velocity added to the character's `Move` at the step.
@@ -409,6 +417,7 @@ impl Physics {
             by_collider: HashMap::new(),
             retired: Vec::new(),
             meshes: HashMap::new(),
+            materials: HashMap::new(),
             pending: Vec::new(),
             root_motion: Vec::new(),
             rejections: Vec::new(),
@@ -470,6 +479,79 @@ impl Physics {
 
     pub fn mesh_count(&self) -> usize {
         self.meshes.len()
+    }
+
+    /// Makes a physics material available to the colliders naming `key`
+    /// (ADR-0025). Registering new values for a key already in use (the
+    /// document was edited and recooked, the scene reloaded) applies them
+    /// to every live collider that names it — no rebuild, velocities kept.
+    /// Refused (with the reason) when a value is out of range.
+    pub fn register_material(
+        &mut self,
+        key: AssetRef,
+        material: PhysicsMaterial,
+    ) -> Result<(), String> {
+        material.validate()?;
+        if self.materials.get(&key) == Some(&material) {
+            return Ok(());
+        }
+        self.materials.insert(key.clone(), material);
+        for entry in self.entries.values() {
+            if entry.character.is_some()
+                || entry.shape.as_ref().and_then(|s| s.material.as_ref()) != Some(&key)
+            {
+                continue;
+            }
+            let Some(h) = entry.collider else { continue };
+            let Some(c) = self.world.colliders.get_mut(h) else {
+                continue;
+            };
+            c.set_friction(material.friction);
+            c.set_restitution(material.bounciness);
+            c.set_friction_combine_rule(material.friction_combine.rapier());
+            c.set_restitution_combine_rule(material.bounce_combine.rapier());
+            if let Some(b) = entry.body.and_then(|b| self.world.bodies.get_mut(b)) {
+                b.wake_up(true);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn has_material(&self, key: &AssetRef) -> bool {
+        self.materials.contains_key(key)
+    }
+
+    /// The registered values of `key`.
+    pub fn material(&self, key: &AssetRef) -> Option<PhysicsMaterial> {
+        self.materials.get(key).copied()
+    }
+
+    pub fn material_count(&self) -> usize {
+        self.materials.len()
+    }
+
+    /// What a collider touches with: its material's values and rules, or
+    /// without one its own `friction`/`restitution`, averaged (Rapier's
+    /// and Unity's default). `Err` carries the fallback and the reason
+    /// when the named material is not registered.
+    fn surface(&self, c: &Collider) -> Result<PhysicsMaterial, (PhysicsMaterial, String)> {
+        let own = PhysicsMaterial {
+            friction: c.friction,
+            bounciness: c.restitution,
+            friction_combine: CombineRule::Average,
+            bounce_combine: CombineRule::Average,
+        };
+        match &c.material {
+            None => Ok(own),
+            Some(key) => self.materials.get(key).copied().ok_or_else(|| {
+                (
+                    own,
+                    format!(
+                        "physics material {key} is not registered (not cooked, or not a physics material): the collider's own friction and restitution apply"
+                    ),
+                )
+            }),
+        }
     }
 
     /// Queues a body command for the next [`Physics::step`] (after the
@@ -876,9 +958,26 @@ impl Physics {
                     } else {
                         ActiveCollisionTypes::default()
                     };
+                    let surface = match self.surface(c) {
+                        Ok(m) => m,
+                        Err((own, message)) => {
+                            if !entry.reported {
+                                entry.reported = true;
+                                self.rejections.push(Rejection {
+                                    index: u32::MAX,
+                                    entity,
+                                    kind: RejectionKind::MaterialUnavailable,
+                                    message,
+                                });
+                            }
+                            own
+                        }
+                    };
                     let builder = ColliderBuilder::new(s)
-                        .friction(c.friction)
-                        .restitution(c.restitution)
+                        .friction(surface.friction)
+                        .friction_combine_rule(surface.friction_combine.rapier())
+                        .restitution(surface.bounciness)
+                        .restitution_combine_rule(surface.bounce_combine.rapier())
                         .sensor(c.is_sensor)
                         .collision_groups(groups(layer, c.mask))
                         .active_events(ActiveEvents::COLLISION_EVENTS)
@@ -2523,5 +2622,240 @@ mod tests {
         assert!(max_y < 1.0, "did not climb the 60° ramp: {max_y}");
         assert!(slid, "reported sliding");
         assert!(p.take_rejections().is_empty());
+    }
+
+    // ---------------------------------------------------- physics materials
+
+    fn material_key(n: u8) -> AssetRef {
+        AssetRef::new(
+            format!("0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0{n:02x}")
+                .parse()
+                .unwrap(),
+        )
+    }
+
+    fn floor_with(ecs: &mut Ecs, material: Option<AssetRef>) -> Entity {
+        spawn(
+            ecs,
+            Vec3::ZERO,
+            None,
+            Some(Collider {
+                size: Vec3::new(50.0, 0.5, 50.0),
+                material,
+                ..Collider::default()
+            }),
+        )
+    }
+
+    /// The highest the ball climbs after its first landing, dropped from
+    /// 3 m onto the floor (its bottom 2.25 m above the floor's top).
+    fn rebound(floor: PhysicsMaterial, ball: PhysicsMaterial) -> f32 {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        p.register_material(material_key(1), floor).unwrap();
+        p.register_material(material_key(2), ball).unwrap();
+        floor_with(&mut ecs, Some(material_key(1)));
+        let b = spawn(
+            &mut ecs,
+            Vec3::new(0.0, 3.0, 0.0),
+            Some(RigidBody::default()),
+            Some(Collider {
+                shape: ColliderShape::Sphere,
+                size: Vec3::new(0.25, 0.0, 0.0),
+                material: Some(material_key(2)),
+                ..Collider::default()
+            }),
+        );
+        let none = BTreeSet::new();
+        let mut landed = false;
+        let mut top = f32::MIN;
+        for _ in 0..180 {
+            tick(&mut p, &mut ecs, &none);
+            landed |= p
+                .events()
+                .iter()
+                .any(|e| matches!(e, PhysicsEvent::CollisionEnter(_)));
+            if landed {
+                top = top.max(ecs.copy::<Transform>(b).unwrap().position.y);
+            }
+        }
+        assert!(landed);
+        assert!(p.take_rejections().is_empty());
+        top - 0.75
+    }
+
+    /// How far a box launched at 4 m/s along +X slides in two seconds.
+    fn slide(floor: PhysicsMaterial, block: PhysicsMaterial) -> f32 {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        p.register_material(material_key(1), floor).unwrap();
+        p.register_material(material_key(2), block).unwrap();
+        floor_with(&mut ecs, Some(material_key(1)));
+        let b = spawn(
+            &mut ecs,
+            Vec3::new(0.0, 1.0, 0.0),
+            Some(RigidBody::default()),
+            Some(Collider {
+                material: Some(material_key(2)),
+                ..Collider::default()
+            }),
+        );
+        let none = BTreeSet::new();
+        // Settle, then launch.
+        for _ in 0..30 {
+            tick(&mut p, &mut ecs, &none);
+        }
+        let start = ecs.copy::<Transform>(b).unwrap().position.x;
+        p.queue(0, b, BodyCommand::SetLinearVelocity(Vec3::X * 4.0));
+        for _ in 0..120 {
+            tick(&mut p, &mut ecs, &none);
+        }
+        assert!(p.take_rejections().is_empty());
+        ecs.copy::<Transform>(b).unwrap().position.x - start
+    }
+
+    fn mat(friction: f32, bounciness: f32) -> PhysicsMaterial {
+        PhysicsMaterial {
+            friction,
+            bounciness,
+            ..PhysicsMaterial::default()
+        }
+    }
+
+    #[test]
+    fn a_materials_bounciness_makes_a_ball_bounce() {
+        let dead = rebound(mat(0.6, 0.0), mat(0.6, 0.0));
+        let live = rebound(mat(0.6, 1.0), mat(0.6, 1.0));
+        assert!(dead < 0.05, "bounciness 0 stays down: {dead}");
+        assert!(
+            live > 1.5,
+            "bounciness 1 comes most of the way back: {live}"
+        );
+        // Averaged with a dead floor: half the restitution, a lower bounce.
+        let half = rebound(mat(0.6, 0.0), mat(0.6, 1.0));
+        assert!(half > 0.2 && half < live * 0.6, "{half} vs {live}");
+    }
+
+    #[test]
+    fn a_materials_friction_decides_how_far_a_box_slides() {
+        let ice = slide(mat(0.0, 0.0), mat(0.0, 0.0));
+        let rubber = slide(mat(1.0, 0.0), mat(1.0, 0.0));
+        assert!(ice > 7.0, "frictionless keeps going: {ice}");
+        assert!(rubber < 1.5, "friction 1 stops it: {rubber}");
+    }
+
+    #[test]
+    fn combine_rules_the_higher_one_wins() {
+        let floor = mat(1.0, 0.0);
+        let with = |rule| {
+            slide(
+                floor,
+                PhysicsMaterial {
+                    friction_combine: rule,
+                    ..mat(0.0, 0.0)
+                },
+            )
+        };
+        // The floor averages; the box's rule is the higher one either way.
+        let minimum = with(CombineRule::Minimum);
+        let maximum = with(CombineRule::Maximum);
+        let average = with(CombineRule::Average);
+        assert!(minimum > 7.0, "min(1, 0) = 0 slides on: {minimum}");
+        assert!(maximum < 1.5, "max(1, 0) = 1 stops: {maximum}");
+        assert!(
+            average > maximum && average < minimum,
+            "average 0.5 is between: {maximum} < {average} < {minimum}"
+        );
+        // Bounciness likewise: a bouncy ball on a dead floor.
+        let bouncy = |rule| {
+            rebound(
+                mat(0.6, 0.0),
+                PhysicsMaterial {
+                    bounce_combine: rule,
+                    ..mat(0.6, 1.0)
+                },
+            )
+        };
+        assert!(bouncy(CombineRule::Maximum) > 1.5);
+        assert!(bouncy(CombineRule::Minimum) < 0.05);
+        assert!(bouncy(CombineRule::Multiply) < 0.05);
+    }
+
+    #[test]
+    fn a_collider_without_a_material_keeps_its_own_values_and_a_missing_one_is_reported() {
+        let mut ecs = world();
+        let mut p = Physics::new();
+        let own = spawn(
+            &mut ecs,
+            Vec3::ZERO,
+            None,
+            Some(Collider {
+                friction: 0.3,
+                restitution: 0.4,
+                ..Collider::default()
+            }),
+        );
+        let missing = spawn(
+            &mut ecs,
+            Vec3::X * 5.0,
+            None,
+            Some(Collider {
+                friction: 0.2,
+                material: Some(material_key(9)),
+                ..Collider::default()
+            }),
+        );
+        let none = BTreeSet::new();
+        tick(&mut p, &mut ecs, &none);
+        let coefficients = |p: &Physics, e: Entity| {
+            let c = &p.world.colliders[p.entries[&e].collider.unwrap()];
+            (
+                c.friction(),
+                c.restitution(),
+                c.friction_combine_rule(),
+                c.restitution_combine_rule(),
+            )
+        };
+        let avg = CoefficientCombineRule::Average;
+        assert_eq!(coefficients(&p, own), (0.3, 0.4, avg, avg));
+        assert_eq!(coefficients(&p, missing), (0.2, 0.0, avg, avg));
+        let r = p.take_rejections();
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert_eq!(
+            (r[0].entity, r[0].kind),
+            (missing, RejectionKind::MaterialUnavailable)
+        );
+        tick(&mut p, &mut ecs, &none);
+        assert!(p.take_rejections().is_empty(), "reported once");
+        // Registered later (a hot reload): the live collider takes it,
+        // and new values for the same key apply to it again.
+        p.register_material(
+            material_key(9),
+            PhysicsMaterial {
+                friction: 0.9,
+                bounciness: 0.5,
+                friction_combine: CombineRule::Maximum,
+                bounce_combine: CombineRule::Multiply,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            coefficients(&p, missing),
+            (
+                0.9,
+                0.5,
+                CoefficientCombineRule::Max,
+                CoefficientCombineRule::Multiply
+            )
+        );
+        p.register_material(material_key(9), mat(0.1, 0.0)).unwrap();
+        assert_eq!(coefficients(&p, missing), (0.1, 0.0, avg, avg));
+        assert_eq!(coefficients(&p, own), (0.3, 0.4, avg, avg));
+        assert!(p
+            .register_material(material_key(3), mat(-1.0, 0.0))
+            .is_err());
+        assert!(p.register_material(material_key(3), mat(0.5, 2.0)).is_err());
+        assert!(!p.has_material(&material_key(3)));
+        assert_eq!(p.material_count(), 1);
     }
 }

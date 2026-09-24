@@ -400,6 +400,36 @@ fn invalid_component_values_are_rejected_at_the_tick() {
     assert!(w.diagnostics().is_empty(), "reported once");
     assert!(w.ecs().has::<Collider>(e));
     assert_eq!(w.physics().stats().colliders, 0);
+    // A collider naming a physics material nobody registered (ADR-0025):
+    // it collides on its own friction and restitution, reported once.
+    w.submit(
+        Lane::Simulation,
+        vec![Command::SetComponent {
+            entity: e,
+            value: ComponentValue::Collider(Collider {
+                material: Some(AssetRef::new(
+                    "70d7ba8b-f7fb-4eba-920d-ec9e6b968331".parse().unwrap(),
+                )),
+                ..Collider::default()
+            }),
+        }],
+    );
+    let r = w.step();
+    assert_eq!(r.rejected, 0);
+    assert_eq!(w.diagnostics().len(), 1, "{:?}", w.diagnostics());
+    let d = &w.diagnostics()[0];
+    assert_eq!(
+        (d.code, d.component, d.command_index),
+        (
+            DiagnosticCode::INVALID_PAYLOAD,
+            ComponentId::COLLIDER,
+            u32::MAX
+        )
+    );
+    assert!(d.message.contains("physics material"), "{}", d.message);
+    w.step();
+    assert!(w.diagnostics().is_empty(), "reported once");
+    assert_eq!(w.physics().stats().colliders, 1);
 }
 
 #[test]

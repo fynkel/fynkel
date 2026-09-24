@@ -47,13 +47,24 @@
       "maxItems": 3,
       "description": "Local translation of the shape from the entity's origin, metres."
     },
+    "material": {
+      "oneOf": [
+        {
+          "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A `.physicsmaterial.json` (ADR-0025): its friction, bounciness and combine rules replace `friction` and `restitution`. None: those two apply, averaged with the other collider's."
+    },
     "friction": {
       "type": "number",
-      "description": "Coulomb friction coefficient, `>= 0` (0.5 is rubber on concrete)."
+      "description": "Coulomb friction coefficient, `>= 0` (0.5 is rubber on concrete); ignored when `material` names one."
     },
     "restitution": {
       "type": "number",
-      "description": "Bounciness `0..=1`."
+      "description": "Bounciness `0..=1`; ignored when `material` names one."
     },
     "is_sensor": {
       "type": "boolean",
@@ -80,7 +91,7 @@
     "kind": "component",
     "id": 11,
     "rust": "fynkel_physics::components::Collider",
-    "wireSize": 72,
+    "wireSize": 96,
     "authored": true
   }
 }

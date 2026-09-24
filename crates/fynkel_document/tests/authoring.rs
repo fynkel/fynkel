@@ -79,7 +79,7 @@ fn only_scenes_prefabs_and_materials_open() {
     let doc = Document::read(&fixtures().join("project/fynkel.project.json"), None).unwrap();
     let err = Editor::open(doc, &s).err().unwrap();
     assert_eq!(err[0].code.0, "FYN-E0007");
-    assert!(err[0].message.contains("volume profiles are"));
+    assert!(err[0].message.contains("physics materials are"));
     // A material opens (M4-01) and is edited through document fields.
     let doc = Document::read(
         &fixtures().join("project/assets/materials/rusted.material.json"),

@@ -1547,6 +1547,12 @@ impl World {
                 RejectionKind::MeshUnavailable => {
                     (DiagnosticCode::MESH_UNAVAILABLE, ComponentId::COLLIDER)
                 }
+                // ADR-0025: the collider still collides, on its own
+                // values; the loader's diagnostic says why the asset is
+                // missing, this one says which collider it affects.
+                RejectionKind::MaterialUnavailable => {
+                    (DiagnosticCode::INVALID_PAYLOAD, ComponentId::COLLIDER)
+                }
                 RejectionKind::MissingCharacter => (
                     DiagnosticCode::MISSING_COMPONENT,
                     ComponentId::CHARACTER_CONTROLLER,

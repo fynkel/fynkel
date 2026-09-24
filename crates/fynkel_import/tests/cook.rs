@@ -1447,3 +1447,67 @@ fn a_volume_profile_cooks_as_its_document_and_a_scene_depends_on_it() {
     );
     assert_ne!(status(&r, MAIN), Status::Cooked);
 }
+
+#[test]
+fn a_physics_material_cooks_as_its_document_and_a_scene_depends_on_it() {
+    const ICE: &str = "c0000000-0000-4000-8000-000000000801";
+    let p = Project::new("physics-material-doc");
+    let ice = |fields: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/physics_material.schema.json","formatVersion":1,"id":"{ICE}","name":"Ice"{fields}}}"#
+        )
+    };
+    p.write(
+        "ice.physicsmaterial.json",
+        &ice(r#","friction":0,"friction_combine":"minimum""#),
+    );
+    let mut scene: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(p.assets().join("scenes/main.scene.json")).unwrap(),
+    )
+    .unwrap();
+    scene["entities"]["c0000000-0000-4000-8000-0000000000e9"] = serde_json::json!({
+        "name": "Rink", "parent": null, "children": [],
+        "components": {
+            "c0000000-0000-4000-8000-0000000000c9": {
+                "type": "fynkel.Collider", "version": 1,
+                "data": { "shape": "box", "size": [5, 0.5, 5], "mesh": null, "offset": [0, 0, 0],
+                          "material": { "asset": ICE }, "friction": 0.5, "restitution": 0,
+                          "is_sensor": false, "mask": 4294967295u32 }
+            }
+        }
+    });
+    p.write(
+        "scenes/main.scene.json",
+        &serde_json::to_string_pretty(&scene).unwrap(),
+    );
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    let cooked = r.get(id(ICE)).unwrap();
+    assert_eq!(cooked.status, Status::Cooked);
+    assert_eq!(cooked.kind, "document/physics_material");
+    let mut f = ChunkFile::open_path(cooked.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(kinds, ["META", "JSON"]);
+    assert!(r.get(id(MAIN)).unwrap().dependencies.contains(&id(ICE)));
+
+    // Editing the material recooks the scene that uses it.
+    p.write("ice.physicsmaterial.json", &ice(r#","friction":0.05"#));
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert_eq!(status(&r, ICE), Status::Cooked);
+    assert_eq!(status(&r, MAIN), Status::Cooked);
+
+    // Out of range: the material fails and the scene that uses it with it.
+    p.write("ice.physicsmaterial.json", &ice(r#","bounciness":2"#));
+    let r = p.cook();
+    assert_eq!(status(&r, ICE), Status::Failed);
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.pointer.as_deref() == Some("/bounciness")),
+        "{:?}",
+        r.diagnostics
+    );
+    assert_ne!(status(&r, MAIN), Status::Cooked);
+}

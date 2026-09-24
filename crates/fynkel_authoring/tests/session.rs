@@ -561,6 +561,49 @@ fn a_volume_profile_edits_through_document_fields() {
 }
 
 #[test]
+fn a_physics_material_edits_through_document_fields() {
+    let copy = Copy::new("physics-material");
+    let fresh =
+        fynkel_document::Document::new(fynkel_document::DocumentKind::PhysicsMaterial, "Ice");
+    std::fs::create_dir_all(copy.path("assets/physics")).unwrap();
+    std::fs::write(
+        copy.path("assets/physics/ice.physicsmaterial.json"),
+        fresh.write().unwrap(),
+    )
+    .unwrap();
+    let mut s = open(&copy);
+    let h = s
+        .open_document("assets/physics/ice.physicsmaterial.json")
+        .unwrap();
+    let inspect = s.inspect_json(h).unwrap();
+    assert_eq!(inspect["kind"], "physics_material");
+    assert_eq!(inspect["fields"]["friction"], 0.6);
+    assert_eq!(inspect["fields"]["friction_combine"], "average");
+    let applied = s
+        .apply_json(
+            h,
+            &json!([
+                { "command": "setDocumentField", "pointer": "/friction", "value": 0 },
+                { "command": "setDocumentField", "pointer": "/friction_combine", "value": "minimum" },
+            ]),
+        )
+        .unwrap();
+    assert_eq!(applied["ok"], true, "{applied}");
+    s.save(h, None).unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_str(&copy.read("assets/physics/ice.physicsmaterial.json")).unwrap();
+    assert_eq!(saved["friction"], 0);
+    assert_eq!(saved["friction_combine"], "minimum");
+    let refused = s
+        .apply_json(
+            h,
+            &json!([{ "command": "setDocumentField", "pointer": "/bounciness", "value": 2 }]),
+        )
+        .unwrap();
+    assert_eq!(refused["ok"], false);
+}
+
+#[test]
 fn other_kinds_and_bad_paths_are_refused_and_nothing_works_without_a_project() {
     let copy = Copy::new("refused");
     let mut s = AuthoringSession::new();

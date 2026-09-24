@@ -1373,6 +1373,10 @@ pub fn validate_project_with(
                 let volume = crate::volume::VolumeDocument::from_document(doc);
                 report.diagnostics.extend(volume.validate(schemas));
             }
+            DocumentKind::PhysicsMaterial => {
+                let material = crate::physics_material::PhysicsMaterialDocument::from_document(doc);
+                report.diagnostics.extend(material.validate(schemas));
+            }
             DocumentKind::Project | DocumentKind::Meta => {
                 report.diagnostics.extend(doc.validate(schemas));
             }

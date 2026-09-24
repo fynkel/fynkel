@@ -323,6 +323,7 @@ fn fixtures_match_generated_codecs() {
             size: Vec3::new(0.5, 1.0, 0.25),
             mesh: Some(AssetRef::with_sub(mesh_id, "mesh/0")),
             offset: Vec3::new(0.0, 0.5, 0.0),
+            material: Some(AssetRef::new(mesh_id)),
             friction: 0.6,
             restitution: 0.1,
             is_sensor: true,
