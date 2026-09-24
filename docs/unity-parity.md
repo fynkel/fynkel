@@ -68,7 +68,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | ⌘D | duplicates the asset | 🔧 `duplicateAsset` (`52bde19`), `16e16ab` |
 | Undo | ⌘Z, one history | 🟡 its own ⌥⌘Z history; empty-folder create/delete not undoable |
 | Drag files in from Finder | imports | ❌ (changes on disk do import) |
-| Model sub-assets | expand in the browser, draggable | ❌ only in the Inspector's asset page |
+| Model sub-assets | expand in the browser, draggable | 🔧 `554ae0d` (▸, → / ←, a part's page on click) |
 | Create → Volume Profile, Physics Material | | 🔧 Volume Profile (`682f953`, `adb5146`); Physics Material ❌ — no such asset: friction and restitution are the Collider's own fields, and an asset would need an ADR (Tier 3) |
 | Find References In Scene | | 🔧 `fc22546` (the Hierarchy searches `ref:<id>:<name>`) |
 
@@ -139,3 +139,5 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 - 2026-09-24: Find References In Scene (`fc22546`) — the parity test
   finds a model's users (one of them inside a prefab instance) and a
   prefab's instance.
+- 2026-09-24: a model's parts in the Project (`554ae0d`) — the parity test
+  opens robot.glb, drags a mesh onto the Robot's Mesh field and saves.

@@ -715,7 +715,12 @@ contents included; × clears it) / Rename / Move to… / Delete /
 Reimport / **Set as Startup Scene** (a scene: the one `fynkel run`
 starts with, one asset-history step) / Copy id / Copy path / New … Here; a folder's Show / Reveal /
 New … Here / Rename Folder / Delete Empty Folder; the empty area's New …
-Here. **Drag and drop**: an asset row is a `Draggable<AssetDragPayload>`
+Here. **A model's parts**: a source with more than one part (a glTF's
+meshes, materials, images, clips) has Unity's ▸ before its icon (→ and ←
+on the selected row); open, its parts are listed under it by key, each
+one a `Draggable<AssetDragPayload>` of `{asset, sub}` onto an asset field,
+and a click shows that part's page in the Inspector.
+**Drag and drop**: an asset row is a `Draggable<AssetDragPayload>`
 (dragging a selected row drags the whole selection, the feedback says "3
 assets"); every folder row in the tree and in the list is a drop target
 that moves through the session (the target lights up only when the move
