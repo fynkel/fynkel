@@ -80,7 +80,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Drop a material on an object | assigns it | 🔧 `6203b47`, `b6ee085` (Hierarchy row or Scene view; drawn while hovering; an override inside a prefab instance) |
 | Volume profile Inspector | Add Override, a checkbox per field | 🔧 `b1b7402`, `d2fa8ea` (Remove, All / None; saved at once, live in the Scene view, ⌘Z in the Inspector) |
 | Model import settings | scale, normals, animation… | 🔧 `41190a1`, `c3e7d3e` (Scale Factor, Normals Import / Calculate + Smoothing Angle, Import Animation; leaving with unapplied settings asks Apply / Revert); 🟡 no Rig or Animation tab beyond that (clips are split by the rig document), no mesh compression / read-write / lightmap UVs |
-| `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | ❌ local setters only (`localPosition` semantics); read-only world transform |
+| `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | 🔧 `2e0183f` (`position` / `rotation` are world, `localPosition` / `localRotation` / `localScale`, `translate` / `rotate` / `rotateAround` / `lookAt` with `Space.self` / `Space.world`, `forward` / `right` / `up`, `eulerAngles` in degrees, `transformPoint` and friends); 🟡 Euler order is the Inspector's X-then-Y-then-Z, not Unity's Z-X-Y |
 | One script throwing | only that script stops | ❌ the rest of the frame's update pass is skipped |
 | Coroutines / `Invoke` | | ❌ |
 | `Input.GetKey` | raw keys | ❌ declared actions only; an undeclared one reads false silently |
@@ -108,6 +108,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 ## On purpose
 
 - `Vec3.forward` is −Z (right-handed, as glTF), not Unity's +Z.
+- Euler angles are degrees (as in Unity) but every other angle is
+  radians (`Quat.axisAngle`), per ADR-0013's amendment.
 - A post effect needs a volume (as Unity's URP/HDRP): no volume, no
   ambient occlusion or bloom (2026-09-24).
 
@@ -172,3 +174,11 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   that the robot is drawn bigger; a second test unticks Import Animation,
   selects another asset, and answers the Unapplied import settings
   question with Revert and then Apply.
+- 2026-09-24: the world transform (`2e0183f`) — `transform.position`
+  and `rotation` are world values now, with the local ones beside them
+  and Unity's `translate` / `rotate` / `rotateAround` / `lookAt`, axes and
+  Euler degrees (ADR-0013 amended: Euler angles are degrees). Scripts
+  run in the SDK, so the parity test is `packages/fynkel/test/transform_test.dart`
+  over the real native library: a child of a turned, scaled parent reads
+  and writes its world position, `lookAt` and `translate` move it the
+  way a Unity script would, and the world's own snapshot agrees.
