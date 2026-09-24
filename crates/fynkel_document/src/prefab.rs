@@ -32,7 +32,14 @@
 //! prefab that instantiates itself, directly or through others, is
 //! `D0402` and is left unexpanded.
 //!
-//! Out of scope: variants, apply/revert.
+//! A **prefab variant** (ADR-0022 amendment, 2026-09-25) is a prefab
+//! whose root is itself an instance of another prefab, its base
+//! ([`Prefab::variant_of`]). The format has nothing new for it: it
+//! flattens like any nested prefab, so the variant's entities are the
+//! base's under ids derived from the root's `instance`, with the root's
+//! overrides applied, followed by the children the variant adds. Chains (a
+//! variant of a variant) flatten innermost first; a variant of itself,
+//! directly or through a chain, is `D0402`.
 //!
 //! Codes: `D0400` the root is not the one parentless entity, `D0401`
 //! unknown prefab, `D0402` instantiation cycle, `D0403` override target
@@ -129,6 +136,13 @@ impl Prefab {
 
     pub fn read_diagnostics(&self) -> &[Diagnostic] {
         &self.read_diagnostics
+    }
+
+    /// The base of a **variant** (a prefab whose root is itself an
+    /// instance, ADR-0022 amendment 2026-09-25): the root's
+    /// `prefab: { asset, instance, overrides }`; `None` for a plain prefab.
+    pub fn variant_of(&self) -> Option<&PrefabInstance> {
+        self.entity(self.root).and_then(|e| e.prefab.as_ref())
     }
 
     /// Whether an entity of this prefab is itself a prefab instance.
@@ -580,6 +594,76 @@ pub fn identity_transform() -> Node {
         ("rotation".into(), v(&[0.0, 0.0, 0.0, 1.0])),
         ("scale".into(), v(&[1.0, 1.0, 1.0])),
     ])
+}
+
+/// A new **variant** document of `base` (ADR-0022 amendment 2026-09-25):
+/// a prefab named `name` whose one root, named `root_name`, is an instance
+/// of `base` with the `instance` id given (a fresh one otherwise) and
+/// `overrides` (op objects addressed by the base's ids, as a scene
+/// instance's are). The root has no components of its own and no children.
+pub fn new_variant(
+    name: &str,
+    base: &AssetRef,
+    root_name: &str,
+    instance: Option<Uuid>,
+    overrides: Vec<Node>,
+) -> Document {
+    let mut doc = Document::new(DocumentKind::Prefab, name);
+    let root = Uuid::new_v4();
+    let mut asset = vec![(
+        "asset".to_string(),
+        Node::string(Uuid::from_bytes(base.asset.0).to_string()),
+    )];
+    if !base.sub.is_empty() {
+        asset.push(("sub".to_string(), Node::string(base.sub.clone())));
+    }
+    let entity = Node::object(vec![
+        ("name".into(), Node::string(root_name)),
+        ("parent".into(), Node::synthetic(Value::Null)),
+        ("children".into(), Node::synthetic(Value::Array(Vec::new()))),
+        ("components".into(), Node::object(Vec::new())),
+        (
+            "prefab".into(),
+            Node::object(vec![
+                ("asset".into(), Node::object(asset)),
+                (
+                    "instance".into(),
+                    Node::string(instance.unwrap_or_else(Uuid::new_v4).to_string()),
+                ),
+                ("overrides".into(), Node::synthetic(Value::Array(overrides))),
+            ]),
+        ),
+    ]);
+    doc.root
+        .set("entities", Node::object(vec![(root.to_string(), entity)]));
+    doc.root.set("root", Node::string(root.to_string()));
+    doc
+}
+
+/// Which instance of a document an expanded id belongs to. For every
+/// entity and component id an [`Expanded`] made, it gives the anchor (the
+/// document entity carrying `prefab`) and the prefab-local id the id came
+/// from. The anchor itself maps to the prefab's root. The document's own
+/// plain entities are not in it.
+#[derive(Clone, Debug, Default)]
+pub struct Owners {
+    pub entities: HashMap<Uuid, (Uuid, Uuid)>,
+    pub components: HashMap<Uuid, (Uuid, Uuid)>,
+}
+
+impl Owners {
+    pub fn of(instances: &[ExpandedInstance]) -> Owners {
+        let mut out = Owners::default();
+        for i in instances {
+            for (local, id) in &i.entities {
+                out.entities.insert(*id, (i.anchor, *local));
+            }
+            for (local, id) in &i.components {
+                out.components.insert(*id, (i.anchor, *local));
+            }
+        }
+        out
+    }
 }
 
 /// Prefab-local id → scene id for one instance: UUID v5 in the instance's
@@ -1207,7 +1291,7 @@ impl Working {
 /// Replaces every string equal to a prefab-local entity or component id
 /// (references inside component data: an entity name-free reference, a
 /// behaviour reference's component) with the derived id.
-fn remap_strings(node: &mut Node, map: &dyn Fn(Uuid) -> Option<Uuid>) {
+pub(crate) fn remap_strings(node: &mut Node, map: &dyn Fn(Uuid) -> Option<Uuid>) {
     match &mut node.value {
         Value::String(s) => {
             if let Ok(u) = crate::parse_uuid(s) {
@@ -1236,6 +1320,15 @@ fn anchor(root: &Node, d: Diagnostic, pointer: &str) -> Diagnostic {
     Locator::new(root).anchor(d, pointer)
 }
 
+/// `{ asset, sub? }` as documents write an asset reference.
+pub fn asset_ref_json(r: &AssetRef) -> serde_json::Value {
+    let mut v = serde_json::json!({ "asset": Uuid::from_bytes(r.asset.0).to_string() });
+    if !r.sub.is_empty() {
+        v["sub"] = serde_json::json!(r.sub);
+    }
+    v
+}
+
 /// `inspect --json` payload for a prefab.
 pub fn inspect_json(prefab: &Prefab) -> serde_json::Value {
     serde_json::json!({
@@ -1246,6 +1339,7 @@ pub fn inspect_json(prefab: &Prefab) -> serde_json::Value {
         "revision": crate::authoring::Revision::of(&prefab.document).map(|r| r.to_string()).ok(),
         "entityCount": prefab.entities.len(),
         "root": prefab.root.to_string(),
+        "variantOf": prefab.variant_of().map(|v| asset_ref_json(&v.asset)),
         "entities": prefab.entities.iter().map(|e| serde_json::json!({
             "id": e.id.to_string(),
             "name": e.name,

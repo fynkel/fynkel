@@ -837,3 +837,150 @@ fn a_running_world_answers_live_calls_in_document_terms() {
         (Status::InvalidArgument, serde_json::Value::Null)
     );
 }
+
+/// Prefab variants and prefabs holding instances (ADR-0022 amendment
+/// 2026-09-25) cook flat and spawn through the ABI: a scene holding an
+/// instance of a prefab that holds an instance of a variant, and each
+/// instantiated at run time.
+#[test]
+fn variants_and_nested_instances_cook_and_instantiate() {
+    const CRATE: &str = "c0000000-0000-4000-8000-000000000040";
+    const CRATE_ROOT: &str = "c0000000-0000-4000-8000-0000000000b1";
+    const CRATE_TRANSFORM: &str = "c0000000-0000-4000-8000-0000000000c2";
+    const VARIANT: &str = "c0000000-0000-4000-8000-000000000700";
+    const HOLDER: &str = "c0000000-0000-4000-8000-000000000701";
+    const SCENE: &str = "c0000000-0000-4000-8000-000000000702";
+    let project =
+        std::env::temp_dir().join(format!("fynkel-native-variants-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&project);
+    copy_dir(&fixture(), &project);
+    let transform = |y: f64| {
+        serde_json::json!({ "type": "fynkel.Transform", "version": 1,
+            "data": { "position": [0, y, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] } })
+    };
+    let prefab_header = |id: &str, name: &str, root: &str| {
+        serde_json::json!({ "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+            "formatVersion": 5, "id": id, "name": name, "root": root })
+    };
+    // The variant: the Crate twice as big, with a Flag of its own.
+    let mut variant = prefab_header(
+        VARIANT,
+        "Crate Variant",
+        "c0000000-0000-4000-8000-0000000007a0",
+    );
+    variant["entities"] = serde_json::json!({
+        "c0000000-0000-4000-8000-0000000007a0": { "name": "Crate", "parent": null,
+            "children": ["c0000000-0000-4000-8000-0000000007a1"], "components": {},
+            "prefab": { "asset": { "asset": CRATE }, "instance": "c0000000-0000-4000-8000-0000000007e0",
+                "overrides": [ { "op": "setField", "entity": CRATE_ROOT, "component": CRATE_TRANSFORM,
+                                 "field": "scale", "value": [2, 2, 2] } ] } },
+        "c0000000-0000-4000-8000-0000000007a1": { "name": "Flag",
+            "parent": "c0000000-0000-4000-8000-0000000007a0", "children": [],
+            "components": { "c0000000-0000-4000-8000-0000000007c1": transform(1.0) } }
+    });
+    // The holder: an object with the variant inside, its Flag raised.
+    let mut holder = prefab_header(HOLDER, "Holder", "c0000000-0000-4000-8000-0000000007b0");
+    holder["entities"] = serde_json::json!({
+        "c0000000-0000-4000-8000-0000000007b0": { "name": "Holder", "parent": null,
+            "children": ["c0000000-0000-4000-8000-0000000007b1"],
+            "components": { "c0000000-0000-4000-8000-0000000007c2": transform(0.0) } },
+        "c0000000-0000-4000-8000-0000000007b1": { "name": "Box",
+            "parent": "c0000000-0000-4000-8000-0000000007b0", "children": [], "components": {},
+            "prefab": { "asset": { "asset": VARIANT }, "instance": "c0000000-0000-4000-8000-0000000007e1",
+                "overrides": [ { "op": "setField", "entity": "c0000000-0000-4000-8000-0000000007a1",
+                                 "component": "c0000000-0000-4000-8000-0000000007c1",
+                                 "field": "position", "value": [0, 5, 0] } ] } }
+    });
+    let scene = serde_json::json!({ "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+        "formatVersion": 5, "id": SCENE, "name": "Variants", "entities": {
+            "c0000000-0000-4000-8000-0000000007d0": { "name": "Stand", "parent": null,
+                "children": [], "components": {},
+                "prefab": { "asset": { "asset": HOLDER }, "instance": "c0000000-0000-4000-8000-0000000007e2" } }
+        } });
+    for (path, doc) in [
+        ("assets/prefabs/crate_variant.prefab.json", &variant),
+        ("assets/prefabs/holder.prefab.json", &holder),
+        ("assets/scenes/variants.scene.json", &scene),
+    ] {
+        std::fs::write(
+            project.join(path),
+            serde_json::to_string_pretty(doc).unwrap(),
+        )
+        .unwrap();
+    }
+    let dir = project.join(".fynkel/cache");
+    let report = cook_project(&project, Some(&dir), &CookOptions::default())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert!(!report.has_errors(), "{}", report.text());
+    let cache = dir.display().to_string();
+    let host = Host::new();
+
+    // The scene: Stand (the Holder's root), Box (the variant's root, the
+    // Crate's), Flag.
+    assert_eq!(host.load_scene(&cache, SCENE), Status::Ok);
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    assert_eq!(r["scene"]["entities"], 3);
+    assert_eq!(host.live(), 3);
+
+    let spawn = |id: &str| {
+        let desc = FynkelInstantiateDesc {
+            prefab_id_utf8: id.as_ptr(),
+            prefab_id_len: id.len() as u32,
+            name_utf8: ptr::null(),
+            name_len: 0,
+            parent: 0,
+            position: [0.0; 3],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: [1.0; 3],
+        };
+        assert_eq!(
+            unsafe { fynkel_world_instantiate(host.w, &desc) },
+            Status::Ok
+        );
+        let r = host.report();
+        assert_eq!(r["ok"], true, "{r:#}");
+        (
+            Entity::from_bits(r["instance"]["root"].as_u64().unwrap()),
+            r["instance"]["entities"].as_u64().unwrap(),
+        )
+    };
+    // The variant: its root and its Flag.
+    let (root, count) = spawn(VARIANT);
+    assert_eq!(count, 2);
+    {
+        let ecs = unsafe { &*host.w }.core().ecs();
+        // Named after the prefab by default, like any instance.
+        assert_eq!(ecs.copy::<Name>(root).unwrap().value, "Crate Variant");
+        let kids = scene::children_of(ecs, root);
+        assert_eq!(kids.len(), 1);
+        assert_eq!(ecs.copy::<Name>(kids[0]).unwrap().value, "Flag");
+        assert_eq!(
+            ecs.copy::<Transform>(kids[0]).unwrap().position,
+            Vec3::new(0.0, 1.0, 0.0)
+        );
+    }
+    // The holder: the variant inside, twice as big, its Flag raised.
+    let (root, count) = spawn(HOLDER);
+    assert_eq!(count, 3);
+    {
+        let ecs = unsafe { &*host.w }.core().ecs();
+        assert_eq!(ecs.copy::<Name>(root).unwrap().value, "Holder");
+        let kids = scene::children_of(ecs, root);
+        assert_eq!(kids.len(), 1);
+        let boxed = kids[0];
+        assert_eq!(ecs.copy::<Name>(boxed).unwrap().value, "Box");
+        assert_eq!(
+            ecs.copy::<Transform>(boxed).unwrap().scale,
+            Vec3::new(2.0, 2.0, 2.0)
+        );
+        let flag = scene::children_of(ecs, boxed)[0];
+        assert_eq!(
+            ecs.copy::<Transform>(flag).unwrap().position,
+            Vec3::new(0.0, 5.0, 0.0)
+        );
+    }
+    assert_eq!(host.live(), 8);
+    drop(host);
+    let _ = std::fs::remove_dir_all(&project);
+}

@@ -663,3 +663,206 @@ fn imported_hierarchies_open_read_only_and_instances_of_them_expand() {
     );
     assert_eq!(copy.read(RIG_SCENE), rig_text);
 }
+
+fn clean(s: &AuthoringSession) {
+    let report = s.validate_project().unwrap();
+    let errors: Vec<_> = report.diagnostics.iter().filter(|d| d.is_error()).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+}
+
+/// Prefab variants, Apply into a variant, Unpack (one level / completely)
+/// and nested instances in a prefab, through the session (ADR-0022
+/// amendment 2026-09-25).
+#[test]
+fn variants_are_made_applied_to_and_unpacked_through_the_session() {
+    let copy = Copy::new("variants");
+    let mut s = open(&copy);
+    let vi = "c0000000-0000-4000-8000-0000000007e1";
+
+    // newDocument { kind: prefab, variantOf }: one root, an instance of
+    // the Crate named like its root, with the given overrides.
+    let v = s
+        .operate(
+            "newDocument",
+            &json!({ "kind": "prefab", "path": "prefabs/crate_variant", "name": "Crate Variant",
+                     "variantOf": CRATE_PREFAB, "instance": vi, "overrides": [
+                { "op": "setField", "entity": CRATE_LOCAL, "component": CRATE_LOCAL_RENDERER,
+                  "field": "cast_shadows", "value": false } ] }),
+        )
+        .unwrap_or_else(|d| panic!("{d:#?}"));
+    let variant = v["id"].as_str().unwrap().to_string();
+    let detail = s
+        .query("assetDetail", &json!({ "asset": variant }))
+        .unwrap();
+    assert_eq!(detail["variantOf"], json!({ "asset": CRATE_PREFAB }));
+    let crate_detail = s
+        .query("assetDetail", &json!({ "asset": CRATE_PREFAB }))
+        .unwrap();
+    assert_eq!(crate_detail["variantOf"], Value::Null);
+    clean(&s);
+    // Refused: not a prefab, not a prefab kind, overrides that do not apply.
+    for args in [
+        json!({ "kind": "prefab", "path": "prefabs/x", "variantOf": RUSTED }),
+        json!({ "kind": "scene", "path": "scenes/x", "variantOf": CRATE_PREFAB }),
+        json!({ "kind": "prefab", "path": "prefabs/x", "variantOf": CRATE_PREFAB, "overrides": [
+            { "op": "removeObject", "entity": "c0000000-0000-4000-8000-0000000007ff" } ] }),
+    ] {
+        let d = s.operate("newDocument", &args).unwrap_err();
+        assert_eq!(d[0].code.as_str(), "FYN-T0003", "{args}: {d:#?}");
+    }
+    assert!(!copy.dir.join("assets/prefabs/x.prefab.json").exists());
+
+    // A scene instance of the variant: the Crate's look through it, the
+    // prefab block names the base.
+    let h = s.open_document(MAIN_SCENE).unwrap();
+    let si = "c0000000-0000-4000-8000-0000000007e2";
+    let r = apply(
+        &mut s,
+        h,
+        json!([{ "command": "instantiatePrefab", "name": "Variant", "prefab": { "asset": variant },
+                 "instance": si, "components": [] }]),
+    );
+    let anchor = r["mutations"][0]["affectedIds"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let p = s.open_document(&variant).unwrap();
+    let v_root = s.document_json(p).unwrap()["root"]["root"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let renderer = derived(vi, CRATE_LOCAL_RENDERER);
+    let transform = derived(vi, CRATE_LOCAL_TRANSFORM);
+    let moved = json!({ "op": "setField", "entity": v_root, "component": transform,
+                        "field": "position", "value": [0, 3, 0] });
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "setPrefabOverride", "entity": anchor, "override": moved }]),
+    );
+    let v = instance(&s, h, &anchor);
+    assert_eq!(v["expanded"], true, "{:#}", v["diagnostics"]);
+    assert_eq!(v["prefab"]["variantOf"], json!({ "asset": CRATE_PREFAB }));
+    assert_eq!(v["prefab"]["handle"], p);
+    let e = &v["entities"][0];
+    assert_eq!(e["id"], anchor);
+    assert_eq!(
+        e["components"][derived(si, &renderer)]["data"]["cast_shadows"],
+        false,
+        "the variant's override"
+    );
+    assert_eq!(
+        e["components"][derived(si, &transform)]["data"]["position"],
+        json!([0, 3, 0])
+    );
+
+    // Apply to Prefab: applyPrefabOverride on the variant (the op as the
+    // instance holds it), then revert in the scene — two transactions.
+    let r = apply(
+        &mut s,
+        p,
+        json!([{ "command": "applyPrefabOverride", "override": moved }]),
+    );
+    assert_eq!(r["mutations"].as_array().unwrap().len(), 1);
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "revertPrefabOverride", "entity": anchor, "index": 0 }]),
+    );
+    let v = instance(&s, h, &anchor);
+    assert_eq!(v["overrides"], json!([]));
+    assert_eq!(
+        v["entities"][0]["components"][derived(si, &transform)]["data"]["position"],
+        json!([0, 3, 0]),
+        "inherited from the variant now"
+    );
+    let doc = s.document_json(p).unwrap();
+    let overrides = &doc["root"]["entities"][&v_root]["prefab"]["overrides"];
+    assert_eq!(overrides.as_array().unwrap().len(), 2, "{overrides:#}");
+    assert_eq!(overrides[1]["entity"], CRATE_LOCAL, "in the Crate's ids");
+    assert_eq!(overrides[1]["component"], CRATE_LOCAL_TRANSFORM);
+
+    // Unpack one level: an instance of the Crate with the variant's
+    // overrides; Unpack Completely: plain. One transaction each.
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "unpackPrefab", "entity": anchor }]),
+    );
+    let v = instance(&s, h, &anchor);
+    assert_eq!(v["asset"]["asset"], CRATE_PREFAB);
+    assert_eq!(v["overrides"].as_array().unwrap().len(), 2);
+    let position = v["entities"][0]["components"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|c| c["type"] == "fynkel.Transform")
+        .unwrap()["data"]["position"]
+        .clone();
+    assert_eq!(position, json!([0, 3, 0]));
+    s.undo(h).unwrap();
+    let count = s.inspect_json(h).unwrap()["instanceCount"]
+        .as_u64()
+        .unwrap();
+    apply(
+        &mut s,
+        h,
+        json!([{ "command": "unpackPrefab", "entity": anchor, "completely": true }]),
+    );
+    assert_eq!(
+        s.inspect_json(h).unwrap()["instanceCount"]
+            .as_u64()
+            .unwrap(),
+        count - 1
+    );
+    let err = s
+        .query("instance", &json!({ "handle": h, "entity": anchor }))
+        .unwrap_err();
+    assert_eq!(err[0].code.as_str(), "FYN-E0008");
+
+    // A prefab made of an object holding instances: instantiatePrefab in a
+    // prefab document with an id and overrides; the prefab validates.
+    let holder = s
+        .operate(
+            "newDocument",
+            &json!({ "kind": "prefab", "path": "prefabs/holder", "name": "Holder" }),
+        )
+        .unwrap();
+    let holder_id = holder["id"].as_str().unwrap().to_string();
+    let hp = s.open_document(&holder_id).unwrap();
+    let h_root = s.document_json(hp).unwrap()["root"]["root"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let nested = "c0000000-0000-4000-8000-0000000007a1";
+    let nested_instance = "c0000000-0000-4000-8000-0000000007e3";
+    apply(
+        &mut s,
+        hp,
+        json!([{ "command": "instantiatePrefab", "id": nested, "name": "Box", "parent": h_root,
+                 "prefab": { "asset": variant }, "instance": nested_instance, "components": [],
+                 "overrides": [ { "op": "setField", "entity": v_root, "component": renderer,
+                                  "field": "visible", "value": false } ] }]),
+    );
+    let v = instance(&s, hp, nested);
+    assert_eq!(v["expanded"], true, "{:#}", v["diagnostics"]);
+    assert_eq!(
+        v["entities"][0]["components"][derived(nested_instance, &renderer)]["data"]["visible"],
+        false
+    );
+    apply(&mut s, hp, json!([{ "command": "saveDocument" }]));
+    clean(&s);
+    // The variant cannot hold the Holder (it would contain itself).
+    let r = s
+        .apply_json(
+            p,
+            &json!([{ "command": "instantiatePrefab", "name": "Loop", "parent": v_root,
+                      "prefab": { "asset": holder_id }, "components": [] }]),
+        )
+        .unwrap();
+    assert_eq!(r["ok"], false);
+    assert_eq!(
+        r["mutations"][0]["diagnostics"][0]["code"], "FYN-D0402",
+        "{r:#}"
+    );
+}

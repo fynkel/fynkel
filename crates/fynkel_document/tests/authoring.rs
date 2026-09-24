@@ -739,20 +739,24 @@ fn prefab_documents_keep_their_one_root() {
     editor.undo().unwrap();
     assert_eq!(text(&editor), original);
 
-    // No prefab instances inside a prefab document.
+    // A prefab cannot instance itself (ADR-0022 amendment 2026-09-25:
+    // nested instances are fine in a prefab, a cycle is not).
     let r = editor.apply(
         Request::new(vec![Command::InstantiatePrefab {
             id: None,
             name: "x".into(),
-            parent: None,
+            parent: Some(root),
             index: None,
             prefab: AssetRef::new("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             instance: None,
             components: vec![],
+            overrides: vec![],
         }]),
         &s,
     );
-    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0007");
+    assert!(!r.ok);
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-D0402");
+    assert_eq!(text(&editor), original);
 }
 
 const TURRET_A: &str = "20000000-0000-4000-8000-0000000000a1";
@@ -773,6 +777,7 @@ fn instantiate_and_override_prefabs() {
             prefab: AssetRef::new("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             instance: Some(instance),
             components: vec![],
+            overrides: vec![],
         }],
     );
     let host = r.mutations[0].affected_ids[0];
@@ -885,7 +890,10 @@ fn library() -> PrefabLibrary {
 
 fn unpack(editor: &mut Editor, lib: &PrefabLibrary, entity: &str) -> Applied {
     let r = editor.apply_with_prefabs(
-        Request::new(vec![Command::UnpackPrefab { entity: u(entity) }]),
+        Request::new(vec![Command::UnpackPrefab {
+            entity: u(entity),
+            completely: false,
+        }]),
         &schemas(),
         lib,
     );
@@ -1108,7 +1116,10 @@ fn unpack_prefab_writes_the_expansion_in_place() {
 
     // Not an instance.
     let r = editor.apply_with_prefabs(
-        Request::new(vec![Command::UnpackPrefab { entity: u(LABEL) }]),
+        Request::new(vec![Command::UnpackPrefab {
+            entity: u(LABEL),
+            completely: false,
+        }]),
         &s,
         &lib,
     );
@@ -1116,7 +1127,10 @@ fn unpack_prefab_writes_the_expansion_in_place() {
     assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0008");
     // Unknown entity.
     let r = editor.apply_with_prefabs(
-        Request::new(vec![Command::UnpackPrefab { entity: u(KID1) }]),
+        Request::new(vec![Command::UnpackPrefab {
+            entity: u(KID1),
+            completely: false,
+        }]),
         &s,
         &lib,
     );
@@ -1126,6 +1140,7 @@ fn unpack_prefab_writes_the_expansion_in_place() {
     let r = editor.apply(
         Request::new(vec![Command::UnpackPrefab {
             entity: u(TURRET_A),
+            completely: false,
         }]),
         &s,
     );
@@ -1369,6 +1384,9 @@ fn commands_round_trip_through_json() {
             prefab: AssetRef::new(mesh.asset),
             instance: Some(u(KID2)),
             components: vec![],
+            overrides: vec![Node::from_serde(
+                &json!({"op": "setActive", "entity": KID1, "value": false}),
+            )],
         },
         Command::SetPrefabOverride {
             entity: u(ROOT),
@@ -1378,7 +1396,17 @@ fn commands_round_trip_through_json() {
             entity: u(ROOT),
             index: Some(1),
         },
-        Command::UnpackPrefab { entity: u(ROOT) },
+        Command::UnpackPrefab {
+            entity: u(ROOT),
+            completely: false,
+        },
+        Command::UnpackPrefab {
+            entity: u(ROOT),
+            completely: true,
+        },
+        Command::ApplyPrefabOverride {
+            r#override: Node::from_serde(&json!({"op": "removeObject", "entity": KID1})),
+        },
         Command::DuplicateObject {
             id: u(ROOT),
             new_id: Some(u(KID2)),
@@ -1408,7 +1436,8 @@ fn commands_round_trip_through_json() {
         let back = Command::from_json(&j).unwrap_or_else(|d| panic!("{j}: {d}"));
         assert_eq!(&back, c);
     }
-    let names: Vec<&str> = all.iter().map(Command::name).collect();
+    let mut names: Vec<&str> = all.iter().map(Command::name).collect();
+    names.dedup();
     assert_eq!(
         names,
         [
@@ -1426,6 +1455,7 @@ fn commands_round_trip_through_json() {
             "setPrefabOverride",
             "revertPrefabOverride",
             "unpackPrefab",
+            "applyPrefabOverride",
             "duplicateObject",
             "setDocumentField",
             "unsetDocumentField",
@@ -2119,4 +2149,511 @@ fn move_component_reorders_the_components_and_undoes_exactly() {
         &schemas(),
     );
     assert!(!r.ok);
+}
+
+// ------------------------------------------ variants, nesting, unpack (2026-09-25)
+
+const TURRET: &str = "10000000-0000-4000-8000-000000000001";
+const T_BASE: &str = "10000000-0000-4000-8000-0000000000b1";
+const T_BARREL: &str = "10000000-0000-4000-8000-0000000000b2";
+const T_RENDERER: &str = "10000000-0000-4000-8000-0000000000c2";
+const T_BARREL_T: &str = "10000000-0000-4000-8000-0000000000c3";
+
+fn full_transform(y: f64) -> serde_json::Value {
+    json!({ "type": "fynkel.Transform", "version": 1,
+        "data": { "position": [0, y, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] } })
+}
+
+fn light() -> serde_json::Value {
+    json!({ "type": "fynkel.PointLight", "version": 1,
+        "data": { "color": [1, 0.5, 0.2], "intensity": 3.0, "range": 4.0, "culling_mask": 4294967295u32 } })
+}
+
+fn prefab_of(v: serde_json::Value) -> Prefab {
+    Prefab::from_document(Document::parse(DocumentKind::Prefab, None, &v.to_string()).unwrap())
+}
+
+fn scene_of(v: serde_json::Value) -> Editor {
+    Editor::open(
+        Document::parse(DocumentKind::Scene, None, &v.to_string()).unwrap(),
+        &schemas(),
+    )
+    .unwrap()
+}
+
+/// A scene holding one instance of `prefab` with `overrides`.
+fn one_instance(
+    anchor: &str,
+    instance: &str,
+    prefab: &str,
+    overrides: serde_json::Value,
+) -> Editor {
+    scene_of(json!({
+        "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+        "formatVersion": 5, "id": "60000000-0000-4000-8000-000000000000", "name": "S",
+        "entities": { anchor: { "name": "Thing", "parent": null, "children": [], "components": {},
+            "prefab": { "asset": { "asset": prefab }, "instance": instance, "overrides": overrides } } }
+    }))
+}
+
+/// What a scene looks like once expanded, without ids: the tree of names,
+/// active flags and components (type and data, by type).
+fn shape(scene: &Scene, lib: &PrefabLibrary) -> serde_json::Value {
+    let x = expand(scene, lib, &schemas());
+    assert!(!x.has_errors(), "{:#?}", x.diagnostics);
+    let out = x.scene();
+    fn node(s: &Scene, e: &fynkel_document::scene::Entity) -> serde_json::Value {
+        let mut components: Vec<(String, serde_json::Value)> = e
+            .components
+            .iter()
+            .map(|c| (c.type_id.clone(), c.data.to_serde()))
+            .collect();
+        components.sort_by(|a, b| a.0.cmp(&b.0));
+        json!({
+            "name": e.name,
+            "active": e.active,
+            "components": components,
+            "children": e.children.iter().map(|c| node(s, s.entity(*c).unwrap())).collect::<Vec<_>>(),
+        })
+    }
+    json!(out
+        .entities
+        .iter()
+        .filter(|e| e.parent.is_none())
+        .map(|e| node(&out, e))
+        .collect::<Vec<_>>())
+}
+
+fn instances_in(editor: &Editor) -> usize {
+    editor.scene().instances().count()
+}
+
+/// Nested instances in a prefab document (ADR-0022 amendment 2026-09-25):
+/// `instantiatePrefab` there takes an explicit id and instance and a full
+/// override list, children go under it with `createObject`, the prefab
+/// validates and flattens; a malformed override and an instance that
+/// would contain the prefab itself are refused.
+#[test]
+fn prefabs_hold_nested_instances_with_ids_and_overrides() {
+    let s = schemas();
+    let lib = library();
+    let holder = prefab_of(json!({
+        "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+        "formatVersion": 5, "id": "60000000-0000-4000-8000-000000000001", "name": "Holder",
+        "root": "60000000-0000-4000-8000-0000000000a1",
+        "entities": { "60000000-0000-4000-8000-0000000000a1": { "name": "Holder", "parent": null,
+            "children": [], "components": { "60000000-0000-4000-8000-0000000000c1": full_transform(0.0) } } }
+    }));
+    let root = holder.root;
+    let mut editor = Editor::open(holder.document.clone(), &s).unwrap();
+    let gun = u("60000000-0000-4000-8000-0000000000a2");
+    let gun_instance = u("60000000-0000-4000-8000-0000000000e2");
+    let scope = u("60000000-0000-4000-8000-0000000000a3");
+    let moved = json!({ "op": "setField", "entity": T_BARREL, "component": T_BARREL_T,
+                        "field": "position", "value": [0, 4, 0] });
+    let instantiate = |overrides: Vec<Node>| Command::InstantiatePrefab {
+        id: Some(gun),
+        name: "Gun".into(),
+        parent: Some(root),
+        index: None,
+        prefab: AssetRef::new(TURRET.parse().unwrap()),
+        instance: Some(gun_instance),
+        components: vec![],
+        overrides,
+    };
+    let r = editor.apply_with_prefabs(
+        Request::new(vec![
+            instantiate(vec![Node::from_serde(&moved)]),
+            Command::CreateObject {
+                id: Some(scope),
+                name: "Scope".into(),
+                parent: Some(gun),
+                index: None,
+                components: vec![transform()],
+            },
+        ]),
+        &s,
+        &lib,
+    );
+    assert!(r.ok, "{:#?}", r.all_diagnostics());
+    assert!(r.mutations[0].affected_ids.contains(&gun_instance));
+    let p = Prefab::from_document(editor.document().clone());
+    assert!(p.validate(&s).is_empty(), "{:#?}", p.validate(&s));
+    let inst = p.entity(gun).unwrap().prefab.as_ref().unwrap();
+    assert_eq!(inst.instance, gun_instance);
+    assert_eq!(inst.overrides.len(), 1);
+    assert_eq!(p.entity(gun).unwrap().children, vec![scope]);
+
+    // Flattened: Holder › Gun (the Turret's root) › Barrel (moved), Scope.
+    let mut lib2 = lib.clone();
+    lib2.add(p.clone());
+    let (flat, _) = lib2.flattened(&s);
+    let fh = flat.get(p.id()).unwrap();
+    let names: Vec<&str> = fh.entities.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["Holder", "Gun", "Barrel", "Scope"]);
+    let barrel = fh
+        .entity(fynkel_document::prefab::derive_id(
+            gun_instance,
+            u(T_BARREL),
+        ))
+        .unwrap();
+    assert_eq!(
+        barrel
+            .component_of("fynkel.Transform")
+            .unwrap()
+            .data
+            .get("position")
+            .unwrap()
+            .to_serde(),
+        json!([0, 4, 0])
+    );
+    assert_eq!(fh.entity(gun).unwrap().children.last(), Some(&scope));
+
+    // JSON: `overrides` round-trips.
+    let c = instantiate(vec![Node::from_serde(&moved)]);
+    assert_eq!(Command::from_json(&c.to_json()).unwrap(), c);
+    // A malformed override is refused before anything is written.
+    let before = text(&editor);
+    let mut bad = instantiate(vec![Node::from_serde(&json!({ "op": "setField" }))]);
+    if let Command::InstantiatePrefab { id, .. } = &mut bad {
+        *id = None;
+    }
+    let r = editor.apply_with_prefabs(Request::new(vec![bad]), &s, &lib);
+    assert!(!r.ok);
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0004");
+    // A prefab that contains the Holder cannot go into it (a cycle).
+    let outer = prefab_of(json!({
+        "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+        "formatVersion": 5, "id": "60000000-0000-4000-8000-000000000002", "name": "Outer",
+        "root": "60000000-0000-4000-8000-0000000000b1",
+        "entities": { "60000000-0000-4000-8000-0000000000b1": { "name": "Outer", "parent": null,
+            "children": [], "components": {},
+            "prefab": { "asset": { "asset": "60000000-0000-4000-8000-000000000001" },
+                        "instance": "60000000-0000-4000-8000-0000000000e9" } } }
+    }));
+    lib2.add(outer);
+    let r = editor.apply_with_prefabs(
+        Request::new(vec![Command::InstantiatePrefab {
+            id: None,
+            name: "Outer".into(),
+            parent: Some(root),
+            index: None,
+            prefab: AssetRef::new("60000000-0000-4000-8000-000000000002".parse().unwrap()),
+            instance: None,
+            components: vec![],
+            overrides: vec![],
+        }]),
+        &s,
+        &lib2,
+    );
+    assert!(!r.ok);
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-D0402");
+    assert_eq!(text(&editor), before);
+}
+
+/// Apply to Prefab into a variant (ADR-0022 amendment 2026-09-25): each
+/// override of a scene instance of the variant, sent as
+/// `applyPrefabOverride` to the variant document, lands as an override of
+/// the variant's root (translated to the base's ids) or as a plain child
+/// of the root; the instance without its overrides then looks exactly as
+/// it did with them. Removing what the variant added drops its override.
+#[test]
+fn apply_prefab_override_writes_into_a_variant() {
+    use fynkel_document::prefab::{derive_id, new_variant};
+    let s = schemas();
+    let mut lib = library();
+    let vi = u("61000000-0000-4000-8000-0000000000e1");
+    let doc = new_variant(
+        "Turret Variant",
+        &AssetRef::new(TURRET.parse().unwrap()),
+        "Base",
+        Some(vi),
+        vec![Node::from_serde(
+            &json!({ "op": "setField", "entity": T_BASE,
+            "component": T_RENDERER, "field": "cast_shadows", "value": false }),
+        )],
+    );
+    let variant_id = doc.envelope.id.to_string();
+    let mut variant = Editor::open(doc, &s).unwrap();
+    let original = text(&variant);
+    let vr = Prefab::from_document(variant.document().clone()).root;
+    assert_eq!(
+        Prefab::from_document(variant.document().clone())
+            .variant_of()
+            .unwrap()
+            .prefab_id(),
+        u(TURRET)
+    );
+    lib.add(Prefab::from_document(variant.document().clone()));
+
+    // The scene's instance, overridden in the variant's (flat) ids.
+    let barrel = derive_id(vi, u(T_BARREL)).to_string();
+    let barrel_t = derive_id(vi, u(T_BARREL_T)).to_string();
+    let renderer = derive_id(vi, u(T_RENDERER)).to_string();
+    let light_id = "61000000-0000-4000-8000-0000000000c7";
+    let muzzle = "61000000-0000-4000-8000-0000000000b7";
+    let tag = "61000000-0000-4000-8000-0000000000b8";
+    let tag_t = "61000000-0000-4000-8000-0000000000c8";
+    let mut add_light = light();
+    add_light["op"] = json!("addComponent");
+    add_light["entity"] = json!(barrel);
+    add_light["component"] = json!(light_id);
+    let ops = json!([
+        { "op": "setField", "entity": vr.to_string(), "component": renderer, "field": "visible", "value": false },
+        { "op": "setField", "entity": barrel, "component": barrel_t, "field": "position", "value": [0, 7, 0] },
+        add_light,
+        { "op": "addObject", "entity": muzzle, "name": "Muzzle", "parent": barrel,
+          "components": { "61000000-0000-4000-8000-0000000000c9": full_transform(1.0) } },
+        { "op": "addObject", "entity": tag, "name": "Tag", "parent": vr.to_string(),
+          "components": { tag_t: full_transform(3.0) } },
+        { "op": "setActive", "entity": barrel, "value": false }
+    ]);
+    let anchor = "61000000-0000-4000-8000-0000000000a9";
+    let instance = "61000000-0000-4000-8000-0000000000e9";
+    let with = one_instance(anchor, instance, &variant_id, ops.clone());
+    let before = shape(&with.scene(), &lib);
+
+    for op in ops.as_array().unwrap() {
+        let r = variant.apply_with_prefabs(
+            Request::new(vec![Command::ApplyPrefabOverride {
+                r#override: Node::from_serde(op),
+            }]),
+            &s,
+            &lib,
+        );
+        assert!(r.ok, "{op}: {:#?}", r.all_diagnostics());
+    }
+    let p = Prefab::from_document(variant.document().clone());
+    assert!(p.validate(&s).is_empty(), "{:#?}", p.validate(&s));
+    let overrides = &p.variant_of().unwrap().overrides;
+    let names: Vec<&str> = overrides.iter().map(|o| o.op.name()).collect();
+    assert_eq!(
+        names,
+        [
+            "setField",
+            "setField",
+            "setField",
+            "addComponent",
+            "addObject",
+            "setActive"
+        ],
+        "in the base's ids, after the variant's own"
+    );
+    assert_eq!(overrides[1].op.entity(), u(T_BASE));
+    assert_eq!(overrides[2].op.entity(), u(T_BARREL));
+    // The object added under the root is the variant's own child, same id.
+    assert_eq!(p.entity(u(tag)).unwrap().parent, Some(vr));
+
+    // Applied: the instance without overrides looks the same.
+    lib.add(p.clone());
+    let without = one_instance(anchor, instance, &variant_id, json!([]));
+    assert_eq!(shape(&without.scene(), &lib), before);
+
+    // Removing what the variant added drops its override.
+    let muzzle_now = derive_id(vi, u(muzzle)).to_string();
+    let light_now = derive_id(vi, u(light_id)).to_string();
+    for op in [
+        json!({ "op": "removeObject", "entity": muzzle_now }),
+        json!({ "op": "removeComponent", "entity": barrel, "component": light_now }),
+        // A plain child of the variant: deleted.
+        json!({ "op": "removeObject", "entity": tag }),
+    ] {
+        let r = variant.apply_with_prefabs(
+            Request::new(vec![Command::ApplyPrefabOverride {
+                r#override: Node::from_serde(&op),
+            }]),
+            &s,
+            &lib,
+        );
+        assert!(r.ok, "{op}: {:#?}", r.all_diagnostics());
+    }
+    let p = Prefab::from_document(variant.document().clone());
+    let names: Vec<&str> = p
+        .variant_of()
+        .unwrap()
+        .overrides
+        .iter()
+        .map(|o| o.op.name())
+        .collect();
+    assert_eq!(names, ["setField", "setField", "setField", "setActive"]);
+    assert!(p.entity(u(tag)).is_none());
+
+    // An op on something the variant does not have is refused.
+    let r = variant.apply_with_prefabs(
+        Request::new(vec![Command::ApplyPrefabOverride {
+            r#override: Node::from_serde(&json!({ "op": "removeObject",
+                "entity": "61000000-0000-4000-8000-0000000000ff" })),
+        }]),
+        &s,
+        &lib,
+    );
+    assert!(!r.ok);
+    while variant.can_undo() {
+        variant.undo().unwrap();
+    }
+    assert_eq!(text(&variant), original);
+    let c = Command::ApplyPrefabOverride {
+        r#override: Node::from_serde(&ops[0]),
+    };
+    assert_eq!(Command::from_json(&c.to_json()).unwrap(), c);
+}
+
+/// Unpack (one level) and Unpack Completely (ADR-0022 amendment
+/// 2026-09-25): an instance of a prefab holding a nested instance becomes
+/// plain entities with the nested instance kept (its overrides first, then
+/// the outer instance's that land inside it, in its prefab's ids), or plain
+/// entities only; an instance of a variant becomes an instance of the base.
+/// The scene looks the same after each; one transaction each.
+#[test]
+fn unpack_one_level_keeps_nested_instances_and_completely_does_not() {
+    use fynkel_document::prefab::derive_id;
+    let s = schemas();
+    let mut lib = library();
+    const HOLDER: &str = "62000000-0000-4000-8000-000000000001";
+    let h_root = "62000000-0000-4000-8000-0000000000a1";
+    let h_t = "62000000-0000-4000-8000-0000000000c1";
+    let gun = "62000000-0000-4000-8000-0000000000a2";
+    let gi = u("62000000-0000-4000-8000-0000000000e2");
+    let scope = "62000000-0000-4000-8000-0000000000a3";
+    lib.add(prefab_of(json!({
+        "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+        "formatVersion": 5, "id": HOLDER, "name": "Holder", "root": h_root,
+        "entities": {
+            h_root: { "name": "Holder", "parent": null, "children": [gun],
+                      "components": { h_t: full_transform(0.0) } },
+            gun: { "name": "Gun", "parent": h_root, "children": [scope], "components": {},
+                   "prefab": { "asset": { "asset": TURRET }, "instance": gi.to_string(), "overrides": [
+                       { "op": "setField", "entity": T_BARREL, "component": T_BARREL_T, "field": "position", "value": [0, 4, 0] }
+                   ] } },
+            scope: { "name": "Scope", "parent": gun, "children": [],
+                     "components": { "62000000-0000-4000-8000-0000000000c3": full_transform(0.5) } }
+        }
+    })));
+    let barrel = derive_id(gi, u(T_BARREL)).to_string();
+    let ops = json!([
+        { "op": "setField", "entity": h_root, "component": h_t, "field": "position", "value": [1, 0, 0] },
+        { "op": "setField", "entity": barrel, "component": derive_id(gi, u(T_BARREL_T)).to_string(),
+          "field": "position", "value": [0, 9, 0] },
+        { "op": "addObject", "entity": "62000000-0000-4000-8000-0000000000b5", "name": "Lamp", "parent": barrel,
+          "components": { "62000000-0000-4000-8000-0000000000c5": full_transform(0.1) } },
+        { "op": "setField", "entity": gun, "component": derive_id(gi, u(T_RENDERER)).to_string(),
+          "field": "cast_shadows", "value": false }
+    ]);
+    let anchor = "62000000-0000-4000-8000-0000000000aa";
+    let j = u("62000000-0000-4000-8000-0000000000ea");
+    let mut one = one_instance(anchor, &j.to_string(), HOLDER, ops.clone());
+    let original = text(&one);
+    let before = shape(&one.scene(), &lib);
+
+    // One level: the Gun stays an instance, with the moved barrel, the
+    // Lamp and the shadows in the Turret's ids.
+    let r = one.apply_with_prefabs(
+        Request::new(vec![Command::UnpackPrefab {
+            entity: u(anchor),
+            completely: false,
+        }]),
+        &s,
+        &lib,
+    );
+    assert!(r.ok, "{:#?}", r.all_diagnostics());
+    assert_eq!(instances_in(&one), 1);
+    let sc = one.scene();
+    assert!(sc.entity(u(anchor)).unwrap().prefab.is_none());
+    let new_gun = derive_id(j, u(gun));
+    let kept = sc.entity(new_gun).unwrap().prefab.as_ref().unwrap();
+    assert_eq!(kept.instance, derive_id(j, gi));
+    let targets: Vec<(&str, Uuid)> = kept
+        .overrides
+        .iter()
+        .map(|o| (o.op.name(), o.op.entity()))
+        .collect();
+    assert_eq!(
+        targets,
+        [
+            ("setField", u(T_BARREL)),
+            ("setField", u(T_BARREL)),
+            ("addObject", u("62000000-0000-4000-8000-0000000000b5")),
+            ("setField", u(T_BASE)),
+        ]
+    );
+    assert_eq!(
+        sc.entity(derive_id(j, u(scope))).unwrap().parent,
+        Some(new_gun)
+    );
+    assert_eq!(shape(&sc, &lib), before);
+    one.undo().unwrap();
+    assert_eq!(text(&one), original);
+
+    // Completely: plain entities only, the same scene.
+    let r = one.apply_with_prefabs(
+        Request::new(vec![Command::UnpackPrefab {
+            entity: u(anchor),
+            completely: true,
+        }]),
+        &s,
+        &lib,
+    );
+    assert!(r.ok, "{:#?}", r.all_diagnostics());
+    assert_eq!(instances_in(&one), 0);
+    assert_eq!(shape(&one.scene(), &lib), before);
+    assert_eq!(one.scene().entities.len(), 5);
+
+    // An instance of a variant, one level: an instance of the base with
+    // the variant's overrides then its own; the variant's own child plain.
+    const VARIANT: &str = "62000000-0000-4000-8000-000000000002";
+    let v_root = "62000000-0000-4000-8000-0000000000d1";
+    let vi = u("62000000-0000-4000-8000-0000000000e3");
+    let flag = "62000000-0000-4000-8000-0000000000d2";
+    lib.add(prefab_of(json!({
+        "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+        "formatVersion": 5, "id": VARIANT, "name": "Turret Variant", "root": v_root,
+        "entities": {
+            v_root: { "name": "Base", "parent": null, "children": [flag], "components": {},
+                "prefab": { "asset": { "asset": TURRET }, "instance": vi.to_string(), "overrides": [
+                    { "op": "setField", "entity": T_BASE, "component": T_RENDERER, "field": "cast_shadows", "value": false }
+                ] } },
+            flag: { "name": "Flag", "parent": v_root, "children": [],
+                    "components": { "62000000-0000-4000-8000-0000000000d3": full_transform(2.0) } }
+        }
+    })));
+    let ops = json!([
+        { "op": "setField", "entity": derive_id(vi, u(T_BARREL)).to_string(),
+          "component": derive_id(vi, u(T_BARREL_T)).to_string(), "field": "position", "value": [0, 6, 0] }
+    ]);
+    let mut v = one_instance(anchor, &j.to_string(), VARIANT, ops);
+    let before = shape(&v.scene(), &lib);
+    let r = v.apply_with_prefabs(
+        Request::new(vec![Command::UnpackPrefab {
+            entity: u(anchor),
+            completely: false,
+        }]),
+        &s,
+        &lib,
+    );
+    assert!(r.ok, "{:#?}", r.all_diagnostics());
+    let sc = v.scene();
+    let now = sc.entity(u(anchor)).unwrap().prefab.as_ref().unwrap();
+    assert_eq!(now.prefab_id(), u(TURRET));
+    assert_eq!(now.instance, derive_id(j, vi));
+    assert_eq!(now.overrides.len(), 2);
+    assert_eq!(
+        sc.entity(u(anchor)).unwrap().children,
+        vec![derive_id(j, u(flag))]
+    );
+    assert!(sc.validate(&s).is_empty(), "{:#?}", sc.validate(&s));
+    assert_eq!(shape(&sc, &lib), before);
+
+    // JSON: `completely` round-trips and defaults to one level.
+    let c = Command::UnpackPrefab {
+        entity: u(anchor),
+        completely: true,
+    };
+    assert_eq!(Command::from_json(&c.to_json()).unwrap(), c);
+    assert_eq!(
+        Command::from_json(&json!({ "command": "unpackPrefab", "entity": anchor })).unwrap(),
+        Command::UnpackPrefab {
+            entity: u(anchor),
+            completely: false
+        }
+    );
 }

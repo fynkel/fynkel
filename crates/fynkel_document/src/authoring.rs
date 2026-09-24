@@ -143,14 +143,18 @@ pub enum Command {
         field: String,
         asset: AssetRef,
     },
-    /// Creates an entity that is a prefab instance (scene documents only).
-    /// The instance is the prefab's root (ADR-0022) and has no components
-    /// of its own: each of `components` becomes overrides on the root —
-    /// `setField` for every field that differs from the root's component
-    /// of the same type (the placement is a Transform whose position
-    /// differs), `addComponent` when the root has none of that type. With
+    /// Creates an entity that is a prefab instance, in a scene or (nested,
+    /// ADR-0022 amendment 2026-09-25) in a prefab document. The instance
+    /// is the prefab's root (ADR-0022) and has no components of its own:
+    /// each of `components` becomes overrides on the root. A field that
+    /// differs from the root's component of the same type becomes a
+    /// `setField` (the placement is a Transform whose position differs),
+    /// and a type the root lacks becomes an `addComponent`. With
     /// `components`, the prefab must be in the library
-    /// ([`Editor::apply_with_prefabs`]).
+    /// ([`Editor::apply_with_prefabs`]). `overrides` (op objects of the
+    /// prefab model, prefab-local ids) follow them as given: an instance
+    /// copied with its overrides. In a prefab document, an instance of the
+    /// prefab itself, or of one that reaches it, is refused (`D0402`).
     InstantiatePrefab {
         id: Option<Uuid>,
         name: String,
@@ -159,6 +163,7 @@ pub enum Command {
         prefab: AssetRef,
         instance: Option<Uuid>,
         components: Vec<ComponentSpec>,
+        overrides: Vec<Node>,
     },
     /// Adds an override (the JSON op object of the prefab model) to an
     /// instance, replacing an existing override with the same target.
@@ -171,16 +176,49 @@ pub enum Command {
         entity: Uuid,
         index: Option<usize>,
     },
-    /// Replaces an instance by its expansion (M4-07): the instance keeps
-    /// its id, loses its `prefab` key and gains the root's components and
-    /// children (the overrides applied), and the other expanded entities —
-    /// with the ids the runtime derives — are inserted right after it in
-    /// `entities`, so the document reads exactly like the expansion.
+    /// Replaces an instance by its prefab's content (M4-07; Unity's Unpack
+    /// and Unpack Completely, ADR-0022 amendment 2026-09-25). The instance
+    /// keeps its id and gains the root's components and children (the
+    /// overrides applied); the prefab's other entities are inserted right
+    /// after it in `entities` under the ids the runtime derives
+    /// (`derive_id(instance, local)`).
+    ///
+    /// - `completely`: every nested instance is unpacked too, so the
+    ///   document reads exactly like the expansion (plain entities only).
+    /// - otherwise, **one level**: the prefab's own nested instances stay
+    ///   instances. Each keeps its derived anchor id, gets the instance id
+    ///   `derive_id(instance, its instance id)`, and holds its own overrides
+    ///   followed by those of this instance that land inside it (translated
+    ///   to its prefab's ids). An instance of a variant becomes an instance
+    ///   of the base the same way. The entities inside a nested instance
+    ///   therefore get new derived ids. A prefab without nested instances
+    ///   unpacks the same either way.
+    ///
     /// Needs the prefab library ([`Editor::apply_with_prefabs`]); an
     /// instance that does not expand (unknown prefab, invalid override,
     /// id collision) is refused with its expansion diagnostics.
     UnpackPrefab {
         entity: Uuid,
+        completely: bool,
+    },
+    /// Makes one override permanent in this document, which is the
+    /// instance's prefab (Apply to Prefab, ADR-0022 amendment 2026-09-25).
+    /// `override` is the instance's op as it stands, addressed by this
+    /// document's ids: the ids the `instance` query calls `local`. When
+    /// its target is one of this document's own entities, it is written
+    /// the way the equivalent command writes it (`setField`, `unsetField`,
+    /// `addComponent`, `removeComponent`, `createObject` with the op's
+    /// ids, `deleteObject`, `setObjectActive`). When the target lies inside
+    /// one of this document's instances (a variant's root, a nested
+    /// instance: its components, or an entity its expansion made), it
+    /// becomes an override on that instance, translated to its prefab's
+    /// ids, replacing one with the same target.
+    /// Removing a component or object that such an override added drops
+    /// that override instead. An object added under the instance itself
+    /// becomes a plain child entity, so its id stays the op's. Needs the
+    /// prefab library.
+    ApplyPrefabOverride {
+        r#override: Node,
     },
     /// Copies an entity and its subtree next to the original (M4-01):
     /// fresh entity, component and prefab-instance ids, every reference
@@ -251,6 +289,7 @@ impl Command {
             Command::SetPrefabOverride { .. } => "setPrefabOverride",
             Command::RevertPrefabOverride { .. } => "revertPrefabOverride",
             Command::UnpackPrefab { .. } => "unpackPrefab",
+            Command::ApplyPrefabOverride { .. } => "applyPrefabOverride",
             Command::DuplicateObject { .. } => "duplicateObject",
             Command::PasteObjects { .. } => "pasteObjects",
             Command::SetDocumentField { .. } => "setDocumentField",
@@ -394,6 +433,17 @@ impl Command {
                 prefab: asset_ref("prefab")?,
                 instance: opt_uuid("instance")?,
                 components: components()?,
+                overrides: match v.get("overrides") {
+                    None | Some(J::Null) => Vec::new(),
+                    Some(J::Array(items)) if items.iter().all(J::is_object) => {
+                        items.iter().map(Node::from_serde).collect()
+                    }
+                    Some(_) => {
+                        return Err(invalid(format!(
+                            "{name}: \"overrides\" must be an array of op objects"
+                        )))
+                    }
+                },
             },
             "setPrefabOverride" => Command::SetPrefabOverride {
                 entity: uuid("entity")?,
@@ -409,6 +459,20 @@ impl Command {
             },
             "unpackPrefab" => Command::UnpackPrefab {
                 entity: uuid("entity")?,
+                completely: match v.get("completely") {
+                    None | Some(J::Null) => false,
+                    Some(J::Bool(b)) => *b,
+                    Some(_) => {
+                        return Err(invalid(format!("{name}: \"completely\" must be a boolean")))
+                    }
+                },
+            },
+            "applyPrefabOverride" => Command::ApplyPrefabOverride {
+                r#override: Node::from_serde(
+                    v.get("override").filter(|o| o.is_object()).ok_or_else(|| {
+                        invalid(format!("{name}: \"override\" must be an op object"))
+                    })?,
+                ),
             },
             "duplicateObject" => Command::DuplicateObject {
                 id: uuid("id")?,
@@ -519,8 +583,13 @@ impl Command {
                 prefab,
                 instance,
                 components,
+                overrides,
             } => {
-                json!({ "id": id_or_null(id), "name": name, "parent": id_or_null(parent), "index": index, "prefab": asset_json(prefab), "instance": id_or_null(instance), "components": specs(components) })
+                let mut v = json!({ "id": id_or_null(id), "name": name, "parent": id_or_null(parent), "index": index, "prefab": asset_json(prefab), "instance": id_or_null(instance), "components": specs(components) });
+                if !overrides.is_empty() {
+                    v["overrides"] = J::Array(overrides.iter().map(Node::to_serde).collect());
+                }
+                v
             }
             Command::SetPrefabOverride { entity, r#override } => {
                 json!({ "entity": entity.to_string(), "override": r#override.to_serde() })
@@ -528,7 +597,16 @@ impl Command {
             Command::RevertPrefabOverride { entity, index } => {
                 json!({ "entity": entity.to_string(), "index": index })
             }
-            Command::UnpackPrefab { entity } => json!({ "entity": entity.to_string() }),
+            Command::UnpackPrefab { entity, completely } => {
+                let mut v = json!({ "entity": entity.to_string() });
+                if *completely {
+                    v["completely"] = J::Bool(true);
+                }
+                v
+            }
+            Command::ApplyPrefabOverride { r#override } => {
+                json!({ "override": r#override.to_serde() })
+            }
             Command::DuplicateObject {
                 id,
                 new_id,
@@ -1638,15 +1716,25 @@ impl Cx<'_> {
                 prefab,
                 instance,
                 components,
+                overrides: given,
             } => {
-                if self.kind != DocumentKind::Scene {
-                    return Err(Diagnostic::error(
-                        Code::EDIT_NOT_EDITABLE,
-                        "instantiatePrefab: prefab instances live in scene documents only",
-                    ));
+                if self.kind == DocumentKind::Prefab {
+                    self.refuse_cycle(prefab)?;
                 }
                 let instance = instance.unwrap_or_else(Uuid::new_v4);
-                let overrides = self.placement_overrides(prefab, components)?;
+                let mut overrides = self.placement_overrides(prefab, components)?;
+                for (i, op) in given.iter().enumerate() {
+                    let mut diags = Vec::new();
+                    if crate::scene::read_override(op, "", &mut diags, &|d, _| d).is_none() {
+                        let mut d = Diagnostic::error(
+                            Code::EDIT_INVALID_COMMAND,
+                            format!("instantiatePrefab: overrides[{i}] is not a valid op"),
+                        );
+                        d.related = diags;
+                        return Err(d);
+                    }
+                    overrides.push(op.clone());
+                }
                 let mut asset = vec![("asset".to_string(), Node::string(prefab.asset.to_string()))];
                 if !prefab.sub.is_empty() {
                     asset.push(("sub".to_string(), Node::string(prefab.sub.clone())));
@@ -1701,7 +1789,14 @@ impl Cx<'_> {
                 }
                 vec![*entity]
             }
-            Command::UnpackPrefab { entity } => self.unpack(*entity)?,
+            Command::UnpackPrefab { entity, completely } => {
+                if *completely {
+                    self.unpack(*entity)?
+                } else {
+                    self.unpack_one_level(*entity)?
+                }
+            }
+            Command::ApplyPrefabOverride { r#override } => self.apply_override(r#override)?,
             Command::DuplicateObject {
                 id,
                 new_id,
@@ -2443,6 +2538,518 @@ impl Cx<'_> {
         Ok(affected)
     }
 
+    /// The document read as a scene (a prefab's `root` ignored), for
+    /// expansion.
+    fn as_scene(&self) -> Scene {
+        Scene::from_document(Document {
+            kind: DocumentKind::Scene,
+            path: None,
+            root: self.root.clone(),
+            envelope: self.envelope.clone(),
+        })
+    }
+
+    /// In a prefab document: `prefab` must not be this prefab, nor reach it
+    /// through its own instances (a prefab cannot contain itself, `D0402`).
+    fn refuse_cycle(&self, prefab: &AssetRef) -> Result<(), Diagnostic> {
+        let me = self.envelope.id;
+        let target = self
+            .prefabs
+            .resolve(prefab)
+            .unwrap_or_else(|| Uuid::from_bytes(prefab.asset.0));
+        if target == me || self.prefabs.reachable_from([target]).contains(&me) {
+            return Err(Diagnostic::error(
+                Code::PREFAB_NESTED,
+                if target == me {
+                    format!("instantiatePrefab: {target} is this prefab; a prefab cannot contain (or be a variant of) itself")
+                } else {
+                    format!("instantiatePrefab: prefab {target} contains this prefab; instancing it here would make a cycle")
+                },
+            )
+            .with_id(target.to_string())
+            .with_suggestion("instance another prefab, or unpack the one that contains this prefab"));
+        }
+        Ok(())
+    }
+
+    /// `unpackPrefab` without `completely`: one level (see the command).
+    fn unpack_one_level(&mut self, entity: Uuid) -> Result<Vec<Uuid>, Diagnostic> {
+        use crate::scene::OverrideOp as O;
+        let e = self.entity_pointer(entity)?;
+        let scene = self.as_scene();
+        let Some(inst) = scene.entity(entity).and_then(|x| x.prefab.clone()) else {
+            return self.unpack(entity); // refused there: not an instance
+        };
+        let Some(p) = self.prefabs.get_ref(&inst.asset).cloned() else {
+            return self.unpack(entity); // refused there, with D0401
+        };
+        let full = prefab::expand(&scene, self.prefabs, self.schemas);
+        if !p.has_instances() || !full.instances.iter().any(|i| i.anchor == entity) {
+            // Nothing nested (the same either way), or refused there.
+            return self.unpack(entity);
+        }
+        // The prefab's nested instances against the flat library: which
+        // flat id belongs to which nested anchor.
+        let px = prefab::expand(&p.scene(), self.prefabs, self.schemas);
+        if px.has_errors() {
+            return self.unpack(entity);
+        }
+        let owners = prefab::Owners::of(&px.instances);
+        let mut owned_e = owners.entities.clone();
+        let mut owned_c = owners.components.clone();
+        let j = inst.instance;
+        // Each nested anchor's new instance id.
+        let nested: Vec<(Uuid, Uuid)> = p
+            .entities
+            .iter()
+            .filter_map(|x| {
+                x.prefab
+                    .as_ref()
+                    .map(|i| (x.id, prefab::derive_id(j, i.instance)))
+            })
+            .collect();
+        let new_instance = |n: Uuid| nested.iter().find(|(a, _)| *a == n).map(|(_, x)| *x);
+        let plain_components: HashSet<Uuid> = p
+            .entities
+            .iter()
+            .flat_map(|x| x.components.iter().map(|c| c.id))
+            .collect();
+        let root_local = p.root;
+        let scene_of_plain = |u: Uuid| {
+            if u == root_local {
+                entity
+            } else {
+                prefab::derive_id(j, u)
+            }
+        };
+        // A flat id of the prefab → its id once nested instances are kept
+        // (`keep` names the instance the value will live in: its own ids
+        // stay local there).
+        let values = |keep: Option<Uuid>,
+                      owned_e: &std::collections::HashMap<Uuid, (Uuid, Uuid)>,
+                      owned_c: &std::collections::HashMap<Uuid, (Uuid, Uuid)>,
+                      u: Uuid|
+         -> Option<Uuid> {
+            if p.entity(u).is_some() {
+                return Some(scene_of_plain(u));
+            }
+            if plain_components.contains(&u) {
+                return Some(prefab::derive_id(j, u));
+            }
+            let (anchor, local) = owned_e.get(&u).or_else(|| owned_c.get(&u)).copied()?;
+            if Some(anchor) == keep {
+                Some(local)
+            } else {
+                new_instance(anchor).map(|x| prefab::derive_id(x, local))
+            }
+        };
+
+        // This instance's overrides: the ones inside a nested instance go
+        // to it (in its prefab's ids), the rest apply here.
+        let raw: Vec<Node> = self
+            .root
+            .pointer(&format!("{e}/prefab/overrides"))
+            .and_then(Node::as_array)
+            .map(<[Node]>::to_vec)
+            .unwrap_or_default();
+        let mut plain_ops: Vec<Node> = Vec::new();
+        let mut routed: Vec<(Uuid, Node)> = Vec::new();
+        for node in &raw {
+            let mut sink = Vec::new();
+            let Some(op) = crate::scene::read_override(node, "", &mut sink, &|d, _| d) else {
+                plain_ops.push(node.clone());
+                continue;
+            };
+            let Some(anchor) = route(&op, &owned_e, &|id| p.entity(id).is_some()) else {
+                plain_ops.push(node.clone());
+                continue;
+            };
+            let local = localize(node, &op, anchor, &owned_e, &owned_c, &|u| {
+                values(Some(anchor), &owned_e, &owned_c, u)
+            })
+            .map_err(|why| {
+                Diagnostic::error(
+                    Code::EDIT_INVALID_COMMAND,
+                    format!("unpackPrefab: an override of {entity} cannot move into its nested instance: {why}"),
+                )
+                .with_pointer(format!("{e}/prefab/overrides"))
+                .with_id(entity.to_string())
+            })?;
+            // What it adds belongs to that instance from now on.
+            match &op {
+                O::AddObject {
+                    entity: added,
+                    components,
+                    ..
+                } => {
+                    owned_e.insert(*added, (anchor, *added));
+                    for c in components {
+                        owned_c.insert(c.id, (anchor, c.id));
+                    }
+                }
+                O::AddComponent { component, .. } => {
+                    owned_c.insert(component.id, (anchor, component.id));
+                }
+                _ => {}
+            }
+            routed.push((anchor, local));
+        }
+
+        // The prefab with its nested anchors as plain (componentless)
+        // entities; this instance's other overrides expand against it.
+        let mut stripped = p.document.clone();
+        for (n, _) in &nested {
+            if let Some(m) = stripped
+                .root
+                .pointer_mut(&format!("/entities/{n}"))
+                .and_then(Node::as_object_mut)
+            {
+                m.retain(|m| m.key != "prefab");
+            }
+        }
+        let mut library = self.prefabs.clone();
+        library.add(Prefab::from_document(stripped));
+        let mut root = self.root.clone();
+        if let Some(list) = root.pointer_mut(&format!("{e}/prefab")) {
+            list.set(
+                "overrides",
+                Node::synthetic(Value::Array(plain_ops.clone())),
+            );
+        }
+        let synthetic = Scene::from_document(Document {
+            kind: DocumentKind::Scene,
+            path: None,
+            root,
+            envelope: self.envelope.clone(),
+        });
+        let expanded = prefab::expand(&synthetic, &library, self.schemas);
+        let Some(x) = expanded.instances.iter().find(|i| i.anchor == entity) else {
+            let text = entity.to_string();
+            let mut d = Diagnostic::error(
+                Code::EDIT_INVALID_COMMAND,
+                format!("unpackPrefab: the instance at {entity} cannot be unpacked one level"),
+            )
+            .with_pointer(format!("{e}/prefab"))
+            .with_id(text.clone())
+            .with_suggestion("unpack it completely (completely: true)");
+            d.related = expanded
+                .diagnostics
+                .iter()
+                .filter(|d| d.id.as_deref() == Some(text.as_str()))
+                .cloned()
+                .collect();
+            return Err(d);
+        };
+
+        // The nested anchors get their `prefab` back: the prefab's own
+        // overrides (ids of this prefab mapped to their new scene ids),
+        // then the ones routed from this instance.
+        let prefab_node = |n: Uuid| -> Option<Node> {
+            let x = new_instance(n)?;
+            let src = p.document.root.pointer(&format!("/entities/{n}/prefab"))?;
+            let mut ops: Vec<Node> = src
+                .get("overrides")
+                .and_then(Node::as_array)
+                .map(<[Node]>::to_vec)
+                .unwrap_or_default();
+            for op in &mut ops {
+                remap_values(op, &|u| {
+                    values(None, &owners.entities, &owners.components, u)
+                });
+            }
+            ops.extend(
+                routed
+                    .iter()
+                    .filter(|(a, _)| *a == n)
+                    .map(|(_, op)| op.clone()),
+            );
+            Some(Node::object(vec![
+                ("asset".into(), src.get("asset")?.clone()),
+                ("instance".into(), Node::string(x.to_string())),
+                ("overrides".into(), Node::synthetic(Value::Array(ops))),
+            ]))
+        };
+        // Component data still naming a flat id inside a nested instance
+        // names its new derived id.
+        let fix = |mut node: Node| -> Node {
+            if let Some(components) = node.get_mut("components") {
+                prefab::remap_strings(components, &|u| {
+                    if owners.entities.contains_key(&u) || owners.components.contains_key(&u) {
+                        values(None, &owners.entities, &owners.components, u)
+                    } else {
+                        None
+                    }
+                });
+            }
+            node
+        };
+        let ex_entities = expanded
+            .document
+            .root
+            .get("entities")
+            .and_then(Node::as_object)
+            .expect("the expansion has an entities object");
+        let member = |id: Uuid| -> Node {
+            let key = id.to_string();
+            fix(ex_entities
+                .iter()
+                .find(|m| m.key == key)
+                .expect("the expansion has every derived entity")
+                .value
+                .clone())
+        };
+
+        // The instance: its `prefab` gone (or the base's, for a variant),
+        // the root's components and children.
+        let own = member(entity);
+        match prefab_node(root_local) {
+            Some(node) => self.edits.push(Edit::Replace {
+                pointer: format!("{e}/prefab"),
+                value: node,
+            }),
+            None => self.edits.push(Edit::RemoveMember {
+                parent: e.clone(),
+                key: "prefab".into(),
+            }),
+        }
+        for key in ["children", "components"] {
+            let Some(value) = own.get(key) else { continue };
+            let pointer = format!("{e}/{key}");
+            if self.root.pointer(&pointer).is_some() {
+                self.edits.push(Edit::Replace {
+                    pointer,
+                    value: value.clone(),
+                });
+            } else {
+                self.edits.push(Edit::InsertMember {
+                    parent: e.clone(),
+                    index: usize::MAX,
+                    key: key.into(),
+                    value: value.clone(),
+                });
+            }
+        }
+        let position = self
+            .root
+            .get("entities")
+            .and_then(Node::as_object)
+            .and_then(|m| m.iter().position(|m| m.key == entity.to_string()))
+            .expect("the anchor is an entity");
+        let mut affected = vec![entity];
+        let derived = x.entities.iter().filter(|(_, sid)| *sid != entity);
+        for (i, (local, sid)) in derived.enumerate() {
+            let mut value = member(*sid);
+            if let Some(node) = prefab_node(*local) {
+                value.set("prefab", node);
+            }
+            self.edits.push(Edit::InsertMember {
+                parent: "/entities".into(),
+                index: position + 1 + i,
+                key: sid.to_string(),
+                value,
+            });
+            affected.push(*sid);
+        }
+        affected.extend(x.components.iter().map(|(_, sid)| *sid));
+        affected.extend(nested.iter().map(|(_, x)| *x));
+        Ok(affected)
+    }
+
+    /// `applyPrefabOverride`: one override of an instance of this document
+    /// made permanent here (see the command).
+    fn apply_override(&mut self, node: &Node) -> Result<Vec<Uuid>, Diagnostic> {
+        use crate::scene::OverrideOp as O;
+        let mut sink = Vec::new();
+        let Some(op) = crate::scene::read_override(node, "", &mut sink, &|d, _| d) else {
+            let mut d = Diagnostic::error(
+                Code::EDIT_INVALID_COMMAND,
+                "applyPrefabOverride: the override is not a valid op",
+            );
+            d.related = sink;
+            return Err(d);
+        };
+        let scene = self.as_scene();
+        let expanded = prefab::expand(&scene, self.prefabs, self.schemas);
+        let owners = prefab::Owners::of(&expanded.instances);
+        let Some(anchor) = route(&op, &owners.entities, &|id| scene.entity(id).is_some()) else {
+            // One of this document's own entities: the plain command.
+            let spec = |c: &crate::scene::Component| ComponentSpec {
+                id: Some(c.id),
+                type_id: c.type_id.clone(),
+                version: Some(c.version),
+                data: Some(c.data.clone()),
+            };
+            let command = match &op {
+                O::SetField {
+                    entity,
+                    component,
+                    field,
+                    value,
+                } => Command::SetField {
+                    entity: *entity,
+                    component: *component,
+                    field: field.clone(),
+                    value: value.clone(),
+                },
+                O::UnsetField {
+                    entity,
+                    component,
+                    field,
+                } => Command::UnsetField {
+                    entity: *entity,
+                    component: *component,
+                    field: field.clone(),
+                },
+                O::AddComponent { entity, component } => Command::AddComponent {
+                    entity: *entity,
+                    component: spec(component),
+                },
+                O::RemoveComponent { entity, component } => Command::RemoveComponent {
+                    entity: *entity,
+                    component: *component,
+                },
+                O::AddObject {
+                    entity,
+                    name,
+                    parent,
+                    components,
+                } => Command::CreateObject {
+                    id: Some(*entity),
+                    name: name.clone(),
+                    parent: *parent,
+                    index: None,
+                    components: components.iter().map(spec).collect(),
+                },
+                O::RemoveObject { entity } => Command::DeleteObject { id: *entity },
+                O::SetActive { entity, value } => Command::SetObjectActive {
+                    id: *entity,
+                    active: *value,
+                },
+            };
+            return self.run(&command).map(|p| p.affected);
+        };
+        let local = localize(
+            node,
+            &op,
+            anchor,
+            &owners.entities,
+            &owners.components,
+            &|u| {
+                owners
+                    .entities
+                    .get(&u)
+                    .or_else(|| owners.components.get(&u))
+                    .filter(|(a, _)| *a == anchor)
+                    .map(|(_, l)| *l)
+            },
+        )
+        .map_err(|why| {
+            Diagnostic::error(
+                Code::EDIT_INVALID_COMMAND,
+                format!("applyPrefabOverride: {why}"),
+            )
+            .with_id(anchor.to_string())
+        })?;
+        let mut sink = Vec::new();
+        let local_op = crate::scene::read_override(&local, "", &mut sink, &|d, _| d)
+            .expect("a translated op reads");
+        // Removing what an override of that instance added drops the
+        // override (and what depends on it) instead.
+        let list: Vec<Option<O>> = self
+            .root
+            .pointer(&format!("/entities/{anchor}/prefab/overrides"))
+            .and_then(Node::as_array)
+            .into_iter()
+            .flatten()
+            .map(|n| crate::scene::read_override(n, "", &mut Vec::new(), &|d, _| d))
+            .collect();
+        let mut drop: Vec<usize> = Vec::new();
+        let mut rewrite: Option<(usize, Node)> = None;
+        match &local_op {
+            O::RemoveComponent { component: c, .. } => {
+                let names_c = |o: &O| match o {
+                    O::SetField { component, .. }
+                    | O::UnsetField { component, .. }
+                    | O::RemoveComponent { component, .. } => component == c,
+                    O::AddComponent { component, .. } => component.id == *c,
+                    _ => false,
+                };
+                let added_alone = list.iter().any(
+                    |o| matches!(o, Some(O::AddComponent { component, .. }) if component.id == *c),
+                );
+                let in_object = list.iter().position(|o| {
+                    matches!(o, Some(O::AddObject { components, .. }) if components.iter().any(|x| x.id == *c))
+                });
+                if added_alone || in_object.is_some() {
+                    drop = list
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, o)| o.as_ref().is_some_and(names_c))
+                        .map(|(i, _)| i)
+                        .collect();
+                    if let Some(i) = in_object {
+                        let pointer = format!("/entities/{anchor}/prefab/overrides/{i}");
+                        let mut op = self.root.pointer(&pointer).cloned().expect("listed");
+                        if let Some(m) = op.get_mut("components").and_then(Node::as_object_mut) {
+                            let key = c.to_string();
+                            m.retain(|m| m.key != key);
+                        }
+                        rewrite = Some((i, op));
+                    }
+                }
+            }
+            O::RemoveObject { entity: x }
+                if list
+                    .iter()
+                    .any(|o| matches!(o, Some(O::AddObject { entity, .. }) if entity == x)) =>
+            {
+                let mut removed: HashSet<Uuid> = HashSet::from([*x]);
+                loop {
+                    let before = removed.len();
+                    for o in list.iter().flatten() {
+                        if let O::AddObject {
+                            entity,
+                            parent: Some(p),
+                            ..
+                        } = o
+                        {
+                            if removed.contains(p) {
+                                removed.insert(*entity);
+                            }
+                        }
+                    }
+                    if removed.len() == before {
+                        break;
+                    }
+                }
+                drop = list
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, o)| o.as_ref().is_some_and(|o| removed.contains(&o.entity())))
+                    .map(|(i, _)| i)
+                    .collect();
+            }
+            _ => {}
+        }
+        if drop.is_empty() && rewrite.is_none() {
+            return self.set_override(anchor, &local);
+        }
+        let p = format!("/entities/{anchor}/prefab/overrides");
+        if let Some((i, op)) = rewrite {
+            self.edits.push(Edit::Replace {
+                pointer: format!("{p}/{i}"),
+                value: op,
+            });
+        }
+        for i in drop.into_iter().rev() {
+            self.edits.push(Edit::RemoveItem {
+                parent: p.clone(),
+                index: i,
+            });
+        }
+        Ok(vec![anchor, local_op.entity()])
+    }
+
     fn duplicate(
         &mut self,
         id: Uuid,
@@ -2825,6 +3432,102 @@ fn remap(node: &Node, map: &std::collections::HashMap<String, String>) -> Node {
         other => other.clone(),
     };
     Node::synthetic(value)
+}
+
+/// The instance an op addressed by a document's (expanded) ids lands in:
+/// the anchor whose expansion made its target, when the op must become an
+/// override of that instance. A component op on an anchor lands in it (the
+/// anchor's components are its prefab root's). An object op on one of the
+/// document's own entities, an anchor included, does not: it is a plain
+/// edit. `None` for a plain edit.
+fn route(
+    op: &crate::scene::OverrideOp,
+    owned: &std::collections::HashMap<Uuid, (Uuid, Uuid)>,
+    is_entity: &dyn Fn(Uuid) -> bool,
+) -> Option<Uuid> {
+    use crate::scene::OverrideOp as O;
+    let target = match op {
+        O::AddObject {
+            parent: Some(p), ..
+        } => *p,
+        O::AddObject { parent: None, .. } => return None,
+        o => o.entity(),
+    };
+    let component_op = matches!(
+        op,
+        O::SetField { .. }
+            | O::UnsetField { .. }
+            | O::AddComponent { .. }
+            | O::RemoveComponent { .. }
+    );
+    if !component_op && is_entity(target) {
+        return None;
+    }
+    owned.get(&target).map(|(anchor, _)| *anchor)
+}
+
+/// `node` (the op `op`) readdressed to the prefab-local ids of the instance
+/// at `anchor`: its target entity (an `addObject`'s parent), its target
+/// component; the ids it adds are kept. Id strings inside its values are
+/// mapped through `values`.
+fn localize(
+    node: &Node,
+    op: &crate::scene::OverrideOp,
+    anchor: Uuid,
+    entities: &std::collections::HashMap<Uuid, (Uuid, Uuid)>,
+    components: &std::collections::HashMap<Uuid, (Uuid, Uuid)>,
+    values: &dyn Fn(Uuid) -> Option<Uuid>,
+) -> Result<Node, String> {
+    use crate::scene::OverrideOp as O;
+    let local = |map: &std::collections::HashMap<Uuid, (Uuid, Uuid)>, id: Uuid, what: &str| {
+        map.get(&id)
+            .filter(|(a, _)| *a == anchor)
+            .map(|(_, l)| Node::string(l.to_string()))
+            .ok_or_else(|| format!("{what} {id} is not part of the instance {anchor}"))
+    };
+    let mut out = node.clone();
+    match op {
+        O::SetField {
+            entity, component, ..
+        }
+        | O::UnsetField {
+            entity, component, ..
+        }
+        | O::RemoveComponent { entity, component } => {
+            out.set("entity", local(entities, *entity, "entity")?);
+            out.set("component", local(components, *component, "component")?);
+        }
+        O::AddComponent { entity, .. }
+        | O::RemoveObject { entity }
+        | O::SetActive { entity, .. } => {
+            out.set("entity", local(entities, *entity, "entity")?);
+        }
+        O::AddObject {
+            parent: Some(p), ..
+        } => out.set("parent", local(entities, *p, "entity")?),
+        O::AddObject { parent: None, .. } => {
+            return Err("addObject needs a parent".to_string());
+        }
+    }
+    remap_values(&mut out, values);
+    Ok(out)
+}
+
+/// Maps the id strings inside an op's values (`value`, `data`, an
+/// `addObject`'s component data) through `map`.
+fn remap_values(op: &mut Node, map: &dyn Fn(Uuid) -> Option<Uuid>) {
+    for key in ["value", "data"] {
+        if let Some(v) = op.get_mut(key) {
+            prefab::remap_strings(v, map);
+        }
+    }
+    if let Some(cs) = op.get_mut("components").and_then(Node::as_object_mut) {
+        for m in cs {
+            if let Some(d) = m.value.get_mut("data") {
+                prefab::remap_strings(d, map);
+            }
+        }
+    }
 }
 
 /// Two overrides with the same target replace each other.

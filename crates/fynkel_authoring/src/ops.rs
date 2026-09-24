@@ -364,8 +364,10 @@ impl AuthoringSession {
     /// `newDocument { kind: scene|prefab|material|volume, path, name?, shader? }`:
     /// `path` is relative to the asset root (the kind's suffix is added
     /// when missing); `name` defaults to the file's stem; a material may
-    /// name a `shader` (the built-in PBR by default). Refused when the
-    /// file or a file of another kind's name exists.
+    /// name a `shader` (the built-in PBR by default); a prefab may be a
+    /// variant (`variantOf`, `overrides?`, `instance?`: see
+    /// [`Self::new_variant`]). Refused when the file or a file of another
+    /// kind's name exists.
     fn new_document(&mut self, args: &Value) -> Result<Value, Diagnostic> {
         const OP: &str = "newDocument";
         let kind_name = string_arg(args, "kind", OP)?;
@@ -415,6 +417,9 @@ impl AuthoringSession {
             .map(str::to_string)
             .unwrap_or_else(|| stem(&path, kind));
         let mut doc = Document::new(kind, &name);
+        if let Some(base) = args.get("variantOf").filter(|v| !v.is_null()) {
+            doc = self.new_variant(&name, base, args)?;
+        }
         if kind == DocumentKind::Material {
             if let Some(shader) = args.get("shader").and_then(Value::as_str) {
                 doc.root.set("shader", Node::string(shader));
@@ -459,6 +464,95 @@ impl AuthoringSession {
             Some(id),
             json!({ "path": path.display().to_string(), "id": id.to_string() }),
         ))
+    }
+
+    /// `newDocument { kind: "prefab", variantOf, overrides?, instance? }`:
+    /// a **variant** of the base `variantOf` (a prefab document's id, or
+    /// `{ asset, sub? }` for an imported `#prefab` hierarchy; ADR-0022
+    /// amendment 2026-09-25). The new prefab's one root is an instance of
+    /// the base named like the base's root, carrying `overrides` (op
+    /// objects addressed by the base's ids, e.g. a scene instance's, copied
+    /// to make a variant of it) under `instance` (fresh by default).
+    /// Refused when the base is not a prefab of the project or the overrides
+    /// do not apply to it.
+    fn new_variant(&self, name: &str, base: &Value, args: &Value) -> Result<Document, Diagnostic> {
+        const OP: &str = "newDocument";
+        if args.get("kind").and_then(Value::as_str) != Some("prefab") {
+            return Err(invalid(format!(
+                "{OP}: variantOf makes a prefab; kind must be \"prefab\""
+            )));
+        }
+        let (asset, sub) = match base {
+            Value::String(s) => (s.as_str(), ""),
+            Value::Object(o) => (
+                o.get("asset").and_then(Value::as_str).unwrap_or(""),
+                o.get("sub").and_then(Value::as_str).unwrap_or(""),
+            ),
+            _ => ("", ""),
+        };
+        let asset: Uuid = asset.parse().map_err(|_| {
+            invalid(format!(
+                "{OP}: variantOf must be a prefab's id or {{ asset, sub? }}"
+            ))
+        })?;
+        let mut base_ref = AssetRef::new(crate::project::to_contract(asset));
+        base_ref.sub = sub.to_string();
+        let overrides: Vec<Node> = match args.get("overrides") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(items)) if items.iter().all(Value::is_object) => {
+                items.iter().map(Node::from_serde).collect()
+            }
+            Some(_) => {
+                return Err(invalid(format!(
+                    "{OP}: overrides must be an array of op objects"
+                )))
+            }
+        };
+        let instance = match args.get("instance") {
+            None | Some(Value::Null) => None,
+            Some(_) => Some(uuid_arg(args, "instance", OP)?),
+        };
+        let project = self.project().unwrap();
+        // The base as the preview sees it (open editors first), flattened
+        // (a variant of a variant) for its root's name.
+        let probe =
+            fynkel_document::prefab::new_variant(name, &base_ref, "", instance, overrides.clone());
+        let probe_scene = fynkel_document::Prefab::from_document(probe).scene();
+        let (library, _) = self.prefab_library(project, &probe_scene);
+        let (flat, _) = library.flattened(&project.schemas);
+        let Some(found) = flat.get_ref(&base_ref) else {
+            return Err(invalid(format!(
+                "{OP}: variantOf {} is not a prefab of the project",
+                if sub.is_empty() {
+                    asset.to_string()
+                } else {
+                    format!("{asset}#{sub}")
+                }
+            )));
+        };
+        let root_name = found
+            .entity(found.root)
+            .map(|r| r.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| found.document.envelope.name.clone());
+        let doc =
+            fynkel_document::prefab::new_variant(name, &base_ref, &root_name, instance, overrides);
+        let expanded = fynkel_document::expand(
+            &fynkel_document::Prefab::from_document(doc.clone()).scene(),
+            &library,
+            &project.schemas,
+        );
+        if expanded.has_errors() {
+            let mut d = invalid(format!(
+                "{OP}: the variant of {} would not expand",
+                found.document.envelope.name
+            ));
+            for e in expanded.diagnostics.into_iter().filter(|d| d.is_error()) {
+                d = d.with_related(e);
+            }
+            return Err(d);
+        }
+        Ok(doc)
     }
 
     // --------------------------------------------------------- rename
@@ -1653,6 +1747,13 @@ impl AuthoringSession {
                         });
                     }
                     DocumentKind::Scene | DocumentKind::Prefab => {
+                        if *kind == DocumentKind::Prefab {
+                            // A variant names its base (ADR-0022 amendment).
+                            v["variantOf"] = fynkel_document::Prefab::from_document(doc.clone())
+                                .variant_of()
+                                .map(|b| fynkel_document::prefab::asset_ref_json(&b.asset))
+                                .unwrap_or(Value::Null);
+                        }
                         v["entities"] = doc
                             .root
                             .get("entities")

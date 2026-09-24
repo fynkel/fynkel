@@ -69,6 +69,7 @@ pub const COMMANDS: &[&str] = &[
     "setPrefabOverride",
     "revertPrefabOverride",
     "unpackPrefab",
+    "applyPrefabOverride",
     "setDocumentField",
     "unsetDocumentField",
     "createMaterial",
@@ -524,16 +525,20 @@ impl AuthoringSession {
     /// and the paths a committed transaction wrote are rescanned so the
     /// asset database sees the new material or the saved document at once.
     /// `Err` only when the handle is unknown or the document or project is
-    /// read-only. `unpackPrefab`, and `instantiatePrefab` with components
-    /// (which become overrides of the prefab's root, ADR-0022), see the
-    /// prefabs as the preview does — open prefab documents from their
+    /// read-only. `unpackPrefab`, `applyPrefabOverride`, and
+    /// `instantiatePrefab` with components (which become overrides of the
+    /// prefab's root, ADR-0022) or in a prefab document (the cycle check)
+    /// see the prefabs as the preview does — open prefab documents from their
     /// editors, the rest from disk, the imported hierarchies through the
     /// importer ([`Self::describe`]).
     pub fn apply(&mut self, handle: Handle, mut request: Request) -> Result<Applied, Diagnostic> {
         self.writable(handle)?;
+        let in_prefab = self.documents[&handle].editor.document().kind == DocumentKind::Prefab;
         let needs_prefabs = request.commands.iter().any(|c| match &c.command {
-            Command::UnpackPrefab { .. } => true,
-            Command::InstantiatePrefab { components, .. } => !components.is_empty(),
+            Command::UnpackPrefab { .. } | Command::ApplyPrefabOverride { .. } => true,
+            // Components become overrides of the root; in a prefab, the
+            // library tells whether the instance would make a cycle.
+            Command::InstantiatePrefab { components, .. } => !components.is_empty() || in_prefab,
             _ => false,
         });
         let library = if needs_prefabs {

@@ -23,7 +23,7 @@ impl AuthoringSession {
     ///
     /// ```text
     /// { anchor, instance, asset: { asset, sub }, expanded,
-    ///   prefab: { id, name, path, kind: prefab|source|rig, open, handle, readOnly } | null,
+    ///   prefab: { id, name, variantOf: { asset, sub? } | null, path, kind: prefab|source|rig, open, handle, readOnly } | null,
     ///   diagnostics: [...],                       // about this instance
     ///   entities: [ { id, local, name, active, activeOverridden, parent, children: [id], added,
     ///                 components: { <id>: { id, local, type, version, data, added, overridden: [field] } } } ],
@@ -91,9 +91,13 @@ impl AuthoringSession {
                 diagnostics.push(fynkel_document::diagnostic_json(d));
             }
         }
-        let prefab = library.get_ref(&inst.asset);
-        let prefab_json =
-            prefab.map(|p| self.prefab_json(project, p, inst.prefab_id(), &inst.asset.sub));
+        let prefab_json = library
+            .get_ref(&inst.asset)
+            .map(|p| self.prefab_json(project, p, inst.prefab_id(), &inst.asset.sub));
+        // The prefab's entities as the overrides address them (a variant's
+        // include its base's, under the variant's ids).
+        let (flat, _) = library.flattened(&project.schemas);
+        let prefab = flat.get_ref(&inst.asset);
         let expansion = expanded.instances.iter().find(|i| i.anchor == entity);
 
         // Derived ids, then the overrides marked on them.
@@ -272,6 +276,7 @@ impl AuthoringSession {
         json!({
             "id": prefab.id().to_string(),
             "name": prefab.document.envelope.name,
+            "variantOf": prefab.variant_of().map(|v| fynkel_document::prefab::asset_ref_json(&v.asset)),
             "path": path,
             "kind": kind,
             "open": if imported { format!("{asset}#{sub}") } else { asset.to_string() },

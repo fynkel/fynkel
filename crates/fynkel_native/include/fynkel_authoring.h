@@ -237,7 +237,10 @@ FynkelStatus fynkel_authoring_query(FynkelAuthoringSession* session,
  *                                                  added when missing; name defaults to the
  *                                                  file's stem; a material's shader
  *                                                  validated against the project's)
- *   renameAsset        asset, path                 moves the file — and a source's
+ *                      variantOf?, overrides?,     a prefab variant: one root, an instance
+ *                      instance?                   of the base (an id or { asset, sub? })
+ *                                                  carrying the overrides (ADR-0022)
+ *   renameAsset       asset, path                 moves the file — and a source's
  *                                                  sidecar — so the id survives; `path`
  *                                                  ending in `/` or naming a folder keeps
  *                                                  the name; the kind (suffix, extension)

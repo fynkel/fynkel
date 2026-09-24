@@ -151,11 +151,12 @@ Commands: createObject, deleteObject, renameObject, setObjectActive (`id`,
 addComponent (`entity`, `component: { type, version?, data? }`),
 removeComponent, moveComponent, setField, unsetField, assignAsset,
 instantiatePrefab,
-setPrefabOverride, revertPrefabOverride, unpackPrefab, createMaterial,
-saveDocument. Omitted ids are minted; `--json` prints the affected ids and the
-new revision. `unpackPrefab` replaces an instance by its expansion in place and
-so reads the prefabs the way `inspect --expand` does — `--prefabs <dir>`, else
-the document's directory. Hand edits are fine too — run `fynkel validate`
+setPrefabOverride, revertPrefabOverride, unpackPrefab, applyPrefabOverride,
+createMaterial, saveDocument. Omitted ids are minted; `--json` prints the
+affected ids and the new revision. `unpackPrefab` replaces an instance by its
+expansion in place (one level: instances nested in the prefab stay instances;
+`"completely": true` unpacks those too) and so reads the prefabs the way
+`inspect --expand` does — `--prefabs <dir>`, else the document's directory. Hand edits are fine too — run `fynkel validate`
 afterwards.
 
 ## Behaviours (gameplay code)

@@ -417,3 +417,229 @@ fn script_references_inside_a_prefab_reach_the_instance_copies() {
         spinner
     );
 }
+
+// ------------------------------------------------------------- variants
+
+const TURRET: &str = "10000000-0000-4000-8000-000000000001";
+const T_BASE: &str = "10000000-0000-4000-8000-0000000000b1";
+const T_BARREL: &str = "10000000-0000-4000-8000-0000000000b2";
+const T_RENDERER: &str = "10000000-0000-4000-8000-0000000000c2";
+const T_BARREL_TRANSFORM: &str = "10000000-0000-4000-8000-0000000000c3";
+const VARIANT: &str = "50000000-0000-4000-8000-000000000001";
+const V_ROOT: &str = "50000000-0000-4000-8000-0000000000a1";
+const V_INSTANCE: &str = "50000000-0000-4000-8000-0000000000e1";
+const V_SIGHT: &str = "50000000-0000-4000-8000-0000000000b9";
+const V_FLAG: &str = "50000000-0000-4000-8000-0000000000f1";
+const V_FLAG_TRANSFORM: &str = "50000000-0000-4000-8000-0000000000cf";
+
+fn uu(s: &str) -> Uuid {
+    s.parse().unwrap()
+}
+
+fn transform_at(y: f64) -> serde_json::Value {
+    serde_json::json!({ "type": "fynkel.Transform", "version": 1,
+        "data": { "position": [0, y, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] } })
+}
+
+fn prefab_doc(path: &str, v: serde_json::Value) -> Prefab {
+    Prefab::from_document(
+        Document::parse(DocumentKind::Prefab, Some(path), &v.to_string()).unwrap(),
+    )
+}
+
+/// The Turret's variant: its root is an instance of the Turret (no
+/// shadows, a Sight added under the barrel) with a Flag of its own.
+fn variant() -> Prefab {
+    prefab_doc(
+        "turret_variant.prefab.json",
+        serde_json::json!({
+            "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+            "formatVersion": 5, "id": VARIANT, "name": "Turret Variant", "root": V_ROOT,
+            "entities": {
+                V_ROOT: { "name": "Base", "parent": null, "children": [V_FLAG], "components": {},
+                    "prefab": { "asset": { "asset": TURRET }, "instance": V_INSTANCE, "overrides": [
+                        { "op": "setField", "entity": T_BASE, "component": T_RENDERER, "field": "cast_shadows", "value": false },
+                        { "op": "addObject", "entity": V_SIGHT, "name": "Sight", "parent": T_BARREL,
+                          "components": { "50000000-0000-4000-8000-0000000000c9": transform_at(0.25) } }
+                    ] } },
+                V_FLAG: { "name": "Flag", "parent": V_ROOT, "children": [],
+                    "components": { V_FLAG_TRANSFORM: transform_at(2.0) } }
+            }
+        }),
+    )
+}
+
+/// Prefab variants (ADR-0022 amendment 2026-09-25): a prefab whose root
+/// is an instance of another validates, flattens with the base's entities
+/// under ids derived from the root's instance (its overrides applied, its
+/// own children after the base's), a variant of the variant flattens once
+/// more, and a scene instance of the chain expands to one root with every
+/// level's overrides; a variant of itself is D0402.
+#[test]
+fn variants_flatten_through_chains_and_refuse_themselves() {
+    let schemas = schemas();
+    let v = variant();
+    assert!(
+        v.validate(&schemas).is_empty(),
+        "{:#?}",
+        v.validate(&schemas)
+    );
+    assert_eq!(v.variant_of().unwrap().prefab_id(), uu(TURRET));
+    assert_eq!(
+        fynkel_document::prefab::inspect_json(&v)["variantOf"],
+        serde_json::json!({ "asset": TURRET })
+    );
+    let turret_barrel = derive_id(uu(V_INSTANCE), uu(T_BARREL));
+    let turret_barrel_t = derive_id(uu(V_INSTANCE), uu(T_BARREL_TRANSFORM));
+    let sight = derive_id(uu(V_INSTANCE), uu(V_SIGHT));
+
+    // A variant of the variant moves the (variant's) barrel.
+    const CHAIN: &str = "50000000-0000-4000-8000-000000000002";
+    const C_ROOT: &str = "50000000-0000-4000-8000-0000000000a2";
+    const C_INSTANCE: &str = "50000000-0000-4000-8000-0000000000e2";
+    let chain = prefab_doc(
+        "turret_variant_2.prefab.json",
+        serde_json::json!({
+            "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+            "formatVersion": 5, "id": CHAIN, "name": "Turret Variant 2", "root": C_ROOT,
+            "entities": { C_ROOT: { "name": "Base", "parent": null, "children": [], "components": {},
+                "prefab": { "asset": { "asset": VARIANT }, "instance": C_INSTANCE, "overrides": [
+                    { "op": "setField", "entity": turret_barrel.to_string(), "component": turret_barrel_t.to_string(),
+                      "field": "position", "value": [0, 3, 0] }
+                ] } } }
+        }),
+    );
+    assert!(chain.validate(&schemas).is_empty());
+    let mut lib = library();
+    lib.add(v.clone());
+    lib.add(chain);
+    let (flat, diags) = lib.flattened(&schemas);
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.code == fynkel_contracts::Code::PREFAB_NESTED),
+        "only the cycle fixtures: {diags:#?}"
+    );
+
+    // The variant, flat: Base (the Turret's root, no shadows) › Barrel ›
+    // Sight, then its own Flag.
+    let fv = flat.get(uu(VARIANT)).unwrap();
+    assert!(!fv.has_instances());
+    assert_eq!(fv.root, uu(V_ROOT));
+    assert!(
+        fv.validate(&schemas).is_empty(),
+        "{:#?}",
+        fv.validate(&schemas)
+    );
+    let root = fv.entity(uu(V_ROOT)).unwrap();
+    assert_eq!(root.name, "Base");
+    assert_eq!(root.children, vec![turret_barrel, uu(V_FLAG)]);
+    let r = root.component_of("fynkel.MeshRenderer").unwrap();
+    assert_eq!(r.id, derive_id(uu(V_INSTANCE), uu(T_RENDERER)));
+    assert_eq!(r.data.get("cast_shadows").unwrap().as_bool(), Some(false));
+    assert_eq!(fv.entity(turret_barrel).unwrap().children, vec![sight]);
+    assert_eq!(fv.entities.len(), 4);
+
+    // The chain, flat: every id derived once more, the barrel moved.
+    let fc = flat.get(uu(CHAIN)).unwrap();
+    assert_eq!(fc.root, uu(C_ROOT));
+    assert_eq!(fc.entities.len(), 4);
+    let c_barrel = derive_id(uu(C_INSTANCE), turret_barrel);
+    let moved = fc
+        .entity(c_barrel)
+        .unwrap()
+        .component_of("fynkel.Transform")
+        .unwrap();
+    assert_eq!(moved.id, derive_id(uu(C_INSTANCE), turret_barrel_t));
+    assert_eq!(
+        moved.data.get("position").unwrap().to_serde(),
+        serde_json::json!([0, 3, 0])
+    );
+
+    // A scene instance of the chain overrides the variant's Flag, which
+    // the chain shows under its derived id.
+    let flag = derive_id(uu(C_INSTANCE), uu(V_FLAG));
+    let flag_t = derive_id(uu(C_INSTANCE), uu(V_FLAG_TRANSFORM));
+    let scene_json = serde_json::json!({
+        "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+        "formatVersion": 5, "id": "50000000-0000-4000-8000-000000000003", "name": "Variants",
+        "entities": { "50000000-0000-4000-8000-0000000000a3": {
+            "name": "Turret V2", "parent": null, "children": [], "components": {},
+            "prefab": { "asset": { "asset": CHAIN }, "instance": "50000000-0000-4000-8000-0000000000e3", "overrides": [
+                { "op": "setField", "entity": flag.to_string(), "component": flag_t.to_string(),
+                  "field": "position", "value": [0, 5, 0] }
+            ] } } }
+    });
+    let scene = Scene::from_document(
+        Document::parse(
+            DocumentKind::Scene,
+            Some("variants.scene.json"),
+            &scene_json.to_string(),
+        )
+        .unwrap(),
+    );
+    let expanded = expand(&scene, &lib, &schemas);
+    assert!(!expanded.has_errors(), "{:#?}", expanded.diagnostics);
+    let out = expanded.scene();
+    assert!(out.validate(&schemas).is_empty());
+    assert!(!describe(&out, &schemas).has_errors());
+    assert_eq!(
+        out.entities.iter().filter(|e| e.parent.is_none()).count(),
+        1,
+        "one root"
+    );
+    let top = out
+        .entity(uu("50000000-0000-4000-8000-0000000000a3"))
+        .unwrap();
+    assert_eq!(top.name, "Turret V2");
+    assert_eq!(
+        top.component_of("fynkel.MeshRenderer")
+            .unwrap()
+            .data
+            .get("cast_shadows")
+            .unwrap()
+            .as_bool(),
+        Some(false)
+    );
+    let names: Vec<&str> = out.entities.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["Turret V2", "Barrel", "Sight", "Flag"]);
+    let e3 = uu("50000000-0000-4000-8000-0000000000e3");
+    let position = |id: Uuid| {
+        out.entity(id)
+            .unwrap()
+            .component_of("fynkel.Transform")
+            .unwrap()
+            .data
+            .get("position")
+            .unwrap()
+            .to_serde()
+    };
+    assert_eq!(position(derive_id(e3, flag)), serde_json::json!([0, 5, 0]));
+    assert_eq!(
+        position(derive_id(e3, c_barrel)),
+        serde_json::json!([0, 3, 0])
+    );
+
+    // A variant of itself: D0402 in the prefab.
+    let own = prefab_doc(
+        "self.prefab.json",
+        serde_json::json!({
+            "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+            "formatVersion": 5, "id": "50000000-0000-4000-8000-000000000009", "name": "Self",
+            "root": "50000000-0000-4000-8000-0000000000a9",
+            "entities": { "50000000-0000-4000-8000-0000000000a9": {
+                "name": "Self", "parent": null, "children": [], "components": {},
+                "prefab": { "asset": { "asset": "50000000-0000-4000-8000-000000000009" },
+                            "instance": "50000000-0000-4000-8000-0000000000e9" } } }
+        }),
+    );
+    let mut lib = PrefabLibrary::empty();
+    lib.add(own);
+    let (_, diags) = lib.flattened(&schemas);
+    assert_eq!(diags.len(), 1, "{diags:#?}");
+    assert_eq!(diags[0].code.as_str(), "FYN-D0402");
+    assert_eq!(
+        diags[0].pointer.as_deref(),
+        Some("/entities/50000000-0000-4000-8000-0000000000a9/prefab/asset")
+    );
+}

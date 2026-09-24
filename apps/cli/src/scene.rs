@@ -313,13 +313,18 @@ fn apply(opts: &Opts, kind: DocumentKind, schemas: &SchemaSet) -> ExitCode {
         Ok(e) => e,
         Err(diags) => return report(&diags, opts.json),
     };
-    // `unpackPrefab` (M4-07) reads the instance's prefab: the same library
-    // `inspect --expand` uses (`--prefabs`, else the document's directory).
+    // `unpackPrefab` (M4-07), `applyPrefabOverride` and `instantiatePrefab`
+    // (a cycle check in a prefab, ADR-0022 amendment 2026-09-25) read the
+    // prefabs: the same library `inspect --expand` uses (`--prefabs`, else
+    // the document's directory).
     let mut diags = Vec::new();
-    let unpacks = request
-        .commands
-        .iter()
-        .any(|c| matches!(c.command, fynkel_document::Command::UnpackPrefab { .. }));
+    let in_prefab = editor.document().kind == DocumentKind::Prefab;
+    let unpacks = request.commands.iter().any(|c| match c.command {
+        fynkel_document::Command::UnpackPrefab { .. }
+        | fynkel_document::Command::ApplyPrefabOverride { .. } => true,
+        fynkel_document::Command::InstantiatePrefab { .. } => in_prefab,
+        _ => false,
+    });
     let library = if unpacks {
         library_for(&editor.scene(), opts, path, schemas, &mut diags)
     } else {
