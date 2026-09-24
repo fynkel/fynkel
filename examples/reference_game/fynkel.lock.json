@@ -13,22 +13,22 @@
     "blend": 1,
     "material": 2,
     "meta": 2,
-    "prefab": 4,
+    "prefab": 5,
     "project": 2,
     "rig": 1,
-    "scene": 4,
+    "scene": 5,
     "shader": 1,
     "volume": 1
   },
   "importers": {
     "fynkel.audio": 2,
-    "fynkel.fbx": 3,
+    "fynkel.fbx": 4,
     "fynkel.file": 1,
-    "fynkel.gltf": 7,
+    "fynkel.gltf": 8,
     "fynkel.image": 1
   },
   "cache": {
-    "version": 7,
+    "version": 8,
     "container": 1
   }
 }

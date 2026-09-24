@@ -1,12 +1,48 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "88641ff3-d525-5d0b-b21f-226ee8e246a8",
   "name": "Burst",
   "entities": {
+    "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711": {
+      "name": "Burst",
+      "parent": null,
+      "children": [
+        "366a6680-70bd-5910-b02a-a5087f64cd47",
+        "af962ff6-bd17-5003-ae95-ca9968780b19",
+        "cac5bfca-af81-55d8-9a04-d875c98f781c",
+        "0842e392-8f77-500e-885d-501269df4c0f",
+        "5746334d-ab90-5a97-9d00-46bdfeff8b3b",
+        "bb388879-32c5-5fca-bb2a-0dd759e641fe"
+      ],
+      "components": {
+        "28580b98-133d-5ed7-9caa-43077dd326b0": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        }
+      }
+    },
     "366a6680-70bd-5910-b02a-a5087f64cd47": {
       "name": "Spark 1",
-      "parent": null,
+      "parent": "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711",
       "children": [],
       "components": {
         "3b0f5cc5-0b5e-5597-8bb7-ee10f5007ce8": {
@@ -99,7 +135,7 @@
     },
     "af962ff6-bd17-5003-ae95-ca9968780b19": {
       "name": "Spark 2",
-      "parent": null,
+      "parent": "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711",
       "children": [],
       "components": {
         "7c75f1b9-a468-509d-9a65-64187c5fc37d": {
@@ -192,7 +228,7 @@
     },
     "cac5bfca-af81-55d8-9a04-d875c98f781c": {
       "name": "Spark 3",
-      "parent": null,
+      "parent": "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711",
       "children": [],
       "components": {
         "6081ba8f-8c62-5075-bab0-e92eee2009fa": {
@@ -285,7 +321,7 @@
     },
     "0842e392-8f77-500e-885d-501269df4c0f": {
       "name": "Spark 4",
-      "parent": null,
+      "parent": "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711",
       "children": [],
       "components": {
         "95bd63d6-0b6d-5a5f-8ed3-aa8b63c98cb6": {
@@ -378,7 +414,7 @@
     },
     "5746334d-ab90-5a97-9d00-46bdfeff8b3b": {
       "name": "Spark 5",
-      "parent": null,
+      "parent": "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711",
       "children": [],
       "components": {
         "58c0da79-7bcb-5440-9332-d0576919189e": {
@@ -471,7 +507,7 @@
     },
     "bb388879-32c5-5fca-bb2a-0dd759e641fe": {
       "name": "Spark 6",
-      "parent": null,
+      "parent": "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711",
       "children": [],
       "components": {
         "4dee922e-0ea8-54f2-956d-d4c9835a19cd": {
@@ -563,12 +599,5 @@
       }
     }
   },
-  "roots": [
-    "366a6680-70bd-5910-b02a-a5087f64cd47",
-    "af962ff6-bd17-5003-ae95-ca9968780b19",
-    "cac5bfca-af81-55d8-9a04-d875c98f781c",
-    "0842e392-8f77-500e-885d-501269df4c0f",
-    "5746334d-ab90-5a97-9d00-46bdfeff8b3b",
-    "bb388879-32c5-5fca-bb2a-0dd759e641fe"
-  ]
+  "root": "2c9f7e35-3b81-5706-9e8b-e7dfb8e88711"
 }

@@ -207,8 +207,12 @@ class Scene:
         self.key = key
         self.entities = {}
 
-    def add(self, name, components, parent=None, prefab=None, tags=0):
+    def add(self, name, components, parent=None, prefab=None, overrides=(), tags=0):
+        """An entity; with `prefab` an instance of it — the instance is the
+        prefab's root (ADR-0022), so it has no components of its own and
+        its changes are `overrides` on the root."""
         eid = uid(self.key, name)
+        assert prefab is None or not components, f"{name!r}: a prefab instance has no components of its own"
         assert eid not in self.entities, f"duplicate entity name {name!r}"
         entity = {"name": name, "parent": parent, "children": [], "components": {}}
         layer = 0
@@ -222,7 +226,7 @@ class Scene:
         if tags:
             entity["components"][uid(self.key, name, "tags")] = {"type": "fynkel.Tags", "version": 1, "data": {"bits": tags}}
         if prefab is not None:
-            entity["prefab"] = {"asset": {"asset": prefab}, "instance": uid(self.key, name, "instance")}
+            entity["prefab"] = {"asset": {"asset": prefab}, "instance": uid(self.key, name, "instance"), "overrides": list(overrides)}
         if parent is not None:
             self.entities[parent]["children"].append(eid)
         self.entities[eid] = entity
@@ -231,7 +235,7 @@ class Scene:
     def document(self, kind, id_, extra=None):
         doc = {
             "$schema": f"https://fynkel.dev/schemas/{kind}.schema.json",
-            "formatVersion": 4,
+            "formatVersion": 5,
             "id": id_,
             "name": self.name,
             "entities": self.entities,
@@ -351,6 +355,7 @@ MATERIAL_DOCS = {
 MATERIALS = {name: uid("material", name) for name in MATERIAL_DOCS}
 
 PREFABS = {name: uid("prefab", name) for name in ("coin", "ball", "burst")}
+COIN_LIFT = 0.7  # the coin prefab's root height
 SCENE_ID = uid("scene", "playground")
 # The look (R3a/R3b): tools/sky.py's sky and the volume profile.
 SKY = json.loads((ASSETS / "textures" / "sky.hdr.meta.json").read_text())["id"]
@@ -371,7 +376,7 @@ def coin_prefab():
     root = p.add(
         "Coin",
         [
-            transform((0, 0.7, 0), scale=(0.7, 0.7, 0.7)),
+            transform((0, COIN_LIFT, 0), scale=(0.7, 0.7, 0.7)),
             mesh_renderer("coin", "gold", cast=True, receive=False),
             ("fynkel.Rotator", {"axis": [0, 1, 0], "speed": 2.5, "space": "world"}),
             # The pickup volume: a sensor only the player's layer meets.
@@ -382,7 +387,7 @@ def coin_prefab():
         ],
         tags=TAG_PICKUP,
     )
-    return p.document("prefab", PREFABS["coin"], {"roots": [root]})
+    return p.document("prefab", PREFABS["coin"], {"root": root})
 
 
 def ball_prefab():
@@ -405,29 +410,37 @@ def ball_prefab():
         ],
         parent=root,
     )
-    return p.document("prefab", PREFABS["ball"], {"roots": [root]})
+    return p.document("prefab", PREFABS["ball"], {"root": root})
 
 
 def burst_prefab():
     """Six sparks thrown from a collected coin (`Collectible` instantiates
     it and gives each a kick), gone after a second."""
     p = Scene("Burst", "prefab/burst")
-    roots = []
+    # One root holds the sparks (a prefab has one root, ADR-0022); its ids
+    # are the ones `fynkel migrate` gave the v4 prefab's wrapper.
+    prefab = uuid.UUID(PREFABS["burst"])
+    root = str(uuid.uuid5(prefab, "root"))
+    p.entities[root] = {
+        "name": "Burst",
+        "parent": None,
+        "children": [],
+        "components": {str(uuid.uuid5(prefab, "root/transform")): {"type": "fynkel.Transform", "version": 1, "data": transform((0, 0, 0))[1]}},
+    }
     for i in range(6):
         a = 2 * math.pi * i / 6
-        roots.append(
-            p.add(
-                f"Spark {i + 1}",
-                [
-                    transform((0.25 * math.cos(a), 0.6, 0.25 * math.sin(a)), scale=(0.18, 0.18, 0.18)),
-                    mesh_renderer("cube", "spark", cast=False, receive=False),
-                    rigid_body(mass=0.05, angular_damping=0.5),
-                    collider("box", size=(0.5, 0.5, 0.5), friction=0.3, restitution=0.4, layer=PROPS, mask=DEFAULT),
-                    ("fynkel.LifetimeDespawn", {"seconds": 1.2}),
-                ],
-            )
+        p.add(
+            f"Spark {i + 1}",
+            [
+                transform((0.25 * math.cos(a), 0.6, 0.25 * math.sin(a)), scale=(0.18, 0.18, 0.18)),
+                mesh_renderer("cube", "spark", cast=False, receive=False),
+                rigid_body(mass=0.05, angular_damping=0.5),
+                collider("box", size=(0.5, 0.5, 0.5), friction=0.3, restitution=0.4, layer=PROPS, mask=DEFAULT),
+                ("fynkel.LifetimeDespawn", {"seconds": 1.2}),
+            ],
+            parent=root,
         )
-    return p.document("prefab", PREFABS["burst"], {"roots": roots})
+    return p.document("prefab", PREFABS["burst"], {"root": root})
 
 
 # ------------------------------------------------------------------ scene
@@ -526,7 +539,8 @@ def playground():
         # joints, as `fynkel import` derived them) instanced under a Rig
         # turned to face -Z; the animator above finds the joints by name.
         rig = s.add("Rig", [transform((0, 0, 0), quat_axis_angle((0, 1, 0), math.pi))] + ([wave_layer] if WAVE else []), parent=player)
-        s.entities[rig]["prefab"] = {"asset": {"asset": CHARACTER, "sub": "prefab"}, "instance": uid(s.key, "Rig", "instance"), "overrides": []}
+        model = s.add("Model", [], parent=rig)
+        s.entities[model]["prefab"] = {"asset": {"asset": CHARACTER, "sub": "prefab"}, "instance": uid(s.key, "Rig", "instance"), "overrides": []}
     else:
         # The skinned body, posed by the joint entities below (the skin's
         # skeleton root is found by name under the Player), and the joints in
@@ -626,7 +640,12 @@ def playground():
 
     def coin(n, position):
         counts["coins"] += 1
-        coins[n] = s.add(f"Coin {n}", [transform(position)], prefab=PREFABS["coin"])
+        # The instance is the coin's root: its place is an override on the
+        # root's Transform (the root sits 0.7 m up in the prefab).
+        root = uid("prefab/coin", "Coin")
+        at = r6((position[0], position[1] + COIN_LIFT, position[2]))
+        place = {"op": "setField", "entity": root, "component": uid("prefab/coin", "Coin", 0, "fynkel.Transform"), "field": "position", "value": at}
+        coins[n] = s.add(f"Coin {n}", [], prefab=PREFABS["coin"], overrides=[place])
 
     # Straight ahead (-Z), then right (+X).
     coin(1, (0, 0, -5))

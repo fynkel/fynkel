@@ -12,9 +12,8 @@ import 'game_state.dart';
 /// (M3-11: a fire-and-forget `world.audio.play` — the coin is gone a tick
 /// later, so no source on it could finish), leaves a burst of sparks
 /// (the `burst` prefab instantiated at runtime, its pieces kicked apart
-/// and despawned by their `LifetimeDespawn`) and destroys its prefab
-/// instance — the anchor entity the scene spawned it under, so nothing of
-/// the coin stays.
+/// and despawned by their `LifetimeDespawn`) and destroys itself: the
+/// coin is its prefab's root, so nothing of the coin stays.
 @FynkelBehaviour(id: 'game.Collectible')
 class Collectible extends Behaviour {
   /// Points this coin is worth (the HUD counts coins, not points; here for
@@ -58,8 +57,7 @@ class Collectible extends Behaviour {
       i++;
     }
 
-    // The prefab instance's anchor (our root's parent) goes, and we with it.
-    final anchor = gameObject.parent;
-    (anchor == null ? gameObject : (world.byEntity(anchor) ?? world.attach(anchor))).destroy();
+    // We are the coin prefab's root, so the whole instance goes.
+    gameObject.destroy();
   }
 }

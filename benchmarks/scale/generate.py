@@ -121,10 +121,10 @@ def main() -> None:
     for i in range(a.prefabs):
         pid = uid(f"prefab/{i}")
         root = uid(f"prefab/{i}/root")
-        prefabs.append((pid, root))
+        prefabs.append((pid, root, uid(f"prefab/{i}/t")))
         write(assets / "prefabs" / f"p{i:05d}.prefab.json", {
             "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-            "formatVersion": 4,
+            "formatVersion": 5,
             "id": pid,
             "name": f"P{i:05d}",
             "entities": {
@@ -148,7 +148,7 @@ def main() -> None:
                     },
                 }
             },
-            "roots": [root],
+            "root": root,
         })
 
     first_scene = None
@@ -158,19 +158,26 @@ def main() -> None:
         entities = {}
         for k in range(20):
             e = uid(f"scene/{s}/{k}")
-            pid, _ = prefabs[(s * 20 + k) % len(prefabs)]
+            pid, root, t = prefabs[(s * 20 + k) % len(prefabs)]
+            # The instance is the prefab's root (ADR-0022): its placement is
+            # an override on the root's Transform.
             entities[e] = {
                 "name": f"I{k:02d}",
                 "parent": None,
                 "children": [],
-                "components": {
-                    uid(f"scene/{s}/{k}/t"): {"type": "fynkel.Transform", "version": 1, "data": transform(k * 2.0)},
+                "components": {},
+                "prefab": {
+                    "asset": {"asset": pid},
+                    "instance": uid(f"scene/{s}/{k}/i"),
+                    "overrides": [
+                        {"op": "setField", "entity": root, "component": t, "field": "position",
+                         "value": [k * 2.0, 0.0, 0.0]},
+                    ],
                 },
-                "prefab": {"asset": {"asset": pid}, "instance": uid(f"scene/{s}/{k}/i"), "overrides": []},
             }
         write(assets / "scenes" / f"s{s:04d}.scene.json", {
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 4,
+            "formatVersion": 5,
             "id": sid,
             "name": f"S{s:04d}",
             "entities": entities,

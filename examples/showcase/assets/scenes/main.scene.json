@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "3a56fbbd-b340-41ca-ac2b-b5603d1dc0da",
   "name": "Showcase",
   "entities": {
@@ -1526,46 +1526,7 @@
       "name": "Runner",
       "parent": null,
       "children": [],
-      "components": {
-        "46577a38-c05b-5483-acb9-728f425fed81": {
-          "type": "fynkel.Transform",
-          "version": 1,
-          "data": {
-            "position": [
-              1.2,
-              0.0,
-              2.6
-            ],
-            "rotation": [
-              0.0,
-              0.946527,
-              0.0,
-              -0.322624
-            ],
-            "scale": [
-              1,
-              1,
-              1
-            ]
-          }
-        },
-        "5decf37e-322b-508b-967d-fd4c47c55d8b": {
-          "type": "fynkel.Animator",
-          "version": 1,
-          "data": {
-            "clip": {
-              "asset": "b81d30e0-81e2-466d-9066-0eed7151d8b3",
-              "sub": "anim/run"
-            },
-            "speed": 1.0,
-            "looping": true,
-            "playing": true,
-            "weight": 1.0,
-            "additive": false,
-            "root_motion": false
-          }
-        }
-      },
+      "components": {},
       "prefab": {
         "asset": {
           "asset": "b81d30e0-81e2-466d-9066-0eed7151d8b3",
@@ -1580,6 +1541,48 @@
             "field": "material",
             "value": {
               "asset": "0605f86c-548f-5a17-83a4-d07f21f52896"
+            }
+          },
+          {
+            "op": "setField",
+            "entity": "13961cb6-aa3a-5351-a50d-9f3273e39129",
+            "component": "95f9c940-0c2a-5e39-a71b-e6e50893a92c",
+            "field": "position",
+            "value": [
+              1.2,
+              0.0,
+              2.6
+            ]
+          },
+          {
+            "op": "setField",
+            "entity": "13961cb6-aa3a-5351-a50d-9f3273e39129",
+            "component": "95f9c940-0c2a-5e39-a71b-e6e50893a92c",
+            "field": "rotation",
+            "value": [
+              0.0,
+              0.946527,
+              0.0,
+              -0.322624
+            ]
+          },
+          {
+            "op": "addComponent",
+            "entity": "13961cb6-aa3a-5351-a50d-9f3273e39129",
+            "component": "5decf37e-322b-508b-967d-fd4c47c55d8b",
+            "type": "fynkel.Animator",
+            "version": 1,
+            "data": {
+              "clip": {
+                "asset": "b81d30e0-81e2-466d-9066-0eed7151d8b3",
+                "sub": "anim/run"
+              },
+              "speed": 1.0,
+              "looping": true,
+              "playing": true,
+              "weight": 1.0,
+              "additive": false,
+              "root_motion": false
             }
           }
         ]

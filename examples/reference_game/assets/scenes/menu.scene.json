@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "65905281-dc97-58ac-8d21-f5fbbac251a9",
   "name": "Menu",
   "entities": {
