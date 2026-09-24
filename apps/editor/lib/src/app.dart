@@ -773,6 +773,46 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _canEdit && _hasSelection,
         run: () => hierarchy?.duplicate(),
       ),
+      // Unity's object clipboard: a text field keeps its own ⌘C/⌘X/⌘V.
+      EditorCommand(
+        id: 'hierarchy.copy',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyC),
+        group: 1,
+        order: 0,
+        enabled: () => _hasTab && _hasSelection,
+        textIntent: CopySelectionTextIntent.copy,
+        run: () => hierarchy?.copy(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.cut',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyX),
+        group: 1,
+        order: 0,
+        enabled: () => _canEdit && _hasSelection,
+        textIntent: CopySelectionTextIntent.cut(SelectionChangedCause.keyboard),
+        run: () => hierarchy?.cut(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.paste',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyV),
+        group: 1,
+        order: 0,
+        enabled: () => hierarchy?.canPaste ?? false,
+        textIntent: const PasteTextIntent(SelectionChangedCause.keyboard),
+        run: () => hierarchy?.paste(),
+      ),
+      EditorCommand(
+        id: 'hierarchy.pasteAsChild',
+        menu: EditorMenu.edit,
+        shortcut: k(LogicalKeyboardKey.keyV, shift: true),
+        group: 1,
+        order: 0,
+        enabled: () => (hierarchy?.canPaste ?? false) && _hasSelection,
+        run: () => hierarchy?.paste(asChild: true),
+      ),
       EditorCommand(
         id: 'hierarchy.delete',
         menu: EditorMenu.edit,
@@ -786,10 +826,21 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'hierarchy.createEmpty',
         menu: EditorMenu.edit,
-        shortcut: k(LogicalKeyboardKey.keyN, alt: true),
+        // Unity's GameObject → Create Empty: at the root.
+        shortcut: k(LogicalKeyboardKey.keyN, shift: true),
         group: 1,
         order: 3,
         enabled: () => _canEdit,
+        run: () => hierarchy?.createEmpty(underSelection: false),
+      ),
+      EditorCommand(
+        id: 'hierarchy.createEmptyChild',
+        menu: EditorMenu.edit,
+        // Unity's ⌥⇧N: under the selected object (no ⌘, so never while typing).
+        key: const SingleActivator(LogicalKeyboardKey.keyN, shift: true, alt: true, includeRepeats: false),
+        group: 1,
+        order: 3,
+        enabled: () => _canEdit && _hasSelection,
         run: () => hierarchy?.createEmpty(),
       ),
       EditorCommand(
@@ -1114,7 +1165,6 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'project.new',
         menu: EditorMenu.project,
-        shortcut: k(LogicalKeyboardKey.keyN, shift: true),
         group: 0,
         order: 0,
         run: newProject,

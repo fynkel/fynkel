@@ -49,6 +49,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
   String? _lastLead;
   TextEditingController? _rename;
   String? _renameFor;
+  int _renameStarted = 0;
   DateTime? _lastTap;
   String? _lastTapId;
   String? _wasRenaming;
@@ -542,7 +543,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       renameController: renaming ? _renameController(n) : null,
       errors: tree.errors[n.id] ?? const [],
       onTap: () => _tapRow(n.id),
-      onDoubleTap: () => model.beginRename(n.id),
+      onDoubleTap: _frame,
       onSecondaryTap: (at) => _contextMenu(context, n.id, at),
       onToggle: () => model.toggle(n.id),
       onRenameSubmit: (v) => model.rename(n.id, v),
@@ -550,8 +551,12 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     );
   }
 
+  void _frame() => widget.commands?.execute('view.frameSelected');
+
   TextEditingController _renameController(HierarchyNode n) {
-    if (_renameFor != n.id) {
+    // A new rename starts from the name, not from text an Esc abandoned.
+    if (_renameFor != n.id || _renameStarted != model.renameStarted) {
+      _renameStarted = model.renameStarted;
       _rename?.dispose();
       _rename = TextEditingController(text: n.name)
         ..selection = TextSelection(baseOffset: 0, extentOffset: n.name.length);
@@ -566,8 +571,9 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     _lastTap = now;
     _lastTapId = id;
     _listFocus.requestFocus();
-    if (isDouble && model.tab!.isSelected(id) && model.tab!.selection.length == 1) {
-      model.beginRename(id);
+    if (isDouble && model.tab!.isSelected(id)) {
+      // Unity: a double-click frames the object in the Scene view.
+      _frame();
       return;
     }
     model.select(
@@ -1049,7 +1055,11 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
   static IconData _iconOf(HierarchyNode n) {
     if (n.isPrefabInstance) return FIcons.widgetsOutlined;
     if (n.hasComponent('fynkel.Camera')) return FIcons.videocamOutlined;
-    if (n.hasComponent('fynkel.Light')) return FIcons.lightbulbOutline;
+    if (n.hasComponent('fynkel.DirectionalLight') ||
+        n.hasComponent('fynkel.PointLight') ||
+        n.hasComponent('fynkel.SpotLight')) {
+      return FIcons.lightbulbOutline;
+    }
     if (n.hasComponent('fynkel.MeshRenderer')) return FIcons.viewInArOutlined;
     if (n.hasComponent('fynkel.RigidBody')) return FIcons.sportsBasketballOutlined;
     if (n.hasComponent('fynkel.Collider')) return FIcons.cropSquare;

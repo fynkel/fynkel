@@ -1081,12 +1081,14 @@ void main() {
                       Draggable<AssetDragPayload>(
                         key: const Key('drag.coin'),
                         data: coin,
+                        dragAnchorStrategy: pointerDragAnchorStrategy, // as the browser's rows
                         feedback: const Text('coin'),
                         child: const SizedBox(width: 100, height: 30, child: Text('coin')),
                       ),
                       Draggable<AssetDragPayload>(
                         key: const Key('drag.robot'),
                         data: imported,
+                        dragAnchorStrategy: pointerDragAnchorStrategy, // as the browser's rows
                         feedback: const Text('robot'),
                         child: const SizedBox(width: 100, height: 30, child: Text('robot#prefab')),
                       ),

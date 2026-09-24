@@ -182,14 +182,16 @@ void main() {
       expect(tree.roots.length, 6);
       final copies = model.selection.toList();
       expect(copies.length, 2);
-      expect(tree[copies[0]]!.name, 'Robot');
+      // Unity's names, each right after its original.
+      expect(tree[copies[0]]!.name, 'Robot (1)');
       expect(tree[copies[0]]!.children.length, 2);
-      expect(tree[copies[1]]!.name, 'Floor');
-      expect(tree.roots.skip(4).toList(), copies); // a scene's roots follow the entity key order
+      expect(tree[copies[1]]!.name, 'Floor (1)');
+      expect(tree.roots.indexOf(copies[0]), tree.roots.indexOf('robot') + 1);
+      expect(tree.roots.indexOf(copies[1]), tree.roots.indexOf('floor') + 1);
       expect(tree.builds, 1);
     });
 
-    test('delete removes the subtrees and selects the nearest row', () {
+    test('delete removes the subtrees and leaves nothing selected', () {
       final (project, tabs, model) = setUpModel();
       addTearDown(tabs.dispose);
       model.expand('robot');
@@ -200,7 +202,7 @@ void main() {
       final tree = model.tree!;
       expect(tree.roots, ['cam', 'floor']);
       expect(tree['arm'], isNull);
-      expect(model.selection.toList(), ['floor']);
+      expect(model.selection, isEmpty);
     });
 
     test('create empty under the selection, create with a native component and its defaults', () {
@@ -211,7 +213,7 @@ void main() {
       expect(model.createEmpty(), isTrue);
       final id = model.selection.single;
       expect(model.tree![id]!.parent, 'robot');
-      expect(model.tree![id]!.name, 'Empty');
+      expect(model.tree![id]!.name, 'GameObject');
       expect(model.tree!.expanded, contains('robot'));
       expect(model.renaming, id); // ready to type a name
       expect(doc.entitiesView[id]!['components'], hasLength(1));
@@ -254,7 +256,7 @@ void main() {
       model.toggleKeepWorldTransform();
       expect(model.reparent(['crate'], const DropTarget(parent: null, index: 0)), isTrue);
       expect(tree['crate']!.parent, isNull);
-      expect(tree.roots, ['cam', 'robot', 'floor', 'crate']); // key order: the index means nothing in a scene
+      expect(tree.roots, ['crate', 'cam', 'robot', 'floor']); // index 0 among the roots, as Unity's
       expect(tree['crate']!.transform!.position, [-3.5, 0, 0]);
       expect(doc.history, 2);
     });
@@ -432,39 +434,45 @@ void main() {
       expect(find.textContaining('1 match'), findsOneWidget);
     });
 
-    testWidgets('click selects, ⌘-click toggles, double-click renames in place, ↩ commits, ⎋ cancels', (tester) async {
-      final (project, _, model) = await pumpPanel(tester);
-      await tester.tap(find.byKey(const Key('hierarchy.name.cam')));
-      await tester.pumpAndSettle();
-      expect(model.selection.toList(), ['cam']);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-      await tester.tap(find.byKey(const Key('hierarchy.name.floor')));
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
-      await tester.pumpAndSettle();
-      expect(model.selection.toList(), ['cam', 'floor']);
+    testWidgets(
+      'click selects, ⌘-click toggles, double-click does not rename, F2 renames in place, ↩ commits, ⎋ cancels',
+      (tester) async {
+        final (project, _, model) = await pumpPanel(tester);
+        await tester.tap(find.byKey(const Key('hierarchy.name.cam')));
+        await tester.pumpAndSettle();
+        expect(model.selection.toList(), ['cam']);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.tap(find.byKey(const Key('hierarchy.name.floor')));
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.pumpAndSettle();
+        expect(model.selection.toList(), ['cam', 'floor']);
 
-      await tester.tap(find.byKey(const Key('hierarchy.name.robot')));
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.tap(find.byKey(const Key('hierarchy.name.robot')));
-      await tester.pumpAndSettle();
-      expect(model.renaming, 'robot');
-      expect(find.byKey(const Key('hierarchy.rename.robot')), findsOneWidget);
-      await tester.enterText(find.byKey(const Key('hierarchy.rename.robot')), 'Bot');
-      await tester.testTextInput.receiveAction(TextInputAction.done);
-      await tester.pumpAndSettle();
-      expect(model.renaming, isNull);
-      expect(model.tree!['robot']!.name, 'Bot');
-      expect(project.fakeDocuments.first.history, 1);
+        await tester.tap(find.byKey(const Key('hierarchy.name.robot')));
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(find.byKey(const Key('hierarchy.name.robot')));
+        await tester.pumpAndSettle();
+        expect(model.renaming, isNull, reason: 'a double-click frames the object, as in Unity');
+        await tester.sendKeyEvent(LogicalKeyboardKey.f2);
+        await tester.pumpAndSettle();
+        expect(model.renaming, 'robot');
+        expect(find.byKey(const Key('hierarchy.rename.robot')), findsOneWidget);
+        await tester.enterText(find.byKey(const Key('hierarchy.rename.robot')), 'Bot');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+        expect(model.renaming, isNull);
+        expect(model.tree!['robot']!.name, 'Bot');
+        expect(project.fakeDocuments.first.history, 1);
 
-      // ↩ on the selection starts a rename; ⎋ cancels without a transaction.
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-      expect(model.renaming, 'robot');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pumpAndSettle();
-      expect(model.renaming, isNull);
-      expect(project.fakeDocuments.first.history, 1);
-    });
+        // ↩ on the selection starts a rename; ⎋ cancels without a transaction.
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(model.renaming, 'robot');
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(model.renaming, isNull);
+        expect(project.fakeDocuments.first.history, 1);
+      },
+    );
 
     testWidgets('⌫ deletes the selection; the arrow keys move it', (tester) async {
       final (project, _, model) = await pumpPanel(tester);
@@ -481,7 +489,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(model.tree!['arm'], isNull);
       expect(project.fakeDocuments.first.history, 1);
-      expect(model.selection.toList(), ['head']);
+      expect(model.selection, isEmpty);
     });
 
     testWidgets('drag-and-drop reparents onto a row and orders above/below', (tester) async {
@@ -512,7 +520,7 @@ void main() {
       expect(model.tree!['robot']!.children, ['crate', 'arm', 'head', 'floor']);
       expect(project.fakeDocuments.first.history, 2);
 
-      // A scene's roots follow the entity key order: the top edge of Camera is "onto Camera", not "before".
+      // A scene's roots are ordered too (as Unity's): the top edge of Camera is "before Camera".
       final head = tester.getCenter(find.byKey(const Key('hierarchy.name.head')));
       final camTop = tester.getTopLeft(find.byKey(const Key('hierarchy.name.cam'))) + const Offset(20, 1);
       final g3 = await tester.startGesture(head);
@@ -521,8 +529,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
       await g3.up();
       await tester.pumpAndSettle();
-      expect(model.tree!['head']!.parent, 'cam');
-      expect(model.tree!.roots, ['cam', 'robot']);
+      expect(model.tree!['head']!.parent, isNull);
+      expect(model.tree!.roots, ['head', 'cam', 'robot']);
       expect(project.fakeDocuments.first.history, 3);
     });
 

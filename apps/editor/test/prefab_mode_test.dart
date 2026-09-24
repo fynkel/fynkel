@@ -262,7 +262,7 @@ void main() {
       expect(f.sceneDoc.history, 1);
       expect(f.overridesOf('inst').last, {'op': 'removeObject', 'entity': 'mesh'});
       expect(tree.rows.map((r) => r.id), ['cam', 'inst', 'i1:root', 'broken', 'imported']);
-      expect(f.tab.selection, ['broken'], reason: 'the row that took its place');
+      expect(f.tab.selection, isEmpty, reason: 'nothing selected after a delete, as in Unity');
       f.sceneDoc.undo();
       expect(tree.rows.map((r) => r.id), ['cam', 'inst', 'i1:root', 'i1:mesh', 'broken', 'imported']);
     });
@@ -277,7 +277,7 @@ void main() {
       final op = f.overridesOf('inst').last;
       expect(op['op'], 'addObject');
       expect(op['parent'], 'root');
-      expect(op['name'], 'Empty');
+      expect(op['name'], 'GameObject');
       final local = op['entity'] as String;
       expect(local, matches(RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')));
       expect((op['components'] as Map).values.single['type'], 'fynkel.Transform');

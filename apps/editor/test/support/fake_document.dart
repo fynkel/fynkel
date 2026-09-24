@@ -670,7 +670,25 @@ final class FakeDocument extends EditorDocument {
 
   void _insert(String? parent, String id, int? index) {
     if (parent == null && kind == 'scene') {
-      // Like the crate: a scene has no `roots` list — its roots follow entity key order.
+      // Like the crate: a scene has no `roots` list — its roots follow entity
+      // key order, and an index moves the entity before the root now there.
+      if (index != null) {
+        final others = [
+          for (final e in _entities.entries)
+            if (e.value['parent'] == null && e.key != id) e.key,
+        ];
+        final entity = _entities.remove(id)!;
+        final before = index < others.length ? others[index < 0 ? 0 : index] : null;
+        final rebuilt = <String, Map<String, Object?>>{};
+        for (final e in _entities.entries) {
+          if (e.key == before) rebuilt[id] = entity;
+          rebuilt[e.key] = e.value;
+        }
+        if (before == null) rebuilt[id] = entity;
+        _entities
+          ..clear()
+          ..addAll(rebuilt);
+      }
       _roots = [
         for (final e in _entities.entries)
           if (e.value['parent'] == null) e.key,

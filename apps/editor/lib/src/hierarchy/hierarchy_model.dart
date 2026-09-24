@@ -52,7 +52,16 @@ final class HierarchyModel extends ChangeNotifier {
   bool keepWorldTransform = true;
 
   /// The row being renamed in place, if any.
-  String? renaming;
+  String? get renaming => _renaming;
+  set renaming(String? id) {
+    if (id != null) renameStarted++;
+    _renaming = id;
+  }
+
+  String? _renaming;
+
+  /// Counts renames begun, so a field shows the name anew each time.
+  int renameStarted = 0;
 
   /// Whether the search field should take focus on the next build.
   int searchFocusRequests = 0;
@@ -382,7 +391,19 @@ final class HierarchyModel extends ChangeNotifier {
       }
       return false;
     }
-    final a = _run([for (final id in targets) Command.duplicateObject(id)]);
+    // Unity's names: `Cube` → `Cube (1)`, the next number its siblings
+    // (and the other copies) do not use yet.
+    final taken = <String>{};
+    final commands = <Map<String, Object?>>[];
+    for (final id in targets) {
+      final n = t.tree[id]!;
+      final (siblings, _) = t.tree.siblingsOf(id);
+      taken.addAll([for (final s in siblings) t.tree[s]?.name ?? '']);
+      final name = copyName(n.name, taken);
+      taken.add(name);
+      commands.add(Command.duplicateObject(id, name: name));
+    }
+    final a = _run(commands);
     if (a == null || !a.ok) return false;
     final copies = [
       for (final m in a.mutations)
@@ -390,6 +411,95 @@ final class HierarchyModel extends ChangeNotifier {
     ];
     t.setSelection(copies.where((id) => t.tree[id] != null));
     return true;
+  }
+
+  /// What Copy put aside, for any Hierarchy and any scene or prefab to
+  /// paste (Unity's clipboard is the editor's, not the scene's): the
+  /// copied subtrees' entities as the document has them, by id, roots
+  /// first in the order they were shown.
+  static Map<String, Map<String, Object?>>? clipboard;
+
+  /// Copies the topmost selected objects with everything under them.
+  bool copy() {
+    final t = _tab;
+    if (t == null) return false;
+    final tree = t.tree;
+    final order = {for (var i = 0; i < tree.rows.length; i++) tree.rows[i].id: i};
+    final tops = tree.topmost(t.selection).where((id) => !tree[id]!.isDerived).toList()
+      ..sort((a, b) => (order[a] ?? 1 << 30).compareTo(order[b] ?? 1 << 30));
+    if (tops.isEmpty) {
+      if (t.selection.isNotEmpty) {
+        t.lastError = 'A prefab instance\'s entities cannot be copied on their own — copy the instance.';
+        t.keepEditing();
+      }
+      return false;
+    }
+    final ids = <String>[];
+    void walk(String id) {
+      final n = tree[id];
+      if (n == null || n.isDerived) return;
+      ids.add(id);
+      n.children.forEach(walk);
+    }
+
+    tops.forEach(walk);
+    final patch = t.document.entities(ids);
+    clipboard = {
+      for (final id in ids)
+        if (patch.entities[id] != null) id: patch.entities[id]!,
+    };
+    return clipboard!.isNotEmpty;
+  }
+
+  /// Copy, then delete (one undo step for the delete).
+  bool cut() => copy() && delete();
+
+  bool get canPaste => canEdit && (clipboard?.isNotEmpty ?? false);
+
+  /// Pastes what Copy put aside: next to the selected object (same
+  /// parent, right after it) or, with nothing selected, at the end of the
+  /// roots; [asChild] puts it under the selected object instead. The
+  /// pasted objects are selected.
+  bool paste({bool asChild = false}) {
+    final t = _tab;
+    final copied = clipboard;
+    if (t == null || !canEdit || copied == null || copied.isEmpty) return false;
+    final tree = t.tree;
+    final lead = t.selection.isEmpty ? null : tree[t.selection.last];
+    String? parent;
+    int? index;
+    if (lead != null && asChild) {
+      if (lead.isDerived) {
+        t.lastError = 'Paste under a prefab instance\'s entity is not supported yet — paste under the instance.';
+        t.keepEditing();
+        return false;
+      }
+      parent = lead.id;
+    } else if (lead != null && !lead.isDerived) {
+      parent = lead.parent;
+      final (siblings, i) = tree.siblingsOf(lead.id);
+      index = siblings.isEmpty ? null : i + 1;
+    }
+    final roots = copied.keys.where((id) {
+      final p = copied[id]!['parent'];
+      return p is! String || !copied.containsKey(p);
+    }).length;
+    final a = _run([Command.pasteObjects(copied, parent: parent, index: index)]);
+    if (a == null || !a.ok || a.mutations.isEmpty) return false;
+    final pasted = a.mutations.first.affectedIds.take(roots);
+    if (parent != null) tree.expand(parent);
+    t.setSelection(pasted.where((id) => tree[id] != null));
+    return true;
+  }
+
+  /// `Cube` → `Cube (1)`; `Cube (1)` → the first `Cube (n)` not in [taken].
+  static String copyName(String name, Set<String> taken) {
+    final m = RegExp(r'^(.*) \((\d+)\)$').firstMatch(name);
+    final base = m == null ? name : m.group(1)!;
+    for (var i = 1; ; i++) {
+      final candidate = '$base ($i)';
+      if (!taken.contains(candidate)) return candidate;
+    }
   }
 
   /// Deletes the topmost selected entities (their subtrees go with them).
@@ -401,12 +511,6 @@ final class HierarchyModel extends ChangeNotifier {
     if (t == null) return false;
     final targets = t.tree.topmost(ids ?? t.selection);
     if (targets.isEmpty) return false;
-    // Select the nearest remaining row afterwards.
-    final rows = t.tree.rows;
-    final firstRow = targets
-        .map(t.tree.rowIndexOf)
-        .where((i) => i >= 0)
-        .fold<int>(rows.length, (a, b) => a < b ? a : b);
     final commands = <Map<String, Object?>>[];
     final reverts = <String, List<int>>{};
     final removes = <Map<String, Object?>>[];
@@ -446,16 +550,12 @@ final class HierarchyModel extends ChangeNotifier {
     commands.addAll(removes);
     final a = _run(commands);
     if (a == null || !a.ok) return false;
-    final after = t.tree.rows;
-    if (after.isNotEmpty) {
-      t.select(after[firstRow.clamp(0, after.length - 1)].id);
-    } else {
-      t.clearSelection();
-    }
+    // Nothing is selected afterwards, as in Unity.
+    t.clearSelection();
     return true;
   }
 
-  /// Creates an entity named "Empty" with a default Transform under
+  /// Creates an entity named "GameObject" with a default Transform under
   /// [parent] (null: under the single selected entity, else a root) and
   /// selects it — ready to rename.
   bool createEmpty({String? parent, bool underSelection = true}) =>
@@ -470,7 +570,7 @@ final class HierarchyModel extends ChangeNotifier {
     final components = <Map<String, Object?>>[];
     final transformData = project.componentDefaults('fynkel.Transform') ?? Trs.identity.toData();
     components.add(componentSpec('fynkel.Transform', data: transformData));
-    var name = 'Empty';
+    var name = 'GameObject';
     if (type != null && type != 'fynkel.Transform') {
       final data = project.componentDefaults(type);
       if (data == null) {
@@ -744,9 +844,10 @@ final class HierarchyModel extends ChangeNotifier {
 
   /// Whether [ids] may be dropped at [target]: not onto themselves or
   /// their own descendants; prefab-instance children are not in the document.
-  /// Whether the roots can be ordered by a drop: a prefab lists its `roots`;
-  /// a scene's roots follow the entity key order and `index` is ignored there.
-  bool get rootOrderIsEditable => _tab?.kind == 'prefab';
+  /// Whether the roots can be ordered by a drop: a scene's roots follow the
+  /// entity key order, which `reparentObject` with an index rewrites (as
+  /// Unity reorders its roots).
+  bool get rootOrderIsEditable => _tab != null;
 
   bool canDrop(Iterable<String> ids, DropTarget target) {
     final t = _tab;
@@ -779,19 +880,36 @@ final class HierarchyModel extends ChangeNotifier {
     final order = {for (var i = 0; i < tree.rows.length; i++) tree.rows[i].id: i};
     final moving = tree.topmost(ids)..sort((a, b) => (order[a] ?? 1 << 30).compareTo(order[b] ?? 1 << 30));
     final commands = <Map<String, Object?>>[];
-    // An index counted in the target's current children: entities already
-    // in that parent before the drop point shift it down once removed.
-    var index = target.index;
-    final (siblings, _) = target.parent == null ? (tree.roots, 0) : (tree[target.parent!]!.children, 0);
-    for (final id in moving) {
-      final pos = siblings.indexOf(id);
-      if (pos >= 0 && pos < index) index--;
+    // The order the drop asks for: the target's list without the moved
+    // entities, with them inserted at the drop point (an index counted in
+    // the current list, so moved entities above it shift it up once
+    // removed). Each command moves one entity, and its index is counted in
+    // the list as it is then, without that entity: right after whatever
+    // precedes it in the wanted order and is already where it belongs.
+    final siblings = target.parent == null ? tree.roots : tree[target.parent!]!.children;
+    final stay = [for (final s in siblings) if (!moving.contains(s)) s];
+    final at = target.index - siblings.take(target.index).where(moving.contains).length;
+    final wanted = [...stay.take(at), ...moving, ...stay.skip(at)];
+    final current = [...siblings];
+    final placed = <String>{...stay};
+    int indexFor(String id) {
+      current.remove(id);
+      final w = wanted.indexOf(id);
+      var i = 0;
+      for (var k = w - 1; k >= 0; k--) {
+        if (!placed.contains(wanted[k])) continue;
+        i = current.indexOf(wanted[k]) + 1;
+        break;
+      }
+      current.insert(i, id);
+      placed.add(id);
+      return i;
     }
     final parentWorld = tree.worldMatrix(target.parent);
     final invParent = matInverseAffine(parentWorld);
     for (final id in moving) {
       final n = tree[id]!;
-      commands.add(Command.reparentObject(id, parent: target.parent, index: index++));
+      commands.add(Command.reparentObject(id, parent: target.parent, index: indexFor(id)));
       final world = tree.worldMatrix(id); // reads an instance's root first
       if (keepWorldTransform && n.transformId != null && n.transform != null && n.parent != target.parent) {
         final local = Trs.fromMatrix(matMul(invParent, world));

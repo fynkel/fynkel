@@ -83,9 +83,9 @@ void main() {
     expect(model.duplicate(), isTrue);
     expect(tab.document.history, ++history);
     final floorCopy = model.selection.single;
-    expect(tree[floorCopy]!.name, 'Floor');
+    expect(tree[floorCopy]!.name, 'Floor (1)');
     expect(tree[floorCopy]!.children.length, 1);
-    expect(tree.roots.last, floorCopy); // a scene's roots follow the entity key order: the copy is newest
+    expect(tree.roots[tree.roots.indexOf(floor) + 1], floorCopy); // right after the original, as Unity's
     // A child's copy lands right after its original.
     model.select(crateA);
     expect(model.duplicate(), isTrue);
@@ -129,7 +129,7 @@ void main() {
     addTearDown(again.close);
     final doc = again.openDocument(tab.path);
     expect(doc.root()['entities'], hasLength(entities.length));
-    expect(doc.roots().last, floorCopy);
+    expect(doc.roots()[doc.roots().indexOf(floor) + 1], floorCopy);
     expect((doc.root()['entities'] as Map)[floor]['children'], [crateA, crateCopy]);
   });
 
