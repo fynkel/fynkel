@@ -81,7 +81,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Volume profile Inspector | Add Override, a checkbox per field | 🔧 `b1b7402`, `d2fa8ea` (Remove, All / None; saved at once, live in the Scene view, ⌘Z in the Inspector) |
 | Model import settings | scale, normals, animation… | 🔧 `41190a1`, `c3e7d3e` (Scale Factor, Normals Import / Calculate + Smoothing Angle, Import Animation; leaving with unapplied settings asks Apply / Revert); 🟡 no Rig or Animation tab beyond that (clips are split by the rig document), no mesh compression / read-write / lightmap UVs |
 | `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | 🔧 `2e0183f` (`position` / `rotation` are world, `localPosition` / `localRotation` / `localScale`, `translate` / `rotate` / `rotateAround` / `lookAt` with `Space.self` / `Space.world`, `forward` / `right` / `up`, `eulerAngles` in degrees, `transformPoint` and friends); 🟡 Euler order is the Inspector's X-then-Y-then-Z, not Unity's Z-X-Y |
-| One script throwing | only that script stops | ❌ the rest of the frame's update pass is skipped |
+| One script throwing | only that script stops | 🔧 `faf648d` (every callback on its own; the Console gets the message and the stack; called again next frame) |
 | Coroutines / `Invoke` | | ❌ |
 | `Input.GetKey` | raw keys | ❌ declared actions only; an undeclared one reads false silently |
 | `Debug.Log` | Console, click to the line | 🟡 info only, no source link; `print` not captured |
@@ -182,3 +182,10 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   over the real native library: a child of a turned, scaled parent reads
   and writes its world position, `lookAt` and `translate` move it the
   way a Unity script would, and the world's own snapshot agrees.
+- 2026-09-24: one script throwing (`faf648d`) — every behaviour
+  callback runs on its own and reports to `World.onBehaviourError` (the
+  Console's Game tab with the stack under the editor).
+  `packages/fynkel/test/script_errors_test.dart`: a throwing `update`
+  leaves the behaviours before and after it running every frame, a
+  throwing `onCreate` / `start` is reported once, and the channel record
+  carries the message and the stack.

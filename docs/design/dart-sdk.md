@@ -293,6 +293,8 @@ Development builds should fail loudly and locally for invalid handles, missing a
 
 Release builds may reduce expensive checks but must never turn invalid state into memory unsafety.
 
+**A behaviour that throws (Unity parity, 2026-09-24; `packages/fynkel/lib/src/behaviour.dart`).** Every behaviour callback — the lifecycle ones, `fixedUpdate` / `afterPhysics` / `update` / `lateUpdate`, and the contact, zone, animation and playback callbacks — runs on its own: a throw stops only that call, the other behaviours still run the pass, and the one that threw is called again next time (a `start` that threw is not retried, and its object's update is skipped for that one frame, as in Unity). The error goes to `World.onBehaviourError(BehaviourError { behaviour, callback, error, stack, tick, message })`; the default, `World.reportBehaviourError`, writes an `exception` log record with the Dart stack on the editor channel when an editor listens (the Console's Game tab: `Player.update on "Hero" threw: …`, a click to the line), else hands the error to the current zone — a test fails on a broken script — or, in a plain Dart process's root zone, prints it. Before this, a throw left the rest of the frame's pass undone. Tests: `packages/fynkel/test/script_errors_test.dart`.
+
 ### 21.9 SDK compatibility and deprecation policy
 
 Before 1.0, breaking changes are allowed but must use changelogs and migration notes. From 1.0 onward, adopt semantic versioning for public Dart APIs and documented project formats. Deprecate public APIs before removing them when practical. File/schema migrations need a tested upgrade path independent of source API deprecations.
