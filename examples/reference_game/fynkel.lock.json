@@ -8,11 +8,12 @@
   "tools": {
     "version": "0.0.1"
   },
-  "schemaFingerprint": "0xa6bee88bec527d9b",
+  "schemaFingerprint": "0xc9dc361258a0c148",
   "documents": {
     "blend": 1,
     "material": 2,
     "meta": 2,
+    "physics_material": 1,
     "prefab": 5,
     "project": 2,
     "rig": 1,
