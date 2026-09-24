@@ -653,6 +653,14 @@ window, never running game code and never reading a cooked cache
   `mesh/Capsule`, `mesh/Cylinder`, `mesh/Plane`, `mesh/Quad` and
   `material/Default` ids derive from the fixed id, so they are the same
   in every project.
+  `importFiles { paths, folder? }` (2026-09-24) copies files from
+  outside the project into `folder` (the asset root when omitted), as a
+  drop from Finder does in Unity: one undoable step (`Import <name>`,
+  or `Import N files`); a taken name counts on (`tree 1.png`); a file's
+  own `.meta.json` next to it comes along when its id is free, and a
+  document whose id is taken gets a new one; the rescan gives the rest
+  sidecars. Refused for a folder, a file already inside the asset root
+  and an empty `paths`; a lone `.meta.json` is skipped.
   `deleteAsset { asset, force? }` is
   **refused while anything references the asset** — `FYN-T0003` with one
   `related` `FYN-A0004` per referencing field (`document` absolute path,
@@ -733,7 +741,7 @@ game's runtime has none of these symbols, and CI checks that
 **The Dart side** is `packages/fynkel_authoring` (ffigen bindings over the
 header onto the same code asset as `package:fynkel`; games never depend on
 it): `AuthoringSession` (`openProject`, `openDocument`, the queries typed,
-`rescan`, `operate` with typed wrappers — `newDocument`, `renameAsset`, `duplicateAsset`, `installPrimitives`,
+`rescan`, `operate` with typed wrappers — `newDocument`, `renameAsset`, `duplicateAsset`, `installPrimitives`, `importFiles`,
 `deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`, `redoAsset`
 → `OperationResult` —, `assetDetail` → `AssetDetail`, `assetHistory` →
 `AssetHistory`, `dependents`, a **synchronous** broadcast

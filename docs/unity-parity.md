@@ -66,8 +66,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Enter | renames | 🔧 `16e16ab` (⌘↓ opens) |
 | ⌘⌫ | deletes after a confirmation | 🔧 `16e16ab` |
 | ⌘D | duplicates the asset | 🔧 `duplicateAsset` (`52bde19`), `16e16ab` |
-| Undo | ⌘Z, one history | 🟡 its own ⌥⌘Z history; empty-folder create/delete not undoable |
-| Drag files in from Finder | imports | ❌ (changes on disk do import) |
+| Undo | ⌘Z undoes the scene; asset operations are not undoable | ✅ ⌘Z undoes the focused document, as in Unity; asset operations also have their own ⌥⌘Z history (more than Unity), except that creating or deleting an empty folder can't be undone |
+| Drag files in from Finder | imports | 🔧 `14811dd`, `395220e` (into the shown folder, one ⌥⌘Z step) |
 | Model sub-assets | expand in the browser, draggable | 🔧 `554ae0d` (▸, → / ←, a part's page on click) |
 | Create → Volume Profile, Physics Material | | 🔧 Volume Profile (`682f953`, `adb5146`); Physics Material ❌ — no such asset: friction and restitution are the Collider's own fields, and an asset would need an ADR (Tier 3) |
 | Find References In Scene | | 🔧 `fc22546` (the Hierarchy searches `ref:<id>:<name>`) |
@@ -141,3 +141,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   prefab's instance.
 - 2026-09-24: a model's parts in the Project (`554ae0d`) — the parity test
   opens robot.glb, drags a mesh onto the Robot's Mesh field and saves.
+- 2026-09-24: files dragged in from Finder (`14811dd` `importFiles`,
+  `395220e`) — the parity test sends a drop through the channel and
+  finds the file, its sidecar and one undo step. Undo reclassified: Unity
+  doesn't undo asset operations either, so ⌘Z on the focused document
+  matches.

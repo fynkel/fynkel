@@ -127,6 +127,12 @@ sidecar — dropped into `assets/` from Finder, or there when the project
 opens — gets one on that scan, as Unity writes a `.meta`: a new id and the
 importer from its extension (`OpenProject::rescan`, the report's
 `sidecarsWritten`); it shows up in the Project browser like any asset.
+Files dragged from Finder onto the Project panel are **imported into the
+folder it shows** (`importFiles`, one ⌥⌘Z step): on macOS a
+`FileDropView` over the Flutter view (registered for `.fileURL`, clicks
+passed through) sends `over` / `exit` / `drop {paths, x, y}` on
+`fynkel.editor/drop`; `FileDrops` hands a drop to the panel whose box
+holds the point, which outlines itself while files hover.
 Nothing is written in a read-only project (`FYN-A0001` stays). Move a
 file with its sidecar, or in the Project browser: a file moved alone in
 Finder is a new asset, and its old sidecar is reported orphaned
