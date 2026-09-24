@@ -517,6 +517,53 @@ the mask. The Apple viewport takes it as `fynkel_apple_viewport_outline`
 editor gets the entities to list from its ids through the authoring
 preview's `entities` kind (the live world's `handles`).
 
+**Extra worlds** (`push_extra_world(ExtraWorld { extract, transform,
+gray })`) draw other worlds into the same frame as the extract `prepare`
+is given — the editor's Prefab Mode *in context* (the prefab's preview
+is the main world; the scene it was opened from is an extra world at
+`inverse(instance world matrix)`, so the prefab stays at its own origin,
+greyed in Unity's "Gray" mode) and multi-scene editing (the active
+scene's preview is the main world, the other loaded scenes' previews
+are extra worlds at identity). They are not an overlay: `prepare` walks
+the main extract's records, then each extra world's with its model
+matrices pre-multiplied by `transform`, into the one instance buffer —
+the same batches, the same depth buffer, depth prepass and AO, the same
+light pool (an extra world's point and spot lights are placed by the
+transform, their range scaled by its largest axis, and are culled and
+assigned per object like the main world's), the same shadow cascades
+(its casters cast into them and its surfaces receive). Skinned meshes
+are posed by the extra world's own palettes, uploaded after the main
+extract's (each instance's first joint offset by the palettes before
+it). The main extract's camera, `Environment`, volumes and so exposure
+and post are the frame's; an extra world's first directional light is
+the sun only when the main extract has none (and its lights count as
+authored, so the fallback sun stays off). Meshes and materials come from
+the renderer's asset store — the main world's; every preview of one
+authoring session shares one cache. The selection outline only rings
+the main extract's entities (handle bits are per world). **Grey** is
+bit 1 of the instance's fourth flag (bit 0 is "receives shadows"); the
+mesh stage replaces the final shaded colour — lit radiance with
+emissive and ambient, or an unlit colour — by `0.5 · dot(rgb, (0.2126,
+0.7152, 0.0722))` in every channel (desaturated to its Rec. 709
+luminance, then dimmed by half, before exposure and tone mapping; alpha
+and the blend tag kept), so a grey world is still depth-tested,
+shadowed and casting. The queue is consumed by the next `prepare`
+(`clear_extra_worlds` drops it); without extra worlds the frame is
+bit-identical to what it was before they existed (the shading tests'
+46 dumped frames compare equal byte for byte). `FrameStats.extra_worlds`
+counts the ones drawn. The Apple viewport takes them as
+`fynkel_apple_viewport_extra_worlds(vp, worlds, transforms, flags,
+count)` (ABI v9: `FynkelWorld*`s, 16 column-major floats and one flag
+word each — `FYNKEL_APPLE_EXTRA_WORLD_GRAY` = 1 — extracted by the call;
+a later call replaces an earlier one, a NULL world is skipped, -1 for a
+NULL viewport, a NULL array with a count or a non-finite transform) and
+`package:fynkel_flutter` as `ViewportOverlay.extraWorld(worldAddress,
+{transform, gray})`, queued by `FynkelViewportController.overlay` and
+cleared with the overlay; the editor passes each preview's
+`ScenePreview.worldAddress`. Picking stays per preview: every hit of
+`ScenePreview.pick`/`pickRay` carries its `distance` along the ray, so
+the nearest across several identity-placed previews is the smallest.
+
 Placeholder cubes (entities without a `MeshRenderer`, when
 `placeholders` is on) are lit like a rough white dielectric in their
 palette tint; a mesh missing from the cache is the unlit magenta cube.
@@ -886,7 +933,18 @@ pixels (2 against 6, 0 drawing nothing, the same ring at render scale
 entity the extract lacks or one on a layer the camera leaves out —
 bit-identical to a renderer's that never had one, a blend material ringed by its whole surface, and (in
 `tests/project.rs`) the fixture's skinned meshes ringed in their pose,
-not their bind pose; from V1 (c): frustum culling dropping four off-screen cubes
+not their bind pose; extra worlds: a cube in an extra world drawn
+through its transform bit-identical to the same cube in the main world,
+lit by the main world's sun, and gone from the next frame (bit-identical
+to a renderer's that never had one; an empty or cleared queue changes
+nothing), a grey extra world desaturated (channel spread under 1) and
+at most 0.8 of its normal brightness while the main world's pixels stay
+as they were, an extra world's point light lighting the main cube in
+front of it and not behind it, an extra world's cube shadowing the main
+slab and a grey extra slab (with the only sun) receiving the main
+cube's shadow, and (in `tests/project.rs`) the rig scene's skinned
+columns posed by the extra world's palettes, not the main extract's;
+from V1 (c): frustum culling dropping four off-screen cubes
 (one of them still casting its shadow into the view) with the picture
 identical to `frustum_culling = false`. `tests/offscreen.rs` counts a
 40 × 25 grid of placeholders as drawn + culled = 1 000 in one draw.
