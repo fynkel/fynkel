@@ -70,7 +70,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Drag files in from Finder | imports | ❌ (changes on disk do import) |
 | Model sub-assets | expand in the browser, draggable | ❌ only in the Inspector's asset page |
 | Create → Volume Profile, Physics Material | | 🔧 Volume Profile (`682f953`, `adb5146`); Physics Material ❌ — no such asset: friction and restitution are the Collider's own fields, and an asset would need an ADR (Tier 3) |
-| Find References In Scene | | ❌ |
+| Find References In Scene | | 🔧 `fc22546` (the Hierarchy searches `ref:<id>:<name>`) |
 
 ## Tier 2 — the look and the code
 
@@ -136,3 +136,6 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   light colour while picking, Cancel, and one undo on OK.
 - 2026-09-24: New Volume Profile (`682f953`, `adb5146`) —
   `project_parity_test.dart` makes one from + and renames it.
+- 2026-09-24: Find References In Scene (`fc22546`) — the parity test
+  finds a model's users (one of them inside a prefab instance) and a
+  prefab's instance.

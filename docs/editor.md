@@ -707,7 +707,11 @@ a referenced asset goes straight to the "still referenced" dialog below —
 ⌘A ⎋ ←(up a folder). An asset field clicked in the Inspector **pings**
 its asset here: shown in its folder, scrolled to and outlined, nothing
 selected. Context menus: an asset's
-Open / Show in Inspector / Reveal in Finder / Rename / Move to… / Delete /
+Open / Show in Inspector / Reveal in Finder / **Find References In
+Scene** (not a scene: the focused document's Hierarchy comes forward
+searching `ref:<asset id>:<name>`, as Unity's — the objects whose
+components reference the asset or whose prefab it is, prefab instances'
+contents included; × clears it) / Rename / Move to… / Delete /
 Reimport / **Set as Startup Scene** (a scene: the one `fynkel run`
 starts with, one asset-history step) / Copy id / Copy path / New … Here; a folder's Show / Reveal /
 New … Here / Rename Folder / Delete Empty Folder; the empty area's New …
