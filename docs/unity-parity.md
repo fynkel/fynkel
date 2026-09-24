@@ -86,7 +86,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | `Input.GetKey` | raw keys | 🔧 `6b25b52` (ADR-0024: `getKey` / `getKeyDown` / `getKeyUp`, `getMouseButton…`, `anyKey`, with the actions' tick rules; an undeclared action warns once in the Console) |
 | `Debug.Log` | Console, click to the line | 🔧 `9bdf3d6` (`Debug.log` / `logWarning` / `logError` / `logException` with the caller's stack: the row shows the line, ↩ opens it; `print` in game code is a Console row) |
 | Inspector fields | public fields; GameObject/component/colour/enum references | 🔧 `46c091a`, `de1de2c`, `962d30a` (ADR-0018 amended: `GameObject?` and script-typed fields — `None (Type)`, drop a Hierarchy row, ⊙, ×, `Missing` — resolved at load whatever the attach order, a prefab instance's to its own copies; Dart enums as a dropdown; colours were already `@Expose(kind: 'color')`); 🟡 fields still need `@Expose` (no implicit public fields), no asset-typed fields beyond `AssetRef`, no `List` of references |
-| A failed hot reload | blocks Play, errors in the Console | 🟡 a toast; old code keeps running |
+| A failed hot reload | blocks Play, errors in the Console | 🔧 `68f7d45` (each `file:line:column: Error:` is a Console row, ↩ opens the line in the IDE; Play and Build And Run refused until a reload goes through; the notice links the Console); 🟡 the old code keeps running in the game view meanwhile, as Unity keeps the old assemblies |
 | Drag a script onto an object | adds it | ❌ |
 
 ## Tier 3 — the Scene view and prefabs, beyond the basics
@@ -217,3 +217,10 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   still resolves; a gone target is None with `FYN-B0003`) and
   instantiates a prefab twice (each reaches its own child); the prefab
   expansion test checks the derived component id.
+- 2026-09-24: a failed hot reload.
+  `apps/editor/test/parity/compile_error_parity_test.dart` writes a
+  `reloadFailed` status with two compiler errors: ⌘P is refused with
+  Unity's message, the Console has both rows at their file:line:column, ↩
+  runs the IDE command with the absolute path and position, and a
+  `reloaded` status clears them. `code_reload_test.dart` covers the
+  parser.

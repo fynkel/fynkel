@@ -802,6 +802,16 @@ build_runner removes the generated files while a build fails. Closing the
 editor ends the watch, and the CLI puts the last good files back. A CLI
 without `--watch` falls back to `recompileOnSave`.
 
+**A hot reload that fails** (Unity's compiler errors). When `fynkel
+editor` reports `reloadFailed`, `CodeReloadStatus.errors` holds the
+compiler's `file:line:column: Error: …` lines (`CompileError.parse`; a
+message without one is one error). They are error rows in the Console
+with the code `compile`, and ↩ on a row opens the file at that line in
+the IDE. The notice links to the Console. Play and Build And Run are
+refused while any are left (*All compiler errors have to be fixed before
+you can enter Play mode*), since the game in the editor still runs the
+old code. The next reload that goes through clears them.
+
 A finding while testing: a `GestureDetector` that catches the empty-space
 click (clear the selection, focus the list) must be `excludeFromSemantics`
 — with its semantics node in the tree, rows leaving the `ListView` while
