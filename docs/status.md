@@ -1794,3 +1794,14 @@ The M3 backlog as it landed, for the record:
    fps lines, Record, Clear, Clear on Play, a selectable window, and that
    window's full breakdown (timers as p50 / p95 / p99). The editor
    samples nothing itself. Next: IDE navigation.
+26. **IDE navigation (roadmap Phase 2) — done 2026-09-24.** A game's
+   uncaught errors now reach the Console's Game tab with their Dart
+   stack. While an editor listens, `FynkelGameView` installs reporters
+   before Flutter's and the platform dispatcher's error handlers, which
+   still run. The SDK method is the new `EditorChannel.error`. The row's
+   location is the first frame in the game's own code (`lib/…:line`).
+   ↩ or a double-click opens the IDE at that line, and the details list
+   every frame, with the game's own frames as links. Build and Run's
+   printed frame lines open the same way. The Inspector's Open Script
+   now opens at the behaviour's `class` declaration. Next: the a11y/l10n
+   basics, the docs, and the M4 gate report.

@@ -502,7 +502,8 @@ slot with the type's icon (the `icon` hint or a per-type default), its
 description as a tooltip, the field rows in groups, and a menu: **Reset to
 Defaults**, **Open Script** (a behaviour: `package:<pkg>/<path>` from the
 metadata resolved to `<project>/lib/<path>` when `<pkg>` is the project's
-package, then the configured IDE command), **Copy Type Name**, **Remove
+package, then the configured IDE command at the line of its `class`
+declaration), **Copy Type Name**, **Remove
 Component**. A prefab instance's anchor shows a **Prefab instance** section
 listing the override ops in bold with a Revert arrow each and **Revert
 all** (per-field bold inside the expanded instance is item 7's). **Add
@@ -1420,6 +1421,24 @@ in a tab with the entity selected in the Hierarchy (through the same
 `revealAndSelect` a Project row uses, so a diagnostic about an entity
 inside a prefab instance opens the instance on the way), or the asset
 revealed in the Project panel.
+
+**An error goes to its line of code.** A behaviour that throws is caught
+by Flutter, not by the engine. So while an editor listens,
+`FynkelGameView` puts reporters in front of `FlutterError.onError` and
+`PlatformDispatcher.onError`, and the handlers that were there still run.
+Each error becomes an `exception` log record carrying the Dart stack
+(`EditorChannel.error`). `dart_stack.dart` reads the stack back: the VM
+form `#0  Player.update (package:game/player.dart:42:7)`, the terse form
+of `package:stack_trace`, and `flutter run`'s `flutter: ` prefix. A frame
+is the game's own when it is `package:<own>/…` or a `file:` inside the
+project. `<own>` is the behaviour metadata's `package`, else the
+pubspec's `name`. The row's location is the first such frame
+(`lib/game/player.dart:42`). ↩ or a double-click opens the IDE there
+(`console.game.open` too), and an error from the IDE command shows in the
+status line. The details list the frames (up to 30,
+`console.game.frame.<i>`); the game's own frames are links, and the
+engine's and Flutter's are grey. Build and Run's printed frame lines
+(`output` rows) open the same way.
 
 A game names its documents the way the **cooked** project is laid out —
 from the assets root, `scenes/menu.scene.json` — while the editor works in

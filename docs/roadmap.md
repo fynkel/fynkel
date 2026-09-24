@@ -53,6 +53,7 @@ Apply to Scene (`docs/design/live-play-mode.md`).
 - **Profiler panel** over the frame timings the engine already measures.
   **Done 2026-09-24.**
 - **IDE navigation** from the Console and components to source.
+  **Done 2026-09-24.**
 - a11y/l10n basics, docs, the **M4 gate report**.
 
 ## Phase 3 — Extensibility and the data model
