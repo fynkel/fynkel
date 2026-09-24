@@ -1774,3 +1774,16 @@ The M3 backlog as it landed, for the record:
    target only, for fresh ids; `Cargo.lock` is unchanged. The ADR index in
    `docs/README.md` now lists 0019–0021 and shows 0018 as accepted.
    **Phase 1 is complete.** Next: Phase 2 (close M4).
+24. **Scripts in the editor (roadmap Phase 2 item 1) — done 2026-09-24.**
+   The Project browser has a Scripts root over `lib/`. A double-click
+   opens a script in the IDE; a file that declares a behaviour shows as
+   one. **New ▾ → New Behaviour…** writes a class from a template, opens
+   it in the IDE, runs `fynkel codegen --project <game> --project-only`
+   and then the session's new `registerBehaviour` operation. That
+   operation adds the type to the project's component registry (undoable)
+   and re-reads the metadata and schemas, so Add Component lists the type
+   at once. `--project-only` is a new CLI flag that skips the native
+   pipeline, so the editor never rewrites the engine's generated files.
+   Running codegen from the editor is a dated amendment to ADR-0016
+   (explicit action only; the CLI subprocess runs `build_runner`, never the
+   editor process). Next: Phase 2's Profiler panel.

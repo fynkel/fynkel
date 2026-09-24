@@ -47,7 +47,9 @@ Apply to Scene (`docs/design/live-play-mode.md`).
 
 - **Scripts in the editor:** the Project browser shows `lib/` (a
   *Scripts* root; double-click opens the IDE); **Create → Behaviour**
-  from a template (codegen, then open in the IDE).
+  from a template (codegen, then open in the IDE). **Done 2026-09-24**
+  (ADR-0016 amended: the editor runs `fynkel codegen --project-only` for
+  it).
 - **Profiler panel** over the frame timings the engine already measures.
 - **IDE navigation** from the Console and components to source.
 - a11y/l10n basics, docs, the **M4 gate report**.

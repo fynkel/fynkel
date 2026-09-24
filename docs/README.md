@@ -47,7 +47,7 @@
 | 0013 | Dart math types | Accepted |
 | 0014 | Error reporting across the ABI | Accepted |
 | 0015 | Native runtime distribution | Accepted |
-| 0016 | Editor architecture | Accepted |
+| 0016 | Editor architecture | Accepted (Play superseded by 0021; amended 2026-09-24: codegen for Create → Behaviour) |
 | 0017 | AI and automation interface | Accepted |
 | 0018 | Editor extension model: declarative Inspector hints, no game code in the editor | Accepted (with M4 item 4; the roadmap's Phase 3 reopens it for Dart editor extensions) |
 | 0019 | Gizmos, handles and Scene tools | Accepted |

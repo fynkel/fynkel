@@ -668,6 +668,48 @@ dependents by document path with each pointer, and offers Cancel or
 and a ×; the status line counts `shown of total assets in <where>` and the
 selection, with an up arrow inside a folder.
 
+### Scripts and Create → Behaviour (roadmap Phase 2 item 1)
+
+Below the asset folders the tree has a **Scripts** root: the game's
+`lib/` and its folders (`scripts.dart`, `ProjectBrowserModel`'s Scripts
+section). Scripts are not assets. The session never indexes them, so the
+browser lists the directory itself and reads it again when the watcher
+reports a change under `lib/`. The list shows the shown folder's
+sub-folders and `.dart` files. Kind is `behaviour` for a file the
+committed metadata names as a behaviour's `library` (its class names
+under Contents), `generated` for `lib/generated/` and `*.g.dart`, else
+`script`. A search covers the paths and behaviour ids under the shown
+folder, and the list view shows every script. A double-click or ↩ opens
+the file in the IDE (the Console's opener, `IdeLauncher.open`). The
+context menu has Open in IDE, Reveal in Finder, Copy path and New
+Behaviour Here…. Scripts only open: they do not move, rename or delete
+here, which is the IDE's job. The folder shown in Scripts is remembered
+with the rest of the browser.
+
+**New ▾ → New Behaviour…**, for an editable Dart package with `lib/`:
+
+1. A dialog asks for the class name (UpperCamelCase, checked as typed)
+   and shows the file it makes: `snake_case.dart` in the shown scripts
+   folder, else `lib/game/` when there is one, else `lib/`.
+2. The file is written from the template: `@FynkelBehaviour(id:
+   '<namespace>.<Name>')`, one `@Expose` field, and `start` and `update`.
+   The namespace is the one every existing behaviour shares, else
+   `game`. A file, or an id, that is already there is refused before
+   anything is written.
+3. The file opens in the IDE at once.
+4. `fynkel codegen --project <game> --project-only --json` runs
+   (`CodegenCheck.generate`; seconds, shown in the status line). This is
+   the one command the editor runs that writes (ADR-0016 amendment of
+   2026-09-24). `--project-only` never touches the engine's own
+   generated files.
+5. The session's `registerBehaviour` adds the id to the project's
+   component registry (one asset-history step, so ⌥⌘Z takes it back)
+   and re-reads the metadata and schemas. Add Component lists the type
+   at once.
+
+Each failure is shown in the error bar: codegen failing (the file stays
+written), or codegen not listing the type (a compile error in the file).
+
 A finding while testing: a `GestureDetector` that catches the empty-space
 click (clear the selection, focus the list) must be `excludeFromSemantics`
 — with its semantics node in the tree, rows leaving the `ListView` while
@@ -1940,6 +1982,7 @@ around the one step that causes it.
 | 9f | done 2026-09-23 (gate driven by the user) | Gizmo rendering: the grid, outlines and icons drawn by the renderer's overlay — anti-aliased lines with a width, faded behind the scene, the analytic ground grid (§ What is drawn over the world; `docs/renderer.md` § The overlay). |
 | 9g | done 2026-09-23 (gate driven by the user) | Handles and Scene tools: the handle framework, the tool registry with move, rotate, scale and the combined transform tool drawn through the overlay, and component handles — light range and angles, collider sizes, camera field of view — behind the Inspector's Edit toggle (§ The gizmo). |
 | 9h | done 2026-09-23 (gate driven by the user) | Gizmos for game code: the runtime `Gizmos` API in the game's window (`FynkelGameView(gizmos:)`, Play's *Show Gizmos in Play*), and declarative `@Gizmo` fields drawn and dragged in the Scene view (§ The gizmo). |
+| Scripts | 2026-09-24 | The Project browser's Scripts root over `lib/` (open in the IDE) and New ▾ → Behaviour: template, `fynkel codegen --project-only`, `registerBehaviour` (§ The Project browser › Scripts and Create → Behaviour; roadmap Phase 2 item 1). |
 | 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 

@@ -628,7 +628,13 @@ window, never running game code and never reading a cooked cache
   entries) and the same values inside prefab overrides — and is refused,
   with nothing written, while such a document has unsaved edits; the
   result's `reload` lists the handles of the clean open documents it
-  rewrote. `undoAsset` / `redoAsset` replay the
+  rewrote. `registerBehaviour { id, description? }` (`src/behaviours.rs`,
+  the editor's Create → Behaviour, after `fynkel codegen` wrote the new
+  type's metadata and schema) adds `id → { kind: behaviour, version: 1,
+  description? }` to the project's component registry when the project
+  has one and the entry is missing, as one asset-history step, and re-reads
+  the project either way. Its answer is `{ id, registered, inMetadata }`.
+  `undoAsset` / `redoAsset` replay the
   **asset history**, an undo stack of its own (a document's ⌘Z never moves
   a file): created documents are removed and re-written byte-for-byte,
   moves reversed, trashed files brought back, settings restored;

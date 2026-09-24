@@ -1,6 +1,6 @@
 # ADR-0016: Editor architecture authoring service edit preview Play process docking
 
-**Status:** Accepted; its Play decision superseded by ADR-0021 (2026-09-23: Play runs in the editor, the separate process becomes Build and Run)  
+**Status:** Accepted; its Play decision superseded by ADR-0021 (2026-09-23: Play runs in the editor, the separate process becomes Build and Run); amended 2026-09-24 (the editor may run `fynkel codegen` for Create → Behaviour, below)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
@@ -45,3 +45,11 @@ Recorded here rather than in the blueprint because each one fixes a reading of t
   Not exercised and not needed for V0: multi-window, floating panels (§22.2 defers both). `multi_split_view` 2.4.0 and `tabbed_view` 1.18.1 come pinned by `docking` (newer majors of both exist; `docking` owns that upgrade). No native code, nothing on the runtime path.
 - **Extension model:** ADR-0018 — declarative Inspector hints in 1.0, no custom widgets, windows or editor scripts; a compiled plugin SDK after 1.0.
 - **Parallel development:** M4 runs on branch `editor` in its own worktree while M3 finishes on `main`, under the rules in §19.2e (new directories only; shared-crate touches as separate commits merged to `main` first, announced by name).
+
+## Amendment (2026-09-24): Create → Behaviour runs codegen
+
+The decision says "the editor never executes game code or codegen". Create → Behaviour (roadmap Phase 2 item 1, Unity's Create → C# Script) needs the new type's metadata and schema before the Inspector can add it, so this one reading changes:
+
+- The editor may **run `fynkel codegen --project <game> --project-only --json` as a subprocess**, and only on an explicit user action: New ▾ → Behaviour in the Project browser. It never runs on a timer or on save. The "run `fynkel codegen`" banner is unchanged; it still checks with `--check` and shows the command.
+- **Still true:** the editor process never loads game code or `build_runner`. The CLI runs `build_runner` in its own child process on the game package, as it does from a terminal. The Inspector is still generated from the committed metadata; the session re-reads that metadata after the run (`registerBehaviour`, which also adds the type to the project's component registry as one undoable step).
+- **`--project-only`** skips the native pipeline. An editor action therefore never rewrites the engine's own generated files, even when the configured CLI is older or newer than the checkout.
