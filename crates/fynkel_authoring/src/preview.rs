@@ -191,7 +191,12 @@ impl Ray {
 /// One picked entity, nearest first in [`Preview::pick`]'s result.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Hit {
+    /// The id the editor knows: a prefab instance's anchor for anything
+    /// inside it.
     pub id: Uuid,
+    /// The object the ray met — `id` itself, or the child of the instance
+    /// (a material dropped there goes onto it, as in Unity).
+    pub object: Uuid,
     pub entity: Entity,
     /// Along the ray, metres.
     pub distance: f32,
@@ -205,6 +210,7 @@ impl Hit {
     pub fn json(&self) -> Value {
         json!({
             "id": self.id.to_string(),
+            "object": self.object.to_string(),
             "distance": self.distance,
             "point": [self.point.x, self.point.y, self.point.z],
             "mesh": self.mesh,
@@ -916,7 +922,7 @@ impl Preview {
     /// skinned mesh is tested unposed), any other entity through an
     /// [`ICON_RADIUS`] sphere at its origin. Hidden entities never hit. A
     /// hit inside a prefab instance is reported as its anchor (once, at
-    /// the nearest hit); `entity` stays the entity the ray met.
+    /// the nearest hit); `object` and `entity` stay the one the ray met.
     pub fn pick(&self, world: &World, assets: Option<&Assets>, ray: &Ray) -> Vec<Hit> {
         let mut hits = self.pick_entities(world, assets, ray);
         for h in hits.iter_mut() {
@@ -940,6 +946,7 @@ impl Preview {
             if let Some((distance, point, mesh)) = pick_entity(world, assets, ray, e) {
                 hits.push(Hit {
                     id: *id,
+                    object: *id,
                     entity: e,
                     distance,
                     point,

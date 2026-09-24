@@ -7,6 +7,7 @@
 //! picture equals a plain game world's from the same camera, pixel for
 //! pixel, when a GPU is there.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use fynkel_assets::Assets;
@@ -581,7 +582,7 @@ fn a_ray_through_every_entitys_centre_picks_it() {
         let described = describe(&s, h);
         let document = s.document(h).unwrap().editor.document().envelope.id;
         let mut w = edit_world();
-        let p = Preview::load(document, &mut w, Some(&assets), &described);
+        let mut p = Preview::load(document, &mut w, Some(&assets), &described);
         // Through the scene's own camera — the picture the user sees; the
         // fixture's rig body is an open column, so a ray from straight
         // above would pass through it without touching a triangle, as a
@@ -628,6 +629,15 @@ fn a_ray_through_every_entitys_centre_picks_it() {
                 e.name
             );
             assert!((hit.point - centre).length() < 50.0 && hit.distance > 0.0);
+            assert_eq!(hit.object, id, "no anchors: the object is the id");
+            // Inside a prefab instance the hit answers with the anchor, and
+            // still names the object the ray met.
+            let anchor = Uuid::from_u128(0xa11c0);
+            p.set_anchors(HashMap::from([(id, anchor)]));
+            let hits = p.pick(&w, Some(&assets), &ray);
+            let hit = hits.iter().find(|hit| hit.id == anchor).unwrap();
+            assert_eq!(hit.object, id);
+            p.set_anchors(HashMap::new());
         }
         // The stacked-hits rule the Scene view cycles through: the ray
         // through the floor's centre from above hits the floor and only
