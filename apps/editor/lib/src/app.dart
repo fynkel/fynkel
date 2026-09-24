@@ -21,6 +21,7 @@ import 'env/tools.dart';
 import 'hierarchy/hierarchy_model.dart';
 import 'hierarchy/presets.dart';
 import 'hierarchy/hierarchy_panel.dart';
+import 'hierarchy/hierarchy_tree.dart';
 import 'inspector/codegen_check.dart';
 import 'l10n/strings.dart';
 import 'inspector/inspector_model.dart';
@@ -554,6 +555,7 @@ class EditorShellState extends State<EditorShell> {
           model: b,
           onOpenDocument: openDocument,
           onShowAsset: showAssetInInspector,
+          onFindReferences: findReferencesInScene,
           run: widget.run,
           searchFocus: PanelIds.number(id) == 1 ? projectSearchFocus : null,
           onOpenScript: (file) => ide.open(file),
@@ -2320,9 +2322,9 @@ class EditorShellState extends State<EditorShell> {
   /// [tab]: the copy used last when it does, else another that does (an
   /// unlocked copy follows the focused tab); a new copy opens when every
   /// copy is locked to another document.
-  void _revealEntity(OpenDocument tab, String? id) {
+  String? _revealEntity(OpenDocument tab, String? id) {
     final ws = workspace;
-    if (ws == null) return;
+    if (ws == null) return null;
     const base = PanelRegistry.hierarchy;
     var target = ws.copiesByRecency(base).where((c) => _hierarchies[c]?.tab == tab).firstOrNull;
     target ??= (!ws.isShown(base) && _hierarchies[base]?.tab == tab) ? base : null;
@@ -2333,6 +2335,18 @@ class EditorShellState extends State<EditorShell> {
     }
     ws.show(target);
     if (id != null) _hierarchies[target]?.revealAndSelect(id);
+    return target;
+  }
+
+  /// Unity's Find References In Scene: the focused document's Hierarchy
+  /// comes forward searching `ref:<asset>:<name>` — the objects that
+  /// reference the asset (× clears it).
+  void findReferencesInScene(String asset, String name) {
+    final tab = tabs?.focused;
+    if (tab == null) return;
+    final target = _revealEntity(tab, null);
+    if (target == null) return;
+    _hierarchies[target]?.setQuery(HierarchyFilter.referencesQuery(asset, name));
   }
 
   void _newAsset(String kind) {

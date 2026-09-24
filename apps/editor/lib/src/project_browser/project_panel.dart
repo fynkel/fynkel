@@ -33,6 +33,7 @@ class ProjectPanel extends StatefulWidget {
     required this.model,
     required this.onOpenDocument,
     required this.onShowAsset,
+    this.onFindReferences,
     this.run = runProcess,
     this.searchFocus,
     this.onOpenScript,
@@ -47,6 +48,10 @@ class ProjectPanel extends StatefulWidget {
   /// Any other asset double-clicked (or Show in Inspector): the Inspector
   /// shows it and comes forward.
   final VoidCallback onShowAsset;
+
+  /// Find References In Scene: the focused document's Hierarchy searches
+  /// for the objects that reference the asset.
+  final void Function(String asset, String name)? onFindReferences;
   final RunProcess run;
   final FocusNode? searchFocus;
 
@@ -432,6 +437,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
         if (isDoc) PopupMenuItem(value: 'open', enabled: !many, child: const Text('Open  ⇧⌥⌘O')),
         const PopupMenuItem(value: 'show', child: Text('Show in Inspector')),
         const PopupMenuItem(value: 'reveal', child: Text('Reveal in Finder  ⇧⌥⌘E')),
+        if (widget.onFindReferences != null && e.document != 'scene')
+          PopupMenuItem(
+            key: const Key('project.menu.findReferences'),
+            value: 'findReferences',
+            enabled: !many,
+            child: const Text('Find References In Scene'),
+          ),
         const PopupMenuDivider(),
         PopupMenuItem(value: 'rename', enabled: model.canEdit && !many, child: const Text('Rename  ⇧⌥⌘R')),
         PopupMenuItem(
@@ -468,6 +480,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         widget.onShowAsset();
       case 'reveal':
         await _reveal(e.path);
+      case 'findReferences':
+        widget.onFindReferences?.call(e.id, e.name);
       case 'rename':
         model.beginRename(e.id);
       case 'move':

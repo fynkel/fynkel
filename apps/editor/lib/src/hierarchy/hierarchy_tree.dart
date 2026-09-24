@@ -29,6 +29,11 @@ final class HierarchyNode {
   List<String> children = const [];
   List<String> componentTypes = const [];
 
+  /// The asset ids the entity's components reference (`{asset, sub?}`
+  /// anywhere in their data) and its prefab: what Unity's Find
+  /// References In Scene looks for.
+  Set<String> assetRefs = const {};
+
   /// The entity's own active flag (`"active": false` in the document, a
   /// derived entity's with the overrides applied); see
   /// [HierarchyTree.activeInHierarchy] for what the row shows.
@@ -84,6 +89,7 @@ final class HierarchyNode {
         if (c is String) c,
     ];
     final types = <String>[];
+    final refs = <String>{};
     transformId = null;
     transform = null;
     final components = e['components'];
@@ -93,6 +99,7 @@ final class HierarchyNode {
         if (c is! Map) continue;
         final type = c['type'] as String? ?? '';
         types.add(type);
+        _collectRefs(c['data'], refs);
         if (type == 'fynkel.Transform' && transformId == null) {
           transformId = entry.key as String;
           final data = c['data'];
@@ -110,10 +117,12 @@ final class HierarchyNode {
       final asset = prefab['asset'];
       prefabAsset = asset is Map ? asset['asset'] as String? : asset as String?;
       overrideCount = (prefab['overrides'] as List?)?.length ?? 0;
+      if (prefabAsset != null) refs.add(prefabAsset!);
     } else {
       prefabAsset = null;
       overrideCount = 0;
     }
+    assetRefs = refs;
     version++;
   }
 
@@ -127,9 +136,11 @@ final class HierarchyNode {
     transformLocal = null;
     transform = null;
     final types = <String>[];
+    final refs = <String>{?prefabAsset};
     var overridden = 0;
     for (final c in e.components.values) {
       types.add(c.type);
+      _collectRefs(c.data, refs);
       overridden += c.overridden.length;
       if (c.type == 'fynkel.Transform' && transformId == null) {
         transformId = c.id;
@@ -138,6 +149,7 @@ final class HierarchyNode {
       }
     }
     componentTypes = types;
+    assetRefs = refs;
     overriddenFields = overridden;
     version++;
   }
@@ -150,6 +162,7 @@ final class HierarchyNode {
     transformLocal = null;
     transform = null;
     componentTypes = const [];
+    assetRefs = {?prefabAsset};
     overriddenFields = 0;
     version++;
   }
@@ -171,9 +184,11 @@ final class HierarchyNode {
     transformLocal = null;
     transform = null;
     final types = <String>[];
+    final refs = <String>{};
     var overridden = e.activeOverridden ? 1 : 0;
     for (final c in e.components.values) {
       types.add(c.type);
+      _collectRefs(c.data, refs);
       overridden += c.overridden.length;
       if (c.type == 'fynkel.Transform' && transformId == null) {
         transformId = c.id;
@@ -182,6 +197,7 @@ final class HierarchyNode {
       }
     }
     componentTypes = types;
+    assetRefs = refs;
     overriddenFields = overridden;
     isPrefabInstance = false;
     prefabAsset = null;
@@ -192,6 +208,20 @@ final class HierarchyNode {
   /// `Transform` counts as "a component" for the filter, but is on nearly
   /// everything, so a search on it is rarely meant.
   bool hasComponent(String type) => componentTypes.contains(type);
+
+  static void _collectRefs(Object? v, Set<String> out) {
+    if (v is Map) {
+      final a = v['asset'];
+      if (a is String) out.add(a);
+      for (final x in v.values) {
+        _collectRefs(x, out);
+      }
+    } else if (v is List) {
+      for (final x in v) {
+        _collectRefs(x, out);
+      }
+    }
+  }
 
   @override
   String toString() => 'HierarchyNode($id "$name")';
@@ -244,8 +274,23 @@ final class HierarchyFilter {
         hasError: hasError ?? this.hasError,
       );
 
+  /// Unity's Find References In Scene puts `ref:<asset id>:<name>` in the
+  /// search: the objects that reference that asset.
+  static String referencesQuery(String asset, String name) => 'ref:$asset:$name';
+
+  /// The asset a `ref:` query looks for, or null.
+  String? get referencedAsset {
+    final q = query.trim();
+    if (!q.startsWith('ref:')) return null;
+    final rest = q.substring(4);
+    final colon = rest.indexOf(':');
+    return colon < 0 ? rest : rest.substring(0, colon);
+  }
+
   bool matches(HierarchyNode n, {required bool hasError}) {
-    final q = query.trim().toLowerCase();
+    final ref = referencedAsset;
+    final q = ref != null ? '' : query.trim().toLowerCase();
+    if (ref != null && !n.assetRefs.contains(ref)) return false;
     if (q.isNotEmpty) {
       final words = q.split(RegExp(r'\s+'));
       final hay = '${n.name.toLowerCase()} ${n.id} ${n.componentTypes.join(' ').toLowerCase()}';
@@ -665,6 +710,16 @@ final class HierarchyTree extends ChangeNotifier {
 
   Set<String> _computeMatching() {
     if (_filter.isEmpty) return nodes.keys.toSet();
+    // A reference may be inside a prefab instance: read every instance's
+    // contents first (they are fetched lazily otherwise).
+    if (_filter.referencedAsset != null) {
+      for (final id in [
+        for (final n in nodes.values)
+          if (n.isPrefabInstance) n.id,
+      ]) {
+        expansionOf(id);
+      }
+    }
     return {
       for (final n in nodes.values)
         if (_filter.matches(n, hasError: hasError(n.id))) n.id,

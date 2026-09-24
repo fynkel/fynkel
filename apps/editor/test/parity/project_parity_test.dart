@@ -2,9 +2,12 @@
 // real project (docs/unity-parity.md § Project).
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'package:fynkel_editor/src/theme/icons.dart';
 
 import 'harness.dart';
 
@@ -105,5 +108,31 @@ void main() {
     expect(json, contains('volume.schema.json'));
     // The starting look: ambient occlusion on, bloom ready for an intensity.
     expect(json, contains('ambientOcclusion'));
+  });
+
+  testWidgets('Find References In Scene: the Hierarchy searches for the objects that use the asset', (tester) async {
+    final e = await Editor.open(tester);
+    const robot = 'c0000000-0000-4000-8000-000000000001';
+    Future<void> findReferences(String folder, String id) async {
+      e.shell.browser!.setFolder(folder);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key('project.asset.$id')), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await e.click(find.byKey(const Key('project.menu.findReferences')));
+    }
+
+    // The model: the Robot, and Crate A whose prefab draws it.
+    await findReferences('models', robot);
+    final search = tester.widget<TextField>(find.byKey(const Key('hierarchy.search')));
+    expect(search.controller!.text, startsWith('ref:$robot:'));
+    expect(e.rows, ['Robot', 'Crate A']);
+
+    // The prefab: its one instance.
+    await findReferences('prefabs', crate);
+    expect(e.rows, ['Crate A']);
+
+    // × clears the search: every object again.
+    await e.click(find.descendant(of: find.byKey(const Key('hierarchy.search')), matching: find.byIcon(FIcons.close)));
+    expect(e.rows, ['Camera', 'Robot', 'Sun', 'Crate A', 'Floor', 'Crate B']);
   });
 }
