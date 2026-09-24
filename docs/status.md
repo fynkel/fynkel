@@ -1740,3 +1740,16 @@ The M3 backlog as it landed, for the record:
    subtree, live Play and Apply to Scene. Design:
    `docs/design/set-active.md`. Next: Phase 1 item 3 (editor and cook
    scale).
+21. **Editor and cook scale (roadmap Phase 1 item 3) — done
+   2026-09-24.** Measured on a generated project of 10 001 assets and
+   11 600 references (`benchmarks/scale/`: `generate.py`, the
+   `fynkel_authoring` example `scale`). `AssetDatabase::by_path` is a map,
+   so the editor's reference prune after a rescan is linear, and a
+   one-file rescan takes 2 ms instead of 29 ms. The cook no longer holds
+   every source's bytes (peak RSS 238 → 155 MB). It stamps each source's
+   size and time in `.fynkel/cache/stamps.json`, so an unchanged source
+   is not read again. It no longer reopens cached textures and sounds to
+   look for a prefab chunk. A cook with nothing to do takes ~850 ms
+   instead of 1 050 ms; the rest is parsing and validating every sidecar
+   and document. Cache version, keys and fingerprint are unchanged.
+   Next: Phase 1 item 4 (automatic sidecars).

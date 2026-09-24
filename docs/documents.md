@@ -1452,6 +1452,17 @@ and the chunk table (`kind`, `name`, `length`, `crc32`), no timestamps.
 `Cache::prune(keep)` deletes every object not in `keep`; `fynkel cook
 --prune` keeps the current profile's keys only.
 
+**Stamps.** `<cache>/stamps.json` remembers each source file's size,
+modification time and hash, plus the extra files a `.gltf`/`.fbx`
+names. A cook reads a source only when its size or time no longer
+matches its stamp, or when the asset must cook. A key still hashes the
+content, so a file that is touched but not changed stays cached. Only a
+same-size edit that keeps the old time (a deliberate `touch -t`, a clock
+set back) goes unseen; `cook --force` trusts no stamp. A file modified
+within two seconds of the cook is hashed but not stamped. The stamps
+are only an optimisation: deleting the file costs one full read of
+every source.
+
 **What is cooked.** A document: validated (schema + references + scene
 semantics; errors fail it) and stored as its canonical text in one `JSON`
 chunk — a scene **expanded** (prefabs applied, ids derived; see "Cooked

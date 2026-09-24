@@ -32,7 +32,8 @@ Apply to Scene (`docs/design/live-play-mode.md`).
    (`fynkel_authoring/src/project.rs`), `by_path` as a map, a
    size+mtime check before the cook re-reads and re-hashes a source,
    cook inputs read one at a time instead of all held at once. Measured on
-   a generated 10k-asset project.
+   a generated 10k-asset project (`benchmarks/scale/`).
+   **Done 2026-09-24.**
 4. **Automatic sidecars.** A file dropped into `assets/` from Finder gets
    its sidecar on the editor's next scan instead of `FYN-A0001`.
 5. **Housekeeping.** The editor's tests in CI; the ADR index in
