@@ -184,3 +184,84 @@ after release.
      and the benchmarks;
    - `playground.py` and `benchmarks/stress/generate.py` write v5;
    - the docs, and the M4 gate rebuild on a fresh copy.
+
+## Amendment (2026-09-25): prefab variants and Unpack Completely
+
+**Status:** proposed by the assistant; to be confirmed by the user.
+
+Unity has three prefab workflows that this ADR did not cover: **Prefab
+Variants**, **Unpack** vs **Unpack Completely**, and **making a prefab
+from an object that already holds prefab instances**. With "the instance
+is the root" in place, all three follow from rules already here.
+
+1. **A variant is a prefab whose root is an instance of its base.** The
+   variant's `root` entity carries `prefab: { asset: <base>, instance,
+   overrides[] }` and has no components of its own (D0408, as for every
+   instance). It may have plain children after the base's (Unity's added
+   GameObjects). This is the nested case of decision 2, so:
+   - **Ids.** The flattening already resolves it. The root keeps the
+     variant root's id, and the other entities are `derive_id(instance,
+     local)`. A chain (a variant of a variant) resolves innermost first.
+     `derive_id` is unchanged, and so is every derived id.
+   - **Cycles.** A variant that leads back to itself is `D0402`, like any
+     other cycle.
+   - **What follows.** Everything reads the flat prefab: describe, the
+     preview, the `instance` query, the cook and `World::instantiate`.
+     There is no variant-specific code downstream.
+   - **Override addressing.** A variant's overrides address the base's
+     flattened ids, like any instance's. A scene instance of a variant
+     addresses the variant's flattened ids.
+   - **Creating one.** `newDocument { kind: "prefab", variantOf, overrides?,
+     instance? }`. The root is named like the base's root.
+     `Prefab::variant_of()`, `assetDetail.variantOf` and the `instance`
+     query's `prefab.variantOf` say that a prefab is a variant, and of
+     what.
+
+2. **Apply from an instance goes where the value comes from.** The new
+   command `applyPrefabOverride { override }` is sent to the prefab
+   document an instance comes from.
+   - **Plain edit.** An op on the prefab's own entities and components
+     becomes the equivalent plain edit.
+   - **Override.** An op on something the prefab takes from another prefab
+     becomes an override of that instance in the prefab. That other prefab
+     is a variant's base, or a nested instance. The op is translated to
+     that prefab's ids.
+   - **Removing what the prefab added.** Removing an object or component
+     that the prefab's own override added drops that override.
+   - **Two transactions.** The editor then reverts the override on the
+     instance, as for any Apply.
+   - **Apply to the base.** Unity's "Apply to Base" is the same command
+     sent further down the chain, one prefab at a time. It is not a
+     separate mode.
+
+3. **Unpack is one level by default. `completely: true` is Unity's
+   Unpack Completely.**
+   - **One level.** The instances nested in the prefab stay instances. An
+     instance of a variant becomes an instance of its base. The outer
+     overrides that land inside a nested instance move into its list.
+   - **Completely.** Nothing below the entity is an instance any more.
+     Every entity keeps the id the runtime already used. This is M4-07's
+     unpack.
+   - **Ids under one level.** Entities inside a kept instance get ids
+     derived from the new instance id, `derive_id(instance, J's instance)`.
+     `derive_id` is a hash, so the old ids cannot be carried over.
+   - **Both.** The scene looks the same after either, and each is one undo
+     step.
+
+4. **A prefab can hold instances.** `instantiatePrefab` works in a prefab
+   document, with an explicit `id`, `instance` and a whole `overrides[]`
+   list. It is refused with `D0402` when the prefab being placed is, or
+   contains, the document itself. So "make a prefab from an object that
+   holds instances" writes nested instances rather than copies, which is
+   what Unity does.
+
+**No `formatVersion` bump.** Nothing new is written:
+- A variant is a prefab document whose root carries the `prefab` block
+  that decision 2 already allows on any prefab entity.
+- `unpackPrefab.completely`, `instantiatePrefab.overrides` and
+  `applyPrefabOverride` are authoring commands, not document keys.
+
+A reader that predates this amendment already flattens a variant
+correctly: `PrefabLibrary::flattened` handles an instance at a prefab's
+root. So no document needs migrating, and no older build misreads a newer
+file.

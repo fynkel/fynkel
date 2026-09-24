@@ -366,6 +366,27 @@ problems of the prefabs it reaches. The cook writes each prefab's chunk
 `expanded`, `behaviourTypes`), which is what `fynkel_assets::Assets::prefab`
 describes for runtime instantiation (hosts.md § Prefabs at runtime).
 
+**Prefab variants** (ADR-0022 amendment 2026-09-25, Unity's Prefab
+Variant): a prefab whose **root** carries `prefab: { asset: <base>,
+instance, overrides[] }` is a variant of that base — no new key and no
+format change, it is the nested case above with the instance at the root.
+Flattened, the variant is the base's entities under the variant's ids
+(the root keeps the variant root's id, name and active flag; the others
+`derive_id(instance, local)`) with the variant's overrides applied, plus
+the plain children the variant adds under its root. Its overrides address
+the **base's** (flattened) ids, like any instance's; a variant of a
+variant is a chain the flattening resolves innermost first; a variant
+whose chain leads back to itself is `D0402`. Everything downstream —
+`describe`, the preview, `describe_with_anchors`, the `instance` query's
+override listing, the cook and `World::instantiate` — reads the flat
+prefab, so a variant (or a scene instance of one) needs nothing of its
+own. A scene instance of a variant addresses the **variant's** flattened
+ids. `Prefab::variant_of()` returns the root's `PrefabInstance` (the base
+is its `asset`), `prefab::new_variant(name, &base, root_name, instance?,
+overrides)` builds one (the authoring session's `newDocument { kind:
+"prefab", variantOf }`, below), and `fynkel prefab inspect --json` prints
+`variantOf: { asset, sub? } | null`.
+
 `fynkel_document::expand(&scene, &library, &schemas) -> Expanded` replaces
 every instance by the prefab's entities: the root becomes the instance
 entity itself (its id, name and active; the root's components with the
@@ -441,7 +462,8 @@ inspect --json` print it as `revision`.
 `Editor::apply(Request { id?, baseRevision?, commands }, &schemas)` runs one
 **transaction** atomically (`Editor::apply_with_prefabs(request, &schemas,
 &PrefabLibrary)` is the same with the prefabs the document can see, which
-only `unpackPrefab` reads — `apply` passes an empty library):
+`unpackPrefab`, `applyPrefabOverride` and — in a prefab document, for the
+cycle check — `instantiatePrefab` read; `apply` passes an empty library):
 
 1. When `baseRevision` is given and differs from the editor's revision the
    whole request is a conflict (`FYN-E0001`): nothing is read, nothing is
@@ -495,10 +517,11 @@ pointer into it such as `/position/1`):
 | `setField` | `entity`, `component`, `field`, `value` | replaces the value, or adds the member / appends to an array end |
 | `unsetField` | `entity`, `component`, `field` | removes the member (distinct from setting `null`) |
 | `assignAsset` | `entity`, `component`, `field`, `asset: { asset, sub? }` | `setField` with an `assetRef` |
-| `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]` | an entity with `prefab: { asset, instance, overrides }` — the instance is the prefab's root (ADR-0022), so `components[]` become overrides on the root (`setField` for a key that differs from the prefab, `addComponent` for a type the root lacks); scene documents only |
+| `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]`, `overrides[]?` | an entity with `prefab: { asset, instance, overrides }` — the instance is the prefab's root (ADR-0022), so `components[]` become overrides on the root (`setField` for a key that differs from the prefab, `addComponent` for a type the root lacks); `overrides[]` (op objects in the prefab's flattened ids) follow those, each checked like an override (`FYN-E0004` with the reason in `related` when malformed) — the whole list at once, one undo step. In a scene or in a **prefab** document (a nested instance, Unity's prefab made of an object holding instances; ADR-0022 amendment 2026-09-25); in a prefab, an instance of the prefab itself or of one that contains it is `FYN-D0402` |
 | `setPrefabOverride` | `entity`, `override` (a prefab-model op object) | replaces the override with the same target (field for `setField`/`unsetField`, component for `addComponent`/`removeComponent`, object for `addObject`/`removeObject`, the entity's flag for `setActive`), else appends |
 | `revertPrefabOverride` | `entity`, `index?` | removes one override, or all of them |
-| `unpackPrefab` | `entity` | replaces the instance by its expansion, in place: the instance keeps its id and loses `prefab`, gaining the root's components with the overrides applied and the root's children (under the ids the runtime derives) before its added ones; the expanded entities are inserted right after it in `entities` — the document then reads exactly like `expand`'s; needs the prefab library (`Editor::apply_with_prefabs`), an instance that does not expand is refused (`FYN-E0004` with the `D040x` in `related`), not an instance `FYN-E0008`; one undo step (M4-07) |
+| `unpackPrefab` | `entity`, `completely?` (default `false`) | replaces the instance by its expansion, in place: the instance keeps its id and loses `prefab`, gaining the root's components with the overrides applied and the root's children before its added ones; the expanded entities are inserted right after it in `entities`. **`completely: true`** (Unity's Unpack Completely, M4-07's behaviour): every entity under the id the runtime derives, nothing an instance any more — the document then reads exactly like `expand`'s. **One level** (the default, Unity's Unpack; ADR-0022 amendment 2026-09-25): the instances nested in the prefab stay instances — the nested anchor `J` of the prefab becomes the entity `derive_id(instance, J)` holding `prefab` with instance id `derive_id(instance, J's instance)` and J's overrides followed by the outer instance's overrides that land inside it (translated to J's prefab's ids); an instance of a **variant** becomes an instance of the variant's base, with the variant's overrides then the instance's, and the variant's own children plain. The scene looks the same after either (entities inside a kept instance get ids derived from the new instance id, since v5 derivation cannot be carried over). Needs the prefab library (`Editor::apply_with_prefabs`), an instance that does not expand is refused (`FYN-E0004` with the `D040x` in `related`), not an instance `FYN-E0008`; one undo step |
+| `applyPrefabOverride` | `override` (an op object as an instance of this prefab holds it) | Apply to Prefab, sent to the **prefab** document (ADR-0022 amendment 2026-09-25): an op on the prefab's own entities and components is the equivalent plain command (`setField`, `unsetField`, `addComponent`, `removeComponent`, `createObject` for `addObject`, `deleteObject` for `removeObject`, `setObjectActive`); an op on what the prefab takes from another prefab — a variant's base, a nested instance — becomes an override of that instance in the prefab (translated to its prefab's ids, replacing one with the same target), and an `addObject` under the root of such an instance a plain child; removing a component or an object that the prefab's own override added drops that override (or that component from its `addObject`). Then `revertPrefabOverride` on the instance — two transactions, one undo step each. An op whose target the prefab does not have is refused (`FYN-E0004`/`E0002`) |
 | `duplicateObject` | `id`, `newId?`, `name?`, `index?` | deep-copies the subtree with fresh entity, component and prefab-instance ids (every reference inside the copy remapped), placed right after the original (a scene root's copy: right after it in `entities`, since 2026-09-24) or at `index`; the copy's root is the first affected id; a taken `newId` is `FYN-E0010`; one undo step (M4-01) |
 | `pasteObjects` | `entities` (object of entity JSON by id: whole subtrees, as the `document` query's `ids` returns them), `parent?`, `index?` | the editor's Paste (2026-09-24): copies the entities with fresh entity, component and prefab-instance ids, every reference among them remapped as `duplicateObject` does; the entities whose parent is not among them are the pasted roots, in order, under `parent` at `index` (or at the end); `children` naming an entity not among them are dropped; the affected ids start with the pasted roots; works across documents; one undo step |
 | `setDocumentField` | `pointer`, `value` | sets a field of the document itself by RFC 6901 pointer — a material's `/base_color`, a scene's `/name`; the envelope's identity (`/$schema`, `/kind`, `/formatVersion`, `/id`) and a scene's `/entities` / `/roots` are refused with `FYN-E0012` (M4-01) |
@@ -598,7 +621,8 @@ window, never running game code and never reading a cooked cache
   the editor's Preview migration, M4-02), `instance` (`handle`, `entity`
   → the expansion of the prefab instance `entity`, M4-07:
   `{ anchor, instance, asset: { asset, sub }, expanded, prefab: { id, name,
-  path, kind: prefab|source|rig, open, handle, readOnly } | null,
+  variantOf: { asset, sub? } | null, path, kind: prefab|source|rig, open,
+  handle, readOnly } | null,
   diagnostics, entities: [{ id, local, name, parent, children, added,
   components: { <id>: { id, local, type, version, data, added, overridden:
   [field] } } }], overrides: [{ index, op, entity, entityId, entityName,
@@ -630,7 +654,14 @@ window, never running game code and never reading a cooked cache
   scene|prefab|material|volume, path, name?, shader? }` writes `Document::new`
   under the asset root (the kind's suffix added when missing; the PBR
   shader by default; refused when the file or another kind's file of that
-  name exists). `renameAsset { asset, path }` moves a document, or a source
+  name exists); with `variantOf` (a prefab's id, or `{ asset, sub? }` for
+  an imported hierarchy), `overrides?` (op objects in the base's flattened
+  ids) and `instance?`, a prefab is a **variant**: one root, an instance of
+  the base named like the base's root, carrying the overrides — refused
+  (`FYN-T0003`) when the base is not a prefab of the project (the open
+  editors first, as for the preview) or the overrides do not apply to it.
+  `assetDetail` gives a prefab's `variantOf` (`null` when not a variant).
+  `renameAsset { asset, path }` moves a document, or a source
   **with its sidecar**, so the id survives — `path` is relative to the
   asset root, a path ending in `/` or naming a directory keeps the file
   name, parent directories are created, a document keeps its `.kind.json`
@@ -752,11 +783,14 @@ before `operate` returns), `DocumentHandle`
 (`state`, `apply(commands, baseRevision:)` → `Applied`, `undo`/`redo` →
 `Replayed`, `save`, `reload`, `close`, `root()`, `inspect()`,
 `validate()`, `instance(anchor)` → `PrefabExpansion` (M4-07: `prefab` an
-`ExpansionPrefab` with `isImported`, `entities` as `ExpandedEntity`/
+`ExpansionPrefab` with `isImported`, `variantOf`/`isVariant`, `entities` as `ExpandedEntity`/
 `ExpandedComponent`, `overrides` as `ExpansionOverride`, `entity(id)`,
 `byLocal(local)`), `changes`), `Command` builders for every command above
 (`setPrefabOverrideOp(entity, op)` takes any override op object,
-`unpackPrefab`),
+`unpackPrefab(entity, completely:)`, `applyPrefabOverride(op)`,
+`instantiatePrefab(..., overrides:)`; `newDocument('prefab', path,
+variantOf: assetRef(base), overrides:, instance:)` makes a variant and
+`AssetDetail.variantOf`/`isVariant` names its base),
 the ADR-0014 `Diagnostic` record and `AuthoringException` (`isConflict`,
 `isReadOnly`, `isNothingToReplay`, `isPoisoned`). Its test drives a
 complete session over the ABI on a copy of the fixture project.
@@ -1851,7 +1885,7 @@ under it serve `{ asset, sub: "prefab" }` instances, M3-19a) and report
 override problems in `validate`. `prefab inspect` prints the tree (`root` in `--json`). `scene apply` and
 `prefab apply` run one authoring transaction from a patch file (see
 [Authoring commands and transactions](#authoring-commands-and-transactions)); a patch
-that `unpackPrefab`s reads the prefabs the way `inspect --expand` does (`--prefabs`, else the
+that `unpackPrefab`s or `applyPrefabOverride`s (or, in a prefab, `instantiatePrefab`s) reads the prefabs the way `inspect --expand` does (`--prefabs`, else the
 document's directory). `material inspect` prints the resolved material (every
 manifest parameter with its value, `(default)` where the material did not set
 it; every slot with its binding or fallback); `--shader` adds custom manifests
