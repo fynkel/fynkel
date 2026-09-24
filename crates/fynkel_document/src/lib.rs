@@ -264,8 +264,10 @@ impl Document {
                 members.push(("sync".into(), Node::string("phase")));
             }
             DocumentKind::Volume => {
-                // The engine defaults, spelled out: a new profile shows
-                // what it can override (delete a field to inherit it).
+                // A starting look (the engine has every effect off without
+                // a volume): R2's ambient occlusion on, bloom ready to be
+                // given an intensity; every field shows what a profile can
+                // override (delete one to inherit it).
                 members.push((
                     "ambientOcclusion".into(),
                     Node::object(vec![

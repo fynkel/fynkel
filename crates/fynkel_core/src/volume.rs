@@ -6,6 +6,7 @@
 //! A [`VolumeProfile`] (a `.volume.json`) holds *overrides*: a field that
 //! is present replaces the engine default, a field that is absent leaves
 //! whatever is below it. [`resolve`] starts from [`PostSettings::default`]
+//! (every effect off: a scene without volumes has no post effects)
 //! and blends the contributing volumes over it in priority order (ties in
 //! scene order), each by its weight × [`factor`] — 1 inside the shape,
 //! falling linearly to 0 at `blend_distance` outside it. The result is
@@ -60,12 +61,14 @@ pub struct PostSettings {
     pub bloom_tint: Vec3,
 }
 
-/// R2's constants: a scene without volumes looks as it did.
+/// Ambient occlusion is off until a volume gives it an intensity (as in
+/// Unity: no volume, no post effects; 2026-09-24 — before, R2's 1.35 was
+/// always on and a volume could barely be told apart). The radius is what
+/// an intensity alone gets.
 pub const DEFAULT_AO_RADIUS: f32 = 0.6;
-pub const DEFAULT_AO_INTENSITY: f32 = 1.35;
-/// Bloom is off until a volume gives it an intensity (R3b), so a scene
-/// without one renders as it did; the other defaults are what an
-/// intensity alone gets.
+pub const DEFAULT_AO_INTENSITY: f32 = 0.0;
+/// Bloom is off until a volume gives it an intensity (R3b); the other
+/// defaults are what an intensity alone gets.
 pub const DEFAULT_BLOOM_INTENSITY: f32 = 0.0;
 pub const DEFAULT_BLOOM_THRESHOLD: f32 = 0.9;
 pub const DEFAULT_BLOOM_SCATTER: f32 = 0.7;
@@ -294,6 +297,7 @@ mod tests {
     fn bloom_is_off_by_default_and_its_tint_blends_per_channel() {
         let base = PostSettings::default();
         assert_eq!(base.bloom_intensity, 0.0);
+        assert_eq!(base.ao_intensity, 0.0, "no volume, no ambient occlusion");
         let warm = VolumeProfile {
             bloom: BloomOverrides {
                 intensity: Some(2.0),

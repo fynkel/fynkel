@@ -7,7 +7,24 @@
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{AssetRef, Entity, Uuid};
-use fynkel_core::volume::{PostSettings, DEFAULT_AO_INTENSITY};
+use fynkel_core::volume::PostSettings;
+
+/// R2's ambient occlusion exponent: the engine default until 2026-09-24,
+/// a volume's since (no volume, no post effects).
+const R2_AO_INTENSITY: f32 = 1.35;
+
+/// A global volume over the whole frame, record 9.
+fn global_volume(profile: &AssetRef, priority: i32) -> ExtractVolume {
+    ExtractVolume {
+        record: 9,
+        world: Mat4::IDENTITY,
+        volume: Volume {
+            profile: profile.clone(),
+            priority,
+            ..Volume::default()
+        },
+    }
+}
 use fynkel_core::{
     Camera, DirectionalLight, Environment, ExposureMode, Extract, ExtractCamera,
     ExtractDirectionalLight, ExtractEnvironment, ExtractPointLight, ExtractRecord,
@@ -1256,10 +1273,20 @@ fn ambient_occlusion_darkens_what_a_wall_closes_in_and_leaves_the_open_floor() {
     let Some((device, queue)) = device() else {
         return;
     };
+    // Ambient occlusion comes from a volume (none: none).
+    let lab = Lab::new("ao");
+    let on = lab.volume(
+        1,
+        json!({ "ambientOcclusion": { "intensity": R2_AO_INTENSITY } }),
+    );
+    let (assets, _) = lab.extract(Vec3::new(0.0, 0.3, 3.0), &[], false);
     let mut r = renderer(&device);
+    r.set_assets(Some(assets));
     r.camera.eye = Vec3::new(4.0, 2.5, 6.0);
     r.camera.target = Vec3::new(0.5, 0.3, 0.0);
-    let e = ao_corner_scene();
+    let bare = ao_corner_scene();
+    let mut e = bare.clone();
+    e.volumes = vec![global_volume(&on, 0)];
 
     // The corner where the cube meets the floor, and open floor four
     // metres away — the same surface, the same light, the same normal.
@@ -1284,6 +1311,10 @@ fn ambient_occlusion_darkens_what_a_wall_closes_in_and_leaves_the_open_floor() {
     let (ao_corner, ao_open) = (sample(&px, corner_px), sample(&px, open_px));
     assert!(!is_background(ao_corner) && !is_background(ao_open));
 
+    // Without a volume there is none: the same picture as the quality
+    // profile's AO off.
+    let none = render_offscreen(&device, &queue, &mut r, &bare);
+    assert!(!r.stats().ambient_occlusion);
     // Without it the two are the same flat grey.
     r.set_quality(Quality {
         ambient_occlusion: false,
@@ -1292,6 +1323,7 @@ fn ambient_occlusion_darkens_what_a_wall_closes_in_and_leaves_the_open_floor() {
     let flat = render_offscreen(&device, &queue, &mut r, &e);
     dump(&flat, "ao-off");
     assert!(!r.stats().ambient_occlusion);
+    assert_eq!(none, flat, "no volume is the same as the profile's AO off");
     let (flat_corner, flat_open) = (sample(&flat, corner_px), sample(&flat, open_px));
     assert!(
         (luminance(flat_corner) - luminance(flat_open)).abs() < 4.0,
@@ -1328,6 +1360,10 @@ fn volumes_shape_the_ambient_occlusion_where_the_camera_stands() {
     let off = lab.volume(1, json!({ "ambientOcclusion": { "intensity": 0.0 } }));
     let wide = lab.volume(2, json!({ "ambientOcclusion": { "radius": 1.6 } }));
     let dark = lab.volume(3, json!({ "ambientOcclusion": { "intensity": 2.5 } }));
+    let on = lab.volume(
+        4,
+        json!({ "ambientOcclusion": { "intensity": R2_AO_INTENSITY } }),
+    );
     let (assets, _) = lab.extract(Vec3::new(0.0, 0.3, 3.0), &[], false);
 
     let mut r = renderer(&device);
@@ -1343,32 +1379,29 @@ fn volumes_shape_the_ambient_occlusion_where_the_camera_stands() {
     let near_px = at(Vec3::new(1.9, 0.0, 0.0));
     let open_px = at(Vec3::new(5.0, 0.0, 0.0));
     let lum = |px: &[[u8; 4]], i: usize| luminance(px[i]);
-    let global = |profile: &AssetRef, priority: i32| ExtractVolume {
-        record: 9,
-        world: Mat4::IDENTITY,
-        volume: Volume {
-            profile: profile.clone(),
-            priority,
-            ..Volume::default()
-        },
-    };
+    let global = global_volume;
     let with = |volumes: Vec<ExtractVolume>| {
         let mut e = base.clone();
         e.volumes = volumes;
         e
     };
 
-    let plain = render_offscreen(&device, &queue, &mut r, &base);
-    assert!(r.stats().ambient_occlusion);
+    // No volume: the engine defaults, every effect off.
+    render_offscreen(&device, &queue, &mut r, &base);
+    assert!(!r.stats().ambient_occlusion);
     assert_eq!(r.stats().volumes, 0);
     assert_eq!(r.post_settings(), PostSettings::default());
+    // The reference picture: R2's occlusion from a global volume.
+    let plain = render_offscreen(&device, &queue, &mut r, &with(vec![global(&on, 0)]));
+    assert!(r.stats().ambient_occlusion);
+    assert_eq!(r.stats().volumes, 1);
 
     // Intensity 0 turns the stage off: the corner is as bright as the
     // open floor, exactly as with the quality profile's AO off.
-    let e = with(vec![global(&off, 0)]);
+    let e = with(vec![global(&on, 0), global(&off, 1)]);
     let no_ao = render_offscreen(&device, &queue, &mut r, &e);
     dump(&no_ao, "volume-off");
-    assert_eq!(r.stats().volumes, 1);
+    assert_eq!(r.stats().volumes, 2);
     assert!(!r.stats().ambient_occlusion);
     assert!(
         (lum(&no_ao, corner_px) - lum(&no_ao, open_px)).abs() < 4.0,
@@ -1393,11 +1426,11 @@ fn volumes_shape_the_ambient_occlusion_where_the_camera_stands() {
 
     // A wider radius reaches further from the wall: 0.9 m out, past the
     // default 0.6 m hemisphere, the floor darkens.
-    let e = with(vec![global(&wide, 0)]);
+    let e = with(vec![global(&on, 0), global(&wide, 1)]);
     let wider = render_offscreen(&device, &queue, &mut r, &e);
     dump(&wider, "volume-wide");
     assert_eq!(r.post_settings().ao_radius, 1.6);
-    assert_eq!(r.post_settings().ao_intensity, DEFAULT_AO_INTENSITY);
+    assert_eq!(r.post_settings().ao_intensity, R2_AO_INTENSITY);
     assert!(
         lum(&wider, near_px) < lum(&plain, near_px) - 3.0,
         "the wide radius darkens 0.9 m out: {:?} vs {:?}",
@@ -1426,24 +1459,25 @@ fn volumes_shape_the_ambient_occlusion_where_the_camera_stands() {
             shape: VolumeShape::Box,
             size: Vec3::splat(4.0),
             blend_distance: 2.0,
+            priority: 1,
             ..Volume::default()
         },
     };
     let eye = r.camera.eye;
-    let e = with(vec![boxed(eye + Vec3::new(10.0, 0.0, 0.0))]);
+    let e = with(vec![global(&on, 0), boxed(eye + Vec3::new(10.0, 0.0, 0.0))]);
     let outside = render_offscreen(&device, &queue, &mut r, &e);
-    assert_eq!(r.stats().volumes, 0);
+    assert_eq!(r.stats().volumes, 1);
     assert_eq!(
         outside, plain,
         "a volume that does not reach the camera changes nothing"
     );
     // The box's -X face is 2 m from its centre; 1 m beyond it is half.
-    let e = with(vec![boxed(eye + Vec3::new(3.0, 0.0, 0.0))]);
+    let e = with(vec![global(&on, 0), boxed(eye + Vec3::new(3.0, 0.0, 0.0))]);
     render_offscreen(&device, &queue, &mut r, &e);
-    assert_eq!(r.stats().volumes, 1);
+    assert_eq!(r.stats().volumes, 2);
     let half = r.post_settings().ao_intensity;
-    assert!((half - DEFAULT_AO_INTENSITY * 0.5).abs() < 1e-4, "{half}");
-    let e = with(vec![boxed(eye)]);
+    assert!((half - R2_AO_INTENSITY * 0.5).abs() < 1e-4, "{half}");
+    let e = with(vec![global(&on, 0), boxed(eye)]);
     render_offscreen(&device, &queue, &mut r, &e);
     assert_eq!(r.post_settings().ao_intensity, 0.0);
     assert!(!r.stats().ambient_occlusion);
