@@ -202,7 +202,8 @@ shadow and the scene:
    `AO_BIAS` (2 cm) — both lie on the same ray, so their distances order
    them — weighted by `radius / |s − p|` so an occluder beyond the
    hemisphere fades out instead of darkening across a gap. The result is
-   `(1 − occlusion)^intensity` (`frame.ao.y`, 1.35 by default).
+   `(1 − occlusion)^intensity` (`frame.ao.y`; 0 — the pass is skipped —
+   unless a volume gives it one: § Volumes).
 3. **The blur** averages a 4×4 square of that, dropping taps more than
    2 % of the view distance away along the ray, which is what turns the
    per-pixel rotation back into a smooth term without smearing across a
@@ -267,7 +268,10 @@ document.
   distance back in world metres. Its value rules are `FYN-H0011`.
 - **Resolution** runs once a frame on the CPU, in `prepare`
   (`ExtractRenderer::resolve_volumes` → `volume::resolve`): start from
-  the engine defaults (`PostSettings::default()`, exactly R2's picture),
+  the engine defaults (`PostSettings::default()`: every effect off, as
+  in Unity — a scene without a volume has no ambient occlusion and no
+  bloom; until 2026-09-24 the default was R2's ambient occlusion at
+  0.6 m ^1.35, which made a volume's weight barely visible),
   take every enabled volume in the extract (`Extract::volumes`), its
   amount = `weight × factor(camera position)` — 1 inside the shape, `1 −
   d / blend_distance` at distance `d` outside it, 0 beyond — and, lowest
