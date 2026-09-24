@@ -1,4 +1,4 @@
-# Engine status — 2026-09-22 (M3 gate: GO with two named exceptions; M4 in parallel, §6)
+# Engine status — 2026-09-25 (M4 gate: GO; M3: GO with two named exceptions; §6)
 
 The one-page, plain-words answer to "what do we have, is it solid, what is
 missing". Rewritten at every milestone gate and updated whenever a row below
@@ -1306,11 +1306,16 @@ The capture for R3a and R3b together follows as its own commit.
 
 ## 6. Verdict and next steps
 
+**M4 is closed with a GO** (`m4-gate-report.md`, 2026-09-25): a level is
+made in the editor instead of code, every edit goes through the shared
+authoring commands and the authoring log, Play runs the project's own
+game, and the user's own session passed. Carry-overs F1–F7 are in the
+report's §5.
+
 **The order from here is `docs/roadmap.md`** (agreed 2026-09-23 after a
-full foundation review): Phase 1 foundation fixes (stable sub-asset ids,
-`SetActive`, editor/cook scale, automatic sidecars, housekeeping), then
-closing M4, the extensibility and data-model ADRs, rendering, M5, M6.
-This section stays the log of what is done.
+full foundation review): Phases 1 and 2 are done; next the extensibility
+and data-model ADRs (Phase 3), rendering, M5, M6. This section stays the
+log of what is done.
 
 M3 is closed with a GO (`m3-gate-report.md`, 2026-09-22) carrying two
 named exceptions that are decisions, not failures: the repository stays
@@ -1338,8 +1343,8 @@ scene data, `docs/renderer.md` § Volumes) and R3b (bloom, the profile's
 second block, § Bloom) are done; R3c colour grading — a block in the
 same volume profile — and contact shadows follow, then the package architecture (which also decides the deferred
 game-defined data asset, a `ScriptableObject`-like `@DataAsset`) and the
-shader assets the user asked for. M4 continues on its branch (item 16 below); M5
-opens when M4 closes.
+shader assets the user asked for. M4 closed on 2026-09-25 (item 30
+below).
 
 **Tags and layers** (ADR-0020, 2026-09-23) come in while the joint R3a +
 R3b capture waits for a quiet machine: several tags and one engine-wide
@@ -1833,8 +1838,8 @@ The M3 backlog as it landed, for the record:
    is a widget test. The command, menu and panel words are in one table,
    `lib/src/l10n/strings.dart`. The words inside the panels are not yet.
 
-29. **The M4 gate report (item 10, 2026-09-24) — pending the user's
-   rebuild.** `docs/m4-gate-report.md`: five of the six gate rows pass;
+29. **The M4 gate report (item 10, 2026-09-24) — GO on 2026-09-25
+   (item 30).** `docs/m4-gate-report.md`: five of the six gate rows pass;
    the sixth is the user's own rebuild of the start area, with its
    checklist in the report. Writing it found two gaps, both closed:
    - There was no authoring log. The session now writes every change —
@@ -1845,5 +1850,14 @@ The M3 backlog as it landed, for the record:
      `fynkel.project.json`. A scene's context menu now has **Set as
      Startup Scene**.
    Warm `fynkel editor` open on the reference game: the built app launches in 0.2 s,
-   hot reload on at 2.0–2.5 s. This file's header and §6 are rewritten
-   when the verdict is in.
+   hot reload on at 2.0–2.5 s.
+
+30. **M4 closed — GO (2026-09-25).** After the Unity parity pass (tiers
+   1–3, `docs/unity-parity.md`; ADR-0022's variants amendment, ADR-0024
+   and ADR-0025 confirmed by the user the same day) the user ran the
+   gate's hands-on session and reported "all working good". It found one
+   bug, fixed in `a69d448`: Finder's `.DS_Store` got an automatic sidecar.
+   The report's §5 lists the carry-overs (F1–F7), among them the Unity
+   differences left (a selection spans one scene; no Rig or Animation
+   import tabs) and CI, which GitHub has not run since 2026-09-23
+   because of the account's billing. Next: roadmap Phase 3.

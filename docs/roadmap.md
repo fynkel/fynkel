@@ -54,7 +54,8 @@ Apply to Scene (`docs/design/live-play-mode.md`).
   **Done 2026-09-24.**
 - **IDE navigation** from the Console and components to source.
   **Done 2026-09-24.**
-- a11y/l10n basics, docs, the **M4 gate report**.
+- a11y/l10n basics, docs, the **M4 gate report**. **Done 2026-09-25:
+  M4 GO** (`docs/m4-gate-report.md`), after the Unity parity pass.
 
 ## Phase 3 — Extensibility and the data model
 

@@ -1,6 +1,6 @@
 # M4 gate report and go/no-go
 
-**Date:** 2026-09-24 · **Milestone:** M4 (blueprint §16 "M4 — Fynkel Editor V0", backlog §19.2e item 10) · **Verdict: PENDING — every row below passes except the first, which is the user's hands-on rebuild and has not been run yet.**
+**Date:** 2026-09-24, verdict 2026-09-25 · **Milestone:** M4 (blueprint §16 "M4 — Fynkel Editor V0", backlog §19.2e item 10) · **Verdict: GO (2026-09-25).** Every row below passes; the first, the user's hands-on session, was run on 2026-09-25 (§2, §4).
 
 M4 asked whether a developer can make a level in Fynkel with an editor
 instead of code: open a project, build a scene visually, press Play and
@@ -17,7 +17,7 @@ by the user on a copy of the reference game before it was called done
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| A developer can recreate the reference level visually (item 10: the user rebuilds the start area — floor, walls, the Player prefab, the camera rig, the sun, three coins — from an empty scene with the editor only, saves, and `fynkel validate` / `fynkel test --headless` / `fynkel run` accept it) | **Not run yet.** Needs the user (§2). Every tool it needs has passed its own user session: Create (empty / with a component), the Hierarchy's reparent, the Inspector, prefab drop, the gizmos, the asset pickers, Save. | Items 3–7 done-notes in blueprint §19.2e; §2 below is the checklist. |
+| A developer can recreate the reference level visually (item 10: the user rebuilds the start area — floor, walls, the Player prefab, the camera rig, the sun, three coins — from an empty scene with the editor only, saves, and `fynkel validate` / `fynkel test --headless` / `fynkel run` accept it) | **Pass (2026-09-25).** The user's own session in the editor, on `examples/reference_game` itself rather than a fresh copy: "all working good". A first attempt on 2026-09-24 had found the prefab workflow unlike Unity's; that led to ADR-0022 and the Unity parity pass (`docs/unity-parity.md`, tiers 1–3), all done before this session (§4). | Items 3–7 done-notes in blueprint §19.2e; §2 below is the checklist. |
 | All mutations go through shared authoring commands | **Pass.** The editor holds no project truth: every document change is one `fynkel_document` transaction through `AuthoringSession::apply` (the same commands `fynkel scene apply` reads), every file operation one session asset operation. Since 2026-09-24 the session also writes each of them to `.fynkel/authoring.log` — commands, undo, redo, save, asset operations — and replaying a log on another copy writes the same bytes. | `crates/fynkel_authoring/src/log.rs`; test `every_change_of_a_session_is_in_the_authoring_log_and_replays`; docs/documents.md § The authoring session and its ABI. |
 | The CLI sees the same data immediately | **Pass.** Saves are atomic replacements of the source documents, no editor-only format in between; the session rescans what it wrote. The CLI reads the files, so `fynkel validate` / `scene inspect` right after ⌘S see the save (driven by the user in items 3, 4, 5). The other direction too: a file changed from a terminal re-validates through the watcher, a dirty tab gets the conflict dialog, a saved script reaches the Inspector in about a second (`fynkel codegen --watch`). | Tests `a_transaction_that_writes_resolves_paths_against_the_project_and_rescans`, `editing a scene on disk revalidates through the watcher`, `a conflict shows the badge; the dialog offers reload, save as, keep editing`, the codegen-watch tests in `project_scripts_test.dart`. |
 | Play launches the actual project runtime | **Pass.** ADR-0021: `fynkel editor <project>` compiles the project's game into the editor, so Play runs the game's own `buildGame` in the Game view; *Build and Run* runs `fynkel run` as a separate process with the editor channel (Console and Profiler read it). Warm open measured today on a copy of the reference game: the built editor launches in 0.2 s and hot reload is on at 2.0–2.5 s (item 9's "under 3 s warm"); cold build 34.5 s. | docs/editor.md § The project editor, § The Game view, § Build and Run; the P1–P7 gates in `play-in-editor` notes. |
@@ -76,7 +76,17 @@ surprise goes into §4 before the verdict.
 
 ## 4. Surprises from the rebuild
 
-*(Filled in after §2.)*
+- **The first attempt (2026-09-24)** found three things: no drag from the
+  Hierarchy to the Project to make a prefab, a dropped prefab instance
+  with no Transform, and an instance wrapper (`ball › Ball › Danger`)
+  that is not Unity's. The first two were fixed the same day (`32f2cfa`,
+  `82f5c34`), the third by ADR-0022 (one root; the instance is the root).
+  The user then asked for the editor to behave as a Unity user expects,
+  and the Unity parity pass followed: three tiers, each row with a test
+  driving the whole shell (`apps/editor/test/parity/`).
+- **The session of 2026-09-25** turned up one bug: Finder's `.DS_Store`
+  in `assets/` got an automatic sidecar, because a rescan of named paths
+  did not skip hidden files as the full scan does. Fixed in `a69d448`.
 
 ## 5. Carry-overs to M5
 
@@ -94,11 +104,18 @@ surprise goes into §4 before the verdict.
   a separate process only streams records one way.
 - **F5 — The log's size.** `.fynkel/authoring.log` grows without bound;
   rotate it once a real project shows how fast.
+- **F6 — Unity differences left from the parity pass:** a selection
+  spans one scene at a time; the model import settings have no Rig or
+  Animation tabs (clip splitting, loop settings); one friction value in a
+  Physics Material (Rapier has no static friction, ADR-0025).
+- **F7 — CI.** GitHub has not started a job since 2026-09-23 (the
+  account's billing); the Phase 1 CI steps have never run there.
 - From M3: E2 (published artifacts), E3 (device and second machine), E4
   (threads), E5–E8 (physics, audio, animation, input V1 limits), E9
   (native components' Inspector hints still a table).
 
 ## 6. Decision
 
-**Pending the rebuild.** Every criterion the implementer can check
-passes; the one that decides M4 is the user's own session in §2.
+**GO (2026-09-25).** Every criterion passes, the user's own session
+included. M4 is closed; the carry-overs are §5, and the order from here
+is `docs/roadmap.md` Phase 3 (extensibility and the data model).
