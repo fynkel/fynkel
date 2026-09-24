@@ -106,6 +106,21 @@ final class ScenePreview {
     _call('restoreTransforms', {'ids': ids.toList()});
   }
 
+  /// The Inspector's live edit (a colour being picked): each component's
+  /// whole [data] set on the entity in the world only, the document
+  /// untouched. A type that is not built in (a behaviour) is skipped;
+  /// returns how many were set. The commit's transaction follows with the
+  /// same values.
+  int setComponents(Iterable<({String id, String type, Map<String, Object?> data})> components) =>
+      _call('setComponents', {
+        'components': [for (final c in components) {'id': c.id, 'type': c.type, 'data': c.data}],
+      })['count'] as int? ?? 0;
+
+  /// The components of [ids] back to the document's (a cancelled edit).
+  void restoreComponents(Iterable<String> ids) {
+    _call('restoreComponents', {'ids': ids.toList()});
+  }
+
   /// The incremental sync now (a no-op when the world already matches the
   /// document).
   PreviewSyncReport resync() {
