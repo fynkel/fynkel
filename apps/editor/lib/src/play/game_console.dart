@@ -5,11 +5,14 @@
 // exactly as the Project tab's, so one Console behaves one way.
 //
 // A row that names a document opens it with its entity selected, the same
-// double-click (or ↩) as a project diagnostic.
+// double-click (or ↩) as a project diagnostic. A row whose Dart stack has a
+// frame in the game's own code (an uncaught error of a behaviour) opens the
+// IDE at that line instead, and its details list the frames.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import 'dart_stack.dart';
 import 'game_record.dart';
 import 'play_session.dart';
 
@@ -23,7 +26,14 @@ final class GameEntry {
 
 /// Filters and selection over a [PlaySession]'s records.
 final class GameConsoleModel extends ChangeNotifier {
-  GameConsoleModel({required this.session, this.openRecord, this.relative}) {
+  GameConsoleModel({
+    required this.session,
+    this.openRecord,
+    this.relative,
+    this.projectDir,
+    this.ownPackage,
+    this.openInIde,
+  }) {
     session.addListener(_onSession);
   }
 
@@ -35,6 +45,21 @@ final class GameConsoleModel extends ChangeNotifier {
 
   /// Shortens a path for display (the project's `relative`).
   final String Function(String path)? relative;
+
+  /// Where the game's own frames are: `package:<own>/…` is
+  /// `<projectDir>/lib/…`.
+  final String? projectDir;
+
+  /// The game's package name (asked once it is known).
+  final String? Function()? ownPackage;
+
+  /// Opens a source file at a line; answers the error or null.
+  final Future<String?> Function(String file, {int? line, int? column})? openInIde;
+
+  /// The last IDE launch's error, shown in the status line.
+  String? lastIdeError;
+
+  String? _own;
 
   String query = '';
   final severities = {Severity.error, Severity.warning, Severity.info};
@@ -152,7 +177,15 @@ final class GameConsoleModel extends ChangeNotifier {
 
   int countOf(Severity s) => session.records.where((r) => r.severity == s && _shows(r)).length;
 
-  String location(GameRecord r) => r.location(relative: relative);
+  /// The record's document, or its own frame's `lib/…:line`.
+  String location(GameRecord r) {
+    final at = r.location(relative: relative);
+    if (at.isNotEmpty) return at;
+    final f = ownFrame(r);
+    if (f == null) return '';
+    final file = sourceOf(f)!;
+    return '${relative?.call(file) ?? file}${f.line == null ? '' : ':${f.line}'}';
+  }
 
   String lineOf(GameEntry e) => '${e.record.text}${e.count > 1 ? ' (×${e.count})' : ''}';
 
@@ -167,15 +200,48 @@ final class GameConsoleModel extends ChangeNotifier {
     return es.length;
   }
 
-  bool get canOpenSelected => (selected?.record.hasTarget ?? false) && openRecord != null;
+  /// The file of [f] when it is the game's own code, else null.
+  String? sourceOf(DartFrame f) {
+    final dir = projectDir;
+    if (dir == null) return null;
+    return f.sourceIn(dir, ownPackage: _own ??= ownPackage?.call());
+  }
+
+  /// The first frame of [r]'s stack in the game's own code — where its
+  /// error was thrown, as far as the game's author is concerned.
+  DartFrame? ownFrame(GameRecord r) {
+    for (final f in r.frames) {
+      if (sourceOf(f) != null) return f;
+    }
+    return null;
+  }
+
+  /// Whether ↩ or a double-click on [r] goes somewhere.
+  bool canActivate(GameRecord r) => (r.hasTarget && openRecord != null) || (openInIde != null && ownFrame(r) != null);
+
+  bool get canOpenSelected => selected != null && canActivate(selected!.record);
 
   void openSelected() {
     final r = selected?.record;
-    if (r != null && r.hasTarget) openRecord?.call(r);
+    if (r != null) activate(r);
   }
 
   void activate(GameRecord r) {
-    if (r.hasTarget) openRecord?.call(r);
+    if (r.hasTarget) {
+      openRecord?.call(r);
+      return;
+    }
+    final f = ownFrame(r);
+    if (f != null) openFrame(f);
+  }
+
+  /// Opens [f]'s line in the IDE (only the game's own frames have a file).
+  Future<void> openFrame(DartFrame f) async {
+    final file = sourceOf(f);
+    final open = openInIde;
+    if (file == null || open == null) return;
+    lastIdeError = await open(file, line: f.line, column: f.column);
+    notifyListeners();
   }
 
   @override

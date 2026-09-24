@@ -8,6 +8,8 @@ import 'dart:convert';
 
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
+import 'dart_stack.dart';
+
 enum GameRecordKind {
   /// `Diagnostics.log` and the engine's own notes.
   log,
@@ -48,6 +50,7 @@ final class GameRecord {
     this.stats,
     this.related = const [],
     this.raw,
+    this.stack,
   });
 
   /// The editor's own row (the launch, the exit, a dropped-records note):
@@ -99,6 +102,13 @@ final class GameRecord {
 
   /// The line as it arrived (a record's JSON, or the printed line).
   final String? raw;
+
+  /// The Dart stack an `exception` record carries (`EditorChannel.error`).
+  final String? stack;
+
+  /// The stack's frames — or the one frame a printed line is (Build and
+  /// Run's `flutter: #0 …` lines of an error Flutter presented).
+  late final List<DartFrame> frames = parseDartStack(stack ?? (kind == GameRecordKind.output ? message : null));
 
   bool get isDiagnostic => kind == GameRecordKind.diagnostic;
 
@@ -207,6 +217,7 @@ final class GameRecord {
             ),
       ],
       raw: jsonEncode(j),
+      stack: j['stack'] as String?,
     );
   }
 

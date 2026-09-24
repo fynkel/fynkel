@@ -695,7 +695,7 @@ void main() {
       final opened = <String>[];
       final r = rig(
         openInIde: (file, {line, column}) async {
-          opened.add(file);
+          opened.add('$file@$line');
           return null;
         },
       );
@@ -704,7 +704,14 @@ void main() {
       final spinner = r.model.slots.singleWhere((s) => s.type == 'game.Spinner');
       expect(r.model.scriptPath(spinner), '${r.project.dir}/lib/spinner.dart');
       expect(await r.model.openScript(spinner), isNull);
-      expect(opened, ['${r.project.dir}/lib/spinner.dart']);
+      expect(opened, ['${r.project.dir}/lib/spinner.dart@null']);
+      // With the source on disk, the IDE opens at the class.
+      Directory('${r.project.dir}/lib').createSync(recursive: true);
+      File('${r.project.dir}/lib/spinner.dart').writeAsStringSync(
+        "import 'package:fynkel/fynkel.dart';\n\n/// Rotates.\n@Behaviour('game.Spinner')\nfinal class Spinner extends FynkelBehaviour {}\n",
+      );
+      expect(await r.model.openScript(spinner), isNull);
+      expect(opened.last, '${r.project.dir}/lib/spinner.dart@5');
       final mesh = r.model.slots.singleWhere((s) => s.type == 'fynkel.MeshRenderer');
       expect(await r.model.openScript(mesh), contains('no source file'));
       // A library from another package is not this project's file.

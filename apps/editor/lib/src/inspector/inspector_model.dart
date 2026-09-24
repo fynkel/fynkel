@@ -22,6 +22,7 @@
 // `removeComponent`, an added object's re-issued `addObject`. Per field:
 // Revert (drop that override) and Apply to prefab (`prefab_actions.dart`).
 import 'dart:collection';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -1384,7 +1385,8 @@ final class InspectorModel extends ChangeNotifier {
     return p.join(project.dir, 'lib', rest);
   }
 
-  /// Opens the behaviour's source in the IDE; answers the error or null.
+  /// Opens the behaviour's source in the IDE at its class; answers the
+  /// error or null.
   Future<String?> openScript(ComponentSlot slot) async {
     final file = scriptPath(slot);
     if (file == null) {
@@ -1392,7 +1394,20 @@ final class InspectorModel extends ChangeNotifier {
     }
     final open = openInIde;
     if (open == null) return 'no IDE command is configured';
-    return open(file);
+    return open(file, line: classLine(file, slot.spec.className));
+  }
+
+  /// The 1-based line that declares `class <name>` in [file], or null.
+  static int? classLine(String file, String? name) {
+    if (name == null) return null;
+    final f = File(file);
+    if (!f.existsSync()) return null;
+    final declares = RegExp('^\\s*(?:[a-z]+\\s+)*class\\s+${RegExp.escape(name)}\\b');
+    final lines = f.readAsLinesSync();
+    for (var i = 0; i < lines.length; i++) {
+      if (declares.hasMatch(lines[i])) return i + 1;
+    }
+    return null;
   }
 
   static String _topLevel(String field) => topLevelKey(field);

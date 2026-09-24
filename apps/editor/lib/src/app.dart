@@ -28,6 +28,7 @@ import 'launcher/launcher.dart';
 import 'launcher/opening_screen.dart';
 import 'picker/picker.dart';
 import 'play/code_reload.dart';
+import 'play/dart_stack.dart';
 import 'play/editor_game.dart';
 import 'play/game_console.dart';
 import 'play/game_panel.dart';
@@ -1767,7 +1768,14 @@ class EditorShellState extends State<EditorShell> {
       final h = HierarchyModel(tabs: t, project: opened);
       final c = ConsoleModel(project: opened, openInIde: ide.open, openInEditor: openDiagnosticInEditor);
       final ps = PlaySession(projectDir: opened.dir, cli: () => toolchain?.fynkelCli, start: widget.startPlayProcess);
-      final gc = GameConsoleModel(session: ps, relative: opened.relative, openRecord: openGameRecord);
+      final gc = GameConsoleModel(
+        session: ps,
+        relative: opened.relative,
+        openRecord: openGameRecord,
+        projectDir: opened.dir,
+        ownPackage: () => opened.behaviourMetadata()?['package'] as String? ?? packageNameOf(opened.dir),
+        openInIde: ide.open,
+      );
       final pm = ProfilerModel(session: ps);
       final cg = CodegenCheck(
         projectDir: opened.dir,

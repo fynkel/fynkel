@@ -1,7 +1,8 @@
 // The Game tab's view: the run's toolbar (Play / Stop, search, filters),
 // the rows, the selected record and a status line with the state, the pid
 // and the last stats window. It is the Project tab's twin on purpose —
-// same chips, same collapse, same ↩ and double-click.
+// same chips, same collapse, same ↩ and double-click. An error's details
+// list its Dart stack; the game's own frames are links to the IDE.
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,7 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../theme/icons.dart';
 import '../theme/panel_focus.dart';
+import 'dart_stack.dart';
 import 'game_console.dart';
 import 'game_record.dart';
 
@@ -334,8 +336,37 @@ class _GameConsoleViewState extends State<GameConsoleView> {
             if (r.suggestion != null) Text('Suggestion: ${r.suggestion}', style: theme.textTheme.bodySmall),
             for (final rel in r.related) Text('related: ${rel.code} ${rel.message}', style: theme.textTheme.bodySmall),
             if (r.kind == GameRecordKind.stats && r.raw != null) SelectableText(r.raw!, style: mono),
+            if (r.frames.isNotEmpty) const SizedBox(height: 4),
+            for (final (i, f) in r.frames.take(_framesShown).indexed) _frame(theme, i, f),
+            if (r.frames.length > _framesShown)
+              Text('… ${r.frames.length - _framesShown} more frames', style: theme.textTheme.bodySmall),
           ],
         ),
+      ),
+    );
+  }
+
+  static const _framesShown = 30;
+
+  /// One stack frame: a link when it is the game's own code.
+  Widget _frame(ThemeData theme, int i, DartFrame f) {
+    final t = theme.tokens;
+    final own = model.sourceOf(f) != null;
+    final text = Text(
+      '${f.member}  ${f.location}',
+      key: Key('console.game.frame.$i'),
+      style: monoStyle(
+        context,
+        color: own ? t.accent : t.textDisabled,
+      ).copyWith(decoration: own ? TextDecoration.underline : null, decorationColor: t.accent),
+      overflow: TextOverflow.ellipsis,
+    );
+    if (!own) return text;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => model.openFrame(f),
+        child: Tooltip(message: 'Open in the IDE', child: text),
       ),
     );
   }
@@ -355,6 +386,7 @@ class _GameConsoleViewState extends State<GameConsoleView> {
       if (session.failure != null) session.failure!,
       if (dropped > 0) '$dropped older rows dropped',
       if (session.runningOlderFiles) 'edited since Play — changes apply on the next Play',
+      if (model.lastIdeError != null) model.lastIdeError!,
     ].join(' · ');
     return Container(
       height: theme.tokens.row + 2,
@@ -371,7 +403,9 @@ class _GameConsoleViewState extends State<GameConsoleView> {
               text,
               key: const Key('console.game.status'),
               style: theme.textTheme.bodySmall?.copyWith(
-                color: session.crashed || session.failure != null ? theme.tokens.error : theme.tokens.textSecondary,
+                color: session.crashed || session.failure != null || model.lastIdeError != null
+                    ? theme.tokens.error
+                    : theme.tokens.textSecondary,
               ),
               overflow: TextOverflow.ellipsis,
             ),
