@@ -254,7 +254,7 @@ abstract class EditorProject extends ChangeNotifier {
   AssetHistory assetHistory();
 
   /// An asset operation through the session (`newDocument`, `renameAsset`,
-  /// `duplicateAsset`, `installPrimitives`, `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
+  /// `duplicateAsset`, `installPrimitives`, `importFiles`, `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
   /// `registerBehaviour`, `setStartupScene`, `undoAsset`, `redoAsset`) — one history step each, the database re-read
   /// incrementally. Throws `AuthoringException` when refused; nothing was
   /// touched then.
@@ -271,6 +271,11 @@ abstract class EditorProject extends ChangeNotifier {
   /// The editor's built-in shapes (ADR-0023): the asset of the fixed id,
   /// or `Fynkel/Primitives.glb` written — `json['installed']` says which.
   OperationResult installPrimitives() => operate('installPrimitives');
+
+  /// Files from outside the project (Finder) copied into [folder] of the
+  /// asset root, one history step; `json['imported']` lists `{path, id}`.
+  OperationResult importFiles(List<String> paths, {String folder = ''}) =>
+      operate('importFiles', {'paths': paths, 'folder': folder});
   OperationResult deleteAsset(String id, {bool force = false}) =>
       operate('deleteAsset', {'asset': id, if (force) 'force': true});
   OperationResult setImportSettings(String id, Map<String, Object?> settings) =>

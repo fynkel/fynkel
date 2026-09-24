@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:fynkel_editor/src/shell/file_drops.dart';
 import 'package:fynkel_editor/src/theme/icons.dart';
 
 import 'harness.dart';
@@ -179,5 +180,52 @@ void main() {
     // ← closes the model again.
     await e.press(LogicalKeyboardKey.arrowLeft);
     expect(find.byKey(const Key('project.part.$robot.material/Glass')), findsNothing);
+  });
+
+  testWidgets('files dropped from Finder on the Project are copied into its folder, selected; ⌥⌘Z takes them out', (
+    tester,
+  ) async {
+    final e = await inPrefabs(tester);
+    final outside = Directory('${e.dir.path}/outside')..createSync();
+    File('${e.dir.path}/assets/textures/swatch.png').copySync('${outside.path}/leaf.png');
+    Future<void> send(String method, Map<String, Object?> args) async {
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        FileDrops.channel.name,
+        FileDrops.channel.codec.encodeMethodCall(MethodCall(method, args)),
+        (_) {},
+      );
+      await tester.pumpAndSettle();
+    }
+
+    final at = tester.getCenter(find.byKey(const Key('project.list')));
+    // Over the list: outlined, as for any drop.
+    await send('over', {'x': at.dx, 'y': at.dy});
+    expect(
+      find.descendant(of: find.byKey(const Key('project.prefabDrop')), matching: find.byType(DecoratedBox)),
+      findsWidgets,
+    );
+    await send('drop', {
+      'paths': ['${outside.path}/leaf.png'],
+      'x': at.dx,
+      'y': at.dy,
+    });
+    expect(file(e, 'leaf.png').existsSync(), isTrue, reason: 'into the shown folder');
+    expect(file(e, 'leaf.png.meta.json').existsSync(), isTrue, reason: 'with a sidecar, as Unity writes a .meta');
+    final browser = e.shell.browser!;
+    expect(browser.entry(browser.lead!)!.path, 'prefabs/leaf.png');
+    expect(File('${outside.path}/leaf.png').existsSync(), isTrue, reason: 'a copy; the original stays');
+
+    // Dropped over the Hierarchy: the Project does not take it.
+    final elsewhere = tester.getCenter(e.row('Robot'));
+    await send('drop', {
+      'paths': ['${outside.path}/leaf.png'],
+      'x': elsewhere.dx,
+      'y': elsewhere.dy,
+    });
+    expect(file(e, 'leaf 1.png').existsSync(), isFalse);
+
+    await e.press(LogicalKeyboardKey.keyZ, command: true, alt: true);
+    expect(file(e, 'leaf.png').existsSync(), isFalse);
+    expect(file(e, 'leaf.png.meta.json').existsSync(), isFalse);
   });
 }

@@ -14,6 +14,7 @@ import 'package:path/path.dart' as p;
 import '../env/tools.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload, assetKindIcon;
 import '../project/editor_project.dart';
+import '../shell/file_drops.dart';
 import '../shell/notices.dart';
 import '../inspector/inspector_chrome.dart' show InspectorCaption;
 import '../theme/icons.dart';
@@ -91,6 +92,31 @@ class _ProjectPanelState extends State<ProjectPanel> {
     _search.text = model.query;
     model.addListener(_onModel);
     _seenSearchRequests = model.searchFocusRequests;
+    FileDrops.instance.addTaker(_takeFiles);
+    FileDrops.instance.hover.addListener(_onFilesHover);
+  }
+
+  /// A drag from Finder is over this panel (the list is outlined).
+  bool _filesOver = false;
+
+  bool _contains(Offset global) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return false;
+    return (box.localToGlobal(Offset.zero) & box.size).contains(global);
+  }
+
+  void _onFilesHover() {
+    final at = FileDrops.instance.hover.value;
+    final over = mounted && at != null && model.canEdit && _contains(at);
+    if (over != _filesOver) setState(() => _filesOver = over);
+  }
+
+  /// Files dropped from Finder on this panel: imported into the shown folder.
+  bool _takeFiles(FileDrop drop) {
+    if (!mounted || !_contains(drop.position)) return false;
+    if (_filesOver) setState(() => _filesOver = false);
+    if (model.canEdit) model.importFiles(drop.paths);
+    return true;
   }
 
   @override
@@ -105,6 +131,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
   @override
   void dispose() {
     model.removeListener(_onModel);
+    FileDrops.instance.removeTaker(_takeFiles);
+    FileDrops.instance.hover.removeListener(_onFilesHover);
     _search.dispose();
     if (_ownSearchFocus) _searchFocus.dispose();
     _listFocus.dispose();
@@ -703,7 +731,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     key: const Key('project.prefabDrop'),
     onWillAcceptWithDetails: (d) => model.canMakePrefab(d.data),
     onAcceptWithDetails: (d) => model.dropObjects(d.data, model.folder),
-    builder: (context, candidates, _) => candidates.isEmpty
+    builder: (context, candidates, _) => candidates.isEmpty && !_filesOver
         ? list
         : DecoratedBox(
             position: DecorationPosition.foreground,

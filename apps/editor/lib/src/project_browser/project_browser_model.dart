@@ -677,6 +677,26 @@ final class ProjectBrowserModel extends ChangeNotifier {
     return r;
   }
 
+  /// Files dragged in from Finder, copied into [inFolder] (the shown
+  /// folder by default) and selected, as Unity imports them.
+  OperationResult? importFiles(List<String> paths, {String? inFolder}) {
+    final target = inFolder ?? (view == BrowserView.folders ? folder : '');
+    final r = _guard(() => project.importFiles(paths, folder: target));
+    if (r == null) return null;
+    final ids = [
+      for (final i in r.json['imported'] as List? ?? const [])
+        if (i is Map && i['id'] is String) i['id'] as String,
+    ];
+    _sync();
+    selection
+      ..clear()
+      ..addAll(ids.where((id) => entry(id) != null));
+    lead = selection.lastOrNull;
+    leadPart = null;
+    notifyListeners();
+    return r;
+  }
+
   /// An empty folder under [inFolder], shown and ready to rename.
   bool newFolder({String? inFolder}) {
     final target = inFolder ?? folder;

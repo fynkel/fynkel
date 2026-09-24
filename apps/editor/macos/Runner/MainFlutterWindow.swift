@@ -73,6 +73,13 @@ class MainFlutterWindow: NSWindow {
     }
     self.channel = channel
 
+    let drops = FileDropView(
+      frame: flutterViewController.view.bounds,
+      channel: FlutterMethodChannel(
+        name: "fynkel.editor/drop", binaryMessenger: flutterViewController.engine.binaryMessenger))
+    drops.autoresizingMask = [.width, .height]
+    flutterViewController.view.addSubview(drops)
+
     let center = NotificationCenter.default
     center.addObserver(
       forName: NSWindow.willEnterFullScreenNotification, object: self, queue: .main
@@ -119,5 +126,65 @@ class MainFlutterWindow: NSWindow {
     default:
       zoom(nil)
     }
+  }
+}
+
+// Files dragged in from Finder (the Flutter view takes no file drags): a
+// clear view over it registered for file URLs reports the drag on
+// `fynkel.editor/drop` in the view's logical coordinates (origin top left)
+// — `over` as it moves, `exit`, `drop` with the paths — and the Project
+// browser under the point imports them (lib/src/shell/file_drops.dart).
+// It draws nothing and handles no mouse event: clicks go up the responder
+// chain to Flutter, as with the desktop_drop plugin.
+final class FileDropView: NSView {
+  private let channel: FlutterMethodChannel
+
+  init(frame: NSRect, channel: FlutterMethodChannel) {
+    self.channel = channel
+    super.init(frame: frame)
+    registerForDraggedTypes([.fileURL])
+  }
+
+  required init?(coder: NSCoder) { nil }
+
+  /// A click on an inactive window acts as the Flutter view beneath says.
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+    superview?.subviews.first(where: { $0 !== self })?.acceptsFirstMouse(for: event)
+      ?? superview?.acceptsFirstMouse(for: event) ?? true
+  }
+
+  private func paths(_ sender: NSDraggingInfo) -> [String] {
+    let urls =
+      sender.draggingPasteboard.readObjects(
+        forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    return urls.map { $0.path }
+  }
+
+  private func point(_ sender: NSDraggingInfo) -> [String: Any] {
+    let p = convert(sender.draggingLocation, from: nil)
+    return ["x": Double(p.x), "y": Double(isFlipped ? p.y : bounds.height - p.y)]
+  }
+
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    draggingUpdated(sender)
+  }
+
+  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+    if paths(sender).isEmpty { return [] }
+    channel.invokeMethod("over", arguments: point(sender))
+    return .copy
+  }
+
+  override func draggingExited(_ sender: NSDraggingInfo?) {
+    channel.invokeMethod("exit", arguments: nil)
+  }
+
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    let files = paths(sender)
+    if files.isEmpty { return false }
+    var args = point(sender)
+    args["paths"] = files
+    channel.invokeMethod("drop", arguments: args)
+    return true
   }
 }

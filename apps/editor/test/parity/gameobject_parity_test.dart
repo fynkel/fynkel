@@ -3,7 +3,6 @@
 // rendered by the real `fynkel render` to see that the cube is there
 // (docs/unity-parity.md § Hierarchy).
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
