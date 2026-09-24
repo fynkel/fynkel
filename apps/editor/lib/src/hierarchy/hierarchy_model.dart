@@ -518,6 +518,160 @@ final class HierarchyModel extends ChangeNotifier {
     return true;
   }
 
+  /// Why [ids] (a Hierarchy drag) cannot become a prefab, or null when
+  /// it can: one plain object of an editable scene, with no prefab
+  /// instance in its subtree (nested prefabs from here come later).
+  String? cannotCreatePrefab(List<String> ids) {
+    final t = _tab;
+    if (t == null || !canEdit) return 'Nothing editable is open.';
+    if (t.kind != 'scene') return 'Prefabs are made from a scene\'s objects.';
+    if (ids.length != 1) return 'Drag one object to make a prefab.';
+    final n = t.tree[ids.single];
+    if (n == null) return 'The object is gone.';
+    if (n.isDerived) return 'That object belongs to a prefab instance; open the prefab to change it.';
+    final entities = _entities(t);
+    for (final id in _subtree(entities, ids.single)) {
+      if ((entities[id] as Map?)?['prefab'] != null) {
+        return id == ids.single
+            ? '${n.name} is a prefab instance already.'
+            : '${n.name} holds a prefab instance; nested prefabs from the Hierarchy are not supported yet.';
+      }
+    }
+    return null;
+  }
+
+  /// Drag from the Hierarchy to the Project panel (Unity's way to make a
+  /// prefab): writes `<folder>/<name>.prefab.json` with the object and its
+  /// children — through the prefab's own commands, then saved — and
+  /// replaces the object in the scene by an instance of it at the same
+  /// place (one scene transaction, one ⌘Z; the prefab file stays, as in
+  /// Unity). The object's Transform goes to the instance and the prefab's
+  /// root starts at the origin, so the scene looks the same. Returns the
+  /// new prefab's id.
+  String? createPrefab(String id, String folder) {
+    final t = _tab;
+    final why = cannotCreatePrefab([id]);
+    if (t == null || why != null) {
+      if (t != null) {
+        t.lastError = why;
+        notifyListeners();
+      }
+      return null;
+    }
+    final entities = _entities(t);
+    final root = entities[id] as Map;
+    final name = root['name'] as String? ?? 'Prefab';
+    final path = _freePrefabPath(folder, name);
+    final String prefabId;
+    try {
+      prefabId = project.newDocument('prefab', path, name: name).id!;
+    } on AuthoringException catch (e) {
+      t.lastError = 'Could not create the prefab: ${_why(e)}';
+      notifyListeners();
+      return null;
+    }
+    final transformData = project.componentDefaults('fynkel.Transform') ?? Trs.identity.toData();
+    Map<String, Object?>? rootTransform;
+    final commands = <Map<String, Object?>>[];
+    final inactive = <String>[];
+    for (final e in _subtree(entities, id)) {
+      final entity = entities[e] as Map;
+      final components = <Map<String, Object?>>[];
+      for (final c in ((entity['components'] as Map?) ?? const {}).entries) {
+        final spec = c.value as Map;
+        var data = spec['data'] as Map<String, Object?>?;
+        if (e == id && spec['type'] == 'fynkel.Transform') {
+          rootTransform = data;
+          data = transformData;
+        }
+        components.add(componentSpec(spec['type'] as String, id: c.key as String, version: spec['version'] as int?, data: data));
+      }
+      commands.add(
+        Command.createObject(
+          id: e,
+          name: entity['name'] as String? ?? '',
+          parent: e == id ? null : entity['parent'] as String?,
+          components: components,
+        ),
+      );
+      if (entity['active'] == false) inactive.add(e);
+    }
+    commands.addAll([for (final e in inactive) Command.setObjectActive(e, false)]);
+    final doc = project.openDocument(prefabId);
+    try {
+      final a = doc.apply(commands, baseRevision: doc.revision);
+      if (!a.ok) {
+        t.lastError = 'Could not fill the prefab: ${describeRejection(a)}';
+        notifyListeners();
+        return null;
+      }
+      doc.save();
+    } on AuthoringException catch (e) {
+      t.lastError = 'Could not fill the prefab: ${_why(e)}';
+      notifyListeners();
+      return null;
+    } finally {
+      doc.close();
+    }
+    // The scene: the object out, the instance in at its place.
+    final parent = root['parent'] as String?;
+    final siblings = parent == null
+        ? t.document.roots()
+        : (((entities[parent] as Map?)?['children'] as List?) ?? const []).cast<String>();
+    final index = siblings.indexOf(id);
+    final anchor = prefab.newUuid();
+    final a = _run([
+      Command.deleteObject(id),
+      Command.instantiatePrefab(
+        prefab: {'asset': prefabId},
+        id: anchor,
+        name: name,
+        parent: parent,
+        index: parent == null && !rootOrderIsEditable ? null : (index < 0 ? null : index),
+        components: [componentSpec('fynkel.Transform', data: rootTransform ?? transformData)],
+      ),
+    ]);
+    if (a == null || !a.ok) return prefabId;
+    if (t.tree[anchor] != null) {
+      t.select(anchor);
+      notifyListeners();
+    }
+    return prefabId;
+  }
+
+  static String _why(AuthoringException e) =>
+      e.diagnostics.isEmpty ? e.toString() : e.diagnostics.map((d) => d.message).join('; ');
+
+  static Map<String, Object?> _entities(OpenDocument t) =>
+      (t.document.root()['entities'] as Map?)?.cast<String, Object?>() ?? const {};
+
+  /// [id] and its descendants, parents first, children in order.
+  static List<String> _subtree(Map<String, Object?> entities, String id) {
+    final out = <String>[];
+    void walk(String e) {
+      out.add(e);
+      for (final c in (((entities[e] as Map?)?['children'] as List?) ?? const []).cast<String>()) {
+        walk(c);
+      }
+    }
+
+    walk(id);
+    return out;
+  }
+
+  /// `<folder>/<name>.prefab.json`, numbered when taken (`Coin 1`, …).
+  String _freePrefabPath(String folder, String name) {
+    final clean = name.replaceAll(RegExp(r'[/\\:*?"<>|]'), '_').trim();
+    final base = clean.isEmpty ? 'Prefab' : clean;
+    final taken = {for (final a in project.assets()) a.path.toLowerCase()};
+    String at(String n) => folder.isEmpty ? '$n.prefab.json' : '$folder/$n.prefab.json';
+    var candidate = at(base);
+    for (var i = 1; taken.contains(candidate.toLowerCase()); i++) {
+      candidate = at('$base $i');
+    }
+    return candidate;
+  }
+
   /// Whether a dragged asset may be dropped: a prefab document or an
   /// imported `#prefab` (kind `prefab`), into an editable document, not
   /// into a prefab instance's expansion.

@@ -590,7 +590,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                         Expanded(
                           child: scripts
                               ? _scriptList(context, theme, columns: columns)
-                              : _list(context, theme, folders, assets, columns: columns),
+                              : _prefabDrop(_list(context, theme, folders, assets, columns: columns)),
                         ),
                       ],
                     );
@@ -605,6 +605,21 @@ class _ProjectPanelState extends State<ProjectPanel> {
       ],
     );
   }
+
+  /// The list takes a Hierarchy object as a new prefab in the shown
+  /// folder (Unity's drag from the Hierarchy to the Project window).
+  Widget _prefabDrop(Widget list) => DragTarget<List<String>>(
+    key: const Key('project.prefabDrop'),
+    onWillAcceptWithDetails: (d) => model.canMakePrefab(d.data),
+    onAcceptWithDetails: (d) => model.dropObjects(d.data, model.folder),
+    builder: (context, candidates, _) => candidates.isEmpty
+        ? list
+        : DecoratedBox(
+            position: DecorationPosition.foreground,
+            decoration: BoxDecoration(border: Border.all(color: context.tokens.accent)),
+            child: list,
+          ),
+  );
 
   /// Below this width the list shows names and kinds only.
   static const _columnsFrom = 380.0;
@@ -1259,7 +1274,7 @@ class _FolderRowState extends State<_FolderRow> {
       ),
     );
     if (widget.renaming) return content;
-    return DragTarget<AssetDragPayload>(
+    final assets = DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) {
         final ok = widget.model.canMove(_dragged(d.data), widget.rel);
         if (ok != _hot) setState(() => _hot = ok);
@@ -1276,6 +1291,20 @@ class _FolderRowState extends State<_FolderRow> {
         onSecondaryTapUp: (d) => widget.onSecondaryTap(d.globalPosition),
         child: content,
       ),
+    );
+    // A Hierarchy object dropped here becomes a prefab in this folder.
+    return DragTarget<List<String>>(
+      onWillAcceptWithDetails: (d) {
+        final ok = widget.model.canMakePrefab(d.data);
+        if (ok != _hot) setState(() => _hot = ok);
+        return ok;
+      },
+      onLeave: (_) => setState(() => _hot = false),
+      onAcceptWithDetails: (d) {
+        setState(() => _hot = false);
+        widget.model.dropObjects(d.data, widget.rel);
+      },
+      builder: (context, _, _) => assets,
     );
   }
 }

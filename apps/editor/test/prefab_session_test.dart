@@ -371,4 +371,62 @@ void main() {
       expect(s.inspector.activeOverridden, isFalse);
     },
   );
+
+  test('Hierarchy → Project: an object and its child become a prefab, the scene holds an instance in its place', () async {
+    final s = await Session.open('prefab_create');
+    final tab = s.tabs.openDocument(mainScene)!;
+    // A lamp with a bulb, moved off the origin.
+    expect(s.hierarchy.createEmpty(underSelection: false), isTrue);
+    final lamp = tab.selection.single;
+    expect(s.hierarchy.rename(lamp, 'Lamp'), isTrue);
+    expect(s.hierarchy.createWith('fynkel.PointLight', parent: lamp), isTrue);
+    final bulb = tab.selection.single;
+    tab.select(lamp);
+    expect(s.inspector.setField(slotOf(s.inspector, 'fynkel.Transform'), 'position', [3.0, 1.0, -2.0]), isTrue);
+    final history = tab.document.history;
+
+    // Refused: a prefab instance, a child of one.
+    expect(s.hierarchy.cannotCreatePrefab([crateA]), contains('prefab instance'));
+    expect(s.hierarchy.cannotCreatePrefab([lamp, bulb]), contains('one object'));
+    expect(s.hierarchy.cannotCreatePrefab([lamp]), isNull);
+
+    final id = s.hierarchy.createPrefab(lamp, 'prefabs')!;
+    final file = File(s.file('assets/prefabs/Lamp.prefab.json'));
+    expect(file.existsSync(), isTrue);
+    final prefab = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+    expect(prefab['id'], id);
+    expect(prefab['name'], 'Lamp');
+    expect(prefab['roots'], [lamp]);
+    final entities = prefab['entities'] as Map<String, Object?>;
+    expect(entities.keys, unorderedEquals([lamp, bulb]));
+    Map<String, Object?> componentOf(Map<String, Object?> e, String type) =>
+        ((e['components'] as Map).values.cast<Map<String, Object?>>()).firstWhere((c) => c['type'] == type);
+    // The root starts at the origin; the child keeps its components.
+    expect(componentOf(entities[lamp] as Map<String, Object?>, 'fynkel.Transform')['data'], containsPair('position', [0.0, 0.0, 0.0]));
+    expect(componentOf(entities[bulb] as Map<String, Object?>, 'fynkel.PointLight'), isNotNull);
+
+    // The scene: one transaction, the object gone, an instance at its place with its Transform.
+    expect(tab.document.history, history + 1);
+    final anchor = tab.selection.single;
+    final scene = tab.document.entities([lamp, anchor]).entities;
+    expect(scene[lamp], isNull);
+    expect((scene[anchor]!['prefab'] as Map)['asset'], {'asset': id});
+    expect(scene[anchor]!['name'], 'Lamp');
+    expect(componentOf(scene[anchor]!, 'fynkel.Transform')['data'], containsPair('position', [3.0, 1.0, -2.0]));
+    expect(tab.expansionOf(anchor)!.prefab!.name, 'Lamp');
+    expect(tab.document.validate().where((d) => d.severity == Severity.error), isEmpty);
+
+    // ⌘Z brings the object back; the prefab file stays, as in Unity.
+    expect(tab.undo(), isTrue);
+    expect(tab.document.entities([lamp]).entities[lamp], isNotNull);
+    expect(file.existsSync(), isTrue);
+
+    // A second drag of the same kind of object is numbered.
+    expect(s.hierarchy.createEmpty(underSelection: false), isTrue);
+    final other = tab.selection.single;
+    expect(s.hierarchy.rename(other, 'Lamp'), isTrue);
+    s.hierarchy.createPrefab(other, 'prefabs');
+    expect(File(s.file('assets/prefabs/Lamp 1.prefab.json')).existsSync(), isTrue);
+
+  });
 }

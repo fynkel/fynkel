@@ -407,6 +407,28 @@ final class ProjectBrowserModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Hierarchy → Project: a new prefab (Unity's drag) ─────────────────
+
+  /// Why the Hierarchy's dragged objects cannot become a prefab (null:
+  /// they can); set by the shell to the Hierarchy's rule.
+  String? Function(List<String> ids)? cannotMakePrefab;
+
+  /// Makes the prefab in [folder] and answers its id; set by the shell.
+  String? Function(List<String> ids, String folder)? makePrefab;
+
+  bool canMakePrefab(List<String> ids) =>
+      canEdit && makePrefab != null && cannotMakePrefab != null && cannotMakePrefab!(ids) == null;
+
+  /// A Hierarchy drag dropped on [folder]: the prefab is made there and
+  /// selected.
+  bool dropObjects(List<String> ids, String folder) {
+    if (!canMakePrefab(ids)) return false;
+    final id = makePrefab!(ids, folder);
+    if (id == null) return false;
+    reveal(id);
+    return true;
+  }
+
   /// Selects [id] and shows its folder in the folders view.
   void reveal(String id) {
     final e = entry(id);

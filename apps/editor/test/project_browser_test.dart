@@ -586,6 +586,61 @@ void main() {
       expect(model.entry(created)!.path, 'New Material.material.json');
     });
 
+    testWidgets('a Hierarchy object dropped on the list or a folder becomes a prefab there', (tester) async {
+      final project = fakeProject();
+      final model = ProjectBrowserModel(project: project);
+      addTearDown(model.dispose);
+      final made = <(List<String>, String)>[];
+      model.cannotMakePrefab = (ids) => ids.contains('instance') ? 'a prefab instance already' : null;
+      model.makePrefab = (ids, folder) {
+        made.add((ids, folder));
+        return coinPrefab;
+      };
+      Widget source(String id) => Draggable<List<String>>(
+        data: [id],
+        feedback: const SizedBox(width: 10, height: 10),
+        child: SizedBox(key: Key('source.$id'), width: 80, height: 20, child: Text(id)),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                Row(children: [source('lamp'), source('instance')]),
+                SizedBox(
+                  height: 500,
+                  child: ProjectPanel(model: model, onOpenDocument: (_) {}, onShowAsset: () {}, run: RecordingRunner().call),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      model.setFolder('scenes');
+      await tester.pumpAndSettle();
+      Future<void> drag(String id, Finder to) async {
+        final g = await tester.startGesture(tester.getCenter(find.byKey(Key('source.$id'))));
+        await tester.pump(const Duration(milliseconds: 50));
+        await g.moveTo(tester.getCenter(to));
+        await tester.pump(const Duration(milliseconds: 50));
+        await g.up();
+        await tester.pumpAndSettle();
+      }
+
+      // Onto the list: the shown folder; the new prefab is selected and shown.
+      await drag('lamp', find.byKey(const Key('project.asset.$mainScene')));
+      expect(made.single.$1, ['lamp']);
+      expect(made.single.$2, 'scenes');
+      expect(model.lead, coinPrefab);
+      expect(model.folder, 'prefabs');
+      // Onto a folder in the tree: that folder.
+      await drag('lamp', find.byKey(const Key('project.folder.tree.scenes')));
+      expect(made.last.$2, 'scenes');
+      // Refused: nothing is made.
+      await drag('instance', find.byKey(const Key('project.folder.tree.scenes')));
+      expect(made.length, 2);
+    });
+
     testWidgets('a scene\'s context menu sets it as the startup scene, one asset-history step', (tester) async {
       final (project, model, _, _) = await pumpPanel(tester);
       model.setFolder('scenes');

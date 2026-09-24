@@ -2457,6 +2457,9 @@ class EditorShellState extends State<EditorShell> {
       case PanelRegistry.project:
         final b = ProjectBrowserModel(project: opened);
         b.recall(es.panel(id));
+        // Hierarchy → Project makes a prefab of the focused scene's object.
+        b.cannotMakePrefab = (ids) => _sceneOps?.cannotCreatePrefab(ids) ?? 'No scene is open.';
+        b.makePrefab = (ids, folder) => _sceneOps?.createPrefab(ids.single, folder);
         for (final sel in _selections.values) {
           sel.addBrowser(b);
         }
