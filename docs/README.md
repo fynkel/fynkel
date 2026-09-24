@@ -49,7 +49,10 @@
 | 0015 | Native runtime distribution | Accepted |
 | 0016 | Editor architecture | Accepted |
 | 0017 | AI and automation interface | Accepted |
-| 0018 | Editor extension model: declarative Inspector hints, no game code in the editor | **Proposed** — accepted with M4 item 4 |
+| 0018 | Editor extension model: declarative Inspector hints, no game code in the editor | Accepted (with M4 item 4; the roadmap's Phase 3 reopens it for Dart editor extensions) |
+| 0019 | Gizmos, handles and Scene tools | Accepted |
+| 0020 | Tags and layers | Accepted |
+| 0021 | Play in the editor | Accepted |
 
 ## Still open
 

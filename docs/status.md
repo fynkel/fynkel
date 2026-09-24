@@ -410,9 +410,10 @@ cargo test --workspace
 cargo run -p fynkel_cli -- codegen --check
 cd packages/fynkel && dart pub get && dart analyze --fatal-infos && dart test   # Flutter's dart
 cd packages/fynkel_authoring && dart pub get && dart analyze --fatal-infos && dart test   # M4-01: the hook builds the runtime with --features authoring
-cd apps/editor && flutter pub get && flutter analyze --fatal-infos && flutter test   # M4-02…08 and 9a–9e: the editor shell, tabs, Hierarchy, Inspector, Project browser, Scene view, Prefab mode, the look, the title bar, one Inspector, one picker and the panel copies (`-j 4` while another stream compiles); project_test.dart, documents_session_test.dart, inspector_session_test.dart, project_browser_session_test.dart, scene_session_test.dart and prefab_session_test.dart drive the real session (scene_session renders through the real Metal viewport); M4-08's play_process_test.dart drives a real process
+cd apps/editor && flutter pub get && flutter analyze --fatal-infos && FYNKEL_CLI=$PWD/../../target/debug/fynkel flutter test   # M4-02…08 and 9a–9e: the editor shell, tabs, Hierarchy, Inspector, Project browser, Scene view, Prefab mode, the look, the title bar, one Inspector, one picker and the panel copies (`-j 4` while another stream compiles); project_test.dart, documents_session_test.dart, inspector_session_test.dart, project_browser_session_test.dart, scene_session_test.dart and prefab_session_test.dart drive the real session (scene_session renders through the real Metal viewport); M4-08's play_process_test.dart drives a real process
 cargo test -p fynkel_authoring --test preview && cargo test -p fynkel_native --test authoring   # M4-06: the edit-preview world (sync == fresh load) and authoring ABI 3
 cargo test -p fynkel_authoring --test prefab_mode && cargo test -p fynkel_document --test authoring   # M4-07: the instance query, apply as two transactions, unpackPrefab, imported hierarchies read-only, broken prefabs left alone
+cargo check --target wasm32-unknown-unknown -p fynkel_core -p fynkel_scene -p fynkel_physics -p fynkel_render   # blueprint §12.1: a compile check, not a product
 cargo build -p fynkel_native -p fynkel_platform_apple --no-default-features && ! nm -gU target/debug/libfynkel_platform_apple.dylib | grep -q fynkel_authoring_   # a game's runtime has no editor code
 cd packages/fynkel_flutter && flutter pub get && flutter analyze --fatal-infos && flutter test
 cd hosts/flutter_apple && flutter pub get && flutter analyze --fatal-infos
@@ -1763,3 +1764,13 @@ The M3 backlog as it landed, for the record:
    replaced, and nothing is written in a read-only project. `fynkel
    validate` still reports `FYN-A0001`: the CLI does not write files
    unasked. Next: Phase 1 item 5 (housekeeping).
+23. **Housekeeping (roadmap Phase 1 item 5) — done 2026-09-24.** CI
+   runs the editor's suite (`apps/editor`: analyze and `flutter test`,
+   after the reference game). A `wasm` job runs `cargo check --target
+   wasm32-unknown-unknown` over `fynkel_core`, `fynkel_scene`,
+   `fynkel_physics` and `fynkel_render` (blueprint §12.1). Core, scene and
+   physics were already clean. Render needed one change: `fynkel_document`
+   (reached through `fynkel_assets`) enables uuid's `js` feature on that
+   target only, for fresh ids; `Cargo.lock` is unchanged. The ADR index in
+   `docs/README.md` now lists 0019–0021 and shows 0018 as accepted.
+   **Phase 1 is complete.** Next: Phase 2 (close M4).

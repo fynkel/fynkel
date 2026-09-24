@@ -41,6 +41,7 @@ Apply to Scene (`docs/design/live-play-mode.md`).
    `docs/README.md` (0019–0021); a `cargo check --target
    wasm32-unknown-unknown` job over core, scene, physics and render
    (blueprint §12.1).
+   **Done 2026-09-24.**
 
 ## Phase 2 — Close M4 (the editor)
 
