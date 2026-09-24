@@ -827,7 +827,7 @@ history step, undoable) and reimports at once, the result box showing the
 importer's summary (meshes, images, clips, …) or its refusal with the
 diagnostics, **Revert** drops the draft; **Sub-assets**, each row
 draggable onto an Inspector field or the Hierarchy; a material's
-shader, alpha mode, double-sided and fields; a scene's or prefab's entity
+fields, edited in place (§ The material Inspector below); a scene's or prefab's entity
 count; **Referenced by (N)** grouped by document, each row opening that
 document — a scene or prefab in a tab with the entity selected
 (`openReference` in `app.dart`: the pointer's `/entities/<id>` is
@@ -1964,12 +1964,38 @@ applied yet.
 `AssetDocumentSections.register(kind, builder)` gives every document of
 that kind its own sections on the asset page, in place of the generic
 summary (a scene's or prefab's entity count, or the document's top-level
-fields). The material's factors are registered this way today; a later
+fields). A custom-shader material's summary is registered this way today; a later
 data-asset kind (`@DataAsset`, the packages stream) registers one builder
 — no panel, no change to the page.
 
+**The material Inspector** (Unity parity, Tier 2, 2026-09-24): a
+`fynkel.pbr@1` material's page edits it where it is shown, as Unity's
+material Inspector does (`inspector/material_inspector.dart`, keys
+`material.<field>`). **Surface Options**: Rendering Mode (Opaque, Cutout,
+Transparent — `alpha_mode` opaque / mask / blend), Alpha Cutoff under
+Cutout, Double-Sided. **Surface Inputs**: Base Map and Base Color (RGBA),
+Metallic Map, Metallic, Roughness, Normal Map and its scale, Occlusion Map
+and its strength. **Emission**: Emission Map, Emission Color and
+Intensity (`emissive_strength` — the HDR colour as a colour and an
+intensity). The maps take the Project's textures (the picker, a drop from
+the Project browser, × for None). Each change is one transaction on the
+material's own document, **saved at once** — there is no Save for a
+material — through `MaterialEdits` (`inspector/material_edits.dart`,
+one per project, which opens the document without a tab and shares it
+with one when the material is also open in a tab). While a colour is
+picked, a label dragged or a slider moved, the Scene view draws the
+material as it would be and nothing is written (`previewMaterial` →
+the preview's `setMaterial`); every change, undo and redo hands it the
+document's fields, so the picture never waits for the recook the save
+starts. **⌘Z / ⇧⌘Z undo and redo the material** while the Inspector or
+the Project holds the keyboard and the Inspector shows it (the menu reads
+"Undo Material Change"); anywhere else they undo the focused tab. Every
+Inspector slider is live now, a component's included. Not yet: a preview
+sphere at the bottom of the page, and a custom-shader material, whose page
+stays read-only.
+
 **Open** is offered for scenes, prefabs and an imported model's `prefab`
-part. Materials and blend spaces have no editor in M4, so opening one
+part. Blend spaces have no editor in M4, so opening one
 would give an empty tab; their pages show their content read-only until
 an editor for them exists.
 

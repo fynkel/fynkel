@@ -832,6 +832,12 @@ next sync).
   (`outline` ids and colour, `iconsAspect`), `worldMatrix`,
   `setTransforms`, `restoreTransforms`, `setComponents` (`components:
   [{id, type, data}]` → `count` set), `restoreComponents` (`ids`),
+  `setMaterial` (`material`, `data` — a `fynkel.pbr@1` document's
+  fields drawn in place of the cooked material by every open preview's
+  asset store, the file untouched: `Assets::override_material` bumps
+  `material_edits` and the renderer rebuilds its material bind groups
+  on its next frame; → `stores`), `restoreMaterial` (`material`), `material`
+  (`material` → what this preview draws for it now, as document fields),
   `resync`, `reload`, `recook` (cook
   again, point every preview at the new store, reload each; with
   `live: true` unsaved documents cook as held, their files untouched, and a
@@ -842,7 +848,8 @@ next sync).
   renderHandle`, `stats`, `diagnostics`, `cook`; `setCamera`,
   `setHidden`, `pick`/`pickRay`/`pickRect` → `PreviewPick`, `lines` →
   `PreviewLines`, `worldMatrices`, `setTransforms`/`restoreTransforms`,
-  `setComponents`/`restoreComponents`,
+  `setComponents`/`restoreComponents`, `setMaterial`/`restoreMaterial`/
+  `material`,
   `resync` → `PreviewSyncReport`, `reload`/`refreshStats` →
   `PreviewStats`, `recook` → `CookReport`, `dump`, `close`), and a
   `PreviewSynced` event on the session's stream after every call that

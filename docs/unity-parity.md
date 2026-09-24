@@ -76,7 +76,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 
 | | Unity | Fynkel |
 |---|---|---|
-| Material Inspector | edit colour, maps, emission (HDR colour + intensity); preview sphere; live in the Scene view | ❌ **read-only** |
+| Material Inspector | edit colour, maps, emission (HDR colour + intensity); preview sphere; live in the Scene view | 🔧 `dcd42ba`, `27f122f` (saved at once, live while picking or dragging, ⌘Z in the Inspector); no preview sphere yet; a custom-shader material stays read-only |
 | Drop a material on an object | assigns it | ❌ |
 | Volume profile Inspector | Add Override, a checkbox per field | ❌ read-only |
 | Model import settings | scale, normals, animation… | 🟡 external files + material remap only; unapplied changes dropped without asking |
@@ -146,3 +146,9 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   finds the file, its sidecar and one undo step. Undo reclassified: Unity
   doesn't undo asset operations either, so ⌘Z on the focused document
   matches.
+- 2026-09-24: the material Inspector (`dcd42ba` preview `setMaterial`,
+  `27f122f`) — the parity test types Metallic, drags the Roughness
+  slider (drawn during the drag, written on release), switches to Cutout,
+  clears the Base Map, undoes all four with ⌘Z and redoes one; a second
+  test picks a Base Color (live, Cancel writes nothing, OK once). Every
+  Inspector slider is live now, a component's included.
