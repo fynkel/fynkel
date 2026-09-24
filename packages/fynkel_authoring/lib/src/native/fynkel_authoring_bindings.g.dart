@@ -530,7 +530,9 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_preview_world(
 /// visible mesh through its bounding sphere then
 /// its triangles, anything else through a 0.25 m
 /// sphere at its origin → "ray", "hits": [{ id,
-/// distance, point [3], mesh }]
+/// object, distance, point [3], mesh }] — id is a
+/// prefab instance's anchor for a hit inside it,
+/// object the entity the ray met
 /// pickRect        view, min [2], max [2] (NDC)
 /// the entities whose projected bounds overlap the
 /// rectangle (the marquee) → "ids"

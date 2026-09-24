@@ -826,11 +826,17 @@ final class PreviewCamera {
 final class PreviewHit {
   PreviewHit.fromJson(Map<String, Object?> json)
       : id = json['id'] as String? ?? '',
+        object = json['object'] as String? ?? json['id'] as String? ?? '',
         distance = (json['distance'] as num? ?? 0).toDouble(),
         point = _doubles(json['point']),
         mesh = json['mesh'] == true;
 
+  /// The id the editor knows: a prefab instance's anchor for anything
+  /// inside it.
   final String id;
+
+  /// The object the ray met: [id], or the child of the instance.
+  final String object;
 
   /// Along the ray from its origin, metres.
   final double distance;
