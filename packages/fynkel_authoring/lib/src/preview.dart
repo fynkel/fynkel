@@ -129,6 +129,11 @@ final class ScenePreview {
     _call('setMaterial', {'material': material, 'data': data});
   }
 
+  /// What this preview draws for [material] now — the live edit while one
+  /// is set, else the cooked record — as its document fields.
+  Map<String, Object?> material(String material) =>
+      (_call('material', {'material': material})['material'] as Map).cast<String, Object?>();
+
   /// The cooked [material] again (a cancelled edit).
   void restoreMaterial(String material) {
     _call('restoreMaterial', {'material': material});

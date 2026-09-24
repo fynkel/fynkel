@@ -692,7 +692,9 @@ void main() {
     final rustedBytes = rustedFile.readAsStringSync();
     preview.setMaterial(rusted, {'shader': 'fynkel.pbr@1', 'metallic': 0.9});
     expect(rustedFile.readAsStringSync(), rustedBytes);
+    expect(preview.material(rusted)['metallic'], 0.9);
     preview.restoreMaterial(rusted);
+    expect(preview.material(rusted)['metallic'], 0.25);
     expect(() => preview.setMaterial(rusted, {'metallic': 'shiny'}), throwsA(isA<AuthoringException>()));
 
     // Recook rebuilds the cache and reloads every preview over it; the
