@@ -1787,3 +1787,10 @@ The M3 backlog as it landed, for the record:
    Running codegen from the editor is a dated amendment to ADR-0016
    (explicit action only; the CLI subprocess runs `build_runner`, never the
    editor process). Next: Phase 2's Profiler panel.
+25. **The Profiler (roadmap Phase 2) — done 2026-09-24.** The Profiler
+   panel, a placeholder until now, charts the per-second stats windows
+   the game already sends under Play (the Game view and Build and Run
+   alike). It has CPU, GPU, Rendering and Memory charts with 60 and 120
+   fps lines, Record, Clear, Clear on Play, a selectable window, and that
+   window's full breakdown (timers as p50 / p95 / p99). The editor
+   samples nothing itself. Next: IDE navigation.

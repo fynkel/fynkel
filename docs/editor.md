@@ -1962,6 +1962,41 @@ package, cannot be seen in a release build and has no effect;
 (`ignoreTabStripCornerOverflow`, matched on the package's paint frame)
 around the one step that causes it.
 
+## The Profiler (roadmap Phase 2)
+
+`lib/src/profiler/`. The numbers are the ones the engine already
+measures. `FynkelGameView` closes a stats window about once a second
+(frame work, simulate, the Dart behaviours and the engine step, the
+render call and its extract / prepare / encode, Flutter's build and
+raster, GPU pass timings where the device has timestamps, draws,
+instances, culling, memory). Under Play each window reaches the editor as
+the channel's `stats` record, in the Game view and in Build and Run
+alike, and `PlaySession.lastStats` holds it. The `ProfilerModel` keeps
+every window in a ring (600, ten minutes), parsed once from the record
+and its `summary` line (a timer is `p50/p95/p99` ms). Nothing is
+sampled by the editor.
+
+The panel follows Unity's:
+
+- **Toolbar.** Record (off drops the windows that arrive), Clear, Clear
+  on Play (on by default), and the chart: CPU, GPU, Rendering or Memory.
+  The timing charts add the percentile their lines show (p95 by
+  default). The status reads Playing / Stopped and how many seconds are
+  kept.
+- **Chart.** One line per series that any kept window has. The oldest
+  window is at the left, and a short run grows from the left over at
+  least 60 slots. The CPU and GPU charts carry dashed 60 and 120 fps
+  lines. A click or drag selects a window; ← → step, and End or ⎋
+  follows the newest again.
+- **Legend.** Each series' colour and its value in the shown window.
+- **Breakdown.** Every number of the shown window in sections (Frame,
+  CPU, GPU, Rendering, Memory), timers as p50 / p95 / p99.
+
+The Console's Game tab still hides the stats rows by default; its toggle
+shows them as text. What the Profiler does not do yet: per-system times
+(the window carries only the last tick's, and the channel record omits
+them), a hierarchy of markers, or a capture saved to disk.
+
 ## What exists after each item
 
 | Item | Done | What |
@@ -1983,7 +2018,8 @@ around the one step that causes it.
 | 9g | done 2026-09-23 (gate driven by the user) | Handles and Scene tools: the handle framework, the tool registry with move, rotate, scale and the combined transform tool drawn through the overlay, and component handles — light range and angles, collider sizes, camera field of view — behind the Inspector's Edit toggle (§ The gizmo). |
 | 9h | done 2026-09-23 (gate driven by the user) | Gizmos for game code: the runtime `Gizmos` API in the game's window (`FynkelGameView(gizmos:)`, Play's *Show Gizmos in Play*), and declarative `@Gizmo` fields drawn and dragged in the Scene view (§ The gizmo). |
 | Scripts | 2026-09-24 | The Project browser's Scripts root over `lib/` (open in the IDE) and New ▾ → Behaviour: template, `fynkel codegen --project-only`, `registerBehaviour` (§ The Project browser › Scripts and Create → Behaviour; roadmap Phase 2 item 1). |
-| 9 | — | Profiler, IDE navigation, `fynkel editor`, polish. |
+| Profiler | 2026-09-24 | The Profiler panel over Play's stats windows: CPU / GPU / Rendering / Memory charts, Record, Clear on Play, a selected window's breakdown (§ The Profiler; roadmap Phase 2). |
+| 9 | — | IDE navigation, `fynkel editor`, polish. |
 | 10 | — | M4 gate and report. |
 
 ## Verification
