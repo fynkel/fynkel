@@ -1832,6 +1832,7 @@ fynkel project lock [--project <dir>] [--check] [--json] [--schemas <dir>]
 fynkel validate [--project <dir>] [--json] [--schemas <dir>]
 fynkel codegen [--check] [--root <repo>] [--project <dart package>]
 fynkel render [--project <dir>] [--scene <path|id>] [--out <file.png>] [--size <W>x<H>] [--cache <dir>] [--no-cook] [--placeholders] [--quality <profile>] [--json]
+fynkel thumbnail [--project <dir>] [--cache <dir>] [--no-cook] [--size <px>] --out-dir <dir> [--json] <asset>...
 fynkel schema list [--json]
 fynkel schema describe <type|kind> [--json]
 fynkel test --headless [--project <dir>] [--scene <path|id>] [--cache <dir>] [--no-cook] [--input <file.input.json>] [--steps N] [--seed S] [--json]
@@ -1920,7 +1921,34 @@ assetErrors, diagnostics }`; `docs/renderer.md` names the counts).
 `--quality <profile>` renders with one of the project's quality profiles
 instead of its default (exit 2 naming the profiles when it does not
 exist); exit 1 on a project/scene/asset error, 2 when no GPU adapter is
-available. `codegen` regenerates the native schemas and
+available. `thumbnail` draws the editor's Project-grid tiles through the
+same path (cook, the cache, one step, `ExtractRenderer`), as Unity's
+Project browser shows them: each `<asset>` is `<assetId>` or
+`<assetId>#<sub>` (the sub-asset path of a `{ asset, sub }` reference). A
+prefab document is instantiated in an empty world; a model (glTF/FBX)
+or a rig draws its whole hierarchy (its `prefab`, also accepted as
+`#prefab`); a model's `#mesh/<name>` draws that mesh alone with the
+material the model pairs it with; a material, or a model's
+`#material/<name>`, is drawn on the built-in `Fynkel/Primitives.glb`'s
+`mesh/Sphere` (ADR-0023) when the project has it, otherwise on a
+stand-in sphere of the same size that never reaches the cache. The
+camera is a 30° perspective from (1, 0.8, 1) at the centre of the drawn
+meshes' world bounds, fitted to their bounding sphere with a 10 %
+margin; the renderer's fallback sun from the upper left front and its
+default ambient light every tile alike (a prefab's own camera, lights,
+environment and volumes are left out); the project's default quality
+profile applies with MSAA 4 and bloom off. Each tile is an RGBA PNG,
+`--size` square (16–1024, default 128), at
+`<out-dir>/<assetId>.png` or `<out-dir>/<assetId>__<sub with '/' as
+'_'>.png`, alpha 0 wherever the pixel is exactly the clear colour.
+Anything else — a texture, a scene, a sound, a volume, an image or clip
+sub-asset — is reported as `no thumbnail for a <kind>` and gets no file.
+`--json` prints `{ thumbnails: [{ asset, sub, file } | { asset, sub,
+error }] }` in argument order (`sub` null for a whole asset, `file`
+absolute); without it, a line per asset. Exit 0 when every asset got a
+file or has no thumbnail, 1 when the cook failed or an asset is not in
+the cache or cannot be read (its entry carries the reason), 2 on usage
+or when no GPU adapter is available. `codegen` regenerates the native schemas and
 codecs (pipeline (a)); with `--project <dart package>` it also runs the
 behaviour generator in that package and splits its schemas into
 `schemas/behaviours/` (pipeline (b), `docs/codegen.md`); `--check` compares
