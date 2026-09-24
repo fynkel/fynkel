@@ -477,6 +477,36 @@ fn the_scene_view_picks_and_outlines_the_running_world() {
     assert!(one > 0);
     assert_eq!(outline(&mut w, json!([uid(4), bullet])), one * 2);
     assert_eq!(outline(&mut w, json!([uid(77)])), 0);
+    // Without the boxes an entity that draws no mesh keeps its cross.
+    let crosses = call(
+        &mut w,
+        "lines",
+        json!({ "outline": { "ids": [uid(4)], "boxes": false } }),
+    );
+    assert_eq!(crosses["count"].as_u64().unwrap(), one);
+    // The handles the renderer's outline takes: the runtime one is its
+    // own bits, a gone one is left out.
+    let handles = call(
+        &mut w,
+        "handles",
+        json!({ "ids": [uid(4), bullet, uid(77)] }),
+    );
+    let bits: Vec<u64> = handles["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b.as_u64().unwrap())
+        .collect();
+    assert_eq!(bits.len(), 2, "{handles}");
+    assert_eq!(
+        bits[1].to_string(),
+        bullet.strip_prefix(RUNTIME_PREFIX).unwrap()
+    );
+    assert_eq!(
+        bits[0],
+        live::resolve(&w, &uid(4)).unwrap().to_bits(),
+        "{handles}"
+    );
     // Icons: the camera's frustum and the light's range, for everyone.
     let icons = call(&mut w, "lines", json!({ "icons": { "aspect": 1.5 } }));
     assert!(icons["count"].as_u64().unwrap() > 0, "{icons}");

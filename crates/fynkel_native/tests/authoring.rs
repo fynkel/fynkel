@@ -767,6 +767,57 @@ fn the_edit_preview_world_crosses_the_edge() {
     let lines = host.result();
     assert!(lines["count"].as_u64().unwrap() > 12, "{}", lines["count"]);
     assert_eq!(lines["lines"][0].as_array().unwrap().len(), 10);
+    // Without boxes the robot is left to the renderer's silhouette: only
+    // the sun, which draws no mesh, keeps its cross (three segments).
+    let crosses = |host: &Host| {
+        assert_eq!(
+            host.preview_call(
+                scene,
+                "lines",
+                &json!({ "outline": { "ids": [MAIN_ROBOT, MAIN_SUN], "boxes": false } })
+            ),
+            Status::Ok
+        );
+        host.result()["count"].as_u64().unwrap()
+    };
+    assert_eq!(crosses(&host), 3);
+    assert_eq!(
+        host.preview_call(
+            scene,
+            "lines",
+            &json!({ "outline": { "ids": [MAIN_ROBOT], "boxes": 1 } })
+        ),
+        Status::InvalidArgument
+    );
+
+    // The handles the renderer outlines: one per live id, the unknown
+    // and the hidden left out.
+    let entities = |host: &Host, ids: Value| {
+        assert_eq!(
+            host.preview_call(scene, "entities", &json!({ "ids": ids })),
+            Status::Ok
+        );
+        host.result()["entities"].as_array().unwrap().clone()
+    };
+    let both = entities(
+        &host,
+        json!([MAIN_ROBOT, MAIN_SUN, "c0000000-0000-4000-8000-0000000000ff"]),
+    );
+    assert_eq!(both.len(), 2, "{both:?}");
+    assert!(both.iter().all(|b| b.as_u64().is_some_and(|b| b != 0)));
+    assert_ne!(both[0], both[1]);
+    assert_eq!(
+        host.preview_call(scene, "hidden", &json!({ "ids": [MAIN_ROBOT] })),
+        Status::Ok
+    );
+    assert_eq!(
+        entities(&host, json!([MAIN_ROBOT, MAIN_SUN])),
+        vec![both[1].clone()]
+    );
+    assert_eq!(
+        host.preview_call(scene, "hidden", &json!({ "ids": [] })),
+        Status::Ok
+    );
 
     // A transaction: the apply result carries the preview's report and
     // the incremental world dumps exactly like a reload of the document.

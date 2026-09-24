@@ -17,9 +17,11 @@
 //! Every call is `(kind, args JSON) -> JSON`, like the session's `query`:
 //! `entities`, `entity`, `set`, `remove`, `rename`, `setActive`, `parent`,
 //! `destroy`, `spawn`, and for the Scene view
-//! on the running world (L5) `pick`, `pickRect`, `lines` and
-//! `worldMatrix` — the edit preview's own picking and overlays
-//! ([`crate::preview`]), over every live entity.
+//! on the running world (L5) `pick`, `pickRect`, `lines`, `worldMatrix`
+//! and `handles` — the edit preview's own picking and overlays
+//! ([`crate::preview`]), over every live entity, and the handle bits the
+//! renderer's selection outline takes (the preview's `entities`; the name
+//! is this module's entity table's).
 
 use fynkel_assets::Assets;
 use fynkel_contracts::{Code, ComponentId, Diagnostic, Entity};
@@ -37,7 +39,7 @@ use crate::preview::{self, Line, Ray, View};
 /// The prefix of the id of an entity no loaded scene spawned.
 pub const RUNTIME_PREFIX: &str = "runtime:";
 
-pub const KINDS: [&str; 13] = [
+pub const KINDS: [&str; 14] = [
     "entities",
     "entity",
     "set",
@@ -51,6 +53,7 @@ pub const KINDS: [&str; 13] = [
     "pickRect",
     "lines",
     "worldMatrix",
+    "handles",
 ];
 
 /// The selection outline's colour when a `lines` call gives none (the
@@ -109,13 +112,16 @@ pub fn call_with(
                     }
                     None => OUTLINE_COLOR,
                 };
+                // `boxes: false`: the meshes are ringed by the renderer's
+                // silhouette outline, only the crosses are lines.
+                let boxes = o.get("boxes").and_then(Value::as_bool).unwrap_or(true);
                 // An entity gone since the selection was made draws nothing.
                 selected = ids_arg(o)?
                     .iter()
                     .filter_map(|id| resolve(world, id))
                     .collect();
                 for e in &selected {
-                    preview::outline_entity(world, assets, *e, color, &mut out);
+                    preview::outline_entity(world, assets, *e, color, boxes, &mut out);
                 }
             }
             if let Some(i) = args.get("icons").filter(|i| !i.is_null()) {
@@ -129,6 +135,20 @@ pub fn call_with(
                 "count": out.len(),
                 "lines": out.iter().map(Line::json).collect::<Vec<_>>(),
             }))
+        }
+        "handles" => {
+            // What the renderer's selection outline takes: the live
+            // handles' bits, the gone and the hidden left out.
+            let hidden: Vec<Entity> = world.edit_hidden().collect();
+            let mut out: Vec<u64> = Vec::new();
+            for id in ids_arg(args)? {
+                if let Some(e) = resolve(world, &id).filter(|e| !hidden.contains(e)) {
+                    if !out.contains(&e.to_bits()) {
+                        out.push(e.to_bits());
+                    }
+                }
+            }
+            Ok(json!({ "entities": out }))
         }
         "worldMatrix" => {
             let mut matrices = serde_json::Map::new();

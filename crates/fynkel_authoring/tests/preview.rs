@@ -524,11 +524,23 @@ fn a_prefab_open_in_another_tab_previews_live_and_a_material_is_refused() {
         "the root's box and the Lid's"
     );
     assert!(outline_inner.iter().all(|l| outline_instance.contains(l)));
+    // The renderer's silhouette outline names the instance's every mesh.
+    let handles = p.entities(&w, &[crate_a]);
+    assert_eq!(
+        handles,
+        vec![p.entity(crate_a).unwrap(), p.entity(lid).unwrap()]
+    );
+    assert_eq!(p.entities(&w, &[lid]), vec![p.entity(lid).unwrap()]);
     p.set_hidden(&mut w, &[crate_a]);
     assert_eq!(
         w.edit_hidden().count(),
         2,
         "the Lid hides with its instance"
+    );
+    assert_eq!(
+        p.entities(&w, &[crate_a]),
+        vec![],
+        "the hidden are not ringed"
     );
     assert!(p
         .pick(&w, Some(&assets), &ray)
@@ -762,6 +774,15 @@ fn the_marquee_the_outlines_and_the_icons() {
         .iter()
         .all(|l| (l.a - sun_pos).length() <= ICON_RADIUS + 1e-4));
     assert_eq!(lines[0].json().as_array().unwrap().len(), 10);
+    // Without the boxes (the renderer rings the meshes): the cross alone.
+    let crosses = p.outline_crosses(&w, Some(&assets), &[robot, sun], Vec4::ONE);
+    assert_eq!(crosses, lines[12..].to_vec());
+    // Each id's handle, an unknown one left out.
+    let handles = p.entities(&w, &[robot, sun, Uuid::nil()]);
+    assert_eq!(
+        handles,
+        vec![p.entity(robot).unwrap(), p.entity(sun).unwrap()]
+    );
     // Icons: the camera's frustum and the sun's arrows are there; hidden
     // entities are left out.
     let camera = Uuid::parse_str(CAMERA).unwrap();

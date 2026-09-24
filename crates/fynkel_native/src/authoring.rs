@@ -782,12 +782,13 @@ pub unsafe extern "C" fn fynkel_authoring_preview_call(
     })
 }
 
-const PREVIEW_KINDS: [&str; 21] = [
+const PREVIEW_KINDS: [&str; 22] = [
     "camera",
     "hidden",
     "pick",
     "pickRect",
     "lines",
+    "entities",
     "worldMatrix",
     "setTransforms",
     "restoreTransforms",
@@ -879,7 +880,15 @@ fn preview_call(
                         Some(c) if !c.is_null() => vec4_of(c, "outline.color")?,
                         _ => Vec4::new(1.0, 0.6, 0.0, 1.0),
                     };
-                    Some((ids_arg(o, "ids")?, color))
+                    // `boxes: false`: the meshes are ringed by the
+                    // renderer's silhouette outline (`entities`), only the
+                    // crosses of what draws none are lines.
+                    let boxes = match o.get("boxes") {
+                        None | Some(Value::Null) => true,
+                        Some(Value::Bool(b)) => *b,
+                        Some(_) => return Err(invalid("lines: `outline.boxes` must be a bool")),
+                    };
+                    Some((ids_arg(o, "ids")?, color, boxes))
                 }
                 _ => None,
             };
@@ -891,15 +900,15 @@ fn preview_call(
             let mut lines = Vec::new();
             let selected = outline
                 .as_ref()
-                .map(|(ids, _)| ids.clone())
+                .map(|(ids, _, _)| ids.clone())
                 .unwrap_or_default();
-            if let Some((ids, color)) = outline {
-                lines.extend(slot.preview.outline_lines(
-                    slot.world.core(),
-                    slot.world.assets(),
-                    &ids,
-                    color,
-                ));
+            if let Some((ids, color, boxes)) = outline {
+                let (world, assets) = (slot.world.core(), slot.world.assets());
+                lines.extend(if boxes {
+                    slot.preview.outline_lines(world, assets, &ids, color)
+                } else {
+                    slot.preview.outline_crosses(world, assets, &ids, color)
+                });
             }
             if let Some(aspect) = icons {
                 lines.extend(slot.preview.icon_lines(
@@ -915,6 +924,20 @@ fn preview_call(
                 "count": lines.len(),
                 "lines": lines.iter().map(|l| l.json()).collect::<Vec<_>>(),
             }))
+        }
+        "entities" => {
+            // The handles the renderer's selection outline takes
+            // (`fynkel_apple_viewport_outline`): the ids with the entities
+            // of the prefab instances they anchor, the hidden left out.
+            let ids = ids_arg(args, "ids")?;
+            let slot = s.slot(handle)?;
+            let entities: Vec<u64> = slot
+                .preview
+                .entities(slot.world.core(), &ids)
+                .iter()
+                .map(|e| e.to_bits())
+                .collect();
+            Ok(json!({ "ok": true, "handle": handle, "entities": entities }))
         }
         "worldMatrix" => {
             let ids = ids_arg(args, "ids")?;

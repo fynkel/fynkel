@@ -25,7 +25,9 @@
 //!   `fynkel state dump --json`, so a test can prove that an incrementally
 //!   synced world equals a fresh load after every transaction kind.
 //! - picking ([`Preview::pick`], [`Preview::pick_rect`]), the debug-line
-//!   overlays ([`Preview::outline_lines`], [`Preview::icon_lines`]) and
+//!   overlays ([`Preview::outline_lines`], [`Preview::icon_lines`]), the
+//!   handles the renderer's selection outline names ([`Preview::entities`])
+//!   and
 //!   the gizmo's transform preview ([`Preview::set_transforms`]), the
 //!   Inspector's live component, material and volume profile edits
 //!   ([`Preview::set_components`], [`Preview::set_material`],
@@ -1083,13 +1085,58 @@ impl Preview {
         ids: &[Uuid],
         color: Vec4,
     ) -> Vec<Line> {
+        self.outline(world, assets, ids, color, true)
+    }
+
+    /// [`outline_lines`](Self::outline_lines) without the boxes: only the
+    /// crosses of the entities that draw no mesh. The meshes are ringed by
+    /// the renderer's silhouette outline instead
+    /// (`fynkel_render::Overlay::outline`, fed by [`entities`](Self::entities)).
+    pub fn outline_crosses(
+        &self,
+        world: &World,
+        assets: Option<&Assets>,
+        ids: &[Uuid],
+        color: Vec4,
+    ) -> Vec<Line> {
+        self.outline(world, assets, ids, color, false)
+    }
+
+    fn outline(
+        &self,
+        world: &World,
+        assets: Option<&Assets>,
+        ids: &[Uuid],
+        color: Vec4,
+        boxes: bool,
+    ) -> Vec<Line> {
         let mut out = Vec::new();
         let ids = self.with_anchored(ids);
         for id in &ids {
             let Some(&e) = self.ids.get(id) else {
                 continue;
             };
-            outline_entity(world, assets, e, color, &mut out);
+            outline_entity(world, assets, e, color, boxes, &mut out);
+        }
+        out
+    }
+
+    /// The world's handles for `ids` — with the entities of the prefab
+    /// instances they anchor, so a selected instance names every mesh it
+    /// expanded to — leaving out what is gone and what the editor hides.
+    /// What the renderer's selection outline takes
+    /// (`fynkel_render::Overlay::outline`, by `Entity::to_bits` over the
+    /// ABI); an inactive entity is named but draws nothing to ring.
+    pub fn entities(&self, world: &World, ids: &[Uuid]) -> Vec<Entity> {
+        let hidden: HashSet<Entity> = world.edit_hidden().collect();
+        let mut out: Vec<Entity> = Vec::new();
+        for id in self.with_anchored(ids) {
+            let Some(&e) = self.ids.get(&id) else {
+                continue;
+            };
+            if world.ecs().contains(e) && !hidden.contains(&e) && !out.contains(&e) {
+                out.push(e);
+            }
         }
         out
     }
@@ -1289,17 +1336,28 @@ pub(crate) fn rect_hits(
     lo.x <= max.x && hi.x >= min.x && lo.y <= max.y && hi.y >= min.y
 }
 
-/// `e`'s selection outline (see [`Preview::outline_lines`]).
+/// `e`'s selection outline (see [`Preview::outline_lines`]); without
+/// `boxes`, only the cross of an entity that draws no mesh (see
+/// [`Preview::outline_crosses`]).
 pub(crate) fn outline_entity(
     world: &World,
     assets: Option<&Assets>,
     e: Entity,
     color: Vec4,
+    boxes: bool,
     out: &mut Vec<Line>,
 ) {
     let Ok(m) = scene::world_matrix(world.ecs(), e) else {
         return;
     };
+    if !boxes {
+        // Whatever the renderer draws for it — the mesh, or the magenta
+        // cube of one the cache lacks — carries the silhouette.
+        if !draws_mesh(world, e) {
+            cross_lines(m.transform_point3(Vec3::ZERO), ICON_RADIUS, color, out);
+        }
+        return;
+    }
     match mesh_of(world, assets, e) {
         Some(mesh) => box_lines(
             &m,
@@ -1310,6 +1368,15 @@ pub(crate) fn outline_entity(
         ),
         None => cross_lines(m.transform_point3(Vec3::ZERO), ICON_RADIUS, color, out),
     }
+}
+
+/// Whether the renderer draws a mesh for `e`: a visible `MeshRenderer`
+/// naming one.
+fn draws_mesh(world: &World, e: Entity) -> bool {
+    world
+        .ecs()
+        .copy::<MeshRenderer>(e)
+        .is_ok_and(|r| r.visible && !r.mesh.asset.is_nil())
 }
 
 /// The visible mesh an entity draws, read from the assets.
