@@ -77,6 +77,8 @@ pub enum LoadError {
     UnknownAnchorParent(Entity),
     /// `instantiate`: the anchor's transform is not finite.
     AnchorTransform,
+    /// `instantiate`: the prefab does not have exactly one root (ADR-0022).
+    NotOneRoot(Uuid),
     /// An additive load named a scene the world already holds (M3-12).
     AlreadyLoaded(Uuid),
     /// `unload_scene` named a scene the world does not hold (M3-12).
@@ -112,6 +114,12 @@ impl core::fmt::Display for LoadError {
                 )
             }
             LoadError::AnchorTransform => write!(f, "instantiate: transform is not finite"),
+            LoadError::NotOneRoot(id) => {
+                write!(
+                    f,
+                    "instantiate: prefab {id} does not have exactly one root (recook it)"
+                )
+            }
             LoadError::AlreadyLoaded(id) => write!(f, "scene {id} is already loaded"),
             LoadError::NotLoaded(id) => write!(f, "scene {id} is not loaded"),
         }
@@ -119,6 +127,13 @@ impl core::fmt::Display for LoadError {
 }
 
 impl std::error::Error for LoadError {}
+
+/// Where and as what an instantiated prefab's root spawns.
+struct Placed<'a> {
+    root: Uuid,
+    name: &'a str,
+    transform: Transform,
+}
 
 /// Handles of a loaded scene, queryable both ways.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -215,7 +230,7 @@ impl World {
             }
         }
         let tick = self.tick();
-        let loaded = self.load_under(scene, None, tick, true)?;
+        let loaded = self.load_under(scene, None, None, tick, true)?;
         self.scenes.push(loaded.clone());
         self.push_event(EventPayload::SceneReady { scene: scene.id });
         Ok(loaded)
@@ -360,10 +375,11 @@ impl World {
     }
 
     /// Instantiates a cooked prefab now (M3-08b, blueprint item 12's
-    /// `world.instantiate`): an **anchor** entity (`name`, `transform`,
-    /// under `parent`) whose children are the prefab's roots, exactly the
-    /// shape a scene instance expands to. Components go through the
-    /// command path as for a scene; no `SceneReady`. The anchor's handle
+    /// `world.instantiate`): the prefab's **root** (ADR-0022) spawns under
+    /// `parent` with `transform` as its Transform and `name` as its name
+    /// (the root's own when empty), its descendants under it — exactly
+    /// the shape a scene instance expands to. Components go through the
+    /// command path as for a scene; no `SceneReady`. The root's handle
     /// and the prefab's entities are returned; `parent` must be live.
     pub fn instantiate(
         &mut self,
@@ -401,21 +417,28 @@ impl World {
         }
         // The structure is checked before anything is spawned.
         spawn_order(prefab)?;
-        let anchor = scene::spawn(self.ecs_mut(), transform, parent)
-            .map_err(|_| LoadError::Spawn(prefab.id))?;
-        if !name.is_empty() {
-            let _ = self.ecs_mut().insert(anchor, Name::new(name.to_string()));
-        }
-        let loaded = self.load_under(prefab, Some(anchor), tick, propagate)?;
-        Ok((anchor, loaded))
+        let mut roots = prefab.entities.iter().filter(|d| d.parent.is_none());
+        let (Some(root), None) = (roots.next(), roots.next()) else {
+            return Err(LoadError::NotOneRoot(prefab.id));
+        };
+        let root = root.id;
+        let placed = Placed {
+            root,
+            name,
+            transform,
+        };
+        let loaded = self.load_under(prefab, parent, Some(placed), tick, propagate)?;
+        Ok((loaded.by_id[&root], loaded))
     }
 
     /// Spawns `scene`'s entities, its roots under `root_parent`, then their
-    /// components through the command path; propagates.
+    /// components through the command path; propagates. `placed` gives
+    /// an instantiated prefab's root its place and name.
     fn load_under(
         &mut self,
         scene: &SceneDescription,
         root_parent: Option<Entity>,
+        placed: Option<Placed<'_>>,
         tick: u64,
         propagate: bool,
     ) -> Result<LoadedScene, LoadError> {
@@ -431,18 +454,26 @@ impl World {
         for &i in &order {
             let d = &scene.entities[i];
             let parent = d.parent.map(|p| loaded.by_id[&p]).or(root_parent);
-            let transform = d
-                .components
-                .iter()
-                .find_map(|c| match c {
-                    ComponentValue::Transform(t) => Some(*t),
-                    _ => None,
-                })
-                .unwrap_or(Transform::IDENTITY);
+            let here = placed.as_ref().filter(|p| p.root == d.id);
+            let transform = match here {
+                Some(p) => p.transform,
+                None => d
+                    .components
+                    .iter()
+                    .find_map(|c| match c {
+                        ComponentValue::Transform(t) => Some(*t),
+                        _ => None,
+                    })
+                    .unwrap_or(Transform::IDENTITY),
+            };
             let e = scene::spawn(self.ecs_mut(), transform, parent)
                 .map_err(|_| LoadError::Spawn(d.id))?;
-            if !d.name.is_empty() {
-                let _ = self.ecs_mut().insert(e, Name::new(d.name.clone()));
+            let name = here
+                .map(|p| p.name)
+                .filter(|n| !n.is_empty())
+                .unwrap_or(&d.name);
+            if !name.is_empty() {
+                let _ = self.ecs_mut().insert(e, Name::new(name.to_string()));
             }
             if !d.active {
                 let _ = scene::set_active(self.ecs_mut(), e, false);

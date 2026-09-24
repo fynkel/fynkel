@@ -537,46 +537,64 @@ fn set_unset_and_assign_fields() {
 // --------------------------------------------------------------- prefabs
 
 #[test]
-fn prefab_documents_keep_their_roots() {
+fn prefab_documents_keep_their_one_root() {
     let (mut editor, original) = open("valid/turret.prefab.json");
     let s = schemas();
     let before = Prefab::from_document(editor.document().clone());
-    let root_count = before.roots.len();
+    let root = before.root;
+    let refused = |r: &fynkel_document::authoring::Applied| {
+        !r.ok
+            && r.all_diagnostics()
+                .iter()
+                .flat_map(|d| std::iter::once(d).chain(d.related.iter()))
+                .any(|d| d.code.0 == "FYN-D0400")
+    };
+
+    // A second parentless object is refused: a prefab has one root.
+    let r = editor.apply(
+        Request::new(vec![Command::CreateObject {
+            id: None,
+            name: "Extra root".into(),
+            parent: None,
+            index: None,
+            components: vec![transform()],
+        }]),
+        &s,
+    );
+    assert!(refused(&r), "{:#?}", r.all_diagnostics());
+    assert_eq!(text(&editor), original);
+
+    // Under the root it is an ordinary child.
     let r = apply(
         &mut editor,
         vec![Command::CreateObject {
             id: None,
-            name: "Extra root".into(),
-            parent: None,
+            name: "Extra".into(),
+            parent: Some(root),
             index: Some(0),
             components: vec![transform()],
         }],
     );
     let new_id = r.mutations[0].affected_ids[0];
     let p = Prefab::from_document(editor.document().clone());
-    assert_eq!(p.roots.len(), root_count + 1);
-    assert_eq!(p.roots[0], new_id);
+    assert_eq!(p.root, root);
+    assert_eq!(p.entity(root).unwrap().children[0], new_id);
     let d = p.validate(&s);
     assert!(!fynkel_document::has_errors(&d), "{d:#?}");
 
-    let existing_root = p.roots[1];
-    apply(
-        &mut editor,
-        vec![Command::ReparentObject {
-            id: existing_root,
-            parent: Some(new_id),
+    // Taking it out to the top, or deleting the root, is refused too.
+    let r = editor.apply(
+        Request::new(vec![Command::ReparentObject {
+            id: new_id,
+            parent: None,
             index: None,
-        }],
+        }]),
+        &s,
     );
-    let p = Prefab::from_document(editor.document().clone());
-    assert_eq!(p.roots.len(), root_count);
-    let d = p.validate(&s);
-    assert!(!fynkel_document::has_errors(&d), "{d:#?}");
+    assert!(refused(&r), "{:#?}", r.all_diagnostics());
+    let r = editor.apply(Request::new(vec![Command::DeleteObject { id: root }]), &s);
+    assert!(refused(&r), "{:#?}", r.all_diagnostics());
     apply(&mut editor, vec![Command::DeleteObject { id: new_id }]);
-    let p = Prefab::from_document(editor.document().clone());
-    assert_eq!(p.roots.len(), root_count - 1);
-    assert!(!fynkel_document::has_errors(&p.validate(&s)));
-    editor.undo().unwrap();
     editor.undo().unwrap();
     editor.undo().unwrap();
     assert_eq!(text(&editor), original);
@@ -614,7 +632,7 @@ fn instantiate_and_override_prefabs() {
             index: None,
             prefab: AssetRef::new("10000000-0000-4000-8000-000000000001".parse().unwrap()),
             instance: Some(instance),
-            components: vec![transform()],
+            components: vec![],
         }],
     );
     let host = r.mutations[0].affected_ids[0];
@@ -648,7 +666,7 @@ fn instantiate_and_override_prefabs() {
             .overrides
             .clone()
     };
-    assert_eq!(ov(&editor).len(), 3, "replaced, not appended");
+    assert_eq!(ov(&editor).len(), 4, "replaced, not appended");
     match &ov(&editor)[0].op {
         fynkel_document::scene::OverrideOp::SetField { value, .. } => {
             assert_eq!(value.to_serde(), json!(true))
@@ -665,7 +683,7 @@ fn instantiate_and_override_prefabs() {
             })),
         }],
     );
-    assert_eq!(ov(&editor).len(), 4);
+    assert_eq!(ov(&editor).len(), 5);
     // Revert one, then all.
     apply(
         &mut editor,
@@ -674,12 +692,12 @@ fn instantiate_and_override_prefabs() {
             index: Some(1),
         }],
     );
-    assert_eq!(ov(&editor).len(), 3);
+    assert_eq!(ov(&editor).len(), 4);
     assert_eq!(ov(&editor)[1].op.name(), "addObject");
     let r = editor.apply(
         Request::new(vec![Command::RevertPrefabOverride {
             entity: u(TURRET_A),
-            index: Some(3),
+            index: Some(4),
         }]),
         &s,
     );
@@ -879,7 +897,13 @@ fn unpack_prefab_writes_the_expansion_in_place() {
     let m = &r.mutations[0];
     assert_eq!(m.command, "unpackPrefab");
     assert_eq!(m.affected_ids[0], u(TURRET_A));
-    let derived: Vec<Uuid> = a.entities.iter().map(|(_, sid)| *sid).collect();
+    // The instance is the prefab's root, so it is not among the derived.
+    let derived: Vec<Uuid> = a
+        .entities
+        .iter()
+        .map(|(_, sid)| *sid)
+        .filter(|sid| *sid != u(TURRET_A))
+        .collect();
     assert_eq!(&m.affected_ids[1..1 + derived.len()], &derived[..]);
     for (_, cid) in &a.components {
         assert!(m.affected_ids.contains(cid), "component {cid} is affected");
@@ -891,20 +915,16 @@ fn unpack_prefab_writes_the_expansion_in_place() {
     let order: Vec<Uuid> = sc.entities.iter().map(|e| e.id).collect();
     let at = order.iter().position(|id| *id == u(TURRET_A)).unwrap();
     assert_eq!(&order[at + 1..at + 1 + derived.len()], &derived[..]);
-    // The instance roots are the anchor's trailing children, each derived
+    // The root's children lead the instance's children, each derived
     // entity's parent points back into the scene.
-    let roots: Vec<Uuid> = a
-        .entities
+    let kids: Vec<Uuid> = derived
         .iter()
-        .filter(|(_, sid)| sc.entity(*sid).unwrap().parent == Some(u(TURRET_A)))
-        .map(|(_, sid)| *sid)
+        .copied()
+        .filter(|sid| sc.entity(*sid).unwrap().parent == Some(u(TURRET_A)))
         .collect();
-    assert!(!roots.is_empty());
-    assert_eq!(
-        anchor.children[anchor.children.len() - roots.len()..],
-        roots[..]
-    );
-    for (_, sid) in &a.entities {
+    assert!(!kids.is_empty());
+    assert_eq!(anchor.children[..kids.len()], kids[..]);
+    for sid in &derived {
         let e = sc.entity(*sid).unwrap();
         assert!(
             sc.entity(e.parent.unwrap()).is_some(),
@@ -1006,12 +1026,13 @@ fn unpack_prefab_of_an_imported_hierarchy() {
     assert_eq!(
         names,
         [
-            "Camera", "Sun", "Rig", "Body", "hips", "spine", "head", "Prop", "Imported", "Rig",
-            "Body", "hips", "spine", "head", "Prop"
+            "Camera", "Sun", "Rig", "Body", "hips", "spine", "head", "Prop", "Imported", "Body",
+            "hips", "spine", "head", "Prop"
         ]
     );
+    // `Imported` is the rig's root: the Prop hangs off it directly.
     let prop = sc.entities.last().unwrap();
-    assert_eq!(prop.parent, Some(sc.entities[9].id));
+    assert_eq!(prop.parent, Some(sc.entities[8].id));
     let renderer = prop
         .components
         .iter()
@@ -1490,7 +1511,7 @@ fn document_fields_on_scenes_leave_the_entity_tree_to_entity_commands() {
         editor.document().root.get("name").and_then(Node::as_str),
         Some("Renamed scene")
     );
-    for pointer in ["/entities", &format!("/entities/{ROOT}/name"), "/roots"] {
+    for pointer in ["/entities", &format!("/entities/{ROOT}/name"), "/root"] {
         let r = editor.apply(
             Request::new(vec![Command::SetDocumentField {
                 pointer: pointer.to_string(),
@@ -1636,14 +1657,27 @@ fn duplicate_object_copies_the_subtree_with_fresh_ids() {
 
 #[test]
 fn duplicate_object_in_prefabs_and_of_prefab_instances() {
-    // A prefab root: the copy joins `roots` after the original.
+    // A prefab's root cannot be copied next to itself (one root); a child
+    // is copied next to the original.
     let (mut editor, original) = open("valid/turret.prefab.json");
     let prefab = Prefab::from_document(editor.document().clone());
-    let root = prefab.roots[0];
+    let root = prefab.root;
+    let r = editor.apply(
+        Request::new(vec![Command::DuplicateObject {
+            id: root,
+            new_id: None,
+            name: None,
+            index: None,
+        }]),
+        &schemas(),
+    );
+    assert!(!r.ok);
+    assert_eq!(text(&editor), original);
+    let child = prefab.entity(root).unwrap().children[0];
     let r = apply(
         &mut editor,
         vec![Command::DuplicateObject {
-            id: root,
+            id: child,
             new_id: None,
             name: None,
             index: None,
@@ -1651,9 +1685,9 @@ fn duplicate_object_in_prefabs_and_of_prefab_instances() {
     );
     let copy = r.mutations[0].affected_ids[0];
     let after = Prefab::from_document(editor.document().clone());
-    assert_eq!(after.roots[0], root);
-    assert_eq!(after.roots[1], copy);
-    assert_eq!(after.entities.len(), prefab.entities.len() * 2);
+    let children = &after.entity(root).unwrap().children;
+    assert_eq!(children[0], child);
+    assert_eq!(children[1], copy);
     assert!(
         editor.validate(&schemas()).iter().all(|d| !d.is_error()),
         "{:#?}",
@@ -1715,7 +1749,7 @@ fn duplicate_object_in_prefabs_and_of_prefab_instances() {
 fn large_documents_with_many_diagnostics_validate_in_linear_time() {
     fn synthetic(n: usize) -> String {
         let mut s = String::with_capacity(n * 400);
-        s.push_str("{\n  \"$schema\": \"https://fynkel.dev/schemas/scene.schema.json\",\n  \"formatVersion\": 4,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"Big\",\n  \"entities\": {\n");
+        s.push_str("{\n  \"$schema\": \"https://fynkel.dev/schemas/scene.schema.json\",\n  \"formatVersion\": 5,\n  \"id\": \"70d7ba8b-f7fb-4eba-920d-ec9e6b968330\",\n  \"name\": \"Big\",\n  \"entities\": {\n");
         for i in 0..n {
             let id = format!("aaaaaaaa-0000-4000-8000-{:012x}", i + 1);
             let comp = format!("11111111-0000-4000-8000-{:012x}", i + 1);

@@ -1,16 +1,21 @@
 //! Prefab documents, instances and expansion (blueprint §6 Prefabs, §19.2c
 //! item 7).
 //!
-//! A `.prefab.json` is the scene entity model plus declared `roots`
-//! ([`Prefab`]). A scene entity becomes an **instance** by carrying
-//! `prefab: { asset, instance, overrides[] }` ([`crate::scene::PrefabInstance`]):
-//! on expansion the prefab's roots become children of that entity (after
-//! its authored children), every prefab-local entity and component id is
-//! remapped to an id **derived from the instance id** (UUID v5 of the local
-//! id in the instance's namespace — deterministic, so expanding twice gives
-//! the same scene), and internal references — `parent`, `children`, and
-//! any string inside component `data` that equals a prefab-local entity id
-//! — are remapped with them. External references (assets) are shared.
+//! A `.prefab.json` is the scene entity model plus its one `root`
+//! ([`Prefab`], ADR-0022): the root is the only parentless entity and
+//! every other entity descends from it. A scene entity becomes an
+//! **instance** by carrying `prefab: { asset, instance, overrides[] }`
+//! ([`crate::scene::PrefabInstance`]), and on expansion that entity **is**
+//! the prefab's root: it keeps its own id, `name` and `active`, takes the
+//! root's components (it has none of its own, `D0408`) and the root's
+//! children, followed by the children the scene added under it. Every
+//! other prefab-local entity id, and every component id, is remapped to
+//! an id **derived from the instance id** (UUID v5 of the local id in the
+//! instance's namespace — deterministic, so expanding twice gives the same
+//! scene), and internal references — `parent`, `children`, and any string
+//! inside component `data` that equals a prefab-local entity id — are
+//! remapped with them (the root's to the instance's id). External
+//! references (assets) are shared.
 //!
 //! Overrides are an explicit ordered op list addressed by prefab-local ids
 //! (`setField`, `unsetField`, `addComponent`, `removeComponent`,
@@ -29,10 +34,11 @@
 //!
 //! Out of scope: variants, apply/revert.
 //!
-//! Codes: `D0400` roots mismatch, `D0401` unknown prefab, `D0402`
-//! instantiation cycle, `D0403` override target missing, `D0404` override
-//! not applicable, `D0405` duplicate instance id, `D0406` derived id
-//! collision, `D0407` malformed entry.
+//! Codes: `D0400` the root is not the one parentless entity, `D0401`
+//! unknown prefab, `D0402` instantiation cycle, `D0403` override target
+//! missing, `D0404` override not applicable, `D0405` duplicate instance
+//! id, `D0406` derived id collision, `D0407` malformed entry, `D0408` an
+//! instance with components of its own.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -53,8 +59,8 @@ pub struct Prefab {
     pub document: Document,
     /// Document order.
     pub entities: Vec<Entity>,
-    /// As declared.
-    pub roots: Vec<Uuid>,
+    /// As declared (nil when missing or malformed; reported).
+    pub root: Uuid,
     index: HashMap<Uuid, usize>,
     read_diagnostics: Vec<Diagnostic>,
 }
@@ -72,27 +78,28 @@ impl Prefab {
             );
         }
         let (entities, index) = read_entities(&document.root, &mut diags);
-        let mut roots = Vec::new();
-        match document.root.get("roots").and_then(Node::as_array) {
-            Some(items) => {
-                for (i, item) in items.iter().enumerate() {
-                    match item.as_str().map(crate::parse_uuid) {
-                        Some(Ok(u)) => roots.push(u),
-                        _ => diags.push(anchor(
-                            &document.root,
-                            Diagnostic::error(Code::MALFORMED_ID, "root must be a canonical UUID"),
-                            &format!("/roots/{i}"),
-                        )),
-                    }
+        let root = match document.root.get("root") {
+            Some(node) => match node.as_str().map(crate::parse_uuid) {
+                Some(Ok(u)) => u,
+                _ => {
+                    diags.push(anchor(
+                        &document.root,
+                        Diagnostic::error(Code::MALFORMED_ID, "root must be a canonical UUID"),
+                        "/root",
+                    ));
+                    Uuid::nil()
                 }
+            },
+            None => {
+                diags.push(anchor(
+                    &document.root,
+                    Diagnostic::error(Code::PREFAB_MALFORMED_ENTRY, "root is required")
+                        .with_suggestion("name the prefab's one parentless entity"),
+                    "",
+                ));
+                Uuid::nil()
             }
-            None => diags.push(anchor(
-                &document.root,
-                Diagnostic::error(Code::PREFAB_MALFORMED_ENTRY, "roots is required")
-                    .with_suggestion("list the parentless entities in instantiation order"),
-                "",
-            )),
-        }
+        };
         for d in &mut diags {
             if d.document.is_none() {
                 d.document = document.path.clone();
@@ -101,7 +108,7 @@ impl Prefab {
         Prefab {
             document,
             entities,
-            roots,
+            root,
             index,
             read_diagnostics: diags,
         }
@@ -129,7 +136,7 @@ impl Prefab {
         self.entities.iter().any(|e| e.prefab.is_some())
     }
 
-    /// The prefab read as a scene (same entities, `roots` ignored), for
+    /// The prefab read as a scene (same entities, `root` ignored), for
     /// expansion and description with the scene machinery.
     pub fn scene(&self) -> Scene {
         Scene::from_document(Document {
@@ -141,7 +148,7 @@ impl Prefab {
     }
 
     /// Envelope + JSON Schema, read problems, hierarchy/component rules,
-    /// and the prefab rules (`roots`). Its own instances are checked by
+    /// and the prefab rules (`root`). Its own instances are checked by
     /// expansion (`PrefabLibrary::flattened`), as a scene's are.
     pub fn validate(&self, schemas: &SchemaSet) -> Vec<Diagnostic> {
         let mut out = self.document.validate(schemas);
@@ -173,65 +180,44 @@ impl Prefab {
             &|id| self.entity(id),
             schemas,
         );
-        // roots ⇔ parentless entities, each once (`/roots/<i>` lookups
-        // never cross the entity map, so the plain anchor is fine here).
-        let parentless: Vec<Uuid> = self
+        // One root: an entity of the prefab, without a parent, and the only
+        // parentless entity (`/root` never crosses the entity map, so the
+        // plain anchor is fine here).
+        let mismatch = |msg: String| Diagnostic::error(Code::PREFAB_ROOT, msg);
+        match self.entity(self.root) {
+            _ if self.root.is_nil() => {} // reported when read
+            None => out.push(anchor(
+                root,
+                mismatch(format!(
+                    "root {} is not an entity of this prefab",
+                    self.root
+                ))
+                .with_suggestion("name the prefab's one parentless entity"),
+                "/root",
+            )),
+            Some(e) if e.parent.is_some() => out.push(anchor(
+                root,
+                mismatch(format!("root {} ({:?}) has a parent", e.id, e.name))
+                    .with_id(e.id.to_string())
+                    .with_suggestion("the root is the prefab's one parentless entity"),
+                "/root",
+            )),
+            Some(_) => {}
+        }
+        for e in self
             .entities
             .iter()
-            .filter(|e| e.parent.is_none())
-            .map(|e| e.id)
-            .collect();
-        let mut seen = HashSet::new();
-        for (i, r) in self.roots.iter().enumerate() {
-            let pointer = format!("/roots/{i}");
-            if !seen.insert(*r) {
-                out.push(anchor(
-                    root,
-                    Diagnostic::error(
-                        Code::PREFAB_ROOTS_MISMATCH,
-                        format!("root {r} is listed twice"),
-                    ),
-                    &pointer,
-                ));
-                continue;
-            }
-            match self.entity(*r) {
-                None => out.push(anchor(
-                    root,
-                    Diagnostic::error(
-                        Code::PREFAB_ROOTS_MISMATCH,
-                        format!("root {r} is not an entity of this prefab"),
-                    )
-                    .with_suggestion("remove it from roots"),
-                    &pointer,
-                )),
-                Some(e) if e.parent.is_some() => out.push(anchor(
-                    root,
-                    Diagnostic::error(
-                        Code::PREFAB_ROOTS_MISMATCH,
-                        format!("root {r} ({:?}) has a parent", e.name),
-                    )
-                    .with_id(e.id.to_string())
-                    .with_suggestion("roots are the parentless entities only"),
-                    &pointer,
-                )),
-                Some(_) => {}
-            }
-        }
-        for id in parentless.iter().filter(|id| !seen.contains(id)) {
-            let e = self.entity(*id).unwrap();
+            .filter(|e| e.parent.is_none() && e.id != self.root)
+        {
             out.push(anchor(
                 root,
-                Diagnostic::error(
-                    Code::PREFAB_ROOTS_MISMATCH,
-                    format!(
-                        "parentless entity {id} ({:?}) is missing from roots",
-                        e.name
-                    ),
-                )
-                .with_id(id.to_string())
-                .with_suggestion(format!("append {id} to roots")),
-                "/roots",
+                mismatch(format!(
+                    "{} ({:?}) has no parent but is not the root: a prefab has one root",
+                    e.id, e.name
+                ))
+                .with_id(e.id.to_string())
+                .with_suggestion(format!("make it a child of the root {}", self.root)),
+                &format!("{}/parent", e.pointer),
             ));
         }
         for d in &mut out {
@@ -585,6 +571,17 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The default Transform's `data`: at the origin, unrotated, unit scale.
+pub fn identity_transform() -> Node {
+    let v =
+        |xs: &[f64]| Node::synthetic(Value::Array(xs.iter().map(|x| Node::float(*x)).collect()));
+    Node::object(vec![
+        ("position".into(), v(&[0.0, 0.0, 0.0])),
+        ("rotation".into(), v(&[0.0, 0.0, 0.0, 1.0])),
+        ("scale".into(), v(&[1.0, 1.0, 1.0])),
+    ])
+}
+
 /// Prefab-local id → scene id for one instance: UUID v5 in the instance's
 /// namespace. Deterministic; the same instance always yields the same ids.
 pub fn derive_id(instance: Uuid, local: Uuid) -> Uuid {
@@ -699,6 +696,11 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             // Reported by Scene::validate (D0405); do not expand twice.
             continue;
         }
+        if !e.components.is_empty() {
+            // Reported by validation (D0408): the root's components are
+            // the instance's; there is nothing to put its own next to.
+            continue;
+        }
         let Some(prefab) = library.get_ref(&inst.asset) else {
             diagnostics.push(anchor(
                 src,
@@ -741,6 +743,24 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             continue;
         }
 
+        if prefab
+            .entity(prefab.root)
+            .is_none_or(|r| r.parent.is_some())
+        {
+            // Reported by the prefab's own validation (D0400).
+            diagnostics.push(anchor(
+                src,
+                Diagnostic::error(
+                    Code::PREFAB_ROOT,
+                    format!("prefab {} has no valid root", inst.describe()),
+                )
+                .with_id(e.id.to_string())
+                .with_suggestion("fix the prefab first (see its diagnostics)"),
+                &format!("{}/asset", inst.pointer),
+            ));
+            continue;
+        }
+
         // Working copy of the prefab, then the overrides in order.
         let mut work = Working::new(prefab);
         let mut touched: HashMap<(Uuid, Uuid), String> = HashMap::new();
@@ -775,6 +795,11 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                         Err(fail(
                             Code::PREFAB_OVERRIDE_INVALID,
                             format!("addObject: entity {entity} already exists"),
+                        ))
+                    } else if parent.is_none() {
+                        Err(fail(
+                            Code::PREFAB_OVERRIDE_INVALID,
+                            format!("addObject: entity {entity} needs a parent in the prefab (the root at the top)"),
                         ))
                     } else if let Some(p) = parent.filter(|p| work.entity(*p).is_none()) {
                         Err(fail(
@@ -899,11 +924,19 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                         Ok(())
                     }
                 }
+                OverrideOp::RemoveObject { entity } if *entity == work.root => Err(fail(
+                    Code::PREFAB_OVERRIDE_INVALID,
+                    "removeObject: the root is the instance itself; delete the instance".to_string(),
+                )),
                 OverrideOp::RemoveObject { entity } => {
                     let removed = work.remove_subtree(*entity);
                     touched.retain(|(en, _), _| !removed.contains(en));
                     Ok(())
                 }
+                OverrideOp::SetActive { entity, .. } if *entity == work.root => Err(fail(
+                    Code::PREFAB_OVERRIDE_INVALID,
+                    "setActive: the root's active flag is the instance's own; set it on the instance".to_string(),
+                )),
                 OverrideOp::SetActive { value, .. } => {
                     work.entity_mut(entity_id).unwrap().active = *value;
                     Ok(())
@@ -946,9 +979,16 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             continue;
         }
 
-        // Remap and emit.
+        // Remap and emit: the root is the instance entity itself.
+        let root_local = work.root;
         let local_ids: HashSet<Uuid> = work.entities.iter().map(|w| w.id).collect();
-        let map_entity = |id: Uuid| derive_id(inst.instance, id);
+        let map_entity = |id: Uuid| {
+            if id == root_local {
+                e.id
+            } else {
+                derive_id(inst.instance, id)
+            }
+        };
         let mut expanded = ExpandedInstance {
             anchor: e.id,
             instance: inst.instance,
@@ -959,7 +999,7 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
         let mut collision = None;
         for w in &work.entities {
             let sid = map_entity(w.id);
-            if !taken.insert(sid) {
+            if w.id != root_local && !taken.insert(sid) {
                 collision = Some(sid);
             }
             expanded.entities.push((w.id, sid));
@@ -984,41 +1024,52 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             ));
             continue;
         }
-        let mut new_members: Vec<Member> = Vec::with_capacity(work.entities.len());
-        for w in &work.entities {
-            let parent = match w.parent {
-                Some(p) => Node::string(map_entity(p).to_string()),
-                None => Node::string(e.id.to_string()),
-            };
-            let children: Vec<Node> = w
-                .children
+        let components_of = |w: &Entity| -> Node {
+            Node::object(
+                w.components
+                    .iter()
+                    .map(|c| {
+                        let mut data = c.data.clone();
+                        remap_strings(&mut data, &local_ids, &map_entity);
+                        (
+                            derive_id(inst.instance, c.id).to_string(),
+                            Node::object(vec![
+                                ("type".into(), Node::string(c.type_id.clone())),
+                                ("version".into(), Node::integer(c.version as i64)),
+                                ("data".into(), data),
+                            ]),
+                        )
+                    })
+                    .collect(),
+            )
+        };
+        let children_of = |w: &Entity| -> Vec<Node> {
+            w.children
                 .iter()
                 .map(|c| Node::string(map_entity(*c).to_string()))
-                .collect();
-            let components: Vec<(String, Node)> = w
-                .components
-                .iter()
-                .map(|c| {
-                    let mut data = c.data.clone();
-                    remap_strings(&mut data, &local_ids, &map_entity);
-                    (
-                        derive_id(inst.instance, c.id).to_string(),
-                        Node::object(vec![
-                            ("type".into(), Node::string(c.type_id.clone())),
-                            ("version".into(), Node::integer(c.version as i64)),
-                            ("data".into(), data),
-                        ]),
-                    )
-                })
-                .collect();
+                .collect()
+        };
+        let mut new_members: Vec<Member> = Vec::with_capacity(work.entities.len());
+        let mut root_entity = None;
+        for w in &work.entities {
+            if w.id == root_local {
+                root_entity = Some(w);
+                continue;
+            }
+            let parent = Node::string(
+                map_entity(w.parent.expect("only the root is parentless")).to_string(),
+            );
             let mut members = vec![("name".into(), Node::string(w.name.clone()))];
             if !w.active {
                 members.push(("active".into(), Node::synthetic(Value::Bool(false))));
             }
             members.extend([
                 ("parent".into(), parent),
-                ("children".into(), Node::synthetic(Value::Array(children))),
-                ("components".into(), Node::object(components)),
+                (
+                    "children".into(),
+                    Node::synthetic(Value::Array(children_of(w))),
+                ),
+                ("components".into(), components_of(w)),
             ]);
             new_members.push(Member {
                 key: map_entity(w.id).to_string(),
@@ -1026,6 +1077,7 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                 value: Node::object(members),
             });
         }
+        let root_entity = root_entity.expect("the root is never removed");
         let entities = root
             .get_mut("entities")
             .and_then(Node::as_object_mut)
@@ -1034,14 +1086,15 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
             .iter()
             .position(|m| m.key == e.id.to_string())
             .expect("anchor entity exists");
-        // Instance roots become the anchor's trailing children.
-        if let Some(children) = entities[anchor_index].value.get_mut("children") {
-            if let Value::Array(items) = &mut children.value {
-                for r in &work.roots {
-                    items.push(Node::string(map_entity(*r).to_string()));
-                }
-            }
+        // The instance takes the root's components, and the root's children
+        // before the ones the scene added under it.
+        let node = &mut entities[anchor_index].value;
+        let mut children = children_of(root_entity);
+        if let Some(Value::Array(own)) = node.get("children").map(|c| &c.value) {
+            children.extend(own.iter().cloned());
         }
+        node.set("children", Node::synthetic(Value::Array(children)));
+        node.set("components", components_of(root_entity));
         let tail = entities.split_off(anchor_index + 1);
         entities.extend(new_members);
         entities.extend(tail);
@@ -1068,14 +1121,14 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
 /// A prefab's entities being edited by overrides.
 struct Working {
     entities: Vec<Entity>,
-    roots: Vec<Uuid>,
+    root: Uuid,
 }
 
 impl Working {
     fn new(prefab: &Prefab) -> Working {
         Working {
             entities: prefab.entities.clone(),
-            roots: prefab.roots.clone(),
+            root: prefab.root,
         }
     }
 
@@ -1101,9 +1154,8 @@ impl Working {
         components: Vec<Component>,
         pointer: &str,
     ) {
-        match parent {
-            Some(p) => self.entity_mut(p).unwrap().children.push(id),
-            None => self.roots.push(id),
+        if let Some(p) = parent {
+            self.entity_mut(p).unwrap().children.push(id);
         }
         self.entities.push(Entity {
             id,
@@ -1133,7 +1185,6 @@ impl Working {
         for e in &mut self.entities {
             e.children.retain(|c| !removed.contains(c));
         }
-        self.roots.retain(|r| !removed.contains(r));
         removed
     }
 }
@@ -1178,7 +1229,7 @@ pub fn inspect_json(prefab: &Prefab) -> serde_json::Value {
         "formatVersion": prefab.document.envelope.format_version,
         "revision": crate::authoring::Revision::of(&prefab.document).map(|r| r.to_string()).ok(),
         "entityCount": prefab.entities.len(),
-        "roots": prefab.roots.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
+        "root": prefab.root.to_string(),
         "entities": prefab.entities.iter().map(|e| serde_json::json!({
             "id": e.id.to_string(),
             "name": e.name,
@@ -1191,7 +1242,7 @@ pub fn inspect_json(prefab: &Prefab) -> serde_json::Value {
     })
 }
 
-/// Human `inspect` output: roots first, indented by depth.
+/// Human `inspect` output: the root first, indented by depth.
 pub fn inspect_text(prefab: &Prefab) -> String {
     fn walk(prefab: &Prefab, e: &Entity, depth: usize, out: &mut String) {
         let types: Vec<&str> = e.components.iter().map(|c| c.type_id.as_str()).collect();
@@ -1219,14 +1270,13 @@ pub fn inspect_text(prefab: &Prefab) -> String {
         }
     }
     let mut out = format!(
-        "prefab {:?} ({}) formatVersion {}: {} entities, {} roots\n",
+        "prefab {:?} ({}) formatVersion {}: {} entities\n",
         prefab.document.envelope.name,
         prefab.id(),
         prefab.document.envelope.format_version,
         prefab.entities.len(),
-        prefab.roots.len()
     );
-    for r in prefab.roots.iter().filter_map(|r| prefab.entity(*r)) {
+    if let Some(r) = prefab.entity(prefab.root) {
         walk(prefab, r, 0, &mut out);
     }
     out

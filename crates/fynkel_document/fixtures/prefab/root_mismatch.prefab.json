@@ -1,8 +1,9 @@
 {
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "10000000-0000-4000-8000-000000000002",
-  "name": "Roots mismatch",
+  "name": "Root mismatch",
+  "root": "10000000-0000-4000-8000-0000000000b3",
   "entities": {
     "10000000-0000-4000-8000-0000000000b1": {
       "name": "A",
@@ -24,9 +25,5 @@
       "children": [],
       "components": {}
     }
-  },
-  "roots": [
-    "10000000-0000-4000-8000-0000000000b1",
-    "10000000-0000-4000-8000-0000000000b3"
-  ]
+  }
 }

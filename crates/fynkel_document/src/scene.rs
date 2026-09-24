@@ -19,11 +19,13 @@
 //! - component `data` must match the type's schema (`D0206`, via the
 //!   loaded component schemas);
 //! - engine-managed components may not be authored (`D0207`);
-//! - prefab instance ids are unique per scene (`D0405`); resolving and
-//!   expanding instances is [`crate::prefab`].
+//! - prefab instance ids are unique per scene (`D0405`), and an instance
+//!   has no components of its own (`D0408`: it is the prefab's root, whose
+//!   components it takes); resolving and expanding instances is
+//!   [`crate::prefab`].
 //!
 //! The entity/component reading and the rules above are shared with prefab
-//! documents ([`crate::prefab::Prefab`]), which add `roots`.
+//! documents ([`crate::prefab::Prefab`]), which add `root`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -118,8 +120,9 @@ pub enum OverrideOp {
         entity: Uuid,
         component: Uuid,
     },
-    /// Adds an object under `parent` (or as a new instance root when
-    /// `None`), appended to the parent's children.
+    /// Adds an object under `parent`, appended to the parent's children.
+    /// `None` is read (a formatVersion 4 document said so for a new
+    /// instance root) and refused by expansion: a prefab has one root.
     AddObject {
         entity: Uuid,
         name: String,
@@ -438,7 +441,23 @@ pub(crate) fn validate_entities<'a>(
         ));
     }
 
-    // Components.
+    // Components. An instance has none of its own (ADR-0022).
+    for e in entities.iter().filter(|e| e.prefab.is_some()) {
+        if let Some(c) = e.components.first() {
+            out.push(anchor(
+                Diagnostic::error(
+                    Code::PREFAB_INSTANCE_COMPONENTS,
+                    format!(
+                        "{:?} is a prefab instance and has components of its own; an instance is the prefab's root and takes its components",
+                        e.name
+                    ),
+                )
+                .with_id(e.id.to_string())
+                .with_suggestion("change the root's components with overrides (setField, addComponent)"),
+                &c.pointer,
+            ));
+        }
+    }
     for e in entities {
         let mut types: HashMap<&str, &Component> = HashMap::new();
         for c in &e.components {

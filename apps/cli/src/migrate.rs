@@ -16,7 +16,7 @@ use fynkel_document::{
     diagnostics_json, has_errors, Diagnostic, Document, DocumentKind, Migrations,
 };
 use fynkel_import::keys_migration::{
-    document_files, is_outdated_model_sidecar, migrate_documents, Planned,
+    document_files, is_outdated_model_sidecar, migrate_documents_with, Planned,
 };
 
 pub fn usage() -> ExitCode {
@@ -138,7 +138,20 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let mut seen = std::collections::HashSet::new();
     files.retain(|f| seen.insert(std::fs::canonicalize(f).unwrap_or_else(|_| f.clone())));
 
-    let (planned, plan_diags) = migrate_documents(&files, &migrations, &schemas);
+    // What the files point at — the prefabs and models an instance names
+    // (ADR-0022's one-root step) — is read from their projects, not
+    // migrated.
+    let mut context = Vec::new();
+    let mut seen_projects: Vec<PathBuf> = Vec::new();
+    for path in &files {
+        if let Some(dir) = project_dir(path) {
+            if !seen_projects.contains(&dir) {
+                context.extend(document_files(&dir).unwrap_or_default());
+                seen_projects.push(dir);
+            }
+        }
+    }
+    let (planned, plan_diags) = migrate_documents_with(&files, &context, &migrations, &schemas);
     diags.extend(plan_diags);
     let mut reports = Vec::new();
     let mut changed = 0usize;

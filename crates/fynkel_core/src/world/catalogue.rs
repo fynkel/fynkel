@@ -291,20 +291,34 @@ impl World {
                 }
                 continue;
             };
-            let transform = Transform {
+            // The prefab's root keeps its own rotation and scale, placed
+            // at the emitter's pose (ADR-0022: the instance is the root).
+            let own = prefab
+                .entities
+                .iter()
+                .find(|d| d.parent.is_none())
+                .and_then(|d| {
+                    d.components.iter().find_map(|c| match c {
+                        crate::ComponentValue::Transform(t) => Some(*t),
+                        _ => None,
+                    })
+                })
+                .unwrap_or(Transform::IDENTITY);
+            let pose = Transform {
                 position: e.position,
                 rotation: e.rotation,
                 scale: Vec3::ONE,
             };
+            let transform = Transform::from_matrix(pose.matrix() * own.matrix());
             for _ in 0..e.count {
-                let Ok((anchor, loaded)) =
+                let Ok((root, loaded)) =
                     self.instantiate_inner(&prefab, &prefab.name, transform, None, tick, false)
                 else {
                     break;
                 };
                 if e.lifetime > 0.0 {
                     let _ = self.ecs.insert(
-                        anchor,
+                        root,
                         LifetimeDespawn {
                             seconds: e.lifetime,
                         },
@@ -326,7 +340,7 @@ impl World {
                     }
                 }
                 if let Ok(mut run) = self.ecs.get_mut::<EmitterRun>(e.emitter) {
-                    run.alive.push(anchor);
+                    run.alive.push(root);
                 }
             }
         }

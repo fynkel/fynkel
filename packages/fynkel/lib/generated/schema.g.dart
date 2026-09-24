@@ -2838,7 +2838,7 @@ class LifetimeDespawn implements WireRecord {
   String toString() => 'LifetimeDespawn(seconds: $seconds)';
 }
 
-/// Instantiates `prefab` at the entity's world pose `rate` times per second (pre-tick slot; the fractional remainder carries over so 2.5/s alternates 2 and 3 per second): each instance is an unparented anchor named after the prefab whose children are the prefab's roots — exactly `World::instantiate` — with a `LifetimeDespawn { seconds: lifetime }` when `lifetime > 0`, and every dynamic `RigidBody` in it starts at `velocity` (world axes). With `max_alive > 0` no more are spawned while that many of this emitter's instances live. The world must know the prefab (`World::register_prefab`; the loaders register every prefab a loaded scene's emitters name, `PREFAB_UNAVAILABLE` once otherwise).
+/// Instantiates `prefab` at the entity's world pose `rate` times per second (pre-tick slot; the fractional remainder carries over so 2.5/s alternates 2 and 3 per second): each instance is the prefab's root, unparented and named after the prefab, with the prefab's other entities under it — exactly `World::instantiate` — with a `LifetimeDespawn { seconds: lifetime }` on the root when `lifetime > 0`, and every dynamic `RigidBody` in it starts at `velocity` (world axes). With `max_alive > 0` no more are spawned while that many of this emitter's instances live. The world must know the prefab (`World::register_prefab`; the loaders register every prefab a loaded scene's emitters name, `PREFAB_UNAVAILABLE` once otherwise).
 ///
 /// `fynkel.Emitter` (component, id 19, 56 bytes).
 class Emitter implements WireRecord {

@@ -135,14 +135,15 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
     assert_eq!(v["prefab"]["handle"], Value::Null, "not open yet");
     assert_eq!(v["prefab"]["readOnly"], Value::Null);
 
-    // One derived entity, parented to the anchor, its ids the runtime's.
-    assert_eq!(names(&v), ["Crate"]);
+    // One entity: the prefab's root is the instance itself (its id and
+    // name, ADR-0022), its components under the ids the runtime derives.
+    assert_eq!(names(&v), ["Crate A"]);
     let e = &v["entities"][0];
-    let crate_id = derived(CRATE_A_INSTANCE, CRATE_LOCAL);
+    let crate_id = CRATE_A.to_string();
     let renderer_id = derived(CRATE_A_INSTANCE, CRATE_LOCAL_RENDERER);
     assert_eq!(e["id"], crate_id);
     assert_eq!(e["local"], CRATE_LOCAL);
-    assert_eq!(e["parent"], CRATE_A);
+    assert_eq!(e["parent"], Value::Null);
     assert_eq!(e["children"], json!([]));
     assert_eq!(e["added"], false);
     assert_eq!(e["active"], true);
@@ -157,7 +158,12 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
     assert_eq!(renderer["overridden"], json!(["cast_shadows"]));
     assert_eq!(renderer["added"], false);
     let transform = &e["components"][derived(CRATE_A_INSTANCE, CRATE_LOCAL_TRANSFORM)];
-    assert_eq!(transform["overridden"], json!([]));
+    assert_eq!(
+        transform["overridden"],
+        json!(["position"]),
+        "where it stands"
+    );
+    assert_eq!(transform["data"]["position"], json!([2.0, 0.5, 0.0]));
 
     // The override, annotated with where it landed.
     let o = &v["overrides"][0];
@@ -165,7 +171,7 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
     assert_eq!(o["op"], "setField");
     assert_eq!(o["entity"], CRATE_LOCAL);
     assert_eq!(o["entityId"], crate_id);
-    assert_eq!(o["entityName"], "Crate");
+    assert_eq!(o["entityName"], "Crate A");
     assert_eq!(o["component"], CRATE_LOCAL_RENDERER);
     assert_eq!(o["componentId"], renderer_id);
     assert_eq!(o["componentType"], "fynkel.MeshRenderer");
@@ -176,20 +182,29 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
         format!("/entities/{CRATE_A}/prefab/overrides/0")
     );
 
-    // Live: the prefab opened and renamed in its own editor shows through
-    // the instance before anything is saved; its handle is reported.
+    // Live: the prefab opened and changed in its own editor shows through
+    // the instance before anything is saved; its handle is reported. The
+    // instance's own name wins over the root's.
     let p = s.open_document(CRATE_PREFAB).unwrap();
     assert_eq!(instance(&s, h, CRATE_A)["prefab"]["handle"], p);
     apply(
         &mut s,
         p,
-        json!([{ "command": "renameObject", "id": CRATE_LOCAL, "name": "Box" }]),
+        json!([
+            { "command": "renameObject", "id": CRATE_LOCAL, "name": "Box" },
+            { "command": "setField", "entity": CRATE_LOCAL, "component": CRATE_LOCAL_TRANSFORM, "field": "scale", "value": [2, 2, 2] }
+        ]),
     );
     let v = instance(&s, h, CRATE_A);
-    assert_eq!(names(&v), ["Box"]);
-    assert_eq!(v["overrides"][0]["entityName"], "Box");
+    assert_eq!(names(&v), ["Crate A"]);
+    let transform =
+        &v["entities"][0]["components"][derived(CRATE_A_INSTANCE, CRATE_LOCAL_TRANSFORM)];
+    assert_eq!(transform["data"]["scale"], json!([2, 2, 2]));
     s.undo(p).unwrap();
-    assert_eq!(names(&instance(&s, h, CRATE_A)), ["Crate"]);
+    let v = instance(&s, h, CRATE_A);
+    let transform =
+        &v["entities"][0]["components"][derived(CRATE_A_INSTANCE, CRATE_LOCAL_TRANSFORM)];
+    assert_eq!(transform["data"]["scale"], json!([1, 1, 1]));
 
     // Every override kind marks its target.
     let sensor = derived(CRATE_A_INSTANCE, "c0000000-0000-4000-8000-0000000000aa");
@@ -215,7 +230,7 @@ fn the_instance_query_expands_one_anchor_with_its_overrides_marked() {
     );
     let v = instance(&s, h, CRATE_A);
     assert_eq!(v["expanded"], true, "{:#}", v["diagnostics"]);
-    assert_eq!(names(&v), ["Crate", "Lid"]);
+    assert_eq!(names(&v), ["Crate A", "Lid"]);
     let e = &v["entities"][0];
     // The second setField replaced the first on the same field (an
     // override's `field` is a whole key of `data`, never a pointer into it).
@@ -382,11 +397,12 @@ fn apply_to_prefab_is_two_transactions_and_unpack_is_one() {
         ]),
     );
     assert_eq!(r["mutations"].as_array().unwrap().len(), 2);
+    // The coin is its prefab's root: it stays itself, with its components.
     assert_eq!(r["mutations"][1]["affectedIds"][0], coin);
-    assert_eq!(
-        r["mutations"][1]["affectedIds"][1],
-        derived(coin_instance, COIN_LOCAL)
-    );
+    assert!(r["mutations"][1]["affectedIds"]
+        .as_array()
+        .unwrap()
+        .contains(&json!(trigger)));
     let live = s.document(h).unwrap().editor.document().write().unwrap();
     assert_eq!(live, expected);
     let err = s
@@ -394,18 +410,11 @@ fn apply_to_prefab_is_two_transactions_and_unpack_is_one() {
         .unwrap_err();
     assert_eq!(err[0].code.as_str(), "FYN-E0008", "a plain entity now");
     let part = s
-        .query(
-            "document",
-            &json!({ "handle": h, "ids": [derived(coin_instance, COIN_LOCAL)] }),
-        )
+        .query("document", &json!({ "handle": h, "ids": [coin] }))
         .unwrap();
+    assert_eq!(part["entities"][&coin]["name"], "Coin");
     assert_eq!(
-        part["entities"][derived(coin_instance, COIN_LOCAL)]["name"],
-        "Coin"
-    );
-    assert_eq!(
-        part["entities"][derived(coin_instance, COIN_LOCAL)]["components"][&trigger]["data"]
-            ["event"],
+        part["entities"][&coin]["components"][&trigger]["data"]["event"],
         "pickup"
     );
     assert_eq!(s.inspect_json(h).unwrap()["instanceCount"], 0);
@@ -437,12 +446,12 @@ fn broken_and_missing_prefabs_are_shown_and_left_alone() {
     assert_eq!(v["expanded"], false);
     assert_eq!(v["entities"], json!([]));
     assert_eq!(v["prefab"]["name"], "Crate", "the prefab itself is known");
-    assert_eq!(v["overrides"].as_array().unwrap().len(), 2);
-    assert_eq!(v["overrides"][1]["entityId"], Value::Null);
+    assert_eq!(v["overrides"].as_array().unwrap().len(), 3);
+    assert_eq!(v["overrides"][2]["entityId"], Value::Null);
     assert_eq!(v["diagnostics"][0]["code"], "FYN-D0403");
     assert_eq!(
         v["diagnostics"][0]["pointer"],
-        format!("/entities/{CRATE_A}/prefab/overrides/1")
+        format!("/entities/{CRATE_A}/prefab/overrides/2")
     );
     // Unpacking it is refused with the same diagnostic; nothing changes.
     let before = s.state_json(h).unwrap()["revision"].clone();
@@ -514,7 +523,10 @@ fn imported_hierarchies_open_read_only_and_instances_of_them_expand() {
         reason.contains("column.rig.json#prefab") && reason.contains("import --prefab"),
         "{reason}"
     );
-    assert_eq!(names(&v), ["Rig", "Body", "hips", "spine", "head", "Prop"]);
+    assert_eq!(
+        names(&v),
+        ["Imported", "Body", "hips", "spine", "head", "Prop"]
+    );
     let prop = &v["entities"][5];
     let renderer = prop["components"]
         .as_object()
@@ -608,7 +620,8 @@ fn imported_hierarchies_open_read_only_and_instances_of_them_expand() {
         assert_eq!(err[0].code.as_str(), code, "{what}: {err:#?}");
     }
 
-    // Unpack Imported: the scene holds the six derived entities, the way
+    // Unpack Imported: it becomes the rig's root, the scene holds the five
+    // derived entities under it, the way
     // `fynkel scene inspect --expand` shows them; one undo step.
     let r = apply(
         &mut s,
@@ -617,7 +630,7 @@ fn imported_hierarchies_open_read_only_and_instances_of_them_expand() {
     );
     assert!(r["mutations"][0]["affectedIds"].as_array().unwrap().len() > 7);
     let inspect = s.inspect_json(h).unwrap();
-    assert_eq!(inspect["entityCount"], 15);
+    assert_eq!(inspect["entityCount"], 14);
     assert_eq!(inspect["instanceCount"], 0);
     assert_eq!(inspect["diagnostics"], json!([]));
     let expected = {

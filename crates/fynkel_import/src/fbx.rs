@@ -60,8 +60,10 @@ use crate::{read_source, Imported, Limits};
 pub const IMPORTER: &str = fynkel_document::asset::FBX_IMPORTER;
 /// 2: sub-asset keys are the parts' names once the sidecar is at
 /// `formatVersion` 2 (`subkey`). 3: `settings.materials` remaps embedded
-/// materials in the model's hierarchy (`graph::remap_materials`).
-pub const IMPORTER_VERSION: u32 = 3;
+/// materials in the model's hierarchy (`graph::remap_materials`). 4: the
+/// hierarchy has one root (ADR-0022; a new root named after the file over
+/// several top-level nodes).
+pub const IMPORTER_VERSION: u32 = 4;
 
 struct Ctx<'a> {
     path: &'a Path,

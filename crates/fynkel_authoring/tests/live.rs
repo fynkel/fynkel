@@ -81,7 +81,10 @@ fn entities_carry_authoring_ids_and_the_games_own_are_runtime() {
     let prefab = SceneDescription {
         id: id(50),
         name: "Coin".into(),
-        entities: vec![entity(51, None, &[], vec![at(0.0)])],
+        entities: vec![
+            entity(51, None, &[52], vec![at(0.0)]),
+            entity(52, Some(51), &[], vec![at(1.0)]),
+        ],
     };
     w.instantiate(&prefab, "Coin", Transform::default(), None)
         .unwrap();
@@ -123,8 +126,8 @@ fn entities_carry_authoring_ids_and_the_games_own_are_runtime() {
         .collect();
     assert_eq!(
         names,
-        ["Coin", "e51", "Bullet"],
-        "an instance root, its prefab's entity, a spawn"
+        ["Coin", "e52", "Bullet"],
+        "an instance (the prefab's root, renamed), its child, a spawn"
     );
     for r in &rows[4..] {
         assert!(r["id"].as_str().unwrap().starts_with(RUNTIME_PREFIX), "{r}");

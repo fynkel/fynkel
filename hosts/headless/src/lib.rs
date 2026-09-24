@@ -834,16 +834,16 @@ mod tests {
         let (report, world, loaded) = run_with(&cfg);
         let scene = report.scene.as_ref().unwrap();
         assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
-        // Camera, Robot, Sun, the "Crate A" instance and its expanded
-        // crate, the physics Floor and Crate B (M3-08).
-        assert_eq!((scene.entities, scene.rejected_components), (7, 0));
+        // Camera, Robot, Sun, the "Crate A" instance (the crate prefab's
+        // root), the physics Floor and Crate B (M3-08).
+        assert_eq!((scene.entities, scene.rejected_components), (6, 0));
         assert_eq!(scene.name, "Main");
         assert_eq!(scene.path, "scenes/main.scene.json");
         assert_eq!(scene.key.len(), 64);
         assert_eq!(scene.retained, 8, "the Robot's tone (M3-11) too");
         assert!(report.scene_ready);
         assert_eq!(report.tick, 5);
-        assert_eq!(report.live_entities, 7);
+        assert_eq!(report.live_entities, 6);
         // The Robot's `AudioSource` plays the (very short) tone from the
         // load and it ends within the run; the camera is the listener
         // (M3-11).
@@ -874,22 +874,28 @@ mod tests {
 
         let loaded = loaded.unwrap();
         let dump = dump_json(&world, &loaded);
-        assert_eq!(dump["entityCount"], 7);
+        assert_eq!(dump["entityCount"], 6);
         assert_eq!(dump["tick"], 5);
         let text = dump.to_string();
         assert!(!text.contains("handle:"), "authoring ids only: {text}");
-        // The prefab's crate carries the id the cook derived for it, under
-        // the instance entity.
+        // The instance entity is the crate prefab's root: it keeps its
+        // scene id, carries the crate's components with the instance
+        // override applied by the cook, and the template id is nowhere.
+        let crate_a = dump["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == "c0000000-0000-4000-8000-0000000000e2")
+            .unwrap();
+        assert!(!text.contains("c0000000-0000-4000-8000-0000000000b1"));
+        let renderer = crate_a["components"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["type"] == "fynkel.MeshRenderer")
+            .unwrap();
         assert_eq!(
-            dump["entities"][4]["parent"],
-            "c0000000-0000-4000-8000-0000000000e2"
-        );
-        assert_ne!(
-            dump["entities"][4]["id"], "c0000000-0000-4000-8000-0000000000b1",
-            "the prefab's entity got a derived id, not its template id"
-        );
-        assert_eq!(
-            dump["entities"][4]["components"][1]["data"]["cast_shadows"], false,
+            renderer["data"]["cast_shadows"], false,
             "the instance override was applied by the cook"
         );
         assert_eq!(
@@ -1030,8 +1036,8 @@ mod catalogue_tests {
         assert_eq!(scene.prefabs, 1, "the Spark prefab was registered");
         assert_eq!(report.commands_rejected, 0);
         assert_eq!(report.diagnostics, 0);
-        // Puff and its core gone; 12 Sparks alive, each an anchor + root.
-        assert_eq!(report.live_entities, 10 - 2 + 12 * 2);
+        // Puff and its core gone; 12 Sparks alive, each the prefab's root.
+        assert_eq!(report.live_entities, 10 - 2 + 12);
         let physics = report.physics.as_ref().expect("physics ran");
         assert_eq!(
             (physics.bodies, physics.colliders),
@@ -1275,7 +1281,7 @@ mod animation_tests {
         let (report, world, loaded) = run_with(&cfg);
         let scene = report.scene.as_ref().expect("scene report");
         assert!(scene.loaded, "{:#?}", scene.document_diagnostics);
-        assert_eq!((scene.entities, scene.rejected_components), (15, 0));
+        assert_eq!((scene.entities, scene.rejected_components), (14, 0));
         assert_eq!(report.diagnostics, 0);
         let anim = report.animation.as_ref().expect("animation report");
         assert_eq!(

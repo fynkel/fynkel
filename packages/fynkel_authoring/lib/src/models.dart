@@ -101,11 +101,12 @@ final class DocumentState {
 }
 
 /// One prefab instance's expansion as Prefab mode shows it (the `instance`
-/// query, M4-07): the anchor, the prefab it comes from, the derived
-/// entities with the overrides applied and marked, and the overrides
-/// annotated with where they landed. `expanded` false means the prefab is
-/// missing or an override does not apply — [diagnostics] say why and
-/// [entities] is empty; the anchor keeps its data either way.
+/// query, M4-07): the instance, the prefab it comes from, its entities
+/// with the overrides applied and marked — the first is the instance
+/// itself as the prefab's root (ADR-0022) — and the overrides annotated
+/// with where they landed. `expanded` false means the prefab is missing
+/// or an override does not apply — [diagnostics] say why and [entities]
+/// is empty; the instance keeps its data either way.
 final class PrefabExpansion {
   PrefabExpansion.fromJson(this.json)
       : anchor = json['anchor'] as String? ?? '',
@@ -120,7 +121,7 @@ final class PrefabExpansion {
 
   final Map<String, Object?> json;
 
-  /// The scene entity carrying `prefab`.
+  /// The scene entity carrying `prefab` (the instance, the prefab's root).
   final String anchor;
   final String instance;
 
@@ -132,7 +133,8 @@ final class PrefabExpansion {
   final ExpansionPrefab? prefab;
   final List<Diagnostic> diagnostics;
 
-  /// Expansion document order; a root's `parent` is the anchor.
+  /// Expansion document order; the first is the instance itself (its id,
+  /// name and parent), the others derived.
   final List<ExpandedEntity> entities;
   final List<ExpansionOverride> overrides;
 

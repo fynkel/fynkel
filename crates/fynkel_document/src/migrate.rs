@@ -105,6 +105,13 @@ impl Migrations {
                 description: "a collider's layer became its object's (ADR-0020): fynkel.Collider and fynkel.CharacterController lose `layer`, an entity whose colliders were not on layer 0 gains a fynkel.Layer (the lowest bit when several), and fynkel.Camera, fynkel.PointLight and fynkel.SpotLight gain culling_mask (all layers)",
                 apply: object_layers_3_to_4,
             });
+            m.add(Migration {
+                kind,
+                from: 4,
+                name: "one-root",
+                description: "a prefab has one root and an instance is that root (ADR-0022): `roots` becomes `root` (several get a new root named after the prefab), and an instance's own components become overrides of the root — its Transform composed with the root's; needs the project (`fynkel migrate <project dir>`) when an instance has components or a prefab several roots",
+                apply: crate::one_root::step_4_to_5,
+            });
         }
         m
     }
@@ -216,13 +223,16 @@ pub fn backup_path(path: &Path) -> PathBuf {
 
 /// A change that needs more than the document itself — another file, the
 /// whole project — applied before the per-kind steps (the stable
-/// sub-asset keys: a model's sidecar and the documents pointing into it).
-/// `apply` returns whether it changed anything; it may move the
-/// document's `formatVersion` (root and envelope both), and the steps
-/// then continue from there.
+/// sub-asset keys: a model's sidecar and the documents pointing into it)
+/// or, with `at`, just before the step from that version (one root per
+/// prefab: the documents it reads are at that version's layout).
+/// `apply` returns whether it changed anything; before the steps it may
+/// move the document's `formatVersion` (root and envelope both), and the
+/// steps then continue from there.
 pub struct Rewrite<'a> {
     pub name: String,
     pub description: String,
+    pub at: Option<u32>,
     pub apply: &'a dyn Fn(&mut Document) -> Result<bool, String>,
 }
 
@@ -230,16 +240,16 @@ pub struct Rewrite<'a> {
 /// validated against `schemas`; a step that fails, a missing step, or an
 /// invalid result leaves `document` as the original and reports why.
 pub fn migrate(doc: &Document, migrations: &Migrations, schemas: &SchemaSet) -> Migrated {
-    migrate_with(doc, migrations, schemas, None)
+    migrate_with(doc, migrations, schemas, &[])
 }
 
-/// [`migrate`] with a [`Rewrite`] first. A rewrite that changes the
+/// [`migrate`] with [`Rewrite`]s (see `at`). A rewrite that changes the
 /// document counts as an applied step even when the version is current.
 pub fn migrate_with(
     doc: &Document,
     migrations: &Migrations,
     schemas: &SchemaSet,
-    rewrite: Option<&Rewrite>,
+    rewrites: &[&Rewrite],
 ) -> Migrated {
     let from = doc.envelope.format_version;
     let to = doc.kind.supported_format_version();
@@ -274,7 +284,7 @@ pub fn migrate_with(
     }
     let mut out = doc.clone();
     let mut applied = Vec::new();
-    if let Some(rewrite) = rewrite {
+    for rewrite in rewrites.iter().filter(|r| r.at.is_none()) {
         match (rewrite.apply)(&mut out) {
             Ok(true) => applied.push(Applied {
                 from,
@@ -326,6 +336,26 @@ pub fn migrate_with(
         Err(d) => return unchanged(vec![with_doc(d)]),
     };
     for step in chain {
+        for rewrite in rewrites.iter().filter(|r| r.at == Some(step.from)) {
+            match (rewrite.apply)(&mut out) {
+                Ok(true) => applied.push(Applied {
+                    from: step.from,
+                    to: step.from,
+                    name: rewrite.name.clone(),
+                    description: rewrite.description.clone(),
+                }),
+                Ok(false) => {}
+                Err(msg) => {
+                    return unchanged(vec![with_doc(
+                        Diagnostic::error(
+                            Code::MIGRATION_FAILED,
+                            format!("{} failed: {msg}", rewrite.name),
+                        )
+                        .with_pointer(""),
+                    )]);
+                }
+            }
+        }
         if let Err(msg) = (step.apply)(&mut out.root) {
             return unchanged(vec![with_doc(
                 Diagnostic::error(

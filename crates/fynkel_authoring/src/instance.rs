@@ -1,5 +1,6 @@
-//! One prefab instance as Prefab mode shows it (M4-07): the anchor's
-//! expansion — the prefab's entities under the ids the runtime derives,
+//! One prefab instance as Prefab mode shows it (M4-07): its expansion —
+//! the prefab's root as the instance itself (ADR-0022), the other
+//! entities under the ids the runtime derives,
 //! with the overrides applied and marked — plus the prefab it comes from
 //! and why it did not expand when it did not. Read-only; the `instance`
 //! query.
@@ -29,8 +30,10 @@ impl AuthoringSession {
     ///   overrides: [ { index, op, entity, entityId, entityName, component?, componentId?, componentType?, field?, value?, pointer } ] }
     /// ```
     ///
-    /// `entities` are in the expansion's document order, ids are the derived
-    /// scene ids and `local` the prefab's; a root's `parent` is the anchor.
+    /// `entities` are in the expansion's document order, the first is the
+    /// instance itself (the prefab's root, with the instance's id, name and
+    /// parent); the others' ids are the derived scene ids. `local` is the
+    /// prefab's id.
     /// `overridden` lists the `setField`/`unsetField` fields of a
     /// component (the Inspector's bold), `activeOverridden` a `setActive`
     /// on the entity, `added` marks an `addComponent`

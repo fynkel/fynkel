@@ -99,7 +99,9 @@ fn prefab_fixtures_report_exact_diagnostics() {
         Document::read(&fixtures().join("valid/turret.prefab.json"), None).unwrap(),
     );
     assert!(turret.validate(&schemas).is_empty());
-    assert_eq!(turret.roots.len(), 1);
+    assert!(turret
+        .entity(turret.root)
+        .is_some_and(|r| r.parent.is_none()));
     assert_eq!(turret.entities.len(), 2);
 }
 
@@ -145,16 +147,18 @@ fn expansion_is_exact_and_deterministic() {
     let base_local: Uuid = "10000000-0000-4000-8000-0000000000b1".parse().unwrap();
     let barrel_local: Uuid = "10000000-0000-4000-8000-0000000000b2".parse().unwrap();
     let muzzle_local: Uuid = "10000000-0000-4000-8000-0000000000b3".parse().unwrap();
+    // The base is the prefab's root: it maps to the instance entity itself,
+    // every other entity to a derived id.
+    assert_eq!(a.entity(base_local), Some(a.anchor));
     assert_eq!(
-        a.entity(base_local),
-        Some(derive_id(a.instance, base_local))
+        a.entity(barrel_local),
+        Some(derive_id(a.instance, barrel_local))
     );
-    let base = out.entity(a.entity(base_local).unwrap()).unwrap();
-    assert_eq!(base.parent, Some(a.anchor));
+    let base = out.entity(a.anchor).unwrap();
+    assert_eq!(base.name, "Turret A");
     assert_eq!(base.children, vec![a.entity(barrel_local).unwrap()]);
-    let anchor = out.entity(a.anchor).unwrap();
-    assert_eq!(anchor.children, vec![a.entity(base_local).unwrap()]);
     let barrel = out.entity(a.entity(barrel_local).unwrap()).unwrap();
+    assert_eq!(barrel.parent, Some(a.anchor));
     assert_eq!(barrel.children, vec![a.entity(muzzle_local).unwrap()]);
     assert!(barrel.component_of("fynkel.PointLight").is_some());
     let renderer = base.component_of("fynkel.MeshRenderer").unwrap();
@@ -162,21 +166,19 @@ fn expansion_is_exact_and_deterministic() {
         renderer.data.get("cast_shadows").and_then(|n| n.as_bool()),
         Some(false)
     );
-    // Instance B removed the barrel subtree and the renderer.
+    // Instance B removed the barrel subtree and the renderer; its authored
+    // child (Label) comes after the root's children, of which none are left.
     let b = &expanded.instances[1];
     assert!(b.entity(barrel_local).is_none());
-    let base_b = out.entity(b.entity(base_local).unwrap()).unwrap();
-    assert!(base_b.children.is_empty());
+    let base_b = out.entity(b.anchor).unwrap();
     assert!(base_b.component_of("fynkel.MeshRenderer").is_none());
-    let anchor_b = out.entity(b.anchor).unwrap();
-    // Authored children first, then the instance roots.
-    assert_eq!(anchor_b.children.len(), 2);
-    assert_eq!(anchor_b.children[1], b.entity(base_local).unwrap());
+    assert_eq!(base_b.children.len(), 1);
+    assert_eq!(out.entity(base_b.children[0]).unwrap().name, "Label");
 
     // And it loads.
     let described = describe(&out, &schemas);
     assert!(!described.has_errors());
-    assert_eq!(described.description.entities.len(), 3 + 3 + 1);
+    assert_eq!(described.description.entities.len(), 3 + 2);
 }
 
 #[test]
@@ -235,37 +237,34 @@ fn nested_prefabs_flatten_and_cycles_are_refused() {
     assert!(none.is_empty());
     assert_eq!(again.len(), flat.len());
 
-    // The flattened `Nested`: holder → base (derived from the inner instance) → barrel.
+    // The flattened `Nested`: the holder is the inner instance, so it is
+    // the turret's root (its components) and the barrel hangs off it.
     let nested = flat
         .get("10000000-0000-4000-8000-000000000003".parse().unwrap())
         .unwrap();
     let holder: Uuid = "10000000-0000-4000-8000-0000000000b1".parse().unwrap();
     let inner_instance: Uuid = "10000000-0000-4000-8000-0000000000e1".parse().unwrap();
-    let base = derive_id(
-        inner_instance,
-        "10000000-0000-4000-8000-0000000000b1".parse().unwrap(),
-    );
     let barrel = derive_id(
         inner_instance,
         "10000000-0000-4000-8000-0000000000b2".parse().unwrap(),
     );
-    assert_eq!(nested.entities.len(), 3);
-    assert_eq!(nested.entity(holder).unwrap().children, vec![base]);
-    assert_eq!(nested.entity(base).unwrap().children, vec![barrel]);
+    assert_eq!(nested.root, holder);
+    assert_eq!(nested.entities.len(), 2);
+    assert_eq!(nested.entity(holder).unwrap().children, vec![barrel]);
     assert!(nested
-        .entity(base)
+        .entity(holder)
         .unwrap()
         .component_of("fynkel.MeshRenderer")
         .is_some());
     assert!(nested.validate(&schemas).is_empty());
 
-    // A scene instantiating `Nested` gets the same three entities, remapped
-    // once more by the scene instance; one that instantiates a cyclic
-    // prefab is refused for that instance (and only sees its own prefab's
-    // problems).
+    // A scene instantiating `Nested` gets the same two entities, remapped
+    // once more by the scene instance (the holder becomes the instance
+    // itself); one that instantiates a cyclic prefab is refused for that
+    // instance (and only sees its own prefab's problems).
     let scene_json = r#"{
       "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-      "formatVersion": 4,
+      "formatVersion": 5,
       "id": "20000000-0000-4000-8000-000000000077",
       "name": "Nesting",
       "entities": {
@@ -287,12 +286,18 @@ fn nested_prefabs_flatten_and_cycles_are_refused() {
     );
     assert_eq!(expanded.instances.len(), 1);
     let inst = &expanded.instances[0];
-    assert_eq!(inst.entities.len(), 3);
+    let stand: Uuid = "20000000-0000-4000-8000-0000000000a1".parse().unwrap();
+    assert_eq!(inst.entities.len(), 2);
+    assert_eq!(inst.entity(holder), Some(stand));
     let out = expanded.scene();
-    assert_eq!(out.entities.len(), 4);
+    assert_eq!(out.entities.len(), 2);
+    assert_eq!(out.entities[0].name, "Turret Stand");
+    assert!(out.entities[0]
+        .component_of("fynkel.MeshRenderer")
+        .is_some());
     assert_eq!(
-        out.entity(inst.entity(holder).unwrap()).unwrap().children,
-        vec![inst.entity(base).unwrap()]
+        out.entity(stand).unwrap().children,
+        vec![inst.entity(barrel).unwrap()]
     );
     assert!(out.validate(&schemas).is_empty());
     assert!(!describe(&out, &schemas).has_errors());

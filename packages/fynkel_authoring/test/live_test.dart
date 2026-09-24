@@ -28,15 +28,15 @@ void main() {
     final live = LiveWorld(world.native.handleAddress);
 
     final all = live.entities();
-    expect(all, hasLength(7));
+    expect(all, hasLength(6));
     expect(all.any((e) => e.spawned), isFalse);
     final robotRow = all.firstWhere((e) => e.id == robot);
     expect(robotRow.name, 'Robot');
     expect(robotRow.types, contains('fynkel.MeshRenderer'));
     expect(live.entity(robot).handle, robotRow.handle);
     expect(world.attach(robotRow.handle).name, 'Robot', reason: "the handle is package:fynkel's entity");
-    final crate = all.where((e) => e.parent == crateA).single;
-    expect(crate.id, isNot(startsWith('runtime:')), reason: 'the id the cook derived for the instance');
+    final crate = all.where((e) => e.id == crateA).single;
+    expect(crate.types, contains('fynkel.MeshRenderer'), reason: 'the instance is the prefab\'s root (ADR-0022)');
     final tick = live.tick;
     world.step();
     expect(live.changedEntities(), isNull, reason: 'nothing spawned, renamed or moved in the table');
@@ -50,15 +50,13 @@ void main() {
     expect(live.changedEntities()!.firstWhere((e) => e.id == robot).name, 'Hero');
     expect(live.tick, tick + 1, reason: 'a live edit runs no tick');
 
-    // Switching an instance off takes its subtree along; the child's own flag stays.
+    // Switching an instance off and on again.
     expect(live.setActive(crateA, false), isEmpty);
     expect(live.entity(crateA).activeSelf, isFalse);
-    final rows = live.changedEntities()!;
-    final off = rows.firstWhere((e) => e.parent == crateA);
-    expect(off.activeSelf, isTrue);
+    final off = live.changedEntities()!.firstWhere((e) => e.id == crateA);
     expect(off.activeInHierarchy, isFalse);
     expect(live.setActive(crateA, true), isEmpty);
-    expect(live.entity(off.id).activeInHierarchy, isTrue);
+    expect(live.entity(crateA).activeInHierarchy, isTrue);
 
     // The world refuses what it would from a game; a bad call throws.
     expect(live.remove(robot, 'fynkel.Camera'), isNotEmpty);

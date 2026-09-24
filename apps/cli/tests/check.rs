@@ -131,7 +131,7 @@ fn test_headless_reports_json() {
 /// asset references.
 const SECOND_SCENE: &str = r#"{
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "70d7ba8b-f7fb-4eba-920d-ec9e6b968331",
   "name": "Second",
   "entities": {
@@ -217,10 +217,10 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     assert_eq!(v["scene"]["name"], "Main");
     assert_eq!(v["scene"]["path"], "scenes/main.scene.json");
     assert_eq!(v["scene"]["cache"], cache.to_str().unwrap());
-    assert_eq!(v["scene"]["entities"], 7);
+    assert_eq!(v["scene"]["entities"], 6);
     assert_eq!(v["scene"]["retained"], 8);
     assert_eq!(v["scene"]["document_diagnostics"], serde_json::json!([]));
-    assert_eq!(v["live_entities"], 7);
+    assert_eq!(v["live_entities"], 6);
     assert!(cache.join("index.json").is_file());
 
     // A scene by path resolves the enclosing project; by id it reads the
@@ -282,14 +282,25 @@ fn scene_documents_load_headlessly_and_dump_by_id() {
     ]);
     assert!(out.status.success());
     let v = json(&out);
-    assert_eq!(v["entityCount"], 7);
-    let crate_entity = &v["entities"][4];
-    assert_eq!(
-        crate_entity["parent"],
-        "c0000000-0000-4000-8000-0000000000e2"
-    );
-    assert_ne!(crate_entity["id"], "c0000000-0000-4000-8000-0000000000b1");
-    assert_eq!(crate_entity["components"][1]["data"]["cast_shadows"], false);
+    assert_eq!(v["entityCount"], 6);
+    // Crate A is the crate prefab's root, with its components and the
+    // instance override applied.
+    let crate_a = v["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "c0000000-0000-4000-8000-0000000000e2")
+        .unwrap();
+    assert!(!v
+        .to_string()
+        .contains("c0000000-0000-4000-8000-0000000000b1"));
+    let renderer = crate_a["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["type"] == "fynkel.MeshRenderer")
+        .unwrap();
+    assert_eq!(renderer["data"]["cast_shadows"], false);
 
     // A scene that does not validate fails the cook: exit 1, the document
     // diagnostic on stderr, nothing loaded.
@@ -474,10 +485,10 @@ fn prefab_commands_validate_inspect_and_expand() {
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["kind"], "prefab");
-    assert_eq!(v["roots"][0], "10000000-0000-4000-8000-0000000000b1");
+    assert_eq!(v["root"], "10000000-0000-4000-8000-0000000000b1");
     assert_eq!(v["entities"][0]["children"].as_array().unwrap().len(), 1);
 
-    let mismatch = fixtures.join("prefab/roots_mismatch.prefab.json");
+    let mismatch = fixtures.join("prefab/root_mismatch.prefab.json");
     let out = run(&["prefab", "validate", "--json", mismatch.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
@@ -520,7 +531,7 @@ fn prefab_commands_validate_inspect_and_expand() {
         v["roots"][0]["prefab"]["asset"],
         "10000000-0000-4000-8000-000000000001"
     );
-    assert_eq!(v["roots"][0]["prefab"]["overrides"], 3);
+    assert_eq!(v["roots"][0]["prefab"]["overrides"], 4);
 
     let out = run(&[
         "scene",
@@ -533,12 +544,14 @@ fn prefab_commands_validate_inspect_and_expand() {
     ]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["expanded"], true);
-    assert_eq!(v["entityCount"], 7);
+    assert_eq!(v["entityCount"], 5);
     assert_eq!(v["instanceCount"], 0);
-    assert_eq!(v["roots"][0]["children"][0]["name"], "Base");
+    // Turret A is the turret's root (Base); the Barrel hangs off it.
+    assert_eq!(v["roots"][0]["name"], "Turret A");
+    assert_eq!(v["roots"][0]["children"][0]["name"], "Barrel");
     assert_eq!(
         v["roots"][0]["children"][0]["id"],
-        "650fd857-152f-582a-9c45-012b2be17ad8"
+        "cd1ea7dd-840a-51fc-ab33-dc6bc8e18d47"
     );
 
     let bad = fixtures.join("prefab/bad_overrides.scene.json");
@@ -790,8 +803,8 @@ fn migrate_dry_runs_then_writes_with_backup() {
     let out = run(&["migrate", "--list", "--json"]);
     assert!(out.status.success());
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["current"]["scene"], 4);
-    assert_eq!(v["current"]["prefab"], 4);
+    assert_eq!(v["current"]["scene"], 5);
+    assert_eq!(v["current"]["prefab"], 5);
     assert_eq!(v["current"]["project"], 2);
     assert_eq!(v["current"]["material"], 2);
     assert_eq!(v["current"]["meta"], 2);
@@ -809,11 +822,13 @@ fn migrate_dry_runs_then_writes_with_backup() {
             "prefab/1-2/camera-exposure",
             "prefab/2-3/animator-layers",
             "prefab/3-4/object-layers",
+            "prefab/4-5/one-root",
             "project/1-2/layers",
             "scene/0-1/entities-keyed-by-id",
             "scene/1-2/camera-exposure",
             "scene/2-3/animator-layers",
-            "scene/3-4/object-layers"
+            "scene/3-4/object-layers",
+            "scene/4-5/one-root"
         ]
     );
 
@@ -856,7 +871,7 @@ fn migrate_dry_runs_then_writes_with_backup() {
         .unwrap()
         .contains("+  \"base_color_texture\": {"));
     assert_eq!(docs[2]["from"], 0);
-    assert_eq!(docs[2]["to"], 4);
+    assert_eq!(docs[2]["to"], 5);
     assert_eq!(
         docs[2]["applied"][0]["name"],
         "scene/0-1/entities-keyed-by-id"
@@ -864,10 +879,11 @@ fn migrate_dry_runs_then_writes_with_backup() {
     assert_eq!(docs[2]["applied"][1]["name"], "scene/1-2/camera-exposure");
     assert_eq!(docs[2]["applied"][2]["name"], "scene/2-3/animator-layers");
     assert_eq!(docs[2]["applied"][3]["name"], "scene/3-4/object-layers");
+    assert_eq!(docs[2]["applied"][4]["name"], "scene/4-5/one-root");
     assert!(docs[2]["diff"]
         .as_str()
         .unwrap()
-        .contains("+  \"formatVersion\": 4,"));
+        .contains("+  \"formatVersion\": 5,"));
     assert_eq!(docs[2]["written"], false);
     assert_eq!(std::fs::read(&scene).unwrap(), original);
     assert!(!dir.join("scenes/room.scene.json.bak").exists());
@@ -1105,8 +1121,8 @@ fn import_writes_intermediate_and_maintains_the_sidecar() {
     assert_ne!(doc["id"], subs["prefab"], "a fresh id, not the sub-asset's");
     assert_eq!(
         doc["entities"].as_object().unwrap().len(),
-        9,
-        "the robot's nodes and primitive entities"
+        10,
+        "the robot's root, nodes and primitive entities"
     );
     let out = run(&["prefab", "validate", prefab.to_str().unwrap()]);
     assert!(
@@ -1455,7 +1471,7 @@ fn scene_apply_unpacks_prefabs_with_the_inspect_library() {
         prefabs,
     ]);
     let expanded: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(expanded["entityCount"], 7);
+    assert_eq!(expanded["entityCount"], 5);
 
     // Without the prefabs (the temp directory holds none): refused, untouched.
     let out = run(&[
@@ -1503,7 +1519,7 @@ fn scene_apply_unpacks_prefabs_with_the_inspect_library() {
     );
     let unpacked: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(unpacked["expanded"], false);
-    assert_eq!(unpacked["entityCount"], 7);
+    assert_eq!(unpacked["entityCount"], 5);
     assert_eq!(unpacked["instanceCount"], 0);
     assert_eq!(unpacked["roots"], expanded["roots"]);
     let _ = std::fs::remove_dir_all(&dir);
@@ -1672,7 +1688,7 @@ fn scene_apply_dry_runs_conflicts_and_writes() {
     std::fs::copy(fixtures.join("valid/turret.prefab.json"), &prefab).unwrap();
     std::fs::write(
         &patch,
-        r#"[{"command": "createObject", "name": "Antenna", "parent": null,
+        r#"[{"command": "createObject", "name": "Antenna", "parent": "10000000-0000-4000-8000-0000000000b1",
              "components": [{"type": "fynkel.Transform", "data": {"position": [0, 1, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1]}}]}]"#,
     )
     .unwrap();
@@ -1692,7 +1708,8 @@ fn scene_apply_dry_runs_conflicts_and_writes() {
     let out = run(&["prefab", "inspect", "--json", prefab.to_str().unwrap()]);
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["ok"], true);
-    assert_eq!(v["roots"].as_array().unwrap().len(), 2);
+    assert_eq!(v["root"], "10000000-0000-4000-8000-0000000000b1");
+    assert_eq!(v["entities"][0]["children"].as_array().unwrap().len(), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1735,7 +1752,8 @@ fn khronos_rigs_instance_from_the_source_alone() {
 
     // (model, clip to play, a joint the clip moves, joints, prefab entities)
     let rigs = [
-        ("Fox", "anim/Run", "b_Neck_04", 24, 26),
+        // The fox's skeleton and mesh are two top-level nodes: + a root.
+        ("Fox", "anim/Run", "b_Neck_04", 24, 27),
         ("CesiumMan", "anim/#0", "Skeleton_arm_joint_L__3_", 19, 22),
         ("RiggedFigure", "anim/#0", "arm_joint_L_3", 19, 22),
     ];
@@ -1811,11 +1829,19 @@ fn khronos_rigs_instance_from_the_source_alone() {
                 }
             }
         });
-        std::fs::write(
-            dir.join(format!("assets/scenes/{}.scene.json", model.to_lowercase())),
-            serde_json::to_string_pretty(&scene).unwrap(),
-        )
-        .unwrap();
+        // Written the way a formatVersion 4 tool did (the anchor holds the
+        // Transform and the Animator); `fynkel migrate` makes them
+        // overrides of the imported root (ADR-0022).
+        let path = dir.join(format!("assets/scenes/{}.scene.json", model.to_lowercase()));
+        std::fs::write(&path, serde_json::to_string_pretty(&scene).unwrap()).unwrap();
+        let out = run(&["migrate", path.to_str().unwrap()]);
+        assert!(
+            out.status.success(),
+            "{model}: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        std::fs::remove_file(path.with_extension("json.bak")).unwrap();
         scene_ids.push(scene_id);
     }
 
@@ -1857,7 +1883,8 @@ fn khronos_rigs_instance_from_the_source_alone() {
             String::from_utf8_lossy(&out.stderr)
         );
         let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(v["scene"]["entities"], entities + 3, "{model}");
+        // The camera, the sun and the prefab (its root is the Character).
+        assert_eq!(v["scene"]["entities"], entities + 2, "{model}");
         assert_eq!(v["diagnostics"], 0, "{model}");
         let anim = &v["animation"];
         assert_eq!(
@@ -2057,7 +2084,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     assert_eq!(v["ok"], true);
     assert_eq!(v["id"], rig_id.as_str());
     assert_eq!(v["skeleton"]["joints"].as_array().unwrap().len(), 24);
-    assert_eq!(v["skeleton"]["entities"], 26);
+    assert_eq!(v["skeleton"]["entities"], 27);
     assert_eq!(v["skeleton"]["roots"], serde_json::json!(["_rootJoint"]));
     assert_eq!(v["clips"][1]["name"], "walk");
     assert_eq!(v["clips"][1]["sub"], "anim/walk");
@@ -2068,7 +2095,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("fox (assets/models/fox.rig.json)"), "{text}");
     assert!(
-        text.contains("24 joint(s) (root _rootJoint), 26 entities"),
+        text.contains("24 joint(s) (root _rootJoint), 27 entities"),
         "{text}"
     );
     assert!(text.contains("clips (3)"), "{text}");
@@ -2131,11 +2158,17 @@ fn khronos_rigs_assemble_into_a_rig_document() {
             }
         }
     });
-    std::fs::write(
-        dir.join("assets/scenes/fox.scene.json"),
-        serde_json::to_string_pretty(&scene).unwrap(),
-    )
-    .unwrap();
+    // Written as formatVersion 4 and migrated, as above.
+    let path = dir.join("assets/scenes/fox.scene.json");
+    std::fs::write(&path, serde_json::to_string_pretty(&scene).unwrap()).unwrap();
+    let out = run(&["migrate", path.to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::remove_file(path.with_extension("json.bak")).unwrap();
     let out = run(&["validate", "--project", project, "--json"]);
     let v = json(&out);
     assert_eq!(
@@ -2182,7 +2215,7 @@ fn khronos_rigs_assemble_into_a_rig_document() {
         String::from_utf8_lossy(&out.stderr)
     );
     let v = json(&out);
-    assert_eq!(v["scene"]["entities"], 26 + 3);
+    assert_eq!(v["scene"]["entities"], 27 + 2);
     assert_eq!(v["diagnostics"], 0);
     let anim = &v["animation"];
     assert_eq!(
@@ -2252,12 +2285,20 @@ fn khronos_rigs_assemble_into_a_rig_document() {
     )
     .unwrap();
     let blend_scene_id = "c0000000-0000-4000-8000-000000000039";
-    let mut blend_scene = scene.clone();
+    // The migrated fox scene with its Animator (an override of the
+    // imported root now) playing the blend space.
+    let mut blend_scene: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     blend_scene["id"] = serde_json::json!(blend_scene_id);
     blend_scene["name"] = serde_json::json!("Fox blend");
-    blend_scene["entities"]["c0000000-0000-4000-8000-0000000005e2"]["components"]
-        ["c0000000-0000-4000-8000-000000000505"]["data"]["clip"] =
-        serde_json::json!({ "asset": blend_id });
+    let animator = blend_scene["entities"]["c0000000-0000-4000-8000-0000000005e2"]["prefab"]
+        ["overrides"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|o| o["type"] == "fynkel.Animator")
+        .unwrap();
+    animator["data"]["clip"] = serde_json::json!({ "asset": blend_id });
     std::fs::write(
         dir.join("assets/scenes/fox_blend.scene.json"),
         serde_json::to_string_pretty(&blend_scene).unwrap(),

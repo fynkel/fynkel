@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "c0000000-0000-4000-8000-000000000030",
   "name": "Main",
   "entities": {
@@ -151,30 +151,7 @@
       "name": "Crate A",
       "parent": null,
       "children": [],
-      "components": {
-        "c0000000-0000-4000-8000-0000000000c4": {
-          "type": "fynkel.Transform",
-          "version": 1,
-          "data": {
-            "position": [
-              2,
-              0,
-              0
-            ],
-            "rotation": [
-              0,
-              0,
-              0,
-              1
-            ],
-            "scale": [
-              1,
-              1,
-              1
-            ]
-          }
-        }
-      },
+      "components": {},
       "prefab": {
         "asset": {
           "asset": "c0000000-0000-4000-8000-000000000040"
@@ -187,6 +164,17 @@
             "component": "c0000000-0000-4000-8000-0000000000c3",
             "field": "cast_shadows",
             "value": false
+          },
+          {
+            "op": "setField",
+            "entity": "c0000000-0000-4000-8000-0000000000b1",
+            "component": "c0000000-0000-4000-8000-0000000000c2",
+            "field": "position",
+            "value": [
+              2.0,
+              0.5,
+              0.0
+            ]
           }
         ]
       }

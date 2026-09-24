@@ -1,8 +1,15 @@
 {
-  "roots": [],
+  "root": "a586c518-766f-57e3-8e33-a8eaf8118f32",
   "name": "Later",
   "id": "5d4c3b2a-1f0e-4d9c-8b7a-695847362510",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
-  "entities": {}
+  "entities": {
+    "a586c518-766f-57e3-8e33-a8eaf8118f32": {
+      "name": "Later",
+      "parent": null,
+      "children": [],
+      "components": {}
+    }
+  }
 }

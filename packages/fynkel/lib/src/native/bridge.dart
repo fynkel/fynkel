@@ -426,8 +426,8 @@ class NativeWorld {
       _withUtf8(rebindsJson, (s, sl) => _load(() => fynkel_world_bind_actions(_w, s, sl)));
 
   /// `fynkel_world_instantiate`: the cooked prefab [prefabId] (UUID text)
-  /// under a new anchor entity named [name] (empty: the prefab's) with the
-  /// given local transform, child of [parent] (0: a root); the status and
+  /// with its root named [name] (empty: the prefab's) at the given local
+  /// transform, child of [parent] (0: a root); the status and
   /// the JSON report of that call.
   (FynkelStatus, Map<String, Object?>) instantiate(
     String prefabId,

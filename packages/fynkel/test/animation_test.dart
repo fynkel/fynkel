@@ -75,7 +75,7 @@ void main() {
     final report = w.loadScene(rigScene, cacheDir: cache);
     expect(report.ok, isTrue);
     expect(report.sceneName, 'Rig');
-    expect(report.entityCount, 15, reason: 'the authored rig and, since M3-19a, its import instanced beside it');
+    expect(report.entityCount, 14, reason: 'the authored rig and, since M3-19a, its import instanced beside it');
     expect((report.animation.clips, report.animation.skins), (3, 1), reason: 'wave, bob, the Column rig\'s anim/wave; one skin');
     expect(w.systemTimes().map((s) => s.system), contains(SystemKind.animation));
 
@@ -144,9 +144,10 @@ void main() {
     w.frame(1 / 60);
     final before = w.allEntities().length;
 
-    // `rig.glb#prefab`: the anchor is the glTF's own hierarchy — Rig >
-    // Body (skinned), hips > spine > head, Prop — spawned like a prefab
-    // document's entities, with the source's closure retained.
+    // `rig.glb#prefab`: the glTF's own hierarchy — Rig (the root, named
+    // Statue here) > Body (skinned), hips > spine > head, Prop — spawned
+    // like a prefab document's entities, with the source's closure
+    // retained.
     const rigPrefab = AssetRef(rigAsset, sub: World.importedPrefabSub);
     final statue = w.instantiate(
       rigPrefab,
@@ -159,9 +160,9 @@ void main() {
     expect(report.prefabPath, 'models/rig.glb');
     expect(report.entityCount, 6);
     expect(report.rejectedComponents, 0);
-    expect(w.allEntities().length, before + 7, reason: 'anchor + six nodes');
+    expect(w.allEntities().length, before + 6, reason: 'the six nodes, the root is the statue');
     expect(statue.name, 'Statue');
-    final root = statue.findChild('Rig')!;
+    final root = statue;
     final body = root.findChild('Body')!;
     final hips = root.findChild('hips')!;
     final spine = hips.findChild('spine')!;
@@ -169,10 +170,10 @@ void main() {
     w.frame(1 / 60);
     expect(body.get<Skin>(), const Skin(skin: AssetRef(rigAsset, sub: 'skin/Skin'), skeleton: 'hips'));
     expect(body.get<MeshRenderer>()!.mesh, const AssetRef(rigAsset, sub: 'mesh/Body'));
-    expect(head.worldTransform!.position, const Vec3(3, 1, 0), reason: 'bind pose under the anchor');
+    expect(head.worldTransform!.position, const Vec3(3, 1, 0), reason: 'bind pose under the root');
 
     // The instance has no animator of its own (a glTF names clips, not
-    // players): one added to the anchor finds its targets by name below
+    // players): one added to the root finds its targets by name below
     // it — half a second in the statue waves like the scene's rig.
     expect(statue.animation.state, isNull);
     statue.add(
@@ -184,7 +185,7 @@ void main() {
     expect(hips.localTransform.position.y, closeTo(0.125, 1e-3));
     expect(spine.localTransform.rotation.z, closeTo(0.3827, 1e-3), reason: 'sin(22.5°)');
     expect(head.worldTransform!.position.y, closeTo(0.125 + 0.5 + 0.5 * 0.7071, 1e-3));
-    expect(head.worldTransform!.position.x, lessThan(3 - 0.3), reason: 'the column leans toward −X, from the anchor at x = 3');
+    expect(head.worldTransform!.position.x, lessThan(3 - 0.3), reason: 'the column leans toward −X, from the root at x = 3');
 
     // Not a prefab: a wrong sub is an ArgumentError before the call, a
     // texture has no hierarchy (FynkelInstantiateError).
@@ -213,8 +214,8 @@ void main() {
     expect(report.prefabId, columnRig);
     expect(report.prefabPath, 'rigs/column.rig.json');
     expect(report.entityCount, 6);
-    expect(w.allEntities().length, before + 7);
-    final root = statue.findChild('Rig')!;
+    expect(w.allEntities().length, before + 6);
+    final root = statue;
     final body = root.findChild('Body')!;
     final hips = root.findChild('hips')!;
     final head = hips.findChild('spine')!.findChild('head')!;
@@ -420,7 +421,7 @@ void main() {
     }
     expect(statue.animation.state!.rootDelta, Vec3.zero);
     expect(statue.animation.state!.rootYaw, 0);
-    expect(statue.findChild('Rig')!.findChild('hips')!.localTransform.position.y, closeTo(0.125, 1e-3));
+    expect(statue.findChild('hips')!.localTransform.position.y, closeTo(0.125, 1e-3));
   });
 
   test('a blend space plays like a clip: its parameter mixes the points phase-synced (M3-19c)', () {
@@ -438,8 +439,8 @@ void main() {
     expect(state.clip, blend);
     expect(state.duration, closeTo(2, 1e-5), reason: 'the parameter starts at the first point: bob');
     expect(state.parameter, 0);
-    final hips = statue.findChild('Rig')!.findChild('hips')!;
-    final prop = statue.findChild('Rig')!.findChild('Prop')!;
+    final hips = statue.findChild('hips')!;
+    final prop = statue.findChild('Prop')!;
 
     // Halfway: a 1.5 s lap, the hips half as high as the wave lifts them
     // at the same phase; the Prop, which only bob moves, follows bob as

@@ -155,9 +155,9 @@ fn scenes_describe_from_the_expanded_chunk() {
         vec![],
         "game.Spinner is known to the cook"
     );
-    // Camera, Robot, Sun, Crate A and the crate the prefab expands to,
-    // the physics Floor and Crate B.
-    assert_eq!(scene.description.entities.len(), 7);
+    // Camera, Robot, Sun, Crate A (the crate prefab's root), the physics
+    // Floor and Crate B.
+    assert_eq!(scene.description.entities.len(), 6);
     assert_eq!(scene.closure.len(), 8, "the Robot's tone too (M3-11)");
     assert_eq!(scene.behaviours.len(), 1);
     assert_eq!(scene.behaviours[0].type_id, "game.Spinner");
@@ -188,7 +188,7 @@ fn prefabs_describe_from_their_chunk() {
     assert_eq!(prefab.diagnostics, vec![]);
     assert_eq!(prefab.description.entities.len(), 1);
     assert_eq!(prefab.description.entities[0].name, "Crate");
-    assert_eq!(prefab.roots, vec![prefab.description.entities[0].id]);
+    assert_eq!(prefab.root, prefab.description.entities[0].id);
     assert!(prefab.behaviours.is_empty());
     // The prefab, the robot mesh, the material and its three maps.
     assert_eq!(prefab.closure.len(), 6);
@@ -220,7 +220,7 @@ fn prefabs_describe_from_their_chunk() {
         .map(|e| e.name.as_str())
         .collect();
     assert_eq!(names, ["Rig", "Body", "hips", "spine", "head", "Prop"]);
-    assert_eq!(rig.roots, vec![rig.description.entities[0].id]);
+    assert_eq!(rig.root, rig.description.entities[0].id);
     assert!(rig.description.entities[1]
         .components
         .iter()

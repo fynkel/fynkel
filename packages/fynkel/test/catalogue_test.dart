@@ -138,10 +138,10 @@ void main() {
     expect(facing.y.abs(), lessThan(1e-4));
     expect(puff.isAlive, isFalse, reason: 'despawned at 1 s');
     expect(core.isAlive, isFalse, reason: 'with its subtree');
-    // 12 Sparks alive (anchor + root each), every one a dynamic body.
+    // 12 Sparks alive (one root each), every one a dynamic body.
     final sparks = w.findAll('Spark');
-    expect(sparks, hasLength(24));
-    expect(w.allEntities(), hasLength(10 - 2 + 24));
+    expect(sparks, hasLength(12));
+    expect(w.allEntities(), hasLength(10 - 2 + 12));
     final bodies = sparks.where((s) => s.has<RigidBody>()).toList();
     expect(bodies, hasLength(12));
     expect(bodies.first.bodyState(), isNotNull);
@@ -149,7 +149,7 @@ void main() {
     final times = w.systemTimes();
     expect(times.map((t) => t.system), SystemKind.values);
     final by = {for (final t in times) t.system: t};
-    expect(by[SystemKind.step]!.entities, 32);
+    expect(by[SystemKind.step]!.entities, 20);
     expect(by[SystemKind.rotator]!.entities, 1);
     expect(by[SystemKind.oscillate]!.entities, 1);
     expect(

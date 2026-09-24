@@ -61,7 +61,7 @@ void main() {
     expect(w.stats().ffiCalls, before + 2, reason: 'one call for every anchor (and the stats call)');
     expect(w.projection.camera, w.find('Camera')!.entity);
 
-    final (x, y) = expected(const Vec3(2, 0, 0), 800, 600);
+    final (x, y) = expected(const Vec3(2, 0.5, 0), 800, 600);
     expect(anchor.x, closeTo(x, 0.01));
     expect(anchor.y, closeTo(y, 0.01));
     expect(anchor.depth, closeTo(6, 1e-4));
@@ -70,7 +70,7 @@ void main() {
     expect(anchor.visible, isTrue);
     expect(anchor.occluded, isFalse);
     expect(anchor.missing, isFalse);
-    final (tx, ty) = expected(const Vec3(2, 1.5, 0), 800, 600);
+    final (tx, ty) = expected(const Vec3(2, 2, 0), 800, 600);
     expect(top.x, closeTo(tx, 0.01));
     expect(top.y, closeTo(ty, 0.01));
     expect(top.y, lessThan(anchor.y), reason: 'above the crate on screen');
@@ -106,7 +106,7 @@ void main() {
     expect(anchor.depth, lessThan(0));
 
     // The viewport scales the answer; the aspect ratio shapes it.
-    crate.setLocalPosition(2, 0, 0);
+    crate.setLocalPosition(2, 0.5, 0);
     w.frame(1 / 60);
     w.frame(1 / 60);
     w.projection.setViewport(400, 300);

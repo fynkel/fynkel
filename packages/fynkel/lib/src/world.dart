@@ -1045,11 +1045,11 @@ class World {
   /// document with its `prefab` sub-asset, `AssetRef(glb, sub: 'prefab')`,
   /// whose node hierarchy then spawns with its meshes and `Skin`s;
   /// M3-19a/b) **now**:
-  /// an anchor object named [name] (the prefab's
-  /// name by default) at [transform] under [parent], whose children are
-  /// the prefab's entities — the shape a scene instance expands to — with
-  /// the prefab's authored behaviours attached from [registry]. Returns
-  /// the anchor, already resolved (no tick needed); the prefab's
+  /// the prefab's root (ADR-0022), named [name] (the prefab's name by
+  /// default), at [transform] under [parent], with the prefab's other
+  /// entities under it — the shape a scene instance expands to — and the
+  /// prefab's authored behaviours attached from [registry]. Returns the
+  /// root, already resolved (no tick needed); the prefab's
   /// components apply through the command path like a scene's, so a
   /// rejected value is a diagnostic on the next step. [lastInstantiate]
   /// has the report. Throws [FynkelInstantiateError] when the prefab is
@@ -1087,14 +1087,14 @@ class World {
         throw FynkelBridgeError('instantiate: $status');
     }
     _entityTable = null;
-    final anchor = attach(report.anchor, name: report.name, initial: transform);
+    final root = attach(report.root, name: report.name, initial: transform);
     if (report.behaviours.isNotEmpty) {
       final (attached, extra) = _attachBehaviours(report.behaviours, report.prefabPath);
       report = report.withBehaviours(attached: attached, extra: extra);
     }
     lastInstantiate = report;
     if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
-    return anchor;
+    return root;
   }
 
   /// The report of the last [instantiate] (null before any).

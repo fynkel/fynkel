@@ -173,13 +173,13 @@ fn a_remap_points_the_models_hierarchy_at_the_project_material() {
         "scenes/robots.scene.json",
         &json!({
             "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-            "formatVersion": 4,
+            "formatVersion": 5,
             "id": ROBOTS,
             "name": "Robots",
             "entities": {
                 "c0000000-0000-4000-8000-0000000000a1": entity(
                     "Plain",
-                    vec![transform("c0000000-0000-4000-8000-0000000000a2")],
+                    vec![],
                     Some(json!({
                         "asset": { "asset": ROBOT, "sub": "prefab" },
                         "instance": "c0000000-0000-4000-8000-0000000000a3",
@@ -188,7 +188,7 @@ fn a_remap_points_the_models_hierarchy_at_the_project_material() {
                 ),
                 "c0000000-0000-4000-8000-0000000000a4": entity(
                     "Overridden",
-                    vec![transform("c0000000-0000-4000-8000-0000000000a5")],
+                    vec![],
                     Some(json!({
                         "asset": { "asset": ROBOT, "sub": "prefab" },
                         "instance": "c0000000-0000-4000-8000-0000000000a6",

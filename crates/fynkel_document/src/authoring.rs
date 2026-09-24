@@ -135,6 +135,13 @@ pub enum Command {
         asset: AssetRef,
     },
     /// Creates an entity that is a prefab instance (scene documents only).
+    /// The instance is the prefab's root (ADR-0022) and has no components
+    /// of its own: each of `components` becomes overrides on the root —
+    /// `setField` for every field that differs from the root's component
+    /// of the same type (the placement is a Transform whose position
+    /// differs), `addComponent` when the root has none of that type. With
+    /// `components`, the prefab must be in the library
+    /// ([`Editor::apply_with_prefabs`]).
     InstantiatePrefab {
         id: Option<Uuid>,
         name: String,
@@ -155,11 +162,11 @@ pub enum Command {
         entity: Uuid,
         index: Option<usize>,
     },
-    /// Replaces an instance by its expansion (M4-07): the anchor loses its
-    /// `prefab` key and gains the instance roots as trailing children, the
-    /// expanded entities — the prefab's entities with the overrides applied
-    /// and the ids the runtime derives — are inserted right after the anchor
-    /// in `entities`, so the document reads exactly like the expansion.
+    /// Replaces an instance by its expansion (M4-07): the instance keeps
+    /// its id, loses its `prefab` key and gains the root's components and
+    /// children (the overrides applied), and the other expanded entities —
+    /// with the ids the runtime derives — are inserted right after it in
+    /// `entities`, so the document reads exactly like the expansion.
     /// Needs the prefab library ([`Editor::apply_with_prefabs`]); an
     /// instance that does not expand (unknown prefab, invalid override,
     /// id collision) is refused with its expansion diagnostics.
@@ -1544,6 +1551,7 @@ impl Cx<'_> {
                     ));
                 }
                 let instance = instance.unwrap_or_else(Uuid::new_v4);
+                let overrides = self.placement_overrides(prefab, components)?;
                 let mut asset = vec![("asset".to_string(), Node::string(prefab.asset.to_string()))];
                 if !prefab.sub.is_empty() {
                     asset.push(("sub".to_string(), Node::string(prefab.sub.clone())));
@@ -1553,11 +1561,11 @@ impl Cx<'_> {
                     ("instance".to_string(), Node::string(instance.to_string())),
                     (
                         "overrides".to_string(),
-                        Node::synthetic(Value::Array(Vec::new())),
+                        Node::synthetic(Value::Array(overrides)),
                     ),
                 ]);
                 let mut affected =
-                    self.create_object(*id, name, *parent, *index, components, Some(prefab_node))?;
+                    self.create_object(*id, name, *parent, *index, &[], Some(prefab_node))?;
                 affected.push(instance);
                 affected
             }
@@ -1916,36 +1924,16 @@ impl Cx<'_> {
         Ok(affected)
     }
 
-    /// Adds `id` to a parent's `children` (or the prefab's `roots`).
+    /// Adds `id` to a parent's `children` (a parentless entity is listed
+    /// nowhere).
     fn attach(&mut self, id: Uuid, parent_pointer: Option<&str>, index: Option<usize>) {
-        let list = match parent_pointer {
-            Some(p) => {
-                let children = format!("{p}/children");
-                if self
-                    .root
-                    .pointer(&children)
-                    .and_then(Node::as_array)
-                    .is_none()
-                {
-                    self.set_member(p, "children", Node::synthetic(Value::Array(Vec::new())));
-                }
-                children
-            }
-            None => {
-                if self.kind != DocumentKind::Prefab {
-                    return;
-                }
-                if self
-                    .root
-                    .pointer("/roots")
-                    .and_then(Node::as_array)
-                    .is_none()
-                {
-                    self.set_member("", "roots", Node::synthetic(Value::Array(Vec::new())));
-                }
-                "/roots".to_string()
-            }
+        let Some(p) = parent_pointer else {
+            return;
         };
+        let list = format!("{p}/children");
+        if self.root.pointer(&list).and_then(Node::as_array).is_none() {
+            self.set_member(p, "children", Node::synthetic(Value::Array(Vec::new())));
+        }
         self.edits.push(Edit::InsertItem {
             parent: list,
             index: index.unwrap_or(usize::MAX),
@@ -1953,13 +1941,12 @@ impl Cx<'_> {
         });
     }
 
-    /// Removes `id` from its parent's `children` (or `roots`), when listed.
+    /// Removes `id` from its parent's `children`, when listed.
     fn detach(&mut self, id: Uuid, parent: Option<Uuid>) {
-        let list = match parent {
-            Some(p) => format!("/entities/{p}/children"),
-            None if self.kind == DocumentKind::Prefab => "/roots".to_string(),
-            None => return,
+        let Some(p) = parent else {
+            return;
         };
+        let list = format!("/entities/{p}/children");
         let text = id.to_string();
         if let Some(items) = self.root.pointer(&list).and_then(Node::as_array) {
             // Every occurrence (a malformed document may list it twice).
@@ -2092,7 +2079,7 @@ impl Cx<'_> {
         if parent.is_empty() && matches!(first, "$schema" | "kind" | "formatVersion" | "id") {
             return refuse("is the document's identity; migrations own it");
         }
-        if matches!(first, "entities" | "roots") && self.kind != DocumentKind::Material {
+        if matches!(first, "entities" | "root") && self.kind != DocumentKind::Material {
             return refuse("is the entity tree; use the entity commands");
         }
         if self.root.pointer(&parent).is_none() {
@@ -2240,24 +2227,27 @@ impl Cx<'_> {
                 .value
         };
 
-        // The anchor: no `prefab`, the instance roots appended to its children.
+        // The instance: no `prefab`, the root's components and children.
         self.edits.push(Edit::RemoveMember {
             parent: e.clone(),
             key: "prefab".into(),
         });
-        if let Some(children) = member(entity).get("children") {
-            let p = format!("{e}/children");
+        for key in ["children", "components"] {
+            let Some(value) = member(entity).get(key) else {
+                continue;
+            };
+            let p = format!("{e}/{key}");
             if self.root.pointer(&p).is_some() {
                 self.edits.push(Edit::Replace {
                     pointer: p,
-                    value: children.clone(),
+                    value: value.clone(),
                 });
             } else {
                 self.edits.push(Edit::InsertMember {
                     parent: e.clone(),
                     index: usize::MAX,
-                    key: "children".into(),
-                    value: children.clone(),
+                    key: key.into(),
+                    value: value.clone(),
                 });
             }
         }
@@ -2269,7 +2259,8 @@ impl Cx<'_> {
             .and_then(|m| m.iter().position(|m| m.key == entity.to_string()))
             .expect("the anchor is an entity");
         let mut affected = vec![entity];
-        for (i, (_, sid)) in inst.entities.iter().enumerate() {
+        let derived = inst.entities.iter().filter(|(_, sid)| *sid != entity);
+        for (i, (_, sid)) in derived.enumerate() {
             self.edits.push(Edit::InsertMember {
                 parent: "/entities".into(),
                 index: position + 1 + i,
@@ -2382,14 +2373,10 @@ impl Cx<'_> {
                 value: copy,
             });
         }
-        // Next to the original in its parent's list (or the roots).
+        // Next to the original in its parent's list.
         let parent = self.parent_of(id);
         let parent_pointer = parent.map(|p| format!("/entities/{p}"));
-        let list = match parent {
-            Some(p) => Some(format!("/entities/{p}/children")),
-            None if self.kind == DocumentKind::Prefab => Some("/roots".to_string()),
-            None => None,
-        };
+        let list = parent.map(|p| format!("/entities/{p}/children"));
         let after_original = list.and_then(|l| {
             self.root
                 .pointer(&l)
@@ -2410,6 +2397,74 @@ impl Cx<'_> {
             affected.push(p);
         }
         Ok(affected)
+    }
+
+    /// `instantiatePrefab`'s `components` as overrides on the prefab's
+    /// root: a field that differs from the root's component of the same
+    /// type is a `setField`, a type the root lacks an `addComponent`.
+    fn placement_overrides(
+        &self,
+        prefab: &AssetRef,
+        components: &[ComponentSpec],
+    ) -> Result<Vec<Node>, Diagnostic> {
+        if components.is_empty() {
+            return Ok(Vec::new());
+        }
+        let refuse = |why: String| {
+            Diagnostic::error(Code::EDIT_INVALID_COMMAND, format!("instantiatePrefab: {why}"))
+                .with_suggestion("open the project (or pass --prefabs) so the prefab's root is known, or place it without components")
+        };
+        let (flat, _) = self.prefabs.flattened(self.schemas);
+        let Some(p) = flat.get_ref(prefab) else {
+            return Err(refuse(format!(
+                "prefab {} is not available, so its components cannot become overrides of its root",
+                prefab.asset
+            )));
+        };
+        let Some(root) = p.entity(p.root).filter(|_| !p.has_instances()) else {
+            return Err(refuse(format!("prefab {} has no valid root", prefab.asset)));
+        };
+        let mut out = Vec::new();
+        for spec in components {
+            let data = spec
+                .data
+                .clone()
+                .unwrap_or_else(|| Node::object(Vec::new()));
+            match root.component_of(&spec.type_id) {
+                Some(existing) => {
+                    for m in data.as_object().unwrap_or_default() {
+                        let same = existing
+                            .data
+                            .get(&m.key)
+                            .is_some_and(|v| v.to_serde() == m.value.to_serde());
+                        if !same {
+                            out.push(Node::object(vec![
+                                ("op".into(), Node::string("setField")),
+                                ("entity".into(), Node::string(root.id.to_string())),
+                                ("component".into(), Node::string(existing.id.to_string())),
+                                ("field".into(), Node::string(m.key.clone())),
+                                ("value".into(), m.value.clone()),
+                            ]));
+                        }
+                    }
+                }
+                None => out.push(Node::object(vec![
+                    ("op".into(), Node::string("addComponent")),
+                    ("entity".into(), Node::string(root.id.to_string())),
+                    (
+                        "component".into(),
+                        Node::string(spec.id.unwrap_or_else(Uuid::new_v4).to_string()),
+                    ),
+                    ("type".into(), Node::string(spec.type_id.clone())),
+                    (
+                        "version".into(),
+                        Node::integer(spec.version.unwrap_or(1) as i64),
+                    ),
+                    ("data".into(), data),
+                ])),
+            }
+        }
+        Ok(out)
     }
 
     fn set_override(&mut self, entity: Uuid, op: &Node) -> Result<Vec<Uuid>, Diagnostic> {

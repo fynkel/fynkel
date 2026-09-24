@@ -303,7 +303,8 @@ class UnloadReport {
   Iterable<LoadDiagnostic> get errors => diagnostics.where((d) => d.isError);
 }
 
-/// What [World.instantiate] produced: the anchor is the returned object.
+/// What [World.instantiate] produced: the prefab's root is the returned
+/// object (ADR-0022).
 class InstantiateReport {
   const InstantiateReport({
     required this.ok,
@@ -311,7 +312,7 @@ class InstantiateReport {
     this.prefabId,
     this.prefabPath,
     this.name = '',
-    this.anchor = 0,
+    this.root = 0,
     this.entityCount = 0,
     this.rejectedComponents = 0,
     this.assetCount = 0,
@@ -331,7 +332,7 @@ class InstantiateReport {
       prefabId: inst?['prefab'] as String?,
       prefabPath: inst?['path'] as String?,
       name: inst?['name'] as String? ?? '',
-      anchor: (inst?['anchor'] as num?)?.toInt() ?? 0,
+      root: (inst?['root'] as num?)?.toInt() ?? 0,
       entityCount: (inst?['entities'] as num?)?.toInt() ?? 0,
       rejectedComponents: (inst?['rejectedComponents'] as num?)?.toInt() ?? 0,
       assetCount: (inst?['assets'] as num?)?.toInt() ?? 0,
@@ -348,13 +349,13 @@ class InstantiateReport {
   final String? prefabId;
   final String? prefabPath;
 
-  /// The anchor's name.
+  /// The root's name.
   final String name;
 
-  /// The anchor entity's handle.
-  final int anchor;
+  /// The prefab root's entity handle.
+  final int root;
 
-  /// The prefab's entities spawned under the anchor (the anchor excluded).
+  /// The prefab's entities spawned, its root included.
   final int entityCount;
   final int rejectedComponents;
   final int assetCount;
@@ -370,7 +371,7 @@ class InstantiateReport {
         prefabId: prefabId,
         prefabPath: prefabPath,
         name: name,
-        anchor: anchor,
+        root: root,
         entityCount: entityCount,
         rejectedComponents: rejectedComponents,
         assetCount: assetCount,

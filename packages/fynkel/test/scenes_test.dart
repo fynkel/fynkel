@@ -27,10 +27,8 @@ class Collector extends Behaviour {
     seen.add(event);
     if (event.event != 'collect') return;
     collected++;
-    // The coin's anchor is the parent of the zone's entity: destroy the
-    // whole spawn.
-    final parent = world.byEntity(event.zone)?.parent;
-    if (parent != null) world.byEntity(parent)?.destroy();
+    // The zone's entity is the coin's root: destroy the whole spawn.
+    world.byEntity(event.zone)?.destroy();
     expect(Time.tick, greaterThan(0), reason: 'the world context is current');
   }
 
@@ -87,10 +85,10 @@ void main() {
     // 4 m/s: the coin at z −2 — its 0.5 m sensor meets the 0.4 m capsule
     // after ~1.1 m — is reached at ~0.3 s, before the jump at 20 frames).
     final coin = w.instantiate(coinPrefab, transform: identityTransform.copyWith(position: const Vec3(0, 0, -2)));
-    final zone = coin.findChild('Coin')!;
+    final zone = coin; // the coin's root holds the zone (ADR-0022)
     expect(zone.get<TriggerZone>(), const TriggerZone(event: 'collect', once: true));
     expect(zone.get<Collider>()!.isSensor, isTrue);
-    expect(w.allEntities(), hasLength(7));
+    expect(w.allEntities(), hasLength(6));
 
     final player = w.find('Player')!;
     final playerEntity = player.entity;
@@ -130,7 +128,6 @@ void main() {
     expect(exits, isEmpty);
     expect(collector.collected, 1);
     expect(coin.isAlive, isFalse, reason: 'destroyed by the callback');
-    expect(zone.isAlive, isFalse);
 
     // The transition ran at the start of the frame after the request:
     // Playground went (its 5 entities), Results is in, the Player's
@@ -209,7 +206,7 @@ void main() {
 
     final crate = w.instantiate('c0000000-0000-4000-8000-000000000040');
     w.frame(1 / 60);
-    expect(w.allEntities(), hasLength(10));
+    expect(w.allEntities(), hasLength(9));
 
     final gone = w.unloadScene(playground);
     expect(gone.sceneName, 'Playground');
@@ -220,7 +217,7 @@ void main() {
     final events = w.drainEvents();
     expect(events.whereType<EntityDestroyed>().length, 5);
     expect(events.whereType<SceneUnloaded>().single.entities, 5);
-    expect(w.allEntities(), hasLength(5), reason: 'Results and the crate stay');
+    expect(w.allEntities(), hasLength(4), reason: 'Results and the crate stay');
     expect(crate.isAlive, isTrue);
     expect(w.find('Player'), isNull);
     expect(
@@ -232,14 +229,14 @@ void main() {
     expect(() => w.unloadScene('nope'), throwsA(isA<FynkelBridgeError>()));
 
     // Replace clears the crate too; the events say what went, then what
-    // came: DESTROYED ×5 (Results' 3, the crate's anchor + entity),
+    // came: DESTROYED ×4 (Results' 3, the crate),
     // SCENE_UNLOADED (Results, 3), SCENE_READY (Playground).
     w.loadScene(playground);
     expect(w.allEntities(), hasLength(5));
     expect(crate.isAlive, isTrue, reason: 'until the next drain');
     final replaced = w.drainEvents();
     expect(crate.isAlive, isFalse);
-    expect(replaced.whereType<EntityDestroyed>().length, 5);
+    expect(replaced.whereType<EntityDestroyed>().length, 4);
     final unloaded = replaced.whereType<SceneUnloaded>().single;
     expect(unloaded.scene, results);
     expect(unloaded.entities, 3);

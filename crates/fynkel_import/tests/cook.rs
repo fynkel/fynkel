@@ -719,7 +719,7 @@ fn cycles_and_unresolved_references_fail_only_the_assets_involved() {
     let b = "c0000000-0000-4000-8000-0000000000b0";
     let scene = |own: &str, other: &str| {
         format!(
-            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":4,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
+            r#"{{"$schema":"https://fynkel.dev/schemas/scene.schema.json","formatVersion":5,"id":"{own}","name":"x","entities":{{"c0000000-0000-4000-8000-0000000000e9":{{"name":"E","parent":null,"children":[],"components":{{"c0000000-0000-4000-8000-0000000000c9":{{"type":"fynkel.MeshRenderer","version":1,"data":{{"mesh":{{"asset":"{other}"}},"material":{{"asset":"{RUSTED}"}},"cast_shadows":true,"receive_shadows":true,"visible":true}}}}}}}}}}}}"#
         )
     };
     p.write("scenes/a.scene.json", &scene(a, b));
@@ -882,8 +882,8 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert_eq!(main_entry["name"], "Main");
     assert_eq!(main_entry["status"], "cooked");
 
-    // The scene chunk is the expanded scene: the crate prefab's entity is
-    // under the instance with a derived id, the override applied, and no
+    // The scene chunk is the expanded scene: the instance is the crate
+    // prefab's root (its components, the override applied), and no
     // `prefab` block remains. META says so, and names the behaviour types.
     let main = r.get(id(MAIN)).unwrap();
     let bytes = std::fs::read(main.file.as_ref().unwrap()).unwrap();
@@ -893,7 +893,7 @@ fn cook_project_expands_scenes_and_records_the_project() {
     assert_eq!(info["kind"], "JSON");
     assert_eq!(info["documentKind"], "scene");
     assert_eq!(info["expanded"], true);
-    assert_eq!(info["entities"], 7);
+    assert_eq!(info["entities"], 6);
     assert_eq!(info["instances"], 1);
     assert_eq!(
         info["behaviourTypes"],
@@ -901,17 +901,11 @@ fn cook_project_expands_scenes_and_records_the_project() {
     );
     let scene: serde_json::Value = serde_json::from_slice(c.read(1, 1 << 20).unwrap()).unwrap();
     let entities = scene["entities"].as_object().unwrap();
-    assert_eq!(entities.len(), 7);
+    assert_eq!(entities.len(), 6);
     let host = &entities["c0000000-0000-4000-8000-0000000000e2"];
     assert!(host.get("prefab").is_none(), "expanded: {host}");
-    let child = host["children"][0].as_str().unwrap();
-    assert_ne!(child, "c0000000-0000-4000-8000-0000000000b1");
-    let crate_entity = &entities[child];
-    assert_eq!(
-        crate_entity["parent"],
-        "c0000000-0000-4000-8000-0000000000e2"
-    );
-    let mesh_renderer = crate_entity["components"]
+    assert!(!entities.contains_key("c0000000-0000-4000-8000-0000000000b1"));
+    let mesh_renderer = host["components"]
         .as_object()
         .unwrap()
         .values()
@@ -1037,7 +1031,7 @@ fn an_fbx_source_cooks_like_a_gltf_one() {
     assert_eq!(meta["chunks"][4]["name"], "bob");
     assert_eq!(meta["chunks"][5]["name"], "wave");
     assert_eq!(meta["chunks"][6]["documentKind"], "prefab");
-    assert_eq!(meta["chunks"][6]["entities"], 6);
+    assert_eq!(meta["chunks"][6]["entities"], 7);
     let again = p.cook();
     assert_eq!(status(&again, RIG), Status::Cached);
 }

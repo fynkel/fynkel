@@ -654,7 +654,7 @@ fn the_edit_preview_world_crosses_the_edge() {
     let opened = host.result();
     assert_eq!(opened["opened"], true);
     assert_eq!(opened["cook"]["ok"], true, "{opened}");
-    assert_eq!(opened["stats"]["entities"], 7);
+    assert_eq!(opened["stats"]["entities"], 6);
     assert_eq!(opened["diagnostics"], json!([]));
     assert!(copy.dir.join(".fynkel/cache/index.json").is_file());
     // Again: idempotent, no second cook.
@@ -785,7 +785,7 @@ fn the_edit_preview_world_crosses_the_edge() {
     let incremental = host.result()["dump"].clone();
     assert_ne!(incremental, before);
     assert_eq!(host.preview_call(scene, "reload", &json!({})), Status::Ok);
-    assert_eq!(host.result()["stats"]["entities"], 7);
+    assert_eq!(host.result()["stats"]["entities"], 6);
     assert_eq!(host.preview_call(scene, "dump", &json!({})), Status::Ok);
     assert_eq!(host.result()["dump"], incremental, "incremental == fresh");
     // Undo brings the world back with the document.
@@ -825,7 +825,7 @@ fn the_edit_preview_world_crosses_the_edge() {
     let recook = host.result();
     assert_eq!(recook["cook"]["ok"], true, "{recook}");
     assert_eq!(recook["previews"][0]["handle"], scene);
-    assert_eq!(recook["previews"][0]["stats"]["entities"], 7);
+    assert_eq!(recook["previews"][0]["stats"]["entities"], 6);
     let world2 = unsafe { fynkel_authoring_preview_world(host.0, scene) };
     assert_eq!(world, world2, "the world pointer stays put");
 

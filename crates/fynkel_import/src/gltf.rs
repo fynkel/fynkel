@@ -57,8 +57,10 @@ use crate::{read_source, Imported, Limits};
 pub const IMPORTER: &str = fynkel_document::asset::GLTF_IMPORTER;
 /// 6: sub-asset keys are the parts' names once the sidecar is at
 /// `formatVersion` 2 (`subkey`). 7: `settings.materials` remaps embedded
-/// materials in the model's hierarchy (`graph::remap_materials`).
-pub const IMPORTER_VERSION: u32 = 7;
+/// materials in the model's hierarchy (`graph::remap_materials`). 8: the
+/// hierarchy has one root (ADR-0022; a new root named after the file over
+/// several top-level nodes).
+pub const IMPORTER_VERSION: u32 = 8;
 
 /// Extensions the importer understands when a file *requires* them.
 const SUPPORTED_REQUIRED: &[&str] = &["KHR_materials_emissive_strength"];

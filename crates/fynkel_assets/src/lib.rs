@@ -301,8 +301,8 @@ pub struct CookedPrefab {
     /// The prefab document's name.
     pub name: String,
     pub path: String,
-    /// The parentless entities in instantiation order.
-    pub roots: Vec<Uuid>,
+    /// The root (ADR-0022): the one parentless entity.
+    pub root: Uuid,
     pub description: SceneDescription,
     pub behaviours: Vec<AuthoredBehaviour>,
     pub diagnostics: Vec<Diagnostic>,
@@ -1208,11 +1208,7 @@ impl Assets {
             id,
             name: described.description.name.clone(),
             path,
-            roots: prefab
-                .roots
-                .iter()
-                .map(|u| Uuid::from_bytes(*u.as_bytes()))
-                .collect(),
+            root: Uuid::from_bytes(*prefab.root.as_bytes()),
             description: described.description,
             behaviours: described.behaviours,
             diagnostics,

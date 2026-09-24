@@ -528,14 +528,14 @@ FynkelStatus fynkel_world_bind_actions(FynkelWorld* world,
                                        const uint8_t* json_utf8,
                                        uint32_t json_len);
 /* Runtime prefab instantiation (M3-08b, blueprint §6 item 12). Spawns,
- * now, an anchor entity named `name_utf8` (empty: the prefab's name) with
- * the given local transform under `parent` (0 = root), and the cooked
- * prefab `prefab_id_utf8` (36-char UUID text) as the anchor's children —
- * the shape a scene instance expands to. The prefab comes from the cache
+ * now, the cooked prefab `prefab_id_utf8` (36-char UUID text): its root
+ * (ADR-0022) named `name_utf8` (empty: the prefab's name) with the given
+ * local transform under `parent` (0 = root), its other entities under it
+ * — the shape a scene instance expands to. The prefab comes from the cache
  * the last successful load opened (FYNKEL_STATUS_LOAD_FAILED before any);
  * its closure is retained with the scene's. Components go through the
- * command path; the anchor and the entities are in the report:
- * {"ok", "instance": {"prefab", "name", "path", "anchor": u64,
+ * command path; the root and the entities are in the report:
+ * {"ok", "instance": {"prefab", "name", "path", "root": u64,
  * "entities": n, "rejectedComponents", "assets", "behaviours": [...]},
  * "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED when the prefab is not
  * in the cache, does not decode (recook) or `parent` is not live (the

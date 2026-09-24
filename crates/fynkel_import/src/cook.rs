@@ -1789,7 +1789,7 @@ fn prefab_chunk(
         info: json!({
             "documentKind": "prefab",
             "entities": flat.entities.len(),
-            "roots": flat.roots.len(),
+            "root": flat.root.to_string(),
             "instances": instances,
             "expanded": true,
             "behaviourTypes": behaviour_types.iter().map(|(t, v)| json!({ "type": t, "version": v })).collect::<Vec<_>>(),

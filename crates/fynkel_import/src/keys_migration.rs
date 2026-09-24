@@ -18,7 +18,14 @@
 //!
 //! A model whose file cannot be imported is reported; its sidecar's own
 //! step then refuses, and documents pointing into it keep their keys.
+//!
+//! The same pass carries the project half of `scene|prefab/4-5/one-root`
+//! (ADR-0022, [`fynkel_document::one_root`]): an instance becomes its
+//! prefab's root, which needs the prefab — or the hierarchy an imported
+//! model derives, imported here — so it runs as a second rewrite when a
+//! document's chain reaches version 4.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -26,7 +33,8 @@ use fynkel_contracts::{Code, Diagnostic};
 use fynkel_document::asset::{source_path, Meta, FBX_IMPORTER, GLTF_IMPORTER};
 use fynkel_document::json::{Node, Value};
 use fynkel_document::migrate::Migrated;
-use fynkel_document::prefab::derive_id;
+use fynkel_document::one_root::{self, Plan};
+use fynkel_document::prefab::{derive_id, Prefab};
 use fynkel_document::{migrate_with, Document, DocumentKind, Migrations, Rewrite, SchemaSet};
 use uuid::Uuid;
 
@@ -94,12 +102,36 @@ pub fn migrate_documents(
     migrations: &Migrations,
     schemas: &SchemaSet,
 ) -> (Vec<Planned>, Vec<Diagnostic>) {
+    migrate_documents_with(files, &[], migrations, schemas)
+}
+
+/// [`migrate_documents`] with `context`: more documents of the same
+/// project, read for what `files` point at (the prefabs and models an
+/// instance names) but neither migrated nor reported. Migrating one scene
+/// of a project needs them; paths already in `files` are skipped.
+pub fn migrate_documents_with(
+    files: &[PathBuf],
+    context: &[PathBuf],
+    migrations: &Migrations,
+    schemas: &SchemaSet,
+) -> (Vec<Planned>, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut docs: Vec<(PathBuf, Document)> = Vec::new();
     for path in files {
         match Document::read(path, None) {
             Ok(d) => docs.push((path.clone(), d)),
             Err(d) => diags.extend(d),
+        }
+    }
+    let migrating = docs.len();
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let known: HashSet<PathBuf> = files.iter().map(|p| canonical(p)).collect();
+    for path in context {
+        if known.contains(&canonical(path)) {
+            continue;
+        }
+        if let Ok(d) = Document::read(path, None) {
+            docs.push((path.clone(), d));
         }
     }
 
@@ -173,8 +205,46 @@ pub fn migrate_documents(
         busy: HashSet::new(),
     };
 
+    // The hierarchies imported models derive (one root each), for the
+    // instances of `{ asset: <model or rig>, sub: "prefab" }`.
+    let metas: HashMap<Uuid, &PathBuf> = docs
+        .iter()
+        .filter(|(_, d)| d.kind == DocumentKind::Meta)
+        .map(|(p, d)| (d.envelope.id, p))
+        .collect();
+    let hierarchies: RefCell<HashMap<Uuid, Option<Prefab>>> = RefCell::new(HashMap::new());
+    let imported = |asset: Uuid, sub: &str| -> Option<Prefab> {
+        if sub != "prefab" {
+            return None;
+        }
+        let model = *rigs.get(&asset).unwrap_or(&asset);
+        if let Some(p) = hierarchies.borrow().get(&model) {
+            return p.clone();
+        }
+        let prefab = metas.get(&model).and_then(|sidecar| {
+            let source = source_path(sidecar)?;
+            let meta = Meta::from_document(Document::read(sidecar, Some(DocumentKind::Meta)).ok()?);
+            let imported = import(&source, &meta, &Limits::default());
+            let prefab = imported.intermediate?.prefab?;
+            let text = serde_json::to_string(&prefab).ok()?;
+            Document::parse(DocumentKind::Prefab, None, &text)
+                .ok()
+                .map(Prefab::from_document)
+        });
+        hierarchies.borrow_mut().insert(model, prefab.clone());
+        prefab
+    };
+    let plan = Plan::new(docs.iter().map(|(_, d)| d), &imported);
+    let one_root = |d: &mut Document| plan.rewrite(d);
+    let one_root = Rewrite {
+        name: one_root::REWRITE.to_string(),
+        description: "a prefab has one root and an instance is that root: several roots get a new one, an instance's own components become overrides of the root".to_string(),
+        at: Some(4),
+        apply: &one_root,
+    };
+
     let mut out = Vec::new();
-    for (path, doc) in &docs {
+    for (path, doc) in &docs[..migrating] {
         // Ids to replace in this document: the instanced asset's own local
         // ids (override targets) and the ids each instance derives.
         let mut ids: HashMap<String, String> = HashMap::new();
@@ -214,11 +284,12 @@ pub fn migrate_documents(
         let rewrite = Rewrite {
             name: REWRITE.to_string(),
             description: "sub-asset keys of the project's models are their parts' names; references and the ids derived from model nodes follow".to_string(),
+            at: None,
             apply: &apply,
         };
         out.push(Planned {
             path: path.clone(),
-            migrated: migrate_with(doc, migrations, schemas, Some(&rewrite)),
+            migrated: migrate_with(doc, migrations, schemas, &[&rewrite, &one_root]),
         });
     }
     (out, diags)

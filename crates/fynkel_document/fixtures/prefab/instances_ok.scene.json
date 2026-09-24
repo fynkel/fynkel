@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "20000000-0000-4000-8000-000000000001",
   "name": "Two turrets",
   "entities": {
@@ -8,30 +8,7 @@
       "name": "Turret A",
       "parent": null,
       "children": [],
-      "components": {
-        "20000000-0000-4000-8000-0000000000d1": {
-          "type": "fynkel.Transform",
-          "version": 1,
-          "data": {
-            "position": [
-              -2,
-              0,
-              0
-            ],
-            "rotation": [
-              0,
-              0,
-              0,
-              1
-            ],
-            "scale": [
-              1,
-              1,
-              1
-            ]
-          }
-        }
-      },
+      "components": {},
       "prefab": {
         "asset": {
           "asset": "10000000-0000-4000-8000-000000000001"
@@ -91,6 +68,17 @@
                 }
               }
             }
+          },
+          {
+            "op": "setField",
+            "entity": "10000000-0000-4000-8000-0000000000b1",
+            "component": "10000000-0000-4000-8000-0000000000c1",
+            "field": "position",
+            "value": [
+              -2.0,
+              0.0,
+              0.0
+            ]
           }
         ]
       }

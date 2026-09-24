@@ -123,7 +123,7 @@ fn the_new_extension_maps_to_the_importer() {
     );
     assert!(fynkel_import::IMPORTERS
         .iter()
-        .any(|(name, version)| *name == "fynkel.fbx" && *version == 3));
+        .any(|(name, version)| *name == "fynkel.fbx" && *version == 4));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn rig_fbx_matches_the_gltf_rig() {
     );
     let i = r.intermediate.as_ref().unwrap();
     assert_eq!(i.importer, "fynkel.fbx");
-    assert_eq!(i.importer_version, 3);
+    assert_eq!(i.importer_version, 4);
     assert_eq!(i.source, "rig.fbx");
     let (g, _) = import_fixture("rig.glb");
     let g = g.intermediate.unwrap();
@@ -317,13 +317,19 @@ fn rig_fbx_matches_the_gltf_rig() {
     // renderer naming the skin and the hips, none on the Prop; it validates.
     let p = i.prefab.as_ref().unwrap();
     let entities = p["entities"].as_object().unwrap();
-    assert_eq!(entities.len(), 6);
+    // Blender's export puts Body next to the armature, so the two
+    // top-level nodes get a root named after the file (ADR-0022).
+    assert_eq!(entities.len(), 7);
+    assert_eq!(entities[p["root"].as_str().unwrap()]["name"], "rig");
     let mut names: Vec<&str> = entities
         .values()
         .map(|e| e["name"].as_str().unwrap())
         .collect();
     names.sort_unstable();
-    assert_eq!(names, ["Body", "Prop", "Rig", "head", "hips", "spine"]);
+    assert_eq!(
+        names,
+        ["Body", "Prop", "Rig", "head", "hips", "rig", "spine"]
+    );
     let body = entities.values().find(|e| e["name"] == "Body").unwrap();
     let components: Vec<&serde_json::Value> =
         body["components"].as_object().unwrap().values().collect();
@@ -494,8 +500,9 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     assert_eq!(mine.dimensions(), theirs.dimensions());
     assert_eq!(mine.as_raw(), theirs.as_raw());
 
-    // The prefab mirrors the glTF's hierarchy (Ground, Robot > Antenna,
-    // Body, Head) with the two-part mesh as two children.
+    // The prefab mirrors the glTF's hierarchy (robot > Ground, Robot >
+    // Antenna, Body, Head: two top-level nodes get a root named after the
+    // file) with the two-part mesh as two children.
     let p = i.prefab.as_ref().unwrap();
     let entities = p["entities"].as_object().unwrap();
     let names: Vec<&str> = entities
@@ -505,6 +512,7 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
     assert_eq!(
         names,
         [
+            "robot",
             "Ground",
             "PyramidAndQuad[0]",
             "PyramidAndQuad[1]",
@@ -516,7 +524,8 @@ fn robot_fbx_imports_meshes_materials_and_the_embedded_texture() {
             "Head"
         ]
     );
-    assert_eq!(p["roots"].as_array().unwrap().len(), 2);
+    let root = p["root"].as_str().unwrap();
+    assert_eq!(p["entities"][root]["children"].as_array().unwrap().len(), 2);
 
     // Warnings only: the texture's clamped wrap is not kept.
     assert_eq!(codes(&r), [Code::IMPORT_SKIPPED]);

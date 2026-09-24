@@ -65,8 +65,8 @@ impl Code {
     pub const SHADER_MALFORMED_ENTRY: Code = Code("FYN-D0312");
     // Documents (FYN-D): prefabs and instances (blueprint §6 Prefabs;
     // `fynkel_document::prefab`).
-    /// `roots` and the parentless entities disagree.
-    pub const PREFAB_ROOTS_MISMATCH: Code = Code("FYN-D0400");
+    /// A prefab's `root` is not its one parentless entity (ADR-0022).
+    pub const PREFAB_ROOT: Code = Code("FYN-D0400");
     /// An instance names a prefab the library does not have.
     pub const PREFAB_UNKNOWN: Code = Code("FYN-D0401");
     /// A prefab's nesting cannot be resolved: an instance chain leads back
@@ -81,6 +81,9 @@ impl Code {
     /// A derived id collides with an existing entity or component id.
     pub const PREFAB_ID_COLLISION: Code = Code("FYN-D0406");
     pub const PREFAB_MALFORMED_ENTRY: Code = Code("FYN-D0407");
+    /// An instance carries components of its own: the prefab root's are
+    /// the instance's, changed by overrides (ADR-0022).
+    pub const PREFAB_INSTANCE_COMPONENTS: Code = Code("FYN-D0408");
     // Documents (FYN-D): rig documents (blueprint §19.2d item 19b;
     // `fynkel_document::rig`).
     /// `skeleton` does not name an imported model (a source without a sub).

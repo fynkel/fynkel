@@ -57,6 +57,7 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
         LoadError::Unreachable(_) => Code::SCENE_HIERARCHY_CYCLE,
         LoadError::DuplicateComponent { .. } => Code::SCENE_DUPLICATE_COMPONENT,
         LoadError::UnknownAnchorParent(_) | LoadError::AnchorTransform => Code::IO,
+        LoadError::NotOneRoot(_) => Code::RUNTIME_SCENE_INVALID,
         LoadError::AlreadyLoaded(_) => Code::RUNTIME_SCENE_ALREADY_LOADED,
         LoadError::NotLoaded(_) => Code::RUNTIME_SCENE_NOT_LOADED,
     };
@@ -385,7 +386,7 @@ fn instantiate_prefab(
         .core_mut()
         .instantiate(&prefab.description, name, transform, parent)
     {
-        Ok((anchor, loaded)) => {
+        Ok((root, loaded)) => {
             let residency = assets.retain(&prefab.closure);
             let stats = assets.stats();
             w.residency.push((None, residency));
@@ -418,7 +419,7 @@ fn instantiate_prefab(
                         "prefab": prefab.id.to_string(),
                         "name": name,
                         "path": prefab.path,
-                        "anchor": anchor.to_bits(),
+                        "root": root.to_bits(),
                         "entities": loaded.entities().len(),
                         "rejectedComponents": loaded.rejected_components,
                         "assets": prefab.closure.len(),
@@ -446,8 +447,8 @@ fn instantiate_prefab(
     }
 }
 
-/// Instantiates the cooked prefab `desc.prefab_id_utf8` as the children
-/// of a new anchor entity (see the header).
+/// Instantiates the cooked prefab `desc.prefab_id_utf8`: its root under
+/// `desc.parent` (see the header).
 ///
 /// # Safety
 /// `world` live or NULL; `desc` NULL or valid, its strings readable for

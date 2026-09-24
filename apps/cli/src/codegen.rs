@@ -389,9 +389,8 @@ enum EntityDocument {
 }
 
 /// `scene.schema.json` and `prefab.schema.json` share the entity/component
-/// model; a scene entity may be a prefab instance (`prefab`), a prefab
-/// declares its `roots` and may not contain instances (nested prefabs are
-/// out of M2 scope).
+/// model; an entity of either may be a prefab instance (`prefab`), and a
+/// prefab declares its one `root` (ADR-0022).
 fn entity_document_schema(kind: EntityDocument) -> Value {
     let uuid = json!({"$ref": format!("{ENVELOPE_ID}#/$defs/uuid")});
     let asset_ref = json!({"$ref": format!("{ENVELOPE_ID}#/$defs/assetRef")});
@@ -454,7 +453,7 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
     entity_properties["prefab"] = json!({"$ref": "#/$defs/prefabInstance"});
     defs["prefabInstance"] = json!({
         "type": "object",
-        "description": "Makes this entity a prefab instance: the prefab's roots are expanded as its children (after the authored ones), with prefab-local ids remapped per instance. Overrides apply in order.",
+        "description": "Makes this entity a prefab instance: it is the prefab's root (ADR-0022) — it keeps its id, name and active flag, takes the root's components (it has none of its own) and the root's children before its own — and the prefab's other ids are remapped per instance. Overrides apply in order.",
         "properties": {
             "asset": asset_ref,
             "instance": {"allOf": [uuid], "description": "Stable per instance; prefab-local ids are derived from it."},
@@ -477,7 +476,7 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
             "version": {"type": "integer", "minimum": 1},
             "data": {"type": "object"},
             "name": {"type": "string", "maxLength": 256},
-            "parent": {"oneOf": [uuid, {"type": "null"}], "description": "addObject: prefab-local parent, or null for a new instance root."},
+            "parent": {"allOf": [uuid], "description": "addObject: the prefab-local parent (the root at the top)."},
             "components": {
                 "type": "object",
                 "propertyNames": uuid,
@@ -506,17 +505,15 @@ fn entity_document_schema(kind: EntityDocument) -> Value {
             )
         }
         EntityDocument::Prefab => {
-            properties["roots"] = json!({
-                "type": "array",
-                "description": "The parentless entities, in instantiation order; must list each exactly once.",
-                "items": uuid,
-                "uniqueItems": true,
+            properties["root"] = json!({
+                "allOf": [uuid],
+                "description": "The prefab's one root: its only parentless entity; every other entity descends from it (ADR-0022). An instance of the prefab is this entity.",
             });
             (
                 "prefab",
                 "Fynkel prefab document",
-                "The scene entity model plus declared `roots` (blueprint §6 Prefabs). An entity with `prefab` is a nested prefab instance, expanded when the prefab is (a cycle is `FYN-D0402`). `fynkel prefab validate` checks the semantic rules.",
-                json!(["entities", "roots"]),
+                "The scene entity model plus its one `root` (blueprint §6 Prefabs, ADR-0022). An entity with `prefab` is a nested prefab instance, expanded when the prefab is (a cycle is `FYN-D0402`). `fynkel prefab validate` checks the semantic rules.",
+                json!(["entities", "root"]),
             )
         }
     };

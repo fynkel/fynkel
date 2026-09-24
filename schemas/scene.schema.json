@@ -461,7 +461,7 @@
     },
     "prefabInstance": {
       "type": "object",
-      "description": "Makes this entity a prefab instance: the prefab's roots are expanded as its children (after the authored ones), with prefab-local ids remapped per instance. Overrides apply in order.",
+      "description": "Makes this entity a prefab instance: it is the prefab's root (ADR-0022) — it keeps its id, name and active flag, takes the root's components (it has none of its own) and the root's children before its own — and the prefab's other ids are remapped per instance. Overrides apply in order.",
       "properties": {
         "asset": {
           "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef"
@@ -533,15 +533,12 @@
           "maxLength": 256
         },
         "parent": {
-          "oneOf": [
+          "allOf": [
             {
               "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/uuid"
-            },
-            {
-              "type": "null"
             }
           ],
-          "description": "addObject: prefab-local parent, or null for a new instance root."
+          "description": "addObject: the prefab-local parent (the root at the top)."
         },
         "components": {
           "type": "object",

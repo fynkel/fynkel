@@ -108,66 +108,73 @@ fn loads_hierarchy_in_document_order_with_components() {
     assert_eq!(w.step().status, Status::Ok);
 }
 
-/// `World::instantiate` (M3-08b): the description's roots become the
-/// children of a new anchor — the shape a scene instance expands to — with
-/// the anchor's name, transform and parent as given; the anchor's world
-/// matrix is applied to the prefab's own transforms; the structural checks
-/// run before anything is spawned.
+/// The scene above without its second root: a prefab has one (ADR-0022).
+fn prefab() -> SceneDescription {
+    let mut s = scene();
+    s.entities.retain(|e| e.id != id(4));
+    s
+}
+
+/// `World::instantiate` (M3-08b, ADR-0022): the description's one root
+/// spawns under `parent` with the given transform and name — the shape a
+/// scene instance expands to — and is returned; its descendants keep
+/// their own transforms; the structural checks run before anything is
+/// spawned.
 #[test]
-fn instantiate_places_a_description_under_an_anchor() {
+fn instantiate_places_the_prefab_root() {
     let mut w = World::new(WorldConfig::default());
     let base = w.load_scene(&scene()).unwrap();
     let e1 = base.handle_of(id(1)).unwrap();
     let live = w.live_entities();
 
-    let at_anchor = Transform::from_position(Vec3::new(0.0, 5.0, 0.0));
-    let (anchor, loaded) = w
-        .instantiate(&scene(), "Copy", at_anchor, Some(e1))
-        .unwrap();
-    assert_eq!(loaded.len(), 4);
+    let placed = Transform::from_position(Vec3::new(0.0, 5.0, 0.0));
+    let (root, loaded) = w.instantiate(&prefab(), "Copy", placed, Some(e1)).unwrap();
+    assert_eq!(loaded.len(), 3);
     assert_eq!(loaded.rejected_components, 0, "{:?}", w.diagnostics());
     assert_eq!(
         w.live_entities(),
-        live + 5,
-        "the four entities plus the anchor"
+        live + 3,
+        "no entity besides the prefab's"
     );
-    assert_eq!(w.ecs().copy::<Name>(anchor).unwrap().value, "Copy");
-    assert_eq!(w.ecs().copy::<Transform>(anchor).unwrap(), at_anchor);
-    assert_eq!(scene::parent_of(w.ecs(), anchor), Some(e1));
-    let c1 = loaded.handle_of(id(1)).unwrap();
-    let c4 = loaded.handle_of(id(4)).unwrap();
+    assert_eq!(loaded.handle_of(id(1)), Some(root));
+    assert_ne!(
+        root, e1,
+        "fresh handles; the same description twice is fine"
+    );
+    assert_eq!(w.ecs().copy::<Name>(root).unwrap().value, "Copy");
     assert_eq!(
-        scene::children_of(w.ecs(), anchor),
-        vec![c1, c4],
-        "the roots, in instantiation order"
+        w.ecs().copy::<Transform>(root).unwrap(),
+        placed,
+        "the given transform replaces the root's own"
     );
-    assert_eq!(scene::parent_of(w.ecs(), c1), Some(anchor));
-    assert_ne!(c1, e1, "fresh handles; the same description twice is fine");
-    // e1 at x 10 → anchor at y 5 under it → c1 at x 10 → c2 at x 1.
+    assert_eq!(scene::parent_of(w.ecs(), root), Some(e1));
     let c2 = loaded.handle_of(id(2)).unwrap();
+    let c3 = loaded.handle_of(id(3)).unwrap();
+    assert_eq!(scene::children_of(w.ecs(), root), vec![c3, c2]);
+    // e1 at x 10 → the root at y 5 under it → c2 at x 1.
     let m = scene::world_matrix(w.ecs(), c2).unwrap();
-    assert_eq!(m.transform_point3(Vec3::ZERO), Vec3::new(21.0, 5.0, 0.0));
+    assert_eq!(m.transform_point3(Vec3::ZERO), Vec3::new(11.0, 5.0, 0.0));
     // Components went through the command path, like a scene's.
     assert!(w.ecs().has::<Camera>(c2));
 
-    // No name: the anchor has none. No parent: a root.
+    // No name: the root keeps its own. No parent: a root of the world.
     let (bare, _) = w
-        .instantiate(&scene(), "", Transform::IDENTITY, None)
+        .instantiate(&prefab(), "", Transform::IDENTITY, None)
         .unwrap();
-    assert!(w.ecs().copy::<Name>(bare).is_err());
+    assert_eq!(w.ecs().copy::<Name>(bare).unwrap().value, "e1");
     assert_eq!(scene::parent_of(w.ecs(), bare), None);
 
     // Refusals spawn nothing.
     let live = w.live_entities();
     let stale = Entity::new(w.id(), 7, 60_000);
     assert_eq!(
-        w.instantiate(&scene(), "", Transform::IDENTITY, Some(stale))
+        w.instantiate(&prefab(), "", Transform::IDENTITY, Some(stale))
             .unwrap_err(),
         LoadError::UnknownAnchorParent(stale)
     );
     assert_eq!(
         w.instantiate(
-            &scene(),
+            &prefab(),
             "",
             Transform::from_position(Vec3::new(f32::NAN, 0.0, 0.0)),
             None
@@ -175,7 +182,13 @@ fn instantiate_places_a_description_under_an_anchor() {
         .unwrap_err(),
         LoadError::AnchorTransform
     );
-    let mut s = scene();
+    // Two parentless entities: not a prefab.
+    assert_eq!(
+        w.instantiate(&scene(), "", Transform::IDENTITY, None)
+            .unwrap_err(),
+        LoadError::NotOneRoot(id(99))
+    );
+    let mut s = prefab();
     s.entities.push(entity(1, None, &[], vec![]));
     assert_eq!(
         w.instantiate(&s, "", Transform::IDENTITY, None)

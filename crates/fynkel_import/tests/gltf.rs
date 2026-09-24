@@ -236,10 +236,18 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
     let p = i.prefab.as_ref().unwrap();
     assert_eq!(p["name"], "Robot");
     assert_eq!(p["id"], derive_sub_id(asset, "prefab").to_string());
-    assert_eq!(p["roots"], serde_json::json!([node(0), node(4)]));
+    // Two top-level nodes: a root named after the file holds them (ADR-0022).
+    let wrapper = derive_sub_id(asset, "node").to_string();
+    assert_eq!(p["root"], serde_json::json!(wrapper));
+    assert_eq!(
+        p["entities"][&wrapper]["children"],
+        serde_json::json!([node(0), node(4)])
+    );
+    assert_eq!(p["entities"][&wrapper]["parent"], serde_json::Value::Null);
+    assert_eq!(p["entities"][node(0)]["parent"], serde_json::json!(wrapper));
 
     let entities = p["entities"].as_object().unwrap();
-    assert_eq!(entities.len(), 9); // 5 nodes + 2 primitive children under Antenna and Ground
+    assert_eq!(entities.len(), 10); // the root + 5 nodes + 2 primitive children under Antenna and Ground
     let order: Vec<&str> = entities
         .values()
         .map(|e| e["name"].as_str().unwrap())
@@ -247,6 +255,7 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
     assert_eq!(
         order,
         [
+            "Robot", // the root, named like the prefab
             "Robot",
             "Body",
             "Head",
@@ -260,7 +269,7 @@ fn robot_prefab_mirrors_the_node_hierarchy_and_validates() {
     );
 
     let robot = &entities[&node(0)];
-    assert_eq!(robot["parent"], serde_json::Value::Null);
+    assert_eq!(robot["parent"], serde_json::json!(wrapper));
     assert_eq!(robot["children"], serde_json::json!([node(1), node(3)]));
     let robot_transform = robot["components"]
         .as_object()
@@ -778,7 +787,8 @@ fn khronos_sample_rigs_import_clean() {
             "khronos/Fox.glb",
             24,
             &[("Survey", 3.42), ("Walk", 0.71), ("Run", 1.16)],
-            26,
+            // The skeleton and the mesh are two top-level nodes: + a root.
+            27,
             "fox",
         ),
         (

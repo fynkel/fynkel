@@ -458,22 +458,21 @@ fn an_emitter_spawns_its_prefab_at_rate_with_lifetime_ceiling_and_velocity() {
     for _ in 0..3 {
         w.step();
     }
-    let anchors = named(&w, "Spark");
-    assert_eq!(anchors.len(), 2, "after 4 ticks");
-    // Anchors carry the emitter's world pose, the prefab root sits under them.
-    let (p, _) = world_pose(&w, anchors[0]);
-    assert!(close(p, Vec3::new(0.0, 4.0, 0.0)), "{p:?}");
-    assert!(w.ecs().has::<LifetimeDespawn>(anchors[0]));
+    // Each instance is the prefab's root, named after the prefab, placed
+    // at the emitter's world pose composed with the root's own Transform.
+    let sparks = named(&w, "Spark");
+    assert_eq!(sparks.len(), 2, "after 4 ticks");
+    assert!(named(&w, "Ember").is_empty());
+    assert!(w.ecs().has::<LifetimeDespawn>(sparks[0]));
     assert!(
-        fynkel_scene::parent_of(w.ecs(), anchors[0]).is_none(),
+        fynkel_scene::parent_of(w.ecs(), sparks[0]).is_none(),
         "unparented"
     );
-    let child = fynkel_scene::children_of(w.ecs(), anchors[0])[0];
-    assert_eq!(w.ecs().copy::<Name>(child).unwrap().value, "Ember");
-    let (p, _) = world_pose(&w, child);
+    assert!(fynkel_scene::children_of(w.ecs(), sparks[0]).is_empty());
+    let (p, _) = world_pose(&w, sparks[0]);
     assert!(p.y > 4.3 && p.y <= 4.5, "fell a little from 4.5: {p:?}");
     // Launched at 3 m/s (+X); the overlapping instances nudge each other.
-    let state = w.physics().body_state(child).unwrap();
+    let state = w.physics().body_state(sparks[0]).unwrap();
     assert!((state.linear_velocity.x - 3.0).abs() < 0.5, "{state:?}");
 
     // The ceiling holds, then the lifetime frees a slot.
@@ -486,7 +485,7 @@ fn an_emitter_spawns_its_prefab_at_rate_with_lifetime_ceiling_and_velocity() {
     }
     let live = named(&w, "Spark").len();
     assert!(live == 4 || live == 3, "steady state: {live}");
-    assert!(!w.ecs().contains(anchors[0]), "the first one expired");
+    assert!(!w.ecs().contains(sparks[0]), "the first one expired");
     let (entities, _) = time_of(&w, SystemKind::Emitter);
     assert_eq!(entities, 1);
 

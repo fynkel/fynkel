@@ -174,17 +174,17 @@ fn project_and_scene_load_through_the_abi() {
     assert_eq!(r["scene"]["id"], MAIN_SCENE);
     assert_eq!(r["scene"]["path"], "scenes/main.scene.json");
     assert_eq!(r["scene"]["key"].as_str().unwrap().len(), 64);
-    // Camera, Robot, Sun, the "Crate A" instance and the crate it expands
-    // to — expanded by the cook, not here — plus the physics Floor and
-    // Crate B (M3-08).
-    assert_eq!(r["scene"]["entities"], 7);
+    // Camera, Robot, Sun, the "Crate A" instance (the crate prefab's root,
+    // expanded by the cook, not here), the physics Floor and Crate B
+    // (M3-08).
+    assert_eq!(r["scene"]["entities"], 6);
     assert_eq!(r["scene"]["rejectedComponents"], 0);
     // The scene, its prefab, the robot, the material and its three maps,
     // the Robot's tone (M3-11).
     assert_eq!(r["scene"]["assets"], 8);
     assert_eq!(r["residency"]["retained"], 8);
     assert_eq!(r["residency"]["meshes"], 0, "nothing loaded until drawn");
-    assert_eq!(host.live(), 7);
+    assert_eq!(host.live(), 6);
     // The Robot's `game.Spinner` is a Dart behaviour: known through the
     // cook's record of the project's registry, so no warning, and handed
     // to the SDK with its authored data and the spawned entity's handle.
@@ -204,13 +204,13 @@ fn project_and_scene_load_through_the_abi() {
     // instance is unloaded, the world holds one Main again, residency
     // is the scene's closure alone.
     assert_eq!(host.load_scene(&cache, MAIN_SCENE), Status::Ok);
-    assert_eq!(host.live(), 7);
+    assert_eq!(host.live(), 6);
     let r = host.report();
     assert_eq!(r["mode"], "replace");
     assert_eq!(r["residency"]["retained"], 8);
     assert_eq!(r["scenes"].as_array().unwrap().len(), 1);
     assert_eq!(r["scenes"][0]["name"], "Main");
-    assert_eq!(r["scenes"][0]["entities"], 7);
+    assert_eq!(r["scenes"][0]["entities"], 6);
 
     // Not a scene, not in the cache, not a UUID.
     let prefab = "c0000000-0000-4000-8000-000000000040";
@@ -218,7 +218,7 @@ fn project_and_scene_load_through_the_abi() {
     let r = host.report();
     assert_eq!(r["ok"], false);
     assert_eq!(r["diagnostics"][0]["code"], "FYN-R0006");
-    assert_eq!(host.live(), 7, "a failed load leaves the world alone");
+    assert_eq!(host.live(), 6, "a failed load leaves the world alone");
     let unknown = "c0000000-0000-4000-8000-0000000000ff";
     assert_eq!(host.load_scene(&cache, unknown), Status::LoadFailed);
     assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0003");
@@ -237,7 +237,7 @@ fn the_cache_is_the_only_source() {
     let host = Host::new();
     let cache = moved.display().to_string();
     assert_eq!(host.load_project(&cache), Status::Ok);
-    assert_eq!(host.live(), 7);
+    assert_eq!(host.live(), 6);
 
     // A stale cache (another fingerprint) is refused, never re-read from
     // source; a missing one says to cook.
@@ -335,7 +335,7 @@ fn prefabs_instantiate_through_the_abi() {
     assert_eq!(host.live(), 0);
 
     assert_eq!(host.load_project(&cache), Status::Ok);
-    assert_eq!(host.live(), 7);
+    assert_eq!(host.live(), 6);
     let retained = host.report()["residency"]["retained"].as_u64().unwrap();
 
     // The prefab's name by default, at the transform, a root.
@@ -352,12 +352,12 @@ fn prefabs_instantiate_through_the_abi() {
     assert_eq!(i["path"], "prefabs/crate.prefab.json");
     assert_eq!(
         i["entities"], 1,
-        "the prefab's entities; the anchor is extra"
+        "the prefab's entities, the root among them"
     );
     assert_eq!(i["rejectedComponents"], 0);
     assert_eq!(i["behaviours"].as_array().unwrap().len(), 0);
-    assert_eq!(host.live(), 9);
-    let anchor = Entity::from_bits(i["anchor"].as_u64().unwrap());
+    assert_eq!(host.live(), 7);
+    let root = Entity::from_bits(i["root"].as_u64().unwrap());
     assert_eq!(
         r["residency"]["retained"].as_u64().unwrap(),
         retained,
@@ -365,35 +365,32 @@ fn prefabs_instantiate_through_the_abi() {
     );
     {
         let ecs = unsafe { &*host.w }.core().ecs();
-        assert_eq!(ecs.copy::<Name>(anchor).unwrap().value, "Crate");
-        assert_eq!(scene::parent_of(ecs, anchor), None);
-        let t = ecs.copy::<Transform>(anchor).unwrap();
-        assert_eq!(t.position, Vec3::new(2.0, 0.0, -3.0));
-        let kids = scene::children_of(ecs, anchor);
-        assert_eq!(kids.len(), 1);
-        assert_eq!(ecs.copy::<Name>(kids[0]).unwrap().value, "Crate");
-        assert_eq!(scene::parent_of(ecs, kids[0]), Some(anchor));
+        assert_eq!(ecs.copy::<Name>(root).unwrap().value, "Crate");
+        assert_eq!(scene::parent_of(ecs, root), None);
+        let t = ecs.copy::<Transform>(root).unwrap();
         assert_eq!(
-            ecs.copy::<Transform>(kids[0]).unwrap().position,
-            Vec3::new(0.0, 0.5, 0.0),
-            "the prefab's own transform, local to the anchor"
+            t.position,
+            Vec3::new(2.0, 0.0, -3.0),
+            "the given transform is the root's"
         );
+        assert!(scene::children_of(ecs, root).is_empty());
     }
 
-    // Named and parented under the first anchor.
+    // Named and parented under the first instance.
     assert_eq!(
-        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "Cargo", anchor.to_bits())) },
+        unsafe { fynkel_world_instantiate(host.w, &desc(CRATE, "Cargo", root.to_bits())) },
         Status::Ok
     );
     let r = host.report();
     assert_eq!(r["instance"]["name"], "Cargo");
-    let second = Entity::from_bits(r["instance"]["anchor"].as_u64().unwrap());
+    let second = Entity::from_bits(r["instance"]["root"].as_u64().unwrap());
     {
         let ecs = unsafe { &*host.w }.core().ecs();
-        assert_eq!(scene::parent_of(ecs, second), Some(anchor));
-        assert_eq!(scene::children_of(ecs, anchor).len(), 2);
+        assert_eq!(ecs.copy::<Name>(second).unwrap().value, "Cargo");
+        assert_eq!(scene::parent_of(ecs, second), Some(root));
+        assert_eq!(scene::children_of(ecs, root), vec![second]);
     }
-    assert_eq!(host.live(), 11);
+    assert_eq!(host.live(), 8);
 
     // Not a prefab, unknown, a dead parent, malformed input.
     assert_eq!(
@@ -432,7 +429,7 @@ fn prefabs_instantiate_through_the_abi() {
     );
     assert_eq!(
         host.live(),
-        11,
+        8,
         "a failed instantiate leaves the world alone"
     );
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
@@ -564,7 +561,7 @@ fn input_binds_on_load_captures_and_views_through_the_abi() {
     };
     assert_eq!(capture(host.w, &[alien]), Status::Ok);
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
-    assert_eq!(host.live(), 7);
+    assert_eq!(host.live(), 6);
 }
 
 /// M3-12: scenes stack additively and unload one at a time, a replace
@@ -583,7 +580,7 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
     assert_eq!(host.bind_actions("{}"), Status::LoadFailed);
 
     assert_eq!(host.load_project(&cache), Status::Ok);
-    assert_eq!(host.live(), 7);
+    assert_eq!(host.live(), 6);
     let _ = host.events();
 
     // Additive: Playground joins Main; the same id again is refused.
@@ -600,7 +597,7 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
     assert_eq!(scenes[0]["name"], "Main");
     assert_eq!(scenes[1]["name"], "Playground");
     assert_eq!(scenes[1]["entities"], 5);
-    assert_eq!(host.live(), 12);
+    assert_eq!(host.live(), 11);
     let ev = host.events();
     let ready: Vec<_> = ev
         .iter()
@@ -615,7 +612,7 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
     );
     let r = host.report();
     assert_eq!(r["diagnostics"][0]["code"], "FYN-R0011");
-    assert_eq!(host.live(), 12, "a refused load leaves the world alone");
+    assert_eq!(host.live(), 11, "a refused load leaves the world alone");
     assert_eq!(
         host.load_scene_with(&cache, PLAYGROUND, 0x80),
         Status::InvalidArgument,
@@ -639,7 +636,7 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
         unsafe { fynkel_world_instantiate(host.w, &desc) },
         Status::Ok
     );
-    assert_eq!(host.live(), 14);
+    assert_eq!(host.live(), 12);
     let _ = host.events();
     assert_eq!(host.step(), Status::Ok);
     let ev = host.events();
@@ -670,21 +667,21 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
         "the physics-lane event is still there"
     );
 
-    // Unload Main: its 7 go, the coin (a runtime spawn) and Playground
+    // Unload Main: its 6 go, the coin (a runtime spawn) and Playground
     // stay; unloading it again is FYN-R0010.
     assert_eq!(host.unload_scene(MAIN_SCENE), Status::Ok);
     let r = host.report();
     assert_eq!(r["ok"], true, "{r:#}");
     assert_eq!(r["unloaded"]["name"], "Main");
     assert_eq!(r["unloaded"]["id"], MAIN_SCENE);
-    assert_eq!(r["unloaded"]["entities"], 7);
+    assert_eq!(r["unloaded"]["entities"], 6);
     assert_eq!(r["scenes"].as_array().unwrap().len(), 1);
     assert_eq!(r["scenes"][0]["name"], "Playground");
-    assert_eq!(host.live(), 7);
+    assert_eq!(host.live(), 6);
     let ev = host.events();
     assert_eq!(
         ev.iter().filter(|e| e.0 == EventKind::DESTROYED.0).count(),
-        7
+        6
     );
     let gone = ev
         .iter()
@@ -692,7 +689,7 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
         .unwrap();
     let gone = SceneUnloadedEvent::decode(&gone.1, &gone.2).unwrap();
     assert_eq!(gone.scene.asset.to_string(), MAIN_SCENE);
-    assert_eq!(gone.entities, 7);
+    assert_eq!(gone.entities, 6);
     assert_eq!(host.unload_scene(MAIN_SCENE), Status::LoadFailed);
     assert_eq!(host.report()["diagnostics"][0]["code"], "FYN-R0010");
     assert_eq!(host.unload_scene("nope"), Status::InvalidArgument);
@@ -740,8 +737,8 @@ fn scenes_stack_unload_replace_and_zones_fire_through_the_abi() {
     );
     assert_eq!(
         ev.iter().filter(|e| e.0 == EventKind::DESTROYED.0).count(),
-        7,
-        "Playground's 5 and the coin's anchor + entity"
+        6,
+        "Playground's 5 and the coin"
     );
     assert_eq!(ev.last().map(|e| e.0), Some(EventKind::SCENE_READY.0));
     assert_eq!(host.bind_actions("{}"), Status::Ok);
@@ -793,7 +790,7 @@ fn a_running_world_answers_live_calls_in_document_terms() {
     let (status, table) = live(host.w, "entities", "{}");
     assert_eq!(status, Status::Ok, "{table}");
     let rows = table["entities"].as_array().unwrap();
-    assert_eq!(rows.len(), 7);
+    assert_eq!(rows.len(), 6);
     let authored: Vec<String> = (0xe0..=0xe5)
         .map(|n| format!("c0000000-0000-4000-8000-0000000000{n:x}"))
         .collect();

@@ -170,10 +170,10 @@ void main() {
           prefabEntity: cratePrefabEntity, component: cratePrefabRenderer, field: 'visible', value: false),
     ]);
     var overrides = (entity(main, crateA)['prefab'] as Map)['overrides'] as List;
-    expect(overrides, hasLength(2));
-    ok([Command.revertPrefabOverride(crateA, index: 1)]);
+    expect(overrides, hasLength(3));
+    ok([Command.revertPrefabOverride(crateA, index: 2)]);
     overrides = (entity(main, crateA)['prefab'] as Map)['overrides'] as List;
-    expect(overrides, hasLength(1));
+    expect(overrides, hasLength(2));
     ok([Command.removeComponent(robot, robotSpinner), Command.deleteObject(floor)]);
     ok([Command.setDocumentField('/name', 'Main (edited)')]);
     // createMaterial and saveDocument write files, after the other commands.
@@ -604,7 +604,7 @@ void main() {
     expect(preview.cook, isNotNull);
     expect(preview.cook!.ok, isTrue, reason: preview.cook!.diagnostics.join('; '));
     expect(File('${dir.path}/.fynkel/cache/index.json').existsSync(), isTrue);
-    expect(preview.stats.entities, 7);
+    expect(preview.stats.entities, 6);
     expect(preview.stats.loads, 1);
     expect(preview.diagnostics, isEmpty);
     expect(preview.worldAddress, isNot(0));
@@ -658,7 +658,7 @@ void main() {
     expect(events.whereType<PreviewSynced>().single.document, same(scene));
     final after = preview.dump();
     expect(after, isNot(equals(before)));
-    expect(preview.reload().entities, 7);
+    expect(preview.reload().entities, 6);
     expect(preview.dump(), after, reason: 'incremental == fresh');
     expect(preview.stats.loads, 2);
     // Undo brings it back.
@@ -746,7 +746,8 @@ void main() {
     final main = session.openDocument(mainScene);
     final sceneBytes = File('${dir.path}/$mainScene').readAsStringSync();
 
-    // Crate A's expansion: one derived entity with the override marked.
+    // Crate A's expansion: one entity, Crate A itself as the prefab's root
+    // (ADR-0022), with the overrides marked.
     var x = main.instance(crateA);
     expect(x.anchor, crateA);
     expect(x.expanded, isTrue);
@@ -759,10 +760,11 @@ void main() {
     expect(x.prefab!.handle, isNull);
     expect(x.prefab!.readOnly, isNull);
     expect(x.diagnostics, isEmpty);
-    expect(x.entities.map((e) => e.name), ['Crate']);
+    expect(x.entities.map((e) => e.name), ['Crate A']);
     final crateEntity = x.entities.single;
+    expect(crateEntity.id, crateA);
     expect(crateEntity.local, cratePrefabEntity);
-    expect(crateEntity.parent, crateA);
+    expect(crateEntity.parent, isNull);
     expect(crateEntity.added, isFalse);
     final renderer = crateEntity.components.values.singleWhere((c) => c.type == 'fynkel.MeshRenderer');
     expect(renderer.local, cratePrefabRenderer);
@@ -770,11 +772,12 @@ void main() {
     expect(renderer.overridden, ['cast_shadows']);
     expect(x.byLocal(cratePrefabEntity), same(crateEntity));
     expect(x.entity(crateEntity.id), same(crateEntity));
-    final o = x.overrides.single;
+    expect(x.overrides, hasLength(2), reason: 'the shadows, and where it stands');
+    final o = x.overrides.first;
     expect(o.index, 0);
     expect(o.op, 'setField');
     expect(o.entityId, crateEntity.id);
-    expect(o.entityName, 'Crate');
+    expect(o.entityName, 'Crate A');
     expect(o.componentId, renderer.id);
     expect(o.componentType, 'fynkel.MeshRenderer');
     expect(o.field, 'cast_shadows');
@@ -796,17 +799,17 @@ void main() {
     expect(applied.ok, isTrue, reason: '$applied');
     expect(main.apply([Command.revertPrefabOverride(crateA, index: 0)]).ok, isTrue);
     x = main.instance(crateA);
-    expect(x.overrides, isEmpty);
+    expect(x.overrides.map((o) => o.field), ['position']);
     final inherited = x.entities.single.components.values.singleWhere((c) => c.type == 'fynkel.MeshRenderer');
     expect(inherited.data['cast_shadows'], false, reason: 'inherited now');
     expect(inherited.overridden, isEmpty);
     expect(prefab.state.dirty, isTrue);
     main.undo();
     prefab.undo();
-    expect(main.instance(crateA).overrides, hasLength(1));
+    expect(main.instance(crateA).overrides, hasLength(2));
     expect(prefab.state.dirty, isFalse);
 
-    // A broken override: shown with its diagnostic, the anchor kept.
+    // A broken override: shown with its diagnostic, the instance kept.
     expect(
       main.apply([
         Command.setPrefabOverrideOp(crateA, {
@@ -823,23 +826,22 @@ void main() {
     expect(x.expanded, isFalse);
     expect(x.entities, isEmpty);
     expect(x.prefab!.name, 'Crate');
-    expect(x.overrides, hasLength(2));
-    expect(x.overrides[1].entityId, isNull);
+    expect(x.overrides, hasLength(3));
+    expect(x.overrides[2].entityId, isNull);
     expect(x.diagnostics.single.code, 'FYN-D0403');
     final refused = main.apply([Command.unpackPrefab(crateA)]);
     expect(refused.ok, isFalse);
     expect(refused.mutations.single.diagnostics.single.code, 'FYN-E0004');
     main.undo();
 
-    // Unpack Crate A: one transaction, the derived entity is a plain one.
+    // Unpack Crate A: one transaction, Crate A is a plain entity holding
+    // the root's components.
     final unpacked = main.apply([Command.unpackPrefab(crateA)]);
     expect(unpacked.ok, isTrue, reason: '$unpacked');
-    expect(unpacked.affectedIds, containsAll([crateA, crateEntity.id, renderer.id]));
+    expect(unpacked.affectedIds, containsAll([crateA, renderer.id]));
     expect(entity(main, crateA).containsKey('prefab'), isFalse);
-    expect((entity(main, crateA)['children'] as List), [crateEntity.id]);
-    expect(entity(main, crateEntity.id)['parent'], crateA);
-    expect(((entity(main, crateEntity.id)['components'] as Map)[renderer.id] as Map)['data'], renderer.data);
-    expect(entities(main).keys.toList().indexOf(crateEntity.id), entities(main).keys.toList().indexOf(crateA) + 1);
+    expect((entity(main, crateA)['children'] as List), isEmpty);
+    expect(((entity(main, crateA)['components'] as Map)[renderer.id] as Map)['data'], renderer.data);
     expect(() => main.instance(crateA), throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-E0008')));
     main.undo();
     expect(main.instance(crateA).expanded, isTrue);
@@ -858,7 +860,7 @@ void main() {
     expect(x.prefab!.kind, 'rig');
     expect(x.prefab!.isImported, isTrue);
     expect(x.prefab!.readOnly, contains('column.rig.json#prefab'));
-    expect(x.entities.map((e) => e.name), ['Rig', 'Body', 'hips', 'spine', 'head', 'Prop']);
+    expect(x.entities.map((e) => e.name), ['Imported', 'Body', 'hips', 'spine', 'head', 'Prop']);
     final prop = x.entities.last;
     expect(prop.components.values.singleWhere((c) => c.type == 'fynkel.MeshRenderer').overridden, ['material']);
     final hierarchy = session.openDocument(x.open);
@@ -883,9 +885,10 @@ void main() {
       throwsA(isA<AuthoringException>().having((e) => e.code, 'code', 'FYN-D0401')),
       reason: 'a texture has no hierarchy',
     );
-    // Unpack Imported: 15 entities, none an instance, one undo step.
+    // Unpack Imported: 14 entities (Imported is the rig's root), none an
+    // instance, one undo step.
     expect(rigDoc.apply([Command.unpackPrefab(imported)]).ok, isTrue);
-    expect(rigDoc.inspect()['entityCount'], 15);
+    expect(rigDoc.inspect()['entityCount'], 14);
     expect(rigDoc.inspect()['instanceCount'], 0);
     expect(entities(rigDoc)[prop.id], isNotNull);
     rigDoc.undo();
@@ -907,11 +910,11 @@ void main() {
     final doc = preview.documents.single;
     expect(doc.kind, 'scene');
     expect(doc.from, 0);
-    expect(doc.to, 4, reason: 'scenes are at formatVersion 4 (ADR-0020): four steps');
+    expect(doc.to, 5, reason: 'scenes are at formatVersion 5 (ADR-0022): five steps');
     expect(doc.ok, isTrue);
     expect(doc.path, target.path);
     expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
-    expect(doc.applied.map((a) => a.from), [0, 1, 2, 3]);
+    expect(doc.applied.map((a) => a.from), [0, 1, 2, 3, 4]);
     expect(doc.diff, contains('formatVersion'));
     expect(target.readAsStringSync(), before, reason: 'a preview writes nothing');
     expect(session.validateProject().diagnostics.map((d) => d.code), contains('FYN-D0016'));

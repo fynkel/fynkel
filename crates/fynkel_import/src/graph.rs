@@ -298,7 +298,8 @@ pub(crate) struct SourceNode {
 }
 
 /// The file's node graph: `nodes[i]` is the node with index `i`; `roots`
-/// the nodes the prefab starts from; `name` the prefab's.
+/// the top-level nodes (the prefab's root when there is one, the children
+/// of a root named `name` when there are several); `name` the prefab's.
 pub(crate) struct SourceGraph {
     pub name: String,
     pub nodes: Vec<SourceNode>,
@@ -363,10 +364,36 @@ pub(crate) fn prefab_document(
     let mut visited = vec![false; graph.nodes.len()];
     let root_ids: Vec<String> = graph.roots.iter().map(|r| entity_id(*r)).collect();
 
+    // One root (ADR-0022): the file's one top-level node, or a new root
+    // named after the file over several.
+    let (root, top_parent) = match root_ids.as_slice() {
+        [one] => (one.clone(), None),
+        _ => {
+            let wrapper = derive_sub_id(asset, "node").to_string();
+            entities.push((
+                wrapper.clone(),
+                entity_value(
+                    &graph.name,
+                    None,
+                    root_ids.clone(),
+                    vec![(
+                        derive_sub_id(asset, "node/transform").to_string(),
+                        transform_component([0.0; 3], [0.0, 0.0, 0.0, 1.0], [1.0; 3]),
+                    )],
+                ),
+            ));
+            (wrapper.clone(), Some(wrapper))
+        }
+    };
+
     // Explicit stack: (node, parent entity id, depth); children pushed in
     // reverse so document order is depth-first, first child first.
-    let mut stack: Vec<(usize, Option<String>, usize)> =
-        graph.roots.iter().rev().map(|r| (*r, None, 1)).collect();
+    let mut stack: Vec<(usize, Option<String>, usize)> = graph
+        .roots
+        .iter()
+        .rev()
+        .map(|r| (*r, top_parent.clone(), 1))
+        .collect();
 
     while let Some((index, parent, depth)) = stack.pop() {
         let node = &graph.nodes[index];
@@ -469,7 +496,7 @@ pub(crate) fn prefab_document(
         ents.insert(k, v);
     }
     prefab.insert("entities".into(), Value::Object(ents));
-    prefab.insert("roots".into(), json!(root_ids));
+    prefab.insert("root".into(), json!(root));
     Some((Value::Object(prefab), moved.into_inner()))
 }
 

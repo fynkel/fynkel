@@ -522,16 +522,19 @@ impl AuthoringSession {
     /// and the paths a committed transaction wrote are rescanned so the
     /// asset database sees the new material or the saved document at once.
     /// `Err` only when the handle is unknown or the document or project is
-    /// read-only. `unpackPrefab` sees the prefabs as the preview does —
-    /// open prefab documents from their editors, the rest from disk, the
-    /// imported hierarchies through the importer ([`Self::describe`]).
+    /// read-only. `unpackPrefab`, and `instantiatePrefab` with components
+    /// (which become overrides of the prefab's root, ADR-0022), see the
+    /// prefabs as the preview does — open prefab documents from their
+    /// editors, the rest from disk, the imported hierarchies through the
+    /// importer ([`Self::describe`]).
     pub fn apply(&mut self, handle: Handle, mut request: Request) -> Result<Applied, Diagnostic> {
         self.writable(handle)?;
-        let unpacks = request
-            .commands
-            .iter()
-            .any(|c| matches!(c.command, Command::UnpackPrefab { .. }));
-        let library = if unpacks {
+        let needs_prefabs = request.commands.iter().any(|c| match &c.command {
+            Command::UnpackPrefab { .. } => true,
+            Command::InstantiatePrefab { components, .. } => !components.is_empty(),
+            _ => false,
+        });
+        let library = if needs_prefabs {
             let project = self.project.as_ref().unwrap();
             let doc = self.documents.get(&handle).unwrap();
             self.prefab_library(project, &doc.editor.scene()).0
@@ -1012,15 +1015,12 @@ pub fn component_default(type_id: &str) -> Option<Node> {
     })
 }
 
-/// The root entity ids in sibling order: a prefab's `roots` array, or —
-/// for a scene, which has none — the entities with a null `parent` in
+/// The root entity ids in sibling order: a prefab's one `root`
+/// (ADR-0022), or — for a scene — the entities with a null `parent` in
 /// document order.
 fn root_ids(root: &Node) -> Vec<String> {
-    if let Some(items) = root.get("roots").and_then(Node::as_array) {
-        return items
-            .iter()
-            .filter_map(|n| n.as_str().map(str::to_string))
-            .collect();
+    if let Some(id) = root.get("root").and_then(Node::as_str) {
+        return vec![id.to_string()];
     }
     root.get("entities")
         .and_then(Node::as_object)

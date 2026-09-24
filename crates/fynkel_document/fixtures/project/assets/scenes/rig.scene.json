@@ -1,6 +1,6 @@
 {
   "$schema": "https://fynkel.dev/schemas/scene.schema.json",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "id": "c0000000-0000-4000-8000-000000000034",
   "name": "Rig",
   "entities": {
@@ -351,46 +351,7 @@
       "name": "Imported",
       "parent": null,
       "children": [],
-      "components": {
-        "c0000000-0000-4000-8000-000000000410": {
-          "type": "fynkel.Transform",
-          "version": 1,
-          "data": {
-            "position": [
-              -2,
-              0,
-              0
-            ],
-            "rotation": [
-              0,
-              0,
-              0,
-              1
-            ],
-            "scale": [
-              1,
-              1,
-              1
-            ]
-          }
-        },
-        "c0000000-0000-4000-8000-000000000411": {
-          "type": "fynkel.Animator",
-          "version": 1,
-          "data": {
-            "clip": {
-              "asset": "c0000000-0000-4000-8000-000000000050",
-              "sub": "anim/wave"
-            },
-            "speed": 1.0,
-            "looping": true,
-            "playing": true,
-            "weight": 1.0,
-            "additive": false,
-            "root_motion": false
-          }
-        }
-      },
+      "components": {},
       "prefab": {
         "asset": {
           "asset": "c0000000-0000-4000-8000-000000000050",
@@ -405,6 +366,36 @@
             "field": "material",
             "value": {
               "asset": "c0000000-0000-4000-8000-000000000020"
+            }
+          },
+          {
+            "op": "setField",
+            "entity": "96e0047d-a85a-538c-b69a-77588cb9b43f",
+            "component": "ccda5afc-374d-5b72-836f-6c5dc9609a4a",
+            "field": "position",
+            "value": [
+              -2.0,
+              0.0,
+              0.0
+            ]
+          },
+          {
+            "op": "addComponent",
+            "entity": "96e0047d-a85a-538c-b69a-77588cb9b43f",
+            "component": "c0000000-0000-4000-8000-000000000411",
+            "type": "fynkel.Animator",
+            "version": 1,
+            "data": {
+              "clip": {
+                "asset": "c0000000-0000-4000-8000-000000000050",
+                "sub": "anim/wave"
+              },
+              "speed": 1.0,
+              "looping": true,
+              "playing": true,
+              "weight": 1.0,
+              "additive": false,
+              "root_motion": false
             }
           }
         ]

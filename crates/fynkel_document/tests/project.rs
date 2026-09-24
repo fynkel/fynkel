@@ -38,17 +38,17 @@ fn schemas() -> SchemaSet {
 }
 
 const IMPORTERS: &[(&str, u32)] = &[
-    ("fynkel.fbx", 3),
-    ("fynkel.gltf", 7),
+    ("fynkel.fbx", 4),
+    ("fynkel.gltf", 8),
     ("fynkel.image", 1),
     ("fynkel.audio", 2),
     ("fynkel.file", 1),
 ];
 
 /// What `fynkel_import::expected_lock()` produces; mirrored here because
-/// this crate cannot depend on the importers (cache version 6, container 1).
+/// this crate cannot depend on the importers (cache version 8, container 1).
 fn expected_lock() -> Lock {
-    Lock::expected(IMPORTERS, 7, 1)
+    Lock::expected(IMPORTERS, 8, 1)
 }
 
 /// A temporary copy of the fixture project, removed on drop.
@@ -661,8 +661,8 @@ fn imported_hierarchies_instantiate_like_prefabs() {
         .message
         .contains(&format!("prefab {COLUMN}#prefab is not available")));
 
-    // With the importer: clean, and the expansion has the six nodes under
-    // the anchor with the Prop's material overridden to `rusted`.
+    // With the importer: clean, and the expansion has the rig's root as the
+    // instance and its five nodes under it, with the Prop's material overridden to `rusted`.
     let t = Temp::new("imported");
     assert_eq!(t.codes(), []);
     let scene = Scene::from_document(
@@ -683,8 +683,8 @@ fn imported_hierarchies_instantiate_like_prefabs() {
     assert_eq!(
         names,
         [
-            "Camera", "Sun", "Rig", "Body", "hips", "spine", "head", "Prop", "Imported", "Rig",
-            "Body", "hips", "spine", "head", "Prop"
+            "Camera", "Sun", "Rig", "Body", "hips", "spine", "head", "Prop", "Imported", "Body",
+            "hips", "spine", "head", "Prop"
         ]
     );
     let prop = out.entities.last().unwrap();
@@ -752,17 +752,13 @@ fn imported_hierarchies_instantiate_like_prefabs() {
     let t = Temp::new("imported-nested");
     let mut crate_doc: serde_json::Value =
         serde_json::from_str(&t.read("assets/prefabs/crate.prefab.json")).unwrap();
-    let root = crate_doc["roots"][0].as_str().unwrap().to_string();
+    let root = crate_doc["root"].as_str().unwrap().to_string();
+    // The instance is the imported root: no components of its own.
     crate_doc["entities"]["c0000000-0000-4000-8000-0000000004ee"] = serde_json::json!({
         "name": "Statue",
         "parent": root,
         "children": [],
-        "components": {
-            "c0000000-0000-4000-8000-0000000004ef": {
-                "type": "fynkel.Transform", "version": 1,
-                "data": { "position": [0, 1, 0], "rotation": [0, 0, 0, 1], "scale": [0.25, 0.25, 0.25] }
-            }
-        },
+        "components": {},
         "prefab": { "asset": { "asset": RIG, "sub": "prefab" }, "instance": "c0000000-0000-4000-8000-0000000004f1" }
     });
     crate_doc["entities"][&root]["children"]
@@ -897,7 +893,7 @@ fn rig_documents_validate_against_the_database() {
             ("FYN-D0502", Some("/markers/wave")),
             (
                 "FYN-A0005",
-                Some("/entities/c0000000-0000-4000-8000-0000000004e8/components/c0000000-0000-4000-8000-000000000411/data/clip")
+                Some("/entities/c0000000-0000-4000-8000-0000000004e8/prefab/overrides/2/data/clip")
             ),
         ],
         "{codes:?}"
@@ -917,7 +913,7 @@ fn rig_documents_validate_against_the_database() {
             ("FYN-D0502", Some("/markers/wave")),
             (
                 "FYN-A0005",
-                Some("/entities/c0000000-0000-4000-8000-0000000004e8/components/c0000000-0000-4000-8000-000000000411/data/clip")
+                Some("/entities/c0000000-0000-4000-8000-0000000004e8/prefab/overrides/2/data/clip")
             )
         ],
         "{codes:?}"

@@ -1,6 +1,7 @@
 // Runtime prefab instantiate (M3-08b, docs/design/dart-sdk.md §21):
-// `World.instantiate` builds a cooked prefab now — an anchor with the
-// prefab's entities as children, the same shape a scene instance expands to.
+// `World.instantiate` builds a cooked prefab now — its root, with the
+// prefab's other entities under it, the same shape a scene instance expands
+// to (ADR-0022).
 
 import 'dart:io';
 
@@ -34,7 +35,7 @@ void main() {
     return w;
   }
 
-  test('instantiate builds the prefab under an anchor at the given transform', () {
+  test('instantiate builds the prefab\'s root at the given transform', () {
     final w = loaded();
     final before = w.allEntities().length;
     final crate = w.instantiate(
@@ -46,22 +47,21 @@ void main() {
     expect(report.prefabId, cratePrefab);
     expect(report.prefabPath, 'prefabs/crate.prefab.json');
     expect(report.name, 'Crate');
-    expect(report.entityCount, 1, reason: 'the prefab\'s entities, without the anchor');
+    expect(report.entityCount, 1, reason: 'the prefab\'s entities, its root included');
     expect(report.rejectedComponents, 0);
     expect(report.warnings, isEmpty);
     expect(crate.name, 'Crate');
-    expect(crate.entity, report.anchor);
-    expect(w.allEntities().length, before + 2, reason: 'anchor + one prefab entity');
+    expect(crate.entity, report.root);
+    expect(w.allEntities().length, before + 1, reason: 'the root is the whole crate');
 
-    // The anchor is live now; the prefab's components land at the next tick.
+    // The root is live now, at the given transform (it replaces the
+    // prefab's); its components land at the next tick.
     expect(crate.localTransform.position, const Vec3(2, 0, -3));
-    final child = crate.findChild('Crate');
-    expect(child, isNotNull);
-    expect(child!.parent, crate.entity);
+    expect(crate.parent, isNull);
     w.frame(1 / 60);
-    expect(child.get<MeshRenderer>(), isNotNull);
-    expect(child.worldTransform!.position, const Vec3(2, 0.5, -3));
-    expect(w.findAll('Crate').length, 3, reason: 'the scene\'s Crate A instance already expands to one');
+    expect(crate.get<MeshRenderer>(), isNotNull);
+    expect(crate.worldTransform!.position, const Vec3(2, 0, -3));
+    expect(w.findAll('Crate').length, 1, reason: 'the scene\'s instance is named Crate A');
   });
 
   test('instantiate accepts an AssetRef, a name and a parent', () {
@@ -70,9 +70,9 @@ void main() {
     final go = w.instantiate(const AssetRef(cratePrefab), name: 'Cargo', parent: robot);
     expect(go.name, 'Cargo');
     expect(go.parent, robot.entity);
-    expect(robot.findChild('Cargo/Crate'), isNotNull);
+    expect(robot.findChild('Cargo'), isNotNull);
     w.frame(1 / 60);
-    expect(w.componentsOf(go.findChild('Crate')!.entity).whereType<MeshRenderer>(), hasLength(1));
+    expect(w.componentsOf(go.entity).whereType<MeshRenderer>(), hasLength(1));
   });
 
   test('instantiate fails for an unknown prefab, a pending parent and before a project is loaded', () {

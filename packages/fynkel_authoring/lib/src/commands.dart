@@ -123,10 +123,11 @@ final class Command {
   static Map<String, Object?> revertPrefabOverride(String entity, {int? index}) =>
       {'command': 'revertPrefabOverride', 'entity': entity, 'index': ?index};
 
-  /// Replaces the instance rooted at [entity] by its expansion, in place:
-  /// the anchor becomes a plain entity whose trailing children are the
-  /// instance roots, the derived entities follow it in the document under
-  /// the ids the runtime already used (M4-07). One undo step.
+  /// Replaces the instance [entity] by its expansion, in place: it becomes
+  /// a plain entity with the same id holding the prefab root's components
+  /// with the overrides applied, the derived entities follow it in the
+  /// document under the ids the runtime already used (M4-07, ADR-0022).
+  /// One undo step.
   static Map<String, Object?> unpackPrefab(String entity) => {'command': 'unpackPrefab', 'entity': entity};
 
   /// Sets a top-level or nested field of the document itself (a material's

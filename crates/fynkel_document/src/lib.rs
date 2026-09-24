@@ -26,6 +26,7 @@ pub mod blend;
 pub mod json;
 pub mod material;
 pub mod migrate;
+pub mod one_root;
 pub mod prefab;
 pub mod project;
 pub mod rig;
@@ -149,12 +150,13 @@ impl DocumentKind {
     /// (M3-04): `fynkel.Camera` carries `exposure_mode`/`exposure`; 3
     /// (M3-19c): `fynkel.Animator` carries `weight`/`additive`/`root_motion`;
     /// 4 (ADR-0020): a collider's layer is its object's `fynkel.Layer`, and
-    /// cameras and point/spot lights carry `culling_mask`. Project 2
+    /// cameras and point/spot lights carry `culling_mask`; 5 (ADR-0022): a
+    /// prefab has one `root`, and an instance is that root. Project 2
     /// (ADR-0020): `layers` and `tags` at the top level. Meta 2 (stable
     /// sub-asset ids): a model's sub-asset keys are the parts' names.
     pub const fn supported_format_version(self) -> u32 {
         match self {
-            DocumentKind::Scene | DocumentKind::Prefab => 4,
+            DocumentKind::Scene | DocumentKind::Prefab => 5,
             DocumentKind::Project | DocumentKind::Meta => 2,
             DocumentKind::Material => 2,
             _ => 1,
@@ -202,8 +204,28 @@ impl Document {
         match kind {
             DocumentKind::Scene => members.push(("entities".into(), Node::object(Vec::new()))),
             DocumentKind::Prefab => {
-                members.push(("entities".into(), Node::object(Vec::new())));
-                members.push(("roots".into(), Node::synthetic(Value::Array(Vec::new()))));
+                // One root (ADR-0022): an object named after the prefab
+                // with the default Transform.
+                let root = uuid::Uuid::new_v4().to_string();
+                let transform = Node::object(vec![
+                    ("type".into(), Node::string("fynkel.Transform")),
+                    ("version".into(), Node::integer(1)),
+                    ("data".into(), prefab::identity_transform()),
+                ]);
+                let entity = Node::object(vec![
+                    ("name".into(), Node::string(name)),
+                    ("parent".into(), Node::synthetic(Value::Null)),
+                    ("children".into(), Node::synthetic(Value::Array(Vec::new()))),
+                    (
+                        "components".into(),
+                        Node::object(vec![(uuid::Uuid::new_v4().to_string(), transform)]),
+                    ),
+                ]);
+                members.push((
+                    "entities".into(),
+                    Node::object(vec![(root.clone(), entity)]),
+                ));
+                members.push(("root".into(), Node::string(root)));
             }
             DocumentKind::Material => {
                 members.push(("shader".into(), Node::string(material::PBR_SHADER_ID)));

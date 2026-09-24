@@ -375,7 +375,7 @@ fn incremental_sync_matches_a_fresh_load_after_every_transaction_kind() {
         ] }]),
     );
     let r = check(&mut s, &mut w, &mut p, "instantiatePrefab");
-    assert_eq!(r.spawned, 2, "the anchor and the prefab's entity");
+    assert_eq!(r.spawned, 1, "the instance is the prefab's one entity");
     apply(
         &mut s,
         h,
@@ -392,8 +392,8 @@ fn incremental_sync_matches_a_fresh_load_after_every_transaction_kind() {
     );
     let r = check(&mut s, &mut w, &mut p, "revertPrefabOverride");
     assert_eq!(
-        r.updated, 1,
-        "cast_shadows back to the prefab's and visible back on: one SetComponent"
+        r.updated, 2,
+        "cast_shadows back to the prefab's and visible back on, and Crate A back at the prefab's position: two SetComponents"
     );
 
     // deleteObject: a parent with children goes as one destroy.
@@ -427,8 +427,8 @@ fn incremental_sync_matches_a_fresh_load_after_every_transaction_kind() {
     }
     assert_eq!(
         p.dump(&w)["entityCount"],
-        7,
-        "back to the fixture's six plus Crate A's expanded entity"
+        6,
+        "back to the fixture's six (Crate A is the crate prefab's root)"
     );
     for i in 0..history {
         s.redo(h).unwrap();
@@ -448,38 +448,47 @@ fn a_prefab_open_in_another_tab_previews_live_and_a_material_is_refused() {
     let document = s.document(scene).unwrap().editor.document().envelope.id;
     let mut w = edit_world();
     let mut p = Preview::load(document, &mut w, Some(&assets), &describe(&s, scene));
-    // Edit the prefab (unsaved): the scene's instances follow on the next
+    // Edit the prefab (unsaved): scale its root and give it a Lid, a
+    // child with the root's mesh. The scene's instances follow on the next
     // sync, and the synced world equals a fresh load.
-    let prefab_transform = s.document_json(prefab).unwrap()["root"]["entities"]
-        [CRATE_PREFAB_ENTITY]["components"]
-        .as_object()
-        .unwrap()
-        .iter()
-        .find(|(_, c)| c["type"] == "fynkel.Transform")
-        .map(|(id, _)| id.clone());
-    match prefab_transform {
-        Some(component) => apply(
-            &mut s,
-            prefab,
-            json!([{ "command": "setField", "entity": CRATE_PREFAB_ENTITY, "component": component, "field": "scale", "value": [2, 2, 2] }]),
-        ),
-        None => apply(
-            &mut s,
-            prefab,
-            json!([{ "command": "addComponent", "entity": CRATE_PREFAB_ENTITY, "component": { "type": "fynkel.Transform", "data": { "position": [0, 0, 0], "rotation": [0, 0, 0, 1], "scale": [2, 2, 2] } } }]),
-        ),
+    let root_components = s.document_json(prefab).unwrap()["root"]["entities"][CRATE_PREFAB_ENTITY]
+        ["components"]
+        .clone();
+    let component_of = |ty: &str| {
+        root_components
+            .as_object()
+            .unwrap()
+            .iter()
+            .find(|(_, c)| c["type"] == ty)
+            .map(|(id, c)| (id.clone(), c["data"].clone()))
+            .unwrap()
     };
+    let (transform, _) = component_of("fynkel.Transform");
+    let (_, renderer) = component_of("fynkel.MeshRenderer");
+    apply(
+        &mut s,
+        prefab,
+        json!([
+            { "command": "setField", "entity": CRATE_PREFAB_ENTITY, "component": transform, "field": "scale", "value": [2, 2, 2] },
+            { "command": "createObject", "name": "Lid", "parent": CRATE_PREFAB_ENTITY, "components": [
+                { "type": "fynkel.Transform", "data": { "position": [0, 2, 0], "rotation": [0, 0, 0, 1], "scale": [1, 1, 1] } },
+                { "type": "fynkel.MeshRenderer", "data": renderer }
+            ] }
+        ]),
+    );
     let described = describe(&s, scene);
     let report = p.sync(&mut w, Some(&assets), &described);
-    assert!(!report.reloaded);
-    assert_eq!(report.updated, 1, "Crate A's expanded entity: {report:?}");
+    assert!(!report.reloaded, "{report:?}");
     assert_eq!(p.dump(&w), fresh_dump(&assets, document, &described));
+    // Crate A is the prefab's root: scaled itself, the Lid under it.
     let crate_a = Uuid::parse_str(CRATE_A).unwrap();
-    let child = p.subtree(crate_a);
-    assert_eq!(child.len(), 2);
+    let subtree = p.subtree(crate_a);
+    assert_eq!(subtree.len(), 2);
+    assert_eq!(subtree[0], crate_a);
+    let lid = subtree[1];
     let scale = w
         .ecs()
-        .copy::<Transform>(p.entity(child[1]).unwrap())
+        .copy::<Transform>(p.entity(crate_a).unwrap())
         .unwrap()
         .scale;
     assert_eq!(scale, Vec3::splat(2.0));
@@ -487,10 +496,10 @@ fn a_prefab_open_in_another_tab_previews_live_and_a_material_is_refused() {
     // pick, a marquee, an outline and a hidden flag inside the instance
     // all speak of Crate A.
     let (_, anchors) = s.describe_with_anchors(scene).unwrap();
-    assert_eq!(anchors.get(&child[1]), Some(&crate_a));
+    assert_eq!(anchors.get(&lid), Some(&crate_a));
     p.set_anchors(anchors);
     let inner = p
-        .world_matrix(&w, child[1])
+        .world_matrix(&w, lid)
         .unwrap()
         .transform_point3(Vec3::ZERO);
     let ray = Ray {
@@ -504,22 +513,21 @@ fn a_prefab_open_in_another_tab_previews_live_and_a_material_is_refused() {
         hits.iter().map(|h| h.id).collect::<Vec<_>>()
     );
     assert!(
-        !hits.iter().any(|h| h.id == child[1]),
-        "the inner entity answers as its anchor"
+        !hits.iter().any(|h| h.id == lid),
+        "the inner entity answers as its instance"
     );
-    let outline_anchor = p.outline_lines(&w, Some(&assets), &[crate_a], Vec4::ONE);
-    let outline_inner = p.outline_lines(&w, Some(&assets), &[child[1]], Vec4::ONE);
-    assert_eq!(
-        outline_anchor.len(),
-        outline_inner.len() + 3,
-        "the anchor's cross plus its instance's box"
+    let outline_instance = p.outline_lines(&w, Some(&assets), &[crate_a], Vec4::ONE);
+    let outline_inner = p.outline_lines(&w, Some(&assets), &[lid], Vec4::ONE);
+    assert!(
+        outline_instance.len() > outline_inner.len(),
+        "the root's box and the Lid's"
     );
-    assert!(outline_inner.iter().all(|l| outline_anchor.contains(l)));
+    assert!(outline_inner.iter().all(|l| outline_instance.contains(l)));
     p.set_hidden(&mut w, &[crate_a]);
     assert_eq!(
         w.edit_hidden().count(),
         2,
-        "the instance hides with its anchor"
+        "the Lid hides with its instance"
     );
     assert!(p
         .pick(&w, Some(&assets), &ray)
@@ -529,7 +537,7 @@ fn a_prefab_open_in_another_tab_previews_live_and_a_material_is_refused() {
     p.set_anchors(Default::default());
     // The prefab document itself previews as a scene.
     let pd = s.describe(prefab).unwrap();
-    assert_eq!(pd.description.entities.len(), 1);
+    assert_eq!(pd.description.entities.len(), 2);
     // A material has nothing to preview.
     let material = s
         .open_document("assets/materials/rusted.material.json")

@@ -85,9 +85,9 @@ fn load_startup(assets: &Assets) -> (World, fynkel_core::Extract, fynkel_assets:
     assert_eq!(cooked.name, "Main");
     let mut world = World::new(WorldConfig::default());
     let loaded = world.load_scene(&cooked.description).unwrap();
-    // Camera, Robot, Sun, the "Crate A" instance and the crate it expands
-    // to, the physics Floor and Crate B.
-    assert_eq!(loaded.len(), 7);
+    // Camera, Robot, Sun, the "Crate A" instance (the crate prefab's
+    // root), the physics Floor and Crate B.
+    assert_eq!(loaded.len(), 6);
     let residency = assets.retain(&cooked.closure);
     world.begin_frame(1.0 / 60.0);
     world.step();
@@ -220,14 +220,14 @@ fn placeholders_off_hides_entities_without_meshes() {
     let (_world, extract, _residency) = load_startup(&assets);
 
     let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 64, 64);
-    // No assets, placeholders on: the camera, the instance host entity and
-    // the physics Floor and Crate B become cubes too (the Sun's cube sits
-    // outside the view: culled).
+    // No assets, placeholders on: the camera and the physics Floor and
+    // Crate B become cubes too (the Sun's cube sits outside the view:
+    // culled).
     render_offscreen(&device, &queue, &mut renderer, &extract);
     let s = renderer.stats();
     assert_eq!(
         (s.instances, s.culled, s.placeholders, s.missing),
-        (6, 1, 5, 2)
+        (5, 1, 4, 2)
     );
     renderer.placeholders = false;
     render_offscreen(&device, &queue, &mut renderer, &extract);

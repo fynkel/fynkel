@@ -270,8 +270,9 @@ fn a_reorder_moves_indices_bits_and_masks_everywhere() {
     );
     let overrides = &main["entities"][CRATE_A]["prefab"]["overrides"];
     assert_eq!(overrides[0]["value"], false, "cast_shadows untouched");
-    assert_eq!(overrides[1]["data"]["mask"], 5);
-    assert_eq!(overrides[2]["value"], 4);
+    assert_eq!(overrides[1]["field"], "position", "the placement untouched");
+    assert_eq!(overrides[2]["data"]["mask"], 5);
+    assert_eq!(overrides[3]["value"], 4);
     let spark = copy.json(SPARK);
     let spark_layer = spark["entities"]["c0000000-0000-4000-8000-0000000000b2"]["components"]
         ["3a7e307e-e092-5956-8abe-d1bad540c72e"]["data"]["layer"]
@@ -321,7 +322,7 @@ fn a_removal_sends_objects_to_default_and_drops_the_bits() {
         json!(u32::MAX)
     );
     assert_eq!(
-        main["entities"][CRATE_A]["prefab"]["overrides"][1]["data"]["mask"],
+        main["entities"][CRATE_A]["prefab"]["overrides"][2]["data"]["mask"],
         1
     );
     assert_clean(&s);
