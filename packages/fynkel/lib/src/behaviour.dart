@@ -506,6 +506,37 @@ class BehaviourField {
   final num? min;
   final num? max;
   final num? step;
+
+  /// A GameObject or script reference (type `gameObject` / `behaviour`):
+  /// its JSON is `{"entity": id}` (`, "component": id` for a script), and
+  /// [set] takes the resolved object ([GameObject] / the [Behaviour], or
+  /// null) — the world resolves it once every behaviour of the load is
+  /// attached, so a reference may name one attached after it.
+  bool get isReference => type == 'gameObject' || type == 'behaviour';
+}
+
+/// The JSON a reference field's `get` answers for [target] (a
+/// [GameObject] or a [Behaviour], or null): the object's live id — what
+/// [World.liveIdOf] answers, else its authoring id, else
+/// `runtime:<handle>` — and a script's authored component id. Generated
+/// code calls it.
+Map<String, Object?>? referenceJson(Object? target) {
+  final GameObject go;
+  String? component;
+  switch (target) {
+    case null:
+      return null;
+    case GameObject g:
+      go = g;
+    case Behaviour b:
+      go = b.gameObject;
+      component = b.authoredComponentId;
+    default:
+      throw ArgumentError.value(target, 'target', 'not a GameObject or a Behaviour');
+  }
+  if (go.isPending || !go.isAlive) return null;
+  final id = go.world.liveIdOf?.call(go.entity) ?? go.authoringId ?? 'runtime:${go.entity}';
+  return {'entity': id, 'component': ?component};
 }
 
 /// A registered behaviour type: id, version, factory and fields — what the
@@ -577,6 +608,9 @@ class BehaviourRegistry {
     for (final entry in fields.entries) {
       final f = type.field(entry.key);
       if (f == null) throw BehaviourDataError(id, 'unknown field', field: entry.key);
+      // A reference names an object of the load: the world sets it once
+      // they are all there (World._attachBehaviours).
+      if (f.isReference) continue;
       try {
         f.set(b, entry.value);
       } on BehaviourDataError {

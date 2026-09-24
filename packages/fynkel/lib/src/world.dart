@@ -561,6 +561,11 @@ class World {
     }
   }
 
+  /// The id an editor shows for the entity with runtime handle [handle]
+  /// (its live table's), when one is attached: what a script's object
+  /// field reads back as ([referenceJson]). Null otherwise.
+  String? Function(int handle)? liveIdOf;
+
   /// Authoring ids of the entities the last loads spawned with a behaviour
   /// (the only runtime → authored mapping the SDK has), and the scene
   /// document they came from. Filled only while the editor channel is on.
@@ -1028,15 +1033,27 @@ class World {
   /// other components are loaded regardless.
   LoadReport _attachAuthoredBehaviours(LoadReport report) {
     if (report.behaviours.isEmpty) return report;
-    final (attached, extra) = _attachBehaviours(report.behaviours, report.scenePath);
+    final (attached, extra) = _attachBehaviours(report.behaviours, report.scenePath, scene: true);
     return report.withBehaviours(attached: attached, extra: extra);
   }
 
-  (int, List<LoadDiagnostic>) _attachBehaviours(List<AuthoredBehaviour> behaviours, String? document) {
+  /// Attaches every behaviour of one load, then sets their GameObject and
+  /// script fields (Unity's object references): a reference resolves
+  /// against this load — the handles the native report gives for the
+  /// authoring ids, the scripts by component id — so it may name an
+  /// object whose script is attached after its own, and a prefab
+  /// instance's references reach its own copies. A target that is gone
+  /// (deleted, a component removed) or of another type leaves the field
+  /// null, with `FYN-B0003`. [scene]: a scene load, whose authoring ids
+  /// are the objects' live ids ([GameObject.authoringId]).
+  (int, List<LoadDiagnostic>) _attachBehaviours(List<AuthoredBehaviour> behaviours, String? document, {bool scene = false}) {
     final extra = <LoadDiagnostic>[];
     var attached = 0;
+    final byComponent = <String, Behaviour>{};
+    final withReferences = <(AuthoredBehaviour, Behaviour)>[];
     for (final b in behaviours) {
-      if (!registry.contains(b.type)) {
+      final type = registry.lookup(b.type);
+      if (type == null) {
         extra.add(LoadDiagnostic(
           code: 'FYN-B0001',
           severity: 'warning',
@@ -1048,8 +1065,12 @@ class World {
         continue;
       }
       try {
-        attach(b.entity).addBehaviourFromData(b.type, fields: b.data, version: b.version)._authoredComponent =
-            b.component.isEmpty ? null : b.component;
+        final go = attach(b.entity);
+        if (scene && b.authoringId.isNotEmpty) go._authoringId = b.authoringId;
+        final behaviour = go.addBehaviourFromData(b.type, fields: b.data, version: b.version)
+          .._authoredComponent = b.component.isEmpty ? null : b.component;
+        if (b.component.isNotEmpty) byComponent[b.component] = behaviour;
+        if (type.fields.any((f) => f.isReference && b.data[f.name] != null)) withReferences.add((b, behaviour));
         attached++;
       } on BehaviourDataError catch (e) {
         extra.add(LoadDiagnostic(
@@ -1062,7 +1083,58 @@ class World {
         ));
       }
     }
+    for (final (b, behaviour) in withReferences) {
+      for (final f in behaviour.behaviourType!.fields) {
+        if (!f.isReference) continue;
+        final value = b.data[f.name];
+        if (value == null) continue;
+        final target = _resolveReference(value, b.references, byComponent, scene: scene);
+        String? problem;
+        if (target == null) {
+          problem = 'references ${value is Map && value['component'] != null ? 'a script' : 'an object'} that is not in the scene';
+        } else {
+          try {
+            f.set(behaviour, target);
+          } on Object {
+            problem = 'references a ${target is Behaviour ? target.behaviourType?.id ?? target.runtimeType : 'GameObject'}, '
+                'which does not fit the field';
+          }
+        }
+        if (problem != null) {
+          extra.add(LoadDiagnostic(
+            code: 'FYN-B0003',
+            severity: 'warning',
+            message: '${b.type}.${f.name} $problem; it is None',
+            document: document,
+            pointer: b.pointer == null ? null : '${b.pointer}/data/${f.name}',
+            suggestion: 'pick the object again in the Inspector',
+          ));
+        }
+      }
+    }
     return (attached, extra);
+  }
+
+  /// A reference field's JSON as the object it names in one load (null
+  /// when it is not there).
+  Object? _resolveReference(
+    Object? value,
+    Map<String, int> handles,
+    Map<String, Behaviour> byComponent, {
+    required bool scene,
+  }) {
+    if (value is! Map) return null;
+    final entity = value['entity'], component = value['component'];
+    if (component is String) {
+      final b = byComponent[component];
+      return b != null && !b.isDestroyed ? b : null;
+    }
+    if (entity is! String) return null;
+    final handle = handles[entity];
+    if (handle == null) return null;
+    final go = byEntity(handle) ?? attach(handle);
+    if (scene) go._authoringId ??= entity;
+    return go;
   }
 
   // ---------------------------------------------------------------- prefabs (M3-08b)
@@ -1366,6 +1438,13 @@ class GameObject {
   /// like [set]).
   String get name => _name;
   set name(String value) => set(gen.Name(value: value));
+
+  /// The id the scene document gives this object, when a scene load
+  /// spawned it and told the SDK (it has a script, or a script field
+  /// references it); null for what the game made, and inside a prefab
+  /// instance.
+  String? get authoringId => _authoringId;
+  String? _authoringId;
   int? _entity;
   bool _alive = true;
 

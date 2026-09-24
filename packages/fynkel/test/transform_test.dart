@@ -4,7 +4,6 @@
 // native library.
 
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 Matcher near(Vec3 v) => predicate<Vec3>((a) => (a - v).length < 1e-4, 'within 1e-4 of $v');

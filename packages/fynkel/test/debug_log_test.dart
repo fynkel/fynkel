@@ -7,7 +7,6 @@
 import 'dart:convert';
 
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 class Talker extends Behaviour {
@@ -69,7 +68,7 @@ void main() {
       Debug.logWarning('careful');
       Debug.logError('broken');
     });
-    expect((context.diagnostics as RecordingDiagnostics).lines, [
+    expect(context.diagnostics.lines, [
       '[game] plain',
       '[game] warning: careful',
       '[game] error: broken',

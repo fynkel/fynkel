@@ -29,7 +29,18 @@ enum FieldKind {
   assetRef('assetRef'),
 
   /// `List<Vec3>` ↔ `[[x, y, z], …]` (`vec3List`): a path's points.
-  vec3List('vec3List');
+  vec3List('vec3List'),
+
+  /// A Dart `enum` ↔ the value's name (`enum`); the Inspector's dropdown.
+  enumeration('enum'),
+
+  /// `GameObject?` ↔ `{ "entity": id }` (`gameObject`): an object of the
+  /// scene, set from the Inspector (Unity's object field).
+  gameObject('gameObject'),
+
+  /// A `@FynkelBehaviour` class, nullable ↔ `{ "entity": id, "component":
+  /// id }` (`behaviour`): that script on an object of the scene.
+  behaviour('behaviour');
 
   const FieldKind(this.typeName);
 
@@ -46,7 +57,13 @@ enum FieldKind {
         FieldKind.quat => 'Quat',
         FieldKind.assetRef => 'AssetRef',
         FieldKind.vec3List => 'List<Vec3>',
+        FieldKind.enumeration => 'an enum',
+        FieldKind.gameObject => 'GameObject?',
+        FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
       };
+
+  /// A reference to an object of the scene, resolved at load.
+  bool get isReference => this == FieldKind.gameObject || this == FieldKind.behaviour;
 
   static FieldKind? fromDartType(String name) {
     for (final k in values) {
@@ -79,6 +96,10 @@ class ExposedField {
     this.showIf,
     this.gizmo,
     this.doc,
+    this.typeLibrary,
+    this.typeName,
+    this.enumValues = const [],
+    this.behaviourId,
   });
 
   /// The Dart field name; also the JSON/scene field name.
@@ -117,6 +138,17 @@ class ExposedField {
   /// The field's doc comment, first paragraph, without `///`.
   final String? doc;
 
+  /// The enum's or the referenced script's class, and the library
+  /// declaring it (the generated file imports it).
+  final String? typeLibrary;
+  final String? typeName;
+
+  /// An enum's value names, in declaration order.
+  final List<String> enumValues;
+
+  /// The type id of the script a [FieldKind.behaviour] field references.
+  final String? behaviourId;
+
   /// The `x-fynkel` hints beyond the type, in a fixed key order (what the
   /// schema and the metadata both carry).
   Map<String, Object?> get hints => {
@@ -134,6 +166,7 @@ class ExposedField {
         if (hidden) 'hidden': true,
         if (showIf != null) 'showIf': showIf,
         if (gizmo != null) 'gizmo': gizmo!.json,
+        if (behaviourId != null) 'behaviour': behaviourId,
       };
 }
 

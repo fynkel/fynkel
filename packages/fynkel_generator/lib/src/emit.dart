@@ -40,7 +40,10 @@ List<BehaviourClass> _sorted(List<BehaviourClass> classes) {
 /// `lib/generated/behaviours.g.dart` for [package].
 String emitDart(String package, List<BehaviourClass> classes) {
   final sorted = _sorted(classes);
-  final libraries = sorted.map((c) => c.libraryUri).toSet().toList()..sort();
+  final libraries = {
+    for (final c in sorted) ...[c.libraryUri, for (final f in c.fields) ?f.typeLibrary],
+  }.toList()
+    ..sort();
   final prefix = {for (var i = 0; i < libraries.length; i++) libraries[i]: '_lib$i'};
   final names = <String, String>{};
   final used = <String>{};
@@ -58,7 +61,7 @@ String emitDart(String package, List<BehaviourClass> classes) {
   for (final c in sorted) {
     for (final f in c.fields) {
       kinds.add(f.kind);
-      anyNullable |= f.nullable;
+      anyNullable |= f.nullable && !f.kind.isReference;
     }
   }
 
@@ -98,7 +101,8 @@ String emitDart(String package, List<BehaviourClass> classes) {
         if (f.max != null) o.writeln('      max: ${_dartLiteral(f.max)},');
         if (f.step != null) o.writeln('      step: ${_dartLiteral(f.step)},');
         o.writeln('      get: (b) => ${_getter(f, cls)},');
-        o.writeln('      set: (b, v) => (b as $cls).${f.name} = ${_setter(f)},');
+        final type = f.typeName == null ? null : '${prefix[f.typeLibrary]}.${f.typeName}';
+        o.writeln('      set: (b, v) => (b as $cls).${f.name} = ${_setter(f, type)},');
         o.writeln('    ),');
       }
       o.writeln('  ],');
@@ -192,11 +196,16 @@ String _getter(ExposedField f, String cls) {
     FieldKind.quat => '_quatJson($read)',
     FieldKind.assetRef => '_assetRefJson($read)',
     FieldKind.vec3List => '_vec3ListJson($read)',
+    FieldKind.enumeration => f.nullable ? '$read?.name' : '$read.name',
+    FieldKind.gameObject || FieldKind.behaviour => 'referenceJson($read)',
     _ => read,
   };
 }
 
-String _setter(ExposedField f) {
+/// [type]: the enum's or the referenced script's class, prefixed.
+String _setter(ExposedField f, String? type) {
+  // References arrive resolved (BehaviourField.isReference).
+  if (f.kind.isReference) return 'v as ${type ?? 'GameObject'}?';
   final convert = switch (f.kind) {
     FieldKind.number => '_double',
     FieldKind.integer => '_int',
@@ -206,11 +215,14 @@ String _setter(ExposedField f) {
     FieldKind.quat => '_quat',
     FieldKind.assetRef => '_assetRef',
     FieldKind.vec3List => '_vec3List',
+    FieldKind.enumeration => '(v) => $type.values.byName(v as String)',
+    FieldKind.gameObject || FieldKind.behaviour => throw StateError('unreachable'),
   };
   if (f.nullable) return '_orNull(v, $convert)';
   return switch (f.kind) {
     FieldKind.boolean => 'v as bool',
     FieldKind.string => 'v as String',
+    FieldKind.enumeration => '$type.values.byName(v as String)',
     _ => '$convert(v)',
   };
 }
@@ -292,6 +304,18 @@ Map<String, Object?> _propertySchema(ExposedField f) {
         'minItems': 3,
         'maxItems': 3,
       };
+    case FieldKind.enumeration:
+      s['type'] = f.nullable ? ['string', 'null'] : 'string';
+      s['enum'] = [...f.enumValues, if (f.nullable) null];
+    case FieldKind.gameObject:
+    case FieldKind.behaviour:
+      final keys = ['entity', if (f.kind == FieldKind.behaviour) 'component'];
+      s['type'] = ['object', 'null'];
+      s['properties'] = {
+        for (final k in keys) k: {'type': 'string'},
+      };
+      s['required'] = keys;
+      s['additionalProperties'] = false;
     case FieldKind.assetRef:
       final ref = {r'$ref': '$envelopeSchemaId#/\$defs/assetRef'};
       if (f.nullable) {

@@ -207,6 +207,43 @@ Future<ExposedField> _readField(
     );
   }
   final nullable = type.nullabilitySuffix == NullabilitySuffix.question;
+  // An enum's values, a referenced script's class and type id.
+  String? typeLibrary, typeName, behaviourId;
+  var enumValues = const <String>[];
+  if (kind == FieldKind.enumeration || kind == FieldKind.behaviour) {
+    final element = (type as InterfaceType).element;
+    typeLibrary = element.library.uri.toString();
+    typeName = element.name;
+    if (element.isPrivate) {
+      throw BehaviourGenerationError(
+        '@Expose field type $typeName must be public (the generated file names it)',
+        library: libraryUri,
+        member: member,
+      );
+    }
+    if (element is EnumElement) enumValues = [for (final c in element.constants) c.name ?? ''];
+  }
+  if (kind.isReference && !nullable) {
+    throw BehaviourGenerationError(
+      '@Expose ${type.getDisplayString()} field must be nullable (${type.getDisplayString()}?): '
+      'a reference is None until one is picked, and again when its object is deleted',
+      library: libraryUri,
+      member: member,
+    );
+  }
+  if (kind == FieldKind.behaviour) {
+    final element = (type as InterfaceType).element;
+    final annotation = _behaviourAnnotation.firstAnnotationOfExact(element);
+    behaviourId = annotation == null ? null : ConstantReader(annotation).peek('id')?.stringValue;
+    if (behaviourId == null) {
+      throw BehaviourGenerationError(
+        '@Expose ${type.getDisplayString()} field: $typeName is not a @FynkelBehaviour class '
+        '(a script field names one; use GameObject? for any object)',
+        library: libraryUri,
+        member: member,
+      );
+    }
+  }
   Object? defaultValue;
   var hasDefault = false;
   final node = await resolver.astNodeFor(f.firstFragment);
@@ -267,6 +304,10 @@ Future<ExposedField> _readField(
     showIf: expose.peek('showIf')?.stringValue,
     gizmo: gizmo,
     doc: _doc(f.documentationComment),
+    typeLibrary: typeLibrary,
+    typeName: typeName,
+    enumValues: enumValues,
+    behaviourId: behaviourId,
   );
 }
 
@@ -282,6 +323,10 @@ FieldKind? _kindOf(DartType type) {
   final element = type.element;
   final name = element.name;
   if (name == null) return null;
+  if (element is EnumElement) return FieldKind.enumeration;
+  if (element is ClassElement && _behaviourBase.isAssignableFrom(element) && !_behaviourBase.isExactly(element)) {
+    return FieldKind.behaviour;
+  }
   final lib = element.library.uri;
   if (lib.isScheme('dart') && lib.path == 'core' && name != 'List') {
     return switch (name) {
@@ -302,6 +347,7 @@ FieldKind? _kindOf(DartType type) {
       'Vec3' => FieldKind.vec3,
       'Quat' => FieldKind.quat,
       'AssetRef' => FieldKind.assetRef,
+      'GameObject' => FieldKind.gameObject,
       _ => null,
     };
   }
@@ -344,6 +390,16 @@ _Literal? _literal(Expression e, FieldKind kind) {
       });
     case FieldKind.assetRef:
       return _assetRef(e);
+    case FieldKind.enumeration:
+      // `Mode.fast` (a prefixed `lib.Mode.fast` too).
+      return switch (e) {
+        PrefixedIdentifier(:final identifier) => _Literal(identifier.name),
+        PropertyAccess(:final propertyName) => _Literal(propertyName.name),
+        _ => null,
+      };
+    case FieldKind.gameObject:
+    case FieldKind.behaviour:
+      return null;
     case FieldKind.vec3List:
       if (e is! ListLiteral) return null;
       final points = <Object?>[];

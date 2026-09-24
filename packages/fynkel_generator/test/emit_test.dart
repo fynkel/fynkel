@@ -268,6 +268,65 @@ void main() {
     expect(text, endsWith('\n'));
   });
 
+  test('enums, GameObject and script references: the enum by name, a reference resolved by the world', () {
+    const turret = BehaviourClass(
+      id: 'game.Turret',
+      version: 1,
+      className: 'Turret',
+      libraryUri: 'package:demo/turret.dart',
+      fields: [
+        ExposedField(
+          name: 'mode',
+          kind: FieldKind.enumeration,
+          typeLibrary: 'package:demo/modes.dart',
+          typeName: 'Mode',
+          enumValues: ['idle', 'aim', 'fire'],
+          defaultValue: 'aim',
+          hasDefault: true,
+        ),
+        ExposedField(
+          name: 'fallback',
+          kind: FieldKind.enumeration,
+          nullable: true,
+          typeLibrary: 'package:demo/modes.dart',
+          typeName: 'Mode',
+          enumValues: ['idle', 'aim', 'fire'],
+        ),
+        ExposedField(name: 'target', kind: FieldKind.gameObject, nullable: true),
+        ExposedField(
+          name: 'spinner',
+          kind: FieldKind.behaviour,
+          nullable: true,
+          typeLibrary: 'package:demo/spinner.dart',
+          typeName: 'Spinner',
+          behaviourId: 'game.Spinner',
+        ),
+      ],
+    );
+    final src = emitDart('demo', [turret]);
+    // The enum's and the script's libraries are imported with the rest.
+    expect(src, contains("import 'package:demo/modes.dart' as _lib0;"));
+    expect(src, contains("import 'package:demo/spinner.dart' as _lib1;"));
+    expect(src, contains("import 'package:demo/turret.dart' as _lib2;"));
+    expect(src, contains('get: (b) => (b as _lib2.Turret).mode.name'));
+    expect(src, contains('(b as _lib2.Turret).mode = _lib0.Mode.values.byName(v as String)'));
+    expect(src, contains('get: (b) => (b as _lib2.Turret).fallback?.name'));
+    expect(src, contains('(b as _lib2.Turret).fallback = _orNull(v, (v) => _lib0.Mode.values.byName(v as String))'));
+    expect(src, contains("type: 'gameObject'"));
+    expect(src, contains('get: (b) => referenceJson((b as _lib2.Turret).target)'));
+    expect(src, contains('(b as _lib2.Turret).target = v as GameObject?'));
+    expect(src, contains('(b as _lib2.Turret).spinner = v as _lib1.Spinner?'));
+
+    final props = schemaFor(turret)['properties'] as Map<String, Object?>;
+    expect(props['mode'], containsPair('enum', ['idle', 'aim', 'fire']));
+    expect((props['mode'] as Map)['x-fynkel'], {'type': 'enum'});
+    expect(props['fallback'], containsPair('enum', ['idle', 'aim', 'fire', null]));
+    expect(props['target'], containsPair('required', ['entity']));
+    expect(props['target'], containsPair('type', ['object', 'null']));
+    expect(props['spinner'], containsPair('required', ['entity', 'component']));
+    expect((props['spinner'] as Map)['x-fynkel'], {'type': 'behaviour', 'nullable': true, 'behaviour': 'game.Spinner'});
+  });
+
   test('errors name the declaration', () {
     final e = BehaviourGenerationError('bad', library: 'package:demo/a.dart', member: 'A.x');
     expect(e.toString(), 'fynkel_generator: package:demo/a.dart A.x: bad');

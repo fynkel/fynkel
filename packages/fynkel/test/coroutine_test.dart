@@ -4,7 +4,6 @@
 // over the real native library.
 
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 /// Runs whatever the test hands it and counts frames through `update`.

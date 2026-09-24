@@ -175,6 +175,7 @@ class AuthoredBehaviour {
     required this.version,
     required this.known,
     required this.data,
+    this.references = const {},
     this.pointer,
   });
 
@@ -186,6 +187,9 @@ class AuthoredBehaviour {
         version: (j['version'] as num?)?.toInt() ?? 1,
         known: j['known'] == true,
         data: (j['data'] as Map?)?.cast<String, Object?>() ?? const {},
+        references: {
+          for (final e in ((j['references'] as Map?) ?? const {}).entries) e.key as String: (e.value as num).toInt(),
+        },
         pointer: j['pointer'] as String?,
       );
 
@@ -206,6 +210,10 @@ class AuthoredBehaviour {
 
   /// The authored `data` object: the fields to set.
   final Map<String, Object?> data;
+
+  /// The spawned handles of the objects [data]'s GameObject and script
+  /// fields reference (`{"entity": id}`), by authoring id, in this load.
+  final Map<String, int> references;
   final String? pointer;
 }
 
