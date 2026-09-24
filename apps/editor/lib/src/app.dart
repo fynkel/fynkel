@@ -38,6 +38,8 @@ import 'play/play_prompt.dart';
 import 'play/play_session.dart';
 import 'prefs/preferences.dart';
 import 'prefs/preferences_dialog.dart';
+import 'profiler/profiler_model.dart';
+import 'profiler/profiler_panel.dart';
 import 'project/editor_handover.dart';
 import 'project/editor_project.dart';
 import 'project/migration_dialog.dart';
@@ -226,6 +228,7 @@ class EditorShellState extends State<EditorShell> {
   ConsoleModel? console;
   PlaySession? play;
   GameConsoleModel? gameConsole;
+  ProfilerModel? profiler;
   DocumentTabs? tabs;
   CodegenCheck? codegen;
   EditorState? editorState;
@@ -442,6 +445,7 @@ class EditorShellState extends State<EditorShell> {
     project?.removeListener(_onProjectChanged);
     project?.close();
     gameConsole?.dispose();
+    profiler?.dispose();
     play?.dispose();
     consoleTab.dispose();
     consoleSearchFocus.dispose();
@@ -573,8 +577,11 @@ class EditorShellState extends State<EditorShell> {
       title: 'Profiler',
       icon: FIcons.speed,
       home: PanelHome.bottom,
-      builder: (_, _) =>
-          const ComingPanel(title: 'Profiler', item: 9, what: 'Frame time, ticks, bridge bytes.', icon: FIcons.speed),
+      builder: (_, _) {
+        final m = profiler;
+        if (m == null) return const SizedBox.shrink();
+        return ProfilerPanel(key: const Key('profiler.panel'), model: m);
+      },
     ),
     PanelSpec(
       id: PanelRegistry.animation,
@@ -1761,6 +1768,7 @@ class EditorShellState extends State<EditorShell> {
       final c = ConsoleModel(project: opened, openInIde: ide.open, openInEditor: openDiagnosticInEditor);
       final ps = PlaySession(projectDir: opened.dir, cli: () => toolchain?.fynkelCli, start: widget.startPlayProcess);
       final gc = GameConsoleModel(session: ps, relative: opened.relative, openRecord: openGameRecord);
+      final pm = ProfilerModel(session: ps);
       final cg = CodegenCheck(
         projectDir: opened.dir,
         run: widget.run,
@@ -1774,6 +1782,7 @@ class EditorShellState extends State<EditorShell> {
       ps.addListener(registry.refresh);
       t.addListener(_onTabsChanged);
       gameConsole?.dispose();
+      profiler?.dispose();
       play?.dispose();
       project = opened;
       tabs = t;
@@ -1795,6 +1804,7 @@ class EditorShellState extends State<EditorShell> {
         workspace = ws;
         play = ps;
         gameConsole = gc;
+        profiler = pm;
         tabs = t;
         codegen = cg;
         console = c;

@@ -44,7 +44,7 @@ final class GameConsoleModel extends ChangeNotifier {
   bool showOutput = false;
 
   /// Whether the per-second `stats` windows are shown (off: the Profiler
-  /// is where they belong, item 9; the toolbar shows the last one).
+  /// is where they belong; the toolbar shows the last one).
   bool showStats = false;
   bool collapse = true;
   String? selectedKey;

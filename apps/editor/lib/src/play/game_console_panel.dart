@@ -209,7 +209,7 @@ class _GameConsoleViewState extends State<GameConsoleView> {
           FilterChip(
             key: const Key('console.game.stats'),
             label: const Text('Stats'),
-            tooltip: 'One row per stats window (the Profiler shows them properly, item 9)',
+            tooltip: 'One row per stats window (the Profiler charts them)',
             selected: model.showStats,
             onSelected: model.setShowStats,
             visualDensity: VisualDensity.compact,

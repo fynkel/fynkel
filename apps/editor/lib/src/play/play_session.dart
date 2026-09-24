@@ -129,8 +129,8 @@ final class PlaySession extends ChangeNotifier {
   DateTime? startedAt;
   DateTime? endedAt;
 
-  /// The last `stats` record's numbers (the Profiler, item 9, will read
-  /// the series; the toolbar shows fps and ticks now).
+  /// The last `stats` record's numbers: the Profiler keeps each one as it
+  /// arrives, the toolbar shows fps and ticks.
   Map<String, Object?>? lastStats;
 
   /// The scene the game says it is in (its `loaded` record).
