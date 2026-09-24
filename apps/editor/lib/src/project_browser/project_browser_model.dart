@@ -11,12 +11,14 @@ import 'dart:io';
 import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show ImageProvider;
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:path/path.dart' as p;
 
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../project/editor_project.dart';
 import 'scripts.dart';
+import 'thumbnails.dart';
 
 enum BrowserView { folders, list }
 
@@ -499,6 +501,41 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// when every copy is locked. The user's own clicks still move it.
   bool locked = false;
 
+  // ── The zoom slider (Unity's, at the status bar's right) ─────────────
+
+  /// Below this the slider's left end shows the list.
+  static const gridFrom = 0.05;
+
+  /// 0: the list; above [gridFrom], a grid of tiles growing with it.
+  double zoom = 0;
+
+  bool get grid => zoom >= gridFrom;
+
+  void setZoom(double v) {
+    v = v.clamp(0.0, 1.0);
+    if (v < gridFrom) v = 0;
+    if (v == zoom) return;
+    zoom = v;
+    notifyListeners();
+  }
+
+  /// A tile's picture, a side, in logical pixels.
+  double get tileSize => 48 + zoom * 80;
+
+  /// Rendered pictures of models, prefabs, meshes and materials; null when
+  /// there is no CLI to draw them (tests).
+  ThumbnailCache? thumbnails;
+
+  /// The rendered picture of [e] (its part [sub]) when it has one: a
+  /// model, a prefab, a material, a model's mesh or material.
+  ImageProvider? thumbnail(AssetEntry e, {String? sub}) {
+    final cache = thumbnails;
+    if (cache == null) return null;
+    final kind = sub == null ? browserKindOf(e) : AssetEntry.subKind(sub);
+    if (!const {'model', 'prefab', 'material', 'mesh'}.contains(kind)) return null;
+    return cache.image(e.id, sub, project.assetFile(e.path));
+  }
+
   void setLocked(bool on) {
     if (on == locked) return;
     locked = on;
@@ -511,6 +548,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
     'view': view.name,
     if (inScripts) 'scripts': scriptFolder,
     if (locked) 'locked': true,
+    if (zoom > 0) 'zoom': zoom,
   };
 
   /// Restores [remembered]; a folder that is gone falls back to the root.
@@ -526,6 +564,8 @@ final class ProjectBrowserModel extends ChangeNotifier {
       scriptFolder = s;
     }
     locked = json['locked'] == true;
+    final z = json['zoom'];
+    zoom = z is num && z >= gridFrom ? z.toDouble().clamp(0.0, 1.0) : 0;
     notifyListeners();
   }
 
@@ -536,12 +576,19 @@ final class ProjectBrowserModel extends ChangeNotifier {
     var i = lead == null ? -1 : rows.indexWhere((e) => e.id == lead);
     i = (i + delta).clamp(0, rows.length - 1);
     if (extend) {
-      selection.add(rows[i].id);
-      lead = rows[i].id;
-      notifyListeners();
+      extendTo(rows[i].id);
     } else {
       select(rows[i].id);
     }
+  }
+
+  /// [id] added to the selection as its lead (⇧ with an arrow key).
+  void extendTo(String id) {
+    selection.add(id);
+    lead = id;
+    leadPart = null;
+    pinged = null;
+    notifyListeners();
   }
 
   /// The selected entries, in the list's order.

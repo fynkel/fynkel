@@ -41,6 +41,7 @@ abstract final class FIcons {
   static const IconData check = LucideIcons.check;
   static const IconData checkCircle = LucideIcons.circleCheck;
   static const IconData chevronRight = LucideIcons.chevronRight;
+  static const IconData chevronLeft = LucideIcons.chevronLeft;
   static const IconData circle = LucideIcons.circle;
   static const IconData circleOutlined = LucideIcons.circle;
   static const IconData clearAll = LucideIcons.eraser;

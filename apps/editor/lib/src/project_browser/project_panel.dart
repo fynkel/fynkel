@@ -184,18 +184,63 @@ class _ProjectPanelState extends State<ProjectPanel> {
     setState(() {});
   }
 
-  /// The pinged asset (else the lead) scrolled into the list's view.
+  /// The pinged asset (else the lead, its part) scrolled into the list's
+  /// or the grid's view.
   void _scrollToShown() {
     if (!mounted || !_listScroll.hasClients) return;
     final id = model.pinged ?? model.lead;
-    final i = model.visibleAssets.indexWhere((e) => e.id == id);
+    final part = model.pinged == null ? model.leadPart : null;
+    final i = _rows().indexWhere(
+      (r) => switch (r) {
+        final AssetEntry a => a.id == id && part == null,
+        (final AssetEntry a, final String sub) => a.id == id && sub == part,
+        _ => false,
+      },
+    );
     if (i < 0) return;
-    final row = projectRowHeight(context);
-    final top = (model.visibleFolders.length + i) * row;
+    final grid = model.grid;
+    final row = grid ? _tileExtent(model.tileSize) : projectRowHeight(context);
+    final top = grid ? _gridPad + (i ~/ _gridColumns) * row : i * row;
     final pos = _listScroll.position;
     if (top < pos.pixels || top + row > pos.pixels + pos.viewportDimension) {
       _listScroll.jumpTo((top - pos.viewportDimension / 2 + row / 2).clamp(0, pos.maxScrollExtent));
     }
+  }
+
+  /// What the list (or the grid) shows, in order: folders, then each asset
+  /// with an expanded model's parts after it (Unity's ▸).
+  List<Object> _rows() => [
+    ...model.visibleFolders,
+    for (final a in model.visibleAssets) ...[a, for (final sub in model.partsOf(a)) (a, sub)],
+  ];
+
+  /// The grid's columns at its last layout.
+  int _gridColumns = 1;
+
+  /// An arrow key in the grid: the lead [delta] tiles on (a row is
+  /// [_gridColumns]), over assets and parts; folders are not selected.
+  void _gridStep(int delta, {required bool extend}) {
+    final rows = _rows();
+    bool pickable(Object r) => r is! String;
+    final i = rows.indexWhere(
+      (r) => switch (r) {
+        final AssetEntry a => a.id == model.lead && model.leadPart == null,
+        (final AssetEntry a, final String sub) => a.id == model.lead && model.leadPart == sub,
+        _ => false,
+      },
+    );
+    var j = i < 0 ? rows.indexWhere(pickable) : (i + delta).clamp(0, rows.length - 1);
+    while (j >= 0 && j < rows.length && !pickable(rows[j])) {
+      j += delta.sign;
+    }
+    if (j < 0 || j >= rows.length || j == i) return;
+    switch (rows[j]) {
+      case final AssetEntry a:
+        extend ? model.extendTo(a.id) : model.select(a.id);
+      case (final AssetEntry a, final String sub):
+        model.selectPart(a.id, sub);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToShown());
   }
 
   // ── Actions ───────────────────────────────────────────────────────────
@@ -595,14 +640,22 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final shift = HardwareKeyboard.instance.isShiftPressed;
     final meta = HardwareKeyboard.instance.isMetaPressed;
     if (model.inScripts) return _onScriptKey(k);
+    final grid = model.grid;
     if (k == LogicalKeyboardKey.arrowDown && meta) {
       // Unity (macOS): ⌘↓ opens; Enter renames.
       final lead = model.leadEntry;
       if (lead != null) _activate(lead);
+    } else if (grid && (k == LogicalKeyboardKey.arrowDown || k == LogicalKeyboardKey.arrowUp)) {
+      // The grid: a row down or up, and across with ← →.
+      _gridStep(k == LogicalKeyboardKey.arrowDown ? _gridColumns : -_gridColumns, extend: shift);
+    } else if (grid && (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.arrowLeft)) {
+      _gridStep(k == LogicalKeyboardKey.arrowRight ? 1 : -1, extend: shift);
     } else if (k == LogicalKeyboardKey.arrowDown) {
       model.step(1, extend: shift);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToShown());
     } else if (k == LogicalKeyboardKey.arrowUp) {
       model.step(-1, extend: shift);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToShown());
     } else if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter || k == LogicalKeyboardKey.f2) {
       model.beginRename();
     } else if (k == LogicalKeyboardKey.backspace || k == LogicalKeyboardKey.delete) {
@@ -638,9 +691,14 @@ class _ProjectPanelState extends State<ProjectPanel> {
   }
 
   KeyEventResult _onScriptKey(LogicalKeyboardKey k) {
+    final grid = model.grid;
     if (k == LogicalKeyboardKey.arrowDown) {
-      model.stepScript(1);
+      model.stepScript(grid ? _gridColumns : 1);
     } else if (k == LogicalKeyboardKey.arrowUp) {
+      model.stepScript(grid ? -_gridColumns : -1);
+    } else if (grid && k == LogicalKeyboardKey.arrowRight) {
+      model.stepScript(1);
+    } else if (grid && k == LogicalKeyboardKey.arrowLeft) {
       model.stepScript(-1);
     } else if (k == LogicalKeyboardKey.enter) {
       final lead = model.scriptLead;
@@ -705,7 +763,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _columnHeader(context, theme, columns: columns),
+                        if (!model.grid) _columnHeader(context, theme, columns: columns),
                         Expanded(
                           child: scripts
                               ? _scriptList(context, theme, columns: columns)
@@ -776,31 +834,39 @@ class _ProjectPanelState extends State<ProjectPanel> {
             : Builder(
                 builder: (context) {
                   // An expanded model lists its parts under it (Unity's ▸).
-                  final rows = <Object>[
-                    ...folders,
-                    for (final a in assets) ...[a, for (final sub in model.partsOf(a)) (a, sub)],
-                  ];
+                  final rows = _rows();
+                  final tile = model.grid ? model.tileSize : null;
+                  Widget item(BuildContext context, int i) => switch (rows[i]) {
+                    final String f => _folderRow(context, theme, f, inList: true, columns: columns, tile: tile),
+                    final AssetEntry a => _assetRow(context, theme, a, columns: columns, tile: tile),
+                    (final AssetEntry a, final String sub) => _PartRow(
+                      key: Key('project.part.${a.id}.$sub'),
+                      model: model,
+                      entry: a,
+                      sub: sub,
+                      selected: model.lead == a.id && model.leadPart == sub,
+                      tile: tile,
+                      onTap: () {
+                        _listFocus.requestFocus();
+                        model.selectPart(a.id, sub);
+                      },
+                    ),
+                    _ => const SizedBox.shrink(),
+                  };
+                  if (tile != null) {
+                    return _grid(
+                      key: const Key('project.grid'),
+                      controller: _listScroll,
+                      count: rows.length,
+                      item: item,
+                    );
+                  }
                   return ListView.builder(
                     key: const Key('project.list'),
                     controller: _listScroll,
                     itemCount: rows.length,
                     itemExtent: projectRowHeight(context),
-                    itemBuilder: (context, i) => switch (rows[i]) {
-                      final String f => _folderRow(context, theme, f, inList: true, columns: columns),
-                      final AssetEntry a => _assetRow(context, theme, a, columns: columns),
-                      (final AssetEntry a, final String sub) => _PartRow(
-                        key: Key('project.part.${a.id}.$sub'),
-                        model: model,
-                        entry: a,
-                        sub: sub,
-                        selected: model.lead == a.id && model.leadPart == sub,
-                        onTap: () {
-                          _listFocus.requestFocus();
-                          model.selectPart(a.id, sub);
-                        },
-                      ),
-                      _ => const SizedBox.shrink(),
-                    },
+                    itemBuilder: item,
                   );
                 },
               ),
@@ -831,43 +897,104 @@ class _ProjectPanelState extends State<ProjectPanel> {
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
                 ),
               )
-            : ListView.builder(
-                key: const Key('project.scripts.list'),
-                itemCount: folders.length + files.length,
-                itemExtent: projectRowHeight(context),
-                itemBuilder: (context, i) {
-                  if (i < folders.length) {
-                    final f = folders[i];
-                    return _ScriptRow(
-                      key: Key('project.scripts.row.$f'),
-                      model: model,
-                      rel: f,
-                      folder: true,
-                      depth: 0,
-                      current: false,
-                      columns: columns,
-                      onTap: () {
-                        _listFocus.requestFocus();
-                        model.showScripts(f);
-                      },
-                      onSecondaryTap: (at) => _scriptMenu(context, f, at, folder: true),
-                    );
-                  }
-                  final f = files[i - folders.length];
+            : _scriptItems(model.grid, folders.length + files.length, (context, i) {
+                if (i < folders.length) {
+                  final f = folders[i];
                   return _ScriptRow(
-                    key: Key('project.script.$f'),
+                    key: Key('project.scripts.row.$f'),
                     model: model,
                     rel: f,
-                    folder: false,
+                    folder: true,
                     depth: 0,
-                    current: model.scriptLead == f,
-                    showPath: model.view == BrowserView.list || model.query.trim().isNotEmpty,
+                    current: false,
                     columns: columns,
-                    onTap: () => _tapScript(f),
-                    onSecondaryTap: (at) => _scriptMenu(context, f, at, folder: false),
+                    tile: model.grid ? model.tileSize : null,
+                    onTap: () {
+                      _listFocus.requestFocus();
+                      model.showScripts(f);
+                    },
+                    onSecondaryTap: (at) => _scriptMenu(context, f, at, folder: true),
                   );
-                },
-              ),
+                }
+                final f = files[i - folders.length];
+                return _ScriptRow(
+                  key: Key('project.script.$f'),
+                  model: model,
+                  rel: f,
+                  folder: false,
+                  depth: 0,
+                  current: model.scriptLead == f,
+                  showPath: model.view == BrowserView.list || model.query.trim().isNotEmpty,
+                  columns: columns,
+                  tile: model.grid ? model.tileSize : null,
+                  onTap: () => _tapScript(f),
+                  onSecondaryTap: (at) => _scriptMenu(context, f, at, folder: false),
+                );
+              }),
+      ),
+    );
+  }
+
+  /// The Scripts list, or its grid.
+  Widget _scriptItems(bool grid, int count, IndexedWidgetBuilder item) => grid
+      ? _grid(key: const Key('project.scripts.grid'), count: count, item: item)
+      : ListView.builder(
+          key: const Key('project.scripts.list'),
+          itemCount: count,
+          itemExtent: projectRowHeight(context),
+          itemBuilder: item,
+        );
+
+  /// Tiles as many to a row as fit, the zoom slider's size; rendered
+  /// thumbnails fill in as they are drawn.
+  Widget _grid({
+    required Key key,
+    ScrollController? controller,
+    required int count,
+    required IndexedWidgetBuilder item,
+  }) {
+    final size = model.tileSize;
+    // A new grid each time: a thumbnail drawn rebuilds the tiles.
+    Widget grid() => LayoutBuilder(
+      builder: (context, c) {
+        final columns = ((c.maxWidth - 2 * _gridPad) / (size + _tileGutter)).floor().clamp(1, 1 << 16);
+        _gridColumns = columns;
+        return GridView.builder(
+          key: key,
+          controller: controller,
+          padding: const EdgeInsets.all(_gridPad),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisExtent: _tileExtent(size),
+          ),
+          itemCount: count,
+          itemBuilder: item,
+        );
+      },
+    );
+    final thumbnails = model.thumbnails;
+    return thumbnails == null ? grid() : ListenableBuilder(listenable: thumbnails, builder: (_, _) => grid());
+  }
+
+  /// Unity's slider at the status bar's right: its left end is the list.
+  Widget _zoomSlider(BuildContext context) {
+    final t = context.tokens;
+    return Tooltip(
+      message: model.grid ? 'Tile size (all the way left: the list)' : 'Drag right for a grid of thumbnails',
+      waitDuration: const Duration(milliseconds: 600),
+      child: SizedBox(
+        width: 96,
+        child: SliderTheme(
+          data: SliderTheme.of(context).copyWith(
+            trackHeight: 2,
+            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+            overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+            activeTrackColor: t.textSecondary,
+            inactiveTrackColor: t.line,
+            thumbColor: t.text,
+          ),
+          child: Slider(key: const Key('project.zoom'), value: model.zoom, onChanged: model.setZoom),
+        ),
       ),
     );
   }
@@ -912,6 +1039,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          _zoomSlider(context),
         ],
       ),
     );
@@ -1201,7 +1329,14 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _folderRow(BuildContext context, ThemeData theme, String rel, {required bool inList, bool columns = false}) {
+  Widget _folderRow(
+    BuildContext context,
+    ThemeData theme,
+    String rel, {
+    required bool inList,
+    bool columns = false,
+    double? tile,
+  }) {
     final depth = inList || rel.isEmpty ? 0 : rel.split('/').length;
     final name = rel.isEmpty ? 'assets' : p.basename(rel);
     final current = !inList && !model.inScripts && rel == model.folder;
@@ -1215,6 +1350,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       current: current,
       inList: inList,
       columns: columns,
+      tile: tile,
       renaming: renaming,
       renameController: renaming ? _rename : null,
       onTap: () {
@@ -1226,7 +1362,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     );
   }
 
-  Widget _assetRow(BuildContext context, ThemeData theme, AssetEntry e, {required bool columns}) {
+  Widget _assetRow(BuildContext context, ThemeData theme, AssetEntry e, {required bool columns, double? tile}) {
     final renaming = model.renamingAsset == e.id;
     return _AssetRow(
       key: Key('project.asset.${e.id}'),
@@ -1237,6 +1373,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
       pinged: model.pinged == e.id,
       showPath: model.view == BrowserView.list || model.filtering,
       columns: columns,
+      tile: tile,
       renaming: renaming,
       renameController: renaming ? _rename : null,
       onTap: () => _tap(e),
@@ -1311,8 +1448,157 @@ class _ProjectPanelState extends State<ProjectPanel> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          _zoomSlider(context),
         ],
       ),
+    );
+  }
+}
+
+// ── Tiles ───────────────────────────────────────────────────────────────
+
+/// The grid's padding around its tiles.
+const _gridPad = 6.0;
+
+/// A tile's width beyond its picture.
+const _tileGutter = 16.0;
+
+/// A tile's height below its picture: two lines of name.
+const _tileLabel = 34.0;
+
+/// A tile of [size] (its picture's side), from the zoom slider.
+double _tileExtent(double size) => size + 8 + _tileLabel;
+
+/// A grid tile (Unity's Project grid): the picture over the name. The
+/// selected tile's name is filled, the rest of a multi-selection a step
+/// quieter; a model's parts sit on a darker ground.
+class _Tile extends StatelessWidget {
+  const _Tile({
+    required this.size,
+    required this.picture,
+    required this.name,
+    this.selected = false,
+    this.lead = true,
+    this.outlined = false,
+    this.part = false,
+    this.badge,
+    this.label,
+  });
+
+  final double size;
+  final Widget picture;
+  final String name;
+  final bool selected;
+  final bool lead;
+
+  /// An accent frame: a ping, or a folder with a drag over it.
+  final bool outlined;
+
+  /// One of an expanded model's parts.
+  final bool part;
+
+  /// At the picture's right edge (a model's ▸).
+  final Widget? badge;
+
+  /// In place of the name (the inline rename).
+  final Widget? label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final t = context.tokens;
+    final focused = PanelFocus.of(context);
+    final fill = t.selectedRow(focused: focused);
+    return Container(
+      margin: const EdgeInsets.all(1),
+      decoration: BoxDecoration(
+        color: part ? t.header : (outlined ? t.surfaceOf(t.accent, .18) : null),
+        borderRadius: BorderRadius.circular(6),
+        border: outlined ? Border.all(color: t.accent, width: 1.5) : null,
+      ),
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        children: [
+          SizedBox(
+            width: size + _tileGutter - 4,
+            height: size,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Center(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: selected ? t.surfaceOf(fill, lead ? .45 : .3) : null,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: SizedBox.square(
+                      dimension: size,
+                      child: Center(child: picture),
+                    ),
+                  ),
+                ),
+                if (badge != null) Positioned(right: -2, top: 0, bottom: 0, child: Center(child: badge)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          SizedBox(
+            height: _tileLabel - 4,
+            child:
+                label ??
+                Align(
+                  alignment: Alignment.topCenter,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: selected ? (lead ? fill : t.surfaceOf(fill, .7)) : null,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(
+                      name,
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: selected ? t.onSelectedRow(focused: focused) : t.text,
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The rendered thumbnail of [entry] (its part [sub]) when there is one,
+/// else the row's preview (a texture, a swatch, the kind's icon).
+class _TilePicture extends StatelessWidget {
+  const _TilePicture({required this.model, required this.entry, this.sub, required this.size});
+
+  final ProjectBrowserModel model;
+  final AssetEntry entry;
+  final String? sub;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = sub == null
+        ? AssetPreviewWidget(preview: model.preview(entry), size: size)
+        : AssetPreviewWidget(preview: IconPreview(AssetEntry.subKind(sub!)), size: size);
+    final image = model.thumbnail(entry, sub: sub);
+    if (image == null) return fallback;
+    return Image(
+      key: ValueKey('project.thumbnail.${entry.id}${sub == null ? '' : '#$sub'}'),
+      image: image,
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      gaplessPlayback: true,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (_, _, _) => fallback,
     );
   }
 }
@@ -1331,6 +1617,7 @@ class _FolderRow extends StatefulWidget {
     required this.current,
     this.inList = false,
     this.columns = false,
+    this.tile,
     required this.renaming,
     required this.renameController,
     required this.onTap,
@@ -1341,6 +1628,9 @@ class _FolderRow extends StatefulWidget {
   final ProjectBrowserModel model;
   final String rel;
   final String name;
+
+  /// A grid tile of this size instead of a row.
+  final double? tile;
   final int depth;
   final bool current;
 
@@ -1369,62 +1659,80 @@ class _FolderRowState extends State<_FolderRow> {
     final theme = Theme.of(context);
     final t = context.tokens;
     final focused = PanelFocus.of(context);
-    final content = Container(
-      height: projectRowHeight(context),
-      padding: EdgeInsets.only(left: 6.0 + widget.depth * 14),
-      decoration: BoxDecoration(
-        color: widget.current ? t.selectedRow(focused: focused) : (_hot ? t.surfaceOf(t.accent, .2) : null),
-        border: _hot ? Border.all(color: t.accent) : null,
-      ),
-      child: Row(
-        children: [
-          Icon(
-            widget.rel.isEmpty ? FIcons.homeOutlined : (widget.current ? FIcons.folderOpen : FIcons.folderOutlined),
-            size: 14,
-            color: widget.current ? t.onSelectedRowSecondary(focused: focused) : t.textSecondary,
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: widget.renaming
+    final tile = widget.tile;
+    final content = tile != null
+        ? _Tile(
+            size: tile,
+            outlined: _hot,
+            name: widget.name,
+            picture: Icon(FIcons.folderOutlined, size: tile * .8, color: t.textSecondary),
+            label: widget.renaming
                 ? _InlineRename(
                     key: Key('project.renameFolder.${widget.rel}'),
                     controller: widget.renameController!,
                     onSubmit: widget.onRenameSubmit,
                     onCancel: widget.model.cancelRename,
                   )
-                : Text(
-                    widget.name,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: widget.current ? t.onSelectedRow(focused: focused) : t.text,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-          ),
-          if (widget.inList && !widget.renaming) ...[
-            SizedBox(
-              width: _AssetRow.kindWidth,
-              child: Text('folder', style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled)),
+                : null,
+          )
+        : Container(
+            height: projectRowHeight(context),
+            padding: EdgeInsets.only(left: 6.0 + widget.depth * 14),
+            decoration: BoxDecoration(
+              color: widget.current ? t.selectedRow(focused: focused) : (_hot ? t.surfaceOf(t.accent, .2) : null),
+              border: _hot ? Border.all(color: t.accent) : null,
             ),
-            if (widget.columns) ...[
-              SizedBox(
-                width: _AssetRow.contentsWidth,
-                child: Text(
-                  switch (widget.model.folderCount(widget.rel)) {
-                    0 => 'empty',
-                    1 => '1 asset',
-                    final n => '$n assets',
-                  },
-                  key: Key('project.contents.folder.${widget.rel}'),
-                  style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
+            child: Row(
+              children: [
+                Icon(
+                  widget.rel.isEmpty
+                      ? FIcons.homeOutlined
+                      : (widget.current ? FIcons.folderOpen : FIcons.folderOutlined),
+                  size: 14,
+                  color: widget.current ? t.onSelectedRowSecondary(focused: focused) : t.textSecondary,
                 ),
-              ),
-              const SizedBox(width: _AssetRow.sizeWidth),
-            ],
-            const SizedBox(width: _AssetRow.endGap),
-          ],
-        ],
-      ),
-    );
+                const SizedBox(width: 6),
+                Expanded(
+                  child: widget.renaming
+                      ? _InlineRename(
+                          key: Key('project.renameFolder.${widget.rel}'),
+                          controller: widget.renameController!,
+                          onSubmit: widget.onRenameSubmit,
+                          onCancel: widget.model.cancelRename,
+                        )
+                      : Text(
+                          widget.name,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: widget.current ? t.onSelectedRow(focused: focused) : t.text,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                ),
+                if (widget.inList && !widget.renaming) ...[
+                  SizedBox(
+                    width: _AssetRow.kindWidth,
+                    child: Text('folder', style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled)),
+                  ),
+                  if (widget.columns) ...[
+                    SizedBox(
+                      width: _AssetRow.contentsWidth,
+                      child: Text(
+                        switch (widget.model.folderCount(widget.rel)) {
+                          0 => 'empty',
+                          1 => '1 asset',
+                          final n => '$n assets',
+                        },
+                        key: Key('project.contents.folder.${widget.rel}'),
+                        style: theme.textTheme.bodySmall?.copyWith(color: t.textDisabled),
+                      ),
+                    ),
+                    const SizedBox(width: _AssetRow.sizeWidth),
+                  ],
+                  const SizedBox(width: _AssetRow.endGap),
+                ],
+              ],
+            ),
+          );
     if (widget.renaming) return content;
     final assets = DragTarget<AssetDragPayload>(
       onWillAcceptWithDetails: (d) {
@@ -1471,6 +1779,7 @@ class _AssetRow extends StatelessWidget {
     this.pinged = false,
     required this.showPath,
     required this.columns,
+    this.tile,
     required this.renaming,
     required this.renameController,
     required this.onTap,
@@ -1496,6 +1805,9 @@ class _AssetRow extends StatelessWidget {
 
   /// Contents and Size too (a wide enough panel).
   final bool columns;
+
+  /// A grid tile of this size instead of a row.
+  final double? tile;
   final bool renaming;
   final TextEditingController? renameController;
   final VoidCallback onTap;
@@ -1517,128 +1829,168 @@ class _AssetRow extends StatelessWidget {
     final fill = t.selectedRow(focused: focused);
     final on = selected ? t.onSelectedRow(focused: focused) : t.text;
     final dim = selected ? t.onSelectedRowSecondary(focused: focused) : t.textDisabled;
-    final content = Container(
-      height: projectRowHeight(context),
-      padding: const EdgeInsets.only(left: 6),
-      decoration: BoxDecoration(
-        color: selected ? (lead ? fill : t.surfaceOf(fill, .7)) : (pinged ? t.surfaceOf(t.accent, .18) : null),
-        border: pinged ? Border.all(color: t.accent, width: 1.5) : null,
-      ),
-      child: Row(
-        children: [
-          // Unity's ▸ on a model: its parts under it.
-          SizedBox(
-            width: 14,
-            child: model.canExpand(e)
+    final tile = this.tile;
+    final content = tile != null
+        ? _Tile(
+            size: tile,
+            selected: selected,
+            lead: lead,
+            outlined: pinged,
+            name: stem,
+            picture: _TilePicture(model: model, entry: e, size: tile),
+            badge: model.canExpand(e)
                 ? GestureDetector(
                     key: Key('project.expand.${e.id}'),
                     onTap: () => model.toggleExpanded(e.id),
-                    child: Icon(
-                      model.expandedSources.contains(e.id) ? FIcons.expandMore : FIcons.chevronRight,
-                      size: 14,
-                      color: dim,
+                    child: Container(
+                      decoration: BoxDecoration(color: t.header, borderRadius: BorderRadius.circular(3)),
+                      child: Icon(
+                        model.expandedSources.contains(e.id) ? FIcons.chevronLeft : FIcons.chevronRight,
+                        size: 14,
+                        color: t.textSecondary,
+                      ),
                     ),
                   )
                 : null,
-          ),
-          AssetPreviewWidget(preview: model.preview(e), size: t.row - 2),
-          const SizedBox(width: 8),
-          if (renaming)
-            Expanded(
-              child: _InlineRename(
-                key: Key('project.rename.${e.id}'),
-                controller: renameController!,
-                onSubmit: onRenameSubmit,
-                onCancel: onRenameCancel,
-              ),
-            )
-          else ...[
-            Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    flex: 3,
+            label: renaming
+                ? _InlineRename(
+                    key: Key('project.rename.${e.id}'),
+                    controller: renameController!,
+                    onSubmit: onRenameSubmit,
+                    onCancel: onRenameCancel,
+                  )
+                : null,
+          )
+        : Container(
+            height: projectRowHeight(context),
+            padding: const EdgeInsets.only(left: 6),
+            decoration: BoxDecoration(
+              color: selected ? (lead ? fill : t.surfaceOf(fill, .7)) : (pinged ? t.surfaceOf(t.accent, .18) : null),
+              border: pinged ? Border.all(color: t.accent, width: 1.5) : null,
+            ),
+            child: Row(
+              children: [
+                // Unity's ▸ on a model: its parts under it.
+                SizedBox(
+                  width: 14,
+                  child: model.canExpand(e)
+                      ? GestureDetector(
+                          key: Key('project.expand.${e.id}'),
+                          onTap: () => model.toggleExpanded(e.id),
+                          child: Icon(
+                            model.expandedSources.contains(e.id) ? FIcons.expandMore : FIcons.chevronRight,
+                            size: 14,
+                            color: dim,
+                          ),
+                        )
+                      : null,
+                ),
+                AssetPreviewWidget(preview: model.preview(e), size: t.row - 2),
+                const SizedBox(width: 8),
+                if (renaming)
+                  Expanded(
+                    child: _InlineRename(
+                      key: Key('project.rename.${e.id}'),
+                      controller: renameController!,
+                      onSubmit: onRenameSubmit,
+                      onCancel: onRenameCancel,
+                    ),
+                  )
+                else ...[
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          flex: 3,
+                          child: Text(
+                            file,
+                            style: theme.textTheme.bodyMedium?.copyWith(color: on),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (showName) ...[
+                          const SizedBox(width: 8),
+                          Flexible(
+                            flex: 2,
+                            child: Text(
+                              '“${e.name}”',
+                              style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                        if (showPath && e.path.contains('/')) ...[
+                          const SizedBox(width: 8),
+                          Flexible(
+                            flex: 3,
+                            child: Text(
+                              e.path.substring(0, e.path.lastIndexOf('/')),
+                              style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: kindWidth,
                     child: Text(
-                      file,
-                      style: theme.textTheme.bodyMedium?.copyWith(color: on),
+                      kind,
+                      style: theme.textTheme.bodySmall?.copyWith(color: dim),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (showName) ...[
-                    const SizedBox(width: 8),
-                    Flexible(
-                      flex: 2,
-                      child: Text(
-                        '“${e.name}”',
-                        style: theme.textTheme.bodySmall?.copyWith(color: dim),
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                  if (columns) ...[
+                    SizedBox(
+                      width: contentsWidth,
+                      child: e.isSource && e.subAssets.isNotEmpty
+                          ? Tooltip(
+                              message: e.subAssets.keys.join(', '),
+                              child: Text(
+                                e.subAssets.length == 1 ? '1 part' : '${e.subAssets.length} parts',
+                                key: Key('project.contents.${e.id}'),
+                                style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                              ),
+                            )
+                          : null,
                     ),
-                  ],
-                  if (showPath && e.path.contains('/')) ...[
-                    const SizedBox(width: 8),
-                    Flexible(
-                      flex: 3,
+                    SizedBox(
+                      width: sizeWidth,
                       child: Text(
-                        e.path.substring(0, e.path.lastIndexOf('/')),
-                        style: theme.textTheme.bodySmall?.copyWith(color: dim),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            SizedBox(
-              width: kindWidth,
-              child: Text(
-                kind,
-                style: theme.textTheme.bodySmall?.copyWith(color: dim),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (columns) ...[
-              SizedBox(
-                width: contentsWidth,
-                child: e.isSource && e.subAssets.isNotEmpty
-                    ? Tooltip(
-                        message: e.subAssets.keys.join(', '),
-                        child: Text(
-                          e.subAssets.length == 1 ? '1 part' : '${e.subAssets.length} parts',
-                          key: Key('project.contents.${e.id}'),
-                          style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                        switch (model.size(e)) {
+                          final n? => formatBytes(n),
+                          null => '',
+                        },
+                        key: Key('project.size.${e.id}'),
+                        textAlign: TextAlign.right,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: dim,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
-                      )
-                    : null,
-              ),
-              SizedBox(
-                width: sizeWidth,
-                child: Text(
-                  switch (model.size(e)) {
-                    final n? => formatBytes(n),
-                    null => '',
-                  },
-                  key: Key('project.size.${e.id}'),
-                  textAlign: TextAlign.right,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: dim,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(width: endGap),
-          ],
-        ],
-      ),
-    );
-    final interactive = GestureDetector(
+                      ),
+                    ),
+                  ],
+                  const SizedBox(width: endGap),
+                ],
+              ],
+            ),
+          );
+    Widget interactive = GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onSecondaryTapUp: (d) => onSecondaryTap(d.globalPosition),
       child: content,
     );
     if (renaming) return interactive;
+    if (tile != null) {
+      // A tile shows the name only: the file and the kind on hover.
+      interactive = Tooltip(
+        message: '${e.path}\n$kind',
+        waitDuration: const Duration(milliseconds: 600),
+        child: interactive,
+      );
+    }
     final payload = model.dragPayload(e);
     if (payload == null) return interactive;
     return Draggable<AssetDragPayload>(
@@ -1678,6 +2030,7 @@ class _PartRow extends StatelessWidget {
     required this.entry,
     required this.sub,
     required this.selected,
+    this.tile,
     required this.onTap,
   });
 
@@ -1685,6 +2038,9 @@ class _PartRow extends StatelessWidget {
   final AssetEntry entry;
   final String sub;
   final bool selected;
+
+  /// A grid tile of this size instead of a row.
+  final double? tile;
   final VoidCallback onTap;
 
   @override
@@ -1696,33 +2052,46 @@ class _PartRow extends StatelessWidget {
     final dim = selected ? t.onSelectedRowSecondary(focused: focused) : t.textDisabled;
     final kind = AssetEntry.subKind(sub);
     final name = sub.contains('/') ? sub.substring(sub.indexOf('/') + 1) : sub;
-    final content = Container(
-      height: projectRowHeight(context),
-      padding: const EdgeInsets.only(left: 6 + 14 + 16),
-      color: selected ? t.selectedRow(focused: focused) : null,
-      child: Row(
-        children: [
-          Icon(assetKindIcon(kind), size: 14, color: dim),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              name,
-              style: theme.textTheme.bodyMedium?.copyWith(color: on),
-              overflow: TextOverflow.ellipsis,
+    final tile = this.tile;
+    final content = tile != null
+        ? Tooltip(
+            message: '$name\n$kind in ${p.basename(entry.path)}',
+            waitDuration: const Duration(milliseconds: 600),
+            child: _Tile(
+              size: tile,
+              part: true,
+              selected: selected,
+              name: name,
+              picture: _TilePicture(model: model, entry: entry, sub: sub, size: tile),
             ),
-          ),
-          SizedBox(
-            width: _AssetRow.kindWidth,
-            child: Text(
-              kind,
-              style: theme.textTheme.bodySmall?.copyWith(color: dim),
-              overflow: TextOverflow.ellipsis,
+          )
+        : Container(
+            height: projectRowHeight(context),
+            padding: const EdgeInsets.only(left: 6 + 14 + 16),
+            color: selected ? t.selectedRow(focused: focused) : null,
+            child: Row(
+              children: [
+                Icon(assetKindIcon(kind), size: 14, color: dim),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    name,
+                    style: theme.textTheme.bodyMedium?.copyWith(color: on),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                SizedBox(
+                  width: _AssetRow.kindWidth,
+                  child: Text(
+                    kind,
+                    style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: _AssetRow.endGap),
+              ],
             ),
-          ),
-          const SizedBox(width: _AssetRow.endGap),
-        ],
-      ),
-    );
+          );
     final interactive = GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: content);
     final payload = model.dragPayload(entry, sub: sub);
     if (payload == null) return interactive;
@@ -1764,9 +2133,13 @@ class _ScriptRow extends StatelessWidget {
     this.tree = false,
     this.showPath = false,
     this.columns = false,
+    this.tile,
     required this.onTap,
     required this.onSecondaryTap,
   });
+
+  /// A grid tile of this size instead of a row.
+  final double? tile;
 
   final ProjectBrowserModel model;
   final String rel;
@@ -1801,64 +2174,71 @@ class _ScriptRow extends StatelessWidget {
       child: Tooltip(
         message: rel.isEmpty ? 'lib/ — the game\'s Dart source' : 'lib/$rel',
         waitDuration: const Duration(milliseconds: 600),
-        child: Container(
-          height: projectRowHeight(context),
-          padding: EdgeInsets.only(left: 6.0 + depth * 14),
-          color: current ? t.selectedRow(focused: focused) : null,
-          child: Row(
-            children: [
-              SizedBox(
-                width: tree ? 14 : t.row - 2,
-                child: Icon(icon, size: 14, color: current ? dim : t.textSecondary),
-              ),
-              SizedBox(width: tree ? 6 : 8),
-              Expanded(
+        child: tile != null
+            ? _Tile(
+                size: tile!,
+                selected: current,
+                name: name,
+                picture: Icon(icon, size: tile! * .8, color: t.textSecondary),
+              )
+            : Container(
+                height: projectRowHeight(context),
+                padding: EdgeInsets.only(left: 6.0 + depth * 14),
+                color: current ? t.selectedRow(focused: focused) : null,
                 child: Row(
                   children: [
-                    Flexible(
-                      flex: 3,
-                      child: Text(
-                        name,
-                        style: theme.textTheme.bodyMedium?.copyWith(color: on),
-                        overflow: TextOverflow.ellipsis,
+                    SizedBox(
+                      width: tree ? 14 : t.row - 2,
+                      child: Icon(icon, size: 14, color: current ? dim : t.textSecondary),
+                    ),
+                    SizedBox(width: tree ? 6 : 8),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Flexible(
+                            flex: 3,
+                            child: Text(
+                              name,
+                              style: theme.textTheme.bodyMedium?.copyWith(color: on),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (showPath && rel.contains('/')) ...[
+                            const SizedBox(width: 8),
+                            Flexible(
+                              flex: 3,
+                              child: Text(
+                                rel.substring(0, rel.lastIndexOf('/')),
+                                style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                    if (showPath && rel.contains('/')) ...[
-                      const SizedBox(width: 8),
-                      Flexible(
-                        flex: 3,
-                        child: Text(
-                          rel.substring(0, rel.lastIndexOf('/')),
-                          style: theme.textTheme.bodySmall?.copyWith(color: dim),
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                    if (!tree) ...[
+                      SizedBox(
+                        width: _AssetRow.kindWidth,
+                        child: Text(kind, style: theme.textTheme.bodySmall?.copyWith(color: dim)),
                       ),
+                      if (columns) ...[
+                        SizedBox(
+                          width: _AssetRow.contentsWidth,
+                          child: Text(
+                            ids.map((id) => id.substring(id.lastIndexOf('.') + 1)).join(', '),
+                            key: Key('project.script.contents.$rel'),
+                            style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: _AssetRow.sizeWidth),
+                      ],
+                      const SizedBox(width: _AssetRow.endGap),
                     ],
                   ],
                 ),
               ),
-              if (!tree) ...[
-                SizedBox(
-                  width: _AssetRow.kindWidth,
-                  child: Text(kind, style: theme.textTheme.bodySmall?.copyWith(color: dim)),
-                ),
-                if (columns) ...[
-                  SizedBox(
-                    width: _AssetRow.contentsWidth,
-                    child: Text(
-                      ids.map((id) => id.substring(id.lastIndexOf('.') + 1)).join(', '),
-                      key: Key('project.script.contents.$rel'),
-                      style: theme.textTheme.bodySmall?.copyWith(color: dim),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: _AssetRow.sizeWidth),
-                ],
-                const SizedBox(width: _AssetRow.endGap),
-              ],
-            ],
-          ),
-        ),
       ),
     );
     // A behaviour's file drags the behaviour: onto an object in the

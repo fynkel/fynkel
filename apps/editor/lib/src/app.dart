@@ -51,6 +51,7 @@ import 'project/editor_project.dart';
 import 'project/migration_dialog.dart';
 import 'project_browser/project_browser_model.dart';
 import 'project_browser/project_panel.dart';
+import 'project_browser/thumbnails.dart';
 import 'scene_view/editor_state.dart';
 import 'scene_view/scene_panel.dart';
 import 'scene_view/scene_view_model.dart';
@@ -316,6 +317,9 @@ class EditorShellState extends State<EditorShell> {
 
   /// The Game view between runs: the active camera's picture (P4b).
   GamePreview? _gamePreview;
+
+  /// The Project grid's rendered thumbnails, shared by the browser copies.
+  ThumbnailCache? _thumbnails;
 
   /// Live Play mode (ADR-0021 P7): the Hierarchy and the Inspector on the
   /// running game's world while it runs.
@@ -2672,6 +2676,12 @@ class EditorShellState extends State<EditorShell> {
       case PanelRegistry.project:
         final b = ProjectBrowserModel(project: opened);
         b.recall(es.panel(id));
+        // One set of rendered thumbnails for every copy of the browser.
+        b.thumbnails = _thumbnails ??= ThumbnailCache(
+          projectDir: opened.dir,
+          cli: () => toolchain?.fynkelCli,
+          run: widget.run,
+        );
         // Hierarchy → Project makes a prefab of the focused scene's object.
         // (Null from the Hierarchy means "allowed": no `??` fallback here.)
         b.cannotMakePrefab = (ids) => _sceneOps == null ? 'No scene is open.' : _sceneOps!.cannotCreatePrefab(ids);
@@ -2797,6 +2807,8 @@ class EditorShellState extends State<EditorShell> {
     _sceneOps?.dispose();
     _sceneOps = null;
     _sceneViews = null;
+    _thumbnails?.dispose();
+    _thumbnails = null;
   }
 
   /// A panel copy took the keyboard. Every unlocked Inspector shows that
