@@ -1330,6 +1330,41 @@ final class InspectorModel extends ChangeNotifier {
     return a?.ok ?? false;
   }
 
+  // ── Copy / Paste Component Values (Unity) ───────────────────────────────
+
+  /// The values last copied from a component, for Paste Component Values
+  /// on any component of that type, in any document.
+  static ({String type, Map<String, Object?> data})? componentClipboard;
+
+  void copyValues(ComponentSlot slot) {
+    componentClipboard = (type: slot.type, data: Map<String, Object?>.from(_copyJson(slot.first.data) as Map));
+    notifyListeners();
+  }
+
+  bool canPasteValues(ComponentSlot slot) => canEdit && componentClipboard?.type == slot.type;
+
+  /// Every selected instance takes the copied values — a key the copy does
+  /// not hold goes back to its default — in one transaction.
+  bool pasteValues(ComponentSlot slot) {
+    final c = componentClipboard;
+    if (c == null || !canPasteValues(slot)) return false;
+    final commands = <Map<String, Object?>>[];
+    for (final i in slot.instances) {
+      for (final e in c.data.entries) {
+        if (!deepEquals(i.data[e.key], e.value)) commands.add(_setFieldCommand(i, e.key, e.value));
+      }
+      if (i.isDerived) continue;
+      for (final k in i.data.keys) {
+        if (!c.data.containsKey(k)) commands.add(Command.unsetField(i.entityId, i.componentId, k));
+      }
+    }
+    if (commands.isEmpty) return true;
+    final a = _run(commands);
+    if (a?.ok ?? false) _errors.removeWhere((k, _) => k.startsWith('${slot.key}/'));
+    notifyListeners();
+    return a?.ok ?? false;
+  }
+
   // ── Apply to Scene (ADR-0021 P7 L4) ─────────────────────────────────────
 
   /// Whether the Inspector shows the running game (Apply to Scene is

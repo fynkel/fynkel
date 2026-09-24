@@ -94,4 +94,39 @@ void main() {
     await e.press(LogicalKeyboardKey.keyZ, command: true, shift: true);
     expect(angles(), ['10', '120', '0'], reason: 'redone');
   });
+
+  testWidgets('Copy Component on one object, Paste Component Values on another; one undo', (tester) async {
+    final e = await Editor.open(tester);
+    final tab = e.shell.tabs!.focused!;
+    List<double> positionOf(String name) => [
+      for (final v in tab.tree.nodes.values.firstWhere((n) => n.name == name).transform!.position) v.toDouble(),
+    ];
+    await e.click(e.row('Floor'));
+    final menu = find.byWidgetPredicate(
+      (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('card.menu.fynkel.Transform'),
+    );
+    await e.click(menu.first);
+    await e.click(find.byKey(const Key('card.menu.copyValues')));
+    await e.click(e.row('Crate B'));
+    expect(positionOf('Crate B'), isNot(positionOf('Floor')));
+    await e.click(menu.first);
+    await e.click(find.byKey(const Key('card.menu.pasteValues')));
+    expect(positionOf('Crate B'), positionOf('Floor'));
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(positionOf('Crate B'), isNot(positionOf('Floor')));
+  });
+
+  testWidgets('a component\'s enabled is the checkbox in its header', (tester) async {
+    final e = await Editor.open(tester, scene: 'c0000000-0000-4000-8000-000000000032');
+    await e.click(e.row('Fountain'));
+    final box = find.byWidgetPredicate(
+      (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('card.enabled.fynkel.Emitter'),
+    );
+    expect(box, findsOneWidget);
+    final before = tester.widget<Checkbox>(box).value;
+    await e.click(box);
+    expect(tester.widget<Checkbox>(box).value, before == false);
+    final tab = e.shell.tabs!.focused!;
+    expect(tab.document.history, 1, reason: 'one undo step');
+  });
 }

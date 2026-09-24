@@ -639,7 +639,24 @@ class _ComponentCard extends StatelessWidget {
                     Icon(collapsed ? FIcons.chevronRight : FIcons.expandMore, size: 14, color: t.textSecondary),
                     const SizedBox(width: 2),
                     Icon(componentIcon(spec), size: 14, color: t.textSecondary),
-                    const SizedBox(width: 7),
+                    // Unity: a component's `enabled` is the header's checkbox.
+                    if (_enabledField != null)
+                      SizedBox(
+                        width: 22,
+                        height: 18,
+                        child: Checkbox(
+                          key: ValueKey('card.enabled.${slot.key}'),
+                          tristate: slot.isMixed('enabled'),
+                          value: slot.isMixed('enabled') ? null : slot.shown('enabled') != false,
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onChanged: model.canEdit
+                              ? (v) => model.setField(slot, 'enabled', v ?? true, spec: _enabledField)
+                              : null,
+                        ),
+                      )
+                    else
+                      const SizedBox(width: 7),
                     Expanded(
                       child: Tooltip(
                         message: spec.description ?? spec.type,
@@ -681,6 +698,20 @@ class _ComponentCard extends StatelessWidget {
                       icon: Icon(Icons.adaptive.more, semanticLabel: '${spec.title} options'),
                       onSelected: (v) => _menu(context, v),
                       itemBuilder: (_) => [
+                        const PopupMenuItem(
+                          key: Key('card.menu.copyValues'),
+                          value: 'copyValues',
+                          height: 28,
+                          child: Text('Copy Component'),
+                        ),
+                        PopupMenuItem(
+                          key: const Key('card.menu.pasteValues'),
+                          value: 'pasteValues',
+                          enabled: model.canPasteValues(slot),
+                          height: 28,
+                          child: const Text('Paste Component Values'),
+                        ),
+                        const PopupMenuDivider(),
                         PopupMenuItem(
                           value: 'reset',
                           enabled: model.canEdit,
@@ -735,6 +766,10 @@ class _ComponentCard extends StatelessWidget {
         model.removeComponent(slot);
       case 'reset':
         model.resetToDefaults(slot);
+      case 'copyValues':
+        model.copyValues(slot);
+      case 'pasteValues':
+        model.pasteValues(slot);
       case 'applyToScene':
         model.applyToScene(slot);
       case 'copyType':
@@ -763,6 +798,13 @@ class _ComponentCard extends StatelessWidget {
     return w;
   }
 
+  /// The component's boolean `enabled`, shown as the header's checkbox
+  /// rather than a row.
+  FieldSpec? get _enabledField {
+    final f = slot.spec.field('enabled');
+    return f != null && f.kind == FieldKind.boolean ? f : null;
+  }
+
   Widget _fields(BuildContext context) {
     final theme = Theme.of(context);
     final spec = slot.spec;
@@ -770,7 +812,9 @@ class _ComponentCard extends StatelessWidget {
     final rows = <Widget>[];
     String? group;
     var any = false;
+    final enabled = _enabledField;
     for (final f in spec.fields) {
+      if (identical(f, enabled)) continue;
       if (!f.visibleWith(data, siblings: spec.fields)) continue;
       any = true;
       if (f.group != group) {
