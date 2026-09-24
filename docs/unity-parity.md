@@ -46,7 +46,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | A value that does not parse | goes back to the old value | ✅ (Unity does the same) |
 | Component header | enable checkbox, Copy/Paste Values, Move Up/Down, drag to reorder | 🔧 checkbox + Copy Component / Paste Component Values (`13d2876`); Move Up / Move Down (`moveComponent` `8b8e747`, `5d36af3`); ❌ drag to reorder |
 | Click an asset reference | pings the asset in the Project | 🔧 `2455f5d` (⊙ opens the picker) |
-| Colour picker | live while picking, HDR intensity | 🟡 applies on OK only; no HDR |
+| Colour picker | live while picking, HDR intensity | 🔧 live in the Scene view, one undo on OK, Cancel restores (`ff6611e`, `7edb455`); HDR intensity goes with the Material Inspector (no component colour is HDR; emission is) |
 | Rotation after reselect/undo | keeps the typed Euler | 🔧 `10e1f8b` (editor-side hints) |
 | Typing, maths, Enter/Esc, drag-scrub with ⇧/⌥, one undo per edit, enums, sliders, tooltips, lock | | ✅ |
 
@@ -76,7 +76,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 
 | | Unity | Fynkel |
 |---|---|---|
-| Material Inspector | edit colour, maps, emission; preview sphere; live in the Scene view | ❌ **read-only** |
+| Material Inspector | edit colour, maps, emission (HDR colour + intensity); preview sphere; live in the Scene view | ❌ **read-only** |
 | Drop a material on an object | assigns it | ❌ |
 | Volume profile Inspector | Add Override, a checkbox per field | ❌ read-only |
 | Model import settings | scale, normals, animation… | 🟡 external files + material remap only; unapplied changes dropped without asking |
@@ -130,3 +130,6 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   `fynkel render` and checks that the cube is drawn.
 - 2026-09-24: Move Up / Move Down (`8b8e747`, `5d36af3`) — the parity
   test reads the cards' order on screen and in the saved file.
+- 2026-09-24: the colour picker is live (`ff6611e` preview `setComponents`,
+  `6b8ffe7`, `7edb455`) — `inspector_parity_test.dart` checks the world's
+  light colour while picking, Cancel, and one undo on OK.

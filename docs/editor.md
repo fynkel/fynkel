@@ -516,7 +516,7 @@ reports an edit **once per gesture**:
 | enum | a menu of the `enum` values |
 | `vec2` / `vec3` / `vec4` | X Y Z W numbers, each a pointer write on its own; the per-axis fields carry no unit suffix (too narrow for `20 m`) — the row's label shows it once |
 | quaternion | **Euler degrees** (X, Y, Z, `q = qz·qy·qx`) over the stored `[x, y, z, w]`; each axis commits the whole quaternion; the shown triple is kept across a commit so dragging Y never snaps X |
-| `color` | a swatch (linear → sRGB for display) with the hex next to it; the picker is HSV + hex + alpha for four components; values are written linear |
+| `color` | a swatch (linear → sRGB for display) with the hex next to it; the picker is HSV + hex + alpha for four components; values are written linear. As Unity's, the Scene view follows every change while picking (`preview.setComponents`, no transaction); OK writes one transaction, Cancel or a click outside puts the world back (`restoreComponents`) |
 | `assetRef` | the asset's name, `…` opens a **searchable picker** filtered by `asset(<kind>)` (a source offers its matching sub-assets; an audio source is offered whole as a `sound` — `AudioSource.clip` takes no sub), Clear when nullable, and a `DragTarget<AssetDragPayload>` for the Project browser's rows (item 5) |
 | `entity` | a name field with a menu of the document's entity names |
 | `layerMask` | a check-list of the project's `layers` (Everything / Nothing), the number beside it — a collider's `mask` ("Collides with"), a camera's or light's `culling_mask` |

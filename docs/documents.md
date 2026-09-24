@@ -806,7 +806,9 @@ next sync).
   circles, cone, arrows), cameras (their frustum to `CAMERA_OUTLINE_DEPTH`
   4 m), colliders (green); `set_transforms`/`restore_transforms` — the
   gizmo's preview of local transforms without touching the document;
-  `set_hidden` — the editor's hidden set (a filter in the world's dump and
+  `set_components`/`restore_components` — the Inspector's live edit of a
+  built-in component's whole data (a colour being picked) the same way, a
+  behaviour skipped; `set_hidden` — the editor's hidden set (a filter in the world's dump and
   picks, never in the document); `world_matrix`; `stats`. A `View` is
   `{ world[16], aspect, projection?, fovY?, orthoHeight?, near?, far?,
   exposureMode?, exposure? }` with the runtime's own projection formulas.
@@ -820,7 +822,9 @@ next sync).
   the kinds `camera` (the editor camera, so the world's exposure follows
   it), `hidden`, `pick` (`view` + `ndc`, or a `ray`), `pickRect`, `lines`
   (`outline` ids and colour, `iconsAspect`), `worldMatrix`,
-  `setTransforms`, `restoreTransforms`, `resync`, `reload`, `recook` (cook
+  `setTransforms`, `restoreTransforms`, `setComponents` (`components:
+  [{id, type, data}]` → `count` set), `restoreComponents` (`ids`),
+  `resync`, `reload`, `recook` (cook
   again, point every preview at the new store, reload each; with
   `live: true` unsaved documents cook as held, their files untouched, and a
   recovery copy goes to `.fynkel/recovery/` — ADR-0021 P5), `dump`,
@@ -830,6 +834,7 @@ next sync).
   renderHandle`, `stats`, `diagnostics`, `cook`; `setCamera`,
   `setHidden`, `pick`/`pickRay`/`pickRect` → `PreviewPick`, `lines` →
   `PreviewLines`, `worldMatrices`, `setTransforms`/`restoreTransforms`,
+  `setComponents`/`restoreComponents`,
   `resync` → `PreviewSyncReport`, `reload`/`refreshStats` →
   `PreviewStats`, `recook` → `CookReport`, `dump`, `close`), and a
   `PreviewSynced` event on the session's stream after every call that
