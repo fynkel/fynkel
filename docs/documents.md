@@ -648,6 +648,11 @@ window, never running game code and never reading a cooked cache
   description? }` to the project's component registry when the project
   has one and the entry is missing, as one asset-history step, and re-reads
   the project either way. Its answer is `{ id, registered, inMetadata }`.
+  `setStartupScene { id }` (the M4 gate; Unity's first scene in Build
+  Settings) writes the project file's `startupScene` — the scene
+  `fynkel run` and `fynkel test --headless` start with — as one
+  asset-history step; `FYN-T0003` for anything but a scene of the project
+  or the scene that already is the startup scene.
   `undoAsset` / `redoAsset` replay the
   **asset history**, an undo stack of its own (a document's ⌘Z never moves
   a file): created documents are removed and re-written byte-for-byte,

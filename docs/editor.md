@@ -661,7 +661,8 @@ the sub-asset ids as a tooltip, and the kind. **Inline rename** (F2, the
 menu, or right after New): ↩ commits, ⎋ cancels, losing focus commits.
 Keys: ↑↓ ⇧↑↓ ↩ F2 ⌫/⌦ ⌘A ⎋ ←(up a folder). Context menus: an asset's
 Open / Show in Inspector / Reveal in Finder / Rename / Move to… / Delete /
-Reimport / Copy id / Copy path / New … Here; a folder's Show / Reveal /
+Reimport / **Set as Startup Scene** (a scene: the one `fynkel run`
+starts with, one asset-history step) / Copy id / Copy path / New … Here; a folder's Show / Reveal /
 New … Here / Rename Folder / Delete Empty Folder; the empty area's New …
 Here. **Drag and drop**: an asset row is a `Draggable<AssetDragPayload>`
 (dragging a selected row drags the whole selection, the feedback says "3
