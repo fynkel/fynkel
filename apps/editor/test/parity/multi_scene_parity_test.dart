@@ -22,10 +22,8 @@ const trophy = 'c0000000-0000-4000-8000-0000000003e1';
 
 void main() {
   Finder header(OpenDocument s) => find.byKey(Key('hierarchy.scene.${s.document.id}'));
-  FontWeight? weight(Editor e, OpenDocument s) => e.tester
-      .widget<Text>(find.byKey(Key('hierarchy.scene.name.${s.document.id}')))
-      .style
-      ?.fontWeight;
+  FontWeight? weight(Editor e, OpenDocument s) =>
+      e.tester.widget<Text>(find.byKey(Key('hierarchy.scene.name.${s.document.id}'))).style?.fontWeight;
 
   Future<(Editor, OpenDocument, OpenDocument)> twoScenes(WidgetTester tester) async {
     final e = await Editor.open(tester);
@@ -41,41 +39,49 @@ void main() {
     return (e, main, added);
   }
 
-  testWidgets('Open Scene Additive: both scenes under headers, the active one bold; a click in the other activates it', (
-    tester,
-  ) async {
-    final (e, main, added) = await twoScenes(tester);
-    expect(e.shell.tabs!.focused, same(main), reason: 'the active scene stays active');
-    expect(header(main), findsOneWidget);
-    expect(header(added), findsOneWidget);
-    expect(weight(e, main), FontWeight.w700);
-    expect(weight(e, added), FontWeight.w500);
-    expect(find.byKey(const ValueKey('row.$trophy')), findsOneWidget, reason: "the other scene's objects are listed");
-    expect(
-      tester.getTopLeft(header(added)).dy,
-      greaterThan(tester.getTopLeft(find.byKey(const ValueKey('row.$floor'))).dy),
-      reason: 'each scene under its own header, in tab order',
-    );
+  testWidgets(
+    'Open Scene Additive: both scenes under headers, the active one bold; a click in the other activates it',
+    (tester) async {
+      final (e, main, added) = await twoScenes(tester);
+      expect(e.shell.tabs!.focused, same(main), reason: 'the active scene stays active');
+      expect(header(main), findsOneWidget);
+      expect(header(added), findsOneWidget);
+      expect(weight(e, main), FontWeight.w700);
+      expect(weight(e, added), FontWeight.w500);
+      expect(find.byKey(const ValueKey('row.$trophy')), findsOneWidget, reason: "the other scene's objects are listed");
+      expect(
+        tester.getTopLeft(header(added)).dy,
+        greaterThan(tester.getTopLeft(find.byKey(const ValueKey('row.$floor'))).dy),
+        reason: 'each scene under its own header, in tab order',
+      );
 
-    await e.click(e.row('Crate A'));
-    expect(main.selection, [crateA]);
-    final camera = e.shell.scene!.camera!.toJson();
+      // The other loaded scene is drawn with the active one, as it is.
+      final sv = e.shell.scene!;
+      final extras = sv.overlay(sv.current!).extraWorlds;
+      expect(extras.map((x) => x.worldAddress), [sv.previewOf(added)!.worldAddress]);
+      expect(extras.single.gray, isFalse);
+      expect(extras.single.transform, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
-    // A click on the other scene's object: that scene is active, the object selected, the old selection gone.
-    await e.click(find.byKey(const ValueKey('row.$trophy')));
-    expect(e.shell.tabs!.focused, same(added));
-    expect(added.selection, [trophy]);
-    expect(main.selection, isEmpty);
-    expect(weight(e, added), FontWeight.w700);
-    expect(e.shell.scene!.camera!.toJson(), camera, reason: 'one Scene view camera across the loaded scenes');
+      await e.click(e.row('Crate A'));
+      expect(main.selection, [crateA]);
+      final camera = e.shell.scene!.camera!.toJson();
 
-    // The header's Set Active Scene.
-    await tester.tap(find.byKey(Key('hierarchy.scene.menu.${main.document.id}')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(Key('hierarchy.scene.${main.document.id}.setActive')));
-    await tester.pumpAndSettle();
-    expect(e.shell.tabs!.focused, same(main));
-  });
+      // A click on the other scene's object: that scene is active, the object selected, the old selection gone.
+      await e.click(find.byKey(const ValueKey('row.$trophy')));
+      expect(e.shell.tabs!.focused, same(added));
+      expect(added.selection, [trophy]);
+      expect(main.selection, isEmpty);
+      expect(weight(e, added), FontWeight.w700);
+      expect(e.shell.scene!.camera!.toJson(), camera, reason: 'one Scene view camera across the loaded scenes');
+
+      // The header's Set Active Scene.
+      await tester.tap(find.byKey(Key('hierarchy.scene.menu.${main.document.id}')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key('hierarchy.scene.${main.document.id}.setActive')));
+      await tester.pumpAndSettle();
+      expect(e.shell.tabs!.focused, same(main));
+    },
+  );
 
   testWidgets("a click in the Scene view on another loaded scene's object activates that scene and selects it", (
     tester,
@@ -135,6 +141,11 @@ void main() {
     await tester.tap(find.byKey(const Key('hierarchy.scene.$results.unload')));
     await tester.pumpAndSettle();
     expect(e.shell.tabs!.isLoaded(added), isFalse);
+    expect(
+      e.shell.scene!.overlay(e.shell.scene!.current!).extraWorlds,
+      isEmpty,
+      reason: 'an unloaded scene is not drawn',
+    );
     expect(find.byKey(const ValueKey('row.$trophy')), findsNothing, reason: 'an unloaded scene is its header alone');
     expect(find.textContaining('(not loaded)'), findsOneWidget);
 

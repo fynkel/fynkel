@@ -11,6 +11,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel_editor/src/hierarchy/transform_math.dart';
 import 'package:fynkel_editor/src/scene_view/editor_state.dart';
 
 import 'harness.dart';
@@ -136,6 +137,28 @@ void main() {
     expect(jsonDecode(File('${e.dir.path}/.fynkel/editor.json').readAsStringSync())['prefabContext'], 'hidden');
     sv.setPrefabContext(PrefabContextMode.normal);
     expect(sv.drawnContext?.instance, crateA);
+
+    // The scene is drawn around the prefab: the instance's place is the prefab root's, greyed in Gray.
+    final prefabTab = sv.current!;
+    final scene = e.shell.tabs!.contextOf(prefabTab.tab)!.tab;
+    final scenePreview = sv.previewOf(scene)!;
+    var o = sv.overlay(prefabTab);
+    expect(o.extraWorlds, hasLength(1));
+    expect(o.extraWorlds.single.worldAddress, scenePreview.worldAddress);
+    expect(o.extraWorlds.single.gray, isFalse, reason: 'Normal');
+    final instance = scenePreview.worldMatrices([crateA])[crateA]!;
+    final root = prefabTab.preview!.worldMatrices([crateRoot])[crateRoot]!;
+    final placed = matMul(o.extraWorlds.single.transform, instance);
+    for (var i = 0; i < 16; i++) {
+      expect(placed[i], closeTo(root[i], 1e-4));
+    }
+    expect(scenePreview.entities([crateA]), isEmpty, reason: 'the instance itself is not drawn twice');
+    sv.setPrefabContext(PrefabContextMode.gray);
+    o = sv.overlay(prefabTab);
+    expect(o.extraWorlds.single.gray, isTrue);
+    sv.setPrefabContext(PrefabContextMode.hidden);
+    expect(sv.overlay(prefabTab).extraWorlds, isEmpty);
+    sv.setPrefabContext(PrefabContextMode.normal);
 
     // Double-clicked in the Project: in isolation — no scene crumb, no Context.
     await tester.tap(find.byKey(const Key('scene.prefab.back')));

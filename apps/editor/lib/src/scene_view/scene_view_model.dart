@@ -125,6 +125,10 @@ final class SceneTab {
   /// were read for; null after a sync respawned the world.
   ({String key, List<int> selected, List<int> children})? outline;
 
+  /// The hidden set applied while this world is drawn around a prefab
+  /// (Prefab mode in context), null when it is its own.
+  String? contextHidden;
+
   /// Click cycling: the hits under the last click and which is selected.
   Offset? clickPx;
   List<String> clickHits = const [];
@@ -480,6 +484,8 @@ final class SceneViewModel extends ChangeNotifier {
       notice = 'Preview reloaded: the incremental sync could not apply a change (${st.fallbackReloads}×)';
     }
     st.hiddenDirty = true;
+    st.contextHidden = null;
+    st.outline = null;
     _repaint();
   }
 
@@ -982,6 +988,7 @@ final class SceneViewModel extends ChangeNotifier {
     // any anchor among them itself.
     t.preview!.setHidden(_hiddenAll(t));
     t.hiddenDirty = false;
+    t.contextHidden = null;
     views?.changed(this, t.preview);
   }
 
@@ -1210,7 +1217,53 @@ final class SceneViewModel extends ChangeNotifier {
     }
     _drawDeclared(o, t);
     _drawHandles(o);
+    _drawOtherWorlds(o, t);
     return o;
+  }
+
+  /// The worlds drawn with [t]'s (the renderer's extra worlds): in Prefab
+  /// mode the scene the prefab was opened from, around it — placed so the
+  /// prefab's root sits where the instance is, the instance itself hidden
+  /// there, greyed in Gray (Unity's Prefab Mode in context); with several
+  /// scenes open the other loaded ones, as they are.
+  void _drawOtherWorlds(ViewportOverlay o, SceneTab t) {
+    final context = drawnContext;
+    if (context != null) {
+      final ctx = _sceneTabOf(context.tab);
+      final root = t.tab.tree.roots.firstOrNull;
+      if (!ctx.hasPreview || root == null) return;
+      try {
+        _applyContextHidden(ctx, context.instance);
+        final instance = ctx.preview!.worldMatrices([context.instance])[context.instance];
+        final rootWorld = t.preview!.worldMatrices([root])[root];
+        if (instance == null || rootWorld == null) return;
+        o.extraWorld(
+          ctx.preview!.worldAddress,
+          transform: matMul(rootWorld, matInverseAffine(instance)),
+          gray: editorState.prefabContext == PrefabContextMode.gray,
+        );
+      } on AuthoringException catch (_) {
+        // The instance is gone from its scene: the prefab alone.
+      }
+      return;
+    }
+    for (final other in otherLoadedScenes(t)) {
+      if (!other.hasPreview) continue;
+      _applyHidden(other);
+      o.extraWorld(other.preview!.worldAddress);
+    }
+  }
+
+  /// [ctx]'s world with the instance a prefab is edited from hidden (the
+  /// prefab is drawn in its place); its own hidden set comes back the next
+  /// time it is drawn itself.
+  void _applyContextHidden(SceneTab ctx, String instance) {
+    final hidden = {..._hiddenAll(ctx), ...ctx.tab.tree.subtree(instance)};
+    final key = (hidden.toList()..sort()).join(',');
+    if (ctx.contextHidden == key) return;
+    ctx.preview!.setHidden(hidden);
+    ctx.contextHidden = key;
+    ctx.hiddenDirty = true;
   }
 
   /// Unity's selection outline: the selected objects' meshes ringed in
@@ -2123,6 +2176,9 @@ final class SceneViewModel extends ChangeNotifier {
     }
     t.tab.tree.reveal(id);
   }
+
+  /// The world this view keeps for [tab], if it opened one.
+  PreviewBackend? previewOf(OpenDocument tab) => _sceneTabs[tab]?.preview;
 
   /// The other loaded scenes drawn with [t]'s (none in Prefab mode or
   /// Play), each's Scene view state.
