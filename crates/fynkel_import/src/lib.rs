@@ -32,6 +32,7 @@ pub(crate) mod graph;
 pub mod image;
 pub mod intermediate;
 pub mod keys_migration;
+pub mod model_settings;
 pub mod rig;
 pub mod subkey;
 pub mod tangents;

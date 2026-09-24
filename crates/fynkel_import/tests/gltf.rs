@@ -862,3 +862,126 @@ fn khronos_sample_rigs_import_clean() {
         );
     }
 }
+
+/// `name` imported with `settings` added to its sidecar's.
+fn import_with(name: &str, settings: serde_json::Value) -> Imported {
+    let path = fixture(name);
+    let mut meta = meta_for(&path);
+    for (k, v) in settings.as_object().unwrap() {
+        meta.settings.set(k, fynkel_document::Node::from_serde(v));
+    }
+    import(&path, &meta, &Limits::default())
+}
+
+#[test]
+fn model_settings_scale_calculate_normals_and_leave_out_animation() {
+    let plain = import_fixture("rig.glb").0.intermediate.unwrap();
+    let r = import_with("rig.glb", serde_json::json!({ "scaleFactor": 2 }));
+    assert!(!r.has_errors(), "{:#?}", r.diagnostics);
+    let big = r.intermediate.unwrap();
+    // Positions, bounds, joints and translation keys double; nothing else moves.
+    for (a, b) in plain.meshes.iter().zip(&big.meshes) {
+        assert_eq!(b.bounds_max, a.bounds_max.map(|x| x * 2.0));
+        for (u, v) in a.vertices.iter().zip(&b.vertices) {
+            assert_eq!(v.position, u.position.map(|x| x * 2.0));
+            assert_eq!(v.normal, u.normal);
+        }
+    }
+    for (a, b) in plain.skins[0]
+        .payload
+        .joints
+        .iter()
+        .zip(&big.skins[0].payload.joints)
+    {
+        assert_eq!(b.rest_translation, a.rest_translation.map(|x| x * 2.0));
+        assert_eq!(b.rest_rotation, a.rest_rotation);
+        assert_eq!(b.inverse_bind[13], a.inverse_bind[13] * 2.0);
+        assert_eq!(b.inverse_bind[5], a.inverse_bind[5]);
+    }
+    for (a, b) in plain.animations[0]
+        .payload
+        .channels
+        .iter()
+        .zip(&big.animations[0].payload.channels)
+    {
+        let k = if a.property == fynkel_cooked::payload::ANIM_PROPERTY_TRANSLATION {
+            2.0
+        } else {
+            1.0
+        };
+        assert_eq!(b.values, a.values.iter().map(|x| x * k).collect::<Vec<_>>());
+    }
+    let positions = |i: &Intermediate| -> Vec<f64> {
+        let e = i.prefab.as_ref().unwrap()["entities"].as_object().unwrap();
+        e.values()
+            .flat_map(|e| e["components"].as_object().unwrap().values())
+            .filter(|c| c["type"] == "fynkel.Transform")
+            .flat_map(|c| c["data"]["position"].as_array().unwrap().clone())
+            .map(|v| v.as_f64().unwrap())
+            .collect()
+    };
+    let (p, q) = (positions(&plain), positions(&big));
+    assert!(p.iter().any(|x| *x != 0.0));
+    for (a, b) in p.iter().zip(&q) {
+        assert!((b - a * 2.0).abs() < 1e-5, "{a} → {b}");
+    }
+
+    // Import Animation off: no clips, and no warning about their ids.
+    let r = import_with("rig.glb", serde_json::json!({ "importAnimation": false }));
+    assert!(r.diagnostics.is_empty(), "{:#?}", r.diagnostics);
+    assert!(r.intermediate.unwrap().animations.is_empty());
+    assert!(!r.sub_assets.iter().any(|(k, _)| k.starts_with("anim/")));
+
+    // Calculated normals: the cube's 90° edges stay hard under 60°, go
+    // smooth over 100°.
+    let hard = import_with("robot.glb", serde_json::json!({ "normals": "calculate" }));
+    let cube = &hard.intermediate.unwrap().meshes[0];
+    assert_eq!(cube.vertices.len(), 24);
+    assert!(cube
+        .vertices
+        .iter()
+        .all(|v| v.normal.iter().filter(|c| c.abs() > 0.99).count() == 1));
+    let smooth = import_with(
+        "robot.glb",
+        serde_json::json!({ "normals": "calculate", "smoothingAngle": 100 }),
+    );
+    let cube = &smooth.intermediate.unwrap().meshes[0];
+    let d = 1.0 / 3f32.sqrt();
+    for v in &cube.vertices {
+        for (n, p) in v.normal.iter().zip(v.position) {
+            assert!(
+                (n - d * p.signum()).abs() < 1e-5,
+                "{:?} at {:?}",
+                v.normal,
+                v.position
+            );
+        }
+    }
+
+    // A bad value refuses the import, at its pointer.
+    for (settings, pointer) in [
+        (
+            serde_json::json!({ "scaleFactor": 0 }),
+            "/settings/scaleFactor",
+        ),
+        (
+            serde_json::json!({ "normals": "flat" }),
+            "/settings/normals",
+        ),
+        (
+            serde_json::json!({ "smoothingAngle": 200 }),
+            "/settings/smoothingAngle",
+        ),
+        (
+            serde_json::json!({ "importAnimation": "no" }),
+            "/settings/importAnimation",
+        ),
+    ] {
+        let r = import_with("robot.glb", settings);
+        assert!(r.intermediate.is_none());
+        let errors: Vec<_> = r.diagnostics.iter().filter(|d| d.is_error()).collect();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, Code::IMPORT_INVALID_DATA);
+        assert_eq!(errors[0].pointer.as_deref(), Some(pointer));
+    }
+}

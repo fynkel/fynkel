@@ -667,6 +667,18 @@ pub(crate) fn finish(
     } = produced;
     let asset = meta.id();
 
+    // The Model tab's settings (scale, normals, animation).
+    let settings = match crate::model_settings::ModelSettings::from_meta(meta) {
+        Ok(s) => s,
+        Err(d) => {
+            report
+                .diagnostics
+                .push(d.with_document(report.shown.clone()));
+            return report.fail(meta);
+        }
+    };
+    settings.apply(&mut meshes, &mut skins, &mut animations, &mut prefab);
+
     // Position keys → name keys (`subkey`): always recorded for `fynkel
     // migrate`, applied when the sidecar has moved to name keys.
     let renames = crate::subkey::Renames {
@@ -734,6 +746,7 @@ pub(crate) fn finish(
         .sub_assets
         .iter()
         .filter(|(k, _)| !sub_assets.iter().any(|(s, _)| s == k))
+        .filter(|(k, _)| settings.import_animation || !k.starts_with("anim/"))
         .map(|(k, _)| k.as_str())
         .collect();
     if !dropped.is_empty() {
