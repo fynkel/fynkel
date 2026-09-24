@@ -1046,6 +1046,23 @@ class EditorShellState extends State<EditorShell> {
         },
       ),
       EditorCommand(
+        id: 'prefab.unpackCompletely',
+        menu: EditorMenu.edit,
+        group: 4,
+        order: 3,
+        enabled: () {
+          final a = _selectionAnchor;
+          return _canEdit && a != null && (inspector?.cannotUnpack(a) == null);
+        },
+        run: () {
+          final a = _selectionAnchor;
+          if (a == null) return;
+          if (!(inspector?.unpack(a, completely: true) ?? false) && inspector?.lastError != null) {
+            _showError(inspector!.lastError!);
+          }
+        },
+      ),
+      EditorCommand(
         id: 'prefab.open',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyD, shift: true, alt: true),
@@ -2745,7 +2762,18 @@ class EditorShellState extends State<EditorShell> {
         // Hierarchy → Project makes a prefab of the focused scene's object.
         // (Null from the Hierarchy means "allowed": no `??` fallback here.)
         b.cannotMakePrefab = (ids) => _sceneOps == null ? 'No scene is open.' : _sceneOps!.cannotCreatePrefab(ids);
-        b.makePrefab = (ids, folder) => _sceneOps?.createPrefab(ids.single, folder);
+        b.makePrefab = (ids, folder) async {
+          final h = _sceneOps;
+          if (h == null) return null;
+          var variant = false;
+          if (h.isInstance(ids.single)) {
+            // Unity's question when a prefab instance is dragged.
+            final choice = await showCreatePrefabPrompt(context);
+            if (choice == null || !mounted) return null;
+            variant = choice == CreatePrefabChoice.variant;
+          }
+          return h.createPrefab(ids.single, folder, variant: variant);
+        };
         for (final sel in _selections.values) {
           sel.addBrowser(b);
         }

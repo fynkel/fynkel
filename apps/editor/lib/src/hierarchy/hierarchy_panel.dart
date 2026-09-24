@@ -900,6 +900,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
         'prefab.revertOverrides',
         'prefab.applyOverrides',
         'prefab.unpack',
+        'prefab.unpackCompletely',
         'prefab.open',
         'prefab.selectAsset',
       ])

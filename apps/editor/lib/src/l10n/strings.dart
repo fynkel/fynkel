@@ -163,7 +163,12 @@ abstract final class EditorStrings {
     ),
     'prefab.unpack': (
       label: 'Unpack Prefab Instance',
-      description: 'The instance becomes plain entities of this document (one undo step)',
+      description:
+          'The instance becomes plain entities of this document, one level: nested instances stay (one undo step)',
+    ),
+    'prefab.unpackCompletely': (
+      label: 'Unpack Prefab Instance Completely',
+      description: 'The instance and every instance inside it become plain entities (one undo step)',
     ),
     'project.close': (label: 'Close Project', description: null),
     'project.migrations': (label: 'Migration Preview…', description: null),

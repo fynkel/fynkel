@@ -97,7 +97,7 @@ class FieldRow extends StatelessWidget {
   /// prefab) and Revert (drops the override).
   final bool overridden;
   final VoidCallback? onRevert;
-  final VoidCallback? onApply;
+  final ApplyTo? onApply;
 
   /// When set, the label is a horizontal drag surface (numbers).
   final Widget Function(Widget label)? dragLabel;
@@ -178,16 +178,26 @@ class FieldRow extends StatelessWidget {
       ],
     );
     if (onRevert == null && onApply == null) return row;
-    final prefab = PrefabNameScope.of(context);
+    // Unity's: one Apply per prefab the value can go to — the instance's
+    // prefab, then a variant's bases.
+    final targets = PrefabNameScope.of(context);
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onSecondaryTapUp: (d) => showCascadingMenu(context, d.globalPosition, [
-        MenuAction(
-          prefab == null ? 'Apply to Prefab' : "Apply to Prefab '$prefab'",
-          key: const ValueKey('field.apply'),
-          enabled: onApply != null,
-          onSelected: () => onApply?.call(),
-        ),
+        if (targets.isEmpty)
+          MenuAction(
+            'Apply to Prefab',
+            key: const ValueKey('field.apply'),
+            enabled: onApply != null,
+            onSelected: () => onApply?.call(0),
+          ),
+        for (final (i, target) in targets.indexed)
+          MenuAction(
+            'Apply to $target',
+            key: ValueKey(i == 0 ? 'field.apply' : 'field.apply.$i'),
+            enabled: onApply != null,
+            onSelected: () => onApply?.call(i),
+          ),
         MenuAction(
           'Revert',
           key: const ValueKey('field.revert'),
@@ -200,17 +210,23 @@ class FieldRow extends StatelessWidget {
   }
 }
 
-/// The prefab the Inspector's overridden fields would apply to, named in
-/// their right-click menus.
+/// An overridden field's Apply to the prefab at [depth] (0 the instance's
+/// own, 1 a variant's base, …).
+typedef ApplyTo = void Function(int depth);
+
+/// The prefabs the Inspector's overridden fields would apply to ("Prefab
+/// 'Crate'", or a variant's "Prefab Variant 'Big Crate'" then its bases),
+/// named in their right-click menus.
 class PrefabNameScope extends InheritedWidget {
-  const PrefabNameScope({super.key, required this.name, required super.child});
+  const PrefabNameScope({super.key, required this.targets, required super.child});
 
-  final String? name;
+  final List<String> targets;
 
-  static String? of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<PrefabNameScope>()?.name;
+  static List<String> of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<PrefabNameScope>()?.targets ?? const [];
 
   @override
-  bool updateShouldNotify(PrefabNameScope old) => old.name != name;
+  bool updateShouldNotify(PrefabNameScope old) => !listEquals(old.targets, targets);
 }
 
 // ── Text entry shared by number and string fields ──────────────────────────
@@ -560,7 +576,7 @@ class NumberField extends StatefulWidget {
   /// The row's Prefab-mode marks (see [FieldRow.overridden]).
   final bool overridden;
   final VoidCallback? onRevert;
-  final VoidCallback? onApply;
+  final ApplyTo? onApply;
 
   /// A vector component: narrow, with the axis letter as the drag handle.
   final bool compact;

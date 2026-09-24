@@ -592,7 +592,7 @@ void main() {
       addTearDown(model.dispose);
       final made = <(List<String>, String)>[];
       model.cannotMakePrefab = (ids) => ids.contains('instance') ? 'a prefab instance already' : null;
-      model.makePrefab = (ids, folder) {
+      model.makePrefab = (ids, folder) async {
         made.add((ids, folder));
         return coinPrefab;
       };

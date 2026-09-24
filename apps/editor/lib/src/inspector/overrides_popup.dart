@@ -11,6 +11,7 @@ import '../theme/icons.dart';
 import '../theme/tokens.dart';
 import 'field_widgets.dart' show prettyJson;
 import 'inspector_model.dart';
+import 'prefab_actions.dart' show ApplyTarget, applyTargetLabel;
 
 /// The bar under a prefab instance's header: what it is an instance of,
 /// Open, Select and the Overrides dropdown; a broken or missing prefab
@@ -33,6 +34,7 @@ class PrefabBar extends StatelessWidget {
     final broken = x != null && !x.expanded;
     final missing = x == null || x.prefab == null;
     final count = x?.overrides.length ?? p.overrides.length;
+    final kind = info?.isVariant ?? false ? 'Prefab Variant' : 'Prefab';
     ButtonStyle compact() => TextButton.styleFrom(
       visualDensity: VisualDensity.compact,
       padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -62,10 +64,10 @@ class PrefabBar extends StatelessWidget {
                   Expanded(
                     child: Tooltip(
                       message:
-                          'Prefab instance of $name${info?.isImported ?? false ? ' (imported hierarchy, read-only)' : ''}',
+                          '$kind instance of $name${info?.isImported ?? false ? ' (imported hierarchy, read-only)' : ''}',
                       waitDuration: const Duration(milliseconds: 500),
                       child: Text(
-                        'Prefab  $name',
+                        '$kind  $name',
                         key: const ValueKey('prefab.title'),
                         style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
                         overflow: TextOverflow.ellipsis,
@@ -283,15 +285,17 @@ class _OverridesPanelState extends State<OverridesPanel> {
               const SizedBox(width: 6),
               Tooltip(
                 message: applyWhy ?? 'Write every override into the prefab, then revert them here',
-                child: FilledButton(
-                  key: const ValueKey('prefab.applyAll'),
-                  onPressed: overrides.isEmpty || applyWhy != null
+                child: _ApplyButton(
+                  keyName: 'prefab.applyAll',
+                  label: 'Apply All',
+                  filled: true,
+                  targets: model.applyTargets(id),
+                  onApply: overrides.isEmpty || applyWhy != null
                       ? null
-                      : () {
-                          model.applyOverrides(id);
+                      : (depth) {
+                          model.applyOverrides(id, depth: depth);
                           close();
                         },
-                  child: const Text('Apply All'),
                 ),
               ),
             ],
@@ -360,10 +364,13 @@ class _OverridesPanelState extends State<OverridesPanel> {
                   ),
                   Tooltip(
                     message: applyWhy ?? 'Write this override into the prefab',
-                    child: TextButton(
-                      key: ValueKey('prefab.apply.${o.index}'),
-                      onPressed: applyWhy == null ? () => model.applyOverrides(widget.entityId, index: o.index) : null,
-                      child: const Text('Apply'),
+                    child: _ApplyButton(
+                      keyName: 'prefab.apply.${o.index}',
+                      label: 'Apply',
+                      targets: model.applyTargets(widget.entityId),
+                      onApply: applyWhy == null
+                          ? (depth) => model.applyOverrides(widget.entityId, index: o.index, depth: depth)
+                          : null,
                     ),
                   ),
                 ],
@@ -412,4 +419,54 @@ class _OverridesPanelState extends State<OverridesPanel> {
   };
 
   static String _short(String type) => type.contains('.') ? type.substring(type.lastIndexOf('.') + 1) : type;
+}
+
+/// Apply, or — for an instance of a variant — Apply ▾ with one item per
+/// prefab it can go to (Unity's "Apply to Prefab Variant 'X'" / "Apply to
+/// Prefab 'Base'").
+class _ApplyButton extends StatelessWidget {
+  const _ApplyButton({
+    required this.keyName,
+    required this.label,
+    required this.targets,
+    required this.onApply,
+    this.filled = false,
+  });
+
+  final String keyName;
+  final String label;
+  final List<ApplyTarget> targets;
+  final void Function(int depth)? onApply;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final apply = onApply;
+    if (targets.length < 2) {
+      final press = apply == null ? null : () => apply(0);
+      return filled
+          ? FilledButton(key: ValueKey(keyName), onPressed: press, child: Text(label))
+          : TextButton(key: ValueKey(keyName), onPressed: press, child: Text(label));
+    }
+    return MenuAnchor(
+      menuChildren: [
+        for (final t in targets)
+          MenuItemButton(
+            key: ValueKey('$keyName.target.${t.depth}'),
+            onPressed: apply == null ? null : () => apply(t.depth),
+            child: Text('$label to ${applyTargetLabel(t)}'),
+          ),
+      ],
+      builder: (context, controller, _) {
+        final press = apply == null ? null : () => controller.isOpen ? controller.close() : controller.open();
+        final child = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [Text(label), const SizedBox(width: 2), const Icon(FIcons.expandMore, size: 14)],
+        );
+        return filled
+            ? FilledButton(key: ValueKey(keyName), onPressed: press, child: child)
+            : TextButton(key: ValueKey(keyName), onPressed: press, child: child);
+      },
+    );
+  }
 }

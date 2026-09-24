@@ -415,8 +415,8 @@ void main() {
     final roots = tab.document.roots();
     expect(roots.last, isNot(lamp));
 
-    // Refused: a prefab instance, a child of one.
-    expect(s.hierarchy.cannotCreatePrefab([crateA]), contains('prefab instance'));
+    // An instance makes an original prefab or a variant; several objects are refused.
+    expect(s.hierarchy.cannotCreatePrefab([crateA]), isNull);
     expect(s.hierarchy.cannotCreatePrefab([lamp, bulb]), contains('one object'));
     expect(s.hierarchy.cannotCreatePrefab([lamp]), isNull);
 

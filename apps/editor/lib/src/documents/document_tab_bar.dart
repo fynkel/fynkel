@@ -370,6 +370,38 @@ Future<ClosePromptChoice> showClosePrompt(BuildContext context, OpenDocument tab
   return r ?? ClosePromptChoice.cancel;
 }
 
+enum CreatePrefabChoice { original, variant }
+
+/// Unity's question when a prefab instance is dragged to the Project: a new
+/// original prefab (the instance unpacked one level into it) or a variant
+/// of its prefab; null when cancelled.
+Future<CreatePrefabChoice?> showCreatePrefabPrompt(BuildContext context) => showDialog<CreatePrefabChoice>(
+  animationStyle: AnimationStyle.noAnimation,
+  context: context,
+  builder: (context) => AlertDialog(
+    key: const Key('dialog.createPrefab'),
+    title: const Text('Create Prefab or Variant?'),
+    content: const Text('Would you like to create a new original Prefab or a variant of this Prefab?'),
+    actions: [
+      TextButton(
+        key: const Key('createPrefab.cancel'),
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      TextButton(
+        key: const Key('createPrefab.original'),
+        onPressed: () => Navigator.pop(context, CreatePrefabChoice.original),
+        child: const Text('Original Prefab'),
+      ),
+      FilledButton(
+        key: const Key('createPrefab.variant'),
+        onPressed: () => Navigator.pop(context, CreatePrefabChoice.variant),
+        child: const Text('Prefab Variant'),
+      ),
+    ],
+  ),
+);
+
 enum RevertChoice { revert, cancel }
 
 Future<bool> showRevertPrompt(BuildContext context, OpenDocument tab) async {

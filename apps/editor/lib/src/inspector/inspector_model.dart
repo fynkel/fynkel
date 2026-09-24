@@ -1084,13 +1084,13 @@ final class InspectorModel extends ChangeNotifier {
   /// Apply to prefab on one field: the override(s) that wrote it become the
   /// prefab's value (a transaction on the prefab document), then are
   /// reverted on the instance — per anchor, two undo steps each.
-  bool applyField(ComponentSlot slot, String field) {
+  bool applyField(ComponentSlot slot, String field, {int depth = 0}) {
     final t = _tab;
     final per = _fieldOverrides(slot, field);
     if (t == null || per.isEmpty) return false;
     final key = '${slot.key}/${_topLevel(field)}';
     for (final e in per.entries) {
-      final outcome = prefab.applyOverrides(tabs, t, e.key, indices: e.value);
+      final outcome = prefab.applyOverrides(tabs, t, e.key, indices: e.value, depth: depth);
       if (!outcome.ok) {
         _errors[key] = outcome.error ?? 'Apply to prefab failed.';
         lastError = outcome.error;
@@ -1125,20 +1125,28 @@ final class InspectorModel extends ChangeNotifier {
   /// Apply to prefab: every override of the instance [entityId] (or the one
   /// at [index]) is written to the prefab document — its tab opens behind
   /// this one — then reverted here. Two undo steps, one per document.
-  bool applyOverrides(String entityId, {int? index}) {
+  bool applyOverrides(String entityId, {int? index, int depth = 0}) {
     final t = _tab;
     if (t == null || !canEdit) return false;
-    final outcome = prefab.applyOverrides(tabs, t, entityId, indices: index == null ? null : [index]);
+    final outcome = prefab.applyOverrides(tabs, t, entityId, indices: index == null ? null : [index], depth: depth);
     lastError = outcome.ok ? null : outcome.error;
     notifyListeners();
     return outcome.ok;
   }
 
-  /// Unpack: the instance [entityId] becomes plain entities, one transaction.
-  bool unpack(String entityId) {
+  /// Where Apply can write the overrides of the instance [entityId]: its
+  /// prefab, then (a variant's) the bases, nearest first.
+  List<prefab.ApplyTarget> applyTargets(String entityId) {
+    final x = _tab?.expansionOf(entityId);
+    return x == null ? const [] : prefab.applyTargets(tabs, x);
+  }
+
+  /// Unpack: the instance [entityId] becomes plain entities, one transaction
+  /// — one level (nested instances stay), or [completely].
+  bool unpack(String entityId, {bool completely = false}) {
     final t = _tab;
     if (t == null || !canEdit) return false;
-    final ok = prefab.unpackInstance(t, entityId);
+    final ok = prefab.unpackInstance(t, entityId, completely: completely);
     lastError = ok ? null : t.lastError;
     notifyListeners();
     return ok;

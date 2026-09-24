@@ -450,17 +450,18 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// they can); set by the shell to the Hierarchy's rule.
   String? Function(List<String> ids)? cannotMakePrefab;
 
-  /// Makes the prefab in [folder] and answers its id; set by the shell.
-  String? Function(List<String> ids, String folder)? makePrefab;
+  /// Makes the prefab in [folder] and answers its id (null: refused or
+  /// cancelled — an instance asks first); set by the shell.
+  Future<String?> Function(List<String> ids, String folder)? makePrefab;
 
   bool canMakePrefab(List<String> ids) =>
       canEdit && makePrefab != null && cannotMakePrefab != null && cannotMakePrefab!(ids) == null;
 
   /// A Hierarchy drag dropped on [folder]: the prefab is made there and
   /// selected.
-  bool dropObjects(List<String> ids, String folder) {
+  Future<bool> dropObjects(List<String> ids, String folder) async {
     if (!canMakePrefab(ids)) return false;
-    final id = makePrefab!(ids, folder);
+    final id = await makePrefab!(ids, folder);
     if (id == null) return false;
     reveal(id);
     return true;
@@ -716,6 +717,28 @@ final class ProjectBrowserModel extends ChangeNotifier {
     if (r == null) return null;
     final id = r.id;
     if (view == BrowserView.folders && !filtering) folder = target;
+    if (id != null && entry(id) != null) {
+      select(id);
+      renamingAsset = id;
+      notifyListeners();
+    }
+    return r;
+  }
+
+  /// Unity's Create ▸ Prefab Variant on the prefab [baseId]:
+  /// `<Base> Variant` beside it, its root an instance of the base, selected and
+  /// ready to rename.
+  OperationResult? newPrefabVariant(String baseId) {
+    final base = entry(baseId);
+    if (base == null || base.document != 'prefab') return null;
+    final slash = base.path.lastIndexOf('/');
+    final inFolder = slash < 0 ? '' : base.path.substring(0, slash);
+    final file = slash < 0 ? base.path : base.path.substring(slash + 1);
+    final stem = file.endsWith('.prefab.json') ? file.substring(0, file.length - '.prefab.json'.length) : file;
+    final rel = _freshPath(inFolder, '$stem Variant', '.prefab.json');
+    final r = _guard(() => project.newDocument('prefab', rel, variantOf: {'asset': baseId}));
+    if (r == null) return null;
+    final id = r.id;
     if (id != null && entry(id) != null) {
       select(id);
       renamingAsset = id;

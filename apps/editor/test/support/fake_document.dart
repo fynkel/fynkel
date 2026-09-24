@@ -574,6 +574,52 @@ final class FakeDocument extends EditorDocument {
           list.add(op);
         }
         return _Result([id]);
+      case 'applyPrefabOverride':
+        // A plain prefab's: the edit the override stands for (the crate
+        // also writes a variant's or a nested instance's own override).
+        final op = c['override'] as Map;
+        final entity = op['entity'] as String;
+        final plain = switch (op['op']) {
+          'setField' => {
+            'command': 'setField',
+            'entity': entity,
+            'component': op['component'],
+            'field': op['field'],
+            'value': op['value'],
+          },
+          'unsetField' => {
+            'command': 'unsetField',
+            'entity': entity,
+            'component': op['component'],
+            'field': op['field'],
+          },
+          'addComponent' => {
+            'command': 'addComponent',
+            'entity': entity,
+            'component': {
+              'id': op['component'],
+              'type': op['type'],
+              'version': op['version'] ?? 1,
+              'data': op['data'] ?? <String, Object?>{},
+            },
+          },
+          'removeComponent' => {'command': 'removeComponent', 'entity': entity, 'component': op['component']},
+          'addObject' => {
+            'command': 'createObject',
+            'id': entity,
+            'name': op['name'] ?? '',
+            'parent': op['parent'],
+            'components': [
+              if (op['components'] is Map)
+                for (final e in (op['components'] as Map).entries)
+                  if (e.value is Map) {'id': e.key, ...Map<String, Object?>.from(e.value as Map)},
+            ],
+          },
+          'removeObject' => {'command': 'deleteObject', 'entity': entity},
+          _ => null,
+        };
+        if (plain == null) return _Result.error('override ${op['op']} cannot be applied');
+        return _run(plain.cast<String, Object?>());
       case 'revertPrefabOverride':
         final id = c['entity'] as String;
         final e = _entities[id];

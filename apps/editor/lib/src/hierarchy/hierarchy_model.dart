@@ -790,8 +790,9 @@ final class HierarchyModel extends ChangeNotifier {
   }
 
   /// Why [ids] (a Hierarchy drag) cannot become a prefab, or null when
-  /// it can: one plain object of an editable scene, with no prefab
-  /// instance in its subtree (nested prefabs from here come later).
+  /// it can: one object of an editable scene (not a part of an instance)
+  /// — prefab instances in it stay nested instances, and an instance
+  /// itself makes an original prefab or a variant of its own.
   String? cannotCreatePrefab(List<String> ids) {
     final t = _tab;
     if (t == null || !canEdit) return 'Nothing editable is open.';
@@ -800,16 +801,12 @@ final class HierarchyModel extends ChangeNotifier {
     final n = t.tree[ids.single];
     if (n == null) return 'The object is gone.';
     if (n.isDerived) return 'That object belongs to a prefab instance; open the prefab to change it.';
-    final entities = _entities(t);
-    for (final id in _subtree(entities, ids.single)) {
-      if ((entities[id] as Map?)?['prefab'] != null) {
-        return id == ids.single
-            ? '${n.name} is a prefab instance already.'
-            : '${n.name} holds a prefab instance; nested prefabs from the Hierarchy are not supported yet.';
-      }
-    }
     return null;
   }
+
+  /// [id] is a prefab instance: dragged to the Project it asks Unity's
+  /// question — an original prefab, or a variant of its prefab.
+  bool isInstance(String id) => (_entities(_tab!)[id] as Map?)?['prefab'] != null;
 
   /// Drag from the Hierarchy to the Project panel (Unity's way to make a
   /// prefab): writes `<folder>/<name>.prefab.json` with the object and its
@@ -818,9 +815,12 @@ final class HierarchyModel extends ChangeNotifier {
   /// place (one scene transaction, one ⌘Z; the prefab file stays, as in
   /// Unity). The object becomes the instance under its own id — the
   /// prefab's root (ADR-0022) — and its Transform stays the root's, with
-  /// no override, so the scene looks the same. Returns the new prefab's
-  /// id.
-  String? createPrefab(String id, String folder) {
+  /// no override, so the scene looks the same. Prefab instances under it
+  /// stay instances in the prefab, their overrides kept (Unity's nested
+  /// prefabs). An instance dragged makes a [variant] of its prefab (its
+  /// overrides the variant's) or an original prefab — the instance
+  /// unpacked one level into it. Returns the new prefab's id.
+  String? createPrefab(String id, String folder, {bool variant = false}) {
     final t = _tab;
     final why = cannotCreatePrefab([id]);
     if (t == null || why != null) {
@@ -834,9 +834,24 @@ final class HierarchyModel extends ChangeNotifier {
     final root = entities[id] as Map;
     final name = root['name'] as String? ?? 'Prefab';
     final path = _freePrefabPath(folder, name);
+    final instance = root['prefab'] is Map ? (root['prefab'] as Map).cast<String, Object?>() : null;
     final String prefabId;
     try {
-      prefabId = project.newDocument('prefab', path, name: name).id!;
+      prefabId = instance == null
+          ? project.newDocument('prefab', path, name: name).id!
+          : project
+                .newDocument(
+                  'prefab',
+                  path,
+                  name: name,
+                  variantOf: (instance['asset'] as Map).cast<String, Object?>(),
+                  overrides: [
+                    for (final o in instance['overrides'] as List? ?? const [])
+                      if (o is Map) o.cast<String, Object?>(),
+                  ],
+                  instance: instance['instance'] as String?,
+                )
+                .id!;
     } on AuthoringException catch (e) {
       t.lastError = 'Could not create the prefab: ${_why(e)}';
       notifyListeners();
@@ -847,18 +862,31 @@ final class HierarchyModel extends ChangeNotifier {
       // The new prefab has its one root (ADR-0022), named after it with
       // the default Transform: the object fills it — its Transform's
       // values, its other components — and its children go under it.
-      final prefabRoot = doc.root();
+      var prefabRoot = doc.root();
       final rootId = prefabRoot['root'] as String;
-      final rootComponents =
-          (((prefabRoot['entities'] as Map)[rootId] as Map)['components'] as Map).cast<String, Object?>();
-      final rootTransform = rootComponents.entries.firstWhere((c) => (c.value as Map)['type'] == 'fynkel.Transform').key;
       final commands = <Map<String, Object?>>[];
       final inactive = <String>[];
-      var transformKept = false;
+      var transformKept = instance != null;
+      if (instance != null && !variant) {
+        // An original prefab: the base's contents, one level unpacked.
+        final u = doc.apply([Command.unpackPrefab(rootId)], baseRevision: doc.revision);
+        if (!u.ok) {
+          t.lastError = 'Could not unpack into the prefab: ${describeRejection(u)}';
+          notifyListeners();
+          return null;
+        }
+        prefabRoot = doc.root();
+      }
+      final rootComponents =
+          (((prefabRoot['entities'] as Map)[rootId] as Map)['components'] as Map? ?? const {}).cast<String, Object?>();
+      final rootTransform = rootComponents.entries
+          .where((c) => (c.value as Map)['type'] == 'fynkel.Transform')
+          .firstOrNull
+          ?.key;
       for (final c in ((root['components'] as Map?) ?? const {}).entries) {
         final spec = c.value as Map;
         final data = spec['data'] as Map<String, Object?>?;
-        if (spec['type'] == 'fynkel.Transform' && !transformKept) {
+        if (spec['type'] == 'fynkel.Transform' && !transformKept && rootTransform != null) {
           transformKept = true;
           for (final f in (data ?? const {}).entries) {
             commands.add(Command.setField(rootId, rootTransform, f.key, f.value));
@@ -872,7 +900,7 @@ final class HierarchyModel extends ChangeNotifier {
           ),
         );
       }
-      if (!transformKept) commands.add(Command.removeComponent(rootId, rootTransform));
+      if (!transformKept && rootTransform != null) commands.add(Command.removeComponent(rootId, rootTransform));
       if (root['active'] == false) inactive.add(rootId);
       for (final e in _subtree(entities, id).skip(1)) {
         final entity = entities[e] as Map;
@@ -883,19 +911,34 @@ final class HierarchyModel extends ChangeNotifier {
           components.add(componentSpec(spec['type'] as String, id: c.key as String, version: spec['version'] as int?, data: data));
         }
         final parent = entity['parent'] as String?;
+        final nested = entity['prefab'] is Map ? (entity['prefab'] as Map).cast<String, Object?>() : null;
         commands.add(
-          Command.createObject(
-            id: e,
-            name: entity['name'] as String? ?? '',
-            parent: parent == id ? rootId : parent,
-            components: components,
-          ),
+          nested == null
+              ? Command.createObject(
+                  id: e,
+                  name: entity['name'] as String? ?? '',
+                  parent: parent == id ? rootId : parent,
+                  components: components,
+                )
+              // A nested instance: the same prefab, its overrides kept.
+              : Command.instantiatePrefab(
+                  prefab: (nested['asset'] as Map).cast<String, Object?>(),
+                  id: e,
+                  name: entity['name'] as String? ?? '',
+                  parent: parent == id ? rootId : parent,
+                  instance: nested['instance'] as String?,
+                  components: components,
+                  overrides: [
+                    for (final o in nested['overrides'] as List? ?? const [])
+                      if (o is Map) o.cast<String, Object?>(),
+                  ],
+                ),
         );
         if (entity['active'] == false) inactive.add(e);
       }
       commands.addAll([for (final e in inactive) Command.setObjectActive(e, false)]);
-      final a = doc.apply(commands, baseRevision: doc.revision);
-      if (!a.ok) {
+      final a = commands.isEmpty ? null : doc.apply(commands, baseRevision: doc.revision);
+      if (a != null && !a.ok) {
         t.lastError = 'Could not fill the prefab: ${describeRejection(a)}';
         notifyListeners();
         return null;

@@ -546,6 +546,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ),
         if (e.isSource)
           PopupMenuItem(value: 'reimport', enabled: model.canEdit && !many, child: const Text('Reimport  ⇧⌥⌘I')),
+        if (e.document == 'prefab')
+          PopupMenuItem(
+            key: const Key('project.menu.createVariant'),
+            value: 'createVariant',
+            enabled: model.canEdit && !many,
+            child: const Text('Create Prefab Variant'),
+          ),
         if (e.document == 'scene')
           PopupMenuItem(value: 'startup', enabled: model.canEdit && !many, child: const Text('Set as Startup Scene')),
         const PopupMenuDivider(),
@@ -564,6 +571,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
     switch (choice) {
       case 'open':
         _activate(e);
+      case 'createVariant':
+        model.newPrefabVariant(e.id);
       case 'openAdditive':
         widget.onOpenScene?.call(e.id, additive: true);
       case 'show':

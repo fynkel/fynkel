@@ -260,8 +260,26 @@ abstract class EditorProject extends ChangeNotifier {
   /// touched then.
   OperationResult operate(String kind, [Map<String, Object?> args = const {}]);
 
-  OperationResult newDocument(String kind, String path, {String? name, String? shader}) =>
-      operate('newDocument', {'kind': kind, 'path': path, 'name': ?name, 'shader': ?shader});
+  /// A new document; a prefab with [variantOf] (`{asset}`) is a variant of
+  /// that base (ADR-0022 amendment 2026-09-25): its root an instance of it,
+  /// with [overrides] (the base's ids) and the [instance] id they derive from.
+  OperationResult newDocument(
+    String kind,
+    String path, {
+    String? name,
+    String? shader,
+    Map<String, Object?>? variantOf,
+    List<Map<String, Object?>>? overrides,
+    String? instance,
+  }) => operate('newDocument', {
+    'kind': kind,
+    'path': path,
+    'name': ?name,
+    'shader': ?shader,
+    'variantOf': ?variantOf,
+    'overrides': ?overrides,
+    'instance': ?instance,
+  });
   OperationResult renameAsset(String id, String path) => operate('renameAsset', {'asset': id, 'path': path});
 
   /// A copy beside the asset (`coin 1`, …) under a fresh id; a source gets a

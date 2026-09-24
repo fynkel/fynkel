@@ -34,6 +34,7 @@ import 'inspector_math.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'inspector_model.dart';
+import 'prefab_actions.dart' show applyTargetLabel;
 import 'asset_edits.dart';
 import 'object_header.dart';
 import '../project/tags_and_layers_dialog.dart';
@@ -227,7 +228,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
         Expanded(
           child: _scriptDrop(
             PrefabNameScope(
-              name: _prefabName(),
+              targets: _applyTargets(),
               child: CustomScrollView(
               key: const ValueKey('inspector.list'),
               slivers: [
@@ -293,12 +294,15 @@ class _InspectorPanelState extends State<InspectorPanel> {
     );
   }
 
-  /// The prefab a field's Apply would write to: the selection's instance's.
-  String? _prefabName() {
+  /// Where a field's Apply would write: the selection's instance's prefab,
+  /// then (a variant's) its bases.
+  List<String> _applyTargets() {
     final e = model.single;
-    if (e == null || (e.prefab == null && e.anchor == null)) return null;
-    final name = model.expansionOf(e.anchor ?? e.id)?.prefab?.name;
-    return name == null || name.isEmpty ? null : name;
+    if (e == null || (e.prefab == null && e.anchor == null)) return const [];
+    return [
+      for (final t in model.applyTargets(e.anchor ?? e.id))
+        if (t.name.isNotEmpty) applyTargetLabel(t),
+    ];
   }
 
   /// The page around the cards (the header, the Add Component section)
@@ -952,7 +956,7 @@ class _ComponentCard extends StatelessWidget {
             overridden: slot.isOverridden(key),
             onRevert: model.canRevertField(slot, key) ? () => model.revertField(slot, key) : null,
             onApply: slot.isOverridden(key) && model.cannotApplyField(slot, key) == null
-                ? () => model.applyField(slot, key)
+                ? (depth) => model.applyField(slot, key, depth: depth)
                 : null,
             child: JsonField(
               value: slot.value(key),
@@ -1353,8 +1357,9 @@ class _FieldEditor extends StatelessWidget {
   bool get _overridden => slot.isOverridden(path);
   VoidCallback? get _onRevert =>
       _overridden && model.canRevertField(slot, path) ? () => model.revertField(slot, _writePath) : null;
-  VoidCallback? get _onApply =>
-      _overridden && model.cannotApplyField(slot, path) == null ? () => model.applyField(slot, _writePath) : null;
+  ApplyTo? get _onApply => _overridden && model.cannotApplyField(slot, path) == null
+      ? (depth) => model.applyField(slot, _writePath, depth: depth)
+      : null;
 
   Widget _array(BuildContext context, String label, String? error, Object? value) {
     final theme = Theme.of(context);

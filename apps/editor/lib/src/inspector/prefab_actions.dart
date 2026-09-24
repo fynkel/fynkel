@@ -5,6 +5,7 @@
 // the prefab document, then `revertPrefabOverride` on the instance: two
 // undo steps, one per document), Unpack (one `unpackPrefab` transaction),
 // and what each of them needs before it can run.
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -79,47 +80,35 @@ String? cannotUnpack(OpenDocument tab, PrefabExpansion x) {
   return null;
 }
 
-/// The command on the prefab document that makes one override permanent
-/// (`setField` → `setField`, `addObject` → `createObject` with the op's
-/// ids, …); null for an op nobody knows.
-Map<String, Object?>? commandForOverride(ExpansionOverride o) {
-  final op = o.rawOp;
-  switch (o.op) {
-    case 'setField':
-      if (o.component == null || o.field == null) return null;
-      return Command.setField(o.entity, o.component!, o.field!, o.value);
-    case 'unsetField':
-      if (o.component == null || o.field == null) return null;
-      return Command.unsetField(o.entity, o.component!, o.field!);
-    case 'addComponent':
-      if (o.component == null) return null;
-      return Command.addComponent(o.entity, {
-        'id': o.component,
-        'type': op['type'],
-        'version': op['version'] ?? 1,
-        'data': op['data'] ?? <String, Object?>{},
-      });
-    case 'removeComponent':
-      if (o.component == null) return null;
-      return Command.removeComponent(o.entity, o.component!);
-    case 'addObject':
-      final components = op['components'];
-      return Command.createObject(
-        id: o.entity,
-        name: op['name'] as String? ?? '',
-        parent: op['parent'] as String?,
-        components: [
-          if (components is Map)
-            for (final c in components.entries)
-              if (c.value is Map) {'id': c.key, ...Map<String, Object?>.from(c.value as Map)},
-        ],
-      );
-    case 'removeObject':
-      return Command.deleteObject(o.entity);
-    default:
-      return null;
+/// A prefab an instance's overrides can be applied to: the one it comes
+/// from ([depth] 0) and, when that is a variant, its base and the base's
+/// base (Unity's "Apply to Prefab Variant 'X'" / "Apply to Prefab 'Base'").
+typedef ApplyTarget = ({int depth, String name, bool variant});
+
+/// [x]'s apply targets, nearest first.
+List<ApplyTarget> applyTargets(DocumentTabs tabs, PrefabExpansion x) {
+  final p = x.prefab;
+  if (p == null) return const [];
+  final out = <ApplyTarget>[(depth: 0, name: p.name, variant: p.isVariant)];
+  final seen = {p.id};
+  var next = p.variantOf?['asset'] as String?;
+  while (next != null && seen.add(next)) {
+    final d = tabs.project.assetDetail(next);
+    if (d == null) break;
+    out.add((depth: out.length, name: _stem(d.name), variant: d.isVariant));
+    next = d.variantOf?['asset'] as String?;
   }
+  return out;
 }
+
+/// `Crate.prefab.json` → `Crate`.
+String _stem(String name) {
+  final dot = name.indexOf('.');
+  return dot <= 0 ? name : name.substring(0, dot);
+}
+
+/// "Prefab Variant 'Big Crate'" or "Prefab 'Crate'".
+String applyTargetLabel(ApplyTarget t) => "${t.variant ? 'Prefab Variant' : 'Prefab'} '${t.name}'";
 
 /// What Apply to prefab did.
 final class ApplyOutcome {
@@ -137,11 +126,16 @@ final class ApplyOutcome {
 
 /// Apply to prefab: the overrides at [indices] (every one when null) of
 /// the instance anchored at [anchor] become one transaction on the prefab
-/// document — opened into a tab behind the focused one, so its unsaved
-/// edit is visible and undoable there — then are reverted on the instance
-/// in one `revertPrefabOverride` transaction. Two undo steps, one per
-/// document; the scene is untouched when the prefab refuses.
-ApplyOutcome applyOverrides(DocumentTabs tabs, OpenDocument tab, String anchor, {List<int>? indices}) {
+/// document (`applyPrefabOverride` each: a plain edit, or an override of
+/// what the prefab takes from its base or a nested instance) — opened into
+/// a tab behind the focused one, so its unsaved edit is visible and
+/// undoable there — then are reverted on the instance in one
+/// `revertPrefabOverride` transaction. Two undo steps, one per document;
+/// the scene is untouched when the prefab refuses. [depth] 1 applies to
+/// the variant's base instead (see [applyTargets]): the overrides this
+/// made on the variant's root are applied on down, so the variant keeps
+/// none of them.
+ApplyOutcome applyOverrides(DocumentTabs tabs, OpenDocument tab, String anchor, {List<int>? indices, int depth = 0}) {
   final x = tab.expansionOf(anchor);
   if (x == null) return const ApplyOutcome(ok: false, error: 'Not a prefab instance.');
   final why = cannotApply(tab, x);
@@ -153,16 +147,12 @@ ApplyOutcome applyOverrides(DocumentTabs tabs, OpenDocument tab, String anchor, 
             if (indices.contains(o.index)) o,
         ];
   if (chosen.isEmpty) return const ApplyOutcome(ok: false, error: 'No overrides to apply.');
-  final commands = <Map<String, Object?>>[];
-  for (final o in chosen) {
-    final c = commandForOverride(o);
-    if (c == null) {
-      return ApplyOutcome(ok: false, error: 'Override ${o.index} (${o.op}) is not one the editor can apply.');
-    }
-    commands.add(c);
-  }
+  final commands = [for (final o in chosen) Command.applyPrefabOverride(o.rawOp)];
   final prefabTab = tabs.openDocument(x.open, focus: false);
   if (prefabTab == null) return ApplyOutcome(ok: false, error: tabs.openError ?? 'The prefab could not be opened.');
+  // Toward the base: what the variant's root instance holds before.
+  final root = depth > 0 ? prefabTab.tree.roots.firstOrNull : null;
+  final before = root == null ? null : {...?prefabTab.expansionOf(root)?.overrides.map((o) => jsonEncode(o.rawOp))};
   final applied = prefabTab.transaction(commands);
   if (applied == null || !applied.ok) {
     return ApplyOutcome(
@@ -190,6 +180,24 @@ ApplyOutcome applyOverrides(DocumentTabs tabs, OpenDocument tab, String anchor, 
       applied: chosen.length,
     );
   }
+  if (root != null && before != null) {
+    final now = prefabTab.expansionOf(root);
+    final made = [
+      for (final o in now?.overrides ?? const <ExpansionOverride>[])
+        if (!before.contains(jsonEncode(o.rawOp))) o.index,
+    ];
+    if (made.isNotEmpty) {
+      final down = applyOverrides(tabs, prefabTab, root, indices: made, depth: depth - 1);
+      if (!down.ok) {
+        return ApplyOutcome(
+          ok: false,
+          error: 'Applied to ${prefabTab.title}, but its base refused it: ${down.error}',
+          prefabTab: prefabTab,
+          applied: chosen.length,
+        );
+      }
+    }
+  }
   return ApplyOutcome(ok: true, prefabTab: prefabTab, applied: chosen.length);
 }
 
@@ -198,8 +206,10 @@ bool revertOverrides(OpenDocument tab, String anchor, {int? index}) =>
     tab.transaction([Command.revertPrefabOverride(anchor, index: index)])?.ok ?? false;
 
 /// Unpack: the instance becomes plain entities in place, one transaction;
-/// the anchor stays selected.
-bool unpackInstance(OpenDocument tab, String anchor) {
+/// the anchor stays selected. Unity's: one level — a nested instance stays
+/// an instance, an instance of a variant becomes one of its base;
+/// [completely] leaves no instance at all.
+bool unpackInstance(OpenDocument tab, String anchor, {bool completely = false}) {
   final x = tab.expansionOf(anchor);
   if (x != null) {
     final why = cannotUnpack(tab, x);
@@ -209,7 +219,7 @@ bool unpackInstance(OpenDocument tab, String anchor) {
       return false;
     }
   }
-  final a = tab.transaction([Command.unpackPrefab(anchor)]);
+  final a = tab.transaction([Command.unpackPrefab(anchor, completely: completely)]);
   if (a == null || !a.ok) return false;
   tab.select(anchor);
   return true;

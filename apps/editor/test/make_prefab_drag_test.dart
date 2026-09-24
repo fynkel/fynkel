@@ -35,7 +35,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(browser.canMakePrefab(['crate']), isTrue);
     final made = <(List<String>, String)>[];
-    browser.makePrefab = (ids, folder) {
+    browser.makePrefab = (ids, folder) async {
       made.add((ids, folder));
       return null;
     };
