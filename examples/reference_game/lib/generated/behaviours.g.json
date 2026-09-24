@@ -179,7 +179,7 @@
           "default": {
             "asset": "00000000-0000-0000-0000-000000000000"
           },
-          "description": "The jump, played once over the locomotion: `anim/3` of the box character, `anim/jump` of a rig document (`--hero` sets it), so the model can be swapped without touching the code."
+          "description": "The jump, played once over the locomotion: `anim/jump` of the box character, `anim/jump` of a rig document (`--hero` sets it), so the model can be swapped without touching the code."
         },
         {
           "name": "jumpSpeed",
@@ -301,7 +301,7 @@
             "default": {
               "asset": "00000000-0000-0000-0000-000000000000"
             },
-            "description": "The jump, played once over the locomotion: `anim/3` of the box character, `anim/jump` of a rig document (`--hero` sets it), so the model can be swapped without touching the code.",
+            "description": "The jump, played once over the locomotion: `anim/jump` of the box character, `anim/jump` of a rig document (`--hero` sets it), so the model can be swapped without touching the code.",
             "x-fynkel": {
               "type": "assetRef"
             }
