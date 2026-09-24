@@ -242,6 +242,7 @@ run, Escape closes.
 | `assets.undo` / `assets.redo` | Edit | ⌥⌘Z / ⇧⌥⌘Z | undo / redo the last **asset operation** (its own history; the label names it: "Undo Rename coin.prefab.json → gold.prefab.json") |
 | `assets.newScene` / `assets.newPrefab` / `assets.newMaterial` | Project | ⇧⌥⌘S / ⇧⌥⌘P / ⇧⌥⌘M | a new document in the Project browser's folder (`New Scene`, `New Scene 2`, …), selected and renaming at once |
 | `assets.newVolume` | Project | — | New Volume Profile (Unity's Create → Volume Profile): the starting look of `Document::new` — ambient occlusion on, bloom at intensity 0 — renaming at once; also in the + menu and the folder and asset menus |
+| `assets.newPhysicsMaterial` | Project | — | New Physics Material (Unity's Create → Physics Material, ADR-0025): friction 0.6, bounciness 0, both combines Average, renaming at once; also in the + menu and the folder menus |
 | `assets.newFolder` | Project | ⇧⌥⌘F | a new folder there (`New Folder`), renaming at once |
 | `assets.open` | Project | ⇧⌥⌘O | the selected scene or prefab into a tab; any other asset into the Inspector |
 | `assets.rename` | Project | ⇧⌥⌘R | rename the selected asset in place (the sidecar moves with it; the id survives) |
@@ -2165,6 +2166,21 @@ transaction per change on the profile's own document through
 is dragged or the tint picked (`previewVolume` → the preview's
 `setVolume`), and ⌘Z / ⇧⌘Z in the Inspector read "Undo Volume Profile
 Change".
+
+**The Physics Material Inspector** (Unity parity, Tier 3, 2026-09-25,
+ADR-0025): a `.physicsmaterial.json`'s page
+(`inspector/physics_material_inspector.dart`, keys
+`physicsMaterial.<field>`) edits **Friction**, **Bounciness**, **Friction
+Combine** and **Bounce Combine** (Average, Minimum, Multiply, Maximum —
+the higher rule of the two colliders wins), through `AssetEdits` like a
+material: one saved step per change, ⌘Z reading "Undo Physics Material
+Change". Nothing draws it in the Scene view; Play reads the cooked
+values. New Physics Material is in the + menu, the folder menus and
+Assets (`assets.newPhysicsMaterial`, no shortcut, as in Unity). A
+Collider's **Material** field picks one (`asset(physics_material)`); while
+it is set the collider's own Friction and Bounciness are hidden, since
+the material's replace them (`showIf: '!material'` — `showIf` counts a
+set reference as on).
 
 **Open** is offered for scenes, prefabs and an imported model's `prefab`
 part. Blend spaces have no editor in M4, so opening one

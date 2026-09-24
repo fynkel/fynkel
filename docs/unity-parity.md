@@ -69,7 +69,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Undo | ⌘Z undoes the scene; asset operations are not undoable | ✅ ⌘Z undoes the focused document, as in Unity; asset operations also have their own ⌥⌘Z history (more than Unity), except that creating or deleting an empty folder can't be undone |
 | Drag files in from Finder | imports | 🔧 `14811dd`, `395220e` (into the shown folder, one ⌥⌘Z step) |
 | Model sub-assets | expand in the browser, draggable | 🔧 `554ae0d` (▸, → / ←, a part's page on click) |
-| Create → Volume Profile, Physics Material | | 🔧 Volume Profile (`682f953`, `adb5146`); Physics Material 🟡 the asset exists (`0aef815`, ADR-0025: `fynkel document new physics_material`, the session's `newDocument`); no Create menu entry in the editor yet |
+| Create → Volume Profile, Physics Material | | 🔧 Volume Profile (`682f953`, `adb5146`); Physics Material (`eee5782`, ADR-0025; `089773d` editor: the + menu, the folder menus and Assets ▸ New Physics Material) |
 | Find References In Scene | | 🔧 `fc22546` (the Hierarchy searches `ref:<id>:<name>`) |
 
 ## Tier 2 — the look and the code
@@ -102,7 +102,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Prefab variants, Unpack Completely, a prefab from an object holding instances | | 🔧 `9146759`…`3fa1469` (ADR-0022 amendment, proposed), `9241460` editor |
 | Overrides dropdown, blue margin bar | | 🔧 `7d51553` (the Prefab bar — Open, Select, Overrides ▾ — lists the overrides by object, a row comparing the prefab's value with the instance's, Revert / Apply, Revert All / Apply All; the blue bar and Apply / Revert on a right-click; an added component's '+' and Apply / Revert Added Component; Unpack stays in the Hierarchy menu) |
 | Multi-scene Hierarchy | | 🔧 `f632f96`, `ca34f28` (every open scene a section under its header — the active one bold, Set Active / Save / Unload / Load / Remove / Select Scene Asset; Open Scene Additive or a scene dropped on the Hierarchy adds one, a double-click opens one alone after asking; a click on another scene's row or object in the Scene view activates it; rows dragged onto another scene move there; one Scene view camera); 🟡 the selection is one scene's at a time (Unity's may span scenes); `a95f43b`: the other loaded scenes drawn in the Scene view, lit and shadowed with the active one) |
-| Physics Material asset | shared friction/bounciness, combine modes | 🟡 engine side `0aef815` (ADR-0025: `.physicsmaterial.json` with `friction`, `bounciness`, `friction_combine` / `bounce_combine` in Unity's priority, the Collider's `material`, hot reload of live colliders); one friction coefficient, as Rapier has no static friction; the editor's picker, browser kind and Inspector still to come |
+| Physics Material asset | shared friction/bounciness, combine modes | 🔧 `eee5782`, `797c4b8` (ADR-0025, proposed: `.physicsmaterial.json` with `friction`, `bounciness`, `friction_combine` / `bounce_combine` in Unity's priority, the Collider's `material`, hot reload of live colliders); `089773d` editor (its Inspector page, the Collider's Material picker, the collider's own Friction and Bounciness hidden while one is set); 🟡 one friction coefficient, as Rapier has no static friction |
 | Grid thumbnails, zoom slider | | 🔧 `8da4595` (the slider at the status bar's right, remembered; tiles act like rows; models, prefabs, materials and a model's meshes and materials drawn by `fynkel thumbnail` in the background, again when their file changes) |
 
 ## On purpose
@@ -291,11 +291,19 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   the new prefab one level; Create ▸ Prefab Variant in the Project; an
   empty holding Crate A makes a prefab with Crate A nested, overrides
   kept; Unpack leaves Crate A an instance, Unpack Completely does not).
-- 2026-09-25: Physics Material, engine side (`0aef815` crates,
-  `08091cf` SDK; ADR-0025, proposed). `fynkel_physics` tests: a ball
+- 2026-09-25: Physics Material, engine side (`eee5782` crates,
+  `797c4b8` SDK; ADR-0025, proposed). `fynkel_physics` tests: a ball
   bounces on bounciness 1, how far a box slides depends on friction, and
   the higher combine rule wins on both sides (minimum on ice slides on,
   maximum stops it). The cook test and `fynkel_assets/tests/physics_material.rs`
   cook a bouncy material into the fixture project: the crate rebounds
   over a metre, and a recook re-registers the new values on the live
-  collider. No editor row yet.
+  collider.
+- 2026-09-25: Physics Material in the editor (`089773d`,
+  `physics_material_parity_test.dart`: + ▸ New Physics Material writes
+  `New Physics Material.physicsmaterial.json`; Bounciness typed and
+  Friction Combine set to Maximum are saved at once, ⌘Z reads *Undo
+  Physics Material Change* and undoes each, the scene untouched; the
+  Floor's Collider shows Material None with Friction and Bounciness, ⊙
+  offers the one physics material only, picked it hides both, ⌘Z brings
+  them back).
