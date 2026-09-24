@@ -293,6 +293,11 @@ abstract class EditorProject extends ChangeNotifier {
   OperationResult registerBehaviour(String id, {String? description}) =>
       operate('registerBehaviour', {'id': id, 'description': ?description});
 
+  /// `fynkel codegen` regenerated the metadata (a script was saved): the
+  /// session re-reads it and the schemas, so the Inspector shows the
+  /// fields as the source declares them now. Writes nothing.
+  OperationResult reloadBehaviours() => operate('reloadBehaviours', const {});
+
   /// The absolute path of an asset-root-relative [path].
   String assetFile(String path) => p.join(assetsDir, p.joinAll(path.split('/')));
 

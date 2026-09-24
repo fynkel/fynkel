@@ -163,6 +163,9 @@ final class FakeProject extends EditorProject {
   /// Schemas by type; tests fill them (`fakeSchemas()` gives a usable set).
   List<TypeSchema> schemas = [];
   Map<String, Object?>? metadata;
+
+  /// How many times `reloadBehaviours` ran.
+  int reloads = 0;
   List<AssetEntry> assetEntries = [];
 
   @override
@@ -520,6 +523,10 @@ final class FakeProject extends EditorProject {
         final id = args['id'] as String;
         final known = (metadata?['behaviours'] as List? ?? const []).any((b) => b is Map && b['id'] == id);
         return _done(kind, 'Register Behaviour $id', null, {'id': id, 'registered': true, 'inMetadata': known});
+      case 'reloadBehaviours':
+        reloads++;
+        final types = [for (final b in (metadata?['behaviours'] as List? ?? const [])) (b as Map)['id']];
+        return _done(kind, 'Reload Behaviours', null, {'types': types});
       case 'undoAsset' || 'redoAsset':
         final from = kind == 'undoAsset' ? _undo : _redo;
         if (from.isEmpty) {

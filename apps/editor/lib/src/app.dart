@@ -1832,6 +1832,20 @@ class EditorShellState extends State<EditorShell> {
       registry.refresh();
       // A project with Dart behaviours gets its codegen check once at open, in the background.
       if (opened.behaviourMetadata() != null && cg.isDartPackage) unawaited(cg.check());
+      // A saved script regenerates its metadata and the Inspector follows (Unity's recompile).
+      if (cg.isDartPackage) {
+        cg.recompileOnSave(
+          opened.fileChanges,
+          reload: () {
+            if (!identical(project, opened)) return;
+            try {
+              opened.reloadBehaviours();
+            } on AuthoringException catch (e) {
+              _showError('The behaviour metadata could not be read again: $e');
+            }
+          },
+        );
+      }
     } on AuthoringException catch (e) {
       final reasons = e.diagnostics.map((d) => '${d.code}: ${d.message}').join('\n');
       _showError('Could not open $dir.\n${reasons.isEmpty ? e : reasons}');

@@ -14,9 +14,13 @@
 //     at open and on request, never on a timer.
 //
 // The banner shows the command to run and a button to copy it. The
-// editor runs the generating command itself only on an explicit action —
-// Create → Behaviour ([generate], ADR-0016 amendment of 2026-09-24): the
-// CLI as a subprocess, never game code in the editor process.
+// editor runs the generating command itself — the CLI as a subprocess,
+// never game code in the editor process (ADR-0016 amendments of
+// 2026-09-24) — on Create → Behaviour ([generate]) and, as Unity
+// recompiles, when a script under `lib/` is saved ([recompileOnSave]):
+// the session then re-reads the metadata, so the Inspector shows a field
+// the moment its script is saved.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -103,6 +107,9 @@ final class CodegenCheck extends ChangeNotifier {
   final String? Function() repoRoot;
 
   CodegenStatus status = CodegenStatus.unknown;
+
+  /// Whether the running command writes ([generate]) rather than checks.
+  bool generating = false;
   List<String> stalePaths = const [];
   String? error;
   DateTime? checkedAt;
@@ -165,6 +172,7 @@ final class CodegenCheck extends ChangeNotifier {
     final exe = cli();
     if (exe == null) return 'no `fynkel` CLI is configured (Preferences → Fynkel CLI)';
     status = CodegenStatus.running;
+    generating = true;
     error = null;
     notifyListeners();
     runs++;
@@ -178,6 +186,7 @@ final class CodegenCheck extends ChangeNotifier {
       error = 'could not run `fynkel codegen`: $e';
     }
     checkedAt = DateTime.now();
+    generating = false;
     if (error != null && error!.contains('unknown argument')) {
       error =
           'the fynkel CLI at $exe is older than this editor ($error) — update it '
@@ -187,12 +196,54 @@ final class CodegenCheck extends ChangeNotifier {
     return status == CodegenStatus.upToDate ? null : error ?? 'fynkel codegen left the files stale';
   }
 
+  /// Whether [path] is a script whose save regenerates: a `.dart` file
+  /// under `lib/`, not the generated ones.
+  bool isScriptSource(String path) {
+    final lib = p.join(projectDir, 'lib');
+    return p.isWithin(lib, path) &&
+        path.endsWith('.dart') &&
+        !path.endsWith('.g.dart') &&
+        !p.isWithin(p.join(lib, 'generated'), path);
+  }
+
+  StreamSubscription<List<String>>? _saves;
+  Timer? _recompile;
+
+  /// Regenerates [delay] after a script under `lib/` changes (saved,
+  /// added, deleted), then calls [reload] so the session re-reads the
+  /// metadata. A save while a command runs waits for it.
+  void recompileOnSave(
+    Stream<List<String>> changes, {
+    required void Function() reload,
+    Duration delay = const Duration(milliseconds: 500),
+  }) {
+    _saves?.cancel();
+    _saves = changes.listen((paths) {
+      if (!paths.any(isScriptSource)) return;
+      _recompile?.cancel();
+      _recompile = Timer(delay, () => _recompileNow(reload, delay));
+    });
+  }
+
+  Future<void> _recompileNow(void Function() reload, Duration delay) async {
+    if (_disposed) return;
+    if (status == CodegenStatus.running) {
+      _recompile = Timer(delay, () => _recompileNow(reload, delay));
+      return;
+    }
+    final problem = await generate();
+    if (_disposed) return;
+    if (problem == null) reload();
+  }
+
   /// The project closed while a check ran: its answer is dropped.
   bool _disposed = false;
 
   @override
   void dispose() {
     _disposed = true;
+    _saves?.cancel();
+    _recompile?.cancel();
     super.dispose();
   }
 

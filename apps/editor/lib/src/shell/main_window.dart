@@ -408,8 +408,10 @@ class MainWindow extends StatelessWidget {
           CodegenStatus.running => (
             FIcons.refresh,
             t.textSecondary,
-            'Checking code…',
-            'fynkel codegen --check is running',
+            check.generating ? 'Updating scripts…' : 'Checking code…',
+            check.generating
+                ? 'fynkel codegen is updating the behaviour metadata after a script changed'
+                : 'fynkel codegen --check is running',
           ),
           CodegenStatus.upToDate => (
             FIcons.checkCircleOutline,
