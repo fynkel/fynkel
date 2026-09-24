@@ -1,7 +1,7 @@
 // Item 9's accessibility pass, held by tests: every control a screen reader
 // can press has a name, and the whole editor works from the keyboard alone
 // — Unity's ⌘1… keys move it between panels, Tab walks one panel, the
-// palette (⇧⌘P) runs any command.
+// palette (⌘K) runs any command.
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
@@ -130,8 +130,8 @@ void main() {
     expect(ws.focusedPanel.value, PanelRegistry.profiler);
     expect(ws.isShown(PanelRegistry.profiler), isTrue);
 
-    // ⇧⌘P, type, ⏎: any command by name.
-    await _press(tester, LogicalKeyboardKey.keyP, meta: true, shift: true);
+    // ⌘K, type, ⏎: any command by name.
+    await _press(tester, LogicalKeyboardKey.keyK, meta: true);
     await tester.enterText(find.byType(EditableText).last, 'Go to Hierarchy');
     await tester.pumpAndSettle();
     await _press(tester, LogicalKeyboardKey.enter);

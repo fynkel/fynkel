@@ -1140,7 +1140,8 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'assets.search',
         menu: EditorMenu.project,
-        shortcut: k(LogicalKeyboardKey.keyP, alt: true),
+        // ⌥⌘P went to Step, as in Unity.
+        shortcut: k(LogicalKeyboardKey.keyB, alt: true),
         group: 4,
         order: 11,
         enabled: () => _hasProject,
@@ -1282,7 +1283,7 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'scene.toggleLocked',
         menu: EditorMenu.edit,
-        shortcut: k(LogicalKeyboardKey.keyK),
+        // ⌘K is the Command Palette (Unity's Search).
         key: bare(LogicalKeyboardKey.keyL),
         group: 3,
         order: 2,
@@ -1415,13 +1416,14 @@ class EditorShellState extends State<EditorShell> {
       // ── Play (Play menu) ──
       EditorCommand(
         id: 'play.start',
-        labelBuilder: () => play?.isActive ?? false ? 'Playing…' : 'Play',
+        labelBuilder: () => play?.isActive ?? false ? 'Stop Playing' : 'Play',
         menu: EditorMenu.play,
+        // Unity: ⌘P toggles Play and Stop.
         shortcut: k(LogicalKeyboardKey.keyP),
         group: 0,
         order: 0,
-        enabled: () => _hasProject && !(play?.isActive ?? false),
-        run: playProject,
+        enabled: () => _hasProject,
+        run: () => (play?.isActive ?? false) ? stopPlaying() : playProject(),
       ),
       EditorCommand(
         id: 'play.buildAndRun',
@@ -1445,7 +1447,7 @@ class EditorShellState extends State<EditorShell> {
         id: 'play.pause',
         labelBuilder: () => gameRun?.paused ?? false ? 'Resume' : 'Pause',
         menu: EditorMenu.play,
-        shortcut: k(LogicalKeyboardKey.keyP, control: true),
+        shortcut: k(LogicalKeyboardKey.keyP, shift: true),
         group: 0,
         order: 3,
         enabled: () => gameRun?.running ?? false,
@@ -1454,7 +1456,7 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'play.step',
         menu: EditorMenu.play,
-        shortcut: k(LogicalKeyboardKey.keyP, control: true, alt: true),
+        shortcut: k(LogicalKeyboardKey.keyP, alt: true),
         group: 0,
         order: 4,
         enabled: () => gameRun?.running ?? false,
@@ -1500,7 +1502,7 @@ class EditorShellState extends State<EditorShell> {
       EditorCommand(
         id: 'window.commandPalette',
         menu: EditorMenu.window,
-        shortcut: k(LogicalKeyboardKey.keyP, shift: true),
+        shortcut: k(LogicalKeyboardKey.keyK),
         group: 0,
         run: showPalette,
       ),
@@ -2493,6 +2495,12 @@ class EditorShellState extends State<EditorShell> {
       case PanelRegistry.inspector:
         final ins = InspectorModel(tabs: t, project: opened, codegen: codegen!, openInIde: ide.open);
         ins.revealAsset = (asset, sub) => revealInProject(asset);
+        // A Transform value dragged in the Inspector moves in every Scene view.
+        ins.previewTransforms = (tab, locals, ids) {
+          for (final sv in _scenes.values) {
+            sv.previewLocals(tab, locals, ids);
+          }
+        };
         // A preview depends on the asset only; any browser draws it.
         ins.assetPreview = (asset) => _browsers.values.first.preview(asset);
         final sel = EditorSelection(inspector: ins);

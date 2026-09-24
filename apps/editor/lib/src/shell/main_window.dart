@@ -519,7 +519,7 @@ class MainWindow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text('⇧⌘P', style: theme.textTheme.labelSmall?.copyWith(color: t.textDisabled, letterSpacing: .5)),
+                Text('⌘K', style: theme.textTheme.labelSmall?.copyWith(color: t.textDisabled, letterSpacing: .5)),
               ],
             ),
           ),
@@ -553,7 +553,7 @@ class MainWindow extends StatelessWidget {
             children: [
               IconButton(
                 key: const Key('window.play'),
-                tooltip: active ? 'Stop the game (⌘.)' : 'Play the project (⌘P)',
+                tooltip: active ? 'Stop the game (⌘P)' : 'Play the project (⌘P)',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints.tightFor(width: 34, height: 26),
                 iconSize: 15,
@@ -563,7 +563,7 @@ class MainWindow extends StatelessWidget {
               if (run != null) ...[
                 IconButton(
                   key: const Key('window.pause'),
-                  tooltip: paused ? 'Resume (⌃⌘P)' : 'Pause (⌃⌘P)',
+                  tooltip: paused ? 'Resume (⇧⌘P)' : 'Pause (⇧⌘P)',
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(width: 30, height: 26),
                   iconSize: 15,
@@ -573,7 +573,7 @@ class MainWindow extends StatelessWidget {
                 ),
                 IconButton(
                   key: const Key('window.step'),
-                  tooltip: 'Step one frame (⌃⌥⌘P)',
+                  tooltip: 'Step one frame (⌥⌘P)',
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints.tightFor(width: 30, height: 26),
                   iconSize: 15,

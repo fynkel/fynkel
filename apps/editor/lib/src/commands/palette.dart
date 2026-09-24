@@ -1,4 +1,4 @@
-// The command palette (⇧⌘P), on the shared picker (item 9d): every
+// The command palette (⌘K), on the shared picker (item 9d): every
 // registered command grouped by menu; typing ranks them into one list.
 // Arrows move, Enter runs, Escape closes; a disabled command is listed dim
 // and does not run.

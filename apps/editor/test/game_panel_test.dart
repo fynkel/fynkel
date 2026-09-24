@@ -138,7 +138,7 @@ void main() {
       expect(find.text('game in /fake/game at null editor=true'), findsOneWidget);
       expect(shell.play!.state, PlayState.running);
       expect(shell.play!.inEditor, isTrue);
-      expect(shell.registry.byId('play.start')!.enabled!(), isFalse);
+      expect(shell.registry.byId('play.start')!.enabled!(), isTrue, reason: '⌘P toggles, as in Unity');
       expect(find.text('Playing'), findsOneWidget);
 
       // The game has the keyboard: the editor's bare keys stay out.
@@ -210,8 +210,10 @@ void main() {
       expect(runner.calls.where((c) => c.$2.contains('cook')), isEmpty, reason: 'no cook from the files');
       expect(shell.tabs!.focused!.dirty, isTrue, reason: 'nothing was saved');
       expect(find.textContaining('game in /fake/game at main'), findsOneWidget, reason: 'the open scene plays');
-      shell.registry.execute('play.stop');
+      // ⌘P again stops, as in Unity.
+      shell.registry.execute('play.start');
       await tester.pumpAndSettle();
+      expect(shell.gameRun?.running ?? false, isFalse);
     });
 
     testWidgets('Build and Run runs the saved files as their own app, even in a project editor (P6)', (tester) async {

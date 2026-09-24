@@ -126,7 +126,7 @@ class EditorMenuBar extends StatelessWidget {
               for (final c in group)
                 MenuItemButton(
                   key: Key('menuitem.${c.id}'),
-                  // Our own label (⇧⌘P), not Flutter's platform spelling.
+                  // Our own label (⌘K), not Flutter's platform spelling.
                   trailingIcon: c.shortcut == null ? null : Text(CommandRegistry.shortcutLabel(c.shortcut!)),
                   onPressed: c.isEnabled ? () => registry.execute(c.id) : null,
                   child: Text(c.label),

@@ -923,6 +923,21 @@ class _FieldEditor extends StatelessWidget {
 
   void _commit(Object? v) => model.setField(slot, _writePath, v, spec: spec);
 
+  static List<num>? _quaternionOf(Object? v) =>
+      v is List && v.length == 4 ? [for (final x in v) x is num ? x : 0] : null;
+
+  /// Per axis, whether the selected objects' angles differ (to 0.001°).
+  List<bool> _mixedAxes() {
+    final eulers = [
+      for (final i in slot.instances)
+        if (_quaternionOf(slot.shownFor(i, path)) case final q?) Euler.fromQuaternion(q).clean,
+    ];
+    if (eulers.length < 2) return const [false, false, false];
+    return [
+      for (var a = 0; a < 3; a++) eulers.any((e) => (e[a] - eulers.first[a]).abs() > 1e-3),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final value = slot.shown(path);
@@ -1005,6 +1020,16 @@ class _FieldEditor extends StatelessWidget {
             step: spec.step,
             min: spec.min,
             max: spec.max,
+            // A Transform's axis drag moves the object in the Scene view live.
+            onPreviewComponent: (i, v) {
+              if (v == null) return model.endPreview(slot);
+              model.previewEach(slot, path, (inst) {
+                final own = slot.shownFor(inst, path);
+                final list = own is List ? [for (final x in own) x is num ? x.toDouble() : 0.0] : null;
+                if (list == null || i >= list.length) return own;
+                return [...list]..[i] = v;
+              });
+            },
             onCommitComponent: (i, v) {
               if (list == null || list.length != spec.components) {
                 // No vector yet: write the whole thing.
@@ -1028,6 +1053,23 @@ class _FieldEditor extends StatelessWidget {
             mixed: mixed,
             enabled: _enabled,
             onCommit: (quat) => _commit(_numbersLike(quat, q)),
+            // Several objects: each keeps its own angles but the edited one.
+            mixedAxes: slot.single ? null : _mixedAxes(),
+            onPreviewAxis: (axis, degrees) {
+              if (degrees == null) return model.endPreview(slot);
+              model.previewEach(slot, path, (i) {
+                final own = _quaternionOf(slot.shownFor(i, path));
+                final e = (own == null ? Euler.zero : Euler.fromQuaternion(own).clean).withComponent(axis, degrees);
+                return e.toQuaternion();
+              });
+            },
+            onCommitAxis: slot.single
+                ? null
+                : (axis, degrees) => model.setFieldEach(slot, _writePath, (i) {
+                    final own = _quaternionOf(slot.shownFor(i, path));
+                    final e = (own == null ? Euler.zero : Euler.fromQuaternion(own).clean).withComponent(axis, degrees);
+                    return _numbersLike(e.toQuaternion(), own);
+                  }),
           ),
         );
       case FieldKind.color:

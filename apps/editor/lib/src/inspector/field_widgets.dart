@@ -496,6 +496,7 @@ class NumberField extends StatefulWidget {
     this.onApply,
     this.compact = false,
     this.onDragState,
+    this.onPreview,
     this.live,
   });
 
@@ -532,6 +533,11 @@ class NumberField extends StatefulWidget {
   /// A vector component: narrow, with the axis letter as the drag handle.
   final bool compact;
   final void Function(bool dragging)? onDragState;
+
+  /// While the label is dragged: the value it would commit (stored form),
+  /// for the Scene view to follow before the release; null when the drag
+  /// ends, just before the commit.
+  final void Function(double? value)? onPreview;
 
   @override
   State<NumberField> createState() => _NumberFieldState();
@@ -645,12 +651,14 @@ class _NumberFieldState extends State<NumberField> {
     if (min != null) shown = math.max(shown, _toShown(min.toDouble()));
     if (max != null) shown = math.min(shown, _toShown(max.toDouble()));
     setState(() => _preview = _toStored(shown));
+    widget.onPreview?.call(_preview);
   }
 
   void _dragEnded() {
     final p = _preview;
     setState(() => _preview = null);
     widget.onDragState?.call(false);
+    widget.onPreview?.call(null);
     if (p == null) return;
     final before = _value?.toDouble();
     if (before != null && (p - before).abs() < 1e-12) return;
@@ -945,6 +953,7 @@ class VecField extends StatelessWidget {
     this.integer = false,
     this.names = _axisNames,
     this.live,
+    this.onPreviewComponent,
   });
 
   final List<num>? value;
@@ -963,6 +972,9 @@ class VecField extends StatelessWidget {
   final bool integer;
   final List<String> names;
   final void Function(int index, Object value) onCommitComponent;
+
+  /// A component's label drag (see [NumberField.onPreview]).
+  final void Function(int index, double? value)? onPreviewComponent;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -985,6 +997,7 @@ class VecField extends StatelessWidget {
             integer: integer,
             live: live == null ? null : _Component(live!, i),
             onCommit: (v) => onCommitComponent(i, v),
+            onPreview: onPreviewComponent == null ? null : (v) => onPreviewComponent!(i, v),
           ),
         ),
       ],
@@ -1027,11 +1040,25 @@ class EulerField extends StatefulWidget {
     required this.quaternion,
     required this.onCommit,
     this.mixed = false,
+    this.mixedAxes,
+    this.onCommitAxis,
+    this.onPreviewAxis,
     this.enabled = true,
     this.live,
   });
 
   final List<num>? quaternion;
+
+  /// Several objects: which of X, Y, Z differ among them (each shows "—"
+  /// alone); with [onCommitAxis], an edit changes only that axis on each.
+  final List<bool>? mixedAxes;
+
+  /// Several objects: the edited axis and its degrees, for each object to
+  /// apply to its own angles (Unity changes that axis only).
+  final void Function(int axis, double degrees)? onCommitAxis;
+
+  /// An axis's label drag: the degrees it would commit, null at the end.
+  final void Function(int axis, double? degrees)? onPreviewAxis;
 
   /// [quaternion] as it moves between builds (see [NumberField.live]).
   final ValueListenable<Object?>? live;
@@ -1108,12 +1135,18 @@ class _EulerFieldState extends State<EulerField> {
   }
 
   void _commit(int i, Object v) {
+    if (widget.onCommitAxis != null) {
+      widget.onCommitAxis!(i, (v as num).toDouble());
+      return;
+    }
     final e = _euler.withComponent(i, (v as num).toDouble());
     final q = e.toQuaternion();
     _shown = e;
     _for = q;
     widget.onCommit(q);
   }
+
+  bool _mixed(int i) => widget.mixedAxes?[i] ?? widget.mixed;
 
   @override
   Widget build(BuildContext context) {
@@ -1127,14 +1160,15 @@ class _EulerFieldState extends State<EulerField> {
               key: ValueKey('euler.$i'),
               compact: true,
               label: _axisNames[i],
-              value: widget.mixed ? null : e[i],
+              value: _mixed(i) ? null : e[i],
               previous: 0.5, // degrees are shown as decimals; the quaternion decides the stored form
-              mixed: widget.mixed,
+              mixed: _mixed(i),
               enabled: widget.enabled,
               unit: '°',
               step: 1,
               live: widget.live == null ? null : _axes[i],
               onCommit: (v) => _commit(i, v),
+              onPreview: widget.onPreviewAxis == null ? null : (v) => widget.onPreviewAxis!(i, v),
             ),
           ),
         ],

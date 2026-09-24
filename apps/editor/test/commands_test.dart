@@ -131,7 +131,7 @@ void main() {
     expect(CommandRegistry.shortcutLabel(registry.byId('view.reload')!.shortcut!), '⌃⌘R');
     expect(CommandRegistry.shortcutLabel(registry.byId('view.recook')!.shortcut!), '⌃⇧⌘R');
     expect(CommandRegistry.shortcutLabel(registry.byId('view.frameSelected')!.shortcut!), '⌘F');
-    expect(CommandRegistry.shortcutLabel(registry.byId('window.commandPalette')!.shortcut!), '⇧⌘P');
+    expect(CommandRegistry.shortcutLabel(registry.byId('window.commandPalette')!.shortcut!), '⌘K');
     expect(CommandRegistry.shortcutLabel(registry.byId('window.panel.console')!.shortcut!), '⌥⌘5');
     expect(CommandRegistry.shortcutLabel(registry.byId('document.save')!.shortcut!), '⌘S');
     expect(CommandRegistry.shortcutLabel(registry.byId('document.redo')!.shortcut!), '⇧⌘Z');
@@ -174,11 +174,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(shell.workspace!.isVisible(PanelRegistry.console), isTrue);
 
-    // Palette ⇧⌘P → type → Enter.
+    // Palette ⌘K → type → Enter.
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('palette.search')), findsOneWidget);

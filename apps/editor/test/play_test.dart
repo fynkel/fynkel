@@ -639,8 +639,8 @@ void main() {
       expect(launcher.calls.single.$4!['FYNKEL_GIZMOS'], '1');
       expect(shell.consoleTab.value, ConsolePanel.gameTab);
       expect(find.text('Starting…'), findsOneWidget);
-      expect(shell.registry.byId('play.start')!.label, 'Playing…');
-      expect(shell.registry.byId('play.start')!.enabled!(), isFalse);
+      expect(shell.registry.byId('play.start')!.label, 'Stop Playing', reason: '⌘P toggles, as in Unity');
+      expect(shell.registry.byId('play.start')!.enabled!(), isTrue);
       expect(shell.registry.byId('play.stop')!.enabled!(), isTrue);
 
       launcher.last.emit(record({'fynkel': 'state', 'seq': 1, 'state': 'started', 'pid': 7100}));

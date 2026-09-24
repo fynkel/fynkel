@@ -30,6 +30,7 @@ import 'package:path/path.dart' as p;
 
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
+import '../hierarchy/transform_math.dart' show Trs;
 import '../play/apply_to_scene.dart';
 import '../play/play_document.dart' show PlayDocument;
 import '../project/editor_project.dart';
@@ -117,6 +118,9 @@ final class ComponentSlot {
   /// does not have the field (a field added to the script after the
   /// component was) — its schema default, which is what the game uses.
   Object? shown(String path) => _shownIn(first.data, path);
+
+  /// [shown] on one of the instances.
+  Object? shownFor(ComponentInstance i, String path) => _shownIn(i.data, path);
 
   Object? _shownIn(Map<String, Object?> data, String path) {
     if (hasPath(data, path)) return readPath(data, path);
@@ -826,6 +830,40 @@ final class InspectorModel extends ChangeNotifier {
       }
     }
     final commands = [for (final i in slot.instances) _setFieldCommand(i, field, value)];
+    return _commit(commands, key);
+  }
+
+  /// Shows [locals] (entity id → its Transform as the drag has it) in
+  /// [tab]'s Scene view without a transaction; null puts the world back to
+  /// the document. Set by the shell.
+  void Function(OpenDocument tab, Map<String, Trs>? locals, Iterable<String> ids)? previewTransforms;
+
+  /// A Transform field's label drag, as Unity's: the Scene view follows
+  /// each instance with [path] set to `valueFor(i)`; nothing is written
+  /// until the release commits. Other components have no preview yet.
+  void previewEach(ComponentSlot slot, String path, Object? Function(ComponentInstance i) valueFor) {
+    final t = _tab;
+    final show = previewTransforms;
+    if (t == null || show == null || slot.type != 'fynkel.Transform') return;
+    final top = _topLevel(path);
+    show(t, {
+      for (final i in slot.instances)
+        i.entityId: Trs.fromData({...i.data, top: valueFor(i)}),
+    }, [for (final i in slot.instances) i.entityId]);
+  }
+
+  /// The drag ended: the world back to the document (the commit follows).
+  void endPreview(ComponentSlot slot) {
+    final t = _tab;
+    if (t == null || slot.type != 'fynkel.Transform') return;
+    previewTransforms?.call(t, null, [for (final i in slot.instances) i.entityId]);
+  }
+
+  /// One field on every instance, each with its own value (one Euler axis
+  /// of several objects' rotations), one transaction.
+  bool setFieldEach(ComponentSlot slot, String field, Object? Function(ComponentInstance i) valueFor) {
+    final key = '${slot.key}/${_topLevel(field)}';
+    final commands = [for (final i in slot.instances) _setFieldCommand(i, field, valueFor(i))];
     return _commit(commands, key);
   }
 

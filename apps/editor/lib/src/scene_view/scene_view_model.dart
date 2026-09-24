@@ -1457,6 +1457,29 @@ final class SceneViewModel extends ChangeNotifier {
     return a;
   }
 
+  /// The Inspector's label drag (Unity's live scrub): [locals] shown in
+  /// [tab]'s world with no transaction; null puts [ids] back to the
+  /// document (the release's transaction then syncs the world). Only a
+  /// tab whose world is open follows.
+  void previewLocals(OpenDocument tab, Map<String, Trs>? locals, Iterable<String> ids) {
+    final t = _sceneTabs[tab];
+    if (t == null || !t.hasPreview || isLive) return;
+    try {
+      if (locals == null) {
+        t.preview!.restoreTransforms(ids);
+      } else {
+        t.preview!.setTransforms([
+          for (final e in locals.entries)
+            PreviewTransform(id: e.key, position: e.value.position, rotation: e.value.rotation, scale: e.value.scale),
+        ]);
+      }
+    } on AuthoringException catch (e) {
+      notice = 'Preview: $e';
+    }
+    views?.changed(this, t.preview);
+    _repaint();
+  }
+
   /// Escape: the world back to the document, nothing written.
   void cancelDrag() {
     final d = drag;
