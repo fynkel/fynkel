@@ -1990,7 +1990,7 @@ Intensity (`emissive_strength` — the HDR colour as a colour and an
 intensity). The maps take the Project's textures (the picker, a drop from
 the Project browser, × for None). Each change is one transaction on the
 material's own document, **saved at once** — there is no Save for a
-material — through `MaterialEdits` (`inspector/material_edits.dart`,
+material — through `AssetEdits` (`inspector/asset_edits.dart`,
 one per project, which opens the document without a tab and shares it
 with one when the material is also open in a tab). While a colour is
 picked, a label dragged or a slider moved, the Scene view draws the
@@ -2003,6 +2003,23 @@ the Project holds the keyboard and the Inspector shows it (the menu reads
 Inspector slider is live now, a component's included. Not yet: a preview
 sphere at the bottom of the page, and a custom-shader material, whose page
 stays read-only.
+
+**The Volume Profile Inspector** (Unity parity, Tier 2, 2026-09-24): a
+`.volume.json`'s page edits it as Unity's Volume Profile Inspector does
+(`inspector/volume_inspector.dart`, keys `volume.<override>.<field>`).
+One card per override the profile holds — **Ambient Occlusion**
+(Intensity, Radius), **Bloom** (Intensity, Threshold, Scatter, Tint) —
+with **All** / **None** and **Remove** in its menu; **Add Override**
+lists the ones it lacks and adds an empty block. A **checkbox in front of
+every field** says whether the profile sets it: ticked, the field is in
+the file and editable; not ticked, it is absent — inherited from the
+volumes below and the engine — and shows the engine default greyed.
+Ticking writes the value shown. The rest is the material's: one
+transaction per change on the profile's own document through
+`AssetEdits`, saved at once, blended live in the Scene view while a label
+is dragged or the tint picked (`previewVolume` → the preview's
+`setVolume`), and ⌘Z / ⇧⌘Z in the Inspector read "Undo Volume Profile
+Change".
 
 **Open** is offered for scenes, prefabs and an imported model's `prefab`
 part. Blend spaces have no editor in M4, so opening one

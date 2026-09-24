@@ -426,12 +426,14 @@ instance of the Column rig document's `prefab` (the same hierarchy as
 `fynkel_document::authoring` (§11.1, ADR-0016) is the one implementation of
 document mutation the editor, the CLI and agents share; the editor reaches
 it through the authoring session and its C ABI (below, M4-01). An `Editor`
-holds one scene, prefab or **material** document (`Editor::open` refuses
+holds one scene, prefab, **material** or **volume profile** document
+(`Editor::open` refuses
 other kinds, read-only newer documents and outdated ones with `FYN-E0007`; a
 document that already has errors opens, and those baseline errors are
 tolerated; a material is validated against the shader library —
 `Editor::open_with(document, schemas, shaders)` — and an entity command on
-it is `FYN-E0007` pointing at `setDocumentField`). Its `Revision` is the blake3 hash of the canonical
+it is `FYN-E0007` pointing at `setDocumentField`; a volume profile is the
+same, validated as a `VolumeDocument`, since 2026-09-24). Its `Revision` is the blake3 hash of the canonical
 text (`Document::write`), so two tools that read the same bytes agree on it
 without shared state — `fynkel scene inspect --json` and `fynkel prefab
 inspect --json` print it as `revision`.
@@ -836,9 +838,12 @@ next sync).
   `setMaterial` (`material`, `data` — a `fynkel.pbr@1` document's
   fields drawn in place of the cooked material by every open preview's
   asset store, the file untouched: `Assets::override_material` bumps
-  `material_edits` and the renderer rebuilds its material bind groups
+  `live_edits` and the renderer rebuilds its material bind groups
   on its next frame; → `stores`), `restoreMaterial` (`material`), `material`
   (`material` → what this preview draws for it now, as document fields),
+  `setVolume` / `restoreVolume` / `volume` (`volume`, `data` — the same
+  for a volume profile: `Assets::override_volume`, the renderer re-reads
+  its profiles; `volume` answers the present fields it blends),
   `resync`, `reload`, `recook` (cook
   again, point every preview at the new store, reload each; with
   `live: true` unsaved documents cook as held, their files untouched, and a
@@ -850,7 +855,7 @@ next sync).
   `setHidden`, `pick`/`pickRay`/`pickRect` → `PreviewPick`, `lines` →
   `PreviewLines`, `worldMatrices`, `setTransforms`/`restoreTransforms`,
   `setComponents`/`restoreComponents`, `setMaterial`/`restoreMaterial`/
-  `material`,
+  `material`, `setVolume`/`restoreVolume`/`volume`,
   `resync` → `PreviewSyncReport`, `reload`/`refreshStats` →
   `PreviewStats`, `recook` → `CookReport`, `dump`, `close`), and a
   `PreviewSynced` event on the session's stream after every call that

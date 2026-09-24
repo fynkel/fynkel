@@ -78,7 +78,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 |---|---|---|
 | Material Inspector | edit colour, maps, emission (HDR colour + intensity); preview sphere; live in the Scene view | 🔧 `dcd42ba`, `27f122f` (saved at once, live while picking or dragging, ⌘Z in the Inspector); no preview sphere yet; a custom-shader material stays read-only |
 | Drop a material on an object | assigns it | 🔧 `6203b47`, `b6ee085` (Hierarchy row or Scene view; drawn while hovering; an override inside a prefab instance) |
-| Volume profile Inspector | Add Override, a checkbox per field | ❌ read-only |
+| Volume profile Inspector | Add Override, a checkbox per field | 🔧 `b1b7402`, `d2fa8ea` (Remove, All / None; saved at once, live in the Scene view, ⌘Z in the Inspector) |
 | Model import settings | scale, normals, animation… | 🟡 external files + material remap only; unapplied changes dropped without asking |
 | `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | ❌ local setters only (`localPosition` semantics); read-only world transform |
 | One script throwing | only that script stops | ❌ the rest of the frame's update pass is skipped |
@@ -157,3 +157,11 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   Crate A's (an override) and on the Sun's (refused), and drag one over
   the Scene view: the Robot draws with it while hovering, the drop is one
   undo step.
+- 2026-09-24: the Volume Profile Inspector (`b1b7402` profiles edit
+  through document fields and preview `setVolume`, `d2fa8ea`) —
+  `volume_parity_test.dart` unticks Bloom's Threshold (inherited, left out
+  of the file), types an Intensity (saved, blended), removes Ambient
+  Occlusion and adds it back empty, ticks Radius, undoes all five with ⌘Z
+  and redoes one; a second test puts the profile on a global volume and
+  checks with `fynkel render` that the bloom set in the Inspector makes a
+  tenth of the picture brighter.
