@@ -514,6 +514,12 @@ final class FakeProject extends EditorProject {
         _redo.clear();
         _undo.add((label, () => file.writeAsStringSync(before)));
         return _done(kind, label, null, {'layers': args['layers'], 'tags': args['tags'], 'reload': const []});
+      case 'registerBehaviour':
+        // The registry lives in the project file the fake does not keep: the
+        // answer says whether the metadata (what `codegen` wrote) has the id.
+        final id = args['id'] as String;
+        final known = (metadata?['behaviours'] as List? ?? const []).any((b) => b is Map && b['id'] == id);
+        return _done(kind, 'Register Behaviour $id', null, {'id': id, 'registered': true, 'inMetadata': known});
       case 'undoAsset' || 'redoAsset':
         final from = kind == 'undoAsset' ? _undo : _redo;
         if (from.isEmpty) {

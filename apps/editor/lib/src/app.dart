@@ -542,6 +542,8 @@ class EditorShellState extends State<EditorShell> {
           onShowAsset: showAssetInInspector,
           run: widget.run,
           searchFocus: PanelIds.number(id) == 1 ? projectSearchFocus : null,
+          onOpenScript: (file) => ide.open(file),
+          generateBehaviours: codegen == null ? null : () => codegen!.generate(),
         );
       },
     ),

@@ -3,7 +3,9 @@
 // undo/redo; rows drag as `AssetDragPayload` (onto Inspector fields, the
 // Hierarchy, a folder here); the context menu, inline rename, delete with
 // the "referenced by" dialog; double-click opens documents and shows any
-// other asset in the Inspector (item 9c).
+// other asset in the Inspector (item 9c). Below the assets, the Scripts
+// root lists `lib/`: a double-click opens a script in the IDE, and New ▾ →
+// Behaviour makes one from a template (roadmap Phase 2 item 1).
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
@@ -20,6 +22,7 @@ import '../theme/panel_focus.dart';
 import 'asset_preview.dart';
 import '../theme/tokens.dart';
 import 'project_browser_model.dart';
+import 'scripts.dart';
 
 /// One browser row, from the density preference (item 9a).
 double projectRowHeight(BuildContext context) => context.tokens.row + 2;
@@ -32,6 +35,8 @@ class ProjectPanel extends StatefulWidget {
     required this.onShowAsset,
     this.run = runProcess,
     this.searchFocus,
+    this.onOpenScript,
+    this.generateBehaviours,
   });
 
   final ProjectBrowserModel model;
@@ -44,6 +49,14 @@ class ProjectPanel extends StatefulWidget {
   final VoidCallback onShowAsset;
   final RunProcess run;
   final FocusNode? searchFocus;
+
+  /// A script (absolute path) double-clicked: into the IDE. Returns the
+  /// problem, or null.
+  final Future<String?> Function(String file)? onOpenScript;
+
+  /// `fynkel codegen` for New Behaviour (returns the problem, or null);
+  /// null leaves New Behaviour off.
+  final Future<String?> Function()? generateBehaviours;
 
   @override
   State<ProjectPanel> createState() => _ProjectPanelState();
@@ -155,6 +168,88 @@ class _ProjectPanelState extends State<ProjectPanel> {
       return;
     }
     model.select(e.id, toggle: meta, range: shift);
+  }
+
+  Future<void> _openScript(String rel) async {
+    model.selectScript(rel);
+    final open = widget.onOpenScript;
+    if (open == null) return;
+    final err = await open(model.scriptFile(rel));
+    if (err != null && mounted) Notices.maybeOf(context)?.show('Open in IDE failed: $err');
+  }
+
+  void _tapScript(String rel) {
+    _listFocus.requestFocus();
+    final now = DateTime.now();
+    final doubled =
+        _lastTapId == 'script:$rel' &&
+        _lastTapAt != null &&
+        now.difference(_lastTapAt!) < const Duration(milliseconds: 400);
+    _lastTapId = 'script:$rel';
+    _lastTapAt = now;
+    if (doubled) {
+      _lastTapAt = null;
+      _openScript(rel);
+      return;
+    }
+    model.selectScript(rel);
+  }
+
+  bool get _canNewBehaviour => widget.generateBehaviours != null && model.canNewBehaviour;
+
+  /// New ▾ → Behaviour: asks for the class name, writes the file from the
+  /// template, opens it in the IDE, then runs `fynkel codegen` and
+  /// registers the type.
+  Future<void> _newBehaviour({String? inFolder}) async {
+    final generate = widget.generateBehaviours;
+    if (generate == null || !model.canNewBehaviour) return;
+    final folder = inFolder ?? model.newBehaviourFolder;
+    final name = await showDialog<String>(
+      animationStyle: AnimationStyle.noAnimation,
+      context: context,
+      builder: (context) => _NewBehaviourDialog(folder: folder),
+    );
+    if (name == null || !mounted) return;
+    final b = model.writeNewBehaviour(name, inFolder: folder);
+    if (b == null) return;
+    await _openScript(b.rel);
+    final problem = await model.generateBehaviour(b, generate);
+    if (problem == null && mounted) {
+      Notices.maybeOf(context)?.show('${b.id} is ready: Add Component lists it.');
+    }
+  }
+
+  Future<void> _scriptMenu(BuildContext context, String rel, Offset at, {required bool folder}) async {
+    if (!folder) model.selectScript(rel);
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final choice = await showMenu<String>(
+      popUpAnimationStyle: AnimationStyle.noAnimation,
+      context: context,
+      position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
+      items: [
+        if (folder)
+          const PopupMenuItem(value: 'open', child: Text('Show Folder'))
+        else
+          PopupMenuItem(value: 'open', enabled: widget.onOpenScript != null, child: const Text('Open in IDE')),
+        const PopupMenuItem(value: 'reveal', child: Text('Reveal in Finder')),
+        PopupMenuItem(value: 'copyPath', child: Text('Copy path  lib/$rel')),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 'behaviour', enabled: _canNewBehaviour, child: const Text('New Behaviour Here…')),
+      ],
+    );
+    if (!mounted) return;
+    final here = folder ? rel : (rel.contains('/') ? rel.substring(0, rel.lastIndexOf('/')) : '');
+    switch (choice) {
+      case 'open':
+        folder ? model.showScripts(rel) : await _openScript(rel);
+      case 'reveal':
+        final err = await revealInFileBrowser(rel.isEmpty ? model.scriptsDir : model.scriptFile(rel), run: widget.run);
+        if (err != null && mounted) Notices.maybeOf(this.context)?.show('Reveal in Finder failed: $err');
+      case 'copyPath':
+        await Clipboard.setData(ClipboardData(text: 'lib/$rel'));
+      case 'behaviour':
+        await _newBehaviour(inFolder: here);
+    }
   }
 
   Future<void> _reveal(String rel) async {
@@ -388,6 +483,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
     }
     final shift = HardwareKeyboard.instance.isShiftPressed;
     final meta = HardwareKeyboard.instance.isMetaPressed;
+    if (model.inScripts) return _onScriptKey(k);
     if (k == LogicalKeyboardKey.arrowDown) {
       model.step(1, extend: shift);
     } else if (k == LogicalKeyboardKey.arrowUp) {
@@ -410,6 +506,29 @@ class _ProjectPanelState extends State<ProjectPanel> {
       }
     } else if (k == LogicalKeyboardKey.arrowLeft && model.view == BrowserView.folders && !model.filtering) {
       model.goUp();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
+  KeyEventResult _onScriptKey(LogicalKeyboardKey k) {
+    if (k == LogicalKeyboardKey.arrowDown) {
+      model.stepScript(1);
+    } else if (k == LogicalKeyboardKey.arrowUp) {
+      model.stepScript(-1);
+    } else if (k == LogicalKeyboardKey.enter) {
+      final lead = model.scriptLead;
+      if (lead != null) _openScript(lead);
+    } else if (k == LogicalKeyboardKey.escape) {
+      if (model.query.isNotEmpty) {
+        _search.clear();
+        model.setQuery('');
+      } else {
+        model.selectScript(null);
+      }
+    } else if (k == LogicalKeyboardKey.arrowLeft && model.view == BrowserView.folders && model.query.isEmpty) {
+      model.scriptsUp();
     } else {
       return KeyEventResult.ignored;
     }
@@ -439,8 +558,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
 
   Widget _body(BuildContext context) {
     final theme = Theme.of(context);
-    final folders = model.visibleFolders;
-    final assets = model.visibleAssets;
+    final scripts = model.inScripts;
+    final folders = scripts ? const <String>[] : model.visibleFolders;
+    final assets = scripts ? const <AssetEntry>[] : model.visibleAssets;
     return Column(
       children: [
         _toolbar(context, theme),
@@ -460,7 +580,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         _columnHeader(context, theme, columns: columns),
-                        Expanded(child: _list(context, theme, folders, assets, columns: columns)),
+                        Expanded(
+                          child: scripts
+                              ? _scriptList(context, theme, columns: columns)
+                              : _list(context, theme, folders, assets, columns: columns),
+                        ),
                       ],
                     );
                   },
@@ -470,7 +594,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           ),
         ),
         if (model.lastError != null) _errorBar(context, theme, model.lastError!),
-        _status(context, theme, assets.length),
+        scripts ? _scriptStatus(context, theme) : _status(context, theme, assets.length),
       ],
     );
   }
@@ -516,6 +640,115 @@ class _ProjectPanelState extends State<ProjectPanel> {
                     ? _folderRow(context, theme, folders[i], inList: true, columns: columns)
                     : _assetRow(context, theme, assets[i - folders.length], columns: columns),
               ),
+      ),
+    );
+  }
+
+  Widget _scriptList(BuildContext context, ThemeData theme, {required bool columns}) {
+    final folders = model.visibleScriptFolders;
+    final files = model.visibleScripts;
+    return Focus(
+      focusNode: _listFocus,
+      onKeyEvent: _onKey,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        excludeFromSemantics: true,
+        onTap: () {
+          _listFocus.requestFocus();
+          model.selectScript(null);
+        },
+        onSecondaryTapUp: (d) => _scriptMenu(context, model.scriptFolder, d.globalPosition, folder: true),
+        child: folders.isEmpty && files.isEmpty
+            ? Center(
+                child: Text(
+                  model.query.trim().isNotEmpty ? 'Nothing matches.' : 'No Dart files here. Use New ▾ → Behaviour.',
+                  key: const Key('project.noRows'),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
+                ),
+              )
+            : ListView.builder(
+                key: const Key('project.scripts.list'),
+                itemCount: folders.length + files.length,
+                itemExtent: projectRowHeight(context),
+                itemBuilder: (context, i) {
+                  if (i < folders.length) {
+                    final f = folders[i];
+                    return _ScriptRow(
+                      key: Key('project.scripts.row.$f'),
+                      model: model,
+                      rel: f,
+                      folder: true,
+                      depth: 0,
+                      current: false,
+                      columns: columns,
+                      onTap: () {
+                        _listFocus.requestFocus();
+                        model.showScripts(f);
+                      },
+                      onSecondaryTap: (at) => _scriptMenu(context, f, at, folder: true),
+                    );
+                  }
+                  final f = files[i - folders.length];
+                  return _ScriptRow(
+                    key: Key('project.script.$f'),
+                    model: model,
+                    rel: f,
+                    folder: false,
+                    depth: 0,
+                    current: model.scriptLead == f,
+                    showPath: model.view == BrowserView.list || model.query.trim().isNotEmpty,
+                    columns: columns,
+                    onTap: () => _tapScript(f),
+                    onSecondaryTap: (at) => _scriptMenu(context, f, at, folder: false),
+                  );
+                },
+              ),
+      ),
+    );
+  }
+
+  Widget _scriptStatus(BuildContext context, ThemeData theme) {
+    final t = context.tokens;
+    final total = model.scripts.files.length;
+    final shown = model.visibleScripts.length;
+    final where = model.view == BrowserView.list
+        ? 'lib'
+        : model.scriptFolder.isEmpty
+        ? 'lib'
+        : 'lib/${model.scriptFolder}';
+    final text =
+        model.scriptsBusy ??
+        [shown == total ? '$total script${total == 1 ? '' : 's'}' : '$shown of $total scripts', 'in $where'].join(' ');
+    return Container(
+      height: t.row + 2,
+      alignment: Alignment.centerLeft,
+      padding: EdgeInsets.symmetric(horizontal: t.pad),
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(top: t.hairline),
+      ),
+      child: Row(
+        children: [
+          if (model.view == BrowserView.folders && model.scriptFolder.isNotEmpty)
+            InkWell(
+              key: const Key('project.up'),
+              onTap: model.scriptsUp,
+              child: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(FIcons.arrowUpward, size: 13)),
+            ),
+          if (model.scriptsBusy != null) ...[
+            const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5)),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Text(
+              text,
+              key: const Key('project.status'),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -621,7 +854,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
               decoration: InputDecoration(
                 prefixIcon: Icon(FIcons.search, size: 13, color: t.textDisabled),
                 prefixIconConstraints: BoxConstraints(minWidth: t.row, minHeight: t.row),
-                hintText: model.view == BrowserView.folders && model.folder.isNotEmpty
+                hintText: model.inScripts
+                    ? 'Search scripts and behaviour ids…'
+                    : model.view == BrowserView.folders && model.folder.isNotEmpty
                     ? 'Search under ${model.folder}…'
                     : 'Search name, path, id, sub-asset…',
                 suffixIcon: model.query.isEmpty
@@ -698,7 +933,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           PopupMenuButton<String>(
             popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('project.new'),
-            tooltip: 'New scene, prefab, material or folder in the shown folder',
+            tooltip: 'New scene, prefab, material, folder or behaviour',
             icon: const Icon(FIcons.add),
             enabled: model.canEdit,
             itemBuilder: (context) => [
@@ -727,8 +962,26 @@ class _ProjectPanelState extends State<ProjectPanel> {
                 value: 'folder',
                 child: ListTile(dense: true, leading: Icon(FIcons.createNewFolderOutlined), title: Text('New Folder')),
               ),
+              if (widget.generateBehaviours != null && model.hasScripts) ...[
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  key: const Key('project.new.behaviour'),
+                  value: 'behaviour',
+                  enabled: _canNewBehaviour,
+                  child: ListTile(
+                    dense: true,
+                    leading: const Icon(FIcons.code),
+                    title: const Text('New Behaviour…'),
+                    subtitle: Text('in lib/${model.newBehaviourFolder}', overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
             ],
-            onSelected: (v) => v == 'folder' ? model.newFolder() : model.newDocument(v),
+            onSelected: (v) => switch (v) {
+              'folder' => model.newFolder(),
+              'behaviour' => _newBehaviour(),
+              _ => model.newDocument(v),
+            },
           ),
           IconButton(
             key: const Key('project.undo'),
@@ -755,6 +1008,22 @@ class _ProjectPanelState extends State<ProjectPanel> {
       children: [
         _folderRow(context, theme, '', inList: false),
         for (final f in folders) _folderRow(context, theme, f, inList: false),
+        if (model.hasScripts)
+          for (final f in ['', ...model.scripts.folders])
+            _ScriptRow(
+              key: Key('project.scripts.tree.${f.isEmpty ? 'root' : f}'),
+              model: model,
+              rel: f,
+              folder: true,
+              depth: f.isEmpty ? 0 : f.split('/').length,
+              current: model.inScripts && model.scriptFolder == f,
+              tree: true,
+              onTap: () {
+                _listFocus.requestFocus();
+                model.showScripts(f);
+              },
+              onSecondaryTap: (at) => _scriptMenu(context, f, at, folder: true),
+            ),
       ],
     );
   }
@@ -762,7 +1031,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
   Widget _folderRow(BuildContext context, ThemeData theme, String rel, {required bool inList, bool columns = false}) {
     final depth = inList || rel.isEmpty ? 0 : rel.split('/').length;
     final name = rel.isEmpty ? 'assets' : p.basename(rel);
-    final current = !inList && rel == model.folder;
+    final current = !inList && !model.inScripts && rel == model.folder;
     final renaming = model.renamingFolder == rel && rel.isNotEmpty;
     return _FolderRow(
       key: Key('project.folder.${inList ? 'row' : 'tree'}.${rel.isEmpty ? 'root' : rel}'),
@@ -1185,6 +1454,190 @@ class _AssetRow extends StatelessWidget {
       ),
       childWhenDragging: Opacity(opacity: .4, child: content),
       child: interactive,
+    );
+  }
+}
+
+/// A Scripts row: `lib/` and its folders in the tree, a folder or a `.dart`
+/// file in the list (kind `behaviour` when it declares one, its ids under
+/// Contents).
+class _ScriptRow extends StatelessWidget {
+  const _ScriptRow({
+    super.key,
+    required this.model,
+    required this.rel,
+    required this.folder,
+    required this.depth,
+    required this.current,
+    this.tree = false,
+    this.showPath = false,
+    this.columns = false,
+    required this.onTap,
+    required this.onSecondaryTap,
+  });
+
+  final ProjectBrowserModel model;
+  final String rel;
+  final bool folder;
+  final int depth;
+  final bool current;
+
+  /// A row of the folder tree (no columns).
+  final bool tree;
+  final bool showPath;
+  final bool columns;
+  final VoidCallback onTap;
+  final void Function(Offset at) onSecondaryTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final t = context.tokens;
+    final focused = PanelFocus.of(context);
+    final on = current ? t.onSelectedRow(focused: focused) : t.text;
+    final dim = current ? t.onSelectedRowSecondary(focused: focused) : t.textDisabled;
+    final kind = folder ? 'folder' : model.scriptKind(rel);
+    final ids = folder ? const <String>[] : model.behaviourIds[rel] ?? const <String>[];
+    final name = rel.isEmpty ? 'Scripts' : p.basename(rel);
+    final icon = folder
+        ? (rel.isEmpty ? FIcons.code : (current ? FIcons.folderOpen : FIcons.folderOutlined))
+        : FIcons.descriptionOutlined;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      onSecondaryTapUp: (d) => onSecondaryTap(d.globalPosition),
+      child: Tooltip(
+        message: rel.isEmpty ? 'lib/ — the game\'s Dart source' : 'lib/$rel',
+        waitDuration: const Duration(milliseconds: 600),
+        child: Container(
+          height: projectRowHeight(context),
+          padding: EdgeInsets.only(left: 6.0 + depth * 14),
+          color: current ? t.selectedRow(focused: focused) : null,
+          child: Row(
+            children: [
+              SizedBox(
+                width: tree ? 14 : t.row - 2,
+                child: Icon(icon, size: 14, color: current ? dim : t.textSecondary),
+              ),
+              SizedBox(width: tree ? 6 : 8),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      flex: 3,
+                      child: Text(
+                        name,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: on),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (showPath && rel.contains('/')) ...[
+                      const SizedBox(width: 8),
+                      Flexible(
+                        flex: 3,
+                        child: Text(
+                          rel.substring(0, rel.lastIndexOf('/')),
+                          style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (!tree) ...[
+                SizedBox(
+                  width: _AssetRow.kindWidth,
+                  child: Text(kind, style: theme.textTheme.bodySmall?.copyWith(color: dim)),
+                ),
+                if (columns) ...[
+                  SizedBox(
+                    width: _AssetRow.contentsWidth,
+                    child: Text(
+                      ids.map((id) => id.substring(id.lastIndexOf('.') + 1)).join(', '),
+                      key: Key('project.script.contents.$rel'),
+                      style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: _AssetRow.sizeWidth),
+                ],
+                const SizedBox(width: _AssetRow.endGap),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// New Behaviour's name: an UpperCamelCase class name, checked as typed.
+class _NewBehaviourDialog extends StatefulWidget {
+  const _NewBehaviourDialog({required this.folder});
+
+  /// Where the file goes, under `lib/`.
+  final String folder;
+
+  @override
+  State<_NewBehaviourDialog> createState() => _NewBehaviourDialogState();
+}
+
+class _NewBehaviourDialogState extends State<_NewBehaviourDialog> {
+  final _name = TextEditingController(text: 'NewBehaviour')
+    ..selection = const TextSelection(baseOffset: 0, extentOffset: 12);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = _name.text.trim();
+    final ok = isBehaviourClassName(name);
+    final file = ['lib', if (widget.folder.isNotEmpty) widget.folder, '${ok ? snakeCase(name) : '…'}.dart'].join('/');
+    void submit() {
+      if (ok) Navigator.pop(context, name);
+    }
+
+    return AlertDialog(
+      key: const Key('project.newBehaviour'),
+      title: const Text('New Behaviour'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: const Key('project.newBehaviour.name'),
+              controller: _name,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Class name',
+                errorText: ok || name.isEmpty ? null : 'A capital letter, then letters and digits',
+              ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => submit(),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '$file opens in your IDE; fynkel codegen then generates its schema (seconds).',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          key: const Key('project.newBehaviour.create'),
+          onPressed: ok ? submit : null,
+          child: const Text('Create'),
+        ),
+      ],
     );
   }
 }

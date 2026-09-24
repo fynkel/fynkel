@@ -2,7 +2,8 @@
 // fixture project: every operation leaves the project validating clean,
 // an id survives a rename, a referenced asset is refused and then forced,
 // import settings reach the sidecar, and undo/redo run through the
-// session's own history.
+// session's own history. New Behaviour registers its type with the session
+// (what `fynkel codegen` writes is stood in for).
 import 'dart:convert';
 import 'dart:io';
 
@@ -202,6 +203,41 @@ void main() {
     expect(Directory('${dir.path}/assets/textures/ui').existsSync(), isFalse);
     model.undo();
     expect(model.entries.map((e) => e.path), contains('audio/tone.wav'));
+    await expectClean();
+  });
+
+  test('New Behaviour: the session registers the generated type, Add Component sees its schema', () async {
+    File('${dir.path}/pubspec.yaml').writeAsStringSync('name: fixture\n');
+    Directory('${dir.path}/lib/game').createSync(recursive: true);
+    expect(model.canNewBehaviour, isTrue);
+    expect(project.typeSchemas().map((t) => t.type), isNot(contains('game.Hover')));
+
+    final b = model.writeNewBehaviour('Hover')!;
+    expect(b.rel, 'game/hover.dart');
+    final problem = await model.generateBehaviour(b, () async {
+      // What `fynkel codegen --project` leaves behind for it.
+      final spinner = File('${dir.path}/schemas/behaviours/game.Spinner.schema.json').readAsStringSync();
+      File('${dir.path}/schemas/behaviours/game.Hover.schema.json')
+          .writeAsStringSync(spinner.replaceAll('game.Spinner', 'game.Hover'));
+      File('${dir.path}/lib/generated/behaviours.g.json')
+        ..createSync(recursive: true)
+        ..writeAsStringSync(
+          jsonEncode({
+            'package': 'fixture',
+            'behaviours': [
+              {'id': 'game.Hover', 'version': 1, 'class': 'Hover', 'library': 'package:fixture/game/hover.dart'},
+            ],
+          }),
+        );
+      return null;
+    });
+    expect(problem, isNull, reason: model.lastError);
+    expect(project.typeSchemas().map((t) => t.type), contains('game.Hover'));
+    expect(model.scriptKind('game/hover.dart'), 'behaviour');
+    final registry =
+        (jsonDecode(File('${dir.path}/fynkel.project.json').readAsStringSync()) as Map)['components'] as Map;
+    expect(registry['game.Hover'], {'kind': 'behaviour', 'version': 1, 'description': 'Hover (lib/game/hover.dart).'});
+    expect(model.history.undoLabel, 'Register Behaviour game.Hover');
     await expectClean();
   });
 }

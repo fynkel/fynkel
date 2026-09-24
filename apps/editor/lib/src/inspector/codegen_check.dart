@@ -13,8 +13,10 @@
 //     so a check never writes). It takes seconds; it runs in the background
 //     at open and on request, never on a timer.
 //
-// The editor never regenerates anything: the banner shows the command to
-// run and a button to copy it.
+// The banner shows the command to run and a button to copy it. The
+// editor runs the generating command itself only on an explicit action —
+// Create → Behaviour ([generate], ADR-0016 amendment of 2026-09-24): the
+// CLI as a subprocess, never game code in the editor process.
 import 'dart:convert';
 import 'dart:io';
 
@@ -108,16 +110,20 @@ final class CodegenCheck extends ChangeNotifier {
 
   bool get isDartPackage => File(p.join(projectDir, 'pubspec.yaml')).existsSync();
 
-  /// What to run to fix it (shown, copied; never run by the editor).
+  /// What to run to fix it (shown and copied; [generate] runs its
+  /// project-only form).
   String get command => 'fynkel codegen --project ${_quote(projectDir)}';
 
-  /// The command line the check runs, for the log and the tests.
-  List<String> arguments() => [
+  /// The command line the check runs, for the log and the tests; with
+  /// [check] false the one [generate] runs, which writes the game's files
+  /// only (`--project-only`: never the engine's own generated files).
+  List<String> arguments({bool check = true}) => [
     'codegen',
-    '--check',
+    if (check) '--check',
     '--project',
     projectDir,
-    if (repoRoot() != null) ...['--root', repoRoot()!],
+    if (!check) '--project-only',
+    if (check && repoRoot() != null) ...['--root', repoRoot()!],
     '--json',
   ];
 
@@ -149,6 +155,31 @@ final class CodegenCheck extends ChangeNotifier {
     }
     checkedAt = DateTime.now();
     notifyListeners();
+  }
+
+  /// Regenerates the behaviour metadata and schemas (`fynkel codegen
+  /// --project`, which writes). Returns the problem, or null when the files
+  /// were written or already up to date; the status follows either way.
+  Future<String?> generate() async {
+    if (!isDartPackage) return 'the project is not a Dart package (no pubspec.yaml)';
+    final exe = cli();
+    if (exe == null) return 'no `fynkel` CLI is configured (Preferences → Fynkel CLI)';
+    status = CodegenStatus.running;
+    error = null;
+    notifyListeners();
+    runs++;
+    try {
+      final r = await run(exe, arguments(check: false), workingDirectory: projectDir);
+      if (_disposed) return 'the project closed';
+      _read(r);
+    } catch (e) {
+      if (_disposed) return 'the project closed';
+      status = CodegenStatus.failed;
+      error = 'could not run `fynkel codegen`: $e';
+    }
+    checkedAt = DateTime.now();
+    notifyListeners();
+    return status == CodegenStatus.upToDate ? null : error ?? 'fynkel codegen left the files stale';
   }
 
   /// The project closed while a check ran: its answer is dropped.

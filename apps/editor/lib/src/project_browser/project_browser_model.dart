@@ -4,7 +4,9 @@
 // (`EditorProject.operate`), the browser only chooses paths and names.
 // Folders are not assets: creating, renaming and deleting one is file
 // work here, and a folder rename moves each asset under it through the
-// session so every id survives.
+// session so every id survives. The Scripts root (roadmap Phase 2 item 1)
+// lists `lib/` beside the assets (`scripts.dart`).
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show Color;
 
@@ -14,6 +16,7 @@ import 'package:path/path.dart' as p;
 
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../project/editor_project.dart';
+import 'scripts.dart';
 
 enum BrowserView { folders, list }
 
@@ -88,6 +91,7 @@ final class DeleteRefusal {
 final class ProjectBrowserModel extends ChangeNotifier {
   ProjectBrowserModel({required this.project}) {
     project.addListener(_onProject);
+    _files = project.fileChanges.listen(_onFiles);
   }
 
   final EditorProject project;
@@ -142,6 +146,9 @@ final class ProjectBrowserModel extends ChangeNotifier {
     _sizes.clear();
     _folderCounts = null;
     _history = null;
+    // An operation may have been registerBehaviour: the metadata moved.
+    _scripts = null;
+    _behaviourIds = null;
     // What vanished leaves the selection.
     selection.removeWhere((id) => !_byId.containsKey(id));
     if (lead != null && !_byId.containsKey(lead)) lead = selection.lastOrNull;
@@ -316,6 +323,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   void setFolder(String rel) {
     _sync();
     if (rel.isNotEmpty && !_folders.contains(rel)) return;
+    inScripts = false;
     folder = rel;
     if (view != BrowserView.folders) view = BrowserView.folders;
     notifyListeners();
@@ -403,6 +411,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   void reveal(String id) {
     final e = entry(id);
     if (e == null) return;
+    inScripts = false;
     if (view == BrowserView.folders && !filtering) folder = _folderOf(e);
     select(id);
   }
@@ -421,7 +430,12 @@ final class ProjectBrowserModel extends ChangeNotifier {
   }
 
   /// What a restart brings back: the folder, the view and the padlock.
-  Map<String, Object?> get remembered => {'folder': folder, 'view': view.name, if (locked) 'locked': true};
+  Map<String, Object?> get remembered => {
+    'folder': folder,
+    'view': view.name,
+    if (inScripts) 'scripts': scriptFolder,
+    if (locked) 'locked': true,
+  };
 
   /// Restores [remembered]; a folder that is gone falls back to the root.
   void recall(Object? json) {
@@ -430,6 +444,11 @@ final class ProjectBrowserModel extends ChangeNotifier {
     final f = json['folder'];
     if (f is String && (f.isEmpty || _folders.contains(f))) folder = f;
     view = BrowserView.values.asNameMap()[json['view']] ?? view;
+    final s = json['scripts'];
+    if (s is String && (s.isEmpty || scripts.folders.contains(s))) {
+      inScripts = true;
+      scriptFolder = s;
+    }
     locked = json['locked'] == true;
     notifyListeners();
   }
@@ -848,9 +867,188 @@ final class ProjectBrowserModel extends ChangeNotifier {
   OperationResult? undo() => history.canUndo ? _guard(project.undoAsset) : null;
   OperationResult? redo() => history.canRedo ? _guard(project.redoAsset) : null;
 
+  // ── Scripts (roadmap Phase 2 item 1) ────────────────────────────────
+
+  /// `lib/`: the game's Dart source, the Scripts root.
+  String get scriptsDir => p.join(project.dir, 'lib');
+
+  /// Whether the project has a `lib/` to show (a Dart package's).
+  bool get hasScripts => Directory(scriptsDir).existsSync();
+
+  /// The browser shows `lib/` rather than the assets.
+  bool inScripts = false;
+
+  /// The scripts folder shown, relative to `lib/` (`''` is `lib/` itself).
+  String scriptFolder = '';
+
+  /// The selected script, relative to `lib/` (one at a time: scripts only
+  /// open, they do not move or rename here).
+  String? scriptLead;
+
+  /// What New Behaviour is doing while `fynkel codegen` runs, for the
+  /// status bar; null when idle.
+  String? scriptsBusy;
+
+  StreamSubscription<List<String>>? _files;
+  ScriptTree? _scripts;
+  Map<String, List<String>>? _behaviourIds;
+
+  ScriptTree get scripts => _scripts ??= ScriptTree.read(scriptsDir);
+
+  /// The behaviour ids each script declares, from the committed metadata.
+  Map<String, List<String>> get behaviourIds => _behaviourIds ??= behaviourScripts(project.behaviourMetadata());
+
+  /// The absolute path of a `lib/`-relative script.
+  String scriptFile(String rel) => p.join(scriptsDir, p.joinAll(rel.split('/')));
+
+  void _onFiles(List<String> changed) {
+    if (_disposed || !changed.any((c) => p.isWithin(scriptsDir, c))) return;
+    _scripts = null;
+    _behaviourIds = null;
+    if (scriptLead != null && !scripts.files.contains(scriptLead)) scriptLead = null;
+    if (scriptFolder.isNotEmpty && !scripts.folders.contains(scriptFolder)) scriptFolder = '';
+    notifyListeners();
+  }
+
+  bool get _searchingScripts => query.trim().isNotEmpty;
+
+  /// The sub-folders of [scriptFolder] (none while searching or in the list view).
+  List<String> get visibleScriptFolders {
+    if (view == BrowserView.list || _searchingScripts) return const [];
+    return [
+      for (final f in scripts.folders)
+        if (_parentOf(f) == scriptFolder) f,
+    ];
+  }
+
+  /// The scripts shown: the folder's own, everything under it while
+  /// searching, every one in the list view. The kind filter is the assets'.
+  List<String> get visibleScripts {
+    final q = query.trim().toLowerCase();
+    final out = [
+      for (final f in scripts.files)
+        if (view == BrowserView.list ||
+            (_searchingScripts ? scriptFolder.isEmpty || f.startsWith('$scriptFolder/') : _parentOf(f) == scriptFolder))
+          if (q.isEmpty ||
+              f.toLowerCase().contains(q) ||
+              (behaviourIds[f] ?? const []).any((id) => id.toLowerCase().contains(q)))
+            f,
+    ];
+    int byName(String a, String b) => p.basename(a).toLowerCase().compareTo(p.basename(b).toLowerCase());
+    out.sort(switch (sort) {
+      AssetSort.path => (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+      AssetSort.kind => (a, b) {
+        final r = scriptKind(a).compareTo(scriptKind(b));
+        return r != 0 ? r : byName(a, b);
+      },
+      _ => byName,
+    });
+    return descending ? out.reversed.toList() : out;
+  }
+
+  /// A script row's kind: `behaviour`, `generated` or `script`.
+  String scriptKind(String rel) => behaviourIds.containsKey(rel)
+      ? 'behaviour'
+      : isGeneratedScript(rel)
+      ? 'generated'
+      : 'script';
+
+  /// Shows the Scripts root at [rel] (under `lib/`).
+  void showScripts([String rel = '']) {
+    if (rel.isNotEmpty && !scripts.folders.contains(rel)) return;
+    inScripts = true;
+    scriptFolder = rel;
+    if (view != BrowserView.folders) view = BrowserView.folders;
+    notifyListeners();
+  }
+
+  void selectScript(String? rel) {
+    if (rel == scriptLead) return;
+    scriptLead = rel;
+    notifyListeners();
+  }
+
+  /// Moves the script selection by [delta] rows.
+  void stepScript(int delta) {
+    final rows = visibleScripts;
+    if (rows.isEmpty) return;
+    var i = scriptLead == null ? -1 : rows.indexOf(scriptLead!);
+    i = (i + delta).clamp(0, rows.length - 1);
+    selectScript(rows[i]);
+  }
+
+  /// Up one scripts folder.
+  void scriptsUp() => showScripts(_parentOf(scriptFolder));
+
+  /// Where New Behaviour writes: the shown scripts folder, else `lib/game`
+  /// when the project has one (the template's layout), else `lib/`.
+  String get newBehaviourFolder => inScripts ? scriptFolder : (scripts.folders.contains('game') ? 'game' : '');
+
+  /// Whether New Behaviour can run: an editable Dart package with `lib/`.
+  bool get canNewBehaviour => canEdit && hasScripts && File(p.join(project.dir, 'pubspec.yaml')).existsSync();
+
+  /// Create → Behaviour, first half: [className]'s file from the template
+  /// in [inFolder] (the [newBehaviourFolder] by default), shown and
+  /// selected. Null, with [lastError] saying why, when refused.
+  NewBehaviour? writeNewBehaviour(String className, {String? inFolder}) {
+    final metadata = project.behaviourMetadata();
+    final taken = {
+      for (final b in metadata?['behaviours'] as List? ?? const [])
+        if (b is Map && b['id'] is String) b['id'] as String,
+    };
+    final NewBehaviour b;
+    try {
+      b = writeBehaviour(
+        libDir: scriptsDir,
+        folder: inFolder ?? newBehaviourFolder,
+        className: className,
+        namespace: behaviourNamespace(metadata),
+        taken: taken,
+      );
+    } on FormatException catch (e) {
+      lastError = e.message;
+      notifyListeners();
+      return null;
+    }
+    lastError = null;
+    _scripts = null;
+    inScripts = true;
+    scriptFolder = _parentOf(b.rel);
+    scriptLead = b.rel;
+    view = BrowserView.folders;
+    notifyListeners();
+    return b;
+  }
+
+  /// Create → Behaviour, second half: [generate] (`fynkel codegen`) writes
+  /// the metadata and schema, then the session registers the type
+  /// (`registerBehaviour`, undoable) so the Inspector's Add Component lists
+  /// it at once. Returns the problem, or null.
+  Future<String?> generateBehaviour(NewBehaviour b, Future<String?> Function() generate) async {
+    scriptsBusy = 'Generating ${b.id} (fynkel codegen)…';
+    notifyListeners();
+    final problem = await generate();
+    if (_disposed) return problem;
+    scriptsBusy = null;
+    if (problem != null) {
+      lastError = 'lib/${b.rel} was written, but fynkel codegen failed: $problem';
+      notifyListeners();
+      return lastError;
+    }
+    final r = _guard(() => project.registerBehaviour(b.id, description: '${b.className} (lib/${b.rel}).'));
+    if (r == null) return lastError;
+    if (r.json['inMetadata'] != true) {
+      lastError = 'fynkel codegen did not list ${b.id}: check lib/${b.rel} for errors.';
+      notifyListeners();
+      return lastError;
+    }
+    return null;
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_files?.cancel());
     project.removeListener(_onProject);
     super.dispose();
   }

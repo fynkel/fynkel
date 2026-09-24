@@ -186,7 +186,8 @@ abstract class EditorProject extends ChangeNotifier {
   List<TypeSchema> typeSchemas();
 
   /// The committed behaviour metadata (`lib/generated/behaviours.g.json`)
-  /// as read at open, or null when the project has none.
+  /// as the session last read it (at open, and at `registerBehaviour`), or
+  /// null when the project has none.
   Map<String, Object?>? behaviourMetadata();
 
   /// The asset database now.
@@ -254,7 +255,7 @@ abstract class EditorProject extends ChangeNotifier {
 
   /// An asset operation through the session (`newDocument`, `renameAsset`,
   /// `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
-  /// `undoAsset`, `redoAsset`) — one history step each, the database re-read
+  /// `registerBehaviour`, `undoAsset`, `redoAsset`) — one history step each, the database re-read
   /// incrementally. Throws `AuthoringException` when refused; nothing was
   /// touched then.
   OperationResult operate(String kind, [Map<String, Object?> args = const {}]);
@@ -285,6 +286,12 @@ abstract class EditorProject extends ChangeNotifier {
     List<int?>? layersFrom,
     List<int?>? tagsFrom,
   }) => operate('setLayersAndTags', {'layers': layers, 'tags': tags, 'layersFrom': ?layersFrom, 'tagsFrom': ?tagsFrom});
+
+  /// A behaviour `fynkel codegen` just generated joins the project: the
+  /// component registry gains [id] when missing, and the session re-reads
+  /// the metadata and schemas (Create → Behaviour).
+  OperationResult registerBehaviour(String id, {String? description}) =>
+      operate('registerBehaviour', {'id': id, 'description': ?description});
 
   /// The absolute path of an asset-root-relative [path].
   String assetFile(String path) => p.join(assetsDir, p.joinAll(path.split('/')));
