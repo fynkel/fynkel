@@ -1817,3 +1817,10 @@ The M3 backlog as it landed, for the record:
      getters now.
    - A saved script now updates the Inspector: the editor runs codegen
      and the new `reloadBehaviours` (second ADR-0016 amendment).
+   - A field added to a script later showed "—" because the scene had
+     no value for it. The Inspector now shows the script's default, as
+     the game already used.
+   - Faster: the editor keeps `fynkel codegen --watch` running, so a
+     save reaches the Inspector in about a second (it was 3.3 s, and
+     18 s for the first save). Play waits while a script has an error
+     (third ADR-0016 amendment).

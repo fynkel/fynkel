@@ -1,6 +1,6 @@
 # ADR-0016: Editor architecture authoring service edit preview Play process docking
 
-**Status:** Accepted; its Play decision superseded by ADR-0021 (2026-09-23: Play runs in the editor, the separate process becomes Build and Run); amended 2026-09-24 (the editor may run `fynkel codegen` for Create → Behaviour, and when a script is saved, below)  
+**Status:** Accepted; its Play decision superseded by ADR-0021 (2026-09-23: Play runs in the editor, the separate process becomes Build and Run); amended 2026-09-24 (the editor may run `fynkel codegen` for Create → Behaviour, and when a script is saved; the third keeps `fynkel codegen --watch` running, below)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
@@ -60,3 +60,12 @@ The first amendment ruled out running codegen on save. Using it showed why that 
 
 - When a `.dart` file under the game's `lib/` is saved, added or deleted (not `lib/generated/` or a `.g.dart`), the editor runs the same `fynkel codegen --project <game> --project-only --json` subprocess, debounced (0.5 s) and after any command already running. On success, the session's new `reloadBehaviours` operation re-reads the metadata and schemas. It writes nothing and is not an undo step.
 - **Still true:** the subprocess is the CLI, so the editor process never loads game code or `build_runner`. `--project-only` never touches the engine's files. A failed run (the code does not build yet) is shown in the toolbar, reloads nothing, and leaves the committed generated files in place, because the CLI restores them on any failure. The `--check` banner and the terminal command are unchanged.
+
+## Amendment (2026-09-24, third): the editor keeps `fynkel codegen --watch` running
+
+The second amendment ran one `fynkel codegen` per save. Measured on the reference game, that is 3.3 s from save to Inspector, and 18 s for the first save after opening: most of it is `build_runner` starting up. `build_runner watch` stays warm and rebuilds in well under a second. So:
+
+- `fynkel codegen --watch --project <game>` runs `build_runner watch` in the game package, splits the schemas after every build, and prints one JSON line per build (`building`, `built` with `written` or `upToDate`, `failed` with the error). It ends when its stdin closes, taking build_runner's whole process group with it.
+- The editor starts it when a Dart game project opens and keeps it for the session. Its first build replaces the check at open. Every build that wrote reloads the behaviour metadata (`reloadBehaviours`). Create → Behaviour waits for the build its new file starts instead of running a second build_runner. A save reaches the Inspector in about a second.
+- **What changes:** the editor now writes the generated files at open when they are stale, as Unity recompiles when a project opens. And while a script does not compile, the generated files are absent. build_runner deletes them when a build fails, and putting them back starts another build that fails again. The Inspector keeps its last fields. The banner and toolbar show the error. Play refuses until it is fixed, as Unity's *All compiler errors have to be fixed before you can enter Play mode*. When the watch ends with the error unfixed (the editor quits), the CLI puts the last good files back.
+- **Still true:** the process is the CLI, so the editor never loads game code or build_runner. The watch never touches the engine's files. A CLI without `--watch`, or a watch that ends, falls back to the second amendment's one run per save.

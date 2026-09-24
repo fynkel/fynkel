@@ -724,6 +724,17 @@ game in the editor hot-reloads the regenerated file as well: the
 generated types are getters, so a new behaviour or field reaches the
 next Play.
 
+**Kept warm** (the third ADR-0016 amendment). `CodegenCheck.watch` keeps
+`fynkel codegen --watch` running from open, so a save reaches the
+Inspector in about a second instead of 3 s and more. Its first build is
+the check at open. Every build that wrote reloads the metadata. Create →
+Behaviour waits for the build its new file starts. A script that does not
+compile reads *Script error* in the toolbar and fills the Inspector
+banner. Play refuses until the script is fixed, as in Unity, because
+build_runner removes the generated files while a build fails. Closing the
+editor ends the watch, and the CLI puts the last good files back. A CLI
+without `--watch` falls back to `recompileOnSave`.
+
 A finding while testing: a `GestureDetector` that catches the empty-space
 click (clear the selection, focus the list) must be `excludeFromSemantics`
 — with its semantics node in the tree, rows leaving the `ListView` while
