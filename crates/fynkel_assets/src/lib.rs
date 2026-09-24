@@ -840,6 +840,18 @@ impl Assets {
         s.evictions += 1;
     }
 
+    /// Makes `m` resident as the mesh `r` without a cooked object behind
+    /// it: a tool's stand-in geometry (`fynkel thumbnail`'s preview sphere
+    /// when the project has no primitives), drawn by every renderer on
+    /// this store like a cooked mesh. `r` should name an id the cache
+    /// does not have; the mesh goes with the other payloads on [`clear`]
+    /// or when a release evicts `r`'s id.
+    ///
+    /// [`clear`]: Assets::clear
+    pub fn insert_mesh(&self, r: &AssetRef, m: MeshPayload) {
+        self.lock().meshes.insert(r.clone(), Arc::new(m));
+    }
+
     pub fn mesh(&self, r: &AssetRef) -> Result<Arc<MeshPayload>, Diagnostic> {
         if let Some(m) = self.lock().meshes.get(r) {
             return Ok(m.clone());

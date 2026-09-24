@@ -418,6 +418,36 @@ fn payloads_load_by_reference_and_residency_evicts() {
     assert_eq!(d.code, Code::RUNTIME_OBJECT_UNREADABLE);
 }
 
+/// A mesh a tool made (not cooked) is resident like a cooked one under
+/// the reference it was given, and goes with the rest on `clear`.
+#[test]
+fn an_inserted_mesh_is_served_until_cleared() {
+    let cooked = Cooked::new("inserted");
+    let assets = Assets::open(&cooked.0).unwrap();
+    let r = AssetRef::with_sub(id("c0000000-0000-4000-8000-0000000000fe"), "mesh/Sphere");
+    assert_eq!(
+        assets.mesh(&r).unwrap_err().code,
+        Code::RUNTIME_ASSET_MISSING
+    );
+    let v = fynkel_assets::MeshPayload {
+        bounds_min: [-1.0; 3],
+        bounds_max: [1.0; 3],
+        vertices: vec![Default::default(); 3],
+        indices: vec![0, 1, 2],
+        skin: Vec::new(),
+    };
+    assets.insert_mesh(&r, v);
+    let m = assets.mesh(&r).unwrap_or_else(|d| panic!("{d}"));
+    assert_eq!((m.vertices.len(), m.indices.len()), (3, 3));
+    assert_eq!(m.bounds_max, [1.0; 3]);
+    assert!(
+        assets.clone().mesh(&r).is_ok(),
+        "every clone of the store serves it"
+    );
+    assets.clear();
+    assert!(assets.mesh(&r).is_err(), "not in the cache: gone");
+}
+
 #[test]
 fn a_failed_cook_is_reported_by_id() {
     let cooked = Cooked::new("failed");
