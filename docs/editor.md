@@ -726,6 +726,23 @@ meshes, materials, images, clips) has Unity's ▸ before its icon (→ and ←
 on the selected row); open, its parts are listed under it by key, each
 one a `Draggable<AssetDragPayload>` of `{asset, sub}` onto an asset field,
 and a click shows that part's page in the Inspector.
+**The grid** (2026-09-25, Unity's): the **zoom slider** at the status
+bar's right turns the list into tiles, bigger further right (48 to 128
+points), the list again at its left end; `ProjectBrowserModel.zoom` is
+remembered with the folder. A tile is the picture over the name and does
+what the row does — click, ⇧/⌘-click, double-click, right-click, inline
+rename under the picture, drag, a folder tile's drops; a model's ▸ sits
+at its tile's right edge and its parts follow on a darker ground; ← → ↑ ↓
+move across and down (a row is the grid's column count). Models,
+prefabs, materials and a model's meshes and materials are drawn by
+`fynkel thumbnail` (`project_browser/thumbnails.dart`, `ThumbnailCache`,
+one per project shared by the browser copies): the tiles ask as they are
+built, the asks wait 150 ms and go as one `fynkel thumbnail --json`
+batch, the PNGs go to `.fynkel/thumbnails/<id>[__<sub>].png` with
+`index.json` recording each one's source size and modification time; a
+changed file is drawn again (the old picture stays until then), a refusal
+— a CLI without the command, a failed cook — leaves the kind's icon and is
+not asked again until the file changes. A texture is its own picture.
 **Drag and drop**: an asset row is a `Draggable<AssetDragPayload>`
 (dragging a selected row drags the whole selection, the feedback says "3
 assets"); every folder row in the tree and in the list is a drop target
@@ -994,7 +1011,11 @@ click or a frame stops it),
 (a 16 ms timer while the button is down; ⇧ four times faster; the speed
 scales with the distance). Keys: **F** frames the selection (its outline
 bounds; hidden entities skipped; nothing selected → everything),
-**⇧F** frames all, **5** toggles perspective/orthographic (the
+**⇧F** (or **F** twice) **locks the view to the selection** (2026-09-25,
+Unity's Lock View to Selected: framed, then followed as it moves — dragged,
+or in Play; orbit and zoom keep the lock, panning, flying, framing or
+selecting something else let it go; Frame All is the View menu's, with no
+key), **5** toggles perspective/orthographic (the
 orthographic height keeps what the perspective view showed at the pivot),
 **⇧⌘0** resets the view. **Look through the selected camera** (⌥⌘L,
 `alignViewToSelectedCamera`) takes the lead entity's `fynkel.Camera`
@@ -1050,7 +1071,10 @@ entity the ray meets, nearest first — a visible mesh through its
 bounding sphere then its triangles, anything else through a 25 cm sphere
 at its origin, a hit inside a prefab instance answering as the instance —
 minus locked and hidden entities; the nearest is selected and revealed in
-the Hierarchy. A repeated click **on the same pixel (± 3 px) cycles**
+the Hierarchy. **Inside a prefab instance** (2026-09-25, Unity's): the
+first click selects the instance's root, the next one on the same object
+the child under the pointer, the next what is behind; with the instance
+or something in it already selected, a click goes straight to the child. A repeated click **on the same pixel (± 3 px) cycles**
 through the stacked hits. ⌘-click toggles, ⇧-click adds; a click on
 nothing clears (with a modifier held it keeps the selection). A drag of
 more than 4 px on empty space or with the select tool is a **marquee**
@@ -1066,9 +1090,28 @@ transform (move, rotate and scale at once) (as commands too, with no ⌘ key);
 **X** toggles world/local axes (scale is always local);
 **⌥⌘G** toggles snapping, a long-press on the snap button edits the
 steps (move 0.5 m, angle 15°, scale 0.1 by default), ⌘ held during a
-drag inverts snapping for that drag. The gizmo sits at the **lead**
-entity's world origin at a constant 80 pt (`GizmoFrame.screenSize` ×
-the panel's pixel ratio).
+drag inverts snapping for that drag. The gizmo is a constant 80 pt
+(`GizmoFrame.screenSize` × the panel's pixel ratio). **Z** toggles
+**Pivot / Center** (2026-09-25): Pivot puts it at the active object's
+origin and each object turns and scales about its own; Center puts it at
+the middle of the selection's bounds, children included, and the group
+turns and scales about it. A scale multiplies each object's own scale
+(never a shear); the uniform cube scales by the drag, 100 points doubling
+it, wherever it is grabbed.
+
+**T** is the **Rect tool** (2026-09-25): a rectangle around the
+selection, children included (`GizmoFrame.box`), in the plane of its two
+axes most across the view. A corner resizes about the opposite one (⌥
+about the centre, ⇧ in proportion), an edge one way; the objects move with
+the edge and their own scale is multiplied. A drag inside moves them in
+the plane, a drag just outside a corner (`rect.rotate.*`, invisible zones)
+turns them about the plane's normal, and a click inside that never drags
+selects what is under it (the move handle is a *background* handle, hit
+only when nothing else is). **E**'s rotate gizmo has the same kind of
+background disc inside its rings (`rotate.free`, `TrackballConstraint`):
+a drag there turns freely, one degree per point, about the axis across
+the drag; the rings keep their priority. The Transform tool has no
+trackball — its move handles are inside.
 
 **Handles and tools (item 9g, ADR-0019 §2).** A tool is a registered
 object (`SceneTool` in `scene_view/scene_tools.dart`: id, label, icon,
@@ -1324,14 +1367,21 @@ here either (the name field is disabled). The header's active checkbox
 writes a `setActive` override; when one is set the checkbox carries the
 accent bar and a **Revert** button (`inspector.active.revert`).
 
-The instance's **Prefab instance** section (item 4, under its components) grew into the mode's
-control panel: the prefab's name and kind ("imported hierarchy,
-read-only"), a broken-link icon and the diagnostics when the instance
-does not expand, the override list (each op described — "Light.intensity
-= 5 on Mesh", "+ Component TriggerZone on Root", "+ Object Extra under
-Root" — with **Revert** and **Apply** per row), and the buttons **Apply
-to prefab**, **Revert all**, **Unpack**, **Open prefab** and **Select
-prefab asset**; a disabled button carries its reason as the tooltip.
+**The Prefab bar** (2026-09-25, `inspector/overrides_popup.dart`,
+Unity's layout) opens the instance's Inspector: "Prefab  <name>", **Open**,
+**Select** and **Overrides (n) ▾**, above the components (the title over
+the buttons in a narrow panel); a broken instance shows its diagnostics
+there. **Overrides ▾** is a popup: "Review, Revert or Apply Overrides on
+'<instance>'", the overrides grouped by object, each described
+("Light.intensity = 5", "+ Component TriggerZone", "+ Object Extra"); a
+click opens a row to the prefab's value beside the instance's with
+**Revert** and **Apply**, and **Revert All** / **Apply All** close it.
+An overridden field is bold **with a blue bar in the margin**, and a
+right-click on it offers **Apply to Prefab '<name>'** and **Revert**; a
+component the instance added carries a **'+'** and the bar, with **Apply
+Added Component to Prefab '<name>'** and **Revert Added Component** in
+its card menu. Unpack is the Hierarchy's (its context menu), as in
+Unity.
 
 ### Apply, Revert, Unpack — what each writes
 

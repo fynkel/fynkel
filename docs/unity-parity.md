@@ -93,17 +93,17 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 
 | | Unity | Fynkel |
 |---|---|---|
-| Pivot / Center (Z) | | ❌ always the lead object's origin |
-| Click a prefab, click again | root, then the child under the pointer | 🟡 root, then the object behind |
-| ⇧F / double-F | follow the selection | 🟡 ⇧F frames all |
+| Pivot / Center (Z) | | 🔧 `51a245a` (the gizmo at the active object's origin, each turning and scaling about its own, or at the selection's bounds centre, children included, the group about it; a scale multiplies each object's own, no shear) |
+| Click a prefab, click again | root, then the child under the pointer | 🔧 `7a66084` (root, then the child under the pointer, then what is behind; inside a selected instance a click goes straight to the child) |
+| ⇧F / double-F | follow the selection | 🔧 `5c57adb` (Lock View to Selected: the view follows the selection dragged or in Play; orbit and zoom keep the lock, pan, fly, framing or another selection let go; Frame All stays in the View menu) |
 | Selection outline | silhouette | 🟡 bounding box |
-| Rect tool (T), free-rotate trackball | | ❌ |
+| Rect tool (T), free-rotate trackball | | 🔧 `510d218` (the rectangle in the plane of the two axes most across the view, children included: corners about the opposite one, ⌥ about the centre, ⇧ in proportion; edges one way; inside moves; just outside a corner turns; a click inside selects what is under it. Inside the rotate rings a drag turns freely, the rings first) |
 | Prefab mode | in context, breadcrumb, auto-save | 🟡 a document tab |
 | Prefab variants, Unpack Completely, a prefab from an object holding instances | | ❌ |
-| Overrides dropdown, blue margin bar | | 🟡 bold labels + a list at the bottom |
+| Overrides dropdown, blue margin bar | | 🔧 `7d51553` (the Prefab bar — Open, Select, Overrides ▾ — lists the overrides by object, a row comparing the prefab's value with the instance's, Revert / Apply, Revert All / Apply All; the blue bar and Apply / Revert on a right-click; an added component's '+' and Apply / Revert Added Component; Unpack stays in the Hierarchy menu) |
 | Multi-scene Hierarchy | | ❌ one document per Hierarchy |
 | Physics Material asset | shared friction/bounciness, combine modes | ❌ per-Collider fields; needs an ADR |
-| Grid thumbnails, zoom slider | | ❌ list only |
+| Grid thumbnails, zoom slider | | 🔧 `8da4595` (the slider at the status bar's right, remembered; tiles act like rows; models, prefabs, materials and a model's meshes and materials drawn by `fynkel thumbnail` in the background, again when their file changes) |
 
 ## On purpose
 
@@ -232,3 +232,31 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   has one) is left alone, Crate A gets an `addComponent` override and ⌘Z
   takes it back; dropped on the Inspector it goes onto the selected
   Crate B, and on the Scene view onto Crate A under the pointer.
+- 2026-09-25: Tier 3, the Scene view. Pivot / Center (`51a245a`,
+  `test/parity/pivot_parity_test.dart`: Z moves the gizmo between the
+  active object's origin and the selection's centre; two crates turned
+  and scaled each about their own origin and then as a group about the
+  centre; the uniform cube doubles over 100 points). Prefab picking
+  (`7a66084`, `prefab_click_parity_test.dart`: root, child, what is
+  behind; straight to the child inside a selected instance). Lock View
+  (`5c57adb`, `lock_view_parity_test.dart`: ⇧F and F twice lock, a drag
+  and Play move the view with the object, orbit keeps the lock, pan lets
+  go). The Rect tool and the trackball (`510d218`,
+  `rect_tool_parity_test.dart`: a corner ×1.5 with the opposite one
+  still, ⌥ on an edge, a move inside, a quarter turn from a corner zone,
+  a click inside selecting the crate under it; a 90-point drag inside the
+  rotate rings turning the front a quarter to the right).
+- 2026-09-25: the Prefab bar and Overrides ▾ (`7d51553`,
+  `overrides_parity_test.dart`: Crate A's two overrides listed, the
+  prefab's `true` beside the instance's `false`, Revert as one undo step,
+  Apply to Prefab from a right-click on the field saved into the prefab,
+  an added Point Light reverted and then applied, Apply All emptying the
+  list).
+- 2026-09-25: the Project grid (`8da4595`,
+  `project_grid_parity_test.dart`: the slider turns the list into tiles,
+  bigger further right, remembered, the list again at its left end;
+  ← → ↑ ↓ across and down, ⇧ extending, Enter renaming under the
+  picture, a double-click opening the prefab, a folder tile going in, a
+  model's ▸ bringing its parts; the thumbnails asked for in one batch,
+  not again when shown again, a refusal not asked again, a changed file
+  drawn again as a new image, a texture never asked for).
