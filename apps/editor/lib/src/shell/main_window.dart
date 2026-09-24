@@ -568,8 +568,8 @@ class MainWindow extends StatelessWidget {
                   constraints: const BoxConstraints.tightFor(width: 30, height: 26),
                   iconSize: 15,
                   isSelected: paused,
-                  icon: Icon(FIcons.pause, color: !inEditor ? t.textDisabled : (paused ? t.accent : t.text)),
-                  onPressed: inEditor ? run.togglePause : null,
+                  icon: Icon(FIcons.pause, color: paused ? t.accent : t.text),
+                  onPressed: run.togglePause,
                 ),
                 IconButton(
                   key: const Key('window.step'),

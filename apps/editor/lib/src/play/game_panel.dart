@@ -48,7 +48,11 @@ final class GameRun extends ChangeNotifier {
 
   FynkelLaunch? get launch => _launch;
   bool get running => _launch != null;
-  bool get paused => running && control.paused;
+
+  /// The Pause toggle, as Unity's: it may be on before Play (the game then
+  /// starts paused on its first frame) and stays as it is across Stop.
+  bool get paused => _pause;
+  bool _pause = false;
 
   /// Which run is mounted: a new Play is a new widget subtree, so nothing
   /// of the previous run's widgets survives.
@@ -60,7 +64,7 @@ final class GameRun extends ChangeNotifier {
     final watch = Stopwatch()..start();
     _launch = FynkelLaunch(projectDir: projectDir, startScene: startScene, inEditor: true);
     _runs++;
-    control.paused = false;
+    control.paused = _pause;
     FynkelApplication.inEditor = true;
     _quitOutside = FynkelApplication.onQuit;
     // Unity ignores Application.Quit in the editor; here it ends Play.
@@ -84,8 +88,8 @@ final class GameRun extends ChangeNotifier {
   }
 
   void togglePause() {
-    if (!running) return;
-    control.paused = !control.paused;
+    _pause = !_pause;
+    if (running) control.paused = _pause;
     notifyListeners();
   }
 
@@ -93,7 +97,7 @@ final class GameRun extends ChangeNotifier {
   void step() {
     if (!running) return;
     if (!control.paused) {
-      control.paused = true;
+      _pause = control.paused = true;
       notifyListeners();
     }
     control.step();

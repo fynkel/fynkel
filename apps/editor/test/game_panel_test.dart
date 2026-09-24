@@ -103,6 +103,24 @@ void main() {
     expect(lines, hasLength(1), reason: 'the channel is off again');
   });
 
+  test('Pause before Play starts the game paused and stays on across Stop (Unity)', () {
+    final run = GameRun(game: _game());
+    addTearDown(run.dispose);
+    run.togglePause();
+    expect(run.paused, isTrue);
+    expect(run.running, isFalse);
+    run.start(projectDir: '/p');
+    expect(run.control.paused, isTrue, reason: 'the first frame waits');
+    run.step();
+    expect(run.control.pendingSteps, 1);
+    run.stop();
+    expect(run.paused, isTrue, reason: 'the toggle is kept');
+    run.start(projectDir: '/p');
+    expect(run.control.paused, isTrue);
+    run.togglePause();
+    expect(run.control.paused, isFalse);
+  });
+
   group('the shell', () {
     late Preferences prefs;
     late MemoryLayoutStore store;
@@ -130,7 +148,11 @@ void main() {
       final shell = tester.state<EditorShellState>(find.byType(EditorShell));
       expect(shell.workspace!.isShown(PanelRegistry.game), isTrue, reason: 'Game sits beside Scene by default');
       expect(find.byKey(const Key('window.pause')), findsOneWidget);
-      expect(tester.widget<IconButton>(find.byKey(const Key('window.pause'))).onPressed, isNull);
+      expect(
+        tester.widget<IconButton>(find.byKey(const Key('window.pause'))).onPressed,
+        isNotNull,
+        reason: 'Pause may be on before Play',
+      );
 
       shell.registry.execute('play.start');
       await tester.pumpAndSettle();

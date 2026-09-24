@@ -1445,12 +1445,13 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.pause',
-        labelBuilder: () => gameRun?.paused ?? false ? 'Resume' : 'Pause',
+        labelBuilder: () => (gameRun?.running ?? false) && gameRun!.paused ? 'Resume' : 'Pause',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyP, shift: true),
         group: 0,
         order: 3,
-        enabled: () => gameRun?.running ?? false,
+        // Unity: Pause may be on before Play; the game starts paused.
+        enabled: () => gameRun != null && _hasProject,
         run: () => gameRun?.togglePause(),
       ),
       EditorCommand(
