@@ -167,8 +167,9 @@ them ("Arrives with editor item N"), so an empty panel is never mistaken
 for a broken one.
 
 **Commands** (`lib/src/commands/commands.dart`): one `CommandRegistry`
-with stable dotted ids; every command has a menu, a shortcut and a palette
-entry, so each is reachable three ways (`test/commands_test.dart` proves the
+with stable dotted ids; every command has a menu, a shortcut (or, like the
+Scene tools, only Unity's bare key) and a palette entry, so each is
+reachable three ways (`test/commands_test.dart` proves the
 same command runs from all three). The menu bar is native on macOS
 (`PlatformMenuBar`) and in-window elsewhere and in tests; only the menus
 that have commands exist (Project, Edit, Window, Help — no stub menus). The
@@ -208,7 +209,7 @@ run, Escape closes.
 | `inspector.openScript` | Edit | ⌥⌘↩ | the selected entity's first behaviour's source in the IDE |
 | `prefab.applyOverrides` / `prefab.revertOverrides` / `prefab.unpack` / `prefab.open` / `prefab.selectAsset` | Edit | ⇧⌥⌘A / ⇧⌥⌘U / ⇧⌥⌘X / ⇧⌥⌘D / ⇧⌥⌘L | prefab mode on the selected instance (§ Prefab mode): apply the overrides to the prefab (two transactions, two documents), revert them all, unpack, open the prefab's tab, select its asset |
 | `inspector.checkCodegen` | Project | ⇧⌘G | run `fynkel codegen --check --project <dir> --json` in the background; the Inspector banner shows the result |
-| `scene.tool.<id>` — `select` / `move` / `rotate` / `scale` / `transform` | Edit | ⌘1 / ⌘2 / ⌘3 / ⌘4 / ⌘6 | the Scene view's tool (Q W E R Y in the viewport); one command per registered tool, ⌘6 on for tools past the fourth (⌘5 is the projection) |
+| `scene.tool.<id>` — `select` / `move` / `rotate` / `scale` / `transform` | Edit | Q / W / E / R / Y | the Scene view's tool, from any panel but a text field; one command per registered tool. No ⌘ digit: those are Go to *Panel*, as in Unity |
 | `scene.toggleSpace` | Edit | ⌘L | gizmo axes world ↔ local (X in the viewport; scale is always local) |
 | `scene.toggleSnap` | Edit | ⌥⌘G | snapping on/off (the steps: long-press the snap button) |
 | `scene.toggleHidden` | Edit | ⇧⌘H | hide / show the selection's subtrees in the Scene view (H) — editor-only, never in the document |
@@ -216,7 +217,7 @@ run, Escape closes.
 | `scene.toggleLocked` | Edit | ⌘K | lock / unlock the selection against picking and dragging (L) |
 | `scene.alignCameraToView` | Edit | ⇧⌘L | write the editor camera into the selected `fynkel.Camera` entity: one transaction (Transform + lens fields) |
 | `view.frameSelected` / `view.frameAll` | View | ⌘F / ⇧⌘F | frame the selection's bounds (F) / everything visible (⇧F) |
-| `view.toggleProjection` | View | ⌘5 | perspective ↔ orthographic (5) |
+| `view.toggleProjection` | View | 5 | perspective ↔ orthographic (bare 5, as in Unity; ⌘5 is Go to Project) |
 | `view.alignToCamera` | View | ⌥⌘L | look through the selected scene camera (its exact matrix, lens and exposure) |
 | `view.reset` | View | ⇧⌘0 | the initial editor camera |
 | `view.toggleGrid` / `view.toggleOverlays` / `view.toggleStats` | View | ⌘G / ⌘I / ⌘T | grid and axes / light-camera-collider icons / the stats overlay |
@@ -240,6 +241,7 @@ run, Escape closes.
 | `window.resetLayout` | Window | ⌥⌘0 | the §22.2 default layout |
 | `window.panel.<id>` | Window | ⌥⌘1 … ⌥⌘7 | show/hide Hierarchy, Scene, Inspector, Project, Console, Profiler, Animation (the label flips between Show and Hide; the Asset panel's `import` is retired, item 9c) |
 | `window.newCopy.<id>` | Window | ⇧⌥⌘1 … ⇧⌥⌘4 | New Hierarchy / New Scene View / New Inspector / New Project Browser: another copy beside the one used last (item 9e) |
+| `window.goto.<id>` | Window | ⌘1 Scene, ⌘2 Game, ⌘3 Inspector, ⌘4 Hierarchy, ⌘5 Project, ⌘7 Profiler, ⇧⌘C Console | Unity's keys for its windows: show the panel and put the keyboard on its list or view (item 9 accessibility) |
 | `console.focusSearch` | Window | ⌥⌘F | focus the Console's filter |
 | `console.copy` | Window | ⌥⌘C | copy the selected or all visible Console lines |
 | `console.openInIde` | Window | ⌥⌘O | open the selected diagnostic in the IDE |
@@ -960,7 +962,7 @@ its own.
 ### The gizmo
 
 Tools **Q** select, **W** move, **E** rotate, **R** scale, **Y**
-transform (move, rotate and scale at once) (⌘1–⌘4, ⌘6 as commands);
+transform (move, rotate and scale at once) (as commands too, with no ⌘ key);
 **X** toggles world/local axes (scale is always local);
 **⌥⌘G** toggles snapping, a long-press on the snap button edits the
 steps (move 0.5 m, angle 15°, scale 0.1 by default), ⌘ held during a
@@ -2039,6 +2041,42 @@ The Console's Game tab still hides the stats rows by default; its toggle
 shows them as text. What the Profiler does not do yet: per-system times
 (the window carries only the last tick's, and the channel record omits
 them), a hierarchy of markers, or a capture saved to disk.
+
+## The keyboard, a screen reader, and the words (item 9)
+
+**The keyboard alone.** Window → Go to *Panel* uses Unity's keys: ⌘1
+Scene, ⌘2 Game, ⌘3 Inspector, ⌘4 Hierarchy, ⌘5 Project, ⌘7 Profiler,
+⇧⌘C Console. It shows the panel and puts the keyboard on the node the
+panel names with `PanelFocus.primary`: the Hierarchy's, Project's and
+Console's lists, the Scene and Game views, the Profiler's chart. A panel
+with none, or whose list is empty, gets its first control. Every panel is
+a `FocusTraversalGroup`, so Tab walks one panel's controls before the
+next. Arrows, Enter and ⎋ work inside the lists. ⇧⌘P reaches every other
+command by name. The Scene tools gave their ⌘ digits to the panels and
+keep Q W E R Y, as in Unity.
+
+**A screen reader.** Most controls are named by their tooltip. The
+Hierarchy's rows say whether they are selected and expanded, and the
+expander is a named button. Each component's ⋮ menu is named after the
+component. Clicks on empty space (the Hierarchy under its rows) and a
+tab's right-click are left out of the semantics tree. The text fields are
+named by the row label beside them, which is not yet linked to the field.
+The splitters between panels belong to the docking package: a screen
+reader can resize with them, but they have no name.
+
+`test/accessibility_test.dart` holds both. It finds no nameless control
+with a scene open and an entity selected. It walks every panel and the
+palette with the keyboard alone, which is the item 9 gate.
+
+**The words** are in one table, `lib/src/l10n/strings.dart`
+(`EditorStrings`): every command's label and description by its id, the
+templates the generated commands fill in (tools, Show/Hide, New, Go to,
+Open Recent), the menus and the panel titles. `EditorCommand` takes its
+words from there unless it passes its own, and `commands_test.dart`
+checks that every command has an entry and that no entry has outlived its
+command. A translation is another table with the same keys. The words
+inside the panels (buttons, empty states, messages) are not there yet.
+They move in as their panels are touched.
 
 ## What exists after each item
 

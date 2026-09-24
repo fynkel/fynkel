@@ -1824,3 +1824,11 @@ The M3 backlog as it landed, for the record:
      save reaches the Inspector in about a second (it was 3.3 s, and
      18 s for the first save). Play waits while a script has an error
      (third ADR-0016 amendment).
+
+28. **Accessibility and the words (item 9, 2026-09-24).** The keyboard
+   reaches every panel: Go to *Panel* on Unity's ⌘1… keys, with each
+   panel a Tab group. The Scene tools keep only Q W E R Y, as in Unity.
+   A screen reader finds no nameless control (the panel splitters
+   excepted: they are the docking package's). A keyboard-only walkthrough
+   is a widget test. The command, menu and panel words are in one table,
+   `lib/src/l10n/strings.dart`. The words inside the panels are not yet.
