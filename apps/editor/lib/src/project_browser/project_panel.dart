@@ -591,12 +591,22 @@ class _ProjectPanelState extends State<ProjectPanel> {
       } else {
         model.clearSelection();
       }
+    } else if (k == LogicalKeyboardKey.arrowRight && _leadExpandable(expanded: false)) {
+      // Unity: → opens a model's parts, ← closes them.
+      model.toggleExpanded(model.lead!);
+    } else if (k == LogicalKeyboardKey.arrowLeft && _leadExpandable(expanded: true)) {
+      model.toggleExpanded(model.lead!);
     } else if (k == LogicalKeyboardKey.arrowLeft && model.view == BrowserView.folders && !model.filtering) {
       model.goUp();
     } else {
       return KeyEventResult.ignored;
     }
     return KeyEventResult.handled;
+  }
+
+  bool _leadExpandable({required bool expanded}) {
+    final e = model.lead == null ? null : model.entry(model.lead!);
+    return e != null && model.canExpand(e) && model.expandedSources.contains(e.id) == expanded;
   }
 
   KeyEventResult _onScriptKey(LogicalKeyboardKey k) {
@@ -735,14 +745,36 @@ class _ProjectPanelState extends State<ProjectPanel> {
                   style: theme.textTheme.bodySmall?.copyWith(color: theme.disabledColor),
                 ),
               )
-            : ListView.builder(
-                key: const Key('project.list'),
-                controller: _listScroll,
-                itemCount: folders.length + assets.length,
-                itemExtent: projectRowHeight(context),
-                itemBuilder: (context, i) => i < folders.length
-                    ? _folderRow(context, theme, folders[i], inList: true, columns: columns)
-                    : _assetRow(context, theme, assets[i - folders.length], columns: columns),
+            : Builder(
+                builder: (context) {
+                  // An expanded model lists its parts under it (Unity's ▸).
+                  final rows = <Object>[
+                    ...folders,
+                    for (final a in assets) ...[a, for (final sub in model.partsOf(a)) (a, sub)],
+                  ];
+                  return ListView.builder(
+                    key: const Key('project.list'),
+                    controller: _listScroll,
+                    itemCount: rows.length,
+                    itemExtent: projectRowHeight(context),
+                    itemBuilder: (context, i) => switch (rows[i]) {
+                      final String f => _folderRow(context, theme, f, inList: true, columns: columns),
+                      final AssetEntry a => _assetRow(context, theme, a, columns: columns),
+                      (final AssetEntry a, final String sub) => _PartRow(
+                        key: Key('project.part.${a.id}.$sub'),
+                        model: model,
+                        entry: a,
+                        sub: sub,
+                        selected: model.lead == a.id && model.leadPart == sub,
+                        onTap: () {
+                          _listFocus.requestFocus();
+                          model.selectPart(a.id, sub);
+                        },
+                      ),
+                      _ => const SizedBox.shrink(),
+                    },
+                  );
+                },
               ),
       ),
     );
@@ -1466,6 +1498,21 @@ class _AssetRow extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // Unity's ▸ on a model: its parts under it.
+          SizedBox(
+            width: 14,
+            child: model.canExpand(e)
+                ? GestureDetector(
+                    key: Key('project.expand.${e.id}'),
+                    onTap: () => model.toggleExpanded(e.id),
+                    child: Icon(
+                      model.expandedSources.contains(e.id) ? FIcons.expandMore : FIcons.chevronRight,
+                      size: 14,
+                      color: dim,
+                    ),
+                  )
+                : null,
+          ),
           AssetPreviewWidget(preview: model.preview(e), size: t.row - 2),
           const SizedBox(width: 8),
           if (renaming)
@@ -1583,6 +1630,88 @@ class _AssetRow extends StatelessWidget {
                 selected && model.selection.length > 1 ? '${model.selection.length} assets' : payload.name,
                 style: theme.textTheme.bodySmall,
               ),
+            ],
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: .4, child: content),
+      child: interactive,
+    );
+  }
+}
+
+/// A part of an expanded model (`mesh/Cube`, `material/Glass`): its name
+/// indented under the model, dragged onto an asset field or the Hierarchy
+/// like any asset, shown in the Inspector when clicked.
+class _PartRow extends StatelessWidget {
+  const _PartRow({
+    super.key,
+    required this.model,
+    required this.entry,
+    required this.sub,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final ProjectBrowserModel model;
+  final AssetEntry entry;
+  final String sub;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final t = context.tokens;
+    final focused = PanelFocus.of(context);
+    final on = selected ? t.onSelectedRow(focused: focused) : t.text;
+    final dim = selected ? t.onSelectedRowSecondary(focused: focused) : t.textDisabled;
+    final kind = AssetEntry.subKind(sub);
+    final name = sub.contains('/') ? sub.substring(sub.indexOf('/') + 1) : sub;
+    final content = Container(
+      height: projectRowHeight(context),
+      padding: const EdgeInsets.only(left: 6 + 14 + 16),
+      color: selected ? t.selectedRow(focused: focused) : null,
+      child: Row(
+        children: [
+          Icon(assetKindIcon(kind), size: 14, color: dim),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              name,
+              style: theme.textTheme.bodyMedium?.copyWith(color: on),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          SizedBox(
+            width: _AssetRow.kindWidth,
+            child: Text(
+              kind,
+              style: theme.textTheme.bodySmall?.copyWith(color: dim),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: _AssetRow.endGap),
+        ],
+      ),
+    );
+    final interactive = GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: content);
+    final payload = model.dragPayload(entry, sub: sub);
+    if (payload == null) return interactive;
+    return Draggable<AssetDragPayload>(
+      data: payload,
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(assetKindIcon(payload.kind), size: 14),
+              const SizedBox(width: 6),
+              Text(name, style: theme.textTheme.bodySmall),
             ],
           ),
         ),

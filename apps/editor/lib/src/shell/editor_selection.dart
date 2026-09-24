@@ -175,8 +175,9 @@ final class EditorSelection extends ChangeNotifier {
       case 'hierarchy' || 'scene':
         if (inspector.selection.isNotEmpty) _set(const InspectEntities());
       case 'project':
-        final lead = (from ?? browser)?.lead;
-        if (lead != null) _set(InspectAsset(lead));
+        final b = from ?? browser;
+        final lead = b?.lead;
+        if (lead != null) _set(InspectAsset(lead, sub: b?.leadPart));
     }
   }
 
@@ -209,10 +210,12 @@ final class EditorSelection extends ChangeNotifier {
     if (seen == null) return;
     final lead = b.lead;
     final folder = b.folder;
-    final leadMoved = lead != seen.lead;
+    final part = b.leadPart;
+    final leadMoved = lead != seen.lead || part != seen.part;
     final folderMoved = folder != seen.folder;
     seen.lead = lead;
     seen.folder = folder;
+    seen.part = part;
     // A deleted asset or folder cannot stay on the page.
     final t = _target;
     if (t is InspectAsset && b.entry(t.id) == null) {
@@ -228,7 +231,7 @@ final class EditorSelection extends ChangeNotifier {
       return;
     }
     if (leadMoved && lead != null) {
-      _set(InspectAsset(lead));
+      _set(InspectAsset(lead, sub: part));
     } else if (folderMoved) {
       _set(InspectFolder(folder));
     } else if (leadMoved && _latest is InspectAsset) {
@@ -257,5 +260,6 @@ final class _BrowserSeen {
 
   String? lead;
   String? folder;
+  String? part;
   late VoidCallback listener;
 }

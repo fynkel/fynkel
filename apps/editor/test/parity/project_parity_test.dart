@@ -135,4 +135,49 @@ void main() {
     await e.click(find.descendant(of: find.byKey(const Key('hierarchy.search')), matching: find.byIcon(FIcons.close)));
     expect(e.rows, ['Camera', 'Robot', 'Sun', 'Crate A', 'Floor', 'Crate B']);
   });
+
+  testWidgets('a model\'s ▸ lists its parts; one shows in the Inspector, one drags onto the Mesh field', (
+    tester,
+  ) async {
+    final e = await Editor.open(tester);
+    const robot = 'c0000000-0000-4000-8000-000000000001';
+    final browser = e.shell.browser!;
+    browser.setFolder('models');
+    await tester.pumpAndSettle();
+    await e.click(e.row('Robot'));
+    expect(find.byKey(const Key('project.part.$robot.mesh/PyramidAndQuad/0')), findsNothing);
+
+    await e.click(find.byKey(const Key('project.expand.$robot')));
+    final part = find.byKey(const Key('project.part.$robot.mesh/PyramidAndQuad/0'));
+    expect(part, findsOneWidget);
+    expect(find.byKey(const Key('project.part.$robot.material/Glass')), findsOneWidget);
+    expect(e.selectedNames, ['Robot'], reason: 'the ▸ selects nothing');
+
+    // Dragged onto the Robot's Mesh field (the Inspector still shows the Robot).
+    final meshField = find.byWidgetPredicate(
+      (w) =>
+          w is RepaintBoundary &&
+          w.key is ValueKey<String> &&
+          (w.key! as ValueKey<String>).value.startsWith('field.') &&
+          (w.key! as ValueKey<String>).value.endsWith('.mesh'),
+    );
+    expect(meshField, findsOneWidget);
+    await e.drag(part, tester.getCenter(meshField));
+    await e.press(LogicalKeyboardKey.keyS, command: true);
+    final robotEntity = (e.savedScene()['entities'] as Map<String, dynamic>).values
+        .cast<Map<String, dynamic>>()
+        .singleWhere((x) => x['name'] == 'Robot');
+    final renderer = (robotEntity['components'] as Map<String, dynamic>).values
+        .cast<Map<String, dynamic>>()
+        .singleWhere((c) => c['type'] == 'fynkel.MeshRenderer');
+    expect((renderer['data'] as Map)['mesh'], {'asset': robot, 'sub': 'mesh/PyramidAndQuad/0'});
+
+    // A click on a part: the Inspector shows that part.
+    await e.click(find.byKey(const Key('project.part.$robot.material/Glass')));
+    expect(find.byKey(const ValueKey('inspector.part.$robot.material/Glass')), findsOneWidget);
+
+    // ← closes the model again.
+    await e.press(LogicalKeyboardKey.arrowLeft);
+    expect(find.byKey(const Key('project.part.$robot.material/Glass')), findsNothing);
+  });
 }

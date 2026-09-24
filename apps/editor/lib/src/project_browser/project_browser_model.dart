@@ -112,6 +112,33 @@ final class ProjectBrowserModel extends ChangeNotifier {
   final Set<String> selection = {};
   String? lead;
 
+  /// The selected part of [lead] (a model's `mesh/Cube`), shown in the
+  /// Inspector; null when the asset itself is.
+  String? leadPart;
+
+  /// Sources whose parts the list shows under them (Unity's ▸ on a model).
+  final Set<String> expandedSources = {};
+
+  /// A source with parts to show: more than the one it drags whole.
+  bool canExpand(AssetEntry e) => e.isSource && e.subAssets.length > 1;
+
+  void toggleExpanded(String id) {
+    if (!expandedSources.remove(id)) expandedSources.add(id);
+    if (!expandedSources.contains(id) && lead == id) leadPart = null;
+    notifyListeners();
+  }
+
+  /// The parts listed under [e] when it is expanded, in key order.
+  List<String> partsOf(AssetEntry e) =>
+      expandedSources.contains(e.id) && canExpand(e) ? (e.subAssets.keys.toList()..sort()) : const [];
+
+  /// A part clicked: its asset selected, the part the Inspector shows.
+  void selectPart(String id, String sub) {
+    select(id);
+    leadPart = sub;
+    notifyListeners();
+  }
+
   /// The asset (id) or folder (path) whose name is being edited inline.
   String? renamingAsset;
   String? renamingFolder;
@@ -374,6 +401,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
   void select(String id, {bool toggle = false, bool range = false}) {
     _sync();
     pinged = null;
+    leadPart = null;
     if (!_byId.containsKey(id)) return;
     if (range && lead != null) {
       final rows = visibleAssets.map((e) => e.id).toList();
@@ -407,6 +435,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
 
   void clearSelection() {
     pinged = null;
+    leadPart = null;
     if (selection.isEmpty && lead == null) return;
     selection.clear();
     lead = null;
