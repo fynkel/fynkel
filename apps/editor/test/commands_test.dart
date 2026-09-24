@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/commands/commands.dart';
+import 'package:fynkel_editor/src/l10n/strings.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/shell/menu_bar.dart';
 import 'package:fynkel_editor/src/shell/workspace.dart';
@@ -31,6 +32,19 @@ void main() {
     expect(find.byKey(const Key('window.projectName')), findsOneWidget);
     return tester.state<EditorShellState>(find.byType(EditorShell));
   }
+
+  testWidgets('every command\'s words are in the l10n table, and the table names no command that is gone', (
+    tester,
+  ) async {
+    final shell = await openShell(tester);
+    final ids = shell.registry.all.map((c) => c.id).toSet();
+    // The generated families fill a template in EditorStrings instead.
+    final templated = RegExp(r'^(scene\.tool|window\.panel|window\.newCopy|window\.goto|project\.recent)\.');
+    for (final id in ids.where((id) => !templated.hasMatch(id))) {
+      expect(EditorStrings.commands.containsKey(id), isTrue, reason: '$id has no entry in EditorStrings.commands');
+    }
+    expect(EditorStrings.commands.keys.toSet().difference(ids), isEmpty);
+  });
 
   testWidgets('every non-generated command has a menu, a unique shortcut and a stable id', (tester) async {
     final shell = await openShell(tester);

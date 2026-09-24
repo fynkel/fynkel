@@ -4,14 +4,16 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import '../l10n/strings.dart';
+
 /// The menus, in menu-bar order.
 enum EditorMenu {
-  project('Project'),
-  edit('Edit'),
-  view('View'),
-  play('Play'),
-  window('Window'),
-  help('Help');
+  project(EditorStrings.menuProject),
+  edit(EditorStrings.menuEdit),
+  view(EditorStrings.menuView),
+  play(EditorStrings.menuPlay),
+  window(EditorStrings.menuWindow),
+  help(EditorStrings.menuHelp);
 
   const EditorMenu(this.title);
 
@@ -19,9 +21,12 @@ enum EditorMenu {
 }
 
 final class EditorCommand {
+  /// [baseLabel] and [description] default to the command's words in
+  /// [EditorStrings.commands]; a generated command passes its own, filled
+  /// from a template there.
   EditorCommand({
     required this.id,
-    required this.baseLabel,
+    String? baseLabel,
     required this.menu,
     required this.run,
     this.shortcut,
@@ -29,11 +34,12 @@ final class EditorCommand {
     this.group = 0,
     this.order = 0,
     this.enabled,
-    this.description,
+    String? description,
     this.generated = false,
     this.labelBuilder,
     this.textIntent,
-  });
+  }) : baseLabel = baseLabel ?? EditorStrings.label(id),
+       description = description ?? EditorStrings.description(id);
 
   /// Stable, dotted, never renamed: `project.open`, `window.panel.console`.
   final String id;

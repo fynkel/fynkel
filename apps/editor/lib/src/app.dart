@@ -21,6 +21,7 @@ import 'env/tools.dart';
 import 'hierarchy/hierarchy_model.dart';
 import 'hierarchy/hierarchy_panel.dart';
 import 'inspector/codegen_check.dart';
+import 'l10n/strings.dart';
 import 'inspector/inspector_model.dart';
 import 'inspector/inspector_panel.dart';
 import 'inspector/prefab_actions.dart' as prefab;
@@ -480,7 +481,7 @@ class EditorShellState extends State<EditorShell> {
   List<PanelSpec> _panelSpecs() => [
     PanelSpec(
       id: PanelRegistry.hierarchy,
-      title: 'Hierarchy',
+      title: EditorStrings.panelHierarchy,
       icon: FIcons.accountTreeOutlined,
       home: PanelHome.left,
       copies: true,
@@ -498,9 +499,9 @@ class EditorShellState extends State<EditorShell> {
     ),
     PanelSpec(
       id: PanelRegistry.scene,
-      title: 'Scene',
+      title: EditorStrings.panelScene,
       icon: FIcons.viewInArOutlined,
-      fullTitle: 'Scene View',
+      fullTitle: EditorStrings.panelSceneFull,
       home: PanelHome.center,
       copies: true,
       builder: (_, id) {
@@ -511,15 +512,15 @@ class EditorShellState extends State<EditorShell> {
     ),
     PanelSpec(
       id: PanelRegistry.game,
-      title: 'Game',
+      title: EditorStrings.panelGame,
       icon: FIcons.sportsEsports,
-      fullTitle: 'Game View',
+      fullTitle: EditorStrings.panelGameFull,
       home: PanelHome.center,
       builder: (_, _) => GamePanel(run: gameRun, preview: _gamePreview, showViewport: widget.sceneViewport),
     ),
     PanelSpec(
       id: PanelRegistry.inspector,
-      title: 'Inspector',
+      title: EditorStrings.panelInspector,
       icon: FIcons.tune,
       home: PanelHome.right,
       copies: true,
@@ -539,9 +540,9 @@ class EditorShellState extends State<EditorShell> {
     ),
     PanelSpec(
       id: PanelRegistry.project,
-      title: 'Project',
+      title: EditorStrings.panelProject,
       icon: FIcons.folderOutlined,
-      fullTitle: 'Project Browser',
+      fullTitle: EditorStrings.panelProjectFull,
       home: PanelHome.bottom,
       copies: true,
       locked: _isLocked,
@@ -561,7 +562,7 @@ class EditorShellState extends State<EditorShell> {
     ),
     PanelSpec(
       id: PanelRegistry.console,
-      title: 'Console',
+      title: EditorStrings.panelConsole,
       icon: FIcons.terminal,
       home: PanelHome.bottom,
       builder: (_, _) {
@@ -582,7 +583,7 @@ class EditorShellState extends State<EditorShell> {
     ),
     PanelSpec(
       id: PanelRegistry.profiler,
-      title: 'Profiler',
+      title: EditorStrings.panelProfiler,
       icon: FIcons.speed,
       home: PanelHome.bottom,
       builder: (_, _) {
@@ -593,11 +594,11 @@ class EditorShellState extends State<EditorShell> {
     ),
     PanelSpec(
       id: PanelRegistry.animation,
-      title: 'Animation',
+      title: EditorStrings.panelAnimation,
       icon: FIcons.animation,
       home: PanelHome.bottom,
       builder: (_, _) => const ComingPanel(
-        title: 'Animation',
+        title: EditorStrings.panelAnimation,
         item: 6,
         what: 'Clips and the pose of the selection.',
         icon: FIcons.animation,
@@ -636,8 +637,6 @@ class EditorShellState extends State<EditorShell> {
       // ── Documents (Project menu, group 1) ──
       EditorCommand(
         id: 'document.open',
-        baseLabel: 'Open Document…',
-        description: 'A scene or prefab of the project, into a tab',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyO, shift: true),
         group: 1,
@@ -647,7 +646,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.save',
-        baseLabel: 'Save Document',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyS),
         group: 1,
@@ -657,7 +655,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.saveAs',
-        baseLabel: 'Save Document As…',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyS, shift: true),
         group: 1,
@@ -667,7 +664,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.saveAll',
-        baseLabel: 'Save All Documents',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyS, alt: true),
         group: 1,
@@ -677,7 +673,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.revert',
-        baseLabel: 'Revert Document to Saved',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyR, alt: true),
         group: 1,
@@ -687,7 +682,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.close',
-        baseLabel: 'Close Document',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyW),
         group: 1,
@@ -697,7 +691,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.next',
-        baseLabel: 'Next Document',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.arrowRight, alt: true),
         group: 1,
@@ -707,7 +700,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.previous',
-        baseLabel: 'Previous Document',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.arrowLeft, alt: true),
         group: 1,
@@ -718,7 +710,6 @@ class EditorShellState extends State<EditorShell> {
       // ── Edit menu: undo/redo (group 0), the Hierarchy (groups 1–2) ──
       EditorCommand(
         id: 'document.undo',
-        baseLabel: 'Undo',
         labelBuilder: () => _focusedTab?.canUndoLabel ?? 'Undo',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyZ),
@@ -730,7 +721,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'document.redo',
-        baseLabel: 'Redo',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyZ, shift: true),
         group: 0,
@@ -741,12 +731,10 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.undo',
-        baseLabel: 'Undo Asset Operation',
         labelBuilder: () {
           final l = browser?.history.undoLabel;
           return l == null ? 'Undo Asset Operation' : 'Undo $l';
         },
-        description: 'Takes back the last rename, move, delete, new document or import-settings change',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyZ, alt: true),
         group: 0,
@@ -756,7 +744,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.redo',
-        baseLabel: 'Redo Asset Operation',
         labelBuilder: () {
           final l = browser?.history.redoLabel;
           return l == null ? 'Redo Asset Operation' : 'Redo $l';
@@ -770,7 +757,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.rename',
-        baseLabel: 'Rename Entity',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyR),
         group: 1,
@@ -780,7 +766,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.duplicate',
-        baseLabel: 'Duplicate',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyD),
         group: 1,
@@ -790,7 +775,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.delete',
-        baseLabel: 'Delete',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.backspace),
         group: 1,
@@ -801,8 +785,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.createEmpty',
-        baseLabel: 'Create Empty Entity',
-        description: 'Under the selected entity, or at the root',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyN, alt: true),
         group: 1,
@@ -812,7 +794,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.createWith',
-        baseLabel: 'Create Entity with Component…',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyN, shift: true, alt: true),
         group: 1,
@@ -822,7 +803,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.keepWorldTransform',
-        baseLabel: 'Keep World Transform when Reparenting',
         labelBuilder: () =>
             '${(hierarchy?.keepWorldTransform ?? true) ? '✓ ' : ''}Keep World Transform when Reparenting',
         menu: EditorMenu.edit,
@@ -834,7 +814,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.search',
-        baseLabel: 'Search Hierarchy',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyH, alt: true),
         group: 2,
@@ -847,7 +826,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.expandAll',
-        baseLabel: 'Expand All',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.bracketRight, alt: true),
         group: 2,
@@ -857,7 +835,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.collapseAll',
-        baseLabel: 'Collapse All',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.bracketLeft, alt: true),
         group: 2,
@@ -868,8 +845,6 @@ class EditorShellState extends State<EditorShell> {
       // ── Inspector (Edit menu, group 3) ──
       EditorCommand(
         id: 'inspector.addComponent',
-        baseLabel: 'Add Component…',
-        description: 'A native component or a behaviour, on every selected entity',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyA, shift: true),
         group: 3,
@@ -882,7 +857,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'inspector.openScript',
-        baseLabel: 'Open Script',
         description: "The selected entity's first behaviour, in the IDE",
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.enter, alt: true),
@@ -903,8 +877,6 @@ class EditorShellState extends State<EditorShell> {
       // ── Prefab mode (Edit menu, group 4) ──
       EditorCommand(
         id: 'prefab.applyOverrides',
-        baseLabel: 'Apply to Prefab',
-        description: 'The selected instance\'s overrides become the prefab\'s values, then are reverted here',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyA, shift: true, alt: true),
         group: 4,
@@ -923,8 +895,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'prefab.revertOverrides',
-        baseLabel: 'Revert Prefab Overrides',
-        description: 'Drops every override of the selected instance — back to the prefab',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyU, shift: true, alt: true),
         group: 4,
@@ -937,8 +907,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'prefab.unpack',
-        baseLabel: 'Unpack Prefab Instance',
-        description: 'The instance becomes plain entities of this document (one undo step)',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyX, shift: true, alt: true),
         group: 4,
@@ -955,8 +923,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'prefab.open',
-        baseLabel: 'Open Prefab',
-        description: 'The selected instance\'s prefab in its own tab (an imported hierarchy read-only)',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyD, shift: true, alt: true),
         group: 4,
@@ -970,8 +936,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'prefab.selectAsset',
-        baseLabel: 'Select Prefab Asset',
-        description: 'Reveals the selected instance\'s prefab (or model source) in the Project browser',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyL, shift: true, alt: true),
         group: 4,
@@ -984,8 +948,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'inspector.checkCodegen',
-        baseLabel: 'Check Generated Behaviour Files',
-        description: 'Runs `fynkel codegen --check` on the project (never writes)',
         menu: EditorMenu.project,
         group: 3,
         order: 5,
@@ -996,8 +958,6 @@ class EditorShellState extends State<EditorShell> {
       // ── Assets (Project menu, group 4) ──
       EditorCommand(
         id: 'assets.newScene',
-        baseLabel: 'New Scene',
-        description: 'An empty scene document in the Project browser\'s folder',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyS, shift: true, alt: true),
         group: 4,
@@ -1007,7 +967,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.newPrefab',
-        baseLabel: 'New Prefab',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyP, shift: true, alt: true),
         group: 4,
@@ -1017,8 +976,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.newMaterial',
-        baseLabel: 'New Material',
-        description: 'A fynkel.pbr@1 material with the shader\'s defaults',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyM, shift: true, alt: true),
         group: 4,
@@ -1028,7 +985,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.newFolder',
-        baseLabel: 'New Folder',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyF, shift: true, alt: true),
         group: 4,
@@ -1041,8 +997,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.open',
-        baseLabel: 'Open Asset',
-        description: 'The selected scene or prefab into a tab; any other asset into the Inspector',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyO, shift: true, alt: true),
         group: 4,
@@ -1060,8 +1014,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.rename',
-        baseLabel: 'Rename Asset',
-        description: 'The file and its sidecar move together; the id and every reference survive',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyR, shift: true, alt: true),
         group: 4,
@@ -1074,7 +1026,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.move',
-        baseLabel: 'Move Asset to Folder…',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyV, shift: true, alt: true),
         group: 4,
@@ -1084,8 +1035,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.delete',
-        baseLabel: 'Delete Asset',
-        description: 'To .fynkel/trash; refused while referenced unless you say "delete anyway"',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.backspace, shift: true, alt: true),
         group: 4,
@@ -1098,8 +1047,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.reimport',
-        baseLabel: 'Reimport Asset',
-        description: 'Runs the selected source through its importer with the sidecar\'s settings',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyI, shift: true, alt: true),
         group: 4,
@@ -1115,7 +1062,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.reveal',
-        baseLabel: 'Reveal Asset in Finder',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyE, shift: true, alt: true),
         group: 4,
@@ -1130,7 +1076,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.copyId',
-        baseLabel: 'Copy Asset Id',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyC, shift: true, alt: true),
         group: 4,
@@ -1143,7 +1088,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.search',
-        baseLabel: 'Search Project',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyP, alt: true),
         group: 4,
@@ -1156,7 +1100,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'assets.toggleView',
-        baseLabel: 'Toggle Project Folders / List',
         labelBuilder: () => browser?.view == BrowserView.list ? 'Show Project as Folders' : 'Show Project as One List',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyT, shift: true, alt: true),
@@ -1170,7 +1113,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'project.new',
-        baseLabel: 'New Project…',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyN, shift: true),
         group: 0,
@@ -1179,7 +1121,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'project.open',
-        baseLabel: 'Open Project…',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyO),
         group: 0,
@@ -1188,7 +1129,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'project.close',
-        baseLabel: 'Close Project',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyW, shift: true),
         group: 2,
@@ -1198,7 +1138,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'project.revalidate',
-        baseLabel: 'Validate Project',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyV, alt: true),
         group: 2,
@@ -1208,7 +1147,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'project.migrations',
-        baseLabel: 'Migration Preview…',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyM, alt: true),
         group: 2,
@@ -1218,7 +1156,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'project.reveal',
-        baseLabel: 'Reveal in Finder',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyR, shift: true),
         group: 2,
@@ -1228,7 +1165,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'app.quit',
-        baseLabel: 'Quit Fynkel Editor',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.keyQ),
         group: 9,
@@ -1242,10 +1178,8 @@ class EditorShellState extends State<EditorShell> {
       for (final (i, tool) in SceneTools.all.indexed)
         EditorCommand(
           id: 'scene.tool.${tool.id}',
-          baseLabel: '${tool.label} Tool',
-          description:
-              'The Scene view\'s ${tool.label.toLowerCase()} tool'
-              '${tool.key == null ? '' : ' (also ${tool.key!.keyLabel} from any panel)'}',
+          baseLabel: EditorStrings.toolCommand(tool.label),
+          description: EditorStrings.toolDescription(tool.label, tool.key?.keyLabel),
           menu: EditorMenu.edit,
           // Unity's bare Q W E R Y only: ⌘1… are Go to <panel>, as in Unity.
           key: tool.key == null ? null : bare(tool.key!),
@@ -1256,9 +1190,7 @@ class EditorShellState extends State<EditorShell> {
         ),
       EditorCommand(
         id: 'scene.toggleSpace',
-        baseLabel: 'Toggle Local / World Axes',
         labelBuilder: () => scene?.space == GizmoSpace.local ? 'Use World Axes' : 'Use Local Axes',
-        description: 'The gizmo\'s axes: the entity\'s own or the world\'s',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyL),
         key: bare(LogicalKeyboardKey.keyX),
@@ -1269,9 +1201,7 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'scene.toggleSnap',
-        baseLabel: 'Toggle Snapping',
         labelBuilder: () => scene?.snap.enabled ?? false ? 'Snapping Off' : 'Snapping On',
-        description: 'Move, rotate and scale in steps (hold ⌘ during a drag to invert)',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyG, alt: true),
         group: 2,
@@ -1281,8 +1211,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'scene.toggleHidden',
-        baseLabel: 'Hide / Show Selected',
-        description: 'Editor-only: out of the picture and of picking, never in the scene file',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyH, shift: true),
         key: bare(LogicalKeyboardKey.keyH),
@@ -1293,7 +1221,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'scene.showAll',
-        baseLabel: 'Show All Hidden',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyU, shift: true),
         key: bare(LogicalKeyboardKey.keyH, shift: true),
@@ -1304,8 +1231,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'scene.toggleLocked',
-        baseLabel: 'Lock / Unlock Selected',
-        description: 'Editor-only: a locked entity is not picked or dragged in the Scene view',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyK),
         key: bare(LogicalKeyboardKey.keyL),
@@ -1316,8 +1241,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'scene.alignCameraToView',
-        baseLabel: 'Align Selected Camera to View',
-        description: 'The selected camera entity moves to where the view is, one transaction',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyL, shift: true),
         group: 3,
@@ -1327,7 +1250,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'app.preferences',
-        baseLabel: 'Preferences…',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.comma),
         group: 9,
@@ -1336,8 +1258,6 @@ class EditorShellState extends State<EditorShell> {
       // ── View menu: the Scene view's camera and overlays ──
       EditorCommand(
         id: 'view.frameSelected',
-        baseLabel: 'Frame Selected',
-        description: 'The camera swings to fit the selection (everything when nothing is selected)',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyF),
         key: bare(LogicalKeyboardKey.keyF),
@@ -1348,7 +1268,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.frameAll',
-        baseLabel: 'Frame All',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyF, shift: true),
         key: bare(LogicalKeyboardKey.keyF, shift: true),
@@ -1359,7 +1278,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.toggleProjection',
-        baseLabel: 'Toggle Perspective / Orthographic',
         labelBuilder: () => scene?.camera?.orthographic ?? false ? 'Perspective' : 'Orthographic',
         menu: EditorMenu.view,
         // Bare 5 only: ⌘5 is Go to Project, as in Unity.
@@ -1371,8 +1289,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.alignToCamera',
-        baseLabel: 'Look Through Selected Camera',
-        description: 'The view takes the selected camera\'s placement and lens — the picture is what it renders',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyL, alt: true),
         group: 0,
@@ -1382,8 +1298,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.reset',
-        baseLabel: 'Reset View',
-        description: 'The editor camera back to its starting place',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.digit0, shift: true),
         group: 0,
@@ -1393,7 +1307,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.toggleGrid',
-        baseLabel: 'Toggle Grid and Axes',
         labelBuilder: () => scene?.showGrid ?? true ? 'Hide Grid and Axes' : 'Show Grid and Axes',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyG),
@@ -1404,7 +1317,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.toggleOverlays',
-        baseLabel: 'Toggle Light and Camera Icons',
         labelBuilder: () => scene?.showOverlays ?? true ? 'Hide Light and Camera Icons' : 'Show Light and Camera Icons',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyI),
@@ -1415,7 +1327,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.toggleStats',
-        baseLabel: 'Toggle Stats Overlay',
         labelBuilder: () => scene?.showStats ?? false ? 'Hide Stats Overlay' : 'Show Stats Overlay',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyT),
@@ -1426,9 +1337,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.reload',
-        baseLabel: 'Reload Preview',
-        description:
-            'The preview world emptied and loaded fresh from the document (the fallback the sync uses on its own)',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyR, control: true),
         group: 2,
@@ -1438,8 +1346,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.recook',
-        baseLabel: 'Rebuild Asset Cache and Reload',
-        description: '`fynkel cook` in process, then every preview reloaded',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyR, control: true, shift: true),
         group: 2,
@@ -1449,9 +1355,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'view.saveFrame',
-        baseLabel: 'Save Frame…',
-        description:
-            'One frame of the Scene view as a PNG at the viewport\'s size (the pixel gate against `fynkel render`)',
         menu: EditorMenu.view,
         shortcut: k(LogicalKeyboardKey.keyX, alt: true),
         group: 2,
@@ -1462,11 +1365,7 @@ class EditorShellState extends State<EditorShell> {
       // ── Play (Play menu) ──
       EditorCommand(
         id: 'play.start',
-        baseLabel: 'Play',
         labelBuilder: () => play?.isActive ?? false ? 'Playing…' : 'Play',
-        description:
-            'Run the game in the Game view (a project editor, `fynkel editor`); the plain editor has no game '
-            'compiled in and builds and runs it as its own app',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyP),
         group: 0,
@@ -1476,10 +1375,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.buildAndRun',
-        baseLabel: 'Build and Run',
-        description:
-            'Run the game as its own app in its own window (`fynkel run`): release-like speed, or a crash that '
-            'must not take the editor down. It plays the saved files',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyB),
         group: 0,
@@ -1489,8 +1384,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.stop',
-        baseLabel: 'Stop',
-        description: 'Kill the game and everything it started',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.period),
         group: 0,
@@ -1500,9 +1393,7 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.pause',
-        baseLabel: 'Pause',
         labelBuilder: () => gameRun?.paused ?? false ? 'Resume' : 'Pause',
-        description: 'Pause or resume the game in the Game view — its loop and its audio',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyP, control: true),
         group: 0,
@@ -1512,8 +1403,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.step',
-        baseLabel: 'Step',
-        description: 'Pause the game and run one fixed step',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyP, control: true, alt: true),
         group: 0,
@@ -1523,10 +1412,7 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.gizmos',
-        baseLabel: 'Show Gizmos in Play',
         labelBuilder: () => editorState?.playGizmos ?? false ? 'Hide Gizmos in Play' : 'Show Gizmos in Play',
-        description:
-            'The next Play draws the game\'s `Gizmos` calls in its window (`FYNKEL_GIZMOS=1`; debug and profile builds)',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyG, shift: true, alt: true),
         group: 0,
@@ -1536,10 +1422,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.restart',
-        baseLabel: 'Restart to Apply Code Changes',
-        description:
-            'Save every document and restart the editor with the current code (for a change a hot reload cannot apply); '
-            'the open tabs and selection come back',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyR, control: true, alt: true),
         group: 1,
@@ -1549,8 +1431,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.showConsole',
-        baseLabel: 'Game Console',
-        description: 'The Console\'s Game tab: the running game\'s logs, diagnostics and state',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyJ, alt: true),
         group: 1,
@@ -1560,7 +1440,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'play.clearConsole',
-        baseLabel: 'Clear Game Console',
         menu: EditorMenu.play,
         shortcut: k(LogicalKeyboardKey.keyK, shift: true),
         group: 1,
@@ -1570,7 +1449,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'window.commandPalette',
-        baseLabel: 'Command Palette…',
         menu: EditorMenu.window,
         shortcut: k(LogicalKeyboardKey.keyP, shift: true),
         group: 0,
@@ -1578,7 +1456,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'window.resetLayout',
-        baseLabel: 'Reset Layout',
         menu: EditorMenu.window,
         shortcut: k(LogicalKeyboardKey.digit0, alt: true),
         group: 1,
@@ -1588,8 +1465,9 @@ class EditorShellState extends State<EditorShell> {
       for (final (i, id) in PanelRegistry.defaultOrder.indexed)
         EditorCommand(
           id: 'window.panel.$id',
-          baseLabel: 'Toggle ${_panels.byId(id)!.title}',
-          labelBuilder: () => '${workspace?.isShown(id) ?? true ? 'Hide' : 'Show'} ${_panels.byId(id)!.title}',
+          baseLabel: EditorStrings.togglePanel(_panels.byId(id)!.title),
+          labelBuilder: () =>
+              EditorStrings.showOrHidePanel(_panels.byId(id)!.title, shown: workspace?.isShown(id) ?? true),
           menu: EditorMenu.window,
           shortcut: k(_digit(i + 1), alt: true),
           group: 2,
@@ -1600,7 +1478,7 @@ class EditorShellState extends State<EditorShell> {
       for (final (i, id) in copyablePanels.indexed)
         EditorCommand(
           id: 'window.newCopy.$id',
-          baseLabel: 'New ${_panels.byId(id)!.name}',
+          baseLabel: EditorStrings.newPanel(_panels.byId(id)!.name),
           description:
               'Another ${_panels.byId(id)!.name} beside the one used last, with its own ${switch (id) {
                 PanelRegistry.inspector => 'selection and padlock',
@@ -1630,8 +1508,8 @@ class EditorShellState extends State<EditorShell> {
         if (_panels.byId(id) != null)
           EditorCommand(
             id: 'window.goto.$id',
-            baseLabel: 'Go to ${_panels.byId(id)!.name}',
-            description: 'Shows the ${_panels.byId(id)!.name} and moves the keyboard into it',
+            baseLabel: EditorStrings.goToPanel(_panels.byId(id)!.name),
+            description: EditorStrings.goToPanelDescription(_panels.byId(id)!.name),
             menu: EditorMenu.window,
             shortcut: shortcut,
             group: 5,
@@ -1641,7 +1519,6 @@ class EditorShellState extends State<EditorShell> {
           ),
       EditorCommand(
         id: 'console.focusSearch',
-        baseLabel: 'Search Console',
         menu: EditorMenu.window,
         shortcut: k(LogicalKeyboardKey.keyF, alt: true),
         group: 3,
@@ -1654,7 +1531,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'console.copy',
-        baseLabel: 'Copy Console',
         menu: EditorMenu.window,
         shortcut: k(LogicalKeyboardKey.keyC, alt: true),
         group: 3,
@@ -1664,7 +1540,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'console.openInIde',
-        baseLabel: 'Open Console Row in IDE',
         menu: EditorMenu.window,
         shortcut: k(LogicalKeyboardKey.keyO, alt: true),
         group: 3,
@@ -1674,8 +1549,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'console.openInEditor',
-        baseLabel: 'Open Console Row in Editor',
-        description: 'The diagnostic\'s scene or prefab into a tab, its entity selected',
         menu: EditorMenu.window,
         shortcut: k(LogicalKeyboardKey.keyE, alt: true),
         group: 3,
@@ -1685,7 +1558,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'help.documentation',
-        baseLabel: 'Editor Documentation',
         menu: EditorMenu.help,
         shortcut: k(LogicalKeyboardKey.keyD, alt: true),
         enabled: () => toolchain?.fynkelRoot != null,
@@ -1693,7 +1565,6 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'help.about',
-        baseLabel: 'About Fynkel Editor',
         menu: EditorMenu.help,
         shortcut: k(LogicalKeyboardKey.keyA, alt: true),
         run: showAbout,
@@ -1721,7 +1592,7 @@ class EditorShellState extends State<EditorShell> {
       for (final (i, r) in widget.prefs.recents.indexed)
         EditorCommand(
           id: 'project.recent.$i',
-          baseLabel: 'Open Recent: ${r.name.isEmpty ? p.basename(r.dir) : r.name}',
+          baseLabel: EditorStrings.openRecent(r.name.isEmpty ? p.basename(r.dir) : r.name),
           description: r.dir,
           menu: EditorMenu.project,
           group: 0,
