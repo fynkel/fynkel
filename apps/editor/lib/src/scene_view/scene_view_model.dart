@@ -1783,7 +1783,7 @@ final class SceneViewModel extends ChangeNotifier {
 
   bool canDropAsset(AssetDragPayload d) =>
       hasView &&
-      (d.kind == 'material'
+      (d.kind == 'material' || d.kind == 'script'
           ? hierarchy.canEdit
           : hierarchy.canDropAsset(d.toRef(), d.kind, DropTarget(parent: null, index: hierarchy.tree?.roots.length ?? 0)));
 
@@ -1835,6 +1835,32 @@ final class SceneViewModel extends ChangeNotifier {
     final target = materialTargetAt(px);
     if (target == null) return false;
     final ok = hierarchy.assignMaterial(d.toRef(), target);
+    if (ok) notice = null;
+    _repaint();
+    return ok;
+  }
+
+  /// The object a script dropped at [px] goes onto: the nearest one
+  /// under the pointer (a mesh or a gizmo; inside a prefab instance, the
+  /// child the ray met) when it does not have the script yet.
+  String? scriptTargetAt(String type, Offset px) {
+    final t = current;
+    if (t == null || !t.hasPreview || viewportWidth <= 0) return null;
+    final ndc = [px.dx / viewportWidth * 2 - 1, 1 - px.dy / viewportHeight * 2];
+    final hidden = _hiddenAll(t);
+    for (final h in t.preview!.pick(t.camera.toPreview(), aspect, ndc).hits) {
+      if (t.state.locked.contains(h.id) || hidden.contains(h.id)) continue;
+      return hierarchy.canAddScript(type, h.object) ? h.object : null;
+    }
+    return null;
+  }
+
+  /// Drops a script at [px] onto the object under it (Unity's script
+  /// drop): one transaction, the selection kept. False over nothing.
+  bool dropScript(AssetDragPayload d, Offset px) {
+    final target = scriptTargetAt(d.id, px);
+    if (target == null) return false;
+    final ok = hierarchy.addScript(d.id, target);
     if (ok) notice = null;
     _repaint();
     return ok;

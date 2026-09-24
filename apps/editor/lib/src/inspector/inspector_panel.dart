@@ -169,6 +169,22 @@ class _InspectorPanelState extends State<InspectorPanel> {
     return _entityPage(context);
   }
 
+  /// A script dropped on the Inspector goes onto the selection (Unity's
+  /// script drop; Add Component's rules, so not twice on one object).
+  Widget _scriptDrop(Widget child) => DragTarget<AssetDragPayload>(
+    onWillAcceptWithDetails: (d) =>
+        d.data.kind == 'script' && model.canEdit && model.entities.isNotEmpty && model.entitiesWith(d.data.id).isEmpty,
+    onAcceptWithDetails: (d) => model.addComponent(d.data.id),
+    builder: (context, candidates, _) => DecoratedBox(
+      key: const ValueKey('inspector.scriptDrop'),
+      position: DecorationPosition.foreground,
+      decoration: BoxDecoration(
+        border: candidates.isEmpty ? null : Border.all(color: Theme.of(context).colorScheme.primary, width: 2),
+      ),
+      child: child,
+    ),
+  );
+
   Widget _entityPage(BuildContext context) {
     final theme = Theme.of(context);
     if (!model.hasDocument) return _empty(context, FIcons.tune, 'Open a document and select an entity.');
@@ -209,60 +225,62 @@ class _InspectorPanelState extends State<InspectorPanel> {
         ?banner,
         _kept('header', () => _header(context)),
         Expanded(
-          child: CustomScrollView(
-            key: const ValueKey('inspector.list'),
-            slivers: [
-              if (model.single?.isDerived ?? false)
-                SliverToBoxAdapter(
-                  child: _DerivedBanner(model: model, entity: model.single!),
-                ),
-              for (final slot in model.slots) _card(slot),
-              _kept('footer', () => SliverPadding(
-                padding: const EdgeInsets.only(bottom: 12),
-                sliver: SliverList.list(
-                  children: [
-                    if (model.single?.prefab != null) _PrefabSection(model: model, entity: model.single!),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                      child: Builder(
-                        builder: (button) => OutlinedButton.icon(
-                          key: const ValueKey('inspector.addComponent'),
-                          onPressed: model.canEdit
-                              ? () => showAddComponent(context, model, anchor: globalRectOf(button))
-                              : null,
-                          icon: const Icon(FIcons.add),
-                          label: const Text('Add Component'),
-                        ),
-                      ),
-                    ),
-                    if (model.lastError != null && model.errors.isEmpty)
+          child: _scriptDrop(
+            CustomScrollView(
+              key: const ValueKey('inspector.list'),
+              slivers: [
+                if (model.single?.isDerived ?? false)
+                  SliverToBoxAdapter(
+                    child: _DerivedBanner(model: model, entity: model.single!),
+                  ),
+                for (final slot in model.slots) _card(slot),
+                _kept('footer', () => SliverPadding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  sliver: SliverList.list(
+                    children: [
+                      if (model.single?.prefab != null) _PrefabSection(model: model, entity: model.single!),
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: SelectableText(
-                                model.lastError!,
-                                key: const ValueKey('inspector.lastError'),
-                                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                              ),
-                            ),
-                            IconButton(
-                              key: const ValueKey('inspector.dismissError'),
-                              tooltip: 'Dismiss',
-                              icon: const Icon(FIcons.close, size: 14),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                              onPressed: model.dismissError,
-                            ),
-                          ],
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                        child: Builder(
+                          builder: (button) => OutlinedButton.icon(
+                            key: const ValueKey('inspector.addComponent'),
+                            onPressed: model.canEdit
+                                ? () => showAddComponent(context, model, anchor: globalRectOf(button))
+                                : null,
+                            icon: const Icon(FIcons.add),
+                            label: const Text('Add Component'),
+                          ),
                         ),
                       ),
-                  ],
-                ),
-              )),
-            ],
+                      if (model.lastError != null && model.errors.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: SelectableText(
+                                  model.lastError!,
+                                  key: const ValueKey('inspector.lastError'),
+                                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                                ),
+                              ),
+                              IconButton(
+                                key: const ValueKey('inspector.dismissError'),
+                                tooltip: 'Dismiss',
+                                icon: const Icon(FIcons.close, size: 14),
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                                onPressed: model.dismissError,
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                )),
+              ],
+            ),
           ),
         ),
       ],

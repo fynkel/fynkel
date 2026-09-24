@@ -489,6 +489,8 @@ class _ScenePanelState extends State<ScenePanel> {
         if (at == null) return;
         if (d.data.kind == 'material') {
           model.dropMaterial(d.data, at);
+        } else if (d.data.kind == 'script') {
+          model.dropScript(d.data, at);
         } else {
           model.dropPrefab(d.data, at);
         }

@@ -1094,6 +1094,18 @@ final class ProjectBrowserModel extends ChangeNotifier {
     return descending ? out.reversed.toList() : out;
   }
 
+  /// What a script row drags (Unity's script drop): the behaviour the
+  /// file declares — of several, the one named after the file, as Unity
+  /// asks — as a `script` whose id is the type id. Null for a file without one.
+  AssetDragPayload? scriptDragPayload(String rel) {
+    final ids = behaviourIds[rel] ?? const <String>[];
+    String className(String id) => id.substring(id.lastIndexOf('.') + 1);
+    final id = ids.length == 1
+        ? ids.single
+        : ids.where((id) => snakeCase(className(id)) == p.basenameWithoutExtension(rel)).firstOrNull;
+    return id == null ? null : AssetDragPayload(id: id, kind: 'script', name: className(id));
+  }
+
   /// A script row's kind: `behaviour`, `generated` or `script`.
   String scriptKind(String rel) => behaviourIds.containsKey(rel)
       ? 'behaviour'

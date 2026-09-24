@@ -1025,9 +1025,11 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
 
     if (widget.renaming) return interactive;
 
-    // A material goes onto the object (Unity's material drop), anywhere on the row.
+    // A material or a script goes onto the object (Unity's material and
+    // script drops), anywhere on the row.
     _Zone? assetZone(DragTargetDetails<AssetDragPayload> d) {
       if (d.data.kind == 'material') return model.canAssignMaterial(d.data.kind, row.id) ? _Zone.onto : null;
+      if (d.data.kind == 'script') return model.canAddScript(d.data.id, row.id) ? _Zone.onto : null;
       final z = _zoneAt(d.offset);
       return model.canDropAsset(d.data.toRef(), d.data.kind, _target(z)) ? z : null;
     }
@@ -1047,6 +1049,10 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
         setState(() => _zone = null);
         if (d.data.kind == 'material') {
           model.assignMaterial(d.data.toRef(), row.id);
+          return;
+        }
+        if (d.data.kind == 'script') {
+          model.addScript(d.data.id, row.id);
           return;
         }
         final z = _zoneAt(d.offset);

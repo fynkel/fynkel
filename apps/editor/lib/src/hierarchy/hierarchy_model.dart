@@ -930,7 +930,12 @@ final class HierarchyModel extends ChangeNotifier {
   /// [id]'s MeshRenderer: its component id and data, and for an object a
   /// prefab puts there (an instance or one of its children) the anchor
   /// and the prefab-local ids its override names.
-  ({String component, Map<String, Object?> data, String? anchor, String? entityLocal, String? local})? _renderer(String id) {
+  _Held? _renderer(String id) => _held(id)?.components.where((c) => c.type == _meshRenderer).firstOrNull;
+
+  /// [id]'s components as the object has it, and for an object a prefab
+  /// puts there the anchor and the prefab-local entity id its overrides
+  /// name; null when [id] is not in the shown document.
+  ({List<_Held> components, String? anchor, String? entityLocal})? _held(String id) {
     final t = _tab;
     final n = t?.tree[id];
     if (t == null || n == null) return null;
@@ -939,12 +944,14 @@ final class HierarchyModel extends ChangeNotifier {
       final x = t.expansionOf(anchor);
       final de = x?.entity(id);
       if (de == null) return null;
-      for (final c in de.components.entries) {
-        if (c.value.type == _meshRenderer) {
-          return (component: c.key, data: Map<String, Object?>.from(c.value.data), anchor: anchor, entityLocal: de.local, local: c.value.local);
-        }
-      }
-      return null;
+      return (
+        components: [
+          for (final c in de.components.entries)
+            (component: c.key, type: c.value.type, data: Map<String, Object?>.from(c.value.data), anchor: anchor, entityLocal: de.local, local: c.value.local),
+        ],
+        anchor: anchor,
+        entityLocal: de.local,
+      );
     }
     final Map<String, Object?>? e;
     try {
@@ -952,15 +959,50 @@ final class HierarchyModel extends ChangeNotifier {
     } on AuthoringException {
       return null;
     }
-    final comps = e?['components'];
-    if (comps is! Map) return null;
-    for (final c in comps.entries) {
-      final v = c.value;
-      if (v is Map && v['type'] == _meshRenderer) {
-        return (component: c.key as String, data: v['data'] is Map ? Map<String, Object?>.from(v['data'] as Map) : <String, Object?>{}, anchor: null, entityLocal: null, local: null);
-      }
-    }
-    return null;
+    if (e == null) return null;
+    final comps = e['components'];
+    return (
+      components: [
+        if (comps is Map)
+          for (final c in comps.entries)
+            if (c.value case final Map v)
+              (component: c.key as String, type: v['type'] as String? ?? '', data: v['data'] is Map ? Map<String, Object?>.from(v['data'] as Map) : <String, Object?>{}, anchor: null, entityLocal: null, local: null),
+      ],
+      anchor: null,
+      entityLocal: null,
+    );
+  }
+
+  // ── A script dropped on an object (Unity parity, Tier 2) ───────────────
+
+  /// Whether the behaviour [type] dropped on [id] would be added: an
+  /// editable document and an object without one already (an entity holds
+  /// one component per type, FYN-D0204).
+  bool canAddScript(String type, String id) {
+    if (!canEdit) return false;
+    final h = _held(id);
+    return h != null && !h.components.any((c) => c.type == type);
+  }
+
+  /// Unity's script drop: the behaviour [type] with its schema defaults
+  /// goes onto [id] — an `addComponent`, or an `addComponent` override
+  /// when a prefab puts the object there. One undo step; the selection stays.
+  bool addScript(String type, String id) {
+    final h = _held(id);
+    if (h == null || !canAddScript(type, id)) return false;
+    final spec = ComponentSpecs(project).of(type);
+    if (spec.missingSchema) return false;
+    final data = spec.schemaDefaults();
+    final version = spec.version ?? 1;
+    final a = _run([
+      h.anchor == null
+          ? Command.addComponent(id, {'type': type, 'version': version, 'data': data})
+          : Command.setPrefabOverrideOp(
+              h.anchor!,
+              prefab.addComponentOverride(entity: h.entityLocal!, type: type, version: version, data: data),
+            ),
+    ]);
+    return a != null && a.ok;
   }
 
   static const _meshRenderer = 'fynkel.MeshRenderer';
@@ -1099,3 +1141,6 @@ String prefabInstanceName(String assetName) {
   }
   return n;
 }
+
+/// One component of an object, as [HierarchyModel] reads it for a drop.
+typedef _Held = ({String component, String type, Map<String, Object?> data, String? anchor, String? entityLocal, String? local});

@@ -40,7 +40,8 @@ final class AssetDragPayload {
   final String id;
   final String? sub;
 
-  /// `mesh`, `material`, `texture`, … — what the field checks.
+  /// `mesh`, `material`, `texture`, … — what the field checks. A
+  /// `script` is a behaviour: [id] is its type id (`game.Spinner`).
   final String kind;
   final String name;
 
@@ -1751,6 +1752,7 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'clip' => FIcons.animation,
   'skin' || 'rig' => FIcons.accessibilityNew,
   'volume' => FIcons.tune,
+  'script' => FIcons.descriptionOutlined,
   _ => FIcons.insertDriveFileOutlined,
 };
 

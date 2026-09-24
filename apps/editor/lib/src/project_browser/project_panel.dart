@@ -1794,7 +1794,7 @@ class _ScriptRow extends StatelessWidget {
     final icon = folder
         ? (rel.isEmpty ? FIcons.code : (current ? FIcons.folderOpen : FIcons.folderOutlined))
         : FIcons.descriptionOutlined;
-    return GestureDetector(
+    final row = GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       onSecondaryTapUp: (d) => onSecondaryTap(d.globalPosition),
@@ -1860,6 +1860,31 @@ class _ScriptRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+    // A behaviour's file drags the behaviour: onto an object in the
+    // Hierarchy, the Scene view or the Inspector it is added (Unity's script drop).
+    final payload = folder ? null : model.scriptDragPayload(rel);
+    if (payload == null) return row;
+    return Draggable<AssetDragPayload>(
+      data: payload,
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(4),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(assetKindIcon(payload.kind), size: 14),
+              const SizedBox(width: 6),
+              Text(payload.name, style: theme.textTheme.bodySmall),
+            ],
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: .4, child: row),
+      child: row,
     );
   }
 }
