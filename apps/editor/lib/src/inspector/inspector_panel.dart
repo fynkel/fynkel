@@ -926,11 +926,20 @@ class _FieldEditor extends StatelessWidget {
   static List<num>? _quaternionOf(Object? v) =>
       v is List && v.length == 4 ? [for (final x in v) x is num ? x : 0] : null;
 
+  /// Where [EulerHints] keeps the angles typed for instance [i]'s rotation.
+  String _hintKey(ComponentInstance i) => '${i.entityId}/${i.componentId}/$path';
+
+  /// Instance [i]'s rotation in degrees as the Inspector shows it.
+  Euler _eulerOf(ComponentInstance i) {
+    final own = _quaternionOf(slot.shownFor(i, path));
+    return own == null ? Euler.zero : EulerHints.of(_hintKey(i), own);
+  }
+
   /// Per axis, whether the selected objects' angles differ (to 0.001°).
   List<bool> _mixedAxes() {
     final eulers = [
       for (final i in slot.instances)
-        if (_quaternionOf(slot.shownFor(i, path)) case final q?) Euler.fromQuaternion(q).clean,
+        if (_quaternionOf(slot.shownFor(i, path)) != null) _eulerOf(i),
     ];
     if (eulers.length < 2) return const [false, false, false];
     return [
@@ -1049,6 +1058,7 @@ class _FieldEditor extends StatelessWidget {
           error,
           EulerField(
             quaternion: q,
+            hintKey: _hintKey(slot.first),
             live: model.liveField(slot, path),
             mixed: mixed,
             enabled: _enabled,
@@ -1057,18 +1067,15 @@ class _FieldEditor extends StatelessWidget {
             mixedAxes: slot.single ? null : _mixedAxes(),
             onPreviewAxis: (axis, degrees) {
               if (degrees == null) return model.endPreview(slot);
-              model.previewEach(slot, path, (i) {
-                final own = _quaternionOf(slot.shownFor(i, path));
-                final e = (own == null ? Euler.zero : Euler.fromQuaternion(own).clean).withComponent(axis, degrees);
-                return e.toQuaternion();
-              });
+              model.previewEach(slot, path, (i) => _eulerOf(i).withComponent(axis, degrees).toQuaternion());
             },
             onCommitAxis: slot.single
                 ? null
                 : (axis, degrees) => model.setFieldEach(slot, _writePath, (i) {
-                    final own = _quaternionOf(slot.shownFor(i, path));
-                    final e = (own == null ? Euler.zero : Euler.fromQuaternion(own).clean).withComponent(axis, degrees);
-                    return _numbersLike(e.toQuaternion(), own);
+                    final e = _eulerOf(i).withComponent(axis, degrees);
+                    final q = e.toQuaternion();
+                    EulerHints.remember(_hintKey(i), q, e);
+                    return _numbersLike(q, _quaternionOf(slot.shownFor(i, path)));
                   }),
           ),
         );

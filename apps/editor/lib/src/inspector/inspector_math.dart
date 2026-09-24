@@ -3,6 +3,8 @@
 // the number formatting a document round-trips byte-exactly.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 /// Euler angles in degrees, applied as intrinsic X, then Y, then Z
 /// (`q = qz · qy · qx`, i.e. the entity pitches about its own X, yaws about
 /// the resulting Y, rolls about the resulting Z) — the Unity/Godot reading
@@ -94,6 +96,38 @@ List<double> normalizeQuaternion(List<double> q) {
 }
 
 /// Same rotation (q and −q), within [eps].
+/// Unity's Euler hint: the angles last typed for a rotation, kept by the
+/// editor (the document stores only the quaternion), so a rotation typed as
+/// 180° shows as 180° again after a reselect or an undo instead of the
+/// decomposition's own triple. A few per rotation (undo goes back through
+/// them); a quaternion none of them makes is decomposed as before.
+abstract final class EulerHints {
+  static final _hints = <String, List<(List<num>, Euler)>>{};
+
+  /// The angles to show for [q] under [key] (`entity/component/field`).
+  static Euler of(String? key, List<num> q) {
+    final hints = key == null ? null : _hints[key];
+    for (final (hq, e) in hints ?? const <(List<num>, Euler)>[]) {
+      if (sameRotation(hq, q)) return e;
+    }
+    return Euler.fromQuaternion(q).clean;
+  }
+
+  static void remember(String? key, List<num> q, Euler e) {
+    if (key == null) return;
+    final list = _hints.remove(key) ?? [];
+    list
+      ..removeWhere((h) => sameRotation(h.$1, q))
+      ..add((List.of(q), e));
+    if (list.length > 8) list.removeAt(0);
+    _hints[key] = list;
+    if (_hints.length > 4096) _hints.remove(_hints.keys.first);
+  }
+
+  @visibleForTesting
+  static void clear() => _hints.clear();
+}
+
 bool sameRotation(List<num> a, List<num> b, {double eps = 1e-6}) {
   bool close(int sign) {
     for (var i = 0; i < 4; i++) {

@@ -71,4 +71,27 @@ void main() {
     expect(tab.document.history, 1, reason: 'one undo step on release');
     expect(world.worldMatrices([id])[id]![12], closeTo(during, 1e-6));
   });
+
+  testWidgets('a typed rotation reads the same after a reselect and after undo/redo', (tester) async {
+    final e = await Editor.open(tester);
+    // Y beyond 90°: the quaternion alone would read back as X 180, Y 60, Z 180.
+    await e.click(e.row('Floor'));
+    await setRotation(e, 1, '120');
+    String shown(int axis) => tester
+        .widget<EditableText>(
+          find.descendant(of: find.byKey(ValueKey('euler.$axis')).first, matching: find.byType(EditableText)),
+        )
+        .controller
+        .text;
+    List<String> angles() => [shown(0), shown(1), shown(2)];
+    expect(angles(), ['0', '120', '0']);
+    await e.click(e.row('Crate B'));
+    await e.click(e.row('Floor'));
+    expect(angles(), ['0', '120', '0'], reason: 'reselected');
+    await setRotation(e, 0, '10');
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(angles(), ['0', '120', '0'], reason: 'undone');
+    await e.press(LogicalKeyboardKey.keyZ, command: true, shift: true);
+    expect(angles(), ['10', '120', '0'], reason: 'redone');
+  });
 }

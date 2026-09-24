@@ -1045,9 +1045,13 @@ class EulerField extends StatefulWidget {
     this.onPreviewAxis,
     this.enabled = true,
     this.live,
+    this.hintKey,
   });
 
   final List<num>? quaternion;
+
+  /// Where the angles typed here are remembered ([EulerHints]); null: not.
+  final String? hintKey;
 
   /// Several objects: which of X, Y, Z differ among them (each shows "—"
   /// alone); with [onCommitAxis], an edit changes only that axis on each.
@@ -1128,7 +1132,7 @@ class _EulerFieldState extends State<EulerField> {
     final q = _quaternion;
     if (q == null || q.length != 4) return Euler.zero;
     if (_shown != null && _for != null && sameRotation(_for!, q, eps: 1e-9)) return _shown!;
-    final e = Euler.fromQuaternion(q).clean;
+    final e = EulerHints.of(widget.hintKey, q);
     _shown = e;
     _for = List.of(q);
     return e;
@@ -1143,6 +1147,7 @@ class _EulerFieldState extends State<EulerField> {
     final q = e.toQuaternion();
     _shown = e;
     _for = q;
+    EulerHints.remember(widget.hintKey, q, e);
     widget.onCommit(q);
   }
 
