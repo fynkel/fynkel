@@ -311,10 +311,13 @@ final class OpenDocument extends ChangeNotifier {
       notifyListeners();
       return null;
     }
+    final before = selection.toList();
+    final depth = document.history;
     try {
       final a = document.apply(commands, baseRevision: document.revision);
       if (a.ok) {
         lastError = null;
+        _recordStep(before, depth);
       } else if (a.isConflict) {
         // FYN-E0001: the document moved on since this revision — nothing
         // was touched. Re-read and let the user try again.
@@ -332,8 +335,60 @@ final class OpenDocument extends ChangeNotifier {
     }
   }
 
-  bool undo() => _replay(document.undo);
-  bool redo() => _replay(document.redo);
+  bool undo() {
+    final step = _selectionUndo.length == document.history ? _selectionUndo.lastOrNull : null;
+    final now = selection.toList();
+    if (!_replay(document.undo)) return false;
+    if (step == null) {
+      _forgetSteps();
+      return true;
+    }
+    _selectionUndo.removeLast();
+    _selectionRedo.add(step..after = now);
+    _restoreSelection(step.before);
+    return true;
+  }
+
+  bool redo() {
+    final step = _selectionRedo.lastOrNull;
+    final now = selection.toList();
+    final depth = document.history;
+    if (!_replay(document.redo)) return false;
+    if (step == null || _selectionUndo.length != depth) {
+      _forgetSteps();
+      return true;
+    }
+    _selectionRedo.removeLast();
+    _selectionUndo.add(step..before = now);
+    final after = step.after;
+    if (after != null) _restoreSelection(after);
+    return true;
+  }
+
+  // Unity: undo and redo bring back the selection a step was made with
+  // (and left with). One entry per committed transaction, beside the
+  // document's own history; when the two disagree (a reload, an edit the
+  // tab did not make) the steps are forgotten and the selection is only
+  // pruned, as before.
+  final _selectionUndo = <_SelectionStep>[];
+  final _selectionRedo = <_SelectionStep>[];
+
+  void _recordStep(List<String> before, int depth) {
+    if (document.history != depth + 1) return;
+    if (_selectionUndo.length != depth) _selectionUndo.clear();
+    _selectionUndo.add(_SelectionStep(before));
+    _selectionRedo.clear();
+  }
+
+  void _forgetSteps() {
+    _selectionUndo.clear();
+    _selectionRedo.clear();
+  }
+
+  void _restoreSelection(List<String> ids) {
+    final t = _tree;
+    setSelection(t == null ? ids : ids.where(t.contains));
+  }
 
   bool _replay(Replayed Function() f) {
     try {
@@ -542,4 +597,13 @@ final class OpenDocument extends ChangeNotifier {
 
   @override
   String toString() => 'OpenDocument($fileName${dirty ? ' •' : ''})';
+}
+
+/// The selection before a transaction and when its result was left by an
+/// undo.
+final class _SelectionStep {
+  _SelectionStep(this.before);
+
+  List<String> before;
+  List<String>? after;
 }

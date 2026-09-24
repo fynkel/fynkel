@@ -1,5 +1,6 @@
 // Unity parity: the Hierarchy, driven through the whole shell over a real
 // project (docs/unity-parity.md § Hierarchy).
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -182,5 +183,66 @@ void main() {
     final floor = tree.nodes.values.firstWhere((n) => n.name == 'Floor');
     final crate = tree.nodes.values.firstWhere((n) => n.name == 'Crate B');
     expect(crate.parent, floor.id);
+  });
+
+  testWidgets('undo and redo bring back the selection the step was made with', (tester) async {
+    final e = await Editor.open(tester);
+    await e.click(e.row('Sun'));
+    await e.press(LogicalKeyboardKey.keyD, command: true);
+    expect(e.selectedNames, ['Sun (1)']);
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(e.selectedNames, ['Sun']);
+    await e.press(LogicalKeyboardKey.keyZ, command: true, shift: true);
+    expect(e.selectedNames, ['Sun (1)']);
+
+    await e.click(e.row('Robot'));
+    await e.click(e.row('Floor'), command: true);
+    await e.press(LogicalKeyboardKey.backspace, command: true);
+    expect(e.selectedNames, isEmpty);
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(e.selectedNames, ['Robot', 'Floor']);
+  });
+
+  testWidgets('⌥-click on the arrow opens or closes everything below', (tester) async {
+    final e = await Editor.open(tester);
+    await e.click(e.row('Floor'));
+    await e.press(LogicalKeyboardKey.keyN, shift: true, alt: true);
+    await e.press(LogicalKeyboardKey.enter);
+    await e.press(LogicalKeyboardKey.keyN, shift: true, alt: true);
+    await e.press(LogicalKeyboardKey.escape);
+    int made() => e.rows.where((r) => r == 'GameObject').length;
+    expect(made(), 2);
+    final floor = e.shell.tabs!.focused!.tree.nodes.values.firstWhere((n) => n.name == 'Floor').id;
+    final arrow = find.byKey(Key('hierarchy.expander.$floor'));
+
+    Future<void> altClick() async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.altLeft);
+      await tester.tap(arrow);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await altClick();
+    expect(made(), 0);
+    await e.click(arrow);
+    expect(made(), 1, reason: 'the child was closed too');
+    await e.click(arrow);
+    await altClick();
+    expect(made(), 2);
+  });
+
+  testWidgets('right-click on empty space offers Create Empty at the root, and Paste', (tester) async {
+    final e = await Editor.open(tester);
+    final list = tester.getRect(find.byKey(const Key('hierarchy.list')));
+    final below = Offset(list.center.dx, e.rowRect('Crate B').bottom + 40);
+    expect(below.dy, lessThan(list.bottom));
+    await tester.tapAt(below, buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('hierarchy.empty.paste')), findsOneWidget);
+    await e.click(find.byKey(const Key('hierarchy.empty.createEmpty')));
+    final tab = e.shell.tabs!.focused!;
+    expect(e.selectedNames, ['GameObject']);
+    expect(tab.tree.roots.last, tab.selection.single, reason: 'the last root, renaming');
+    expect(tab.tree[tab.selection.single]!.parent, isNull);
   });
 }

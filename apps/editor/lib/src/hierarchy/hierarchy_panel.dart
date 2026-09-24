@@ -262,6 +262,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
                       _listFocus.requestFocus();
                       model.clearSelection();
                     },
+                    onSecondaryTapUp: (d) => _emptySpaceMenu(context, d.globalPosition),
                     child: _RootDropTarget(
                       model: model,
                       child: ListView.builder(
@@ -545,7 +546,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       onTap: () => _tapRow(n.id),
       onDoubleTap: _frame,
       onSecondaryTap: (at) => _contextMenu(context, n.id, at),
-      onToggle: () => model.toggle(n.id),
+      onToggle: () => model.toggle(n.id, recursive: HardwareKeyboard.instance.isAltPressed),
       onRenameSubmit: (v) => model.rename(n.id, v),
       onRenameCancel: model.cancelRename,
     );
@@ -583,6 +584,58 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     );
   }
 
+  /// Unity's right-click on the Hierarchy's empty space: create at the
+  /// root, paste, expand or collapse everything.
+  Future<void> _emptySpaceMenu(BuildContext context, Offset at) async {
+    final tab = model.tab;
+    if (tab == null) return;
+    _listFocus.requestFocus();
+    model.clearSelection();
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final choice = await showMenu<String>(
+      popUpAnimationStyle: AnimationStyle.noAnimation,
+      context: context,
+      position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
+      items: [
+        PopupMenuItem(
+          key: const Key('hierarchy.empty.paste'),
+          value: 'paste',
+          enabled: model.canPaste,
+          child: const Text('Paste  ⌘V'),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          key: const Key('hierarchy.empty.createEmpty'),
+          value: 'createEmpty',
+          enabled: model.canEdit,
+          child: const Text('Create Empty  ⇧⌘N'),
+        ),
+        for (final c in model.nativeComponentTypes)
+          if (c.type != 'fynkel.Transform')
+            PopupMenuItem(value: 'createWith:${c.type}', enabled: model.canEdit, child: Text('Create with ${c.type}')),
+        const PopupMenuDivider(),
+        const PopupMenuItem(value: 'expandAll', child: Text('Expand All')),
+        const PopupMenuItem(value: 'collapseAll', child: Text('Collapse All')),
+      ],
+    );
+    switch (choice) {
+      case 'paste':
+        model.paste();
+      case 'createEmpty':
+        model.createEmpty(underSelection: false);
+      case 'expandAll':
+        model.expandAll();
+      case 'collapseAll':
+        model.collapseAll();
+      case null:
+        break;
+      default:
+        if (choice.startsWith('createWith:')) {
+          model.createWith(choice.substring('createWith:'.length), underSelection: false);
+        }
+    }
+  }
+
   Future<void> _contextMenu(BuildContext context, String id, Offset at) async {
     final tab = model.tab!;
     if (!tab.isSelected(id)) model.select(id);
@@ -607,6 +660,15 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       context: context,
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
+        PopupMenuItem(value: 'cut', enabled: model.canEdit && !anyDerived, child: const Text('Cut  ⌘X')),
+        PopupMenuItem(value: 'copy', enabled: !anyDerived, child: const Text('Copy  ⌘C')),
+        PopupMenuItem(value: 'paste', enabled: model.canPaste, child: const Text('Paste  ⌘V')),
+        PopupMenuItem(
+          value: 'pasteAsChild',
+          enabled: model.canPaste && !many,
+          child: const Text('Paste As Child  ⇧⌘V'),
+        ),
+        const PopupMenuDivider(),
         PopupMenuItem(value: 'rename', enabled: model.canRename(id) && !many, child: const Text('Rename  ↩')),
         PopupMenuItem(
           value: 'duplicate',
@@ -672,6 +734,14 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       ],
     );
     switch (choice) {
+      case 'cut':
+        model.cut();
+      case 'copy':
+        model.copy();
+      case 'paste':
+        model.paste();
+      case 'pasteAsChild':
+        model.paste(asChild: true);
       case 'rename':
         model.beginRename(id);
       case 'duplicate':

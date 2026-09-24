@@ -156,8 +156,24 @@ final class HierarchyModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void toggle(String id) {
-    _tab?.tree.toggle(id);
+  /// Opens or closes [id]; with [recursive] (Unity's ⌥-click on the
+  /// arrow) everything below it follows.
+  void toggle(String id, {bool recursive = false}) {
+    final t = _tab?.tree;
+    if (t == null) return;
+    if (!recursive) {
+      t.toggle(id);
+    } else {
+      final open = !t.isExpanded(id);
+      void walk(String i) {
+        open ? t.expand(i) : t.collapse(i);
+        for (final c in t.childrenOf(i)) {
+          walk(c);
+        }
+      }
+
+      walk(id);
+    }
     notifyListeners();
   }
 
