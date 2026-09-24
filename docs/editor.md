@@ -545,7 +545,9 @@ transaction; a key the copy lacks goes back to its default), **Reset to
 Defaults**, **Open Script** (a behaviour: `package:<pkg>/<path>` from the
 metadata resolved to `<project>/lib/<path>` when `<pkg>` is the project's
 package, then the configured IDE command at the line of its `class`
-declaration), **Copy Type Name**, **Remove
+declaration), **Copy Type Name**, **Move Up** / **Move Down** (one
+object's own components, `moveComponent`; the Transform stays first, and
+not during Play or on a prefab instance, 2026-09-24), **Remove
 Component**. A prefab instance shows a **Prefab instance** section
 listing the override ops in bold with a Revert arrow each and **Revert
 all** (per-field bold inside the expanded instance is item 7's). **Add

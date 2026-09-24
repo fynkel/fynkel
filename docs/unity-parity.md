@@ -44,7 +44,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Edit rotation with several objects selected | changes that axis on each | 🔧 `b5a9c11` (it overwrote the other axes with the first object's) |
 | Drag a value (label scrub) | the Scene view follows live | 🔧 `b5a9c11` (Transform values; one undo on release) |
 | A value that does not parse | goes back to the old value | ✅ (Unity does the same) |
-| Component header | enable checkbox, Copy/Paste Values, Move Up/Down, drag to reorder | 🔧 checkbox + Copy Component / Paste Component Values (`13d2876`); ❌ Move Up/Down, drag to reorder (needs a document command) |
+| Component header | enable checkbox, Copy/Paste Values, Move Up/Down, drag to reorder | 🔧 checkbox + Copy Component / Paste Component Values (`13d2876`); Move Up / Move Down (`moveComponent` `8b8e747`, `5d36af3`); ❌ drag to reorder |
 | Click an asset reference | pings the asset in the Project | 🔧 `2455f5d` (⊙ opens the picker) |
 | Colour picker | live while picking, HDR intensity | 🟡 applies on OK only; no HDR |
 | Rotation after reselect/undo | keeps the typed Euler | 🔧 `10e1f8b` (editor-side hints) |
@@ -128,3 +128,5 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   (`ad6a6ca`, `033df72`, `89889b6`) —
   `test/parity/gameobject_parity_test.dart` renders the saved scene with
   `fynkel render` and checks that the cube is drawn.
+- 2026-09-24: Move Up / Move Down (`8b8e747`, `5d36af3`) — the parity
+  test reads the cards' order on screen and in the saved file.

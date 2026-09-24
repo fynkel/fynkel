@@ -489,6 +489,7 @@ pointer into it such as `/position/1`):
 | `reparentObject` | `id`, `parent?`, `index?` | moves the entity (`FYN-E0006` if `parent` is the entity or below it); `null` makes it a root; `index` counts the new parent's list without the entity — for a scene root, the roots without it: the entity's member moves to just before that root in `entities` (the Hierarchy's reorder, as Unity's, 2026-09-24) |
 | `addComponent` | `entity`, `component: { id?, type, version?, data? }` | `version` 1 and empty `data` by default; `FYN-E0010` if the id exists |
 | `removeComponent` | `entity`, `component` | |
+| `moveComponent` | `entity`, `component`, `index` | moves the component's member to `index` among the entity's components (the Inspector's Move Up / Move Down, as Unity's, 2026-09-24); past the end is last |
 | `setField` | `entity`, `component`, `field`, `value` | replaces the value, or adds the member / appends to an array end |
 | `unsetField` | `entity`, `component`, `field` | removes the member (distinct from setting `null`) |
 | `assignAsset` | `entity`, `component`, `field`, `asset: { asset, sub? }` | `setField` with an `assetRef` |

@@ -148,7 +148,8 @@ the diff. A patch is a JSON array of commands, e.g.
 
 Commands: createObject, deleteObject, renameObject, reparentObject,
 addComponent (`entity`, `component: { type, version?, data? }`),
-removeComponent, setField, unsetField, assignAsset, instantiatePrefab,
+removeComponent, moveComponent, setField, unsetField, assignAsset,
+instantiatePrefab,
 setPrefabOverride, revertPrefabOverride, unpackPrefab, createMaterial,
 saveDocument. Omitted ids are minted; `--json` prints the affected ids and the
 new revision. `unpackPrefab` replaces an instance by its expansion in place and
