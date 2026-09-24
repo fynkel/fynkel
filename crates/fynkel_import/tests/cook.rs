@@ -220,6 +220,45 @@ fn editing_a_texture_invalidates_exactly_its_dependents() {
 }
 
 #[test]
+fn a_stamped_source_is_not_reread_until_it_changes() {
+    let p = Project::new("stamps");
+    let notes = p.assets().join("docs/notes.txt");
+    let set_time = |ago: u64| {
+        std::fs::File::options()
+            .write(true)
+            .open(&notes)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(ago))
+            .unwrap();
+    };
+    set_time(60);
+    let first = p.cook();
+    assert!(all(&first, Status::Cooked));
+    let stamps = std::fs::read_to_string(p.cache().stamps_path()).unwrap();
+    assert!(stamps.contains("notes.txt"), "{stamps}");
+
+    // Same length, new bytes, a new (settled) time: re-read and recooked.
+    let text = std::fs::read_to_string(&notes).unwrap();
+    let edited: String = text.chars().rev().collect();
+    assert_eq!(edited.len(), text.len());
+    std::fs::write(&notes, &edited).unwrap();
+    set_time(30);
+    let second = p.cook();
+    assert_eq!(status(&second, NOTES), Status::Cooked);
+    let key = |r: &CookReport| r.get(id(NOTES)).unwrap().key.unwrap();
+    assert_ne!(key(&first), key(&second));
+
+    // Touched, not changed: re-read (the time moved), same hash, cached.
+    set_time(20);
+    let third = p.cook();
+    assert!(all(&third, Status::Cached), "{:?}", statuses(&third));
+    assert_eq!(key(&third), key(&second));
+    // The plain file's object holds the bytes read at cook time.
+    let object = std::fs::read(p.cache().object_path(&key(&second))).unwrap();
+    assert!(object.windows(edited.len()).any(|w| w == edited.as_bytes()));
+}
+
+#[test]
 fn editing_import_settings_invalidates_the_same_set() {
     let p = Project::new("edit-settings");
     let first = p.cook();

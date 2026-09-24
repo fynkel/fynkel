@@ -14,6 +14,10 @@
 //! `index.json` at the cache root records the last cook: asset id → key,
 //! so a loader can find "the current cooked file for this asset" without
 //! recomputing keys.
+//!
+//! `stamps.json` at the cache root remembers each source file's size,
+//! modification time and hash, so a cook hashes only the files that
+//! changed instead of reading every source again ([`Stamps`]).
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -197,6 +201,10 @@ impl Cache {
         self.root.join("index.json")
     }
 
+    pub fn stamps_path(&self) -> PathBuf {
+        self.root.join("stamps.json")
+    }
+
     /// True when both the object and its manifest exist.
     pub fn has(&self, key: &CacheKey) -> bool {
         self.object_path(key).is_file() && self.manifest_path(key).is_file()
@@ -259,6 +267,134 @@ impl Cache {
     }
 }
 
+/// Each source file's hash, trusted while the file's size and
+/// modification time are what they were when it was hashed — git's index
+/// and every build system's answer to "did this change?". The hash, not
+/// the stamp, is what the key covers, so a file touched but not changed
+/// still keys the same; a file changed without its size or time moving
+/// (a deliberate `touch -t`, a clock set back) is missed until
+/// `cook --force`, which re-hashes everything. A file modified within
+/// [`Stamps::RACY`] of the cook is hashed but not stamped: its time could
+/// still match a write that lands after the hash.
+#[derive(Debug, Default)]
+pub struct Stamps {
+    files: std::collections::HashMap<String, Stamp>,
+    /// Paths asked for this cook; [`Stamps::save`] keeps only these.
+    seen: std::collections::HashSet<String>,
+    changed: bool,
+    /// Ignore the stamps (re-hash everything) but still record them.
+    rehash: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+struct Stamp {
+    size: u64,
+    /// Nanoseconds since the Unix epoch.
+    mtime: u64,
+    /// [`CacheKey::hex`].
+    hash: String,
+    /// What the caller derived from the bytes along with the hash (the
+    /// extra files a `.gltf` or `.fbx` names), kept so a stamped file
+    /// need not be read to answer it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    derived: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StampsFile {
+    version: u32,
+    files: std::collections::BTreeMap<String, Stamp>,
+}
+
+impl Stamps {
+    const VERSION: u32 = 1;
+    pub const RACY: std::time::Duration = std::time::Duration::from_secs(2);
+
+    /// The cache's stamps; none when the file is missing, unreadable or
+    /// of another version (everything is hashed, as before stamps).
+    /// `rehash` trusts none of them.
+    pub fn load(cache: &Cache, rehash: bool) -> Stamps {
+        let files = std::fs::read(cache.stamps_path())
+            .ok()
+            .and_then(|b| serde_json::from_slice::<StampsFile>(&b).ok())
+            .filter(|f| f.version == Self::VERSION)
+            .map(|f| f.files.into_iter().collect())
+            .unwrap_or_default();
+        Stamps {
+            files,
+            rehash,
+            ..Default::default()
+        }
+    }
+
+    /// The hash of the file at `path` and what `derive` made of its
+    /// bytes — from the stamp when the file's size and time still match
+    /// it, else by reading the file (and dropping the bytes).
+    pub fn hash(
+        &mut self,
+        path: &Path,
+        derive: impl FnOnce(&[u8]) -> Vec<String>,
+    ) -> std::io::Result<(CacheKey, Vec<String>)> {
+        let name = path.to_string_lossy().into_owned();
+        let md = std::fs::metadata(path)?;
+        let mtime = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+        self.seen.insert(name.clone());
+        if let (Some(stamp), Some(mtime), false) = (self.files.get(&name), mtime, self.rehash) {
+            if stamp.size == md.len() && u128::from(stamp.mtime) == mtime.as_nanos() {
+                if let Some(hash) = CacheKey::parse(&stamp.hash) {
+                    return Ok((hash, stamp.derived.clone()));
+                }
+            }
+        }
+        let bytes = std::fs::read(path)?;
+        let hash = hash_bytes(&bytes);
+        let derived = derive(&bytes);
+        let fresh = mtime.is_none_or(|m| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .is_ok_and(|now| now.saturating_sub(m) < Self::RACY)
+        });
+        // Stamped only when the size read is the size hashed (the file did
+        // not grow between the two) and the time is settled.
+        if !fresh && bytes.len() as u64 == md.len() {
+            let stamp = Stamp {
+                size: md.len(),
+                mtime: mtime.map_or(0, |m| m.as_nanos() as u64),
+                hash: hash.hex(),
+                derived: derived.clone(),
+            };
+            if self.files.get(&name) != Some(&stamp) {
+                self.files.insert(name, stamp);
+                self.changed = true;
+            }
+        } else if self.files.remove(&name).is_some() {
+            self.changed = true;
+        }
+        Ok((hash, derived))
+    }
+
+    /// Writes the stamps of the files asked for this cook (a file no
+    /// longer in the project drops out); nothing when nothing changed.
+    pub fn save(mut self, cache: &Cache) -> Result<(), Diagnostic> {
+        let before = self.files.len();
+        let seen = std::mem::take(&mut self.seen);
+        self.files.retain(|k, _| seen.contains(k));
+        if !self.changed && self.files.len() == before {
+            return Ok(());
+        }
+        std::fs::create_dir_all(&cache.root).map_err(|e| io_error(&cache.root, e))?;
+        let file = StampsFile {
+            version: Self::VERSION,
+            files: self.files.into_iter().collect(),
+        };
+        let text = serde_json::to_vec(&file).expect("stamps serialize");
+        write_atomic(&cache.stamps_path(), &text)
+    }
+}
+
 fn io_error(path: &Path, e: std::io::Error) -> Diagnostic {
     Diagnostic::error(Code::IO, format!("{e}")).with_document(path.display().to_string())
 }
@@ -287,6 +423,69 @@ mod tests {
             dependencies: Vec::new(),
             profile: "dev".into(),
         }
+    }
+
+    #[test]
+    fn stamps_skip_unchanged_files_and_catch_changed_ones() {
+        let dir = std::env::temp_dir().join(format!("fynkel-stamps-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache = Cache::at(&dir.join("cache"));
+        let file = dir.join("a.bin");
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        let write = |bytes: &[u8], at: std::time::SystemTime| {
+            std::fs::write(&file, bytes).unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(at)
+                .unwrap();
+        };
+        let derive = |b: &[u8]| vec![format!("{}", b.len())];
+
+        write(b"one", old);
+        let mut stamps = Stamps::load(&cache, false);
+        assert_eq!(
+            stamps.hash(&file, derive).unwrap(),
+            (hash_bytes(b"one"), vec!["3".to_string()])
+        );
+        stamps.save(&cache).unwrap();
+        assert!(cache.stamps_path().is_file());
+
+        // Same size and time: the stamp answers, the file is not read (a
+        // same-size edit that kept the time is the documented miss).
+        write(b"two", old);
+        let mut stamps = Stamps::load(&cache, false);
+        assert_eq!(
+            stamps.hash(&file, |_| panic!("read")).unwrap().0,
+            hash_bytes(b"one")
+        );
+        // `cook --force` trusts no stamp.
+        let mut forced = Stamps::load(&cache, true);
+        assert_eq!(forced.hash(&file, derive).unwrap().0, hash_bytes(b"two"));
+        // A new time is a new hash, and it is stamped.
+        write(b"two", old + std::time::Duration::from_secs(1));
+        assert_eq!(stamps.hash(&file, derive).unwrap().0, hash_bytes(b"two"));
+        stamps.save(&cache).unwrap();
+        let mut stamps = Stamps::load(&cache, false);
+        assert_eq!(
+            stamps.hash(&file, |_| panic!("read")).unwrap().0,
+            hash_bytes(b"two")
+        );
+
+        // A file written just now is hashed every time until it settles.
+        write(b"three", std::time::SystemTime::now());
+        assert_eq!(stamps.hash(&file, derive).unwrap().0, hash_bytes(b"three"));
+        write(b"four!", std::time::SystemTime::now());
+        assert_eq!(stamps.hash(&file, derive).unwrap().0, hash_bytes(b"four!"));
+
+        // A file not asked for in a cook drops out of the saved stamps.
+        stamps.save(&cache).unwrap();
+        Stamps::load(&cache, false).save(&cache).unwrap();
+        let text = std::fs::read_to_string(cache.stamps_path()).unwrap();
+        assert!(!text.contains("a.bin"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

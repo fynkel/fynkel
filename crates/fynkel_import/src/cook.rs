@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 use crate::cache::{
     hash_bytes, Cache, CacheKey, KeyInputs, Manifest, ManifestChunk, ManifestDependency,
-    ManifestInput, CACHE_VERSION,
+    ManifestInput, Stamps, CACHE_VERSION,
 };
 use crate::intermediate::{AudioData, ColorSpace, Intermediate, MeshData, TextureData};
 use crate::Limits;
@@ -233,14 +233,16 @@ struct Prepared {
     /// `dependencies`): the same, except for a rig, whose clip sources
     /// are copied into its object and stay out of the bundle (M3-19b).
     runtime_dependencies: Vec<Uuid>,
-    /// The loaded document (documents) or sidecar (sources).
+    /// The loaded document (documents) or sidecar (sources). A source's
+    /// bytes are not held: the import reads the file when (and only when)
+    /// the asset must cook, one at a time.
     input: Input,
     failed: bool,
 }
 
 enum Input {
     Document(Document),
-    Source { meta: Meta, bytes: Vec<u8> },
+    Source { meta: Meta },
     None,
 }
 
@@ -256,11 +258,21 @@ pub fn cook(
     let entries = db.entries();
     let by_id: HashMap<Uuid, usize> = entries.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
 
-    // 1. Inputs and dependencies for every asset.
+    // 1. Inputs and dependencies for every asset. A source unchanged since
+    // the last cook (size and time) is not read again for its hash.
+    let mut stamps = Stamps::load(cache, opts.force);
     let prepared: Vec<Prepared> = entries
         .iter()
-        .map(|e| prepare(db, schemas, e, &opts.live, &mut diagnostics))
+        .map(|e| prepare(db, schemas, e, &opts.live, &mut stamps, &mut diagnostics))
         .collect();
+    if let Err(d) = stamps.save(cache) {
+        diagnostics.push(
+            Diagnostic::warning(d.code, d.message).with_document(
+                d.document
+                    .unwrap_or_else(|| cache.stamps_path().display().to_string()),
+            ),
+        );
+    }
 
     // 2. Dependency order: Tarjan's strongly connected components come
     // out dependencies first; a component with more than one member (or a
@@ -329,7 +341,13 @@ pub fn cook(
             &mut diagnostics,
         );
         let entry = &entries[i];
-        if let Some(file) = results[i].as_ref().and_then(|r| r.file.as_ref()) {
+        // Only a `JSON` chunk can be the prefab; a texture or a sound is
+        // not opened again to find that out.
+        if let Some(file) = results[i]
+            .as_ref()
+            .filter(|r| r.chunks.iter().any(|c| c.kind == "JSON"))
+            .and_then(|r| r.file.as_ref())
+        {
             match imported_prefab(file) {
                 Ok(Some(doc)) => library.add_imported(Prefab::from_document(doc), entry.id, "prefab"),
                 Ok(None) => {}
@@ -703,6 +721,7 @@ fn prepare(
     schemas: &SchemaSet,
     entry: &AssetEntry,
     live: &HashMap<PathBuf, String>,
+    stamps: &mut Stamps,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Prepared {
     let file = entry.file(db.root());
@@ -809,22 +828,22 @@ fn prepare(
                     None
                 }
             };
-            let bytes = match std::fs::read(&file) {
-                Ok(b) => b,
+            let names: fn(&[u8]) -> Vec<String> = if is_gltf_json(&file) {
+                gltf_extra_files
+            } else if has_extension(&file, "fbx") {
+                crate::fbx::external_files
+            } else {
+                |_| Vec::new()
+            };
+            let (source, extra) = match stamps.hash(&file, names) {
+                Ok(h) => h,
                 Err(e) => {
                     diagnostics.push(io_fail(e));
                     failed = true;
-                    Vec::new()
+                    (hash_bytes(b""), Vec::new())
                 }
             };
-            let source = hash_bytes(&bytes);
-            let extra_inputs = if is_gltf_json(&file) {
-                gltf_extra_inputs(&file, &bytes)
-            } else if has_extension(&file, "fbx") {
-                fbx_extra_inputs(&file, &bytes)
-            } else {
-                Vec::new()
-            };
+            let extra_inputs = hash_extra_inputs(&file, extra, stamps);
             // What the import reads from the sidecar besides the file: its
             // settings, its key scheme (`subkey`) and the sub-asset ids it
             // writes into the cooked documents.
@@ -874,7 +893,7 @@ fn prepare(
                 dependencies: Vec::new(),
                 runtime_dependencies,
                 input: match meta {
-                    Some(meta) if !failed => Input::Source { meta, bytes },
+                    Some(meta) if !failed => Input::Source { meta },
                     _ => Input::None,
                 },
                 failed,
@@ -903,19 +922,11 @@ fn has_extension(path: &Path, ext: &str) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case(ext))
 }
 
-/// The files an `.fbx` may read besides itself: every file texture that
-/// is not embedded, by its relative path (`fbx::external_files`), hashed
-/// the way `gltf_extra_inputs` hashes URIs.
-fn fbx_extra_inputs(path: &Path, bytes: &[u8]) -> Vec<(String, CacheKey)> {
-    hash_extra_inputs(path, crate::fbx::external_files(bytes))
-}
-
 /// The files a `.gltf` may read besides itself: every non-`data:`
-/// `buffers[].uri` and `images[].uri`, hashed (a missing file hashes as
-/// "missing", so its appearance later changes the key too). Whether the
-/// importer is allowed to read them is its business; they are inputs
-/// either way.
-fn gltf_extra_inputs(path: &Path, bytes: &[u8]) -> Vec<(String, CacheKey)> {
+/// `buffers[].uri` and `images[].uri` (an `.fbx`'s are its file textures
+/// that are not embedded, `fbx::external_files`). Whether the importer is
+/// allowed to read them is its business; they are inputs either way.
+fn gltf_extra_files(bytes: &[u8]) -> Vec<String> {
     let Ok(v) = serde_json::from_slice::<Value>(bytes) else {
         return Vec::new();
     };
@@ -931,22 +942,26 @@ fn gltf_extra_inputs(path: &Path, bytes: &[u8]) -> Vec<(String, CacheKey)> {
             }
         }
     }
-    hash_extra_inputs(path, names.into_iter().collect())
+    names.into_iter().collect()
 }
 
 /// Each relative file next to `path`, hashed: its bytes when it is a
 /// plain relative path that exists, "missing" when it does not (so its
 /// appearance later changes the key too), "denied" when the importer
 /// would refuse the path anyway.
-fn hash_extra_inputs(path: &Path, names: Vec<String>) -> Vec<(String, CacheKey)> {
+fn hash_extra_inputs(
+    path: &Path,
+    names: Vec<String>,
+    stamps: &mut Stamps,
+) -> Vec<(String, CacheKey)> {
     let dir = path.parent().unwrap_or(Path::new("."));
     names
         .into_iter()
         .map(|uri| {
             let plain = !uri.contains("://") && !uri.starts_with('/') && !uri.contains("..");
             let hash = if plain {
-                match std::fs::read(dir.join(&uri)) {
-                    Ok(b) => hash_bytes(&b),
+                match stamps.hash(&dir.join(&uri), |_| Vec::new()) {
+                    Ok((h, _)) => h,
                     Err(_) => hash_bytes(b"missing"),
                 }
             } else {
@@ -1057,19 +1072,41 @@ fn cook_one(
                 chunks.push(c);
             }
         }
-        Input::Source { meta, bytes } => {
+        Input::Source { meta } => {
             importer = Some(meta.importer.clone());
             importer_version = Some(meta.importer_version);
             for (sub, id) in &meta.sub_assets {
                 sub_assets.insert(sub.clone(), *id);
             }
             if meta.importer == fynkel_document::asset::FILE_IMPORTER {
+                let bytes = match std::fs::read(&file) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        diagnostics.push(
+                            Diagnostic::error(Code::IO, format!("cannot read: {e}"))
+                                .with_document(shown.clone()),
+                        );
+                        return None;
+                    }
+                };
+                // The key hashed the file a moment ago; a copy that changed
+                // since would be cached under the old content's key.
+                if hash_bytes(&bytes) != p.source {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            Code::IO,
+                            format!("{} changed during the cook; cook again", entry.path),
+                        )
+                        .with_document(shown.clone()),
+                    );
+                    return None;
+                }
                 chunks.push(ChunkPlan {
                     kind: KIND_BLOB,
                     name: entry.name.clone(),
                     sub: None,
                     info: json!({ "extension": file.extension().and_then(|e| e.to_str()).unwrap_or("") }),
-                    payload: bytes.clone(),
+                    payload: bytes,
                 });
             } else {
                 let mut imported = crate::import(&file, meta, &opts.limits);
