@@ -782,7 +782,7 @@ pub unsafe extern "C" fn fynkel_authoring_preview_call(
     })
 }
 
-const PREVIEW_KINDS: [&str; 18] = [
+const PREVIEW_KINDS: [&str; 21] = [
     "camera",
     "hidden",
     "pick",
@@ -796,6 +796,9 @@ const PREVIEW_KINDS: [&str; 18] = [
     "setMaterial",
     "restoreMaterial",
     "material",
+    "setVolume",
+    "restoreVolume",
+    "volume",
     "resync",
     "reload",
     "recook",
@@ -1024,6 +1027,42 @@ fn preview_call(
             })?;
             let fields = Preview::material(assets, material).map_err(one)?;
             Ok(json!({ "ok": true, "handle": handle, "material": fields }))
+        }
+        "setVolume" | "restoreVolume" => {
+            let volume = uuid_of(args.get("volume"), "volume")?;
+            let data = if kind == "setVolume" {
+                Some(args.get("data").filter(|d| d.is_object()).ok_or_else(|| {
+                    invalid("setVolume: `data` must be the profile's fields, an object")
+                })?)
+            } else {
+                None
+            };
+            s.slot(handle)?;
+            // Every open preview's store, as for a material.
+            let mut stores: Vec<fynkel_assets::Assets> = Vec::new();
+            for slot in s.previews.values() {
+                if let Some(a) = slot.world.assets() {
+                    if !stores.iter().any(|b| b.same_store(a)) {
+                        stores.push(a.clone());
+                    }
+                }
+            }
+            for a in &stores {
+                match data {
+                    Some(d) => Preview::set_volume(a, volume, d).map_err(one)?,
+                    None => Preview::restore_volume(a, volume),
+                }
+            }
+            Ok(json!({ "ok": true, "handle": handle, "stores": stores.len() }))
+        }
+        "volume" => {
+            let volume = uuid_of(args.get("volume"), "volume")?;
+            let slot = s.slot(handle)?;
+            let assets = slot.world.assets().ok_or_else(|| {
+                invalid("volume: the preview has no cache (the project did not cook)")
+            })?;
+            let fields = Preview::volume(assets, volume).map_err(one)?;
+            Ok(json!({ "ok": true, "handle": handle, "volume": fields }))
         }
         "resync" => {
             let (described, anchors) = s.inner.describe_with_anchors(handle).map_err(one)?;

@@ -79,7 +79,7 @@ fn only_scenes_prefabs_and_materials_open() {
     let doc = Document::read(&fixtures().join("project/fynkel.project.json"), None).unwrap();
     let err = Editor::open(doc, &s).err().unwrap();
     assert_eq!(err[0].code.0, "FYN-E0007");
-    assert!(err[0].message.contains("materials are"));
+    assert!(err[0].message.contains("volume profiles are"));
     // A material opens (M4-01) and is edited through document fields.
     let doc = Document::read(
         &fixtures().join("project/assets/materials/rusted.material.json"),
@@ -1634,6 +1634,66 @@ fn materials_edit_through_document_fields() {
         editor.document().root.get("name").and_then(Node::as_str),
         Some("Rusty")
     );
+}
+
+#[test]
+fn volume_profiles_edit_through_document_fields() {
+    let s = schemas();
+    let mut fresh = Document::new(DocumentKind::Volume, "Look").root.to_serde();
+    fresh.as_object_mut().unwrap().remove("bloom");
+    let doc = Document::parse(DocumentKind::Volume, None, &fresh.to_string()).unwrap();
+    let original = doc.write().unwrap();
+    let mut editor = Editor::open(doc, &s).unwrap();
+    // Add Override: a block with one field; then a field of it; then off.
+    apply(
+        &mut editor,
+        vec![Command::SetDocumentField {
+            pointer: "/bloom".into(),
+            value: Node::from_serde(&json!({ "intensity": 1.5 })),
+        }],
+    );
+    apply(
+        &mut editor,
+        vec![
+            Command::SetDocumentField {
+                pointer: "/bloom/threshold".into(),
+                value: Node::from_serde(&json!(2.0)),
+            },
+            Command::UnsetDocumentField {
+                pointer: "/ambientOcclusion/radius".into(),
+            },
+        ],
+    );
+    let root = &editor.document().root;
+    assert_eq!(
+        root.pointer("/bloom/threshold").and_then(Node::as_f64),
+        Some(2.0)
+    );
+    assert!(root.pointer("/ambientOcclusion/radius").is_none());
+    // The schema's ranges refuse the transaction whole.
+    let before = text(&editor);
+    let r = editor.apply(
+        Request::new(vec![Command::SetDocumentField {
+            pointer: "/bloom/scatter".into(),
+            value: Node::from_serde(&json!(4)),
+        }]),
+        &s,
+    );
+    assert!(!r.ok);
+    assert_eq!(text(&editor), before);
+    // No entities in a profile.
+    let r = editor.apply(
+        Request::new(vec![Command::RenameObject {
+            id: u(ROOT),
+            name: "x".into(),
+        }]),
+        &s,
+    );
+    assert_eq!(r.mutations[0].diagnostics[0].code.0, "FYN-E0007");
+    assert!(r.mutations[0].diagnostics[0].message.contains("volume"));
+    editor.undo().unwrap();
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
 }
 
 #[test]

@@ -353,8 +353,8 @@ struct Store {
     /// decrements; zero evicts).
     counts: HashMap<Uuid, u32>,
     evictions: u64,
-    /// Bumps on every `override_material` / `restore_material`.
-    material_edits: u64,
+    /// Bumps on every material or volume profile override or restore.
+    live_edits: u64,
 }
 
 /// Residency numbers (`fynkel_world_load_report`, HUDs).
@@ -425,7 +425,7 @@ impl Assets {
                 sounds: HashMap::new(),
                 counts: HashMap::new(),
                 evictions: 0,
-                material_edits: 0,
+                live_edits: 0,
             })),
         }
     }
@@ -474,10 +474,11 @@ impl Assets {
         self.lock().evictions
     }
 
-    /// Bumps on every material override or restore; a renderer compares
-    /// it to rebuild its materials.
-    pub fn material_edits(&self) -> u64 {
-        self.lock().material_edits
+    /// Bumps on every material or volume profile override or restore; a
+    /// renderer compares it to rebuild its materials and re-read its
+    /// profiles.
+    pub fn live_edits(&self) -> u64 {
+        self.lock().live_edits
     }
 
     /// `m` in place of the cooked material `r` until [`restore_material`]
@@ -488,14 +489,32 @@ impl Assets {
     pub fn override_material(&self, r: &AssetRef, m: PbrMaterial) {
         let mut s = self.lock();
         s.materials.insert(r.clone(), Arc::new(m));
-        s.material_edits += 1;
+        s.live_edits += 1;
     }
 
     /// The cooked material `r` again (read on its next use).
     pub fn restore_material(&self, r: &AssetRef) {
         let mut s = self.lock();
         s.materials.remove(r);
-        s.material_edits += 1;
+        s.live_edits += 1;
+    }
+
+    /// `p` in place of the cooked volume profile `r` until
+    /// [`restore_volume`], as [`override_material`] for a material.
+    ///
+    /// [`restore_volume`]: Assets::restore_volume
+    /// [`override_material`]: Assets::override_material
+    pub fn override_volume(&self, r: &AssetRef, p: VolumeProfile) {
+        let mut s = self.lock();
+        s.volumes.insert(r.clone(), p);
+        s.live_edits += 1;
+    }
+
+    /// The cooked volume profile `r` again (read on its next use).
+    pub fn restore_volume(&self, r: &AssetRef) {
+        let mut s = self.lock();
+        s.volumes.remove(r);
+        s.live_edits += 1;
     }
 
     pub fn stats(&self) -> ResidencyStats {

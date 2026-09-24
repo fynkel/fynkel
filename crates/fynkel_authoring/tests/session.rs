@@ -522,6 +522,45 @@ fn a_material_edits_through_document_fields_and_dependents_follow_a_save() {
 }
 
 #[test]
+fn a_volume_profile_edits_through_document_fields() {
+    let copy = Copy::new("volume");
+    let fresh = fynkel_document::Document::new(fynkel_document::DocumentKind::Volume, "Look");
+    std::fs::create_dir_all(copy.path("assets/volumes")).unwrap();
+    std::fs::write(
+        copy.path("assets/volumes/look.volume.json"),
+        fresh.write().unwrap(),
+    )
+    .unwrap();
+    let mut s = open(&copy);
+    let h = s.open_document("assets/volumes/look.volume.json").unwrap();
+    let inspect = s.inspect_json(h).unwrap();
+    assert_eq!(inspect["kind"], "volume");
+    assert_eq!(inspect["fields"]["bloom"]["threshold"], 0.9);
+    let applied = s
+        .apply_json(
+            h,
+            &json!([
+                { "command": "setDocumentField", "pointer": "/bloom/intensity", "value": 2 },
+                { "command": "unsetDocumentField", "pointer": "/ambientOcclusion" },
+            ]),
+        )
+        .unwrap();
+    assert_eq!(applied["ok"], true, "{applied}");
+    s.save(h, None).unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_str(&copy.read("assets/volumes/look.volume.json")).unwrap();
+    assert_eq!(saved["bloom"]["intensity"], 2);
+    assert!(saved.get("ambientOcclusion").is_none());
+    let refused = s
+        .apply_json(
+            h,
+            &json!([{ "command": "setDocumentField", "pointer": "/bloom/intensity", "value": -1 }]),
+        )
+        .unwrap();
+    assert_eq!(refused["ok"], false);
+}
+
+#[test]
 fn other_kinds_and_bad_paths_are_refused_and_nothing_works_without_a_project() {
     let copy = Copy::new("refused");
     let mut s = AuthoringSession::new();

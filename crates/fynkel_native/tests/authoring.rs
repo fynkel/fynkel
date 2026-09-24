@@ -867,7 +867,7 @@ fn the_edit_preview_world_crosses_the_edge() {
     ));
     let store = unsafe { (*world).assets() }.expect("the preview draws from the cache");
     assert_eq!(store.material(&rusted).unwrap().metallic, 0.25);
-    let edits = store.material_edits();
+    let edits = store.live_edits();
     let file = std::fs::read(copy.dir.join("assets/materials/rusted.material.json")).unwrap();
     assert_eq!(
         host.preview_call(
@@ -886,7 +886,7 @@ fn the_edit_preview_world_crosses_the_edge() {
     );
     assert_eq!(host.result()["material"]["metallic"], 0.9);
     assert!(
-        store.material_edits() > edits,
+        store.live_edits() > edits,
         "the renderer rebuilds its materials"
     );
     assert_eq!(
@@ -903,6 +903,45 @@ fn the_edit_preview_world_crosses_the_edge() {
             scene,
             "setMaterial",
             &json!({ "material": RUSTED, "data": { "metallic": "shiny" } })
+        ),
+        Status::Ok
+    );
+
+    // The live volume profile the same way (this project cooks none: the
+    // edit is what the store holds, restored it is gone again).
+    let look = "c0000000-0000-4000-8000-0000000000f7";
+    let edits = store.live_edits();
+    assert_eq!(
+        host.preview_call(
+            scene,
+            "setVolume",
+            &json!({ "volume": look, "data": { "bloom": { "intensity": 2, "tint": [1, 0.5, 0] } } })
+        ),
+        Status::Ok
+    );
+    assert_eq!(host.result()["stores"], 1);
+    assert!(store.live_edits() > edits, "the renderer re-reads its profiles");
+    assert_eq!(
+        host.preview_call(scene, "volume", &json!({ "volume": look })),
+        Status::Ok
+    );
+    assert_eq!(
+        host.result()["volume"],
+        json!({ "bloom": { "intensity": 2.0, "tint": [1.0, 0.5, 0.0] } })
+    );
+    assert_eq!(
+        host.preview_call(scene, "restoreVolume", &json!({ "volume": look })),
+        Status::Ok
+    );
+    assert_ne!(
+        host.preview_call(scene, "volume", &json!({ "volume": look })),
+        Status::Ok
+    );
+    assert_ne!(
+        host.preview_call(
+            scene,
+            "setVolume",
+            &json!({ "volume": look, "data": { "bloom": { "intensity": "bright" } } })
         ),
         Status::Ok
     );

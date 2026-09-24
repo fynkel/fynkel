@@ -30,6 +30,7 @@ use crate::json::{Member, Node, Span, Value};
 use crate::material::{Material, ShaderLibrary};
 use crate::prefab::{self, Prefab, PrefabLibrary};
 use crate::scene::{escape, Scene};
+use crate::volume::VolumeDocument;
 use crate::{diagnostic_json, has_errors, parse_uuid, Document, DocumentKind, Envelope, SchemaSet};
 
 // ------------------------------------------------------------------ revision
@@ -1082,10 +1083,13 @@ impl Editor {
         };
         if !matches!(
             document.kind,
-            DocumentKind::Scene | DocumentKind::Prefab | DocumentKind::Material
+            DocumentKind::Scene
+                | DocumentKind::Prefab
+                | DocumentKind::Material
+                | DocumentKind::Volume
         ) {
             return Err(not_editable(format!(
-                "{} documents are not edited by commands (scenes, prefabs and materials are)",
+                "{} documents are not edited by commands (scenes, prefabs, materials and volume profiles are)",
                 document.kind.name()
             )));
         }
@@ -1394,6 +1398,7 @@ fn validate(document: &Document, schemas: &SchemaSet, shaders: &ShaderLibrary) -
         DocumentKind::Material => {
             Material::from_document(document.clone()).validate(schemas, shaders)
         }
+        DocumentKind::Volume => VolumeDocument::from_document(document.clone()).validate(schemas),
         _ => Scene::from_document(document.clone()).validate(schemas),
     }
 }
@@ -1482,12 +1487,13 @@ impl Cx<'_> {
                 | Command::CreateMaterial { .. }
                 | Command::SaveDocument { .. }
         );
-        if entity_command && self.kind == DocumentKind::Material {
+        if entity_command && !matches!(self.kind, DocumentKind::Scene | DocumentKind::Prefab) {
             return Err(Diagnostic::error(
                 Code::EDIT_NOT_EDITABLE,
                 format!(
-                    "{}: material documents have no entities; use setDocumentField",
-                    command.name()
+                    "{}: {} documents have no entities; use setDocumentField",
+                    command.name(),
+                    self.kind.name()
                 ),
             ));
         }
@@ -2241,7 +2247,9 @@ impl Cx<'_> {
         if parent.is_empty() && matches!(first, "$schema" | "kind" | "formatVersion" | "id") {
             return refuse("is the document's identity; migrations own it");
         }
-        if matches!(first, "entities" | "root") && self.kind != DocumentKind::Material {
+        if matches!(first, "entities" | "root")
+            && matches!(self.kind, DocumentKind::Scene | DocumentKind::Prefab)
+        {
             return refuse("is the entity tree; use the entity commands");
         }
         if self.root.pointer(&parent).is_none() {

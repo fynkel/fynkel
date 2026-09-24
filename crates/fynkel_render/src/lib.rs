@@ -866,7 +866,7 @@ pub struct ExtractRenderer {
     assets: Option<Assets>,
     /// `Assets::evictions` when the GPU caches were last reconciled.
     evictions_seen: u64,
-    material_edits_seen: u64,
+    live_edits_seen: u64,
     meshes: HashMap<AssetRef, Option<GpuMesh>>,
     textures: HashMap<AssetRef, Option<GpuTexture>>,
     /// The cooked environments read for an HDR sky (E1; `None`: the
@@ -1261,7 +1261,7 @@ impl ExtractRenderer {
             unknown_profile: None,
             assets: None,
             evictions_seen: 0,
-            material_edits_seen: 0,
+            live_edits_seen: 0,
             meshes: HashMap::new(),
             textures: HashMap::new(),
             environments: HashMap::new(),
@@ -1517,7 +1517,7 @@ impl ExtractRenderer {
             }
         }
         self.evictions_seen = assets.as_ref().map(Assets::evictions).unwrap_or(0);
-        self.material_edits_seen = assets.as_ref().map(Assets::material_edits).unwrap_or(0);
+        self.live_edits_seen = assets.as_ref().map(Assets::live_edits).unwrap_or(0);
         self.assets = assets;
         self.clear_assets();
     }
@@ -1530,12 +1530,14 @@ impl ExtractRenderer {
     /// frame (a scene unload released them); nothing to do otherwise.
     fn reconcile_evictions(&mut self) {
         let Some(assets) = &self.assets else { return };
-        // A material edited in place (the editor's Inspector): every bind
-        // group is rebuilt from the store on its next use.
-        let edits = assets.material_edits();
-        if edits != self.material_edits_seen {
-            self.material_edits_seen = edits;
+        // A material or volume profile edited in place (the editor's
+        // Inspector): every bind group is rebuilt and every profile re-read
+        // from the store on its next use.
+        let edits = assets.live_edits();
+        if edits != self.live_edits_seen {
+            self.live_edits_seen = edits;
             self.materials.clear();
+            self.volume_profiles.clear();
         }
         let now = assets.evictions();
         if now == self.evictions_seen {

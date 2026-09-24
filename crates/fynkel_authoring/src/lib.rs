@@ -881,7 +881,8 @@ impl AuthoringSession {
     }
 
     /// The typed view `fynkel scene|prefab inspect --json` prints — for a
-    /// material, its shader and fields — plus the document's diagnostics.
+    /// material, its shader and fields; for a volume profile, its fields —
+    /// plus the document's diagnostics.
     pub fn inspect_json(&self, handle: Handle) -> Result<Value, Diagnostic> {
         let doc = self.document(handle)?;
         let document = doc.editor.document();
@@ -904,6 +905,13 @@ impl AuthoringSession {
                     "fields": document.root.to_serde(),
                 })
             }
+            DocumentKind::Volume => json!({
+                "kind": "volume",
+                "id": document.envelope.id.to_string(),
+                "formatVersion": document.envelope.format_version,
+                "revision": doc.editor.revision().as_str(),
+                "fields": document.root.to_serde(),
+            }),
             _ => fynkel_document::scene::inspect_json(&doc.editor.scene()),
         };
         v["name"] = live_name(document).into();

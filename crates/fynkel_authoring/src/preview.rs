@@ -27,8 +27,9 @@
 //! - picking ([`Preview::pick`], [`Preview::pick_rect`]), the debug-line
 //!   overlays ([`Preview::outline_lines`], [`Preview::icon_lines`]) and
 //!   the gizmo's transform preview ([`Preview::set_transforms`]), the
-//!   Inspector's live component and material edits
-//!   ([`Preview::set_components`], [`Preview::set_material`]).
+//!   Inspector's live component, material and volume profile edits
+//!   ([`Preview::set_components`], [`Preview::set_material`],
+//!   [`Preview::set_volume`]).
 
 use std::collections::{HashMap, HashSet};
 
@@ -895,6 +896,84 @@ impl Preview {
     /// The cooked material `material` again after [`Preview::set_material`].
     pub fn restore_material(assets: &Assets, material: Uuid) {
         assets.restore_material(&AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())));
+    }
+
+    /// Every renderer on `assets` draws `volume` (a volume profile's id)
+    /// with the fields of `data` — the profile document as the editor
+    /// holds it, unsaved — until [`Preview::restore_volume`]: the
+    /// profile Inspector's live edit (its envelope, if any, is not
+    /// read). A field that does not read is refused.
+    pub fn set_volume(assets: &Assets, volume: Uuid, data: &Value) -> Result<(), Diagnostic> {
+        let refuse = |message: String| {
+            Diagnostic::error(Code::SESSION_INVALID_REQUEST, message).with_id(volume.to_string())
+        };
+        let kind = fynkel_document::DocumentKind::Volume;
+        let mut fields = fynkel_document::Document::new(kind, "live").root.to_serde();
+        let fields = fields.as_object_mut().expect("a document is an object");
+        fields.retain(|k, _| {
+            matches!(
+                k.as_str(),
+                "$schema" | "kind" | "formatVersion" | "id" | "name"
+            )
+        });
+        for (k, v) in data.as_object().into_iter().flatten() {
+            fields.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        let document = fynkel_document::Document::parse(
+            kind,
+            None,
+            &Value::Object(fields.clone()).to_string(),
+        )
+        .map_err(|d| refuse(format!("volume profile: {}", d[0].message)))?;
+        let v = fynkel_document::VolumeDocument::from_document(document);
+        if let Some(d) = v.read_diagnostics().first() {
+            return Err(refuse(format!("volume profile: {}", d.message)));
+        }
+        assets.override_volume(
+            &AssetRef::new(fynkel_contracts::Uuid(*volume.as_bytes())),
+            v.profile,
+        );
+        Ok(())
+    }
+
+    /// What the renderers on `assets` blend for `volume` now — the live
+    /// edit while one is set, else the cooked profile — as its present
+    /// fields (`{ "bloom": { "intensity": 2 } }`).
+    pub fn volume(assets: &Assets, volume: Uuid) -> Result<Value, Diagnostic> {
+        let p =
+            assets.volume_profile(&AssetRef::new(fynkel_contracts::Uuid(*volume.as_bytes())))?;
+        let mut out = serde_json::Map::new();
+        let mut block = |name: &str, fields: Vec<(&str, Option<Value>)>| {
+            let present: serde_json::Map<String, Value> = fields
+                .into_iter()
+                .filter_map(|(k, v)| Some((k.to_string(), v?)))
+                .collect();
+            if !present.is_empty() {
+                out.insert(name.to_string(), Value::Object(present));
+            }
+        };
+        let n = |v: Option<f32>| v.map(|v| serde_json::json!(v));
+        let ao = p.ambient_occlusion;
+        block(
+            "ambientOcclusion",
+            vec![("radius", n(ao.radius)), ("intensity", n(ao.intensity))],
+        );
+        let b = p.bloom;
+        block(
+            "bloom",
+            vec![
+                ("intensity", n(b.intensity)),
+                ("threshold", n(b.threshold)),
+                ("scatter", n(b.scatter)),
+                ("tint", b.tint.map(|t| serde_json::json!([t.x, t.y, t.z]))),
+            ],
+        );
+        Ok(Value::Object(out))
+    }
+
+    /// The cooked profile `volume` again after [`Preview::set_volume`].
+    pub fn restore_volume(assets: &Assets, volume: Uuid) {
+        assets.restore_volume(&AssetRef::new(fynkel_contracts::Uuid(*volume.as_bytes())));
     }
 
     /// The editor's hidden flag: exactly `ids` (the caller passes the
