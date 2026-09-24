@@ -327,3 +327,93 @@ fn nested_prefabs_flatten_and_cycles_are_refused() {
         Some("/entities/20000000-0000-4000-8000-0000000000a1/prefab/asset")
     );
 }
+
+/// A script field inside a prefab referencing the prefab's own object and
+/// the script on it (`{"entity", "component"}`, the Inspector's object
+/// field) points at the instance's copies after expansion: the entity and
+/// the component id are both derived; an id outside the prefab is kept.
+#[test]
+fn script_references_inside_a_prefab_reach_the_instance_copies() {
+    let schemas = schemas();
+    let prefab_json = r#"{
+      "$schema": "https://fynkel.dev/schemas/prefab.schema.json",
+      "formatVersion": 5,
+      "id": "30000000-0000-4000-8000-000000000001",
+      "name": "Turret",
+      "root": "30000000-0000-4000-8000-0000000000b1",
+      "entities": {
+        "30000000-0000-4000-8000-0000000000b1": {
+          "name": "Turret", "parent": null, "children": ["30000000-0000-4000-8000-0000000000b2"],
+          "components": {
+            "30000000-0000-4000-8000-0000000000c1": { "type": "game.Turret", "version": 1, "data": {
+              "target": { "entity": "30000000-0000-4000-8000-0000000000b2" },
+              "spinner": { "entity": "30000000-0000-4000-8000-0000000000b2", "component": "30000000-0000-4000-8000-0000000000c2" },
+              "outside": { "entity": "30000000-0000-4000-8000-0000000000ff" }
+            } }
+          }
+        },
+        "30000000-0000-4000-8000-0000000000b2": {
+          "name": "Barrel", "parent": "30000000-0000-4000-8000-0000000000b1", "children": [],
+          "components": {
+            "30000000-0000-4000-8000-0000000000c2": { "type": "game.Spinner", "version": 1, "data": {} }
+          }
+        }
+      }
+    }"#;
+    let scene_json = r#"{
+      "$schema": "https://fynkel.dev/schemas/scene.schema.json",
+      "formatVersion": 5,
+      "id": "30000000-0000-4000-8000-000000000002",
+      "name": "Turrets",
+      "entities": {
+        "30000000-0000-4000-8000-0000000000a1": {
+          "name": "Turret A", "parent": null, "children": [], "components": {},
+          "prefab": { "asset": { "asset": "30000000-0000-4000-8000-000000000001" }, "instance": "30000000-0000-4000-8000-0000000000e1" }
+        }
+      }
+    }"#;
+    let mut lib = PrefabLibrary::empty();
+    lib.add(Prefab::from_document(
+        Document::parse(
+            DocumentKind::Prefab,
+            Some("turret.prefab.json"),
+            prefab_json,
+        )
+        .unwrap(),
+    ));
+    let scene = Scene::from_document(
+        Document::parse(DocumentKind::Scene, Some("turrets.scene.json"), scene_json).unwrap(),
+    );
+    let expanded = expand(&scene, &lib, &schemas);
+    let inst = &expanded.instances[0];
+    let barrel_local: Uuid = "30000000-0000-4000-8000-0000000000b2".parse().unwrap();
+    let spinner_local: Uuid = "30000000-0000-4000-8000-0000000000c2".parse().unwrap();
+    let barrel = inst.entity(barrel_local).unwrap().to_string();
+    let spinner = derive_id(inst.instance, spinner_local).to_string();
+    let out = expanded.scene();
+    let root = out.entity(inst.anchor).unwrap();
+    let data = &root.component_of("game.Turret").unwrap().data;
+    let field = |f: &str, k: &str| {
+        data.get(f)
+            .and_then(|n| n.get(k))
+            .and_then(|n| n.as_str())
+            .map(str::to_string)
+    };
+    assert_eq!(field("target", "entity"), Some(barrel.clone()));
+    assert_eq!(field("spinner", "entity"), Some(barrel.clone()));
+    assert_eq!(field("spinner", "component"), Some(spinner.clone()));
+    assert_eq!(
+        field("outside", "entity").as_deref(),
+        Some("30000000-0000-4000-8000-0000000000ff")
+    );
+    // The barrel's Spinner is that component.
+    let barrel_entity = out.entity(barrel.parse().unwrap()).unwrap();
+    assert_eq!(
+        barrel_entity
+            .component_of("game.Spinner")
+            .unwrap()
+            .id
+            .to_string(),
+        spinner
+    );
+}

@@ -920,7 +920,10 @@ fn the_edit_preview_world_crosses_the_edge() {
         Status::Ok
     );
     assert_eq!(host.result()["stores"], 1);
-    assert!(store.live_edits() > edits, "the renderer re-reads its profiles");
+    assert!(
+        store.live_edits() > edits,
+        "the renderer re-reads its profiles"
+    );
     assert_eq!(
         host.preview_call(scene, "volume", &json!({ "volume": look })),
         Status::Ok

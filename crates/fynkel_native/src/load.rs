@@ -287,6 +287,37 @@ fn bind_actions(
     }
 }
 
+/// The spawned handles of the entities a behaviour's data references
+/// (`{"entity": uuid}` and `{"entity": uuid, "component": uuid}`, a
+/// GameObject or script field), by authoring id: resolved against this
+/// load, so a prefab instance's references reach its own copies. An id
+/// this load did not spawn is left out (the SDK sets the field to null).
+fn references(data: &Value, loaded: &LoadedScene) -> serde_json::Map<String, Value> {
+    fn walk(v: &Value, loaded: &LoadedScene, out: &mut serde_json::Map<String, Value>) {
+        match v {
+            Value::Object(m) => {
+                if let Some(Value::String(id)) = m.get("entity") {
+                    if let Some(e) = id.parse::<Uuid>().ok().and_then(|u| loaded.handle_of(u)) {
+                        out.insert(id.clone(), json!(e.to_bits()));
+                    }
+                }
+                for item in m.values() {
+                    walk(item, loaded, out);
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    walk(item, loaded, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = serde_json::Map::new();
+    walk(data, loaded, &mut out);
+    out
+}
+
 fn scene_json(loaded: &LoadedScene, scene: &CookedScene) -> Value {
     // `entity` is the spawned handle (what `World.attach` takes); an
     // authored behaviour whose entity was not spawned cannot happen after
@@ -305,6 +336,7 @@ fn scene_json(loaded: &LoadedScene, scene: &CookedScene) -> Value {
                 "version": b.version,
                 "known": b.known,
                 "data": b.data,
+                "references": references(&b.data, loaded),
                 "pointer": b.pointer,
             }))
         })
@@ -403,6 +435,7 @@ fn instantiate_prefab(
                         "version": b.version,
                         "known": b.known,
                         "data": b.data,
+                        "references": references(&b.data, &loaded),
                         "pointer": b.pointer,
                     }))
                 })

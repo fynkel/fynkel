@@ -982,6 +982,13 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
         // Remap and emit: the root is the instance entity itself.
         let root_local = work.root;
         let local_ids: HashSet<Uuid> = work.entities.iter().map(|w| w.id).collect();
+        // Behaviour references (`{"entity", "component"}`) name the
+        // prefab's own components too.
+        let local_components: HashSet<Uuid> = work
+            .entities
+            .iter()
+            .flat_map(|w| w.components.iter().map(|c| c.id))
+            .collect();
         let map_entity = |id: Uuid| {
             if id == root_local {
                 e.id
@@ -1030,7 +1037,15 @@ fn expand_in(scene: &Scene, library: &PrefabLibrary, schemas: &SchemaSet) -> Exp
                     .iter()
                     .map(|c| {
                         let mut data = c.data.clone();
-                        remap_strings(&mut data, &local_ids, &map_entity);
+                        remap_strings(&mut data, &|u| {
+                            if local_ids.contains(&u) {
+                                Some(map_entity(u))
+                            } else if local_components.contains(&u) {
+                                Some(derive_id(inst.instance, u))
+                            } else {
+                                None
+                            }
+                        });
                         (
                             derive_id(inst.instance, c.id).to_string(),
                             Node::object(vec![
@@ -1189,25 +1204,26 @@ impl Working {
     }
 }
 
-/// Replaces every string equal to a prefab-local entity id (references
-/// inside component data) with the derived id.
-fn remap_strings(node: &mut Node, local_ids: &HashSet<Uuid>, map: &dyn Fn(Uuid) -> Uuid) {
+/// Replaces every string equal to a prefab-local entity or component id
+/// (references inside component data: an entity name-free reference, a
+/// behaviour reference's component) with the derived id.
+fn remap_strings(node: &mut Node, map: &dyn Fn(Uuid) -> Option<Uuid>) {
     match &mut node.value {
         Value::String(s) => {
             if let Ok(u) = crate::parse_uuid(s) {
-                if local_ids.contains(&u) {
-                    *s = map(u).to_string();
+                if let Some(to) = map(u) {
+                    *s = to.to_string();
                 }
             }
         }
         Value::Array(items) => {
             for item in items {
-                remap_strings(item, local_ids, map);
+                remap_strings(item, map);
             }
         }
         Value::Object(members) => {
             for m in members {
-                remap_strings(&mut m.value, local_ids, map);
+                remap_strings(&mut m.value, map);
             }
         }
         _ => {}
