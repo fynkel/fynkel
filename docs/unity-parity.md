@@ -84,7 +84,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | One script throwing | only that script stops | 🔧 `faf648d` (every callback on its own; the Console gets the message and the stack; called again next frame) |
 | Coroutines / `Invoke` | | 🔧 `b92178e` (`startCoroutine` over a `sync*` generator; `WaitForSeconds`, `WaitUntil`, `WaitWhile`, `WaitForFixedUpdate`, nested routines; `invoke`, `invokeRepeating`, `cancelInvoke`; Unity's lifetimes) |
 | `Input.GetKey` | raw keys | 🔧 `6b25b52` (ADR-0024: `getKey` / `getKeyDown` / `getKeyUp`, `getMouseButton…`, `anyKey`, with the actions' tick rules; an undeclared action warns once in the Console) |
-| `Debug.Log` | Console, click to the line | 🟡 info only, no source link; `print` not captured |
+| `Debug.Log` | Console, click to the line | 🔧 `9bdf3d6` (`Debug.log` / `logWarning` / `logError` / `logException` with the caller's stack: the row shows the line, ↩ opens it; `print` in game code is a Console row) |
 | Inspector fields | public fields; GameObject/component/colour/enum references | 🟡 `@Expose` only; no object references, enums or colours |
 | A failed hot reload | blocks Play, errors in the Console | 🟡 a toast; old code keeps running |
 | Drag a script onto an object | adds it | ❌ |
@@ -200,3 +200,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   project: down on the first of three catch-up ticks and in `update`,
   held after, a release in a frame too short to tick reaching the next
   tick, a focus reset; a misspelt action warns once in the Console.
+- 2026-09-24: Debug.Log (`9bdf3d6`) — `debug_log_parity_test.dart`
+  sends the SDK's own `Debug.logWarning`, `logError` and a `print` over
+  the channel into the Game tab: each at its level, the warning located at
+  its calling line, ↩ opening that line; `packages/fynkel/test/debug_log_test.dart`
+  covers every level from a behaviour.
