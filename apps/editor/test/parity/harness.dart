@@ -22,9 +22,15 @@ final class Editor {
   Editor._(this.tester, this.dir, this.shell);
 
   /// Opens the whole shell over a copy of the fixture project, with
-  /// [scene] open in a tab.
-  static Future<Editor> open(WidgetTester tester, {String tag = 'parity', String scene = mainScene}) async {
+  /// [scene] open in a tab; [prepare] changes the copy first.
+  static Future<Editor> open(
+    WidgetTester tester, {
+    String tag = 'parity',
+    String scene = mainScene,
+    void Function(Directory dir)? prepare,
+  }) async {
     final dir = copyFixture(tag);
+    prepare?.call(dir);
     final project = (await tester.runAsync(() => SessionProject.open(dir.path, watch: false)))!;
     addTearDown(() {
       project.close();

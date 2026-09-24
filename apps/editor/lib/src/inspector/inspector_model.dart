@@ -30,6 +30,7 @@ import 'package:path/path.dart' as p;
 
 import '../documents/document_tabs.dart';
 import '../documents/open_document.dart';
+import '../hierarchy/hierarchy_tree.dart' show HierarchyNode;
 import '../hierarchy/transform_math.dart' show Trs;
 import '../play/apply_to_scene.dart';
 import '../play/play_document.dart' show PlayDocument;
@@ -742,6 +743,57 @@ final class InspectorModel extends ChangeNotifier {
       if (n.name.isNotEmpty) names.add(n.name);
     }
     return names.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  }
+
+  /// The objects a GameObject or script field may take, in Hierarchy
+  /// order with their paths: every object, or those carrying the script
+  /// [spec] names.
+  List<({String id, String name, String path})> objectsFor(FieldSpec spec) {
+    final t = _tab;
+    if (t == null) return const [];
+    final nodes = t.tree.nodes;
+    String pathOf(HierarchyNode n) {
+      final parts = <String>[];
+      for (var p = n.parent == null ? null : nodes[n.parent]; p != null; p = p.parent == null ? null : nodes[p.parent]) {
+        parts.insert(0, p.name);
+      }
+      return parts.join('/');
+    }
+
+    final out = <({String id, String name, String path})>[];
+    void visit(String id) {
+      final n = nodes[id];
+      if (n == null) return;
+      if (objectRef(spec, id) != null) out.add((id: id, name: n.name, path: pathOf(n)));
+      n.children.forEach(visit);
+    }
+
+    t.tree.roots.forEach(visit);
+    return out;
+  }
+
+  /// The value a GameObject or script field takes for the object [entity]
+  /// (a picked or dropped one): `{entity}`, or `{entity, component}` of
+  /// its script of the field's type — null when it has none.
+  Map<String, Object?>? objectRef(FieldSpec spec, String entity) {
+    final n = _tab?.tree.nodes[entity];
+    if (n == null) return null;
+    if (spec.kind != FieldKind.scriptRef) return {'entity': entity};
+    for (final (id, type) in n.components) {
+      if (type == spec.behaviourType) return {'entity': entity, 'component': id};
+    }
+    return null;
+  }
+
+  /// The name of the object [ref] names; null when it (or, for a script
+  /// field, the script on it) is not in the document — the field shows
+  /// Missing.
+  String? describeObject(Map<String, Object?> ref) {
+    final n = _tab?.tree.nodes[ref['entity']];
+    if (n == null) return null;
+    final component = ref['component'];
+    if (component != null && !n.components.any((c) => c.$1 == component)) return null;
+    return n.name;
   }
 
   /// The assets an `asset(<kind>)` field may take (every asset when [kind] is null).

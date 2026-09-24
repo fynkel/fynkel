@@ -1198,6 +1198,35 @@ class _FieldEditor extends StatelessWidget {
             onCommit: _commit,
           ),
         );
+      case FieldKind.objectRef:
+      case FieldKind.scriptRef:
+        return _row(
+          label,
+          error,
+          ObjectField(
+            value: value is Map ? Map<String, Object?>.from(value) : null,
+            typeLabel: spec.kind == FieldKind.objectRef
+                ? 'GameObject'
+                : humanize(spec.behaviourType?.split('.').last ?? 'Script'),
+            subject: label,
+            describe: model.describeObject,
+            candidates: () => [
+              for (final o in model.objectsFor(spec))
+                PickerItem(
+                  value: o.id,
+                  title: o.name,
+                  icon: FIcons.cropSquare,
+                  detail: o.path.isEmpty ? null : o.path,
+                  keywords: o.path,
+                  facts: [('Name', o.name), if (o.path.isNotEmpty) ('Parent', o.path)],
+                ),
+            ],
+            refFor: (entity) => model.objectRef(spec, entity),
+            mixed: mixed,
+            enabled: _enabled,
+            onCommit: _commit,
+          ),
+        );
       case FieldKind.layerMask:
         return _row(
           label,
@@ -1375,7 +1404,7 @@ class _FieldEditor extends StatelessWidget {
     FieldKind.vec2 || FieldKind.vec3 || FieldKind.vec4 => List<Object>.filled(s.components, 0),
     FieldKind.quaternion => [0, 0, 0, 1],
     FieldKind.color => List<Object>.filled(s.components, 1),
-    FieldKind.assetRef => null,
+    FieldKind.assetRef || FieldKind.objectRef || FieldKind.scriptRef => null,
     FieldKind.array => <Object?>[],
     FieldKind.object => {
       for (final c in s.children)

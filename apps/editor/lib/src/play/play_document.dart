@@ -100,16 +100,54 @@ abstract class LiveBackend {
 
 /// A package:fynkel world the game is running.
 final class WorldLiveBackend extends LiveBackend {
-  WorldLiveBackend(this.world) : live = LiveWorld(world.native.handleAddress);
+  WorldLiveBackend(this.world) : live = LiveWorld(world.native.handleAddress) {
+    // A script's object field reads back under the ids the table shows.
+    world.liveIdOf = (handle) => _ids[handle];
+  }
 
   final fynkel.World world;
   final LiveWorld live;
 
   @override
-  List<LiveEntity> entities() => live.entities();
+  List<LiveEntity> entities() => _keep(live.entities());
 
   @override
-  List<LiveEntity>? changedEntities() => live.changedEntities();
+  List<LiveEntity>? changedEntities() {
+    final rows = live.changedEntities();
+    return rows == null ? null : _keep(rows);
+  }
+
+  /// The live ids by handle, from the last table read: what a script's
+  /// object field shows (`{entity: id}`) for the object it holds.
+  final Map<int, String> _ids = {};
+
+  List<LiveEntity> _keep(List<LiveEntity> rows) {
+    _ids
+      ..clear()
+      ..addEntries(rows.map((r) => MapEntry(r.handle, r.id)));
+    return rows;
+  }
+
+  /// An object field's `{entity, component?}` as the object in the world
+  /// (null when it is not there).
+  Object? _resolveReference(Object? value) {
+    if (value is! Map) return null;
+    final entity = value['entity'];
+    if (entity is! String) return null;
+    final int handle;
+    try {
+      handle = live.entity(entity).handle;
+    } on AuthoringException {
+      return null;
+    }
+    final go = world.byEntity(handle) ?? world.attach(handle);
+    final component = value['component'];
+    if (component is! String) return go;
+    for (final b in go.behaviours) {
+      if (!b.isDestroyed && b.authoredComponentId == component) return b;
+    }
+    return null;
+  }
 
   @override
   LiveEntityState entity(String id) => live.entity(id);
@@ -171,6 +209,12 @@ final class WorldLiveBackend extends LiveBackend {
     final f = b.behaviourType?.fields.where((f) => f.name == field).firstOrNull;
     if (f == null) return ['${b.behaviourType?.id ?? b.runtimeType} has no field $field'];
     try {
+      if (f.isReference) {
+        final target = _resolveReference(value);
+        if (value != null && target == null) return ['$field: that object is not in the running game'];
+        f.set(b, target);
+        return const [];
+      }
       f.set(b, value);
     } on Object catch (e) {
       return ['$field: $e'];

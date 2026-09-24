@@ -1814,6 +1814,130 @@ class EntityField extends StatelessWidget {
   }
 }
 
+// ── Object reference ───────────────────────────────────────────────────────
+
+/// A script's GameObject or script field (Unity's object field): the
+/// object's name — `None (Type)` when empty, `Missing (Type)` when what it
+/// named is gone — with ⊙ for the picker and × to clear; a Hierarchy row
+/// dropped on it assigns that object (for a script field, its script of
+/// the type, refused when it has none).
+class ObjectField extends StatelessWidget {
+  const ObjectField({
+    super.key,
+    required this.value,
+    required this.typeLabel,
+    required this.describe,
+    required this.candidates,
+    required this.refFor,
+    required this.onCommit,
+    this.subject,
+    this.mixed = false,
+    this.enabled = true,
+  });
+
+  /// `{entity}` or `{entity, component}`; null for None.
+  final Map<String, Object?>? value;
+
+  /// `GameObject`, or the script's title.
+  final String typeLabel;
+
+  /// The referenced object's name; null when it is not in the document.
+  final String? Function(Map<String, Object?> ref) describe;
+
+  /// The picker's rows; each value is what [refFor] takes.
+  final List<PickerItem<String>> Function() candidates;
+
+  /// The reference for an entity id (a dropped row, a picked one); null
+  /// when the entity does not fit (no script of the type).
+  final Map<String, Object?>? Function(String entity) refFor;
+  final String? subject;
+  final bool mixed;
+  final bool enabled;
+  final void Function(Map<String, Object?>? ref) onCommit;
+
+  Future<void> _pick(BuildContext context) async {
+    final choice = await showPicker<String>(
+      context,
+      title: 'Select $typeLabel',
+      subject: subject,
+      anchor: globalRectOf(context),
+      items: candidates(),
+      allowNone: true,
+      current: value?['entity'] as String?,
+      hint: 'Search by name',
+      keyPrefix: 'objectPicker',
+      countNoun: 'objects',
+      empty: typeLabel == 'GameObject' ? 'No object has that name.' : 'No object with a $typeLabel has that name.',
+    );
+    if (choice == null) return;
+    onCommit(choice.isNone ? null : refFor(choice.value!));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    final style = Theme.of(context).textTheme.bodySmall;
+    final v = value;
+    final name = v == null ? null : describe(v);
+    final missing = v != null && name == null;
+    final face = mixed
+        ? '—'
+        : v == null
+        ? 'None ($typeLabel)'
+        : missing
+        ? 'Missing ($typeLabel)'
+        : typeLabel == 'GameObject'
+        ? name!
+        : '$name ($typeLabel)';
+    return DragTarget<List<String>>(
+      onWillAcceptWithDetails: (d) => enabled && d.data.length == 1 && refFor(d.data.single) != null,
+      onAcceptWithDetails: (d) => onCommit(refFor(d.data.single)),
+      builder: (context, accepting, rejected) => Builder(
+        builder: (context) => FieldBox(
+          edge: accepting.isNotEmpty ? t.accent : (rejected.isNotEmpty ? t.error : null),
+          padding: const EdgeInsets.only(left: 5, right: 1),
+          child: Row(
+            children: [
+              Icon(
+                typeLabel == 'GameObject' ? FIcons.cropSquare : FIcons.code,
+                size: 13,
+                color: v == null ? t.textDisabled : (missing ? t.error : t.textSecondary),
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                child: MouseRegion(
+                  cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: enabled ? () => _pick(context) : null,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        face,
+                        key: const ValueKey('object.name'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: style?.copyWith(color: v == null ? t.textDisabled : (missing ? t.error : t.text)),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (v != null && enabled) _InBoxButton(tooltip: 'Clear', icon: FIcons.close, onPressed: () => onCommit(null)),
+              _InBoxButton(
+                key: const ValueKey('object.pick'),
+                tooltip: 'Select $typeLabel',
+                icon: FIcons.pick,
+                onPressed: enabled ? () => _pick(context) : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── Layer mask ─────────────────────────────────────────────────────────────
 
 /// A 32-bit mask: the project's physics layer names as check rows (bits

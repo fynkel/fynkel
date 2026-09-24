@@ -35,6 +35,14 @@ enum FieldKind {
   /// An entity's name (authored components reference entities by name).
   entity,
 
+  /// A script's `GameObject?` field: `{ entity: id }` or null (Unity's
+  /// object field — pick, or drag a Hierarchy row onto it).
+  objectRef,
+
+  /// A script's field of another script type ([FieldSpec.behaviourType]):
+  /// `{ entity: id, component: id }` or null.
+  scriptRef,
+
   /// An integer of physics-layer bits (`layer`, `mask`).
   layerMask,
 
@@ -80,6 +88,7 @@ final class FieldSpec {
     this.children = const [],
     this.declarationIndex = 0,
     this.gizmo,
+    this.behaviourType,
   });
 
   /// The key in the component's `data` (a nested field's key in its parent).
@@ -136,6 +145,9 @@ final class FieldSpec {
 
   /// Its declared Scene-view gizmo (`@Gizmo`, ADR-0019 §3), if any.
   final GizmoHint? gizmo;
+
+  /// For [FieldKind.scriptRef]: the script type it takes (`game.Spinner`).
+  final String? behaviourType;
 
   /// The sibling [showIf] names, without the `!`.
   String? get showIfField {
@@ -453,7 +465,10 @@ FieldSpec _parseField(
         final e = p['enum'];
         if (e is List) {
           kind = FieldKind.enumeration;
-          enumValues = [for (final v in e) v.toString()];
+          enumValues = [
+            for (final v in e)
+              if (v != null) v.toString(),
+          ];
         }
       case 'array':
         final items = _map(p['items']);
@@ -505,6 +520,12 @@ FieldSpec _parseField(
       fixedLength = 4;
     case 'assetRef':
       kind = FieldKind.assetRef;
+    case 'gameObject':
+      kind = FieldKind.objectRef;
+      nullable = true;
+    case 'behaviour':
+      kind = FieldKind.scriptRef;
+      nullable = true;
     case 'number' when kind == FieldKind.any:
       kind = FieldKind.number;
     case 'integer' when kind == FieldKind.any:
@@ -568,7 +589,7 @@ FieldSpec _parseField(
     hidden: hints['hidden'] == true,
     showIf: hints['showIf'] as String?,
     enumValues: enumValues,
-    enumName: hints['enum'] as String?,
+    enumName: hints['enum'] is String ? hints['enum'] as String : null,
     assetKind: assetKind,
     angle: angle,
     slider: slider,
@@ -580,6 +601,7 @@ FieldSpec _parseField(
     children: children,
     declarationIndex: index,
     gizmo: GizmoHint.parse(hints['gizmo']),
+    behaviourType: kind == FieldKind.scriptRef ? hints['behaviour'] as String? : null,
   );
 }
 

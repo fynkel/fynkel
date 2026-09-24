@@ -29,6 +29,10 @@ final class HierarchyNode {
   List<String> children = const [];
   List<String> componentTypes = const [];
 
+  /// The components' ids with their types, in order (what a script
+  /// field's picker offers: `{entity, component}`).
+  List<(String, String)> components = const [];
+
   /// The asset ids the entity's components reference (`{asset, sub?}`
   /// anywhere in their data) and its prefab: what Unity's Find
   /// References In Scene looks for.
@@ -89,6 +93,7 @@ final class HierarchyNode {
         if (c is String) c,
     ];
     final types = <String>[];
+    final ids = <(String, String)>[];
     final refs = <String>{};
     transformId = null;
     transform = null;
@@ -99,6 +104,7 @@ final class HierarchyNode {
         if (c is! Map) continue;
         final type = c['type'] as String? ?? '';
         types.add(type);
+        ids.add((entry.key as String, type));
         _collectRefs(c['data'], refs);
         if (type == 'fynkel.Transform' && transformId == null) {
           transformId = entry.key as String;
@@ -108,6 +114,7 @@ final class HierarchyNode {
       }
     }
     componentTypes = types;
+    this.components = ids;
     final prefab = e['prefab'];
     isPrefabInstance = prefab is Map;
     rootLocal = null;
@@ -136,10 +143,12 @@ final class HierarchyNode {
     transformLocal = null;
     transform = null;
     final types = <String>[];
+    final ids = <(String, String)>[];
     final refs = <String>{?prefabAsset};
     var overridden = 0;
     for (final c in e.components.values) {
       types.add(c.type);
+      ids.add((c.id, c.type));
       _collectRefs(c.data, refs);
       overridden += c.overridden.length;
       if (c.type == 'fynkel.Transform' && transformId == null) {
@@ -149,6 +158,7 @@ final class HierarchyNode {
       }
     }
     componentTypes = types;
+    components = ids;
     assetRefs = refs;
     overriddenFields = overridden;
     version++;
@@ -162,6 +172,7 @@ final class HierarchyNode {
     transformLocal = null;
     transform = null;
     componentTypes = const [];
+    components = const [];
     assetRefs = {?prefabAsset};
     overriddenFields = 0;
     version++;
@@ -184,10 +195,12 @@ final class HierarchyNode {
     transformLocal = null;
     transform = null;
     final types = <String>[];
+    final ids = <(String, String)>[];
     final refs = <String>{};
     var overridden = e.activeOverridden ? 1 : 0;
     for (final c in e.components.values) {
       types.add(c.type);
+      ids.add((c.id, c.type));
       _collectRefs(c.data, refs);
       overridden += c.overridden.length;
       if (c.type == 'fynkel.Transform' && transformId == null) {
@@ -197,6 +210,7 @@ final class HierarchyNode {
       }
     }
     componentTypes = types;
+    components = ids;
     assetRefs = refs;
     overriddenFields = overridden;
     isPrefabInstance = false;
