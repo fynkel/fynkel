@@ -9,7 +9,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:fynkel_editor/src/documents/open_document.dart';
+import 'package:fynkel_editor/src/scene_view/scene_math.dart';
 
 import 'harness.dart';
 
@@ -73,6 +75,30 @@ void main() {
     await tester.tap(find.byKey(Key('hierarchy.scene.${main.document.id}.setActive')));
     await tester.pumpAndSettle();
     expect(e.shell.tabs!.focused, same(main));
+  });
+
+  testWidgets("a click in the Scene view on another loaded scene's object activates that scene and selects it", (
+    tester,
+  ) async {
+    final (e, main, added) = await twoScenes(tester);
+    final sv = e.shell.scene!;
+    await e.press(LogicalKeyboardKey.keyQ);
+    // Look at the Trophy from above, where Main has nothing in front of it.
+    final m = sv.otherLoadedScenes(sv.current!).single.preview!.worldMatrices([trophy])[trophy]!;
+    sv.camera!
+      ..pivot = matTranslation(m)
+      ..distance = 4
+      ..pitch = -1.5;
+    sv.current!.cameraVersion++;
+    await tester.pumpAndSettle();
+    final px = sv.viewProjection!.project(matTranslation(m))!;
+    final picture = find.byWidgetPredicate((w) => w.key is GlobalKey && '${w.key}'.contains('scene.picture'));
+    await tester.tapAt(tester.getTopLeft(picture) + Offset(px[0], px[1]) / tester.view.devicePixelRatio);
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    expect(e.shell.tabs!.focused, same(added));
+    expect(added.selection, [trophy]);
+    expect(main.selection, isEmpty);
   });
 
   testWidgets("rows dragged onto another scene's header move there; each scene's undo has its step", (tester) async {

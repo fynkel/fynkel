@@ -2079,8 +2079,19 @@ final class SceneViewModel extends ChangeNotifier {
   /// what is behind; ⌘ toggles, ⇧ adds; a click on nothing clears (unless
   /// a modifier is held).
   void click(Offset px, {bool toggle = false, bool add = false}) {
-    final t = current;
-    if (t == null || !t.hasPreview) return;
+    final shown = current;
+    if (shown == null || !shown.hasPreview) return;
+    var t = shown;
+    // Several loaded scenes (Unity's): the nearest hit in any of them; one
+    // in another scene makes that scene the active one, selected there.
+    if (!toggle && !add) {
+      final other = _nearerSceneAt(t, px);
+      if (other != null) {
+        t.tab.clearSelection();
+        tabs.focus(other.tab);
+        t = other;
+      }
+    }
     final samePixel = t.clickPx != null && (t.clickPx! - px).distance < 3 && t.clickHits.isNotEmpty;
     List<String> hits;
     if (samePixel) {
@@ -2111,6 +2122,46 @@ final class SceneViewModel extends ChangeNotifier {
       t.tab.select(id);
     }
     t.tab.tree.reveal(id);
+  }
+
+  /// The other loaded scenes drawn with [t]'s (none in Prefab mode or
+  /// Play), each's Scene view state.
+  List<SceneTab> otherLoadedScenes(SceneTab t) {
+    if (!_isLoadedScene(t.tab) || isLive) return const [];
+    return [
+      for (final s in tabs.loadedScenes)
+        if (!identical(s, t.tab)) _sceneTabOf(s),
+    ];
+  }
+
+  /// The distance to the nearest pickable hit in [t] at [ndc], or null.
+  double? _nearestIn(SceneTab t, List<double> ndc) {
+    if (!t.hasPreview) return null;
+    final hidden = _hiddenAll(t);
+    for (final h in t.preview!.pick(camera!.toPreview(), aspect, ndc).hits) {
+      if (!t.state.locked.contains(h.id) && !hidden.contains(h.id) && t.tab.tree.nodes.containsKey(h.id)) {
+        return h.distance;
+      }
+    }
+    return null;
+  }
+
+  /// Another loaded scene whose object under [px] is nearer than [t]'s.
+  SceneTab? _nearerSceneAt(SceneTab t, Offset px) {
+    if (viewportWidth <= 0) return null;
+    final others = otherLoadedScenes(t);
+    if (others.isEmpty) return null;
+    final ndc = [px.dx / viewportWidth * 2 - 1, 1 - px.dy / viewportHeight * 2];
+    var best = _nearestIn(t, ndc) ?? double.infinity;
+    SceneTab? nearer;
+    for (final o in others) {
+      final d = _nearestIn(o, ndc);
+      if (d != null && d < best) {
+        best = d;
+        nearer = o;
+      }
+    }
+    return nearer;
   }
 
   /// The marquee from [a] to [b] (physical pixels) selects what overlaps
