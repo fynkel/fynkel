@@ -182,7 +182,7 @@ run, Escape closes.
 
 | Id | Menu | Shortcut | Does |
 | --- | --- | --- | --- |
-| `project.new` | Project | ⇧⌘N | the New Project dialog (`fynkel create`) |
+| `project.new` | Project | — | the New Project dialog (`fynkel create`); ⇧⌘N is Create Empty, as in Unity |
 | `project.open` | Project | ⌘O | pick a directory and open it |
 | `project.recent.<i>` | Project | — | generated from Recent; no shortcut |
 | `project.close` | Project | ⇧⌘W | close the project, back to the launcher |
@@ -200,9 +200,13 @@ run, Escape closes.
 | `document.undo` | Edit | ⌘Z | undo the focused tab's last transaction — the label counts what is left, "Undo (3)"; inside a text field the field's own undo runs |
 | `document.redo` | Edit | ⇧⌘Z | redo (same rule for text fields) |
 | `hierarchy.rename` | Edit | ⌘R | rename the selected entity in place |
-| `hierarchy.duplicate` | Edit | ⌘D | duplicate the topmost selected entities with their subtrees; the copies are selected |
-| `hierarchy.delete` | Edit | ⌘⌫ | delete the topmost selected entities with their subtrees; the nearest row is selected (in a text field: delete to the line start) |
-| `hierarchy.createEmpty` | Edit | ⌥⌘N | a new entity with a Transform, under the single selected entity or at the root |
+| `hierarchy.duplicate` | Edit | ⌘D | duplicate the topmost selected entities with their subtrees, each right after its original and named as Unity names a copy (`Cube` → `Cube (1)`); the copies are selected |
+| `hierarchy.copy` / `hierarchy.cut` | Edit | ⌘C / ⌘X | copy (cut: and delete) the topmost selected entities with everything under them to the editor's object clipboard (in a text field: the field's own copy / cut) |
+| `hierarchy.paste` | Edit | ⌘V | paste right after the selected object (same parent), or at the end of the roots; into any open scene or prefab; the pasted objects are selected |
+| `hierarchy.pasteAsChild` | Edit | ⇧⌘V | paste under the selected object |
+| `hierarchy.delete` | Edit | ⌘⌫ | delete the topmost selected entities with their subtrees; nothing is selected afterwards, as in Unity (in a text field: delete to the line start) |
+| `hierarchy.createEmpty` | Edit | ⇧⌘N | a new object named `GameObject` with a Transform at the root, renamed at once (Unity's Create Empty) |
+| `hierarchy.createEmptyChild` | Edit | ⌥⇧N (bare) | the same under the selected object (Unity's Create Empty Child) |
 | `hierarchy.createWith` | Edit | ⇧⌥⌘N | pick a native component type; the new entity has a Transform plus that component with its defaults, and is renamed at once |
 | `hierarchy.keepWorldTransform` | Edit | ⌥⌘K | toggle the drop policy (✓ when on) |
 | `hierarchy.search` | Edit | ⌥⌘H | focus the Hierarchy's search field |
@@ -368,12 +372,15 @@ records for undo, and can save — the editor never edits JSON by hand.
   greyed like Unity's (`HierarchyTree.activeInHierarchy`; a derived
   entity reads its flag from the expansion).
 - **Operations — one transaction each** (`HierarchyModel`): rename in
-  place (double-click, ⌘R, Enter; Enter or focus loss commits, Esc
-  cancels, an unchanged or empty name is not a transaction), Duplicate
-  (⌘D; the topmost selected with their subtrees; a child's copy lands
-  right after its original, a scene root's copy at the end — a scene's
-  roots follow the entity key order), Delete (⌘⌫; the nearest remaining
-  row is selected), Create empty (⌥⌘N) and Create with a native component
+  place (F2, ⌘R, Enter; Enter or focus loss commits, Esc
+  cancels and the next rename starts from the name again, an unchanged or
+  empty name is not a transaction; a double-click frames the object in
+  the Scene view, as Unity's), Duplicate (⌘D; the topmost selected with
+  their subtrees, each copy right after its original and named `Cube
+  (1)`), Copy / Cut / Paste / Paste as Child (⌘C ⌘X ⌘V ⇧⌘V, the
+  `pasteObjects` command, across documents), Delete (⌘⌫; nothing stays
+  selected), Create Empty (⇧⌘N at the root, ⌥⇧N as a child) and Create
+  with a native component
   (⇧⌥⌘N or the + menu; the Transform's and the component's **defaults
   come from the session** — the `defaults` query is the component's Rust
   `Default` through the document codec, so what the editor writes is what
@@ -382,9 +389,9 @@ records for undo, and can save — the editor never edits JSON by hand.
   it, the bottom quarter *below* it (or as the first child when the row is
   expanded); a drop onto itself or a descendant is refused; several moved
   entities keep their visible order, and an index counts the slots they
-  vacate. Between two **roots of a scene** there is no insertion line
-  (roots follow entity key order; only a prefab's `roots` list is
-  orderable) — the top and bottom quarters of a scene root mean *into*.
+  vacate. A **scene's roots** reorder the same way (since 2026-09-24:
+  `reparentObject` with an index moves the entity's member in
+  `entities`, whose key order is the roots' order).
   **Keep world transform** (on by default, ⌥⌘K) rewrites the moved
   entity's Transform in the **same transaction** — `newLocal =
   inverse(world(newParent)) × world(entity)`, only the fields that
