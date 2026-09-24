@@ -280,8 +280,14 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// stats — R2; 6: `fynkel_apple_viewport_overlay`, the gizmo overlay —
 /// ADR-0019, item 9f; 7: `fynkel_apple_viewport_set_view`, a viewport's
 /// own camera over any world — ADR-0021 P7 L5; 8:
-/// `fynkel_apple_viewport_outline`, the selection outline).
-pub const APPLE_ABI_VERSION: u32 = 8;
+/// `fynkel_apple_viewport_outline`, the selection outline; 9:
+/// `fynkel_apple_viewport_extra_worlds`, other worlds drawn into the frame
+/// — Prefab Mode in context, multi-scene editing).
+pub const APPLE_ABI_VERSION: u32 = 9;
+
+/// Bit 0 of an extra world's flags (`fynkel_apple_viewport_extra_worlds`):
+/// drawn greyed.
+pub const FYNKEL_APPLE_EXTRA_WORLD_GRAY: u32 = 1;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -773,6 +779,72 @@ pub unsafe extern "C" fn fynkel_apple_viewport_outline(
     );
     v.renderer.overlay().outline(&selected, &children, style);
     (selected.len() + children.len()) as i32
+}
+
+/// Queues `count` other worlds for the NEXT render, drawn into the frame
+/// of the world `fynkel_apple_viewport_render` is given
+/// ([`fynkel_render::ExtraWorld`]): the editor's Prefab Mode in context
+/// (the scene's preview around the prefab's, transformed by the inverse of
+/// the instance's world matrix, greyed or not) and multi-scene editing (the
+/// other loaded scenes' previews, identity). Each world is extracted here
+/// — interpolated by its current alpha, presentation overrides applied —
+/// so the host calls this right before the render and may destroy a world
+/// afterwards. `transforms`: sixteen floats per world, column-major, its
+/// frame → the main world's. `flags`: one per world,
+/// [`FYNKEL_APPLE_EXTRA_WORLD_GRAY`] draws it greyed; other bits are
+/// ignored. The extras draw from the viewport's asset store (the main
+/// world's cache, which every preview of one authoring session shares);
+/// they are never outlined. Cleared by the render; a later call replaces an
+/// earlier one (`count` 0 clears). A NULL or poisoned world is skipped.
+/// Returns the worlds queued, -1 for a NULL viewport, a NULL array with a
+/// non-zero count, or a non-finite transform (nothing is queued).
+///
+/// # Safety
+/// `vp` must be a live viewport; `worlds` readable for `count` pointers,
+/// each a live `FynkelWorld` or NULL, `transforms` for `count * 16` floats
+/// and `flags` for `count` `u32`s (or NULL with a zero count); call from
+/// the host loop thread only, never concurrently with a mutating
+/// `fynkel_world_*` call on one of the worlds.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_extra_worlds(
+    vp: *mut Viewport,
+    worlds: *const *const FynkelWorld,
+    transforms: *const f32,
+    flags: *const u32,
+    count: u32,
+) -> i32 {
+    let Some(v) = vp.as_mut() else { return -1 };
+    if count > 0 && (worlds.is_null() || transforms.is_null() || flags.is_null()) {
+        return -1;
+    }
+    let n = count as usize;
+    let (worlds, transforms, flags): (&[*const FynkelWorld], &[f32], &[u32]) = if n == 0 {
+        (&[], &[], &[])
+    } else {
+        (
+            std::slice::from_raw_parts(worlds, n),
+            std::slice::from_raw_parts(transforms, n * 16),
+            std::slice::from_raw_parts(flags, n),
+        )
+    };
+    if transforms.iter().any(|f| !f.is_finite()) {
+        return -1;
+    }
+    v.renderer.clear_extra_worlds();
+    let mut queued = 0;
+    for (i, w) in worlds.iter().enumerate() {
+        let Some(w) = w.as_ref() else { continue };
+        if w.core().is_poisoned() {
+            continue;
+        }
+        v.renderer.push_extra_world(fynkel_render::ExtraWorld {
+            extract: w.core().extract(),
+            transform: glam::Mat4::from_cols_slice(&transforms[i * 16..i * 16 + 16]),
+            gray: flags[i] & FYNKEL_APPLE_EXTRA_WORLD_GRAY != 0,
+        });
+        queued += 1;
+    }
+    queued
 }
 
 /// Copies the frame in ring slot `slot` (what `fynkel_apple_viewport_render`

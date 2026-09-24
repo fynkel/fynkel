@@ -1,4 +1,4 @@
-/* Fynkel macOS viewport ABI v8 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v9 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
@@ -6,7 +6,9 @@
  * fynkel_apple_viewport_overlay (the gizmo overlay, ADR-0019); v7
  * fynkel_apple_viewport_set_view (a viewport's own camera over any world:
  * the editor's Scene view on a running game, ADR-0021 P7 L5); v8
- * fynkel_apple_viewport_outline (the selection outline). */
+ * fynkel_apple_viewport_outline (the selection outline); v9
+ * fynkel_apple_viewport_extra_worlds (other worlds drawn into the frame:
+ * Prefab Mode in context, multi-scene editing). */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
 
@@ -17,7 +19,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 8
+#define FYNKEL_APPLE_ABI_VERSION 9
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -169,12 +171,39 @@ int32_t fynkel_apple_viewport_overlay(FynkelAppleViewport *vp,
  * live world's `handles`); one in both lists is selected. style: NULL for
  * the default (orange, blue, 2 px) or 9 floats — selected RGBA, children
  * RGBA (linear), width in target pixels. Cleared by every render; a later
- * call replaces an earlier one. Returns the entities queued, -1 for NULL
- * (a list with a count) or a non-finite style. */
+ * call replaces an earlier one. Returns the entities queued, -1 for a NULL
+ * viewport, a NULL list with a count or a non-finite style. */
 int32_t fynkel_apple_viewport_outline(FynkelAppleViewport *vp,
                                       const uint64_t *selected, uint32_t selected_count,
                                       const uint64_t *children, uint32_t children_count,
                                       const float *style);
+/* Bit 0 of an extra world's flags: draw it greyed (Unity's Prefab Mode
+ * context in "Gray").  */
+#define FYNKEL_APPLE_EXTRA_WORLD_GRAY 1u
+/* Queues other worlds for the NEXT render, drawn into the same frame as the
+ * world `fynkel_apple_viewport_render` is given (the main world): Prefab
+ * Mode in context (the scene around the prefab, transformed by the inverse
+ * of the instance's world matrix) and multi-scene editing (the other loaded
+ * scenes, identity). Each world is extracted by this call — call it right
+ * before the render — so a world may be destroyed after it returns.
+ * transforms: 16 floats per world (column-major), the extra world's frame
+ * → the main world's; flags: one per world (FYNKEL_APPLE_EXTRA_WORLD_GRAY:
+ * desaturated to its Rec. 709 luminance and halved; other bits ignored).
+ * Their meshes share the frame's depth buffer and shadow maps (they cast
+ * and receive), their point and spot lights join the frame's (placed by
+ * the transform), their skinned meshes are posed as in their world; their
+ * first directional light is the sun only when the main world has none;
+ * the main world's camera (or the viewport's view), Environment, volumes
+ * and post stay the frame's. They draw from the viewport's asset store
+ * (the main world's cache: every preview of one authoring session shares
+ * it). Never outlined. Cleared by every render; a later call replaces an
+ * earlier one (count 0 clears). A NULL or poisoned world is skipped.
+ * Returns the worlds queued, -1 for a NULL viewport, a NULL array with a
+ * count or a non-finite transform (nothing is queued). */
+int32_t fynkel_apple_viewport_extra_worlds(FynkelAppleViewport *vp,
+                                           const FynkelWorld *const *worlds,
+                                           const float *transforms,
+                                           const uint32_t *flags, uint32_t count);
 /* Copies the frame in ring slot `slot` (a render's return value) into `out`
  * as tightly packed RGBA8, top row first: width * height * 4 bytes at the
  * viewport's size. Blocks until the GPU is idle — a screenshot, never a
