@@ -98,6 +98,10 @@ const FILES: &[TemplateFile] = &[
         "assets/materials/starter.material.json",
         "assets/materials/starter.material.json.tmpl"
     ),
+    text!(
+        "assets/volumes/look.volume.json",
+        "assets/volumes/look.volume.json.tmpl"
+    ),
     bin!("assets/models/cube.glb", "assets/models/cube.glb"),
     bin!("assets/textures/swatch.png", "assets/textures/swatch.png"),
     text!("assets/prefabs/.gitkeep", "assets/prefabs/.gitkeep"),
@@ -310,6 +314,7 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         "project_id",
         "scene_id",
         "material_id",
+        "volume_id",
         "cube_id",
         "swatch_id",
         "jump_id",
@@ -321,6 +326,9 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         "e_sun",
         "c_sun_transform",
         "c_sun",
+        "e_volume",
+        "c_volume_transform",
+        "c_volume",
         "e_cube",
         "c_cube_transform",
         "c_cube_mesh",

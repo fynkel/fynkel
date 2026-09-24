@@ -67,6 +67,36 @@
         }
       }
     },
+    "{{e_volume}}": {
+      "name": "Global Volume",
+      "parent": null,
+      "children": [],
+      "components": {
+        "{{c_volume_transform}}": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [0, 0, 0],
+            "rotation": [0, 0, 0, 1],
+            "scale": [1, 1, 1]
+          }
+        },
+        "{{c_volume}}": {
+          "type": "fynkel.Volume",
+          "version": 1,
+          "data": {
+            "profile": { "asset": "{{volume_id}}" },
+            "shape": "global",
+            "size": [10.0, 10.0, 10.0],
+            "radius": 5.0,
+            "blend_distance": 1.0,
+            "weight": 1.0,
+            "priority": 0,
+            "enabled": true
+          }
+        }
+      }
+    },
     "{{e_cube}}": {
       "name": "Cube",
       "parent": null,
