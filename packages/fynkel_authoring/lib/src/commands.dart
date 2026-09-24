@@ -73,6 +73,11 @@ final class Command {
   static Map<String, Object?> removeComponent(String entity, String component) =>
       {'command': 'removeComponent', 'entity': entity, 'component': component};
 
+  /// Moves a component to [index] among its entity's components (Unity's
+  /// Move Up / Move Down; past the end is last).
+  static Map<String, Object?> moveComponent(String entity, String component, int index) =>
+      {'command': 'moveComponent', 'entity': entity, 'component': component, 'index': index};
+
   static Map<String, Object?> setField(String entity, String component, String field, Object? value) =>
       {'command': 'setField', 'entity': entity, 'component': component, 'field': field, 'value': value};
 
@@ -173,6 +178,7 @@ final class Command {
     'pasteObjects',
     'addComponent',
     'removeComponent',
+    'moveComponent',
     'setField',
     'unsetField',
     'assignAsset',

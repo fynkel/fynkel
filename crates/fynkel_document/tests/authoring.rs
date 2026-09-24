@@ -1981,3 +1981,82 @@ fn tempdir() -> PathBuf {
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
+
+#[test]
+fn move_component_reorders_the_components_and_undoes_exactly() {
+    let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
+    let light = ComponentSpec {
+        id: Some(u("22222222-0000-4000-8000-000000000002")),
+        type_id: "fynkel.PointLight".into(),
+        version: None,
+        data: Some(Node::from_serde(&json!({
+            "color": [1, 1, 1], "intensity": 800, "range": 10, "culling_mask": 4294967295u32
+        }))),
+    };
+    apply(
+        &mut editor,
+        vec![Command::AddComponent {
+            entity: u(ROOT),
+            component: light,
+        }],
+    );
+    let added = text(&editor);
+    let order = |editor: &Editor| -> Vec<String> {
+        editor
+            .document()
+            .root
+            .pointer(&format!("/entities/{ROOT}/components"))
+            .and_then(Node::as_object)
+            .unwrap()
+            .iter()
+            .map(|m| m.key.clone())
+            .collect()
+    };
+    let before = order(&editor);
+    assert_eq!(
+        before.last().unwrap(),
+        "22222222-0000-4000-8000-000000000002"
+    );
+    let mv = |index| Command::MoveComponent {
+        entity: u(ROOT),
+        component: u("22222222-0000-4000-8000-000000000002"),
+        index,
+    };
+
+    // Move Up: to the first place; the data travels with it.
+    let r = apply(&mut editor, vec![mv(0)]);
+    assert_eq!(order(&editor)[0], "22222222-0000-4000-8000-000000000002");
+    assert_eq!(order(&editor).len(), before.len());
+    assert_eq!(
+        r.mutations[0].affected_ids,
+        vec![u(ROOT), u("22222222-0000-4000-8000-000000000002")]
+    );
+    // Past the end is last; the same place changes nothing.
+    apply(&mut editor, vec![mv(99)]);
+    assert_eq!(order(&editor), before);
+    assert_eq!(text(&editor), added);
+    let last = before.len() - 1;
+    apply(&mut editor, vec![mv(last)]);
+    assert_eq!(text(&editor), added);
+
+    // Undo each step back to the byte, then the add.
+    apply(&mut editor, vec![mv(0)]);
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), added);
+    while editor.undo().is_ok() {}
+    assert_eq!(text(&editor), original);
+
+    // The JSON form round-trips; an unknown component is refused.
+    let json = mv(1).to_json();
+    assert_eq!(json["command"], "moveComponent");
+    assert_eq!(Command::from_json(&json).unwrap(), mv(1));
+    let r = editor.apply(
+        Request::new(vec![Command::MoveComponent {
+            entity: u(ROOT),
+            component: u("99999999-0000-4000-8000-000000000009"),
+            index: 0,
+        }]),
+        &schemas(),
+    );
+    assert!(!r.ok);
+}

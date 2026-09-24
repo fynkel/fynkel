@@ -115,6 +115,14 @@ pub enum Command {
         entity: Uuid,
         component: Uuid,
     },
+    /// Moves a component to `index` among its entity's components (Unity's
+    /// Move Up / Move Down; the order is the key order of `components`,
+    /// which the Inspector shows). An index past the end moves it last.
+    MoveComponent {
+        entity: Uuid,
+        component: Uuid,
+        index: usize,
+    },
     SetField {
         entity: Uuid,
         component: Uuid,
@@ -234,6 +242,7 @@ impl Command {
             Command::ReparentObject { .. } => "reparentObject",
             Command::AddComponent { .. } => "addComponent",
             Command::RemoveComponent { .. } => "removeComponent",
+            Command::MoveComponent { .. } => "moveComponent",
             Command::SetField { .. } => "setField",
             Command::UnsetField { .. } => "unsetField",
             Command::AssignAsset { .. } => "assignAsset",
@@ -351,6 +360,11 @@ impl Command {
                 entity: uuid("entity")?,
                 component: uuid("component")?,
             },
+            "moveComponent" => Command::MoveComponent {
+                entity: uuid("entity")?,
+                component: uuid("component")?,
+                index: index()?.ok_or_else(|| invalid(format!("{name}: \"index\" is required")))?,
+            },
             "setField" => Command::SetField {
                 entity: uuid("entity")?,
                 component: uuid("component")?,
@@ -465,6 +479,13 @@ impl Command {
             }
             Command::RemoveComponent { entity, component } => {
                 json!({ "entity": entity.to_string(), "component": component.to_string() })
+            }
+            Command::MoveComponent {
+                entity,
+                component,
+                index,
+            } => {
+                json!({ "entity": entity.to_string(), "component": component.to_string(), "index": index })
             }
             Command::SetField {
                 entity,
@@ -1523,6 +1544,35 @@ impl Cx<'_> {
                 let p = self.component_pointer(*entity, *component)?;
                 let (parent, key) = split_pointer(&p);
                 self.edits.push(Edit::RemoveMember { parent, key });
+                vec![*entity, *component]
+            }
+            Command::MoveComponent {
+                entity,
+                component,
+                index,
+            } => {
+                let p = self.component_pointer(*entity, *component)?;
+                let (parent, key) = split_pointer(&p);
+                let count = self
+                    .root
+                    .pointer(&parent)
+                    .and_then(Node::as_object)
+                    .map_or(0, |m| m.len());
+                let from = self.member_index(&parent, &key);
+                let to = (*index).min(count.saturating_sub(1));
+                if from != Some(to) {
+                    let node = self.root.pointer(&p).expect("resolved above").clone();
+                    self.edits.push(Edit::RemoveMember {
+                        parent: parent.clone(),
+                        key: key.clone(),
+                    });
+                    self.edits.push(Edit::InsertMember {
+                        parent,
+                        index: to,
+                        key,
+                        value: node,
+                    });
+                }
                 vec![*entity, *component]
             }
             Command::SetField {

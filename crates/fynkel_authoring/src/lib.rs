@@ -61,6 +61,7 @@ pub const COMMANDS: &[&str] = &[
     "pasteObjects",
     "addComponent",
     "removeComponent",
+    "moveComponent",
     "setField",
     "unsetField",
     "assignAsset",
