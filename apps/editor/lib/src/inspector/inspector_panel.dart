@@ -34,6 +34,7 @@ import 'inspector_math.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'inspector_model.dart';
+import 'material_edits.dart';
 import 'object_header.dart';
 import '../project/tags_and_layers_dialog.dart';
 
@@ -46,9 +47,13 @@ class InspectorPanel extends StatefulWidget {
     this.onOpenDocument,
     this.onOpenReference,
     this.run = runProcess,
+    this.materials,
   });
 
   final InspectorModel model;
+
+  /// A material asset's page edits it through this (Tier 2).
+  final MaterialEdits? materials;
 
   /// What to show (item 9c): entities, an asset, a part, a folder. Null
   /// shows the entity page alone (a test that pumps the model by itself).
@@ -129,6 +134,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
             onOpenDocument: openDocument,
             onOpenReference: openReference,
             run: widget.run,
+            materials: widget.materials,
           );
         case InspectAsset(:final id, :final sub?):
           return SubAssetPage(

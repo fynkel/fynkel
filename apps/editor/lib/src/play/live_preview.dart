@@ -90,6 +90,15 @@ final class LivePreview implements PreviewBackend {
   @override
   void restoreComponents(Iterable<String> ids) {}
 
+  /// A material edited during Play is saved; the running game draws it
+  /// from its next Play.
+  @override
+  void setMaterial(String material, Map<String, Object?> data) {}
+  @override
+  void restoreMaterial(String material) {}
+  @override
+  Map<String, Object?> material(String material) => throw _refused('material');
+
   static const _transform = 'fynkel.Transform';
 
   void _set(String id, Map<String, Object?> data) {

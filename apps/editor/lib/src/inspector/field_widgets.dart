@@ -737,7 +737,12 @@ class _NumberFieldState extends State<NumberField> {
                 value: current,
                 onChangeStart: widget.enabled ? (_) => widget.onDragState?.call(true) : null,
                 onChanged: widget.enabled
-                    ? (v) => setState(() => _preview = widget.integer ? v.roundToDouble() : v)
+                    ? (v) {
+                        final shown = widget.integer ? v.roundToDouble() : v;
+                        setState(() => _preview = shown);
+                        // Live, as a label drag is: the Scene view follows the thumb.
+                        widget.onPreview?.call(shown);
+                      }
                     : null,
                 onChangeEnd: widget.enabled ? (_) => _dragEnded() : null,
               ),
@@ -886,6 +891,7 @@ class EnumField extends StatelessWidget {
     required this.onCommit,
     this.mixed = false,
     this.enabled = true,
+    this.display,
   });
 
   final String? value;
@@ -893,6 +899,9 @@ class EnumField extends StatelessWidget {
   final bool mixed;
   final bool enabled;
   final void Function(String value) onCommit;
+
+  /// What a value reads as (default: [humanize]d).
+  final String Function(String value)? display;
 
   @override
   Widget build(BuildContext context) {
@@ -913,7 +922,7 @@ class EnumField extends StatelessWidget {
               child: Row(
                 children: [
                   SizedBox(width: 18, child: v == value && !mixed ? const Icon(FIcons.check, size: 14) : null),
-                  Text(humanize(v), style: theme.textTheme.bodySmall),
+                  Text((display ?? humanize)(v), style: theme.textTheme.bodySmall),
                 ],
               ),
             ),
@@ -922,7 +931,7 @@ class EnumField extends StatelessWidget {
           padding: const EdgeInsets.only(left: 6, right: 4),
           child: Row(
             children: [
-              Expanded(child: _boxText(context, shown.isEmpty || mixed ? '' : humanize(shown))),
+              Expanded(child: _boxText(context, shown.isEmpty || mixed ? '' : (display ?? humanize)(shown))),
               Icon(FIcons.chevronDown, size: 12, color: context.tokens.textDisabled),
             ],
           ),

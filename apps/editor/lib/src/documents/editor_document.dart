@@ -128,6 +128,14 @@ abstract class PreviewBackend {
   void restoreTransforms(Iterable<String> ids);
   int setComponents(Iterable<({String id, String type, Map<String, Object?> data})> components);
   void restoreComponents(Iterable<String> ids);
+
+  /// The Inspector's live material edit, in every open preview; see
+  /// [ScenePreview.setMaterial].
+  void setMaterial(String material, Map<String, Object?> data);
+  void restoreMaterial(String material);
+
+  /// What this preview draws for [material] now, as its document fields.
+  Map<String, Object?> material(String material);
   PreviewSyncReport resync();
   PreviewStats reload();
   /// [live]: unsaved documents cook as the editor holds them (Play).
@@ -180,6 +188,12 @@ final class SessionPreview implements PreviewBackend {
       preview.setComponents(components);
   @override
   void restoreComponents(Iterable<String> ids) => preview.restoreComponents(ids);
+  @override
+  void setMaterial(String material, Map<String, Object?> data) => preview.setMaterial(material, data);
+  @override
+  void restoreMaterial(String material) => preview.restoreMaterial(material);
+  @override
+  Map<String, Object?> material(String material) => preview.material(material);
   @override
   PreviewSyncReport resync() => preview.resync();
   @override

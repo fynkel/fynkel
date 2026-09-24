@@ -22,10 +22,12 @@ import 'hierarchy/hierarchy_model.dart';
 import 'hierarchy/presets.dart';
 import 'hierarchy/hierarchy_panel.dart';
 import 'hierarchy/hierarchy_tree.dart';
+import 'documents/editor_document.dart';
 import 'inspector/codegen_check.dart';
 import 'l10n/strings.dart';
 import 'inspector/inspector_model.dart';
 import 'inspector/inspector_panel.dart';
+import 'inspector/material_edits.dart';
 import 'inspector/prefab_actions.dart' as prefab;
 import 'launcher/launcher.dart';
 import 'launcher/opening_screen.dart';
@@ -241,6 +243,9 @@ class EditorShellState extends State<EditorShell> {
   GameConsoleModel? gameConsole;
   ProfilerModel? profiler;
   DocumentTabs? tabs;
+
+  /// The material Inspector's edits, project-wide (Tier 2).
+  MaterialEdits? materials;
   CodegenCheck? codegen;
   EditorState? editorState;
 
@@ -453,6 +458,7 @@ class EditorShellState extends State<EditorShell> {
     editorState?.dispose();
     codegen?.dispose();
     tabs?.dispose();
+    materials?.dispose();
     project?.removeListener(_onProjectChanged);
     project?.close();
     gameConsole?.dispose();
@@ -537,6 +543,7 @@ class EditorShellState extends State<EditorShell> {
           onOpenDocument: openDocument,
           onOpenReference: openReference,
           run: widget.run,
+          materials: materials,
         );
       },
     ),
@@ -613,6 +620,16 @@ class EditorShellState extends State<EditorShell> {
 
   bool get _hasProject => project != null;
   OpenDocument? get _focusedTab => tabs?.focused;
+
+  /// The material ⌘Z (⇧⌘Z) undoes instead of the focused tab: the one the
+  /// Inspector shows, while the Inspector or the Project has the keyboard.
+  EditorDocument? _materialUndo({bool redo = false}) {
+    final panel = PanelIds.base(workspace?.focusedPanel.value ?? '');
+    return materials?.undoTarget(
+      inspectorFocused: panel == PanelRegistry.inspector || panel == PanelRegistry.project,
+      redo: redo,
+    );
+  }
   bool get _hasTab => _focusedTab != null;
   bool get _canEdit => hierarchy?.canEdit ?? false;
   bool get _hasSelection => hierarchy?.hasSelection ?? false;
@@ -713,14 +730,17 @@ class EditorShellState extends State<EditorShell> {
       // ── Edit menu: undo/redo (group 0), the Hierarchy (groups 1–2) ──
       EditorCommand(
         id: 'document.undo',
-        labelBuilder: () => _focusedTab?.canUndoLabel ?? 'Undo',
+        labelBuilder: () => _materialUndo() != null ? 'Undo Material Change' : _focusedTab?.canUndoLabel ?? 'Undo',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyZ),
         group: 0,
         order: 0,
-        enabled: () => _focusedTab?.document.canUndo ?? false,
+        enabled: () => _materialUndo() != null || (_focusedTab?.document.canUndo ?? false),
         textIntent: const UndoTextIntent(SelectionChangedCause.keyboard),
-        run: () => _focusedTab?.undo(),
+        run: () {
+          final m = _materialUndo();
+          m != null ? materials!.undo(m) : _focusedTab?.undo();
+        },
       ),
       EditorCommand(
         id: 'document.redo',
@@ -728,9 +748,12 @@ class EditorShellState extends State<EditorShell> {
         shortcut: k(LogicalKeyboardKey.keyZ, shift: true),
         group: 0,
         order: 1,
-        enabled: () => _focusedTab?.document.canRedo ?? false,
+        enabled: () => _materialUndo(redo: true) != null || (_focusedTab?.document.canRedo ?? false),
         textIntent: const RedoTextIntent(SelectionChangedCause.keyboard),
-        run: () => _focusedTab?.redo(),
+        run: () {
+          final m = _materialUndo(redo: true);
+          m != null ? materials!.undo(m, redo: true) : _focusedTab?.redo();
+        },
       ),
       EditorCommand(
         id: 'assets.undo',
@@ -1752,8 +1775,11 @@ class EditorShellState extends State<EditorShell> {
       editorState?.dispose();
       codegen?.dispose();
       tabs?.dispose();
+      materials?.dispose();
       final ws = Workspace(registry: _panels, store: widget.layoutStore);
       final t = DocumentTabs(project: opened);
+      final me = MaterialEdits(opened)..preview = (id, fields) => scene?.previewMaterial(id, fields);
+      me.addListener(registry.refresh);
       final h = HierarchyModel(tabs: t, project: opened);
       final c = ConsoleModel(project: opened, openInIde: ide.open, openInEditor: openDiagnosticInEditor);
       final ps = PlaySession(projectDir: opened.dir, cli: () => toolchain?.fynkelCli, start: widget.startPlayProcess);
@@ -1784,6 +1810,7 @@ class EditorShellState extends State<EditorShell> {
       play?.dispose();
       project = opened;
       tabs = t;
+      materials = me;
       codegen = cg;
       editorState = es;
       _sceneOps = h;

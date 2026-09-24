@@ -1500,6 +1500,27 @@ final class SceneViewModel extends ChangeNotifier {
     _repaint();
   }
 
+  /// The material Inspector's live edit: [data] (the material document's
+  /// fields) drawn for [material] in every open world with no file
+  /// written; null draws the cooked material again. The asset store is
+  /// shared, so one preview carries it to all of them.
+  void previewMaterial(String material, Map<String, Object?>? data) {
+    if (isLive) return;
+    final t = _sceneTabs.values.where((t) => t.hasPreview).firstOrNull;
+    if (t == null) return;
+    try {
+      if (data == null) {
+        t.preview!.restoreMaterial(material);
+      } else {
+        t.preview!.setMaterial(material, data);
+      }
+    } on AuthoringException catch (e) {
+      notice = 'Preview: $e';
+    }
+    views?.changed(this, null);
+    _repaint();
+  }
+
   /// Escape: the world back to the document, nothing written.
   void cancelDrag() {
     final d = drag;

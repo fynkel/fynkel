@@ -409,6 +409,27 @@ final class FakePreviewBackend implements PreviewBackend {
     }
   }
 
+  /// What `setMaterial` holds: material id → its fields.
+  final materialOverrides = <String, Map<String, Object?>>{};
+
+  @override
+  void setMaterial(String material, Map<String, Object?> data) {
+    _check('setMaterial');
+    materialOverrides[material] = data;
+  }
+
+  @override
+  void restoreMaterial(String material) {
+    _check('restoreMaterial');
+    materialOverrides.remove(material);
+  }
+
+  @override
+  Map<String, Object?> material(String material) {
+    _check('material');
+    return materialOverrides[material] ?? const {};
+  }
+
   @override
   PreviewSyncReport resync() {
     _check('resync');
