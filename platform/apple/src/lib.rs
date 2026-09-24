@@ -279,8 +279,9 @@ pub const FYNKEL_APPLE_RENDER_NO_WORLD: i32 = -2;
 /// the editor's overlays and its Save Frame — M4-06; 5: `gpuAo` in the
 /// stats — R2; 6: `fynkel_apple_viewport_overlay`, the gizmo overlay —
 /// ADR-0019, item 9f; 7: `fynkel_apple_viewport_set_view`, a viewport's
-/// own camera over any world — ADR-0021 P7 L5).
-pub const APPLE_ABI_VERSION: u32 = 7;
+/// own camera over any world — ADR-0021 P7 L5; 8:
+/// `fynkel_apple_viewport_outline`, the selection outline).
+pub const APPLE_ABI_VERSION: u32 = 8;
 
 #[no_mangle]
 pub extern "C" fn fynkel_apple_abi_version() -> u32 {
@@ -711,6 +712,67 @@ pub unsafe extern "C" fn fynkel_apple_viewport_overlay(
         }
     }
     queued
+}
+
+/// Queues the NEXT render's selection outline (Unity's Scene view): the
+/// silhouettes of what the `selected` entities draw ringed in one colour,
+/// their `children`'s in another, `width` target pixels past the edge and
+/// over everything — hidden parts included, handles on top
+/// (`fynkel_render::Overlay::outline`). Entities are handle bits
+/// (`Entity::to_bits`; the authoring preview's `entities` call, the live
+/// world's `handles`); one in both lists is selected, one the frame does
+/// not draw has no outline. `style`: NULL for the default, or nine floats —
+/// selected RGBA, children RGBA (linear, display-referred), width. Cleared
+/// by the render like the rest of the overlay; a later call replaces an
+/// earlier one. Returns the entities queued (both lists), -1 for a NULL
+/// viewport, a NULL list with a non-zero count, or a non-finite style
+/// (nothing is queued).
+///
+/// # Safety
+/// `vp` must be a live viewport; `selected` readable for `selected_count`
+/// `u64`s and `children` for `children_count` (or NULL with a zero
+/// count); `style` NULL or readable for 9 floats.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_apple_viewport_outline(
+    vp: *mut Viewport,
+    selected: *const u64,
+    selected_count: u32,
+    children: *const u64,
+    children_count: u32,
+    style: *const f32,
+) -> i32 {
+    let Some(v) = vp.as_mut() else { return -1 };
+    if (selected_count > 0 && selected.is_null()) || (children_count > 0 && children.is_null()) {
+        return -1;
+    }
+    let style = if style.is_null() {
+        fynkel_render::OutlineStyle::default()
+    } else {
+        let f = std::slice::from_raw_parts(style, 9);
+        if f.iter().any(|x| !x.is_finite()) {
+            return -1;
+        }
+        fynkel_render::OutlineStyle {
+            selected: [f[0], f[1], f[2], f[3]],
+            children: [f[4], f[5], f[6], f[7]],
+            width: f[8],
+        }
+    };
+    let entities = |bits: *const u64, count: u32| -> Vec<fynkel_contracts::Entity> {
+        if count == 0 {
+            return Vec::new();
+        }
+        std::slice::from_raw_parts(bits, count as usize)
+            .iter()
+            .map(|b| fynkel_contracts::Entity::from_bits(*b))
+            .collect()
+    };
+    let (selected, children) = (
+        entities(selected, selected_count),
+        entities(children, children_count),
+    );
+    v.renderer.overlay().outline(&selected, &children, style);
+    (selected.len() + children.len()) as i32
 }
 
 /// Copies the frame in ring slot `slot` (what `fynkel_apple_viewport_render`

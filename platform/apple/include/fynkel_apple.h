@@ -1,11 +1,12 @@
-/* Fynkel macOS viewport ABI v7 (platform/apple). Pairs with fynkel.h: the
+/* Fynkel macOS viewport ABI v8 (platform/apple). Pairs with fynkel.h: the
  * same dylib exports both. See platform/apple/README.md for the contract.
  * v3 added the M3-16 instrumentation fields of FynkelAppleViewportStats; v4
  * fynkel_apple_viewport_debug_lines and fynkel_apple_viewport_read_frame (the
  * editor's overlays and Save Frame, M4-06); v5 gpuAo (R2); v6
  * fynkel_apple_viewport_overlay (the gizmo overlay, ADR-0019); v7
  * fynkel_apple_viewport_set_view (a viewport's own camera over any world:
- * the editor's Scene view on a running game, ADR-0021 P7 L5). */
+ * the editor's Scene view on a running game, ADR-0021 P7 L5); v8
+ * fynkel_apple_viewport_outline (the selection outline). */
 #ifndef FYNKEL_APPLE_H
 #define FYNKEL_APPLE_H
 
@@ -16,7 +17,7 @@
 extern "C" {
 #endif
 
-#define FYNKEL_APPLE_ABI_VERSION 7
+#define FYNKEL_APPLE_ABI_VERSION 8
 
 typedef struct FynkelAppleViewport FynkelAppleViewport;
 
@@ -161,6 +162,19 @@ int32_t fynkel_apple_viewport_overlay(FynkelAppleViewport *vp,
                                       const float *lines, uint32_t line_count,
                                       const float *triangles, uint32_t triangle_count,
                                       const float *grid);
+/* Queues the NEXT render's selection outline: the silhouettes of what the
+ * `selected` entities draw ringed in one colour, their `children`'s in
+ * another, over everything (hidden parts too; overlay handles stay on top).
+ * Entities are handle bits (the authoring preview's `entities` call, the
+ * live world's `handles`); one in both lists is selected. style: NULL for
+ * the default (orange, blue, 2 px) or 9 floats — selected RGBA, children
+ * RGBA (linear), width in target pixels. Cleared by every render; a later
+ * call replaces an earlier one. Returns the entities queued, -1 for NULL
+ * (a list with a count) or a non-finite style. */
+int32_t fynkel_apple_viewport_outline(FynkelAppleViewport *vp,
+                                      const uint64_t *selected, uint32_t selected_count,
+                                      const uint64_t *children, uint32_t children_count,
+                                      const float *style);
 /* Copies the frame in ring slot `slot` (a render's return value) into `out`
  * as tightly packed RGBA8, top row first: width * height * 4 bytes at the
  * viewport's size. Blocks until the GPU is idle — a screenshot, never a

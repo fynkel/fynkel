@@ -1,20 +1,23 @@
-//! Viewport ABI v4 and v6, the editor's entries: `fynkel_apple_viewport_overlay`
-//! (v6, ADR-0019: lines, triangles and the grid for the next render only), `fynkel_apple_viewport_debug_lines`
+//! Viewport ABI v4, v6 and v8, the editor's entries: `fynkel_apple_viewport_overlay`
+//! (v6, ADR-0019: lines, triangles and the grid for the next render only),
+//! `fynkel_apple_viewport_outline` (v8: the selection outline, likewise), `fynkel_apple_viewport_debug_lines`
 //! (the queued segments reach the renderer's debug pass on the next render
 //! and only that one; a non-finite segment is dropped; NULL is safe) and
 //! `fynkel_apple_viewport_read_frame` (the rendered slot's pixels, RGBA8,
 //! equal to `fynkel_render::render_offscreen` of the same extract).
 
-use fynkel_core::{World, WorldConfig};
+use fynkel_contracts::Entity;
+use fynkel_core::{Extract, ExtractRecord, World, WorldConfig};
 use fynkel_platform_apple::{
-    fynkel_apple_abi_version, fynkel_apple_viewport_debug_lines, fynkel_apple_viewport_overlay,
-    fynkel_apple_viewport_read_frame, SyncMode, Viewport, APPLE_ABI_VERSION,
+    fynkel_apple_abi_version, fynkel_apple_viewport_debug_lines, fynkel_apple_viewport_outline,
+    fynkel_apple_viewport_overlay, fynkel_apple_viewport_read_frame, SyncMode, Viewport,
+    APPLE_ABI_VERSION,
 };
 
 #[test]
 fn debug_lines_draw_on_the_next_render_only() {
-    assert_eq!(fynkel_apple_abi_version(), 7);
-    assert_eq!(APPLE_ABI_VERSION, 7);
+    assert_eq!(fynkel_apple_abi_version(), 8);
+    assert_eq!(APPLE_ABI_VERSION, 8);
 
     let mut world = World::new(WorldConfig::default());
     world.begin_frame(1.0 / 60.0);
@@ -266,5 +269,154 @@ fn the_overlay_draws_on_the_next_render_only_and_equals_offscreen() {
             -1
         );
     }
+    vp.ring().wait_idle();
+}
+
+/// Two placeholder cubes in front of the default camera: the selected one
+/// (bits 1) and its child (bits 2).
+fn two_cubes() -> Extract {
+    let mut e = Extract::default();
+    for (bits, x) in [(1u64, -0.7f32), (2, 0.7)] {
+        e.records.push(ExtractRecord {
+            entity: Entity::from_bits(bits),
+            world: glam::Mat4::from_translation(glam::Vec3::new(x, 0.0, 0.0)),
+            overridden: false,
+            layer_bit: 1,
+        });
+    }
+    e
+}
+
+#[test]
+fn the_outline_draws_on_the_next_render_only_and_equals_offscreen() {
+    let extract = two_cubes();
+    let (w, h) = (64u32, 48u32);
+    let mut vp = Viewport::new(w, h, 2, SyncMode::MetalCompletion).expect("viewport");
+    let (selected, children) = ([1u64], [2u64, 1]);
+    // Selected red, children green, three pixels.
+    #[rustfmt::skip]
+    let style: [f32; 9] = [1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 3.0];
+    let queued = unsafe {
+        fynkel_apple_viewport_outline(
+            &mut vp,
+            selected.as_ptr(),
+            1,
+            children.as_ptr(),
+            2,
+            style.as_ptr(),
+        )
+    };
+    assert_eq!(queued, 3);
+    let slot = vp.render(&extract);
+    assert_eq!(vp.frame_stats().outlined, 2);
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    unsafe { fynkel_apple_viewport_read_frame(&vp, slot, out.as_mut_ptr(), out.len() as u32) };
+
+    // The same through the offscreen path.
+    let (device, queue) = fynkel_render::headless_device().expect("gpu");
+    let mut renderer =
+        fynkel_render::ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, w, h);
+    renderer.overlay().outline(
+        &[Entity::from_bits(1)],
+        &[Entity::from_bits(2), Entity::from_bits(1)],
+        fynkel_render::OutlineStyle {
+            selected: [1.0, 0.0, 0.0, 1.0],
+            children: [0.0, 1.0, 0.0, 1.0],
+            width: 3.0,
+        },
+    );
+    let offscreen = fynkel_render::render_offscreen(&device, &queue, &mut renderer, &extract);
+    let flat: Vec<u8> = offscreen.iter().flatten().copied().collect();
+    let differing = out
+        .chunks_exact(4)
+        .zip(flat.chunks_exact(4))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(
+        differing, 0,
+        "viewport and offscreen differ in {differing} pixels"
+    );
+    // Both rings made it to the frame.
+    for rgb in [[255, 0, 0], [0, 255, 0]] {
+        assert!(out.chunks_exact(4).any(|p| p[..3] == rgb), "{rgb:?}");
+    }
+
+    // The next render has none: neither ring is left. (Only first frames
+    // are compared pixel for pixel — a viewport's later frames carry its
+    // temporal state, which a fresh offscreen renderer does not have.)
+    let slot = vp.render(&extract);
+    assert_eq!(vp.frame_stats().outlined, 0);
+    unsafe { fynkel_apple_viewport_read_frame(&vp, slot, out.as_mut_ptr(), out.len() as u32) };
+    for rgb in [[255, 0, 0], [0, 255, 0]] {
+        assert!(
+            !out.chunks_exact(4).any(|p| p[..3] == rgb),
+            "{rgb:?} left over"
+        );
+    }
+
+    // The default style, NULL lists with counts, a non-finite style, a
+    // NULL viewport.
+    unsafe {
+        assert_eq!(
+            fynkel_apple_viewport_outline(
+                &mut vp,
+                selected.as_ptr(),
+                1,
+                std::ptr::null(),
+                0,
+                std::ptr::null()
+            ),
+            1
+        );
+        assert_eq!(
+            fynkel_apple_viewport_outline(
+                &mut vp,
+                std::ptr::null(),
+                1,
+                std::ptr::null(),
+                0,
+                std::ptr::null()
+            ),
+            -1
+        );
+        assert_eq!(
+            fynkel_apple_viewport_outline(
+                &mut vp,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                1,
+                std::ptr::null()
+            ),
+            -1
+        );
+        let mut bad = style;
+        bad[8] = f32::NAN;
+        assert_eq!(
+            fynkel_apple_viewport_outline(
+                &mut vp,
+                selected.as_ptr(),
+                1,
+                std::ptr::null(),
+                0,
+                bad.as_ptr()
+            ),
+            -1
+        );
+        assert_eq!(
+            fynkel_apple_viewport_outline(
+                std::ptr::null_mut(),
+                selected.as_ptr(),
+                1,
+                std::ptr::null(),
+                0,
+                std::ptr::null()
+            ),
+            -1
+        );
+    }
+    // The default-style outline queued above is drawn.
+    let _ = vp.render(&extract);
+    assert_eq!(vp.frame_stats().outlined, 1);
     vp.ring().wait_idle();
 }
