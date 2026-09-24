@@ -83,7 +83,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | 🔧 `2e0183f` (`position` / `rotation` are world, `localPosition` / `localRotation` / `localScale`, `translate` / `rotate` / `rotateAround` / `lookAt` with `Space.self` / `Space.world`, `forward` / `right` / `up`, `eulerAngles` in degrees, `transformPoint` and friends); 🟡 Euler order is the Inspector's X-then-Y-then-Z, not Unity's Z-X-Y |
 | One script throwing | only that script stops | 🔧 `faf648d` (every callback on its own; the Console gets the message and the stack; called again next frame) |
 | Coroutines / `Invoke` | | 🔧 `b92178e` (`startCoroutine` over a `sync*` generator; `WaitForSeconds`, `WaitUntil`, `WaitWhile`, `WaitForFixedUpdate`, nested routines; `invoke`, `invokeRepeating`, `cancelInvoke`; Unity's lifetimes) |
-| `Input.GetKey` | raw keys | ❌ declared actions only; an undeclared one reads false silently |
+| `Input.GetKey` | raw keys | 🔧 `6b25b52` (ADR-0024: `getKey` / `getKeyDown` / `getKeyUp`, `getMouseButton…`, `anyKey`, with the actions' tick rules; an undeclared action warns once in the Console) |
 | `Debug.Log` | Console, click to the line | 🟡 info only, no source link; `print` not captured |
 | Inspector fields | public fields; GameObject/component/colour/enum references | 🟡 `@Expose` only; no object references, enums or colours |
 | A failed hot reload | blocks Play, errors in the Console | 🟡 a toast; old code keeps running |
@@ -194,3 +194,9 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   in the frame (after `update`, before `lateUpdate`), each wait's frame,
   `invokeRepeating`'s calls, and that a disabled behaviour keeps its
   routines while an inactive object or a destroyed behaviour stops them.
+- 2026-09-24: raw keys (`6b25b52`, ADR-0024 — actions stay the binding
+  source; raw reads sit beside them) — `packages/fynkel/test/raw_input_test.dart`
+  presses F, which no action binds, and a mouse button over the fixture
+  project: down on the first of three catch-up ticks and in `update`,
+  held after, a release in a frame too short to tick reaching the next
+  tick, a focus reset; a misspelt action warns once in the Console.

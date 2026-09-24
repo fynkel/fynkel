@@ -134,12 +134,34 @@ would see it), and a `fynkel.ThirdPersonCamera` turns by its
 `look_action · sensitivity · dt` every tick — a relative control
 (`mouse:delta`) is a rate consumed by one tick (rule 5), so a long frame's
 catch-up ticks add nothing and a stick turns steadily. An action the
-project does not declare reads as nothing (`false`, `0`, `Vec2.zero`).
+project does not declare reads as nothing (`false`, `0`, `Vec2.zero`),
+and the world logs one Console warning per such name once a project is
+loaded (ADR-0024).
 The world's table is `world.input` (`WorldInput`: `actions`, the same
 readers, `refresh()`), decoded in place from the native view before each
 tick and — with the frame's edges — before `update`; `LoadReport.
 inputActions` lists what bound (`BoundAction { name, type, bindings,
 overlayControls }`).
+
+### Raw keys and mouse buttons (ADR-0024)
+
+Unity's `Input.GetKey` also works, with no action declared:
+
+```dart
+if (Input.getKeyDown('F')) toggleFlashlight();      // a key name of the grammar above
+if (Input.getKey('ShiftLeft')) speed *= 2;
+if (Input.getMouseButtonDown(0)) fire();            // 0 left, 1 right, 2 middle, 3 back, 4 forward
+if (Input.anyKeyDown) skipIntro();
+```
+
+The timing is the actions' (the rules above): a key held through a frame
+is held on every tick, `getKeyDown` / `getKeyUp` are consumed by one tick
+in `fixedUpdate` and are the frame's in `update`, and a `reset` releases
+everything. A name that isn't in `keyNames` is an `ArgumentError`. Use
+actions for anything a player should be able to rebind, anything read on
+several devices, and anything a native system reads (the character, the
+camera rig). Use raw keys for debug keys and quick scripts. `TestInput`
+has `pressKey('Space')` / `pressKey('mouse:left')` / `releaseKey`.
 
 Tests without a world: `TestGameContext(input: TestInput(actions: [('jump',
 ActionKind.button), ('move', ActionKind.axis2d)]))` — `press`/`release`/
