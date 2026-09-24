@@ -24,6 +24,9 @@ final class FakePreviewBackend implements PreviewBackend {
   /// Previewed local transforms by entity (a gizmo drag in flight).
   final overrides = <String, Trs>{};
 
+  /// What `setComponents` holds in the world: entity id → type → data.
+  final componentOverrides = <String, Map<String, Map<String, Object?>>>{};
+
   /// The ids `setHidden` was last given (subtrees, as the editor passes them).
   Set<String> hiddenIds = const {};
 
@@ -387,9 +390,30 @@ final class FakePreviewBackend implements PreviewBackend {
   }
 
   @override
+  int setComponents(Iterable<({String id, String type, Map<String, Object?> data})> components) {
+    _check('setComponents');
+    var count = 0;
+    for (final c in components) {
+      if (!_known(c.id) || !c.type.startsWith('fynkel.')) continue;
+      (componentOverrides[c.id] ??= {})[c.type] = c.data;
+      count++;
+    }
+    return count;
+  }
+
+  @override
+  void restoreComponents(Iterable<String> ids) {
+    _check('restoreComponents');
+    for (final id in ids) {
+      componentOverrides.remove(id);
+    }
+  }
+
+  @override
   PreviewSyncReport resync() {
     _check('resync');
     overrides.clear();
+    componentOverrides.clear();
     _syncsCount++;
     return PreviewSyncReport.fromJson({'handle': 1});
   }

@@ -1185,12 +1185,15 @@ class _EulerFieldState extends State<EulerField> {
 // ── Colour ─────────────────────────────────────────────────────────────────
 
 /// A linear RGB(A) colour: its hex in a field with the swatch inside, at
-/// the start; the swatch opens the colour picker.
+/// the start; the swatch opens the colour picker, whose every change
+/// [onPreview] shows (Unity's live picker) until OK commits once or
+/// Cancel puts it back (`onPreview(null)` either way).
 class ColorField extends StatelessWidget {
   const ColorField({
     super.key,
     required this.value,
     required this.onCommit,
+    this.onPreview,
     this.mixed = false,
     this.enabled = true,
     this.components = 3,
@@ -1201,6 +1204,7 @@ class ColorField extends StatelessWidget {
   final bool enabled;
   final int components;
   final void Function(List<double> rgb) onCommit;
+  final void Function(List<double>? rgb)? onPreview;
 
   Color get _color {
     final v = value;
@@ -1220,8 +1224,9 @@ class ColorField extends StatelessWidget {
     final picked = await showDialog<List<double>>(
       animationStyle: AnimationStyle.noAnimation,
       context: context,
-      builder: (_) => ColorPickerDialog(initial: start, alpha: components == 4),
+      builder: (_) => ColorPickerDialog(initial: start, alpha: components == 4, onChanged: onPreview),
     );
+    onPreview?.call(null);
     if (picked != null) onCommit(picked);
   }
 
@@ -1269,10 +1274,13 @@ class ColorField extends StatelessWidget {
 
 /// HSV picker over sRGB with a hex field; the result is linear RGB(A).
 class ColorPickerDialog extends StatefulWidget {
-  const ColorPickerDialog({super.key, required this.initial, this.alpha = false});
+  const ColorPickerDialog({super.key, required this.initial, this.alpha = false, this.onChanged});
 
   final List<double> initial;
   final bool alpha;
+
+  /// Every change while picking, as linear RGB(A).
+  final void Function(List<double> rgb)? onChanged;
 
   @override
   State<ColorPickerDialog> createState() => _ColorPickerDialogState();
@@ -1305,6 +1313,11 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
     return Color.fromARGB(255, (r * 255).round(), (g * 255).round(), (b * 255).round());
   }
 
+  void _change(VoidCallback fn) {
+    setState(fn);
+    widget.onChanged?.call(_linear);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1320,6 +1333,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
               height: 160,
               child: LayoutBuilder(
                 builder: (context, c) => GestureDetector(
+                  key: const ValueKey('picker.sv'),
                   onPanDown: (d) => _svAt(d.localPosition, c.biggest),
                   onPanUpdate: (d) => _svAt(d.localPosition, c.biggest),
                   child: CustomPaint(painter: _SvPainter(_h, _s, _v), size: c.biggest),
@@ -1331,7 +1345,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
               children: [
                 const SizedBox(width: 24, child: Text('H')),
                 Expanded(
-                  child: Slider(min: 0, max: 360, value: _h, onChanged: (v) => setState(() => _h = v)),
+                  child: Slider(min: 0, max: 360, value: _h, onChanged: (v) => _change(() => _h = v)),
                 ),
               ],
             ),
@@ -1340,7 +1354,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                 children: [
                   const SizedBox(width: 24, child: Text('A')),
                   Expanded(
-                    child: Slider(min: 0, max: 1, value: _a, onChanged: (v) => setState(() => _a = v)),
+                    child: Slider(min: 0, max: 1, value: _a, onChanged: (v) => _change(() => _a = v)),
                   ),
                 ],
               ),
@@ -1365,7 +1379,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
                       final rgb = hexToLinearRgb(t);
                       if (rgb == null) return;
                       final (h, s, v) = rgbToHsv(linearToSrgb(rgb[0]), linearToSrgb(rgb[1]), linearToSrgb(rgb[2]));
-                      setState(() {
+                      _change(() {
                         _h = h;
                         _s = s;
                         _v = v;
@@ -1391,7 +1405,7 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
     );
   }
 
-  void _svAt(Offset p, Size size) => setState(() {
+  void _svAt(Offset p, Size size) => _change(() {
     _s = (p.dx / size.width).clamp(0.0, 1.0);
     _v = 1 - (p.dy / size.height).clamp(0.0, 1.0);
   });

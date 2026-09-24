@@ -1152,6 +1152,10 @@ class _FieldEditor extends StatelessWidget {
             mixed: mixed,
             enabled: _enabled,
             onCommit: (c) => _commit(_numbersLike(c, rgb)),
+            // The Scene view follows the picker; one transaction on OK.
+            onPreview: (c) => c == null
+                ? model.endPreview(slot)
+                : model.previewEach(slot, path, (_) => _numbersLike(c, rgb)),
           ),
         );
       case FieldKind.assetRef:

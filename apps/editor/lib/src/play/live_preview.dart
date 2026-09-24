@@ -83,6 +83,13 @@ final class LivePreview implements PreviewBackend {
     written?.call();
   }
 
+  /// The Inspector's live edit never previews here: in Play its edits
+  /// write the running game directly.
+  @override
+  int setComponents(Iterable<({String id, String type, Map<String, Object?> data})> components) => 0;
+  @override
+  void restoreComponents(Iterable<String> ids) {}
+
   static const _transform = 'fynkel.Transform';
 
   void _set(String id, Map<String, Object?> data) {

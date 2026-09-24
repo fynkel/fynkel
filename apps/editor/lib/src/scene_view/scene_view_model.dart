@@ -1480,6 +1480,26 @@ final class SceneViewModel extends ChangeNotifier {
     _repaint();
   }
 
+  /// The Inspector's live edit of another component (a colour being
+  /// picked): [data] (entity id → its component's whole data) shown in
+  /// [tab]'s world with no transaction; null puts [ids] back to the
+  /// document. Only a tab whose world is open follows.
+  void previewComponents(OpenDocument tab, String type, Map<String, Map<String, Object?>>? data, Iterable<String> ids) {
+    final t = _sceneTabs[tab];
+    if (t == null || !t.hasPreview || isLive) return;
+    try {
+      if (data == null) {
+        t.preview!.restoreComponents(ids);
+      } else {
+        t.preview!.setComponents([for (final e in data.entries) (id: e.key, type: type, data: e.value)]);
+      }
+    } on AuthoringException catch (e) {
+      notice = 'Preview: $e';
+    }
+    views?.changed(this, t.preview);
+    _repaint();
+  }
+
   /// Escape: the world back to the document, nothing written.
   void cancelDrag() {
     final d = drag;

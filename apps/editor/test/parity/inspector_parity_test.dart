@@ -198,4 +198,55 @@ void main() {
     await e.press(LogicalKeyboardKey.keyZ, command: true);
     expect(cards(), ['fynkel.Transform', 'fynkel.Collider', 'fynkel.RigidBody']);
   });
+
+  testWidgets('the colour picker lights the Scene view while picking; OK is one undo step, Cancel puts it back', (
+    tester,
+  ) async {
+    final e = await Editor.open(tester);
+    await e.click(e.row('Sun'));
+    final tab = e.shell.tabs!.focused!;
+    final sun = tab.selection.single;
+    final world = e.shell.scene!.current!.preview!;
+    List<double> colour() {
+      final entities = (world.dump()['entities'] as List).cast<Map<String, Object?>>();
+      final components = (entities.singleWhere((x) => x['id'] == sun)['components'] as List)
+          .cast<Map<String, Object?>>();
+      final light = components.singleWhere((c) => c['type'] == 'fynkel.DirectionalLight');
+      return [for (final v in (light['data'] as Map)['color'] as List) (v as num).toDouble()];
+    }
+
+    final before = colour();
+    Future<void> pickDarkRed() async {
+      await tester.ensureVisible(find.byKey(const ValueKey('color.swatch')));
+      await e.click(find.byKey(const ValueKey('color.swatch')));
+      final sv = find.byKey(const ValueKey('picker.sv'));
+      final g = await tester.startGesture(tester.getTopLeft(sv) + const Offset(4, 4));
+      await tester.pump();
+      await g.moveTo(tester.getBottomRight(sv) - const Offset(4, 60));
+      await tester.pump();
+      await g.up();
+      await tester.pump();
+    }
+
+    await pickDarkRed();
+    final during = colour();
+    expect(during, isNot(before), reason: 'the world follows the picker');
+    expect(tab.document.history, 0, reason: 'nothing written while picking');
+
+    // Cancel: the world back to the document, nothing written.
+    await e.click(find.text('Cancel'));
+    expect(colour(), before);
+    expect(tab.document.history, 0);
+
+    // OK: one transaction with what was shown.
+    await pickDarkRed();
+    await e.click(find.text('OK'));
+    expect(tab.document.history, 1, reason: 'one undo step');
+    final after = colour();
+    for (var i = 0; i < 3; i++) {
+      expect(after[i], closeTo(during[i], 1e-4));
+    }
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(colour(), before);
+  });
 }

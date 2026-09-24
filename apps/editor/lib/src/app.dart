@@ -2542,6 +2542,12 @@ class EditorShellState extends State<EditorShell> {
             sv.previewLocals(tab, locals, ids);
           }
         };
+        // So does a colour being picked.
+        ins.previewComponents = (tab, type, data, ids) {
+          for (final sv in _scenes.values) {
+            sv.previewComponents(tab, type, data, ids);
+          }
+        };
         // A preview depends on the asset only; any browser draws it.
         ins.assetPreview = (asset) => _browsers.values.first.preview(asset);
         final sel = EditorSelection(inspector: ins);

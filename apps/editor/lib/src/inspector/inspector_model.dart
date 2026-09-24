@@ -842,25 +842,44 @@ final class InspectorModel extends ChangeNotifier {
   /// the document. Set by the shell.
   void Function(OpenDocument tab, Map<String, Trs>? locals, Iterable<String> ids)? previewTransforms;
 
-  /// A Transform field's label drag, as Unity's: the Scene view follows
-  /// each instance with [path] set to `valueFor(i)`; nothing is written
-  /// until the release commits. Other components have no preview yet.
+  /// Shows [data] (entity id → the whole data of a [type] component) in
+  /// [tab]'s Scene view without a transaction; null puts the world back
+  /// to the document. Set by the shell.
+  void Function(OpenDocument tab, String type, Map<String, Map<String, Object?>>? data, Iterable<String> ids)?
+  previewComponents;
+
+  /// A live edit, as Unity's: a Transform field's label drag or a colour
+  /// being picked. The Scene view follows each instance with [path] set
+  /// to `valueFor(i)`; nothing is written until the release (or OK)
+  /// commits. A behaviour has nothing to show.
   void previewEach(ComponentSlot slot, String path, Object? Function(ComponentInstance i) valueFor) {
     final t = _tab;
-    final show = previewTransforms;
-    if (t == null || show == null || slot.type != 'fynkel.Transform') return;
+    if (t == null) return;
     final top = _topLevel(path);
-    show(t, {
-      for (final i in slot.instances)
-        i.entityId: Trs.fromData({...i.data, top: valueFor(i)}),
-    }, [for (final i in slot.instances) i.entityId]);
+    final ids = [for (final i in slot.instances) i.entityId];
+    if (slot.type == 'fynkel.Transform') {
+      previewTransforms?.call(t, {
+        for (final i in slot.instances)
+          i.entityId: Trs.fromData({...i.data, top: valueFor(i)}),
+      }, ids);
+    } else if (slot.type.startsWith('fynkel.')) {
+      previewComponents?.call(t, slot.type, {
+        for (final i in slot.instances)
+          i.entityId: {...i.data, top: _copyJson(valueFor(i))},
+      }, ids);
+    }
   }
 
   /// The drag ended: the world back to the document (the commit follows).
   void endPreview(ComponentSlot slot) {
     final t = _tab;
-    if (t == null || slot.type != 'fynkel.Transform') return;
-    previewTransforms?.call(t, null, [for (final i in slot.instances) i.entityId]);
+    if (t == null) return;
+    final ids = [for (final i in slot.instances) i.entityId];
+    if (slot.type == 'fynkel.Transform') {
+      previewTransforms?.call(t, null, ids);
+    } else if (slot.type.startsWith('fynkel.')) {
+      previewComponents?.call(t, slot.type, null, ids);
+    }
   }
 
   /// One field on every instance, each with its own value (one Euler axis

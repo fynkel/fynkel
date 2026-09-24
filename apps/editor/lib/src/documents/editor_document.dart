@@ -126,6 +126,8 @@ abstract class PreviewBackend {
   Map<String, List<double>> worldMatrices(Iterable<String> ids);
   void setTransforms(Iterable<PreviewTransform> transforms);
   void restoreTransforms(Iterable<String> ids);
+  int setComponents(Iterable<({String id, String type, Map<String, Object?> data})> components);
+  void restoreComponents(Iterable<String> ids);
   PreviewSyncReport resync();
   PreviewStats reload();
   /// [live]: unsaved documents cook as the editor holds them (Play).
@@ -173,6 +175,11 @@ final class SessionPreview implements PreviewBackend {
   void setTransforms(Iterable<PreviewTransform> transforms) => preview.setTransforms(transforms);
   @override
   void restoreTransforms(Iterable<String> ids) => preview.restoreTransforms(ids);
+  @override
+  int setComponents(Iterable<({String id, String type, Map<String, Object?> data})> components) =>
+      preview.setComponents(components);
+  @override
+  void restoreComponents(Iterable<String> ids) => preview.restoreComponents(ids);
   @override
   PreviewSyncReport resync() => preview.resync();
   @override
