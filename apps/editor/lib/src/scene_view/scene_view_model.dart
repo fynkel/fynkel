@@ -1521,6 +1521,24 @@ final class SceneViewModel extends ChangeNotifier {
     _repaint();
   }
 
+  /// The volume profile Inspector's live edit, as [previewMaterial].
+  void previewVolume(String volume, Map<String, Object?>? data) {
+    if (isLive) return;
+    final t = _sceneTabs.values.where((t) => t.hasPreview).firstOrNull;
+    if (t == null) return;
+    try {
+      if (data == null) {
+        t.preview!.restoreVolume(volume);
+      } else {
+        t.preview!.setVolume(volume, data);
+      }
+    } on AuthoringException catch (e) {
+      notice = 'Preview: $e';
+    }
+    views?.changed(this, null);
+    _repaint();
+  }
+
   /// Escape: the world back to the document, nothing written.
   void cancelDrag() {
     final d = drag;

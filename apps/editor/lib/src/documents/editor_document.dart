@@ -136,6 +136,13 @@ abstract class PreviewBackend {
 
   /// What this preview draws for [material] now, as its document fields.
   Map<String, Object?> material(String material);
+
+  /// The Inspector's live volume profile edit; see [ScenePreview.setVolume].
+  void setVolume(String volume, Map<String, Object?> data);
+  void restoreVolume(String volume);
+
+  /// What this preview blends for [volume] now, as its present fields.
+  Map<String, Object?> volume(String volume);
   PreviewSyncReport resync();
   PreviewStats reload();
   /// [live]: unsaved documents cook as the editor holds them (Play).
@@ -194,6 +201,12 @@ final class SessionPreview implements PreviewBackend {
   void restoreMaterial(String material) => preview.restoreMaterial(material);
   @override
   Map<String, Object?> material(String material) => preview.material(material);
+  @override
+  void setVolume(String volume, Map<String, Object?> data) => preview.setVolume(volume, data);
+  @override
+  void restoreVolume(String volume) => preview.restoreVolume(volume);
+  @override
+  Map<String, Object?> volume(String volume) => preview.volume(volume);
   @override
   PreviewSyncReport resync() => preview.resync();
   @override

@@ -28,8 +28,9 @@ import 'package:path/path.dart' as p;
 import '../env/tools.dart';
 import '../project/editor_project.dart';
 import '../project_browser/asset_preview.dart';
-import 'material_edits.dart';
+import 'asset_edits.dart';
 import 'material_inspector.dart';
+import 'volume_inspector.dart';
 import '../project_browser/project_browser_model.dart';
 import '../shell/editor_selection.dart';
 import '../shell/notices.dart';
@@ -277,7 +278,7 @@ class AssetPage extends StatefulWidget {
     required this.onOpenReference,
     this.selection,
     this.run = runProcess,
-    this.materials,
+    this.assetEdits,
   });
 
   final ProjectBrowserModel model;
@@ -285,7 +286,7 @@ class AssetPage extends StatefulWidget {
 
   /// Edits a `fynkel.pbr@1` material in place (its page's fields); the
   /// material's summary is read-only without it.
-  final MaterialEdits? materials;
+  final AssetEdits? assetEdits;
 
   /// A scene or prefab (or an imported prefab part, `id#prefab`) into a tab.
   final void Function(String id) onOpenDocument;
@@ -414,7 +415,8 @@ class _AssetPageState extends State<AssetPage> {
     }
     final draft = e.isSource ? _draftOf(e.id, d) : null;
     final pending = draft != null && (_dirty(d) || _jsonError != null);
-    final editsMaterial = widget.materials != null && d.material?['shader'] == pbrShader;
+    final editsMaterial = widget.assetEdits != null && d.material?['shader'] == pbrShader;
+    final editsVolume = widget.assetEdits != null && e.document == 'volume';
     return Material(
       type: MaterialType.transparency,
       child: Column(
@@ -438,7 +440,8 @@ class _AssetPageState extends State<AssetPage> {
                 ]),
                 _actions(context, e),
                 if (editsMaterial)
-                  MaterialInspector(key: Key('material.${e.id}'), edits: widget.materials!, browser: model, id: e.id),
+                  MaterialInspector(key: Key('material.${e.id}'), edits: widget.assetEdits!, browser: model, id: e.id),
+                if (editsVolume) VolumeInspector(key: Key('volume.${e.id}'), edits: widget.assetEdits!, id: e.id),
                 InspectorSection(
                   title: 'File',
                   children: [
@@ -455,7 +458,7 @@ class _AssetPageState extends State<AssetPage> {
                 if (draft != null) _importSettings(context, e, d, draft),
                 if (draft != null && _isModel(e)) _materials(context, e, d, draft),
                 if (e.isSource) _parts(context, e, d),
-                if (!editsMaterial) ...AssetDocumentSections.of(context, e, d),
+                if (!editsMaterial && !editsVolume) ...AssetDocumentSections.of(context, e, d),
                 _UsedBy(dependents: d.dependents, onOpenReference: widget.onOpenReference),
               ],
             ),

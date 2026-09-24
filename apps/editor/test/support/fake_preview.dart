@@ -430,6 +430,27 @@ final class FakePreviewBackend implements PreviewBackend {
     return materialOverrides[material] ?? const {};
   }
 
+  /// What `setVolume` holds: profile id → its fields.
+  final volumeOverrides = <String, Map<String, Object?>>{};
+
+  @override
+  void setVolume(String volume, Map<String, Object?> data) {
+    _check('setVolume');
+    volumeOverrides[volume] = data;
+  }
+
+  @override
+  void restoreVolume(String volume) {
+    _check('restoreVolume');
+    volumeOverrides.remove(volume);
+  }
+
+  @override
+  Map<String, Object?> volume(String volume) {
+    _check('volume');
+    return volumeOverrides[volume] ?? const {};
+  }
+
   @override
   PreviewSyncReport resync() {
     _check('resync');

@@ -2,7 +2,7 @@
 // place as in Unity's material Inspector: the surface (rendering mode,
 // cutoff, double-sided), the maps with their factors, and the emission
 // as an HDR colour (a colour and an intensity). Every change is one undo
-// step, saved at once ([MaterialEdits]); a colour being picked or a label
+// step, saved at once ([AssetEdits]); a colour being picked or a label
 // being dragged shows in the Scene view before anything is written.
 import 'package:flutter/material.dart';
 
@@ -12,7 +12,7 @@ import '../project_browser/project_browser_model.dart';
 import '../theme/tokens.dart';
 import 'field_widgets.dart';
 import 'inspector_chrome.dart';
-import 'material_edits.dart';
+import 'asset_edits.dart';
 
 /// Unity's names for the three alpha modes.
 const _renderingModes = {'opaque': 'Opaque', 'mask': 'Cutout', 'blend': 'Transparent'};
@@ -20,7 +20,7 @@ const _renderingModes = {'opaque': 'Opaque', 'mask': 'Cutout', 'blend': 'Transpa
 class MaterialInspector extends StatefulWidget {
   const MaterialInspector({super.key, required this.edits, required this.browser, required this.id});
 
-  final MaterialEdits edits;
+  final AssetEdits edits;
   final ProjectBrowserModel browser;
   final String id;
 
@@ -29,7 +29,7 @@ class MaterialInspector extends StatefulWidget {
 }
 
 class _MaterialInspectorState extends State<MaterialInspector> {
-  MaterialEdits get edits => widget.edits;
+  AssetEdits get edits => widget.edits;
   String get id => widget.id;
 
   @override

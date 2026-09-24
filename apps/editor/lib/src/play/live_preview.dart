@@ -98,6 +98,12 @@ final class LivePreview implements PreviewBackend {
   void restoreMaterial(String material) {}
   @override
   Map<String, Object?> material(String material) => throw _refused('material');
+  @override
+  void setVolume(String volume, Map<String, Object?> data) {}
+  @override
+  void restoreVolume(String volume) {}
+  @override
+  Map<String, Object?> volume(String volume) => throw _refused('volume');
 
   static const _transform = 'fynkel.Transform';
 
