@@ -42,7 +42,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 pub use log::LOG_FILE;
-pub use ops::{AssetHistory, AssetOp, Done, OPERATIONS, TRASH_DIR};
+pub use ops::{AssetHistory, AssetOp, Done, OPERATIONS, PRIMITIVES_ID, TRASH_DIR};
 pub use preview::{Hit, Line, Preview, Ray, SyncReport, View};
 pub use project::{OpenProject, Reference, METADATA_FILE};
 

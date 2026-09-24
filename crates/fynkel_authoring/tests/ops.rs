@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use fynkel_authoring::{AuthoringSession, OPERATIONS, TRASH_DIR};
+use fynkel_authoring::{AuthoringSession, OPERATIONS, PRIMITIVES_ID, TRASH_DIR};
 use fynkel_document::{Diagnostic, Document, DocumentKind};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -991,5 +991,86 @@ fn a_duplicate_is_a_fresh_asset_beside_its_original_and_undo_removes_it() {
     }
     assert!(!coin1.exists());
     assert_eq!(s.project().unwrap().assets.len(), before);
+    assert_clean(&s);
+}
+
+#[test]
+fn install_primitives_writes_the_built_in_shapes_once_under_their_fixed_id() {
+    let copy = Copy::new("primitives");
+    let mut s = open(&copy);
+    let before = s.project().unwrap().assets.len();
+    let glb = copy.path("assets/Fynkel/Primitives.glb");
+
+    let v = ok(s.operate("installPrimitives", &json!({})));
+    assert_eq!(v["installed"], true, "{v}");
+    assert_eq!(v["label"], "Install Primitives");
+    assert!(glb.is_file());
+    assert!(copy
+        .path("assets/Fynkel/Primitives.glb.meta.json")
+        .is_file());
+    let entry = s
+        .project()
+        .unwrap()
+        .assets
+        .get(PRIMITIVES_ID)
+        .unwrap()
+        .clone();
+    assert_eq!(entry.path, "Fynkel/Primitives.glb");
+    // Every sub-asset id derives from the fixed id, so the editor can
+    // name `mesh/Cube` without asking.
+    for key in [
+        "mesh/Cube",
+        "mesh/Sphere",
+        "mesh/Capsule",
+        "mesh/Cylinder",
+        "mesh/Plane",
+        "mesh/Quad",
+        "material/Default",
+    ] {
+        assert_eq!(
+            entry.sub_assets.get(key),
+            Some(&Uuid::new_v5(&PRIMITIVES_ID, key.as_bytes())),
+            "{key}"
+        );
+    }
+    assert_eq!(s.project().unwrap().assets.len(), before + 1);
+    // It imports: six meshes on the one material.
+    let v = ok(s.operate("reimport", &json!({ "asset": PRIMITIVES_ID.to_string() })));
+    assert_eq!(
+        v["summary"]["meshes"].as_array().map(Vec::len),
+        Some(6),
+        "{v}"
+    );
+    assert_clean(&s);
+
+    // Again: found, nothing written, nothing on the history.
+    let undo_label = v["undoLabel"].clone();
+    let v = ok(s.operate("installPrimitives", &json!({})));
+    assert_eq!(v["installed"], false);
+    assert_eq!(v["undoLabel"], undo_label);
+
+    // Moved elsewhere, it is still found by id.
+    ok(s.operate(
+        "renameAsset",
+        &json!({ "asset": PRIMITIVES_ID.to_string(), "path": "models/Shapes.glb" }),
+    ));
+    let v = ok(s.operate("installPrimitives", &json!({})));
+    assert_eq!(v["installed"], false);
+    assert!(
+        v["path"].as_str().unwrap().ends_with("models/Shapes.glb"),
+        "{v}"
+    );
+    assert!(!glb.exists());
+    ok(s.operate("undoAsset", &json!({})));
+    assert!(glb.is_file());
+
+    // Undo removes what it wrote; installing again puts it back.
+    ok(s.operate("undoAsset", &json!({})));
+    assert!(!glb.exists());
+    assert!(!copy.path("assets/Fynkel/Primitives.glb.meta.json").exists());
+    assert!(s.project().unwrap().assets.get(PRIMITIVES_ID).is_none());
+    assert_eq!(s.project().unwrap().assets.len(), before);
+    let v = ok(s.operate("installPrimitives", &json!({})));
+    assert_eq!(v["installed"], true);
     assert_clean(&s);
 }

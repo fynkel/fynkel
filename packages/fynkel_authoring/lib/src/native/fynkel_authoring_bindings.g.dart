@@ -359,6 +359,9 @@ FynkelStatus fynkel_authoring_query(
 /// duplicateAsset     asset, path?                a copy beside it (`coin 1`, …) under
 /// a fresh id — a source with a sidecar
 /// of its own and fresh sub-asset ids
+/// installPrimitives  —                           the built-in shapes (ADR-0023): the
+/// existing asset of the fixed id, or
+/// `Fynkel/Primitives.glb` written
 /// deleteAsset        asset, force?               refused with every referencing field
 /// in `related` while a document names
 /// the asset (or a sub-asset) unless
