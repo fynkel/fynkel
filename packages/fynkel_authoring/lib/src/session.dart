@@ -277,8 +277,9 @@ final class AuthoringSession implements Finalizable {
     return r;
   }
 
-  /// A new scene, prefab, material or volume document written as the kind's
-  /// `Document::new`. [path] is relative to the asset root (or absolute
+  /// A new scene, prefab, material, volume or physics material document
+  /// ([kind] `scene`, `prefab`, `material`, `volume` or `physics_material`)
+  /// written as the kind's `Document::new`. [path] is relative to the asset root (or absolute
   /// inside it); the kind's suffix is added when missing. [name] defaults
   /// to the file's stem; a material may name a [shader] the project has.
   ///

@@ -358,6 +358,7 @@ void main() {
       size: const Vec3(0.5, 1.0, 0.25),
       mesh: const AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330', sub: 'mesh/0'),
       offset: const Vec3(0, 0.5, 0),
+      material: const AssetRef('70d7ba8b-f7fb-4eba-920d-ec9e6b968330'),
       friction: 0.6,
       restitution: 0.1,
       isSensor: true,
