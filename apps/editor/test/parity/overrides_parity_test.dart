@@ -29,12 +29,11 @@ void main() {
     await e.click(e.row('Crate A'));
     List<Object?> overrides() => tab.expansionOf(crateA)!.overrides;
     // The prefab's root on disk, by component id. Apply writes into the
-    // prefab's tab, opened behind the scene's and unsaved; it is saved here.
+    // prefab's tab, opened behind the scene's, and Auto Save saves it.
     Map<String, dynamic> prefabRoot() {
       final prefab = e.shell.tabs!.byId('c0000000-0000-4000-8000-000000000040')!;
       expect(e.shell.tabs!.focused, same(tab));
-      expect(prefab.dirty, isTrue);
-      expect(prefab.save(), isTrue);
+      expect(prefab.dirty, isFalse, reason: 'Auto Save');
       final json = jsonDecode(File('${e.dir.path}/assets/prefabs/crate.prefab.json').readAsStringSync()) as Map;
       return (json['entities'] as Map)[json['root']]['components'] as Map<String, dynamic>;
     }

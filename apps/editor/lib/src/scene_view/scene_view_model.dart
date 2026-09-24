@@ -296,6 +296,81 @@ final class SceneViewModel extends ChangeNotifier {
   /// dialog, the tests' a path.
   final Future<String?> Function(String suggestedName)? chooseSavePath;
 
+  // ── Prefab mode (Unity's breadcrumbs, Auto Save, Context) ───────────
+
+  /// Closing and saving a tab through the shell, with its prompts; null
+  /// (tests without a shell) closes only what is saved.
+  Future<bool> Function(OpenDocument tab)? closeTab;
+  Future<bool> Function(OpenDocument tab)? saveTab;
+
+  /// The focused prefab's breadcrumbs — the scene (and prefabs) it was
+  /// opened from, then itself; empty when a prefab is not focused.
+  List<OpenDocument> get breadcrumbs {
+    final t = current?.tab;
+    if (t == null || t.kind != 'prefab' || !identical(t, tabs.focused) || tabs.live != null) return const [];
+    return tabs.trail(t);
+  }
+
+  /// The prefab's instance in the tab it was opened from, when the scene
+  /// around it is drawn (in context, Context not Hidden).
+  PrefabContext? get drawnContext {
+    final t = current?.tab;
+    if (t == null || breadcrumbs.isEmpty || editorState.prefabContext == PrefabContextMode.hidden) return null;
+    final c = tabs.contextOf(t);
+    return c != null && tabs.open.contains(c.tab) ? c : null;
+  }
+
+  /// Breadcrumb [i] clicked (0 the outermost; the one before the last is
+  /// Unity's ‹ back): the prefabs after it are closed — each asked about
+  /// when unsaved, a Cancel stopping there — and it is focused.
+  Future<bool> goToBreadcrumb(int i) async {
+    final trail = breadcrumbs;
+    if (i < 0 || i >= trail.length - 1) return false;
+    for (final tab in trail.sublist(i + 1).reversed) {
+      if (!tabs.open.contains(tab)) continue;
+      final close = closeTab;
+      if (close != null) {
+        if (!await close(tab)) return false;
+      } else if (tab.dirty) {
+        return false;
+      } else {
+        tabs.closeDiscarding(tab);
+      }
+    }
+    if (tabs.open.contains(trail[i])) tabs.focus(trail[i]);
+    return true;
+  }
+
+  /// Unity's ‹: back to where the prefab was opened from, or (opened
+  /// from the Project) the prefab's tab closed.
+  Future<bool> exitPrefabMode() async {
+    final trail = breadcrumbs;
+    if (trail.length > 1) return goToBreadcrumb(trail.length - 2);
+    if (trail.isEmpty) return false;
+    final close = closeTab;
+    if (close != null) return close(trail.single);
+    if (trail.single.dirty) return false;
+    tabs.closeDiscarding(trail.single);
+    return true;
+  }
+
+  /// Unity's Auto Save toggle; on, a prefab with unsaved changes is saved
+  /// at once.
+  void setPrefabAutoSave(bool on) {
+    editorState.prefabAutoSave = on;
+    editorState.changed();
+    tabs.autoSavePrefabs = on;
+  }
+
+  void setPrefabContext(PrefabContextMode mode) {
+    if (editorState.prefabContext == mode) return;
+    editorState.prefabContext = mode;
+    editorState.changed();
+    _contextChanged();
+  }
+
+  void _contextChanged() => _repaint();
+
   final focusNode = FocusNode(debugLabel: 'scene.view');
 
   final _sceneTabs = <OpenDocument, SceneTab>{};

@@ -11,7 +11,7 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../commands/commands.dart';
 import '../l10n/strings.dart';
-import '../inspector/field_widgets.dart' show AssetDragPayload;
+import '../inspector/field_widgets.dart' show AssetDragPayload, assetKindIcon;
 import '../play/play_document.dart' show PlayDocument;
 import '../theme/cascading_menu.dart';
 import '../theme/icons.dart';
@@ -171,6 +171,35 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     return Column(
       children: [
         _toolbar(context, theme),
+        // Prefab mode (Unity's): the prefab's name under a ‹ back.
+        if (tab.kind == 'prefab' && !identical(tab, model.tabs.live))
+          Container(
+            key: const Key('hierarchy.prefabHeader'),
+            color: t.header,
+            height: t.row + 2,
+            padding: EdgeInsets.only(right: t.pad),
+            child: Row(
+              children: [
+                IconButton(
+                  key: const Key('hierarchy.prefab.back'),
+                  tooltip: 'Back from Prefab Mode',
+                  iconSize: 14,
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(FIcons.chevronLeft),
+                  onPressed: () => widget.commands?.execute('prefab.back'),
+                ),
+                Icon(assetKindIcon('prefab'), size: 13, color: t.textSecondary),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    tab.title,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(color: t.text, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (model.locked)
           Container(
             key: const Key('hierarchy.lockedTo'),
@@ -550,6 +579,13 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       onToggle: () => model.toggle(n.id, recursive: HardwareKeyboard.instance.isAltPressed),
       onRenameSubmit: (v) => model.rename(n.id, v),
       onRenameCancel: model.cancelRename,
+      // Unity's › at an instance's row end: Prefab Mode in Context.
+      onOpenPrefab: n.isPrefabInstance && model.tab?.expansionOf(n.id) != null
+          ? () {
+              model.select(n.id);
+              widget.commands?.execute('prefab.open');
+            }
+          : null,
     );
   }
 
@@ -776,6 +812,7 @@ class _HierarchyRowWidget extends StatefulWidget {
     required this.onToggle,
     required this.onRenameSubmit,
     required this.onRenameCancel,
+    this.onOpenPrefab,
   });
 
   final HierarchyModel model;
@@ -793,6 +830,9 @@ class _HierarchyRowWidget extends StatefulWidget {
   final VoidCallback onToggle;
   final void Function(String) onRenameSubmit;
   final VoidCallback onRenameCancel;
+
+  /// A prefab instance's ›: its prefab opened in context.
+  final VoidCallback? onOpenPrefab;
 
   @override
   State<_HierarchyRowWidget> createState() => _HierarchyRowWidgetState();
@@ -994,6 +1034,19 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                         style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onTertiaryContainer),
                       ),
                   ],
+                ),
+              ),
+            ),
+          if (widget.onOpenPrefab != null)
+            Tooltip(
+              message: 'Open the prefab in context',
+              waitDuration: const Duration(milliseconds: 600),
+              child: InkWell(
+                key: Key('hierarchy.openPrefab.${n.id}'),
+                onTap: widget.onOpenPrefab,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(FIcons.chevronRight, size: 14, color: t.textSecondary),
                 ),
               ),
             ),

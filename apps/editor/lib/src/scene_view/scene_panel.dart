@@ -12,7 +12,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
-import '../inspector/field_widgets.dart' show AssetDragPayload;
+import '../documents/open_document.dart';
+import '../inspector/field_widgets.dart' show AssetDragPayload, assetKindIcon;
 import '../theme/icons.dart';
 import '../theme/panel_focus.dart';
 import 'editor_state.dart';
@@ -92,8 +93,10 @@ class _ScenePanelState extends State<ScenePanel> {
         ],
       );
     }
+    final crumbs = model.breadcrumbs;
     return Column(
       children: [
+        if (crumbs.isNotEmpty) _prefabBar(context, theme, crumbs),
         Expanded(
           child: Stack(
             children: [
@@ -181,6 +184,156 @@ class _ScenePanelState extends State<ScenePanel> {
       ),
     ),
   );
+
+  // ── Prefab mode ─────────────────────────────────────────────────────
+
+  /// Unity's Prefab mode bar over the picture: ‹ and the breadcrumbs (the
+  /// scene the prefab was opened from, then the prefab), and at the right
+  /// the Context menu (in context), Save (without Auto Save) and Auto Save.
+  Widget _prefabBar(BuildContext context, ThemeData theme, List<OpenDocument> crumbs) {
+    final t = context.tokens;
+    final prefab = crumbs.last;
+    final inContext = crumbs.length > 1;
+    final es = model.editorState;
+    final small = theme.textTheme.bodySmall;
+    Widget crumb(int i) {
+      final tab = crumbs[i];
+      final last = i == crumbs.length - 1;
+      final label = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(assetKindIcon(tab.kind), size: 13, color: last ? t.text : t.textSecondary),
+          const SizedBox(width: 4),
+          Text(
+            tab.title,
+            style: small?.copyWith(color: last ? t.text : t.textSecondary, fontWeight: last ? FontWeight.w600 : null),
+          ),
+        ],
+      );
+      return last
+          ? KeyedSubtree(key: Key('scene.crumb.$i'), child: label)
+          : InkWell(
+              key: Key('scene.crumb.$i'),
+              onTap: () => model.goToBreadcrumb(i),
+              borderRadius: t.cornerControl,
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2), child: label),
+            );
+    }
+
+    return Container(
+      key: const Key('scene.prefabBar'),
+      height: t.row + 4,
+      padding: EdgeInsets.symmetric(horizontal: t.gap),
+      decoration: BoxDecoration(
+        color: t.header,
+        border: Border(bottom: t.hairline),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            key: const Key('scene.prefab.back'),
+            tooltip: inContext ? 'Back to ${crumbs[crumbs.length - 2].title}' : 'Close the prefab',
+            iconSize: 14,
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(FIcons.chevronLeft),
+            onPressed: model.exitPrefabMode,
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(
+                children: [
+                  for (var i = 0; i < crumbs.length; i++) ...[
+                    if (i > 0) Icon(FIcons.chevronRight, size: 12, color: t.textDisabled),
+                    crumb(i),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (inContext) ...[
+            Text('Context:', style: small?.copyWith(color: t.textSecondary)),
+            const SizedBox(width: 4),
+            PopupMenuButton<PrefabContextMode>(
+              key: const Key('scene.prefab.context'),
+              tooltip: 'How the scene around the prefab is drawn',
+              initialValue: es.prefabContext,
+              onSelected: model.setPrefabContext,
+              itemBuilder: (_) => [
+                for (final m in PrefabContextMode.values)
+                  PopupMenuItem(
+                    key: Key('scene.prefab.context.${m.name}'),
+                    value: m,
+                    height: t.row + 6,
+                    child: Text(_contextLabel(m)),
+                  ),
+              ],
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_contextLabel(es.prefabContext), style: small),
+                    Icon(FIcons.arrowDropDown, size: 14, color: t.textSecondary),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+          if (model.tabs.autoSaveError case final error?) ...[
+            Tooltip(
+              message: 'Not saved automatically: $error',
+              child: Icon(FIcons.errorOutline, key: const Key('scene.prefab.autoSaveError'), size: 14, color: t.error),
+            ),
+            const SizedBox(width: 6),
+          ],
+          if (!es.prefabAutoSave) ...[
+            TextButton(
+              key: const Key('scene.prefab.save'),
+              onPressed: prefab.dirty && prefab.document.readOnly == null
+                  ? () => model.saveTab?.call(prefab) ?? prefab.save()
+                  : null,
+              child: const Text('Save'),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Tooltip(
+            message: prefab.document.readOnly != null
+                ? 'Read-only: ${prefab.document.readOnly}'
+                : 'Save each change to the prefab as it is made',
+            child: InkWell(
+              key: const Key('scene.prefab.autoSave'),
+              onTap: () => model.setPrefabAutoSave(!es.prefabAutoSave),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox.square(
+                    dimension: 18,
+                    child: Checkbox(
+                      value: es.prefabAutoSave,
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onChanged: (v) => model.setPrefabAutoSave(v ?? true),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text('Auto Save', style: small),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _contextLabel(PrefabContextMode m) => switch (m) {
+    PrefabContextMode.normal => 'Normal',
+    PrefabContextMode.gray => 'Gray',
+    PrefabContextMode.hidden => 'Hidden',
+  };
 
   // ── Toolbar ─────────────────────────────────────────────────────────
 

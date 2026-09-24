@@ -94,6 +94,10 @@ enum GizmoSpace { local, world }
 /// selection's bounds, children included, the group turning about it.
 enum PivotMode { pivot, center }
 
+/// How the scene around a prefab opened in context is drawn (Unity's
+/// Prefab Mode "Context:" menu): as it is, greyed, or not at all.
+enum PrefabContextMode { normal, gray, hidden }
+
 /// The Scene view's snapping: on/off and the steps (metres, degrees, a
 /// scale factor step).
 final class SnapSettings {
@@ -139,6 +143,8 @@ final class EditorState extends ChangeNotifier {
       showOverlays = json['overlays'] != false,
       showStats = json['stats'] == true,
       playGizmos = json['playGizmos'] == true,
+      prefabAutoSave = json['prefabAutoSave'] != false,
+      prefabContext = PrefabContextMode.values.asNameMap()[json['prefabContext']] ?? PrefabContextMode.gray,
       _scenes = {
         if (json['scenes'] is Map)
           for (final e in (json['scenes'] as Map).entries)
@@ -207,6 +213,11 @@ final class EditorState extends ChangeNotifier {
 
   /// Play runs the game with its `Gizmos` drawn (item 9h).
   bool playGizmos;
+
+  /// Prefab mode saves each change as it is made (Unity's Auto Save, on
+  /// by default).
+  bool prefabAutoSave;
+  PrefabContextMode prefabContext;
 
   /// The state of a document, created on first use.
   SceneEditorState scene(String documentId) => _scenes.putIfAbsent(documentId, SceneEditorState.new);
@@ -307,6 +318,8 @@ final class EditorState extends ChangeNotifier {
     'overlays': showOverlays,
     'stats': showStats,
     if (playGizmos) 'playGizmos': true,
+    if (!prefabAutoSave) 'prefabAutoSave': false,
+    if (prefabContext != PrefabContextMode.gray) 'prefabContext': prefabContext.name,
     'scenes': {for (final e in _scenes.entries) e.key: e.value.toJson()},
     if (_panels.isNotEmpty) 'panels': _panels,
     if (openTabs.isNotEmpty) 'session': _sessionJson(),

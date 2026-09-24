@@ -145,6 +145,10 @@ abstract final class EditorStrings {
       label: 'Apply to Prefab',
       description: 'The selected instance\'s overrides become the prefab\'s values, then are reverted here',
     ),
+    'prefab.back': (
+      label: 'Back from Prefab Mode',
+      description: 'Closes the prefab\'s tab (asking about unsaved changes) and goes back to where it was opened from',
+    ),
     'prefab.open': (
       label: 'Open Prefab',
       description: 'The selected instance\'s prefab in its own tab (an imported hierarchy read-only)',

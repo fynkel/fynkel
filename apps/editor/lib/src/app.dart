@@ -1054,6 +1054,18 @@ class EditorShellState extends State<EditorShell> {
         },
       ),
       EditorCommand(
+        id: 'prefab.back',
+        menu: EditorMenu.edit,
+        group: 4,
+        order: 5,
+        enabled: () => tabs?.focused?.kind == 'prefab' && tabs?.live == null,
+        // The tab closes back to the one it was opened from (in context).
+        run: () {
+          final f = tabs?.focused;
+          if (f != null) closeTab(f);
+        },
+      ),
+      EditorCommand(
         id: 'prefab.selectAsset',
         menu: EditorMenu.edit,
         shortcut: k(LogicalKeyboardKey.keyL, shift: true, alt: true),
@@ -1852,6 +1864,7 @@ class EditorShellState extends State<EditorShell> {
         start: widget.startCodegen,
       );
       final es = EditorState.load(opened.dir);
+      t.autoSavePrefabs = es.prefabAutoSave;
       ps.gizmos = es.playGizmos;
       opened.addListener(_onProjectChanged);
       c.addListener(registry.refresh);
@@ -2702,6 +2715,8 @@ class EditorShellState extends State<EditorShell> {
           views: _sceneViews,
           zoomToPointer: () => widget.prefs.zoomToPointer,
         );
+        sv.closeTab = closeTab;
+        sv.saveTab = saveTab;
         sv.addListener(registry.refresh);
         _scenes[id] = sv;
     }

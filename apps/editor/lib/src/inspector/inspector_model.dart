@@ -1145,11 +1145,13 @@ final class InspectorModel extends ChangeNotifier {
   }
 
   /// Open prefab: the instance's prefab document (an imported hierarchy
-  /// read-only) in its own tab, focused.
+  /// read-only) in its own tab, focused, in the context of the instance
+  /// (Unity's Prefab Mode in Context).
   bool openPrefab(String entityId) {
-    final x = _tab?.expansionOf(entityId);
-    if (x == null) return false;
-    final tab = tabs.openDocument(x.open);
+    final from = _tab;
+    final x = from?.expansionOf(entityId);
+    if (from == null || x == null) return false;
+    final tab = tabs.openDocument(x.open, context: PrefabContext(from, x.anchor));
     if (tab == null) {
       lastError = tabs.openError;
       notifyListeners();

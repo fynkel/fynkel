@@ -3,7 +3,10 @@
 // Hierarchy shows and what ⌘S, ⌘Z and ⇧⌘Z act on. The tabs listen to the
 // project's file watcher and hand each changed path to its tab. A prefab
 // tab's content change is passed to every other tab (Prefab mode: the
-// instances of that prefab show its unsaved edits live).
+// instances of that prefab show its unsaved edits live). A prefab opened
+// from an instance remembers where (Unity's Prefab Mode in Context: the
+// breadcrumbs, the scene drawn around it), and with Auto Save each change
+// to a prefab is saved as it is made.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -53,8 +56,11 @@ final class DocumentTabs extends ChangeNotifier {
 
   /// Opens (or focuses, unless [focus] is false) a document by path or
   /// asset id — `<id>#prefab` for an imported hierarchy, read-only; null
-  /// with [openError] set when the session refuses it.
-  OpenDocument? openDocument(String pathOrId, {bool focus = true}) {
+  /// with [openError] set when the session refuses it. A prefab focused
+  /// with [context] is in Prefab Mode in Context; focused without one, in
+  /// isolation (Unity's, from the Project). Opened in the background it
+  /// keeps whichever it had.
+  OpenDocument? openDocument(String pathOrId, {bool focus = true, PrefabContext? context}) {
     final EditorDocument doc;
     try {
       doc = project.openDocument(pathOrId);
@@ -72,8 +78,72 @@ final class DocumentTabs extends ChangeNotifier {
       open.add(tab);
       if (!focus) notifyListeners();
     }
+    if (focus && tab.kind == 'prefab') {
+      // Not in a context of its own making (a prefab inside itself).
+      final c = context != null && open.contains(context.tab) && !trail(context.tab).contains(tab) ? context : null;
+      if (c == null) {
+        _contexts.remove(tab);
+      } else {
+        _contexts[tab] = c;
+      }
+    }
     if (focus) this.focus(tab);
     return tab;
+  }
+
+  // ── Prefab mode ─────────────────────────────────────────────────────
+
+  final _contexts = <OpenDocument, PrefabContext>{};
+
+  /// Where the prefab [tab] was opened from, when it was from an instance.
+  PrefabContext? contextOf(OpenDocument tab) => _contexts[tab];
+
+  /// The breadcrumbs of [tab]: the tabs it was opened from, outermost
+  /// first, then itself (a scene, the prefab opened from an instance in it,
+  /// a prefab opened from one inside that…).
+  List<OpenDocument> trail(OpenDocument tab) {
+    final out = [tab];
+    for (var c = _contexts[tab]; c != null && !out.contains(c.tab); c = _contexts[c.tab]) {
+      out.insert(0, c.tab);
+    }
+    return out;
+  }
+
+  /// Unity's Auto Save in Prefab Mode: a prefab tab is saved after each
+  /// change (a transaction, an undo, a redo, an Apply from an instance).
+  /// The shell sets it from the editor state (on unless turned off).
+  bool get autoSavePrefabs => _autoSave;
+  bool _autoSave = false;
+  set autoSavePrefabs(bool on) {
+    if (on == _autoSave) return;
+    _autoSave = on;
+    if (on) {
+      for (final t in open) {
+        _autoSaveSoon(t);
+      }
+    }
+    notifyListeners();
+  }
+
+  /// Why the last automatic save did not happen (a conflict on disk).
+  String? autoSaveError;
+
+  final _saving = <OpenDocument>{};
+
+  void _autoSaveSoon(OpenDocument tab) {
+    if (!_autoSave || tab.kind != 'prefab' || !tab.dirty || tab.document.readOnly != null) return;
+    // After the change has reached every listener: saving is a change too.
+    if (!_saving.add(tab)) return;
+    scheduleMicrotask(() {
+      _saving.remove(tab);
+      if (!open.contains(tab) || !_autoSave || !tab.dirty) return;
+      final ok = tab.save();
+      final error = ok ? null : tab.lastError;
+      if (error != autoSaveError) {
+        autoSaveError = error;
+        notifyListeners();
+      }
+    });
   }
 
   /// The open tab of the document with [id], if any.
@@ -110,9 +180,15 @@ final class DocumentTabs extends ChangeNotifier {
     if (i < 0) return;
     open.removeAt(i);
     _lastPrefabEdit.remove(tab);
+    // Its prefab mode ends (back where it was opened from); prefabs opened
+    // from it are in isolation now.
+    final back = _contexts.remove(tab)?.tab;
+    _contexts.removeWhere((_, c) => identical(c.tab, tab));
     tab.close();
     tab.dispose();
-    if (_focused == tab) _focused = open.isEmpty ? null : open[i.clamp(0, open.length - 1)];
+    if (_focused == tab) {
+      _focused = back != null && open.contains(back) ? back : (open.isEmpty ? null : open[i.clamp(0, open.length - 1)]);
+    }
     // A closed prefab tab's unsaved edits are gone from the instances too.
     if (tab.kind == 'prefab') _prefabChanged(tab);
     notifyListeners();
@@ -134,6 +210,7 @@ final class DocumentTabs extends ChangeNotifier {
         _prefabChanged(tab);
       }
     }
+    _autoSaveSoon(tab);
     notifyListeners();
   }
 
@@ -182,4 +259,15 @@ final class DocumentTabs extends ChangeNotifier {
     _live = null;
     super.dispose();
   }
+}
+
+/// Where a prefab tab was opened from: the tab (a scene, or a prefab in
+/// Prefab mode) and the instance in it (Unity's Prefab Mode in Context).
+final class PrefabContext {
+  const PrefabContext(this.tab, this.instance);
+
+  final OpenDocument tab;
+
+  /// The instance's root entity id in [tab].
+  final String instance;
 }
