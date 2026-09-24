@@ -76,11 +76,13 @@ the world's context current. Every zone event also reaches the next
 ## Runtime prefabs
 
 `World.instantiate(prefab, transform:, parent:, name:)`
-([hosts.md](hosts.md) § Prefabs at runtime) spawns a cooked prefab now,
-under an anchor — an authored one by its id, or an imported model's own
+([hosts.md](hosts.md) § Prefabs at runtime) spawns a cooked prefab now
+and returns its **root** (ADR-0022: the instance is the root, no extra
+entity) — an authored one by its id, or an imported model's own
 hierarchy by `AssetRef(source, sub: World.importedPrefabSub)` (M3-19a). The spawn belongs to **no scene**: an unload of the scene
 it was spawned in leaves it; a replace load destroys it with everything
-else. Destroy it yourself (`anchor.destroy()`) when it is collected.
+else. Destroy it yourself (`root.destroy()`, the whole instance) when it is
+collected.
 
 ## Settings
 

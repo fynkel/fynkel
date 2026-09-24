@@ -163,8 +163,9 @@ with `sub` omitted for the asset itself — never a path. Built-in authored
 components today: `fynkel.Transform`, `fynkel.MeshRenderer`, `fynkel.Camera`,
 `fynkel.DirectionalLight`, `fynkel.PointLight`, `fynkel.SpotLight`,
 `fynkel.Environment` (`fixtures/valid/training_room.scene.json` uses all of
-them). Scenes and prefabs are **formatVersion 4** since ADR-0020 (tags
-and layers): every object may carry `fynkel.Layer { layer }` (the index
+them). Scenes and prefabs are **formatVersion 5** since ADR-0022 (a
+prefab has one `root` and an instance *is* that root, § Prefab
+documents). FormatVersion 4 (ADR-0020, tags and layers): every object may carry `fynkel.Layer { layer }` (the index
 of one of the project's `layers`; absent is 0, `default`) and
 `fynkel.Tags { bits }` (bit `i` is the project's `tags[i]`; absent is no
 tag) — optional authored components like any other, always allowed by a
@@ -319,14 +320,21 @@ headlessly, from the cache alone.
 ## Prefab documents
 
 `.prefab.json` (`schemas/prefab.schema.json`, generated from the same
-document model as the scene schema) is a scene body plus `roots[]`: the
-parentless entities, in order — validation checks both directions
-(`FYN-D0400`). A scene entity becomes an **instance anchor** by carrying
-`prefab: { asset, instance, overrides[] }`: `asset` is the prefab document's
-`id` as an `AssetRef` — or, since M3-19a, an imported model's node
-hierarchy as `{ asset: <source>, sub: "prefab" }` (below) — `instance` a
-UUID v4 that is stable for the anchor's lifetime, `overrides` an ordered
-op list addressed by **prefab-local** ids:
+document model as the scene schema) is a scene body plus **`root`**: the
+id of its one parentless entity, which every other entity descends from
+(ADR-0022; a missing root, a second parentless entity or an entity not
+under the root is `FYN-D0400`). A scene entity becomes a **prefab
+instance** by carrying `prefab: { asset, instance, overrides[] }`, and the
+instance **is the prefab's root**, as in Unity: it keeps its own id,
+`name` and `active` (they win over the root's), and it has **no components
+of its own** (`FYN-D0408`) — its components are the root's, and a change
+to them is an override like any other. Placing an instance is a
+`setField` on the root Transform's `position` (and `rotation`/`scale`
+when they differ). `asset` is the prefab document's `id` as an `AssetRef`
+— or, since M3-19a, an imported model's node hierarchy as `{ asset:
+<source>, sub: "prefab" }` (below) — `instance` a UUID v4 that is stable
+for the instance's lifetime, `overrides` an ordered op list addressed by
+**prefab-local** ids:
 
 | op | fields | note |
 | --- | --- | --- |
@@ -334,12 +342,12 @@ op list addressed by **prefab-local** ids:
 | `unsetField` | `entity`, `component`, `field` | removes the key (the schema default applies) |
 | `addComponent` | `entity`, `component`, `type`, `version`, `data` | new instance id, checked for uniqueness |
 | `removeComponent` | `entity`, `component` | |
-| `addObject` | `entity`, `parent`, `name`, `components` | `parent` is a prefab-local entity or absent (root) |
+| `addObject` | `entity`, `parent`, `name`, `components` | `parent` is a prefab-local entity (the root included) |
 | `removeObject` | `entity` | removes the subtree |
 | `setActive` | `entity`, `value` | sets the entity's own `active` flag (a boolean) |
 
 Array indices, display names and deep merges are not override targets.
-Two anchors sharing an `instance` id is `D0405`.
+Two instances sharing an `instance` id is `D0405`.
 
 **Nested prefabs** (M3-08b): a prefab entity may carry `prefab` itself. The
 library is *flattened* before anything expands
@@ -359,20 +367,23 @@ problems of the prefabs it reaches. The cook writes each prefab's chunk
 describes for runtime instantiation (hosts.md § Prefabs at runtime).
 
 `fynkel_document::expand(&scene, &library, &schemas) -> Expanded` replaces
-every anchor's instance by the prefab's entities: each prefab-local entity
-and component id becomes `derive_id(instance, local)` — UUID v5 with the
-instance as namespace, so expansion is deterministic and two instances of the
-same prefab never collide (`D0406` if a derived id meets an authored one) —
-and every reference inside the prefab (`parent`, `children`, component data
-strings equal to a local id) is remapped; `AssetRef`s stay shared. Instance
-roots are appended to the anchor's `children` after its authored children,
-the new entities follow the anchor in document order, and the `prefab` key is
+every instance by the prefab's entities: the root becomes the instance
+entity itself (its id, name and active; the root's components with the
+overrides applied), every other prefab-local entity and component id
+becomes `derive_id(instance, local)` — UUID v5 with the instance as
+namespace, so expansion is deterministic and two instances of the same
+prefab never collide (`D0406` if a derived id meets an authored one) — and
+every reference inside the prefab (`parent`, `children`, component data
+strings equal to a local id; the root's id becomes the instance's) is
+remapped; `AssetRef`s stay shared. The root's children come first in the
+instance's `children`, the children the scene added after them; the new
+entities follow the instance in document order, and the `prefab` key is
 gone from the result, which is a plain scene (`Expanded::scene()`).
 Overrides apply in order; a target that does not exist (or no longer exists)
 is `D0403`, an op whose result would not validate against the component
 schema (or a duplicate unique component) is `D0404`, a malformed op is
 `D0407`. An unknown prefab is `D0401`; the whole instance is skipped and the
-anchor kept. `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
+instance entity kept (without components). `PrefabLibrary::scan(dir)` collects every `*.prefab.json`
 under a directory (a later path with the same id wins, with a warning).
 The headless host expands before `describe`, so derived ids reach the
 runtime and `fynkel state dump` prints them.
@@ -380,7 +391,10 @@ runtime and `fynkel state dump` prints them.
 **Imported hierarchies** (M3-19a): a source the glTF importer read has its
 node tree as the `prefab` sub-asset (§ Import › glTF/GLB: one entity per
 node with `Transform`, `MeshRenderer` and `Skin`, ids UUID v5 of the asset
-id and `node/<name path>`, components `node/<path>/transform|renderer|skin`), and
+id and `node/<name path>`, components `node/<path>/transform|renderer|skin`;
+one root, as a prefab has: the file's one top-level node, or — when it has
+several — a new root named after the file, id `derive_sub_id(asset,
+"node")` with an identity Transform `node/transform`, over them), and
 `prefab: { asset: <source id>, sub: "prefab" }` instances it like a prefab
 document — the same expansion, derivation, overrides (`setField` on
 `node/<path>/renderer` swaps a material, on the root's transform turns the
@@ -468,8 +482,8 @@ pointer into it such as `/position/1`):
 
 | command | fields | effect |
 | --- | --- | --- |
-| `createObject` | `id?`, `name`, `parent?`, `index?`, `components[]` | new entity `{ name, parent, children: [], components }`, appended to (or inserted at `index` of) the parent's `children`, or the prefab's `roots` |
-| `deleteObject` | `id` | removes the entity and its subtree, detaches it from its parent / `roots` |
+| `createObject` | `id?`, `name`, `parent?`, `index?`, `components[]` | new entity `{ name, parent, children: [], components }`, appended to (or inserted at `index` of) the parent's `children`, a parentless one only in a scene (a prefab's entities descend from its `root`) |
+| `deleteObject` | `id` | removes the entity and its subtree, detaches it from its parent; a prefab's `root` cannot be deleted |
 | `renameObject` | `id`, `name` | |
 | `setObjectActive` | `id`, `active` | `false` writes `"active": false` right after the name; `true` removes the key (nothing to write when it is absent) |
 | `reparentObject` | `id`, `parent?`, `index?` | moves the entity (`FYN-E0006` if `parent` is the entity or below it); `null` makes it a root |
@@ -478,10 +492,10 @@ pointer into it such as `/position/1`):
 | `setField` | `entity`, `component`, `field`, `value` | replaces the value, or adds the member / appends to an array end |
 | `unsetField` | `entity`, `component`, `field` | removes the member (distinct from setting `null`) |
 | `assignAsset` | `entity`, `component`, `field`, `asset: { asset, sub? }` | `setField` with an `assetRef` |
-| `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]` | `createObject` plus `prefab: { asset, instance, overrides: [] }`; scene documents only |
+| `instantiatePrefab` | `id?`, `name`, `parent?`, `index?`, `prefab: { asset, sub? }`, `instance?`, `components[]` | an entity with `prefab: { asset, instance, overrides }` — the instance is the prefab's root (ADR-0022), so `components[]` become overrides on the root (`setField` for a key that differs from the prefab, `addComponent` for a type the root lacks); scene documents only |
 | `setPrefabOverride` | `entity`, `override` (a prefab-model op object) | replaces the override with the same target (field for `setField`/`unsetField`, component for `addComponent`/`removeComponent`, object for `addObject`/`removeObject`, the entity's flag for `setActive`), else appends |
 | `revertPrefabOverride` | `entity`, `index?` | removes one override, or all of them |
-| `unpackPrefab` | `entity` | replaces the instance by its expansion, in place: the anchor loses `prefab` and gains the instance roots as trailing children, the expanded entities (the prefab's with the overrides applied, under the ids the runtime derives) are inserted right after the anchor in `entities` — the document then reads exactly like `expand`'s; needs the prefab library (`Editor::apply_with_prefabs`), an instance that does not expand is refused (`FYN-E0004` with the `D040x` in `related`), not an instance `FYN-E0008`; one undo step (M4-07) |
+| `unpackPrefab` | `entity` | replaces the instance by its expansion, in place: the instance keeps its id and loses `prefab`, gaining the root's components with the overrides applied and the root's children (under the ids the runtime derives) before its added ones; the expanded entities are inserted right after it in `entities` — the document then reads exactly like `expand`'s; needs the prefab library (`Editor::apply_with_prefabs`), an instance that does not expand is refused (`FYN-E0004` with the `D040x` in `related`), not an instance `FYN-E0008`; one undo step (M4-07) |
 | `duplicateObject` | `id`, `newId?`, `name?`, `index?` | deep-copies the subtree with fresh entity, component and prefab-instance ids (every reference inside the copy remapped), placed right after the original or at `index`; the copy's root is the first affected id; a taken `newId` is `FYN-E0010`; one undo step (M4-01) |
 | `setDocumentField` | `pointer`, `value` | sets a field of the document itself by RFC 6901 pointer — a material's `/base_color`, a scene's `/name`; the envelope's identity (`/$schema`, `/kind`, `/formatVersion`, `/id`) and a scene's `/entities` / `/roots` are refused with `FYN-E0012` (M4-01) |
 | `unsetDocumentField` | `pointer` | removes a document field (`/name` cannot be unset, `FYN-E0012`) (M4-01) |
@@ -559,7 +573,7 @@ window, never running game code and never reading a cooked cache
 - **Queries** (`query(kind, args)`, all read-only): `project`, `documents`,
   `document` (state + the whole document as JSON; with `ids: [...]` the
   named entities — `null` for one the document no longer has — plus
-  `roots`, the root ids in sibling order: a prefab's `roots`, a scene's
+  `roots`, the root ids in sibling order: a prefab's `root`, a scene's
   null-parent entities in key order — what the Hierarchy re-reads from a
   transaction's `affectedIds` instead of the whole document, M4-03),
   `defaults` (`type` → `{ type, data }`, a built-in authored component's
@@ -578,7 +592,7 @@ window, never running game code and never reading a cooked cache
   `formatVersion` — the steps this build knows and, per outdated document,
   the applied steps, the diff and any diagnostics; nothing is written —
   the editor's Preview migration, M4-02), `instance` (`handle`, `entity`
-  → the expansion of the prefab instance anchored at `entity`, M4-07:
+  → the expansion of the prefab instance `entity`, M4-07:
   `{ anchor, instance, asset: { asset, sub }, expanded, prefab: { id, name,
   path, kind: prefab|source|rig, open, handle, readOnly } | null,
   diagnostics, entities: [{ id, local, name, parent, children, added,
@@ -586,7 +600,8 @@ window, never running game code and never reading a cooked cache
   [field] } } }], overrides: [{ index, op, entity, entityId, entityName,
   component?, componentId?, componentType?, field?, value?, pointer }] }` —
   `entities` in the expansion's document order under the **derived** ids
-  (a root's `parent` is the anchor), `local` the prefab's own ids,
+  — the first is the instance itself (its own id and parent, `local` the
+  prefab's root; ADR-0022) — `local` the prefab's own ids,
   `overridden` the `setField`/`unsetField` keys of a component (the
   Inspector's bold), `added` an `addComponent`/`addObject`; the library is
   the preview's — an **open prefab editor first**, dirty edits included,
@@ -594,7 +609,7 @@ window, never running game code and never reading a cooked cache
   `prefab.open`/`handle` say when the instance follows a tab; a prefab
   that is not available (`FYN-D0401`) or an override that does not apply
   (`D0403`/`D0404`/`D0407`) is `expanded: false` with the diagnostics and
-  no entities — the anchor keeps its data and nothing is rewritten; not an
+  no entities — the instance keeps its data and nothing is rewritten; not an
   instance `FYN-E0008`, unknown entity `FYN-E0002`; `crates/fynkel_authoring/src/instance.rs`,
   `tests/prefab_mode.rs`), `commands`.
 - **`rescan(paths)`** re-reads only the files a watcher (or an operation)
@@ -737,8 +752,8 @@ next sync).
 - **Load.** `AuthoringSession::describe_with_anchors(handle)` describes
   the document as `fynkel_document::describe_scene` would for the runtime
   and adds the **anchor map** — every derived entity of a prefab instance
-  to the anchor that owns it, so a pick inside an instance answers with
-  the anchor the document knows. `Preview::load` is a `World::load_scene`
+  to the instance entity that owns it, so a pick inside an instance
+  answers with the instance the document knows. `Preview::load` is a `World::load_scene`
   of that description with the skins registered and the closure retained.
   The first preview of a session **cooks the project into its cache in
   process** (`OpenProject::cook`, the same cooker as `fynkel cook`; the
@@ -1054,7 +1069,7 @@ per reference, evicted with its asset). The lock's `documents` gains
 ## Migrations
 
 Each kind has a current `formatVersion` (`DocumentKind::supported_format_version`:
-material, scene and prefab 2, every other kind 1). `fynkel_document::migrate` brings older documents
+material and project 2, scene and prefab 5, every other kind 1). `fynkel_document::migrate` brings older documents
 up: a `Migration` is `(kind, from, name, apply: fn(&mut Node))` and always
 steps `from → from + 1`; `Migrations::builtin()` is the ordered registry
 (`Migrations::path(kind, from, to)` is the chain). `migrate(&doc, &registry,
@@ -1121,6 +1136,32 @@ Built-in steps (`fynkel migrate --list`):
 - **project 1 → 2** `project/1-2/layers` (ADR-0020): `physics.layers`
   moves to the top-level `layers` unchanged, so every bit keeps its
   meaning; a project without it keeps the default.
+- **scene 4 → 5** `scene/4-5/one-root` and **prefab 4 → 5**
+  `prefab/4-5/one-root` (ADR-0022; `crates/fynkel_document/src/one_root.rs`,
+  `crates/fynkel_import/tests/one_root_migration.rs`). An instance cannot
+  move without its prefab, so the work is a **project** rewrite
+  (`scene+prefab/4-5/one-root (project)`, run by `fynkel migrate` on a
+  project directory when a document's chain reaches 4), and the
+  per-document step only finishes what needs no other file (a prefab's
+  single `roots` entry becomes `root`) and refuses the rest with the hint:
+  - a prefab with several roots gets a new root named after the prefab
+    (id `uuid_v5(prefab id, "root")`, Transform `uuid_v5(prefab id,
+    "root/transform")`, identity), the old roots its children;
+  - an anchor loses its components: its Transform composed with the
+    prefab root's is written as `setField` overrides on the root's
+    Transform (only the fields that differ), its other components become
+    `addComponent` overrides on the root; its own children and top-level
+    `addObject`s, placed relative to the anchor, are corrected by the
+    root's inverse; a `setActive` on the root folds into the instance's
+    flag, and a string equal to the old root's derived id becomes the
+    instance's id;
+  - refused, the document left as it was with the reason and a pointer:
+    a composition that is not position/rotation/scale (non-uniform scale
+    under a rotation), an anchor component whose type the root already
+    has, a `removeObject` of the root, a prefab the project does not have.
+
+  Nested anchors inside prefabs are rewritten the same way; a second run
+  changes nothing.
 
 New steps follow the same shape when a format changes: add the
 `Migration`, bump the kind's version, keep the fixture pair. Until a
@@ -1739,12 +1780,12 @@ fynkel run [--project <dir>] [--no-cook] [-- <flutter run args>]
 
 `scene inspect` prints the entity tree (or `{ kind, id, name, formatVersion,
 revision, entityCount, instanceCount, componentCount, componentTypes,
-roots[], expanded }` with `--json`) followed by the diagnostics; anchors show their
+roots[], expanded }` with `--json`) followed by the diagnostics; instances show their
 prefab, instance id and override count, `--expand` shows the expanded scene
 instead. Scenes with instances resolve prefabs from `--prefabs <dir>`
 (default: the scene's own directory; imported models with their sidecars
 under it serve `{ asset, sub: "prefab" }` instances, M3-19a) and report
-override problems in `validate`. `prefab inspect` prints roots and the tree. `scene apply` and
+override problems in `validate`. `prefab inspect` prints the tree (`root` in `--json`). `scene apply` and
 `prefab apply` run one authoring transaction from a patch file (see
 [Authoring commands and transactions](#authoring-commands-and-transactions)); a patch
 that `unpackPrefab`s reads the prefabs the way `inspect --expand` does (`--prefabs`, else the

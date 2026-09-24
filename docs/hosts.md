@@ -167,10 +167,10 @@ scene outside any project (nothing could cook it). This is the M2 gate
 `fynkel_world_instantiate(world, &FynkelInstantiateDesc { prefab_id_utf8,
 prefab_id_len, name_utf8, name_len, parent, position, rotation, scale })`
 spawns a cooked prefab **now**, outside the command path, the way a scene
-instance expands: a new *anchor* entity (named `name`, or the prefab's
-name when empty; at the transform; a child of `parent`, or a root when
-`parent` is 0) whose children are the prefab's roots, the prefab's entities
-under them with their own local transforms, their components applied
+instance expands: the prefab's **root** (ADR-0022 — no extra entity;
+named `name`, or its own name when empty; the transform replaces the
+root's Transform; a child of `parent`, or a root when `parent` is 0), the
+prefab's other entities under it with their own local transforms, their components applied
 through the same command path a scene load uses (`rejectedComponents`),
 its mesh colliders registered and its asset closure retained on the
 world. The prefab comes from the loaded project's cache only
@@ -178,7 +178,7 @@ world. The prefab comes from the loaded project's cache only
 wrote — or, since M3-19a, the `prefab` chunk of a cooked **source**: an
 imported model's node hierarchy, keyed by the source's own id, so
 `World.instantiate(AssetRef(glb, sub: 'prefab'))` spawns the rig with its
-meshes and `Skin`s and an `Animator` added to the anchor finds the joints
+meshes and `Skin`s and an `Animator` added to the root finds the joints
 by name; no new ABI, the Dart side checks the sub — empty or `prefab`,
 anything else is an `ArgumentError` — and passes the id; the closure
 retained is the source's own): no project loaded is `FYN-R0001`, an id
@@ -187,12 +187,12 @@ that is neither a prefab document nor a source with a hierarchy
 or a non-finite transform is a load error; every refusal returns
 `FYNKEL_STATUS_LOAD_FAILED` with nothing spawned, a malformed id or
 string `FYNKEL_STATUS_INVALID_ARGUMENT`. `fynkel_world_load_report`
-then carries `{ ok, scene: null, instance: { prefab, name, path, anchor,
-entities, rejectedComponents, assets, meshColliders, behaviours[] },
+then carries `{ ok, scene: null, instance: { prefab, name, path, root,
+entities (the root included), rejectedComponents, assets, meshColliders, behaviours[] },
 cache, residency, diagnostics }` — the `behaviours` are the prefab's
 authored Dart behaviours with their spawned handles, attached by the SDK
 like a scene's (`FYN-B0001`/`B0002` warnings through
-`onLoadDiagnostics`). `World.instantiate` returns the anchor as a
+`onLoadDiagnostics`). `World.instantiate` returns the root as a
 resolved `GameObject` (`lastInstantiate` is the `InstantiateReport`);
 `FynkelInstantiateError` wraps a refusal.
 

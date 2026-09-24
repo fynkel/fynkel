@@ -500,15 +500,16 @@ Header with the **active checkbox** (`inspector.active`, Unity's; a
 dash when the selection disagrees), the name (editable) and id (copy), or
 "N entities — …" for a multi-selection (above 200 entities a count
 only). The checkbox is one transaction for the whole selection:
-`setObjectActive` on a document entity, a `setActive` override on the
-anchor for a derived one (docs/design/set-active.md). One collapsible card per
+`setObjectActive` on a document entity (a prefab instance included: its
+own flag wins, ADR-0022), a `setActive` override on the instance for a
+derived one (docs/design/set-active.md). One collapsible card per
 slot with the type's icon (the `icon` hint or a per-type default), its
 description as a tooltip, the field rows in groups, and a menu: **Reset to
 Defaults**, **Open Script** (a behaviour: `package:<pkg>/<path>` from the
 metadata resolved to `<project>/lib/<path>` when `<pkg>` is the project's
 package, then the configured IDE command at the line of its `class`
 declaration), **Copy Type Name**, **Remove
-Component**. A prefab instance's anchor shows a **Prefab instance** section
+Component**. A prefab instance shows a **Prefab instance** section
 listing the override ops in bold with a Revert arrow each and **Revert
 all** (per-field bold inside the expanded instance is item 7's). **Add
 Component** (⇧⌘A) is a searchable popup over the project's authored,
@@ -929,7 +930,7 @@ third of its alpha unless selected), and the collider of each *selected*
 entity (its shape, green — as Unity does; every wall of a level collides)
 — ⌘I; the **selection outline** — each
 selected entity's mesh bounds as twelve orange edges, a cross for an
-entity without a mesh, an anchor's whole instance. All three come from
+entity without a mesh, a prefab instance as a whole. All three come from
 the world (`preview.lines(outline:, iconsAspect:)`) so they are exact
 about what is there. Every line is `GizmoTokens.lineWidth` (1) logical
 pixels times the panel's pixel ratio, anti-aliased, and the part behind
@@ -951,7 +952,7 @@ assets and asset errors when there are any).
 A **click** asks the world (`preview.pick(camera, aspect, ndc)`): every
 entity the ray meets, nearest first — a visible mesh through its
 bounding sphere then its triangles, anything else through a 25 cm sphere
-at its origin, a hit inside a prefab instance answering as its anchor —
+at its origin, a hit inside a prefab instance answering as the instance —
 minus locked and hidden entities; the nearest is selected and revealed in
 the Hierarchy. A repeated click **on the same pixel (± 3 px) cycles**
 through the stacked hits. ⌘-click toggles, ⇧-click adds; a click on
@@ -1019,7 +1020,7 @@ squares facing the camera; while a drag runs, the dragged shape is drawn
 thin in the handle's colour over the world's committed one. A drag
 writes nothing until release, then **one transaction** of `setField`s for
 the fields that changed (a derived component: `setField` overrides on
-its anchor); limits the runtime refuses are never produced (a range,
+its instance); limits the runtime refuses are never produced (a range,
 radius or extent of at least 1 mm, angles and a field of view inside
 (0, π)). The status line says "editing Collider · Esc to stop".
 
@@ -1150,10 +1151,11 @@ As in Unity: **drag an object from the Hierarchy onto the Project panel**
 children become `<folder>/<name>.prefab.json` (numbered — `Lamp 1` — when
 the name is taken), written with the prefab's own `createObject`
 commands and saved, so the authoring log shows every step; in the scene
-the object is replaced by an instance of it at the same place, one
+the object is replaced by an instance of it **with the same id**, one
 transaction (⌘Z brings the object back; the prefab file stays, as in
-Unity). The object's Transform moves to the instance and the prefab's
-root starts at the origin, so nothing moves. The new prefab is selected
+Unity). The object becomes the prefab's root (ADR-0022) with its
+Transform and components, so the instance needs no override and
+nothing moves; references to the object by id or name still hold. The new prefab is selected
 in the Project panel. Refused, with the drop not taken: a prefab
 instance or an object that holds one (nested prefabs from the Hierarchy
 come later), a derived row, several objects, a prefab tab
@@ -1167,13 +1169,17 @@ playground's `Environment`); the engine accepts that.
 
 ### The instance in the Hierarchy
 
-A prefab instance's anchor row keeps its badge (item 3); → on it now
-**opens the whole instance**: the expansion's entities appear under the
-anchor as **derived rows** — italic, in the hint colour while they are
+**The instance is the prefab's root** (ADR-0022, as in Unity): the row
+with the prefab badge (item 3) is the root — its own name, and in the
+Inspector the root's components, overridden fields bold; dragging it with
+the gizmo, reparenting it with "keep world transform" or editing its
+Transform writes `setField` overrides on the root's Transform. → on it
+**opens the rest of the instance**: the root's descendants appear under
+it as **derived rows** — italic, in the hint colour while they are
 purely inherited, **bold with a count badge** when a component of theirs
 has overridden fields, a `+` badge when an override added them. The rows
 come from the session's `instance` query (`HierarchyTree.expansionOf`,
-one fetch per anchor, cached until a transaction touches the anchor or
+one fetch per instance, cached until a transaction touches the instance or
 the prefab document changes — an open prefab tab's unsaved edits show at
 once in every scene that instances it, through `DocumentTabs`'
 prefab-change broadcast). Derived ids are the runtime's derived ids
@@ -1181,7 +1187,7 @@ prefab-change broadcast). Derived ids are the runtime's derived ids
 expanded entity selects its row — opening the instance on the way
 (`HierarchyTree.locate`).
 
-Everything you do to a derived row is an **override on the anchor** —
+Everything you do to a derived row is an **override on the instance** —
 one `setPrefabOverride` transaction each, never a write to the prefab:
 rename (only an *added* entity — a prefab's own entity is named by the
 prefab: "rename it there (Open prefab)"), delete (a `removeObject`
@@ -1194,7 +1200,7 @@ with a reason in the status line: duplicating a derived entity
 an asset or another prefab into an instance. **The Scene view's gizmo
 works on a derived row too** (gate finding, 2026-09-22): the drag
 previews on the derived entity in the world and commits as `setField`
-overrides on the anchor — `position` / `rotation` / `scale` as whole
+overrides on the instance — `position` / `rotation` / `scale` as whole
 keys, the prefab-local ids from the expansion (`HierarchyNode.transformLocal`)
 — one transaction, one ⌘Z, the prefab file untouched. The context menu says so in
 its labels ("Delete ⌫ (as an override)", "Create Empty Child (as an
@@ -1211,7 +1217,7 @@ the expansion's: every field editor works, and a value that differs from
 the prefab is **bold** with two extra buttons on its row — **Revert**
 (`revertPrefabOverride` of that field's override) and **Apply**
 (`field.apply`: the two-step apply of that one override, below). A field
-edit on a derived component is a `setField` override on the anchor
+edit on a derived component (or on the instance's own, the root's) is a `setField` override on the instance
 (`field` is a whole top-level key of the component's `data` — the crate's
 override model — so editing `position.x` overrides `position`);
 `unsetField`, Reset to Defaults, Add Component (`addComponent` override)
@@ -1222,7 +1228,7 @@ here either (the name field is disabled). The header's active checkbox
 writes a `setActive` override; when one is set the checkbox carries the
 accent bar and a **Revert** button (`inspector.active.revert`).
 
-The anchor's **Prefab instance** section (item 4) grew into the mode's
+The instance's **Prefab instance** section (item 4, under its components) grew into the mode's
 control panel: the prefab's name and kind ("imported hierarchy,
 read-only"), a broken-link icon and the diagnostics when the instance
 does not expand, the override list (each op described — "Light.intensity
@@ -1253,15 +1259,17 @@ prefab asset**; a disabled button carries its reason as the tooltip.
   is one `revertPrefabOverride` transaction.
 - **Unpack** (`prefab.unpack`, ⇧⌥⌘X) is one `unpackPrefab` transaction —
   the session's new command (a shared `fynkel_document` touch, M4-07):
-  the anchor loses its `prefab` block, the expanded entities are inserted
-  into the document right after it **under the derived ids** the runtime
-  already used (so the edit-preview world does not even reload), the
-  instance roots become the anchor's trailing children. One ⌘Z puts the
+  the instance keeps its id and loses its `prefab` block, taking the
+  root's components with the overrides applied; the expanded entities are
+  inserted into the document right after it **under the derived ids** the
+  runtime already used (so the edit-preview world does not even reload),
+  the root's children first among its children. One ⌘Z puts the
   instance back. Refused for an instance that does not expand.
 - **Open prefab** (`prefab.open`, ⇧⌥⌘D) opens the prefab document — or the
   imported hierarchy, read-only — in its own tab and focuses it; the tab
   has its own Hierarchy, Inspector, edit-preview world and history like
-  any scene tab (a prefab's roots are its `roots` list). **Select prefab
+  any scene tab (a prefab has one `root`; its Hierarchy shows that row
+and everything under it). **Select prefab
   asset** (`prefab.selectAsset`, ⇧⌥⌘L) shows the Project panel with the
   prefab document (or the model source / rig the hierarchy came from)
   selected.
@@ -1285,13 +1293,13 @@ way to "make it mine".
 
 An instance whose prefab is gone (`FYN-D0401`), or whose override no
 longer applies (`D0403` a component the prefab lost, `D0404`, `D0407`),
-still opens: the anchor row keeps its badge and its data, the Inspector
+still opens: the instance row keeps its badge and its data, the Inspector
 section shows the broken icon and the diagnostics, the Console lists them,
 Apply and Unpack are disabled with the reason, **Revert** (and Revert all)
 and **Select prefab asset** stay available, and saving the document
 without touching the instance writes the same bytes — nothing is
 "repaired" behind the user's back. The `instance` query answers `expanded:
-false` for such an anchor; the Hierarchy shows no derived rows under it.
+false` for such an instance; the Hierarchy shows no derived rows under it.
 
 ### Commands
 
@@ -1303,8 +1311,8 @@ false` for such an anchor; the Hierarchy shows no derived rows under it.
 | `prefab.open` | Edit | ⇧⌥⌘D | the instance's prefab (an imported hierarchy read-only) in its own tab |
 | `prefab.selectAsset` | Edit | ⇧⌥⌘L | the prefab document or model source revealed in the Project panel |
 
-All five are enabled when the selection lies in one instance (the anchor
-or any of its derived rows), and appear in the Hierarchy's context menu.
+All five are enabled when the selection lies in one instance (the instance
+itself or any of its derived rows), and appear in the Hierarchy's context menu.
 
 ### What item 7 does not do
 
@@ -1313,7 +1321,7 @@ overrides apply to the inner prefab, the outer document is untouched —
 the crate's model); a visual diff of a prefab against an instance;
 editing an imported hierarchy (import it with `fynkel import --prefab`
 for an authored copy); picking a derived entity *in the picture* (a hit
-inside an instance selects the anchor, item 6 — select the inner row in
+inside an instance selects the instance, item 6 — select the inner row in
 the Hierarchy instead, then the gizmo is there).
 
 ## Build and Run and the game Console (M4-08, ADR-0021 P6)

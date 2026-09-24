@@ -90,11 +90,11 @@ with it).
 - **Emitter** carries the fractional instance across ticks (`rate`
   10/s at 60 Hz emits every sixth tick, never two at once until the
   rate exceeds the tick rate). An instance is what `World::instantiate`
-  makes — an unparented anchor named after the prefab at the emitter's
-  world pose with the prefab's roots under it — plus a `LifetimeDespawn`
+  makes — the prefab's root, unparented, at the emitter's world pose
+  (ADR-0022: no extra entity) — plus a `LifetimeDespawn` on the root
   when `lifetime > 0`, and a `SetLinearVelocity(velocity)` queued on
   every dynamic body in it (applied by this tick's physics step, before
-  gravity). `max_alive` counts anchors still alive; 0 is unlimited. The
+  gravity). `max_alive` counts instances (roots) still alive; 0 is unlimited. The
   prefab must be registered with the world: the hosts register every
   prefab an emitter in the loaded scene or an instantiated prefab names
   (`Assets::register_prefabs`, recursive, with the prefab's own mesh
