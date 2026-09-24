@@ -151,8 +151,25 @@ fn reload_behaviours_reads_regenerated_metadata_and_writes_nothing() {
     )
     .unwrap();
 
+    // The schema file gains the field too, with its default.
+    let mut schema = copy.json("schemas/behaviours/game.Spinner.schema.json");
+    schema["properties"]["speed2"] = json!({ "type": "number", "default": 5.0 });
+    std::fs::write(
+        copy.dir.join("schemas/behaviours/game.Spinner.schema.json"),
+        serde_json::to_string_pretty(&schema).unwrap(),
+    )
+    .unwrap();
+
     let v = ok(s.operate("reloadBehaviours", &json!({})));
     assert_eq!(v["types"], json!(["game.Spinner"]), "{v}");
+    let schemas = s.project().unwrap().schemas_json();
+    let spinner = schemas["behaviours"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["type"] == "game.Spinner")
+        .unwrap();
+    assert_eq!(spinner["schema"]["properties"]["speed2"]["default"], 5.0, "{spinner}");
     let metadata = s.project().unwrap().metadata.clone().unwrap();
     assert_eq!(metadata["behaviours"][0]["fields"][0]["name"], "speed2");
     assert_eq!(copy.read("fynkel.project.json"), project_file);
