@@ -281,8 +281,32 @@ final class AuthoringSession implements Finalizable {
   /// `Document::new`. [path] is relative to the asset root (or absolute
   /// inside it); the kind's suffix is added when missing. [name] defaults
   /// to the file's stem; a material may name a [shader] the project has.
-  OperationResult newDocument(String kind, String path, {String? name, String? shader}) =>
-      operate('newDocument', {'kind': kind, 'path': path, 'name': ?name, 'shader': ?shader});
+  ///
+  /// A prefab with [variantOf] is a **variant** of that base (an
+  /// [assetRef]: a prefab's id, or an imported `#prefab` hierarchy;
+  /// ADR-0022 amendment 2026-09-25): its one root is an instance of the
+  /// base, named like the base's root, carrying [overrides] (op objects in
+  /// the base's flattened ids — a scene instance's list, to make a variant
+  /// of it) under [instance] (fresh by default). Refused when the base is
+  /// not a prefab of the project or the overrides do not apply.
+  OperationResult newDocument(
+    String kind,
+    String path, {
+    String? name,
+    String? shader,
+    Map<String, Object?>? variantOf,
+    List<Map<String, Object?>>? overrides,
+    String? instance,
+  }) =>
+      operate('newDocument', {
+        'kind': kind,
+        'path': path,
+        'name': ?name,
+        'shader': ?shader,
+        'variantOf': ?variantOf,
+        'overrides': ?overrides,
+        'instance': ?instance,
+      });
 
   /// Renames or moves the asset [id] to [path] (relative to the asset
   /// root; a path ending in `/`, or naming a folder, keeps the file's

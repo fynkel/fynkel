@@ -928,6 +928,103 @@ void main() {
     expect(rigDoc.inspect()['entityCount'], 9);
   });
 
+  test('prefab variants, applyPrefabOverride, Unpack Completely and nested instances (ADR-0022 amendment)', () {
+    final dir = copyFixture('variants');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final session = AuthoringSession();
+    addTearDown(session.dispose);
+    session.openProject(dir.path);
+    expect(session.commands(), contains('applyPrefabOverride'));
+
+    // A variant of the Crate, hidden: its one root an instance of the base.
+    final made = session.newDocument(
+      'prefab',
+      'prefabs/crate_variant',
+      name: 'Crate Variant',
+      variantOf: assetRef(cratePrefab),
+      overrides: [
+        {'op': 'setField', 'entity': cratePrefabEntity, 'component': cratePrefabRenderer, 'field': 'visible', 'value': false},
+      ],
+    );
+    expect(made.ok, isTrue);
+    final variantId = made.id!;
+    expect(session.assetDetail(variantId).isVariant, isTrue);
+    expect(session.assetDetail(variantId).variantOf, {'asset': cratePrefab});
+    expect(session.assetDetail(cratePrefab).isVariant, isFalse);
+    expect(
+      () => session.newDocument('prefab', 'prefabs/x', variantOf: assetRef(rustedId)),
+      throwsA(isA<AuthoringException>()),
+      reason: 'a material is no base',
+    );
+
+    // An instance of it in the scene: the prefab block names the base.
+    final main = session.openDocument(mainScene);
+    final placed = main.apply([Command.instantiatePrefab(prefab: assetRef(variantId), id: crateC, name: 'Variant')]);
+    expect(placed.ok, isTrue, reason: '$placed');
+    var x = main.instance(crateC);
+    expect(x.expanded, isTrue, reason: '${x.diagnostics}');
+    expect(x.prefab!.isVariant, isTrue);
+    expect(x.prefab!.variantOf, {'asset': cratePrefab});
+    final root = x.entities.single;
+    expect(root.components.values.singleWhere((c) => c.type == 'fynkel.MeshRenderer').data['visible'], false);
+    final t = root.components.values.singleWhere((c) => c.type == 'fynkel.Transform');
+    final bigger = {'op': 'setField', 'entity': root.local, 'component': t.local, 'field': 'scale', 'value': [2, 2, 2]};
+    expect(main.apply([Command.setPrefabOverrideOp(crateC, bigger)]).ok, isTrue);
+
+    // Apply to the variant: applyPrefabOverride there, revert here.
+    final variant = session.openDocument(variantId);
+    expect(main.instance(crateC).prefab!.handle, variant.handle);
+    final applied = variant.apply([Command.applyPrefabOverride(bigger)]);
+    expect(applied.ok, isTrue, reason: '$applied');
+    expect(main.apply([Command.revertPrefabOverride(crateC)]).ok, isTrue);
+    x = main.instance(crateC);
+    expect(x.overrides, isEmpty);
+    expect(x.entities.single.components[t.id]!.data['scale'], [2, 2, 2], reason: 'the variant has it now');
+    final variantRoot = variant.roots().single;
+    final written = (entity(variant, variantRoot)['prefab'] as Map)['overrides'] as List;
+    expect(written, hasLength(2));
+    expect((written[1] as Map)['entity'], cratePrefabEntity, reason: "in the Crate's ids");
+
+    // Unpack (one level): an instance of the Crate now. Unpack Completely:
+    // a plain entity. One undo step each.
+    expect(main.apply([Command.unpackPrefab(crateC)]).ok, isTrue);
+    expect(main.instance(crateC).asset, cratePrefab);
+    expect(main.instance(crateC).overrides, hasLength(2));
+    main.undo();
+    expect(main.apply([Command.unpackPrefab(crateC, completely: true)]).ok, isTrue);
+    expect(entity(main, crateC).containsKey('prefab'), isFalse);
+    main.undo();
+    expect(main.instance(crateC).asset, variantId);
+
+    // A prefab holding an instance: an id, an instance and its overrides.
+    final holder = session.newDocument('prefab', 'prefabs/holder', name: 'Holder');
+    final holderDoc = session.openDocument(holder.id!);
+    const boxed = '11111111-0000-4000-8000-000000000008';
+    final nested = holderDoc.apply([
+      Command.instantiatePrefab(
+        prefab: assetRef(variantId),
+        id: boxed,
+        name: 'Box',
+        parent: holderDoc.roots().single,
+        instance: '11111111-0000-4000-8000-000000000009',
+        overrides: [
+          {'op': 'setField', 'entity': root.local, 'component': t.local, 'field': 'position', 'value': [0, 3, 0]},
+        ],
+      ),
+    ]);
+    expect(nested.ok, isTrue, reason: '$nested');
+    x = holderDoc.instance(boxed);
+    expect(x.expanded, isTrue, reason: '${x.diagnostics}');
+    expect(x.instance, '11111111-0000-4000-8000-000000000009');
+    expect(x.overrides.single.field, 'position');
+    // The variant cannot hold the Holder: it would contain itself.
+    final loop = variant.apply([
+      Command.instantiatePrefab(prefab: assetRef(holder.id!), parent: variantRoot),
+    ]);
+    expect(loop.ok, isFalse);
+    expect(loop.allDiagnostics.map((d) => d.code), contains('FYN-D0402'));
+  });
+
   test('the migration preview names an outdated scene, its steps and the diff, and writes nothing', () {
     final dir = copyFixture('migrations');
     addTearDown(() => dir.deleteSync(recursive: true));

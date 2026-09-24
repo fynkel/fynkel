@@ -88,7 +88,12 @@ final class Command {
       {'command': 'assignAsset', 'entity': entity, 'component': component, 'field': field, 'asset': asset};
 
   /// Instances [prefab] (a prefab document or an imported `#prefab`
-  /// hierarchy, see [assetRef]) as a new entity.
+  /// hierarchy, see [assetRef]) as a new entity — in a scene, or in a
+  /// prefab document (a nested instance; refused with `FYN-D0402` when
+  /// [prefab] is or contains the document itself). [overrides] are the
+  /// instance's override ops (`{ op, entity, ... }` in [prefab]'s ids,
+  /// e.g. copied from another instance), validated and written after the
+  /// placement overrides — the whole list at once, one undo step.
   static Map<String, Object?> instantiatePrefab({
     required Map<String, Object?> prefab,
     String? id,
@@ -97,6 +102,7 @@ final class Command {
     int? index,
     String? instance,
     List<Map<String, Object?>> components = const [],
+    List<Map<String, Object?>> overrides = const [],
   }) =>
       {
         'command': 'instantiatePrefab',
@@ -107,6 +113,7 @@ final class Command {
         'prefab': prefab,
         'instance': ?instance,
         'components': components,
+        if (overrides.isNotEmpty) 'overrides': overrides,
       };
 
   /// Adds any override op (the prefab model's `{ op, entity, ... }` object)
@@ -137,12 +144,29 @@ final class Command {
   static Map<String, Object?> revertPrefabOverride(String entity, {int? index}) =>
       {'command': 'revertPrefabOverride', 'entity': entity, 'index': ?index};
 
-  /// Replaces the instance [entity] by its expansion, in place: it becomes
-  /// a plain entity with the same id holding the prefab root's components
-  /// with the overrides applied, the derived entities follow it in the
-  /// document under the ids the runtime already used (M4-07, ADR-0022).
-  /// One undo step.
-  static Map<String, Object?> unpackPrefab(String entity) => {'command': 'unpackPrefab', 'entity': entity};
+  /// Replaces the instance [entity] by its expansion, in place (M4-07,
+  /// ADR-0022 and its 2026-09-25 amendment). One level (Unity's Unpack,
+  /// the default): [entity] keeps its id and becomes plain entities, the
+  /// instances nested in its prefab stay instances (under derived ids,
+  /// with the outer overrides that land in them moved into their lists);
+  /// an instance of a variant becomes an instance of the variant's base.
+  /// [completely] (Unity's Unpack Completely): nothing under [entity] is
+  /// an instance any more, every entity under the id the runtime already
+  /// used. One undo step either way.
+  static Map<String, Object?> unpackPrefab(String entity, {bool completely = false}) =>
+      {'command': 'unpackPrefab', 'entity': entity, if (completely) 'completely': true};
+
+  /// Apply to Prefab, sent to the **prefab** document an instance comes
+  /// from: [op] is one of the instance's overrides as the instance holds
+  /// it (the `{ op, entity, ... }` object, addressed by the prefab's
+  /// flattened ids). It becomes a plain edit of the prefab, or — when it
+  /// targets what the prefab itself takes from another prefab (a
+  /// variant's base, a nested instance) — an override of that instance in
+  /// the prefab (a `removeObject`/`removeComponent` of something the
+  /// prefab's own override added drops that override). Then revert the
+  /// override on the instance: two transactions, as for any Apply.
+  static Map<String, Object?> applyPrefabOverride(Map<String, Object?> op) =>
+      {'command': 'applyPrefabOverride', 'override': op};
 
   /// Sets a top-level or nested field of the document itself (a material's
   /// `/base_color`, a scene's `/name`) by JSON pointer.
@@ -186,6 +210,7 @@ final class Command {
     'setPrefabOverride',
     'revertPrefabOverride',
     'unpackPrefab',
+    'applyPrefabOverride',
     'setDocumentField',
     'unsetDocumentField',
     'createMaterial',

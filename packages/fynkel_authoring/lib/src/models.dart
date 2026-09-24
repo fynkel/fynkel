@@ -168,13 +168,20 @@ final class ExpansionPrefab {
         kind = json['kind'] as String? ?? 'prefab',
         open = json['open'] as String? ?? '',
         handle = (json['handle'] as num?)?.toInt(),
-        readOnly = json['readOnly'] as String?;
+        readOnly = json['readOnly'] as String?,
+        variantOf = json['variantOf'] is Map<String, Object?> ? json['variantOf'] as Map<String, Object?> : null;
 
   final Map<String, Object?> json;
 
   /// The prefab document's id (an imported hierarchy's derived one).
   final String id;
   final String name;
+
+  /// The base when the prefab is a variant (its root an instance of
+  /// another prefab; ADR-0022 amendment 2026-09-25): `{ asset, sub? }`.
+  final Map<String, Object?>? variantOf;
+
+  bool get isVariant => variantOf != null;
 
   /// Relative to the assets directory: the prefab document, or the source
   /// / rig document the hierarchy comes from.
@@ -652,6 +659,7 @@ final class AssetDetail {
         },
         material = json['material'] is Map<String, Object?> ? json['material'] as Map<String, Object?> : null,
         entities = (json['entities'] as num?)?.toInt(),
+        variantOf = json['variantOf'] is Map<String, Object?> ? json['variantOf'] as Map<String, Object?> : null,
         fields = json['fields'] is Map<String, Object?> ? json['fields'] as Map<String, Object?> : null,
         dependents = [
           for (final d in json['dependents'] as List? ?? const [])
@@ -692,6 +700,12 @@ final class AssetDetail {
 
   /// A scene's or prefab's entity count.
   final int? entities;
+
+  /// A prefab variant's base, `{ asset, sub? }` (null for a prefab that
+  /// is not a variant and for every other kind).
+  final Map<String, Object?>? variantOf;
+
+  bool get isVariant => variantOf != null;
 
   /// A rig's or blend's whole root.
   final Map<String, Object?>? fields;
