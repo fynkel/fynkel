@@ -120,7 +120,15 @@ command (a warning only). Each failing check names its fix.
 `validateProject()` and `migrationPreview()`; a `watcher` on the project
 directory (400 ms debounce; `.fynkel/`, `.dart_tool/`, `build/`,
 `fynkel_cache/`, `.git/`, `ios/`, `macos/`, `.idea/` ignored) rescans the
-changed paths and revalidates on every change. The lock check is the session's: a lock that
+changed paths and revalidates on every change. A source file with no
+sidecar — dropped into `assets/` from Finder, or there when the project
+opens — gets one on that scan, as Unity writes a `.meta`: a new id and the
+importer from its extension (`OpenProject::rescan`, the report's
+`sidecarsWritten`); it shows up in the Project browser like any asset.
+Nothing is written in a read-only project (`FYN-A0001` stays). Move a
+file with its sidecar, or in the Project browser: a file moved alone in
+Finder is a new asset, and its old sidecar is reported orphaned
+(`FYN-A0002`). The lock check is the session's: a lock that
 names a newer runtime, ABI or tool version opens **read-only** — the
 toolbar shows a chip and a banner with the exact reason (for example
 `the lock names runtime 9.0.0; this build is 0.0.1`) and the Console lists

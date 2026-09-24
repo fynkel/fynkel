@@ -1753,3 +1753,13 @@ The M3 backlog as it landed, for the record:
    instead of 1 050 ms; the rest is parsing and validating every sidecar
    and document. Cache version, keys and fingerprint are unchanged.
    Next: Phase 1 item 4 (automatic sidecars).
+22. **Automatic sidecars (roadmap Phase 1 item 4) — done 2026-09-24.**
+   A source file with no sidecar (dropped into `assets/` from Finder, or
+   present when the project opens) gets a fresh one on the editor
+   session's scan (`OpenProject::rescan`: a new v4 id, the importer from
+   the extension), then it is read like any asset, so there is no
+   `FYN-A0001` to act on. The rescan report lists `sidecarsWritten`
+   (`RescanReport.sidecarsWritten` in Dart). An existing sidecar is never
+   replaced, and nothing is written in a read-only project. `fynkel
+   validate` still reports `FYN-A0001`: the CLI does not write files
+   unasked. Next: Phase 1 item 5 (housekeeping).

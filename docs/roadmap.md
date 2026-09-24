@@ -36,6 +36,7 @@ Apply to Scene (`docs/design/live-play-mode.md`).
    **Done 2026-09-24.**
 4. **Automatic sidecars.** A file dropped into `assets/` from Finder gets
    its sidecar on the editor's next scan instead of `FYN-A0001`.
+   **Done 2026-09-24.**
 5. **Housekeeping.** The editor's tests in CI; the ADR index in
    `docs/README.md` (0019–0021); a `cargo check --target
    wasm32-unknown-unknown` job over core, scene, physics and render

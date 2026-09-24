@@ -1117,7 +1117,9 @@ re-imports. Documents (`.scene.json`, `.prefab.json`, `.material.json`,
 `.shader.json`, `.rig.json`) are their own identity and have no sidecar;
 a rig document declares sub-assets of its own (`prefab`, `anim/<name>`;
 § Rig documents).
-`fynkel asset init <file>` writes a fresh sidecar (new v4 id); moving an
+`fynkel asset init <file>` writes a fresh sidecar (new v4 id), and so
+does the editor for a source it finds without one (its session's scan;
+never in a read-only project); moving an
 asset means moving the file **and** its sidecar — the id, and every
 `assetRef` to it, survive because references never hold a path. A copy
 needs a new sidecar: two files sharing an id is an error.
