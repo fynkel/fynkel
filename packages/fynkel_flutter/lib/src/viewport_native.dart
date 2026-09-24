@@ -12,7 +12,7 @@ import 'package:ffi/ffi.dart';
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 7;
+const viewportAbiVersion = 8;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -258,6 +258,18 @@ external int _overlay(
   int triangleCount,
   Pointer<Float> grid,
 );
+@Native<Int32 Function(Pointer<Void>, Pointer<Uint64>, Uint32, Pointer<Uint64>, Uint32, Pointer<Float>)>(
+  symbol: 'fynkel_apple_viewport_outline',
+  assetId: _asset,
+)
+external int _outline(
+  Pointer<Void> vp,
+  Pointer<Uint64> selected,
+  int selectedCount,
+  Pointer<Uint64> children,
+  int childrenCount,
+  Pointer<Float> style,
+);
 @Native<Int32 Function(Pointer<Void>, Int32, Pointer<Uint8>, Uint32)>(
   symbol: 'fynkel_apple_viewport_read_frame',
   assetId: _asset,
@@ -418,6 +430,26 @@ class ViewportNative {
       );
     } finally {
       calloc.free(p);
+    }
+  }
+
+  /// Queues the next render's selection outline (viewport ABI v8):
+  /// [selected] and [children] entity handles, [style] the nine floats of
+  /// `OverlayOutline.packStyle`. Returns the entities queued, or -1 for a
+  /// non-finite style. Every render empties it.
+  int outline(Pointer<Void> vp, List<int> selected, List<int> children, Float32List style) {
+    final ns = selected.length, nc = children.length;
+    final ids = calloc<Uint64>(ns + nc == 0 ? 1 : ns + nc);
+    final s = calloc<Float>(9);
+    try {
+      ids.asTypedList(ns + nc)
+        ..setAll(0, selected)
+        ..setAll(ns, children);
+      s.asTypedList(9).setAll(0, style);
+      return _outline(vp, ns == 0 ? nullptr : ids, ns, nc == 0 ? nullptr : ids + ns, nc, s);
+    } finally {
+      calloc.free(ids);
+      calloc.free(s);
     }
   }
 

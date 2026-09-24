@@ -387,11 +387,20 @@ class FynkelViewportController extends ChangeNotifier {
   /// Queues [overlay] for the next [render] (ADR-0019): its lines,
   /// triangles and ground grid draw after post, at the target's
   /// resolution, never exposed or tone mapped — the editor's grid, gizmos
-  /// and handles. The queue empties with every render. Returns the lines +
-  /// triangles queued, or null when the viewport is not attached.
+  /// and handles — and its selection outline (viewport ABI v8) under them.
+  /// The queue empties with every render. Returns the lines + triangles
+  /// queued plus the outline's entities, or null when the viewport is not
+  /// attached. An outline with a non-finite colour or width is refused
+  /// and adds nothing.
   int? overlay(ViewportOverlay overlay) {
     if (_state != ViewportState.attached) return null;
-    return _native!.overlay(_viewport, overlay.lines, overlay.triangles, overlay.grid?.pack());
+    var queued = _native!.overlay(_viewport, overlay.lines, overlay.triangles, overlay.grid?.pack());
+    final outline = overlay.selectionOutline;
+    if (outline != null) {
+      final n = _native!.outline(_viewport, outline.selected, outline.children, outline.packStyle());
+      if (n > 0) queued += n;
+    }
+    return queued;
   }
 
   /// The pixels of the frame a [render] returned as [slot]: tightly packed

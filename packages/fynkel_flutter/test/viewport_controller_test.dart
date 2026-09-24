@@ -52,7 +52,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 7);
+    expect(viewportAbiVersion, 8);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -107,6 +107,29 @@ void main() {
     expect(controller.overlay(many), 200);
     many.clear();
     expect(many.isEmpty, isTrue);
+    // The selection outline (viewport ABI v8): entity handles, counted with
+    // the rest; part of isEmpty, gone with clear; a non-finite width is
+    // refused (the Rust test `debug_lines.rs` checks the picture against
+    // the offscreen renderer's).
+    final ringed = ViewportOverlay()..outline([1], [2, 3]);
+    expect(ringed.isEmpty, isFalse);
+    expect(ringed.selectionOutline!.packStyle(), [1, 0.4, 0, 1, 0.37, 0.47, 0.61, 1, 2].map((x) => closeTo(x, 1e-6)));
+    expect(controller.overlay(ringed), 3);
+    ringed.line([0, 0, 0], [1, 0, 0], [1, 1, 1, 1]);
+    expect(controller.overlay(ringed), 4);
+    ringed.outline([5], [], selectedColor: [1, 0, 0, 1], width: 4);
+    expect(ringed.selectionOutline!.selected, [5]);
+    expect(ringed.selectionOutline!.packStyle().sublist(8), [4]);
+    expect(controller.overlay(ringed), 2);
+    ringed.outline([5], [], width: double.nan);
+    expect(controller.overlay(ringed), 1, reason: 'the outline refused, the line kept');
+    ringed.outline([], []);
+    expect(ringed.selectionOutline, isNull);
+    ringed
+      ..outline([1], [])
+      ..clear();
+    expect(ringed.isEmpty, isTrue);
+    expect(ringed.selectionOutline, isNull);
     // A viewport's own camera (viewport ABI v7): it draws, a value that
     // cannot is refused (the last good one stays), null clears; the Rust
     // test `view.rs` checks the picture.

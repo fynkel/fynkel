@@ -1,6 +1,7 @@
 // The overlay a viewport draws over the next render (viewport ABI v6,
 // ADR-0019): anti-aliased lines with a width, filled triangles and the
-// analytic ground grid, drawn after post — never exposed or tone mapped.
+// analytic ground grid, drawn after post — never exposed or tone mapped —
+// and (v8) the selection outline around what the listed entities draw.
 
 import 'dart:typed_data';
 
@@ -22,6 +23,21 @@ class OverlayGrid {
   Float32List pack() => Float32List.fromList([...minor, ...major, ...xAxis, ...zAxis, cell, fade]);
 }
 
+/// The selection outline queued with a [ViewportOverlay]: the renderer's
+/// entity handles (`Entity::to_bits` — the authoring preview's `entities`,
+/// the live world's `handles`) of what is [selected] and of its
+/// [children], their colours (linear RGBA, straight alpha) and the ring's
+/// [width] in physical (target) pixels.
+class OverlayOutline {
+  const OverlayOutline(this.selected, this.children, this.selectedColor, this.childrenColor, this.width);
+  final List<int> selected, children;
+  final List<double> selectedColor, childrenColor;
+  final double width;
+
+  /// The 9 floats of the ABI: selected RGBA, children RGBA, width.
+  Float32List packStyle() => Float32List.fromList([...selectedColor, ...childrenColor, width]);
+}
+
 /// One frame's overlay, built on the host and handed to
 /// `FynkelViewportController.overlay` before each render (the renderer
 /// empties it with every render). Positions are world metres, colours
@@ -37,9 +53,14 @@ class ViewportOverlay {
   /// The ground grid, or null for none.
   OverlayGrid? grid;
 
+  OverlayOutline? _outline;
+
+  /// The selection outline set by [outline], or null for none.
+  OverlayOutline? get selectionOutline => _outline;
+
   int get lineCount => _lineCount;
   int get triangleCount => _triangleCount;
-  bool get isEmpty => _lineCount == 0 && _triangleCount == 0 && grid == null;
+  bool get isEmpty => _lineCount == 0 && _triangleCount == 0 && grid == null && _outline == null;
 
   /// `ax ay az bx by bz r g b a width on_top` per line.
   Float32List get lines => Float32List.sublistView(_lines, 0, _lineCount * lineFloats);
@@ -51,6 +72,26 @@ class ViewportOverlay {
     _lineCount = 0;
     _triangleCount = 0;
     grid = null;
+    _outline = null;
+  }
+
+  /// Unity's selection outline (viewport ABI v8): a ring just outside the
+  /// silhouette of what the [selected] entities draw in [selectedColor]
+  /// (orange) and of their [children]'s in [childrenColor] (blue), [width]
+  /// physical pixels wide — over everything, hidden parts too, under the
+  /// lines and triangles. Entities are renderer handles (`Preview.entities`,
+  /// `LiveWorld.handles`); one in both lists is selected. Replaces an
+  /// earlier outline; empty lists draw none.
+  void outline(
+    List<int> selected,
+    List<int> children, {
+    List<double> selectedColor = const [1, 0.4, 0, 1],
+    List<double> childrenColor = const [0.37, 0.47, 0.61, 1],
+    double width = 2,
+  }) {
+    _outline = selected.isEmpty && children.isEmpty
+        ? null
+        : OverlayOutline(List.of(selected), List.of(children), selectedColor, childrenColor, width);
   }
 
   /// A segment [a]–[b]. [onTop] draws it over the scene; otherwise the part
