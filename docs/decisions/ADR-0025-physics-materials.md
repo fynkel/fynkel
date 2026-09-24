@@ -1,6 +1,6 @@
 # ADR-0025: Physics materials
 
-**Status:** Proposed by the assistant 2026-09-25; to be confirmed by the user  
+**Status:** Accepted — proposed by the assistant 2026-09-25, confirmed by the user 2026-09-25  
 **Date:** 2026-09-25  
 **Related:** ADR-0012 (schema codegen), R3a's volume profile (`ae03864`, the pattern this follows), `docs/physics.md` § Physics materials, `docs/documents.md` § Physics materials, `docs/unity-parity.md` (Physics Material rows)
 

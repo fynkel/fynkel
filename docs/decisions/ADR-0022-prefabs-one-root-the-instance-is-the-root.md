@@ -187,7 +187,7 @@ after release.
 
 ## Amendment (2026-09-25): prefab variants and Unpack Completely
 
-**Status:** proposed by the assistant; to be confirmed by the user.
+**Status:** Accepted — proposed by the assistant, confirmed by the user 2026-09-25.
 
 Unity has three prefab workflows that this ADR did not cover: **Prefab
 Variants**, **Unpack** vs **Unpack Completely**, and **making a prefab

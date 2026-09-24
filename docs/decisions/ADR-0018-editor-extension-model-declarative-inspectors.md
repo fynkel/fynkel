@@ -54,8 +54,8 @@ above.
 
 ## Amendment (2026-09-24, Unity parity pass): object fields and enums
 
-Under the parity pass's standing rule ("default to Unity's concepts"; not
-yet confirmed by the user), `@Expose` takes three more field types, so a
+Under the parity pass's standing rule ("default to Unity's concepts";
+confirmed by the user 2026-09-25), `@Expose` takes three more field types, so a
 script's Inspector has Unity's object field and enum dropdown:
 
 - **A Dart `enum`** (`type: enum`): stored as the value's name, the

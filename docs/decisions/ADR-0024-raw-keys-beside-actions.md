@@ -1,6 +1,6 @@
 # ADR-0024: Raw keys and mouse buttons beside actions
 
-**Status:** Accepted (2026-09-24, under the Unity parity pass's standing rule "default to Unity's concepts"; not yet confirmed by the user)  
+**Status:** Accepted (2026-09-24, under the Unity parity pass's standing rule "default to Unity's concepts"; confirmed by the user 2026-09-25)  
 **Date:** 2026-09-24  
 **Related:** blueprint §5.1 and §9 "Input", D3 (the project's `inputActions` are the only binding source), ADR-0008 (edges consumed by exactly one tick), `docs/input.md`, `docs/unity-parity.md` § Tier 2
 
