@@ -880,6 +880,11 @@ fn the_edit_preview_world_crosses_the_edge() {
     assert_eq!(host.result()["stores"], 1);
     let live = store.material(&rusted).unwrap();
     assert_eq!((live.metallic, live.base_color[1]), (0.9, 1.0));
+    assert_eq!(
+        host.preview_call(scene, "material", &json!({ "material": RUSTED })),
+        Status::Ok
+    );
+    assert_eq!(host.result()["material"]["metallic"], 0.9);
     assert!(
         store.material_edits() > edits,
         "the renderer rebuilds its materials"

@@ -782,7 +782,7 @@ pub unsafe extern "C" fn fynkel_authoring_preview_call(
     })
 }
 
-const PREVIEW_KINDS: [&str; 17] = [
+const PREVIEW_KINDS: [&str; 18] = [
     "camera",
     "hidden",
     "pick",
@@ -795,6 +795,7 @@ const PREVIEW_KINDS: [&str; 17] = [
     "restoreComponents",
     "setMaterial",
     "restoreMaterial",
+    "material",
     "resync",
     "reload",
     "recook",
@@ -1014,6 +1015,15 @@ fn preview_call(
                 }
             }
             Ok(json!({ "ok": true, "handle": handle, "stores": stores.len() }))
+        }
+        "material" => {
+            let material = uuid_of(args.get("material"), "material")?;
+            let slot = s.slot(handle)?;
+            let assets = slot.world.assets().ok_or_else(|| {
+                invalid("material: the preview has no cache (the project did not cook)")
+            })?;
+            let fields = Preview::material(assets, material).map_err(one)?;
+            Ok(json!({ "ok": true, "handle": handle, "material": fields }))
         }
         "resync" => {
             let (described, anchors) = s.inner.describe_with_anchors(handle).map_err(one)?;

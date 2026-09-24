@@ -387,6 +387,9 @@ const FynkelWorld* fynkel_authoring_preview_world(const FynkelAuthoringSession* 
  *                                       drawn in place of the cooked material by every
  *                                       preview's store, the file untouched → "stores"
  *   restoreMaterial material            the cooked material again → "stores"
+ *   material        material            what this preview's renderer draws for the
+ *                                       material now (a live edit, else the cooked
+ *                                       one) → "material": its document fields
  *   resync                              the incremental sync now (a no-op when the
  *                                       world already matches) → the sync report +
  *                                       "stats"

@@ -878,6 +878,14 @@ impl Preview {
         Ok(())
     }
 
+    /// What the renderers on `assets` draw for `material` now — the live
+    /// edit while one is set, else the cooked record — as its document
+    /// fields.
+    pub fn material(assets: &Assets, material: Uuid) -> Result<Value, Diagnostic> {
+        let m = assets.material(&AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())))?;
+        Ok(m.to_node().to_serde())
+    }
+
     /// The cooked material `material` again after [`Preview::set_material`].
     pub fn restore_material(assets: &Assets, material: Uuid) {
         assets.restore_material(&AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())));
