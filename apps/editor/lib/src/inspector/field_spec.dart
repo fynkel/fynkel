@@ -112,7 +112,8 @@ final class FieldSpec {
   final bool readOnly;
   final bool hidden;
 
-  /// `showIf` as written: a sibling boolean's name, `!`-prefixed to invert.
+  /// `showIf` as written: a sibling boolean's (or asset reference's — on
+  /// when set) name, `!`-prefixed to invert.
   final String? showIf;
   final List<String> enumValues;
 
@@ -185,7 +186,8 @@ final class FieldSpec {
         if (s.name == f) v = s.defaultValue;
       }
     }
-    final on = v == true;
+    // A boolean that is true, or a reference that is set.
+    final on = v == true || v is Map;
     return showIfNegated ? !on : on;
   }
 
@@ -541,7 +543,7 @@ FieldSpec _parseField(
   var angle = false, slider = false, multiline = false;
   final k = hints['kind'] as String?;
   if (k != null) {
-    final asset = RegExp(r'^asset\(([a-zA-Z]+)\)$').firstMatch(k);
+    final asset = RegExp(r'^asset\(([a-zA-Z_]+)\)$').firstMatch(k);
     if (asset != null) {
       kind = FieldKind.assetRef;
       assetKind = asset.group(1);

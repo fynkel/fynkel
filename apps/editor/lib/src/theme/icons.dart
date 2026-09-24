@@ -134,6 +134,7 @@ abstract final class FIcons {
   static const IconData toggleOn = LucideIcons.toggleRight;
   static const IconData touchAppOutlined = LucideIcons.pointer;
   static const IconData tune = LucideIcons.sliders;
+  static const IconData physicsMaterial = LucideIcons.volleyball;
   static const IconData unarchiveOutlined = LucideIcons.packageOpen;
   static const IconData undo = LucideIcons.undo2;
   static const IconData upgrade = LucideIcons.circleFadingArrowUp;

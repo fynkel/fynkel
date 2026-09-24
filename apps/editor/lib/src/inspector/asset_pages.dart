@@ -30,6 +30,7 @@ import '../project/editor_project.dart';
 import '../project_browser/asset_preview.dart';
 import 'asset_edits.dart';
 import 'material_inspector.dart';
+import 'physics_material_inspector.dart';
 import 'volume_inspector.dart';
 import '../project_browser/project_browser_model.dart';
 import '../shell/editor_selection.dart';
@@ -162,8 +163,8 @@ class _UsedBy extends StatelessWidget {
   }
 
   static String? _documentKindOf(String path) {
-    for (final k in ['scene', 'prefab', 'material', 'rig', 'blend', 'volume']) {
-      if (path.endsWith('.$k.json')) return k;
+    for (final k in ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'physics_material']) {
+      if (path.endsWith(documentSuffix(k))) return k;
     }
     return null;
   }
@@ -468,6 +469,7 @@ class _AssetPageState extends State<AssetPage> {
     final pending = draft != null && (_dirty(d) || _jsonError != null);
     final editsMaterial = widget.assetEdits != null && d.material?['shader'] == pbrShader;
     final editsVolume = widget.assetEdits != null && e.document == 'volume';
+    final editsPhysics = widget.assetEdits != null && e.document == 'physics_material';
     return Material(
       type: MaterialType.transparency,
       child: Column(
@@ -493,6 +495,8 @@ class _AssetPageState extends State<AssetPage> {
                 if (editsMaterial)
                   MaterialInspector(key: Key('material.${e.id}'), edits: widget.assetEdits!, browser: model, id: e.id),
                 if (editsVolume) VolumeInspector(key: Key('volume.${e.id}'), edits: widget.assetEdits!, id: e.id),
+                if (editsPhysics)
+                  PhysicsMaterialInspector(key: Key('physicsMaterial.${e.id}'), edits: widget.assetEdits!, id: e.id),
                 InspectorSection(
                   title: 'File',
                   children: [
@@ -509,7 +513,7 @@ class _AssetPageState extends State<AssetPage> {
                 if (draft != null) _importSettings(context, e, d, draft),
                 if (draft != null && _isModel(e)) _materials(context, e, d, draft),
                 if (e.isSource) _parts(context, e, d),
-                if (!editsMaterial && !editsVolume) ...AssetDocumentSections.of(context, e, d),
+                if (!editsMaterial && !editsVolume && !editsPhysics) ...AssetDocumentSections.of(context, e, d),
                 _UsedBy(dependents: d.dependents, onOpenReference: widget.onOpenReference),
               ],
             ),

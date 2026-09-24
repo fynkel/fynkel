@@ -26,7 +26,19 @@ enum AssetSort { name, kind, path, modified }
 
 /// The kinds the filter menu offers, in order; a source is one of the last
 /// four by its importer.
-const browserKinds = ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'texture', 'model', 'sound', 'other'];
+const browserKinds = [
+  'scene',
+  'prefab',
+  'material',
+  'rig',
+  'blend',
+  'volume',
+  'physics_material',
+  'texture',
+  'model',
+  'sound',
+  'other',
+];
 
 /// The browser kind of an entry: a document's kind, a source's by importer.
 String browserKindOf(AssetEntry e) {
@@ -45,6 +57,17 @@ String formatBytes(int n) {
   if (n < 1024 * 1024) return '${(n / 1024).toStringAsFixed(1)} KB';
   return '${(n / (1024 * 1024)).toStringAsFixed(2)} MB';
 }
+
+/// A document kind's file suffix: `.scene.json`, and `.physicsmaterial.json`
+/// for `physics_material` (ADR-0025).
+String documentSuffix(String kind) => kind == 'physics_material' ? '.physicsmaterial.json' : '.$kind.json';
+
+/// A document kind's name for people: `Volume Profile`, `Physics Material`.
+String documentKindTitle(String kind) => switch (kind) {
+  'volume' => 'Volume Profile',
+  'physics_material' => 'Physics Material',
+  _ => kind.isEmpty ? kind : '${kind[0].toUpperCase()}${kind.substring(1)}',
+};
 
 /// The `assetKindIcon` kind of a browser kind.
 String iconKindOf(String browserKind) => switch (browserKind) {
@@ -706,13 +729,12 @@ final class ProjectBrowserModel extends ChangeNotifier {
     }
   }
 
-  /// A new scene, prefab, material or volume profile in [inFolder] (the
-  /// shown folder by default), selected and ready to rename.
+  /// A new scene, prefab, material, volume profile or physics material in
+  /// [inFolder] (the shown folder by default), selected and ready to rename.
   OperationResult? newDocument(String kind, {String? inFolder}) {
     final target = inFolder ?? (view == BrowserView.folders ? folder : '');
-    // Unity's names: New Scene, New Material, New Volume Profile.
-    final title = kind == 'volume' ? 'Volume Profile' : '${kind[0].toUpperCase()}${kind.substring(1)}';
-    final rel = _freshPath(target, 'New $title', '.$kind.json');
+    // Unity's names: New Scene, New Material, New Volume Profile, New Physics Material.
+    final rel = _freshPath(target, 'New ${documentKindTitle(kind)}', documentSuffix(kind));
     final r = _guard(() => project.newDocument(kind, rel));
     if (r == null) return null;
     final id = r.id;

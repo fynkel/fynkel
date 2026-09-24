@@ -1664,9 +1664,11 @@ List<PickerItem<String>> assetPickerItems(
 class _AssetFieldState extends State<AssetField> {
   Future<void> _pick() async {
     final kind = widget.kind;
+    // `physics_material` reads "physics material".
+    final noun = kind?.replaceAll('_', ' ');
     final choice = await showPicker<String>(
       context,
-      title: kind == null ? 'Choose an asset' : 'Choose a $kind',
+      title: noun == null ? 'Choose an asset' : 'Choose a $noun',
       subject: widget.subject,
       anchor: globalRectOf(context),
       items: assetPickerItems(widget.candidates(), kind: kind, thumbnail: widget.thumbnail),
@@ -1674,8 +1676,8 @@ class _AssetFieldState extends State<AssetField> {
       current: _refKey(widget.value).isEmpty ? null : _refKey(widget.value),
       hint: 'Search by name or path',
       keyPrefix: 'assetPicker',
-      countNoun: kind == null ? 'assets' : '${kind}s',
-      empty: 'No ${kind ?? 'asset'} matches.',
+      countNoun: noun == null ? 'assets' : '${noun}s',
+      empty: 'No ${noun ?? 'asset'} matches.',
     );
     if (!mounted || choice == null) return;
     widget.onCommit(choice.isNone ? null : _refOf(choice.value!));
@@ -1799,6 +1801,7 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'clip' => FIcons.animation,
   'skin' || 'rig' => FIcons.accessibilityNew,
   'volume' => FIcons.tune,
+  'physics_material' => FIcons.physicsMaterial,
   'script' => FIcons.descriptionOutlined,
   _ => FIcons.insertDriveFileOutlined,
 };

@@ -563,6 +563,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(value: 'new:prefab', enabled: model.canEdit, child: const Text('New Prefab Here')),
         PopupMenuItem(value: 'new:material', enabled: model.canEdit, child: const Text('New Material Here')),
         PopupMenuItem(value: 'new:volume', enabled: model.canEdit, child: const Text('New Volume Profile Here')),
+        PopupMenuItem(
+          value: 'new:physics_material',
+          enabled: model.canEdit,
+          child: const Text('New Physics Material Here'),
+        ),
         PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
       ],
     );
@@ -624,6 +629,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(value: 'new:prefab', enabled: model.canEdit, child: const Text('New Prefab Here')),
         PopupMenuItem(value: 'new:material', enabled: model.canEdit, child: const Text('New Material Here')),
         PopupMenuItem(value: 'new:volume', enabled: model.canEdit, child: const Text('New Volume Profile Here')),
+        PopupMenuItem(
+          value: 'new:physics_material',
+          enabled: model.canEdit,
+          child: const Text('New Physics Material Here'),
+        ),
         PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
         if (!isRoot) ...[
           const PopupMenuDivider(),
@@ -1251,7 +1261,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           PopupMenuButton<String>(
             popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('project.new'),
-            tooltip: 'New scene, prefab, material, volume profile, folder or behaviour',
+            tooltip: 'New scene, prefab, material, volume profile, physics material, folder or behaviour',
             icon: const Icon(FIcons.add),
             enabled: model.canEdit,
             itemBuilder: (context) => [
@@ -1281,6 +1291,15 @@ class _ProjectPanelState extends State<ProjectPanel> {
                   dense: true,
                   leading: Icon(assetKindIcon('volume')),
                   title: const Text('New Volume Profile'),
+                ),
+              ),
+              PopupMenuItem(
+                key: const Key('project.new.physics_material'),
+                value: 'physics_material',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(assetKindIcon('physics_material')),
+                  title: const Text('New Physics Material'),
                 ),
               ),
               const PopupMenuDivider(),

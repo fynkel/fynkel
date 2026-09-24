@@ -34,6 +34,10 @@ abstract final class EditorStrings {
       label: 'New Volume Profile',
       description: 'A post-processing profile: ambient occlusion on, bloom ready for an intensity',
     ),
+    'assets.newPhysicsMaterial': (
+      label: 'New Physics Material',
+      description: 'Friction and bounciness a Collider can share, with how two surfaces combine them',
+    ),
     'assets.newScene': (label: 'New Scene', description: 'An empty scene document in the Project browser\'s folder'),
     'assets.open': (
       label: 'Open Asset',

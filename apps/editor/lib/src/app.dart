@@ -1145,6 +1145,15 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _canEditAssets,
         run: () => _newAsset('volume'),
       ),
+      // Unity's Create → Physics Material (ADR-0025; no shortcut there either).
+      EditorCommand(
+        id: 'assets.newPhysicsMaterial',
+        menu: EditorMenu.project,
+        group: 4,
+        order: 2,
+        enabled: () => _canEditAssets,
+        run: () => _newAsset('physics_material'),
+      ),
       EditorCommand(
         id: 'assets.newFolder',
         menu: EditorMenu.project,
@@ -1861,7 +1870,12 @@ class EditorShellState extends State<EditorShell> {
       final t = DocumentTabs(project: opened);
       final me = AssetEdits(opened)
         ..preview = (kind, id, fields) =>
-            kind == 'volume' ? scene?.previewVolume(id, fields) : scene?.previewMaterial(id, fields);
+            switch (kind) {
+              'volume' => scene?.previewVolume(id, fields),
+              'material' => scene?.previewMaterial(id, fields),
+              // A physics material draws nothing; Play reads it from the cook.
+              _ => null,
+            };
       me.addListener(registry.refresh);
       final h = HierarchyModel(tabs: t, project: opened);
       final c = ConsoleModel(

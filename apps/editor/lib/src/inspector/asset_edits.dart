@@ -1,8 +1,8 @@
-// The Inspector's edits of a document asset — a material or a volume
-// profile (docs/unity-parity.md, Tier 2): as in Unity, such an asset is
-// edited where it is shown — the Inspector — and each change is one
-// transaction on its document, saved at once (there is no Save for a
-// material or a profile). ⌘Z / ⇧⌘Z undo and redo those changes while the
+// The Inspector's edits of a document asset — a material, a volume
+// profile or a physics material (docs/unity-parity.md, Tiers 2 and 3): as
+// in Unity, such an asset is edited where it is shown — the Inspector —
+// and each change is one transaction on its document, saved at once
+// (there is no Save for a material or a profile). ⌘Z / ⇧⌘Z undo and redo those changes while the
 // Inspector or the Project holds the keyboard and the Inspector shows the
 // asset; the shell routes them here ([undoTarget]).
 //
@@ -28,7 +28,8 @@ final class AssetEdits extends ChangeNotifier {
   final EditorProject project;
 
   /// Draws an asset's fields in the Scene view (its document [kind]:
-  /// `material` or `volume`); null draws the cooked asset again. The shell
+  /// `material` or `volume`; a physics material draws nothing); null draws
+  /// the cooked asset again. The shell
   /// points it at the Scene view.
   void Function(String kind, String id, Map<String, Object?>? fields)? preview;
 
@@ -108,8 +109,13 @@ final class AssetEdits extends ChangeNotifier {
     return (redo ? doc.canRedo : doc.canUndo) ? doc : null;
   }
 
-  /// "Material" or "Volume Profile": what the Edit menu's Undo names.
-  static String noun(EditorDocument doc) => doc.kind == 'volume' ? 'Volume Profile' : 'Material';
+  /// "Material", "Volume Profile" or "Physics Material": what the Edit
+  /// menu's Undo names.
+  static String noun(EditorDocument doc) => switch (doc.kind) {
+    'volume' => 'Volume Profile',
+    'physics_material' => 'Physics Material',
+    _ => 'Material',
+  };
 
   bool undo(EditorDocument doc, {bool redo = false}) {
     final id = _documents.entries.where((e) => e.value == doc).firstOrNull?.key;

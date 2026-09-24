@@ -50,7 +50,7 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 130); // Unity parity: Unpack Completely; Back from Prefab Mode; the Rect tool; Lock View to Selected; Pivot / Center; New Volume Profile; ADR-0023: ten GameObject presets; Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
+    expect(commands.length, 131); // Unity parity: New Physics Material; Unpack Completely; Back from Prefab Mode; the Rect tool; Lock View to Selected; Pivot / Center; New Volume Profile; ADR-0023: ten GameObject presets; Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
     for (final c in commands) {
       // A ⌘ shortcut, or Unity's bare key alone (the tools' Q W E R Y, the projection's 5).
       // New Project gave ⇧⌘N to Create Empty, as in Unity (which has no New Project key).
@@ -58,6 +58,7 @@ void main() {
       if (c.id != 'project.new' &&
           c.id != 'assets.duplicate' &&
           c.id != 'assets.newVolume' &&
+          c.id != 'assets.newPhysicsMaterial' &&
           c.id != 'view.frameAll' && // Unity has no key for it; ⇧F is Lock View to Selected
           c.id != 'prefab.back' && // Unity's ‹ in the Scene view and the Hierarchy has no key
           c.id != 'prefab.unpackCompletely' && // Unity's has none either
