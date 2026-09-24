@@ -426,6 +426,28 @@ records for undo, and can save — the editor never edits JSON by hand.
 - The editor never runs game code here either: the tree reads documents,
   and every write is a command the session validates.
 
+- **Several scenes** (2026-09-25, Unity's multi-scene editing): every
+  open scene tab is a section under its **header** (the scene icon, its
+  name, `*` when unsaved, a fold); the focused one is the **active
+  scene**, in bold — where new objects go, what ⌘S saves. A header's
+  menu (right-click or its ⋮): Set Active Scene, Save Scene, Unload /
+  Load Scene (`DocumentTabs.unload`: the header alone stays, nothing of
+  it is listed, drawn or edited; not with unsaved changes, not the last
+  loaded scene), Remove Scene (closes the tab, asking), Select Scene
+  Asset. A click on another scene's row (or its object in the Scene
+  view — the nearest hit of all the loaded scenes) makes that scene
+  active and selects there; the old scene's selection goes (one scene's
+  selection at a time). Rows dragged onto another scene's header, or
+  onto one of its rows, **move** there (`HierarchyModel.moveToScene`: a
+  `pasteObjects` there and a delete here, one step in each scene's
+  history) and are selected there. The Project's double-click (and Open)
+  opens a scene **alone** — the other scenes close, each with unsaved
+  changes asking first, Cancel opening nothing — and its menu's **Open
+  Scene Additive**, or a scene dropped on the Hierarchy, adds one with
+  the active scene kept. Search and filters apply to every section; the
+  Scene view keeps one camera between the loaded scenes. Row keys stay
+  `row.<id>` (`row.<scene id>.<id>` when two scenes share an id).
+
 What item 3 does **not** do: show a component's fields (item 4, the
 Inspector), draw the scene (item 6), or open prefab mode from a badge
 (item 7 — it did). Materials open as tabs but have no Hierarchy (a material has no
@@ -1045,11 +1067,16 @@ scene) — ⌘G; the **icons** of every light (its colour: point range
 circles, spot cone, directional arrows) and camera (frustum to 4 m, at a
 third of its alpha unless selected), and the collider of each *selected*
 entity (its shape, green — as Unity does; every wall of a level collides)
-— ⌘I; the **selection outline** — each
-selected entity's mesh bounds as twelve orange edges, a cross for an
-entity without a mesh, a prefab instance as a whole. All three come from
-the world (`preview.lines(outline:, iconsAspect:)`) so they are exact
-about what is there. Every line is `GizmoTokens.lineWidth` (1) logical
+— ⌘I; the **selection outline** (2026-09-25) — the renderer's ring
+around what the selected entities draw, Unity's orange
+(`GizmoTokens.outlineSelected`), and around what is under them —
+children, a selected instance's parts — its grey-blue
+(`outlineChildren`), `outlineWidth` (1.5) points wide
+(`ViewportOverlay.outline` with the handles of `preview.entities(ids)`,
+read once per document revision, selection and visibility, every frame
+in Play); an entity without a mesh keeps a cross
+(`lines(outlineBoxes: false)`). All of it comes from the world so it is
+exact about what is there. Every line is `GizmoTokens.lineWidth` (1) logical
 pixels times the panel's pixel ratio, anti-aliased, and the part behind
 geometry is drawn at a quarter of its alpha instead of breaking off. The
 **gizmo's handles** (item 9g) are drawn into the same overlay, on top
@@ -1459,6 +1486,24 @@ false` for such an instance; the Hierarchy shows no derived rows under it.
 
 All five are enabled when the selection lies in one instance (the instance
 itself or any of its derived rows), and appear in the Hierarchy's context menu.
+
+### Prefab mode in context (2026-09-25)
+
+An instance's **›** at the end of its Hierarchy row (or Open in its
+Inspector's Prefab bar) opens its prefab **in context**
+(`DocumentTabs.openDocument(context: PrefabContext(tab, instance))`,
+remembered by the tab); from the Project a prefab opens **in
+isolation**. While a prefab is shown the Scene view has a bar: ‹ back,
+the **breadcrumbs** (`DocumentTabs.trail` — the scene, then each prefab
+opened in context; an earlier crumb closes the prefabs after it, asking
+about unsaved changes), the **Context** menu — Normal / Gray / Hidden
+(`EditorState.prefabContext`, Gray by default, remembered) — and
+**Auto Save** (`EditorState.prefabAutoSave`, on by default: each change,
+undo or Apply is saved as it is made; off, a Save button and leaving
+asks). The Hierarchy shows the prefab under a ‹ header. Closing a prefab
+goes back to the tab it was opened from. Drawing the scene around the
+prefab (Normal, or greyed) needs the viewport to draw a second world and
+comes with that work.
 
 ### What item 7 does not do
 

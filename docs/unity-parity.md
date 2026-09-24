@@ -96,12 +96,12 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Pivot / Center (Z) | | 🔧 `51a245a` (the gizmo at the active object's origin, each turning and scaling about its own, or at the selection's bounds centre, children included, the group about it; a scale multiplies each object's own, no shear) |
 | Click a prefab, click again | root, then the child under the pointer | 🔧 `7a66084` (root, then the child under the pointer, then what is behind; inside a selected instance a click goes straight to the child) |
 | ⇧F / double-F | follow the selection | 🔧 `5c57adb` (Lock View to Selected: the view follows the selection dragged or in Play; orbit and zoom keep the lock, pan, fly, framing or another selection let go; Frame All stays in the View menu) |
-| Selection outline | silhouette | 🟡 bounding box |
+| Selection outline | silhouette | 🔧 `6344488`…`4b493b7`, `70ad2db` (the renderer rings what the selection draws — a mask of the outlined instances, then a composite before the overlay lines, ABI 8 — in Unity's orange, what is under it in its grey-blue: children, an instance's parts; an object without a mesh keeps its cross); 🟡 a part hidden behind another is ringed too (the mask has no depth test) |
 | Rect tool (T), free-rotate trackball | | 🔧 `510d218` (the rectangle in the plane of the two axes most across the view, children included: corners about the opposite one, ⌥ about the centre, ⇧ in proportion; edges one way; inside moves; just outside a corner turns; a click inside selects what is under it. Inside the rotate rings a drag turns freely, the rings first) |
-| Prefab mode | in context, breadcrumb, auto-save | 🟡 a document tab |
+| Prefab mode | in context, breadcrumb, auto-save | 🔧 `20edc8e` (an instance's › or Open opens its prefab in context; the Scene view's bar: ‹, the breadcrumbs, Context Normal / Gray / Hidden, Auto Save on by default or a Save button; the Hierarchy's ‹ header; from the Project, in isolation; leaving with unsaved changes asks); the scene drawn around the prefab waits on the viewport's extra worlds |
 | Prefab variants, Unpack Completely, a prefab from an object holding instances | | ❌ |
 | Overrides dropdown, blue margin bar | | 🔧 `7d51553` (the Prefab bar — Open, Select, Overrides ▾ — lists the overrides by object, a row comparing the prefab's value with the instance's, Revert / Apply, Revert All / Apply All; the blue bar and Apply / Revert on a right-click; an added component's '+' and Apply / Revert Added Component; Unpack stays in the Hierarchy menu) |
-| Multi-scene Hierarchy | | ❌ one document per Hierarchy |
+| Multi-scene Hierarchy | | 🔧 `f632f96`, `ca34f28` (every open scene a section under its header — the active one bold, Set Active / Save / Unload / Load / Remove / Select Scene Asset; Open Scene Additive or a scene dropped on the Hierarchy adds one, a double-click opens one alone after asking; a click on another scene's row or object in the Scene view activates it; rows dragged onto another scene move there; one Scene view camera); 🟡 the selection is one scene's at a time (Unity's may span scenes); the other scenes drawn in the Scene view wait on the viewport's extra worlds |
 | Physics Material asset | shared friction/bounciness, combine modes | ❌ per-Collider fields; needs an ADR |
 | Grid thumbnails, zoom slider | | 🔧 `8da4595` (the slider at the status bar's right, remembered; tiles act like rows; models, prefabs, materials and a model's meshes and materials drawn by `fynkel thumbnail` in the background, again when their file changes) |
 
@@ -260,3 +260,22 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   model's ▸ bringing its parts; the thumbnails asked for in one batch,
   not again when shown again, a refusal not asked again, a changed file
   drawn again as a new image, a texture never asked for).
+- 2026-09-25: Prefab mode (`20edc8e`, `prefab_mode_parity_test.dart`:
+  › on Crate A opens the Crate in context — Main › Crate, the Hierarchy's
+  ‹ header —; with Auto Save a rename and its undo are on disk at once;
+  without it Save saves, a crumb or ‹ asks, Cancel stays, Discard leaves
+  the file alone; Context Hidden remembered; from the Project, isolation
+  and no Context menu).
+- 2026-09-25: several scenes (`f632f96`, `ca34f28`,
+  `multi_scene_parity_test.dart`: Open Scene Additive keeps Main active,
+  Results under its own header; a click on the Trophy's row, or on the
+  Trophy in the Scene view, makes Results active with the Trophy
+  selected and Main's selection gone, the camera unmoved; Crate A dragged
+  onto Results' header moves there as an instance, the Floor onto it goes
+  under it, Main's undo brings the Floor back; Unload leaves the header,
+  the last loaded scene cannot unload; a double-click on Results asks
+  about Main's change, Cancel keeps both, Discard leaves Results alone).
+- 2026-09-25: the selection outline (`6344488`…`4b493b7` renderer and
+  ABI, `70ad2db` editor; `selection_outline_parity_test.dart`: the Robot
+  ringed and not boxed, a Cube made under it blue until it is selected,
+  an instance's own mesh and its parts apart, the Camera's cross kept).
