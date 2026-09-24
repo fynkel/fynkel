@@ -685,6 +685,7 @@ class _ScenePanelState extends State<ScenePanel> {
     final text = [
       cam.orthographic ? 'ortho ${_fmt2(cam.orthoHeight)} m' : 'persp ${(cam.fovY * 180 / 3.141592653589793).round()}°',
       'pivot (${cam.pivot.map(_fmt2).join(', ')})  d ${_fmt2(cam.distance)}',
+      if (tab.following != null) 'following the selection · pan to let go',
       if (sel > 0) '$sel selected',
       if (model.editingLabel case final editing?)
         'editing $editing · Esc to stop'

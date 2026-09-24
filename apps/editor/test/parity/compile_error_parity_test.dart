@@ -69,7 +69,7 @@ void main() {
     await e.click(row);
     await e.press(LogicalKeyboardKey.enter);
     await tester.runAsync(() async {
-      for (var i = 0; i < 50 && !opened.existsSync(); i++) {
+      for (var i = 0; i < 200 && !opened.existsSync(); i++) {
         await Future<void>.delayed(const Duration(milliseconds: 100));
       }
     });

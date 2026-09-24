@@ -117,6 +117,10 @@ final class SceneTab {
   /// Fallback reloads the session reported.
   int fallbackReloads = 0;
 
+  /// Lock View to Selected (⇧F, or F twice): the objects the camera's
+  /// pivot follows; null when the view is free.
+  List<String>? following;
+
   /// Click cycling: the hits under the last click and which is selected.
   Offset? clickPx;
   List<String> clickHits = const [];
@@ -566,6 +570,7 @@ final class SceneViewModel extends ChangeNotifier {
   }
 
   void pan(double dx, double dy) {
+    unlockView();
     camera?.pan(dx, dy, math.max(viewportHeight, 1));
     _cameraChanged();
   }
@@ -579,7 +584,8 @@ final class SceneViewModel extends ChangeNotifier {
   /// the pivot's plane, when the preference says so.
   void _dollyAtPointer(double steps) {
     final c = camera, vp = viewProjection, px = pointer;
-    final toward = c == null || vp == null || px == null || !zoomToPointer()
+    // A locked view zooms on what it follows.
+    final toward = c == null || vp == null || px == null || !zoomToPointer() || isFollowing
         ? null
         : vp.rayAt(px.dx, px.dy).hitPlane(c.pivot, c.forward);
     camera?.dolly(steps, toward: toward);
@@ -587,6 +593,7 @@ final class SceneViewModel extends ChangeNotifier {
   }
 
   void look(double dx, double dy) {
+    unlockView();
     camera?.look(dx, dy);
     _cameraChanged();
   }
@@ -632,11 +639,20 @@ final class SceneViewModel extends ChangeNotifier {
     return (min, max);
   }
 
-  /// F: frame the selection (everything when nothing is selected).
+  /// F: frame the selection (everything when nothing is selected); F
+  /// again within half a second locks the view to it, as ⇧F does.
   void frameSelected() {
     _stopCoast();
     final t = current;
     if (t == null) return;
+    final now = DateTime.now();
+    final again = _lastFrame != null && now.difference(_lastFrame!) < const Duration(milliseconds: 500);
+    _lastFrame = again ? null : now;
+    if (again && t.tab.selection.isNotEmpty) {
+      lockViewToSelected();
+      return;
+    }
+    unlockView();
     final sel = t.tab.selection.where((id) => !t.state.hidden.contains(id)).toList();
     if (sel.isEmpty) {
       frameAll();
@@ -648,11 +664,63 @@ final class SceneViewModel extends ChangeNotifier {
     _cameraChanged();
   }
 
-  /// ⇧F: frame every visible entity.
+  DateTime? _lastFrame;
+
+  /// Whether the view follows the selection (⇧F).
+  bool get isFollowing => current?.following != null;
+
+  /// ⇧F (Unity's Lock View to Selected): frame the selection, then keep
+  /// the camera's pivot on it as it moves — dragged, or in Play. Orbiting
+  /// and zooming keep the lock; panning, flying, framing or selecting
+  /// something else let go.
+  void lockViewToSelected() {
+    _stopCoast();
+    final t = current;
+    if (t == null) return;
+    final sel = t.tab.selection.where((id) => !t.state.hidden.contains(id)).toList();
+    if (sel.isEmpty) return;
+    final b = boundsOf(sel);
+    if (b == null) return;
+    t.camera.frame(b.$1, b.$2);
+    t.following = sel;
+    _cameraChanged();
+    notifyListeners();
+  }
+
+  /// The view lets go of what it followed.
+  void unlockView() {
+    final t = current;
+    if (t == null || t.following == null) return;
+    t.following = null;
+    notifyListeners();
+  }
+
+  /// A locked view's pivot to its objects' centre now; the lock goes
+  /// when the selection is no longer what it followed.
+  void _follow(SceneTab t) {
+    final f = t.following;
+    if (f == null) return;
+    final sel = t.tab.selection;
+    if (sel.length != f.length || !f.every(sel.contains)) {
+      t.following = null;
+      scheduleMicrotask(notifyListeners);
+      return;
+    }
+    final b = boundsOf(f);
+    if (b == null) return;
+    final c = vScale(vAdd(b.$1, b.$2), 0.5);
+    if (vDistance(c, t.camera.pivot) < 1e-6) return;
+    t.camera.pivot = c;
+    t.cameraVersion++;
+    editorState.scheduleSave();
+  }
+
+  /// Frame every visible entity (the View menu; Unity has no key for it).
   void frameAll() {
     _stopCoast();
     final t = current;
     if (t == null) return;
+    unlockView();
     final hidden = _hiddenAll(t);
     final ids = t.tab.tree.nodes.keys.where((id) => !hidden.contains(id));
     final b = boundsOf(ids);
@@ -701,6 +769,7 @@ final class SceneViewModel extends ChangeNotifier {
     if (world == null) return;
     final data = cam.$2;
     double? num_(String k) => data[k] is num ? (data[k] as num).toDouble() : null;
+    unlockView();
     t.camera.alignTo(
       world,
       orthographic: data['projection'] == 'orthographic',
@@ -954,7 +1023,9 @@ final class SceneViewModel extends ChangeNotifier {
   /// could be drawn.
   int? renderFrame() {
     final t = current;
-    if (t == null || !t.hasPreview || !controller.isAttached) return null;
+    if (t == null || !t.hasPreview) return null;
+    _follow(t);
+    if (!controller.isAttached) return null;
     if (controller.physicalWidth > 0) {
       viewportWidth = controller.physicalWidth.toDouble();
       viewportHeight = controller.physicalHeight.toDouble();
@@ -2221,6 +2292,7 @@ final class SceneViewModel extends ChangeNotifier {
 
   void _flyTick() {
     if (_flyKeys.isEmpty || camera == null) return;
+    unlockView();
     final c = camera!;
     var speed = math.max(c.distance, 1) * 0.6; // m/s, scaled with the view
     if (_shift) speed *= 4;

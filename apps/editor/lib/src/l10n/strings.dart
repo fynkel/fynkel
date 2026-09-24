@@ -197,6 +197,10 @@ abstract final class EditorStrings {
       description: 'The view takes the selected camera\'s placement and lens — the picture is what it renders',
     ),
     'view.frameAll': (label: 'Frame All', description: null),
+    'view.lockToSelected': (
+      label: 'Lock View to Selected',
+      description: 'Frame the selection and follow it as it moves; pan or fly to let go',
+    ),
     'view.frameSelected': (
       label: 'Frame Selected',
       description: 'The camera swings to fit the selection (everything when nothing is selected)',

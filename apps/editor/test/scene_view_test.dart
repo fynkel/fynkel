@@ -1208,8 +1208,8 @@ void main() {
       expect(sv.hasFocus, isFalse);
       await key(LogicalKeyboardKey.keyF);
       expect(st.camera.pivot[0], closeTo(20, 1e-9), reason: 'F from the Hierarchy frames Far');
-      await key(LogicalKeyboardKey.keyF, shift: true);
-      expect(st.camera.pivot[0], isNot(closeTo(20, 1e-9)), reason: '⇧F frames everything');
+      sv.frameAll();
+      expect(st.camera.pivot[0], isNot(closeTo(20, 1e-9)), reason: 'Frame All frames everything');
 
       // A click on the Inspector's empty space: the panel has the keyboard,
       // no field does.
