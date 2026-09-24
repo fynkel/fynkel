@@ -178,6 +178,7 @@ fn new_documents_are_valid_named_after_their_file_and_undo_removes_them() {
         .unwrap();
     assert_eq!(detail["material"]["shader"], "fynkel.pbr@1");
     assert_eq!(detail["material"]["alphaMode"], "opaque");
+
     assert_eq!(s.project().unwrap().assets.len(), before + 3);
     assert_clean(&s);
 
@@ -245,6 +246,16 @@ fn new_documents_are_valid_named_after_their_file_and_undo_removes_them() {
         s.query("assetHistory", &json!({})).unwrap()["undoLabel"],
         "New material gold.material.json"
     );
+
+    // A volume profile (Unity's Create → Volume Profile), its starting look.
+    let v = ok(s.operate("newDocument", &json!({ "kind": "volume", "path": "look" })));
+    assert_eq!(v["entry"]["document"], "volume");
+    let look = Document::read(
+        &copy.path("assets/look.volume.json"),
+        Some(DocumentKind::Volume),
+    )
+    .unwrap();
+    assert_eq!(look.envelope.name, "look");
     assert_clean(&s);
 }
 

@@ -358,7 +358,7 @@ impl AuthoringSession {
 
     // ------------------------------------------------------------ new
 
-    /// `newDocument { kind: scene|prefab|material, path, name?, shader? }`:
+    /// `newDocument { kind: scene|prefab|material|volume, path, name?, shader? }`:
     /// `path` is relative to the asset root (the kind's suffix is added
     /// when missing); `name` defaults to the file's stem; a material may
     /// name a `shader` (the built-in PBR by default). Refused when the
@@ -367,10 +367,15 @@ impl AuthoringSession {
         const OP: &str = "newDocument";
         let kind_name = string_arg(args, "kind", OP)?;
         let kind = match DocumentKind::parse_name(kind_name) {
-            Some(k @ (DocumentKind::Scene | DocumentKind::Prefab | DocumentKind::Material)) => k,
+            Some(
+                k @ (DocumentKind::Scene
+                | DocumentKind::Prefab
+                | DocumentKind::Material
+                | DocumentKind::Volume),
+            ) => k,
             _ => {
                 return Err(invalid(format!(
-                    "{OP}: kind must be \"scene\", \"prefab\" or \"material\", not {kind_name:?}"
+                    "{OP}: kind must be \"scene\", \"prefab\", \"material\" or \"volume\", not {kind_name:?}"
                 )))
             }
         };
