@@ -3172,7 +3172,9 @@
     "178a4e5d-96f4-560f-a8cb-57841c82afbf": {
       "name": "Lamp 1 light",
       "parent": null,
-      "children": [],
+      "children": [
+        "8e7fb616-dfb3-4e21-b783-16abd5eaa7e5"
+      ],
       "components": {
         "a35773b4-c757-599f-adcd-44816e0f8043": {
           "type": "fynkel.Transform",
@@ -9959,9 +9961,9 @@
           "version": 1,
           "data": {
             "position": [
-              -9.5,
-              0.6,
-              -6.0
+              -1.088444517,
+              0.600000024,
+              -9.927228606
             ],
             "rotation": [
               0.0,
@@ -9992,45 +9994,62 @@
             "visible": true
           }
         },
-        "3171d599-9b11-5754-9b93-726cee5debc6": {
-          "type": "fynkel.RigidBody",
-          "version": 1,
-          "data": {
-            "body_type": "dynamic",
-            "mass": 8.0,
-            "linear_damping": 0.0,
-            "angular_damping": 0.05,
-            "gravity_scale": 1.0,
-            "ccd": false
-          }
-        },
-        "73a8dd60-c1f8-5fd4-9ae1-67dde7d4a9dc": {
-          "type": "fynkel.Collider",
-          "version": 1,
-          "data": {
-            "shape": "capsule",
-            "size": [
-              0.5,
-              0.0,
-              0.5
-            ],
-            "mesh": null,
-            "offset": [
-              0.0,
-              0.0,
-              0.0
-            ],
-            "friction": 0.5,
-            "restitution": 0.0,
-            "is_sensor": false,
-            "mask": 4294967295
-          }
-        },
         "13f329f1-7eae-57c5-8b63-d0345f7a7481": {
           "type": "fynkel.Layer",
           "version": 1,
           "data": {
             "layer": 1
+          }
+        },
+        "118ca078-262a-4b89-bd65-95fb9566d51e": {
+          "type": "game.SomethingFun2",
+          "version": 1,
+          "data": {
+            "speed": 1.0
+          }
+        }
+      }
+    },
+    "8e7fb616-dfb3-4e21-b783-16abd5eaa7e5": {
+      "name": "Empty sedf",
+      "parent": "178a4e5d-96f4-560f-a8cb-57841c82afbf",
+      "children": [],
+      "components": {
+        "77c1424b-e527-4b6d-8107-0f63a457501b": {
+          "type": "fynkel.Transform",
+          "version": 1,
+          "data": {
+            "position": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        },
+        "9f337f72-e7b1-442c-8770-edf31bb34000": {
+          "type": "fynkel.Animator",
+          "version": 1,
+          "data": {
+            "clip": {
+              "asset": "00000000-0000-0000-0000-000000000000"
+            },
+            "speed": 1.0,
+            "looping": true,
+            "playing": true,
+            "weight": 1.0,
+            "additive": false,
+            "root_motion": false
           }
         }
       }

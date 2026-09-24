@@ -7,7 +7,8 @@ import 'package:fynkel/fynkel.dart';
 import 'package:reference_game/game/collectible.dart' as _lib0;
 import 'package:reference_game/game/gate.dart' as _lib1;
 import 'package:reference_game/game/player.dart' as _lib2;
-import 'package:reference_game/game/switch.dart' as _lib3;
+import 'package:reference_game/game/something_fun2.dart' as _lib3;
+import 'package:reference_game/game/switch.dart' as _lib4;
 
 /// `game.Collectible` v1 → [_lib0.Collectible].
 BehaviourType get gameCollectibleType => BehaviourType(
@@ -172,32 +173,76 @@ BehaviourType get gamePlayerType => BehaviourType(
   ],
 );
 
-/// `game.Switch` v1 → [_lib3.Switch].
+/// `game.SomethingFun2` v1 → [_lib3.SomethingFun2].
+BehaviourType get gameSomethingFun2Type => BehaviourType(
+  id: 'game.SomethingFun2',
+  version: 1,
+  create: _lib3.SomethingFun2.new,
+  fields: [
+    BehaviourField(
+      name: 'speed',
+      type: 'number',
+      defaultValue: 5.0,
+      tooltip: 'Units per second',
+      min: 0,
+      step: 0.1,
+      get: (b) => (b as _lib3.SomethingFun2).speed,
+      set: (b, v) => (b as _lib3.SomethingFun2).speed = _double(v),
+    ),
+    BehaviourField(
+      name: 'speed2',
+      type: 'number',
+      defaultValue: 5.0,
+      tooltip: 'Units per second',
+      min: 0,
+      step: 0.1,
+      get: (b) => (b as _lib3.SomethingFun2).speed2,
+      set: (b, v) => (b as _lib3.SomethingFun2).speed2 = _double(v),
+    ),
+    BehaviourField(
+      name: 'speed3',
+      type: 'number',
+      defaultValue: 5.0,
+      tooltip: 'Units per second',
+      min: 0,
+      step: 0.1,
+      get: (b) => (b as _lib3.SomethingFun2).speed3,
+      set: (b, v) => (b as _lib3.SomethingFun2).speed3 = _double(v),
+    ),
+  ],
+);
+
+/// `game.Switch` v1 → [_lib4.Switch].
 BehaviourType get gameSwitchType => BehaviourType(
   id: 'game.Switch',
   version: 1,
-  create: _lib3.Switch.new,
+  create: _lib4.Switch.new,
   fields: [
     BehaviourField(
       name: 'prompt',
       type: 'string',
       defaultValue: 'E — open the gate',
-      get: (b) => (b as _lib3.Switch).prompt,
-      set: (b, v) => (b as _lib3.Switch).prompt = v as String,
+      get: (b) => (b as _lib4.Switch).prompt,
+      set: (b, v) => (b as _lib4.Switch).prompt = v as String,
     ),
     BehaviourField(
       name: 'target',
       type: 'string',
       defaultValue: 'Gate',
-      get: (b) => (b as _lib3.Switch).target,
-      set: (b, v) => (b as _lib3.Switch).target = v as String,
+      get: (b) => (b as _lib4.Switch).target,
+      set: (b, v) => (b as _lib4.Switch).target = v as String,
     ),
   ],
 );
 
 /// Every `@FynkelBehaviour` type of package `reference_game`, by id.
-List<BehaviourType> get behaviourTypes =>
-    List.unmodifiable([gameCollectibleType, gameGateType, gamePlayerType, gameSwitchType]);
+List<BehaviourType> get behaviourTypes => List.unmodifiable([
+  gameCollectibleType,
+  gameGateType,
+  gamePlayerType,
+  gameSomethingFun2Type,
+  gameSwitchType,
+]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {

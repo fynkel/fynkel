@@ -194,6 +194,11 @@
       "kind": "behaviour",
       "version": 1,
       "description": "A slab that slides up when opened (lib/game/gate.dart)."
+    },
+    "game.SomethingFun2": {
+      "kind": "behaviour",
+      "version": 1,
+      "description": "SomethingFun2 (lib/game/something_fun2.dart)."
     }
   },
   "targets": {
