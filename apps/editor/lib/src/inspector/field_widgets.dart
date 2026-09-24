@@ -26,6 +26,7 @@ import 'package:flutter/services.dart';
 
 import '../picker/picker.dart';
 import '../project/editor_project.dart';
+import '../theme/cascading_menu.dart';
 import '../theme/icons.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
@@ -91,9 +92,9 @@ class FieldRow extends StatelessWidget {
   /// their narrow per-axis fields.
   final String? unit;
 
-  /// Bold label with a revert arrow and an apply arrow (Prefab mode, item
-  /// 7: a derived entity's field an override wrote — Revert drops the
-  /// override, Apply writes it into the prefab).
+  /// Unity's override marking: a bold label and a blue bar in the margin;
+  /// a right-click offers Apply to Prefab (writes the value into the
+  /// prefab) and Revert (drops the override).
   final bool overridden;
   final VoidCallback? onRevert;
   final VoidCallback? onApply;
@@ -118,7 +119,7 @@ class FieldRow extends StatelessWidget {
       text = Tooltip(message: tooltip!, waitDuration: const Duration(milliseconds: 500), child: text);
     }
     if (dragLabel != null) text = dragLabel!(text);
-    return Padding(
+    Widget row = Padding(
       padding: EdgeInsets.only(left: indent, top: 2, bottom: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -141,24 +142,6 @@ class FieldRow extends StatelessWidget {
                             style: theme.textTheme.labelSmall?.copyWith(color: context.tokens.textDisabled),
                           ),
                         ),
-                      if (overridden && onRevert != null)
-                        IconButton(
-                          key: const ValueKey('field.revert'),
-                          tooltip: 'Revert override — back to the prefab\'s value',
-                          icon: const Icon(FIcons.undo, size: 13),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                          onPressed: onRevert,
-                        ),
-                      if (overridden && onApply != null)
-                        IconButton(
-                          key: const ValueKey('field.apply'),
-                          tooltip: 'Apply to prefab — this value becomes the prefab\'s',
-                          icon: const Icon(FIcons.upload, size: 13),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                          onPressed: onApply,
-                        ),
                     ],
                   ),
                 ),
@@ -179,7 +162,55 @@ class FieldRow extends StatelessWidget {
         ],
       ),
     );
+    if (!overridden) return row;
+    // The blue bar sits in the card's margin, left of every indent.
+    row = Stack(
+      clipBehavior: Clip.none,
+      children: [
+        row,
+        Positioned(
+          left: 2 - context.tokens.pad,
+          top: 1,
+          bottom: 1,
+          width: 2,
+          child: ColoredBox(key: const ValueKey('field.overrideBar'), color: context.tokens.accent),
+        ),
+      ],
+    );
+    if (onRevert == null && onApply == null) return row;
+    final prefab = PrefabNameScope.of(context);
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onSecondaryTapUp: (d) => showCascadingMenu(context, d.globalPosition, [
+        MenuAction(
+          prefab == null ? 'Apply to Prefab' : "Apply to Prefab '$prefab'",
+          key: const ValueKey('field.apply'),
+          enabled: onApply != null,
+          onSelected: () => onApply?.call(),
+        ),
+        MenuAction(
+          'Revert',
+          key: const ValueKey('field.revert'),
+          enabled: onRevert != null,
+          onSelected: () => onRevert?.call(),
+        ),
+      ]),
+      child: row,
+    );
   }
+}
+
+/// The prefab the Inspector's overridden fields would apply to, named in
+/// their right-click menus.
+class PrefabNameScope extends InheritedWidget {
+  const PrefabNameScope({super.key, required this.name, required super.child});
+
+  final String? name;
+
+  static String? of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<PrefabNameScope>()?.name;
+
+  @override
+  bool updateShouldNotify(PrefabNameScope old) => old.name != name;
 }
 
 // ── Text entry shared by number and string fields ──────────────────────────

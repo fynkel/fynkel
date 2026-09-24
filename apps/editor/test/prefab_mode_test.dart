@@ -690,7 +690,9 @@ void main() {
       expect(find.text('rig.glb › prefab'), findsOneWidget);
     });
 
-    testWidgets('the Inspector shows bold overridden fields with Revert/Apply, and the anchor section', (tester) async {
+    testWidgets('the Inspector marks overridden fields (Apply/Revert on a right-click), and the Prefab bar', (
+      tester,
+    ) async {
       final shell = await openShell(tester);
       final tab = shell.tabs!.focused!;
       shell.hierarchy!.expand('inst');
@@ -699,35 +701,44 @@ void main() {
       expect(find.byKey(const ValueKey('prefab.derived')), findsOneWidget);
       final row = find.byKey(const ValueKey('field.fynkel.Light#0.intensity'));
       expect(row, findsOneWidget);
-      expect(find.descendant(of: row, matching: find.byKey(const ValueKey('field.revert'))), findsOneWidget);
-      expect(find.descendant(of: row, matching: find.byKey(const ValueKey('field.apply'))), findsOneWidget);
+      expect(find.descendant(of: row, matching: find.byKey(const ValueKey('field.overrideBar'))), findsOneWidget);
       final colorRow = find.byKey(const ValueKey('field.fynkel.Light#0.color'));
-      expect(find.descendant(of: colorRow, matching: find.byKey(const ValueKey('field.revert'))), findsNothing);
+      expect(find.descendant(of: colorRow, matching: find.byKey(const ValueKey('field.overrideBar'))), findsNothing);
+      await tester.tap(find.descendant(of: row, matching: find.text('Intensity')), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('field.apply')), findsOneWidget);
       final nameField = tester.widget<TextField>(
         find.descendant(of: find.byKey(const ValueKey('inspector.name')), matching: find.byType(TextField)),
       );
       expect(nameField.enabled, isFalse, reason: 'named by the prefab');
-      await tester.tap(find.descendant(of: row, matching: find.byKey(const ValueKey('field.revert'))));
+      await tester.tap(find.byKey(const ValueKey('field.revert')));
       await tester.pumpAndSettle();
       expect((project.fakeDocuments.last.entitiesView['inst']!['prefab'] as Map)['overrides'], isEmpty);
-      expect(find.descendant(of: row, matching: find.byKey(const ValueKey('field.revert'))), findsNothing);
+      expect(find.descendant(of: row, matching: find.byKey(const ValueKey('field.overrideBar'))), findsNothing);
       // The anchor.
       await tester.tap(find.byKey(const ValueKey('prefab.selectInstance')));
       await tester.pumpAndSettle();
       expect(tab.selection, ['inst']);
       expect(find.byKey(const ValueKey('prefab.title')), findsOneWidget);
-      expect(find.byKey(const ValueKey('prefab.unpack')), findsOneWidget);
+      expect(find.byKey(const ValueKey('prefab.unpack')), findsNothing, reason: 'Unpack is in the Hierarchy menu');
       expect(find.byKey(const ValueKey('prefab.open')), findsOneWidget);
       expect(find.byKey(const ValueKey('prefab.selectAsset')), findsOneWidget);
-      expect(find.byKey(const ValueKey('prefab.applyAll')), findsNothing, reason: 'no overrides left');
+      await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('prefab.noOverrides')), findsOneWidget, reason: 'no overrides left');
+      expect(tester.widget<TextButton>(find.byKey(const ValueKey('prefab.revertAll'))).enabled, isFalse);
+      await tester.tapAt(const Offset(2, 2)); // outside: it closes
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('prefab.overridesPanel')), findsNothing);
       // A broken one.
       tab.select('broken');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('prefab.broken')), findsOneWidget);
       expect(find.byKey(const ValueKey('prefab.diagnostic.0')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('prefab.override.0')), findsOneWidget, reason: 'its data is kept');
-      expect(tester.widget<TextButton>(find.byKey(const ValueKey('prefab.applyAll'))).enabled, isFalse);
-      expect(tester.widget<TextButton>(find.byKey(const ValueKey('prefab.unpack'))).enabled, isFalse);
+      expect(tester.widget<FilledButton>(find.byKey(const ValueKey('prefab.applyAll'))).enabled, isFalse);
     });
   });
 }

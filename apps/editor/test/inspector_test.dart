@@ -1295,18 +1295,27 @@ void main() {
       expect(tab.document.history, before + 2);
       expect(find.byKey(const ValueKey('card.fynkel.DirectionalLight#0')), findsNothing);
 
-      // Prefab section with revert.
+      // The Prefab bar's Overrides dropdown with revert.
       tab.select('inst');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('prefab.title')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('prefab.override.1')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('prefab.override.0')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('prefab.revert.0')));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('prefab.override.1')), findsNothing);
       expect(find.byKey(const ValueKey('prefab.override.0')), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('prefab.revertAll')));
       await tester.pumpAndSettle();
-      expect(find.textContaining('No overrides'), findsOneWidget);
+      expect(find.byKey(const ValueKey('prefab.overridesPanel')), findsNothing, reason: 'Revert All closes it');
+      await tester.tap(find.byKey(const ValueKey('prefab.overrides')));
+      await tester.pumpAndSettle();
+      expect(find.text('No Overrides'), findsOneWidget);
+      await tester.tapAt(const Offset(2, 2));
+      await tester.pumpAndSettle();
 
       // Empty states.
       tab.clearSelection();

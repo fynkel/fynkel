@@ -2,17 +2,16 @@
 // (name, id, count; the layer and tags, ADR-0020), the "run `fynkel codegen`" banner, one collapsible
 // card per component slot with its fields grouped by the `group`/`header`
 // hints and filtered by `showIf`, the card menu (Remove, Reset to defaults,
-// Open script, Copy type), the prefab instance's override list with Revert,
-// and Add Component as a searchable popup. Everything it writes goes
+// Open script, Copy type), the prefab instance's Prefab bar, and Add Component as a searchable popup. Everything it writes goes
 // through `InspectorModel` — one transaction per gesture.
 //
-// Prefab mode (item 7, ADR-0022): an instance (the prefab's root) shows its
-// fields with the overridden ones bold, its prefab (name, kind,
-// a missing or broken one with its diagnostics), the annotated override
-// list with Revert / Apply to prefab per row and for all, Unpack, Open
-// prefab and Select prefab asset; a derived entity's fields show the
-// overridden ones bold with Revert and Apply arrows, and a banner names
-// the instance it belongs to.
+// Prefab mode (item 7, ADR-0022; Unity's layout since the parity pass): an
+// instance (the prefab's root) opens with the Prefab bar — its prefab,
+// Open, Select and the Overrides dropdown (overrides_popup.dart), a missing
+// or broken prefab with its diagnostics. Overridden fields are bold with a
+// blue bar in the margin and Apply / Revert on a right-click; an added
+// component carries a '+' and Apply / Revert Added Component in its menu;
+// a derived entity's banner names the instance it belongs to.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +27,7 @@ import '../theme/icons.dart';
 import 'asset_pages.dart';
 import 'codegen_check.dart';
 import 'field_spec.dart';
+import 'overrides_popup.dart';
 import 'field_widgets.dart';
 import 'inspector_chrome.dart';
 import 'inspector_math.dart';
@@ -226,9 +226,15 @@ class _InspectorPanelState extends State<InspectorPanel> {
         _kept('header', () => _header(context)),
         Expanded(
           child: _scriptDrop(
-            CustomScrollView(
+            PrefabNameScope(
+              name: _prefabName(),
+              child: CustomScrollView(
               key: const ValueKey('inspector.list'),
               slivers: [
+                if (model.single?.prefab != null)
+                  SliverToBoxAdapter(
+                    child: PrefabBar(model: model, entity: model.single!),
+                  ),
                 if (model.single?.isDerived ?? false)
                   SliverToBoxAdapter(
                     child: _DerivedBanner(model: model, entity: model.single!),
@@ -238,7 +244,6 @@ class _InspectorPanelState extends State<InspectorPanel> {
                   padding: const EdgeInsets.only(bottom: 12),
                   sliver: SliverList.list(
                     children: [
-                      if (model.single?.prefab != null) _PrefabSection(model: model, entity: model.single!),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                         child: Builder(
@@ -281,10 +286,19 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 )),
               ],
             ),
+            ),
           ),
         ),
       ],
     );
+  }
+
+  /// The prefab a field's Apply would write to: the selection's instance's.
+  String? _prefabName() {
+    final e = model.single;
+    if (e == null || (e.prefab == null && e.anchor == null)) return null;
+    final name = model.expansionOf(e.anchor ?? e.id)?.prefab?.name;
+    return name == null || name.isEmpty ? null : name;
   }
 
   /// The page around the cards (the header, the Add Component section)
@@ -644,6 +658,12 @@ class _ComponentCard extends StatelessWidget {
     final theme = Theme.of(context);
     final t = context.tokens;
     final spec = slot.spec;
+    // Unity marks an added component with a '+' and a blue bar, and a
+    // component with overridden fields with the bar alone.
+    final added = model.addedComponentOverride(slot);
+    final marked = added != null || slot.instances.any((i) => i.overridden.isNotEmpty);
+    final prefabName = added == null ? null : model.expansionOf(added.$1)?.prefab?.name;
+    final applyAddedWhy = added == null ? null : model.cannotApply(added.$1);
     return SliverMainAxisGroup(
       slivers: [
         PinnedHeaderSliver(
@@ -660,9 +680,28 @@ class _ComponentCard extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 2, right: 2),
                 child: Row(
                   children: [
+                    if (marked)
+                      Container(
+                        key: ValueKey('card.overrideBar.${slot.key}'),
+                        width: 2,
+                        height: t.row,
+                        margin: const EdgeInsets.only(right: 2),
+                        color: t.accent,
+                      ),
                     Icon(collapsed ? FIcons.chevronRight : FIcons.expandMore, size: 14, color: t.textSecondary),
                     const SizedBox(width: 2),
-                    Icon(componentIcon(spec), size: 14, color: t.textSecondary),
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(componentIcon(spec), size: 14, color: t.textSecondary),
+                        if (added != null)
+                          Positioned(
+                            right: -4,
+                            bottom: -3,
+                            child: Icon(FIcons.add, key: ValueKey('card.added.${slot.key}'), size: 10, color: t.accent),
+                          ),
+                      ],
+                    ),
                     // Unity: a component's `enabled` is the header's checkbox.
                     if (_enabledField != null)
                       SizedBox(
@@ -745,6 +784,30 @@ class _ComponentCard extends StatelessWidget {
                         if (spec.isBehaviour)
                           const PopupMenuItem(value: 'open', height: 28, child: Text('Open Script')),
                         const PopupMenuItem(value: 'copyType', height: 28, child: Text('Copy Type Name')),
+                        if (added != null) ...[
+                          const PopupMenuDivider(),
+                          PopupMenuItem(
+                            key: const Key('card.menu.applyAdded'),
+                            value: 'applyAdded',
+                            enabled: applyAddedWhy == null,
+                            height: 28,
+                            child: Tooltip(
+                              message: applyAddedWhy ?? 'Add this component to the prefab',
+                              child: Text(
+                                prefabName == null || prefabName.isEmpty
+                                    ? 'Apply Added Component to Prefab'
+                                    : "Apply Added Component to Prefab '$prefabName'",
+                              ),
+                            ),
+                          ),
+                          PopupMenuItem(
+                            key: const Key('card.menu.revertAdded'),
+                            value: 'revertAdded',
+                            enabled: model.canEdit,
+                            height: 28,
+                            child: const Text('Revert Added Component'),
+                          ),
+                        ],
                         if (model.showsPlay) ...[
                           const PopupMenuDivider(),
                           PopupMenuItem(
@@ -812,6 +875,12 @@ class _ComponentCard extends StatelessWidget {
         model.moveComponent(slot, -1);
       case 'moveDown':
         model.moveComponent(slot, 1);
+      case 'applyAdded':
+        final added = model.addedComponentOverride(slot);
+        if (added != null) model.applyOverrides(added.$1, index: added.$2);
+      case 'revertAdded':
+        final added = model.addedComponentOverride(slot);
+        if (added != null) model.revertOverride(added.$1, index: added.$2);
       case 'applyToScene':
         model.applyToScene(slot);
       case 'copyType':
@@ -1440,185 +1509,6 @@ List<Object> _numbersLike(List<double> values, List<num>? previous) => [
 ];
 
 // ── Prefab overrides ───────────────────────────────────────────────────────
-
-/// The anchor's Prefab mode section: the prefab it comes from, the
-/// override list (Revert / Apply per row, for all), Unpack, Open prefab,
-/// Select prefab asset; a missing or broken prefab shows its diagnostics
-/// and keeps the instance's data.
-class _PrefabSection extends StatelessWidget {
-  const _PrefabSection({required this.model, required this.entity});
-
-  final InspectorModel model;
-  final EntityInfo entity;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final p = entity.prefab!;
-    final x = entity.expansion;
-    final prefabInfo = x?.prefab;
-    final assetText = model.describeAsset({'asset': p.assetId, if (p.sub != null) 'sub': p.sub});
-    final title = prefabInfo == null
-        ? 'Prefab instance — $assetText'
-        : 'Prefab instance — ${prefabInfo.name.isEmpty ? assetText : prefabInfo.name}'
-              '${prefabInfo.isImported ? ' (imported hierarchy, read-only)' : ''}';
-    final broken = x != null && !x.expanded;
-    final missing = x == null || x.prefab == null;
-    final applyWhy = model.cannotApply(entity.id);
-    final unpackWhy = model.cannotUnpack(entity.id);
-    final overrides = x?.overrides;
-    final count = overrides?.length ?? p.overrides.length;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Container(
-          height: context.tokens.row + 4,
-          decoration: BoxDecoration(
-            color: context.tokens.header,
-            border: Border(top: context.tokens.hairline, bottom: context.tokens.hairline),
-          ),
-          padding: const EdgeInsets.only(left: 8, right: 2),
-          child: Row(
-            children: [
-              Icon(
-                missing || broken ? FIcons.brokenImageOutlined : FIcons.widgetsOutlined,
-                size: 13,
-                color: missing || broken ? context.tokens.error : context.tokens.accent,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  title,
-                  key: const ValueKey('prefab.title'),
-                  style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (x != null && x.diagnostics.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 8, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  missing
-                      ? 'The prefab is missing — the instance keeps its data and is not rewritten.'
-                      : 'The instance does not expand — the instance keeps its data and is not rewritten.',
-                  key: const ValueKey('prefab.broken'),
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                ),
-                for (var i = 0; i < x.diagnostics.length; i++)
-                  SelectableText(
-                    '${x.diagnostics[i].code}: ${x.diagnostics[i].message}',
-                    key: ValueKey('prefab.diagnostic.$i'),
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
-                  ),
-              ],
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 8, 6),
-          child: count == 0
-              ? Text(
-                  'No overrides — every field is the prefab\'s.',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var i = 0; i < count; i++)
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              overrides != null
-                                  ? describeExpansionOverride(overrides[i])
-                                  : describeOverride(p.overrides[i]),
-                              key: ValueKey('prefab.override.$i'),
-                              style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.bold),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          IconButton(
-                            key: ValueKey('prefab.revert.$i'),
-                            tooltip: 'Revert this override',
-                            icon: const Icon(FIcons.undo, size: 14),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                            onPressed: model.canEdit ? () => model.revertOverride(entity.id, index: i) : null,
-                          ),
-                          IconButton(
-                            key: ValueKey('prefab.apply.$i'),
-                            tooltip: applyWhy ?? 'Apply this override to the prefab',
-                            icon: const Icon(FIcons.upload, size: 14),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                            onPressed: applyWhy == null ? () => model.applyOverrides(entity.id, index: i) : null,
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 0, 8, 6),
-          child: Wrap(
-            spacing: 4,
-            runSpacing: 2,
-            children: [
-              if (count > 0)
-                Tooltip(
-                  message: applyWhy ?? 'Apply every override to the prefab, then revert them here',
-                  child: TextButton.icon(
-                    key: const ValueKey('prefab.applyAll'),
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                    onPressed: applyWhy == null ? () => model.applyOverrides(entity.id) : null,
-                    icon: const Icon(FIcons.upload, size: 14),
-                    label: const Text('Apply to prefab', style: TextStyle(fontSize: 11)),
-                  ),
-                ),
-              if (count > 0)
-                TextButton.icon(
-                  key: const ValueKey('prefab.revertAll'),
-                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                  onPressed: model.canEdit ? () => model.revertOverride(entity.id) : null,
-                  icon: const Icon(FIcons.undo, size: 14),
-                  label: const Text('Revert all', style: TextStyle(fontSize: 11)),
-                ),
-              Tooltip(
-                message: unpackWhy ?? 'Unpack — the instance becomes plain entities of this document',
-                child: TextButton.icon(
-                  key: const ValueKey('prefab.unpack'),
-                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                  onPressed: unpackWhy == null ? () => model.unpack(entity.id) : null,
-                  icon: const Icon(FIcons.unarchiveOutlined, size: 14),
-                  label: const Text('Unpack', style: TextStyle(fontSize: 11)),
-                ),
-              ),
-              TextButton.icon(
-                key: const ValueKey('prefab.open'),
-                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                onPressed: x == null || missing ? null : () => model.openPrefab(entity.id),
-                icon: const Icon(FIcons.openInNew, size: 14),
-                label: const Text('Open prefab', style: TextStyle(fontSize: 11)),
-              ),
-              TextButton.icon(
-                key: const ValueKey('prefab.selectAsset'),
-                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-                onPressed: model.revealAsset == null ? null : () => model.selectPrefabAsset(entity.id),
-                icon: const Icon(FIcons.folderOpenOutlined, size: 14),
-                label: const Text('Select prefab asset', style: TextStyle(fontSize: 11)),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 /// A derived entity's banner: the instance it belongs to, whether an
 /// override added it, and a way back to the anchor.

@@ -22,6 +22,7 @@
 // `removeComponent`, an added object's re-issued `addObject`. Per field:
 // Revert (drop that override) and Apply to prefab (`prefab_actions.dart`).
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -1617,6 +1618,38 @@ final class InspectorModel extends ChangeNotifier {
   bool get canRename {
     final e = single;
     return canEdit && e != null && (!e.isDerived || e.added);
+  }
+
+  /// The prefab's own value that the override [o] of the instance
+  /// [entityId] replaces — the Overrides dropdown's comparison — read from
+  /// the prefab's file. `(false, null)` when the prefab has none there (an
+  /// imported hierarchy, a nested instance's object, a field left to its
+  /// default) or [o] is not a field.
+  (bool, Object?) prefabValueOf(String entityId, ExpansionOverride o) {
+    final info = expansionOf(entityId)?.prefab;
+    final path = info?.path;
+    if (info == null || info.kind != 'prefab' || path == null || o.component == null || o.field == null) {
+      return (false, null);
+    }
+    try {
+      final json = jsonDecode(File(project.assetFile(path)).readAsStringSync());
+      final data = json['entities'][o.entity]['components'][o.component]['data'];
+      if (data is! Map || !data.containsKey(o.field)) return (false, null);
+      return (true, data[o.field]);
+    } catch (_) {
+      return (false, null);
+    }
+  }
+
+  /// The instance and override index that added [slot]'s component (an
+  /// `addComponent` override on a prefab instance), or null.
+  (String, int)? addedComponentOverride(ComponentSlot slot) {
+    if (!slot.single) return null;
+    final i = slot.first;
+    if (!i.isDerived || !i.added || i.entityLocal == null || i.local == null) return null;
+    final x = expansionOf(i.anchor!);
+    final index = x == null ? null : prefab.addComponentIndexOf(x, entity: i.entityLocal!, component: i.local!);
+    return index == null ? null : (i.anchor!, index);
   }
 
   /// Drops one prefab override of [entityId] (all of them when [index] is null).
