@@ -322,6 +322,90 @@ abstract class Behaviour {
   /// Another behaviour on the same object.
   T? sibling<T extends Behaviour>() => gameObject.behaviour<T>();
 
+  // ---- coroutines and Invoke (Unity's, docs/unity-parity.md § Tier 2)
+
+  /// Runs [routine] — a `sync*` generator — now, up to its first `yield`,
+  /// then resumes it once per frame after every `update` (Unity's
+  /// `StartCoroutine`). What it yields says when it goes on: `null` (the
+  /// next frame), [WaitForSeconds], [WaitUntil], [WaitWhile],
+  /// [WaitForFixedUpdate], another [Coroutine] (until that one ends) or a
+  /// nested generator (run in place). It stops at its end, at [Coroutine.stop] /
+  /// [stopCoroutine] / [stopAllCoroutines], when this behaviour is
+  /// destroyed or its object leaves the active hierarchy, or when it
+  /// throws (reported like a callback, [World.onBehaviourError]).
+  ///
+  /// ```dart
+  /// Iterable<Object?> blink() sync* {
+  ///   for (var i = 0; i < 3; i++) {
+  ///     set(light.copyWith(intensity: 0));
+  ///     yield const WaitForSeconds(0.2);
+  ///     set(light);
+  ///     yield const WaitForSeconds(0.2);
+  ///   }
+  /// }
+  /// ```
+  Coroutine startCoroutine(Iterable<Object?> routine) => _schedule(Coroutine._(this, routine.iterator, false));
+
+  /// Stops [coroutine] (it does nothing more).
+  void stopCoroutine(Coroutine coroutine) => coroutine.stop();
+
+  /// Stops every coroutine this behaviour started ([invoke]s stay).
+  void stopAllCoroutines() {
+    for (final c in _routines) {
+      if (!c._invoke) c.stop();
+    }
+  }
+
+  /// Calls [f] once, [seconds] of game time from now (Unity's `Invoke`;
+  /// `0` is the next frame). It still runs while this behaviour is
+  /// disabled, as Unity's does, and not after it is destroyed.
+  Coroutine invoke(void Function() f, double seconds) => invokeRepeating(f, seconds, 0);
+
+  /// Calls [f] after [delay] seconds, then every [rate] seconds (`0`: once).
+  Coroutine invokeRepeating(void Function() f, double delay, double rate) {
+    Iterable<Object?> calls() sync* {
+      yield WaitForSeconds(delay);
+      f();
+      while (rate > 0) {
+        yield WaitForSeconds(rate);
+        f();
+      }
+    }
+
+    return _schedule(Coroutine._(this, calls().iterator, true));
+  }
+
+  /// Cancels [which], or every pending [invoke] of this behaviour.
+  void cancelInvoke([Coroutine? which]) {
+    if (which != null) return which.stop();
+    for (final c in _routines) {
+      if (c._invoke) c.stop();
+    }
+  }
+
+  /// Whether an [invoke] of this behaviour is pending.
+  bool get isInvoking => _routines.any((c) => c._invoke && c.isRunning);
+
+  final List<Coroutine> _routines = [];
+
+  Coroutine _schedule(Coroutine c) {
+    final system = _system;
+    if (system == null || _destroyRequested) {
+      throw StateError('$runtimeType: a coroutine needs an attached behaviour that is not destroyed');
+    }
+    _routines.add(c);
+    system._routines.add(c);
+    // Run up to the first yield now, as Unity does.
+    system._advance(c);
+    return c;
+  }
+
+  void _stopRoutines({required bool invokes}) {
+    for (final c in _routines) {
+      if (invokes || !c._invoke) c.stop();
+    }
+  }
+
   // ---- the lifecycle (§3.2)
 
   /// The object and serialized fields exist; references are resolved.
@@ -505,6 +589,51 @@ class BehaviourRegistry {
   }
 }
 
+/// A running [Behaviour.startCoroutine] or [Behaviour.invoke].
+final class Coroutine {
+  Coroutine._(this._owner, Iterator<Object?> routine, this._invoke) : _stack = [routine];
+
+  final Behaviour _owner;
+  final List<Iterator<Object?>> _stack;
+  final bool _invoke;
+  bool _done = false;
+
+  /// What the last `yield` waits for, and when it was yielded.
+  Object? _wait;
+  int _frame = 0, _tick = 0;
+  double _until = 0;
+
+  /// False once it ended, was stopped, or threw.
+  bool get isRunning => !_done;
+
+  /// Stops it: it does nothing more.
+  void stop() => _done = true;
+}
+
+/// `yield WaitForSeconds(s)`: go on once [seconds] of game time passed.
+final class WaitForSeconds {
+  const WaitForSeconds(this.seconds);
+  final double seconds;
+}
+
+/// `yield WaitUntil(() => done)`: go on the first frame [condition] holds.
+final class WaitUntil {
+  const WaitUntil(this.condition);
+  final bool Function() condition;
+}
+
+/// `yield WaitWhile(() => busy)`: go on the first frame [condition] fails.
+final class WaitWhile {
+  const WaitWhile(this.condition);
+  final bool Function() condition;
+}
+
+/// `yield const WaitForFixedUpdate()`: go on after the next fixed tick's
+/// physics step (after `afterPhysics`).
+final class WaitForFixedUpdate {
+  const WaitForFixedUpdate();
+}
+
 /// A behaviour callback that threw ([World.onBehaviourError]).
 class BehaviourError {
   BehaviourError(this.behaviour, this.callback, this.error, this.stack, {required this.tick});
@@ -539,6 +668,12 @@ class _BehaviourSystem {
   /// Every attached, not yet destroyed behaviour, kept sorted by (order,
   /// sequence).
   final List<Behaviour> _all = [];
+
+  /// Every running coroutine and invoke, in start order.
+  final List<Coroutine> _routines = [];
+
+  /// Game time as the coroutines see it: the sum of the frames' `dt`.
+  double _clock = 0;
 
   /// Scratch copy for the callback loops (callbacks may attach/destroy);
   /// kept between phases so a steady frame allocates nothing.
@@ -608,6 +743,7 @@ class _BehaviourSystem {
         }
         b._destroyed = true;
         b._destroyRequested = true;
+        b._stopRoutines(invokes: true);
         _all.remove(b);
         go._behaviours.remove(b);
         if (b._created) _call(b, 'onDestroy', b.onDestroy);
@@ -631,6 +767,9 @@ class _BehaviourSystem {
       for (final b in _disabling) {
         if (!b._active || b._destroyed) continue;
         b._active = false;
+        // Unity: an object leaving the active hierarchy stops its
+        // coroutines; a disabled behaviour keeps them.
+        if (!b._gameObject!.activeInHierarchy) b._stopRoutines(invokes: false);
         _call(b, 'onDisable', b.onDisable);
       }
       _disabling.clear();
@@ -707,6 +846,7 @@ class _BehaviourSystem {
     _run(ctx.context, 'afterPhysics', (b) {
       if (b.wantsAfterPhysics) b.afterPhysics(ctx);
     });
+    if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: true));
   }
 
   void _dispatchContacts(List<Contact> contacts) {
@@ -831,7 +971,67 @@ class _BehaviourSystem {
     _run(ctx.context, 'update', (b) {
       if (_startIfNeeded(b)) b.update(ctx);
     });
+    _clock += dt;
+    if (_routines.isNotEmpty) ctx.context.run(() => _resume(fixed: false));
     _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx));
+  }
+
+  /// Resumes the coroutines whose wait is over: every kind but
+  /// [WaitForFixedUpdate] after the frame's `update`s, those after a
+  /// tick's `afterPhysics`. Ones started during the pass wait for the next.
+  void _resume({required bool fixed}) {
+    final n = _routines.length;
+    for (var i = 0; i < n; i++) {
+      final c = _routines[i];
+      if (c._done || (c._wait is WaitForFixedUpdate) != fixed || !_ready(c)) continue;
+      _advance(c);
+    }
+    _routines.removeWhere((c) {
+      if (!c._done) return false;
+      c._owner._routines.remove(c);
+      return true;
+    });
+  }
+
+  bool _ready(Coroutine c) {
+    final w = c._wait;
+    if (w is WaitForFixedUpdate) return world.tick > c._tick;
+    if (world._frameCount <= c._frame) return false;
+    return switch (w) {
+      // A microsecond's slack: frame times summed in floating point.
+      WaitForSeconds() => _clock + 1e-6 >= c._until,
+      WaitUntil(:final condition) => condition(),
+      WaitWhile(:final condition) => !condition(),
+      Coroutine() => !w.isRunning,
+      _ => true,
+    };
+  }
+
+  /// Runs [c] to its next yield (nested generators in place).
+  void _advance(Coroutine c) {
+    try {
+      while (!c._done) {
+        final top = c._stack.last;
+        if (!top.moveNext()) {
+          c._stack.removeLast();
+          if (c._stack.isEmpty) c._done = true;
+          continue;
+        }
+        final v = top.current;
+        if (v is Iterable<Object?>) {
+          c._stack.add(v.iterator);
+          continue;
+        }
+        c._wait = v;
+        c._frame = world._frameCount;
+        c._tick = world.tick;
+        if (v is WaitForSeconds) c._until = _clock + v.seconds;
+        return;
+      }
+    } catch (e, st) {
+      c._done = true;
+      _threw(c._owner, c._invoke ? 'invoke' : 'coroutine', e, st);
+    }
   }
 
   /// Runs `start` the first time; false when it threw (reported, and the
