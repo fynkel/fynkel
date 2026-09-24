@@ -87,6 +87,33 @@ final class Stack {
   }
 }
 
+/// Gives the copy's crate prefab a `Lid` under its root.
+void addLid(Directory dir) {
+  final file = File('${dir.path}/assets/prefabs/crate.prefab.json');
+  final prefab = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+  final root = prefab['root'] as String;
+  const lid = 'c0000000-0000-4000-8000-0000000000b9';
+  final entities = prefab['entities'] as Map<String, Object?>;
+  ((entities[root] as Map)['children'] as List).add(lid);
+  entities[lid] = {
+    'name': 'Lid',
+    'parent': root,
+    'children': <String>[],
+    'components': {
+      'c0000000-0000-4000-8000-0000000000ba': {
+        'type': 'fynkel.Transform',
+        'version': 1,
+        'data': {
+          'position': [0, 0.6, 0],
+          'rotation': [0, 0, 0, 1],
+          'scale': [1, 1, 1],
+        },
+      },
+    },
+  };
+  file.writeAsStringSync('${const JsonEncoder.withIndent('  ').convert(prefab)}\n');
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -137,7 +164,9 @@ void main() {
   });
 
   test('a gizmo drag is one undo step and the world equals a fresh load; hidden never reaches the document', () async {
-    final s = await Stack.open('drag');
+    // The copy's crate gets a Lid under its root, so Crate A has a derived
+    // child to drag.
+    final s = await Stack.open('drag', prepare: addLid);
     addTearDown(s.close);
     final tab = s.tabs.openDocument(mainScene)!;
     final st = s.model.current!;
@@ -156,7 +185,7 @@ void main() {
     expect(s.model.noGizmoReason, contains('no Transform'));
     expect(preview.worldMatrices([robot])[robot], isNotNull);
 
-    // Move Crate A (a prefab instance, dragged by its anchor) along world X.
+    // Move Crate A (a prefab instance: its root Transform, by an override) along world X.
     tab.select(crateA);
     s.model.frameSelected();
     st.camera.distance = 8; // 120 px ≈ 1.2 m at this distance
@@ -177,6 +206,14 @@ void main() {
     expect(applied!.ok, isTrue, reason: applied.diagnostics.join('; '));
     expect(tab.document.history, history + 1, reason: 'one transaction');
     expect(applied.mutations.length, 1, reason: 'the position only: ${applied.mutations}');
+    // The instance is the prefab's root (ADR-0022): its move is the
+    // position override on the root's Transform.
+    final moved = ((tab.document.entities([crateA]).entities[crateA]!['prefab'] as Map)['overrides'] as List)
+        .whereType<Map>()
+        .where((o) => o['field'] == 'position')
+        .single;
+    expect(moved['entity'], tab.tree[crateA]!.rootLocal);
+    expect(moved['component'], tab.tree[crateA]!.transformLocal);
     final committed = preview.worldMatrices([crateA])[crateA]!;
     expect(committed[12], closeTo(previewed[12], 1e-4));
     expect(committed[13], closeTo(startWorld[13], 1e-6));
@@ -199,7 +236,7 @@ void main() {
       expect(back[i], closeTo(startWorld[i], 1e-6), reason: 'element $i');
     }
 
-    // Move the entity *inside* Crate A (its derived `Crate`, M4-07): the
+    // Move the entity *inside* Crate A (its derived `Lid`, M4-07): the
     // drag previews on the derived entity in the world and commits as one
     // `setPrefabOverride` on the anchor — the prefab file is untouched,
     // the incremental sync moves the derived entity, one undo.
@@ -225,7 +262,10 @@ void main() {
     expect(dApplied!.ok, isTrue, reason: dApplied.diagnostics.join('; '));
     expect(tab.document.history, history + 1, reason: 'one transaction');
     final overrides = (tab.document.entities([crateA]).entities[crateA]!['prefab'] as Map)['overrides'] as List;
-    final positionOverride = overrides.whereType<Map>().where((o) => o['field'] == 'position').toList();
+    final positionOverride = overrides
+        .whereType<Map>()
+        .where((o) => o['field'] == 'position' && o['entity'] == tab.tree[derived]!.local)
+        .toList();
     expect(positionOverride, hasLength(1), reason: 'a setField override on the anchor: $overrides');
     expect(positionOverride.single['op'], 'setField');
     expect(positionOverride.single['entity'], tab.tree[derived]!.local);

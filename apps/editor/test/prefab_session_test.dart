@@ -91,7 +91,7 @@ final class Session {
 ComponentSlot slotOf(InspectorModel m, String type) => m.slots.singleWhere((s) => s.type == type);
 
 void main() {
-  test('Crate A: the override shows bold on the derived entity, reverts, and the saved scene reloads clean', () async {
+  test('Crate A: the instance is the prefab\'s root, its overrides show bold, revert, and the saved scene reloads clean', () async {
     final s = await Session.open('prefab_crate');
     final tab = s.tabs.openDocument(mainScene)!;
     final x = tab.expansionOf(crateA)!;
@@ -99,44 +99,54 @@ void main() {
     expect(x.prefab!.name, 'Crate');
     expect(x.prefab!.kind, 'prefab');
     expect(x.prefab!.readOnly, isNull);
+    // One entity: Crate A itself as the prefab's root (ADR-0022).
     expect(x.entities.length, 1);
-    final derived = x.entities.single;
-    expect(derived.parent, crateA);
-    expect(derived.local, 'c0000000-0000-4000-8000-0000000000b1');
-    expect(x.overrides.single.entityId, derived.id);
-    expect(x.overrides.single.componentType, 'fynkel.MeshRenderer');
-    // The Hierarchy shows it under the anchor; the Inspector marks the field.
+    final root = x.entities.single;
+    expect(root.id, crateA);
+    expect(root.name, 'Crate A');
+    expect(root.parent, isNull);
+    expect(root.local, 'c0000000-0000-4000-8000-0000000000b1');
+    expect(x.overrides.map((o) => o.field), ['cast_shadows', 'position']);
+    expect(x.overrides.first.entityId, crateA);
+    expect(x.overrides.first.componentType, 'fynkel.MeshRenderer');
+    // The Hierarchy shows no row below it; the Inspector shows the root's
+    // components on the instance with the fields marked.
     s.hierarchy.expand(crateA);
-    expect(tab.tree.rows.map((r) => r.id), contains(derived.id));
-    expect(tab.tree[derived.id]!.overriddenFields, 1);
-    tab.select(derived.id);
+    expect(tab.tree.childrenOf(crateA), isEmpty);
+    expect(tab.tree[crateA]!.isDerived, isFalse);
+    expect(tab.tree[crateA]!.overriddenFields, 2);
+    expect(tab.tree[crateA]!.componentTypes, containsAll(['fynkel.Transform', 'fynkel.MeshRenderer']));
+    tab.select(crateA);
     final mesh = slotOf(s.inspector, 'fynkel.MeshRenderer');
     expect(mesh.isDerived, isTrue);
     expect(mesh.value('cast_shadows'), false);
     expect(mesh.isOverridden('cast_shadows'), isTrue);
     expect(mesh.isOverridden('mesh'), isFalse);
-    // Revert override: one transaction; the derived entity shows the prefab's value.
+    expect(slotOf(s.inspector, 'fynkel.Transform').isOverridden('position'), isTrue, reason: 'where it stands');
+    // Revert override: one transaction; the instance shows the prefab's value.
     expect(s.inspector.revertField(mesh, 'cast_shadows'), isTrue);
     expect(tab.document.history, 1);
-    expect(s.inspectedOverrides(mainScene, crateA), isEmpty);
+    expect(s.inspectedOverrides(mainScene, crateA).map((o) => o['field']), ['position']);
     expect(slotOf(s.inspector, 'fynkel.MeshRenderer').value('cast_shadows'), true);
     expect(slotOf(s.inspector, 'fynkel.MeshRenderer').isOverridden('cast_shadows'), isFalse);
-    // A new override on a derived field: whole key, and it round-trips through save.
+    // Moving the instance: the position override takes the whole key, and
+    // it round-trips through save.
     final t = slotOf(s.inspector, 'fynkel.Transform');
     expect(s.inspector.setField(t, '/position/1', 2.5), isTrue);
     final o = s.inspectedOverrides(mainScene, crateA).single;
     expect(o['field'], 'position');
-    expect(o['value'], [0, 2.5, 0]);
+    expect(o['value'], [2, 2.5, 0]);
     expect(tab.save(), isTrue);
     final saved = readJson(s.file('assets/scenes/main.scene.json'));
-    final anchor = (saved['entities'] as Map)[crateA] as Map;
-    expect((anchor['prefab'] as Map)['overrides'], [
+    final instance = (saved['entities'] as Map)[crateA] as Map;
+    expect(instance['components'], isEmpty, reason: 'an instance has no components of its own');
+    expect((instance['prefab'] as Map)['overrides'], [
       {
         'op': 'setField',
         'entity': 'c0000000-0000-4000-8000-0000000000b1',
         'component': 'c0000000-0000-4000-8000-0000000000c2',
         'field': 'position',
-        'value': [0, 2.5, 0],
+        'value': [2, 2.5, 0],
       },
     ]);
     final again = await SessionProject.open(s.dir.path, watch: false);
@@ -150,19 +160,19 @@ void main() {
     expect(s.hierarchy.instantiatePrefab({'asset': coinPrefab}, name: 'Coin'), isTrue);
     final anchor = tab.selection.single;
     expect(tab.document.history, 1);
-    // Every object has a Transform, the instance dropped on the Hierarchy too
-    // (the user's gate finding, 2026-09-24) — and the Inspector keeps it.
-    final anchorComponents =
-        (tab.document.entities([anchor]).entities[anchor]!['components'] as Map).values.cast<Map>();
-    expect(anchorComponents.map((c) => c['type']), ['fynkel.Transform']);
+    // The instance is the coin's root (ADR-0022): no components of its own,
+    // no overrides — its Transform is the root's, and the Inspector keeps it.
+    expect(tab.document.entities([anchor]).entities[anchor]!['components'], isEmpty);
+    expect(s.inspectedOverrides(mainScene, anchor), isEmpty);
     expect(s.inspector.removeComponent(slotOf(s.inspector, 'fynkel.Transform')), isFalse);
     expect(s.inspector.lastError, contains('cannot be removed'));
     expect(tab.document.history, 1);
     final x = tab.expansionOf(anchor)!;
     expect(x.prefab!.name, 'Coin');
     final coin = x.byLocal(coinRoot)!;
+    expect(coin.id, anchor);
     expect(coin.components.values.map((c) => c.type), contains('fynkel.TriggerZone'));
-    // An override on the derived TriggerZone's event.
+    // An override on the TriggerZone's event.
     tab.select(coin.id);
     final trigger = slotOf(s.inspector, 'fynkel.TriggerZone');
     expect(trigger.value('event'), 'collect');
@@ -201,28 +211,28 @@ void main() {
       (((savedPrefab['entities'] as Map)[coinRoot] as Map)['components'] as Map)[coinTrigger]['data']['event'],
       'pickup',
     );
-    // Unpack: the instance becomes plain entities under the anchor, one transaction.
+    // Unpack: the instance becomes a plain entity holding the root's
+    // components, under the same id; one transaction.
     tab.select(anchor);
     expect(s.inspector.cannotUnpack(anchor), isNull);
     final instancesBefore = tab.document.inspect()['instanceCount'] as int;
+    final entitiesBefore = tab.tree.entityCount;
     expect(s.inspector.unpack(anchor), isTrue);
     expect(tab.document.history, 4);
-    expect(tab.tree[coin.id]!.isDerived, isFalse);
-    expect(tab.tree[coin.id]!.parent, anchor);
-    expect(tab.tree.entityCount, greaterThan(6));
+    expect(tab.tree[anchor]!.isPrefabInstance, isFalse);
+    expect(tab.tree.entityCount, entitiesBefore, reason: 'the coin is one entity, the instance itself');
     expect(tab.document.inspect()['instanceCount'], instancesBefore - 1, reason: 'inspect sees one instance fewer');
     expect(tab.document.entities([anchor]).entities[anchor]!.containsKey('prefab'), isFalse);
     expect(tab.save(), isTrue);
     final savedScene = readJson(s.file('assets/scenes/main.scene.json'));
-    final e = (savedScene['entities'] as Map)[coin.id] as Map;
-    expect(e['parent'], anchor);
+    final e = (savedScene['entities'] as Map)[anchor] as Map;
+    expect(e.containsKey('prefab'), isFalse);
     expect((e['components'] as Map).values.map((c) => (c as Map)['type']), contains('fynkel.TriggerZone'));
-    expect(((savedScene['entities'] as Map)[anchor] as Map).containsKey('prefab'), isFalse);
     final again = await SessionProject.open(s.dir.path, watch: false);
     addTearDown(again.close);
     expect(again.diagnostics.where((d) => d.severity == Severity.error), isEmpty);
     expect(tab.undo(), isTrue);
-    expect(tab.tree[coin.id]!.isDerived, isTrue);
+    expect(tab.tree[anchor]!.isPrefabInstance, isTrue);
   });
 
   test(
@@ -238,7 +248,11 @@ void main() {
       expect(x.prefab!.readOnly, isNotNull);
       expect(x.open, '$columnRig#prefab');
       expect(x.entities.length, greaterThan(1));
-      final overridden = x.overrides.single;
+      // The Prop's material, and the instance's own place and Animator (on
+      // the rig's root, which it is — ADR-0022).
+      expect(x.overrides.map((o) => o.op), ['setField', 'setField', 'addComponent']);
+      expect(x.overrides.skip(1).map((o) => o.entityId), [importedAnchor, importedAnchor]);
+      final overridden = x.overrides.first;
       expect(overridden.componentType, 'fynkel.MeshRenderer');
       expect(overridden.entityId, isNotNull);
       expect(s.inspector.cannotApply(importedAnchor), contains('cannot be edited'));
@@ -252,7 +266,7 @@ void main() {
       // Another override, saved, reloads clean.
       final t = slotOf(s.inspector, 'fynkel.Transform');
       expect(s.inspector.setField(t, '/scale/0', 2), isTrue);
-      expect(s.inspectedOverrides(rigScene, importedAnchor).length, 2);
+      expect(s.inspectedOverrides(rigScene, importedAnchor).length, 4);
       expect(tab.save(), isTrue);
       final again = await SessionProject.open(s.dir.path, watch: false);
       addTearDown(again.close);
@@ -296,7 +310,7 @@ void main() {
     expect(x.expanded, isFalse);
     expect(x.prefab, isNull);
     expect(x.diagnostics.map((d) => d.code), contains('FYN-D0401'));
-    expect(x.overrides.single.field, 'cast_shadows', reason: 'the instance keeps its data');
+    expect(x.overrides.map((o) => o.field), ['cast_shadows', 'position'], reason: 'the instance keeps its data');
     expect(tab.tree.childrenOf(crateA), isEmpty);
     tab.select(crateA);
     expect(inspector.single!.expansion!.diagnostics, isNotEmpty);
@@ -344,29 +358,41 @@ void main() {
       expect(tab.document.entities([robot]).entities[robot]!.containsKey('active'), isFalse);
       expect(s.inspector.active, isTrue);
 
-      // Crate A off: its derived child is greyed with it but keeps its own flag.
-      s.hierarchy.expand(crateA);
-      final derived = tab.expansionOf(crateA)!.entities.single;
+      // Crate A off: the instance's own flag, written on it (ADR-0022), not
+      // an override.
+      final overridesBefore = s.inspectedOverrides(mainScene, crateA).length;
       tab.select(crateA);
       expect(s.inspector.setActive(false), isTrue);
-      expect(tab.tree[derived.id]!.active, isTrue);
-      expect(tab.tree.activeInHierarchy(derived.id), isFalse);
+      expect(tab.document.entities([crateA]).entities[crateA]!['active'], false);
+      expect(s.inspectedOverrides(mainScene, crateA), hasLength(overridesBefore));
+      expect(tab.tree[crateA]!.active, isFalse);
       expect(tab.undo(), isTrue);
 
-      // The derived child: an override on the anchor, marked, and Revert drops it.
-      final before = s.inspectedOverrides(mainScene, crateA).length;
-      tab.select(derived.id);
+      // The Rig scene's Imported: its derived Body is greyed with it but
+      // keeps its own flag.
+      final rig = s.tabs.openDocument(rigScene)!;
+      s.hierarchy.expand(importedAnchor);
+      final derived = rig.expansionOf(importedAnchor)!.entities.firstWhere((e) => e.name == 'Body');
+      rig.select(importedAnchor);
+      expect(s.inspector.setActive(false), isTrue);
+      expect(rig.tree[derived.id]!.active, isTrue);
+      expect(rig.tree.activeInHierarchy(derived.id), isFalse);
+      expect(rig.undo(), isTrue);
+
+      // The derived child: an override on the instance, marked, and Revert drops it.
+      final before = s.inspectedOverrides(rigScene, importedAnchor).length;
+      rig.select(derived.id);
       expect(s.inspector.active, isTrue);
       expect(s.inspector.activeOverridden, isFalse);
       expect(s.inspector.setActive(false), isTrue, reason: '${s.inspector.lastError}');
-      final overrides = s.inspectedOverrides(mainScene, crateA);
+      final overrides = s.inspectedOverrides(rigScene, importedAnchor);
       expect(overrides, hasLength(before + 1));
       expect(overrides.last, {'op': 'setActive', 'entity': derived.local, 'value': false});
       expect(s.inspector.active, isFalse);
       expect(s.inspector.activeOverridden, isTrue);
-      expect(tab.tree[derived.id]!.active, isFalse);
+      expect(rig.tree[derived.id]!.active, isFalse);
       expect(s.inspector.revertActive(), isTrue, reason: '${s.inspector.lastError}');
-      expect(s.inspectedOverrides(mainScene, crateA), hasLength(before));
+      expect(s.inspectedOverrides(rigScene, importedAnchor), hasLength(before));
       expect(s.inspector.active, isTrue);
       expect(s.inspector.activeOverridden, isFalse);
     },
@@ -396,29 +422,37 @@ void main() {
     final prefab = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
     expect(prefab['id'], id);
     expect(prefab['name'], 'Lamp');
-    expect(prefab['roots'], [lamp]);
+    // The prefab's one root is the lamp, with its Transform; the bulb is
+    // under it with its components.
+    final rootId = prefab['root'] as String;
     final entities = prefab['entities'] as Map<String, Object?>;
-    expect(entities.keys, unorderedEquals([lamp, bulb]));
+    expect(entities.keys, unorderedEquals([rootId, bulb]));
+    expect((entities[rootId] as Map)['name'], 'Lamp');
+    expect((entities[bulb] as Map)['parent'], rootId);
     Map<String, Object?> componentOf(Map<String, Object?> e, String type) =>
         ((e['components'] as Map).values.cast<Map<String, Object?>>()).firstWhere((c) => c['type'] == type);
-    // The root starts at the origin; the child keeps its components.
-    expect(componentOf(entities[lamp] as Map<String, Object?>, 'fynkel.Transform')['data'], containsPair('position', [0.0, 0.0, 0.0]));
+    expect(componentOf(entities[rootId] as Map<String, Object?>, 'fynkel.Transform')['data'], containsPair('position', [3.0, 1.0, -2.0]));
     expect(componentOf(entities[bulb] as Map<String, Object?>, 'fynkel.PointLight'), isNotNull);
 
-    // The scene: one transaction, the object gone, an instance at its place with its Transform.
+    // The scene: one transaction, the object is the instance now — the
+    // same id (ADR-0022), no components of its own, no override.
     expect(tab.document.history, history + 1);
-    final anchor = tab.selection.single;
-    final scene = tab.document.entities([lamp, anchor]).entities;
-    expect(scene[lamp], isNull);
-    expect((scene[anchor]!['prefab'] as Map)['asset'], {'asset': id});
-    expect(scene[anchor]!['name'], 'Lamp');
-    expect(componentOf(scene[anchor]!, 'fynkel.Transform')['data'], containsPair('position', [3.0, 1.0, -2.0]));
-    expect(tab.expansionOf(anchor)!.prefab!.name, 'Lamp');
+    expect(tab.selection.single, lamp);
+    final instance = tab.document.entities([lamp]).entities[lamp]!;
+    expect((instance['prefab'] as Map)['asset'], {'asset': id});
+    expect((instance['prefab'] as Map)['overrides'] ?? const [], isEmpty);
+    expect(instance['name'], 'Lamp');
+    expect(instance['components'], isEmpty);
+    expect(tab.document.entities([bulb]).entities[bulb], isNull, reason: 'the bulb is the prefab\'s now');
+    final x = tab.expansionOf(lamp)!;
+    expect(x.prefab!.name, 'Lamp');
+    expect(x.entity(lamp)!.components.values.firstWhere((c) => c.type == 'fynkel.Transform').data['position'], [3.0, 1.0, -2.0]);
     expect(tab.document.validate().where((d) => d.severity == Severity.error), isEmpty);
 
     // ⌘Z brings the object back; the prefab file stays, as in Unity.
     expect(tab.undo(), isTrue);
-    expect(tab.document.entities([lamp]).entities[lamp], isNotNull);
+    expect(tab.document.entities([lamp]).entities[lamp]!.containsKey('prefab'), isFalse);
+    expect(tab.document.entities([bulb]).entities[bulb], isNotNull);
     expect(file.existsSync(), isTrue);
 
     // A second drag of the same kind of object is numbered.
@@ -427,6 +461,5 @@ void main() {
     expect(s.hierarchy.rename(other, 'Lamp'), isTrue);
     s.hierarchy.createPrefab(other, 'prefabs');
     expect(File(s.file('assets/prefabs/Lamp 1.prefab.json')).existsSync(), isTrue);
-
   });
 }

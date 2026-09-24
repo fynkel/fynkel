@@ -617,7 +617,7 @@ class EditorShellState extends State<EditorShell> {
   bool get _canEditAssets => browser?.canEdit ?? false;
 
   /// Prefab mode: the one prefab instance the selection is about (the
-  /// anchor itself or its derived entities), or null.
+  /// instance itself or its derived entities), or null.
   String? get _selectionAnchor => prefab.selectionAnchor(tabs?.focused);
   PrefabExpansion? get _selectionExpansion {
     final a = _selectionAnchor;

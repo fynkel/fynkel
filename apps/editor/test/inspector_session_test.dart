@@ -301,15 +301,17 @@ void main() {
       expect(tab.save(), isTrue, reason: tab.lastError);
       expect(tab.document.validate().where((d) => d.severity == Severity.error), isEmpty);
 
-      // The prefab instance's override list with revert.
+      // The prefab instance's override list with revert: its shadows and
+      // place, and the two components added to it — overrides on the
+      // prefab's root, which it is (ADR-0022).
       tab.select(crateA);
       final info = model.single!.prefab!;
-      expect(info.overrides.length, 1);
-      expect(info.overrides.single['field'], 'cast_shadows');
+      expect(info.overrides.map((o) => o['op']), ['setField', 'setField', 'addComponent', 'addComponent']);
+      expect(info.overrides.first['field'], 'cast_shadows');
       expect(model.revertOverride(crateA, index: 0), isTrue, reason: model.lastError);
-      expect(model.single!.prefab!.overrides, isEmpty);
+      expect(model.single!.prefab!.overrides.length, 3);
       expect(tab.undo(), isTrue);
-      expect(model.single!.prefab!.overrides.length, 1);
+      expect(model.single!.prefab!.overrides.length, 4);
       expect(model.revertOverride(crateA), isTrue);
       expect(model.single!.prefab!.overrides, isEmpty);
     },

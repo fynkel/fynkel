@@ -550,17 +550,43 @@ final class InspectorModel extends ChangeNotifier {
       final e = patch?.entities[id];
       if (e == null) continue; // deleted under us; the tab prunes the selection next
       final p = _prefabOf(e);
+      final x = p == null ? null : t.expansionOf(id);
       infos.add(
         EntityInfo(
           id: id,
           name: e['name'] as String? ?? '',
           active: e['active'] != false,
           prefab: p,
-          expansion: p == null ? null : t.expansionOf(id),
+          expansion: x,
         ),
       );
       final comps = <ComponentInstance>[];
       final types = _typesOn[id] = <String>{};
+      // A prefab instance is its prefab's root (ADR-0022): the root's
+      // components as the instance applies them, every edit an override
+      // on the instance itself.
+      final root = x != null && x.expanded ? x.entity(id) : null;
+      if (root != null) {
+        for (final c in root.components.entries) {
+          comps.add(
+            ComponentInstance(
+              entityId: id,
+              componentId: c.key,
+              type: c.value.type,
+              version: c.value.version,
+              data: Map<String, Object?>.from(c.value.data),
+              anchor: id,
+              entityLocal: root.local,
+              local: c.value.local,
+              added: c.value.added,
+              overridden: c.value.overridden.toSet(),
+            ),
+          );
+          types.add(c.value.type);
+        }
+        perEntity.add(comps);
+        continue;
+      }
       final map = e['components'];
       if (map is Map) {
         for (final entry in map.entries) {
@@ -836,15 +862,39 @@ final class InspectorModel extends ChangeNotifier {
             path: e.key,
             value: e.value,
           );
-          data = {...data, op['field'] as String: op['value']};
+          final field = op['field'] as String;
+          // The value it has already, inherited: no override (as Unity).
+          if (!i.overridden.contains(field) && _sameValue(data[field], op['value'])) continue;
+          data = {...data, field: op['value']};
           commands.add(Command.setPrefabOverrideOp(i.anchor!, op));
         } else {
           commands.add(Command.setField(i.entityId, i.componentId, e.key, _copyJson(e.value)));
         }
       }
     }
+    if (commands.isEmpty) return true;
     final key = '${slot.key}/${_topLevel(values.keys.first)}';
     return _commit(commands, key);
+  }
+
+  /// JSON equality with numbers by value (`1` is `1.0`).
+  static bool _sameValue(Object? a, Object? b) {
+    if (a is num && b is num) return a == b;
+    if (a is List && b is List) {
+      if (a.length != b.length) return false;
+      for (var k = 0; k < a.length; k++) {
+        if (!_sameValue(a[k], b[k])) return false;
+      }
+      return true;
+    }
+    if (a is Map && b is Map) {
+      if (a.length != b.length) return false;
+      for (final e in a.entries) {
+        if (!b.containsKey(e.key) || !_sameValue(e.value, b[e.key])) return false;
+      }
+      return true;
+    }
+    return a == b;
   }
 
   /// Removes [field] from every instance (the schema default applies again).
@@ -1062,11 +1112,13 @@ final class InspectorModel extends ChangeNotifier {
   /// `addComponent` override on a derived entity's anchor (null when its
   /// expansion is gone).
   Map<String, Object?>? _addCommand(EntityInfo e, String type, int version, Map<String, Object?> data) {
-    if (!e.isDerived) return Command.addComponent(e.id, {'type': type, 'version': version, 'data': _copyJson(data)});
-    final local = _tab!.expansionOf(e.anchor!)?.entity(e.id)?.local;
+    // An instance is its prefab's root: an override on itself (ADR-0022).
+    final anchor = e.anchor ?? (e.prefab != null ? e.id : null);
+    if (anchor == null) return Command.addComponent(e.id, {'type': type, 'version': version, 'data': _copyJson(data)});
+    final local = _tab!.expansionOf(anchor)?.entity(e.id)?.local;
     if (local == null) return null;
     return Command.setPrefabOverrideOp(
-      e.anchor!,
+      anchor,
       prefab.addComponentOverride(entity: local, type: type, version: version, data: data),
     );
   }

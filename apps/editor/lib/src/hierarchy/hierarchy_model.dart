@@ -3,9 +3,10 @@
 // undo step and one revision in `fynkel scene inspect --json` after save.
 // Reparenting with "keep world transform" puts the `setField`s on the
 // moved entity's Transform into the same transaction as the move.
-// Prefab mode (item 7): a derived entity (one a prefab instance expands
-// to) is not in the document, so its operations are override ops on the
-// instance's anchor — Delete is a `removeObject` override (or the revert
+// Prefab mode (item 7, ADR-0022): the instance is the prefab's root, so
+// its own edits are overrides on the root; a derived entity (one of the
+// root's descendants) is not in the document, so its operations are
+// override ops on the instance — Delete is a `removeObject` override (or the revert
 // of the `addObject` that added it), Create Empty Child an `addObject`
 // override, Rename only for an added object (its `addObject` re-issued);
 // derived entities are never duplicated, dragged or drop targets.
@@ -545,9 +546,10 @@ final class HierarchyModel extends ChangeNotifier {
   /// children — through the prefab's own commands, then saved — and
   /// replaces the object in the scene by an instance of it at the same
   /// place (one scene transaction, one ⌘Z; the prefab file stays, as in
-  /// Unity). The object's Transform goes to the instance and the prefab's
-  /// root starts at the origin, so the scene looks the same. Returns the
-  /// new prefab's id.
+  /// Unity). The object becomes the instance under its own id — the
+  /// prefab's root (ADR-0022) — and its Transform stays the root's, with
+  /// no override, so the scene looks the same. Returns the new prefab's
+  /// id.
   String? createPrefab(String id, String folder) {
     final t = _tab;
     final why = cannotCreatePrefab([id]);
@@ -570,35 +572,58 @@ final class HierarchyModel extends ChangeNotifier {
       notifyListeners();
       return null;
     }
-    final transformData = project.componentDefaults('fynkel.Transform') ?? Trs.identity.toData();
-    Map<String, Object?>? rootTransform;
-    final commands = <Map<String, Object?>>[];
-    final inactive = <String>[];
-    for (final e in _subtree(entities, id)) {
-      final entity = entities[e] as Map;
-      final components = <Map<String, Object?>>[];
-      for (final c in ((entity['components'] as Map?) ?? const {}).entries) {
-        final spec = c.value as Map;
-        var data = spec['data'] as Map<String, Object?>?;
-        if (e == id && spec['type'] == 'fynkel.Transform') {
-          rootTransform = data;
-          data = transformData;
-        }
-        components.add(componentSpec(spec['type'] as String, id: c.key as String, version: spec['version'] as int?, data: data));
-      }
-      commands.add(
-        Command.createObject(
-          id: e,
-          name: entity['name'] as String? ?? '',
-          parent: e == id ? null : entity['parent'] as String?,
-          components: components,
-        ),
-      );
-      if (entity['active'] == false) inactive.add(e);
-    }
-    commands.addAll([for (final e in inactive) Command.setObjectActive(e, false)]);
     final doc = project.openDocument(prefabId);
     try {
+      // The new prefab has its one root (ADR-0022), named after it with
+      // the default Transform: the object fills it — its Transform's
+      // values, its other components — and its children go under it.
+      final prefabRoot = doc.root();
+      final rootId = prefabRoot['root'] as String;
+      final rootComponents =
+          (((prefabRoot['entities'] as Map)[rootId] as Map)['components'] as Map).cast<String, Object?>();
+      final rootTransform = rootComponents.entries.firstWhere((c) => (c.value as Map)['type'] == 'fynkel.Transform').key;
+      final commands = <Map<String, Object?>>[];
+      final inactive = <String>[];
+      var transformKept = false;
+      for (final c in ((root['components'] as Map?) ?? const {}).entries) {
+        final spec = c.value as Map;
+        final data = spec['data'] as Map<String, Object?>?;
+        if (spec['type'] == 'fynkel.Transform' && !transformKept) {
+          transformKept = true;
+          for (final f in (data ?? const {}).entries) {
+            commands.add(Command.setField(rootId, rootTransform, f.key, f.value));
+          }
+          continue;
+        }
+        commands.add(
+          Command.addComponent(
+            rootId,
+            componentSpec(spec['type'] as String, id: c.key as String, version: spec['version'] as int?, data: data),
+          ),
+        );
+      }
+      if (!transformKept) commands.add(Command.removeComponent(rootId, rootTransform));
+      if (root['active'] == false) inactive.add(rootId);
+      for (final e in _subtree(entities, id).skip(1)) {
+        final entity = entities[e] as Map;
+        final components = <Map<String, Object?>>[];
+        for (final c in ((entity['components'] as Map?) ?? const {}).entries) {
+          final spec = c.value as Map;
+          final data = spec['data'] as Map<String, Object?>?;
+          components.add(componentSpec(spec['type'] as String, id: c.key as String, version: spec['version'] as int?, data: data));
+        }
+        final parent = entity['parent'] as String?;
+        commands.add(
+          Command.createObject(
+            id: e,
+            name: entity['name'] as String? ?? '',
+            parent: parent == id ? rootId : parent,
+            components: components,
+          ),
+        );
+        if (entity['active'] == false) inactive.add(e);
+      }
+      commands.addAll([for (final e in inactive) Command.setObjectActive(e, false)]);
       final a = doc.apply(commands, baseRevision: doc.revision);
       if (!a.ok) {
         t.lastError = 'Could not fill the prefab: ${describeRejection(a)}';
@@ -619,21 +644,19 @@ final class HierarchyModel extends ChangeNotifier {
         ? t.document.roots()
         : (((entities[parent] as Map?)?['children'] as List?) ?? const []).cast<String>();
     final index = siblings.indexOf(id);
-    final anchor = prefab.newUuid();
     final a = _run([
       Command.deleteObject(id),
       Command.instantiatePrefab(
         prefab: {'asset': prefabId},
-        id: anchor,
+        id: id,
         name: name,
         parent: parent,
         index: parent == null && !rootOrderIsEditable ? null : (index < 0 ? null : index),
-        components: [componentSpec('fynkel.Transform', data: rootTransform ?? transformData)],
       ),
     ]);
     if (a == null || !a.ok) return prefabId;
-    if (t.tree[anchor] != null) {
-      t.select(anchor);
+    if (t.tree[id] != null) {
+      t.select(id);
       notifyListeners();
     }
     return prefabId;
@@ -690,18 +713,19 @@ final class HierarchyModel extends ChangeNotifier {
 
   /// Instantiates the prefab [ref] (`{asset, sub?}`) under [target] — one
   /// `instantiatePrefab` transaction — and selects the instance. The
-  /// instance always gets a `fynkel.Transform`, as every object does:
-  /// [transform] (the Scene view's drop puts it where the pointer hit),
-  /// else the defaults.
+  /// instance is the prefab's root (ADR-0022) and has its Transform: where
+  /// the prefab puts it, or at [transform]'s position (the Scene view's
+  /// drop, where the pointer hit) — a `position` override, as Unity
+  /// stores it.
   bool instantiatePrefab(Map<String, Object?> ref, {required String name, DropTarget? target, Trs? transform}) {
     final t = _tab;
     if (t == null || !canEdit) return false;
     final parent = target?.parent;
     if (parent != null && (t.tree[parent]?.isDerived ?? true)) return false;
     final index = target == null ? null : (parent == null && !rootOrderIsEditable ? null : target.index);
-    final transformData =
-        transform?.toData() ?? project.componentDefaults('fynkel.Transform') ?? Trs.identity.toData();
-    final components = [componentSpec('fynkel.Transform', data: transformData)];
+    final components = [
+      if (transform != null) componentSpec('fynkel.Transform', data: {'position': transform.toData()['position']}),
+    ];
     final a = _run([
       Command.instantiatePrefab(prefab: ref, name: name, parent: parent, index: index, components: components),
     ]);
@@ -767,16 +791,30 @@ final class HierarchyModel extends ChangeNotifier {
     for (final id in moving) {
       final n = tree[id]!;
       commands.add(Command.reparentObject(id, parent: target.parent, index: index++));
+      final world = tree.worldMatrix(id); // reads an instance's root first
       if (keepWorldTransform && n.transformId != null && n.transform != null && n.parent != target.parent) {
-        final world = tree.worldMatrix(id);
         final local = Trs.fromMatrix(matMul(invParent, world));
         if (!local.sameAs(n.transform!)) {
           final data = local.toData();
           final old = n.transform!.toData();
           for (final field in const ['position', 'rotation', 'scale']) {
-            if (!listEquals(data[field] as List?, old[field] as List?)) {
-              commands.add(Command.setField(id, n.transformId!, field, data[field]));
-            }
+            if (listEquals(data[field] as List?, old[field] as List?)) continue;
+            final anchor = n.overrideAnchor;
+            commands.add(
+              anchor == null
+                  ? Command.setField(id, n.transformId!, field, data[field])
+                  // An instance moves by an override on its root (ADR-0022).
+                  : Command.setPrefabOverrideOp(
+                      anchor,
+                      prefab.setFieldOverride(
+                        entity: n.overrideLocal!,
+                        component: n.transformLocal ?? n.transformId!,
+                        data: old,
+                        path: field,
+                        value: data[field],
+                      ),
+                    ),
+            );
           }
         }
       }

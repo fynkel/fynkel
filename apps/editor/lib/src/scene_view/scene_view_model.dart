@@ -1054,11 +1054,12 @@ final class SceneViewModel extends ChangeNotifier {
     final own = <String>[];
     for (final id in wanted) {
       final node = t.tab.tree[id]!;
-      if (!node.isDerived) {
+      final anchor = node.overrideAnchor ?? (node.isPrefabInstance ? id : null);
+      if (anchor == null) {
         own.add(id);
         continue;
       }
-      final de = t.tab.expansionOf(node.anchor!)?.entity(id);
+      final de = t.tab.expansionOf(anchor)?.entity(id);
       for (final c in de?.components.values ?? const <Never>[]) {
         if (declaredGizmos(c.type) != null) items.add((id: id, type: c.type, data: Map<String, Object?>.from(c.data)));
       }
@@ -1177,6 +1178,10 @@ final class SceneViewModel extends ChangeNotifier {
   /// (topmost of the selection), lead first.
   List<String> _dragTargets(SceneTab t) {
     final sel = t.tab.tree.topmost(t.tab.selection);
+    // An instance's Transform is its prefab root's: read from its expansion.
+    for (final id in sel) {
+      if (t.tab.tree[id]?.isPrefabInstance ?? false) t.tab.expansionOf(id);
+    }
     final out = [
       for (final id in sel)
         if (!t.state.locked.contains(id) && t.tab.tree[id]?.transformId != null) id,
@@ -1302,8 +1307,8 @@ final class SceneViewModel extends ChangeNotifier {
           startLocal: node.transform ?? Trs.identity,
           startWorld: world,
           parentWorld: parentWorld,
-          anchor: node.anchor,
-          entityLocal: node.local,
+          anchor: node.overrideAnchor,
+          entityLocal: node.overrideLocal,
           transformLocal: node.transformLocal,
         ),
       );
@@ -1391,7 +1396,8 @@ final class SceneViewModel extends ChangeNotifier {
 
   /// The drag ends: the previewed transforms become one transaction of
   /// `setField`s (only the fields that changed) — for a derived entity of
-  /// a prefab instance, `setField` overrides on its anchor (M4-07); a drag
+  /// a prefab instance or the instance itself, `setField` overrides on the
+  /// instance (M4-07, ADR-0022); a drag
   /// that moved nothing writes nothing. Returns the transaction's outcome
   /// (null when none was needed or the call failed).
   Applied? endDrag() {
@@ -1506,8 +1512,9 @@ final class SceneViewModel extends ChangeNotifier {
   ComponentTarget? _readComponent(SceneTab t, String id, String type, ComponentHandles handler) {
     final node = t.tab.tree[id];
     if (node == null) return null;
-    if (node.isDerived) {
-      final de = t.tab.expansionOf(node.anchor!)?.entity(id);
+    final anchor = node.overrideAnchor ?? (node.isPrefabInstance ? id : null);
+    if (anchor != null) {
+      final de = t.tab.expansionOf(anchor)?.entity(id);
       if (de == null) return null;
       for (final c in de.components.entries) {
         if (c.value.type != type) continue;
@@ -1520,7 +1527,7 @@ final class SceneViewModel extends ChangeNotifier {
           data: data,
           world: identityMatrix,
           handler: handler,
-          anchor: node.anchor,
+          anchor: anchor,
           entityLocal: de.local,
           local: c.value.local,
         );

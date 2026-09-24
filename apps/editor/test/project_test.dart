@@ -125,7 +125,7 @@ void main() {
     final doc = project.migrations!.documents.single;
     expect(project.relative(doc.path), 'assets/scenes/training.scene.json');
     expect(doc.from, 0);
-    expect(doc.to, 4); // scenes are at formatVersion 4 since ADR-0020
+    expect(doc.to, 5); // scenes are at formatVersion 5 since ADR-0022
     expect(doc.applied.first.id, 'scene/0-1/entities-keyed-by-id');
     expect(doc.diff, contains('formatVersion'));
     expect(project.diagnostics.map((d) => d.code), contains('FYN-D0016'));

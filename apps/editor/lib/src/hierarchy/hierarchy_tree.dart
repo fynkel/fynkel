@@ -6,13 +6,15 @@
 // its nodes for one rename. The flat list of visible rows (what the
 // virtualised list shows) is computed lazily and cached.
 //
-// Prefab mode (item 7): a prefab instance's anchor shows its expansion —
-// the prefab's entities under the derived ids the runtime uses — as
-// *derived* nodes below its authored children. They are fetched lazily
-// through [HierarchyTree.expansionProvider] (the session's `instance`
-// query) when an anchor is first opened or one of its derived ids is asked
-// for, cached per anchor, and dropped when the anchor changes, the
-// document is rebuilt or a prefab document edits (`invalidateExpansions`).
+// Prefab mode (item 7): a prefab instance *is* its prefab's root
+// (ADR-0022): its node takes the root's components from the expansion,
+// and the prefab's other entities — under the derived ids the runtime
+// uses — are *derived* nodes before its authored children. Expansions are
+// fetched lazily through [HierarchyTree.expansionProvider] (the session's
+// `instance` query) when an instance is first opened, selected or one of
+// its derived ids is asked for, cached per instance, and dropped when the
+// instance changes, the document is rebuilt or a prefab document edits
+// (`invalidateExpansions`).
 import 'package:flutter/foundation.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
@@ -35,9 +37,10 @@ final class HierarchyNode {
   /// The `fynkel.Transform` component's id and data, when the entity has one.
   String? transformId;
 
-  /// A derived entity's Transform under its prefab-local component id —
-  /// what a `setField` override on the anchor addresses (the gizmo's
-  /// drag of a derived entity, M4-07). Null for a document entity.
+  /// A derived entity's (or an instance's root's) Transform under its
+  /// prefab-local component id — what a `setField` override on the
+  /// instance addresses (the gizmo's drag, M4-07). Null for a plain
+  /// document entity.
   String? transformLocal;
   Trs? transform;
 
@@ -45,6 +48,10 @@ final class HierarchyNode {
   bool isPrefabInstance = false;
   String? prefabAsset;
   int overrideCount = 0;
+
+  /// A prefab instance whose expansion was read: the prefab-local id of
+  /// the root it is (null before, or when it did not expand).
+  String? rootLocal;
 
   /// Prefab mode: the anchor whose expansion this derived node belongs to
   /// (null for an entity of the document), the prefab-local id overrides
@@ -56,6 +63,14 @@ final class HierarchyNode {
   int overriddenFields = 0;
 
   bool get isDerived => anchor != null;
+
+  /// Where an edit of this node's components goes as an override: the
+  /// anchor of a derived node, the instance itself once its root is read
+  /// (ADR-0022); null for a plain entity.
+  String? get overrideAnchor => anchor ?? (rootLocal != null ? id : null);
+
+  /// The prefab-local id that override addresses.
+  String? get overrideLocal => anchor != null ? local : rootLocal;
 
   /// Bumped on every patch; a row widget keyed on it repaints only then.
   int version = 0;
@@ -88,6 +103,9 @@ final class HierarchyNode {
     componentTypes = types;
     final prefab = e['prefab'];
     isPrefabInstance = prefab is Map;
+    rootLocal = null;
+    transformLocal = null;
+    overriddenFields = 0;
     if (prefab is Map) {
       final asset = prefab['asset'];
       prefabAsset = asset is Map ? asset['asset'] as String? : asset as String?;
@@ -96,6 +114,43 @@ final class HierarchyNode {
       prefabAsset = null;
       overrideCount = 0;
     }
+    version++;
+  }
+
+  /// Reads the expansion's entity for this instance itself — the prefab's
+  /// root (ADR-0022): its applied components, and the Transform an
+  /// override on the instance moves. Name, active and the document
+  /// children stay the instance's own.
+  void readRoot(ExpandedEntity e) {
+    rootLocal = e.local;
+    transformId = null;
+    transformLocal = null;
+    transform = null;
+    final types = <String>[];
+    var overridden = 0;
+    for (final c in e.components.values) {
+      types.add(c.type);
+      overridden += c.overridden.length;
+      if (c.type == 'fynkel.Transform' && transformId == null) {
+        transformId = c.id;
+        transformLocal = c.local ?? c.id;
+        transform = Trs.fromData(c.data);
+      }
+    }
+    componentTypes = types;
+    overriddenFields = overridden;
+    version++;
+  }
+
+  /// Forgets what [readRoot] read (the expansion was dropped).
+  void clearRoot() {
+    if (rootLocal == null) return;
+    rootLocal = null;
+    transformId = null;
+    transformLocal = null;
+    transform = null;
+    componentTypes = const [];
+    overriddenFields = 0;
     version++;
   }
 
@@ -327,11 +382,15 @@ final class HierarchyTree extends ChangeNotifier {
   /// (dropped when `null`), the roots are replaced. Untouched nodes keep
   /// their identity and version.
   void patch(EntityPatch p) {
+    final refetch = <String>[];
     for (final e in p.entities.entries) {
       final v = e.value;
       final before = nodes[e.key];
       if (before != null && !before.isDerived) _documentEntities--;
-      if (before?.isPrefabInstance ?? false) invalidateExpansion(e.key);
+      if (before?.isPrefabInstance ?? false) {
+        if (expansions.containsKey(e.key)) refetch.add(e.key);
+        invalidateExpansion(e.key);
+      }
       if (v == null) {
         nodes.remove(e.key);
         expanded.remove(e.key);
@@ -339,6 +398,11 @@ final class HierarchyTree extends ChangeNotifier {
         (nodes[e.key] ??= HierarchyNode(e.key)).read(v);
         _documentEntities++;
       }
+    }
+    // An instance that was read stays read: its root's components and
+    // Transform are what its row and the gizmo show (ADR-0022).
+    for (final id in refetch) {
+      expansionOf(id);
     }
     roots = [
       for (final r in p.roots)
@@ -367,6 +431,10 @@ final class HierarchyTree extends ChangeNotifier {
     }
     expansions[anchor] = x;
     for (final e in x.entities) {
+      if (e.id == anchor) {
+        n.readRoot(e); // the instance is the prefab's root (ADR-0022)
+        continue;
+      }
       _anchorOfDerived[e.id] = anchor;
       (nodes[e.id] ??= HierarchyNode(e.id)).readExpanded(e, anchor: anchor);
     }
@@ -375,24 +443,25 @@ final class HierarchyTree extends ChangeNotifier {
     return x;
   }
 
-  /// The instance roots the expansion of [anchor] adds below its authored
-  /// children (empty for a plain entity or an unexpanded instance).
+  /// The prefab root's children the expansion of [anchor] adds (empty for
+  /// a plain entity or an unexpanded instance).
   List<String> instanceRootsOf(String anchor) {
     final x = expansionOf(anchor);
     if (x == null) return const [];
     return [
       for (final e in x.entities)
-        if (e.parent == anchor) e.id,
+        if (e.parent == anchor && e.id != anchor) e.id,
     ];
   }
 
-  /// The children a row opens to: the document's, then the instance's roots.
+  /// The children a row opens to: the prefab root's first, then the ones
+  /// the document adds under the instance (Unity's order).
   List<String> childrenOf(String id) {
     final n = nodes[id];
     if (n == null) return const [];
     if (!n.isPrefabInstance) return n.children;
     final derived = instanceRootsOf(id);
-    return derived.isEmpty ? n.children : [...n.children, ...derived];
+    return derived.isEmpty ? n.children : [...derived, ...n.children];
   }
 
   /// Drops the cached expansion of [anchor] and its derived nodes; the next
@@ -404,6 +473,7 @@ final class HierarchyTree extends ChangeNotifier {
     for (final e in x.entities) {
       if (nodes[e.id]?.anchor == anchor) nodes.remove(e.id);
     }
+    nodes[anchor]?.clearRoot();
     _rows = null;
     _matching = null;
   }
@@ -515,7 +585,10 @@ final class HierarchyTree extends ChangeNotifier {
     final chain = [...ancestorsOf(id), id];
     var m = List.of(identityMatrix);
     for (final a in chain) {
-      final t = nodes[a]?.transform;
+      final n = nodes[a];
+      // An instance's Transform is its prefab root's (ADR-0022).
+      if (n != null && n.isPrefabInstance && n.rootLocal == null) expansionOf(a);
+      final t = n?.transform;
       if (t != null) m = matMul(m, t.toMatrix());
     }
     return m;

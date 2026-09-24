@@ -6,7 +6,8 @@
 // and Add Component as a searchable popup. Everything it writes goes
 // through `InspectorModel` — one transaction per gesture.
 //
-// Prefab mode (item 7): an instance's anchor shows its prefab (name, kind,
+// Prefab mode (item 7, ADR-0022): an instance (the prefab's root) shows its
+// fields with the overridden ones bold, its prefab (name, kind,
 // a missing or broken one with its diagnostics), the annotated override
 // list with Revert / Apply to prefab per row and for all, Unpack, Open
 // prefab and Select prefab asset; a derived entity's fields show the
