@@ -71,7 +71,9 @@ crates/fynkel_document         Editor (transactions, undo, validation),
   path from the project directory and the asset database is rescanned for
   what was written). Its own preferences, project-local editor state
   (`.fynkel/editor.json`) and recovery revisions (`.fynkel/recovery/`) come
-  with the shell (item 2).
+  with the shell (item 2). The session itself appends every change it
+  makes to `.fynkel/authoring.log` (docs/documents.md § The authoring
+  session and its ABI) — the record the M4 gate reads.
 
 ## The shell (M4-02)
 

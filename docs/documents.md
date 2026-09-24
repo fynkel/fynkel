@@ -542,6 +542,20 @@ window, never running game code and never reading a cooked cache
   second call. `save` and a save-as rescan the written path the same way (a
   save-as keeps the id, so the database reports `FYN-A0003` until one copy
   goes).
+- **The authoring log** (M4 gate, 2026-09-24): every change the session
+  makes is one JSON line in `<project>/.fynkel/authoring.log` (git-ignored
+  with the rest of `.fynkel/`; `fynkel_authoring::log`). Each line has
+  `v` 1, `at` (Unix ms), `session` (new on every `open_project`) and an
+  `op`: `open`; `apply` — a **committed** transaction's `document`
+  (relative to the project), `transactionId`, `baseRevision`, `revision`,
+  its `commands` in the JSON form `fynkel scene apply` reads, and
+  `affectedIds` per command; `undo` / `redo` — the `transactionId`
+  replayed and its command names; `save` — the `document` written;
+  `asset` — an asset operation's `kind` and `args` that succeeded. A
+  refused transaction changed nothing and is not written; a line that
+  cannot be written is dropped rather than failing the edit. Replaying a
+  log's `apply`/`undo`/`redo`/`save` lines on another copy writes the same
+  bytes (`every_change_of_a_session_is_in_the_authoring_log_and_replays`).
 - **Queries** (`query(kind, args)`, all read-only): `project`, `documents`,
   `document` (state + the whole document as JSON; with `ids: [...]` the
   named entities — `null` for one the document no longer has — plus
