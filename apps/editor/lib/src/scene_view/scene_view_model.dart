@@ -1219,6 +1219,8 @@ final class SceneViewModel extends ChangeNotifier {
   void _drawHandles(ViewportOverlay o) {
     final active = drag?.handle.id ?? hoverHandle;
     final highlight = GizmoTokens.linear(GizmoTokens.highlight);
+    // A component handle's guides show while it is dragged; a tool's always.
+    final guides = drag?.component != null || componentTarget() == null;
     for (final h in handles()) {
       final base = h.id == active ? highlight : h.color;
       final dim = drag != null && h.id != active ? 0.35 : 1.0;
@@ -1242,7 +1244,7 @@ final class SceneViewModel extends ChangeNotifier {
           o.line(l[i], l[i + 1], back, width: GizmoTokens.lineWidth * pixelRatio, onTop: true);
         }
       }
-      if (drag?.component != null) {
+      if (guides) {
         final guide = [h.color[0], h.color[1], h.color[2], h.color[3]];
         for (final l in h.shape.guides) {
           for (var i = 0; i + 1 < l.length; i++) {
@@ -1303,7 +1305,11 @@ final class SceneViewModel extends ChangeNotifier {
     if (t == null || !t.hasPreview || vp == null || !tool.hasGizmo) return null;
     if (t.tab.document.readOnly != null) return null; // nothing to drag into
     final d = drag;
-    if (d != null) return GizmoFrame(pivot: d.currentPivot, axes: d.frame.axes, size: d.frame.size);
+    if (d != null) {
+      // The rectangle follows what the drag previews.
+      final box = d.tool.needsBox ? _boxOf(d.ids.toList(), d.currentPivot, d.frame.axes) : null;
+      return GizmoFrame(pivot: d.currentPivot, axes: d.frame.axes, size: d.frame.size, box: box);
+    }
     final targets = _dragTargets(t);
     if (targets.isEmpty) return null;
     final lead = targets.first;
@@ -1311,19 +1317,64 @@ final class SceneViewModel extends ChangeNotifier {
     if (world == null) return null;
     final pivot = pivotMode == PivotMode.center ? selectionCenter(targets) ?? matTranslation(world) : matTranslation(world);
     final local = space == GizmoSpace.local || tool.alwaysLocal;
+    final axes = local ? matAxes(world) : GizmoFrame.worldAxes;
     return GizmoFrame(
       pivot: pivot,
-      axes: local ? matAxes(world) : GizmoFrame.worldAxes,
+      axes: axes,
       size: vp.metresPerPixel(pivot) * GizmoFrame.screenSize * pixelRatio,
+      box: tool.needsBox ? _boxOf(targets, pivot, axes) : null,
     );
   }
 
-  /// Unity's Center: the middle of the bounds of [ids] and everything
-  /// under them that is shown (a mesh's box, an object without one its
-  /// origin); null when none has a position.
-  Vec3? selectionCenter(List<String> ids) {
+  /// The bounds of [ids] and everything shown under them along [axes],
+  /// relative to [pivot] (the Rect tool's rectangle): their outlines — a
+  /// mesh's box; an object without a mesh, its marker cross, taken under
+  /// its own rotation and scale so the rectangle follows a resize.
+  (Vec3, Vec3)? _boxOf(List<String> ids, Vec3 pivot, List<Vec3> axes) {
     final t = current;
-    if (t == null) return null;
+    if (t == null || !t.hasPreview) return null;
+    final all = _shownUnder(t, ids).toList();
+    final matrices = t.preview!.worldMatrices(all);
+    var min = [double.infinity, double.infinity, double.infinity];
+    var max = [-double.infinity, -double.infinity, -double.infinity];
+    var any = false;
+    void add(Vec3 world) {
+      final p = vSub(world, pivot);
+      final q = [vDot(p, axes[0]), vDot(p, axes[1]), vDot(p, axes[2])];
+      min = vMin(min, q);
+      max = vMax(max, q);
+      any = true;
+    }
+
+    for (final id in all) {
+      final m = matrices[id];
+      final origin = m == null ? null : matTranslation(m);
+      final d = t.preview!.lines(outline: [id]).data;
+      for (var i = 0; i + 9 < d.length; i += 10) {
+        final a = [d[i], d[i + 1], d[i + 2]], b = [d[i + 3], d[i + 4], d[i + 5]];
+        final half = vScale(vSub(b, a), 0.5);
+        // The marker: an iconRadius arm through the origin, world-aligned.
+        if (origin != null &&
+            vDistance(vAdd(a, half), origin) < 1e-4 &&
+            (vLength(half) - iconRadius).abs() < 1e-4) {
+          final arm = transformDirection(m!, half);
+          add(vAdd(origin, arm));
+          add(vSub(origin, arm));
+        } else {
+          add(a);
+          add(b);
+        }
+      }
+    }
+    return any ? (min, max) : null;
+  }
+
+  /// The preview's marker for an object without a mesh: a cross of this
+  /// radius at its origin (`ICON_RADIUS` in fynkel_authoring's preview.rs).
+  static const iconRadius = 0.25;
+
+  /// [ids] and their descendants that are shown.
+  Set<String> _shownUnder(SceneTab t, List<String> ids) {
     final hidden = _hiddenAll(t);
     final all = <String>{};
     void add(String id) {
@@ -1334,7 +1385,16 @@ final class SceneViewModel extends ChangeNotifier {
     }
 
     ids.forEach(add);
-    final b = boundsOf(all);
+    return all;
+  }
+
+  /// Unity's Center: the middle of the bounds of [ids] and everything
+  /// under them that is shown (a mesh's box, an object without one its
+  /// origin); null when none has a position.
+  Vec3? selectionCenter(List<String> ids) {
+    final t = current;
+    if (t == null) return null;
+    final b = boundsOf(_shownUnder(t, ids));
     return b == null ? null : vScale(vAdd(b.$1, b.$2), 0.5);
   }
 
@@ -1464,7 +1524,15 @@ final class SceneViewModel extends ChangeNotifier {
       _repaint();
       return;
     }
-    final c = ToolContext(frame: d.frame, vp: vp, snap: snap, snapping: snap.enabled != invertSnap);
+    final keys = HardwareKeyboard.instance;
+    final c = ToolContext(
+      frame: d.frame,
+      vp: vp,
+      snap: snap,
+      snapping: snap.enabled != invertSnap,
+      uniform: keys.isShiftPressed,
+      fromCenter: keys.isAltPressed,
+    );
     final edit = value == null ? null : d.tool.edit(d.handle, value, c);
     if (edit == null) return;
     d.readout = edit.readout;
@@ -1501,7 +1569,7 @@ final class SceneViewModel extends ChangeNotifier {
           scale: target.startLocal.scale,
         ),
         TransformChannel.scale when factors != null => Trs(
-          position: ownPivot ? target.startLocal.position : local.position,
+          position: ownPivot && !edit.movesObjects ? target.startLocal.position : local.position,
           rotation: target.startLocal.rotation,
           scale: [for (var i = 0; i < 3; i++) target.startLocal.scale[i] * factors[i]],
         ),
@@ -2131,7 +2199,11 @@ final class SceneViewModel extends ChangeNotifier {
         marquee = null;
         if (m != null) marqueeSelect(m.topLeft, m.bottomRight, toggle: toggle, add: add);
       case _Mode.gizmo:
+        // A click on the Rect tool's inside or the trackball that never
+        // dragged is a click on the scene.
+        final through = drag != null && !drag!.moved && drag!.handle.background;
         endDrag();
+        if (through) click(px, toggle: toggle, add: add);
       case _Mode.look:
         _stopFly();
       case _:

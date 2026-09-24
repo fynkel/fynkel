@@ -147,6 +147,29 @@ final class ScreenScaleConstraint extends DragConstraint {
   }
 }
 
+/// Unity's free rotation inside the rotate gizmo (the trackball): the
+/// drag on screen turns about the axis in the view plane perpendicular to
+/// it — right turns the front to the right, up turns it up — one degree
+/// per point.
+final class TrackballConstraint extends DragConstraint {
+  const TrackballConstraint({required this.right, required this.up, required this.toCamera, this.pixelRatio = 1});
+
+  /// The camera's right and up axes and the unit direction to it.
+  final Vec3 right, up, toCamera;
+
+  /// Physical pixels per point.
+  final double pixelRatio;
+
+  @override
+  DragValue? solve(DragInput i) {
+    final d = (i.px - i.startPx) / pixelRatio;
+    if (d.distance < 1e-6) return DragValue(0, up);
+    // The front's way on screen (y down), in the world.
+    final dir = vNormalize(vSub(vScale(right, d.dx), vScale(up, d.dy)));
+    return DragValue(d.distance * math.pi / 180, vNormalize(vCross(toCamera, dir)));
+  }
+}
+
 /// A radius from [center] along [direction]: [start] plus the distance
 /// moved along it, never below zero (a light's range, a sphere's radius,
 /// a box's half extent).
@@ -172,6 +195,7 @@ final class Handle {
     required this.constraint,
     required this.grab,
     this.width = HandleWidth.handle,
+    this.background = false,
   });
 
   /// Unique among the handles on screen: `move.x`, `rotate.view`,
@@ -187,6 +211,11 @@ final class Handle {
   /// keyboard-free script) grabs it.
   final Vec3 grab;
   final HandleWidth width;
+
+  /// An area behind the other handles (the Rect tool's inside, the
+  /// rotate gizmo's trackball): hit only where no other handle is within
+  /// reach; a click on it that never drags is a click on the scene.
+  final bool background;
 }
 
 /// Which of the design tokens' widths a handle's lines take: a dot is one
@@ -249,11 +278,13 @@ final class ProjectedHandle {
 
 /// The handle under [p] among [handles] (physical pixels): the first one
 /// [p] is inside a triangle of — so the order is the priority, small
-/// filled handles first — else the nearest line within [tolerance].
+/// filled handles first — else the nearest line within [tolerance]; a
+/// background handle only when nothing else is.
 Handle? hitTestHandles(List<ProjectedHandle> handles, Offset p, {double tolerance = 8}) {
   Handle? best;
   var bestD = tolerance;
   for (final h in handles) {
+    if (h.handle.background) continue;
     final d = h.distanceTo(p);
     if (d == 0) return h.handle;
     if (d < bestD) {
@@ -261,7 +292,11 @@ Handle? hitTestHandles(List<ProjectedHandle> handles, Offset p, {double toleranc
       bestD = d;
     }
   }
-  return best;
+  if (best != null) return best;
+  for (final h in handles) {
+    if (h.handle.background && h.distanceTo(p) == 0) return h.handle;
+  }
+  return null;
 }
 
 // ── Shapes ─────────────────────────────────────────────────────────────
@@ -344,6 +379,14 @@ List<List<Vec3>> cube(Vec3 center, List<Vec3> axes, double h) {
       [corner(f[0]), corner(f[1]), corner(f[2])],
       [corner(f[0]), corner(f[2]), corner(f[3])],
     ],
+  ];
+}
+
+/// A filled disc of radius [r] about [axis] through [center], as a fan.
+List<List<Vec3>> disc(Vec3 center, Vec3 axis, double r, {int segments = 48}) {
+  final rim = circle(center, axis, r, segments: segments);
+  return [
+    for (var i = 0; i < segments; i++) [center, rim[i], rim[i + 1]],
   ];
 }
 

@@ -4,9 +4,9 @@
 // model. A tool turns a handle's constrained drag value into an edit;
 // the model previews it, and commits it as one transaction on release.
 //
-// Move, rotate and scale are three registrations over the handle
-// framework (`gizmo.dart`); the transform tool is the three composed —
-// the proof that a fourth tool costs no surgery.
+// Move, rotate, scale and rect are registrations over the handle
+// framework (`gizmo.dart`); the transform tool is the first three
+// composed — the proof that another tool costs no surgery.
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -23,11 +23,16 @@ import 'scene_math.dart';
 /// the lead's local) and the length in metres of [screenSize] points
 /// there.
 final class GizmoFrame {
-  const GizmoFrame({required this.pivot, required this.axes, required this.size});
+  const GizmoFrame({required this.pivot, required this.axes, required this.size, this.box});
 
   final Vec3 pivot;
   final List<Vec3> axes;
   final double size;
+
+  /// The selection's bounds (children included) along [axes], relative
+  /// to [pivot]: the lowest and highest coordinate on each axis. The Rect
+  /// tool's rectangle; null when nothing shown has a position.
+  final (Vec3, Vec3)? box;
 
   /// Points (logical pixels, so the same on a Retina screen) a handle
   /// spans on screen.
@@ -42,7 +47,14 @@ final class GizmoFrame {
 
 /// What a tool sees when it builds handles or reads a drag.
 final class ToolContext {
-  ToolContext({required this.frame, required this.vp, this.snap = const SnapSettings(), this.snapping = false});
+  ToolContext({
+    required this.frame,
+    required this.vp,
+    this.snap = const SnapSettings(),
+    this.snapping = false,
+    this.uniform = false,
+    this.fromCenter = false,
+  });
 
   final GizmoFrame frame;
   final ViewProjection vp;
@@ -50,6 +62,12 @@ final class ToolContext {
 
   /// Snapping is on for this drag (the setting, inverted by ⌘).
   final bool snapping;
+
+  /// ⇧ held: the Rect tool keeps the rectangle's proportions.
+  final bool uniform;
+
+  /// ⌥ held: the Rect tool resizes about the rectangle's centre.
+  final bool fromCenter;
 
   /// The camera's right, up and forward axes.
   late final List<Vec3> camera = () {
@@ -65,6 +83,9 @@ final class ToolContext {
 
   /// Metres per point at the pivot.
   double get pixel => frame.size / GizmoFrame.screenSize;
+
+  /// Physical pixels per point.
+  double get pixelRatio => frame.size / vp.metresPerPixel(frame.pivot) / GizmoFrame.screenSize;
 }
 
 /// Which parts of a transform a tool's edit changes: a move keeps the
@@ -81,6 +102,7 @@ final class TransformEdit {
     required this.readout,
     required this.channel,
     this.factors,
+    this.movesObjects = false,
   });
 
   final List<double> delta;
@@ -88,6 +110,11 @@ final class TransformEdit {
   /// A scale's factors along the gizmo's axes: each object's own scale
   /// is multiplied by them, as Unity multiplies `localScale`.
   final Vec3? factors;
+
+  /// A scale that moves the objects with the delta even in Pivot mode:
+  /// the Rect tool resizes about the opposite edge, so what it resizes
+  /// moves with the edge.
+  final bool movesObjects;
   final Vec3 pivot;
   final String readout;
   final TransformChannel channel;
@@ -113,6 +140,9 @@ abstract class SceneTool {
   /// Whether the tool shows a gizmo on the selection at all.
   bool get hasGizmo => true;
 
+  /// Whether its handles need the selection's bounds ([GizmoFrame.box]).
+  bool get needsBox => false;
+
   /// The handles on the selection, in priority order (the first one the
   /// pointer is inside wins).
   List<Handle> handles(ToolContext c);
@@ -124,6 +154,7 @@ abstract class SceneTool {
   static const move = MoveTool();
   static const rotate = RotateTool();
   static const scale = ScaleTool();
+  static const rect = RectTool();
   static const transform = TransformTool();
 
   /// Every registered tool, in toolbar order.
@@ -141,6 +172,7 @@ abstract final class SceneTools {
     SceneTool.move,
     SceneTool.rotate,
     SceneTool.scale,
+    SceneTool.rect,
     SceneTool.transform,
   ];
 
@@ -154,7 +186,7 @@ abstract final class SceneTools {
 
   /// Removes a tool [register] added (tests, a closing plug-in).
   static void unregister(String id) {
-    if (const ['select', 'move', 'rotate', 'scale', 'transform'].contains(id)) {
+    if (const ['select', 'move', 'rotate', 'scale', 'rect', 'transform'].contains(id)) {
       throw ArgumentError('"$id" is built in');
     }
     _all.removeWhere((t) => t.id == id);
@@ -338,15 +370,20 @@ final class MoveTool extends SceneTool {
   }
 }
 
-/// Rotate: a ring per axis (the far half faint) and a ring about the view
-/// axis around them.
+/// Rotate: a ring per axis (the far half faint), a ring about the view
+/// axis around them and, inside, Unity's trackball: a drag anywhere on
+/// the sphere the rings draw turns freely.
 final class RotateTool extends SceneTool {
-  const RotateTool({this.radius = 1, this.viewRing = true});
+  const RotateTool({this.radius = 1, this.viewRing = true, this.trackball = true});
 
   /// The rings' radius in gizmo sizes (the transform tool's sit outside
   /// the move arrows).
   final double radius;
   final bool viewRing;
+
+  /// The free rotation inside the rings (the transform tool has its move
+  /// handles there instead).
+  final bool trackball;
 
   @override
   String get id => 'rotate';
@@ -387,6 +424,24 @@ final class RotateTool extends SceneTool {
           color: GizmoTokens.linear(GizmoTokens.neutral),
           constraint: const RingConstraint(null, facingCamera: false),
           grab: vAdd(p, vScale(c.camera[0], r * 1.2)),
+        ),
+      );
+    }
+    if (trackball) {
+      out.add(
+        Handle(
+          id: 'rotate.free',
+          // The sphere's silhouette, faintly shaded, as Unity draws it.
+          shape: HandleShape(triangles: disc(p, c.camera[2], r), guides: [circle(p, c.camera[2], r)], fill: 0.08),
+          color: GizmoTokens.linear(GizmoTokens.neutral),
+          constraint: TrackballConstraint(
+            right: c.camera[0],
+            up: c.camera[1],
+            toCamera: c.toCamera,
+            pixelRatio: c.pixelRatio,
+          ),
+          grab: vAdd(p, vScale(vAdd(c.camera[0], c.camera[1]), r * 0.3)),
+          background: true,
         ),
       );
     }
@@ -434,7 +489,7 @@ final class ScaleTool extends SceneTool {
         id: 'scale.uniform',
         shape: HandleShape(triangles: cube(p, f.axes, s * 0.07)),
         color: GizmoTokens.linear(GizmoTokens.neutral),
-        constraint: ScreenScaleConstraint(pixelRatio: s / c.vp.metresPerPixel(p) / GizmoFrame.screenSize),
+        constraint: ScreenScaleConstraint(pixelRatio: c.pixelRatio),
         grab: p,
       ),
     ];
@@ -479,25 +534,250 @@ final class ScaleTool extends SceneTool {
       default:
         return null;
     }
-    // Along the gizmo's axes about the pivot: A·diag(f)·Aᵀ.
-    final a = f.axes;
-    final m = List<double>.filled(16, 0);
-    for (var r = 0; r < 3; r++) {
-      for (var col = 0; col < 3; col++) {
-        var v = 0.0;
-        for (var k = 0; k < 3; k++) {
-          v += a[k][r] * factors[k] * a[k][col];
-        }
-        m[col * 4 + r] = v;
-      }
-    }
-    m[15] = 1;
     return TransformEdit(
-      delta: _about(f.pivot, m),
+      delta: _about(f.pivot, _alongAxes(f.axes, factors)),
       pivot: List.of(f.pivot),
       readout: '×${_fmt(factor)}',
       channel: TransformChannel.scale,
       factors: factors,
+    );
+  }
+}
+
+/// A scale by [factors] along [axes]: A·diag(f)·Aᵀ.
+List<double> _alongAxes(List<Vec3> axes, List<double> factors) {
+  final m = List<double>.filled(16, 0);
+  for (var r = 0; r < 3; r++) {
+    for (var col = 0; col < 3; col++) {
+      var v = 0.0;
+      for (var k = 0; k < 3; k++) {
+        v += axes[k][r] * factors[k] * axes[k][col];
+      }
+      m[col * 4 + r] = v;
+    }
+  }
+  m[15] = 1;
+  return m;
+}
+
+/// Unity's Rect tool (T) for 3D objects: a rectangle around the selection
+/// (children included) in the plane of its two local axes most across the
+/// view. A corner resizes both ways and an edge one, about the opposite
+/// side (⌥: about the centre; ⇧: keeping the proportions) — the objects
+/// move with the edge, their own scale multiplied; a drag inside moves
+/// them in the plane; just outside a corner turns them about the plane's
+/// normal.
+final class RectTool extends SceneTool {
+  const RectTool();
+
+  @override
+  String get id => 'rect';
+  @override
+  String get label => 'Rect';
+  @override
+  IconData get icon => FIcons.rectTool;
+  @override
+  LogicalKeyboardKey get key => LogicalKeyboardKey.keyT;
+  @override
+  bool get alwaysLocal => true;
+  @override
+  bool get needsBox => true;
+
+  /// The rectangle for [c]: the frame's axes in its plane (a, b), its
+  /// normal, the low and high coordinates along a and b, the plane's depth.
+  static ({int a, int b, int n, double loA, double hiA, double loB, double hiB, double depth})? _rect(ToolContext c) {
+    final box = c.frame.box;
+    if (box == null) return null;
+    final axes = c.frame.axes;
+    var n = 0;
+    for (var i = 1; i < 3; i++) {
+      if (vDot(axes[i], c.toCamera).abs() > vDot(axes[n], c.toCamera).abs()) n = i;
+    }
+    final (a, b) = switch (n) {
+      0 => (1, 2),
+      1 => (0, 2),
+      _ => (0, 1),
+    };
+    final (lo, hi) = box;
+    return (a: a, b: b, n: n, loA: lo[a], hiA: hi[a], loB: lo[b], hiB: hi[b], depth: (lo[n] + hi[n]) / 2);
+  }
+
+  static Vec3 _at(ToolContext c, ({int a, int b, int n, double loA, double hiA, double loB, double hiB, double depth}) r,
+      double x, double y) {
+    final f = c.frame;
+    return vAdd(
+      f.pivot,
+      vAdd(vScale(f.axes[r.a], x), vAdd(vScale(f.axes[r.b], y), vScale(f.axes[r.n], r.depth))),
+    );
+  }
+
+  @override
+  List<Handle> handles(ToolContext c) {
+    final r = _rect(c);
+    if (r == null) return const [];
+    final f = c.frame;
+    final plane = PlaneConstraint(_at(c, r, 0, 0), f.axes[r.n]);
+    final neutral = GizmoTokens.linear(GizmoTokens.neutral);
+    final xs = [r.loA, r.hiA], ys = [r.loB, r.hiB];
+    Vec3 corner(int i, int j) => _at(c, r, xs[i], ys[j]);
+    final out = <Handle>[];
+    // The corners: small squares facing the camera.
+    final hr = vScale(c.camera[0], 4 * c.pixel), hu = vScale(c.camera[1], 4 * c.pixel);
+    for (final (i, j) in const [(0, 0), (1, 0), (1, 1), (0, 1)]) {
+      final p = corner(i, j);
+      final q = [vSub(vSub(p, hr), hu), vSub(vAdd(p, hr), hu), vAdd(vAdd(p, hr), hu), vAdd(vSub(p, hr), hu)];
+      out.add(
+        Handle(
+          id: 'rect.corner.$i$j',
+          shape: HandleShape(
+            lines: [
+              [...q, q.first],
+            ],
+            triangles: quad(q[0], q[1], q[2], q[3]),
+          ),
+          color: neutral,
+          constraint: plane,
+          grab: p,
+          width: HandleWidth.line,
+        ),
+      );
+    }
+    // The edges: along b at each end of a, along a at each end of b.
+    for (final k in const [0, 1]) {
+      out.add(
+        Handle(
+          id: 'rect.edge.a$k',
+          shape: HandleShape(
+            lines: [
+              [corner(k, 0), corner(k, 1)],
+            ],
+          ),
+          color: neutral,
+          constraint: plane,
+          grab: _at(c, r, xs[k], (r.loB + r.hiB) / 2),
+          width: HandleWidth.line,
+        ),
+      );
+      out.add(
+        Handle(
+          id: 'rect.edge.b$k',
+          shape: HandleShape(
+            lines: [
+              [corner(0, k), corner(1, k)],
+            ],
+          ),
+          color: neutral,
+          constraint: plane,
+          grab: _at(c, r, (r.loA + r.hiA) / 2, ys[k]),
+          width: HandleWidth.line,
+        ),
+      );
+    }
+    // Just outside each corner: turn about the normal (unseen, as in Unity).
+    final zone = 14 * c.pixel;
+    for (final (i, j) in const [(0, 0), (1, 0), (1, 1), (0, 1)]) {
+      final p = corner(i, j);
+      final da = vScale(f.axes[r.a], i == 0 ? -1 : 1), db = vScale(f.axes[r.b], j == 0 ? -1 : 1);
+      Vec3 at(double u, double v) => vAdd(p, vAdd(vScale(da, u), vScale(db, v)));
+      out.add(
+        Handle(
+          id: 'rect.rotate.$i$j',
+          shape: HandleShape(triangles: quad(at(0, 0), at(zone, 0), at(zone, zone), at(0, zone)), fill: 0),
+          color: neutral,
+          constraint: RingConstraint(f.axes[r.n], facingCamera: vDot(f.axes[r.n], c.toCamera) >= 0),
+          grab: at(zone * 0.6, zone * 0.6),
+        ),
+      );
+    }
+    // The inside: move in the plane.
+    out.add(
+      Handle(
+        id: 'rect.move',
+        shape: HandleShape(triangles: quad(corner(0, 0), corner(1, 0), corner(1, 1), corner(0, 1)), fill: 0),
+        color: neutral,
+        constraint: plane,
+        grab: _at(c, r, (r.loA + r.hiA) / 2, (r.loB + r.hiB) / 2),
+        background: true,
+      ),
+    );
+    return out;
+  }
+
+  @override
+  TransformEdit? edit(Handle handle, DragValue value, ToolContext c) {
+    final r = _rect(c);
+    if (r == null) return null;
+    final f = c.frame;
+    final id = handle.id;
+    if (id == 'rect.move') {
+      var move = value.vector;
+      if (c.snapping) move = [for (final v in move) snapTo(v, c.snap.move)];
+      return TransformEdit(
+        delta: _translation(move),
+        pivot: vAdd(f.pivot, move),
+        readout: '${_fmt(vLength(move))} m',
+        channel: TransformChannel.move,
+      );
+    }
+    if (id.startsWith('rect.rotate.')) {
+      var angle = value.scalar;
+      if (c.snapping) angle = snapTo(angle, c.snap.angle * math.pi / 180);
+      return TransformEdit(
+        delta: _about(f.pivot, quatToMatrix(quatFromAxisAngle(value.vector, angle))),
+        pivot: List.of(f.pivot),
+        readout: '${_fmt(angle * 180 / math.pi)}°',
+        channel: TransformChannel.rotate,
+      );
+    }
+    // Which side of a and of b the handle drags (null: that way stays).
+    final (int? sideA, int? sideB) = switch (id) {
+      'rect.corner.00' => (0, 0),
+      'rect.corner.10' => (1, 0),
+      'rect.corner.11' => (1, 1),
+      'rect.corner.01' => (0, 1),
+      'rect.edge.a0' => (0, null),
+      'rect.edge.a1' => (1, null),
+      'rect.edge.b0' => (null, 0),
+      'rect.edge.b1' => (null, 1),
+      _ => (null, null),
+    };
+    if (sideA == null && sideB == null) return null;
+    final v = value.vector;
+    // The new extent over the old along one axis, and the coordinate that stays.
+    (double, double) resize(double lo, double hi, int? side, double d) {
+      final e = hi - lo;
+      if (side == null || e.abs() < 1e-9) return (1, lo);
+      final grow = (side == 1 ? d : -d) * (c.fromCenter ? 2 : 1);
+      var next = e + grow;
+      if (c.snapping) next = snapTo(next, c.snap.move);
+      return (math.max(next / e, 0.001), c.fromCenter ? (lo + hi) / 2 : (side == 1 ? lo : hi));
+    }
+
+    var (fa, anchorA) = resize(r.loA, r.hiA, sideA, vDot(v, f.axes[r.a]));
+    var (fb, anchorB) = resize(r.loB, r.hiB, sideB, vDot(v, f.axes[r.b]));
+    if (c.uniform) {
+      final u = sideA == null
+          ? fb
+          : sideB == null
+          ? fa
+          : ((fa - 1).abs() >= (fb - 1).abs() ? fa : fb);
+      fa = u;
+      fb = u;
+      // An edge keeps the other way centred.
+      if (sideA == null) anchorA = (r.loA + r.hiA) / 2;
+      if (sideB == null) anchorB = (r.loB + r.hiB) / 2;
+    }
+    final factors = [1.0, 1.0, 1.0];
+    factors[r.a] = fa;
+    factors[r.b] = fb;
+    final delta = _about(_at(c, r, anchorA, anchorB), _alongAxes(f.axes, factors));
+    return TransformEdit(
+      delta: delta,
+      pivot: transformPoint(delta, f.pivot),
+      readout: '${_fmt((r.hiA - r.loA) * fa)} × ${_fmt((r.hiB - r.loB) * fb)} m',
+      channel: TransformChannel.scale,
+      factors: factors,
+      movesObjects: true,
     );
   }
 }
@@ -509,7 +789,11 @@ final class ScaleTool extends SceneTool {
 final class TransformTool extends SceneTool {
   const TransformTool();
 
-  static const _parts = [ScaleTool(axisHandles: false), MoveTool(viewSquare: false), RotateTool(radius: 1.25, viewRing: false)];
+  static const _parts = [
+    ScaleTool(axisHandles: false),
+    MoveTool(viewSquare: false),
+    RotateTool(radius: 1.25, viewRing: false, trackball: false),
+  ];
 
   @override
   String get id => 'transform';

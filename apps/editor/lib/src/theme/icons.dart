@@ -164,4 +164,5 @@ abstract final class FIcons {
   static const IconData command = LucideIcons.command;
   static const IconData codegenOk = LucideIcons.circleCheck;
   static const IconData transformTool = LucideIcons.move3d;
+  static const IconData rectTool = LucideIcons.squareDashed;
 }

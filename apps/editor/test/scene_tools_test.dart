@@ -116,7 +116,7 @@ void main() {
     test('rings: the front half hit, the back half faint and never hit', () {
       final c = contextAt(EditorCamera.initial(), const [0, 0.5, 0]);
       final hs = SceneTool.rotate.handles(c);
-      expect(hs.map((h) => h.id), ['rotate.x', 'rotate.y', 'rotate.z', 'rotate.view']);
+      expect(hs.map((h) => h.id), ['rotate.x', 'rotate.y', 'rotate.z', 'rotate.view', 'rotate.free']);
       for (final h in hs.take(3)) {
         expect(h.shape.back, isNotEmpty, reason: '${h.id}: the initial camera sees every ring at an angle');
         final grab = px(c, h.grab);
@@ -200,7 +200,8 @@ void main() {
 
   group('the registry', () {
     test('the built-in tools, their keys and ids', () {
-      expect(SceneTools.all.map((t) => t.id), ['select', 'move', 'rotate', 'scale', 'transform']);
+      expect(SceneTools.all.map((t) => t.id), ['select', 'move', 'rotate', 'scale', 'rect', 'transform']);
+      expect(SceneTools.byKey(LogicalKeyboardKey.keyT), SceneTool.rect);
       expect(SceneTools.byKey(LogicalKeyboardKey.keyW), SceneTool.move);
       expect(SceneTools.byKey(LogicalKeyboardKey.keyY), SceneTool.transform);
       expect(SceneTools.byId('rotate'), SceneTool.rotate);

@@ -50,7 +50,7 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 127); // Unity parity: Lock View to Selected; Pivot / Center; New Volume Profile; ADR-0023: ten GameObject presets; Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
+    expect(commands.length, 128); // Unity parity: the Rect tool; Lock View to Selected; Pivot / Center; New Volume Profile; ADR-0023: ten GameObject presets; Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
     for (final c in commands) {
       // A ⌘ shortcut, or Unity's bare key alone (the tools' Q W E R Y, the projection's 5).
       // New Project gave ⇧⌘N to Create Empty, as in Unity (which has no New Project key).
