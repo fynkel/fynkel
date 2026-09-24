@@ -505,6 +505,31 @@ class BehaviourRegistry {
   }
 }
 
+/// A behaviour callback that threw ([World.onBehaviourError]).
+class BehaviourError {
+  BehaviourError(this.behaviour, this.callback, this.error, this.stack, {required this.tick});
+
+  final Behaviour behaviour;
+
+  /// The callback's name: `update`, `onCollisionEnter`, `start`…
+  final String callback;
+  final Object error;
+  final StackTrace stack;
+
+  /// The world's tick when it threw.
+  final int tick;
+
+  /// `Player.update on "Hero" threw: Bad state: no ground` — what the
+  /// Console's row says.
+  String get message {
+    final name = behaviour._gameObject?.name ?? '';
+    return '${behaviour.runtimeType}.$callback${name.isEmpty ? '' : ' on "$name"'} threw: $error';
+  }
+
+  @override
+  String toString() => message;
+}
+
 /// The world's behaviour driver.
 class _BehaviourSystem {
   _BehaviourSystem(this.world);
@@ -579,13 +604,13 @@ class _BehaviourSystem {
       if (b._destroyRequested || gone) {
         if (b._active) {
           b._active = false;
-          b.onDisable();
+          _call(b, 'onDisable', b.onDisable);
         }
         b._destroyed = true;
         b._destroyRequested = true;
         _all.remove(b);
         go._behaviours.remove(b);
-        if (b._created) b.onDestroy();
+        if (b._created) _call(b, 'onDestroy', b.onDestroy);
         continue;
       }
       // A pending spawn resolves at the next tick.
@@ -606,7 +631,7 @@ class _BehaviourSystem {
       for (final b in _disabling) {
         if (!b._active || b._destroyed) continue;
         b._active = false;
-        b.onDisable();
+        _call(b, 'onDisable', b.onDisable);
       }
       _disabling.clear();
     }
@@ -616,11 +641,11 @@ class _BehaviourSystem {
         if (b._destroyed) continue;
         if (!b._created) {
           b._created = true;
-          b.onCreate();
+          _call(b, 'onCreate', b.onCreate);
         }
         if (b._enabled && !b._active && !b._destroyRequested) {
           b._active = true;
-          b.onEnable();
+          _call(b, 'onEnable', b.onEnable);
         }
       }
       _enabling.clear();
@@ -663,9 +688,8 @@ class _BehaviourSystem {
   void fixedUpdate(int tick, List<EngineEvent> events) {
     settle();
     final ctx = FixedUpdateContext(tick: tick, dt: world.fixedDt, events: events, context: world.context);
-    _run(ctx.context, (b) {
-      _startIfNeeded(b);
-      b.fixedUpdate(ctx);
+    _run(ctx.context, 'fixedUpdate', (b) {
+      if (_startIfNeeded(b)) b.fixedUpdate(ctx);
     });
   }
 
@@ -680,7 +704,7 @@ class _BehaviourSystem {
     if (markers.isNotEmpty) _dispatchMarkers(markers);
     if (playback.isNotEmpty) _dispatchPlayback(playback);
     final ctx = AfterPhysicsContext(tick: tick, contacts: contacts, context: world.context);
-    _run(ctx.context, (b) {
+    _run(ctx.context, 'afterPhysics', (b) {
       if (b.wantsAfterPhysics) b.afterPhysics(ctx);
     });
   }
@@ -713,7 +737,11 @@ class _BehaviourSystem {
         if (go == null || go._behaviours.isEmpty) continue;
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
-          b.onAnimationEnded(e);
+          try {
+            b.onAnimationEnded(e);
+          } catch (err, st) {
+            _threw(b, 'onAnimationEnded', err, st);
+          }
         }
       }
     });
@@ -727,7 +755,11 @@ class _BehaviourSystem {
         if (go == null || go._behaviours.isEmpty) continue;
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
-          b.onAnimationMarker(m);
+          try {
+            b.onAnimationMarker(m);
+          } catch (err, st) {
+            _threw(b, 'onAnimationMarker', err, st);
+          }
         }
       }
     });
@@ -741,41 +773,53 @@ class _BehaviourSystem {
         if (go == null || go._behaviours.isEmpty) continue;
         for (final b in go._behaviours.toList(growable: false)) {
           if (!b._active || b._destroyRequested) continue;
-          b.onPlaybackEnded(e);
+          try {
+            b.onPlaybackEnded(e);
+          } catch (err, st) {
+            _threw(b, 'onPlaybackEnded', err, st);
+          }
         }
       }
     });
   }
 
-  static void _zoneTo(GameObject? go, ZoneEvent z) {
+  void _zoneTo(GameObject? go, ZoneEvent z) {
     if (go == null || go._behaviours.isEmpty) return;
     for (final b in go._behaviours.toList(growable: false)) {
       if (!b._active || b._destroyRequested) continue;
-      switch (z) {
-        case ZoneEntered():
-          b.onZoneEnter(z);
-        case ZoneExited():
-          b.onZoneExit(z);
+      try {
+        switch (z) {
+          case ZoneEntered():
+            b.onZoneEnter(z);
+          case ZoneExited():
+            b.onZoneExit(z);
+        }
+      } catch (e, st) {
+        _threw(b, z is ZoneEntered ? 'onZoneEnter' : 'onZoneExit', e, st);
       }
     }
   }
 
-  static void _contactTo(GameObject? go, Contact c) {
+  void _contactTo(GameObject? go, Contact c) {
     if (go == null || go._behaviours.isEmpty) return;
     // A callback may attach or destroy: iterate a copy of the short list.
     for (final b in go._behaviours.toList(growable: false)) {
       if (!b._active || b._destroyRequested) continue;
-      switch (c.kind) {
-        case ContactKind.collisionEnter:
-          b.onCollisionEnter(c);
-        case ContactKind.collisionStay:
-          b.onCollisionStay(c);
-        case ContactKind.collisionExit:
-          b.onCollisionExit(c);
-        case ContactKind.triggerEnter:
-          b.onTriggerEnter(c);
-        case ContactKind.triggerExit:
-          b.onTriggerExit(c);
+      try {
+        switch (c.kind) {
+          case ContactKind.collisionEnter:
+            b.onCollisionEnter(c);
+          case ContactKind.collisionStay:
+            b.onCollisionStay(c);
+          case ContactKind.collisionExit:
+            b.onCollisionExit(c);
+          case ContactKind.triggerEnter:
+            b.onTriggerEnter(c);
+          case ContactKind.triggerExit:
+            b.onTriggerExit(c);
+        }
+      } catch (e, st) {
+        _threw(b, 'on${c.kind.name[0].toUpperCase()}${c.kind.name.substring(1)}', e, st);
       }
     }
   }
@@ -784,32 +828,53 @@ class _BehaviourSystem {
   void update(double dt) {
     settle();
     final ctx = UpdateContext(dt: dt, alpha: world.alpha, tick: world.tick, context: world.context);
-    _run(ctx.context, (b) {
-      _startIfNeeded(b);
-      b.update(ctx);
+    _run(ctx.context, 'update', (b) {
+      if (_startIfNeeded(b)) b.update(ctx);
     });
-    _run(ctx.context, (b) => b.lateUpdate(ctx));
+    _run(ctx.context, 'lateUpdate', (b) => b.lateUpdate(ctx));
   }
 
-  void _startIfNeeded(Behaviour b) {
-    if (!b._started) {
-      b._started = true;
-      b.start();
+  /// Runs `start` the first time; false when it threw (reported, and the
+  /// callback after it skipped this once — Unity's order).
+  bool _startIfNeeded(Behaviour b) {
+    if (b._started) return true;
+    b._started = true;
+    return _call(b, 'start', b.start);
+  }
+
+  /// Calls [f], one of [b]'s callbacks; a throw goes to
+  /// [World.onBehaviourError] and the caller carries on. False when it threw.
+  bool _call(Behaviour b, String callback, void Function() f) {
+    try {
+      f();
+      return true;
+    } catch (e, st) {
+      _threw(b, callback, e, st);
+      return false;
     }
+  }
+
+  void _threw(Behaviour b, String callback, Object e, StackTrace st) {
+    world.onBehaviourError(BehaviourError(b, callback, e, st, tick: world.tick));
   }
 
   /// Runs [f] over the active behaviours in order, with the world's context
   /// current. Behaviours attached, disabled or destroyed during the pass are
   /// skipped for the rest of it (their transition applies at the next
   /// boundary).
-  void _run(GameContext context, void Function(Behaviour) f) {
+  void _run(GameContext context, String callback, void Function(Behaviour) f) {
     final n = _all.length;
     if (n == 0) return;
     _copyScratch();
     context.run(() {
       for (var i = 0; i < n; i++) {
         final b = _scratch[i]!;
-        if (b._active && !b._destroyRequested && b._gameObject!._alive) f(b);
+        if (!b._active || b._destroyRequested || !b._gameObject!._alive) continue;
+        try {
+          f(b);
+        } catch (e, st) {
+          _threw(b, callback, e, st);
+        }
       }
     });
     _scratch.fillRange(0, n, null);

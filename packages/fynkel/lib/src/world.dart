@@ -3,7 +3,7 @@
 // the Behaviour lifecycle the world drives at the §5.1 points of a host
 // frame. Scenes come from the cooked cache through `loadProject`/`loadScene`.
 
-import 'dart:async' show Completer;
+import 'dart:async' show Completer, Zone;
 import 'dart:convert' show jsonEncode;
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -172,6 +172,28 @@ class World {
   /// silent under the editor channel, which already carries the record
   /// ([EditorChannel]), so the Console shows each diagnostic once.
   void Function(List<FynkelDiagnostic>) onDiagnostics = _printDiagnostics;
+
+  /// Called when a behaviour callback throws (docs/unity-parity.md § Tier
+  /// 2): as in Unity, only that call stops — the other behaviours still
+  /// run this pass, and the one that threw is called again next time.
+  /// Defaults to [reportBehaviourError].
+  void Function(BehaviourError error) onBehaviourError = reportBehaviourError;
+
+  /// The default [onBehaviourError]: an `error` log record with the Dart
+  /// stack on the editor channel when an editor listens (the Console's
+  /// Game tab, a click to the line); else the error goes to the current
+  /// zone's uncaught-error handler — a test fails, a Flutter app reports
+  /// it — or, in the root zone of a plain Dart process, to `print`, so the
+  /// game keeps running.
+  static void reportBehaviourError(BehaviourError e) {
+    if (EditorChannel.enabled) {
+      EditorChannel.error(e.message, stack: e.stack.toString(), tick: e.tick);
+    } else if (!identical(Zone.current, Zone.root)) {
+      Zone.current.handleUncaughtError(e.error, e.stack);
+    } else {
+      print('${e.message}\n${e.stack}');
+    }
+  }
 
   /// Throw [FynkelError] on error diagnostics (rejections, protocol errors).
   /// Informational ones ([FynkelDiagnostic.isInformational], e.g. a missed
