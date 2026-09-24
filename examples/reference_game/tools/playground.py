@@ -342,7 +342,7 @@ MATERIAL_DOCS = {
     "crate": dict(base_color=[0.72, 0.45, 0.2, 1.0], metallic=0.0, roughness=0.75),
     "barrel": dict(base_color=[0.35, 0.22, 0.12, 1.0], metallic=0.2, roughness=0.55),
     "ball": dict(base_color=[0.5, 0.08, 0.06, 1.0], metallic=0.6, roughness=0.35),
-    "gold": dict(base_color=[1.0, 0.78, 0.3, 1.0], metallic=0.4, roughness=0.35, emissive=[1.0, 0.75, 0.25], emissive_strength=0.6),
+    "gold": dict(base_color=[1.0, 0.78, 0.3, 1.0], metallic=0.4, roughness=0.35, emissive=[1.0, 0.75, 0.25], emissive_strength=2.5),
     "player": dict(base_color=[0.2, 0.45, 0.95, 1.0], metallic=0.1, roughness=0.5),
     "hazard": dict(base_color=[0.6, 0.05, 0.05, 1.0], metallic=0.3, roughness=0.5, emissive=[1.0, 0.1, 0.05], emissive_strength=0.8),
     "gate": dict(base_color=[0.25, 0.27, 0.32, 1.0], metallic=0.9, roughness=0.4),
@@ -363,7 +363,7 @@ SKY_INTENSITY = 1500.0
 AMBIENT = 600.0
 LOOK_ID = uid("volume", "look")
 LOOK_AO = {"radius": 0.8, "intensity": 1.5}
-LOOK_BLOOM = {"intensity": 0.8, "threshold": 0.8, "scatter": 0.7}
+LOOK_BLOOM = {"intensity": 1.0, "threshold": 0.6, "scatter": 0.7}
 
 MENU_ID = uid("scene", "menu")  # fynkel.project.json's startupScene
 RESULTS_ID = uid("scene", "results")

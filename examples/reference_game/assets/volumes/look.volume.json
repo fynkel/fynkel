@@ -8,8 +8,8 @@
     "intensity": 1.5
   },
   "bloom": {
-    "intensity": 0.8,
-    "threshold": 0.8,
+    "intensity": 1.0,
+    "threshold": 0.6,
     "scatter": 0.7
   }
 }
