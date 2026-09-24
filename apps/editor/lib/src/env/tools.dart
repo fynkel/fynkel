@@ -109,9 +109,11 @@ final class Toolchain {
 
   bool get canCreate => fynkelCli != null && fynkelRoot != null;
 
-  /// Order of discovery for the CLI: the preference, `$FYNKEL_CLI`, `fynkel`
-  /// on `PATH`, then `target/{release,debug}/fynkel` of the checkout that
-  /// contains the running editor or the working directory (development).
+  /// Order of discovery for the CLI: the preference, `$FYNKEL_CLI`, then
+  /// the newest of `fynkel` on `PATH` and `target/{release,debug}/fynkel`
+  /// of the checkout that contains the running editor or the working
+  /// directory (development) — an installed CLI older than the checkout's
+  /// build would lack what this editor asks of it.
   static Future<Toolchain> detect({
     required Preferences prefs,
     Map<String, String>? environment,
@@ -133,14 +135,17 @@ final class Toolchain {
         break;
       }
     }
-    cli ??= which('fynkel', environment: env);
-    if (cli == null && root != null) {
-      for (final profile in ['release', 'debug']) {
-        final f = File(p.join(root, 'target', profile, 'fynkel'));
-        if (f.existsSync()) {
-          cli = f.path;
-          break;
-        }
+    if (cli == null) {
+      final found = [
+        ?which('fynkel', environment: env),
+        if (root != null)
+          for (final profile in ['release', 'debug'])
+            if (File(p.join(root, 'target', profile, 'fynkel')).existsSync()) p.join(root, 'target', profile, 'fynkel'),
+      ];
+      DateTime modified(String f) => File(f).statSync().modified;
+      // The first found wins a tie: PATH, then release, then debug.
+      for (final f in found) {
+        if (cli == null || modified(f).isAfter(modified(cli))) cli = f;
       }
     }
     // A CLI found on PATH still tells us where its checkout is.

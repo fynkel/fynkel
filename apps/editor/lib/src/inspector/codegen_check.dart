@@ -178,6 +178,11 @@ final class CodegenCheck extends ChangeNotifier {
       error = 'could not run `fynkel codegen`: $e';
     }
     checkedAt = DateTime.now();
+    if (error != null && error!.contains('unknown argument')) {
+      error =
+          'the fynkel CLI at $exe is older than this editor ($error) — update it '
+          '(`cargo install --path apps/cli` in the Fynkel checkout) or choose a newer one in Preferences';
+    }
     notifyListeners();
     return status == CodegenStatus.upToDate ? null : error ?? 'fynkel codegen left the files stale';
   }
