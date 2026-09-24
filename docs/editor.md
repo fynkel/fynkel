@@ -821,11 +821,16 @@ modified); for a source **Import**: importer and version, the sidecar
 path, the importer's known settings as controls — `fynkel.image`
 `colorSpace` (sRGB for colour, linear for data; the default writes no
 key), `fynkel.audio` `stream`, `fynkel.gltf`/`fynkel.fbx`
-`allowExternalFiles` — plus the raw `settings` JSON for everything else;
+`allowExternalFiles` and (Unity parity, 2026-09-24) Scale Factor, Normals
+(Import / Calculate, with the Smoothing Angle), Import Animation — plus
+the raw `settings` JSON for everything else;
 **Apply and Reimport** writes the settings through the session (one asset
 history step, undoable) and reimports at once, the result box showing the
 importer's summary (meshes, images, clips, …) or its refusal with the
-diagnostics, **Revert** drops the draft; **Sub-assets**, each row
+diagnostics, **Revert** drops the draft. As in Unity, leaving an asset
+whose settings changed without Apply asks **Unapplied import settings for
+'assets/…'**, with Revert and Apply; the change is never dropped silently.
+In a narrow Inspector the bar's buttons go under its message; **Sub-assets**, each row
 draggable onto an Inspector field or the Hierarchy; a material's
 fields, edited in place (§ The material Inspector below); a scene's or prefab's entity
 count; **Referenced by (N)** grouped by document, each row opening that

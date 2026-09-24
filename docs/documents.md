@@ -1419,10 +1419,27 @@ Cameras, lights, NURBS/procedural surfaces and curves are skipped
 (`A0105`, counted). A file that is not FBX at all (or a version `ufbx`
 does not read) is `A0100` with `ufbx`'s reason; the node graph limits
 (`max_nodes`, `max_node_depth`), vertex and image limits are `A0101`. The
-sidecar's `settings` are `allowExternalFiles` and `materials` (§ Material
-remaps, above). Sub-asset ids and
+sidecar's `settings` are `allowExternalFiles`, `materials` (§ Material
+remaps, above) and the model settings (§ Model settings, below). Sub-asset ids and
 their uuids follow the glTF rules above (`subAssets` in the sidecar,
 UUID v5 otherwise, dropped ids reported).
+
+### Model settings (glTF and FBX)
+
+Unity's Model tab, in the sidecar's `settings` of either scene importer
+(`crates/fynkel_import/src/model_settings.rs`, 2026-09-24), applied to
+what the file produced before its parts get ids:
+
+| Key | Values | What it does |
+|---|---|---|
+| `scaleFactor` | number `> 0`, default 1 | Baked in: vertex positions and bounds, every node's translation in the prefab, every joint's inverse bind and rest translation, and every translation key are multiplied by it. Rotations and scales stay; a uniform scale only scales translations when it conjugates a node's matrix, so skinning and animation still line up. `0.01` brings a centimetre file to metres. |
+| `normals` | `"import"` (default) or `"calculate"` | Calculated normals are the unit face normals of the triangles that meet at a position within `smoothingAngle` of each other, weighted by each one's angle at that corner. A vertex splits where its corners disagree, and its tangents are cleared so the cook derives them again. |
+| `smoothingAngle` | degrees `0..=180`, default 60 | Edges sharper than this stay hard. It is read only when the normals are calculated. |
+| `importAnimation` | bool, default true | When false, the file's clips are not imported: there are no `anim/<a>` parts and no warning about their ids. |
+
+A bad value is `FYN-A0104` at its pointer (`/settings/scaleFactor`, …),
+and the model is not imported. The cache key already covers the
+settings, so changing one recooks the model.
 
 ### Textures (`fynkel.image`, version 1)
 

@@ -79,7 +79,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Material Inspector | edit colour, maps, emission (HDR colour + intensity); preview sphere; live in the Scene view | 🔧 `dcd42ba`, `27f122f` (saved at once, live while picking or dragging, ⌘Z in the Inspector); no preview sphere yet; a custom-shader material stays read-only |
 | Drop a material on an object | assigns it | 🔧 `6203b47`, `b6ee085` (Hierarchy row or Scene view; drawn while hovering; an override inside a prefab instance) |
 | Volume profile Inspector | Add Override, a checkbox per field | 🔧 `b1b7402`, `d2fa8ea` (Remove, All / None; saved at once, live in the Scene view, ⌘Z in the Inspector) |
-| Model import settings | scale, normals, animation… | 🟡 external files + material remap only; unapplied changes dropped without asking |
+| Model import settings | scale, normals, animation… | 🔧 `41190a1`, `c3e7d3e` (Scale Factor, Normals Import / Calculate + Smoothing Angle, Import Animation; leaving with unapplied settings asks Apply / Revert); 🟡 no Rig or Animation tab beyond that (clips are split by the rig document), no mesh compression / read-write / lightmap UVs |
 | `transform.position` (world), `Translate`, `Rotate`, `LookAt`, `forward`, `eulerAngles` | | ❌ local setters only (`localPosition` semantics); read-only world transform |
 | One script throwing | only that script stops | ❌ the rest of the frame's update pass is skipped |
 | Coroutines / `Invoke` | | ❌ |
@@ -165,3 +165,10 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   and redoes one; a second test puts the profile on a global volume and
   checks with `fynkel render` that the bloom set in the Inspector makes a
   tenth of the picture brighter.
+- 2026-09-24: model import settings (`41190a1` the importer's
+  `scaleFactor`, `normals` / `smoothingAngle`, `importAnimation`;
+  `c3e7d3e`) — `import_settings_parity_test.dart` types a Scale Factor,
+  switches Normals to Calculate, applies, and checks with `fynkel render`
+  that the robot is drawn bigger; a second test unticks Import Animation,
+  selects another asset, and answers the Unapplied import settings
+  question with Revert and then Apply.
