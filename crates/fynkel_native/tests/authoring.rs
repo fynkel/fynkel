@@ -604,6 +604,7 @@ fn asset_operations_cross_the_edge_with_their_statuses() {
 const MAIN_SCENE: &str = "assets/scenes/main.scene.json";
 const MAIN_ROBOT: &str = "c0000000-0000-4000-8000-0000000000e1";
 const MAIN_SUN: &str = "c0000000-0000-4000-8000-0000000000e3";
+const RUSTED: &str = "c0000000-0000-4000-8000-000000000020";
 const MAIN_FLOOR: &str = "c0000000-0000-4000-8000-0000000000e4";
 const MAIN_FLOOR_TRANSFORM: &str = "c0000000-0000-4000-8000-0000000000d0";
 
@@ -855,6 +856,48 @@ fn the_edit_preview_world_crosses_the_edge() {
             scene,
             "setComponents",
             &json!({ "components": [{ "id": MAIN_SUN, "type": "fynkel.DirectionalLight", "data": { "color": "red" } }] })
+        ),
+        Status::Ok
+    );
+
+    // The Inspector's live material: drawn in place of the cooked one by
+    // the store, the file untouched; restored, the cooked one comes back.
+    let rusted = fynkel_contracts::AssetRef::new(fynkel_contracts::Uuid(
+        *uuid::Uuid::parse_str(RUSTED).unwrap().as_bytes(),
+    ));
+    let store = unsafe { (*world).assets() }.expect("the preview draws from the cache");
+    assert_eq!(store.material(&rusted).unwrap().metallic, 0.25);
+    let edits = store.material_edits();
+    let file = std::fs::read(copy.dir.join("assets/materials/rusted.material.json")).unwrap();
+    assert_eq!(
+        host.preview_call(
+            scene,
+            "setMaterial",
+            &json!({ "material": RUSTED, "data": { "shader": "fynkel.pbr@1", "metallic": 0.9, "base_color": [0, 1, 0, 1] } })
+        ),
+        Status::Ok
+    );
+    assert_eq!(host.result()["stores"], 1);
+    let live = store.material(&rusted).unwrap();
+    assert_eq!((live.metallic, live.base_color[1]), (0.9, 1.0));
+    assert!(
+        store.material_edits() > edits,
+        "the renderer rebuilds its materials"
+    );
+    assert_eq!(
+        std::fs::read(copy.dir.join("assets/materials/rusted.material.json")).unwrap(),
+        file
+    );
+    assert_eq!(
+        host.preview_call(scene, "restoreMaterial", &json!({ "material": RUSTED })),
+        Status::Ok
+    );
+    assert_eq!(store.material(&rusted).unwrap().metallic, 0.25);
+    assert_ne!(
+        host.preview_call(
+            scene,
+            "setMaterial",
+            &json!({ "material": RUSTED, "data": { "metallic": "shiny" } })
         ),
         Status::Ok
     );

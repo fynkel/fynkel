@@ -782,7 +782,7 @@ pub unsafe extern "C" fn fynkel_authoring_preview_call(
     })
 }
 
-const PREVIEW_KINDS: [&str; 15] = [
+const PREVIEW_KINDS: [&str; 17] = [
     "camera",
     "hidden",
     "pick",
@@ -793,6 +793,8 @@ const PREVIEW_KINDS: [&str; 15] = [
     "restoreTransforms",
     "setComponents",
     "restoreComponents",
+    "setMaterial",
+    "restoreMaterial",
     "resync",
     "reload",
     "recook",
@@ -984,6 +986,34 @@ fn preview_call(
                 .restore_components(slot.world.core_mut(), &ids)
                 .map_err(one)?;
             Ok(json!({ "ok": true, "handle": handle, "count": ids.len() }))
+        }
+        "setMaterial" | "restoreMaterial" => {
+            let material = uuid_of(args.get("material"), "material")?;
+            let data = if kind == "setMaterial" {
+                Some(args.get("data").filter(|d| d.is_object()).ok_or_else(|| {
+                    invalid("setMaterial: `data` must be the material's fields, an object")
+                })?)
+            } else {
+                None
+            };
+            s.slot(handle)?;
+            // Every open preview's store: the material shows the edit in
+            // every Scene view (after a recook they share one store).
+            let mut stores: Vec<fynkel_assets::Assets> = Vec::new();
+            for slot in s.previews.values() {
+                if let Some(a) = slot.world.assets() {
+                    if !stores.iter().any(|b| b.same_store(a)) {
+                        stores.push(a.clone());
+                    }
+                }
+            }
+            for a in &stores {
+                match data {
+                    Some(d) => Preview::set_material(a, material, d).map_err(one)?,
+                    None => Preview::restore_material(a, material),
+                }
+            }
+            Ok(json!({ "ok": true, "handle": handle, "stores": stores.len() }))
         }
         "resync" => {
             let (described, anchors) = s.inner.describe_with_anchors(handle).map_err(one)?;

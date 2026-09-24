@@ -26,7 +26,9 @@
 //!   synced world equals a fresh load after every transaction kind.
 //! - picking ([`Preview::pick`], [`Preview::pick_rect`]), the debug-line
 //!   overlays ([`Preview::outline_lines`], [`Preview::icon_lines`]) and
-//!   the gizmo's transform preview ([`Preview::set_transforms`]).
+//!   the gizmo's transform preview ([`Preview::set_transforms`]), the
+//!   Inspector's live component and material edits
+//!   ([`Preview::set_components`], [`Preview::set_material`]).
 
 use std::collections::{HashMap, HashSet};
 
@@ -852,6 +854,33 @@ impl Preview {
             world.drain_events();
         }
         Ok(())
+    }
+
+    /// The Inspector's live edit of a material document: `data` (a
+    /// `fynkel.pbr@1` document's fields; anything else in it ignored)
+    /// decoded and drawn in place of the cooked material `material` by
+    /// every renderer on `assets`, the file untouched. The save's recook
+    /// brings the cache to the same values; [`Preview::restore_material`]
+    /// puts the cooked one back (a cancelled edit).
+    pub fn set_material(assets: &Assets, material: Uuid, data: &Value) -> Result<(), Diagnostic> {
+        let node = fynkel_document::Node::from_serde(data);
+        let m = fynkel_document::material::PbrMaterial::from_node(&node).map_err(|err| {
+            Diagnostic::error(
+                Code::SESSION_INVALID_REQUEST,
+                format!("material at {}: {}", err.pointer, err.message),
+            )
+            .with_id(material.to_string())
+        })?;
+        assets.override_material(
+            &AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())),
+            m,
+        );
+        Ok(())
+    }
+
+    /// The cooked material `material` again after [`Preview::set_material`].
+    pub fn restore_material(assets: &Assets, material: Uuid) {
+        assets.restore_material(&AssetRef::new(fynkel_contracts::Uuid(*material.as_bytes())));
     }
 
     /// The editor's hidden flag: exactly `ids` (the caller passes the

@@ -353,6 +353,8 @@ struct Store {
     /// decrements; zero evicts).
     counts: HashMap<Uuid, u32>,
     evictions: u64,
+    /// Bumps on every `override_material` / `restore_material`.
+    material_edits: u64,
 }
 
 /// Residency numbers (`fynkel_world_load_report`, HUDs).
@@ -423,6 +425,7 @@ impl Assets {
                 sounds: HashMap::new(),
                 counts: HashMap::new(),
                 evictions: 0,
+                material_edits: 0,
             })),
         }
     }
@@ -469,6 +472,30 @@ impl Assets {
     /// copies of what left the store.
     pub fn evictions(&self) -> u64 {
         self.lock().evictions
+    }
+
+    /// Bumps on every material override or restore; a renderer compares
+    /// it to rebuild its materials.
+    pub fn material_edits(&self) -> u64 {
+        self.lock().material_edits
+    }
+
+    /// `m` in place of the cooked material `r` until [`restore_material`]
+    /// or the store is replaced: the editor's live Inspector edit, drawn
+    /// by every renderer on this store from its next frame.
+    ///
+    /// [`restore_material`]: Assets::restore_material
+    pub fn override_material(&self, r: &AssetRef, m: PbrMaterial) {
+        let mut s = self.lock();
+        s.materials.insert(r.clone(), Arc::new(m));
+        s.material_edits += 1;
+    }
+
+    /// The cooked material `r` again (read on its next use).
+    pub fn restore_material(&self, r: &AssetRef) {
+        let mut s = self.lock();
+        s.materials.remove(r);
+        s.material_edits += 1;
     }
 
     pub fn stats(&self) -> ResidencyStats {
