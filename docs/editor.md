@@ -236,7 +236,8 @@ run, Escape closes.
 | `assets.open` | Project | ⇧⌥⌘O | the selected scene or prefab into a tab; any other asset into the Inspector |
 | `assets.rename` | Project | ⇧⌥⌘R | rename the selected asset in place (the sidecar moves with it; the id survives) |
 | `assets.move` | Project | ⇧⌥⌘V | move the selected assets to a folder picked from a list |
-| `assets.delete` | Project | ⇧⌥⌘⌫ | delete the selected assets to `.fynkel/trash`; refused while referenced, with the dependents listed and a **Delete anyway** |
+| `assets.duplicate` | Project | ⌘D in the Project browser | a copy of each selected asset beside it (`coin 1`, …) under a fresh id, selected |
+| `assets.delete` | Project | ⇧⌥⌘⌫ | asks first, then deletes the selected assets to `.fynkel/trash`; refused while referenced, with the dependents listed and a **Delete anyway** |
 | `assets.reimport` | Project | ⇧⌥⌘I | run the selected source through its importer with the sidecar's settings |
 | `assets.reveal` | Project | ⇧⌥⌘E | reveal the selected asset in Finder (`open -R`; `explorer /select,` and `xdg-open` elsewhere) |
 | `assets.copyId` | Project | ⇧⌥⌘C | the selected asset's id on the clipboard |
@@ -391,7 +392,13 @@ records for undo, and can save — the editor never edits JSON by hand.
   entities keep their visible order, and an index counts the slots they
   vacate. A **scene's roots** reorder the same way (since 2026-09-24:
   `reparentObject` with an index moves the entity's member in
-  `entities`, whose key order is the roots' order).
+  `entities`, whose key order is the roots' order). ⌘Z brings back the
+  selection a step was made with and ⇧⌘Z the one it was left with
+  (`OpenDocument` keeps one entry per transaction beside the document's
+  history). ⌥-click on an arrow opens or closes everything below it; a
+  right-click on empty space offers Paste, Create Empty at the root and
+  Expand / Collapse All; a row's menu has Cut / Copy / Paste / Paste As
+  Child (2026-09-24).
   **Keep world transform** (on by default, ⌥⌘K) rewrites the moved
   entity's Transform in the **same transaction** — `newLocal =
   inverse(world(newParent)) × world(entity)`, only the fields that
@@ -459,6 +466,12 @@ selected entity has that component (a second `Spinner` is slot
 `game.Spinner#1`). A field whose values differ across the slot is
 **mixed** and drawn as `—`; setting it writes one `setField` per instance
 inside a single transaction, so one ⌘Z undoes it everywhere (§22.6).
+A typed rotation keeps its angles: the editor remembers the last few
+Euler triples typed per rotation (`EulerHints`, Unity's Euler hint — the
+document stores only the quaternion) and shows one while the quaternion
+still matches, so Y 120 reads 120 after a reselect or an undo rather than
+X 180, Y 60, Z 180. An asset field's name **pings** the asset in the
+Project browser (⊙, or an empty field, opens the picker).
 With several objects, a Rotation axis edits that axis on each object's
 own Euler angles (`setFieldEach`: one quaternion per object, one
 transaction); an axis that differs shows `—`. Scrubbing a Transform
@@ -517,7 +530,11 @@ only). The checkbox is one transaction for the whole selection:
 own flag wins, ADR-0022), a `setActive` override on the instance for a
 derived one (docs/design/set-active.md). One collapsible card per
 slot with the type's icon (the `icon` hint or a per-type default), its
-description as a tooltip, the field rows in groups, and a menu: **Reset to
+description as a tooltip, the field rows in groups, a component's boolean
+`enabled` as a checkbox in the header (Unity's; the Emitter and the
+Volume have one), and a menu: **Copy Component** / **Paste Component
+Values** (any component of the same type, in any document, one
+transaction; a key the copy lacks goes back to its default), **Reset to
 Defaults**, **Open Script** (a behaviour: `package:<pkg>/<path>` from the
 metadata resolved to `<project>/lib/<path>` when `<pkg>` is the project's
 package, then the configured IDE command at the line of its `class`
@@ -667,13 +684,19 @@ a badge, sort, **New ▾** (Scene, Prefab, Material, Folder), Undo/Redo of
 asset operations with the operation's label in the tooltip. Below, in the
 folders view, the tree (`assets` root and every folder, the shown one
 highlighted) beside the list; a folder opens on one click, a document
-opens in a tab on double-click (or ↩), any other asset shows in the
+opens in a tab on double-click (or ⌘↓, Unity's), any other asset shows in the
 Inspector. Rows show the file name (renaming changes the file, never a
 document's internal `name`, which dims beside it when it differs), a
 preview, the folder path in the list or while filtering, `N sub` with
-the sub-asset ids as a tooltip, and the kind. **Inline rename** (F2, the
-menu, or right after New): ↩ commits, ⎋ cancels, losing focus commits.
-Keys: ↑↓ ⇧↑↓ ↩ F2 ⌫/⌦ ⌘A ⎋ ←(up a folder). Context menus: an asset's
+the sub-asset ids as a tooltip, and the kind. **Inline rename** (↩ or F2
+as in Unity, the menu, or right after New): ↩ commits, ⎋ cancels, losing
+focus commits. Keys (2026-09-24, Unity's): ↑↓ ⇧↑↓ ↩/F2 rename, ⌘↓ open,
+⌘D duplicate (`duplicateAsset`: `coin 1` beside it under a fresh id, the
+copies selected), ⌘⌫ (and ⌫/⌦) delete after **Delete selected asset?** —
+a referenced asset goes straight to the "still referenced" dialog below —
+⌘A ⎋ ←(up a folder). An asset field clicked in the Inspector **pings**
+its asset here: shown in its folder, scrolled to and outlined, nothing
+selected. Context menus: an asset's
 Open / Show in Inspector / Reveal in Finder / Rename / Move to… / Delete /
 Reimport / **Set as Startup Scene** (a scene: the one `fynkel run`
 starts with, one asset-history step) / Copy id / Copy path / New … Here; a folder's Show / Reveal /
@@ -1692,7 +1715,9 @@ the editor camera and its tools.
   `.fynkel/recovery/<path>` (replaced on every Play), so a crash during the
   run loses nothing. Without a Scene view open, Play cooks the files and
   asks to save first, as a process run does.
-- **Pause (⇧⌘P):** stops the game's loop and its audio. **Step (⌥⌘P)**
+- **Pause (⇧⌘P):** stops the game's loop and its audio; like Unity's it
+  can be on before Play, and the game then starts paused on its first
+  frame (the toggle stays across Stop). **Step (⌥⌘P)**
   pauses and runs one fixed step. Both are in the title bar beside
   Play/Stop and in the Play menu. They reach every `FynkelGameView` of the
   game through `FynkelPlayScope`, so a game needs no code for them.

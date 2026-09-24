@@ -635,7 +635,14 @@ window, never running game code and never reading a cooked cache
   itself is refused (`the path names the asset root itself`), and an open
   editor of that document is `relocate`d (its next `save()` writes to the
   new path; revision and history untouched; the Dart side sees a
-  `DocumentChangeKind.moved`). `deleteAsset { asset, force? }` is
+  `DocumentChangeKind.moved`). `duplicateAsset { asset, path? }`
+  (Unity's Duplicate, 2026-09-24) writes a copy beside the asset —
+  `coin 1`, `coin 2`, … (a trailing number counts on) or at `path` —
+  under a fresh id: a document keeps its body, its `name` following the
+  file when it was the file's stem; a source is copied byte for byte with
+  a sidecar of its own (same settings, fresh sub-asset ids under the same
+  keys); undo removes the copy (refused once it was edited).
+  `deleteAsset { asset, force? }` is
   **refused while anything references the asset** — `FYN-T0003` with one
   `related` `FYN-A0004` per referencing field (`document` absolute path,
   `pointer`, `id`) — and with `force` moves the file and sidecar into
@@ -715,7 +722,7 @@ game's runtime has none of these symbols, and CI checks that
 **The Dart side** is `packages/fynkel_authoring` (ffigen bindings over the
 header onto the same code asset as `package:fynkel`; games never depend on
 it): `AuthoringSession` (`openProject`, `openDocument`, the queries typed,
-`rescan`, `operate` with typed wrappers — `newDocument`, `renameAsset`,
+`rescan`, `operate` with typed wrappers — `newDocument`, `renameAsset`, `duplicateAsset`,
 `deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`, `redoAsset`
 → `OperationResult` —, `assetDetail` → `AssetDetail`, `assetHistory` →
 `AssetHistory`, `dependents`, a **synchronous** broadcast
