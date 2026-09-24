@@ -157,6 +157,7 @@ class PrefabBar extends StatelessWidget {
 Future<void> showOverrides(BuildContext context, InspectorModel model, String entityId, {Rect? anchor}) {
   return showDialog<void>(
     context: context,
+    animationStyle: AnimationStyle.noAnimation,
     barrierColor: Colors.transparent,
     builder: (dialog) {
       final screen = MediaQuery.sizeOf(dialog);

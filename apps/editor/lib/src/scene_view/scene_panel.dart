@@ -257,6 +257,7 @@ class _ScenePanelState extends State<ScenePanel> {
             const SizedBox(width: 4),
             PopupMenuButton<PrefabContextMode>(
               key: const Key('scene.prefab.context'),
+              popUpAnimationStyle: AnimationStyle.noAnimation,
               tooltip: 'How the scene around the prefab is drawn',
               initialValue: es.prefabContext,
               onSelected: model.setPrefabContext,
