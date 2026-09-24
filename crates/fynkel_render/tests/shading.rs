@@ -33,8 +33,8 @@ use fynkel_core::{
 };
 use fynkel_import::{cook_project, CookOptions};
 use fynkel_render::{
-    clear_rgba8, exposure, headless_device, render_offscreen, Assets, ExtractRenderer, Grid,
-    OutlineStyle, Quality, LIGHT_POOL, MAX_LIGHTS, PIPELINE_VARIANTS,
+    clear_rgba8, exposure, headless_device, render_offscreen, Assets, ExtraWorld, ExtractRenderer,
+    Grid, OutlineStyle, Quality, LIGHT_POOL, MAX_LIGHTS, PIPELINE_VARIANTS,
 };
 use glam::{Mat4, Quat, Vec3};
 use serde_json::{json, Value};
@@ -2646,4 +2646,259 @@ fn blended_meshes_are_outlined_by_their_whole_surface() {
     for i in deep_inside(&cover, 1) {
         assert_eq!(ringed[i], plain[i]);
     }
+}
+
+// ------------------ extra worlds (Prefab Mode in context, multi-scene)
+
+/// A host-camera scene eight metres back: a cube at the origin, lit by a
+/// sun.
+fn lit_cube() -> Extract {
+    let mut e = Extract::default();
+    e.records.push(record(1, Mat4::IDENTITY));
+    e.directional_lights
+        .push(sun(Vec3::new(-0.3, -1.0, -0.5), 10_000.0));
+    e
+}
+
+fn extra_renderer(device: &wgpu::Device) -> ExtractRenderer {
+    let mut r = renderer(device);
+    r.camera.eye = Vec3::new(0.0, 0.0, 8.0);
+    r
+}
+
+fn one_cube(slot: u32, world: Mat4) -> Extract {
+    let mut e = Extract::default();
+    e.records.push(record(slot, world));
+    e
+}
+
+fn at(p: (u32, u32)) -> usize {
+    (p.1 * W + p.0) as usize
+}
+
+/// How far a pixel is from grey: its largest channel minus its smallest.
+fn spread(p: [u8; 4]) -> f32 {
+    let (hi, lo) = (p[0].max(p[1]).max(p[2]), p[0].min(p[1]).min(p[2]));
+    (hi - lo) as f32
+}
+
+#[test]
+fn an_extra_world_is_drawn_through_its_transform_for_one_frame() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let main = lit_cube();
+    let baseline = render_offscreen(&device, &queue, &mut extra_renderer(&device), &main);
+    let mut r = extra_renderer(&device);
+    let (origin, right) = (
+        pixel_of(&r, Vec3::ZERO),
+        pixel_of(&r, Vec3::new(2.5, 0.0, 0.0)),
+    );
+    assert!(is_background(baseline[at(right)]));
+
+    // A cube half a metre off its world's origin, turned and grown; the
+    // transform puts that world 2 m to +X. The frame is the one where
+    // the main world holds the cube where the transform puts it.
+    let local = Mat4::from_scale_rotation_translation(
+        Vec3::splat(1.2),
+        Quat::from_rotation_y(0.5),
+        Vec3::new(0.5, 0.0, 0.0),
+    );
+    let transform = Mat4::from_translation(Vec3::new(2.0, 0.0, 0.0));
+    r.push_extra_world(ExtraWorld {
+        extract: one_cube(4, local),
+        transform,
+        gray: false,
+    });
+    assert_eq!(r.extra_worlds().len(), 1);
+    let px = render_offscreen(&device, &queue, &mut r, &main);
+    dump(&px, "extra-world");
+    assert!(r.extra_worlds().is_empty(), "the render consumed the queue");
+    let s = r.stats();
+    assert_eq!((s.extra_worlds, s.instances), (1, 2));
+    assert!(!is_background(px[at(right)]));
+    assert!(
+        luminance(px[at(right)]) > 40.0,
+        "lit by the main world's sun"
+    );
+    assert_eq!(px[at(origin)], baseline[at(origin)]);
+    let mut merged = main.clone();
+    merged.records.push(record(4, transform * local));
+    assert_eq!(
+        px,
+        render_offscreen(&device, &queue, &mut extra_renderer(&device), &merged)
+    );
+
+    // Not queued again: the next frame is the main world alone, bit for
+    // bit.
+    assert_eq!(render_offscreen(&device, &queue, &mut r, &main), baseline);
+    assert_eq!(r.stats().extra_worlds, 0);
+    // An empty extra world (grey or not) changes nothing; a cleared queue
+    // draws none.
+    r.push_extra_world(ExtraWorld {
+        extract: Extract::default(),
+        transform: Mat4::IDENTITY,
+        gray: true,
+    });
+    assert_eq!(render_offscreen(&device, &queue, &mut r, &main), baseline);
+    assert_eq!(r.stats().extra_worlds, 1);
+    r.push_extra_world(ExtraWorld {
+        extract: one_cube(4, Mat4::IDENTITY),
+        transform,
+        gray: false,
+    });
+    r.clear_extra_worlds();
+    assert_eq!(render_offscreen(&device, &queue, &mut r, &main), baseline);
+}
+
+#[test]
+fn a_grey_extra_world_is_desaturated_and_dimmed() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let main = lit_cube();
+    let mut r = extra_renderer(&device);
+    let baseline = render_offscreen(&device, &queue, &mut r, &main);
+    let place = Mat4::from_translation(Vec3::new(2.5, 0.0, 0.0));
+    let mut frame = |gray: bool| {
+        r.push_extra_world(ExtraWorld {
+            // Slot 5: the placeholder palette's red.
+            extract: one_cube(5, Mat4::IDENTITY),
+            transform: place,
+            gray,
+        });
+        render_offscreen(&device, &queue, &mut r, &main)
+    };
+    let (normal, grey) = (frame(false), frame(true));
+    dump(&grey, "extra-world-grey");
+    // The extra cube's texels, well inside its silhouette.
+    let cover: Vec<bool> = normal.iter().zip(&baseline).map(|(p, b)| p != b).collect();
+    let inside = deep_inside(&cover, 2);
+    assert!(inside.len() > 100, "{} texels", inside.len());
+    let mean = |px: &[[u8; 4]], f: fn([u8; 4]) -> f32| {
+        inside.iter().map(|&i| f(px[i])).sum::<f32>() / inside.len() as f32
+    };
+    let (lum_normal, lum_grey) = (mean(&normal, luminance), mean(&grey, luminance));
+    let (sat_normal, sat_grey) = (mean(&normal, spread), mean(&grey, spread));
+    assert!(sat_normal > 60.0, "the red cube: spread {sat_normal}");
+    assert!(sat_grey < 1.0, "grey: spread {sat_grey}");
+    assert!(
+        lum_grey < lum_normal * 0.8 && lum_grey > 5.0,
+        "grey {lum_grey} vs normal {lum_normal}"
+    );
+    // The main world is not greyed.
+    for i in (0..baseline.len()).filter(|&i| !cover[i]) {
+        assert_eq!(grey[i], baseline[i]);
+    }
+}
+
+#[test]
+fn an_extra_worlds_lights_shine_where_its_transform_puts_them() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    // No sun: the main world lights its cube with ambient alone.
+    let mut main = Extract::default();
+    main.records.push(record(1, Mat4::IDENTITY));
+    main.environment = Some(environment(Vec3::ONE, 50.0));
+    let mut r = extra_renderer(&device);
+    let baseline = render_offscreen(&device, &queue, &mut r, &main);
+    let face = at(pixel_of(&r, Vec3::new(0.0, 0.0, 0.5)));
+    // A world holding nothing but a point light at its origin.
+    let mut lamp = Extract::default();
+    lamp.point_lights.push(ExtractPointLight {
+        record: 0,
+        position: Vec3::ZERO,
+        light: PointLight {
+            color: Vec3::ONE,
+            intensity: 400.0,
+            range: 10.0,
+            culling_mask: u32::MAX,
+        },
+    });
+    let mut lit_from = |z: f32| {
+        r.push_extra_world(ExtraWorld {
+            extract: lamp.clone(),
+            transform: Mat4::from_translation(Vec3::new(0.0, 0.0, z)),
+            gray: false,
+        });
+        let px = render_offscreen(&device, &queue, &mut r, &main);
+        (px, r.stats())
+    };
+    // In front of the face the camera sees: brighter.
+    let (front, s) = lit_from(2.0);
+    assert_eq!((s.lights, s.extra_worlds, s.instances), (1, 1, 1));
+    assert!(
+        luminance(front[face]) > luminance(baseline[face]) + 30.0,
+        "{:?} vs {:?}",
+        front[face],
+        baseline[face]
+    );
+    // Behind the cube: the face is as it was.
+    let (behind, s) = lit_from(-2.0);
+    assert_eq!(s.lights, 1);
+    assert_eq!(behind[face], baseline[face]);
+}
+
+#[test]
+fn extra_worlds_cast_and_receive_the_suns_shadow() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    // The shadow test's slab and cube, split across two worlds.
+    let slab = Mat4::from_scale_rotation_translation(
+        Vec3::new(10.0, 0.2, 10.0),
+        Quat::IDENTITY,
+        Vec3::new(0.0, -0.6, 0.0),
+    );
+    let mut caster = sun(Vec3::new(0.6, -1.0, 0.0), 10_000.0);
+    caster.light.cast_shadows = true;
+    let mut r = renderer(&device);
+    r.camera.eye = Vec3::new(0.0, 8.0, 6.0);
+    let shadowed_at = at(pixel_of(&r, Vec3::new(0.8, -0.5, 0.0)));
+    let lit_at = at(pixel_of(&r, Vec3::new(-2.0, -0.5, 0.0)));
+
+    // The main world's slab, the cube in an extra world: its shadow
+    // falls on the slab.
+    let mut floor = one_cube(0, slab);
+    floor.directional_lights.push(caster);
+    let alone = render_offscreen(&device, &queue, &mut r, &floor);
+    assert_eq!(r.stats().shadow_casters, 1);
+    r.push_extra_world(ExtraWorld {
+        extract: one_cube(1, Mat4::IDENTITY),
+        transform: Mat4::IDENTITY,
+        gray: false,
+    });
+    let with = render_offscreen(&device, &queue, &mut r, &floor);
+    assert_eq!(r.stats().shadow_casters, 2);
+    assert!(
+        luminance(with[shadowed_at]) < luminance(alone[shadowed_at]) * 0.7,
+        "{:?} vs {:?}",
+        with[shadowed_at],
+        alone[shadowed_at]
+    );
+
+    // The other way round, the slab grey in an extra world with the sun
+    // (the main world has none): the main cube's shadow falls on it.
+    let mut cube = one_cube(1, Mat4::IDENTITY);
+    cube.directional_lights.clear();
+    let mut grey_floor = one_cube(0, slab);
+    grey_floor.directional_lights.push(caster);
+    r.push_extra_world(ExtraWorld {
+        extract: grey_floor,
+        transform: Mat4::IDENTITY,
+        gray: true,
+    });
+    let px = render_offscreen(&device, &queue, &mut r, &cube);
+    dump(&px, "extra-world-shadow");
+    let s = r.stats();
+    assert!(s.scene_light, "the extra world's sun");
+    assert_eq!((s.shadow_casters, s.extra_worlds), (2, 1));
+    assert!(
+        luminance(px[shadowed_at]) < luminance(px[lit_at]) * 0.7,
+        "{:?} vs {:?}",
+        px[shadowed_at],
+        px[lit_at]
+    );
+    assert!(spread(px[lit_at]) < 1.0, "the slab is grey");
 }

@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use fynkel_core::{World, WorldConfig};
 use fynkel_import::{cook_project, CookOptions};
 use fynkel_render::{
-    clear_rgba8, headless_device, render_offscreen, Assets, ExtractRenderer, OutlineStyle,
+    clear_rgba8, headless_device, render_offscreen, Assets, ExtraWorld, ExtractRenderer,
+    OutlineStyle,
 };
 
 fn fixture_project() -> PathBuf {
@@ -386,4 +387,58 @@ fn skinned_meshes_follow_their_joint_palette() {
     assert!(ring.iter().all(|&i| within(&bent, i, 3)));
     let away = ring.iter().filter(|&&i| !within(&straight, i, 4)).count();
     assert!(away > 20, "{away} ring pixels away from the bind pose");
+}
+
+/// Multi-scene editing and Prefab Mode in context: an extra world's
+/// skinned meshes are posed by its own palettes, uploaded after the main
+/// extract's. The rig scene posed half a second into "wave", drawn as an
+/// extra world beside a main extract that draws nothing but holds the
+/// bind pose's palettes, is the posed picture — reading the main
+/// extract's palettes instead would draw the straight columns.
+#[test]
+fn an_extra_worlds_skinned_meshes_follow_its_own_palette() {
+    let Some((device, queue)) = headless_device() else {
+        eprintln!("no GPU adapter; skipping");
+        return;
+    };
+    let project = TempProject::new("rig-extra");
+    let assets = Assets::open(&project.cook()).unwrap_or_else(|d| panic!("{d}"));
+    let id: fynkel_contracts::AssetId = "c0000000-0000-4000-8000-000000000034".parse().unwrap();
+    let cooked = assets.scene(id).unwrap_or_else(|d| panic!("{d:#?}"));
+    let mut world = World::new(WorldConfig::default());
+    world.load_scene(&cooked.description).unwrap();
+    assets.register_animation(&cooked.description, &mut world);
+    let _residency = assets.retain(&cooked.closure);
+    let mut renderer = ExtractRenderer::new(&device, wgpu::TextureFormat::Rgba8Unorm, 320, 240);
+    renderer.placeholders = false;
+    renderer.set_assets(Some(assets.clone()));
+
+    world.begin_frame(1.0 / 60.0);
+    world.step();
+    let bind = world.extract();
+    for _ in 0..29 {
+        world.begin_frame(1.0 / 60.0);
+        world.step();
+    }
+    let posed = world.extract();
+    assert_ne!(bind.joints, posed.joints);
+    let px_posed = render_offscreen(&device, &queue, &mut renderer, &posed);
+    assert_eq!(renderer.stats().skinned, 2);
+
+    let mut main = posed.clone();
+    main.meshes.clear();
+    main.joints = bind.joints.clone();
+    let mut extra = posed.clone();
+    extra.directional_lights.clear();
+    extra.point_lights.clear();
+    extra.spot_lights.clear();
+    renderer.push_extra_world(ExtraWorld {
+        extract: extra,
+        transform: glam::Mat4::IDENTITY,
+        gray: false,
+    });
+    let px = render_offscreen(&device, &queue, &mut renderer, &main);
+    let s = renderer.stats();
+    assert_eq!((s.extra_worlds, s.skinned, s.joints), (1, 2, 12));
+    assert_eq!(px, px_posed);
 }

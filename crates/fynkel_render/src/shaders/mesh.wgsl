@@ -29,7 +29,8 @@ struct VsIn {
     // colour factor, emissive (rgb × strength, nits-relative), params
     // (metallic, roughness, normal_scale, occlusion_strength), flags
     // (alpha cutoff, -1 opaque or -2 blend; unlit; the slot of this
-    // instance's light list; receives shadows).
+    // instance's light list; bits: 1 receives shadows, 2 grey — an extra
+    // world drawn greyed).
     @location(6) m0: vec4<f32>,
     @location(7) m1: vec4<f32>,
     @location(8) m2: vec4<f32>,
@@ -272,6 +273,15 @@ fn fs_mask(in: VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(in.params.x, 0.0, 0.0, 1.0);
 }
 
+// An extra world drawn greyed (Unity's Prefab Mode context in "Gray",
+// `fynkel_render::ExtraWorld::gray`): the shaded colour desaturated to its
+// Rec. 709 luminance, then dimmed.
+const GRAY_DIM: f32 = 0.5;
+
+fn grayed(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)) * GRAY_DIM);
+}
+
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let base = textureSample(base_color_tex, material_sampler, in.uv) * in.color;
@@ -286,8 +296,13 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
         tag = clamp(base.a, 0.0, 1.0);
     }
     let albedo = base.rgb;
+    let bits = u32(in.flags.w);
+    let gray = (bits & 2u) != 0u;
     if in.flags.y > 0.5 {
         // Unlit: display-referred, the post pass only encodes it.
+        if gray {
+            return vec4<f32>(grayed(albedo), 2.0);
+        }
         return vec4<f32>(albedo, 2.0);
     }
 
@@ -325,7 +340,7 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     var radiance = vec3<f32>(0.0);
     if frame.sun_dir.w > 0.5 {
         var visibility = 1.0;
-        if frame.shadow.x > 0.5 && in.flags.w > 0.5 {
+        if frame.shadow.x > 0.5 && (bits & 1u) != 0u {
             visibility = sun_visibility(in.world_pos, geometric_n);
         }
         radiance += visibility * shade(n, v, frame.sun_dir.xyz, frame.sun_color.rgb, diffuse, f0, a2);
@@ -357,5 +372,8 @@ fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0)
     // Emissive is relative to the exposure's white (L_max).
     let emissive = in.emissive.rgb * textureSample(emissive_tex, material_sampler, in.uv).rgb;
     radiance += emissive * frame.ambient.w;
+    if gray {
+        radiance = grayed(radiance);
+    }
     return vec4<f32>(radiance, tag);
 }

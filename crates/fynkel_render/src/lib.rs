@@ -114,6 +114,37 @@ const BLEND: f32 = -2.0;
 /// Receiver normal offset, in shadow texels.
 const SHADOW_NORMAL_OFFSET_TEXELS: f32 = 1.5;
 
+/// Added to [`Instance::flags`]`[3]` (receives shadows, 0 or 1) for an
+/// instance of a grey [`ExtraWorld`]: the mesh stage reads bit 0 as
+/// "receives shadows" and bit 1 as "grey".
+const GRAY_FLAG: f32 = 2.0;
+
+/// Another world drawn into the next frame beside the extract `prepare` is
+/// given (the editor's Prefab Mode in context, multi-scene editing):
+/// [`ExtractRenderer::push_extra_world`].
+///
+/// Its instances share the frame's depth buffer, light pool and shadow
+/// maps, their model matrices pre-multiplied by `transform`; its point and
+/// spot lights (placed by `transform`, their range scaled by its largest
+/// axis) join the frame's pool and its casters the sun's shadow; its
+/// skinned meshes are posed by its own joint palettes. Its first
+/// directional light is the sun only when the main extract has none. Its
+/// camera, `Environment` and volumes are ignored: the main extract's are
+/// the frame's. Meshes and materials come from the renderer's asset store
+/// (the main world's), so an extra world must reference the same cache.
+/// The selection outline only rings the main extract's entities.
+#[derive(Clone, Debug)]
+pub struct ExtraWorld {
+    pub extract: Extract,
+    /// World of the extract → world of the frame (column-major).
+    pub transform: Mat4,
+    /// Drawn greyed — Unity's Prefab Mode context in "Gray": the shaded
+    /// colour (lit, emissive and unlit alike) desaturated to its Rec. 709
+    /// luminance and halved, `rgb' = 0.5 · dot(rgb, (0.2126, 0.7152,
+    /// 0.0722))`, alpha kept; still depth-tested, shadowed and casting.
+    pub gray: bool,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Instance {
@@ -367,6 +398,8 @@ pub struct FrameStats {
     /// Instances drawn into the selection outline's mask (0: the frame
     /// has no outline, and no outline passes).
     pub outlined: u32,
+    /// [`ExtraWorld`]s drawn beside the main extract this frame.
+    pub extra_worlds: u32,
     /// Whether the frame ran the ambient-occlusion stage (R2).
     pub ambient_occlusion: bool,
     /// Whether the frame ran the bloom stage (R3b).
@@ -861,6 +894,10 @@ pub struct ExtractRenderer {
     outline_instances: Vec<Instance>,
     outline_buffer: wgpu::Buffer,
     outline_capacity: u32,
+    /// The worlds the next `prepare` draws beside its extract, and the
+    /// joint palettes of a frame that has any, back to back.
+    extra_worlds: Vec<ExtraWorld>,
+    joint_scratch: Vec<Mat4>,
     attachments: Attachments,
     shadow_map: ShadowMap,
     /// The shadow map holds this frame's sun: the shadow pass runs and the
@@ -1276,6 +1313,8 @@ impl ExtractRenderer {
             outline_instances: Vec::new(),
             outline_buffer,
             outline_capacity,
+            extra_worlds: Vec::new(),
+            joint_scratch: Vec::new(),
             attachments,
             shadow_map,
             shadow_active: false,
@@ -1380,6 +1419,23 @@ impl ExtractRenderer {
     /// (cleared by `prepare` once uploaded; ADR-0019).
     pub fn overlay(&mut self) -> &mut Overlay {
         &mut self.overlay
+    }
+
+    /// Queues `extra` to be drawn by the next `prepare` beside its extract
+    /// (see [`ExtraWorld`]). The queue empties with every `prepare`: a
+    /// host draws its extra worlds by queuing them before each frame.
+    pub fn push_extra_world(&mut self, extra: ExtraWorld) {
+        self.extra_worlds.push(extra);
+    }
+
+    /// The extra worlds queued for the next `prepare`.
+    pub fn extra_worlds(&self) -> &[ExtraWorld] {
+        &self.extra_worlds
+    }
+
+    /// Drops the extra worlds queued for the next `prepare`.
+    pub fn clear_extra_worlds(&mut self) {
+        self.extra_worlds.clear();
     }
 
     // ----------------------------------------------------------- quality
@@ -1630,8 +1686,9 @@ impl ExtractRenderer {
     /// lights, the sun's shadow fit, the environment, the extract's
     /// instances (culled against the camera frustum and the sun's box,
     /// grouped into one range per opaque `(mesh, material)` batch, then
-    /// the transparent ones back-to-front) and the debug lines. Returns
-    /// the number of instances the scene passes will draw.
+    /// the transparent ones back-to-front) — the queued [`ExtraWorld`]s'
+    /// with them, which it consumes — and the debug lines. Returns the
+    /// number of instances the scene passes will draw.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -1639,6 +1696,9 @@ impl ExtractRenderer {
         extract: &Extract,
     ) -> u32 {
         let prepare_start = std::time::Instant::now();
+        // Consumed by this frame; handed back empty at the end to keep
+        // the queue's capacity.
+        let mut extras = std::mem::take(&mut self.extra_worlds);
         self.reconcile_evictions();
         self.resolve_quality(device);
         self.ensure_fallbacks(device, queue);
@@ -1711,32 +1771,47 @@ impl ExtractRenderer {
 
         // Sun, ambient, sky. A scene that authors no lighting at all (no
         // light, no Environment) gets the host's fallback sun.
+        // An extra world's lights count as authored, and its sun is the
+        // frame's when the main extract has none.
         let authored_lighting = !extract.directional_lights.is_empty()
             || !extract.point_lights.is_empty()
             || !extract.spot_lights.is_empty()
-            || extract.environment.is_some();
-        let (sun_dir, sun_color, sun_lux, sun_present, sun_casts) =
-            match extract.directional_lights.first() {
-                Some(l) => {
-                    stats.scene_light = true;
-                    let lux = l.light.intensity.max(0.0);
-                    (
-                        (-l.direction).normalize_or(Vec3::Y),
-                        l.light.color.max(Vec3::ZERO) * lux,
-                        lux,
-                        true,
-                        l.light.cast_shadows,
-                    )
-                }
-                None if !authored_lighting => (
-                    self.light_dir,
-                    Vec3::splat(exposure::FALLBACK_SUN_LUX),
-                    exposure::FALLBACK_SUN_LUX,
+            || extract.environment.is_some()
+            || extras.iter().any(|x| {
+                !x.extract.directional_lights.is_empty()
+                    || !x.extract.point_lights.is_empty()
+                    || !x.extract.spot_lights.is_empty()
+            });
+        let sun = match extract.directional_lights.first() {
+            Some(l) => Some((l, l.direction)),
+            None => extras.iter().find_map(|x| {
+                x.extract
+                    .directional_lights
+                    .first()
+                    .map(|l| (l, x.transform.transform_vector3(l.direction)))
+            }),
+        };
+        let (sun_dir, sun_color, sun_lux, sun_present, sun_casts) = match sun {
+            Some((l, direction)) => {
+                stats.scene_light = true;
+                let lux = l.light.intensity.max(0.0);
+                (
+                    (-direction).normalize_or(Vec3::Y),
+                    l.light.color.max(Vec3::ZERO) * lux,
+                    lux,
                     true,
-                    true,
-                ),
-                None => (Vec3::Y, Vec3::ZERO, 0.0, false, false),
-            };
+                    l.light.cast_shadows,
+                )
+            }
+            None if !authored_lighting => (
+                self.light_dir,
+                Vec3::splat(exposure::FALLBACK_SUN_LUX),
+                exposure::FALLBACK_SUN_LUX,
+                true,
+                true,
+            ),
+            None => (Vec3::Y, Vec3::ZERO, 0.0, false, false),
+        };
         let default_env = Environment::default();
         let env = extract
             .environment
@@ -1803,43 +1878,55 @@ impl ExtractRenderer {
         // Point and spot lights: every one of them, culled to the view
         // and assigned per object below.
         // Each with its `culling_mask` (ADR-0020): the layers it lights.
-        let mut lights: Vec<(f32, GpuLight, u32)> =
-            Vec::with_capacity(extract.point_lights.len() + extract.spot_lights.len());
-        for l in &extract.point_lights {
-            lights.push((
-                l.position.distance_squared(camera_pos),
-                GpuLight {
-                    position: l.position.extend(l.light.range.max(1e-3)).to_array(),
-                    color: (l.light.color.max(Vec3::ZERO) * l.light.intensity.max(0.0))
-                        .extend(LIGHT_POINT)
-                        .to_array(),
-                    ..GpuLight::default()
-                },
-                l.light.culling_mask,
-            ));
-        }
-        for l in &extract.spot_lights {
-            let outer = l.light.outer_angle.clamp(1e-3, std::f32::consts::PI - 1e-3);
-            let inner = l.light.inner_angle.clamp(0.0, outer);
-            let cos_outer = outer.cos();
-            // `smoothstep` needs distinct edges.
-            let cos_inner = inner.cos().max(cos_outer + 1e-4);
-            lights.push((
-                l.position.distance_squared(camera_pos),
-                GpuLight {
-                    position: l.position.extend(l.light.range.max(1e-3)).to_array(),
-                    color: (l.light.color.max(Vec3::ZERO) * l.light.intensity.max(0.0))
-                        .extend(LIGHT_SPOT)
-                        .to_array(),
-                    direction: l
-                        .direction
-                        .normalize_or(Vec3::NEG_Z)
-                        .extend(cos_outer)
-                        .to_array(),
-                    params: [cos_inner, 0.0, 0.0, 0.0],
-                },
-                l.light.culling_mask,
-            ));
+        // An extra world's are placed by its transform first.
+        let light_sources = std::iter::once((extract, None))
+            .chain(extras.iter().map(|x| (&x.extract, Some(&x.transform))));
+        let mut lights: Vec<(f32, GpuLight, u32)> = Vec::with_capacity(
+            light_sources
+                .clone()
+                .map(|(e, _)| e.point_lights.len() + e.spot_lights.len())
+                .sum(),
+        );
+        for (source, transform) in light_sources {
+            for l in &source.point_lights {
+                let (position, _, range) =
+                    place_light(transform, l.position, Vec3::NEG_Z, l.light.range);
+                lights.push((
+                    position.distance_squared(camera_pos),
+                    GpuLight {
+                        position: position.extend(range.max(1e-3)).to_array(),
+                        color: (l.light.color.max(Vec3::ZERO) * l.light.intensity.max(0.0))
+                            .extend(LIGHT_POINT)
+                            .to_array(),
+                        ..GpuLight::default()
+                    },
+                    l.light.culling_mask,
+                ));
+            }
+            for l in &source.spot_lights {
+                let (position, direction, range) =
+                    place_light(transform, l.position, l.direction, l.light.range);
+                let outer = l.light.outer_angle.clamp(1e-3, std::f32::consts::PI - 1e-3);
+                let inner = l.light.inner_angle.clamp(0.0, outer);
+                let cos_outer = outer.cos();
+                // `smoothstep` needs distinct edges.
+                let cos_inner = inner.cos().max(cos_outer + 1e-4);
+                lights.push((
+                    position.distance_squared(camera_pos),
+                    GpuLight {
+                        position: position.extend(range.max(1e-3)).to_array(),
+                        color: (l.light.color.max(Vec3::ZERO) * l.light.intensity.max(0.0))
+                            .extend(LIGHT_SPOT)
+                            .to_array(),
+                        direction: direction
+                            .normalize_or(Vec3::NEG_Z)
+                            .extend(cos_outer)
+                            .to_array(),
+                        params: [cos_inner, 0.0, 0.0, 0.0],
+                    },
+                    l.light.culling_mask,
+                ));
+            }
         }
         // The sun's shadow fit depends only on the camera, so it comes
         // before the instances: casters are culled against its box.
@@ -1884,9 +1971,6 @@ impl ExtractRenderer {
         let mut blended: Vec<(f32, BatchKey, bool, Instance, [u32; 4])> = Vec::new();
         self.batch_index.clear();
         let mut mesh_of_record: HashMap<u32, usize> = HashMap::with_capacity(extract.meshes.len());
-        for (i, m) in extract.meshes.iter().enumerate() {
-            mesh_of_record.insert(m.record, i);
-        }
         let cube_key = || BatchKey {
             mesh: None,
             material: None,
@@ -1909,16 +1993,36 @@ impl ExtractRenderer {
         }
         self.outline_draws.clear();
         self.outline_instances.clear();
-        for (ri, r) in extract.records.iter().enumerate() {
-            if r.layer_bit & camera_mask == 0 {
-                // Not this camera's layers: no draw, no shadow, no light list.
-                stats.layer_hidden += 1;
-                continue;
+        // The main extract, then each extra world: its records placed by
+        // its transform, its palettes after those before it, its
+        // instances marked grey when it is.
+        let sources = std::iter::once((extract, None, false)).chain(
+            extras
+                .iter()
+                .map(|x| (&x.extract, Some(x.transform), x.gray)),
+        );
+        let mut joint_base = 0u32;
+        for (si, (source, transform, gray)) in sources.enumerate() {
+            let main = si == 0;
+            mesh_of_record.clear();
+            for (i, m) in source.meshes.iter().enumerate() {
+                mesh_of_record.insert(m.record, i);
             }
-            let (key, double_sided, instance, casts, blend, bounds) =
-                match mesh_of_record.get(&(ri as u32)) {
+            for (ri, r) in source.records.iter().enumerate() {
+                let world = match transform {
+                    Some(t) => t * r.world,
+                    None => r.world,
+                };
+                if r.layer_bit & camera_mask == 0 {
+                    // Not this camera's layers: no draw, no shadow, no light list.
+                    stats.layer_hidden += 1;
+                    continue;
+                }
+                let (key, double_sided, mut instance, casts, blend, bounds) = match mesh_of_record
+                    .get(&(ri as u32))
+                {
                     Some(&mi) => {
-                        let m = &extract.meshes[mi];
+                        let m = &source.meshes[mi];
                         let have_mesh = self.mesh(device, &m.mesh);
                         let (material_key, material) = self.material(device, queue, &m.material);
                         if have_mesh {
@@ -1933,9 +2037,9 @@ impl ExtractRenderer {
                             let palette = m
                                 .skin
                                 .filter(|_| gpu.is_some_and(|g| g.skin_buffer.is_some()));
-                            let mut instance = instance_for(&material, r.world, m.receive_shadows);
+                            let mut instance = instance_for(&material, world, m.receive_shadows);
                             if let Some(p) = palette {
-                                instance.emissive[3] = p.first_joint as f32;
+                                instance.emissive[3] = (joint_base + p.first_joint) as f32;
                             }
                             (
                                 BatchKey {
@@ -1955,7 +2059,7 @@ impl ExtractRenderer {
                                 cube_key(),
                                 false,
                                 Instance {
-                                    model: r.world.to_cols_array_2d(),
+                                    model: world.to_cols_array_2d(),
                                     tint: MISSING_TINT,
                                     emissive: [0.0; 4],
                                     params: [0.0, 1.0, 1.0, 1.0],
@@ -1976,7 +2080,7 @@ impl ExtractRenderer {
                             cube_key(),
                             false,
                             Instance {
-                                model: r.world.to_cols_array_2d(),
+                                model: world.to_cols_array_2d(),
                                 tint: tint_for(r.entity.slot()),
                                 emissive: [0.0; 4],
                                 params: [0.0, 1.0, 1.0, 1.0],
@@ -1988,100 +2092,105 @@ impl ExtractRenderer {
                         )
                     }
                 };
-            // Culling: the mesh's bounding sphere in world space against
-            // the camera frustum and, for casters, the sun's box. A
-            // caster outside the view still shadows what is in it.
-            let sphere = bounds.transformed(&r.world);
-            // Whether this caster reaches the shadowed range at all,
-            // tested against the loose fit whether or not culling is on:
-            // what casts decides how tight the cascades are (R1), and
-            // culling must not change the picture.
-            let reaches_shadow = casts
-                && light_frustum
-                    .as_ref()
-                    .is_some_and(|f| f.intersects(&sphere));
-            if reaches_shadow {
-                // A subset of the loose fit, so the cascades can only
-                // shrink against it, never grow.
-                caster_bounds = Some(match caster_bounds {
-                    Some(u) => u.union(&sphere),
-                    None => sphere,
-                });
-            }
-            let (in_view, casts) = if self.frustum_culling {
-                (camera_frustum.intersects(&sphere), reaches_shadow)
-            } else {
-                (true, casts && fit.is_some())
-            };
-            // Outlined: a copy of the instance for the mask, whatever
-            // pass draws the original (a blended one included). What is
-            // out of view has no silhouette on screen to ring.
-            if in_view {
-                if let Some(&mark) = outline_marks.get(&r.entity) {
-                    let mut copy = instance;
-                    copy.params[0] = mark;
-                    // Any valid light list: the mask shades nothing.
-                    copy.flags[2] = 0.0;
-                    self.outline_draws.push(OutlineDraw {
-                        key: key.clone(),
-                        double_sided,
-                        index: self.outline_instances.len() as u32,
-                    });
-                    self.outline_instances.push(copy);
+                if gray {
+                    instance.flags[3] += GRAY_FLAG;
                 }
-            }
-            if !in_view {
-                stats.culled += 1;
-                if !casts {
+                // Culling: the mesh's bounding sphere in world space against
+                // the camera frustum and, for casters, the sun's box. A
+                // caster outside the view still shadows what is in it.
+                let sphere = bounds.transformed(&world);
+                // Whether this caster reaches the shadowed range at all,
+                // tested against the loose fit whether or not culling is on:
+                // what casts decides how tight the cascades are (R1), and
+                // culling must not change the picture.
+                let reaches_shadow = casts
+                    && light_frustum
+                        .as_ref()
+                        .is_some_and(|f| f.intersects(&sphere));
+                if reaches_shadow {
+                    // A subset of the loose fit, so the cascades can only
+                    // shrink against it, never grow.
+                    caster_bounds = Some(match caster_bounds {
+                        Some(u) => u.union(&sphere),
+                        None => sphere,
+                    });
+                }
+                let (in_view, casts) = if self.frustum_culling {
+                    (camera_frustum.intersects(&sphere), reaches_shadow)
+                } else {
+                    (true, casts && fit.is_some())
+                };
+                // Outlined: a copy of the instance for the mask, whatever
+                // pass draws the original (a blended one included). What is
+                // out of view has no silhouette on screen to ring.
+                if in_view && main {
+                    if let Some(&mark) = outline_marks.get(&r.entity) {
+                        let mut copy = instance;
+                        copy.params[0] = mark;
+                        // Any valid light list: the mask shades nothing.
+                        copy.flags[2] = 0.0;
+                        self.outline_draws.push(OutlineDraw {
+                            key: key.clone(),
+                            double_sided,
+                            index: self.outline_instances.len() as u32,
+                        });
+                        self.outline_instances.push(copy);
+                    }
+                }
+                if !in_view {
+                    stats.culled += 1;
+                    if !casts {
+                        continue;
+                    }
+                }
+                // The object's light list (E1): the lights of the pool that
+                // reach its bounds, the strongest first. Only what is shaded
+                // needs one — a shadow-only instance is never lit, and an
+                // unlit material ignores every light.
+                let mut light_list = [0u32; 4];
+                if in_view && n_lights > 0 && instance.flags[1] < 0.5 {
+                    let (list, count, overflow) = assign_lights(
+                        &packed[..n_lights],
+                        &light_masks[..n_lights],
+                        r.layer_bit,
+                        &sphere,
+                        &mut self.light_scratch,
+                    );
+                    light_list = list;
+                    stats.lights_max_per_object = stats.lights_max_per_object.max(count as u32);
+                    stats.lights_overflow += overflow as u32;
+                }
+                if blend {
+                    let origin = world.w_axis.truncate();
+                    blended.push((
+                        origin.distance_squared(camera_pos),
+                        key,
+                        double_sided,
+                        instance,
+                        light_list,
+                    ));
                     continue;
                 }
-            }
-            // The object's light list (E1): the lights of the pool that
-            // reach its bounds, the strongest first. Only what is shaded
-            // needs one — a shadow-only instance is never lit, and an
-            // unlit material ignores every light.
-            let mut light_list = [0u32; 4];
-            if in_view && n_lights > 0 && instance.flags[1] < 0.5 {
-                let (list, count, overflow) = assign_lights(
-                    &packed[..n_lights],
-                    &light_masks[..n_lights],
-                    r.layer_bit,
-                    &sphere,
-                    &mut self.light_scratch,
-                );
-                light_list = list;
-                stats.lights_max_per_object = stats.lights_max_per_object.max(count as u32);
-                stats.lights_overflow += overflow as u32;
-            }
-            if blend {
-                let origin = r.world.w_axis.truncate();
-                blended.push((
-                    origin.distance_squared(camera_pos),
-                    key,
-                    double_sided,
+                let slot = match self.batch_index.get(&key) {
+                    Some(&s) => s,
+                    None => {
+                        grouped.push((double_sided, Vec::new()));
+                        self.batch_index.insert(key, grouped.len() - 1);
+                        grouped.len() - 1
+                    }
+                };
+                grouped[slot].1.push((
                     instance,
+                    match (casts, in_view) {
+                        (true, false) => Visibility::ShadowOnly,
+                        (true, true) => Visibility::Both,
+                        (false, true) => Visibility::SceneOnly,
+                        (false, false) => unreachable!("skipped above"),
+                    },
                     light_list,
                 ));
-                continue;
             }
-            let slot = match self.batch_index.get(&key) {
-                Some(&s) => s,
-                None => {
-                    grouped.push((double_sided, Vec::new()));
-                    self.batch_index.insert(key, grouped.len() - 1);
-                    grouped.len() - 1
-                }
-            };
-            grouped[slot].1.push((
-                instance,
-                match (casts, in_view) {
-                    (true, false) => Visibility::ShadowOnly,
-                    (true, true) => Visibility::Both,
-                    (false, true) => Visibility::SceneOnly,
-                    (false, false) => unreachable!("skipped above"),
-                },
-                light_list,
-            ));
+            joint_base += source.joints.len() as u32;
         }
 
         // Batch layout: [shadow only][both][scene only], so the shadow
@@ -2183,7 +2292,9 @@ impl ExtractRenderer {
         // The joint palettes, as the extract laid them out (an instance's
         // `emissive.w` is its first joint). The buffer never shrinks and
         // is never empty: the skinned stages bind it unconditionally.
-        let n_joints = extract.joints.len() as u32;
+        // With extra worlds, their palettes follow the main extract's
+        // (`joint_base` above).
+        let n_joints = joint_base;
         if n_joints > self.joint_capacity {
             self.joint_capacity = n_joints.next_power_of_two().max(self.joint_capacity * 2);
             self.joint_buffer = create_joint_buffer(device, self.joint_capacity);
@@ -2198,7 +2309,20 @@ impl ExtractRenderer {
             );
         }
         if stats.skinned > 0 && n_joints > 0 {
-            queue.write_buffer(&self.joint_buffer, 0, bytemuck::cast_slice(&extract.joints));
+            if extras.is_empty() {
+                queue.write_buffer(&self.joint_buffer, 0, bytemuck::cast_slice(&extract.joints));
+            } else {
+                self.joint_scratch.clear();
+                self.joint_scratch.extend_from_slice(&extract.joints);
+                for x in &extras {
+                    self.joint_scratch.extend_from_slice(&x.extract.joints);
+                }
+                queue.write_buffer(
+                    &self.joint_buffer,
+                    0,
+                    bytemuck::cast_slice(&self.joint_scratch),
+                );
+            }
             stats.joints = n_joints;
         }
 
@@ -2357,6 +2481,9 @@ impl ExtractRenderer {
         stats.overlay_triangles = counts.triangles;
         stats.grid = counts.grid;
 
+        stats.extra_worlds = extras.len() as u32;
+        extras.clear();
+        self.extra_worlds = extras;
         stats.gpu_bytes = self.gpu_bytes();
         stats.prepare_us = prepare_start.elapsed().as_micros() as u32;
         self.stats = stats;
@@ -3225,6 +3352,33 @@ fn assign_lights(
 }
 
 /// The per-instance data for a material at `world`.
+/// Where an extra world's light stands in the frame (`transform`: none for
+/// the main extract's, which is left bit for bit as it is): its position,
+/// its direction and its range, scaled by the transform's largest axis.
+fn place_light(
+    transform: Option<&Mat4>,
+    position: Vec3,
+    direction: Vec3,
+    range: f32,
+) -> (Vec3, Vec3, f32) {
+    match transform {
+        None => (position, direction, range),
+        Some(t) => {
+            let scale = t
+                .x_axis
+                .truncate()
+                .length()
+                .max(t.y_axis.truncate().length())
+                .max(t.z_axis.truncate().length());
+            (
+                t.transform_point3(position),
+                t.transform_vector3(direction),
+                range * scale,
+            )
+        }
+    }
+}
+
 fn instance_for(m: &PbrMaterial, world: Mat4, receive_shadows: bool) -> Instance {
     let cutoff = match m.alpha_mode {
         AlphaMode::Mask => m.alpha_cutoff.clamp(0.0, 1.0),
