@@ -1143,6 +1143,28 @@ turn the copy into plain entities that forget the recipe (**Unpack**).
 Nothing here runs game code; every write is a session transaction the
 crate validates.
 
+### Making a prefab (2026-09-24)
+
+As in Unity: **drag an object from the Hierarchy onto the Project panel**
+— onto the list (the shown folder) or onto a folder. The object and its
+children become `<folder>/<name>.prefab.json` (numbered — `Lamp 1` — when
+the name is taken), written with the prefab's own `createObject`
+commands and saved, so the authoring log shows every step; in the scene
+the object is replaced by an instance of it at the same place, one
+transaction (⌘Z brings the object back; the prefab file stays, as in
+Unity). The object's Transform moves to the instance and the prefab's
+root starts at the origin, so nothing moves. The new prefab is selected
+in the Project panel. Refused, with the drop not taken: a prefab
+instance or an object that holds one (nested prefabs from the Hierarchy
+come later), a derived row, several objects, a prefab tab
+(`HierarchyModel.cannotCreatePrefab`).
+
+**Every object has a Transform**, as in Unity: Create makes one, a
+prefab dropped on the Hierarchy or the Scene view gets one, and the
+Inspector's *Remove Component* is disabled on it. A document written by
+hand or by an older editor may still hold an object without one (the
+playground's `Environment`); the engine accepts that.
+
 ### The instance in the Hierarchy
 
 A prefab instance's anchor row keeps its badge (item 3); → on it now
