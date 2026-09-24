@@ -6,7 +6,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' hide Severity;
+import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Severity;
 import 'package:fynkel_editor/src/play/game_console.dart';
 import 'package:fynkel_editor/src/play/play_session.dart';
@@ -15,7 +15,7 @@ import 'package:fynkel_editor/src/play/play_session.dart';
 void talk() {
   Debug.logWarning('careful'); // the warning's line
   Debug.logError('broken');
-  TestGameContext().run(() => print('printed'));
+  TestGameContext().run(() => print('printed')); // ignore: avoid_print
 }
 
 void main() {

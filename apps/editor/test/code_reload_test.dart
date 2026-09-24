@@ -89,4 +89,21 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox());
   });
+
+  test('CompileError.parse: each located error line, the excerpt skipped; else the first line', () {
+    final errors = CompileError.parse(
+      "lib/game/player.dart:12:5: Error: Expected ';' after this.\n"
+      '    speed = 3\n'
+      '    ^^^^^\n'
+      "lib/game/enemy.dart:40:11: Error: The getter 'hp' isn't defined.",
+    );
+    expect([for (final e in errors) '${e.file}:${e.line}:${e.column} ${e.message}'], [
+      "lib/game/player.dart:12:5 Expected ';' after this.",
+      "lib/game/enemy.dart:40:11 The getter 'hp' isn't defined.",
+    ]);
+    final plain = CompileError.parse('Could not start the compiler.\nsecond line').single;
+    expect((plain.file, plain.message), (null, 'Could not start the compiler.'));
+    expect(CompileError.parse(null), isEmpty);
+    expect(CompileError.parse('  '), isEmpty);
+  });
 }

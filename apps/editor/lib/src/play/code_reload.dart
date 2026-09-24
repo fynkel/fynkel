@@ -53,6 +53,46 @@ class CodeReload {
 
   bool get failed => state == 'reloadFailed';
   bool get rejected => state == 'reloadRejected';
+
+  /// Whether the editor runs the code on disk again (a reload or a restart
+  /// went through), which clears the compile errors.
+  bool get applied => state == 'reloaded' || state == 'restarted' || state == 'running' || state == 'starting';
+}
+
+/// One compiler error of a failed reload: where, and what.
+@immutable
+class CompileError {
+  const CompileError({required this.message, this.file, this.line, this.column});
+
+  /// Relative to the project (`lib/game/player.dart`), as the compiler named it.
+  final String? file;
+  final int? line;
+  final int? column;
+  final String message;
+
+  static final _located = RegExp(r'^(.+?\.dart):(\d+):(\d+): Error: (.*)$');
+
+  /// The errors in the compiler's words ([CodeReload.message]): each
+  /// `file:line:column: Error: …` line (the excerpt and caret after it
+  /// are the IDE's to show); a message without one is one error as it is.
+  static List<CompileError> parse(String? message) {
+    final text = message?.trim() ?? '';
+    if (text.isEmpty) return const [];
+    final out = <CompileError>[];
+    for (final line in text.split('\n')) {
+      final m = _located.firstMatch(line.trim());
+      if (m == null) continue;
+      out.add(
+        CompileError(
+          file: m[1],
+          line: int.parse(m[2]!),
+          column: int.parse(m[3]!),
+          message: m[4]!,
+        ),
+      );
+    }
+    return out.isEmpty ? [CompileError(message: text.split('\n').first)] : out;
+  }
 }
 
 /// Follows the status file; [last] is its newest event.
@@ -74,6 +114,13 @@ class CodeReloadStatus extends ChangeNotifier {
   CodeReload? _last;
 
   CodeReload? get last => _last;
+
+  /// The compile errors of the last failed reload, until a reload or a
+  /// restart goes through: while there are any the editor runs older code
+  /// than the files, so Play is refused (Unity's "All compiler errors have
+  /// to be fixed before you can enter Play mode").
+  List<CompileError> get errors => _errors;
+  List<CompileError> _errors = const [];
 
   /// Asks `fynkel editor` for a hot restart (P3b): the file it looks for
   /// next to the status file. False when it could not be written.
@@ -107,6 +154,11 @@ class CodeReloadStatus extends ChangeNotifier {
     final next = CodeReload.fromJson(json);
     if (next.seq == _last?.seq) return;
     _last = next;
+    if (next.failed) {
+      _errors = CompileError.parse(next.message);
+    } else if (next.applied) {
+      _errors = const [];
+    }
     notifyListeners();
   }
 

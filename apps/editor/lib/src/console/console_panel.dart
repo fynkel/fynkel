@@ -35,9 +35,19 @@ final class ConsoleEntry {
 
 /// Filters and selection; shared between the panel and the `console.*` commands.
 final class ConsoleModel extends ChangeNotifier {
-  ConsoleModel({required this.project, required this.openInIde, this.openInEditor});
+  ConsoleModel({required this.project, required this.openInIde, this.openInEditor, this.extra});
 
   final EditorProject project;
+
+  /// Rows that are not the project's validation: a failed hot reload's
+  /// compile errors (listed first). [refresh] when they change.
+  final List<Diagnostic> Function()? extra;
+
+  /// What the Console lists: [extra], then the project's diagnostics.
+  List<Diagnostic> get diagnostics => [...?extra?.call(), ...project.diagnostics];
+
+  /// [extra] changed.
+  void refresh() => notifyListeners();
 
   /// Opens a file at a position; returns a problem or null.
   final Future<String?> Function(String file, {int? line, int? column}) openInIde;
@@ -115,7 +125,7 @@ final class ConsoleModel extends ChangeNotifier {
     final counts = <String, int>{};
     final order = <String, Diagnostic>{};
     final outdated = showUpgrade ? const <String>{} : outdatedDocuments;
-    for (final d in project.diagnostics) {
+    for (final d in diagnostics) {
       if (!severities.contains(d.severity)) continue;
       if (!showUpgrade && isFromUpgrade(d, outdated)) continue;
       if (q.isNotEmpty && !_matches(d, q)) continue;
@@ -147,7 +157,7 @@ final class ConsoleModel extends ChangeNotifier {
     return null;
   }
 
-  int countOf(Severity s) => project.diagnostics.where((d) => d.severity == s).length;
+  int countOf(Severity s) => diagnostics.where((d) => d.severity == s).length;
 
   /// The position shown for a diagnostic: `scenes/main.scene.json:75:13`,
   /// or the pointer when the record has no line.
@@ -419,9 +429,9 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
                         child: Text(
                           project.validating
                               ? 'Validating…'
-                              : project.diagnostics.isEmpty
+                              : model.diagnostics.isEmpty
                               ? 'No diagnostics. The project validates clean.'
-                              : upgrade == project.diagnostics.length && !model.showUpgrade
+                              : upgrade == model.diagnostics.length && !model.showUpgrade
                               ? 'Nothing else to report.'
                               : 'Nothing matches the filter.',
                           style: theme.textTheme.bodyMedium?.copyWith(color: theme.disabledColor),

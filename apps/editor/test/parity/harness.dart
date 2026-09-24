@@ -28,6 +28,7 @@ final class Editor {
     String tag = 'parity',
     String scene = mainScene,
     void Function(Directory dir)? prepare,
+    String? codeReloadStatus,
   }) async {
     final dir = copyFixture(tag);
     prepare?.call(dir);
@@ -38,7 +39,12 @@ final class Editor {
     });
     await pumpLarge(
       tester,
-      shellApp(prefs: Preferences.inMemory(), projects: {dir.path: project}, initialProject: dir.path),
+      shellApp(
+        prefs: Preferences.inMemory(),
+        projects: {dir.path: project},
+        initialProject: dir.path,
+        codeReloadStatus: codeReloadStatus,
+      ),
     );
     final shell = tester.state<EditorShellState>(find.byType(EditorShell));
     shell.tabs!.openDocument(scene);

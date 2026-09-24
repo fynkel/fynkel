@@ -336,15 +336,34 @@ class EditorShellState extends State<EditorShell> {
 
   bool _playing = false;
 
+  /// A failed hot reload's compile errors as Console rows (Unity lists
+  /// them there, each opening its line): the file, line and column the
+  /// compiler gave, under the code `compile`.
+  List<Diagnostic> _compileDiagnostics(EditorProject opened) => [
+    for (final e in codeReload?.errors ?? const <CompileError>[])
+      Diagnostic(
+        code: 'compile',
+        severity: Severity.error,
+        message: e.message,
+        document: e.file == null ? null : (p.isAbsolute(e.file!) ? e.file : p.join(opened.dir, e.file!)),
+        line: e.line,
+        column: e.column,
+      ),
+  ];
+
   void _onCodeReload() {
     final r = codeReload?.last;
     if (r == null) return;
+    console?.refresh();
     final files = r.files.isEmpty ? '' : ' (${r.files.join(', ')})';
     switch (r.state) {
       case 'reloaded':
         notices.show('Code reloaded in ${r.ms ?? '?'} ms$files', severity: NoticeSeverity.info);
       case 'reloadFailed':
-        notices.show('Code did not reload$files: ${r.message ?? 'no reason given'}');
+        notices.show(
+          'Code did not reload$files: ${r.message ?? 'no reason given'}',
+          action: NoticeAction('Console', () => showGameConsole(project: true)),
+        );
       case 'reloadRejected':
         // It compiles, but only a restart applies it (P3b). With nothing
         // to lose the editor restarts at once, as the ADR says; with
@@ -1786,7 +1805,12 @@ class EditorShellState extends State<EditorShell> {
             kind == 'volume' ? scene?.previewVolume(id, fields) : scene?.previewMaterial(id, fields);
       me.addListener(registry.refresh);
       final h = HierarchyModel(tabs: t, project: opened);
-      final c = ConsoleModel(project: opened, openInIde: ide.open, openInEditor: openDiagnosticInEditor);
+      final c = ConsoleModel(
+        project: opened,
+        openInIde: ide.open,
+        openInEditor: openDiagnosticInEditor,
+        extra: () => _compileDiagnostics(opened),
+      );
       final ps = PlaySession(projectDir: opened.dir, cli: () => toolchain?.fynkelCli, start: widget.startPlayProcess);
       final gc = GameConsoleModel(
         session: ps,
@@ -2008,6 +2032,18 @@ class EditorShellState extends State<EditorShell> {
   bool _lastRunBuilt = false;
 
   bool _refusesErrors(EditorProject opened) {
+    // A hot reload that did not compile leaves the editor on older code
+    // than the files: Play would run that. Unity refuses Play until the
+    // compiler errors are fixed, and lists them in the Console.
+    final compile = codeReload?.errors ?? const <CompileError>[];
+    if (compile.isNotEmpty) {
+      showGameConsole(project: true);
+      _showError(
+        'All compiler errors have to be fixed before you can enter Play mode '
+        '(${compile.length} in the Console).',
+      );
+      return true;
+    }
     // A script that does not compile has no generated files while the
     // watch runs: Unity's "All compiler errors have to be fixed before you
     // can enter Play mode".

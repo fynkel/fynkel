@@ -116,7 +116,7 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('objectPicker.search')), 'Floor');
       await tester.pumpAndSettle();
       final rows = find.byWidgetPredicate(
-        (w) => w.key is ValueKey<String> && '${(w.key! as ValueKey<String>).value}'.startsWith('objectPicker.row.'),
+        (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('objectPicker.row.'),
       );
       expect(rows, findsOneWidget, reason: 'the search leaves the Floor');
       await e.click(rows);
