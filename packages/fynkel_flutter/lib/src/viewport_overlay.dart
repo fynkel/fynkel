@@ -1,7 +1,9 @@
 // The overlay a viewport draws over the next render (viewport ABI v6,
 // ADR-0019): anti-aliased lines with a width, filled triangles and the
 // analytic ground grid, drawn after post — never exposed or tone mapped —
-// and (v8) the selection outline around what the listed entities draw.
+// and (v8) the selection outline around what the listed entities draw;
+// (v9) other worlds drawn into the frame (Prefab Mode in context,
+// multi-scene editing).
 
 import 'dart:typed_data';
 
@@ -38,6 +40,28 @@ class OverlayOutline {
   Float32List packStyle() => Float32List.fromList([...selectedColor, ...childrenColor, width]);
 }
 
+/// Another world drawn into the frame with a [ViewportOverlay] (viewport
+/// ABI v9): the native `FynkelWorld*` at [worldAddress]
+/// (`ScenePreview.worldAddress`, `LiveWorld.worldAddress`,
+/// `World.native.handleAddress`), placed by [transform] — sixteen numbers,
+/// column-major, its world → the rendered world's — and drawn [gray]
+/// (desaturated to its luminance and halved: Unity's Prefab Mode context in
+/// "Gray") or as it is.
+class OverlayExtraWorld {
+  const OverlayExtraWorld(this.worldAddress, this.transform, this.gray);
+  final int worldAddress;
+  final List<double> transform;
+  final bool gray;
+
+  /// The ABI's flag bit for [gray] (`FYNKEL_APPLE_EXTRA_WORLD_GRAY`).
+  static const grayFlag = 1;
+
+  /// Column-major identity: the world drawn where it stands.
+  static const identity = <double>[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+
+  int get flags => gray ? grayFlag : 0;
+}
+
 /// One frame's overlay, built on the host and handed to
 /// `FynkelViewportController.overlay` before each render (the renderer
 /// empties it with every render). Positions are world metres, colours
@@ -58,9 +82,15 @@ class ViewportOverlay {
   /// The selection outline set by [outline], or null for none.
   OverlayOutline? get selectionOutline => _outline;
 
+  final List<OverlayExtraWorld> _extraWorlds = [];
+
+  /// The worlds added by [extraWorld], in order.
+  List<OverlayExtraWorld> get extraWorlds => List.unmodifiable(_extraWorlds);
+
   int get lineCount => _lineCount;
   int get triangleCount => _triangleCount;
-  bool get isEmpty => _lineCount == 0 && _triangleCount == 0 && grid == null && _outline == null;
+  bool get isEmpty =>
+      _lineCount == 0 && _triangleCount == 0 && grid == null && _outline == null && _extraWorlds.isEmpty;
 
   /// `ax ay az bx by bz r g b a width on_top` per line.
   Float32List get lines => Float32List.sublistView(_lines, 0, _lineCount * lineFloats);
@@ -73,7 +103,36 @@ class ViewportOverlay {
     _triangleCount = 0;
     grid = null;
     _outline = null;
+    _extraWorlds.clear();
   }
+
+  /// Draws the world at [worldAddress] (a native `FynkelWorld*`:
+  /// `ScenePreview.worldAddress` for an edit preview) into the frame with
+  /// the one the viewport renders (viewport ABI v9) — the editor's Prefab
+  /// Mode in context (the scene's preview around the prefab's, [transform]
+  /// the inverse of the instance's world matrix, [gray] for Unity's "Gray")
+  /// and multi-scene editing (the other loaded scenes' previews, identity).
+  /// [transform] is sixteen numbers, column-major, the world's frame → the
+  /// rendered world's (null: identity). Its meshes share the frame's depth
+  /// and shadows, its point and spot lights light the frame, its skinned
+  /// meshes are posed as in their world; the rendered world's camera,
+  /// environment and look stay the frame's, and its first directional light
+  /// is the sun only when the rendered world has none. It draws from the
+  /// rendered world's asset cache (every preview of one session shares it)
+  /// and is never outlined. The world is read when the overlay is queued,
+  /// just before the render; adding more worlds draws them all.
+  void extraWorld(int worldAddress, {List<double>? transform, bool gray = false}) {
+    final t = transform ?? OverlayExtraWorld.identity;
+    if (t.length != 16) {
+      throw ArgumentError.value(t.length, 'transform', 'sixteen numbers, column-major');
+    }
+    _extraWorlds.add(OverlayExtraWorld(worldAddress, List.of(t), gray));
+  }
+
+  /// The [extraWorlds]' transforms back to back (sixteen floats each) for
+  /// the ABI.
+  Float32List packExtraTransforms() =>
+      Float32List.fromList([for (final w in _extraWorlds) ...w.transform]);
 
   /// Unity's selection outline (viewport ABI v8): a ring just outside the
   /// silhouette of what the [selected] entities draw in [selectedColor]

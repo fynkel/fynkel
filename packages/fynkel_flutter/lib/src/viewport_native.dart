@@ -12,7 +12,7 @@ import 'package:ffi/ffi.dart';
 
 import 'percentiles.dart';
 
-const viewportAbiVersion = 8;
+const viewportAbiVersion = 9;
 
 /// `fynkel_apple_viewport_render` result when the world pointer is null or
 /// the world is poisoned.
@@ -270,6 +270,17 @@ external int _outline(
   int childrenCount,
   Pointer<Float> style,
 );
+@Native<Int32 Function(Pointer<Void>, Pointer<Pointer<Void>>, Pointer<Float>, Pointer<Uint32>, Uint32)>(
+  symbol: 'fynkel_apple_viewport_extra_worlds',
+  assetId: _asset,
+)
+external int _extraWorlds(
+  Pointer<Void> vp,
+  Pointer<Pointer<Void>> worlds,
+  Pointer<Float> transforms,
+  Pointer<Uint32> flags,
+  int count,
+);
 @Native<Int32 Function(Pointer<Void>, Int32, Pointer<Uint8>, Uint32)>(
   symbol: 'fynkel_apple_viewport_read_frame',
   assetId: _asset,
@@ -450,6 +461,32 @@ class ViewportNative {
     } finally {
       calloc.free(ids);
       calloc.free(s);
+    }
+  }
+
+  /// Queues other worlds for the next render (viewport ABI v9): the native
+  /// `FynkelWorld*` [worldAddresses], [transforms] sixteen floats each
+  /// (column-major), one of [flags] each (bit 0: grey). Each world is
+  /// extracted by this call; an address 0 is skipped. Returns the worlds
+  /// queued, or -1 for a non-finite transform (nothing queued). Replaces an
+  /// earlier call's; every render empties it.
+  int extraWorlds(Pointer<Void> vp, List<int> worldAddresses, Float32List transforms, List<int> flags) {
+    final n = worldAddresses.length;
+    if (n == 0) return _extraWorlds(vp, nullptr, nullptr, nullptr, 0);
+    final w = calloc<Pointer<Void>>(n);
+    final t = calloc<Float>(n * 16);
+    final f = calloc<Uint32>(n);
+    try {
+      for (var i = 0; i < n; i++) {
+        w[i] = Pointer.fromAddress(worldAddresses[i]);
+      }
+      t.asTypedList(n * 16).setAll(0, transforms);
+      f.asTypedList(n).setAll(0, flags);
+      return _extraWorlds(vp, w, t, f, n);
+    } finally {
+      calloc.free(w);
+      calloc.free(t);
+      calloc.free(f);
     }
   }
 

@@ -52,7 +52,7 @@ void main() {
   }
 
   test('abi version matches the native library', () {
-    expect(viewportAbiVersion, 8);
+    expect(viewportAbiVersion, 9);
   });
 
   test('create, render, resize, stats, detach', () async {
@@ -130,6 +130,31 @@ void main() {
       ..clear();
     expect(ringed.isEmpty, isTrue);
     expect(ringed.selectionOutline, isNull);
+    // Extra worlds (viewport ABI v9): native world addresses with a
+    // transform (identity by default) and a grey flag, counted with the
+    // rest; an address 0 is skipped, a non-finite transform refuses them
+    // all; part of isEmpty, gone with clear (the Rust test
+    // `extra_worlds.rs` checks the picture against the offscreen
+    // renderer's).
+    final context = World.create();
+    addTearDown(context.dispose);
+    context.frame(1 / 60);
+    final shifted = <double>[1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 1];
+    final worlds = ViewportOverlay()
+      ..extraWorld(context.native.handleAddress)
+      ..extraWorld(context.native.handleAddress, transform: shifted, gray: true);
+    expect(worlds.isEmpty, isFalse);
+    expect(worlds.extraWorlds.map((w) => w.flags), [0, OverlayExtraWorld.grayFlag]);
+    expect(worlds.packExtraTransforms(), [...OverlayExtraWorld.identity, ...shifted]);
+    expect(controller.overlay(worlds), 2);
+    worlds.extraWorld(0);
+    expect(controller.overlay(worlds), 2, reason: 'address 0 skipped');
+    worlds.extraWorld(context.native.handleAddress, transform: [...shifted]..[12] = double.nan);
+    expect(controller.overlay(worlds), 0, reason: 'a non-finite transform refuses them all');
+    expect(() => worlds.extraWorld(context.native.handleAddress, transform: [1, 0, 0]), throwsArgumentError);
+    worlds.clear();
+    expect(worlds.isEmpty, isTrue);
+    expect(worlds.extraWorlds, isEmpty);
     // A viewport's own camera (viewport ABI v7): it draws, a value that
     // cannot is refused (the last good one stays), null clears; the Rust
     // test `view.rs` checks the picture.

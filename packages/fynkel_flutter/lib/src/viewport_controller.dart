@@ -387,17 +387,30 @@ class FynkelViewportController extends ChangeNotifier {
   /// Queues [overlay] for the next [render] (ADR-0019): its lines,
   /// triangles and ground grid draw after post, at the target's
   /// resolution, never exposed or tone mapped — the editor's grid, gizmos
-  /// and handles — and its selection outline (viewport ABI v8) under them.
-  /// The queue empties with every render. Returns the lines + triangles
-  /// queued plus the outline's entities, or null when the viewport is not
-  /// attached. An outline with a non-finite colour or width is refused
-  /// and adds nothing.
+  /// and handles — its selection outline (viewport ABI v8) under them, and
+  /// its extra worlds (v9: `ViewportOverlay.extraWorld`) drawn into the
+  /// frame with the rendered world, each read now — queue right before
+  /// [render]. The queue empties with every render. Returns the lines +
+  /// triangles queued plus the outline's entities plus the extra worlds
+  /// (an address 0 is skipped), or null when the viewport is not attached.
+  /// An outline with a non-finite colour or width, or extra worlds with a
+  /// non-finite transform, are refused and add nothing.
   int? overlay(ViewportOverlay overlay) {
     if (_state != ViewportState.attached) return null;
     var queued = _native!.overlay(_viewport, overlay.lines, overlay.triangles, overlay.grid?.pack());
     final outline = overlay.selectionOutline;
     if (outline != null) {
       final n = _native!.outline(_viewport, outline.selected, outline.children, outline.packStyle());
+      if (n > 0) queued += n;
+    }
+    final extras = overlay.extraWorlds;
+    if (extras.isNotEmpty) {
+      final n = _native!.extraWorlds(
+        _viewport,
+        [for (final w in extras) w.worldAddress],
+        overlay.packExtraTransforms(),
+        [for (final w in extras) w.flags],
+      );
       if (n > 0) queued += n;
     }
     return queued;
