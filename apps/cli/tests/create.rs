@@ -192,10 +192,39 @@ fn a_fresh_project_validates_and_runs_headlessly() {
             stdout.contains("up to date (2 behaviour types)"),
             "{stdout}"
         );
+        // The editor's form (Create → Behaviour): the game's files only.
+        let (ok, stdout, stderr) = fynkel(
+            &dir,
+            &[
+                "codegen",
+                "--check",
+                "--project",
+                ".",
+                "--project-only",
+                "--json",
+            ],
+        );
+        assert!(ok, "{stdout}{stderr}");
+        let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(report["native"]["status"], "skipped");
+        assert_eq!(report["project"]["status"], "upToDate");
     } else {
         eprintln!("no Dart SDK on PATH; skipping the codegen --check step");
     }
     let _ = std::fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn codegen_project_only_needs_a_project() {
+    let dir = fresh("project-only");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (ok, _, stderr) = fynkel(&dir, &["codegen", "--project-only"]);
+    assert!(!ok);
+    assert!(
+        stderr.contains("--project-only needs --project"),
+        "{stderr}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
