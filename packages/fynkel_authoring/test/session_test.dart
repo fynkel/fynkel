@@ -696,6 +696,15 @@ void main() {
     preview.restoreMaterial(rusted);
     expect(preview.material(rusted)['metallic'], 0.25);
     expect(() => preview.setMaterial(rusted, {'metallic': 'shiny'}), throwsA(isA<AuthoringException>()));
+    const look = 'c0000000-0000-4000-8000-0000000000f7';
+    preview.setVolume(look, {
+      'bloom': {'intensity': 2},
+    });
+    expect(preview.volume(look), {
+      'bloom': {'intensity': 2.0},
+    });
+    preview.restoreVolume(look);
+    expect(() => preview.volume(look), throwsA(isA<AuthoringException>()), reason: 'this project cooks no profile');
 
     // Recook rebuilds the cache and reloads every preview over it; the
     // world pointer stays.

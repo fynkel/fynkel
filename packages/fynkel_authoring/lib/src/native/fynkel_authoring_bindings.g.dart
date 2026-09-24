@@ -564,6 +564,11 @@ external ffi.Pointer<FynkelWorld> fynkel_authoring_preview_world(
 /// material        material            what this preview's renderer draws for the
 /// material now (a live edit, else the cooked
 /// one) → "material": its document fields
+/// setVolume       volume, data        project-wide: a volume profile's fields drawn
+/// in place of the cooked profile, as setMaterial
+/// restoreVolume   volume              the cooked profile again → "stores"
+/// volume          volume              what this preview's renderer blends for the
+/// profile now → "volume": its present fields
 /// resync                              the incremental sync now (a no-op when the
 /// world already matches) → the sync report +
 /// "stats"

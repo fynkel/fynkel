@@ -139,6 +139,23 @@ final class ScenePreview {
     _call('restoreMaterial', {'material': material});
   }
 
+  /// The volume profile Inspector's live edit: [data] (the profile
+  /// document's fields) blended in place of the cooked [volume] in every
+  /// open preview, the file untouched.
+  void setVolume(String volume, Map<String, Object?> data) {
+    _call('setVolume', {'volume': volume, 'data': data});
+  }
+
+  /// What this preview blends for [volume] now — the live edit while one
+  /// is set, else the cooked profile — as its present fields.
+  Map<String, Object?> volume(String volume) =>
+      (_call('volume', {'volume': volume})['volume'] as Map).cast<String, Object?>();
+
+  /// The cooked [volume] again (a cancelled edit).
+  void restoreVolume(String volume) {
+    _call('restoreVolume', {'volume': volume});
+  }
+
   /// The incremental sync now (a no-op when the world already matches the
   /// document).
   PreviewSyncReport resync() {
