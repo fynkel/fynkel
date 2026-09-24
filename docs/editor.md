@@ -778,6 +778,16 @@ with the rest of the browser.
 Each failure is shown in the error bar: codegen failing (the file stays
 written), or codegen not listing the type (a compile error in the file).
 
+**Drag a script onto an object** (Unity's script drop). A behaviour's
+file in Scripts drags the behaviour (`scriptDragPayload`: of several in
+one file, the one named after it, as Unity asks; a file without one does
+not drag). Dropped on a Hierarchy row or on an object in the Scene view
+(`HierarchyModel.addScript`), it is added with its schema defaults — an
+`addComponent` override when a prefab puts the object there — in one undo
+step, and the selection stays. Dropped on the Inspector it goes onto the
+selection through Add Component. An object that already has the script
+refuses the drop (FYN-D0204).
+
 **A saved script updates the Inspector** (Unity's recompile; the second
 ADR-0016 amendment of 2026-09-24). `CodegenCheck.recompileOnSave` listens
 to the project's file changes. A `.dart` file under `lib/` that is saved,

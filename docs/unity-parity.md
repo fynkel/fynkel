@@ -87,7 +87,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | `Debug.Log` | Console, click to the line | 🔧 `9bdf3d6` (`Debug.log` / `logWarning` / `logError` / `logException` with the caller's stack: the row shows the line, ↩ opens it; `print` in game code is a Console row) |
 | Inspector fields | public fields; GameObject/component/colour/enum references | 🔧 `46c091a`, `de1de2c`, `962d30a` (ADR-0018 amended: `GameObject?` and script-typed fields — `None (Type)`, drop a Hierarchy row, ⊙, ×, `Missing` — resolved at load whatever the attach order, a prefab instance's to its own copies; Dart enums as a dropdown; colours were already `@Expose(kind: 'color')`); 🟡 fields still need `@Expose` (no implicit public fields), no asset-typed fields beyond `AssetRef`, no `List` of references |
 | A failed hot reload | blocks Play, errors in the Console | 🔧 `68f7d45` (each `file:line:column: Error:` is a Console row, ↩ opens the line in the IDE; Play and Build And Run refused until a reload goes through; the notice links the Console); 🟡 the old code keeps running in the game view meanwhile, as Unity keeps the old assemblies |
-| Drag a script onto an object | adds it | ❌ |
+| Drag a script onto an object | adds it | 🔧 `888092b` (a behaviour's file in Scripts drags it — of several, the one named after the file; onto a Hierarchy row, the Inspector for the selection, or the object under the pointer in the Scene view; schema defaults, an override on a prefab instance, one undo step, refused where it is already); 🟡 an entity still holds one of each script (FYN-D0204), Unity allows several; a file without a behaviour does not drag rather than saying why |
 
 ## Tier 3 — the Scene view and prefabs, beyond the basics
 
@@ -224,3 +224,11 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   runs the IDE command with the absolute path and position, and a
   `reloaded` status clears them. `code_reload_test.dart` covers the
   parser.
+- 2026-09-24: drag a script onto an object.
+  `apps/editor/test/parity/script_drop_parity_test.dart` gives the fixture
+  copy three scripts (one behaviour, none, two): the payload is the
+  behaviour, the file-named one, or nothing; the Spinner dropped on the
+  Sun's row gets its defaults with the selection kept, the Robot (which
+  has one) is left alone, Crate A gets an `addComponent` override and ⌘Z
+  takes it back; dropped on the Inspector it goes onto the selected
+  Crate B, and on the Scene view onto Crate A under the pointer.
