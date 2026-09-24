@@ -242,6 +242,9 @@ FynkelStatus fynkel_authoring_query(FynkelAuthoringSession* session,
  *                                                  ending in `/` or naming a folder keeps
  *                                                  the name; the kind (suffix, extension)
  *                                                  is kept; an open document follows
+ *   duplicateAsset     asset, path?                a copy beside it (`coin 1`, …) under
+ *                                                  a fresh id — a source with a sidecar
+ *                                                  of its own and fresh sub-asset ids
  *   deleteAsset        asset, force?               refused with every referencing field
  *                                                  in `related` while a document names
  *                                                  the asset (or a sub-asset) unless

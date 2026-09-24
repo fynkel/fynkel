@@ -912,3 +912,84 @@ fn the_startup_scene_is_set_from_the_editor_and_undone() {
     let startup = s.project().unwrap().project.startup_scene.clone().unwrap();
     assert_eq!(startup.asset.to_string(), MAIN);
 }
+
+#[test]
+fn a_duplicate_is_a_fresh_asset_beside_its_original_and_undo_removes_it() {
+    let copy = Copy::new("duplicate");
+    let mut s = open(&copy);
+    let before = s.project().unwrap().assets.len();
+
+    // A prefab: `coin 1`, its own id, the name follows the file, the body kept.
+    let v = ok(s.operate("duplicateAsset", &json!({ "asset": COIN })));
+    let coin1 = copy.path("assets/prefabs/coin 1.prefab.json");
+    assert!(coin1.is_file());
+    assert_eq!(v["label"], "Duplicate coin.prefab.json");
+    let coin1_id = id(v["id"].as_str().unwrap());
+    assert_ne!(coin1_id, id(COIN));
+    let doc = Document::read(&coin1, Some(DocumentKind::Prefab)).unwrap();
+    assert_eq!(doc.envelope.id, coin1_id);
+    assert_eq!(doc.envelope.name, "coin 1");
+    let original = Document::read(
+        &copy.path("assets/prefabs/coin.prefab.json"),
+        Some(DocumentKind::Prefab),
+    )
+    .unwrap();
+    assert_eq!(
+        doc.root.get("entities").map(|n| n.to_serde()),
+        original.root.get("entities").map(|n| n.to_serde())
+    );
+    assert_clean(&s);
+
+    // Again from the copy: `coin 2`.
+    ok(s.operate("duplicateAsset", &json!({ "asset": coin1_id.to_string() })));
+    assert!(copy.path("assets/prefabs/coin 2.prefab.json").is_file());
+
+    // A source: the bytes, a sidecar of its own with fresh sub-asset ids.
+    let v = ok(s.operate("duplicateAsset", &json!({ "asset": ROBOT })));
+    let robot1 = copy.path("assets/models/robot 1.glb");
+    assert_eq!(
+        std::fs::read(&robot1).unwrap(),
+        std::fs::read(copy.path("assets/models/robot.glb")).unwrap()
+    );
+    let robot1_id = id(v["id"].as_str().unwrap());
+    let project = s.project().unwrap();
+    let a = project.assets.get(id(ROBOT)).unwrap();
+    let b = project.assets.get(robot1_id).unwrap();
+    assert_eq!(
+        a.sub_assets.keys().collect::<Vec<_>>(),
+        b.sub_assets.keys().collect::<Vec<_>>()
+    );
+    assert!(!a.sub_assets.is_empty());
+    for (k, sub) in &b.sub_assets {
+        assert_ne!(
+            Some(sub),
+            a.sub_assets.get(k),
+            "{k} keeps the original's id"
+        );
+    }
+    assert_eq!(project.assets.len(), before + 3);
+    assert_clean(&s);
+
+    // A path that exists is refused and leaves nothing.
+    refused(
+        s.operate(
+            "duplicateAsset",
+            &json!({ "asset": MAIN, "path": "scenes/results.scene.json" }),
+        ),
+        "FYN-T0003",
+    );
+
+    // Undo, undo, undo; redo brings the model back byte for byte.
+    ok(s.operate("undoAsset", &json!({})));
+    assert!(!robot1.exists());
+    assert!(!copy.path("assets/models/robot 1.glb.meta.json").exists());
+    ok(s.operate("redoAsset", &json!({})));
+    assert!(robot1.is_file());
+    assert!(s.project().unwrap().assets.get(robot1_id).is_some());
+    for _ in 0..3 {
+        ok(s.operate("undoAsset", &json!({})));
+    }
+    assert!(!coin1.exists());
+    assert_eq!(s.project().unwrap().assets.len(), before);
+    assert_clean(&s);
+}

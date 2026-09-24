@@ -29,6 +29,7 @@ use crate::{AuthoringSession, OpenProject};
 pub const OPERATIONS: &[&str] = &[
     "newDocument",
     "renameAsset",
+    "duplicateAsset",
     "deleteAsset",
     "setImportSettings",
     "extractMaterials",
@@ -78,6 +79,14 @@ pub enum AssetOp {
     /// Files rewritten in place (`setLayersAndTags`: the project file and
     /// the scenes and prefabs whose layers or tags moved).
     Rewrote { files: Vec<FileRewrite> },
+    /// `path` was written as a copy of another asset (`bytes`), with its
+    /// sidecar's `text` beside it for a source.
+    Copied {
+        path: PathBuf,
+        id: Uuid,
+        bytes: Vec<u8>,
+        sidecar: Option<(PathBuf, String)>,
+    },
     /// Several operations as one step (`extractMaterials`: the new
     /// materials, then the model's remaps), undone in reverse; `id` is
     /// the asset the step is about.
@@ -256,7 +265,7 @@ fn normalize(path: &Path) -> PathBuf {
 }
 
 impl AuthoringSession {
-    /// Applies one asset operation by name — `newDocument`, `renameAsset`,
+    /// Applies one asset operation by name — `newDocument`, `renameAsset`, `duplicateAsset`,
     /// `deleteAsset`, `setImportSettings`, `reimport`, `undoAsset`,
     /// `redoAsset` — with its arguments; see the module docs. The result
     /// carries `ok`, `op`, the `label` the history shows, the affected
@@ -279,6 +288,7 @@ impl AuthoringSession {
         let done = match kind {
             "newDocument" => self.new_document(args).map_err(one),
             "renameAsset" => self.rename_asset(args).map_err(one),
+            "duplicateAsset" => self.duplicate_asset(args).map_err(one),
             "deleteAsset" => self.delete_asset(args),
             "setImportSettings" => self.set_import_settings(args),
             "extractMaterials" => self.extract_materials(args),
@@ -561,6 +571,134 @@ impl AuthoringSession {
             }
         }
         Ok(())
+    }
+
+    // ------------------------------------------------------ duplicate
+
+    /// `duplicateAsset { asset, path? }` (Unity's Edit → Duplicate): a copy
+    /// beside the asset named `<stem> 1`, `<stem> 2`, … (or at `path`,
+    /// relative to the asset root) under a fresh id. A document keeps its
+    /// body — only `id` changes, and `name` when it was the file's stem (any case);
+    /// a rig's derived sub-asset ids follow its new id. A source is copied
+    /// byte for byte with a sidecar of its own: a fresh id, the same
+    /// settings, fresh sub-asset ids under the same keys. Nothing refers to
+    /// the copy yet. One step on the asset history.
+    fn duplicate_asset(&mut self, args: &Value) -> Result<Value, Diagnostic> {
+        const OP: &str = "duplicateAsset";
+        let id = uuid_arg(args, "asset", OP)?;
+        let project = self.project().unwrap();
+        let entry = project.entry(id)?.clone();
+        let root = project.assets.root().to_path_buf();
+        let from = entry.file(&root);
+        let from = from.canonicalize().unwrap_or(from);
+        let is_source = matches!(entry.kind, AssetKind::Source { .. });
+        let suffix = match &entry.kind {
+            AssetKind::Document(kind) => kind.suffix().to_string(),
+            AssetKind::Source { .. } => from
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default(),
+        };
+        let name = file_name(&from);
+        let old_stem = name
+            .strip_suffix(suffix.as_str())
+            .unwrap_or(&name)
+            .to_string();
+        let to = match args
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            Some(given) => project.inside_assets(given, OP)?,
+            None => {
+                let dir = from.parent().unwrap_or(&root).to_path_buf();
+                // `coin 1` → `coin 2`: a trailing number counts on.
+                let (base, first) = match old_stem.rsplit_once(' ') {
+                    Some((b, n)) if !b.is_empty() && n.parse::<u32>().is_ok() => {
+                        (b.to_string(), n.parse::<u32>().unwrap() + 1)
+                    }
+                    _ => (old_stem.clone(), 1),
+                };
+                (first..)
+                    .map(|n| dir.join(format!("{base} {n}{suffix}")))
+                    .find(|p| !(p.exists() || is_source && sidecar_path(p).exists()))
+                    .expect("an unused name")
+            }
+        };
+        let to_name = file_name(&to);
+        if !to_name.ends_with(suffix.as_str()) || to_name.len() == suffix.len() {
+            return Err(invalid(format!(
+                "{OP}: the copy keeps the {suffix} suffix; {to_name} does not end with it"
+            )));
+        }
+        if to.exists() || (is_source && sidecar_path(&to).exists()) {
+            return Err(invalid(format!(
+                "{OP}: {} already exists",
+                project.relative_to_assets(&to).unwrap_or_default()
+            ))
+            .with_document(to.display().to_string()));
+        }
+        let new_stem = to_name[..to_name.len() - suffix.len()].to_string();
+        let new_id = Uuid::new_v4();
+        let (bytes, sidecar) = match &entry.kind {
+            AssetKind::Document(kind) => {
+                let mut doc = Document::read(&from, Some(*kind)).map_err(|mut v| v.remove(0))?;
+                doc.root.set("id", Node::string(new_id.to_string()));
+                if doc.envelope.name.eq_ignore_ascii_case(&old_stem) {
+                    doc.root.set("name", Node::string(&new_stem));
+                }
+                doc.path = Some(to.display().to_string());
+                (doc.write()?.into_bytes(), None)
+            }
+            AssetKind::Source { .. } => {
+                let bytes = std::fs::read(&from)
+                    .map_err(|e| io(&from, format!("{OP}: cannot read: {e}")))?;
+                let (_, mut meta) = self.sidecar_of(id, OP).map_err(|mut v| v.remove(0))?;
+                meta.document
+                    .root
+                    .set("id", Node::string(new_id.to_string()));
+                meta.document.root.set("name", Node::string(&to_name));
+                for (_, sub) in &mut meta.sub_assets {
+                    *sub = Uuid::new_v4();
+                }
+                (
+                    bytes,
+                    Some((sidecar_path(&to), meta.to_document().write()?)),
+                )
+            }
+        };
+        if let Some(parent) = to.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| io(parent, format!("{OP}: cannot create the folder: {e}")))?;
+        }
+        std::fs::write(&to, &bytes).map_err(|e| io(&to, format!("{OP}: cannot write: {e}")))?;
+        if let Some((path, text)) = &sidecar {
+            if let Err(e) = std::fs::write(path, text) {
+                let _ = std::fs::remove_file(&to);
+                return Err(io(path, format!("{OP}: cannot write the sidecar: {e}")));
+            }
+        }
+        let to = to.canonicalize().unwrap_or(to);
+        let sidecar = sidecar.map(|(p, t)| (p.canonicalize().unwrap_or(p), t));
+        let mut touched = vec![to.clone()];
+        touched.extend(sidecar.iter().map(|(p, _)| p.clone()));
+        self.project_mut().unwrap().rescan(&touched);
+        let label = format!("Duplicate {}", file_name(&from));
+        self.assets_history.push(Done {
+            op: AssetOp::Copied {
+                path: to.clone(),
+                id: new_id,
+                bytes,
+                sidecar,
+            },
+            label: label.clone(),
+        });
+        Ok(self.finish(
+            OP,
+            &label,
+            Some(new_id),
+            json!({ "path": to.display().to_string(), "id": new_id.to_string() }),
+        ))
     }
 
     // --------------------------------------------------------- delete
@@ -1085,6 +1223,57 @@ impl AuthoringSession {
                     .unwrap()
                     .rescan(std::slice::from_ref(sidecar));
                 Ok(Some(*id))
+            }
+            AssetOp::Copied {
+                path,
+                id,
+                bytes,
+                sidecar,
+            } => {
+                let mut touched = vec![path.clone()];
+                touched.extend(sidecar.iter().map(|(p, _)| p.clone()));
+                if inverse {
+                    if std::fs::read(path).is_ok_and(|b| b != *bytes) {
+                        return Err(invalid(format!(
+                            "{op}: {} was edited since it was made; delete it yourself if you mean to",
+                            file_name(path)
+                        ))
+                        .with_document(path.display().to_string()));
+                    }
+                    if self.documents.values().any(|d| d.path == *path) {
+                        return Err(invalid(format!(
+                            "{op}: {} is open as a document",
+                            file_name(path)
+                        ))
+                        .with_suggestion("close its tab first"));
+                    }
+                    for p in &touched {
+                        if p.exists() {
+                            std::fs::remove_file(p)
+                                .map_err(|e| io(p, format!("{op}: cannot remove: {e}")))?;
+                        }
+                    }
+                    self.project_mut().unwrap().rescan(&touched);
+                    Ok(None)
+                } else {
+                    if let Some(p) = touched.iter().find(|p| p.exists()) {
+                        return Err(invalid(format!("{op}: {} exists again", file_name(p)))
+                            .with_document(p.display().to_string()));
+                    }
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent).map_err(|e| {
+                            io(parent, format!("{op}: cannot create the folder: {e}"))
+                        })?;
+                    }
+                    std::fs::write(path, bytes)
+                        .map_err(|e| io(path, format!("{op}: cannot write: {e}")))?;
+                    if let Some((p, text)) = sidecar {
+                        std::fs::write(p, text)
+                            .map_err(|e| io(p, format!("{op}: cannot write the sidecar: {e}")))?;
+                    }
+                    self.project_mut().unwrap().rescan(&touched);
+                    Ok(Some(*id))
+                }
             }
             AssetOp::Rewrote { files } => {
                 self.reload_after = self.write_rewrites(files, inverse, op)?;
