@@ -254,7 +254,7 @@ abstract class EditorProject extends ChangeNotifier {
   AssetHistory assetHistory();
 
   /// An asset operation through the session (`newDocument`, `renameAsset`,
-  /// `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
+  /// `duplicateAsset`, `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
   /// `registerBehaviour`, `setStartupScene`, `undoAsset`, `redoAsset`) — one history step each, the database re-read
   /// incrementally. Throws `AuthoringException` when refused; nothing was
   /// touched then.
@@ -263,6 +263,10 @@ abstract class EditorProject extends ChangeNotifier {
   OperationResult newDocument(String kind, String path, {String? name, String? shader}) =>
       operate('newDocument', {'kind': kind, 'path': path, 'name': ?name, 'shader': ?shader});
   OperationResult renameAsset(String id, String path) => operate('renameAsset', {'asset': id, 'path': path});
+
+  /// A copy beside the asset (`coin 1`, …) under a fresh id; a source gets a
+  /// sidecar of its own (Unity's Duplicate).
+  OperationResult duplicateAsset(String id, {String? path}) => operate('duplicateAsset', {'asset': id, 'path': ?path});
   OperationResult deleteAsset(String id, {bool force = false}) =>
       operate('deleteAsset', {'asset': id, if (force) 'force': true});
   OperationResult setImportSettings(String id, Map<String, Object?> settings) =>

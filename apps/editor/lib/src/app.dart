@@ -1085,6 +1085,18 @@ class EditorShellState extends State<EditorShell> {
         run: moveAssetsDialog,
       ),
       EditorCommand(
+        id: 'assets.duplicate',
+        menu: EditorMenu.project,
+        // ⌘D in the Project browser (the Hierarchy's ⌘D is the global one).
+        group: 4,
+        order: 6,
+        enabled: () => _canEditAssets && _hasAssetSelection,
+        run: () {
+          workspace?.show(PanelRegistry.project);
+          browser?.duplicate();
+        },
+      ),
+      EditorCommand(
         id: 'assets.delete',
         menu: EditorMenu.project,
         shortcut: k(LogicalKeyboardKey.backspace, shift: true, alt: true),
@@ -1093,7 +1105,7 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _canEditAssets && _hasAssetSelection,
         run: () {
           workspace?.show(PanelRegistry.project);
-          browser?.delete();
+          browser?.requestDelete();
         },
       ),
       EditorCommand(

@@ -119,6 +119,10 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// The last refused operation's reason, until the next one succeeds.
   String? lastError;
   DeleteRefusal? pendingDelete;
+
+  /// The assets a Delete asks about before anything moves (Unity's
+  /// "Delete selected asset?"); the panel shows the question.
+  List<String>? pendingConfirm;
   int searchFocusRequests = 0;
   bool _disposed = false;
 
@@ -866,6 +870,54 @@ final class ProjectBrowserModel extends ChangeNotifier {
     }
     lastError = null;
     _sync();
+    notifyListeners();
+    return true;
+  }
+
+  /// Delete as a key or the menu does it: asks first ([pendingConfirm]);
+  /// a referenced asset goes straight to [delete], whose refusal is the
+  /// question.
+  void requestDelete() {
+    final targets = selection.toList();
+    if (targets.isEmpty || !canEdit) return;
+    if (targets.any((id) => project.dependents(id).isNotEmpty)) {
+      delete(ids: targets);
+      return;
+    }
+    pendingConfirm = targets;
+    notifyListeners();
+  }
+
+  /// The answer to [pendingConfirm].
+  bool answerDelete(bool confirmed) {
+    final ids = pendingConfirm;
+    pendingConfirm = null;
+    if (confirmed && ids != null) return delete(ids: ids);
+    notifyListeners();
+    return false;
+  }
+
+  /// Duplicates the selected assets beside themselves (`coin 1`, …) and
+  /// selects the copies — one asset-history step each.
+  bool duplicate() {
+    final targets = [
+      for (final id in selection)
+        if (entry(id) != null) id,
+    ];
+    if (targets.isEmpty || !canEdit) return false;
+    final copies = <String>[];
+    for (final id in targets) {
+      final r = _guard(() => project.duplicateAsset(id));
+      final copy = r?.entry?['id'] as String?;
+      if (copy == null) break;
+      copies.add(copy);
+    }
+    if (copies.isEmpty) return false;
+    _sync();
+    selection
+      ..clear()
+      ..addAll(copies);
+    lead = copies.last;
     notifyListeners();
     return true;
   }

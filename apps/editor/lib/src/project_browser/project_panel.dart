@@ -70,6 +70,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
   final _listFocus = FocusNode(debugLabel: 'project.list');
   int _seenSearchRequests = 0;
   DeleteRefusal? _shownRefusal;
+  List<String>? _shownConfirm;
   TextEditingController? _rename;
   String? _renameTarget;
   String? _lastTapId;
@@ -117,6 +118,12 @@ class _ProjectPanelState extends State<ProjectPanel> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _askDeleteAnyway(refusal));
     }
     if (refusal == null) _shownRefusal = null;
+    final confirm = model.pendingConfirm;
+    if (confirm != null && !identical(confirm, _shownConfirm)) {
+      _shownConfirm = confirm;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _askDelete(confirm));
+    }
+    if (confirm == null) _shownConfirm = null;
     final target = model.renamingAsset ?? (model.renamingFolder == null ? null : 'folder:${model.renamingFolder}');
     if (target != _renameTarget) {
       _renameTarget = target;
@@ -257,6 +264,39 @@ class _ProjectPanelState extends State<ProjectPanel> {
     if (err != null && mounted) {
       Notices.maybeOf(context)?.show('Reveal in Finder failed: $err');
     }
+  }
+
+  /// Unity's "Delete selected asset?" — Enter deletes, Esc keeps.
+  Future<void> _askDelete(List<String> ids) async {
+    if (!mounted) return;
+    final names = [for (final id in ids) model.entry(id)?.path ?? id];
+    final yes = await showDialog<bool>(
+      animationStyle: AnimationStyle.noAnimation,
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('project.deleteConfirm'),
+        title: Text(names.length == 1 ? 'Delete selected asset?' : 'Delete ${names.length} selected assets?'),
+        content: SizedBox(
+          width: 420,
+          child: Text(
+            '${names.take(8).join('\n')}${names.length > 8 ? '\n…' : ''}\n\n'
+            'The files move to .fynkel/trash; Undo Asset Operation (⌥⌘Z) brings them back.',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            key: const Key('project.deleteConfirm.delete'),
+            autofocus: true,
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    model.answerDelete(yes == true);
   }
 
   Future<void> _askDeleteAnyway(DeleteRefusal refusal) async {
@@ -490,17 +530,21 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final shift = HardwareKeyboard.instance.isShiftPressed;
     final meta = HardwareKeyboard.instance.isMetaPressed;
     if (model.inScripts) return _onScriptKey(k);
-    if (k == LogicalKeyboardKey.arrowDown) {
+    if (k == LogicalKeyboardKey.arrowDown && meta) {
+      // Unity (macOS): ⌘↓ opens; Enter renames.
+      final lead = model.leadEntry;
+      if (lead != null) _activate(lead);
+    } else if (k == LogicalKeyboardKey.arrowDown) {
       model.step(1, extend: shift);
     } else if (k == LogicalKeyboardKey.arrowUp) {
       model.step(-1, extend: shift);
-    } else if (k == LogicalKeyboardKey.enter) {
-      final lead = model.leadEntry;
-      if (lead != null) _activate(lead);
-    } else if (k == LogicalKeyboardKey.f2) {
+    } else if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter || k == LogicalKeyboardKey.f2) {
       model.beginRename();
-    } else if ((k == LogicalKeyboardKey.backspace || k == LogicalKeyboardKey.delete) && !meta) {
-      if (model.selection.isNotEmpty) model.delete();
+    } else if (k == LogicalKeyboardKey.backspace || k == LogicalKeyboardKey.delete) {
+      // ⌘⌫ as in Unity, and bare ⌫ / ⌦; both ask first.
+      model.requestDelete();
+    } else if (k == LogicalKeyboardKey.keyD && meta && !shift) {
+      model.duplicate();
     } else if (k == LogicalKeyboardKey.keyA && meta) {
       model.selectAll();
     } else if (k == LogicalKeyboardKey.escape) {

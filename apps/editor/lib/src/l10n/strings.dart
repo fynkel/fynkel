@@ -20,7 +20,11 @@ abstract final class EditorStrings {
     'assets.copyId': (label: 'Copy Asset Id', description: null),
     'assets.delete': (
       label: 'Delete Asset',
-      description: 'To .fynkel/trash; refused while referenced unless you say "delete anyway"',
+      description: 'Asks first; to .fynkel/trash; refused while referenced unless you say "delete anyway"',
+    ),
+    'assets.duplicate': (
+      label: 'Duplicate Asset',
+      description: 'A copy beside it (coin 1, …) under a fresh id; ⌘D in the Project browser',
     ),
     'assets.move': (label: 'Move Asset to Folder…', description: null),
     'assets.newFolder': (label: 'New Folder', description: null),
