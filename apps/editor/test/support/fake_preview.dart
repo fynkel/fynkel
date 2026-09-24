@@ -321,6 +321,18 @@ final class FakePreviewBackend implements PreviewBackend {
     return out;
   }
 
+  /// A handle per drawn id: its place in the document plus one.
+  @override
+  List<int> entities(Iterable<String> ids) {
+    _check('entities');
+    final order = document.entitiesView.keys.toList();
+    final drawn = _visible.toSet();
+    return {
+      for (final id in ids)
+        if (drawn.contains(id)) order.indexOf(id) + 1,
+    }.toList();
+  }
+
   static const _cubeEdges = [
     [0, 1], [1, 3], [3, 2], [2, 0], //
     [4, 5], [5, 7], [7, 6], [6, 4], //
@@ -328,13 +340,20 @@ final class FakePreviewBackend implements PreviewBackend {
   ];
 
   @override
-  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect}) {
+  PreviewLines lines({
+    Iterable<String> outline = const [],
+    List<double>? outlineColor,
+    bool outlineBoxes = true,
+    double? iconsAspect,
+  }) {
     _check('lines');
     final color = outlineColor ?? const [1.0, 0.6, 0.1, 1.0];
     final lines = <List<double>>[];
     for (final id in outline) {
       final w = worldOf(id);
       if (w == null) continue;
+      // Without boxes a mesh is the renderer's outline's to ring.
+      if (!outlineBoxes && _types(document.entitiesView[id]!).contains('fynkel.MeshRenderer')) continue;
       final corners = [
         for (final x in const [-0.5, 0.5])
           for (final y in const [-0.5, 0.5])

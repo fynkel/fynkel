@@ -122,7 +122,16 @@ abstract class PreviewBackend {
   int setHidden(Iterable<String> ids);
   PreviewPick pick(PreviewCamera camera, double aspect, List<double> ndc);
   List<String> pickRect(PreviewCamera camera, double aspect, List<double> min, List<double> max);
-  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect});
+  PreviewLines lines({
+    Iterable<String> outline = const [],
+    List<double>? outlineColor,
+    bool outlineBoxes = true,
+    double? iconsAspect,
+  });
+
+  /// The renderer's handles of [ids] (with a prefab instance's spawned
+  /// entities) for the selection outline (`ViewportOverlay.outline`).
+  List<int> entities(Iterable<String> ids);
   Map<String, List<double>> worldMatrices(Iterable<String> ids);
   void setTransforms(Iterable<PreviewTransform> transforms);
   void restoreTransforms(Iterable<String> ids);
@@ -182,8 +191,19 @@ final class SessionPreview implements PreviewBackend {
   List<String> pickRect(PreviewCamera camera, double aspect, List<double> min, List<double> max) =>
       preview.pickRect(camera, aspect, min, max);
   @override
-  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect}) =>
-      preview.lines(outline: outline, outlineColor: outlineColor, iconsAspect: iconsAspect);
+  PreviewLines lines({
+    Iterable<String> outline = const [],
+    List<double>? outlineColor,
+    bool outlineBoxes = true,
+    double? iconsAspect,
+  }) => preview.lines(
+    outline: outline,
+    outlineColor: outlineColor,
+    outlineBoxes: outlineBoxes,
+    iconsAspect: iconsAspect,
+  );
+  @override
+  List<int> entities(Iterable<String> ids) => preview.entities(ids);
   @override
   Map<String, List<double>> worldMatrices(Iterable<String> ids) => preview.worldMatrices(ids);
   @override

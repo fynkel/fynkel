@@ -392,6 +392,13 @@ abstract final class GizmoTokens {
   /// light cyan, apart from the lights' white and the colliders' green.
   static const declaredGizmo = Color(0xFF7FD4F0);
 
+  /// The selection outline (the renderer's ring around what the selection
+  /// draws): Unity's orange around the selected objects, its grey-blue
+  /// around what is under them; the ring's width in points.
+  static final outlineSelected = linear(const Color(0xFFFF6600));
+  static final outlineChildren = linear(const Color(0xFF5E789C));
+  static const double outlineWidth = 1.5;
+
   /// [c] as the overlay takes it: linear RGBA.
   static List<double> linear(Color c, {double? alpha}) {
     double lin(double v) => v <= 0.04045 ? v / 12.92 : math.pow((v + 0.055) / 1.055, 2.4).toDouble();

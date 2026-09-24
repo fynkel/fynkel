@@ -121,6 +121,10 @@ final class SceneTab {
   /// pivot follows; null when the view is free.
   List<String>? following;
 
+  /// The selection outline's handles (selected, children) and what they
+  /// were read for; null after a sync respawned the world.
+  ({String key, List<int> selected, List<int> children})? outline;
+
   /// Click cycling: the hits under the last click and which is selected.
   Offset? clickPx;
   List<String> clickHits = const [];
@@ -522,6 +526,7 @@ final class SceneViewModel extends ChangeNotifier {
         // (a respawned entity comes back visible), a drag in flight is
         // stale (an undo under it).
         t.hiddenDirty = true;
+        t.outline = null;
         if (drag != null && edit!.kind != DocumentChangeKind.applied) cancelDrag();
         t.clickHits = const [];
       case _:
@@ -554,7 +559,10 @@ final class SceneViewModel extends ChangeNotifier {
     if (_disposed) return;
     if (reset) {
       for (final st in _sceneTabs.values) {
-        if (preview == null || st.preview == preview) st.hiddenDirty = true;
+        if (preview == null || st.preview == preview) {
+          st.hiddenDirty = true;
+          st.outline = null;
+        }
       }
     }
     final p = current?.preview;
@@ -1183,12 +1191,58 @@ final class SceneViewModel extends ChangeNotifier {
     final hidden = _hiddenAll(t);
     final outline = t.tab.selection.where((id) => !hidden.contains(id)).toList();
     if (outline.isNotEmpty || showOverlays) {
-      final l = t.preview!.lines(outline: outline, iconsAspect: showOverlays ? aspect : null);
+      // Meshes are ringed by the renderer's outline; the lines keep the
+      // crosses of what draws no mesh.
+      final l = t.preview!.lines(outline: outline, outlineBoxes: false, iconsAspect: showOverlays ? aspect : null);
       if (l.count > 0) o.segments(l.data, width: width);
+    }
+    if (outline.isNotEmpty) {
+      final (:selected, :children) = _outlineHandles(t, outline, hidden);
+      if (selected.isNotEmpty || children.isNotEmpty) {
+        o.outline(
+          selected,
+          children,
+          selectedColor: GizmoTokens.outlineSelected,
+          childrenColor: GizmoTokens.outlineChildren,
+          width: GizmoTokens.outlineWidth * pixelRatio,
+        );
+      }
     }
     _drawDeclared(o, t);
     _drawHandles(o);
     return o;
+  }
+
+  /// Unity's selection outline: the selected objects' meshes ringed in
+  /// orange, what is under them (their children, an instance's parts) in
+  /// blue. Read from the world once per document revision, selection and
+  /// visibility (every frame in Play, where the world changes by itself).
+  ({List<int> selected, List<int> children}) _outlineHandles(SceneTab t, List<String> ids, Set<String> hidden) {
+    final tree = t.tab.tree;
+    final chosen = ids.toSet();
+    final under = <String>[];
+    void walk(String id) {
+      for (final c in tree[id]?.children ?? const <String>[]) {
+        if (hidden.contains(c)) continue;
+        if (!chosen.contains(c)) under.add(c);
+        walk(c);
+      }
+    }
+
+    ids.forEach(walk);
+    final live = isLive;
+    final key = '${identityHashCode(t.preview)}|${t.tab.document.revision}|${ids.join(',')}|${hidden.join(',')}';
+    final cached = t.outline;
+    if (!live && cached != null && cached.key == key) return (selected: cached.selected, children: cached.children);
+    final p = t.preview!;
+    final children = under.isEmpty ? const <int>[] : p.entities(under);
+    final skip = children.toSet();
+    final selected = [
+      for (final h in p.entities(ids))
+        if (!skip.contains(h)) h,
+    ];
+    if (!live) t.outline = (key: key, selected: selected, children: children);
+    return (selected: selected, children: children);
   }
 
   // ── Declared gizmos (item 9h) ───────────────────────────────────────

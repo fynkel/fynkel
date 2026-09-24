@@ -60,8 +60,14 @@ final class LivePreview implements PreviewBackend {
   List<String> pickRect(PreviewCamera camera, double aspect, List<double> min, List<double> max) =>
       live.pickRect(camera, aspect, min, max);
   @override
-  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect}) =>
-      live.lines(outline: outline, outlineColor: outlineColor, iconsAspect: iconsAspect);
+  PreviewLines lines({
+    Iterable<String> outline = const [],
+    List<double>? outlineColor,
+    bool outlineBoxes = true,
+    double? iconsAspect,
+  }) => live.lines(outline: outline, outlineColor: outlineColor, outlineBoxes: outlineBoxes, iconsAspect: iconsAspect);
+  @override
+  List<int> entities(Iterable<String> ids) => live.handles(ids);
   @override
   Map<String, List<double>> worldMatrices(Iterable<String> ids) => live.worldMatrices(ids);
 
