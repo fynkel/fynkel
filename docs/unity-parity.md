@@ -44,7 +44,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Edit rotation with several objects selected | changes that axis on each | 🔧 `b5a9c11` (it overwrote the other axes with the first object's) |
 | Drag a value (label scrub) | the Scene view follows live | 🔧 `b5a9c11` (Transform values; one undo on release) |
 | A value that does not parse | goes back to the old value | ✅ (Unity does the same) |
-| Component header | enable checkbox, Copy/Paste Values, Move Up/Down, drag to reorder | 🔧 checkbox + Copy Component / Paste Component Values (`13d2876`); Move Up / Move Down (`moveComponent` `8b8e747`, `5d36af3`); ❌ drag to reorder |
+| Component header | enable checkbox, Copy/Paste Values, Move Up/Down, drag to reorder | 🔧 checkbox + Copy Component / Paste Component Values (`13d2876`); Move Up / Move Down (`moveComponent` `8b8e747`, `5d36af3`); drag a header onto another to reorder (`7d531c3`) |
 | Click an asset reference | pings the asset in the Project | 🔧 `2455f5d` (⊙ opens the picker) |
 | Colour picker | live while picking, HDR intensity | 🔧 live in the Scene view, one undo on OK, Cancel restores (`ff6611e`, `7edb455`); HDR intensity goes with the Material Inspector (no component colour is HDR; emission is) |
 | Rotation after reselect/undo | keeps the typed Euler | 🔧 `10e1f8b` (editor-side hints) |
@@ -96,7 +96,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Pivot / Center (Z) | | 🔧 `51a245a` (the gizmo at the active object's origin, each turning and scaling about its own, or at the selection's bounds centre, children included, the group about it; a scale multiplies each object's own, no shear) |
 | Click a prefab, click again | root, then the child under the pointer | 🔧 `7a66084` (root, then the child under the pointer, then what is behind; inside a selected instance a click goes straight to the child) |
 | ⇧F / double-F | follow the selection | 🔧 `5c57adb` (Lock View to Selected: the view follows the selection dragged or in Play; orbit and zoom keep the lock, pan, fly, framing or another selection let go; Frame All stays in the View menu) |
-| Selection outline | silhouette | 🔧 `6344488`…`4b493b7`, `70ad2db` (the renderer rings what the selection draws — a mask of the outlined instances, then a composite before the overlay lines, ABI 8 — in Unity's orange, what is under it in its grey-blue: children, an instance's parts; an object without a mesh keeps its cross); 🟡 a part hidden behind another is ringed too (the mask has no depth test) |
+| Selection outline | silhouette | 🔧 `6344488`…`4b493b7`, `70ad2db` (the renderer rings what the selection draws — a mask of the outlined instances, then a composite before the overlay lines, ABI 8 — in Unity's orange, what is under it in its grey-blue: children, an instance's parts; an object without a mesh keeps its cross); rung through what hides it, as Unity's (its issue tracker counts an occluded outline as a regression) |
 | Rect tool (T), free-rotate trackball | | 🔧 `510d218` (the rectangle in the plane of the two axes most across the view, children included: corners about the opposite one, ⌥ about the centre, ⇧ in proportion; edges one way; inside moves; just outside a corner turns; a click inside selects what is under it. Inside the rotate rings a drag turns freely, the rings first) |
 | Prefab mode | in context, breadcrumb, auto-save | 🔧 `20edc8e` (an instance's › or Open opens its prefab in context; the Scene view's bar: ‹, the breadcrumbs, Context Normal / Gray / Hidden, Auto Save on by default or a Save button; the Hierarchy's ‹ header; from the Project, in isolation; leaving with unsaved changes asks); `a95f43b`: the scene drawn around it through the viewport's extra worlds — `965d4b7`…`1a023c4`, ABI 9 — placed so the prefab's root sits where the instance was, the instance hidden, greyed in Gray) |
 | Prefab variants, Unpack Completely, a prefab from an object holding instances | | 🔧 `9146759`…`3fa1469` (ADR-0022 amendment, accepted), `9241460` editor |
@@ -279,6 +279,14 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   ABI, `70ad2db` editor; `selection_outline_parity_test.dart`: the Robot
   ringed and not boxed, a Cube made under it blue until it is selected,
   an instance's own mesh and its parts apart, the Camera's cross kept).
+- 2026-09-25: an outline shows through what hides the object, as Unity's
+  does (its issue tracker files the opposite as a regression); the row's
+  🟡 was wrong and is gone.
+- 2026-09-25: drag to reorder components (`7d531c3`,
+  `component_reorder_parity_test.dart`: Crate B's Collider dragged onto
+  the RigidBody shows the line above it and takes its place, dragged
+  back lands after it, nothing goes above the Transform or moves it, one
+  ⌘Z each; a prefab instance's inherited cards do not drag).
 - 2026-09-25: prefab variants and nested prefabs (`9146759`, `e5e44c8`,
   `3fa1469` document and API, `9241460` editor;
   `prefab_variant_parity_test.dart`: Crate A dragged to the Project asks,

@@ -8,7 +8,8 @@
 //!
 //! - **The mask**: the outlined instances again, through the mesh vertex
 //!   stages, into an `R8Unorm` target at the host target's size — one
-//!   sample, no depth test, so what other geometry hides is outlined too.
+//!   sample, no depth test, so what other geometry hides is outlined too,
+//!   as in Unity.
 //!   A selected instance writes 1, a child 0.5, and the target keeps the
 //!   larger (`fs_mask`, blended with `Max`).
 //! - **The composite**: a fullscreen pass that rings the mask in the
