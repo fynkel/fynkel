@@ -254,7 +254,7 @@ abstract class EditorProject extends ChangeNotifier {
   AssetHistory assetHistory();
 
   /// An asset operation through the session (`newDocument`, `renameAsset`,
-  /// `duplicateAsset`, `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
+  /// `duplicateAsset`, `installPrimitives`, `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
   /// `registerBehaviour`, `setStartupScene`, `undoAsset`, `redoAsset`) — one history step each, the database re-read
   /// incrementally. Throws `AuthoringException` when refused; nothing was
   /// touched then.
@@ -267,6 +267,10 @@ abstract class EditorProject extends ChangeNotifier {
   /// A copy beside the asset (`coin 1`, …) under a fresh id; a source gets a
   /// sidecar of its own (Unity's Duplicate).
   OperationResult duplicateAsset(String id, {String? path}) => operate('duplicateAsset', {'asset': id, 'path': ?path});
+
+  /// The editor's built-in shapes (ADR-0023): the asset of the fixed id,
+  /// or `Fynkel/Primitives.glb` written — `json['installed']` says which.
+  OperationResult installPrimitives() => operate('installPrimitives');
   OperationResult deleteAsset(String id, {bool force = false}) =>
       operate('deleteAsset', {'asset': id, if (force) 'force': true});
   OperationResult setImportSettings(String id, Map<String, Object?> settings) =>

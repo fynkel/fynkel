@@ -50,12 +50,12 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 114); // Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
+    expect(commands.length, 124); // ADR-0023: ten GameObject presets; Unity parity: Duplicate asset; Copy, Cut, Paste, Paste as Child, Create Empty Child; 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
     for (final c in commands) {
       // A ⌘ shortcut, or Unity's bare key alone (the tools' Q W E R Y, the projection's 5).
       // New Project gave ⇧⌘N to Create Empty, as in Unity (which has no New Project key).
-      // Duplicate asset is ⌘D inside the Project browser.
-      if (c.id != 'project.new' && c.id != 'assets.duplicate') {
+      // Duplicate asset is ⌘D inside the Project browser. GameObject → 3D Object / Light / Camera have none in Unity.
+      if (c.id != 'project.new' && c.id != 'assets.duplicate' && !c.id.startsWith('gameobject.')) {
         expect(c.shortcut ?? c.key, isNotNull, reason: '${c.id} has no shortcut');
       }
       expect(c.id, matches(RegExp(r'^[a-z]+(\.[a-zA-Z]+)+$')), reason: '${c.id} is not a dotted id');
@@ -146,8 +146,15 @@ void main() {
     for (final menu in EditorMenu.values) {
       await tester.tap(find.byKey(Key('menu.${menu.name}')));
       await tester.pumpAndSettle();
-      for (final c in shell.registry.inMenu(menu)) {
+      for (final c in shell.registry.inMenu(menu).where((c) => c.submenu == null)) {
         expect(find.byKey(Key('menuitem.${c.id}')), findsOneWidget, reason: '${c.id} missing from ${menu.title}');
+      }
+      for (final submenu in {for (final c in shell.registry.inMenu(menu)) ?c.submenu}) {
+        await tester.tap(find.byKey(Key('submenu.${menu.name}.$submenu')));
+        await tester.pumpAndSettle();
+        for (final c in shell.registry.inMenu(menu).where((c) => c.submenu == submenu)) {
+          expect(find.byKey(Key('menuitem.${c.id}')), findsOneWidget, reason: '${c.id} missing from $submenu');
+        }
       }
       final palette = shell.registry.byId('window.commandPalette')!;
       if (menu == EditorMenu.window) expect(find.text(CommandRegistry.shortcutLabel(palette.shortcut!)), findsWidgets);
@@ -226,6 +233,11 @@ void main() {
         'About Fynkel Editor',
         'Undo',
         'Save Document',
+        // GameObject ▸ 3D Object ▸ Cube, Light ▸ Directional Light (ADR-0023).
+        'GameObject',
+        '3D Object',
+        'Cube',
+        'Directional Light',
       ]) {
         expect(wire, contains(label));
       }

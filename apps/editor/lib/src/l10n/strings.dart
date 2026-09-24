@@ -68,6 +68,19 @@ abstract final class EditorStrings {
     'document.saveAll': (label: 'Save All Documents', description: null),
     'document.saveAs': (label: 'Save Document As…', description: null),
     'document.undo': (label: 'Undo', description: null),
+    'gameobject.cube': (label: 'Cube', description: 'A 1 m cube with a box collider'),
+    'gameobject.sphere': (label: 'Sphere', description: 'A 1 m sphere with a sphere collider'),
+    'gameobject.capsule': (label: 'Capsule', description: 'A 2 m capsule with a capsule collider'),
+    'gameobject.cylinder': (label: 'Cylinder', description: 'A 2 m cylinder with a capsule collider'),
+    'gameobject.plane': (label: 'Plane', description: 'A 10 m ground plane with a mesh collider'),
+    'gameobject.quad': (label: 'Quad', description: 'A 1 m square facing +Z'),
+    'gameobject.directionalLight': (
+      label: 'Directional Light',
+      description: 'A sun: parallel light that casts shadows',
+    ),
+    'gameobject.pointLight': (label: 'Point Light', description: null),
+    'gameobject.spotLight': (label: 'Spot Light', description: null),
+    'gameobject.camera': (label: 'Camera', description: null),
     'help.about': (label: 'About Fynkel Editor', description: null),
     'help.documentation': (label: 'Editor Documentation', description: null),
     'hierarchy.collapseAll': (label: 'Collapse All', description: null),
@@ -223,6 +236,9 @@ abstract final class EditorStrings {
   // ── Menus, in menu-bar order ──
   static const menuProject = 'Project';
   static const menuEdit = 'Edit';
+  static const menuGameObject = 'GameObject';
+  static const menu3dObject = '3D Object';
+  static const menuLight = 'Light';
   static const menuView = 'View';
   static const menuPlay = 'Play';
   static const menuWindow = 'Window';

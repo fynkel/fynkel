@@ -10,6 +10,7 @@ import '../l10n/strings.dart';
 enum EditorMenu {
   project(EditorStrings.menuProject),
   edit(EditorStrings.menuEdit),
+  gameObject(EditorStrings.menuGameObject),
   view(EditorStrings.menuView),
   play(EditorStrings.menuPlay),
   window(EditorStrings.menuWindow),
@@ -38,6 +39,7 @@ final class EditorCommand {
     this.generated = false,
     this.labelBuilder,
     this.textIntent,
+    this.submenu,
   }) : baseLabel = baseLabel ?? EditorStrings.label(id),
        description = description ?? EditorStrings.description(id);
 
@@ -64,6 +66,10 @@ final class EditorCommand {
 
   /// Menu items are grouped; a divider separates groups.
   final int group;
+
+  /// The submenu of [menu] it sits in (GameObject ▸ 3D Object ▸ Cube);
+  /// null: directly in the menu. A submenu's items are one group.
+  final String? submenu;
   final int order;
   final bool Function()? enabled;
   final String? description;

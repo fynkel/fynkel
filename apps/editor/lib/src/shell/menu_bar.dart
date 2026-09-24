@@ -58,6 +58,20 @@ class EditorMenuBar extends StatelessWidget {
     return groups;
   }
 
+  /// A group's items with the ones of one submenu gathered: `(null, [c])`
+  /// for an item of its own, `(title, items)` for a submenu.
+  static List<(String?, List<EditorCommand>)> _entries(List<EditorCommand> group) {
+    final out = <(String?, List<EditorCommand>)>[];
+    for (final c in group) {
+      if (c.submenu != null && out.isNotEmpty && out.last.$1 == c.submenu) {
+        out.last.$2.add(c);
+      } else {
+        out.add((c.submenu, [c]));
+      }
+    }
+    return out;
+  }
+
   /// The native menus. About, Preferences and Quit live in the app menu, so a
   /// group or a menu left empty by that move is dropped: `PlatformMenuItemGroup`
   /// asserts on an empty member list (the Edit menu only carries Preferences).
@@ -70,13 +84,11 @@ class EditorMenuBar extends StatelessWidget {
         if (group.any(_inOwnMenu))
           PlatformMenuItemGroup(
             members: [
-              for (final c in group)
-                if (_inOwnMenu(c))
-                  PlatformMenuItem(
-                    label: c.label,
-                    shortcut: c.shortcut,
-                    onSelected: c.isEnabled ? () => registry.execute(c.id) : null,
-                  ),
+              for (final (submenu, items) in _entries(group.where(_inOwnMenu).toList()))
+                if (submenu == null)
+                  _platformItem(items.single)
+                else
+                  PlatformMenu(label: submenu, menus: [for (final c in items) _platformItem(c)]),
             ],
           ),
     ];
@@ -112,6 +124,12 @@ class EditorMenuBar extends StatelessWidget {
     ];
   }
 
+  PlatformMenuItem _platformItem(EditorCommand c) => PlatformMenuItem(
+    label: c.label,
+    shortcut: c.shortcut,
+    onSelected: c.isEnabled ? () => registry.execute(c.id) : null,
+  );
+
   /// False for the commands the app menu already carries.
   bool _inOwnMenu(EditorCommand c) => c.id != aboutCommand && c.id != preferencesCommand && c.id != 'app.quit';
 
@@ -123,18 +141,27 @@ class EditorMenuBar extends StatelessWidget {
           menuChildren: [
             for (final (i, group) in _groups(menu).indexed) ...[
               if (i > 0) const Divider(height: 1),
-              for (final c in group)
-                MenuItemButton(
-                  key: Key('menuitem.${c.id}'),
-                  // Our own label (⌘K), not Flutter's platform spelling.
-                  trailingIcon: c.shortcut == null ? null : Text(CommandRegistry.shortcutLabel(c.shortcut!)),
-                  onPressed: c.isEnabled ? () => registry.execute(c.id) : null,
-                  child: Text(c.label),
-                ),
+              for (final (submenu, items) in _entries(group))
+                if (submenu == null)
+                  _widgetItem(items.single)
+                else
+                  SubmenuButton(
+                    key: Key('submenu.${menu.name}.$submenu'),
+                    menuChildren: [for (final c in items) _widgetItem(c)],
+                    child: Text(submenu),
+                  ),
             ],
           ],
           child: Text(menu.title),
         ),
     ];
   }
+
+  Widget _widgetItem(EditorCommand c) => MenuItemButton(
+    key: Key('menuitem.${c.id}'),
+    // Our own label (⌘K), not Flutter's platform spelling.
+    trailingIcon: c.shortcut == null ? null : Text(CommandRegistry.shortcutLabel(c.shortcut!)),
+    onPressed: c.isEnabled ? () => registry.execute(c.id) : null,
+    child: Text(c.label),
+  );
 }

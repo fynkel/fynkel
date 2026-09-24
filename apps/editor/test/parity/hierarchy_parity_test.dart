@@ -207,7 +207,7 @@ void main() {
     final e = await Editor.open(tester);
     await e.click(e.row('Floor'));
     await e.press(LogicalKeyboardKey.keyN, shift: true, alt: true);
-    await e.press(LogicalKeyboardKey.enter);
+    await e.submit();
     await e.press(LogicalKeyboardKey.keyN, shift: true, alt: true);
     await e.press(LogicalKeyboardKey.escape);
     int made() => e.rows.where((r) => r == 'GameObject').length;
@@ -244,5 +244,17 @@ void main() {
     expect(e.selectedNames, ['GameObject']);
     expect(tab.tree.roots.last, tab.selection.single, reason: 'the last root, renaming');
     expect(tab.tree[tab.selection.single]!.parent, isNull);
+  });
+
+  testWidgets('+ → Create Empty with an object selected: the new child takes typing at once', (tester) async {
+    final e = await Editor.open(tester);
+    await e.click(e.row('Floor'));
+    await e.click(find.byKey(const Key('hierarchy.create')));
+    await e.click(find.byKey(const Key('hierarchy.create.empty')));
+    await e.type('Tile');
+    await e.submit();
+    final tab = e.shell.tabs!.focused!;
+    expect(e.selectedNames, ['Tile']);
+    expect(tab.tree[tab.tree[tab.selection.single]!.parent!]!.name, 'Floor');
   });
 }

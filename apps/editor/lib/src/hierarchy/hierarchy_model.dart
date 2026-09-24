@@ -23,6 +23,7 @@ import '../play/apply_to_scene.dart';
 import '../play/play_document.dart';
 import '../project/editor_project.dart';
 import 'hierarchy_tree.dart';
+import 'presets.dart';
 import 'transform_math.dart';
 
 /// Where a drag lands: as a child of [parent] (null = a root) at [index].
@@ -597,6 +598,46 @@ final class HierarchyModel extends ChangeNotifier {
       components.add(componentSpec(type, data: data));
       name = type.split('.').last;
     }
+    return _create(name, components, under);
+  }
+
+  /// Unity's GameObject → 3D Object / Light / Camera (ADR-0023): the
+  /// object [preset] describes, created like [createWith]. A 3D Object
+  /// first makes sure the project has the built-in shapes
+  /// (`installPrimitives`, a step on the Project's own history when it
+  /// writes them).
+  bool createPreset(GameObjectPreset preset, {String? parent, bool underSelection = true}) {
+    final t = _tab;
+    if (t == null || !canEdit) return false;
+    final under = parent ?? (underSelection && t.selection.length == 1 ? t.selection.first : null);
+    if (preset.usesPrimitives) {
+      try {
+        project.installPrimitives();
+      } on AuthoringException catch (e) {
+        t.lastError = 'Cannot add the built-in shapes: ${e.diagnostics.isEmpty ? e : e.diagnostics.first.message}';
+        notifyListeners();
+        return false;
+      }
+    }
+    final transformData = {
+      ...project.componentDefaults('fynkel.Transform') ?? Trs.identity.toData(),
+      ...preset.transform,
+    };
+    final components = <Map<String, Object?>>[componentSpec('fynkel.Transform', data: transformData)];
+    for (final (type, overrides) in preset.components) {
+      final data = project.componentDefaults(type);
+      if (data == null) {
+        t.lastError = 'No defaults for $type — it is not an authorable native component.';
+        notifyListeners();
+        return false;
+      }
+      components.add(componentSpec(type, data: {...data, ...overrides}));
+    }
+    return _create(preset.label, components, under);
+  }
+
+  bool _create(String name, List<Map<String, Object?>> components, String? under) {
+    final t = _tab!;
     final underNode = under == null ? null : t.tree[under];
     if (underNode != null && underNode.isDerived) return _createDerived(underNode, name, components);
     final a = _run([Command.createObject(name: name, parent: under, components: components)]);

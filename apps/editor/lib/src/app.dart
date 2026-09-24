@@ -19,6 +19,7 @@ import 'documents/document_tabs.dart';
 import 'documents/open_document.dart';
 import 'env/tools.dart';
 import 'hierarchy/hierarchy_model.dart';
+import 'hierarchy/presets.dart';
 import 'hierarchy/hierarchy_panel.dart';
 import 'inspector/codegen_check.dart';
 import 'l10n/strings.dart';
@@ -825,7 +826,7 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.createEmpty',
-        menu: EditorMenu.edit,
+        menu: EditorMenu.gameObject,
         // Unity's GameObject → Create Empty: at the root.
         shortcut: k(LogicalKeyboardKey.keyN, shift: true),
         group: 1,
@@ -835,7 +836,7 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.createEmptyChild',
-        menu: EditorMenu.edit,
+        menu: EditorMenu.gameObject,
         // Unity's ⌥⇧N: under the selected object (no ⌘, so never while typing).
         key: const SingleActivator(LogicalKeyboardKey.keyN, shift: true, alt: true, includeRepeats: false),
         group: 1,
@@ -845,13 +846,29 @@ class EditorShellState extends State<EditorShell> {
       ),
       EditorCommand(
         id: 'hierarchy.createWith',
-        menu: EditorMenu.edit,
+        menu: EditorMenu.gameObject,
         shortcut: k(LogicalKeyboardKey.keyN, shift: true, alt: true),
         group: 1,
         order: 4,
         enabled: () => _canEdit,
         run: createWithDialog,
       ),
+      // Unity's GameObject → 3D Object / Light / Camera (ADR-0023): at the
+      // root, as the menu bar has no row to put them under.
+      for (final p in GameObjectPreset.values)
+        EditorCommand(
+          id: p.commandId,
+          menu: EditorMenu.gameObject,
+          submenu: switch (p.group) {
+            PresetGroup.object3d => EditorStrings.menu3dObject,
+            PresetGroup.light => EditorStrings.menuLight,
+            PresetGroup.camera => null,
+          },
+          group: 2 + p.group.index,
+          order: p.index,
+          enabled: () => _canEdit,
+          run: () => hierarchy?.createPreset(p, underSelection: false),
+        ),
       EditorCommand(
         id: 'hierarchy.keepWorldTransform',
         labelBuilder: () =>

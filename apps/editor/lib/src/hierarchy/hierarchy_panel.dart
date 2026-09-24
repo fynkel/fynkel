@@ -10,14 +10,17 @@ import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../commands/commands.dart';
+import '../l10n/strings.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../play/play_document.dart' show PlayDocument;
+import '../theme/cascading_menu.dart';
 import '../theme/icons.dart';
 import '../theme/lock_button.dart';
 import '../theme/panel_focus.dart';
 import '../theme/tokens.dart';
 import 'hierarchy_model.dart';
 import 'hierarchy_tree.dart';
+import 'presets.dart';
 
 /// One tree row, from the density preference (item 9a) — the scroll math,
 /// the list's `itemExtent` and the row itself all measure with this.
@@ -420,28 +423,26 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             unlockTip: 'Unlock: follow the focused tab again',
             onChanged: model.hasDocument ? model.setLocked : null,
           ),
-          PopupMenuButton<String>(
-            popUpAnimationStyle: AnimationStyle.noAnimation,
-            key: const Key('hierarchy.create'),
-            tooltip: 'Create an entity (under the selection when one is selected)',
-            icon: const Icon(FIcons.add),
-            enabled: model.canEdit,
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                key: Key('hierarchy.create.empty'),
-                value: '',
-                child: ListTile(dense: true, leading: Icon(FIcons.addBoxOutlined), title: Text('Create Empty')),
-              ),
-              const PopupMenuDivider(),
-              for (final c in model.nativeComponentTypes)
-                if (c.type != 'fynkel.Transform')
-                  PopupMenuItem(
-                    key: Key('hierarchy.create.${c.type}'),
-                    value: c.type,
-                    child: Text('Create with ${c.type}'),
-                  ),
-            ],
-            onSelected: (v) => v.isEmpty ? model.createEmpty() : model.createWith(v),
+          Builder(
+            builder: (context) => IconButton(
+              key: const Key('hierarchy.create'),
+              tooltip: 'Create an entity (under the selection when one is selected)',
+              icon: const Icon(FIcons.add),
+              onPressed: model.canEdit
+                  ? () {
+                      final box = context.findRenderObject()! as RenderBox;
+                      showCascadingMenu(context, box.localToGlobal(box.size.bottomLeft(Offset.zero)), [
+                        MenuAction(
+                          'Create Empty',
+                          key: const Key('hierarchy.create.empty'),
+                          onSelected: () => model.createEmpty(),
+                        ),
+                        const MenuSeparator(),
+                        ..._createLines('hierarchy.create', enabled: true, underSelection: true),
+                      ]);
+                    }
+                  : null,
+            ),
           ),
           PopupMenuButton<String>(
             popUpAnimationStyle: AnimationStyle.noAnimation,
@@ -591,49 +592,51 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     if (tab == null) return;
     _listFocus.requestFocus();
     model.clearSelection();
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    final choice = await showMenu<String>(
-      popUpAnimationStyle: AnimationStyle.noAnimation,
-      context: context,
-      position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
-      items: [
-        PopupMenuItem(
-          key: const Key('hierarchy.empty.paste'),
-          value: 'paste',
-          enabled: model.canPaste,
-          child: const Text('Paste  ⌘V'),
-        ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          key: const Key('hierarchy.empty.createEmpty'),
-          value: 'createEmpty',
-          enabled: model.canEdit,
-          child: const Text('Create Empty  ⇧⌘N'),
-        ),
-        for (final c in model.nativeComponentTypes)
-          if (c.type != 'fynkel.Transform')
-            PopupMenuItem(value: 'createWith:${c.type}', enabled: model.canEdit, child: Text('Create with ${c.type}')),
-        const PopupMenuDivider(),
-        const PopupMenuItem(value: 'expandAll', child: Text('Expand All')),
-        const PopupMenuItem(value: 'collapseAll', child: Text('Collapse All')),
-      ],
+    await showCascadingMenu(context, at, [
+      MenuAction(
+        'Paste  ⌘V',
+        key: const Key('hierarchy.empty.paste'),
+        enabled: model.canPaste,
+        onSelected: () => model.paste(),
+      ),
+      const MenuSeparator(),
+      MenuAction(
+        'Create Empty  ⇧⌘N',
+        key: const Key('hierarchy.empty.createEmpty'),
+        enabled: model.canEdit,
+        onSelected: () => model.createEmpty(underSelection: false),
+      ),
+      ..._createLines('hierarchy.empty', enabled: model.canEdit, underSelection: false),
+      const MenuSeparator(),
+      MenuAction('Expand All', onSelected: model.expandAll),
+      MenuAction('Collapse All', onSelected: model.collapseAll),
+    ]);
+  }
+
+  /// Unity's 3D Object ▸ / Light ▸ / Camera and the component picker —
+  /// the + menu's and both context menus' create items (ADR-0023).
+  List<MenuLine> _createLines(String keyPrefix, {required bool enabled, required bool underSelection}) {
+    MenuAction preset(GameObjectPreset p) => MenuAction(
+      p.label,
+      key: Key('$keyPrefix.${p.name}'),
+      enabled: enabled,
+      onSelected: () => model.createPreset(p, underSelection: underSelection),
     );
-    switch (choice) {
-      case 'paste':
-        model.paste();
-      case 'createEmpty':
-        model.createEmpty(underSelection: false);
-      case 'expandAll':
-        model.expandAll();
-      case 'collapseAll':
-        model.collapseAll();
-      case null:
-        break;
-      default:
-        if (choice.startsWith('createWith:')) {
-          model.createWith(choice.substring('createWith:'.length), underSelection: false);
-        }
-    }
+    return [
+      MenuSubmenu(EditorStrings.menu3dObject, key: Key('$keyPrefix.3dObject'), [
+        for (final p in GameObjectPreset.of(PresetGroup.object3d)) preset(p),
+      ]),
+      MenuSubmenu(EditorStrings.menuLight, key: Key('$keyPrefix.light'), [
+        for (final p in GameObjectPreset.of(PresetGroup.light)) preset(p),
+      ]),
+      for (final p in GameObjectPreset.of(PresetGroup.camera)) preset(p),
+      MenuAction(
+        'Create with Component…',
+        key: Key('$keyPrefix.createWith'),
+        enabled: enabled && widget.commands?.byId('hierarchy.createWith') != null,
+        onSelected: () => widget.commands?.execute('hierarchy.createWith'),
+      ),
+    ];
   }
 
   Future<void> _contextMenu(BuildContext context, String id, Offset at) async {
@@ -654,118 +657,75 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
       ])
         ?widget.commands?.byId(cid),
     ];
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    final choice = await showMenu<String>(
-      popUpAnimationStyle: AnimationStyle.noAnimation,
-      context: context,
-      position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
-      items: [
-        PopupMenuItem(value: 'cut', enabled: model.canEdit && !anyDerived, child: const Text('Cut  ⌘X')),
-        PopupMenuItem(value: 'copy', enabled: !anyDerived, child: const Text('Copy  ⌘C')),
-        PopupMenuItem(value: 'paste', enabled: model.canPaste, child: const Text('Paste  ⌘V')),
-        PopupMenuItem(
-          value: 'pasteAsChild',
-          enabled: model.canPaste && !many,
-          child: const Text('Paste As Child  ⇧⌘V'),
-        ),
-        const PopupMenuDivider(),
-        PopupMenuItem(value: 'rename', enabled: model.canRename(id) && !many, child: const Text('Rename  ↩')),
-        PopupMenuItem(
-          value: 'duplicate',
-          enabled: model.canEdit && !anyDerived,
-          child: Text(many ? 'Duplicate Selection  ⌘D' : 'Duplicate  ⌘D'),
-        ),
-        PopupMenuItem(
-          value: 'delete',
-          enabled: model.canEdit,
-          child: Text(
-            many
-                ? 'Delete Selection  ⌫'
-                : derived
-                ? (n.added ? 'Delete  ⌫  (reverts the override that added it)' : 'Delete  ⌫  (as an override)')
-                : 'Delete  ⌫',
+    await showCascadingMenu(context, at, [
+      MenuAction('Cut  ⌘X', enabled: model.canEdit && !anyDerived, onSelected: model.cut),
+      MenuAction('Copy  ⌘C', enabled: !anyDerived, onSelected: model.copy),
+      MenuAction('Paste  ⌘V', enabled: model.canPaste, onSelected: () => model.paste()),
+      MenuAction('Paste As Child  ⇧⌘V', enabled: model.canPaste && !many, onSelected: () => model.paste(asChild: true)),
+      const MenuSeparator(),
+      MenuAction('Rename  ↩', enabled: model.canRename(id) && !many, onSelected: () => model.beginRename(id)),
+      MenuAction(
+        many ? 'Duplicate Selection  ⌘D' : 'Duplicate  ⌘D',
+        enabled: model.canEdit && !anyDerived,
+        onSelected: model.duplicate,
+      ),
+      MenuAction(
+        many
+            ? 'Delete Selection  ⌫'
+            : derived
+            ? (n.added ? 'Delete  ⌫  (reverts the override that added it)' : 'Delete  ⌫  (as an override)')
+            : 'Delete  ⌫',
+        enabled: model.canEdit,
+        onSelected: model.delete,
+      ),
+      const MenuSeparator(),
+      MenuAction(
+        derived ? 'Create Empty Child  (as an override)' : 'Create Empty Child',
+        enabled: model.canEdit && !many,
+        onSelected: () => model.createEmpty(parent: id),
+      ),
+      // The row is the selection, so a created object goes under it.
+      ..._createLines('hierarchy.menu', enabled: model.canEdit && !many, underSelection: true),
+      const MenuSeparator(),
+      MenuAction(
+        'Move to Root',
+        enabled: model.canEdit && !anyDerived && tab.selection.any((s) => tab.tree[s]?.parent != null),
+        onSelected: model.moveToRoot,
+      ),
+      MenuAction(
+        tab.tree.expanded.contains(id) ? 'Collapse' : 'Expand',
+        enabled: n.children.isNotEmpty || n.isPrefabInstance,
+        onSelected: () => model.toggle(id),
+      ),
+      if ((n.isPrefabInstance || derived) && prefabCommands.isNotEmpty) ...[
+        const MenuSeparator(),
+        for (final c in prefabCommands)
+          MenuAction(
+            '${c.label}${c.shortcut == null ? '' : '  ${CommandRegistry.shortcutLabel(c.shortcut!)}'}',
+            key: Key('hierarchy.menu.${c.id}'),
+            enabled: c.isEnabled,
+            onSelected: () => widget.commands?.execute(c.id),
           ),
-        ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          value: 'createEmpty',
-          enabled: model.canEdit && !many,
-          child: Text(derived ? 'Create Empty Child  (as an override)' : 'Create Empty Child'),
-        ),
-        for (final c in model.nativeComponentTypes)
-          if (c.type != 'fynkel.Transform')
-            PopupMenuItem(
-              value: 'createWith:${c.type}',
-              enabled: model.canEdit && !many,
-              child: Text('Create Child with ${c.type}'),
-            ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          value: 'moveToRoot',
-          enabled: model.canEdit && !anyDerived && tab.selection.any((s) => tab.tree[s]?.parent != null),
-          child: const Text('Move to Root'),
-        ),
-        PopupMenuItem(
-          value: 'toggle',
-          enabled: n.children.isNotEmpty || n.isPrefabInstance,
-          child: Text(tab.tree.expanded.contains(id) ? 'Collapse' : 'Expand'),
-        ),
-        if ((n.isPrefabInstance || derived) && prefabCommands.isNotEmpty) ...[
-          const PopupMenuDivider(),
-          for (final c in prefabCommands)
-            PopupMenuItem(
-              key: Key('hierarchy.menu.${c.id}'),
-              value: 'command:${c.id}',
-              enabled: c.isEnabled,
-              child: Text('${c.label}${c.shortcut == null ? '' : '  ${CommandRegistry.shortcutLabel(c.shortcut!)}'}'),
-            ),
-        ],
-        if (model.showsPlay) ...[
-          const PopupMenuDivider(),
-          PopupMenuItem(
-            key: const Key('hierarchy.menu.applyToScene'),
-            value: 'applyToScene',
-            child: Text(many ? 'Apply Selection to Scene' : 'Apply to Scene'),
-          ),
-        ],
-        const PopupMenuDivider(),
-        PopupMenuItem(value: 'copyId', child: Text('Copy id  ${id.length > 13 ? '${id.substring(0, 13)}…' : id}')),
-        if (n.isPrefabInstance) PopupMenuItem(value: 'copyPrefab', child: Text('Copy prefab asset id')),
       ],
-    );
-    switch (choice) {
-      case 'cut':
-        model.cut();
-      case 'copy':
-        model.copy();
-      case 'paste':
-        model.paste();
-      case 'pasteAsChild':
-        model.paste(asChild: true);
-      case 'rename':
-        model.beginRename(id);
-      case 'duplicate':
-        model.duplicate();
-      case 'delete':
-        model.delete();
-      case 'createEmpty':
-        model.createEmpty(parent: id);
-      case 'moveToRoot':
-        model.moveToRoot();
-      case 'applyToScene':
-        model.applyToScene();
-      case 'toggle':
-        model.toggle(id);
-      case 'copyId':
-        await Clipboard.setData(ClipboardData(text: id));
-      case 'copyPrefab':
-        await Clipboard.setData(ClipboardData(text: n.prefabAsset ?? ''));
-      case null:
-        break;
-      default:
-        if (choice.startsWith('createWith:')) model.createWith(choice.substring('createWith:'.length), parent: id);
-        if (choice.startsWith('command:')) widget.commands?.execute(choice.substring('command:'.length));
-    }
+      if (model.showsPlay) ...[
+        const MenuSeparator(),
+        MenuAction(
+          many ? 'Apply Selection to Scene' : 'Apply to Scene',
+          key: const Key('hierarchy.menu.applyToScene'),
+          onSelected: model.applyToScene,
+        ),
+      ],
+      const MenuSeparator(),
+      MenuAction(
+        'Copy id  ${id.length > 13 ? '${id.substring(0, 13)}…' : id}',
+        onSelected: () => Clipboard.setData(ClipboardData(text: id)),
+      ),
+      if (n.isPrefabInstance)
+        MenuAction(
+          'Copy prefab asset id',
+          onSelected: () => Clipboard.setData(ClipboardData(text: n.prefabAsset ?? '')),
+        ),
+    ]);
   }
 }
 
@@ -847,6 +807,9 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
   void initState() {
     super.initState();
     _renameFocus.addListener(_onRenameFocus);
+    // A row made renaming (a new child under an expanded parent): take the
+    // focus after the menu that made it has put its own back.
+    if (widget.renaming) WidgetsBinding.instance.addPostFrameCallback((_) => _renameFocus.requestFocus());
   }
 
   @override
