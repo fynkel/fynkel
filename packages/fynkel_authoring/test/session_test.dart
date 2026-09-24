@@ -267,6 +267,14 @@ void main() {
     File(copyPath).deleteSync();
     expect(session.rescan([copyPath]).assetCount, 18, reason: 'the deleted copy left the database');
 
+    // A file dropped in without a sidecar gets one on the rescan.
+    final dropped = '${dir.path}/assets/textures/dropped.png';
+    File('${dir.path}/assets/textures/swatch.png').copySync(dropped);
+    final scan = session.rescan([dropped]);
+    expect(scan.sidecarsWritten, ['$dropped.meta.json']);
+    expect(scan.assetCount, 19);
+    expect(scan.diagnostics.map((d) => d.code), isNot(contains('FYN-A0001')));
+
     // Events: one per change, in order, synchronously.
     final changes = events.whereType<DocumentChanged>().toList();
     expect(changes.where((c) => c.kind == DocumentChangeKind.applied), hasLength(transactions));
@@ -275,7 +283,7 @@ void main() {
     expect(changes.where((c) => c.kind == DocumentChangeKind.saved), hasLength(3));
     expect(changes.where((c) => c.kind == DocumentChangeKind.reloaded), hasLength(1));
     expect(changes.first.applied!.affectedIds, contains(lamp));
-    expect(events.whereType<AssetsChanged>(), hasLength(2));
+    expect(events.whereType<AssetsChanged>(), hasLength(3));
 
     // Close: the handle is dead, the session goes on.
     main.close();

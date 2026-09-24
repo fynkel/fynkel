@@ -77,6 +77,9 @@ pub struct OpenProject {
     /// the asset scan and the project's checks against the database (the
     /// last two replaced on every rescan).
     pub diagnostics: Vec<Diagnostic>,
+    /// The sidecars the last [`OpenProject::rescan`] wrote for source
+    /// files that had none (absolute paths).
+    pub sidecars_written: Vec<PathBuf>,
     /// The part of `diagnostics` a rescan keeps.
     base_diagnostics: Vec<Diagnostic>,
     /// The asset scan's diagnostics, one set per file: an incremental
@@ -137,6 +140,7 @@ impl OpenProject {
             metadata: None,
             schema_sources: HashMap::new(),
             diagnostics: Vec::new(),
+            sidecars_written: Vec::new(),
             base_diagnostics: diagnostics,
             scan_diagnostics: Vec::new(),
         };
@@ -252,7 +256,54 @@ impl OpenProject {
     /// scanned; [`OpenProject::diagnostics`] is rebuilt from the kept
     /// base, the per-file scan diagnostics and the project's checks
     /// against the database.
+    ///
+    /// A source file found without a sidecar (dropped into `assets/` from
+    /// Finder, say) gets a fresh one — a new id, the importer from its
+    /// extension — and is read again, as Unity writes a `.meta`: no
+    /// `FYN-A0001` for the editor's user to act on. Not in a read-only
+    /// project. The sidecars written are in
+    /// [`OpenProject::sidecars_written`].
     pub fn rescan(&mut self, paths: &[PathBuf]) -> Vec<Diagnostic> {
+        let mut scan = self.rescan_files(paths);
+        self.sidecars_written.clear();
+        if self.read_only.is_some() {
+            return scan;
+        }
+        let mut written = Vec::new();
+        for d in &scan {
+            if d.code != Code::ASSET_MISSING_SIDECAR {
+                continue;
+            }
+            let Some(source) = d.document.as_deref().map(PathBuf::from) else {
+                continue;
+            };
+            let sidecar = sidecar_path(&source);
+            // Never over a sidecar that appeared meanwhile.
+            if !source.is_file() || sidecar.exists() {
+                continue;
+            }
+            let meta = fynkel_document::asset::Meta::new(&source);
+            if let Ok(text) = meta.to_document().write() {
+                if std::fs::write(&sidecar, text).is_ok() {
+                    written.push(sidecar);
+                }
+            }
+        }
+        if !written.is_empty() {
+            scan.retain(|d| {
+                d.code != Code::ASSET_MISSING_SIDECAR
+                    || !d
+                        .document
+                        .as_deref()
+                        .is_some_and(|doc| written.contains(&sidecar_path(Path::new(doc))))
+            });
+            scan.extend(self.rescan_files(&written));
+            self.sidecars_written = written;
+        }
+        scan
+    }
+
+    fn rescan_files(&mut self, paths: &[PathBuf]) -> Vec<Diagnostic> {
         let assets_dir = self.assets_dir();
         let scan = if paths.is_empty() {
             let (assets, scan) = AssetDatabase::scan(&assets_dir, &self.schemas);

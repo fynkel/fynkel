@@ -504,6 +504,7 @@ final class RescanReport {
   RescanReport.fromJson(this.json)
       : assetCount = (json['assetCount'] as num?)?.toInt() ?? 0,
         scanned = _strings(json['scanned']),
+        sidecarsWritten = _strings(json['sidecarsWritten']),
         diagnostics = Diagnostic.listOf(json['diagnostics']),
         previews = PreviewSyncReport.listOf(json['previews']);
 
@@ -512,6 +513,10 @@ final class RescanReport {
 
   /// The paths whose reference index entries were refreshed.
   final List<String> scanned;
+
+  /// The sidecars the rescan wrote for source files that had none (a
+  /// file dropped into `assets/` from Finder), absolute paths.
+  final List<String> sidecarsWritten;
   final List<Diagnostic> diagnostics;
 
   /// The edit-preview worlds re-described over the rescanned database (a

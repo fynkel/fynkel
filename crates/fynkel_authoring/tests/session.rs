@@ -710,6 +710,83 @@ fn rescan_reads_new_documents_and_drops_removed_ones() {
     let _: Handle = 0;
 }
 
+#[test]
+fn a_source_without_a_sidecar_gets_one_on_the_next_scan() {
+    let copy = Copy::new("sidecars");
+    // One file there before the project opens, as a checkout or an
+    // unzip leaves it.
+    let early = copy.path("assets/textures/early.png");
+    std::fs::copy(copy.path("assets/textures/swatch.png"), &early).unwrap();
+    let mut s = open(&copy);
+    let p = s.project().unwrap();
+    let early_sidecar = copy.path("assets/textures/early.png.meta.json");
+    assert_eq!(p.sidecars_written, vec![early_sidecar.clone()]);
+    assert!(p.assets.by_path("textures/early.png").is_some());
+    assert!(!code_of(&p.diagnostics).contains(&"FYN-A0001"));
+    let before = p.assets.len();
+
+    // Dropped in from Finder: a texture, and a folder with a sound and a
+    // file no importer knows. The watcher names the file and the folder.
+    let png = copy.path("assets/textures/dropped.png");
+    std::fs::copy(copy.path("assets/textures/swatch.png"), &png).unwrap();
+    let folder = copy.path("assets/drop");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("notes.txt"), "hello").unwrap();
+    let scan = s.rescan(&[png.clone(), folder.clone()]).unwrap();
+    assert!(!scan.iter().any(|d| d.is_error()), "{scan:?}");
+    let p = s.project().unwrap();
+    let mut written = p.sidecars_written.clone();
+    written.sort();
+    assert_eq!(
+        written,
+        vec![
+            folder.join("notes.txt.meta.json"),
+            copy.path("assets/textures/dropped.png.meta.json"),
+        ]
+    );
+    assert_eq!(p.assets.len(), before + 2);
+    let meta = |rel: &str| {
+        fynkel_document::asset::Meta::from_document(
+            fynkel_document::Document::read(&copy.path(rel), None).unwrap(),
+        )
+    };
+    assert_eq!(
+        meta("assets/textures/dropped.png.meta.json").importer,
+        "fynkel.image"
+    );
+    assert_eq!(
+        meta("assets/drop/notes.txt.meta.json").importer,
+        "fynkel.file"
+    );
+    let dropped = p.assets.by_path("textures/dropped.png").unwrap();
+    assert_eq!(
+        dropped.id,
+        meta("assets/textures/dropped.png.meta.json").id()
+    );
+    assert_ne!(
+        dropped.id,
+        p.assets.by_path("textures/early.png").unwrap().id
+    );
+
+    // A second scan writes nothing; an existing sidecar is never replaced.
+    s.rescan(std::slice::from_ref(&png)).unwrap();
+    assert!(s.project().unwrap().sidecars_written.is_empty());
+
+    // A read-only project (a newer build's lock) is not written to.
+    let lock = copy
+        .read("fynkel.lock.json")
+        .replace("\"version\": \"0.0.1\"", "\"version\": \"9.1.0\"");
+    std::fs::write(copy.path("fynkel.lock.json"), lock).unwrap();
+    let late = copy.path("assets/textures/late.png");
+    std::fs::copy(copy.path("assets/textures/swatch.png"), &late).unwrap();
+    s.open_project(&copy.dir).unwrap();
+    let p = s.project().unwrap();
+    assert!(p.read_only.is_some());
+    assert!(p.sidecars_written.is_empty());
+    assert!(!copy.path("assets/textures/late.png.meta.json").exists());
+    assert!(code_of(&p.diagnostics).contains(&"FYN-A0001"));
+}
+
 const MAIN_SCENE: &str = "assets/scenes/main.scene.json";
 
 #[test]
