@@ -16,6 +16,7 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../commands/commands.dart' show KeyboardOwner;
 import '../theme/icons.dart';
+import '../theme/panel_focus.dart';
 import '../theme/tokens.dart';
 import 'editor_game.dart';
 import 'game_preview.dart';
@@ -125,6 +126,7 @@ class GamePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final run = this.run;
     if (run == null) return _between(context, playsHere: false);
+    PanelFocus.primary(context, run.focusNode);
     return ListenableBuilder(
       listenable: run,
       builder: (context, _) {

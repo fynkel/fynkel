@@ -36,9 +36,10 @@ void main() {
     final shell = await openShell(tester);
     final registry = shell.registry;
     final commands = registry.all.where((c) => !c.generated).toList();
-    expect(commands.length, 101); // 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run
+    expect(commands.length, 108); // 9c: the Asset panel went into the Inspector; 9e: four Window ▸ New <Panel>; 9g: the Transform tool; 9h: Show Gizmos in Play; ADR-0021: Pause, Step, the Game view, Restart to Apply; P6: Build and Run; item 9: seven Go to <Panel>
     for (final c in commands) {
-      expect(c.shortcut, isNotNull, reason: '${c.id} has no shortcut');
+      // A ⌘ shortcut, or Unity's bare key alone (the tools' Q W E R Y, the projection's 5).
+      expect(c.shortcut ?? c.key, isNotNull, reason: '${c.id} has no shortcut');
       expect(c.id, matches(RegExp(r'^[a-z]+(\.[a-zA-Z]+)+$')), reason: '${c.id} is not a dotted id');
       expect(find.byKey(Key('menuitem.${c.id}'), skipOffstage: false), findsNothing); // menus closed
     }

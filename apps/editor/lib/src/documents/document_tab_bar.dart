@@ -224,6 +224,7 @@ class _TabState extends State<_Tab> {
             onEnter: (_) => setState(() => _hover = true),
             onExit: (_) => setState(() => _hover = false),
             child: GestureDetector(
+              excludeFromSemantics: true,
               onSecondaryTapUp: (d) => widget.onMenu(d.globalPosition),
               child: Tooltip(
                 message: tooltip,

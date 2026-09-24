@@ -539,6 +539,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
 
   @override
   Widget build(BuildContext context) {
+    PanelFocus.primary(context, _listFocus);
     // A browser squeezed narrower than its toolbar, tree and columns (a
     // copy beside another, item 9e; a dragged divider) keeps its layout and
     // is cut at the right edge instead of crushing its rows.

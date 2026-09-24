@@ -157,6 +157,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
 
   @override
   Widget build(BuildContext context) {
+    PanelFocus.primary(context, _listFocus);
     final theme = Theme.of(context);
     final t = context.tokens;
     final tab = model.tab;
@@ -253,6 +254,8 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
                   focusNode: _listFocus,
                   onKeyEvent: _onKey,
                   child: GestureDetector(
+                    // The empty space's click is the mouse's; the rows are the screen reader's.
+                    excludeFromSemantics: true,
                     behavior: HitTestBehavior.translucent,
                     onTap: () {
                       _listFocus.requestFocus();
@@ -853,13 +856,17 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
           SizedBox(
             width: 16,
             child: row.hasChildren
-                ? InkWell(
-                    key: Key('hierarchy.expander.${n.id}'),
-                    onTap: widget.onToggle,
-                    child: Icon(
-                      row.expanded ? FIcons.expandMore : FIcons.chevronRight,
-                      size: 14,
-                      color: widget.selected ? onRowDim : t.textSecondary,
+                ? Semantics(
+                    button: true,
+                    label: row.expanded ? 'Collapse' : 'Expand',
+                    child: InkWell(
+                      key: Key('hierarchy.expander.${n.id}'),
+                      onTap: widget.onToggle,
+                      child: Icon(
+                        row.expanded ? FIcons.expandMore : FIcons.chevronRight,
+                        size: 14,
+                        color: widget.selected ? onRowDim : t.textSecondary,
+                      ),
                     ),
                   )
                 : null,
@@ -964,11 +971,17 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
       ),
     );
 
-    final interactive = GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: widget.onTap,
-      onSecondaryTapUp: (d) => widget.onSecondaryTap(d.globalPosition),
-      child: content,
+    // A screen reader hears the row's name, whether it is selected, and
+    // whether its children are showing.
+    final interactive = Semantics(
+      selected: widget.selected,
+      expanded: row.hasChildren ? row.expanded : null,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onTap,
+        onSecondaryTapUp: (d) => widget.onSecondaryTap(d.globalPosition),
+        child: content,
+      ),
     );
 
     if (widget.renaming) return interactive;

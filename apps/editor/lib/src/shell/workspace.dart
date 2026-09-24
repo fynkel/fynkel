@@ -246,6 +246,9 @@ final class Workspace extends ChangeNotifier {
   /// first ([copiesByRecency]).
   final _recent = <String, List<String>>{};
 
+  /// Per panel copy, what moves the keyboard into it ([focusKeyboard]).
+  final _handles = <String, PanelFocusHandle>{};
+
   /// Bumped by [refreshTabs]: the tabs redraw their padlocks.
   final _tabs = ValueNotifier<int>(0);
 
@@ -292,6 +295,7 @@ final class Workspace extends ChangeNotifier {
       leading: (context, status) => _PanelTab(workspace: this, spec: spec, id: id, status: status),
       widget: PanelFocus(
         debugLabel: 'panel.$id',
+        handle: _handles.putIfAbsent(id, PanelFocusHandle.new),
         onChanged: (focused) {
           if (focused) {
             _touch(id);
@@ -465,6 +469,15 @@ final class Workspace extends ChangeNotifier {
     layout.rebuild();
     save();
     notifyListeners();
+  }
+
+  /// Shows the panel and moves the keyboard into it, a frame later when
+  /// its tab has come forward (Window → Go to *Panel*, Unity's ⌘1…).
+  void focusKeyboard(String id) {
+    show(id);
+    final target = PanelIds.number(id) == 1 ? activeCopy(id) ?? id : id;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handles[target]?.focus());
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   DockingItem? _activeItem(String id) {

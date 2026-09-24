@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import '../project_browser/project_browser_model.dart' show formatBytes;
 import '../theme/icons.dart';
+import '../theme/panel_focus.dart';
 import '../theme/tokens.dart';
 import 'profiler_model.dart';
 
@@ -53,6 +54,7 @@ class _ProfilerPanelState extends State<ProfilerPanel> {
 
   @override
   Widget build(BuildContext context) {
+    PanelFocus.primary(context, _focus);
     return ListenableBuilder(
       listenable: model,
       builder: (context, _) {

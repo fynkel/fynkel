@@ -1247,12 +1247,7 @@ class EditorShellState extends State<EditorShell> {
               'The Scene view\'s ${tool.label.toLowerCase()} tool'
               '${tool.key == null ? '' : ' (also ${tool.key!.keyLabel} from any panel)'}',
           menu: EditorMenu.edit,
-          // ⌘1…⌘4, then ⌘6… (⌘5 is the projection); past ⌘9, the key in
-          // the view and the palette only.
-          shortcut: switch (i < 4 ? i + 1 : i + 2) {
-            final n when n <= 9 => k(LogicalKeyboardKey(LogicalKeyboardKey.digit0.keyId + n)),
-            _ => null,
-          },
+          // Unity's bare Q W E R Y only: ⌘1… are Go to <panel>, as in Unity.
           key: tool.key == null ? null : bare(tool.key!),
           group: 2,
           order: i,
@@ -1367,7 +1362,7 @@ class EditorShellState extends State<EditorShell> {
         baseLabel: 'Toggle Perspective / Orthographic',
         labelBuilder: () => scene?.camera?.orthographic ?? false ? 'Perspective' : 'Orthographic',
         menu: EditorMenu.view,
-        shortcut: k(LogicalKeyboardKey.digit5),
+        // Bare 5 only: ⌘5 is Go to Project, as in Unity.
         key: bare(LogicalKeyboardKey.digit5),
         group: 0,
         order: 2,
@@ -1621,6 +1616,29 @@ class EditorShellState extends State<EditorShell> {
           enabled: () => _hasProject,
           run: () => newPanelCopy(id),
         ),
+      // Unity's keys for its windows: ⌘1 Scene, ⌘2 Game, ⌘3 Inspector,
+      // ⌘4 Hierarchy, ⌘5 Project, ⌘7 Profiler, ⇧⌘C Console.
+      for (final (i, (id, shortcut)) in [
+        (PanelRegistry.scene, k(LogicalKeyboardKey.digit1)),
+        (PanelRegistry.game, k(LogicalKeyboardKey.digit2)),
+        (PanelRegistry.inspector, k(LogicalKeyboardKey.digit3)),
+        (PanelRegistry.hierarchy, k(LogicalKeyboardKey.digit4)),
+        (PanelRegistry.project, k(LogicalKeyboardKey.digit5)),
+        (PanelRegistry.profiler, k(LogicalKeyboardKey.digit7)),
+        (PanelRegistry.console, k(LogicalKeyboardKey.keyC, shift: true)),
+      ].indexed)
+        if (_panels.byId(id) != null)
+          EditorCommand(
+            id: 'window.goto.$id',
+            baseLabel: 'Go to ${_panels.byId(id)!.name}',
+            description: 'Shows the ${_panels.byId(id)!.name} and moves the keyboard into it',
+            menu: EditorMenu.window,
+            shortcut: shortcut,
+            group: 5,
+            order: i,
+            enabled: () => _hasProject,
+            run: () => workspace?.focusKeyboard(id),
+          ),
       EditorCommand(
         id: 'console.focusSearch',
         baseLabel: 'Search Console',

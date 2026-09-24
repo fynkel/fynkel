@@ -334,6 +334,7 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
+    PanelFocus.primary(context, _listFocus);
     final game = widget.game;
     final tabs = _tabs;
     if (game == null || tabs == null) return _project(context);

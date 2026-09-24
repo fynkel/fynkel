@@ -75,6 +75,7 @@ class _GameConsoleViewState extends State<GameConsoleView> {
 
   @override
   Widget build(BuildContext context) {
+    PanelFocus.primary(context, _listFocus);
     return ListenableBuilder(
       listenable: model,
       builder: (context, _) {

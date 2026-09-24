@@ -676,6 +676,8 @@ class _ComponentCard extends StatelessWidget {
                       tooltip: '',
                       padding: EdgeInsets.zero,
                       iconSize: 14,
+                      // Its name for a screen reader; no hover tooltip.
+                      icon: Icon(Icons.adaptive.more, semanticLabel: '${spec.title} options'),
                       onSelected: (v) => _menu(context, v),
                       itemBuilder: (_) => [
                         PopupMenuItem(

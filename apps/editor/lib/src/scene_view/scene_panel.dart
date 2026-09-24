@@ -14,6 +14,7 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../inspector/field_widgets.dart' show AssetDragPayload;
 import '../theme/icons.dart';
+import '../theme/panel_focus.dart';
 import 'editor_state.dart';
 import '../theme/tokens.dart';
 import 'orientation_gizmo.dart';
@@ -62,6 +63,7 @@ class _ScenePanelState extends State<ScenePanel> {
 
   @override
   Widget build(BuildContext context) {
+    PanelFocus.primary(context, model.focusNode);
     final theme = Theme.of(context);
     final tab = model.current;
     if (tab == null) {
