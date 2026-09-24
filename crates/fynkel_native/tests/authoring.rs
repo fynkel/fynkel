@@ -603,6 +603,7 @@ fn asset_operations_cross_the_edge_with_their_statuses() {
 
 const MAIN_SCENE: &str = "assets/scenes/main.scene.json";
 const MAIN_ROBOT: &str = "c0000000-0000-4000-8000-0000000000e1";
+const MAIN_SUN: &str = "c0000000-0000-4000-8000-0000000000e3";
 const MAIN_FLOOR: &str = "c0000000-0000-4000-8000-0000000000e4";
 const MAIN_FLOOR_TRANSFORM: &str = "c0000000-0000-4000-8000-0000000000d0";
 
@@ -818,6 +819,44 @@ fn the_edit_preview_world_crosses_the_edge() {
     assert_eq!(
         (&resync["updated"], &resync["spawned"], &resync["steps"]),
         (&json!(0), &json!(0), &json!(0))
+    );
+
+    // The Inspector's live colour: set in the world only (a resync finds
+    // the one difference), and restored so a resync finds none.
+    let red = json!({ "components": [{ "id": MAIN_SUN, "type": "fynkel.DirectionalLight", "data": { "color": [1, 0, 0], "intensity": 10000.0, "cast_shadows": true } }] });
+    assert_eq!(host.preview_call(scene, "setComponents", &red), Status::Ok);
+    assert_eq!(host.result()["count"], 1);
+    assert_eq!(
+        host.query("document", Some(&json!({ "handle": scene }))),
+        Status::Ok
+    );
+    assert_eq!(host.result()["result"]["dirty"], false);
+    assert_eq!(host.preview_call(scene, "resync", &json!({})), Status::Ok);
+    assert_eq!(host.result()["updated"], 1, "the world held the red sun");
+    assert_eq!(host.preview_call(scene, "setComponents", &red), Status::Ok);
+    assert_eq!(
+        host.preview_call(scene, "restoreComponents", &json!({ "ids": [MAIN_SUN] })),
+        Status::Ok
+    );
+    assert_eq!(host.preview_call(scene, "resync", &json!({})), Status::Ok);
+    assert_eq!(host.result()["updated"], 0);
+    // A behaviour is skipped (nothing draws it); bad data is refused.
+    assert_eq!(
+        host.preview_call(
+            scene,
+            "setComponents",
+            &json!({ "components": [{ "id": MAIN_SUN, "type": "game.Spin", "data": {} }] })
+        ),
+        Status::Ok
+    );
+    assert_eq!(host.result()["count"], 0);
+    assert_ne!(
+        host.preview_call(
+            scene,
+            "setComponents",
+            &json!({ "components": [{ "id": MAIN_SUN, "type": "fynkel.DirectionalLight", "data": { "color": "red" } }] })
+        ),
+        Status::Ok
     );
 
     // Recook: the cache rebuilt, every preview reloaded over the new store.

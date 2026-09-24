@@ -757,7 +757,7 @@ pub unsafe extern "C" fn fynkel_authoring_preview_world(
 /// A call on the edit-preview world of `handle`, by kind with JSON
 /// arguments (see `include/fynkel_authoring.h`): `camera`, `hidden`,
 /// `pick`, `pickRect`, `lines`, `worldMatrix`, `setTransforms`,
-/// `restoreTransforms`, `resync`, `reload`, `recook`, `dump`, `stats`.
+/// `restoreTransforms`, `setComponents`, `restoreComponents`, `resync`, `reload`, `recook`, `dump`, `stats`.
 ///
 /// # Safety
 /// `session` live or NULL; `kind_utf8` readable for `kind_len` bytes;
@@ -782,7 +782,7 @@ pub unsafe extern "C" fn fynkel_authoring_preview_call(
     })
 }
 
-const PREVIEW_KINDS: [&str; 13] = [
+const PREVIEW_KINDS: [&str; 15] = [
     "camera",
     "hidden",
     "pick",
@@ -791,6 +791,8 @@ const PREVIEW_KINDS: [&str; 13] = [
     "worldMatrix",
     "setTransforms",
     "restoreTransforms",
+    "setComponents",
+    "restoreComponents",
     "resync",
     "reload",
     "recook",
@@ -946,6 +948,40 @@ fn preview_call(
             let slot = s.slot(handle)?;
             slot.preview
                 .restore_transforms(slot.world.core_mut(), &ids)
+                .map_err(one)?;
+            Ok(json!({ "ok": true, "handle": handle, "count": ids.len() }))
+        }
+        "setComponents" => {
+            let list = args
+                .get("components")
+                .and_then(Value::as_array)
+                .ok_or_else(|| invalid("setComponents: `components` must be an array"))?;
+            let mut components = Vec::with_capacity(list.len());
+            for c in list {
+                let type_id = c.get("type").and_then(Value::as_str).ok_or_else(|| {
+                    invalid("setComponents: `components[].type` must be a string")
+                })?;
+                let data = c.get("data").filter(|d| d.is_object()).ok_or_else(|| {
+                    invalid("setComponents: `components[].data` must be an object")
+                })?;
+                components.push((
+                    uuid_of(c.get("id"), "components[].id")?,
+                    type_id.to_string(),
+                    data.clone(),
+                ));
+            }
+            let slot = s.slot(handle)?;
+            let count = slot
+                .preview
+                .set_components(slot.world.core_mut(), &components)
+                .map_err(one)?;
+            Ok(json!({ "ok": true, "handle": handle, "count": count }))
+        }
+        "restoreComponents" => {
+            let ids = ids_arg(args, "ids")?;
+            let slot = s.slot(handle)?;
+            slot.preview
+                .restore_components(slot.world.core_mut(), &ids)
                 .map_err(one)?;
             Ok(json!({ "ok": true, "handle": handle, "count": ids.len() }))
         }

@@ -790,6 +790,70 @@ impl Preview {
         self.set_transforms(world, &transforms)
     }
 
+    /// The Inspector's live edit of a component (a colour being picked):
+    /// each `(id, type, data)` set on the entity directly (no document
+    /// change) and one step so the picture follows. `Err` names an id the
+    /// preview does not have, or data the type does not decode; a type
+    /// that is not built in (a behaviour) is skipped — nothing draws it.
+    /// The commit's transaction brings the document to the same values.
+    pub fn set_components(
+        &self,
+        world: &mut World,
+        components: &[(Uuid, String, Value)],
+    ) -> Result<usize, Diagnostic> {
+        let mut commands = Vec::with_capacity(components.len());
+        for (id, type_id, data) in components {
+            let Some(&e) = self.ids.get(id) else {
+                return Err(unknown_entity(*id));
+            };
+            let node = fynkel_document::Node::from_serde(data);
+            let value = match fynkel_document::generated::decode_component(type_id, &node) {
+                None => continue,
+                Some(Ok(v)) => v,
+                Some(Err(err)) => {
+                    return Err(Diagnostic::error(
+                        Code::SESSION_INVALID_REQUEST,
+                        format!("{type_id} at {}: {}", err.pointer, err.message),
+                    )
+                    .with_id(id.to_string()))
+                }
+            };
+            commands.push(Command::SetComponent { entity: e, value });
+        }
+        let count = commands.len();
+        if count > 0 {
+            world.submit(Lane::Simulation, commands);
+            world.step();
+            world.drain_events();
+        }
+        Ok(count)
+    }
+
+    /// The components of `ids` back to the document's (a cancelled live
+    /// edit): every described component but the Transform set again.
+    pub fn restore_components(&self, world: &mut World, ids: &[Uuid]) -> Result<(), Diagnostic> {
+        let mut commands = Vec::new();
+        for id in ids {
+            let (Some(d), Some(&e)) = (self.described.get(id), self.ids.get(id)) else {
+                return Err(unknown_entity(*id));
+            };
+            for c in &d.components {
+                if !matches!(c, ComponentValue::Transform(_)) {
+                    commands.push(Command::SetComponent {
+                        entity: e,
+                        value: c.clone(),
+                    });
+                }
+            }
+        }
+        if !commands.is_empty() {
+            world.submit(Lane::Simulation, commands);
+            world.step();
+            world.drain_events();
+        }
+        Ok(())
+    }
+
     /// The editor's hidden flag: exactly `ids` (the caller passes the
     /// document subtrees; the entities of the prefab instances among
     /// them come along) left out of the picture, and out of picking.
