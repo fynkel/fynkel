@@ -125,6 +125,13 @@ void main() {
     final outline = live.lines(outline: [robot]);
     expect(outline.count, preview.lines(outline: [robot]).count);
     expect(live.lines(iconsAspect: 1.5).count, greaterThan(0), reason: "the sun's arrows at least");
+    // Without boxes the meshes are the renderer's to ring.
+    expect(live.lines(outline: [robot], outlineBoxes: false).count, 0);
+    // The renderer's handles: the robot's, and nothing for an id not alive.
+    final handles = live.handles([robot, 'runtime:1']);
+    expect(handles, hasLength(1));
+    expect(handles.single, isNot(0));
+    expect(live.handles([robot, robot]), handles, reason: 'each once');
     expect(live.pickRect(const PreviewCamera(world: _lookingDown), 1, [-1, -1], [1, 1]), contains(robot));
   });
 }

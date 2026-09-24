@@ -645,6 +645,19 @@ void main() {
     expect(outline.data.length, 120);
     final icons = preview.lines(iconsAspect: 16 / 9);
     expect(icons.count, greaterThan(12), reason: 'the camera frustum and the sun arrows');
+    // Without boxes the robot is left to the renderer's outline: only the
+    // sun, which draws no mesh, keeps its cross.
+    expect(preview.lines(outline: [robot, sun], outlineBoxes: false).count, 3);
+    expect(preview.lines(outline: [robot], outlineBoxes: false).count, 0);
+    // The renderer's handles for the outline: one per id the world has,
+    // none for a hidden one.
+    final handles = preview.entities([robot, sun, 'c0000000-0000-4000-8000-0000000000ff']);
+    expect(handles, hasLength(2));
+    expect(handles.toSet(), hasLength(2));
+    expect(handles, everyElement(isNot(0)));
+    expect(preview.setHidden([robot]), 1);
+    expect(preview.entities([robot, sun]), [handles[1]]);
+    expect(preview.setHidden([]), 0);
 
     // A transaction keeps the world in step, incrementally, and says so on
     // the record and as an event; the world dumps like a fresh load.

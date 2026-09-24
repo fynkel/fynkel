@@ -212,12 +212,27 @@ final class LiveWorld {
 
   /// The selection outline of [outline] (an id no longer alive draws
   /// nothing) and, with [iconsAspect], every light's, camera's and
-  /// selected collider's icon.
-  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect}) =>
+  /// selected collider's icon. With [outlineBoxes] false only the crosses
+  /// of entities without a mesh are drawn (the renderer rings the rest —
+  /// [handles]).
+  PreviewLines lines({
+    Iterable<String> outline = const [],
+    List<double>? outlineColor,
+    bool outlineBoxes = true,
+    double? iconsAspect,
+  }) =>
       PreviewLines.fromJson(call('lines', {
-        if (outline.isNotEmpty) 'outline': {'ids': outline.toList(), 'color': ?outlineColor},
+        if (outline.isNotEmpty)
+          'outline': {'ids': outline.toList(), 'color': ?outlineColor, if (!outlineBoxes) 'boxes': false},
         if (iconsAspect != null) 'icons': {'aspect': iconsAspect},
       }));
+
+  /// The renderer's handles (`Entity::to_bits`) of the [ids] still alive
+  /// and not hidden in the editor, each once — what
+  /// `ViewportOverlay.outline` takes. (Named `handles` because [entities]
+  /// is the world's entity table.)
+  List<int> handles(Iterable<String> ids) =>
+      [for (final e in call('handles', {'ids': ids.toList()})['entities'] as List? ?? const []) (e as num).toInt()];
 
   /// The world matrices (16 floats, column-major) of the [ids] still
   /// alive.

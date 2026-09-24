@@ -79,12 +79,28 @@ final class ScenePreview {
   /// The selection outline of [outline] (each id's bounds as twelve edges,
   /// a cross for an entity without a mesh, in [outlineColor] `[r, g, b, a]`
   /// — orange by default) and, with [iconsAspect], the icons of every
-  /// light, camera and collider for a viewport of that aspect.
-  PreviewLines lines({Iterable<String> outline = const [], List<double>? outlineColor, double? iconsAspect}) =>
+  /// light, camera and collider for a viewport of that aspect. With
+  /// [outlineBoxes] false only the crosses are drawn — the meshes are
+  /// ringed by the renderer's selection outline instead ([entities],
+  /// `ViewportOverlay.outline`).
+  PreviewLines lines({
+    Iterable<String> outline = const [],
+    List<double>? outlineColor,
+    bool outlineBoxes = true,
+    double? iconsAspect,
+  }) =>
       PreviewLines.fromJson(_call('lines', {
-        if (outline.isNotEmpty) 'outline': {'ids': outline.toList(), 'color': ?outlineColor},
+        if (outline.isNotEmpty)
+          'outline': {'ids': outline.toList(), 'color': ?outlineColor, if (!outlineBoxes) 'boxes': false},
         if (iconsAspect != null) 'icons': {'aspect': iconsAspect},
       }));
+
+  /// The renderer's handles (`Entity::to_bits`) of [ids] and, for a
+  /// prefab instance's id, of every entity it spawned — what
+  /// `ViewportOverlay.outline` takes. An id the world lacks, and an entity
+  /// hidden in the editor, has none; each handle comes once.
+  List<int> entities(Iterable<String> ids) =>
+      [for (final e in _call('entities', {'ids': ids.toList()})['entities'] as List? ?? const []) (e as num).toInt()];
 
   /// The world matrices of [ids] now (16 numbers column-major each);
   /// throws (`invalidArgument`, FYN-T0003) for an id the world lacks.
