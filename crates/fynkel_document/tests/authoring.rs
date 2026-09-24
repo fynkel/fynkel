@@ -259,6 +259,53 @@ fn create_and_delete_maintain_the_hierarchy() {
 }
 
 #[test]
+fn a_root_created_at_an_index_takes_that_place_among_the_roots() {
+    let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
+    let loose = |name: &str, index| Command::CreateObject {
+        id: None,
+        name: name.into(),
+        parent: None,
+        index,
+        components: vec![],
+    };
+    // Roots: Root, then A and B appended.
+    apply(&mut editor, vec![loose("A", None), loose("B", None)]);
+    let names = |e: &Editor| -> Vec<String> { scene(e).roots().map(|r| r.name.clone()).collect() };
+    assert_eq!(names(&editor), ["Root", "A", "B"]);
+    // Before A; at the front; past the end is the end.
+    let r = apply(
+        &mut editor,
+        vec![
+            loose("C", Some(1)),
+            loose("D", Some(0)),
+            loose("E", Some(99)),
+        ],
+    );
+    assert_eq!(names(&editor), ["D", "Root", "C", "A", "B", "E"]);
+    // Replaced in place (Hierarchy → Project): deleted and re-created
+    // under the same id at its index, in one transaction, it keeps its place.
+    let c = r.mutations[0].affected_ids[0];
+    apply(
+        &mut editor,
+        vec![
+            Command::DeleteObject { id: c },
+            Command::CreateObject {
+                id: Some(c),
+                name: "C".into(),
+                parent: None,
+                index: Some(2),
+                components: vec![],
+            },
+        ],
+    );
+    assert_eq!(names(&editor), ["D", "Root", "C", "A", "B", "E"]);
+    for _ in 0..3 {
+        editor.undo().unwrap();
+    }
+    assert_eq!(text(&editor), original);
+}
+
+#[test]
 fn reparent_refuses_cycles_and_unknown_entities() {
     let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
     let s = schemas();

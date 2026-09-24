@@ -1911,9 +1911,16 @@ impl Cx<'_> {
         {
             self.set_member("", "entities", Node::object(Vec::new()));
         }
+        // A parentless entity is ordered by its place in `entities` (a
+        // scene's roots follow key order): `index` puts it before the root
+        // now at that position, so an object replaced in place keeps it.
+        let member_index = match (parent, index) {
+            (None, Some(i)) => self.root_member_index(i),
+            _ => usize::MAX,
+        };
         self.edits.push(Edit::InsertMember {
             parent: "/entities".into(),
-            index: usize::MAX,
+            index: member_index,
             key: id.to_string(),
             value: Node::object(members),
         });
@@ -1922,6 +1929,27 @@ impl Cx<'_> {
             affected.push(p);
         }
         Ok(affected)
+    }
+
+    /// The position in `entities` of the `i`-th parentless entity, or the
+    /// end when there are not that many.
+    fn root_member_index(&self, i: usize) -> usize {
+        let members = self
+            .root
+            .pointer("/entities")
+            .and_then(Node::as_object)
+            .unwrap_or_default();
+        members
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| {
+                matches!(
+                    m.value.get("parent").map(|p| &p.value),
+                    None | Some(Value::Null)
+                )
+            })
+            .nth(i)
+            .map_or(usize::MAX, |(k, _)| k)
     }
 
     /// Adds `id` to a parent's `children` (a parentless entity is listed
