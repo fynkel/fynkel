@@ -51,6 +51,20 @@ jobs:
           cargo build -p fynkel_native -p fynkel_platform_apple
           nm -gU target/debug/libfynkel_platform_apple.dylib | grep -q _fynkel_authoring_apply
 
+  # Blueprint §12.1: the engine's portable crates still compile for the
+  # browser. A compile check, not a product — no wasm runtime is built or
+  # run. Kept green while it costs nothing to keep green.
+  wasm:
+    name: wasm32 check (core, scene, physics, render)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup show active-toolchain && rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo check --target wasm32-unknown-unknown
+        run: cargo check --target wasm32-unknown-unknown -p fynkel_core -p fynkel_scene -p fynkel_physics -p fynkel_render
+
   dart:
     name: dart (package:fynkel, fynkel_authoring, fynkel_flutter, fynkel_generator, example, starter project and showcase)
     runs-on: macos-15
@@ -161,6 +175,14 @@ jobs:
           "$GITHUB_WORKSPACE/target/debug/fynkel" codegen --check --project .
       - name: reference game flutter analyze + test
         working-directory: examples/reference_game
+        env:
+          FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
+        run: flutter pub get && flutter analyze --fatal-infos && flutter test
+      # The editor (M4): its widget tests, and the ones that drive the real
+      # authoring session, the Metal viewport and a Play process. Some
+      # copy examples/reference_game, so they run after its checks.
+      - name: editor pub get + analyze + test
+        working-directory: apps/editor
         env:
           FYNKEL_CLI: ${{ github.workspace }}/target/debug/fynkel
         run: flutter pub get && flutter analyze --fatal-infos && flutter test

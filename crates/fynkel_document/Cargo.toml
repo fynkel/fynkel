@@ -20,6 +20,12 @@ uuid.workspace = true
 similar.workspace = true
 blake3.workspace = true
 
+# `cargo check --target wasm32-unknown-unknown` over the render crate
+# (blueprint §12.1, CI): a fresh document id needs a source of randomness
+# there, and the browser's is the only one.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+
 [dev-dependencies]
 # The fixture project instances `rig.glb#prefab` (M3-19a); the integration
 # tests validate it with the importer's provider. A dev-dependency cycle
