@@ -1322,10 +1322,20 @@ transaction (⌘Z brings the object back; the prefab file stays, as in
 Unity). The object becomes the prefab's root (ADR-0022) with its
 Transform and components, so the instance needs no override and
 nothing moves; references to the object by id or name still hold. The new prefab is selected
-in the Project panel. Refused, with the drop not taken: a prefab
-instance or an object that holds one (nested prefabs from the Hierarchy
-come later), a derived row, several objects, a prefab tab
-(`HierarchyModel.cannotCreatePrefab`).
+in the Project panel. Refused, with the drop not taken: a derived row,
+several objects, a prefab tab (`HierarchyModel.cannotCreatePrefab`).
+
+**Nested prefabs and variants (2026-09-25, ADR-0022 amendment).**
+Prefab instances under the dragged object stay instances inside the new
+prefab (`instantiatePrefab` in the prefab document), their overrides
+kept. A prefab instance dragged itself asks Unity's question —
+*Original Prefab*, *Prefab Variant* or *Cancel*
+(`showCreatePrefabPrompt`): a variant is a prefab whose root is an
+instance of the base (`newDocument` with `variantOf`), taking the
+instance's overrides so the scene's instance has none; an original
+prefab gets the base unpacked one level. The Project's context menu has
+**Create ▸ Prefab Variant** on a prefab (`<name> Variant.prefab.json`
+beside it). The Prefab bar reads *Prefab Variant* for an instance of one.
 
 **Every object has a Transform**, as in Unity: Create makes one, a
 prefab dropped on the Hierarchy or the Scene view gets one, and the
@@ -1430,6 +1440,16 @@ Unity.
   this once for the Inspector, the Hierarchy and the commands.
 - **Revert** (`prefab.revertOverrides`, ⇧⌥⌘U; per field, per row, or all)
   is one `revertPrefabOverride` transaction.
+- **Apply to a variant or its base.** An instance of a variant offers one
+  Apply per prefab down the chain — *Apply to Prefab Variant 'Crate A'*,
+  *Apply to Prefab 'Crate'* — in the field menu and as Apply ▾ in the
+  Overrides dropdown (`applyTargets`). Each is `applyPrefabOverride` on
+  the chosen prefab; for a base the override goes into the variant first
+  and the variant's new root override is then applied on down, so the
+  variant keeps none of it.
+- **Unpack Completely** (`prefab.unpackCompletely`, Edit and the
+  Hierarchy menu) unpacks nested instances too; plain Unpack is one level
+  — nested instances stay instances under their derived ids.
 - **Unpack** (`prefab.unpack`, ⇧⌥⌘X) is one `unpackPrefab` transaction —
   the session's new command (a shared `fynkel_document` touch, M4-07):
   the instance keeps its id and loses its `prefab` block, taking the

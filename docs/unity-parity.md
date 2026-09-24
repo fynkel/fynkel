@@ -99,7 +99,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Selection outline | silhouette | 🔧 `6344488`…`4b493b7`, `70ad2db` (the renderer rings what the selection draws — a mask of the outlined instances, then a composite before the overlay lines, ABI 8 — in Unity's orange, what is under it in its grey-blue: children, an instance's parts; an object without a mesh keeps its cross); 🟡 a part hidden behind another is ringed too (the mask has no depth test) |
 | Rect tool (T), free-rotate trackball | | 🔧 `510d218` (the rectangle in the plane of the two axes most across the view, children included: corners about the opposite one, ⌥ about the centre, ⇧ in proportion; edges one way; inside moves; just outside a corner turns; a click inside selects what is under it. Inside the rotate rings a drag turns freely, the rings first) |
 | Prefab mode | in context, breadcrumb, auto-save | 🔧 `20edc8e` (an instance's › or Open opens its prefab in context; the Scene view's bar: ‹, the breadcrumbs, Context Normal / Gray / Hidden, Auto Save on by default or a Save button; the Hierarchy's ‹ header; from the Project, in isolation; leaving with unsaved changes asks); `a95f43b`: the scene drawn around it through the viewport's extra worlds — `965d4b7`…`1a023c4`, ABI 9 — placed so the prefab's root sits where the instance was, the instance hidden, greyed in Gray) |
-| Prefab variants, Unpack Completely, a prefab from an object holding instances | | ❌ |
+| Prefab variants, Unpack Completely, a prefab from an object holding instances | | 🔧 `9146759`…`3fa1469` (ADR-0022 amendment, proposed), `9241460` editor |
 | Overrides dropdown, blue margin bar | | 🔧 `7d51553` (the Prefab bar — Open, Select, Overrides ▾ — lists the overrides by object, a row comparing the prefab's value with the instance's, Revert / Apply, Revert All / Apply All; the blue bar and Apply / Revert on a right-click; an added component's '+' and Apply / Revert Added Component; Unpack stays in the Hierarchy menu) |
 | Multi-scene Hierarchy | | 🔧 `f632f96`, `ca34f28` (every open scene a section under its header — the active one bold, Set Active / Save / Unload / Load / Remove / Select Scene Asset; Open Scene Additive or a scene dropped on the Hierarchy adds one, a double-click opens one alone after asking; a click on another scene's row or object in the Scene view activates it; rows dragged onto another scene move there; one Scene view camera); 🟡 the selection is one scene's at a time (Unity's may span scenes); `a95f43b`: the other loaded scenes drawn in the Scene view, lit and shadowed with the active one) |
 | Physics Material asset | shared friction/bounciness, combine modes | ❌ per-Collider fields; needs an ADR |
@@ -279,3 +279,15 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   ABI, `70ad2db` editor; `selection_outline_parity_test.dart`: the Robot
   ringed and not boxed, a Cube made under it blue until it is selected,
   an instance's own mesh and its parts apart, the Camera's cross kept).
+- 2026-09-25: prefab variants and nested prefabs (`9146759`, `e5e44c8`,
+  `3fa1469` document and API, `9241460` editor;
+  `prefab_variant_parity_test.dart`: Crate A dragged to the Project asks,
+  Cancel leaves it; Prefab Variant writes `Crate A.prefab.json` whose root
+  is a Crate instance holding Crate A's two overrides, the instance left
+  with none and its bar reading *Prefab Variant*; a new override offers
+  *Apply to Prefab Variant 'Crate A'* and *Apply to Prefab 'Crate'*, the
+  latter writing the Crate and leaving the variant no override of it;
+  Apply All ▾ into the variant; Original Prefab unpacks the Crate into
+  the new prefab one level; Create ▸ Prefab Variant in the Project; an
+  empty holding Crate A makes a prefab with Crate A nested, overrides
+  kept; Unpack leaves Crate A an instance, Unpack Completely does not).
