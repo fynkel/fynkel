@@ -447,14 +447,16 @@ instance of the Column rig document's `prefab` (the same hierarchy as
 `fynkel_document::authoring` (§11.1, ADR-0016) is the one implementation of
 document mutation the editor, the CLI and agents share; the editor reaches
 it through the authoring session and its C ABI (below, M4-01). An `Editor`
-holds one scene, prefab, **material** or **volume profile** document
+holds one scene, prefab, **material**, **volume profile** or **physics
+material** document
 (`Editor::open` refuses
 other kinds, read-only newer documents and outdated ones with `FYN-E0007`; a
 document that already has errors opens, and those baseline errors are
 tolerated; a material is validated against the shader library —
 `Editor::open_with(document, schemas, shaders)` — and an entity command on
 it is `FYN-E0007` pointing at `setDocumentField`; a volume profile is the
-same, validated as a `VolumeDocument`, since 2026-09-24). Its `Revision` is the blake3 hash of the canonical
+same, validated as a `VolumeDocument`, since 2026-09-24; a physics
+material likewise as a `PhysicsMaterialDocument`, ADR-0025). Its `Revision` is the blake3 hash of the canonical
 text (`Document::write`), so two tools that read the same bytes agree on it
 without shared state — `fynkel scene inspect --json` and `fynkel prefab
 inspect --json` print it as `revision`.
@@ -651,7 +653,7 @@ window, never running game code and never reading a cooked cache
 - **`operate(kind, args)`** (M4-05, `crates/fynkel_authoring/src/ops.rs`)
   is `query`'s mutating twin: the session's own changes to the **asset
   tree**, next to the per-document transactions. `newDocument { kind:
-  scene|prefab|material|volume, path, name?, shader? }` writes `Document::new`
+  scene|prefab|material|volume|physics_material, path, name?, shader? }` writes `Document::new`
   under the asset root (the kind's suffix added when missing; the PBR
   shader by default; refused when the file or another kind's file of that
   name exists); with `variantOf` (a prefab's id, or `{ asset, sub? }` for
@@ -1144,6 +1146,47 @@ volumes name. The runtime store reads the chunk into a
 per reference, evicted with its asset). The lock's `documents` gains
 `volume: 1`. R3b's `bloom` block was the first addition, and R3c
 (colour grading) adds another: blocks, not kinds.
+
+## Physics materials (ADR-0025)
+
+`<name>.physicsmaterial.json` (`schemas/physics_material.schema.json`,
+hand-written; kind `physics_material`,
+`fynkel_document::PhysicsMaterialDocument`) is Unity's Physics Material:
+how a surface slides and bounces. A `fynkel.Collider` names one in its
+`material` field ([physics.md](physics.md) § Physics materials):
+
+```json
+{ "$schema": "https://fynkel.dev/schemas/physics_material.schema.json", "formatVersion": 1,
+  "id": "…", "name": "Ice",
+  "friction": 0.02, "bounciness": 0,
+  "friction_combine": "minimum", "bounce_combine": "average" }
+```
+
+| Field | Default | Range |
+| --- | --- | --- |
+| `friction` | 0.6 | `>= 0`, the one Coulomb coefficient (no separate static friction, ADR-0025) |
+| `bounciness` | 0 | `0..=1`, the restitution |
+| `friction_combine` | `average` | `average`, `minimum`, `multiply` or `maximum` |
+| `bounce_combine` | `average` | the same four |
+
+Every field is optional, and an absent one takes Unity's default. The
+schema holds the ranges and refuses unknown fields (`FYN-D0100`; a
+`static_friction` is one). The read view reports what the schema cannot
+see as `FYN-D0800` and keeps the default. `fynkel document new
+physics_material <name>` (or the authoring session's `newDocument` with
+kind `physics_material`) writes one with the defaults spelled out, and
+the editor opens it as a document whose fields edit like any other. The
+cook validates it: errors fail the asset, and fail a scene whose
+collider names it. It is written through the generic document path as a
+JSON chunk (`documentKind: physics_material`), and a scene depends on
+the materials its colliders name, so an edit recooks both. The runtime
+store reads the chunk into a `fynkel_physics::PhysicsMaterial`
+(`Assets::physics_material`, cached per reference, evicted with its
+asset). `Assets::register_mesh_colliders` registers every material a
+scene's colliders name with the physics world before the first step.
+Registering new values under the same key (a reload after an edit)
+updates the live colliders in place. The lock's `documents` gains
+`physics_material: 1`.
 
 ## Migrations
 

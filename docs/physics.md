@@ -36,8 +36,9 @@ sections below.
 | `size` | (0.5, 0.5, 0.5) | metres, scaled by the entity's world scale |
 | `mesh` | — | the cooked mesh sub-asset (`mesh/<name>`) for `shape: mesh`; static only, at most 32 768 triangles (`MAX_MESH_COLLIDER_TRIANGLES`) |
 | `offset` | 0 | local translation of the shape from the entity's origin |
-| `friction` | 0.5 | Coulomb coefficient, `>= 0` |
-| `restitution` | 0 | bounciness `0..=1` |
+| `material` | — | a `.physicsmaterial.json` (ADR-0025, below): its friction, bounciness and combine rules replace `friction` and `restitution` |
+| `friction` | 0.5 | Coulomb coefficient, `>= 0`; ignored when `material` names one |
+| `restitution` | 0 | bounciness `0..=1`; ignored when `material` names one |
 | `isSensor` | false | reports trigger events, applies no forces |
 | `mask` | all | the layers it collides with; bit `i` is the project's `layers[i]`. Its own layer is its entity's `fynkel.Layer` (absent = 0, `default`; ADR-0020): two colliders touch when each one's mask has the other's layer |
 
@@ -52,6 +53,34 @@ character controller, `H0007` a camera rig value (the corpus fixture
 rules run at the tick for a component set from Dart (`INVALID_PAYLOAD`);
 a mesh the cache does not hold, or one above the limit, is
 `MESH_UNAVAILABLE` (code 13) once per entity and the collider is skipped.
+
+## Physics materials
+
+Unity's Physics Material is a `<name>.physicsmaterial.json` document
+(ADR-0025, [documents.md](documents.md) § Physics materials): `friction`
+(0.6), `bounciness` (0), `friction_combine` and `bounce_combine`
+(`average`). A collider names one in `material`. Many colliders can
+share it, and an edit changes every one of them. The loader
+(`Assets::register_mesh_colliders`) registers each material a scene
+names with the physics world (`Physics::register_material`) before the
+first step. A collider whose material is not registered is an
+`INVALID_PAYLOAD` diagnostic on `fynkel.Collider`, reported once, and
+the collider is still created with its own `friction` and `restitution`.
+Registering new values under the same key (a reload after an edit)
+changes the live colliders in place and wakes their bodies.
+
+When two colliders touch, each value is combined with the other
+collider's. The combine rule is the one with the higher priority:
+`average` < `minimum` < `multiply` < `maximum`. This is Unity's order,
+and Rapier's `CoefficientCombineRule` takes the larger of the two rules
+the same way, so Fynkel passes the rules through unchanged. A collider
+without a material combines with `average`, as Rapier's default and
+Unity's default material both do.
+
+There is one friction coefficient. Unity's `staticFriction` and
+`dynamicFriction` have no Rapier counterpart: Rapier's solver has a
+single Coulomb coefficient. So the document has `friction` only, rather
+than a static value that would be accepted and then ignored.
 
 ## The project file
 
