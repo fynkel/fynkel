@@ -53,7 +53,7 @@
 | 0019 | Gizmos, handles and Scene tools | Accepted |
 | 0020 | Tags and layers | Accepted |
 | 0021 | Play in the editor | Accepted |
-| 0022 | Prefabs: one root, the instance is the root | Proposed |
+| 0022 | Prefabs: one root, the instance is the root | Accepted |
 
 ## Still open
 

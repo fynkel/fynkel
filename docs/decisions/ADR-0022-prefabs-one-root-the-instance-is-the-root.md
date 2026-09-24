@@ -1,6 +1,6 @@
 # ADR-0022: Prefabs — one root, and the instance *is* the root
 
-**Status:** Proposed (2026-09-24; the user asked for Unity's prefab model after the M4 gate rebuild showed `ball › Ball › Danger`)  
+**Status:** Accepted (2026-09-24, the user: "ok do that"; proposed the same day after the M4 gate rebuild showed `ball › Ball › Danger`)  
 **Date:** 2026-09-24  
 **Related:** ADR-0006 (document format, override targets by prefab-local id — unchanged), ADR-0020 (precedent: a scene + prefab `formatVersion` bump with a migration), ADR-0021 (Play in the editor), `docs/documents.md` § Prefab documents, `docs/scenes.md` § Runtime prefabs, `docs/hosts.md` § Prefabs at runtime, `docs/editor.md` § Prefab mode
 
