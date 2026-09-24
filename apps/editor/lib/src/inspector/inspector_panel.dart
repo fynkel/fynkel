@@ -705,9 +705,11 @@ class _ComponentCard extends StatelessWidget {
                         const PopupMenuDivider(),
                         PopupMenuItem(
                           value: 'remove',
-                          enabled: model.canEdit,
+                          enabled: model.canEdit && slot.type != transformType,
                           height: 28,
-                          child: const Text('Remove Component'),
+                          child: slot.type == transformType
+                              ? const Tooltip(message: transformStays, child: Text('Remove Component'))
+                              : const Text('Remove Component'),
                         ),
                       ],
                     ),

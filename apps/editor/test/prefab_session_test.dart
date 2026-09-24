@@ -150,6 +150,14 @@ void main() {
     expect(s.hierarchy.instantiatePrefab({'asset': coinPrefab}, name: 'Coin'), isTrue);
     final anchor = tab.selection.single;
     expect(tab.document.history, 1);
+    // Every object has a Transform, the instance dropped on the Hierarchy too
+    // (the user's gate finding, 2026-09-24) — and the Inspector keeps it.
+    final anchorComponents =
+        (tab.document.entities([anchor]).entities[anchor]!['components'] as Map).values.cast<Map>();
+    expect(anchorComponents.map((c) => c['type']), ['fynkel.Transform']);
+    expect(s.inspector.removeComponent(slotOf(s.inspector, 'fynkel.Transform')), isFalse);
+    expect(s.inspector.lastError, contains('cannot be removed'));
+    expect(tab.document.history, 1);
     final x = tab.expansionOf(anchor)!;
     expect(x.prefab!.name, 'Coin');
     final coin = x.byLocal(coinRoot)!;

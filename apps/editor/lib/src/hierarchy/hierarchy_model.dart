@@ -535,16 +535,19 @@ final class HierarchyModel extends ChangeNotifier {
   }
 
   /// Instantiates the prefab [ref] (`{asset, sub?}`) under [target] — one
-  /// `instantiatePrefab` transaction — and selects the instance. With
-  /// [transform] the instance root gets that `fynkel.Transform` (the Scene
-  /// view's drop puts it where the pointer hit).
+  /// `instantiatePrefab` transaction — and selects the instance. The
+  /// instance always gets a `fynkel.Transform`, as every object does:
+  /// [transform] (the Scene view's drop puts it where the pointer hit),
+  /// else the defaults.
   bool instantiatePrefab(Map<String, Object?> ref, {required String name, DropTarget? target, Trs? transform}) {
     final t = _tab;
     if (t == null || !canEdit) return false;
     final parent = target?.parent;
     if (parent != null && (t.tree[parent]?.isDerived ?? true)) return false;
     final index = target == null ? null : (parent == null && !rootOrderIsEditable ? null : target.index);
-    final components = [if (transform != null) componentSpec('fynkel.Transform', data: transform.toData())];
+    final transformData =
+        transform?.toData() ?? project.componentDefaults('fynkel.Transform') ?? Trs.identity.toData();
+    final components = [componentSpec('fynkel.Transform', data: transformData)];
     final a = _run([
       Command.instantiatePrefab(prefab: ref, name: name, parent: parent, index: index, components: components),
     ]);

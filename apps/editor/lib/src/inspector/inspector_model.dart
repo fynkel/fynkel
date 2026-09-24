@@ -90,6 +90,10 @@ final class ComponentInstance {
 }
 
 /// The same component type at the same position on every selected entity.
+/// Every object has a Transform, as in Unity: the Inspector never removes it.
+const transformType = 'fynkel.Transform';
+const transformStays = 'Every object has a Transform: it cannot be removed.';
+
 final class ComponentSlot {
   ComponentSlot({required this.type, required this.index, required this.spec, required this.instances});
 
@@ -1176,6 +1180,11 @@ final class InspectorModel extends ChangeNotifier {
   bool removeComponent(ComponentSlot slot) {
     final t = _tab;
     if (t == null) return false;
+    if (slot.type == transformType) {
+      lastError = transformStays;
+      notifyListeners();
+      return false;
+    }
     final commands = <Map<String, Object?>>[];
     final reverts = <String, List<int>>{};
     final ops = <Map<String, Object?>>[];
