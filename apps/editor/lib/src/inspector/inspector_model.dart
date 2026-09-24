@@ -109,12 +109,25 @@ final class ComponentSlot {
   /// The value at [path] (a field name, or `a/1/b`) on the first instance.
   Object? value(String path) => readPath(first.data, path);
 
-  /// Whether the instances disagree at [path].
+  /// What the Inspector shows at [path]: the value, or — when the data
+  /// does not have the field (a field added to the script after the
+  /// component was) — its schema default, which is what the game uses.
+  Object? shown(String path) => _shownIn(first.data, path);
+
+  Object? _shownIn(Map<String, Object?> data, String path) {
+    if (hasPath(data, path)) return readPath(data, path);
+    final top = topLevelKey(path);
+    if (data.containsKey(top)) return null;
+    final f = spec.field(top);
+    return f == null || !f.hasDefault ? null : readPath({top: f.defaultValue}, path);
+  }
+
+  /// Whether the instances disagree at [path] (as shown).
   bool isMixed(String path) {
     if (single) return false;
-    final v = value(path);
+    final v = shown(path);
     for (final i in instances.skip(1)) {
-      if (!deepEquals(readPath(i.data, path), v)) return true;
+      if (!deepEquals(_shownIn(i.data, path), v)) return true;
     }
     return false;
   }

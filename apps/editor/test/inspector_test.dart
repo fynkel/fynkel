@@ -296,6 +296,43 @@ FakeDocument scene() => FakeDocument(
 }
 
 void main() {
+  test('a field the data lacks shows its schema default (a field added to the script later)', () {
+    final spec = parseComponentSpec('game.Fun', {
+      'type': 'object',
+      'properties': {
+        'speed': {'type': 'number', 'default': 1.0},
+        'speed3': {'type': 'number', 'default': 5.0},
+        'note': {'type': 'string'},
+      },
+    });
+    ComponentInstance inst(String id, Map<String, Object?> data) =>
+        ComponentInstance(entityId: id, componentId: 'c', type: 'game.Fun', version: 1, data: data);
+    final slot = ComponentSlot(
+      type: 'game.Fun',
+      index: 0,
+      spec: spec,
+      instances: [
+        inst('a', {'speed': 2.0}),
+      ],
+    );
+    expect(slot.shown('speed'), 2.0);
+    expect(slot.shown('speed3'), 5.0);
+    expect(slot.value('speed3'), isNull);
+    expect(slot.shown('note'), isNull);
+    // One instance set to the default, the other without the field: not mixed.
+    final two = ComponentSlot(
+      type: 'game.Fun',
+      index: 0,
+      spec: spec,
+      instances: [
+        inst('a', {'speed3': 5.0}),
+        inst('b', {}),
+      ],
+    );
+    expect(two.isMixed('speed3'), isFalse);
+    expect(two.isMixed('speed'), isFalse);
+  });
+
   group('specs', () {
     test('every native component schema parses with a real kind for every field, and the hint table names only real fields', () {
       final schemas = nativeSchemas();

@@ -742,7 +742,7 @@ class _ComponentCard extends StatelessWidget {
 
   Widget _kept(String name, Widget Function() build) {
     final k = '${slot.key}/$name';
-    final value = slot.value(name);
+    final value = slot.shown(name);
     final mixed = slot.isMixed(name);
     final old = kept?[k];
     if (old != null && old.generation == model.generation && old.mixed == mixed && deepEquals(old.value, value)) {
@@ -916,7 +916,7 @@ class _FieldEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final value = slot.value(path);
+    final value = slot.shown(path);
     final mixed = slot.isMixed(path);
     final error = model.errorFor(
       slot,
