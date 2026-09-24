@@ -255,7 +255,7 @@ abstract class EditorProject extends ChangeNotifier {
 
   /// An asset operation through the session (`newDocument`, `renameAsset`,
   /// `deleteAsset`, `setImportSettings`, `extractMaterials`, `reimport`, `setLayersAndTags`,
-  /// `registerBehaviour`, `undoAsset`, `redoAsset`) — one history step each, the database re-read
+  /// `registerBehaviour`, `setStartupScene`, `undoAsset`, `redoAsset`) — one history step each, the database re-read
   /// incrementally. Throws `AuthoringException` when refused; nothing was
   /// touched then.
   OperationResult operate(String kind, [Map<String, Object?> args = const {}]);
@@ -268,6 +268,10 @@ abstract class EditorProject extends ChangeNotifier {
   OperationResult setImportSettings(String id, Map<String, Object?> settings) =>
       operate('setImportSettings', {'asset': id, 'settings': settings});
   OperationResult reimport(String id) => operate('reimport', {'asset': id});
+
+  /// The scene `fynkel run` and `fynkel test --headless` start with
+  /// (`startupScene`; Unity's first scene in Build Settings).
+  OperationResult setStartupScene(String id) => operate('setStartupScene', {'id': id});
 
   /// A model's embedded materials written as `.material.json` documents
   /// (`Materials/` next to it, or [folder]) and remapped to them — one

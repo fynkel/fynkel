@@ -207,6 +207,9 @@ final class FakeProject extends EditorProject {
   /// What `reimport` answers: null → ok with a summary; a message → refused.
   String? reimportRefusal;
 
+  /// The project's `startupScene` (`setStartupScene`).
+  String? startupScene;
+
   @override
   List<String> folders() {
     final out = <String>{...extraFolders};
@@ -476,6 +479,17 @@ final class FakeProject extends EditorProject {
               {'key': 'material/${m.name}', 'id': m.id, 'path': assetFile(m.path)},
           ],
         });
+      case 'setStartupScene':
+        final id = args['id'] as String;
+        final e = entryOf(id) ?? _refuse('FYN-T0003', 'setStartupScene: $id is not a scene of the project');
+        if (e.document != 'scene') _refuse('FYN-T0003', 'setStartupScene: $id is not a scene of the project');
+        if (startupScene == id) _refuse('FYN-T0003', 'setStartupScene: ${e.name} is already the startup scene');
+        final before = startupScene;
+        startupScene = id;
+        final label = 'Set Startup Scene ${e.name}';
+        _redo.clear();
+        _undo.add((label, () => startupScene = before));
+        return _done(kind, label, e, const {});
       case 'reimport':
         final id = args['asset'] as String;
         final e = entryOf(id) ?? _refuse('FYN-A0004', 'no asset $id');

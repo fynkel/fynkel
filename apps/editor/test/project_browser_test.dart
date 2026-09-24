@@ -586,6 +586,29 @@ void main() {
       expect(model.entry(created)!.path, 'New Material.material.json');
     });
 
+    testWidgets('a scene\'s context menu sets it as the startup scene, one asset-history step', (tester) async {
+      final (project, model, _, _) = await pumpPanel(tester);
+      model.setFolder('scenes');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('project.asset.$mainScene')), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Set as Startup Scene'));
+      await tester.pumpAndSettle();
+      expect(project.startupScene, mainScene);
+      expect(project.operations.last.$1, 'setStartupScene');
+      expect(model.history.undoLabel, startsWith('Set Startup Scene'));
+      // Again: refused, and the panel says why.
+      model.setStartupScene(mainScene);
+      await tester.pumpAndSettle();
+      expect(model.lastError, contains('already the startup scene'));
+      // Not offered for a prefab.
+      model.setFolder('prefabs');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('project.asset.$coinPrefab')), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(find.text('Set as Startup Scene'), findsNothing);
+    });
+
     testWidgets(
       'Delete on a referenced asset shows the dependents and "Delete anyway" forces it; the error bar shows refusals',
       (tester) async {

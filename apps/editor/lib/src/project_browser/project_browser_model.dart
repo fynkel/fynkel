@@ -861,6 +861,9 @@ final class ProjectBrowserModel extends ChangeNotifier {
   /// `ok` false (its diagnostics say why), never as [lastError].
   OperationResult? reimport(String id) => _guard(() => project.reimport(id));
 
+  /// Set as Startup Scene: the scene `fynkel run` starts with.
+  OperationResult? setStartupScene(String id) => _guard(() => project.setStartupScene(id));
+
   /// Extract Materials: [id]'s embedded materials as documents, remapped.
   OperationResult? extractMaterials(String id) => _guard(() => project.extractMaterials(id));
 

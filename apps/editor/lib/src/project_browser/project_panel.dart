@@ -385,6 +385,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
         ),
         if (e.isSource)
           PopupMenuItem(value: 'reimport', enabled: model.canEdit && !many, child: const Text('Reimport  ⇧⌥⌘I')),
+        if (e.document == 'scene')
+          PopupMenuItem(value: 'startup', enabled: model.canEdit && !many, child: const Text('Set as Startup Scene')),
         const PopupMenuDivider(),
         PopupMenuItem(value: 'copyId', child: Text('Copy id  ${e.id.substring(0, 13)}…')),
         PopupMenuItem(value: 'copyPath', child: Text('Copy path  ${e.path}')),
@@ -414,6 +416,10 @@ class _ProjectPanelState extends State<ProjectPanel> {
         final r = model.reimport(e.id);
         if (r != null && !r.ok && mounted) {
           Notices.maybeOf(this.context)?.show('Reimport refused: ${r.diagnostics.map((d) => d.message).join('; ')}');
+        }
+      case 'startup':
+        if (model.setStartupScene(e.id) != null && mounted) {
+          Notices.maybeOf(this.context)?.show('${e.name} is the startup scene: fynkel run starts with it');
         }
       case 'copyId':
         await Clipboard.setData(ClipboardData(text: e.id));
