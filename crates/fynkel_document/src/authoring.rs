@@ -185,6 +185,18 @@ pub enum Command {
         name: Option<String>,
         index: Option<usize>,
     },
+    /// Pastes copied entities (the editor's Copy: the `document` query's
+    /// `entities` for whole subtrees, from this document or another one):
+    /// fresh entity, component and prefab-instance ids with every
+    /// reference among them remapped, as `duplicateObject` does; the
+    /// entities whose parent is not among them are the pasted roots, in
+    /// the given order, under `parent` at `index` (or at the end). The
+    /// affected ids start with the pasted roots.
+    PasteObjects {
+        entities: Vec<(String, Node)>,
+        parent: Option<Uuid>,
+        index: Option<usize>,
+    },
     /// Sets the node at a document-level JSON pointer (a material's
     /// `/base_color`, a scene's `/settings/...`; M4-01). An existing node
     /// is replaced, a missing last token is inserted as a member of its
@@ -230,6 +242,7 @@ impl Command {
             Command::RevertPrefabOverride { .. } => "revertPrefabOverride",
             Command::UnpackPrefab { .. } => "unpackPrefab",
             Command::DuplicateObject { .. } => "duplicateObject",
+            Command::PasteObjects { .. } => "pasteObjects",
             Command::SetDocumentField { .. } => "setDocumentField",
             Command::UnsetDocumentField { .. } => "unsetDocumentField",
             Command::CreateMaterial { .. } => "createMaterial",
@@ -388,6 +401,21 @@ impl Command {
                 name: opt_string("name"),
                 index: index()?,
             },
+            "pasteObjects" => Command::PasteObjects {
+                entities: v
+                    .get("entities")
+                    .and_then(J::as_object)
+                    .ok_or_else(|| {
+                        invalid(format!(
+                            "{name}: \"entities\" must be an object of entities by id"
+                        ))
+                    })?
+                    .iter()
+                    .map(|(k, e)| (k.clone(), Node::from_serde(e)))
+                    .collect(),
+                parent: opt_uuid("parent")?,
+                index: index()?,
+            },
             "setDocumentField" => Command::SetDocumentField {
                 pointer: string("pointer")?,
                 value: Node::from_serde(
@@ -486,6 +514,17 @@ impl Command {
                 index,
             } => {
                 json!({ "id": id.to_string(), "newId": id_or_null(new_id), "name": name, "index": index })
+            }
+            Command::PasteObjects {
+                entities,
+                parent,
+                index,
+            } => {
+                let entities: serde_json::Map<String, J> = entities
+                    .iter()
+                    .map(|(k, n)| (k.clone(), n.to_serde()))
+                    .collect();
+                json!({ "entities": entities, "parent": id_or_null(parent), "index": index })
             }
             Command::SetDocumentField { pointer, value } => {
                 json!({ "pointer": pointer, "value": value.to_serde() })
@@ -1613,6 +1652,11 @@ impl Cx<'_> {
                 name,
                 index,
             } => self.duplicate(*id, *new_id, name.as_deref(), *index)?,
+            Command::PasteObjects {
+                entities,
+                parent,
+                index,
+            } => self.paste(entities, *parent, *index)?,
             Command::SetDocumentField { pointer, value } => {
                 self.set_document_field(pointer, value.clone())?;
                 Vec::new()
@@ -1934,6 +1978,12 @@ impl Cx<'_> {
     /// The position in `entities` of the `i`-th parentless entity, or the
     /// end when there are not that many.
     fn root_member_index(&self, i: usize) -> usize {
+        self.root_member_index_without(i, None)
+    }
+
+    /// [`Self::root_member_index`] not counting `skip` among the roots.
+    fn root_member_index_without(&self, i: usize, skip: Option<Uuid>) -> usize {
+        let skip = skip.map(|u| u.to_string());
         let members = self
             .root
             .pointer("/entities")
@@ -1943,13 +1993,23 @@ impl Cx<'_> {
             .iter()
             .enumerate()
             .filter(|(_, m)| {
-                matches!(
-                    m.value.get("parent").map(|p| &p.value),
-                    None | Some(Value::Null)
-                )
+                Some(&m.key) != skip.as_ref()
+                    && matches!(
+                        m.value.get("parent").map(|p| &p.value),
+                        None | Some(Value::Null)
+                    )
             })
             .nth(i)
             .map_or(usize::MAX, |(k, _)| k)
+    }
+
+    /// The position of member `key` in the object at `pointer`.
+    fn member_index(&self, pointer: &str, key: &str) -> Option<usize> {
+        self.root
+            .pointer(pointer)
+            .and_then(Node::as_object)?
+            .iter()
+            .position(|m| m.key == key)
     }
 
     /// Adds `id` to a parent's `children` (a parentless entity is listed
@@ -2071,15 +2131,39 @@ impl Cx<'_> {
         }
         let old_parent = self.parent_of(id);
         self.detach(id, old_parent);
-        self.set_member(
-            &p,
-            "parent",
-            match new_parent {
-                Some(np) => Node::string(np.to_string()),
-                None => Node::synthetic(Value::Null),
-            },
-        );
-        self.attach(id, new_parent_pointer.as_deref(), index);
+        if let (None, Some(i)) = (new_parent, index) {
+            // A scene root's place is its place in `entities`: move the
+            // member to just before the root now `i`-th (not counting
+            // itself), as a parentless entity.
+            let mut node = self.root.pointer(&p).expect("resolved above").clone();
+            node.set("parent", Node::synthetic(Value::Null));
+            let key = id.to_string();
+            let from = self.member_index("/entities", &key);
+            let to = self.root_member_index_without(i, Some(id));
+            self.edits.push(Edit::RemoveMember {
+                parent: "/entities".into(),
+                key: key.clone(),
+            });
+            self.edits.push(Edit::InsertMember {
+                parent: "/entities".into(),
+                index: match (from, to) {
+                    (Some(f), t) if t != usize::MAX && f < t => t - 1,
+                    (_, t) => t,
+                },
+                key,
+                value: node,
+            });
+        } else {
+            self.set_member(
+                &p,
+                "parent",
+                match new_parent {
+                    Some(np) => Node::string(np.to_string()),
+                    None => Node::synthetic(Value::Null),
+                },
+            );
+            self.attach(id, new_parent_pointer.as_deref(), index);
+        }
         let mut affected = vec![id];
         affected.extend(old_parent);
         affected.extend(new_parent);
@@ -2393,16 +2477,30 @@ impl Cx<'_> {
             }
             copies.push((new_key, copy));
         }
+        let parent = self.parent_of(id);
+        // A root copy goes right after the original in `entities` (a
+        // scene's roots follow key order), or where `index` says.
+        let root_copy_index = match (parent, index) {
+            (Some(_), _) => usize::MAX,
+            (None, Some(i)) => self.root_member_index(i),
+            (None, None) => self
+                .member_index("/entities", &id.to_string())
+                .map_or(usize::MAX, |k| k + 1),
+        };
         for (key, copy) in copies {
+            let index = if key == root_copy.to_string() {
+                root_copy_index
+            } else {
+                usize::MAX
+            };
             self.edits.push(Edit::InsertMember {
                 parent: "/entities".into(),
-                index: usize::MAX,
+                index,
                 key,
                 value: copy,
             });
         }
         // Next to the original in its parent's list.
-        let parent = self.parent_of(id);
         let parent_pointer = parent.map(|p| format!("/entities/{p}"));
         let list = parent.map(|p| format!("/entities/{p}/children"));
         let after_original = list.and_then(|l| {
@@ -2421,6 +2519,113 @@ impl Cx<'_> {
             parent_pointer.as_deref(),
             index.or(after_original),
         );
+        if let Some(p) = parent {
+            affected.push(p);
+        }
+        Ok(affected)
+    }
+
+    fn paste(
+        &mut self,
+        entities: &[(String, Node)],
+        parent: Option<Uuid>,
+        index: Option<usize>,
+    ) -> Result<Vec<Uuid>, Diagnostic> {
+        let refuse = |why: String| {
+            Diagnostic::error(Code::EDIT_INVALID_COMMAND, format!("pasteObjects: {why}"))
+                .with_pointer("/entities")
+        };
+        if entities.is_empty() {
+            return Err(refuse("nothing to paste".into()));
+        }
+        let parent_pointer = match parent {
+            Some(p) => Some(self.entity_pointer(p)?),
+            None => None,
+        };
+        let keys: HashSet<&str> = entities.iter().map(|(k, _)| k.as_str()).collect();
+        let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for (key, node) in entities {
+            parse_uuid(key).map_err(|_| refuse(format!("{key:?} is not an entity id")))?;
+            if node.as_object().is_none() {
+                return Err(refuse(format!("entity {key} is not an object")));
+            }
+            map.insert(key.clone(), Uuid::new_v4().to_string());
+            if let Some(components) = node.get("components").and_then(Node::as_object) {
+                for m in components {
+                    map.entry(m.key.clone())
+                        .or_insert_with(|| Uuid::new_v4().to_string());
+                }
+            }
+            if let Some(inst) = node.pointer("/prefab/instance").and_then(Node::as_str) {
+                map.entry(inst.to_string())
+                    .or_insert_with(|| Uuid::new_v4().to_string());
+            }
+        }
+        let is_root = |node: &Node| !matches!(node.get("parent").and_then(Node::as_str), Some(p) if keys.contains(p));
+        let mut roots = Vec::new();
+        let mut rest = Vec::new();
+        for (key, node) in entities {
+            let mut copy = remap(node, &map);
+            // Children outside the paste were not copied.
+            if let Some(children) = node.get("children").and_then(Node::as_array) {
+                let kept: Vec<Node> = children
+                    .iter()
+                    .filter_map(Node::as_str)
+                    .filter(|c| keys.contains(c))
+                    .map(|c| Node::string(map[c].clone()))
+                    .collect();
+                copy.set("children", Node::synthetic(Value::Array(kept)));
+            }
+            let new_key = map[key].clone();
+            if is_root(node) {
+                copy.set(
+                    "parent",
+                    match parent {
+                        Some(p) => Node::string(p.to_string()),
+                        None => Node::synthetic(Value::Null),
+                    },
+                );
+                roots.push((new_key, copy));
+            } else {
+                rest.push((new_key, copy));
+            }
+        }
+        if self
+            .root
+            .pointer("/entities")
+            .and_then(Node::as_object)
+            .is_none()
+        {
+            self.set_member("", "entities", Node::object(Vec::new()));
+        }
+        let mut member_index = match (parent, index) {
+            (None, Some(i)) => self.root_member_index(i),
+            _ => usize::MAX,
+        };
+        let mut affected = Vec::with_capacity(entities.len());
+        for (k, (key, copy)) in roots.into_iter().enumerate() {
+            let id = parse_uuid(&key).expect("fresh uuid");
+            affected.push(id);
+            self.edits.push(Edit::InsertMember {
+                parent: "/entities".into(),
+                index: member_index,
+                key,
+                value: copy,
+            });
+            if member_index != usize::MAX {
+                member_index += 1;
+            }
+            self.attach(id, parent_pointer.as_deref(), index.map(|i| i + k));
+        }
+        for (key, copy) in rest {
+            affected.push(parse_uuid(&key).expect("fresh uuid"));
+            self.edits.push(Edit::InsertMember {
+                parent: "/entities".into(),
+                index: usize::MAX,
+                key,
+                value: copy,
+            });
+        }
         if let Some(p) = parent {
             affected.push(p);
         }

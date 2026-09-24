@@ -58,6 +58,15 @@ final class Command {
         'index': ?index,
       };
 
+  /// Pastes copied entities (whole subtrees as the document has them, by
+  /// id) with fresh ids under [parent] at [index]; the affected ids start
+  /// with the pasted roots.
+  static Map<String, Object?> pasteObjects(
+    Map<String, Map<String, Object?>> entities, {
+    String? parent,
+    int? index,
+  }) => {'command': 'pasteObjects', 'entities': entities, 'parent': ?parent, 'index': ?index};
+
   static Map<String, Object?> addComponent(String entity, Map<String, Object?> component) =>
       {'command': 'addComponent', 'entity': entity, 'component': component};
 
@@ -161,6 +170,7 @@ final class Command {
     'setObjectActive',
     'reparentObject',
     'duplicateObject',
+    'pasteObjects',
     'addComponent',
     'removeComponent',
     'setField',

@@ -306,6 +306,99 @@ fn a_root_created_at_an_index_takes_that_place_among_the_roots() {
 }
 
 #[test]
+fn a_root_moves_among_the_roots_and_a_root_copy_follows_its_original() {
+    let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
+    let loose = |name: &str| Command::CreateObject {
+        id: None,
+        name: name.into(),
+        parent: None,
+        index: None,
+        components: vec![],
+    };
+    let r = apply(&mut editor, vec![loose("A"), loose("B")]);
+    let names = |e: &Editor| -> Vec<String> { scene(e).roots().map(|r| r.name.clone()).collect() };
+    assert_eq!(names(&editor), ["Root", "A", "B"]);
+    let (a, b) = (
+        r.mutations[0].affected_ids[0],
+        r.mutations[1].affected_ids[0],
+    );
+    let to_root = |id, index| Command::ReparentObject {
+        id,
+        parent: None,
+        index: Some(index),
+    };
+    // Up, down, and to the end (the index counts the roots without it).
+    apply(&mut editor, vec![to_root(b, 0)]);
+    assert_eq!(names(&editor), ["B", "Root", "A"]);
+    apply(&mut editor, vec![to_root(b, 1)]);
+    assert_eq!(names(&editor), ["Root", "B", "A"]);
+    apply(&mut editor, vec![to_root(b, 2)]);
+    assert_eq!(names(&editor), ["Root", "A", "B"]);
+    // A child made a root at an index lands there.
+    apply(&mut editor, vec![to_root(u(KID2), 1)]);
+    assert_eq!(scene(&editor).roots().nth(1).map(|r| r.id), Some(u(KID2)));
+    // A root's copy comes right after it, not at the end.
+    apply(
+        &mut editor,
+        vec![Command::DuplicateObject {
+            id: a,
+            new_id: None,
+            name: Some("A (1)".into()),
+            index: None,
+        }],
+    );
+    let after: Vec<String> = names(&editor);
+    let at = after.iter().position(|n| n == "A").unwrap();
+    assert_eq!(after[at + 1], "A (1)");
+    for _ in 0..6 {
+        editor.undo().unwrap();
+    }
+    assert_eq!(text(&editor), original);
+}
+
+#[test]
+fn pasted_objects_get_fresh_ids_and_land_where_asked() {
+    let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
+    let doc: serde_json::Value = serde_json::from_str(&original).unwrap();
+    // Copy Root's whole subtree, as the editor's Copy sends it.
+    let entities: Vec<(String, fynkel_document::Node)> = doc["entities"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), fynkel_document::Node::from_serde(v)))
+        .collect();
+    let count = entities.len();
+    let r = apply(
+        &mut editor,
+        vec![Command::PasteObjects {
+            entities: entities.clone(),
+            parent: None,
+            index: Some(0),
+        }],
+    );
+    let ids = &r.mutations[0].affected_ids;
+    assert_eq!(ids.len(), count);
+    let s = scene(&editor);
+    let roots: Vec<_> = s.roots().map(|r| r.id).collect();
+    assert_eq!(roots.len(), 2);
+    assert_eq!(roots[0], ids[0], "the pasted root comes first, at index 0");
+    assert_ne!(roots[0], u(ROOT));
+    assert_eq!(s.roots().next().unwrap().name, "Root");
+    // Under a parent: the copy's children keep their shape.
+    apply(
+        &mut editor,
+        vec![Command::PasteObjects {
+            entities,
+            parent: Some(u(KID2)),
+            index: None,
+        }],
+    );
+    editor.undo().unwrap();
+    editor.undo().unwrap();
+    assert_eq!(text(&editor), original);
+}
+
+#[test]
 fn reparent_refuses_cycles_and_unknown_entities() {
     let (mut editor, original) = open("scene/hierarchy_ok.scene.json");
     let s = schemas();

@@ -58,6 +58,7 @@ pub const COMMANDS: &[&str] = &[
     "setObjectActive",
     "reparentObject",
     "duplicateObject",
+    "pasteObjects",
     "addComponent",
     "removeComponent",
     "setField",
