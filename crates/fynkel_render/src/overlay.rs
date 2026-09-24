@@ -15,11 +15,17 @@
 //!   lines whose cell steps by ten as the view widens, the X and Z axes,
 //!   faded with distance and at grazing angles, hidden behind geometry.
 //!
+//! - **The selection outline** is a silhouette, not a primitive: the
+//!   entities it names are drawn into a mask and ringed in the target at
+//!   a width in target pixels (`crate::outline`, [`OutlineStyle`]). It is
+//!   drawn before the rest, so handles stay on top of it.
+//!
 //! "Behind" compares distances from the camera with a small tolerance, so
 //! a line on a surface, or the grid on a floor at `y = 0`, never z-fights
 //! with it. The [`DebugDraw`](crate::DebugDraw) queue is drawn here too, as
 //! [`DEBUG_LINE_WIDTH`]-pixel lines.
 
+use fynkel_contracts::Entity;
 use glam::{Mat4, Vec3};
 
 use crate::debug::DebugDraw;
@@ -89,12 +95,48 @@ impl Default for Grid {
     }
 }
 
+/// The selection outline's look (Unity's Scene view). Colours are linear,
+/// display-referred RGBA.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OutlineStyle {
+    /// Around the selected entities.
+    pub selected: [f32; 4],
+    /// Around their children (the rest of each selected hierarchy).
+    pub children: [f32; 4],
+    /// Target pixels past the silhouette, anti-aliased at its edge;
+    /// clamped to [`MAX_OUTLINE_WIDTH`].
+    pub width: f32,
+}
+
+/// The widest outline drawn: the composite searches `width + 1` pixels
+/// around every pixel of the target, so the cost grows with its square.
+pub const MAX_OUTLINE_WIDTH: f32 = 16.0;
+
+impl Default for OutlineStyle {
+    fn default() -> Self {
+        OutlineStyle {
+            selected: [1.0, 0.4, 0.0, 1.0],
+            children: [0.37, 0.47, 0.61, 1.0],
+            width: 2.0,
+        }
+    }
+}
+
+/// The entities to outline this frame.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct OutlineQueue {
+    pub selected: Vec<Entity>,
+    pub children: Vec<Entity>,
+    pub style: OutlineStyle,
+}
+
 /// The queue of overlay primitives for the next frame.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Overlay {
     lines: Vec<OverlayLine>,
     triangles: Vec<OverlayTriangle>,
     grid: Option<Grid>,
+    outline: Option<OutlineQueue>,
 }
 
 impl Overlay {
@@ -147,6 +189,35 @@ impl Overlay {
         self.grid = Some(grid);
     }
 
+    /// Outlines what the entities draw this frame — every mesh, blended
+    /// ones and placeholder cubes included, skinned ones as posed — in
+    /// `style.selected` around `selected` and `style.children` around
+    /// `children`, over everything (occluded parts ring too, as in Unity).
+    /// An entity in both lists is selected; one the frame does not draw
+    /// (hidden, inactive, another camera's layer) has no outline. Replaces
+    /// any outline queued since the last frame.
+    pub fn outline(&mut self, selected: &[Entity], children: &[Entity], style: OutlineStyle) {
+        self.outline = Some(OutlineQueue {
+            selected: selected.to_vec(),
+            children: children.to_vec(),
+            style,
+        });
+    }
+
+    /// The outline queued for the next frame: the selected entities, their
+    /// children and the style.
+    pub fn outline_queued(&self) -> Option<(&[Entity], &[Entity], OutlineStyle)> {
+        self.outline
+            .as_ref()
+            .map(|o| (&o.selected[..], &o.children[..], o.style))
+    }
+
+    /// Hands the queued outline to `prepare`, which draws it (not the
+    /// overlay pass).
+    pub(crate) fn take_outline(&mut self) -> Option<OutlineQueue> {
+        self.outline.take()
+    }
+
     pub fn lines(&self) -> &[OverlayLine] {
         &self.lines
     }
@@ -160,13 +231,17 @@ impl Overlay {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty() && self.triangles.is_empty() && self.grid.is_none()
+        self.lines.is_empty()
+            && self.triangles.is_empty()
+            && self.grid.is_none()
+            && self.outline.is_none()
     }
 
     pub fn clear(&mut self) {
         self.lines.clear();
         self.triangles.clear();
         self.grid = None;
+        self.outline = None;
     }
 }
 
@@ -601,5 +676,22 @@ mod tests {
         assert!(!o.is_empty());
         o.clear();
         assert!(o.is_empty());
+    }
+
+    #[test]
+    fn an_outline_is_queued_replaced_and_cleared_with_the_rest() {
+        let (a, b) = (Entity::from_bits(1), Entity::from_bits(2));
+        let mut o = Overlay::default();
+        o.outline(&[a], &[b], OutlineStyle::default());
+        assert!(!o.is_empty());
+        let style = OutlineStyle {
+            width: 4.0,
+            ..OutlineStyle::default()
+        };
+        o.outline(&[b], &[], style);
+        assert_eq!(o.outline_queued(), Some((&[b][..], &[][..], style)));
+        o.clear();
+        assert!(o.is_empty());
+        assert_eq!(o.outline_queued(), None);
     }
 }

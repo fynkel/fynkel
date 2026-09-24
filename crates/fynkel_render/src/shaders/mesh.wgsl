@@ -254,6 +254,24 @@ fn fs_depth(in: VsOut) {
     }
 }
 
+// The selection outline's mask (docs/renderer.md § The overlay): the
+// silhouette of an outlined instance, with the prepass's alpha-mask
+// discard (a blend material covers its whole surface). The outline's own
+// copy of the instance carries the mask value — 1 selected, 0.5 a child —
+// in `params.x`, which nothing else reads here; the target keeps the
+// larger of what lands on a texel (a `Max` blend), so selected wins.
+@fragment
+fn fs_mask(in: VsOut) -> @location(0) vec4<f32> {
+    let cutoff = in.flags.x;
+    if cutoff >= 0.0 {
+        let a = textureSample(base_color_tex, material_sampler, in.uv).a * in.color.a;
+        if a < cutoff {
+            discard;
+        }
+    }
+    return vec4<f32>(in.params.x, 0.0, 0.0, 1.0);
+}
+
 @fragment
 fn fs_main(in: VsOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let base = textureSample(base_color_tex, material_sampler, in.uv) * in.color;

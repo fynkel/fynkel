@@ -55,6 +55,7 @@ use wgpu::util::DeviceExt;
 pub mod culling;
 pub mod debug;
 pub mod exposure;
+mod outline;
 pub mod overlay;
 pub mod quality;
 pub mod shadow;
@@ -62,7 +63,7 @@ pub mod shadow;
 pub use culling::{Frustum, Sphere};
 pub use debug::{DebugDraw, DebugVertex};
 pub use fynkel_assets::{Assets, EnvironmentPayload, PbrMaterial, QualityProfile};
-pub use overlay::{Grid, Overlay, OverlayLine, OverlayTriangle};
+pub use overlay::{Grid, OutlineStyle, Overlay, OverlayLine, OverlayTriangle, MAX_OUTLINE_WIDTH};
 pub use quality::{Quality, QualityStatus};
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -304,6 +305,15 @@ struct Batch {
     shadow_count: u32,
 }
 
+/// One outlined instance's draw into the selection outline's mask: its
+/// batch's mesh and material, and its slot in the outline's own instance
+/// buffer (the scene's batches are left as they are).
+struct OutlineDraw {
+    key: BatchKey,
+    double_sided: bool,
+    index: u32,
+}
+
 /// One `blend` instance, drawn on its own in back-to-front order.
 struct TransparentDraw {
     key: BatchKey,
@@ -354,6 +364,9 @@ pub struct FrameStats {
     pub overlay_triangles: u32,
     /// Whether the overlay drew the ground grid.
     pub grid: bool,
+    /// Instances drawn into the selection outline's mask (0: the frame
+    /// has no outline, and no outline passes).
+    pub outlined: u32,
     /// Whether the frame ran the ambient-occlusion stage (R2).
     pub ambient_occlusion: bool,
     /// Whether the frame ran the bloom stage (R3b).
@@ -667,6 +680,13 @@ struct Pipelines {
     depth_double_sided: wgpu::RenderPipeline,
     depth_skinned: wgpu::RenderPipeline,
     depth_skinned_double_sided: wgpu::RenderPipeline,
+    /// The selection outline's mask (`outline.rs`): the mesh vertex
+    /// stages, one sample, no depth, `fs_mask` into `R8Unorm` blended
+    /// with `Max`. Culling as the scene pass's twins.
+    mask: wgpu::RenderPipeline,
+    mask_double_sided: wgpu::RenderPipeline,
+    mask_skinned: wgpu::RenderPipeline,
+    mask_skinned_double_sided: wgpu::RenderPipeline,
     /// Screen-space ambient occlusion and its blur.
     ao: wgpu::RenderPipeline,
     ao_blur: wgpu::RenderPipeline,
@@ -833,6 +853,14 @@ pub struct ExtractRenderer {
     /// them after post (ADR-0019).
     overlay: Overlay,
     overlay_pass: overlay::OverlayPass,
+    /// The selection outline (`outline.rs`): the composite and the mask,
+    /// and the outlined instances — copies of theirs carrying the mask
+    /// value — in their own buffer.
+    outline_pass: outline::OutlinePass,
+    outline_draws: Vec<OutlineDraw>,
+    outline_instances: Vec<Instance>,
+    outline_buffer: wgpu::Buffer,
+    outline_capacity: u32,
     attachments: Attachments,
     shadow_map: ShadowMap,
     /// The shadow map holds this frame's sun: the shadow pass runs and the
@@ -934,6 +962,9 @@ impl ExtractRenderer {
         let instance_capacity = 64;
         let instance_buffer = create_instance_buffer(device, instance_capacity);
         let overlay_pass = overlay::OverlayPass::new(device, format, quality.msaa);
+        let outline_pass = outline::OutlinePass::new(device, format);
+        let outline_capacity = 4;
+        let outline_buffer = create_instance_buffer(device, outline_capacity);
 
         let uniform_entry = |binding, visibility| wgpu::BindGroupLayoutEntry {
             binding,
@@ -1240,6 +1271,11 @@ impl ExtractRenderer {
             debug: DebugDraw::default(),
             overlay: Overlay::default(),
             overlay_pass,
+            outline_pass,
+            outline_draws: Vec::new(),
+            outline_instances: Vec::new(),
+            outline_buffer,
+            outline_capacity,
             attachments,
             shadow_map,
             shadow_active: false,
@@ -1858,6 +1894,21 @@ impl ExtractRenderer {
         };
         let cube_bounds = self.cube.bounds;
         let mut caster_bounds: Option<Sphere> = None;
+        // The selection outline (ADR-0019, `outline.rs`): the mask value
+        // of each outlined entity — a child 0.5, selected 1, selected
+        // winning when an entity is both.
+        let outline = self.overlay.take_outline();
+        let mut outline_marks: HashMap<fynkel_contracts::Entity, f32> = HashMap::new();
+        if let Some(o) = &outline {
+            for e in &o.children {
+                outline_marks.insert(*e, 0.5);
+            }
+            for e in &o.selected {
+                outline_marks.insert(*e, 1.0);
+            }
+        }
+        self.outline_draws.clear();
+        self.outline_instances.clear();
         for (ri, r) in extract.records.iter().enumerate() {
             if r.layer_bit & camera_mask == 0 {
                 // Not this camera's layers: no draw, no shadow, no light list.
@@ -1962,6 +2013,23 @@ impl ExtractRenderer {
             } else {
                 (true, casts && fit.is_some())
             };
+            // Outlined: a copy of the instance for the mask, whatever
+            // pass draws the original (a blended one included). What is
+            // out of view has no silhouette on screen to ring.
+            if in_view {
+                if let Some(&mark) = outline_marks.get(&r.entity) {
+                    let mut copy = instance;
+                    copy.params[0] = mark;
+                    // Any valid light list: the mask shades nothing.
+                    copy.flags[2] = 0.0;
+                    self.outline_draws.push(OutlineDraw {
+                        key: key.clone(),
+                        double_sided,
+                        index: self.outline_instances.len() as u32,
+                    });
+                    self.outline_instances.push(copy);
+                }
+            }
             if !in_view {
                 stats.culled += 1;
                 if !casts {
@@ -2134,6 +2202,38 @@ impl ExtractRenderer {
             stats.joints = n_joints;
         }
 
+        // The outline's instances, in their own buffer. The draws are
+        // grouped by pipeline (static before skinned, culled before
+        // double-sided) so the mask pass switches at most three times;
+        // each keeps its slot. Every outlined instance is in view, so a
+        // skinned one's palette went up above with the scene's.
+        let n_outlined = self.outline_draws.len() as u32;
+        if n_outlined > 0 {
+            self.outline_draws
+                .sort_by_key(|d| (d.key.skinned, d.double_sided));
+            if n_outlined > self.outline_capacity {
+                self.outline_capacity = n_outlined.next_power_of_two();
+                self.outline_buffer = create_instance_buffer(device, self.outline_capacity);
+            }
+            queue.write_buffer(
+                &self.outline_buffer,
+                0,
+                bytemuck::cast_slice(&self.outline_instances),
+            );
+        }
+        self.outline_pass.prepare(
+            device,
+            queue,
+            outline.map(|o| o.style).filter(|_| n_outlined > 0),
+            (self.width, self.height),
+            self.pipelines.encode_srgb,
+        );
+        stats.outlined = if self.outline_pass.active() {
+            n_outlined
+        } else {
+            0
+        };
+
         // The sun's shadow: drawn when the profile draws shadows, the sun
         // casts and something is there to cast.
         self.shadow_active = casters_total > 0;
@@ -2290,6 +2390,8 @@ impl ExtractRenderer {
             + self.instance_buffer.size()
             + self.joint_buffer.size()
             + self.overlay_pass.bytes()
+            + self.outline_pass.bytes()
+            + self.outline_buffer.size()
             + self.uniform_buffer.size()
             + self.shadow_uniform_buffer.size()
             + self.post_buffer.size()
@@ -2357,8 +2459,13 @@ impl ExtractRenderer {
                 self.timestamps(3),
             );
         }
-        // Gizmos and handles over the finished frame, at the target's
-        // resolution (ADR-0019; not timed).
+        // The selection outline, then gizmos and handles, over the
+        // finished frame at the target's resolution (ADR-0019; not timed):
+        // the handles stay on top of the outline.
+        if self.outline_pass.active() {
+            self.outline_mask_pass(encoder);
+            self.outline_pass.composite(encoder, target);
+        }
         self.overlay_pass.draw(encoder, target);
         self.stats.encode_us = encode_start.elapsed().as_micros() as u32;
     }
@@ -2505,6 +2612,49 @@ impl ExtractRenderer {
                 bind_mesh(&mut pass, mesh, skinned);
                 pass.draw_indexed(0..mesh.index_count, 0, b.first..b.first + b.count);
             }
+        }
+    }
+
+    /// The selection outline's mask: every outlined instance's silhouette
+    /// at the target's size, cleared to 0 first, no depth — what other
+    /// geometry hides is in it too, as Unity outlines it.
+    fn outline_mask_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+        let Some(mask) = self.outline_pass.mask_view() else {
+            return;
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("fynkel outline mask"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: mask,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        let Some(fallbacks) = self.fallbacks.as_ref() else {
+            return;
+        };
+        pass.set_bind_group(0, &self.frame_bind_group, &[]);
+        pass.set_bind_group(2, &self.joint_bind_group, &[]);
+        pass.set_vertex_buffer(1, self.outline_buffer.slice(..));
+        let mut bound: Option<(bool, bool)> = None;
+        for d in &self.outline_draws {
+            let Some(mesh) = self.mesh_for(&d.key) else {
+                continue;
+            };
+            let variant = (d.key.skinned, d.double_sided);
+            if bound != Some(variant) {
+                pass.set_pipeline(self.pipelines.mask(d.key.skinned, d.double_sided));
+                bound = Some(variant);
+            }
+            pass.set_bind_group(1, self.material_for(&d.key, fallbacks), &[]);
+            bind_mesh(&mut pass, mesh, d.key.skinned);
+            pass.draw_indexed(0..mesh.index_count, 0, d.index..d.index + 1);
         }
     }
 
@@ -3158,10 +3308,21 @@ impl Pipelines {
         }
     }
 
+    /// The selection outline's mask twin of [`opaque`](Self::opaque).
+    fn mask(&self, skinned: bool, double_sided: bool) -> &wgpu::RenderPipeline {
+        match (skinned, double_sided) {
+            (false, false) => &self.mask,
+            (false, true) => &self.mask_double_sided,
+            (true, false) => &self.mask_skinned,
+            (true, true) => &self.mask_skinned_double_sided,
+        }
+    }
+
     const fn count() -> usize {
-        // The twenty-two below plus the overlay's grid, lines and
-        // triangles (`overlay::OverlayPass`, ADR-0019).
-        25
+        // The twenty-six below plus the overlay's grid, lines and
+        // triangles (`overlay::OverlayPass`, ADR-0019) and the selection
+        // outline's composite (`outline::OutlinePass`).
+        30
     }
 }
 
@@ -3190,14 +3351,15 @@ struct AttachmentLayouts<'a> {
     bloom: &'a wgpu::BindGroupLayout,
 }
 
-/// Twenty-two of the pipeline variants (`docs/renderer.md`) for one sample
+/// Twenty-six of the pipeline variants (`docs/renderer.md`) for one sample
 /// count — the overlay's three (grid, lines, triangles) live with its pass
-/// in `overlay.rs`: mesh (cull back), mesh double-sided (cull none), transparent
-/// (blend, cull back), transparent double-sided, the same four skinned
-/// (`vs_skinned`, a third vertex buffer of joint weights and the palette
-/// storage buffer at group 2), sky, shadow, shadow skinned, the four
-/// camera depth prepass twins, SSAO, the AO blur, bloom's three,
-/// post, present. Nothing else is ever created; a quality switch to
+/// in `overlay.rs`, the outline's composite in `outline.rs`: mesh (cull
+/// back), mesh double-sided (cull none), transparent (blend, cull back),
+/// transparent double-sided, the same four skinned (`vs_skinned`, a
+/// third vertex buffer of joint weights and the palette storage buffer at
+/// group 2), sky, shadow, shadow skinned, the four camera depth prepass
+/// twins, the four outline mask twins (one sample whatever the scene's),
+/// SSAO, the AO blur, bloom's three, post, present. Nothing else is ever created; a quality switch to
 /// another sample count rebuilds this set.
 fn create_pipelines(
     device: &wgpu::Device,
@@ -3429,6 +3591,56 @@ fn create_pipelines(
                     clamp: 0.0,
                 },
             }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    // The outline's mask (`outline.rs`): the scene's vertex stages and
+    // culling at the target's size, one sample and no depth — the whole
+    // silhouette, hidden parts included. `Max` keeps a selected texel's 1
+    // over a child's 0.5 in whatever order they land (WebGPU allows the
+    // min/max operations with factors of one only).
+    let keep_max = wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::One,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Max,
+    };
+    let mask_target = [Some(wgpu::ColorTargetState {
+        format: outline::MASK_FORMAT,
+        blend: Some(wgpu::BlendState {
+            color: keep_max,
+            alpha: keep_max,
+        }),
+        write_mask: wgpu::ColorWrites::ALL,
+    })];
+    let mask = |label, skinned: bool, cull_mode| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&mesh_layout),
+            vertex: wgpu::VertexState {
+                module: &mesh_shader,
+                entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
+                compilation_options: Default::default(),
+                buffers: if skinned {
+                    &skinned_buffers
+                } else {
+                    &mesh_buffers
+                },
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &mesh_shader,
+                entry_point: Some("fs_mask"),
+                compilation_options: Default::default(),
+                targets: &mask_target,
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode,
+                ..Default::default()
+            },
+            depth_stencil: None,
             multisample: Default::default(),
             multiview_mask: None,
             cache: None,
@@ -3671,6 +3883,14 @@ fn create_pipelines(
             &[],
             true,
             "fs_depth",
+        ),
+        mask: mask("fynkel outline mask pipeline", false, back),
+        mask_double_sided: mask("fynkel outline mask pipeline (double-sided)", false, None),
+        mask_skinned: mask("fynkel outline mask skinned pipeline", true, back),
+        mask_skinned_double_sided: mask(
+            "fynkel outline mask skinned pipeline (double-sided)",
+            true,
+            None,
         ),
         ao: ao_pipeline("fynkel ao pipeline", "fs_main"),
         ao_blur: ao_pipeline("fynkel ao blur pipeline", "fs_blur"),

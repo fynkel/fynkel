@@ -34,7 +34,7 @@ use fynkel_core::{
 use fynkel_import::{cook_project, CookOptions};
 use fynkel_render::{
     clear_rgba8, exposure, headless_device, render_offscreen, Assets, ExtractRenderer, Grid,
-    Quality, LIGHT_POOL, MAX_LIGHTS, PIPELINE_VARIANTS,
+    OutlineStyle, Quality, LIGHT_POOL, MAX_LIGHTS, PIPELINE_VARIANTS,
 };
 use glam::{Mat4, Quat, Vec3};
 use serde_json::{json, Value};
@@ -584,7 +584,7 @@ fn orthographic_camera_has_no_perspective() {
 
 #[test]
 fn a_fixed_set_of_pipelines() {
-    assert_eq!(PIPELINE_VARIANTS, 25);
+    assert_eq!(PIPELINE_VARIANTS, 30);
 }
 
 // ------------------------------------------------------------ materials
@@ -2320,4 +2320,330 @@ fn bloom_spreads_bright_light_past_its_edges_and_the_threshold_keeps_the_rest() 
         wide_px[far],
         tight_px[far]
     );
+}
+
+// ------------------------------------------ the selection outline (ADR-0019)
+
+/// A linear colour as the Unorm target stores it (the overlay encodes
+/// sRGB itself).
+fn srgb8(c: [f32; 4]) -> [u8; 3] {
+    let e = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        let s = if v <= 0.003_130_8 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round() as u8
+    };
+    [e(c[0]), e(c[1]), e(c[2])]
+}
+
+fn near(p: [u8; 4], c: [u8; 3]) -> bool {
+    (0..3).all(|i| (p[i] as i32 - c[i] as i32).abs() <= 2)
+}
+
+/// Whether some pixel within `r` of `(x, y)` is set in `cover`.
+fn within(cover: &[bool], x: i32, y: i32, r: i32) -> bool {
+    (-r..=r).any(|dy| {
+        (-r..=r).any(|dx| {
+            let (u, v) = (x + dx, y + dy);
+            u >= 0 && v >= 0 && u < W as i32 && v < H as i32 && cover[(v * W as i32 + u) as usize]
+        })
+    })
+}
+
+/// Pixels whose whole `r` neighbourhood is set in `cover`.
+fn deep_inside(cover: &[bool], r: i32) -> Vec<usize> {
+    (0..(W * H) as usize)
+        .filter(|&i| {
+            let (x, y) = ((i as u32 % W) as i32, (i as u32 / W) as i32);
+            (-r..=r).all(|dy| {
+                (-r..=r).all(|dx| {
+                    let (u, v) = (x + dx, y + dy);
+                    u >= 0
+                        && v >= 0
+                        && u < W as i32
+                        && v < H as i32
+                        && cover[(v * W as i32 + u) as usize]
+                })
+            })
+        })
+        .collect()
+}
+
+/// The placeholder cube at the origin in `cube_scene` (record 1).
+const CUBE: Entity = Entity::from_bits(2);
+
+#[test]
+fn a_selected_cube_is_ringed_just_outside_its_silhouette_and_untouched_inside() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    e.records[1].world = Mat4::from_rotation_y(0.4);
+    let orange = srgb8(OutlineStyle::default().selected);
+    for msaa in [1, 4] {
+        let mut r = renderer(&device);
+        r.set_quality(Quality {
+            msaa,
+            ..Quality::default()
+        });
+        let plain = render_offscreen(&device, &queue, &mut r, &e);
+        assert_eq!(r.stats().outlined, 0);
+        r.overlay().outline(&[CUBE], &[], OutlineStyle::default());
+        let ringed = render_offscreen(&device, &queue, &mut r, &e);
+        dump(&ringed, &format!("outline-msaa{msaa}"));
+        assert_eq!(r.stats().outlined, 1);
+        let cover: Vec<bool> = plain.iter().map(|p| !is_background(*p)).collect();
+        // Inside: the cube as it was.
+        let inside = deep_inside(&cover, 1);
+        assert!(inside.len() > 500, "{}", inside.len());
+        for &i in &inside {
+            assert_eq!(ringed[i], plain[i], "pixel {i} inside the cube");
+        }
+        // Outside: a ring hugging the silhouette, solid where it is
+        // closest and nowhere further than width + 1.
+        let mut solid = 0;
+        for (i, (p, q)) in ringed.iter().zip(&plain).enumerate() {
+            if p == q {
+                continue;
+            }
+            let (x, y) = ((i as u32 % W) as i32, (i as u32 / W) as i32);
+            assert!(within(&cover, x, y, 3), "{x},{y} is far from the cube");
+            if near(*p, orange) {
+                solid += 1;
+            }
+        }
+        assert!(solid > 100, "msaa {msaa}: {solid} solid outline pixels");
+        // Per frame, like the rest of the overlay.
+        assert_eq!(render_offscreen(&device, &queue, &mut r, &e), plain);
+        assert_eq!(r.stats().outlined, 0);
+    }
+
+    // At one sample the mask is the scene's own coverage: the pixel next
+    // to the silhouette is the full colour, two away half of it, three
+    // away untouched.
+    let mut r = renderer(&device);
+    r.set_quality(Quality {
+        msaa: 1,
+        ..Quality::default()
+    });
+    let e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    let plain = render_offscreen(&device, &queue, &mut r, &e);
+    r.overlay().outline(&[CUBE], &[], OutlineStyle::default());
+    let ringed = render_offscreen(&device, &queue, &mut r, &e);
+    let row = (H / 2 * W) as usize;
+    let left = (0..W as usize)
+        .find(|&x| !is_background(plain[row + x]))
+        .unwrap();
+    assert!(
+        near(ringed[row + left - 1], orange),
+        "{:?}",
+        ringed[row + left - 1]
+    );
+    let half = ringed[row + left - 2];
+    assert!(
+        half != plain[row + left - 2] && !near(half, orange),
+        "{half:?}"
+    );
+    assert_eq!(ringed[row + left - 3], plain[row + left - 3]);
+}
+
+#[test]
+fn children_are_ringed_in_their_own_colour_and_selected_wins() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    r.set_quality(Quality {
+        msaa: 1,
+        ..Quality::default()
+    });
+    // Two cubes side by side, touching on screen.
+    let mut e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    e.records[1].world = Mat4::from_translation(Vec3::new(-0.5, 0.0, 0.0));
+    e.records
+        .push(record(2, Mat4::from_translation(Vec3::new(0.5, 0.0, 0.0))));
+    let (a, b) = (CUBE, Entity::from_bits(3));
+    let style = OutlineStyle::default();
+    let (orange, blue) = (srgb8(style.selected), srgb8(style.children));
+    let plain = render_offscreen(&device, &queue, &mut r, &e);
+    let row = (H / 2 * W) as usize;
+    let left = (0..W as usize)
+        .find(|&x| !is_background(plain[row + x]))
+        .unwrap();
+    let right = (0..W as usize)
+        .rev()
+        .find(|&x| !is_background(plain[row + x]))
+        .unwrap();
+    let mut colours = |selected: &[Entity], children: &[Entity]| {
+        r.overlay().outline(selected, children, style);
+        let px = render_offscreen(&device, &queue, &mut r, &e);
+        (px[row + left - 1], px[row + right + 1])
+    };
+    // `a` selected, `b` its child.
+    let (l, rr) = colours(&[a], &[b]);
+    assert!(near(l, orange) && near(rr, blue), "{l:?} {rr:?}");
+    // Both children.
+    let (l, rr) = colours(&[], &[a, b]);
+    assert!(near(l, blue) && near(rr, blue), "{l:?} {rr:?}");
+    // In both lists: selected.
+    let (l, rr) = colours(&[b], &[a, b]);
+    assert!(near(l, blue) && near(rr, orange), "{l:?} {rr:?}");
+    // Just above the seam between the two, the selected one's ring wins
+    // over its child's.
+    let top = (0..H as usize)
+        .find(|&y| !is_background(plain[y * W as usize + W as usize / 2 - 1]))
+        .unwrap();
+    r.overlay().outline(&[a], &[b], style);
+    let px = render_offscreen(&device, &queue, &mut r, &e);
+    let above = px[(top - 1) * W as usize + W as usize / 2 - 1];
+    assert!(near(above, orange), "{above:?}");
+}
+
+#[test]
+fn the_outline_rings_what_other_geometry_hides() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut r = renderer(&device);
+    // A big cube in front of the selected one hides it completely.
+    let mut e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    e.records.push(record(
+        2,
+        Mat4::from_scale_rotation_translation(Vec3::splat(1.5), Quat::IDENTITY, Vec3::Z * 1.5),
+    ));
+    let plain = render_offscreen(&device, &queue, &mut r, &e);
+    r.overlay().outline(&[CUBE], &[], OutlineStyle::default());
+    let ringed = render_offscreen(&device, &queue, &mut r, &e);
+    dump(&ringed, "outline-occluded");
+    let orange = srgb8(OutlineStyle::default().selected);
+    let over = ringed
+        .iter()
+        .zip(&plain)
+        .filter(|(p, q)| !is_background(**q) && near(**p, orange))
+        .count();
+    assert!(over > 100, "{over} outline pixels over the occluder");
+    // The occluder's own silhouette is not ringed: every change is on it.
+    assert!(ringed
+        .iter()
+        .zip(&plain)
+        .all(|(p, q)| p == q || !is_background(*q)));
+}
+
+#[test]
+fn the_outline_width_is_in_target_pixels() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    let ring = |r: &mut ExtractRenderer, width: f32| {
+        let plain = render_offscreen(&device, &queue, r, &e);
+        r.overlay().outline(
+            &[CUBE],
+            &[],
+            OutlineStyle {
+                width,
+                ..OutlineStyle::default()
+            },
+        );
+        let px = render_offscreen(&device, &queue, r, &e);
+        (changed(&plain, &px), px)
+    };
+    let mut r = renderer(&device);
+    let (thin, _) = ring(&mut r, 2.0);
+    let (thick, px) = ring(&mut r, 6.0);
+    dump(&px, "outline-wide");
+    assert!(thick > thin * 2, "{thick} vs {thin}");
+    // No width, no outline — and no outline passes.
+    let (none, _) = ring(&mut r, 0.0);
+    assert_eq!((none, r.stats().outlined), (0, 0));
+
+    // The render scale resamples the scene, never the outline: its ring
+    // is as wide at half and at double the internal size.
+    let orange = srgb8(OutlineStyle::default().selected);
+    for scale in [0.5, 2.0] {
+        r.set_quality(Quality {
+            render_scale: scale,
+            ..Quality::default()
+        });
+        let (n, px) = ring(&mut r, 2.0);
+        dump(&px, &format!("outline-scale-{scale}"));
+        let ratio = n as f32 / thin as f32;
+        assert!(
+            (0.75..=1.35).contains(&ratio),
+            "scale {scale}: {n} vs {thin}"
+        );
+        let solid = px.iter().filter(|p| near(**p, orange)).count();
+        assert!(solid > 100, "scale {scale}: {solid}");
+    }
+}
+
+#[test]
+fn without_an_outline_nothing_changes() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut e = cube_scene(Vec3::new(0.0, 0.0, 4.0), Camera::default());
+    e.directional_lights
+        .push(sun(Vec3::new(-0.3, -1.0, -0.5), 10_000.0));
+    // A renderer that never outlined anything is the baseline.
+    let mut fresh = renderer(&device);
+    let baseline = render_offscreen(&device, &queue, &mut fresh, &e);
+    let mut r = renderer(&device);
+    r.overlay().outline(&[CUBE], &[], OutlineStyle::default());
+    render_offscreen(&device, &queue, &mut r, &e);
+    assert_eq!(render_offscreen(&device, &queue, &mut r, &e), baseline);
+    // Nothing named, an entity the extract lacks, one on a layer the
+    // camera leaves out: no outline, the same pixels.
+    let absent = Entity::from_bits(99);
+    r.overlay().outline(&[], &[], OutlineStyle::default());
+    assert_eq!(render_offscreen(&device, &queue, &mut r, &e), baseline);
+    assert_eq!(r.stats().outlined, 0);
+    r.overlay()
+        .outline(&[absent], &[absent], OutlineStyle::default());
+    assert_eq!(render_offscreen(&device, &queue, &mut r, &e), baseline);
+    assert_eq!(r.stats().outlined, 0);
+    let mut hidden = e.clone();
+    hidden.records[1].layer_bit = 2;
+    if let Some(c) = hidden.camera.as_mut() {
+        c.camera.culling_mask = !2;
+    }
+    let hidden_plain = render_offscreen(&device, &queue, &mut r, &hidden);
+    r.overlay().outline(&[CUBE], &[], OutlineStyle::default());
+    assert_eq!(
+        render_offscreen(&device, &queue, &mut r, &hidden),
+        hidden_plain
+    );
+    assert_eq!(r.stats().outlined, 0);
+}
+
+#[test]
+fn blended_meshes_are_outlined_by_their_whole_surface() {
+    let Some((device, queue)) = device() else {
+        return;
+    };
+    let mut lab = Lab::new("outline-blend");
+    let glass = lab.material(json!({
+        "base_color": [1.0, 0.0, 0.0, 0.3], "alpha_mode": "blend", "roughness": 1.0 }));
+    let (assets, extract) = lab.extract(Vec3::new(0.0, 0.0, 3.0), &[(Vec3::ZERO, glass)], false);
+    let (plain, mut r) = render_lab(&device, &queue, &assets, &extract);
+    assert_eq!(r.stats().transparent, 1);
+    let entity = extract.records[extract.meshes[0].record as usize].entity;
+    r.overlay().outline(&[entity], &[], OutlineStyle::default());
+    let ringed = render_offscreen(&device, &queue, &mut r, &extract);
+    dump(&ringed, "outline-blend");
+    assert_eq!(r.stats().outlined, 1);
+    let orange = srgb8(OutlineStyle::default().selected);
+    let cover: Vec<bool> = plain.iter().map(|p| !is_background(*p)).collect();
+    let ring = ringed
+        .iter()
+        .zip(&plain)
+        .filter(|(p, q)| p != q && near(**p, orange))
+        .count();
+    assert!(ring > 100, "{ring}");
+    for i in deep_inside(&cover, 1) {
+        assert_eq!(ringed[i], plain[i]);
+    }
 }

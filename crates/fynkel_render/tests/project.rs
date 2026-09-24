@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 
 use fynkel_core::{World, WorldConfig};
 use fynkel_import::{cook_project, CookOptions};
-use fynkel_render::{clear_rgba8, headless_device, render_offscreen, Assets, ExtractRenderer};
+use fynkel_render::{
+    clear_rgba8, headless_device, render_offscreen, Assets, ExtractRenderer, OutlineStyle,
+};
 
 fn fixture_project() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -348,4 +350,40 @@ fn skinned_meshes_follow_their_joint_palette() {
         body_diff < 400,
         "{body_diff} pixels differ from the bind pose"
     );
+
+    // The selection outline is drawn through the palette too: its ring
+    // hugs the bent columns, and part of it lies well away from where the
+    // straight ones stood.
+    let skinned: Vec<fynkel_contracts::Entity> = posed
+        .meshes
+        .iter()
+        .filter(|m| m.skin.is_some())
+        .map(|m| posed.records[m.record as usize].entity)
+        .collect();
+    assert_eq!(skinned.len(), 2);
+    renderer
+        .overlay()
+        .outline(&skinned, &[], OutlineStyle::default());
+    let px_ringed = render_offscreen(&device, &queue, &mut renderer, &posed);
+    assert_eq!(renderer.stats().outlined, 2);
+    let within = |cover: &[bool], i: usize, r: i32| {
+        let (x, y) = ((i as u32 % w) as i32, (i as u32 / w) as i32);
+        (-r..=r).any(|dy| {
+            (-r..=r).any(|dx| {
+                let (u, v) = (x + dx, y + dy);
+                u >= 0
+                    && v >= 0
+                    && u < w as i32
+                    && v < h as i32
+                    && cover[(v * w as i32 + u) as usize]
+            })
+        })
+    };
+    let ring: Vec<usize> = (0..px_posed.len())
+        .filter(|&i| px_ringed[i] != px_posed[i])
+        .collect();
+    assert!(ring.len() > 100, "{} ring pixels", ring.len());
+    assert!(ring.iter().all(|&i| within(&bent, i, 3)));
+    let away = ring.iter().filter(|&&i| !within(&straight, i, 4)).count();
+    assert!(away > 20, "{away} ring pixels away from the bind pose");
 }
