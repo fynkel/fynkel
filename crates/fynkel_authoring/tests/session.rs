@@ -854,6 +854,19 @@ fn a_source_without_a_sidecar_gets_one_on_the_next_scan() {
     s.rescan(std::slice::from_ref(&png)).unwrap();
     assert!(s.project().unwrap().sidecars_written.is_empty());
 
+    // Finder's `.DS_Store`, named by the watcher or inside a folder it
+    // names, is not an asset: no sidecar, as in a full scan.
+    let ds = copy.path("assets/.DS_Store");
+    std::fs::write(&ds, [0u8; 16]).unwrap();
+    std::fs::write(folder.join(".DS_Store"), [0u8; 16]).unwrap();
+    let scan = s.rescan(&[ds.clone(), folder.clone()]).unwrap();
+    assert!(!code_of(&scan).contains(&"FYN-A0001"), "{scan:?}");
+    let p = s.project().unwrap();
+    assert!(p.sidecars_written.is_empty());
+    assert!(!copy.path("assets/.DS_Store.meta.json").exists());
+    assert!(!folder.join(".DS_Store.meta.json").exists());
+    assert_eq!(p.assets.len(), before + 2);
+
     // A read-only project (a newer build's lock) is not written to.
     let lock = copy
         .read("fynkel.lock.json")

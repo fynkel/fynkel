@@ -487,6 +487,11 @@ impl AssetDatabase {
             if rel.is_empty() {
                 continue;
             }
+            // Hidden files and folders (`.DS_Store`, `.git`) are not
+            // assets, as in a full scan.
+            if rel.split('/').any(|c| c.starts_with('.')) {
+                continue;
+            }
             if abs.is_dir() {
                 drop_prefixes.push(format!("{rel}/"));
                 let _ = collect(&abs, &mut files);
