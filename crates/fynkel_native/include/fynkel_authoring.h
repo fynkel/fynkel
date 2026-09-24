@@ -260,7 +260,13 @@ FynkelStatus fynkel_authoring_query(FynkelAuthoringSession* session,
  *                                                  overrides); refused while such a document
  *                                                  has unsaved edits; `reload` lists the
  *                                                  open documents the client re-reads
- *   undoAsset / redoAsset                          the asset history
+ *   registerBehaviour  id, description?            after `fynkel codegen` wrote a new
+ *                                                  behaviour's metadata and schema: adds
+ *                                                  it to the project's component registry
+ *                                                  (when missing; undoable) and re-reads
+ *                                                  the metadata and schemas; answers
+ *                                                  { id, registered, inMetadata }
+ *   undoAsset / redoAsset                         the asset history
  * Result: { "ok", "op", "label", "entry", "assetCount", "canUndo", "canRedo",
  * "undoLabel", "redoLabel", ...per operation }. FYNKEL_STATUS_INVALID_ARGUMENT
  * with FYN-T0003 for a refused operation (nothing was touched) or FYN-T0004

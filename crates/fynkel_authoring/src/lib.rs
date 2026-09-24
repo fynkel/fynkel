@@ -20,6 +20,7 @@
 
 #![allow(clippy::result_large_err)] // `Diagnostic` is the workspace's error type
 
+pub mod behaviours;
 pub mod instance;
 pub mod layers;
 pub mod live;

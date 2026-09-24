@@ -374,7 +374,13 @@ FynkelStatus fynkel_authoring_query(
 /// overrides); refused while such a document
 /// has unsaved edits; `reload` lists the
 /// open documents the client re-reads
-/// undoAsset / redoAsset                          the asset history
+/// registerBehaviour  id, description?            after `fynkel codegen` wrote a new
+/// behaviour's metadata and schema: adds
+/// it to the project's component registry
+/// (when missing; undoable) and re-reads
+/// the metadata and schemas; answers
+/// { id, registered, inMetadata }
+/// undoAsset / redoAsset                         the asset history
 /// Result: { "ok", "op", "label", "entry", "assetCount", "canUndo", "canRedo",
 /// "undoLabel", "redoLabel", ...per operation }. FYNKEL_STATUS_INVALID_ARGUMENT
 /// with FYN-T0003 for a refused operation (nothing was touched) or FYN-T0004
@@ -589,17 +595,34 @@ FynkelStatus fynkel_authoring_preview_call(
 
 /// A live call on a RUNNING game's world (ADR-0021 P7, live Play mode) —
 /// not a preview: no session, the world is the game's. Kinds:
-/// - "entities" {} -> { tick, entities: [{ id, entity, name, parent,
-/// spawned, layer, tags, children, types }] }, parents before children
-/// (`entity` the runtime handle, `children` a count, `types` the native
-/// component types). `id` is the
+/// - "entities" { since? } -> { tick, revision, entities: [{ id, entity,
+/// name, parent, spawned, layer, tags, children, types }] }, parents
+/// before children (`entity` the runtime handle, `children` a count,
+/// `types` the native component types). `revision` hashes the rows (this
+/// process only); given `since` equal to it the answer is { tick,
+/// revision, unchanged: true } without them. `id` is the
 /// authoring id for what a loaded scene spawned (a cooked prefab
 /// instance's children carry their derived ids), "runtime:<handle>" for
 /// what the game spawned or instantiated (`spawned` true);
 /// - "entity" { id } -> { id, entity, name, parent, world, components: [{ type,
 /// data }] }, every native component as the scene document stores it;
 /// - "set" { id, type, data } replaces or adds a native component from its
-/// document JSON; "remove" { id, type }; "rename" { id, name }.
+/// document JSON; "remove" { id, type }; "rename" { id, name };
+/// "parent" { id, parent: id | null, index? } moves it (its local
+/// transform kept; `index` among the new siblings, last when absent);
+/// "destroy" { id } destroys it and its subtree; "spawn" { name?, parent?:
+/// id | null, index?, components: [{ type, data }], id?, scene? } makes
+/// an entity at once -> { ok, id } (with an `id` it joins a loaded scene
+/// under that authoring id: `scene`'s, its parent's, else the first);
+/// - for the Scene view on the running world, the preview's own picking
+/// and overlays over every live entity (meshes read from the cache the
+/// world loaded): "pick" { ray: { origin, dir } } or { view, ndc } ->
+/// { ray, hits: [{ id, entity, distance, point, mesh }] } nearest first,
+/// each entity itself (a running prefab instance has no anchor);
+/// "pickRect" { view, min, max } -> { ids }; "lines" { outline?: { ids,
+/// color? }, icons?: { aspect } } -> { count, lines } (an id no longer
+/// alive draws nothing); "worldMatrix" { ids } -> { matrices: { id:
+/// 16 floats } } for the ids still alive. `view` is the preview's shape.
 /// A write applies at once, at the current tick, without stepping (it
 /// shows while paused; no system runs). `out_view` gets the JSON result,
 /// valid until the next query or mutating call on the world. The world
