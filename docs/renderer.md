@@ -485,6 +485,38 @@ Apple viewport takes the overlay as `fynkel_apple_viewport_overlay`
 (every overlay line), `overlay_triangles` and `grid`. Physics shapes
 come with the physics item.
 
+**The selection outline** (`outline(selected, children, OutlineStyle)`,
+`src/outline.rs`, `shaders/outline.wgsl`) is Unity's: an orange ring just
+outside the silhouette of what is selected and a blue one around its
+children, one ring around the union of what each list covers. It is two
+passes after post and presentation and before the overlay's lines, so a
+handle or gizmo line still draws over it. The *mask* pass draws every
+listed entity that has a draw record in view — meshes, placeholder cubes,
+skinned meshes in their pose, `blend` materials by their whole surface,
+`mask` materials cut at their cutoff — from their own instance buffer
+(the scene's batches are left alone) into an `R8Unorm` texture at the
+target's size, one sample, with no depth test, so a selected object
+behind a wall is still ringed where it would be; each writes 1.0
+(selected) or 0.5 (children) and the pipelines blend by `Max`, so an
+entity in both lists is selected. The *composite* pass is one fullscreen
+triangle: inside the mask it discards (the object keeps its own shading),
+outside it searches a square of `ceil(width) + 1` texels for the nearest
+covered one and draws its colour with alpha `clamp(width + 0.5 − d, 0, 1)`
+— at the default width of 2 target pixels a one-pixel solid ring and a
+half-alpha fringe, the same at every render scale and sample count
+(`width` is in target pixels, capped at `MAX_OUTLINE_WIDTH` = 16; 0 or
+less draws nothing). The nearest texel's value picks the colour (`> 0.75`
+is `selected`), colours are linear with straight alpha and are encoded to
+sRGB like the overlay's. `OutlineStyle::default()` is orange
+`[1, 0.4, 0, 1]`, blue `[0.37, 0.47, 0.61, 1]`, width 2. Like the rest of
+the overlay it is consumed by the next `prepare`; with nothing queued, or
+nothing listed in view, neither pass runs and the frame is bit-identical
+to one without it. `FrameStats.outlined` counts the instances drawn into
+the mask. The Apple viewport takes it as `fynkel_apple_viewport_outline`
+(ABI v8) and `package:fynkel_flutter` as `ViewportOverlay.outline`; the
+editor gets the entities to list from its ids through the authoring
+preview's `entities` kind (the live world's `handles`).
+
 Placeholder cubes (entities without a `MeshRenderer`, when
 `placeholders` is on) are lit like a rough white dielectric in their
 palette tint; a mesh missing from the cache is the unlit magenta cube.
@@ -727,7 +759,7 @@ full table.
 
 ## Pipelines and caches — the variant cap
 
-Exactly **twenty-five** render pipelines exist, all created in `new`
+Exactly **thirty** render pipelines exist, all created in `new`
 (`PIPELINE_VARIANTS`) and rebuilt as a set only when the sample count
 changes; nothing is compiled at draw time:
 
@@ -749,6 +781,9 @@ changes; nothing is compiled at draw time:
 | `post` | host format | 1 | none | none | — | |
 | `present` | host format | 1 | none | none | — | |
 | overlay `grid`, `lines`, `triangles` | host format | 1 | none | none (the scene depth is a texture) | src-alpha | `vs_grid`, `vs_line`, `vs_triangle` (item 9f, § The overlay) |
+| `mask`, `mask_double_sided` | `R8Unorm` (the outline mask) | 1 | back / none | none | `Max` | `vs_main`, `fs_mask` (§ The overlay, the selection outline) |
+| `mask_skinned`, `mask_skinned_double_sided` | the same two | | | | | `vs_skinned` |
+| outline `composite` | host format | 1 | none | none | src-alpha | fullscreen |
 
 Material features (maps present or not, mask, blend, unlit) are data —
 instance flags and fallback textures — not variants. A new variant needs
@@ -757,7 +792,10 @@ different vertex input layout (a third vertex buffer) and a different
 vertex entry, which wgpu cannot make data, so it doubles the mesh and
 shadow rows — the 9 of M3-05 became 14, and R2's depth prepass (which
 must cull exactly as the opaque pass does) plus the two AO passes made
-20, and R3b's three bloom passes 23, still all created up front and never at draw time; nothing else about a skinned draw (material, lights,
+20, and R3b's three bloom passes 23 (the overlay's three making 25, and
+the selection outline's four mask twins and its composite 30 — the mask
+must cull and cut exactly as the scene does, so it is the mesh rows
+again with one more fragment entry), still all created up front and never at draw time; nothing else about a skinned draw (material, lights,
 shadow, blend) differs, and `Pipelines::opaque(skinned, double_sided)` /
 `transparent(…)` pick the variant. Bind groups are cached per material `AssetRef`
 (five texture views + the sampler, the fallback view for every unbound
@@ -838,7 +876,17 @@ anti-aliased at the edge, fading behind the scene unless `ON_TOP`, the
 same pixels at EV 0 and EV 6 and at MSAA 1 and 4, filled triangles with
 anti-aliased edges, and the grid on a floor at `y = 0` (the same as a
 floor a millimetre below), hidden under one 20 cm above, and denser near
-the camera than far; from V1 (c): frustum culling dropping four off-screen cubes
+the camera than far; the selection outline: a selected cube ringed just
+outside its silhouette (full colour one pixel out, half two out, nothing
+three out at MSAA 1, the same ring at MSAA 4) and untouched inside,
+children in their own colour with selected winning an entity in both,
+a cube ringed behind the geometry that hides it, the width in target
+pixels (2 against 6, 0 drawing nothing, the same ring at render scale
+0.5 and 2), the frame after an outline — or with one naming nothing, an
+entity the extract lacks or one on a layer the camera leaves out —
+bit-identical to a renderer's that never had one, a blend material ringed by its whole surface, and (in
+`tests/project.rs`) the fixture's skinned meshes ringed in their pose,
+not their bind pose; from V1 (c): frustum culling dropping four off-screen cubes
 (one of them still casting its shadow into the view) with the picture
 identical to `frustum_culling = false`. `tests/offscreen.rs` counts a
 40 × 25 grid of placeholders as drawn + culled = 1 000 in one draw.
