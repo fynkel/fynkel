@@ -9,7 +9,10 @@
 //! The two pipelines have separate caches: (a) is a pure function of the
 //! Rust registry (no cache), (b) is build_runner's `.dart_tool/build`.
 //! `--check` runs the generator too and compares; on drift the committed
-//! files are put back so a check never mutates the tree.
+//! files are put back so a check never mutates the tree. A run that fails
+//! (build_runner's error, a lock held by another build) puts them back as
+//! well: build_runner deletes its outputs before it builds, and a failed
+//! check used to leave the game without them.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -74,13 +77,28 @@ pub fn run(project: &Path, check: bool) -> Result<Outcome, String> {
     let dart_out = project.join(DART_OUT);
     let json_out = project.join(JSON_OUT);
     let before = (read_opt(&dart_out), read_opt(&json_out));
-
-    if !project.join(".dart_tool/package_config.json").is_file() {
-        sh(&dart, &["pub", "get"], project)?;
+    let result = generate(project, &dart, check, &dart_out, &json_out, &before);
+    if result.is_err() || check {
+        restore(&dart_out, before.0.as_deref())?;
+        restore(&json_out, before.1.as_deref())?;
     }
-    sh(&dart, &["run", "build_runner", "build"], project)?;
+    result
+}
 
-    let after = (read_opt(&dart_out), read_opt(&json_out));
+fn generate(
+    project: &Path,
+    dart: &Path,
+    check: bool,
+    dart_out: &Path,
+    json_out: &Path,
+    before: &(Option<String>, Option<String>),
+) -> Result<Outcome, String> {
+    if !project.join(".dart_tool/package_config.json").is_file() {
+        sh(dart, &["pub", "get"], project)?;
+    }
+    sh(dart, &["run", "build_runner", "build"], project)?;
+
+    let after = (read_opt(dart_out), read_opt(json_out));
     let json_text = after
         .1
         .clone()
@@ -133,9 +151,7 @@ pub fn run(project: &Path, check: bool) -> Result<Outcome, String> {
     }
 
     if check {
-        // Put the committed generated files back: a check never mutates.
-        restore(&dart_out, before.0.as_deref())?;
-        restore(&json_out, before.1.as_deref())?;
+        // `run` puts the committed generated files back: a check never mutates.
         return Ok(if drift.is_empty() {
             Outcome::UpToDate { types }
         } else {

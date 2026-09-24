@@ -269,3 +269,55 @@ fn create_refuses_bad_names_and_non_empty_directories() {
     assert!(generated.contains("package:space_game/game/spinner.dart"));
     let _ = std::fs::remove_dir_all(&parent);
 }
+
+/// build_runner deletes its outputs before it builds; a run that fails
+/// (its error, a lock another build holds) must leave the committed
+/// generated files in place — a failed editor check once left the game
+/// without them.
+#[test]
+fn codegen_that_fails_puts_the_generated_files_back() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = fresh("codegen-fails");
+    std::fs::create_dir_all(dir.join("lib/generated")).unwrap();
+    std::fs::create_dir_all(dir.join(".dart_tool")).unwrap();
+    std::fs::write(dir.join("pubspec.yaml"), "name: g\n").unwrap();
+    std::fs::write(dir.join(".dart_tool/package_config.json"), "{}").unwrap();
+    std::fs::write(dir.join("lib/generated/behaviours.g.dart"), "// dart\n").unwrap();
+    std::fs::write(dir.join("lib/generated/behaviours.g.json"), "{}\n").unwrap();
+    let dart = dir.join("fake-dart");
+    std::fs::write(
+        &dart,
+        "#!/bin/sh\nrm -f lib/generated/behaviours.g.dart lib/generated/behaviours.g.json\necho 'build failed' >&2\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&dart, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    for check in [true, false] {
+        let mut args = vec!["codegen", "--project", ".", "--project-only", "--json"];
+        if check {
+            args.push("--check");
+        }
+        let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+            .args(&args)
+            .env("FYNKEL_DART", &dart)
+            .current_dir(&dir)
+            .output()
+            .expect("run fynkel");
+        assert!(!out.status.success(), "check={check}");
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("build failed"),
+            "check={check}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("lib/generated/behaviours.g.dart")).unwrap(),
+            "// dart\n",
+            "check={check}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("lib/generated/behaviours.g.json")).unwrap(),
+            "{}\n",
+            "check={check}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
