@@ -297,32 +297,55 @@ class ApplyBar extends StatelessWidget {
         border: Border(top: BorderSide(color: t.accent.withValues(alpha: .5))),
       ),
       padding: EdgeInsets.fromLTRB(t.pad + 2, 6, t.pad, 6),
-      child: Row(
-        children: [
-          Icon(FIcons.editNote, size: 14, color: t.accent),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              message,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(color: t.text),
+      // Narrow (a docked Inspector), the buttons go under the message.
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final note = Row(
+            children: [
+              Icon(FIcons.editNote, size: 14, color: t.accent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(color: t.text),
+                ),
+              ),
+            ],
+          );
+          final buttons = [
+            TextButton(
+              key: revertKey,
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              onPressed: onRevert,
+              child: const Text('Revert'),
             ),
-          ),
-          TextButton(
-            key: revertKey,
-            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-            onPressed: onRevert,
-            child: const Text('Revert'),
-          ),
-          const SizedBox(width: 4),
-          FilledButton(
-            key: applyKey,
-            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
-            onPressed: onApply,
-            child: Text(applyLabel),
-          ),
-        ],
+            const SizedBox(width: 4),
+            FilledButton(
+              key: applyKey,
+              style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+              onPressed: onApply,
+              child: Text(applyLabel),
+            ),
+          ];
+          if (c.maxWidth < 420) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                note,
+                const SizedBox(height: 4),
+                Wrap(alignment: WrapAlignment.end, runSpacing: 4, children: buttons),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: note),
+              ...buttons,
+            ],
+          );
+        },
       ),
     );
   }

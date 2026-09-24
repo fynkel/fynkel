@@ -309,11 +309,18 @@ class _AssetPageState extends State<AssetPage> {
   String? _jsonError;
   OperationResult? _reimport;
   String? _reimportFor;
+  NavigatorState? _navigator;
 
   @override
   void initState() {
     super.initState();
     model.addListener(_onModel);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _navigator = Navigator.maybeOf(context, rootNavigator: true);
   }
 
   @override
@@ -327,6 +334,7 @@ class _AssetPageState extends State<AssetPage> {
 
   @override
   void dispose() {
+    _leaving();
     model.removeListener(_onModel);
     _json.dispose();
     super.dispose();
@@ -339,12 +347,55 @@ class _AssetPageState extends State<AssetPage> {
   /// The settings being edited for [id]: the sidecar's until touched.
   Map<String, Object?> _draftOf(String id, AssetDetail d) {
     if (_draftFor != id) {
+      _leaving();
       _draftFor = id;
       _draft = Map.of(d.settings);
       _json.text = _pretty(_draft);
       _jsonError = null;
     }
     return _draft;
+  }
+
+  /// Unity's "Unapplied import settings": the page leaving an asset whose
+  /// settings were changed and not applied asks, once it has gone, to
+  /// Apply (write the sidecar and reimport) or Revert.
+  void _leaving() {
+    final id = _draftFor;
+    final nav = _navigator;
+    if (id == null || nav == null || !model.canEdit || _jsonError != null) return;
+    final d = model.detail(id);
+    if (d == null || !_dirty(d)) return;
+    final draft = Map.of(_draft);
+    final path = model.entry(id)?.path;
+    final name = path == null ? id : 'assets/$path';
+    final m = model;
+    _draftFor = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!nav.mounted) return;
+      final apply = await showDialog<bool>(
+        animationStyle: AnimationStyle.noAnimation,
+        context: nav.context,
+        builder: (context) => AlertDialog(
+          key: const Key('asset.unapplied'),
+          title: const Text('Unapplied import settings'),
+          content: SizedBox(width: 420, child: Text("Unapplied import settings for '$name'")),
+          actions: [
+            TextButton(
+              key: const Key('asset.unapplied.revert'),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Revert'),
+            ),
+            FilledButton(
+              key: const Key('asset.unapplied.apply'),
+              autofocus: true,
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      );
+      if (apply == true && m.setImportSettings(id, draft) != null) m.reimport(id);
+    });
   }
 
   static String _pretty(Map<String, Object?> m) => const JsonEncoder.withIndent('  ').convert(m);
@@ -588,7 +639,53 @@ class _AssetPageState extends State<AssetPage> {
           _help(context, 'Music and long sounds; short effects stay decoded in memory.'),
         ]);
       case 'fynkel.gltf' || 'fynkel.fbx':
+        final calculate = draft['normals'] == 'calculate';
         controls.addAll([
+          NumberField(
+            key: const Key('asset.settings.scaleFactor'),
+            label: 'Scale Factor',
+            tooltip: 'Baked into the model: 0.01 brings a centimetre file to metres.',
+            value: draft['scaleFactor'] is num ? draft['scaleFactor'] as num : 1,
+            min: 0.0001,
+            step: 0.01,
+            enabled: enabled,
+            onCommit: (v) => _set('scaleFactor', v == 1 ? null : v),
+          ),
+          FieldRow(
+            label: 'Normals',
+            child: _Choice(
+              key: const Key('asset.settings.normals'),
+              value: calculate ? 'calculate' : 'import',
+              options: const {'import': 'Import', 'calculate': 'Calculate'},
+              enabled: enabled,
+              onChanged: (s) {
+                _set('normals', s == 'import' ? null : s);
+                if (s == 'import') _set('smoothingAngle', null);
+              },
+            ),
+          ),
+          if (calculate)
+            NumberField(
+              key: const Key('asset.settings.smoothingAngle'),
+              label: 'Smoothing Angle',
+              tooltip: 'Edges sharper than this stay hard; gentler ones are smoothed.',
+              value: draft['smoothingAngle'] is num ? draft['smoothingAngle'] as num : 60,
+              min: 0,
+              max: 180,
+              step: 1,
+              slider: true,
+              enabled: enabled,
+              onCommit: (v) => _set('smoothingAngle', v == 60 ? null : v),
+            ),
+          FieldRow(
+            label: 'Import Animation',
+            child: BoolField(
+              key: const Key('asset.settings.importAnimation'),
+              value: draft['importAnimation'] != false,
+              enabled: enabled,
+              onCommit: (b) => _set('importAnimation', b ? null : false),
+            ),
+          ),
           FieldRow(
             label: 'External files',
             child: BoolField(
