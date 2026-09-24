@@ -2458,7 +2458,8 @@ class EditorShellState extends State<EditorShell> {
         final b = ProjectBrowserModel(project: opened);
         b.recall(es.panel(id));
         // Hierarchy → Project makes a prefab of the focused scene's object.
-        b.cannotMakePrefab = (ids) => _sceneOps?.cannotCreatePrefab(ids) ?? 'No scene is open.';
+        // (Null from the Hierarchy means "allowed": no `??` fallback here.)
+        b.cannotMakePrefab = (ids) => _sceneOps == null ? 'No scene is open.' : _sceneOps!.cannotCreatePrefab(ids);
         b.makePrefab = (ids, folder) => _sceneOps?.createPrefab(ids.single, folder);
         for (final sel in _selections.values) {
           sel.addBrowser(b);
