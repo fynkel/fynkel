@@ -407,9 +407,13 @@ void main() {
     expect(s.hierarchy.rename(lamp, 'Lamp'), isTrue);
     expect(s.hierarchy.createWith('fynkel.PointLight', parent: lamp), isTrue);
     final bulb = tab.selection.single;
+    // Another root after it, so the lamp is not the last one.
+    expect(s.hierarchy.createEmpty(underSelection: false), isTrue);
     tab.select(lamp);
     expect(s.inspector.setField(slotOf(s.inspector, 'fynkel.Transform'), 'position', [3.0, 1.0, -2.0]), isTrue);
     final history = tab.document.history;
+    final roots = tab.document.roots();
+    expect(roots.last, isNot(lamp));
 
     // Refused: a prefab instance, a child of one.
     expect(s.hierarchy.cannotCreatePrefab([crateA]), contains('prefab instance'));
@@ -437,6 +441,7 @@ void main() {
     // The scene: one transaction, the object is the instance now — the
     // same id (ADR-0022), no components of its own, no override.
     expect(tab.document.history, history + 1);
+    expect(tab.document.roots(), roots, reason: 'the instance keeps the object\'s place');
     expect(tab.selection.single, lamp);
     final instance = tab.document.entities([lamp]).entities[lamp]!;
     expect((instance['prefab'] as Map)['asset'], {'asset': id});

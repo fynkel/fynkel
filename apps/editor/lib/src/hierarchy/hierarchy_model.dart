@@ -651,7 +651,8 @@ final class HierarchyModel extends ChangeNotifier {
         id: id,
         name: name,
         parent: parent,
-        index: parent == null && !rootOrderIsEditable ? null : (index < 0 ? null : index),
+        // Its place among the siblings — a scene root's too (key order).
+        index: index < 0 ? null : index,
       ),
     ]);
     if (a == null || !a.ok) return prefabId;
