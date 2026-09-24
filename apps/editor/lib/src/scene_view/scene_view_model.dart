@@ -1775,9 +1775,29 @@ final class SceneViewModel extends ChangeNotifier {
     ];
   }
 
-  /// A click at [px]: selects the nearest hit; a repeated click on the
-  /// same pixel cycles to the next stacked hit; ⌘ toggles, ⇧ adds; a click
-  /// on nothing clears (unless a modifier is held).
+  /// What clicks at [px] go through, nearest first: each hit, and after a
+  /// prefab instance the object inside it the ray met (Unity: the first
+  /// click takes the prefab's root, the next the child under the pointer).
+  List<String> clickCandidatesAt(Offset px) {
+    final t = current;
+    if (t == null || !t.hasPreview || viewportWidth <= 0) return const [];
+    final ndc = [px.dx / viewportWidth * 2 - 1, 1 - px.dy / viewportHeight * 2];
+    final hidden = _hiddenAll(t);
+    final out = <String>[];
+    for (final h in t.preview!.pick(t.camera.toPreview(), aspect, ndc).hits) {
+      if (t.state.locked.contains(h.id) || hidden.contains(h.id)) continue;
+      for (final id in [h.id, h.object]) {
+        if (t.tab.tree.nodes.containsKey(id) && !hidden.contains(id) && !out.contains(id)) out.add(id);
+      }
+    }
+    return out;
+  }
+
+  /// A click at [px]: selects the nearest hit — a prefab instance's root
+  /// first, unless it (or the child) is selected already, then the child
+  /// under the pointer; a repeated click on the same pixel cycles on to
+  /// what is behind; ⌘ toggles, ⇧ adds; a click on nothing clears (unless
+  /// a modifier is held).
   void click(Offset px, {bool toggle = false, bool add = false}) {
     final t = current;
     if (t == null || !t.hasPreview) return;
@@ -1787,10 +1807,16 @@ final class SceneViewModel extends ChangeNotifier {
       hits = t.clickHits;
       t.clickIndex = (t.clickIndex + 1) % hits.length;
     } else {
-      hits = hitsAt(px);
+      hits = clickCandidatesAt(px);
       t.clickHits = hits;
       t.clickIndex = 0;
       t.clickPx = px;
+      // The instance, or something inside it, is selected already: this
+      // click goes into it.
+      final child = hits.length > 1 ? t.tab.tree[hits[1]] : null;
+      if (!toggle && !add && child != null && child.anchor == hits[0]) {
+        if (t.tab.selection.any((id) => id == hits[0] || t.tab.tree[id]?.anchor == hits[0])) t.clickIndex = 1;
+      }
     }
     if (hits.isEmpty) {
       if (!toggle && !add) t.tab.clearSelection();
