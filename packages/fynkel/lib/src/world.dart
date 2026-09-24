@@ -5,6 +5,7 @@
 
 import 'dart:async' show Completer;
 import 'dart:convert' show jsonEncode;
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import '../generated/schema.g.dart' as gen;
@@ -212,7 +213,7 @@ class World {
   /// staged so far.
   GameObject spawn({Transform transform = identityTransform, GameObject? parent, String name = ''}) {
     final tempId = _nextTempId++;
-    final go = GameObject._(this, tempId, transform, name);
+    final go = GameObject._(this, tempId, transform, name).._spawnParent = parent;
     _pendingByTempId[tempId] = go;
     _simulation.spawn(
       gen.SpawnCommand(tempId: tempId, transform: transform, parent: parent?._simulationEntity('spawn parent'), name: name),
@@ -1365,6 +1366,7 @@ class GameObject {
 
   void _clearOverlay() {
     _requestedActive = null;
+    _stagedParent = null;
     _overlay = null;
     _stagedValid = false;
     _components?.clear();
@@ -1455,6 +1457,23 @@ class GameObject {
       gen.SetParentCommand(child: e, parent: parent?._simulationEntity('setParent'), keepWorld: keepWorld),
     );
     world._simulationTargets.add(this);
+    _stagedParent = (parent,);
+  }
+
+  /// The parent as a [setParent] this tick left it.
+  (GameObject?,)? _stagedParent;
+  GameObject? _spawnParent;
+
+  /// The parent object, read-your-writes: [setParent] this tick, else the
+  /// spawn's parent while pending, else the world's entity table.
+  GameObject? get _parentObject {
+    final staged = _stagedParent;
+    if (staged != null) return staged.$1;
+    final e = _entity;
+    if (e == null) return _spawnParent;
+    if (!_alive) return null;
+    final p = world._entities.parentOf(e);
+    return p == null ? null : world.attach(p);
   }
 
   List<int> get children => world.childrenOf(this);
@@ -1929,21 +1948,159 @@ class _Targets {
 }
 
 /// Property-style access with read-your-writes semantics.
+/// Which axes [TransformRef.translate] and [TransformRef.rotate] use:
+/// the object's own ([self], Unity's `Space.Self`) or the world's.
+enum Space { self, world }
+
+/// An object's transform the way a Unity script reads it (docs/scripting.md
+/// § The transform): [position] and [rotation] are in the **world**,
+/// [localPosition], [localRotation] and [localScale] relative to the
+/// parent — the same for a root object. Reads include this tick's writes
+/// (the object's and its ancestors'), from the parent chain as the last
+/// tick left it or as [GameObject.setParent] / `spawn(parent:)` set it
+/// this tick; each ancestor is one component query per tick at most.
+/// Writes go to the local transform on the simulation lane, as
+/// [GameObject.setLocalTransform] does.
 class TransformRef {
   TransformRef._(this._go);
   final GameObject _go;
 
+  /// The local transform, whole.
   Transform get value => _go.localTransform;
   set value(Transform t) => _go.setLocalTransform(t);
 
-  Vec3 get position => value.position;
-  set position(Vec3 p) => value = Transform(position: p, rotation: value.rotation, scale: value.scale);
+  /// The parent's transform; null for a root.
+  TransformRef? get parent => _go._parentObject?.transform;
 
-  Quat get rotation => value.rotation;
-  set rotation(Quat q) => value = Transform(position: value.position, rotation: q, scale: value.scale);
+  Vec3 get localPosition => value.position;
+  set localPosition(Vec3 p) => value = Transform(position: p, rotation: value.rotation, scale: value.scale);
 
-  Vec3 get scale => value.scale;
-  set scale(Vec3 s) => value = Transform(position: value.position, rotation: value.rotation, scale: s);
+  Quat get localRotation => value.rotation;
+  set localRotation(Quat q) => value = Transform(position: value.position, rotation: q, scale: value.scale);
+
+  Vec3 get localScale => value.scale;
+  set localScale(Vec3 s) => value = Transform(position: value.position, rotation: value.rotation, scale: s);
+
+  /// [localScale] (kept from before world positions: Unity has no
+  /// settable world scale either — [lossyScale] reads it).
+  Vec3 get scale => localScale;
+  set scale(Vec3 s) => localScale = s;
+
+  /// The whole world pose: the parent's composed with the local one
+  /// (scale per axis, so a rotated child of a non-uniformly scaled parent
+  /// is approximated, as Unity's [lossyScale] is).
+  Transform get world {
+    final local = value;
+    final p = parent;
+    if (p == null) return local;
+    final pw = p.world;
+    return Transform(
+      position: pw.position + pw.rotation.rotate(pw.scale.scaled(local.position)),
+      rotation: pw.rotation * local.rotation,
+      scale: pw.scale.scaled(local.scale),
+    );
+  }
+
+  /// World position.
+  Vec3 get position => world.position;
+  set position(Vec3 p) {
+    final parent = this.parent;
+    localPosition = parent == null ? p : parent.inverseTransformPoint(p);
+  }
+
+  /// World rotation.
+  Quat get rotation => world.rotation;
+  set rotation(Quat q) {
+    final parent = this.parent;
+    localRotation = parent == null ? q : parent.rotation.inverse * q;
+  }
+
+  /// World scale, read only.
+  Vec3 get lossyScale => world.scale;
+
+  /// [rotation] as Euler degrees ([Quat.euler]), what the Inspector shows
+  /// for a root object; [localEulerAngles] for the local one.
+  Vec3 get eulerAngles => rotation.eulerAngles;
+  set eulerAngles(Vec3 degrees) => rotation = Quat.euler(degrees);
+
+  Vec3 get localEulerAngles => localRotation.eulerAngles;
+  set localEulerAngles(Vec3 degrees) => localRotation = Quat.euler(degrees);
+
+  /// The object's own axes in the world. Forward is [Vec3.forward], −Z
+  /// (docs/unity-parity.md § On purpose); setting it turns the object to
+  /// face that way with its up kept near the world's.
+  Vec3 get forward => rotation.rotate(Vec3.forward);
+  set forward(Vec3 direction) => rotation = Quat.lookRotation(direction);
+  Vec3 get right => rotation.rotate(Vec3.right);
+  Vec3 get up => rotation.rotate(Vec3.up);
+
+  /// Moves by [translation]: along the object's own axes ([Space.self],
+  /// Unity's default; its scale does not count) or the world's.
+  void translate(Vec3 translation, {Space relativeTo = Space.self}) {
+    position += relativeTo == Space.self ? rotation.rotate(translation) : translation;
+  }
+
+  /// Turns by Euler [degrees] ([Quat.euler]) about the object's own axes
+  /// ([Space.self], Unity's default) or the world's.
+  void rotate(Vec3 degrees, {Space relativeTo = Space.self}) {
+    final turn = Quat.euler(degrees);
+    if (relativeTo == Space.self) {
+      localRotation = localRotation * turn;
+    } else {
+      rotation = turn * rotation;
+    }
+  }
+
+  /// Turns by [degrees] about the world [axis] through [point], moving
+  /// the object around it.
+  void rotateAround(Vec3 point, Vec3 axis, double degrees) {
+    final turn = Quat.axisAngle(axis.normalized, degrees * math.pi / 180);
+    final w = world;
+    value = Transform(
+      position: _localPoint(point + turn.rotate(w.position - point)),
+      rotation: _localRotation(turn * w.rotation),
+      scale: localScale,
+    );
+  }
+
+  /// Turns the object so its forward points at [target] (a world point)
+  /// with its up as near [worldUp] as it can be.
+  void lookAt(Vec3 target, {Vec3 worldUp = Vec3.up}) {
+    final d = target - position;
+    if (d.lengthSquared < 1e-12) return;
+    rotation = Quat.lookRotation(d, worldUp);
+  }
+
+  /// [lookAt] another object's world position.
+  void lookAtObject(GameObject target, {Vec3 worldUp = Vec3.up}) =>
+      lookAt(target.transform.position, worldUp: worldUp);
+
+  /// A point in this object's space, in the world.
+  Vec3 transformPoint(Vec3 p) {
+    final w = world;
+    return w.position + w.rotation.rotate(w.scale.scaled(p));
+  }
+
+  /// A world point, in this object's space.
+  Vec3 inverseTransformPoint(Vec3 p) {
+    final w = world;
+    final q = w.rotation.inverse.rotate(p - w.position);
+    return Vec3(_div(q.x, w.scale.x), _div(q.y, w.scale.y), _div(q.z, w.scale.z));
+  }
+
+  /// A direction in this object's space, in the world (rotation only).
+  Vec3 transformDirection(Vec3 d) => rotation.rotate(d);
+
+  /// A world direction, in this object's space (rotation only).
+  Vec3 inverseTransformDirection(Vec3 d) => rotation.inverse.rotate(d);
+
+  Vec3 _localPoint(Vec3 p) => parent?.inverseTransformPoint(p) ?? p;
+  Quat _localRotation(Quat q) {
+    final parent = this.parent;
+    return parent == null ? q : parent.rotation.inverse * q;
+  }
+
+  static double _div(double a, double b) => b == 0 ? 0 : a / b;
 }
 
 /// The world's clock as a [TimeService].

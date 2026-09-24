@@ -150,7 +150,8 @@ void main() {
     events.addAll(w.drainEvents());
     w.frame(1 / 60);
     expect(loose.parent, root.entity);
-    expect(loose.transform.position.x, closeTo(-10, 1e-5), reason: 'local adjusted to keep world');
+    expect(loose.transform.localPosition.x, closeTo(-10, 1e-5), reason: 'local adjusted to keep world');
+    expect(loose.transform.position.x, closeTo(0, 1e-5), reason: 'position is the world one');
     expect(loose.worldTransform!.position.x, closeTo(0, 1e-5));
 
     root.destroy();
