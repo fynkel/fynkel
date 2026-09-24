@@ -184,6 +184,97 @@ abstract interface class InputService {
 
   /// Every action in declaration order.
   List<ActionState> get actions;
+
+  /// A keyboard key held down now, by the binding grammar's name (`Space`,
+  /// `A`, `ArrowUp`, `ShiftLeft`, `F1` — [keyNames]): Unity's
+  /// `Input.GetKey`, read straight from the device, no action needed
+  /// (ADR-0024). An unknown name is an [ArgumentError].
+  bool getKey(String key);
+
+  /// The key went down since the last tick (in `fixedUpdate`, consumed by
+  /// one tick like an action's edge) or during this frame (in `update`).
+  bool getKeyDown(String key);
+  bool getKeyUp(String key);
+
+  /// A mouse button held: `0` left, `1` right, `2` middle, `3` back, `4`
+  /// forward (Unity's numbering).
+  bool getMouseButton(int button);
+  bool getMouseButtonDown(int button);
+  bool getMouseButtonUp(int button);
+
+  /// Any key or mouse button held / gone down (Unity's `anyKey`,
+  /// `anyKeyDown`).
+  bool get anyKey;
+  bool get anyKeyDown;
+}
+
+/// The keyboard names [InputService.getKey] takes — the binding grammar's
+/// (docs/input.md): physical keys, the same on every layout.
+const Set<String> keyNames = {
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', //
+  'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Space', 'Enter', 'Escape', 'Tab',
+  'Backspace', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'CapsLock', 'ArrowUp', 'ArrowDown',
+  'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight',
+  'MetaLeft', 'MetaRight', 'Minus', 'Equal', 'BracketLeft', 'BracketRight', 'Backslash', 'Semicolon', 'Quote',
+  'Backquote', 'Comma', 'Period', 'Slash', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11',
+  'F12',
+};
+
+const List<String> _mouseButtons = ['left', 'right', 'middle', 'back', 'forward'];
+
+/// The raw controls under the actions (ADR-0024): what is held, and the
+/// edges — per tick (consumed by one, as an action's are, §5.1) and per
+/// frame — keyed `device:control`.
+class _Controls {
+  final Set<String> held = {}, _pendingDown = {}, _pendingUp = {};
+  final Set<String> _tickDown = {}, _tickUp = {}, _frameDown = {}, _frameUp = {};
+
+  /// Whether reads see the frame's edges (`update`) or the tick's.
+  bool frameView = false;
+
+  Set<String> get down => frameView ? _frameDown : _tickDown;
+  Set<String> get up => frameView ? _frameUp : _tickUp;
+
+  /// A host frame's events; the frame's edges start over.
+  void capture(List<InputEvent> events) {
+    _frameDown.clear();
+    _frameUp.clear();
+    for (final e in events) {
+      switch (e.phase) {
+        case InputPhase.down:
+          final k = '${e.device.name}:${e.control}';
+          if (held.add(k)) {
+            _pendingDown.add(k);
+            _frameDown.add(k);
+          }
+        case InputPhase.up:
+          final k = '${e.device.name}:${e.control}';
+          if (held.remove(k)) {
+            _pendingUp.add(k);
+            _frameUp.add(k);
+          }
+        case InputPhase.reset:
+          _pendingUp.addAll(held);
+          _frameUp.addAll(held);
+          held.clear();
+        default:
+          break;
+      }
+    }
+  }
+
+  /// A tick begins: it takes the pending edges (a catch-up tick finds none).
+  void beginTick() {
+    _tickDown
+      ..clear()
+      ..addAll(_pendingDown);
+    _tickUp
+      ..clear()
+      ..addAll(_pendingUp);
+    _pendingDown.clear();
+    _pendingUp.clear();
+    frameView = false;
+  }
 }
 
 /// Static facade over the current context's [InputService].
@@ -197,34 +288,81 @@ abstract final class Input {
   static Vec2 action2D(String action) => _s.action2D(action);
   static ActionState? state(String action) => _s.state(action);
   static List<ActionState> get actions => _s.actions;
+
+  static bool getKey(String key) => _s.getKey(key);
+  static bool getKeyDown(String key) => _s.getKeyDown(key);
+  static bool getKeyUp(String key) => _s.getKeyUp(key);
+  static bool getMouseButton(int button) => _s.getMouseButton(button);
+  static bool getMouseButtonDown(int button) => _s.getMouseButtonDown(button);
+  static bool getMouseButtonUp(int button) => _s.getMouseButtonUp(button);
+  static bool get anyKey => _s.anyKey;
+  static bool get anyKeyDown => _s.anyKeyDown;
 }
 
 /// Shared name → state lookup with the unknown-action policy: an action the
-/// project does not declare reads as nothing (held false, zero), so a typo
-/// is a silent no-op — `state()` tells the two apart.
+/// project does not declare reads as nothing (held false, zero) — the
+/// world warns once per name ([WorldInput.onUndeclared]); `state()` tells
+/// the two apart — and the raw keys and mouse buttons under the actions.
 abstract class ActionTable implements InputService {
   final List<ActionState> _states = [];
   final Map<String, ActionState> _byName = {};
+  final _Controls _controls = _Controls();
 
   @override
   List<ActionState> get actions => List.unmodifiable(_states);
 
   @override
-  ActionState? state(String action) => _byName[action];
+  ActionState? state(String action) => _byName[action] ?? _undeclared(action);
+
+  /// An action no one declared was read; the reads return nothing.
+  ActionState? _undeclared(String action) => null;
 
   @override
-  bool held(String action) => _byName[action]?.held ?? false;
+  bool held(String action) => state(action)?.held ?? false;
   @override
-  bool pressed(String action) => _byName[action]?.pressed ?? false;
+  bool pressed(String action) => state(action)?.pressed ?? false;
   @override
-  bool released(String action) => _byName[action]?.released ?? false;
+  bool released(String action) => state(action)?.released ?? false;
   @override
-  double axis(String action) => _byName[action]?.x ?? 0;
+  double axis(String action) => state(action)?.x ?? 0;
   @override
   Vec2 action2D(String action) {
-    final s = _byName[action];
+    final s = state(action);
     return s == null ? Vec2.zero : Vec2(s.x, s.y);
   }
+
+  static String _key(String key) {
+    if (!keyNames.contains(key)) {
+      throw ArgumentError.value(key, 'key', 'not a key name (A–Z, 0–9, Space, Enter, ArrowUp, ShiftLeft, F1…: keyNames)');
+    }
+    return 'keyboard:$key';
+  }
+
+  static String _mouse(int button) {
+    if (button < 0 || button >= _mouseButtons.length) {
+      throw ArgumentError.value(button, 'button', '0 left, 1 right, 2 middle, 3 back, 4 forward');
+    }
+    return 'mouse:${_mouseButtons[button]}';
+  }
+
+  @override
+  bool getKey(String key) => _controls.held.contains(_key(key));
+  @override
+  bool getKeyDown(String key) => _controls.down.contains(_key(key));
+  @override
+  bool getKeyUp(String key) => _controls.up.contains(_key(key));
+  @override
+  bool getMouseButton(int button) => _controls.held.contains(_mouse(button));
+  @override
+  bool getMouseButtonDown(int button) => _controls.down.contains(_mouse(button));
+  @override
+  bool getMouseButtonUp(int button) => _controls.up.contains(_mouse(button));
+  @override
+  bool get anyKey => _controls.held.any(_isKeyOrButton);
+  @override
+  bool get anyKeyDown => _controls.down.any(_isKeyOrButton);
+
+  static bool _isKeyOrButton(String k) => k.startsWith('keyboard:') || k.startsWith('mouse:');
 
   void _reset(Iterable<ActionState> states) {
     _states
@@ -287,12 +425,34 @@ class TestInput extends ActionTable {
     s.y = y;
   }
 
+  /// A key ([keyNames]) or mouse button (`mouse:left`) went down: held,
+  /// and down until the next [endTick].
+  void pressKey(String key) {
+    final k = key.startsWith('mouse:') ? key : ActionTable._key(key);
+    if (_controls.held.add(k)) {
+      _controls._tickDown.add(k);
+      _controls._frameDown.add(k);
+    }
+  }
+
+  void releaseKey(String key) {
+    final k = key.startsWith('mouse:') ? key : ActionTable._key(key);
+    if (_controls.held.remove(k)) {
+      _controls._tickUp.add(k);
+      _controls._frameUp.add(k);
+    }
+  }
+
   /// A tick ran: its edges are consumed.
   void endTick() {
     for (final s in _states) {
       s.pressed = false;
       s.released = false;
     }
+    _controls
+      ..beginTick()
+      .._frameDown.clear()
+      .._frameUp.clear();
   }
 
   /// Everything up with its edges (a focus loss).
@@ -315,13 +475,36 @@ class WorldInput extends ActionTable {
   bool _stale = true;
 
   /// The binding table may have changed (a scene or project load).
-  void invalidate() => _stale = true;
+  void invalidate() {
+    _stale = true;
+    _warned.clear();
+  }
+
+  /// Called once per name for an action the loaded project does not
+  /// declare (a typo reads as nothing; Unity throws) — the world logs a
+  /// warning to the Console. Not called before a project declares any.
+  void Function(String action)? onUndeclared;
+  final Set<String> _warned = {};
+
+  @override
+  ActionState? _undeclared(String action) {
+    if (_states.isNotEmpty && _warned.add(action)) onUndeclared?.call(action);
+    return null;
+  }
+
+  /// A host frame's raw events ([World.captureInput]).
+  void capture(List<InputEvent> events) => _controls.capture(events);
 
   /// Re-reads the world's view. With [frameEdges], `pressed`/`released`
   /// are the current frame's raw edges and a relative control's value the
   /// frame's summed motion (for `update`/`lateUpdate`); else the edges
   /// and the motion the next tick consumes.
   void refresh({bool frameEdges = false}) {
+    if (frameEdges) {
+      _controls.frameView = true;
+    } else {
+      _controls.beginTick();
+    }
     final b = _view();
     final n = b.recordCount;
     final d = b.records;

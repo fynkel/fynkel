@@ -43,7 +43,7 @@ const Transform identityTransform = Transform(position: Vec3.zero, rotation: Qua
 class World {
   World._(this._lib, this._native, {required this.ownsLibrary, required this.fixedDt, BehaviourRegistry? registry})
       : registry = registry ?? BehaviourRegistry() {
-    input = WorldInput(() => _native.inputView);
+    input = WorldInput(() => _native.inputView)..onUndeclared = _undeclaredAction;
     context = GameContext(time: _WorldTime(this), input: input);
     _behaviours = _BehaviourSystem(this);
     scenes = SceneManager._(this);
@@ -179,6 +179,15 @@ class World {
   /// Defaults to [reportBehaviourError].
   void Function(BehaviourError error) onBehaviourError = reportBehaviourError;
 
+  void _undeclaredAction(String action) {
+    final message = "Input action '$action' is not declared in fynkel.project.json → inputActions; it reads as nothing";
+    if (EditorChannel.enabled) {
+      EditorChannel.log(message, source: 'input', severity: 'warning', tick: tick);
+    } else {
+      print('[input] $message');
+    }
+  }
+
   /// The default [onBehaviourError]: an `error` log record with the Dart
   /// stack on the editor channel when an editor listens (the Console's
   /// Game tab, a click to the line); else the error goes to the current
@@ -267,6 +276,7 @@ class World {
   /// `pressed`/`released` edges wait for the next tick. [frame] does this
   /// for its `input` argument; hosts with their own loop call it directly.
   void captureInput(List<InputEvent> events) {
+    input.capture(events);
     // A frame without events after a frame without events changes nothing
     // (no relative control to zero, no frame edge to clear): skip the call.
     if (events.isEmpty && !_inputDirty) return;
