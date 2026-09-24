@@ -871,3 +871,44 @@ fn an_incremental_rescan_of_two_thousand_assets_stays_under_fifty_milliseconds()
     s.rescan(&[]).unwrap();
     eprintln!("  {:?}", start.elapsed());
 }
+
+/// `setStartupScene` (Unity's first scene in Build Settings): the project
+/// file's `startupScene`, one undo step; a material, an unknown id and the
+/// scene that is already the startup scene are refused.
+#[test]
+fn the_startup_scene_is_set_from_the_editor_and_undone() {
+    const RIG: &str = "c0000000-0000-4000-8000-000000000034";
+    let copy = Copy::new("startup");
+    let mut s = open(&copy);
+    let before = copy.read("fynkel.project.json");
+
+    refused(
+        s.operate("setStartupScene", &json!({ "id": RUSTED })),
+        "FYN-T0003",
+    );
+    refused(
+        s.operate(
+            "setStartupScene",
+            &json!({ "id": Uuid::new_v4().to_string() }),
+        ),
+        "FYN-T0003",
+    );
+    refused(
+        s.operate("setStartupScene", &json!({ "id": MAIN })),
+        "FYN-T0003",
+    );
+    assert_eq!(copy.read("fynkel.project.json"), before);
+
+    let v = ok(s.operate("setStartupScene", &json!({ "id": RIG })));
+    assert_eq!(v["label"], "Set Startup Scene Rig");
+    let after = copy.read("fynkel.project.json");
+    assert!(after.contains(RIG) && !after.contains(MAIN), "{after}");
+    let startup = s.project().unwrap().project.startup_scene.clone().unwrap();
+    assert_eq!(startup.asset.to_string(), RIG);
+    assert_clean(&s);
+
+    ok(s.operate("undoAsset", &json!({})));
+    assert_eq!(copy.read("fynkel.project.json"), before);
+    let startup = s.project().unwrap().project.startup_scene.clone().unwrap();
+    assert_eq!(startup.asset.to_string(), MAIN);
+}

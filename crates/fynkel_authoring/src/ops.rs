@@ -38,6 +38,7 @@ pub const OPERATIONS: &[&str] = &[
     "setLayersAndTags",
     "registerBehaviour",
     "reloadBehaviours",
+    "setStartupScene",
 ];
 
 /// Where deleted assets go, under the project directory (git-ignored by
@@ -282,6 +283,7 @@ impl AuthoringSession {
             "setImportSettings" => self.set_import_settings(args),
             "extractMaterials" => self.extract_materials(args),
             "reimport" => self.reimport(args).map_err(one),
+            "setStartupScene" => self.set_startup_scene(args).map_err(one),
             "undoAsset" => self.undo_asset().map_err(one),
             "redoAsset" => self.redo_asset().map_err(one),
             crate::layers::OP => self.set_layers_and_tags(args).map_err(one),
@@ -850,6 +852,55 @@ impl AuthoringSession {
     /// summary, subAssets, sidecarWritten, diagnostics }` — `ok: false`
     /// with the importer's diagnostics when it failed, the sidecar
     /// untouched then. Not on the history (a reimport is reproducible).
+    /// `setStartupScene { id }`: the scene `fynkel run` and
+    /// `fynkel test --headless` start with (`fynkel.project.json`
+    /// `startupScene`; Unity's first scene in Build Settings). One
+    /// asset-history step; refused when `id` is not a scene of the
+    /// project or is already the startup scene.
+    fn set_startup_scene(&mut self, args: &Value) -> Result<Value, Diagnostic> {
+        const OP: &str = "setStartupScene";
+        let id = uuid_arg(args, "id", OP)?;
+        let project = self.project().expect("operate checked the project");
+        let entry = project
+            .assets
+            .get(id)
+            .filter(|e| e.kind == AssetKind::Document(DocumentKind::Scene))
+            .ok_or_else(|| invalid(format!("{OP}: {id} is not a scene of the project")))?;
+        if project
+            .project
+            .startup_scene
+            .as_ref()
+            .map(|r| r.asset.to_string())
+            == Some(id.to_string())
+        {
+            return Err(invalid(format!(
+                "{OP}: {} is already the startup scene",
+                entry.name
+            )));
+        }
+        let label = format!("Set Startup Scene {}", entry.name);
+        let project_file = project.dir.join(fynkel_document::project::PROJECT_FILE);
+        let before = std::fs::read_to_string(&project_file)
+            .map_err(|e| io(&project_file, format!("{OP}: cannot read: {e}")))?;
+        let mut doc = project.project.document.clone();
+        doc.root.set(
+            "startupScene",
+            Node::from_serde(&json!({ "asset": id.to_string() })),
+        );
+        let files = vec![FileRewrite {
+            path: project_file,
+            before,
+            after: doc.write()?,
+        }];
+        // Re-reads the project (the project file is among the files).
+        self.reload_after = self.write_rewrites(&files, false, OP)?;
+        self.assets_history.push(Done {
+            op: AssetOp::Rewrote { files },
+            label: label.clone(),
+        });
+        Ok(self.finish(OP, &label, Some(id), json!({})))
+    }
+
     fn reimport(&mut self, args: &Value) -> Result<Value, Diagnostic> {
         const OP: &str = "reimport";
         let id = uuid_arg(args, "asset", OP)?;
