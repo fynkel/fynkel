@@ -482,7 +482,7 @@ pointer into it such as `/position/1`):
 
 | command | fields | effect |
 | --- | --- | --- |
-| `createObject` | `id?`, `name`, `parent?`, `index?`, `components[]` | new entity `{ name, parent, children: [], components }`, appended to (or inserted at `index` of) the parent's `children`, a parentless one only in a scene (a prefab's entities descend from its `root`) |
+| `createObject` | `id?`, `name`, `parent?`, `index?`, `components[]` | new entity `{ name, parent, children: [], components }`, appended to (or inserted at `index` of) the parent's `children`; a parentless one only in a scene, its `index` its place among the roots (the entity goes before the root now at that position in `entities`, whose key order is the roots' order) (a prefab's entities descend from its `root`) |
 | `deleteObject` | `id` | removes the entity and its subtree, detaches it from its parent; a prefab's `root` cannot be deleted |
 | `renameObject` | `id`, `name` | |
 | `setObjectActive` | `id`, `active` | `false` writes `"active": false` right after the name; `true` removes the key (nothing to write when it is absent) |
