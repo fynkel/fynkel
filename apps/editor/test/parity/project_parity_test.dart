@@ -86,4 +86,24 @@ void main() {
     await e.press(LogicalKeyboardKey.escape);
     expect(file(e, 'crate.prefab.json').existsSync(), isTrue);
   });
+
+  testWidgets('+ → New Volume Profile makes a profile here, selected and renaming', (tester) async {
+    final e = await inPrefabs(tester);
+    final browser = e.shell.browser!;
+    await e.click(find.byKey(const Key('project.new')));
+    await e.click(find.byKey(const Key('project.new.volume')));
+    final made = file(e, 'New Volume Profile.volume.json');
+    expect(made.existsSync(), isTrue);
+    final id = browser.selection.single;
+    expect(browser.renamingAsset, id);
+    expect(browser.entry(id)!.document, 'volume');
+    await e.type('Night');
+    await e.submit();
+    final night = file(e, 'Night.volume.json');
+    expect(night.existsSync(), isTrue);
+    final json = night.readAsStringSync();
+    expect(json, contains('volume.schema.json'));
+    // The starting look: ambient occlusion on, bloom ready for an intensity.
+    expect(json, contains('ambientOcclusion'));
+  });
 }

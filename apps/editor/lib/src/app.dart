@@ -1051,6 +1051,15 @@ class EditorShellState extends State<EditorShell> {
         enabled: () => _canEditAssets,
         run: () => _newAsset('material'),
       ),
+      // Unity's Create → Volume Profile (no shortcut there either).
+      EditorCommand(
+        id: 'assets.newVolume',
+        menu: EditorMenu.project,
+        group: 4,
+        order: 2,
+        enabled: () => _canEditAssets,
+        run: () => _newAsset('volume'),
+      ),
       EditorCommand(
         id: 'assets.newFolder',
         menu: EditorMenu.project,

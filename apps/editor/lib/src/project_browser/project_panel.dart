@@ -455,6 +455,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(value: 'new:scene', enabled: model.canEdit, child: const Text('New Scene Here')),
         PopupMenuItem(value: 'new:prefab', enabled: model.canEdit, child: const Text('New Prefab Here')),
         PopupMenuItem(value: 'new:material', enabled: model.canEdit, child: const Text('New Material Here')),
+        PopupMenuItem(value: 'new:volume', enabled: model.canEdit, child: const Text('New Volume Profile Here')),
         PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
       ],
     );
@@ -509,6 +510,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
         PopupMenuItem(value: 'new:scene', enabled: model.canEdit, child: const Text('New Scene Here')),
         PopupMenuItem(value: 'new:prefab', enabled: model.canEdit, child: const Text('New Prefab Here')),
         PopupMenuItem(value: 'new:material', enabled: model.canEdit, child: const Text('New Material Here')),
+        PopupMenuItem(value: 'new:volume', enabled: model.canEdit, child: const Text('New Volume Profile Here')),
         PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
         if (!isRoot) ...[
           const PopupMenuDivider(),
@@ -1021,7 +1023,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           PopupMenuButton<String>(
             popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('project.new'),
-            tooltip: 'New scene, prefab, material, folder or behaviour',
+            tooltip: 'New scene, prefab, material, volume profile, folder or behaviour',
             icon: const Icon(FIcons.add),
             enabled: model.canEdit,
             itemBuilder: (context) => [
@@ -1042,6 +1044,15 @@ class _ProjectPanelState extends State<ProjectPanel> {
                   dense: true,
                   leading: Icon(assetKindIcon('material')),
                   title: const Text('New Material'),
+                ),
+              ),
+              PopupMenuItem(
+                key: const Key('project.new.volume'),
+                value: 'volume',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(assetKindIcon('volume')),
+                  title: const Text('New Volume Profile'),
                 ),
               ),
               const PopupMenuDivider(),

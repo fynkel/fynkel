@@ -629,11 +629,12 @@ final class ProjectBrowserModel extends ChangeNotifier {
     }
   }
 
-  /// A new scene, prefab or material in [inFolder] (the shown folder by
-  /// default), selected and ready to rename.
+  /// A new scene, prefab, material or volume profile in [inFolder] (the
+  /// shown folder by default), selected and ready to rename.
   OperationResult? newDocument(String kind, {String? inFolder}) {
     final target = inFolder ?? (view == BrowserView.folders ? folder : '');
-    final title = '${kind[0].toUpperCase()}${kind.substring(1)}';
+    // Unity's names: New Scene, New Material, New Volume Profile.
+    final title = kind == 'volume' ? 'Volume Profile' : '${kind[0].toUpperCase()}${kind.substring(1)}';
     final rel = _freshPath(target, 'New $title', '.$kind.json');
     final r = _guard(() => project.newDocument(kind, rel));
     if (r == null) return null;

@@ -30,6 +30,10 @@ abstract final class EditorStrings {
     'assets.newFolder': (label: 'New Folder', description: null),
     'assets.newMaterial': (label: 'New Material', description: 'A fynkel.pbr@1 material with the shader\'s defaults'),
     'assets.newPrefab': (label: 'New Prefab', description: null),
+    'assets.newVolume': (
+      label: 'New Volume Profile',
+      description: 'A post-processing profile: ambient occlusion on, bloom ready for an intensity',
+    ),
     'assets.newScene': (label: 'New Scene', description: 'An empty scene document in the Project browser\'s folder'),
     'assets.open': (
       label: 'Open Asset',
