@@ -726,7 +726,12 @@ enum FynkelCommandKind {
 
   /// body: AudioBusCommandRecord { bus, volume, muted }; a bus gain and the
   /// mute (M3-11). Either lane.
-  FYNKEL_COMMAND_AUDIO_BUS(12);
+  FYNKEL_COMMAND_AUDIO_BUS(12),
+
+  /// body: SetActiveCommandRecord { entity, active }; the entity's own
+  /// active flag — off takes its subtree out of the frame (SetActive).
+  /// Simulation lane only.
+  FYNKEL_COMMAND_SET_ACTIVE(13);
 
   final int value;
   const FynkelCommandKind(this.value);
@@ -744,6 +749,7 @@ enum FynkelCommandKind {
     10 => FYNKEL_COMMAND_AUDIO,
     11 => FYNKEL_COMMAND_PLAY_SOUND,
     12 => FYNKEL_COMMAND_AUDIO_BUS,
+    13 => FYNKEL_COMMAND_SET_ACTIVE,
     _ => throw ArgumentError('Unknown value for FynkelCommandKind: $value'),
   };
 }
@@ -897,8 +903,9 @@ enum FynkelQueryKind {
   /// entity -> one BodyStateRecord (0 records without a RigidBody).
   FYNKEL_QUERY_BODY(7),
 
-  /// (no entity) -> one EntityInfoRecord { entity, parent, name } per live
-  /// entity, slot order: the hierarchy and the names in one call.
+  /// (no entity) -> one EntityInfoRecord { entity, parent, name, layer,
+  /// tags, active } per live entity, slot order: the hierarchy, the names,
+  /// the tags and the active flags in one call.
   FYNKEL_QUERY_ENTITIES(8),
 
   /// entity -> one CharacterStateRecord { entity, grounded, sliding,
