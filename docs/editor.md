@@ -175,7 +175,7 @@ reachable three ways (`test/commands_test.dart` proves the
 same command runs from all three). The menu bar is native on macOS
 (`PlatformMenuBar`) and in-window elsewhere and in tests; only the menus
 that have commands exist (Project, Edit, Window, Help — no stub menus). The
-palette (⇧⌘P, `lib/src/commands/palette.dart`) ranks by exact label, prefix,
+palette (⌘K, `lib/src/commands/palette.dart`) ranks by exact label, prefix,
 word start, substring, id/menu, then subsequence, over the live label (so
 "hide console" finds the toggle while the Console is visible); ↑↓ and Enter
 run, Escape closes.
@@ -220,7 +220,7 @@ run, Escape closes.
 | `scene.toggleSnap` | Edit | ⌥⌘G | snapping on/off (the steps: long-press the snap button) |
 | `scene.toggleHidden` | Edit | ⇧⌘H | hide / show the selection's subtrees in the Scene view (H) — editor-only, never in the document |
 | `scene.showAll` | Edit | ⇧⌘U | show every hidden entity (⇧H) |
-| `scene.toggleLocked` | Edit | ⌘K | lock / unlock the selection against picking and dragging (L) |
+| `scene.toggleLocked` | Edit | L | lock / unlock the selection against picking and dragging (L) |
 | `scene.alignCameraToView` | Edit | ⇧⌘L | write the editor camera into the selected `fynkel.Camera` entity: one transaction (Transform + lens fields) |
 | `view.frameSelected` / `view.frameAll` | View | ⌘F / ⇧⌘F | frame the selection's bounds (F) / everything visible (⇧F) |
 | `view.toggleProjection` | View | 5 | perspective ↔ orthographic (bare 5, as in Unity; ⌘5 is Go to Project) |
@@ -240,10 +240,10 @@ run, Escape closes.
 | `assets.reimport` | Project | ⇧⌥⌘I | run the selected source through its importer with the sidecar's settings |
 | `assets.reveal` | Project | ⇧⌥⌘E | reveal the selected asset in Finder (`open -R`; `explorer /select,` and `xdg-open` elsewhere) |
 | `assets.copyId` | Project | ⇧⌥⌘C | the selected asset's id on the clipboard |
-| `assets.search` | Project | ⌥⌘P | focus the Project browser's search field |
+| `assets.search` | Project | ⌥⌘B | focus the Project browser's search field |
 | `assets.toggleView` | Project | ⇧⌥⌘T | the Project browser as folders or as one flat list (the label flips) |
 | `app.preferences` | Edit | ⌘, | Preferences |
-| `window.commandPalette` | Window | ⇧⌘P | the palette |
+| `window.commandPalette` | Window | ⌘K | the palette (⇧⌘P is Pause, as in Unity) |
 | `window.resetLayout` | Window | ⌥⌘0 | the §22.2 default layout |
 | `window.panel.<id>` | Window | ⌥⌘1 … ⌥⌘7 | show/hide Hierarchy, Scene, Inspector, Project, Console, Profiler, Animation (the label flips between Show and Hide; the Asset panel's `import` is retired, item 9c) |
 | `window.newCopy.<id>` | Window | ⇧⌥⌘1 … ⇧⌥⌘4 | New Hierarchy / New Scene View / New Inspector / New Project Browser: another copy beside the one used last (item 9e) |
@@ -459,6 +459,12 @@ selected entity has that component (a second `Spinner` is slot
 `game.Spinner#1`). A field whose values differ across the slot is
 **mixed** and drawn as `—`; setting it writes one `setField` per instance
 inside a single transaction, so one ⌘Z undoes it everywhere (§22.6).
+With several objects, a Rotation axis edits that axis on each object's
+own Euler angles (`setFieldEach`: one quaternion per object, one
+transaction); an axis that differs shows `—`. Scrubbing a Transform
+value's label moves the objects in the Scene view while the pointer
+moves (`previewEach` → `SceneViewModel.previewLocals`, the gizmo's
+`setTransforms`) and commits once on release (2026-09-24).
 Every edit is one transaction: `setField` (a name, or a JSON pointer such
 as `/position/1` for one vector component), `setFields` (a whole vector,
 Euler angles → one quaternion), `unsetField`, `addComponent` (a native
@@ -656,7 +662,7 @@ read-only project refuses everything with the lock's reason.
 
 ### The Project panel (`project_panel.dart`)
 
-Toolbar: view toggle, search (⌥⌘P), the kind filter menu with counts and
+Toolbar: view toggle, search (⌥⌘B), the kind filter menu with counts and
 a badge, sort, **New ▾** (Scene, Prefab, Material, Folder), Undo/Redo of
 asset operations with the operation's label in the tooltip. Below, in the
 folders view, the tree (`assets` root and every folder, the shown one
@@ -1131,8 +1137,8 @@ field). Esc, ⌫ and WASDQE stay the viewport's own.
 ### What item 6 does not do
 
 Mesh thumbnails and material spheres (M5, the world now exists for
-them); the Inspector's numeric drag previewing in the world (its drag
-commits once already; the preview-then-commit rule is the gizmo's here);
+them); the Inspector's numeric drag previewing in the world (done
+2026-09-24 for Transform values, see § The Inspector);
 vertex/edge snapping and surface-snapped placement beyond the drop point;
 multiple Scene views of one document; a game camera as the editor camera
 (never — ADR-0016).
@@ -1519,7 +1525,7 @@ path no game ever sends.
 
 | Id | Menu | Shortcut | Does |
 | --- | --- | --- | --- |
-| `play.start` | Play | ⌘P | plays in the Game view in a project editor; in the plain editor, Build and Run; the label reads *Playing…* while a run is up |
+| `play.start` | Play | ⌘P | plays in the Game view in a project editor; in the plain editor, Build and Run; while a run is up it stops it (Unity's toggle) and reads *Stop Playing* |
 | `play.buildAndRun` | Play | ⌘B | saves what is dirty (after asking), then runs the project as its own app; **Play again** in the edited-during-play banner repeats whichever ran |
 | `play.stop` | Play | ⌘. | SIGTERM then SIGKILL to the game and everything it started |
 | `play.showConsole` | Play | ⌥⌘J | the Console with the Game tab in front |
@@ -1686,11 +1692,11 @@ the editor camera and its tools.
   `.fynkel/recovery/<path>` (replaced on every Play), so a crash during the
   run loses nothing. Without a Scene view open, Play cooks the files and
   asks to save first, as a process run does.
-- **Pause (⌃⌘P):** stops the game's loop and its audio. **Step (⌃⌥⌘P)**
+- **Pause (⇧⌘P):** stops the game's loop and its audio. **Step (⌥⌘P)**
   pauses and runs one fixed step. Both are in the title bar beside
   Play/Stop and in the Play menu. They reach every `FynkelGameView` of the
   game through `FynkelPlayScope`, so a game needs no code for them.
-- **Stop (⌘.):** unmounts the game. It disposes its world, so nothing of
+- **Stop (⌘P again, or ⌘.):** unmounts the game. It disposes its world, so nothing of
   the run survives. The game's own Quit (`FynkelApplication.quit`) does
   the same and never closes the editor.
 - **Keyboard:** while the game has the keyboard, the editor's bare keys
@@ -1798,7 +1804,7 @@ tab row (`MainWindow._titleBar`, 38 px, key `window.titleBar`):
   when it is stale or the committed metadata has drifted, *Codegen check
   failed* when the check itself failed; a click checks again
   (`fynkel codegen --check --json`, as the Inspector's banner does).
-- **The command search** (`window.commands`, ⇧⌘P): opens the palette.
+- **The command search** (`window.commands`, ⌘K): opens the palette.
 
 On macOS the bar *is* the window's title bar. `MainFlutterWindow.swift`
 makes the native one transparent with its title hidden and the content
@@ -1950,7 +1956,7 @@ Open Document, and opens without an animation.
 | Open Document (⇧⌘O, the tab bar's **+**) | `openDocument` | Scenes, Prefabs |
 | Add Component | `addComponent` | by category |
 | Create Entity with Component (the Hierarchy's) | `createWith` | by category |
-| the command palette (⇧⌘P) | `palette` | by menu |
+| the command palette (⌘K) | `palette` | by menu |
 
 The keys are the prefix's: `<prefix>` (the popover), `.search`, `.title`,
 `.<id>` for a row (`.row.<i>` for one without an id), `.note.<id>`,
@@ -2091,7 +2097,7 @@ panel names with `PanelFocus.primary`: the Hierarchy's, Project's and
 Console's lists, the Scene and Game views, the Profiler's chart. A panel
 with none, or whose list is empty, gets its first control. Every panel is
 a `FocusTraversalGroup`, so Tab walks one panel's controls before the
-next. Arrows, Enter and ⎋ work inside the lists. ⇧⌘P reaches every other
+next. Arrows, Enter and ⎋ work inside the lists. ⌘K reaches every other
 command by name. The Scene tools gave their ⌘ digits to the panels and
 keep Q W E R Y, as in Unity.
 

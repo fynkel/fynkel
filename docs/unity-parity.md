@@ -40,8 +40,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 
 | | Unity | Fynkel |
 |---|---|---|
-| Edit rotation with several objects selected | changes that axis on each | ❌ **overwrites the other axes of all of them with the first one's** |
-| Drag a value (label scrub) | the Scene view follows live | ❌ updates only on release (`onDragState` not connected) |
+| Edit rotation with several objects selected | changes that axis on each | 🔧 `b5a9c11` (it overwrote the other axes with the first object's) |
+| Drag a value (label scrub) | the Scene view follows live | 🔧 `b5a9c11` (Transform values; one undo on release) |
 | A value that does not parse | stays and shows why | 🟡 silently snaps back |
 | Component header | enable checkbox, Copy/Paste Values, Move Up/Down, drag to reorder | ❌ `enabled` is a field row; none of the rest |
 | Click an asset reference | pings the asset in the Project | 🟡 opens the picker |
@@ -53,8 +53,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 
 | | Unity | Fynkel |
 |---|---|---|
-| ⌘P | toggles Play/Stop | 🟡 starts only; Stop is ⌘. |
-| ⌘⇧P / ⌘⌥P | Pause / Step | ❌ open the Command Palette / asset search; Pause is ⌃⌘P |
+| ⌘P | toggles Play/Stop | 🔧 `b5a9c11` (⌘. still stops) |
+| ⌘⇧P / ⌘⌥P | Pause / Step | 🔧 `b5a9c11` (the Command Palette moved to ⌘K, asset search to ⌥⌘B) |
 | Start paused | yes | ❌ Pause disabled until running |
 | Changes during Play revert on Stop, tint | | ✅ |
 
@@ -116,3 +116,5 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 - 2026-09-24: Hierarchy basics (`14108b9`, `c5a7248`) —
   `test/parity/hierarchy_parity_test.dart`, 15 tests over the fixture
   project.
+- 2026-09-24: Inspector rotation for several objects, live label drags,
+  Unity's Play keys (`b5a9c11`) — `test/parity/inspector_parity_test.dart`.
