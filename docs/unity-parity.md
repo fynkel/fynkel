@@ -26,7 +26,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | ⌘D Duplicate | copy right below, named `Cube (1)`, selected | 🔧 `14108b9` `c5a7248` |
 | ⌘C / ⌘X / ⌘V, Paste as Child ⌘⇧V | copy objects, also across scenes | 🔧 `pasteObjects` (`14108b9`), `c5a7248` |
 | Create Empty | ⌘⇧N at the root; ⌥⇧N as a child | 🔧 `c5a7248` (named `GameObject`; New Project has no key now) |
-| GameObject → 3D Object / Light / Camera | a visible cube, sphere, plane…, a light, a camera | ❌ "Create with fynkel.X" by raw type; no built-in meshes, so nothing visible can be made from the menu |
+| GameObject → 3D Object / Light / Camera | a visible cube, sphere, plane…, a light, a camera | 🔧 ADR-0023, `033df72` `installPrimitives`, `89889b6` (the menu bar and the Hierarchy's menus cascade; the first shape adds `Fynkel/Primitives.glb`) |
+| A child made from + | its name can be typed at once | 🔧 `89889b6` (the new row took no focus) |
 | Double-click a row | frames it in the Scene view | 🔧 `c5a7248` |
 | Rename after Esc | F2 shows the real name | 🔧 `c5a7248` |
 | Undo | brings the selection back | 🔧 `eaf9a80` (redo too) |
@@ -123,3 +124,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
   the Hierarchy's undo selection, ⌥-click and empty-space menu
   (`eaf9a80`); the Euler hint (`10e1f8b`), Copy/Paste Component Values
   and the header checkbox (`13d2876`), the asset ping (`2455f5d`).
+- 2026-09-24: ADR-0023 built-in primitives and GameObject presets
+  (`ad6a6ca`, `033df72`, `89889b6`) —
+  `test/parity/gameobject_parity_test.dart` renders the saved scene with
+  `fynkel render` and checks that the cube is drawn.

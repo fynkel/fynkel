@@ -205,9 +205,12 @@ run, Escape closes.
 | `hierarchy.paste` | Edit | ⌘V | paste right after the selected object (same parent), or at the end of the roots; into any open scene or prefab; the pasted objects are selected |
 | `hierarchy.pasteAsChild` | Edit | ⇧⌘V | paste under the selected object |
 | `hierarchy.delete` | Edit | ⌘⌫ | delete the topmost selected entities with their subtrees; nothing is selected afterwards, as in Unity (in a text field: delete to the line start) |
-| `hierarchy.createEmpty` | Edit | ⇧⌘N | a new object named `GameObject` with a Transform at the root, renamed at once (Unity's Create Empty) |
-| `hierarchy.createEmptyChild` | Edit | ⌥⇧N (bare) | the same under the selected object (Unity's Create Empty Child) |
-| `hierarchy.createWith` | Edit | ⇧⌥⌘N | pick a native component type; the new entity has a Transform plus that component with its defaults, and is renamed at once |
+| `hierarchy.createEmpty` | GameObject | ⇧⌘N | a new object named `GameObject` with a Transform at the root, renamed at once (Unity's Create Empty) |
+| `hierarchy.createEmptyChild` | GameObject | ⌥⇧N (bare) | the same under the selected object (Unity's Create Empty Child) |
+| `hierarchy.createWith` | GameObject | ⇧⌥⌘N | pick a native component type; the new entity has a Transform plus that component with its defaults, and is renamed at once |
+| `gameobject.cube` … `gameobject.quad` | GameObject ▸ 3D Object | — | Unity's Cube, Sphere, Capsule, Cylinder, Plane, Quad at the root (ADR-0023): a MeshRenderer on the built-in `mesh/<Shape>` and `material/Default` plus Unity's collider; the first one adds `Fynkel/Primitives.glb` to the project (`installPrimitives`) |
+| `gameobject.directionalLight`, `.pointLight`, `.spotLight` | GameObject ▸ Light | — | Unity's lights: the Directional Light 3 m up, tilted 50° down and turned 30°, warm white, 10 000 lux with shadows; the Spot Light pointing down |
+| `gameobject.camera` | GameObject | — | a Camera 1 m up and 10 m back, looking along −Z |
 | `hierarchy.keepWorldTransform` | Edit | ⌥⌘K | toggle the drop policy (✓ when on) |
 | `hierarchy.search` | Edit | ⌥⌘H | focus the Hierarchy's search field |
 | `hierarchy.expandAll` / `hierarchy.collapseAll` | Edit | ⌥⌘] / ⌥⌘[ | expand or collapse every node |
@@ -380,7 +383,11 @@ records for undo, and can save — the editor never edits JSON by hand.
   their subtrees, each copy right after its original and named `Cube
   (1)`), Copy / Cut / Paste / Paste as Child (⌘C ⌘X ⌘V ⇧⌘V, the
   `pasteObjects` command, across documents), Delete (⌘⌫; nothing stays
-  selected), Create Empty (⇧⌘N at the root, ⌥⇧N as a child) and Create
+  selected), Create Empty (⇧⌘N at the root, ⌥⇧N as a child), Unity's
+  **3D Object ▸ / Light ▸ / Camera** presets (ADR-0023: the GameObject
+  menu at the root; the + menu and a row's menu under the selected
+  object, the empty-space menu at the root — submenus that open on hover,
+  as Unity's) and Create
   with a native component
   (⇧⌥⌘N or the + menu; the Transform's and the component's **defaults
   come from the session** — the `defaults` query is the component's Rust
