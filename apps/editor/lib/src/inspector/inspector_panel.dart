@@ -736,6 +736,20 @@ class _ComponentCard extends StatelessWidget {
                         ],
                         const PopupMenuDivider(),
                         PopupMenuItem(
+                          key: const Key('card.menu.moveUp'),
+                          value: 'moveUp',
+                          enabled: model.canMove(slot, -1),
+                          height: 28,
+                          child: const Text('Move Up'),
+                        ),
+                        PopupMenuItem(
+                          key: const Key('card.menu.moveDown'),
+                          value: 'moveDown',
+                          enabled: model.canMove(slot, 1),
+                          height: 28,
+                          child: const Text('Move Down'),
+                        ),
+                        PopupMenuItem(
                           value: 'remove',
                           enabled: model.canEdit && slot.type != transformType,
                           height: 28,
@@ -770,6 +784,10 @@ class _ComponentCard extends StatelessWidget {
         model.copyValues(slot);
       case 'pasteValues':
         model.pasteValues(slot);
+      case 'moveUp':
+        model.moveComponent(slot, -1);
+      case 'moveDown':
+        model.moveComponent(slot, 1);
       case 'applyToScene':
         model.applyToScene(slot);
       case 'copyType':

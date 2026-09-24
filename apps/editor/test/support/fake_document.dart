@@ -2,7 +2,7 @@
 // interpreter for the commands the Hierarchy uses (createObject,
 // deleteObject, renameObject, setObjectActive, reparentObject,
 // duplicateObject, setField, addComponent) and the Inspector uses (setField by JSON pointer,
-// unsetField, assignAsset, removeComponent, setPrefabOverride,
+// unsetField, assignAsset, removeComponent, moveComponent, setPrefabOverride,
 // revertPrefabOverride, unpackPrefab; `reject` stands in for the crate's
 // validation) with snapshots for undo/redo, content-hash revisions, the
 // FYN-E0001 refusal on a stale base, and — when `path` points at a real
@@ -543,6 +543,19 @@ final class FakeDocument extends EditorDocument {
         if (e == null) return _Result.error('no entity $id');
         final removed = (e['components'] as Map).remove(c['component']);
         if (removed == null) return _Result.error('no component ${c['component']} on $id');
+        return _Result([id, c['component'] as String]);
+      case 'moveComponent':
+        final id = c['entity'] as String;
+        final e = _entities[id];
+        if (e == null) return _Result.error('no entity $id');
+        final map = e['components'] as Map;
+        final moved = map.remove(c['component']);
+        if (moved == null) return _Result.error('no component ${c['component']} on $id');
+        final entries = map.entries.toList()
+          ..insert((c['index'] as int).clamp(0, map.length), MapEntry(c['component'], moved));
+        map
+          ..clear()
+          ..addEntries(entries);
         return _Result([id, c['component'] as String]);
       case 'setPrefabOverride':
         final id = c['entity'] as String;

@@ -149,4 +149,53 @@ void main() {
     expect(e.selectedNames, ['Robot'], reason: 'the Inspector keeps the object');
     expect(find.byKey(const ValueKey('assetPicker.search')), findsNothing, reason: 'no picker');
   });
+
+  testWidgets('Move Up / Move Down reorder the cards and the saved file; the Transform stays first; one undo', (
+    tester,
+  ) async {
+    final e = await Editor.open(tester);
+    await e.click(e.row('Crate B'));
+    // The cards top to bottom, as their menus are laid out.
+    List<String> cards() {
+      final menus = find.byWidgetPredicate(
+        (w) => w.key is ValueKey<String> && (w.key! as ValueKey<String>).value.startsWith('card.menu.fynkel.'),
+      );
+      final found = menus.evaluate().map((el) => (el.widget.key! as ValueKey<String>).value).toList()
+        ..sort((a, b) => tester.getTopLeft(find.byKey(ValueKey(a))).dy.compareTo(tester.getTopLeft(find.byKey(ValueKey(b))).dy));
+      return [for (final k in found) k.substring('card.menu.'.length).split('#').first];
+    }
+
+    List<String> saved() {
+      final crate = (e.savedScene()['entities'] as Map<String, dynamic>).values.cast<Map<String, dynamic>>().singleWhere(
+        (x) => x['name'] == 'Crate B',
+      );
+      return [for (final c in (crate['components'] as Map<String, dynamic>).values) (c as Map)['type'] as String];
+    }
+
+    Future<void> menuItem(String card, String item) async {
+      await e.click(find.byKey(ValueKey('card.menu.$card#0')));
+      await e.click(find.byKey(Key('card.menu.$item')));
+    }
+
+    expect(cards(), ['fynkel.Transform', 'fynkel.RigidBody', 'fynkel.Collider']);
+    await menuItem('fynkel.Collider', 'moveUp');
+    expect(cards(), ['fynkel.Transform', 'fynkel.Collider', 'fynkel.RigidBody']);
+
+    // The Collider is right under the Transform now: it cannot go above it,
+    // and the Transform itself does not move.
+    await e.click(find.byKey(const ValueKey('card.menu.fynkel.Collider#0')));
+    expect(tester.widget<PopupMenuItem<String>>(find.byKey(const Key('card.menu.moveUp'))).enabled, isFalse);
+    await e.press(LogicalKeyboardKey.escape);
+    await e.click(find.byKey(const ValueKey('card.menu.fynkel.Transform#0')));
+    expect(tester.widget<PopupMenuItem<String>>(find.byKey(const Key('card.menu.moveDown'))).enabled, isFalse);
+    await e.press(LogicalKeyboardKey.escape);
+
+    await e.press(LogicalKeyboardKey.keyS, command: true);
+    expect(saved(), ['fynkel.Transform', 'fynkel.Collider', 'fynkel.RigidBody', 'fynkel.Layer']);
+
+    await menuItem('fynkel.Collider', 'moveDown');
+    expect(cards(), ['fynkel.Transform', 'fynkel.RigidBody', 'fynkel.Collider']);
+    await e.press(LogicalKeyboardKey.keyZ, command: true);
+    expect(cards(), ['fynkel.Transform', 'fynkel.Collider', 'fynkel.RigidBody']);
+  });
 }

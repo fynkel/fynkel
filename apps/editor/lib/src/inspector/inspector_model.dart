@@ -1369,6 +1369,39 @@ final class InspectorModel extends ChangeNotifier {
     return a?.ok ?? false;
   }
 
+  // ── Move Up / Move Down (Unity) ─────────────────────────────────────────
+
+  /// The card [delta] places away ([slot]'s neighbour: -1 above, +1
+  /// below) that [slot] would trade places with, or null when it cannot
+  /// move: one object selected, its own components (not a prefab's), not
+  /// while the game runs, and the Transform stays first, as in Unity.
+  ComponentSlot? _moveTarget(ComponentSlot slot, int delta) {
+    if (!canEdit || showsPlay || !slot.single || slot.anyDerived || slot.type == 'fynkel.Transform') return null;
+    final i = _slots.indexOf(slot);
+    final j = i + delta;
+    if (i < 0 || j < 0 || j >= _slots.length) return null;
+    final other = _slots[j];
+    return other.type == 'fynkel.Transform' || other.anyDerived ? null : other;
+  }
+
+  bool canMove(ComponentSlot slot, int delta) => _moveTarget(slot, delta) != null;
+
+  /// Moves [slot] one card up (`-1`) or down (`+1`): a `moveComponent` to
+  /// its neighbour's place in the entity's components — one undo step.
+  bool moveComponent(ComponentSlot slot, int delta) {
+    final other = _moveTarget(slot, delta);
+    final t = _tab;
+    if (other == null || t == null) return false;
+    final entity = slot.first.entityId;
+    final components = t.document.entities([entity]).entities[entity]?['components'];
+    if (components is! Map) return false;
+    final index = components.keys.toList().indexOf(other.first.componentId);
+    if (index < 0) return false;
+    final a = _run([Command.moveComponent(entity, slot.first.componentId, index)]);
+    notifyListeners();
+    return a?.ok ?? false;
+  }
+
   // ── Apply to Scene (ADR-0021 P7 L4) ─────────────────────────────────────
 
   /// Whether the Inspector shows the running game (Apply to Scene is
