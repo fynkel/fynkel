@@ -20,9 +20,8 @@ fynkel_host_headless.workspace = true
 fynkel_render.workspace = true
 wgpu.workspace = true
 image.workspace = true
+glam.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 
-[dev-dependencies]
-glam.workspace = true

@@ -88,6 +88,18 @@ fn parse(args: &[String]) -> Option<Opts> {
     Some(o)
 }
 
+/// `render_offscreen`'s pixels (row-major RGBA8, top row first) as a PNG;
+/// `fynkel thumbnail` writes its tiles with it too.
+pub fn save_png(
+    path: &std::path::Path,
+    pixels: &[[u8; 4]],
+    width: u32,
+    height: u32,
+) -> Result<(), image::ImageError> {
+    let rgba: Vec<u8> = pixels.iter().flatten().copied().collect();
+    image::save_buffer(path, &rgba, width, height, image::ColorType::Rgba8)
+}
+
 pub fn run(args: &[String]) -> ExitCode {
     let Some(opts) = parse(args) else {
         return usage();
@@ -181,17 +193,7 @@ pub fn run(args: &[String]) -> ExitCode {
     let quality = renderer.quality();
     let errors = renderer.asset_errors().to_vec();
 
-    let mut rgba = Vec::with_capacity(pixels.len() * 4);
-    for p in &pixels {
-        rgba.extend_from_slice(p);
-    }
-    if let Err(e) = image::save_buffer(
-        &opts.out,
-        &rgba,
-        opts.width,
-        opts.height,
-        image::ColorType::Rgba8,
-    ) {
+    if let Err(e) = save_png(&opts.out, &pixels, opts.width, opts.height) {
         eprintln!("fynkel render: {}: {e}", opts.out.display());
         return ExitCode::from(1);
     }
