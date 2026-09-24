@@ -1805,3 +1805,15 @@ The M3 backlog as it landed, for the record:
    printed frame lines open the same way. The Inspector's Open Script
    now opens at the behaviour's `class` declaration. Next: the a11y/l10n
    basics, the docs, and the M4 gate report.
+27. **Scripts, found by the user's check (2026-09-24).** Four fixes after
+   the user tried New Behaviour.
+   - The editor used an old `fynkel` from PATH that lacked
+     `--project-only`. It now takes the newest of PATH and the checkout's
+     build, and says so when the CLI is too old.
+   - A failed `codegen` could leave the generated files deleted. The CLI
+     now restores them on any failure.
+   - A new behaviour vanished on Play after a hot reload. The generated
+     types were top-level finals, which a hot reload keeps. They are
+     getters now.
+   - A saved script now updates the Inspector: the editor runs codegen
+     and the new `reloadBehaviours` (second ADR-0016 amendment).

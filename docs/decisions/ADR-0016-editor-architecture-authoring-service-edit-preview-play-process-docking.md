@@ -1,6 +1,6 @@
 # ADR-0016: Editor architecture authoring service edit preview Play process docking
 
-**Status:** Accepted; its Play decision superseded by ADR-0021 (2026-09-23: Play runs in the editor, the separate process becomes Build and Run); amended 2026-09-24 (the editor may run `fynkel codegen` for Create → Behaviour, below)  
+**Status:** Accepted; its Play decision superseded by ADR-0021 (2026-09-23: Play runs in the editor, the separate process becomes Build and Run); amended 2026-09-24 (the editor may run `fynkel codegen` for Create → Behaviour, and when a script is saved, below)  
 **Date:** 2026-09-19  
 **Related:** `docs/blueprint.md`
 
@@ -53,3 +53,10 @@ The decision says "the editor never executes game code or codegen". Create → B
 - The editor may **run `fynkel codegen --project <game> --project-only --json` as a subprocess**, and only on an explicit user action: New ▾ → Behaviour in the Project browser. It never runs on a timer or on save. The "run `fynkel codegen`" banner is unchanged; it still checks with `--check` and shows the command.
 - **Still true:** the editor process never loads game code or `build_runner`. The CLI runs `build_runner` in its own child process on the game package, as it does from a terminal. The Inspector is still generated from the committed metadata; the session re-reads that metadata after the run (`registerBehaviour`, which also adds the type to the project's component registry as one undoable step).
 - **`--project-only`** skips the native pipeline. An editor action therefore never rewrites the engine's own generated files, even when the configured CLI is older or newer than the checkout.
+
+## Amendment (2026-09-24, second): a saved script runs codegen
+
+The first amendment ruled out running codegen on save. Using it showed why that is wrong for a Unity user: adding an `@Expose` field and saving changed nothing in the Inspector until `fynkel codegen` ran in a terminal and the project was reopened. Unity recompiles when a script changes and the Inspector follows. So:
+
+- When a `.dart` file under the game's `lib/` is saved, added or deleted (not `lib/generated/` or a `.g.dart`), the editor runs the same `fynkel codegen --project <game> --project-only --json` subprocess, debounced (0.5 s) and after any command already running. On success, the session's new `reloadBehaviours` operation re-reads the metadata and schemas. It writes nothing and is not an undo step.
+- **Still true:** the subprocess is the CLI, so the editor process never loads game code or `build_runner`. `--project-only` never touches the engine's files. A failed run (the code does not build yet) is shown in the toolbar, reloads nothing, and leaves the committed generated files in place, because the CLI restores them on any failure. The `--check` banner and the terminal command are unchanged.

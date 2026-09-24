@@ -700,8 +700,8 @@ with the rest of the browser.
 3. The file opens in the IDE at once.
 4. `fynkel codegen --project <game> --project-only --json` runs
    (`CodegenCheck.generate`; seconds, shown in the status line). This is
-   the one command the editor runs that writes (ADR-0016 amendment of
-   2026-09-24). `--project-only` never touches the engine's own
+   one of the two times the editor runs a command that writes (ADR-0016
+   amendments of 2026-09-24; the other is a saved script, below). `--project-only` never touches the engine's own
    generated files.
 5. The session's `registerBehaviour` adds the id to the project's
    component registry (one asset-history step, so ⌥⌘Z takes it back)
@@ -710,6 +710,19 @@ with the rest of the browser.
 
 Each failure is shown in the error bar: codegen failing (the file stays
 written), or codegen not listing the type (a compile error in the file).
+
+**A saved script updates the Inspector** (Unity's recompile; the second
+ADR-0016 amendment of 2026-09-24). `CodegenCheck.recompileOnSave` listens
+to the project's file changes. A `.dart` file under `lib/` that is saved,
+added or deleted (not `lib/generated/`, not `*.g.dart`) runs the same
+`--project-only` codegen 0.5 s later, after any command already running.
+Then the session's `reloadBehaviours` re-reads the metadata and schemas,
+so a new `@Expose` field is in the Inspector a few seconds after the save.
+The toolbar reads *Updating scripts…* meanwhile. A run that fails (the
+code does not build yet) shows in the toolbar and reloads nothing. The
+game in the editor hot-reloads the regenerated file as well: the
+generated types are getters, so a new behaviour or field reaches the
+next Play.
 
 A finding while testing: a `GestureDetector` that catches the empty-space
 click (clear the selection, focus the list) must be `excludeFromSemantics`
