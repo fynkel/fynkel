@@ -158,8 +158,11 @@ void main() {
       expect(SceneTool.scale.alwaysLocal, isTrue);
       final u = hs.first;
       final pivot = px(c, c.frame.pivot);
-      final v = u.constraint.solve(input(c, pivot + const Offset(40, 0), pivot + const Offset(80, 0)))!;
+      // Unity's cube: 100 points right (or up) doubles it, wherever it was grabbed.
+      final v = u.constraint.solve(input(c, pivot + const Offset(3, 0), pivot + const Offset(103, 0)))!;
       expect(v.scalar, closeTo(2, 1e-9));
+      final up = u.constraint.solve(input(c, pivot, pivot + const Offset(10, -50)))!;
+      expect(up.scalar, closeTo(1.5, 1e-9));
       final e = SceneTool.scale.edit(u, v, c)!;
       expect(e.delta[0], closeTo(2, 1e-9));
       expect(e.delta[5], closeTo(2, 1e-9));

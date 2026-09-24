@@ -540,8 +540,9 @@ void main() {
 
       r.model.tool = SceneTool.scale;
       pivotPx = r.model.gizmoPivotPx!;
-      r.model.beginDrag('scale.uniform', pivotPx + const Offset(40, 0));
-      r.model.updateDrag(pivotPx + const Offset(80, 0));
+      // 100 points to the right doubles it, wherever the cube was grabbed.
+      r.model.beginDrag('scale.uniform', pivotPx + const Offset(4, 0));
+      r.model.updateDrag(pivotPx + Offset(4 + 100 * r.model.pixelRatio, 0));
       expect(r.model.drag!.readout, startsWith('×'));
       expect(r.model.endDrag()!.ok, isTrue);
       final s = st.tab.tree['crate']!.transform!;

@@ -209,6 +209,14 @@ class _ScenePanelState extends State<ScenePanel> {
             onTap: model.toggleSpace,
           ),
           _toggle(
+            key: 'scene.pivot',
+            icon: model.pivotMode == PivotMode.center ? FIcons.centerFocusStrong : FIcons.adjust,
+            tooltip: model.pivotMode == PivotMode.center ? 'Center (Z → Pivot)' : 'Pivot (Z → Center)',
+            on: model.pivotMode == PivotMode.center,
+            enabled: live,
+            onTap: model.togglePivot,
+          ),
+          _toggle(
             key: 'scene.snap',
             icon: FIcons.gridGoldenratio,
             tooltip: model.snap.enabled

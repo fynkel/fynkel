@@ -188,6 +188,10 @@ abstract final class EditorStrings {
       label: 'Toggle Local / World Axes',
       description: 'The gizmo\'s axes: the entity\'s own or the world\'s',
     ),
+    'scene.togglePivot': (
+      label: 'Toggle Pivot / Center',
+      description: 'Where the gizmo sits: the active object\'s pivot, or the middle of the selection',
+    ),
     'view.alignToCamera': (
       label: 'Look Through Selected Camera',
       description: 'The view takes the selected camera\'s placement and lens — the picture is what it renders',

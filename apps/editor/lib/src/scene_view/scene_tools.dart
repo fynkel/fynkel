@@ -75,9 +75,19 @@ enum TransformChannel { move, rotate, scale }
 /// applied to every target's world matrix), the pivot after it and the
 /// readout under the picture.
 final class TransformEdit {
-  const TransformEdit({required this.delta, required this.pivot, required this.readout, required this.channel});
+  const TransformEdit({
+    required this.delta,
+    required this.pivot,
+    required this.readout,
+    required this.channel,
+    this.factors,
+  });
 
   final List<double> delta;
+
+  /// A scale's factors along the gizmo's axes: each object's own scale
+  /// is multiplied by them, as Unity multiplies `localScale`.
+  final Vec3? factors;
   final Vec3 pivot;
   final String readout;
   final TransformChannel channel;
@@ -424,7 +434,7 @@ final class ScaleTool extends SceneTool {
         id: 'scale.uniform',
         shape: HandleShape(triangles: cube(p, f.axes, s * 0.07)),
         color: GizmoTokens.linear(GizmoTokens.neutral),
-        constraint: const ScreenScaleConstraint(),
+        constraint: ScreenScaleConstraint(pixelRatio: s / c.vp.metresPerPixel(p) / GizmoFrame.screenSize),
         grab: p,
       ),
     ];
@@ -487,6 +497,7 @@ final class ScaleTool extends SceneTool {
       pivot: List.of(f.pivot),
       readout: '×${_fmt(factor)}',
       channel: TransformChannel.scale,
+      factors: factors,
     );
   }
 }

@@ -89,6 +89,11 @@ final class SceneEditorState {
 /// The gizmo's frame.
 enum GizmoSpace { local, world }
 
+/// Where the gizmo sits (Unity's Pivot / Center, Z): the lead's origin,
+/// each object rotating and scaling about its own; or the middle of the
+/// selection's bounds, children included, the group turning about it.
+enum PivotMode { pivot, center }
+
 /// The Scene view's snapping: on/off and the steps (metres, degrees, a
 /// scale factor step).
 final class SnapSettings {
@@ -128,6 +133,7 @@ final class EditorState extends ChangeNotifier {
   EditorState._(this.file, Map<String, Object?> json)
     : tool = SceneTools.byId(json['tool'] is String ? json['tool'] as String : null) ?? SceneTool.move,
       space = GizmoSpace.values.asNameMap()[json['space']] ?? GizmoSpace.world,
+      pivotMode = PivotMode.values.asNameMap()[json['pivot']] ?? PivotMode.pivot,
       snap = SnapSettings.fromJson(json['snap']),
       showGrid = json['grid'] != false,
       showOverlays = json['overlays'] != false,
@@ -195,6 +201,7 @@ final class EditorState extends ChangeNotifier {
 
   SceneTool tool;
   GizmoSpace space;
+  PivotMode pivotMode;
   SnapSettings snap;
   bool showGrid, showOverlays, showStats;
 
@@ -294,6 +301,7 @@ final class EditorState extends ChangeNotifier {
     'formatVersion': formatVersion,
     'tool': tool.id,
     'space': space.name,
+    'pivot': pivotMode.name,
     'snap': snap.toJson(),
     'grid': showGrid,
     'overlays': showOverlays,

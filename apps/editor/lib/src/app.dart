@@ -1336,6 +1336,16 @@ class EditorShellState extends State<EditorShell> {
         run: () => scene?.toggleSpace(),
       ),
       EditorCommand(
+        id: 'scene.togglePivot',
+        labelBuilder: () => scene?.pivotMode == PivotMode.center ? 'Handle at Pivot' : 'Handle at Center',
+        menu: EditorMenu.edit,
+        key: bare(LogicalKeyboardKey.keyZ),
+        group: 2,
+        order: 5,
+        enabled: () => _hasView,
+        run: () => scene?.togglePivot(),
+      ),
+      EditorCommand(
         id: 'scene.toggleSnap',
         labelBuilder: () => scene?.snap.enabled ?? false ? 'Snapping Off' : 'Snapping On',
         menu: EditorMenu.edit,

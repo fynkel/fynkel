@@ -127,16 +127,23 @@ final class RingConstraint extends DragConstraint {
   }
 }
 
-/// Away from the pivot on screen: the factor of the pointer's distance
-/// from it now over at the start (a uniform scale).
+/// A uniform scale factor from the drag on screen.
 final class ScreenScaleConstraint extends DragConstraint {
-  const ScreenScaleConstraint();
+  const ScreenScaleConstraint({this.pixelRatio = 1});
 
+  /// Physical pixels per point.
+  final double pixelRatio;
+
+  /// Points of drag that double the scale.
+  static const points = 100.0;
+
+  /// Unity's centre cube: the drag's larger component (right or up grows)
+  /// by [points] — wherever on the cube it was grabbed.
   @override
   DragValue? solve(DragInput i) {
-    final l0 = (i.startPx - i.pivotPx).distance;
-    final l1 = (i.px - i.pivotPx).distance;
-    return DragValue(l0 < 1 ? 1.0 : l1 / l0);
+    final d = i.px - i.startPx;
+    final along = d.dx.abs() >= d.dy.abs() ? d.dx : -d.dy;
+    return DragValue(1 + along / (points * pixelRatio));
   }
 }
 

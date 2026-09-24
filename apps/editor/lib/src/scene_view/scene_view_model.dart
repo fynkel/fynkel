@@ -207,9 +207,14 @@ final class GizmoDrag {
     required this.frame,
     required this.pivotPx,
     required this.targets,
+    this.pivotMode = PivotMode.pivot,
   });
 
   final SceneTool tool;
+
+  /// Pivot or Center when the drag began: whether each object rotates
+  /// and scales about its own origin or the group about the gizmo.
+  final PivotMode pivotMode;
   final Handle handle;
   final Offset startPx;
 
@@ -492,6 +497,15 @@ final class SceneViewModel extends ChangeNotifier {
   GizmoSpace get space => editorState.space;
   void toggleSpace() {
     editorState.space = space == GizmoSpace.world ? GizmoSpace.local : GizmoSpace.world;
+    editorState.changed();
+    _repaint();
+  }
+
+  PivotMode get pivotMode => editorState.pivotMode;
+
+  /// Z: the gizmo at the active object's pivot, or at the selection's centre.
+  void togglePivot() {
+    editorState.pivotMode = pivotMode == PivotMode.pivot ? PivotMode.center : PivotMode.pivot;
     editorState.changed();
     _repaint();
   }
@@ -1208,9 +1222,10 @@ final class SceneViewModel extends ChangeNotifier {
     return 'no Transform component — add one in the Inspector to move it';
   }
 
-  /// The gizmo's frame for the selection now: pivot at the lead's origin,
-  /// world or local axes. Null when the tool has no gizmo, nothing
-  /// draggable is selected or the preview is gone.
+  /// The gizmo's frame for the selection now: at the lead's origin (Pivot)
+  /// or the middle of the selection's bounds (Center), world or local
+  /// axes (the lead's). Null when the tool has no gizmo, nothing draggable
+  /// is selected or the preview is gone.
   GizmoFrame? gizmoFrame() {
     final t = current;
     final vp = viewProjection;
@@ -1223,13 +1238,33 @@ final class SceneViewModel extends ChangeNotifier {
     final lead = targets.first;
     final world = t.preview!.worldMatrices([lead])[lead];
     if (world == null) return null;
-    final pivot = matTranslation(world);
+    final pivot = pivotMode == PivotMode.center ? selectionCenter(targets) ?? matTranslation(world) : matTranslation(world);
     final local = space == GizmoSpace.local || tool.alwaysLocal;
     return GizmoFrame(
       pivot: pivot,
       axes: local ? matAxes(world) : GizmoFrame.worldAxes,
       size: vp.metresPerPixel(pivot) * GizmoFrame.screenSize * pixelRatio,
     );
+  }
+
+  /// Unity's Center: the middle of the bounds of [ids] and everything
+  /// under them that is shown (a mesh's box, an object without one its
+  /// origin); null when none has a position.
+  Vec3? selectionCenter(List<String> ids) {
+    final t = current;
+    if (t == null) return null;
+    final hidden = _hiddenAll(t);
+    final all = <String>{};
+    void add(String id) {
+      if (hidden.contains(id) || !all.add(id)) return;
+      for (final c in t.tab.tree[id]?.children ?? const <String>[]) {
+        add(c);
+      }
+    }
+
+    ids.forEach(add);
+    final b = boundsOf(all);
+    return b == null ? null : vScale(vAdd(b.$1, b.$2), 0.5);
   }
 
   ToolContext? _context(GizmoFrame? frame, {bool snapping = false}) {
@@ -1321,6 +1356,7 @@ final class SceneViewModel extends ChangeNotifier {
       frame: frame,
       pivotPx: Offset(pivot[0], pivot[1]),
       targets: targets,
+      pivotMode: pivotMode,
     )..currentPivot = List.of(frame.pivot);
     _mode = _Mode.gizmo;
     notifyListeners();
@@ -1364,11 +1400,24 @@ final class SceneViewModel extends ChangeNotifier {
     d.currentPivot = edit.pivot;
     final delta = edit.delta;
     final previews = <PreviewTransform>[];
+    final ownPivot = d.pivotMode == PivotMode.pivot;
     for (final target in d.targets) {
-      final newWorld = matMul(delta, target.startWorld);
+      // Pivot: each object turns about its own origin (the delta's
+      // rotation moved there); Center: the group about the gizmo.
+      final origin = matTranslation(target.startWorld);
+      final about = ownPivot && edit.channel == TransformChannel.rotate
+          ? matMul(
+              _translationMatrix(origin),
+              matMul(_linearOf(delta), _translationMatrix(vScale(origin, -1))),
+            )
+          : delta;
+      final newWorld = matMul(about, target.startWorld);
       final local = Trs.fromMatrix(matMul(matInverseAffine(target.parentWorld), newWorld));
       // A pure move keeps the rotation and scale bits exactly (no
-      // decomposition noise on what did not change).
+      // decomposition noise on what did not change); a scale multiplies
+      // each object's own scale and, in Center, moves it away from the
+      // centre — never a shear.
+      final factors = edit.factors;
       final trs = switch (edit.channel) {
         TransformChannel.move => Trs(
           position: local.position,
@@ -1379,6 +1428,11 @@ final class SceneViewModel extends ChangeNotifier {
           position: local.position,
           rotation: local.rotation,
           scale: target.startLocal.scale,
+        ),
+        TransformChannel.scale when factors != null => Trs(
+          position: ownPivot ? target.startLocal.position : local.position,
+          rotation: target.startLocal.rotation,
+          scale: [for (var i = 0; i < 3; i++) target.startLocal.scale[i] * factors[i]],
         ),
         TransformChannel.scale => local,
       };
@@ -2255,3 +2309,8 @@ final class SceneViewModel extends ChangeNotifier {
     super.dispose();
   }
 }
+
+List<double> _translationMatrix(Vec3 v) => [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, v[0], v[1], v[2], 1];
+
+/// [m] without its translation.
+List<double> _linearOf(List<double> m) => [...m.sublist(0, 12), 0, 0, 0, 1];
