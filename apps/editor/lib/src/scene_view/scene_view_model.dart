@@ -489,6 +489,15 @@ final class SceneViewModel extends ChangeNotifier {
     }
     final f = tabs.shown;
     if (f != _listening) {
+      // Between loaded scenes the view does not move (Unity has one Scene
+      // view camera, whichever scene is active).
+      final was = _listening;
+      if (was != null && f != null && _isLoadedScene(was) && _isLoadedScene(f) && _sceneTabs[was] != null) {
+        final st = _sceneTabOf(f);
+        st.camera.setFrom(_sceneTabs[was]!.camera);
+        st.cameraVersion++;
+        editorState.flush();
+      }
       _listening?.removeListener(_onTab);
       _listening = f;
       f?.addListener(_onTab);
@@ -496,6 +505,9 @@ final class SceneViewModel extends ChangeNotifier {
     }
     _repaint();
   }
+
+  bool _isLoadedScene(OpenDocument t) =>
+      t.kind == 'scene' && !identical(t, tabs.live) && tabs.open.contains(t) && tabs.isLoaded(t);
 
   void _onTab() {
     final t = current;

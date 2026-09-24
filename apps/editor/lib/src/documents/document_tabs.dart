@@ -91,6 +91,50 @@ final class DocumentTabs extends ChangeNotifier {
     return tab;
   }
 
+  // ── Several scenes (Unity's multi-scene editing) ─────────────────────
+
+  /// The open scenes, in tab order: all of them are in the Hierarchy and
+  /// the loaded ones in the Scene view; the focused one is the active
+  /// scene (where new objects go, what ⌘S saves).
+  List<OpenDocument> get scenes => [
+    for (final t in open)
+      if (t.kind == 'scene') t,
+  ];
+
+  final _unloaded = <OpenDocument>{};
+
+  /// Unity's Unload Scene: the scene stays in the Hierarchy as a header,
+  /// its objects are not shown, drawn or edited.
+  bool isLoaded(OpenDocument tab) => !_unloaded.contains(tab);
+
+  List<OpenDocument> get loadedScenes => [
+    for (final t in scenes)
+      if (!_unloaded.contains(t)) t,
+  ];
+
+  /// Why [tab] cannot be unloaded now, or null.
+  String? cannotUnload(OpenDocument tab) {
+    if (tab.kind != 'scene' || !open.contains(tab)) return 'Only an open scene unloads.';
+    if (_unloaded.contains(tab)) return 'It is unloaded already.';
+    if (tab.dirty) return 'Save or revert its changes first.';
+    if (loadedScenes.length < 2) return 'The last loaded scene stays loaded.';
+    return null;
+  }
+
+  /// Unloads [tab] (the active one hands over to the next loaded scene).
+  bool unload(OpenDocument tab) {
+    if (cannotUnload(tab) != null) return false;
+    _unloaded.add(tab);
+    tab.clearSelection();
+    if (identical(_focused, tab)) _focused = loadedScenes.first;
+    notifyListeners();
+    return true;
+  }
+
+  void load(OpenDocument tab) {
+    if (_unloaded.remove(tab)) notifyListeners();
+  }
+
   // ── Prefab mode ─────────────────────────────────────────────────────
 
   final _contexts = <OpenDocument, PrefabContext>{};
@@ -153,6 +197,8 @@ final class DocumentTabs extends ChangeNotifier {
 
   void focus(OpenDocument? tab) {
     if (tab != null && !open.contains(tab)) return;
+    // Focusing a scene makes it the active one, which is loaded.
+    if (tab != null) _unloaded.remove(tab);
     if (_focused == tab) {
       notifyListeners();
       return;
@@ -180,6 +226,7 @@ final class DocumentTabs extends ChangeNotifier {
     if (i < 0) return;
     open.removeAt(i);
     _lastPrefabEdit.remove(tab);
+    _unloaded.remove(tab);
     // Its prefab mode ends (back where it was opened from); prefabs opened
     // from it are in isolation now.
     final back = _contexts.remove(tab)?.tab;
@@ -188,6 +235,7 @@ final class DocumentTabs extends ChangeNotifier {
     tab.dispose();
     if (_focused == tab) {
       _focused = back != null && open.contains(back) ? back : (open.isEmpty ? null : open[i.clamp(0, open.length - 1)]);
+      if (_focused != null) _unloaded.remove(_focused);
     }
     // A closed prefab tab's unsaved edits are gone from the instances too.
     if (tab.kind == 'prefab') _prefabChanged(tab);

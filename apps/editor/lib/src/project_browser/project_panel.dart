@@ -33,6 +33,7 @@ class ProjectPanel extends StatefulWidget {
     super.key,
     required this.model,
     required this.onOpenDocument,
+    this.onOpenScene,
     required this.onShowAsset,
     this.onFindReferences,
     this.run = runProcess,
@@ -45,6 +46,11 @@ class ProjectPanel extends StatefulWidget {
 
   /// A scene or prefab double-clicked: into a tab.
   final void Function(String id) onOpenDocument;
+
+  /// A scene's Open (single: the other scenes close) and Open Scene
+  /// Additive (added to the open scenes) — Unity's; without it a scene
+  /// opens like any document.
+  final void Function(String id, {bool additive})? onOpenScene;
 
   /// Any other asset double-clicked (or Show in Inspector): the Inspector
   /// shows it and comes forward.
@@ -246,7 +252,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
   // ── Actions ───────────────────────────────────────────────────────────
 
   void _activate(AssetEntry e) {
-    if (e.document == 'scene' || e.document == 'prefab') {
+    if (e.document == 'scene' && widget.onOpenScene != null) {
+      widget.onOpenScene!(e.id);
+    } else if (e.document == 'scene' || e.document == 'prefab') {
       widget.onOpenDocument(e.id);
     } else {
       model.select(e.id);
@@ -508,6 +516,13 @@ class _ProjectPanelState extends State<ProjectPanel> {
       position: RelativeRect.fromRect(Rect.fromPoints(at, at), Offset.zero & overlay.size),
       items: [
         if (isDoc) PopupMenuItem(value: 'open', enabled: !many, child: const Text('Open  ⇧⌥⌘O')),
+        if (e.document == 'scene' && widget.onOpenScene != null)
+          PopupMenuItem(
+            key: const Key('project.menu.openAdditive'),
+            value: 'openAdditive',
+            enabled: !many,
+            child: const Text('Open Scene Additive'),
+          ),
         const PopupMenuItem(value: 'show', child: Text('Show in Inspector')),
         const PopupMenuItem(value: 'reveal', child: Text('Reveal in Finder  ⇧⌥⌘E')),
         if (widget.onFindReferences != null && e.document != 'scene')
@@ -548,7 +563,9 @@ class _ProjectPanelState extends State<ProjectPanel> {
     final here = e.path.contains('/') ? e.path.substring(0, e.path.lastIndexOf('/')) : '';
     switch (choice) {
       case 'open':
-        widget.onOpenDocument(e.id);
+        _activate(e);
+      case 'openAdditive':
+        widget.onOpenScene?.call(e.id, additive: true);
       case 'show':
         widget.onShowAsset();
       case 'reveal':

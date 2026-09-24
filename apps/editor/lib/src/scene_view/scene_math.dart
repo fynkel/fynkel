@@ -459,6 +459,20 @@ final class EditorCamera {
   }
 
   EditorCamera copy() => EditorCamera.fromJson(toJson())!;
+
+  /// Takes [o]'s framing (one Scene view camera across the loaded scenes).
+  void setFrom(EditorCamera o) {
+    pivot = List.of(o.pivot);
+    distance = o.distance;
+    yaw = o.yaw;
+    pitch = o.pitch;
+    orthographic = o.orthographic;
+    fovY = o.fovY;
+    near = o.near;
+    far = o.far;
+    manualExposure = o.manualExposure;
+    alignedWorld = o.alignedWorld == null ? null : List.of(o.alignedWorld!);
+  }
 }
 
 /// A camera at a viewport size: the pixel ↔ world conversions.

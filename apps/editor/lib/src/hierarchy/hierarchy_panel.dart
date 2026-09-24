@@ -4,12 +4,16 @@
 // rows), search and filter, select / multi-select / range, rename in place,
 // the context menu, drag-and-drop with above / onto / below zones, prefab
 // and error badges, and the keyboard (arrows, ↩ / F2 rename, ⌫ delete, ⌘A).
+// With several scenes open each is a section under its header (Unity's
+// multi-scene Hierarchy): the focused one is the active scene, a click in
+// another activates it, rows dragged onto another scene move there.
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../commands/commands.dart';
+import '../documents/open_document.dart';
 import '../l10n/strings.dart';
 import '../inspector/field_widgets.dart' show AssetDragPayload, assetKindIcon;
 import '../play/play_document.dart' show PlayDocument;
@@ -27,7 +31,17 @@ import 'presets.dart';
 double hierarchyRowHeight(BuildContext context) => context.tokens.row;
 
 class HierarchyPanel extends StatefulWidget {
-  const HierarchyPanel({super.key, required this.model, required this.onOpenDocument, this.searchFocus, this.commands});
+  const HierarchyPanel({
+    super.key,
+    required this.model,
+    required this.onOpenDocument,
+    this.searchFocus,
+    this.commands,
+    this.onSaveScene,
+    this.onRemoveScene,
+    this.onAddScene,
+    this.onSelectSceneAsset,
+  });
 
   final HierarchyModel model;
 
@@ -38,6 +52,14 @@ class HierarchyPanel extends StatefulWidget {
   /// The registry the context menu's Prefab mode items run through
   /// (`prefab.*` — the same commands as the Edit menu and the palette).
   final CommandRegistry? commands;
+
+  /// A scene header's Save Scene, Remove Scene (asks about unsaved
+  /// changes), a scene asset dropped on the Hierarchy (Unity's additive
+  /// open) and Select Scene Asset.
+  final void Function(OpenDocument scene)? onSaveScene;
+  final void Function(OpenDocument scene)? onRemoveScene;
+  final void Function(String sceneAsset)? onAddScene;
+  final void Function(OpenDocument scene)? onSelectSceneAsset;
 
   @override
   State<HierarchyPanel> createState() => _HierarchyPanelState();
@@ -56,6 +78,13 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
   DateTime? _lastTap;
   String? _lastTapId;
   String? _wasRenaming;
+
+  /// Scene sections folded under their header, by document id.
+  final Set<String> _folded = {};
+
+  /// What the list shows: the rows alone, or with several scenes each
+  /// scene's header and (loaded, unfolded) its rows.
+  List<_Item> _items = const [];
 
   HierarchyModel get model => widget.model;
 
@@ -102,8 +131,16 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
 
   void _scrollTo(String id) {
     final t = model.tree;
-    if (t == null || !_scroll.hasClients) return;
-    final i = t.rowIndexOf(id);
+    final tab = model.tab;
+    if (t == null || tab == null || !_scroll.hasClients) return;
+    final int i;
+    if (model.multiScene) {
+      final r = t.rowIndexOf(id);
+      final header = _items.indexWhere((x) => x.row == null && identical(x.scene, tab));
+      i = r < 0 || header < 0 || _folded.contains(tab.document.id) ? -1 : header + 1 + r;
+    } else {
+      i = t.rowIndexOf(id);
+    }
     if (i < 0) return;
     final h = hierarchyRowHeight(context);
     final top = i * h;
@@ -168,6 +205,16 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     if (tab == null) return _empty(context, theme);
     final tree = tab.tree;
     final rows = tree.rows;
+    final multi = model.multiScene;
+    _items = multi
+        ? [
+            for (final s in model.scenes) ...[
+              _Item(s),
+              if (model.isLoaded(s) && !_folded.contains(s.document.id))
+                for (final r in s.tree.rows) _Item(s, r),
+            ],
+          ]
+        : [for (final r in rows) _Item(tab, r)];
     return Column(
       children: [
         _toolbar(context, theme),
@@ -272,7 +319,7 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             ),
           ),
         Expanded(
-          child: rows.isEmpty
+          child: rows.isEmpty && !multi
               ? Center(
                   child: Text(
                     tree.isEmpty
@@ -297,12 +344,13 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
                     onSecondaryTapUp: (d) => _emptySpaceMenu(context, d.globalPosition),
                     child: _RootDropTarget(
                       model: model,
+                      onAddScene: widget.onAddScene,
                       child: ListView.builder(
                         key: const Key('hierarchy.list'),
                         controller: _scroll,
-                        itemCount: rows.length,
+                        itemCount: _items.length,
                         itemExtent: hierarchyRowHeight(context),
-                        itemBuilder: (context, i) => _row(context, theme, tab.tree, rows[i]),
+                        itemBuilder: (context, i) => _item(context, theme, _items[i]),
                       ),
                     ),
                   ),
@@ -558,6 +606,170 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
     );
   }
 
+  // ── Scenes ────────────────────────────────────────────────────────────
+
+  Widget _item(BuildContext context, ThemeData theme, _Item item) {
+    final r = item.row;
+    if (r == null) return _sceneHeader(context, theme, item.scene);
+    if (identical(item.scene, model.tab)) return _row(context, theme, item.scene.tree, r);
+    return _otherRow(context, theme, item.scene, r);
+  }
+
+  Widget _sceneHeader(BuildContext context, ThemeData theme, OpenDocument scene) {
+    final t = context.tokens;
+    final id = scene.document.id;
+    final active = identical(scene, model.tab);
+    final loaded = model.isLoaded(scene);
+    final folded = _folded.contains(id);
+    final header = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        _listFocus.requestFocus();
+        if (active) {
+          model.clearSelection();
+        } else if (loaded) {
+          model.activateScene(scene);
+        }
+      },
+      onSecondaryTapUp: (d) => _sceneMenu(context, scene, d.globalPosition),
+      child: Container(
+        key: Key('hierarchy.scene.$id'),
+        height: hierarchyRowHeight(context),
+        padding: const EdgeInsets.only(left: 4),
+        decoration: BoxDecoration(
+          color: t.header,
+          border: Border(bottom: t.hairline),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              child: loaded
+                  ? Semantics(
+                      button: true,
+                      label: folded ? 'Expand' : 'Collapse',
+                      child: InkWell(
+                        key: Key('hierarchy.scene.fold.$id'),
+                        onTap: () => setState(() => folded ? _folded.remove(id) : _folded.add(id)),
+                        child: Icon(folded ? FIcons.chevronRight : FIcons.expandMore, size: 14, color: t.textSecondary),
+                      ),
+                    )
+                  : null,
+            ),
+            Icon(assetKindIcon('scene'), size: 13, color: loaded ? t.textSecondary : t.textDisabled),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '${scene.title}${scene.dirty ? '*' : ''}${loaded ? '' : '  (not loaded)'}',
+                key: Key('hierarchy.scene.name.$id'),
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: loaded ? t.text : t.textDisabled,
+                  fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+            Builder(
+              builder: (context) => IconButton(
+                key: Key('hierarchy.scene.menu.$id'),
+                tooltip: 'Scene',
+                iconSize: 14,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(FIcons.moreVert),
+                onPressed: () {
+                  final box = context.findRenderObject() as RenderBox;
+                  _sceneMenu(context, scene, box.localToGlobal(box.size.bottomLeft(Offset.zero)));
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    return Semantics(
+      header: true,
+      label: '${scene.title} scene${active ? ', active' : ''}${loaded ? '' : ', not loaded'}',
+      child: _SceneDropTarget(model: model, scene: scene, onAddScene: widget.onAddScene, child: header),
+    );
+  }
+
+  /// Unity's scene header menu.
+  Future<void> _sceneMenu(BuildContext context, OpenDocument scene, Offset at) async {
+    final active = identical(scene, model.tab);
+    final loaded = model.isLoaded(scene);
+    final key = 'hierarchy.scene.${scene.document.id}';
+    await showCascadingMenu(context, at, [
+      MenuAction(
+        'Set Active Scene',
+        key: Key('$key.setActive'),
+        enabled: !active && loaded,
+        onSelected: () => model.activateScene(scene),
+      ),
+      const MenuSeparator(),
+      MenuAction(
+        'Save Scene',
+        key: Key('$key.save'),
+        enabled: loaded && scene.dirty && widget.onSaveScene != null,
+        onSelected: () => widget.onSaveScene?.call(scene),
+      ),
+      const MenuSeparator(),
+      if (loaded)
+        MenuAction(
+          'Unload Scene',
+          key: Key('$key.unload'),
+          enabled: model.tabs.cannotUnload(scene) == null,
+          onSelected: () => model.unloadScene(scene),
+        )
+      else
+        MenuAction('Load Scene', key: Key('$key.load'), onSelected: () => model.loadScene(scene)),
+      MenuAction(
+        'Remove Scene',
+        key: Key('$key.remove'),
+        enabled: model.scenes.length > 1 && widget.onRemoveScene != null,
+        onSelected: () => widget.onRemoveScene?.call(scene),
+      ),
+      const MenuSeparator(),
+      MenuAction(
+        'Select Scene Asset',
+        key: Key('$key.selectAsset'),
+        enabled: widget.onSelectSceneAsset != null,
+        onSelected: () => widget.onSelectSceneAsset?.call(scene),
+      ),
+    ]);
+  }
+
+  /// Another loaded scene's row: drawn like the active scene's; a click
+  /// makes its scene the active one and selects it there (Unity's).
+  Widget _otherRow(BuildContext context, ThemeData theme, OpenDocument scene, HierarchyRow row) {
+    final n = row.node;
+    void activate() {
+      _listFocus.requestFocus();
+      model.activateScene(scene);
+      model.select(n.id);
+    }
+
+    return _HierarchyRowWidget(
+      key: ValueKey(model.tab!.tree[n.id] == null ? 'row.${n.id}' : 'row.${scene.document.id}.${n.id}'),
+      model: model,
+      row: row,
+      scene: scene,
+      selected: false,
+      inactive: !scene.tree.activeInHierarchy(n.id),
+      renaming: false,
+      renameController: null,
+      errors: scene.tree.errors[n.id] ?? const [],
+      onTap: activate,
+      onDoubleTap: _frame,
+      onSecondaryTap: (at) {
+        activate();
+        _contextMenu(context, n.id, at);
+      },
+      onToggle: () => model.toggle(n.id, recursive: HardwareKeyboard.instance.isAltPressed, scene: scene),
+      onRenameSubmit: (_) {},
+      onRenameCancel: () {},
+    );
+  }
+
   // ── Rows ──────────────────────────────────────────────────────────────
 
   Widget _row(BuildContext context, ThemeData theme, HierarchyTree tree, HierarchyRow row) {
@@ -768,18 +980,25 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
 /// The list's background accepts a drop as "append to the roots": entity
 /// rows reparent there, a prefab from the Project browser instantiates.
 class _RootDropTarget extends StatelessWidget {
-  const _RootDropTarget({required this.model, required this.child});
+  const _RootDropTarget({required this.model, required this.child, this.onAddScene});
 
   final HierarchyModel model;
   final Widget child;
+
+  /// A scene from the Project: added to the open scenes (Unity's drop of a
+  /// scene onto the Hierarchy).
+  final void Function(String sceneAsset)? onAddScene;
 
   @override
   Widget build(BuildContext context) {
     DropTarget root() => DropTarget(parent: null, index: model.tree?.roots.length ?? 0);
     return DragTarget<AssetDragPayload>(
-      onWillAcceptWithDetails: (d) => model.canDropAsset(d.data.toRef(), d.data.kind, root()),
-      onAcceptWithDetails: (d) =>
-          model.instantiatePrefab(d.data.toRef(), name: prefabInstanceName(d.data.name), target: root()),
+      onWillAcceptWithDetails: (d) => d.data.kind == 'scene'
+          ? onAddScene != null && model.multiScene
+          : model.canDropAsset(d.data.toRef(), d.data.kind, root()),
+      onAcceptWithDetails: (d) => d.data.kind == 'scene'
+          ? onAddScene?.call(d.data.id)
+          : model.instantiatePrefab(d.data.toRef(), name: prefabInstanceName(d.data.name), target: root()),
       builder: (context, assets, _) => DragTarget<List<String>>(
         onWillAcceptWithDetails: (d) => model.canDrop(d.data, root()),
         onAcceptWithDetails: (d) => model.reparent(d.data, root()),
@@ -794,6 +1013,102 @@ class _RootDropTarget extends StatelessWidget {
   }
 }
 
+/// A scene's header takes the active scene's rows dragged onto it (they
+/// move to that scene), a scene from the Project (added) and a prefab
+/// (instantiated at that scene's roots).
+class _SceneDropTarget extends StatefulWidget {
+  const _SceneDropTarget({required this.model, required this.scene, required this.child, this.onAddScene});
+
+  final HierarchyModel model;
+  final OpenDocument scene;
+  final Widget child;
+  final void Function(String sceneAsset)? onAddScene;
+
+  @override
+  State<_SceneDropTarget> createState() => _SceneDropTargetState();
+}
+
+class _SceneDropTargetState extends State<_SceneDropTarget> {
+  bool _over = false;
+
+  HierarchyModel get model => widget.model;
+  OpenDocument get scene => widget.scene;
+  bool get _active => identical(scene, model.tab);
+
+  bool _acceptsAsset(AssetDragPayload a) {
+    if (a.kind == 'scene') return widget.onAddScene != null;
+    if (!model.isLoaded(scene)) return false;
+    final root = DropTarget(parent: null, index: scene.tree.roots.length);
+    return _active && model.canDropAsset(a.toRef(), a.kind, root) || !_active && a.kind == 'prefab';
+  }
+
+  bool _acceptsRows(List<String> ids) => _active
+      ? model.canDrop(ids, DropTarget(parent: null, index: scene.tree.roots.length))
+      : model.cannotMoveToScene(ids, scene) == null;
+
+  void _setOver(bool v) {
+    if (v != _over) setState(() => _over = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tokens;
+    return DragTarget<AssetDragPayload>(
+      onWillAcceptWithDetails: (d) {
+        final ok = _acceptsAsset(d.data);
+        _setOver(ok);
+        return ok;
+      },
+      onLeave: (_) => _setOver(false),
+      onAcceptWithDetails: (d) {
+        _setOver(false);
+        final a = d.data;
+        if (a.kind == 'scene') {
+          widget.onAddScene?.call(a.id);
+          return;
+        }
+        if (!_active) model.activateScene(scene);
+        model.instantiatePrefab(
+          a.toRef(),
+          name: prefabInstanceName(a.name),
+          target: DropTarget(parent: null, index: scene.tree.roots.length),
+        );
+      },
+      builder: (context, _, _) => DragTarget<List<String>>(
+        onWillAcceptWithDetails: (d) {
+          final ok = _acceptsRows(d.data);
+          _setOver(ok);
+          return ok;
+        },
+        onLeave: (_) => _setOver(false),
+        onAcceptWithDetails: (d) {
+          _setOver(false);
+          if (_active) {
+            model.reparent(d.data, DropTarget(parent: null, index: scene.tree.roots.length));
+          } else {
+            model.moveToScene(d.data, scene);
+          }
+        },
+        builder: (context, _, _) => _over
+            ? DecoratedBox(
+                position: DecorationPosition.foreground,
+                decoration: BoxDecoration(border: Border.all(color: t.accent, width: 1.5)),
+                child: widget.child,
+              )
+            : widget.child,
+      ),
+    );
+  }
+}
+
+/// One line of the list: a scene's header ([row] null) or one of its rows.
+class _Item {
+  const _Item(this.scene, [this.row]);
+
+  final OpenDocument scene;
+  final HierarchyRow? row;
+}
+
 enum _Zone { above, onto, below }
 
 class _HierarchyRowWidget extends StatefulWidget {
@@ -801,6 +1116,7 @@ class _HierarchyRowWidget extends StatefulWidget {
     super.key,
     required this.model,
     required this.row,
+    this.scene,
     required this.selected,
     this.inactive = false,
     required this.renaming,
@@ -817,6 +1133,10 @@ class _HierarchyRowWidget extends StatefulWidget {
 
   final HierarchyModel model;
   final HierarchyRow row;
+
+  /// Another loaded scene the row is in (not the active one): it offers a
+  /// drop of the active scene's rows (they move there), not a drag.
+  final OpenDocument? scene;
   final bool selected;
 
   /// Not active in the hierarchy: the row is greyed, as in Unity.
@@ -892,7 +1212,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
   }
 
   DropTarget _target(_Zone z) {
-    final tree = widget.model.tree!;
+    final tree = widget.scene?.tree ?? widget.model.tree!;
     final n = widget.row.node;
     switch (z) {
       case _Zone.onto:
@@ -913,6 +1233,7 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
     final row = widget.row;
     final n = row.node;
     final model = widget.model;
+    final other = widget.scene;
     final selectionForDrag = model.tab!.isSelected(n.id) ? model.tab!.selection.toList() : [n.id];
     final t = context.tokens;
     final focused = PanelFocus.of(context);
@@ -1077,6 +1398,32 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
     );
 
     if (widget.renaming) return interactive;
+
+    // Another scene's row: the active scene's rows dropped onto it (or
+    // beside it) move to its scene there.
+    if (other != null) {
+      bool ok(DropTarget at, List<String> ids) => model.cannotMoveToScene(ids, other, parent: at.parent) == null;
+      return DragTarget<List<String>>(
+        onWillAcceptWithDetails: (d) {
+          final z = _zoneAt(d.offset);
+          final accepted = ok(_target(z), d.data);
+          setState(() => _zone = accepted ? z : null);
+          return accepted;
+        },
+        onMove: (d) {
+          final z = _zoneAt(d.offset);
+          final next = ok(_target(z), d.data) ? z : null;
+          if (next != _zone) setState(() => _zone = next);
+        },
+        onLeave: (_) => setState(() => _zone = null),
+        onAcceptWithDetails: (d) {
+          final at = _target(_zoneAt(d.offset));
+          setState(() => _zone = null);
+          model.moveToScene(d.data, other, parent: at.parent, index: at.parent == null ? null : at.index);
+        },
+        builder: (context, _, _) => interactive,
+      );
+    }
 
     // A material or a script goes onto the object (Unity's material and
     // script drops), anywhere on the row.

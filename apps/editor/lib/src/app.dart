@@ -525,6 +525,10 @@ class EditorShellState extends State<EditorShell> {
           onOpenDocument: openDocumentDialog,
           searchFocus: PanelIds.number(id) == 1 ? hierarchySearchFocus : null,
           commands: registry,
+          onSaveScene: saveTab,
+          onRemoveScene: closeTab,
+          onAddScene: (id) => openScene(id, additive: true),
+          onSelectSceneAsset: (scene) => revealInProject(scene.document.id),
         );
       },
     ),
@@ -584,6 +588,7 @@ class EditorShellState extends State<EditorShell> {
         return ProjectPanel(
           model: b,
           onOpenDocument: openDocument,
+          onOpenScene: openScene,
           onShowAsset: showAssetInInspector,
           onFindReferences: findReferencesInScene,
           run: widget.run,
@@ -1145,7 +1150,9 @@ class EditorShellState extends State<EditorShell> {
         run: () {
           final a = _leadAsset;
           if (a == null) return;
-          if (a.document == 'scene' || a.document == 'prefab') {
+          if (a.document == 'scene') {
+            openScene(a.id);
+          } else if (a.document == 'prefab') {
             openDocument(a.id);
           } else {
             showAssetInInspector();
@@ -2363,6 +2370,46 @@ class EditorShellState extends State<EditorShell> {
     if (tab == null && t.openError != null) _showError(t.openError!);
     registry.refresh();
     return tab;
+  }
+
+  /// Unity's Open Scene: [id] becomes the only open scene — the others
+  /// close, each with unsaved changes asking first (Cancel opens nothing);
+  /// [additive] adds it to the open scenes, the active one staying active.
+  Future<OpenDocument?> openScene(String id, {bool additive = false}) async {
+    final t = tabs;
+    if (t == null) return null;
+    if (additive) {
+      final tab = t.openDocument(id, focus: t.focused == null);
+      if (tab == null && t.openError != null) _showError(t.openError!);
+      registry.refresh();
+      return tab;
+    }
+    final others = [
+      for (final s in t.scenes)
+        if (s.document.id != id && s.path != id) s,
+    ];
+    for (final s in others.where((s) => s.dirty)) {
+      if (!await _saveOrDiscard(s)) return null;
+    }
+    if (!mounted) return null;
+    final tab = openDocument(id);
+    if (tab == null) return null;
+    for (final s in others) {
+      if (t.open.contains(s) && !identical(s, tab)) t.closeDiscarding(s);
+    }
+    registry.refresh();
+    return tab;
+  }
+
+  /// The save prompt for a tab about to close: false when cancelled (or
+  /// the save failed).
+  Future<bool> _saveOrDiscard(OpenDocument tab) async {
+    if (!mounted) return false;
+    return switch (await showClosePrompt(context, tab)) {
+      ClosePromptChoice.cancel => false,
+      ClosePromptChoice.save => saveTab(tab),
+      ClosePromptChoice.discard => true,
+    };
   }
 
   /// A Console row's document into a tab, its entity revealed and selected.

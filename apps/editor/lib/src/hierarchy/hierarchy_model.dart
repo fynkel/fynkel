@@ -109,7 +109,116 @@ final class HierarchyModel extends ChangeNotifier {
       _tab?.addListener(_onTab);
       renaming = null;
     }
+    // The other scenes' rows are shown too: their changes redraw them.
+    final others = {
+      for (final s in scenes)
+        if (!identical(s, _tab)) s,
+    };
+    for (final s in _others.difference(others)) {
+      s.removeListener(_onOther);
+    }
+    for (final s in others.difference(_others)) {
+      s.addListener(_onOther);
+    }
+    _others = others;
     notifyListeners();
+  }
+
+  Set<OpenDocument> _others = {};
+  void _onOther() => notifyListeners();
+
+  // ── Several scenes (Unity's multi-scene Hierarchy) ─────────────────
+
+  /// Every open scene, each under its header, while a scene is shown
+  /// (not locked to a document, not Play, not Prefab mode); otherwise the
+  /// shown document alone.
+  bool get multiScene {
+    final t = _tab;
+    return t != null && t.kind == 'scene' && _pinned == null && !identical(t, tabs.live);
+  }
+
+  List<OpenDocument> get scenes {
+    final t = _tab;
+    if (t == null) return const [];
+    return multiScene ? tabs.scenes : [t];
+  }
+
+  bool isLoaded(OpenDocument scene) => tabs.isLoaded(scene);
+
+  /// A row or the header of another scene clicked: it becomes the active
+  /// scene, and the selection goes with the click (Unity's is one).
+  void activateScene(OpenDocument scene) {
+    if (identical(scene, _tab) || !tabs.open.contains(scene)) return;
+    _tab?.clearSelection();
+    tabs.focus(scene);
+  }
+
+  /// Unload Scene; the reason it cannot is the active scene's error.
+  bool unloadScene(OpenDocument scene) {
+    final why = tabs.cannotUnload(scene);
+    if (why != null) {
+      _tab?.lastError = 'Cannot unload ${scene.title}: $why';
+      _tab?.keepEditing();
+      notifyListeners();
+      return false;
+    }
+    return tabs.unload(scene);
+  }
+
+  void loadScene(OpenDocument scene) => tabs.load(scene);
+
+  /// Why [ids] (in the active scene) cannot move to [target], or null.
+  String? cannotMoveToScene(Iterable<String> ids, OpenDocument target, {String? parent}) {
+    final from = _tab;
+    if (from == null || !multiScene) return 'Only between open scenes.';
+    if (identical(from, target)) return 'They are in that scene already.';
+    if (!tabs.open.contains(target) || target.kind != 'scene') return 'That is not an open scene.';
+    if (!tabs.isLoaded(target)) return '${target.title} is unloaded.';
+    if (!canEdit || target.document.readOnly != null) return 'Read-only.';
+    final tops = from.tree.topmost(ids);
+    if (tops.isEmpty) return 'Nothing to move.';
+    if (parent != null && (target.tree[parent]?.isDerived ?? true)) {
+      return 'Not under a prefab instance\'s entity.';
+    }
+    if (tops.any((id) => from.tree[id]?.isDerived ?? true)) {
+      return 'A prefab instance\'s entity moves with its instance.';
+    }
+    return null;
+  }
+
+  /// Unity's drag onto another scene's header (or one of its objects): the
+  /// objects, with what is under them, become roots of [target] (or go
+  /// under [parent] at [index]) — added there, then removed here, a step
+  /// in each scene's history — selected there, which becomes the active
+  /// scene.
+  bool moveToScene(Iterable<String> ids, OpenDocument target, {String? parent, int? index}) {
+    final from = _tab;
+    if (from == null || cannotMoveToScene(ids, target, parent: parent) != null) return false;
+    final tops = from.tree.topmost(ids).toList();
+    final kept = clipboard;
+    from.setSelection(tops);
+    final copied = copy() ? clipboard! : null;
+    clipboard = kept;
+    if (copied == null) return false;
+    final roots = copied.keys.where((id) {
+      final p = copied[id]!['parent'];
+      return p is! String || !copied.containsKey(p);
+    }).length;
+    final a = target.transaction([Command.pasteObjects(copied, parent: parent, index: index)]);
+    if (a == null || !a.ok || a.mutations.isEmpty) {
+      from.lastError = 'Could not move to ${target.title}: ${a == null ? target.lastError : describeRejection(a)}';
+      from.keepEditing();
+      notifyListeners();
+      return false;
+    }
+    final moved = a.mutations.first.affectedIds.take(roots).toList();
+    from.transaction([for (final id in tops) Command.deleteObject(id)]);
+    from.clearSelection();
+    tabs.focus(target);
+    if (parent != null) target.tree.expand(parent);
+    target.setSelection(moved.where((id) => target.tree[id] != null));
+    notifyListeners();
+    return true;
   }
 
   void _onTab() {
@@ -136,10 +245,14 @@ final class HierarchyModel extends ChangeNotifier {
 
   // ── Filter / expansion ────────────────────────────────────────────────
 
+  /// The search and filters apply to every scene listed.
   void setFilter(HierarchyFilter f) {
     final t = _tab?.tree;
     if (t == null) return;
     t.setFilter(f);
+    for (final s in scenes) {
+      if (!identical(s, _tab)) s.tree.setFilter(f);
+    }
     notifyListeners();
   }
 
@@ -159,8 +272,8 @@ final class HierarchyModel extends ChangeNotifier {
 
   /// Opens or closes [id]; with [recursive] (Unity's ⌥-click on the
   /// arrow) everything below it follows.
-  void toggle(String id, {bool recursive = false}) {
-    final t = _tab?.tree;
+  void toggle(String id, {bool recursive = false, OpenDocument? scene}) {
+    final t = (scene ?? _tab)?.tree;
     if (t == null) return;
     if (!recursive) {
       t.toggle(id);
@@ -1124,6 +1237,9 @@ final class HierarchyModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    for (final s in _others) {
+      s.removeListener(_onOther);
+    }
     tabs.removeListener(_onTabs);
     _tab?.removeListener(_onTab);
     super.dispose();
