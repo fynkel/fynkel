@@ -1501,9 +1501,14 @@ about unsaved changes), the **Context** menu — Normal / Gray / Hidden
 **Auto Save** (`EditorState.prefabAutoSave`, on by default: each change,
 undo or Apply is saved as it is made; off, a Save button and leaving
 asks). The Hierarchy shows the prefab under a ‹ header. Closing a prefab
-goes back to the tab it was opened from. Drawing the scene around the
-prefab (Normal, or greyed) needs the viewport to draw a second world and
-comes with that work.
+goes back to the tab it was opened from. In Normal and Gray the scene is
+drawn **around** the prefab (`SceneViewModel._drawOtherWorlds`: the
+scene's preview as the renderer's extra world, `ViewportOverlay.extraWorld`,
+transformed by `rootWorld × inverse(instanceWorld)` so the prefab's root
+sits where the instance was, the instance hidden in that world meanwhile;
+Gray desaturates it and halves its brightness in the renderer). With
+several scenes open the other loaded ones are drawn the same way, as
+they are.
 
 ### What item 7 does not do
 
