@@ -1085,3 +1085,132 @@ fn install_primitives_writes_the_built_in_shapes_once_under_their_fixed_id() {
     assert_eq!(v["installed"], true);
     assert_clean(&s);
 }
+
+/// Unity's drag in from Finder: files from outside copied into a folder,
+/// a source's own sidecar kept when its id is free (else a fresh one from
+/// the scan), a document's taken id replaced, a taken name counting on;
+/// one asset-history step takes them all out again.
+#[test]
+fn import_files_copies_files_in_with_their_sidecars_and_undo_takes_them_out() {
+    let copy = Copy::new("import");
+    let outside = copy.path("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    // A texture with no sidecar; one with its own (a free id); a scene
+    // whose id the project already has; a sidecar alone.
+    std::fs::copy(
+        copy.path("assets/textures/swatch.png"),
+        outside.join("tree.png"),
+    )
+    .unwrap();
+    std::fs::copy(
+        copy.path("assets/textures/swatch.png"),
+        outside.join("bark.png"),
+    )
+    .unwrap();
+    let own = Uuid::new_v4();
+    let mut meta: Value =
+        serde_json::from_str(&copy.read("assets/textures/swatch.png.meta.json")).unwrap();
+    meta["id"] = json!(own.to_string());
+    let meta = serde_json::to_string_pretty(&meta).unwrap();
+    std::fs::write(outside.join("bark.png.meta.json"), meta).unwrap();
+    std::fs::copy(
+        copy.path("assets/scenes/main.scene.json"),
+        outside.join("level.scene.json"),
+    )
+    .unwrap();
+    std::fs::write(outside.join("lonely.png.meta.json"), "{}").unwrap();
+    let mut s = open(&copy);
+    let before = s.project().unwrap().assets.len();
+    let paths: Vec<String> = [
+        "tree.png",
+        "bark.png",
+        "bark.png.meta.json",
+        "level.scene.json",
+        "lonely.png.meta.json",
+    ]
+    .iter()
+    .map(|n| outside.join(n).display().to_string())
+    .collect();
+
+    let v = ok(s.operate(
+        "importFiles",
+        &json!({ "paths": paths, "folder": "imported" }),
+    ));
+    assert_eq!(v["label"], "Import 3 files", "{v}");
+    let imported = v["imported"].as_array().unwrap();
+    assert_eq!(imported.len(), 3);
+    assert!(
+        copy.path("assets/imported/tree.png.meta.json").is_file(),
+        "the scan wrote its sidecar"
+    );
+    let bark = s
+        .project()
+        .unwrap()
+        .assets
+        .get(own)
+        .expect("the sidecar's id kept");
+    assert_eq!(bark.path, "imported/bark.png");
+    let level = Document::read(
+        &copy.path("assets/imported/level.scene.json"),
+        Some(DocumentKind::Scene),
+    )
+    .unwrap();
+    let main_id = Document::read(
+        &copy.path("assets/scenes/main.scene.json"),
+        Some(DocumentKind::Scene),
+    )
+    .unwrap()
+    .envelope
+    .id;
+    assert_ne!(level.envelope.id, main_id, "a taken id is replaced");
+    assert!(!copy.path("assets/imported/lonely.png.meta.json").exists());
+    assert_eq!(s.project().unwrap().assets.len(), before + 3);
+    assert_clean(&s);
+
+    // Again: the names count on.
+    let v = ok(s.operate(
+        "importFiles",
+        &json!({ "paths": [outside.join("tree.png").display().to_string()], "folder": "imported" }),
+    ));
+    assert_eq!(v["label"], "Import tree 1.png");
+    assert!(copy.path("assets/imported/tree 1.png").is_file());
+
+    // Refusals write nothing.
+    refused(
+        s.operate(
+            "importFiles",
+            &json!({ "paths": [outside.display().to_string()] }),
+        ),
+        "FYN-T0003",
+    );
+    refused(
+        s.operate(
+            "importFiles",
+            &json!({ "paths": [copy.path("assets/textures/swatch.png").display().to_string()] }),
+        ),
+        "FYN-T0003",
+    );
+    refused(
+        s.operate("importFiles", &json!({ "paths": [] })),
+        "FYN-T0003",
+    );
+
+    // One undo per import, sidecars and all.
+    ok(s.operate("undoAsset", &json!({})));
+    assert!(!copy.path("assets/imported/tree 1.png").exists());
+    assert!(!copy.path("assets/imported/tree 1.png.meta.json").exists());
+    ok(s.operate("undoAsset", &json!({})));
+    for f in [
+        "tree.png",
+        "tree.png.meta.json",
+        "bark.png",
+        "bark.png.meta.json",
+        "level.scene.json",
+    ] {
+        assert!(!copy.path(&format!("assets/imported/{f}")).exists(), "{f}");
+    }
+    assert_eq!(s.project().unwrap().assets.len(), before);
+    ok(s.operate("redoAsset", &json!({})));
+    assert!(s.project().unwrap().assets.get(own).is_some());
+    assert_clean(&s);
+}

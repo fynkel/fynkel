@@ -248,6 +248,10 @@ FynkelStatus fynkel_authoring_query(FynkelAuthoringSession* session,
  *   installPrimitives  —                           the built-in shapes (ADR-0023): the
  *                                                  existing asset of the fixed id, or
  *                                                  `Fynkel/Primitives.glb` written
+ *   importFiles        paths, folder?              files from outside copied into folder
+ *                                                  (a taken name counts on); a source's
+ *                                                  own sidecar kept when its id is free;
+ *                                                  one step undoes them all
  *   deleteAsset        asset, force?               refused with every referencing field
  *                                                  in `related` while a document names
  *                                                  the asset (or a sub-asset) unless

@@ -14,6 +14,7 @@
 //! `FYN-E0007` when the project is read-only, `FYN-E0009` when there is
 //! nothing to undo.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use fynkel_contracts::{AssetRef, Code, Diagnostic};
@@ -31,6 +32,7 @@ pub const OPERATIONS: &[&str] = &[
     "renameAsset",
     "duplicateAsset",
     "installPrimitives",
+    "importFiles",
     "deleteAsset",
     "setImportSettings",
     "extractMaterials",
@@ -299,6 +301,7 @@ impl AuthoringSession {
             "renameAsset" => self.rename_asset(args).map_err(one),
             "duplicateAsset" => self.duplicate_asset(args).map_err(one),
             "installPrimitives" => self.install_primitives().map_err(one),
+            "importFiles" => self.import_files(args).map_err(one),
             "deleteAsset" => self.delete_asset(args),
             "setImportSettings" => self.set_import_settings(args),
             "extractMaterials" => self.extract_materials(args),
@@ -781,6 +784,212 @@ impl AuthoringSession {
             Some(PRIMITIVES_ID),
             json!({ "path": to.display().to_string(), "id": PRIMITIVES_ID.to_string(), "installed": true }),
         ))
+    }
+
+    // --------------------------------------------------------- import
+
+    /// `importFiles { paths, folder? }`: files from outside the project
+    /// (Unity's drag in from Finder) copied into `folder` of the asset
+    /// root (the root when empty), a taken name counting on (`tree 1.png`).
+    /// A source's sidecar beside it comes along when its id is free (the
+    /// settings and ids kept), else the scan writes a fresh one; a
+    /// document whose id is taken gets a new one. A `.meta.json` alone is
+    /// skipped. Refused, with nothing written, for a folder, a file
+    /// already inside the asset root, or one that cannot be read. One
+    /// asset-history step removes them all again.
+    fn import_files(&mut self, args: &Value) -> Result<Value, Diagnostic> {
+        const OP: &str = "importFiles";
+        let paths: Vec<PathBuf> = args
+            .get("paths")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(PathBuf::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if paths.is_empty() {
+            return Err(invalid(format!(
+                "{OP}: `paths` must name at least one file"
+            )));
+        }
+        let project = self.project().unwrap();
+        let root = project.assets.root().to_path_buf();
+        let root = root.canonicalize().unwrap_or(root);
+        let dir = match args
+            .get("folder")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            Some(f) => project.inside_assets(f, OP)?,
+            None => root.clone(),
+        };
+        // Everything read and named before anything is written.
+        struct Plan {
+            to: PathBuf,
+            bytes: Vec<u8>,
+            sidecar: Option<(PathBuf, String)>,
+            id: Option<Uuid>,
+        }
+        let mut plans: Vec<Plan> = Vec::new();
+        let mut taken_ids: HashSet<Uuid> = HashSet::new();
+        for from in &paths {
+            let name = file_name(from);
+            if name.ends_with(".meta.json") {
+                continue;
+            }
+            if from.is_dir() {
+                return Err(invalid(format!(
+                    "{OP}: {name} is a folder; drop the files in it, or copy the folder into the project in Finder"
+                )));
+            }
+            let canonical = from.canonicalize().unwrap_or(from.clone());
+            if canonical.starts_with(&root) {
+                return Err(invalid(format!("{OP}: {name} is already in the project")));
+            }
+            let bytes =
+                std::fs::read(from).map_err(|e| io(from, format!("{OP}: cannot read: {e}")))?;
+            let kind = DocumentKind::from_path(from);
+            let suffix = match kind {
+                Some(k) => k.suffix().to_string(),
+                None => from
+                    .extension()
+                    .map(|e| format!(".{}", e.to_string_lossy()))
+                    .unwrap_or_default(),
+            };
+            let base = name
+                .strip_suffix(suffix.as_str())
+                .unwrap_or(&name)
+                .to_string();
+            let to = std::iter::once(dir.join(&name))
+                .chain((1..).map(|n| dir.join(format!("{base} {n}{suffix}"))))
+                .find(|p| {
+                    !p.exists() && !sidecar_path(p).exists() && !plans.iter().any(|q| q.to == *p)
+                })
+                .expect("an unused name");
+            let is_taken = |id: Uuid, taken: &HashSet<Uuid>| {
+                project.assets.get(id).is_some() || taken.contains(&id)
+            };
+            let (bytes, sidecar, id) = match kind {
+                Some(k) => {
+                    let mut doc = Document::read(from, Some(k)).map_err(|mut v| v.remove(0))?;
+                    let mut id = doc.envelope.id;
+                    if is_taken(id, &taken_ids) {
+                        id = Uuid::new_v4();
+                        doc.root.set("id", Node::string(id.to_string()));
+                    }
+                    doc.path = Some(to.display().to_string());
+                    (doc.write()?.into_bytes(), None, Some(id))
+                }
+                None => {
+                    let beside = sidecar_path(from);
+                    let meta = std::fs::read_to_string(&beside)
+                        .ok()
+                        .and_then(|t| Document::parse(DocumentKind::Meta, None, &t).ok())
+                        .map(Meta::from_document)
+                        .filter(|m| !is_taken(m.document.envelope.id, &taken_ids));
+                    match meta {
+                        Some(mut meta) => {
+                            meta.document.root.set("name", Node::string(file_name(&to)));
+                            let id = meta.document.envelope.id;
+                            (
+                                bytes,
+                                Some((sidecar_path(&to), meta.to_document().write()?)),
+                                Some(id),
+                            )
+                        }
+                        None => (bytes, None, None),
+                    }
+                }
+            };
+            if let Some(id) = id {
+                taken_ids.insert(id);
+            }
+            plans.push(Plan {
+                to,
+                bytes,
+                sidecar,
+                id,
+            });
+        }
+        if plans.is_empty() {
+            return Err(invalid(format!(
+                "{OP}: nothing to import (only sidecars were given)"
+            )));
+        }
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| io(&dir, format!("{OP}: cannot create the folder: {e}")))?;
+        let mut written: Vec<PathBuf> = Vec::new();
+        for plan in &plans {
+            let mut write = |p: &PathBuf, b: &[u8]| -> Result<(), Diagnostic> {
+                std::fs::write(p, b).map_err(|e| io(p, format!("{OP}: cannot write: {e}")))?;
+                written.push(p.clone());
+                Ok(())
+            };
+            let result = write(&plan.to, &plan.bytes).and_then(|_| match &plan.sidecar {
+                Some((p, text)) => write(p, text.as_bytes()),
+                None => Ok(()),
+            });
+            if let Err(e) = result {
+                for p in &written {
+                    let _ = std::fs::remove_file(p);
+                }
+                return Err(e);
+            }
+        }
+        let written: Vec<PathBuf> = written
+            .into_iter()
+            .map(|p| p.canonicalize().unwrap_or(p))
+            .collect();
+        // The scan writes the sidecars the sources did not bring.
+        self.project_mut().unwrap().rescan(&written);
+        let mut ops = Vec::with_capacity(plans.len());
+        let mut imported = Vec::with_capacity(plans.len());
+        for plan in plans {
+            let to = plan.to.canonicalize().unwrap_or(plan.to);
+            let sidecar = match plan.sidecar {
+                Some((p, t)) => Some((p.canonicalize().unwrap_or(p), t)),
+                None if DocumentKind::from_path(&to).is_none() => {
+                    let p = sidecar_path(&to);
+                    std::fs::read_to_string(&p).ok().map(|t| (p, t))
+                }
+                None => None,
+            };
+            let id = plan.id.or_else(|| {
+                sidecar
+                    .as_ref()
+                    .and_then(|(_, t)| Document::parse(DocumentKind::Meta, None, t).ok())
+                    .map(|d| d.envelope.id)
+            });
+            let id = id.unwrap_or_else(Uuid::nil);
+            imported.push(json!({ "path": to.display().to_string(), "id": id.to_string() }));
+            ops.push(AssetOp::Copied {
+                path: to,
+                id,
+                bytes: plan.bytes,
+                sidecar,
+            });
+        }
+        let first = match &ops[0] {
+            AssetOp::Copied { id, path, .. } => (*id, file_name(path)),
+            _ => unreachable!(),
+        };
+        let label = if ops.len() == 1 {
+            format!("Import {}", first.1)
+        } else {
+            format!("Import {} files", ops.len())
+        };
+        let op = if ops.len() == 1 {
+            ops.pop().unwrap()
+        } else {
+            AssetOp::Group { ops, id: first.0 }
+        };
+        self.assets_history.push(Done {
+            op,
+            label: label.clone(),
+        });
+        Ok(self.finish(OP, &label, Some(first.0), json!({ "imported": imported })))
     }
 
     // --------------------------------------------------------- delete
