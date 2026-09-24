@@ -17,9 +17,11 @@
 // editor runs the generating command itself — the CLI as a subprocess,
 // never game code in the editor process (ADR-0016 amendments of
 // 2026-09-24) — on Create → Behaviour ([generate]) and, as Unity
-// recompiles, when a script under `lib/` is saved ([recompileOnSave]):
-// the session then re-reads the metadata, so the Inspector shows a field
-// the moment its script is saved.
+// recompiles, when a script under `lib/` is saved: the session then
+// re-reads the metadata, so the Inspector shows a field the moment its
+// script is saved. [watch] keeps `fynkel codegen --watch` running for
+// that (about a second a save); a CLI without it gets one
+// `fynkel codegen` per save instead ([recompileOnSave], 3 s and more).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -93,8 +95,30 @@ Object? _normalize(Object? v) => switch (v) {
   _ => v,
 };
 
+/// Starts a long-running process (the `fynkel codegen --watch` one) —
+/// injectable so tests never spawn one.
+typedef StartProcess = Future<Process> Function(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+  Map<String, String>? environment,
+});
+
+Future<Process> startProcess(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+  Map<String, String>? environment,
+}) => Process.start(executable, arguments, workingDirectory: workingDirectory, environment: environment);
+
 final class CodegenCheck extends ChangeNotifier {
-  CodegenCheck({required this.projectDir, required this.run, required this.cli, required this.repoRoot});
+  CodegenCheck({
+    required this.projectDir,
+    required this.run,
+    required this.cli,
+    required this.repoRoot,
+    this.start = startProcess,
+  });
 
   /// The game project (the Dart package with `pubspec.yaml`).
   final String projectDir;
@@ -105,6 +129,9 @@ final class CodegenCheck extends ChangeNotifier {
 
   /// The Fynkel checkout the CLI's native pipeline needs (`--root`), or null.
   final String? Function() repoRoot;
+
+  /// Starts the [watch] process.
+  final StartProcess start;
 
   CodegenStatus status = CodegenStatus.unknown;
 
@@ -135,6 +162,8 @@ final class CodegenCheck extends ChangeNotifier {
   ];
 
   Future<void> check() async {
+    // The watch reports every build: its status is the check's answer.
+    if (watching) return;
     if (!isDartPackage) {
       status = CodegenStatus.notADartPackage;
       notifyListeners();
@@ -171,6 +200,10 @@ final class CodegenCheck extends ChangeNotifier {
     if (!isDartPackage) return 'the project is not a Dart package (no pubspec.yaml)';
     final exe = cli();
     if (exe == null) return 'no `fynkel` CLI is configured (Preferences → Fynkel CLI)';
+    // The watch sees the new file itself; a second build_runner would fight it.
+    if (watching) {
+      return _nextBuild().timeout(const Duration(minutes: 2), onTimeout: () => 'the script watch did not answer');
+    }
     status = CodegenStatus.running;
     generating = true;
     error = null;
@@ -236,12 +269,112 @@ final class CodegenCheck extends ChangeNotifier {
     if (problem == null) reload();
   }
 
+  Process? _watcher;
+  Completer<String?>? _waiting;
+
+  /// Whether the build that answers [_waiting] has started.
+  bool _waitingStarted = false;
+
+  /// Whether `fynkel codegen --watch` is running for this project.
+  bool get watching => _watcher != null;
+
+  /// Keeps `fynkel codegen --watch` running: build_runner stays warm, so a
+  /// saved script regenerates in about a second, and [reload] follows every
+  /// build that wrote. A CLI that cannot watch (older than this editor), or
+  /// a watch that ends, falls back to [recompileOnSave].
+  Future<void> watch(Stream<List<String>> changes, {required void Function() reload}) async {
+    final exe = cli();
+    if (!isDartPackage || exe == null) return recompileOnSave(changes, reload: reload);
+    final Process process;
+    try {
+      process = await start(exe, ['codegen', '--watch', '--project', projectDir], workingDirectory: projectDir);
+    } catch (_) {
+      if (!_disposed) recompileOnSave(changes, reload: reload);
+      return;
+    }
+    if (_disposed) {
+      unawaited(process.stdin.close());
+      return;
+    }
+    _watcher = process;
+    process.stdout
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())
+        .listen((line) => _onWatchLine(line, reload), onError: (Object _) {});
+    process.stderr.listen((_) {}, onError: (Object _) {});
+    unawaited(
+      process.exitCode.then((_) {
+        if (_disposed || !identical(_watcher, process)) return;
+        _watcher = null;
+        if (status == CodegenStatus.running) status = CodegenStatus.unknown;
+        generating = false;
+        _answer('the script watch ended');
+        recompileOnSave(changes, reload: reload);
+        notifyListeners();
+      }),
+    );
+  }
+
+  void _onWatchLine(String line, void Function() reload) {
+    if (_disposed) return;
+    final Object? event;
+    try {
+      event = jsonDecode(line);
+    } catch (_) {
+      return;
+    }
+    if (event is! Map) return;
+    switch (event['event']) {
+      case 'building':
+        status = CodegenStatus.running;
+        generating = true;
+        if (_waiting != null) _waitingStarted = true;
+      case 'built':
+        status = CodegenStatus.upToDate;
+        generating = false;
+        error = null;
+        stalePaths = const [];
+        checkedAt = DateTime.now();
+        runs++;
+        if (event['status'] == 'written') reload();
+        if (_waitingStarted) _answer(null);
+      case 'failed':
+        status = CodegenStatus.failed;
+        generating = false;
+        error = event['error']?.toString() ?? 'the build failed';
+        checkedAt = DateTime.now();
+        runs++;
+        if (_waitingStarted) _answer(error);
+      case 'exited':
+        error = event['error']?.toString();
+        return;
+      default:
+        return;
+    }
+    notifyListeners();
+  }
+
+  /// The answer of the next build to start: null when it built.
+  Future<String?> _nextBuild() => (_waiting ??= Completer<String?>()).future;
+
+  void _answer(String? problem) {
+    final w = _waiting;
+    _waiting = null;
+    _waitingStarted = false;
+    if (w != null && !w.isCompleted) w.complete(problem);
+  }
+
   /// The project closed while a check ran: its answer is dropped.
   bool _disposed = false;
 
   @override
   void dispose() {
     _disposed = true;
+    // The CLI ends the watch (and build_runner) when its stdin closes.
+    final w = _watcher;
+    _watcher = null;
+    if (w != null) unawaited(w.stdin.close().catchError((Object _) {}));
+    _answer('the project closed');
     _saves?.cancel();
     _recompile?.cancel();
     super.dispose();

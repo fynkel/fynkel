@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart';
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/editor_document.dart';
+import 'package:fynkel_editor/src/inspector/codegen_check.dart';
 import 'package:fynkel_editor/src/env/tools.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/play_session.dart';
@@ -638,6 +639,16 @@ Future<Process> _noPlayProcess(
   Map<String, String>? environment,
 }) async => throw StateError('this test did not expect Play to start $executable');
 
+/// No `fynkel codegen --watch` in widget tests unless one asks: the
+/// editor falls back to one codegen run per saved script (through the
+/// test's [RecordingRunner]).
+Future<Process> _noCodegenWatch(
+  String executable,
+  List<String> arguments, {
+  String? workingDirectory,
+  Map<String, String>? environment,
+}) async => throw StateError('this test did not expect a codegen watch');
+
 /// Hands Play a [FakePlayProcess] and remembers how it was asked for.
 final class FakePlayLauncher {
   final calls = <(String, List<String>, String?, Map<String, String>?)>[];
@@ -680,6 +691,7 @@ Widget shellApp({
   String? initialProject,
   Future<String?> Function(String suggestedName)? chooseSavePath,
   StartPlayProcess? startPlayProcess,
+  StartProcess? startCodegen,
   bool sceneViewport = false,
   Future<Toolchain> Function(Preferences prefs)? detectToolchain,
   String? codeReloadStatus,
@@ -708,6 +720,7 @@ Widget shellApp({
     detectToolchain: detectToolchain ?? (_) async => toolchain ?? fakeToolchain(),
     run: runner?.call ?? RecordingRunner().call,
     startPlayProcess: startPlayProcess ?? _noPlayProcess,
+    startCodegen: startCodegen ?? _noCodegenWatch,
     nativeMenuBar: false,
     quit: quit ?? () {},
     initialProject: initialProject,

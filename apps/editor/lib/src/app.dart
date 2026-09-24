@@ -90,6 +90,7 @@ class FynkelEditorApp extends StatelessWidget {
     this.detectToolchain,
     this.run = runProcess,
     this.startPlayProcess = spawnPlayProcess,
+    this.startCodegen = startProcess,
     this.nativeMenuBar,
     this.quit,
     this.initialProject,
@@ -127,6 +128,9 @@ class FynkelEditorApp extends StatelessWidget {
   /// Starts the game process for Play (`fynkel run`); a test injects a
   /// fake so no window ever opens.
   final StartPlayProcess startPlayProcess;
+
+  /// Starts `fynkel codegen --watch` (a saved script updates the Inspector).
+  final StartProcess startCodegen;
   final bool? nativeMenuBar;
   final VoidCallback? quit;
 
@@ -162,6 +166,7 @@ class FynkelEditorApp extends StatelessWidget {
             detectToolchain: detectToolchain ?? (prefs) => Toolchain.detect(prefs: prefs, run: run),
             run: run,
             startPlayProcess: startPlayProcess,
+            startCodegen: startCodegen,
             sceneViewport: sceneViewport,
             nativeMenuBar: nativeMenuBar,
             quit: quit ?? () => exit(0),
@@ -189,6 +194,7 @@ class EditorShell extends StatefulWidget {
     required this.run,
     required this.quit,
     this.startPlayProcess = spawnPlayProcess,
+    this.startCodegen = startProcess,
     this.nativeMenuBar,
     this.initialProject,
     this.sceneViewport = true,
@@ -211,6 +217,7 @@ class EditorShell extends StatefulWidget {
   final Future<Toolchain> Function(Preferences prefs) detectToolchain;
   final RunProcess run;
   final StartPlayProcess startPlayProcess;
+  final StartProcess startCodegen;
   final VoidCallback quit;
   final bool? nativeMenuBar;
   final String? initialProject;
@@ -1782,6 +1789,7 @@ class EditorShellState extends State<EditorShell> {
         run: widget.run,
         cli: () => toolchain?.fynkelCli,
         repoRoot: () => toolchain?.fynkelRoot,
+        start: widget.startCodegen,
       );
       final es = EditorState.load(opened.dir);
       ps.gizmos = es.playGizmos;
@@ -1830,20 +1838,28 @@ class EditorShellState extends State<EditorShell> {
       _restoreSession();
       widget.prefs.addRecent(opened.dir, opened.name);
       registry.refresh();
-      // A project with Dart behaviours gets its codegen check once at open, in the background.
-      if (opened.behaviourMetadata() != null && cg.isDartPackage) unawaited(cg.check());
-      // A saved script regenerates its metadata and the Inspector follows (Unity's recompile).
+      // A saved script regenerates its metadata and the Inspector follows
+      // (Unity's recompile): `fynkel codegen --watch` from open, whose first
+      // build is the check; a CLI without it checks once and runs per save.
       if (cg.isDartPackage) {
-        cg.recompileOnSave(
-          opened.fileChanges,
-          reload: () {
-            if (!identical(project, opened)) return;
-            try {
-              opened.reloadBehaviours();
-            } on AuthoringException catch (e) {
-              _showError('The behaviour metadata could not be read again: $e');
-            }
-          },
+        unawaited(
+          cg
+              .watch(
+                opened.fileChanges,
+                reload: () {
+                  if (!identical(project, opened)) return;
+                  try {
+                    opened.reloadBehaviours();
+                  } on AuthoringException catch (e) {
+                    _showError('The behaviour metadata could not be read again: $e');
+                  }
+                },
+              )
+              .then((_) {
+                if (identical(codegen, cg) && !cg.watching && opened.behaviourMetadata() != null) {
+                  unawaited(cg.check());
+                }
+              }),
         );
       }
     } on AuthoringException catch (e) {
@@ -1978,6 +1994,17 @@ class EditorShellState extends State<EditorShell> {
   bool _lastRunBuilt = false;
 
   bool _refusesErrors(EditorProject opened) {
+    // A script that does not compile has no generated files while the
+    // watch runs: Unity's "All compiler errors have to be fixed before you
+    // can enter Play mode".
+    final cg = codegen;
+    if (cg != null && cg.watching && cg.status == CodegenStatus.failed) {
+      _showError(
+        'All script errors have to be fixed before you can enter Play mode. '
+        '${cg.error ?? ''}'.trim(),
+      );
+      return true;
+    }
     if (opened.errorCount == 0) return false;
     showGameConsole(project: true);
     _showError(

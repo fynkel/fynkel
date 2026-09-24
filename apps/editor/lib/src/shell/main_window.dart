@@ -417,13 +417,21 @@ class MainWindow extends StatelessWidget {
             FIcons.checkCircleOutline,
             t.textDisabled,
             null,
-            'Generated behaviour files match the source. Click to check again.',
+            check.watching
+                ? 'Scripts are up to date; a saved script updates the Inspector in about a second.'
+                : 'Generated behaviour files match the source. Click to check again.',
           ),
           CodegenStatus.stale => (
             FIcons.syncProblem,
             t.warning,
             'Run codegen',
             'Generated behaviour files are stale.\nRun: ${check.command}\nClick to check again.',
+          ),
+          CodegenStatus.failed when check.watching => (
+            FIcons.errorOutline,
+            t.error,
+            'Script error',
+            '${check.error ?? 'A script does not compile.'}\nPlay waits until it is fixed.',
           ),
           CodegenStatus.failed => (
             FIcons.errorOutline,

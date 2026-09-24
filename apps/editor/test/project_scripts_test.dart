@@ -184,6 +184,112 @@ void main() {
     expect(check.status, CodegenStatus.failed);
   });
 
+  test(
+    'the watch: every build reports, a written one reloads, Create waits for it, an ended watch falls back',
+    () async {
+      final dir = scriptsProject();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final runner = RecordingRunner(
+        stdout: jsonEncode({
+          'ok': true,
+          'native': {'status': 'skipped'},
+          'project': {'status': 'written', 'files': 2, 'types': 1},
+        }),
+      );
+      final process = FakePlayProcess();
+      final started = <List<String>>[];
+      final check = CodegenCheck(
+        projectDir: dir.path,
+        run: runner.call,
+        cli: () => '/fake/fynkel',
+        repoRoot: () => null,
+        start: (exe, args, {workingDirectory, environment}) async {
+          started.add([exe, ...args]);
+          return process;
+        },
+      );
+      addTearDown(check.dispose);
+      final changes = StreamController<List<String>>();
+      addTearDown(changes.close);
+      var reloads = 0;
+      await check.watch(changes.stream, reload: () => reloads++);
+      expect(check.watching, isTrue);
+      expect(started.single, ['/fake/fynkel', 'codegen', '--watch', '--project', dir.path]);
+
+      process.emit('{"event":"building"}');
+      await FakePlayProcess.settle();
+      expect(check.status, CodegenStatus.running);
+      expect(check.generating, isTrue);
+      process.emit('{"event":"built","status":"upToDate","types":1}');
+      await FakePlayProcess.settle();
+      expect(check.status, CodegenStatus.upToDate);
+      expect(reloads, 0, reason: 'nothing was written');
+
+      // A save: the watch sees it, not a run per save.
+      changes.add(['${dir.path}/lib/game/player.dart']);
+      process.emit('{"event":"building"}');
+      process.emit('{"event":"built","status":"written","types":1}');
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      expect(reloads, 1);
+      expect(runner.calls, isEmpty);
+
+      // Create → Behaviour waits for the build its new file starts.
+      var created = 'pending';
+      unawaited(check.generate().then((p) => created = p ?? 'built'));
+      await FakePlayProcess.settle();
+      process.emit('{"event":"building"}');
+      await FakePlayProcess.settle();
+      expect(created, 'pending');
+      process.emit(
+        '{"event":"failed","error":"E fynkel_generator:behaviours on lib/\$lib\$:\\n12:3: Expected an identifier."}',
+      );
+      await FakePlayProcess.settle();
+      expect(created, contains('Expected an identifier'));
+      expect(check.status, CodegenStatus.failed);
+      expect(runner.calls, isEmpty);
+
+      // `check` has nothing to add while watching.
+      await check.check();
+      expect(runner.calls, isEmpty);
+
+      // The watch ends (a CLI without --watch ends at once): one run per save again.
+      process.exitWith(1);
+      await FakePlayProcess.settle();
+      expect(check.watching, isFalse);
+      changes.add(['${dir.path}/lib/game/player.dart']);
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      expect(runner.calls.single.$2, contains('--project-only'));
+      expect(reloads, 2);
+    },
+  );
+
+  test('a watch that cannot start falls back to one run per save', () async {
+    final dir = scriptsProject();
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final runner = RecordingRunner(
+      stdout: jsonEncode({
+        'ok': true,
+        'native': {'status': 'skipped'},
+        'project': {'status': 'upToDate', 'types': 1},
+      }),
+    );
+    final check = CodegenCheck(
+      projectDir: dir.path,
+      run: runner.call,
+      cli: () => '/fake/fynkel',
+      repoRoot: () => null,
+      start: (exe, args, {workingDirectory, environment}) async => throw const ProcessException('fynkel', []),
+    );
+    addTearDown(check.dispose);
+    final changes = StreamController<List<String>>();
+    addTearDown(changes.close);
+    await check.watch(changes.stream, reload: () {});
+    expect(check.watching, isFalse);
+    changes.add(['${dir.path}/lib/game/player.dart']);
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect(runner.calls, hasLength(1));
+  });
+
   group('ProjectBrowserModel scripts', () {
     test('the Scripts root: folders, files, kinds, search, the list view, file changes, recall', () async {
       final dir = scriptsProject();

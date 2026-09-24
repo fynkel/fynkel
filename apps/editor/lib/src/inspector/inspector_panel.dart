@@ -434,6 +434,10 @@ class _InspectorPanelState extends State<InspectorPanel> {
     } else if (status == CodegenStatus.stale) {
       headline = 'Generated behaviour files are stale — run `fynkel codegen`.';
       detail = check!.stalePaths.isEmpty ? null : check.stalePaths.join('\n');
+    } else if (status == CodegenStatus.failed && check!.watching) {
+      headline = 'A script has an error: the Inspector keeps its last fields, and Play waits until it is fixed.';
+      detail = check.error;
+      isError = true;
     } else if (status == CodegenStatus.failed) {
       headline = 'The codegen check could not run.';
       detail = check!.error;
@@ -473,7 +477,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-            if (check != null)
+            if (check != null && !check.watching)
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 14),
                 child: Wrap(
