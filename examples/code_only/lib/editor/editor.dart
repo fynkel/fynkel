@@ -79,6 +79,27 @@ void registerEditor(EditorExtensions editor) {
     ),
   );
 
+  // Unity's PropertyDrawer, by name: the player's jump speed as its
+  // standard field, and how high that jump reaches.
+  editor.namedDrawer(
+    'jumpHeight',
+    (context, field) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        field.defaultEditor(),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            JumpHeight.describe(field.isMixed ? null : field.value),
+            key: const Key('jumpHeight.text'),
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ],
+    ),
+  );
+
   // A right click on coins in the Hierarchy: they become big coins (the
   // big coin data asset in their Collectible), one undo step.
   editor.hierarchyMenuItem(
@@ -146,6 +167,15 @@ class CoinPreview extends StatelessWidget {
       ),
     );
   }
+}
+
+/// How high a jump at a speed reaches: v² / 2g, at the default gravity.
+abstract final class JumpHeight {
+  static const gravity = 9.81;
+
+  static String describe(Object? speed) => speed is num
+      ? 'Reaches ${(speed * speed / (2 * gravity)).toStringAsFixed(2)} m'
+      : 'Reaches — (the players differ)';
 }
 
 /// The Level Tools window: how many coins, how far out, and a button that

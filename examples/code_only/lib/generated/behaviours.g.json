@@ -147,6 +147,7 @@
           "default": 5.5,
           "min": 0,
           "step": 0.1,
+          "drawer": "jumpHeight",
           "description": "Upward speed of a jump."
         },
         {
@@ -192,7 +193,8 @@
             "x-fynkel": {
               "type": "number",
               "min": 0,
-              "step": 0.1
+              "step": 0.1,
+              "drawer": "jumpHeight"
             }
           },
           "walkSpeed": {

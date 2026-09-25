@@ -10,6 +10,7 @@ import 'package:fynkel/authoring.dart' show ProjectWriter;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
 typedef InspectorBuilder = Widget Function(BuildContext context, InspectorContext inspector);
+typedef InspectorDrawer = Widget Function(BuildContext context, FieldContext field);
 
 class _Items implements EditorExtensions {
   final items = <String, void Function(EditorContext)>{};
@@ -34,6 +35,18 @@ class _Items implements EditorExtensions {
   void inspector<T>(InspectorBuilder build) {
     inspectors.add(T);
     coinKind = build;
+  }
+
+  final drawers = <String>[];
+  final named = <String, InspectorDrawer>{};
+
+  @override
+  void drawer<T>(InspectorDrawer build) => drawers.add('$T');
+
+  @override
+  void namedDrawer(String name, InspectorDrawer build) {
+    drawers.add(name);
+    named[name] = build;
   }
 
   final windows = <String>[];
@@ -128,6 +141,12 @@ void main() {
     expect(editor.windows, ['Tools/Code Only/Level Tools|codeOnly.levelTools']);
     expect(editor.entries, ['Hierarchy|Make Big Coin|game.Collectible']);
     expect(editor.inspectors, [CoinKind]);
+    expect(editor.drawers, ['jumpHeight']);
+  });
+
+  test("the jumpHeight drawer's line: v² / 2g", () {
+    expect(JumpHeight.describe(5.5), 'Reaches 1.54 m');
+    expect(JumpHeight.describe(null), contains('differ'));
   });
 
   testWidgets("the coin kind's Inspector: the coin in its colour at its size, then the default fields", (tester) async {

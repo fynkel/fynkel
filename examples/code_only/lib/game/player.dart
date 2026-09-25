@@ -18,7 +18,10 @@ class Player extends Behaviour {
   double walkSpeed = 4;
 
   /// Upward speed of a jump.
-  @Expose(min: 0, step: 0.1)
+  ///
+  /// The editor shows how high it reaches (lib/editor/'s `jumpHeight`
+  /// drawer).
+  @Expose(min: 0, step: 0.1, drawer: 'jumpHeight')
   double jumpSpeed = 5.5;
 
   /// The object with the `fynkel.ThirdPersonCamera`.

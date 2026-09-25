@@ -489,7 +489,8 @@ last one wins:
 The hint set is ADR-0018's: `label`, `tooltip`, `min`, `max`, `step`,
 `group`, `order`, `header`, `unit`, `kind` (`color`, `asset(<kind>)`,
 `entity`, `multiline`, `angle`, `slider`, `layerMask`), `readOnly`,
-`hidden`, `showIf: "<bool field>"` / `"!<bool field>"`; a behaviour adds
+`hidden`, `showIf: "<bool field>"` / `"!<bool field>"`, and ADR-0028's
+`drawer` (an extension's property drawer, § Editor extensions); a behaviour adds
 `icon` and `category` (`@FynkelBehaviour`). Fields are ordered by `order`,
 then declaration; `group` starts a captioned run, `header` a caption above
 one field; `showIf` hides a row while its sibling boolean disagrees.
@@ -2026,13 +2027,33 @@ and a Hierarchy entry, Make Big Coin.
   - A throw in the builder shows the default fields under a line saying
     why, and a Console error once per distinct error. A card without a
     schema keeps the JSON rows.
+- **Property drawers** (Unity's `PropertyDrawer`) draw one field wherever
+  it appears: a script's card, a data asset's page, inside a record, as a
+  list's item (each item has its own).
+  - `editor.drawer<Wave>((context, field) => …)` draws every field
+    holding the `@FynkelRecord` class `Wave` (the schema's
+    `x-fynkel.record`: the class name), in place of its foldout.
+  - `editor.namedDrawer('minMax', …)` draws every field
+    `@Expose(drawer: 'minMax')` names (`x-fynkel.drawer`; on a list, its
+    items'), whatever its type. A field's named drawer comes before its
+    record's. A second drawer for a record or a name is left out with a
+    Console error.
+  - Its `FieldContext`: `value`, `isMixed`, `set(value)`, `label`,
+    `name`, `record`, `canEdit`, `editor`; for a record `fields`,
+    `valueOf(field)`, `setField(field, value)` and `field(field)` (the
+    sub-field's standard editor, or its own drawer); `row(child)` puts a
+    widget beside the label with the override mark and Revert / Apply;
+    `defaultEditor()` is the field without the drawer. Writes go through
+    the `FieldTarget` as the Inspector's do.
+  - A throw draws the default editor under a line saying why, and a
+    Console error once per distinct error.
 - **A failing extension fails alone.** Every call into a package is
   wrapped. A throwing `registerEditor` skips that package's extensions,
   and a throwing command or `enabled` check is a Console error (with the
   first frame of its stack) while the editor carries on.
 - **Preferences › Extensions** lists each package with an editor part
   and what it registered (menu items, windows, context entries,
-  Inspectors), or why
+  Inspectors, drawers), or why
   it registered nothing.
 - **Editor code never ships in a game.** Only files under `lib/editor/`
   may import `package:fynkel_editor_api` or `lib/editor/`. `fynkel
