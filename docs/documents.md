@@ -1740,7 +1740,7 @@ makes a directory a project. It is a document (envelope, strict JSON,
 
 | Member | Meaning |
 | --- | --- |
-| `startupScene` | `{ asset }` — required; must resolve to a scene document in the asset database |
+| `startupScene` | `{ asset }` — optional; must resolve to a scene document in the asset database. Without it the project opens with no scene loaded (a game that builds its world from code, ADR-0026) |
 | `assets` | The asset root, relative to the project directory (default `assets`; no `..`, no absolute path) |
 | `inputActions` | The game's actions (§5.1, [input.md](input.md)): `name → { type: button \| axis1d \| axis2d, description?, bindings: ["<device>:<control>", …] }` — `keyboard:WASD`, `keyboard:Space`, `mouse:delta*0.0025` (an axis control takes a `*<factor>` scale, M3-14), `gamepad:leftStick`, `touch:overlay/jump`, …; every binding is checked against the runtime's grammar (`FYN-P0009`). The cook copies the block into the cache index; the runtime compiles it into the world's binding table when the project loads (M3-07) |
 | `layers` | The project's layers (ADR-0020): up to 32 unique, non-empty names, `"default"` first; index `i` is bit `i` of every layer mask (a collider's `mask`, a camera's or light's `culling_mask`, a raycast's) and the value of a `fynkel.Layer` (default `["default"]`) — `FYN-P0014` on more than 32, an empty or duplicate name, or a first entry that is not `default`. Scenes and prefabs naming an index past the list are `FYN-H0012` |

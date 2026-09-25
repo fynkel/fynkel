@@ -8,7 +8,7 @@
   "properties": {
     "startupScene": {
       "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef",
-      "description": "The scene a host loads first; must resolve to a `.scene.json` in the asset database."
+      "description": "The scene a host loads first; must resolve to a `.scene.json` in the asset database. Without it the project opens with no scene loaded, for a game that builds its world from code (ADR-0026)."
     },
     "assets": {
       "type": "string",
@@ -64,7 +64,6 @@
       "additionalProperties": { "$ref": "#/$defs/target" }
     }
   },
-  "required": ["startupScene"],
   "patternProperties": { "^x-": true },
   "unevaluatedProperties": false,
   "$defs": {

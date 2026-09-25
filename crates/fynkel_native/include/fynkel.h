@@ -471,7 +471,9 @@ int32_t fynkel_world_is_poisoned(const FynkelWorld* world);
  * `fynkel cook` wrote and never a source document. `cache_utf8` (UTF-8, not
  * NUL-terminated) is the cache directory (`<project>/.fynkel/cache`).
  * `fynkel_world_load_project` loads the startup scene the cache's index
- * names; `fynkel_world_load_scene` loads the cooked scene with asset id
+ * names (a project naming none opens with no scene loaded and the world
+ * left as it is: its input, layers, tags and gravity bound, `scene` null
+ * in the report; ADR-0026); `fynkel_world_load_scene` loads the cooked scene with asset id
  * `scene_id_utf8` (36-char UUID text). Entities are spawned immediately
  * with their authoring ids kept for the report; other components go
  * through the command path and any rejection is in

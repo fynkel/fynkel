@@ -233,6 +233,51 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
     }
 }
 
+/// `fynkel_world_load_project` for a project without a startup scene: the
+/// project's gravity, input actions, layers and tags and the cache's
+/// assets (for `instantiate`, audio and materials by id), the world left
+/// as it is; `scene` is null.
+fn open_project(w: &mut FynkelWorld, assets: Assets, cache: Value) -> Outcome {
+    let layers_and_tags = assets
+        .project()
+        .map(|p| p.layers_and_tags.clone())
+        .unwrap_or_default();
+    let gravity = {
+        let core = w.core_mut();
+        if let Some(p) = assets.project() {
+            core.physics_mut()
+                .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
+        }
+        core.physics().gravity()
+    };
+    let input = bind_project_input(w, &assets);
+    let residency = residency_json(&assets);
+    if let Some(old) = &w.assets {
+        assets.adopt_runtime_materials(old);
+    }
+    w.assets = Some(assets);
+    Outcome {
+        status: Status::Ok,
+        report: json!({
+            "ok": true,
+            "scene": Value::Null,
+            "scenes": scenes_json(w),
+            "cache": cache,
+            "residency": residency,
+            "diagnostics": [],
+            "input": input,
+            "physics": {
+                "gravity": [gravity.x, gravity.y, gravity.z],
+                "meshColliders": 0,
+                "prefabs": 0,
+                "diagnostics": [],
+            },
+            "layers": layers_and_tags.layers,
+            "tags": layers_and_tags.tags,
+        }),
+    }
+}
+
 /// Unloads a loaded scene (M3-12): its entities go, its residency token
 /// with them.
 fn unload(w: &mut FynkelWorld, id: Uuid) -> Outcome {
@@ -377,6 +422,11 @@ fn load(w: &mut FynkelWorld, cache_dir: &Path, scene: Option<Uuid>, mode: LoadMo
         Err(d) => return failed(&[d], Value::Null),
     };
     let cache = cache_json(&assets);
+    // A project that names no startup scene opens with nothing loaded: a
+    // game that builds its world from code (ADR-0026).
+    if scene.is_none() && assets.project().is_some_and(|p| p.startup_scene.is_none()) {
+        return open_project(w, assets, cache);
+    }
     let id = match scene.map(Ok).unwrap_or_else(|| assets.startup_scene()) {
         Ok(id) => id,
         Err(d) => return failed(&[d], cache),

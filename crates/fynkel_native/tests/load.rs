@@ -1124,3 +1124,37 @@ fn clone_through_the_abi() {
         Status::InvalidArgument
     );
 }
+
+/// A project that names no startup scene (a game that builds its world
+/// from code, ADR-0026) opens with nothing loaded: its layers, tags and
+/// input bound, the cache's scenes loadable by id.
+#[test]
+fn a_project_without_a_startup_scene_opens_empty() {
+    let project = std::env::temp_dir().join(format!("fynkel-native-nostartup-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&project);
+    copy_dir(&fixture(), &project);
+    let _ = std::fs::remove_dir_all(project.join(".fynkel"));
+    let file = project.join("fynkel.project.json");
+    let mut json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    json.as_object_mut().unwrap().remove("startupScene");
+    std::fs::write(&file, serde_json::to_string_pretty(&json).unwrap()).unwrap();
+    let cache = project.join(".fynkel/cache");
+    let report = cook_project(&project, Some(&cache), &CookOptions::default())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    assert!(!report.has_errors(), "{}", report.text());
+
+    let host = Host::new();
+    let cache = cache.display().to_string();
+    assert_eq!(host.load_project(&cache), Status::Ok, "{}", host.report());
+    let r = host.report();
+    assert!(r["scene"].is_null());
+    assert_eq!(host.live(), 0);
+    assert_eq!(r["layers"], serde_json::json!(["default", "props"]));
+    assert!(!r["input"]["actions"].as_array().unwrap().is_empty());
+    assert_eq!(host.step(), Status::Ok);
+
+    assert_eq!(host.load_scene(&cache, MAIN_SCENE), Status::Ok);
+    assert_eq!(host.live(), 6);
+    let _ = std::fs::remove_dir_all(&project);
+}
