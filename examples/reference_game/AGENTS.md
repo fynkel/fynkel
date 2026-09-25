@@ -388,6 +388,11 @@ turret.findChild('Barrel');                          // the prefab's entities ar
   prefab (call it per copy — behaviour instances attach once).
   `ObjectSpec.prefab(Assets.prefabs.coin, tags: ['pickup'])` places a
   prefab asset with overrides on its root.
+- `world.createPrimitive(Primitive.cube)` (or `ObjectSpec.primitive`) makes
+  a built-in shape with its collider; `world.createMaterial(PbrMaterial(
+  baseColor: …))` returns an `AssetRef` for a `MeshRenderer`;
+  `obj.clone()` copies a spawned object and its subtree, scripts and all
+  (Unity's `Instantiate(obj)`).
 
 ## Audio (cooked clips, a streamed track, three buses, a voice limit; docs/audio.md)
 

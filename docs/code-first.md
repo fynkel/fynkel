@@ -43,9 +43,9 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 |---|---|---|
 | Name an asset in code | a serialized field, or `Resources.Load("prefabs/Burst")` | 🔧 `Assets.prefabs.burst` (generated `lib/generated/assets.g.dart`, kept current by the editor; `f4902e3`, `10914af`) or `world.assets.find('prefabs/burst')` for a path known only while running (`c9cf929`) (ADR-0026 §3) |
 | Spawn a prefab | `Instantiate(prefab)` | ✅ `world.instantiate(ref)` |
-| Copy a live object | `Instantiate(obj)` | ❌ (ADR-0026 §4) |
-| A cube / sphere / plane | `GameObject.CreatePrimitive` | ❌ only through the editor's GameObject menu (ADR-0023) |
-| A material made in code | `new Material(shader)`, `material.color = …` | ❌ materials are files only |
+| Copy a live object | `Instantiate(obj)` | 🔧 `obj.clone({parent, transform, name})`: made now, scripts copied through their registered fields, references inside the copy re-pointed (`6988733`, `97d0c5b`, ADR-0026 §4) |
+| A cube / sphere / plane | `GameObject.CreatePrimitive` | 🔧 `world.createPrimitive(Primitive.cube)` or `ObjectSpec.primitive(...)`, with Unity's colliders; every cook ships the shapes (`b5dba47`, `c76c0bb`) |
+| A material made in code | `new Material(shader)`, `material.color = …` | 🔧 `world.createMaterial(PbrMaterial(baseColor: …))` returns an `AssetRef` for `MeshRenderer`; `setMaterial` / `destroyMaterial` change and drop it (`b5dba47`, `c76c0bb`) |
 | A mesh made in code | `new Mesh { vertices = … }` | ❌ |
 | Load a scene | `SceneManager.LoadScene("Level1")` | 🔧 `scenes.transition(Assets.scenes.level1)`, or `world.assets.find('scenes/level1')` |
 | Additive scenes | | ✅ `LoadMode.additive` |
@@ -75,3 +75,4 @@ code as well as, or better than, Unity's.
 - 2026-09-25 — Tier 1 object graph (231945a, b1c375b).
 - 2026-09-25 — assets by name: `assets.g.dart`, the editor regenerating it, the reference game using it (abf2787), `world.assets`.
 - 2026-09-25 — `ObjectSpec` + `world.build`, code prefabs (3795afb).
+- 2026-09-25 — `createPrimitive`, `createMaterial` (c76c0bb) and `GameObject.clone` (97d0c5b): step 4 done.
