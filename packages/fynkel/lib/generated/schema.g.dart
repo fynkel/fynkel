@@ -162,9 +162,9 @@ enum VolumeShape {
 /// `fynkel.Transform` (component, id 1, 40 bytes).
 class Transform implements WireRecord {
   const Transform({
-    required this.position,
-    required this.rotation,
-    required this.scale,
+    this.position = const Vec3(0.0, 0.0, 0.0),
+    this.rotation = const Quat(0.0, 0.0, 0.0, 1.0),
+    this.scale = const Vec3(1.0, 1.0, 1.0),
   });
 
   /// Metres.
@@ -929,11 +929,11 @@ class EventHeader implements WireRecord {
 /// `fynkel.MeshRenderer` (component, id 4, 56 bytes).
 class MeshRenderer implements WireRecord {
   const MeshRenderer({
-    required this.mesh,
-    required this.material,
-    required this.castShadows,
-    required this.receiveShadows,
-    required this.visible,
+    this.mesh = AssetRef.none,
+    this.material = AssetRef.none,
+    this.castShadows = true,
+    this.receiveShadows = true,
+    this.visible = true,
   });
 
   /// Mesh asset (an imported glTF `mesh/<n>` sub-asset).
@@ -1002,15 +1002,15 @@ class MeshRenderer implements WireRecord {
 /// `fynkel.Camera` (component, id 5, 40 bytes).
 class Camera implements WireRecord {
   const Camera({
-    required this.projection,
-    required this.fovY,
-    required this.orthoHeight,
-    required this.near,
-    required this.far,
-    required this.priority,
-    required this.exposureMode,
-    required this.exposure,
-    required this.cullingMask,
+    this.projection = Projection.perspective,
+    this.fovY = 1.0471976,
+    this.orthoHeight = 10.0,
+    this.near = 0.1,
+    this.far = 1000.0,
+    this.priority = 0,
+    this.exposureMode = ExposureMode.auto,
+    this.exposure = 12.0,
+    this.cullingMask = 4294967295,
   });
 
   final Projection projection;
@@ -1103,9 +1103,9 @@ class Camera implements WireRecord {
 /// `fynkel.DirectionalLight` (component, id 6, 24 bytes).
 class DirectionalLight implements WireRecord {
   const DirectionalLight({
-    required this.color,
-    required this.intensity,
-    required this.castShadows,
+    this.color = const Vec3(1.0, 1.0, 1.0),
+    this.intensity = 10000.0,
+    this.castShadows = true,
   });
 
   /// Linear RGB, each `0..=1`.
@@ -1163,10 +1163,10 @@ class DirectionalLight implements WireRecord {
 /// `fynkel.PointLight` (component, id 7, 24 bytes).
 class PointLight implements WireRecord {
   const PointLight({
-    required this.color,
-    required this.intensity,
-    required this.range,
-    required this.cullingMask,
+    this.color = const Vec3(1.0, 1.0, 1.0),
+    this.intensity = 800.0,
+    this.range = 10.0,
+    this.cullingMask = 4294967295,
   });
 
   /// Linear RGB, each `0..=1`.
@@ -1338,12 +1338,12 @@ class PbrMaterial implements WireRecord {
 /// `fynkel.SpotLight` (component, id 8, 32 bytes).
 class SpotLight implements WireRecord {
   const SpotLight({
-    required this.color,
-    required this.intensity,
-    required this.range,
-    required this.innerAngle,
-    required this.outerAngle,
-    required this.cullingMask,
+    this.color = const Vec3(1.0, 1.0, 1.0),
+    this.intensity = 1500.0,
+    this.range = 15.0,
+    this.innerAngle = 0.43633232,
+    this.outerAngle = 0.61086524,
+    this.cullingMask = 4294967295,
   });
 
   /// Linear RGB, each `0..=1`.
@@ -1420,11 +1420,11 @@ class SpotLight implements WireRecord {
 /// `fynkel.Environment` (component, id 9, 48 bytes).
 class Environment implements WireRecord {
   const Environment({
-    required this.ambientColor,
-    required this.ambientIntensity,
+    this.ambientColor = const Vec3(1.0, 1.0, 1.0),
+    this.ambientIntensity = 2000.0,
     this.sky,
-    required this.skyIntensity,
-    required this.skyRotation,
+    this.skyIntensity = 5000.0,
+    this.skyRotation = 0.0,
   });
 
   /// Linear RGB, each `0..=1`.
@@ -1756,12 +1756,12 @@ class ComponentHeader implements WireRecord {
 /// `fynkel.RigidBody` (component, id 10, 24 bytes).
 class RigidBody implements WireRecord {
   const RigidBody({
-    required this.bodyType,
-    required this.mass,
-    required this.linearDamping,
-    required this.angularDamping,
-    required this.gravityScale,
-    required this.ccd,
+    this.bodyType = BodyType.dynamic,
+    this.mass = 1.0,
+    this.linearDamping = 0.0,
+    this.angularDamping = 0.05,
+    this.gravityScale = 1.0,
+    this.ccd = false,
   });
 
   final BodyType bodyType;
@@ -1837,15 +1837,15 @@ class RigidBody implements WireRecord {
 /// `fynkel.Collider` (component, id 11, 96 bytes).
 class Collider implements WireRecord {
   const Collider({
-    required this.shape,
-    required this.size,
+    this.shape = ColliderShape.box,
+    this.size = const Vec3(0.5, 0.5, 0.5),
     this.mesh,
-    required this.offset,
+    this.offset = const Vec3(0.0, 0.0, 0.0),
     this.material,
-    required this.friction,
-    required this.restitution,
-    required this.isSensor,
-    required this.mask,
+    this.friction = 0.5,
+    this.restitution = 0.0,
+    this.isSensor = false,
+    this.mask = 4294967295,
   });
 
   final ColliderShape shape;
@@ -2235,21 +2235,21 @@ class EntityInfoRecord implements WireRecord {
 /// `fynkel.CharacterController` (component, id 12, 80 bytes).
 class CharacterController implements WireRecord {
   const CharacterController({
-    required this.radius,
-    required this.height,
-    required this.center,
-    required this.skinWidth,
-    required this.maxSlope,
-    required this.maxStepHeight,
-    required this.snapToGround,
-    required this.gravityScale,
-    required this.mass,
-    required this.speed,
-    required this.jumpSpeed,
-    required this.turnSpeed,
-    required this.moveAction,
-    required this.jumpAction,
-    required this.mask,
+    this.radius = 0.4,
+    this.height = 1.8,
+    this.center = const Vec3(0.0, 0.9, 0.0),
+    this.skinWidth = 0.02,
+    this.maxSlope = 0.7853982,
+    this.maxStepHeight = 0.3,
+    this.snapToGround = 0.2,
+    this.gravityScale = 1.0,
+    this.mass = 70.0,
+    this.speed = 4.0,
+    this.jumpSpeed = 5.0,
+    this.turnSpeed = 10.0,
+    this.moveAction = '',
+    this.jumpAction = '',
+    this.mask = 4294967295,
   });
 
   /// Capsule radius, metres, `> 0`.
@@ -2380,18 +2380,18 @@ class CharacterController implements WireRecord {
 /// `fynkel.ThirdPersonCamera` (component, id 13, 64 bytes).
 class ThirdPersonCamera implements WireRecord {
   const ThirdPersonCamera({
-    required this.target,
-    required this.pivot,
-    required this.distance,
-    required this.minDistance,
-    required this.yaw,
-    required this.pitch,
-    required this.minPitch,
-    required this.maxPitch,
-    required this.lookAction,
-    required this.sensitivity,
-    required this.collisionRadius,
-    required this.mask,
+    this.target = '',
+    this.pivot = const Vec3(0.0, 1.5, 0.0),
+    this.distance = 5.0,
+    this.minDistance = 0.5,
+    this.yaw = 0.0,
+    this.pitch = 0.35,
+    this.minPitch = -0.5,
+    this.maxPitch = 1.3,
+    this.lookAction = '',
+    this.sensitivity = 2.5,
+    this.collisionRadius = 0.2,
+    this.mask = 4294967295,
   });
 
   /// The followed entity's name; empty follows nothing.
@@ -2554,9 +2554,9 @@ class CharacterStateRecord implements WireRecord {
 /// `fynkel.Rotator` (component, id 14, 24 bytes).
 class Rotator implements WireRecord {
   const Rotator({
-    required this.axis,
-    required this.speed,
-    required this.space,
+    this.axis = const Vec3(0.0, 1.0, 0.0),
+    this.speed = 1.0,
+    this.space = MotionSpace.local,
   });
 
   /// Spin axis, normalised at use; must not be zero.
@@ -2614,11 +2614,11 @@ class Rotator implements WireRecord {
 /// `fynkel.Oscillate` (component, id 15, 32 bytes).
 class Oscillate implements WireRecord {
   const Oscillate({
-    required this.axis,
-    required this.amplitude,
-    required this.frequency,
-    required this.phase,
-    required this.space,
+    this.axis = const Vec3(0.0, 1.0, 0.0),
+    this.amplitude = 1.0,
+    this.frequency = 0.5,
+    this.phase = 0.0,
+    this.space = MotionSpace.local,
   });
 
   /// Direction of travel, normalised at use; must not be zero.
@@ -2688,10 +2688,10 @@ class Oscillate implements WireRecord {
 /// `fynkel.Follow` (component, id 16, 32 bytes).
 class Follow implements WireRecord {
   const Follow({
-    required this.target,
-    required this.offset,
-    required this.smoothing,
-    required this.lookAt,
+    this.target = '',
+    this.offset = const Vec3(0.0, 2.0, 0.0),
+    this.smoothing = 0.0,
+    this.lookAt = false,
   });
 
   /// The followed entity's name; empty follows nothing.
@@ -2756,7 +2756,7 @@ class Follow implements WireRecord {
 /// `fynkel.LookAtCamera` (component, id 17, 8 bytes).
 class LookAtCamera implements WireRecord {
   const LookAtCamera({
-    required this.lockY,
+    this.lockY = true,
   });
 
   /// Turn about the world Y axis only, staying upright (a tree card); `false` also tilts to face a camera above or below.
@@ -2803,7 +2803,7 @@ class LookAtCamera implements WireRecord {
 /// `fynkel.LifetimeDespawn` (component, id 18, 8 bytes).
 class LifetimeDespawn implements WireRecord {
   const LifetimeDespawn({
-    required this.seconds,
+    this.seconds = 5.0,
   });
 
   /// Seconds left, `>= 0`.
@@ -2850,12 +2850,12 @@ class LifetimeDespawn implements WireRecord {
 /// `fynkel.Emitter` (component, id 19, 56 bytes).
 class Emitter implements WireRecord {
   const Emitter({
-    required this.prefab,
-    required this.rate,
-    required this.lifetime,
-    required this.maxAlive,
-    required this.velocity,
-    required this.enabled,
+    this.prefab = AssetRef.none,
+    this.rate = 1.0,
+    this.lifetime = 5.0,
+    this.maxAlive = 0,
+    this.velocity = const Vec3(0.0, 0.0, 0.0),
+    this.enabled = true,
   });
 
   /// The `.prefab.json` asset to instantiate.
@@ -2977,8 +2977,8 @@ class SystemTimeRecord implements WireRecord {
 /// `fynkel.TriggerZone` (component, id 20, 16 bytes).
 class TriggerZone implements WireRecord {
   const TriggerZone({
-    required this.event,
-    required this.once,
+    this.event = 'zone',
+    this.once = false,
   });
 
   /// The event name, non-empty.
@@ -3278,13 +3278,13 @@ class ProjectedPointRecord implements WireRecord {
 /// `fynkel.Animator` (component, id 21, 40 bytes).
 class Animator implements WireRecord {
   const Animator({
-    required this.clip,
-    required this.speed,
-    required this.looping,
-    required this.playing,
-    required this.weight,
-    required this.additive,
-    required this.rootMotion,
+    this.clip = AssetRef.none,
+    this.speed = 1.0,
+    this.looping = true,
+    this.playing = true,
+    this.weight = 1.0,
+    this.additive = false,
+    this.rootMotion = false,
   });
 
   /// The clip (an imported glTF `anim/<a>` sub-asset or a blend space `.blend.json`); nil plays nothing.
@@ -3365,8 +3365,8 @@ class Animator implements WireRecord {
 /// `fynkel.Skin` (component, id 22, 32 bytes).
 class Skin implements WireRecord {
   const Skin({
-    required this.skin,
-    required this.skeleton,
+    this.skin = AssetRef.none,
+    this.skeleton = '',
   });
 
   /// The skin sub-asset.
@@ -3669,13 +3669,13 @@ class AnimationMarkerEvent implements WireRecord {
 /// `fynkel.AudioSource` (component, id 23, 48 bytes).
 class AudioSource implements WireRecord {
   const AudioSource({
-    required this.clip,
-    required this.bus,
-    required this.volume,
-    required this.pitch,
-    required this.looping,
-    required this.playing,
-    required this.priority,
+    this.clip = AssetRef.none,
+    this.bus = AudioBus.sfx,
+    this.volume = 1.0,
+    this.pitch = 1.0,
+    this.looping = false,
+    this.playing = false,
+    this.priority = 0,
   });
 
   /// The audio asset (a `.wav`/`.ogg` source; no sub-asset).
@@ -3756,7 +3756,7 @@ class AudioSource implements WireRecord {
 /// `fynkel.AudioListener` (component, id 24, 8 bytes).
 class AudioListener implements WireRecord {
   const AudioListener({
-    required this.volume,
+    this.volume = 1.0,
   });
 
   /// Linear gain over everything, `0..=1`.
@@ -4176,14 +4176,14 @@ class AudioStatsRecord implements WireRecord {
 /// `fynkel.Volume` (component, id 25, 64 bytes).
 class Volume implements WireRecord {
   const Volume({
-    required this.profile,
-    required this.shape,
-    required this.size,
-    required this.radius,
-    required this.blendDistance,
-    required this.weight,
-    required this.priority,
-    required this.enabled,
+    this.profile = AssetRef.none,
+    this.shape = VolumeShape.global,
+    this.size = const Vec3(10.0, 10.0, 10.0),
+    this.radius = 5.0,
+    this.blendDistance = 1.0,
+    this.weight = 1.0,
+    this.priority = 0,
+    this.enabled = true,
   });
 
   /// The `.volume.json` profile.
@@ -4270,7 +4270,7 @@ class Volume implements WireRecord {
 /// `fynkel.Layer` (component, id 26, 8 bytes).
 class Layer implements WireRecord {
   const Layer({
-    required this.layer,
+    this.layer = 0,
   });
 
   /// `0..32`: the project's `layers[layer]`.
@@ -4317,7 +4317,7 @@ class Layer implements WireRecord {
 /// `fynkel.Tags` (component, id 27, 8 bytes).
 class Tags implements WireRecord {
   const Tags({
-    required this.bits,
+    this.bits = 0,
   });
 
   /// Bit `i` set: the object carries the project's `tags[i]`.

@@ -12,6 +12,8 @@ path = "src/main.rs"
 
 [dependencies]
 fynkel_contracts.workspace = true
+# `component_default`: the Dart constructors' defaults (ADR-0026 §6).
+fynkel_authoring.workspace = true
 fynkel_core.workspace = true
 fynkel_document.workspace = true
 fynkel_import.workspace = true

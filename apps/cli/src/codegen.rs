@@ -576,6 +576,74 @@ fn dart_type(ty: &FieldType) -> String {
     }
 }
 
+/// A Dart constant expression for [v], a field's value in its document
+/// form (`fynkel_document`'s codec: the schema's field names, enums by
+/// lowerCamel name, asset references as `{ asset, sub? }`), or `None`
+/// when the value does not fit the field's type.
+fn dart_const(ty: &FieldType, v: &Value) -> Option<String> {
+    fn float(v: &Value) -> Option<String> {
+        // Through f32 so the text is the shortest that round-trips on the
+        // wire (`0.05`, not `0.05000000074505806`).
+        let x = v.as_f64()? as f32;
+        if !x.is_finite() {
+            return None;
+        }
+        let t = format!("{x}");
+        Some(if t.contains(['.', 'e', 'E']) { t } else { format!("{t}.0") })
+    }
+    fn floats(v: &Value, n: usize) -> Option<String> {
+        let a = v.as_array().filter(|a| a.len() == n)?;
+        let parts: Option<Vec<String>> = a.iter().map(float).collect();
+        Some(parts?.join(", "))
+    }
+    fn string(s: &str) -> String {
+        let mut o = String::from("'");
+        for c in s.chars() {
+            match c {
+                '\\' => o.push_str("\\\\"),
+                '\'' => o.push_str("\\'"),
+                '$' => o.push_str("\\$"),
+                '\n' => o.push_str("\\n"),
+                c => o.push(c),
+            }
+        }
+        o.push('\'');
+        o
+    }
+    Some(match ty {
+        FieldType::F32 => float(v)?,
+        FieldType::U32 | FieldType::U64 => v.as_u64()?.to_string(),
+        FieldType::I32 => v.as_i64()?.to_string(),
+        FieldType::Bool => v.as_bool()?.to_string(),
+        FieldType::Vec3 => format!("Vec3({})", floats(v, 3)?),
+        FieldType::Vec4 => format!("Vec4({})", floats(v, 4)?),
+        FieldType::Quat => format!("Quat({})", floats(v, 4)?),
+        FieldType::Str => string(v.as_str()?),
+        FieldType::AssetRef => {
+            let asset = v.get("asset")?.as_str()?;
+            let sub = v.get("sub").and_then(Value::as_str).filter(|s| !s.is_empty());
+            match sub {
+                None if asset == "00000000-0000-0000-0000-000000000000" => "AssetRef.none".into(),
+                None => format!("AssetRef({})", string(asset)),
+                Some(sub) => format!("AssetRef({}, sub: {})", string(asset), string(sub)),
+            }
+        }
+        FieldType::Enum(e) => {
+            let name = v.as_str()?;
+            e.variants.iter().find(|x| **x == name)?;
+            format!("{}.{name}", enum_ident(e))
+        }
+        FieldType::Nested(s) => {
+            let mut args = Vec::new();
+            for f in s.fields {
+                args.push(format!("{}: {}", camel(f.name), dart_const(&f.ty, v.get(f.name)?)?));
+            }
+            format!("{}({})", rust_ident(s), args.join(", "))
+        }
+        FieldType::Entity | FieldType::OptionalEntity | FieldType::OptionalAssetRef => return None,
+    })
+}
+
 fn enum_ident(e: &EnumSchema) -> &str {
     e.rust_path.rsplit("::").next().unwrap()
 }
@@ -660,16 +728,34 @@ fn dart(fp: u64) -> String {
             let _ = writeln!(o, "  const {name}();");
         } else {
             let _ = writeln!(o, "  const {name}({{");
+            // ADR-0026 §6: a built-in authored component's fields default to
+            // its Rust `Default` (what Add Component writes); a field whose
+            // value has no Dart constant form stays `required`.
+            let defaults = match s.kind {
+                SchemaKind::Component => fynkel_authoring::component_default(s.name)
+                    .map(|n| n.to_serde()),
+                _ => None,
+            };
             for f in s.fields {
-                let req = if matches!(
-                    f.ty,
-                    FieldType::OptionalEntity | FieldType::OptionalAssetRef
-                ) {
-                    ""
-                } else {
-                    "required "
-                };
-                let _ = writeln!(o, "    {req}this.{},", camel(f.name));
+                let v = camel(f.name);
+                if matches!(f.ty, FieldType::OptionalEntity | FieldType::OptionalAssetRef) {
+                    let _ = writeln!(o, "    this.{v},");
+                    continue;
+                }
+                match defaults
+                    .as_ref()
+                    .and_then(|d| d.get(f.name))
+                    .and_then(|d| dart_const(&f.ty, d))
+                {
+                    Some(d) => {
+                        // A constructor call as a default value needs `const`.
+                        let d = if d.contains('(') { format!("const {d}") } else { d };
+                        let _ = writeln!(o, "    this.{v} = {d},");
+                    }
+                    None => {
+                        let _ = writeln!(o, "    required this.{v},");
+                    }
+                }
             }
             let _ = writeln!(o, "  }});");
         }
