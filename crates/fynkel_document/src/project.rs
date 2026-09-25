@@ -280,17 +280,24 @@ pub struct Project {
     /// `None` = every built-in component type.
     pub components: Option<Vec<ComponentEntry>>,
     pub targets: Vec<Target>,
+    /// The game's Fynkel packages and the types they declare (ADR-0029),
+    /// found by [`Project::read`]; none for a project built from a
+    /// document alone.
+    pub packages: crate::packages::PackageTypes,
     read_diagnostics: Vec<Diagnostic>,
 }
 
 impl Project {
-    /// `base` plus the project's own schemas (`<dir>/schemas`, where
+    /// `base` plus every Fynkel package's schemas (ADR-0029 §2, in graph
+    /// order) and the project's own (`<dir>/schemas`, where
     /// `fynkel codegen --project` writes `behaviours/<id>.schema.json`),
     /// with every registry entry of kind `behaviour` declared so its type
     /// is known even without a schema.
     #[allow(clippy::result_large_err)]
     pub fn schemas(&self, base: &SchemaSet, dir: &Path) -> Result<SchemaSet, Diagnostic> {
-        let mut schemas = base.extended_with(&dir.join(crate::runtime::PROJECT_SCHEMAS_DIR))?;
+        let mut dirs = self.packages.schema_dirs();
+        dirs.push(dir.join(crate::runtime::PROJECT_SCHEMAS_DIR));
+        let mut schemas = base.extended_with_all(&dirs)?;
         for entry in self.components.iter().flatten() {
             if entry.kind == "behaviour" {
                 schemas.declare_behaviour(&entry.type_id, entry.version);
@@ -536,6 +543,7 @@ impl Project {
             layers_and_tags,
             components,
             targets,
+            packages: Default::default(),
             read_diagnostics: diags,
         }
     }
@@ -572,7 +580,13 @@ impl Project {
                 "run from the project directory, or pass --project <dir>",
             )]);
         }
-        Document::read(&path, Some(DocumentKind::Project)).map(Project::from_document)
+        let mut project =
+            Document::read(&path, Some(DocumentKind::Project)).map(Project::from_document)?;
+        project.packages = crate::packages::package_types(dir);
+        project
+            .read_diagnostics
+            .extend(project.packages.diagnostics.iter().cloned());
+        Ok(project)
     }
 
     pub fn id(&self) -> Uuid {
@@ -827,6 +841,10 @@ impl Project {
         // An object's layer and tags are properties of every object, not a
         // feature a project opts into (ADR-0020).
         if matches!(type_id, "fynkel.Layer" | "fynkel.Tags") {
+            return true;
+        }
+        // A package's types come with the dependency (ADR-0029 §2).
+        if self.packages.types.contains(type_id) {
             return true;
         }
         match &self.components {
@@ -1218,12 +1236,6 @@ pub fn validate_project_with(
     report
         .diagnostics
         .extend(crate::editor_part::check_editor_imports(dir));
-    // The dependencies' fynkel.package.json files (ADR-0029 §1).
-    if let Some(package) = crate::editor_part::package_name(dir) {
-        report
-            .diagnostics
-            .extend(crate::packages::package_graph(dir, &package).diagnostics);
-    }
     // From here on the project's behaviour types are known.
     let schemas = match project.schemas(schemas, dir) {
         Ok(s) => s,

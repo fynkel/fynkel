@@ -193,10 +193,17 @@ impl Code {
     /// code: `package:fynkel_editor_api` or the package's own
     /// `lib/editor/` (ADR-0028 §2), which would ship it in the game.
     pub const PROJECT_EDITOR_IMPORT: Code = Code("FYN-P0015");
+    /// A behaviour or data type id two packages declare, or a package and
+    /// the game (ADR-0029 §2): one registry holds every package's types.
+    pub const PACKAGE_TYPE_CLASH: Code = Code("FYN-P0016");
+    /// A package's behaviour or data type whose id does not start with the
+    /// package's namespace (`pickups.Pickup`, ADR-0029 §2).
+    pub const PACKAGE_TYPE_NAMESPACE: Code = Code("FYN-P0017");
     /// A dependency's `fynkel.package.json` that could not be read: not
     /// JSON, an unknown field, a newer `formatVersion`, an asset folder
     /// outside the package or a namespace that is not an identifier
-    /// (ADR-0029 §1). The package is then not a Fynkel package.
+    /// (ADR-0029 §1), or a namespace the engine or the game owns (`fynkel`,
+    /// `game`). The package is then not a Fynkel package.
     pub const PACKAGE_MANIFEST: Code = Code("FYN-P0019");
 
     // Physics (`FYN-H`, blueprint §9, §19.2d item 8): scene rules the

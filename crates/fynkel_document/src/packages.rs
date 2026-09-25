@@ -10,7 +10,7 @@
 //! assets can be edited: a `path` package is the user's own, a hosted or
 //! git one lives in pub's shared cache.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use fynkel_contracts::{Code, Diagnostic};
@@ -249,7 +249,190 @@ fn read_manifest(
             )
         }
     };
+    if RESERVED_NAMESPACES.contains(&namespace.as_str()) {
+        return fail(
+            "/namespace",
+            format!(
+                "namespace '{namespace}' is the engine's or the game's; name the package's own"
+            ),
+        );
+    }
     Some(PackageManifest { assets, namespace })
+}
+
+/// Namespaces no package may take: the engine's types and the game's.
+pub const RESERVED_NAMESPACES: [&str; 2] = ["fynkel", "game"];
+
+/// What a game's Fynkel packages add to it (ADR-0029 §2): their schemas
+/// and the type ids those declare, with the graph's diagnostics and the
+/// type checks — `FYN-P0016` for a type id two packages (or a package and
+/// the game) declare, `FYN-P0017` for a package's type outside its
+/// namespace.
+#[derive(Debug, Clone, Default)]
+pub struct PackageTypes {
+    /// The Fynkel packages among the game's dependencies, in graph order.
+    pub packages: Vec<Package>,
+    /// Every behaviour and data type id they declare.
+    pub types: BTreeSet<String>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl PackageTypes {
+    /// Each package's `schemas/`, in graph order.
+    pub fn schema_dirs(&self) -> Vec<PathBuf> {
+        self.packages
+            .iter()
+            .map(|p| p.root.join(crate::runtime::PROJECT_SCHEMAS_DIR))
+            .collect()
+    }
+}
+
+/// [`PackageTypes`] of the game at `project` (its pubspec names the
+/// package; without one there are none).
+pub fn package_types(project: &Path) -> PackageTypes {
+    let Some(game) = crate::editor_part::package_name(project) else {
+        return PackageTypes::default();
+    };
+    let graph = package_graph(project, &game);
+    let mut out = PackageTypes {
+        diagnostics: graph.diagnostics.clone(),
+        ..PackageTypes::default()
+    };
+    // Type id → the package that declared it first.
+    let mut owner: BTreeMap<String, String> = BTreeMap::new();
+    for package in graph.fynkel_packages() {
+        let namespace = &package
+            .manifest
+            .as_ref()
+            .expect("a Fynkel package")
+            .namespace;
+        for (file, id) in declared_types(&package.root) {
+            let document = format!("{}/{}", package.name, file);
+            if !id.starts_with(&format!("{namespace}.")) {
+                out.diagnostics.push(outside_namespace(
+                    &id,
+                    &package.name,
+                    namespace,
+                    document.clone(),
+                ));
+            }
+            clash(
+                &mut owner,
+                &id,
+                &package.name,
+                document,
+                &mut out.diagnostics,
+            );
+            out.types.insert(id);
+        }
+        out.packages.push(package.clone());
+    }
+    for (file, id) in declared_types(project) {
+        clash(&mut owner, &id, &game, file, &mut out.diagnostics);
+    }
+    out
+}
+
+/// A Fynkel package's own types outside its namespace (`FYN-P0017`), for
+/// `fynkel codegen` run in the package itself. Nothing for a directory
+/// that is not a Fynkel package.
+pub fn check_own_namespace(dir: &Path) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let Some(name) = crate::editor_part::package_name(dir) else {
+        return out;
+    };
+    let Some(manifest) = read_manifest(&name, dir, &mut out) else {
+        return out;
+    };
+    for (file, id) in declared_types(dir) {
+        if !id.starts_with(&format!("{}.", manifest.namespace)) {
+            out.push(outside_namespace(&id, &name, &manifest.namespace, file));
+        }
+    }
+    out
+}
+
+fn outside_namespace(id: &str, package: &str, namespace: &str, document: String) -> Diagnostic {
+    Diagnostic::error(
+        Code::PACKAGE_TYPE_NAMESPACE,
+        format!("type '{id}' of package '{package}' is outside its namespace '{namespace}'"),
+    )
+    .with_document(document)
+    .with_suggestion(format!(
+        "give it an id starting with '{namespace}.' (@FynkelBehaviour(id: '{namespace}.…'))"
+    ))
+}
+
+fn clash(
+    owner: &mut BTreeMap<String, String>,
+    id: &str,
+    package: &str,
+    document: String,
+    out: &mut Vec<Diagnostic>,
+) {
+    match owner.get(id) {
+        Some(first) if first != package => out.push(
+            Diagnostic::error(
+                Code::PACKAGE_TYPE_CLASH,
+                format!("type '{id}' is declared by both '{first}' and '{package}'"),
+            )
+            .with_document(document),
+        ),
+        Some(_) => {}
+        None => {
+            owner.insert(id.to_string(), package.to_string());
+        }
+    }
+}
+
+/// `(file relative to root, type id)` of every behaviour and data schema
+/// under `<root>/schemas`, sorted by file.
+fn declared_types(root: &Path) -> Vec<(String, String)> {
+    let dir = root.join(crate::runtime::PROJECT_SCHEMAS_DIR);
+    let mut files = Vec::new();
+    schema_files(&dir, &mut files);
+    files.sort();
+    let mut out = Vec::new();
+    for file in files {
+        let Some(v) = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        else {
+            continue; // the schema set reports it
+        };
+        let kind = v.pointer("/x-fynkel/kind").and_then(Value::as_str);
+        if !matches!(kind, Some("behaviour") | Some("data")) {
+            continue;
+        }
+        let Some(id) = v.get("title").and_then(Value::as_str) else {
+            continue;
+        };
+        let rel = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push((rel, id.to_string()));
+    }
+    out
+}
+
+fn schema_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            schema_files(&path, out);
+        } else if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".schema.json"))
+        {
+            out.push(path);
+        }
+    }
 }
 
 /// A non-empty relative path that stays inside the package.
@@ -567,7 +750,7 @@ mod tests {
     #[test]
     fn a_package_file_that_cannot_be_read_is_fyn_p0019_and_the_package_is_not_fynkel() {
         let dir = Scratch::new();
-        let deps = ["a", "b", "c", "d", "e", "f"];
+        let deps = ["a", "b", "c", "d", "e", "f", "g"];
         let game = package(
             &dir.0,
             "my_game",
@@ -585,6 +768,7 @@ mod tests {
             ("d", r#"{"formatVersion": 1, "assets": "../elsewhere"}"#),
             ("e", r#"{"formatVersion": 1, "namespace": "Bad-Name"}"#),
             ("f", r#"{"formatVersion": 1, "sceneRoot": "x"}"#),
+            ("g", r#"{"formatVersion": 1, "namespace": "game"}"#),
         ];
         for (name, text) in files {
             let root = package(&dir.0, name, "");
@@ -613,6 +797,7 @@ mod tests {
                 ("d/fynkel.package.json".into(), "/assets".into()),
                 ("e/fynkel.package.json".into(), "/namespace".into()),
                 ("f/fynkel.package.json".into(), "/sceneRoot".into()),
+                ("g/fynkel.package.json".into(), "/namespace".into()),
             ]
         );
     }

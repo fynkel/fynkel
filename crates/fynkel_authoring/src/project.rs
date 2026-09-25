@@ -102,9 +102,9 @@ impl OpenProject {
             .canonicalize()
             .map_err(|e| vec![io_error(dir, format!("cannot open project directory: {e}"))])?;
         let project = Project::read(&dir)?;
-        let mut diagnostics: Vec<Diagnostic> = project.read_diagnostics().to_vec();
         let base = SchemaSet::embedded();
-        diagnostics.extend(project.validate(&base));
+        // `validate` includes the read problems (the packages' too).
+        let mut diagnostics: Vec<Diagnostic> = project.validate(&base);
         let schemas = project.schemas(&base, &dir).map_err(|d| vec![d])?;
 
         let expected = fynkel_import::expected_lock();
@@ -651,6 +651,39 @@ impl OpenProject {
     }
 
     fn read_metadata(&mut self) {
+        self.read_game_metadata();
+        self.merge_package_metadata();
+    }
+
+    /// Each Fynkel package's `behaviours.g.json` entries ahead of the
+    /// game's, so the Inspector has every package type's metadata too
+    /// (ADR-0029 §2). A package without the file adds nothing.
+    fn merge_package_metadata(&mut self) {
+        let mut behaviours = Vec::new();
+        let mut data_types = Vec::new();
+        for package in &self.project.packages.packages {
+            let Some(v) = std::fs::read_to_string(package.root.join(METADATA_FILE))
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            else {
+                continue;
+            };
+            behaviours.extend(v["behaviours"].as_array().cloned().unwrap_or_default());
+            data_types.extend(v["dataTypes"].as_array().cloned().unwrap_or_default());
+        }
+        if behaviours.is_empty() && data_types.is_empty() {
+            return;
+        }
+        let metadata = self
+            .metadata
+            .get_or_insert_with(|| serde_json::json!({ "behaviours": [], "dataTypes": [] }));
+        for (key, mut theirs) in [("behaviours", behaviours), ("dataTypes", data_types)] {
+            theirs.extend(metadata[key].as_array().cloned().unwrap_or_default());
+            metadata[key] = Value::Array(theirs);
+        }
+    }
+
+    fn read_game_metadata(&mut self) {
         let diagnostics = &mut self.base_diagnostics;
         let path = self.dir.join(METADATA_FILE);
         let declares_behaviours = self
@@ -701,12 +734,16 @@ impl OpenProject {
                 self.take_schema_source(v);
             }
         }
+        // The packages' schemas, then the game's (ADR-0029 §2).
+        let mut dirs = self.project.packages.schema_dirs();
+        dirs.push(self.dir.join(fynkel_document::runtime::PROJECT_SCHEMAS_DIR));
         let mut files = Vec::new();
-        collect_schema_files(
-            &self.dir.join(fynkel_document::runtime::PROJECT_SCHEMAS_DIR),
-            &mut files,
-        );
-        files.sort();
+        for dir in &dirs {
+            let mut own = Vec::new();
+            collect_schema_files(dir, &mut own);
+            own.sort();
+            files.extend(own);
+        }
         for file in files {
             match std::fs::read_to_string(&file)
                 .map_err(|e| e.to_string())

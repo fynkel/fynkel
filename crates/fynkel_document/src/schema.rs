@@ -107,8 +107,14 @@ impl SchemaSet {
     /// missing `dir` adds nothing). A file with the `$id` of a schema
     /// already in the set replaces it. Declared behaviours are kept.
     pub fn extended_with(&self, dir: &Path) -> Result<SchemaSet, Diagnostic> {
+        self.extended_with_all(&[dir.to_path_buf()])
+    }
+
+    /// [`extended_with`](SchemaSet::extended_with) for several directories
+    /// in order (a game's packages, then the game), built once.
+    pub fn extended_with_all(&self, dirs: &[PathBuf]) -> Result<SchemaSet, Diagnostic> {
         let mut loaded = self.sources.clone();
-        if dir.is_dir() {
+        for dir in dirs.iter().filter(|d| d.is_dir()) {
             loaded.extend(read_all(dir)?);
         }
         let mut set = SchemaSet::build(loaded)?;

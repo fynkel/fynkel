@@ -240,3 +240,174 @@ fn reload_behaviours_reads_regenerated_metadata_and_writes_nothing() {
     assert_eq!(copy.read("fynkel.project.json"), project_file);
     assert_eq!(v["canUndo"], false);
 }
+
+/// A Fynkel package (ADR-0029 §2) at `<copy>/packages/pickups`, a `path`
+/// dependency of the copy, as `flutter pub get` and the package's own
+/// `fynkel codegen` leave it: one behaviour, `pickups.Pickup`.
+fn add_pickups(copy: &Copy) -> PathBuf {
+    let root = copy.dir.join("packages/pickups");
+    std::fs::create_dir_all(root.join("schemas/behaviours")).unwrap();
+    std::fs::create_dir_all(root.join("lib/generated")).unwrap();
+    std::fs::write(root.join("pubspec.yaml"), "name: pickups\n").unwrap();
+    std::fs::write(root.join("fynkel.package.json"), r#"{"formatVersion": 1}"#).unwrap();
+    let spinner = copy.read("schemas/behaviours/game.Spinner.schema.json");
+    std::fs::write(
+        root.join("schemas/behaviours/pickups.Pickup.schema.json"),
+        spinner.replace("game.Spinner", "pickups.Pickup"),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("lib/generated/behaviours.g.json"),
+        json!({ "behaviours": [{ "id": "pickups.Pickup", "version": 1, "class": "Pickup" }], "dataTypes": [] })
+            .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        copy.dir.join("pubspec.yaml"),
+        "name: my_game\ndependencies:\n  pickups:\n    path: packages/pickups\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(copy.dir.join(".dart_tool")).unwrap();
+    std::fs::write(
+        copy.dir.join(".dart_tool/package_config.json"),
+        json!({ "configVersion": 2, "packages": [
+            { "name": "my_game", "rootUri": "../", "packageUri": "lib/" },
+            { "name": "pickups", "rootUri": "../packages/pickups", "packageUri": "lib/" },
+        ]})
+        .to_string(),
+    )
+    .unwrap();
+    root
+}
+
+/// The game's own `game.Spinner` in the main scene gets a sibling
+/// component of `type`, with the same data.
+fn use_in_scene(copy: &Copy, type_id: &str) {
+    let path = "assets/scenes/main.scene.json";
+    let mut scene = copy.json(path);
+    let entity = scene["entities"]
+        .as_object_mut()
+        .unwrap()
+        .values_mut()
+        .find(|e| {
+            e["components"]
+                .as_object()
+                .unwrap()
+                .values()
+                .any(|c| c["type"] == "game.Spinner")
+        })
+        .expect("a spinner in the fixture scene");
+    let components = entity["components"].as_object_mut().unwrap();
+    let mut added = components
+        .values()
+        .find(|c| c["type"] == "game.Spinner")
+        .unwrap()
+        .clone();
+    added["type"] = json!(type_id);
+    components.insert("c0000000-0000-4000-8000-00000000f0f0".into(), added);
+    std::fs::write(
+        copy.dir.join(path),
+        serde_json::to_string_pretty(&scene).unwrap(),
+    )
+    .unwrap();
+}
+
+fn validate(copy: &Copy) -> Vec<Diagnostic> {
+    fynkel_document::project::validate_project_with(
+        &copy.dir,
+        &fynkel_document::SchemaSet::embedded(),
+        None,
+        &fynkel_import::ImportedPrefabs::default(),
+    )
+    .diagnostics
+    .into_iter()
+    .filter(|d| d.code.as_str() != "FYN-P0010")
+    .collect()
+}
+
+/// ADR-0029 step 2: a package's behaviour is the game's too — its schema
+/// is loaded, the Inspector has its metadata ahead of the game's, the
+/// registry allows it without an entry, and a scene using it validates.
+#[test]
+fn a_packages_behaviours_are_the_games_without_a_registry_entry() {
+    let copy = Copy::new("package-types");
+    add_pickups(&copy);
+    use_in_scene(&copy, "pickups.Pickup");
+    let found = validate(&copy);
+    assert!(
+        found
+            .iter()
+            .all(|d| !d.is_error() && d.code.as_str() != "FYN-P0004"),
+        "{found:#?}"
+    );
+
+    let s = open(&copy);
+    let p = s.project().unwrap();
+    assert!(p.schema_sources.contains_key("pickups.Pickup"));
+    let listed = p.schemas_json();
+    let pickup = listed["behaviours"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["type"] == "pickups.Pickup")
+        .expect("listed");
+    assert_eq!(pickup["allowed"], true);
+    assert_eq!(pickup["hasSchema"], true);
+    // The package's metadata merged ahead of the game's (the fixture has
+    // none of its own).
+    let ids: Vec<&str> = p.metadata.as_ref().unwrap()["behaviours"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["pickups.Pickup"]);
+}
+
+/// FYN-P0016 (the same type in the game and a package) and FYN-P0017 (a
+/// package type outside its namespace), from `fynkel validate` and the
+/// session alike.
+#[test]
+fn a_type_clash_is_p0016_and_a_type_outside_the_namespace_is_p0017() {
+    let copy = Copy::new("package-clash");
+    let root = add_pickups(&copy);
+    let spinner = copy.read("schemas/behaviours/game.Spinner.schema.json");
+    std::fs::write(
+        copy.dir
+            .join("schemas/behaviours/pickups.Pickup.schema.json"),
+        spinner.replace("game.Spinner", "pickups.Pickup"),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("schemas/behaviours/game.Coin.schema.json"),
+        spinner.replace("game.Spinner", "game.Coin"),
+    )
+    .unwrap();
+    let codes = |ds: &[Diagnostic]| {
+        let mut c: Vec<(String, String)> = ds
+            .iter()
+            .filter(|d| d.code.as_str().starts_with("FYN-P001"))
+            .map(|d| {
+                (
+                    d.code.as_str().to_string(),
+                    d.document.clone().unwrap_or_default(),
+                )
+            })
+            .collect();
+        c.sort();
+        c
+    };
+    let expected = vec![
+        (
+            "FYN-P0016".to_string(),
+            "schemas/behaviours/pickups.Pickup.schema.json".to_string(),
+        ),
+        (
+            "FYN-P0017".to_string(),
+            "pickups/schemas/behaviours/game.Coin.schema.json".to_string(),
+        ),
+    ];
+    assert_eq!(codes(&validate(&copy)), expected);
+    let s = open(&copy);
+    assert_eq!(codes(&s.project().unwrap().diagnostics), expected);
+}
