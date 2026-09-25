@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import '../generated/schema.g.dart' as gen;
 import '../math.dart';
 import 'animation.dart';
+import 'asset_index.dart';
 import 'asset_ref.dart';
 import 'audio.dart';
 import 'context.dart';
@@ -106,6 +107,12 @@ class World {
   /// [loadScene] cache.
   String? get cacheDir => _cacheDir;
   String? _cacheDir;
+
+  /// The project's assets by path, from the cache of the last load
+  /// (ADR-0026 §3): `assets.find('prefabs/burst')` is an [AssetRef], as
+  /// Unity's `Resources.Load`. Names known while writing the code are the
+  /// generated `Assets.…` constants instead.
+  late final AssetIndex assets = AssetIndex(() => _cacheDir);
 
   /// Installs [store] as [context]'s settings and attaches it to this
   /// world (M3-12): its rebinds go over the project's actions now and

@@ -70,6 +70,7 @@ export 'generated/schema.g.dart'
         componentIds;
 export 'src/animation.dart' show AnimationAssets, AnimatorState;
 export 'src/audio.dart' show AudioAssets, AudioState, AudioStats;
+export 'src/asset_index.dart';
 export 'src/asset_ref.dart';
 export 'src/context.dart';
 export 'math.dart';
