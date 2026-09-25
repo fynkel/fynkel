@@ -36,7 +36,7 @@ import 'inspector_math.dart';
 /// The `DragTarget` payload an asset row (the Project browser, item 5)
 /// drags onto an asset field.
 final class AssetDragPayload {
-  const AssetDragPayload({required this.id, this.sub, required this.kind, required this.name});
+  const AssetDragPayload({required this.id, this.sub, required this.kind, required this.name, this.dataType});
 
   final String id;
   final String? sub;
@@ -45,6 +45,10 @@ final class AssetDragPayload {
   /// `script` is a behaviour: [id] is its type id (`game.Spinner`).
   final String kind;
   final String name;
+
+  /// A data asset's type (`game.Weapon`, ADR-0027): a data-typed field
+  /// takes only its own.
+  final String? dataType;
 
   Map<String, Object?> toRef() => {'asset': id, if (sub != null && sub!.isNotEmpty) 'sub': sub};
 }
@@ -1527,6 +1531,7 @@ class AssetField extends StatefulWidget {
     required this.candidates,
     required this.onCommit,
     this.kind,
+    this.dataType,
     this.subject,
     this.thumbnail,
     this.mixed = false,
@@ -1546,6 +1551,9 @@ class AssetField extends StatefulWidget {
   /// The assets the picker lists (already filtered by [kind]).
   final List<AssetEntry> Function() candidates;
   final String? kind;
+
+  /// A data-typed field's type (ADR-0027): a drop must be a data asset of it.
+  final String? dataType;
 
   /// What the picker's title names (the field's label).
   final String? subject;
@@ -1593,6 +1601,7 @@ List<PickerItem<String>> assetPickerItems(
     if (sub != null) ('Part', sub),
     ('File', a.path),
     if (a.importer != null) ('Importer', a.importer!),
+    if (a.dataType != null) ('Type', a.dataType!),
   ];
   WidgetBuilder? picture(AssetEntry a) {
     final th = thumbnail;
@@ -1728,7 +1737,10 @@ class _AssetFieldState extends State<AssetField> {
     final empty = value == null && !widget.mixed;
     final entry = _entry();
     return DragTarget<AssetDragPayload>(
-      onWillAcceptWithDetails: (d) => widget.enabled && (widget.kind == null || d.data.kind == widget.kind),
+      onWillAcceptWithDetails: (d) =>
+          widget.enabled &&
+          (widget.kind == null || d.data.kind == widget.kind) &&
+          (widget.dataType == null || d.data.dataType == widget.dataType),
       onAcceptWithDetails: (d) => widget.onCommit(d.data.toRef()),
       builder: (context, candidatesIn, rejected) {
         final edge = candidatesIn.isNotEmpty ? t.accent : (rejected.isNotEmpty ? t.error : null);
@@ -1825,6 +1837,7 @@ IconData assetKindIcon(String? kind) => switch (kind) {
   'skin' || 'rig' => FIcons.accessibilityNew,
   'volume' => FIcons.tune,
   'physics_material' => FIcons.physicsMaterial,
+  'data' => FIcons.dataAsset,
   'script' => FIcons.descriptionOutlined,
   _ => FIcons.insertDriveFileOutlined,
 };

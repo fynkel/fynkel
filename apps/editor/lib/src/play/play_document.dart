@@ -215,6 +215,12 @@ final class WorldLiveBackend extends LiveBackend {
         f.set(b, target);
         return const [];
       }
+      if (f.holdsData) {
+        // The shared instance(s) of the named data asset(s), as a load sets them.
+        final data = world.resolveData(value, f.dataType!, where: '${b.behaviourType!.id}.$field');
+        f.set(b, data ?? (value is List ? const <Object?>[] : null));
+        return const [];
+      }
       f.set(b, value);
     } on Object catch (e) {
       return ['$field: $e'];

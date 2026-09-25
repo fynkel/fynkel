@@ -89,6 +89,7 @@ final class FieldSpec {
     this.declarationIndex = 0,
     this.gizmo,
     this.behaviourType,
+    this.dataType,
   });
 
   /// The key in the component's `data` (a nested field's key in its parent).
@@ -149,6 +150,11 @@ final class FieldSpec {
 
   /// For [FieldKind.scriptRef]: the script type it takes (`game.Spinner`).
   final String? behaviourType;
+
+  /// A data-typed field's type (ADR-0027, `x-fynkel.type: data`): an
+  /// [FieldKind.assetRef] of [assetKind] `data` that takes only data
+  /// assets of this type (`game.Weapon`).
+  final String? dataType;
 
   /// The sibling [showIf] names, without the `!`.
   String? get showIfField {
@@ -528,6 +534,8 @@ FieldSpec _parseField(
     case 'behaviour':
       kind = FieldKind.scriptRef;
       nullable = true;
+    case 'data':
+      kind = FieldKind.assetRef;
     case 'number' when kind == FieldKind.any:
       kind = FieldKind.number;
     case 'integer' when kind == FieldKind.any:
@@ -571,6 +579,8 @@ FieldSpec _parseField(
     }
   }
 
+  final dataType = hints['type'] == 'data' ? hints['data'] as String? : null;
+  if (dataType != null) assetKind = 'data';
   final min = (hints['min'] as num?) ?? (p['minimum'] as num?) ?? (p['exclusiveMinimum'] as num?);
   final max = (hints['max'] as num?) ?? (p['maximum'] as num?) ?? (p['exclusiveMaximum'] as num?);
   if (slider && (min == null || max == null)) slider = false;
@@ -605,6 +615,7 @@ FieldSpec _parseField(
     declarationIndex: index,
     gizmo: GizmoHint.parse(hints['gizmo']),
     behaviourType: kind == FieldKind.scriptRef ? hints['behaviour'] as String? : null,
+    dataType: dataType,
   );
 }
 

@@ -33,6 +33,17 @@ final class LivePlay {
 
   PlayDocument? get document => tabs.live?.document as PlayDocument?;
 
+  /// A data asset's Inspector edit, saved (ADR-0027 §7): the running
+  /// game's shared instance takes [data] too, as Unity's does. False when
+  /// no game runs or it has not made that asset yet.
+  bool dataEdited(String id, Map<String, Object?> data) {
+    final world = _world;
+    if (world == null) return false;
+    final applied = world.applyDataEdit(id, data);
+    if (applied) written?.call();
+    return applied;
+  }
+
   /// Shows [world] — the running game's, or null when none runs.
   void follow(fynkel.World? world) {
     if (identical(world, _world)) return;

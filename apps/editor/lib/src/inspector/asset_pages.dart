@@ -29,6 +29,7 @@ import '../env/tools.dart';
 import '../project/editor_project.dart';
 import '../project_browser/asset_preview.dart';
 import 'asset_edits.dart';
+import 'data_asset_inspector.dart';
 import 'material_inspector.dart';
 import 'physics_material_inspector.dart';
 import 'volume_inspector.dart';
@@ -163,7 +164,7 @@ class _UsedBy extends StatelessWidget {
   }
 
   static String? _documentKindOf(String path) {
-    for (final k in ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'physics_material']) {
+    for (final k in ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'physics_material', 'data']) {
       if (path.endsWith(documentSuffix(k))) return k;
     }
     return null;
@@ -215,7 +216,7 @@ typedef AssetSectionBuilder = List<Widget> Function(BuildContext context, AssetE
 /// nothing registered shows the generic summary: the entity count of a
 /// scene-like document, or the document's top-level fields.
 abstract final class AssetDocumentSections {
-  static final Map<String, AssetSectionBuilder> _byKind = {'material': _materialSections};
+  static final Map<String, AssetSectionBuilder> _byKind = {'material': _materialSections, 'data': dataAssetSections};
 
   /// Shows [builder]'s sections on the page of every document of [kind],
   /// in place of the generic summary. A second registration replaces the
@@ -513,7 +514,13 @@ class _AssetPageState extends State<AssetPage> {
                 if (draft != null) _importSettings(context, e, d, draft),
                 if (draft != null && _isModel(e)) _materials(context, e, d, draft),
                 if (e.isSource) _parts(context, e, d),
-                if (!editsMaterial && !editsVolume && !editsPhysics) ...AssetDocumentSections.of(context, e, d),
+                if (!editsMaterial && !editsVolume && !editsPhysics)
+                  for (final section in AssetDocumentSections.of(context, e, d))
+                    // A registered section edits through the page's AssetEdits.
+                    if (widget.assetEdits case final edits?)
+                      AssetPageScope(edits: edits, browser: model, child: section)
+                    else
+                      section,
                 _UsedBy(dependents: d.dependents, onOpenReference: widget.onOpenReference),
               ],
             ),

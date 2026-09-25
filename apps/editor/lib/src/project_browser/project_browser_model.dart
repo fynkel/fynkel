@@ -34,6 +34,7 @@ const browserKinds = [
   'blend',
   'volume',
   'physics_material',
+  'data',
   'texture',
   'model',
   'sound',
@@ -66,6 +67,7 @@ String documentSuffix(String kind) => kind == 'physics_material' ? '.physicsmate
 String documentKindTitle(String kind) => switch (kind) {
   'volume' => 'Volume Profile',
   'physics_material' => 'Physics Material',
+  'data' => 'Data Asset',
   _ => kind.isEmpty ? kind : '${kind[0].toUpperCase()}${kind.substring(1)}',
 };
 
@@ -678,7 +680,7 @@ final class ProjectBrowserModel extends ChangeNotifier {
       if (!e.subAssets.containsKey(sub)) return null;
       return AssetDragPayload(id: e.id, sub: sub, kind: AssetEntry.subKind(sub), name: '$name#$sub');
     }
-    if (!e.isSource) return AssetDragPayload(id: e.id, kind: e.document ?? 'other', name: name);
+    if (!e.isSource) return AssetDragPayload(id: e.id, kind: e.document ?? 'other', name: name, dataType: e.dataType);
     if (e.wholeKind != null) return AssetDragPayload(id: e.id, kind: e.wholeKind!, name: name);
     if (e.subAssets.containsKey('prefab')) {
       return AssetDragPayload(id: e.id, sub: 'prefab', kind: 'prefab', name: '$name#prefab');
@@ -736,6 +738,24 @@ final class ProjectBrowserModel extends ChangeNotifier {
     // Unity's names: New Scene, New Material, New Volume Profile, New Physics Material.
     final rel = _freshPath(target, 'New ${documentKindTitle(kind)}', documentSuffix(kind));
     final r = _guard(() => project.newDocument(kind, rel));
+    if (r == null) return null;
+    final id = r.id;
+    if (view == BrowserView.folders && !filtering) folder = target;
+    if (id != null && entry(id) != null) {
+      select(id);
+      renamingAsset = id;
+      notifyListeners();
+    }
+    return r;
+  }
+
+  /// Unity's Create ▸ `<menu>` of a data type (ADR-0027 §7): `New Weapon` in
+  /// [inFolder] (the shown folder by default), a `game.Weapon` data asset
+  /// with every field at its default, selected and ready to rename.
+  OperationResult? newData(DataTypeInfo type, {String? inFolder}) {
+    final target = inFolder ?? (view == BrowserView.folders ? folder : '');
+    final rel = _freshPath(target, 'New ${type.title}', '.data.json');
+    final r = _guard(() => project.newDocument('data', rel, type: type.id));
     if (r == null) return null;
     final id = r.id;
     if (view == BrowserView.folders && !filtering) folder = target;

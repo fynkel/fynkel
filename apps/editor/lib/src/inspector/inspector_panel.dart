@@ -19,24 +19,24 @@ import 'package:fynkel_authoring/fynkel_authoring.dart';
 
 import '../env/tools.dart';
 import '../picker/picker.dart';
-import '../project_browser/asset_preview.dart';
 import '../project_browser/project_browser_model.dart';
 import '../shell/editor_selection.dart';
 import '../shell/notices.dart';
 import '../theme/icons.dart';
 import 'asset_pages.dart';
 import 'codegen_check.dart';
+import 'field_editor.dart';
 import 'field_spec.dart';
 import 'overrides_popup.dart';
 import 'field_widgets.dart';
 import 'inspector_chrome.dart';
-import 'inspector_math.dart';
 import '../theme/theme.dart';
 import '../theme/tokens.dart';
 import 'inspector_model.dart';
 import 'prefab_actions.dart' show applyTargetLabel;
 import 'asset_edits.dart';
 import 'object_header.dart';
+import '../project/editor_project.dart' show AssetEntry;
 import '../project/tags_and_layers_dialog.dart';
 
 class InspectorPanel extends StatefulWidget {
@@ -949,7 +949,7 @@ class _ComponentCard extends StatelessWidget {
 
   /// [f]'s editor — the one built before while the model's generation
   /// holds and the value is the same.
-  Widget _field(FieldSpec f) => _kept(f.name, () => _FieldEditor(model: model, slot: slot, spec: f, path: f.name));
+  Widget _field(FieldSpec f) => _kept(f.name, () => FieldEditor(target: _SlotTarget(model, slot), spec: f, path: f.name));
 
   Widget _kept(String name, Widget Function() build) {
     final k = '${slot.key}/$name';
@@ -1053,6 +1053,9 @@ IconData componentIcon(ComponentSpec spec) {
   };
 }
 
+/// The icon an `icon` hint names (a behaviour's, a data type's), or null.
+IconData? materialIconNamed(String? name) => _materialIcons[name];
+
 /// The `icon` hint names a Material icon; the ones a behaviour is likely to
 /// use. An unknown name falls back to the type's default.
 const _materialIcons = <String, IconData>{
@@ -1096,6 +1099,7 @@ const _materialIcons = <String, IconData>{
   'inventory': FIcons.inventory2Outlined,
   'health_and_safety': FIcons.healthAndSafety,
   'shield': FIcons.shield,
+  'swords': FIcons.swords,
   'gps_fixed': FIcons.gpsFixed,
   'explore': FIcons.explore,
   'map': FIcons.map,
@@ -1105,509 +1109,74 @@ const _materialIcons = <String, IconData>{
   'physics': FIcons.sportsBasketballOutlined,
 };
 
-// ── One field ──────────────────────────────────────────────────────────────
-
-/// Picks the widget for a spec and wires it to the model. [path] is the
-/// `data` path (`speed`, `inner/offset`, `/points/2`).
-class _FieldEditor extends StatelessWidget {
-  const _FieldEditor({
-    super.key,
-    required this.model,
-    required this.slot,
-    required this.spec,
-    required this.path,
-    this.indent = 0,
-  });
+/// A component slot as a [FieldEditor]'s target: the component on every
+/// selected object, each written through the model's transactions.
+final class _SlotTarget extends FieldTarget {
+  _SlotTarget(this.model, this.slot) : _byKey = {for (final i in slot.instances) _keyOf(i): i};
 
   final InspectorModel model;
   final ComponentSlot slot;
-  final FieldSpec spec;
-  final String path;
-  final double indent;
+  final Map<String, ComponentInstance> _byKey;
 
-  bool get _enabled => model.canEdit && !spec.readOnly;
-  String get _pointer => path.startsWith('/') ? path : '/$path';
-
-  /// A field name at the top level writes by name (the crate adds a missing
-  /// member); a nested path writes by pointer.
-  String get _writePath => path.contains('/') ? _pointer : path;
-
-  void _commit(Object? v) => model.setField(slot, _writePath, v, spec: spec);
-
-  static List<num>? _quaternionOf(Object? v) =>
-      v is List && v.length == 4 ? [for (final x in v) x is num ? x : 0] : null;
-
-  /// Where [EulerHints] keeps the angles typed for instance [i]'s rotation.
-  String _hintKey(ComponentInstance i) => '${i.entityId}/${i.componentId}/$path';
-
-  /// Instance [i]'s rotation in degrees as the Inspector shows it.
-  Euler _eulerOf(ComponentInstance i) {
-    final own = _quaternionOf(slot.shownFor(i, path));
-    return own == null ? Euler.zero : EulerHints.of(_hintKey(i), own);
-  }
-
-  /// Per axis, whether the selected objects' angles differ (to 0.001°).
-  List<bool> _mixedAxes() {
-    final eulers = [
-      for (final i in slot.instances)
-        if (_quaternionOf(slot.shownFor(i, path)) != null) _eulerOf(i),
-    ];
-    if (eulers.length < 2) return const [false, false, false];
-    return [
-      for (var a = 0; a < 3; a++) eulers.any((e) => (e[a] - eulers.first[a]).abs() > 1e-3),
-    ];
-  }
+  static String _keyOf(ComponentInstance i) => '${i.entityId}/${i.componentId}';
 
   @override
-  Widget build(BuildContext context) {
-    final value = slot.shown(path);
-    final mixed = slot.isMixed(path);
-    final error = model.errorFor(
-      slot,
-      path.startsWith('/') ? path.substring(1).split('/').first : path.split('/').first,
-    );
-    final label = spec.label + (spec.readOnly ? '  🔒' : '');
-    switch (spec.kind) {
-      case FieldKind.number:
-      case FieldKind.integer:
-        final live = model.liveField(slot, path);
-        return NumberField(
-          value: value is num ? value : null,
-          live: live == null ? null : _Number(live),
-          previous: value,
-          mixed: mixed,
-          label: label,
-          tooltip: spec.tooltip,
-          error: error,
-          min: spec.min,
-          max: spec.max,
-          step: spec.step,
-          unit: spec.unit,
-          angle: spec.angle,
-          slider: spec.slider,
-          integer: spec.kind == FieldKind.integer,
-          enabled: _enabled,
-          overridden: _overridden,
-          onRevert: _onRevert,
-          onApply: _onApply,
-          onCommit: _commit,
-        );
-      case FieldKind.boolean:
-        return _row(
-          label,
-          error,
-          BoolField(value: value is bool ? value : null, mixed: mixed, enabled: _enabled, onCommit: _commit),
-        );
-      case FieldKind.string:
-        return _row(
-          label,
-          error,
-          StringField(
-            value: value?.toString(),
-            mixed: mixed,
-            multiline: spec.multiline,
-            enabled: _enabled,
-            onCommit: _commit,
-          ),
-        );
-      case FieldKind.enumeration:
-        return _row(
-          label,
-          error,
-          EnumField(
-            value: value?.toString(),
-            values: spec.enumValues,
-            mixed: mixed,
-            enabled: _enabled,
-            onCommit: _commit,
-          ),
-        );
-      case FieldKind.vec2:
-      case FieldKind.vec3:
-      case FieldKind.vec4:
-        final list = value is List ? [for (final v in value) v is num ? v : 0] : null;
-        return _row(
-          label,
-          error,
-          unit: spec.unit,
-          VecField(
-            value: list,
-            live: model.liveField(slot, path),
-            components: spec.components,
-            mixed: [for (var i = 0; i < spec.components; i++) slot.isMixed('$path/$i')],
-            enabled: _enabled,
-            unit: spec.unit,
-            step: spec.step,
-            min: spec.min,
-            max: spec.max,
-            // A Transform's axis drag moves the object in the Scene view live.
-            onPreviewComponent: (i, v) {
-              if (v == null) return model.endPreview(slot);
-              model.previewEach(slot, path, (inst) {
-                final own = slot.shownFor(inst, path);
-                final list = own is List ? [for (final x in own) x is num ? x.toDouble() : 0.0] : null;
-                if (list == null || i >= list.length) return own;
-                return [...list]..[i] = v;
-              });
-            },
-            onCommitComponent: (i, v) {
-              if (list == null || list.length != spec.components) {
-                // No vector yet: write the whole thing.
-                final full = List<Object>.filled(spec.components, 0);
-                full[i] = v;
-                _commit(full);
-              } else {
-                model.setField(slot, '$_pointer/$i', v);
-              }
-            },
-          ),
-        );
-      case FieldKind.quaternion:
-        final q = value is List && value.length == 4 ? [for (final v in value) v is num ? v : 0] : null;
-        return _row(
-          label,
-          error,
-          EulerField(
-            quaternion: q,
-            hintKey: _hintKey(slot.first),
-            live: model.liveField(slot, path),
-            mixed: mixed,
-            enabled: _enabled,
-            onCommit: (quat) => _commit(_numbersLike(quat, q)),
-            // Several objects: each keeps its own angles but the edited one.
-            mixedAxes: slot.single ? null : _mixedAxes(),
-            onPreviewAxis: (axis, degrees) {
-              if (degrees == null) return model.endPreview(slot);
-              model.previewEach(slot, path, (i) => _eulerOf(i).withComponent(axis, degrees).toQuaternion());
-            },
-            onCommitAxis: slot.single
-                ? null
-                : (axis, degrees) => model.setFieldEach(slot, _writePath, (i) {
-                    final e = _eulerOf(i).withComponent(axis, degrees);
-                    final q = e.toQuaternion();
-                    EulerHints.remember(_hintKey(i), q, e);
-                    return _numbersLike(q, _quaternionOf(slot.shownFor(i, path)));
-                  }),
-          ),
-        );
-      case FieldKind.color:
-        final rgb = value is List ? [for (final v in value) v is num ? v : 0] : null;
-        return _row(
-          label,
-          error,
-          ColorField(
-            value: rgb,
-            components: spec.components,
-            mixed: mixed,
-            enabled: _enabled,
-            onCommit: (c) => _commit(_numbersLike(c, rgb)),
-            // The Scene view follows the picker; one transaction on OK.
-            onPreview: (c) => c == null
-                ? model.endPreview(slot)
-                : model.previewEach(slot, path, (_) => _numbersLike(c, rgb)),
-          ),
-        );
-      case FieldKind.assetRef:
-        return _row(
-          label,
-          error,
-          AssetField(
-            value: value is Map ? Map<String, Object?>.from(value) : null,
-            kind: spec.assetKind,
-            nullable: spec.nullable,
-            mixed: mixed,
-            enabled: _enabled,
-            subject: label,
-            describe: model.describeAsset,
-            candidates: () => model.assetsFor(spec.assetKind),
-            thumbnail: switch (model.assetPreview) {
-              final preview? => (e, size) => AssetPreviewWidget(preview: preview(e), size: size),
-              null => null,
-            },
-            onPing: model.pingAsset,
-            onCommit: _commit,
-          ),
-        );
-      case FieldKind.entity:
-        return _row(
-          label,
-          error,
-          EntityField(
-            value: value?.toString(),
-            subject: label,
-            names: model.entityNames,
-            mixed: mixed,
-            enabled: _enabled,
-            onCommit: _commit,
-          ),
-        );
-      case FieldKind.objectRef:
-      case FieldKind.scriptRef:
-        return _row(
-          label,
-          error,
-          ObjectField(
-            value: value is Map ? Map<String, Object?>.from(value) : null,
-            typeLabel: spec.kind == FieldKind.objectRef
-                ? 'GameObject'
-                : humanize(spec.behaviourType?.split('.').last ?? 'Script'),
-            subject: label,
-            describe: model.describeObject,
-            candidates: () => [
-              for (final o in model.objectsFor(spec))
-                PickerItem(
-                  value: o.id,
-                  title: o.name,
-                  icon: FIcons.cropSquare,
-                  detail: o.path.isEmpty ? null : o.path,
-                  keywords: o.path,
-                  facts: [('Name', o.name), if (o.path.isNotEmpty) ('Parent', o.path)],
-                ),
-            ],
-            refFor: (entity) => model.objectRef(spec, entity),
-            mixed: mixed,
-            enabled: _enabled,
-            onCommit: _commit,
-          ),
-        );
-      case FieldKind.layerMask:
-        return _row(
-          label,
-          error,
-          LayerMaskField(
-            value: value is num ? value.toInt() : null,
-            layers: model.project.layerNames(),
-            mixed: mixed,
-            enabled: _enabled,
-            onCommit: _commit,
-          ),
-        );
-      case FieldKind.array:
-        return _array(context, label, error, value);
-      case FieldKind.object:
-        return _object(context, label, value);
-      case FieldKind.any:
-        return _row(label, error, JsonField(value: value, mixed: mixed, enabled: _enabled, onCommit: _commit));
-    }
-  }
-
-  Widget _row(String label, String? error, Widget child, {String? unit}) => FieldRow(
-    label: label,
-    tooltip: spec.tooltip,
-    error: error,
-    indent: indent,
-    unit: unit,
-    overridden: _overridden,
-    onRevert: _onRevert,
-    onApply: _onApply,
-    child: child,
-  );
-
-  /// Prefab mode: the field's top-level key was written by an override on
-  /// a derived instance — bold, with Revert and (when the prefab can take
-  /// it) Apply.
-  bool get _overridden => slot.isOverridden(path);
-  VoidCallback? get _onRevert =>
-      _overridden && model.canRevertField(slot, path) ? () => model.revertField(slot, _writePath) : null;
-  ApplyTo? get _onApply => _overridden && model.cannotApplyField(slot, path) == null
-      ? (depth) => model.applyField(slot, _writePath, depth: depth)
-      : null;
-
-  Widget _array(BuildContext context, String label, String? error, Object? value) {
-    final theme = Theme.of(context);
-    final item = spec.item;
-    final list = value is List ? value : const [];
-    final mixed = slot.isMixed(path);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        FieldRow(
-          label: label,
-          tooltip: spec.tooltip,
-          error: error,
-          indent: indent,
-          overridden: _overridden,
-          onRevert: _onRevert,
-          onApply: _onApply,
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  mixed ? '—' : '${list.length} item${list.length == 1 ? '' : 's'}',
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-                ),
-              ),
-              if (_enabled && !mixed && item != null)
-                IconButton(
-                  key: ValueKey('array.add.$path'),
-                  tooltip: 'Add item',
-                  icon: const Icon(FIcons.add, size: 14),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                  onPressed: () => _addItem(context, item, list),
-                ),
-            ],
-          ),
-        ),
-        if (!mixed && item != null)
-          for (var i = 0; i < list.length; i++)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _FieldEditor(
-                    key: ValueKey('field.${slot.key}.$path.$i'),
-                    model: model,
-                    slot: slot,
-                    spec: FieldSpec(
-                      name: '$i',
-                      label: '${item.label} $i',
-                      kind: item.kind,
-                      tooltip: item.tooltip,
-                      min: item.min,
-                      max: item.max,
-                      step: item.step,
-                      unit: item.unit,
-                      enumValues: item.enumValues,
-                      assetKind: item.assetKind,
-                      angle: item.angle,
-                      slider: item.slider,
-                      multiline: item.multiline,
-                      nullable: item.nullable,
-                      item: item.item,
-                      fixedLength: item.fixedLength,
-                      children: item.children,
-                    ),
-                    path: '$_pointer/$i',
-                    indent: indent + 10,
-                  ),
-                ),
-                if (_enabled) ...[
-                  for (final (d, icon, tip) in const [
-                    (-1, FIcons.arrowUpward, 'Move up'),
-                    (1, FIcons.arrowDownward, 'Move down'),
-                  ])
-                    IconButton(
-                      key: ValueKey('array.move$d.$path.$i'),
-                      tooltip: tip,
-                      icon: Icon(icon, size: 12),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 18, minHeight: 26),
-                      onPressed: i + d < 0 || i + d >= list.length
-                          ? null
-                          : () => _commit([...list]
-                              ..[i] = list[i + d]
-                              ..[i + d] = list[i]),
-                    ),
-                  IconButton(
-                    key: ValueKey('array.remove.$path.$i'),
-                    tooltip: 'Remove item',
-                    icon: const Icon(FIcons.remove, size: 14),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(minWidth: 22, minHeight: 26),
-                    onPressed: () {
-                      final next = [
-                        for (var j = 0; j < list.length; j++)
-                          if (j != i) list[j],
-                      ];
-                      _commit(next);
-                    },
-                  ),
-                ],
-              ],
-            ),
-      ],
-    );
-  }
-
-  /// Unity's `+`: a copy of the last item; into an empty list the item's
-  /// default, or a fresh value — an asset item, which cannot be None, is
-  /// picked first.
-  Future<void> _addItem(BuildContext context, FieldSpec item, List<Object?> list) async {
-    Object? value;
-    if (list.isNotEmpty) {
-      value = _copy(list.last);
-    } else if (item.hasDefault) {
-      value = item.defaultValue;
-    } else if (item.kind == FieldKind.assetRef && !item.nullable) {
-      final choice = await pickAssetRef(
-        context,
-        kind: item.assetKind,
-        subject: '${spec.label} 0',
-        candidates: () => model.assetsFor(item.assetKind),
-      );
-      if (choice?.ref == null) return;
-      value = choice!.ref;
-    } else {
-      value = _blank(item);
-    }
-    model.setField(slot, '$_pointer/${list.length}', value);
-  }
-
-  static Object? _copy(Object? v) => switch (v) {
-    final List<Object?> l => [for (final x in l) _copy(x)],
-    final Map<Object?, Object?> m => {for (final e in m.entries) e.key as String: _copy(e.value)},
-    _ => v,
-  };
-
-  Widget _object(BuildContext context, String label, Object? value) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: EdgeInsets.only(left: indent, top: 4, bottom: 1),
-          child: Text(label, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-        ),
-        if (value == null && spec.nullable)
-          Padding(
-            padding: EdgeInsets.only(left: indent + 10),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(onPressed: _enabled ? () => _commit(_blank(spec)) : null, child: const Text('Set…')),
-            ),
-          )
-        else
-          for (final child in spec.children)
-            if (child.visibleWith(value is Map ? Map<String, Object?>.from(value) : const {}, siblings: spec.children))
-              _FieldEditor(
-                key: ValueKey('field.${slot.key}.$path.${child.name}'),
-                model: model,
-                slot: slot,
-                spec: child,
-                path: '$_pointer/${child.name}',
-                indent: indent + 10,
-              ),
-      ],
-    );
-  }
-
-  /// A fresh value of a spec (an added array item, a nullable object set).
-  static Object? _blank(FieldSpec s) => switch (s.kind) {
-    FieldKind.number => 0,
-    FieldKind.integer || FieldKind.layerMask => 0,
-    FieldKind.boolean => false,
-    FieldKind.string || FieldKind.entity => '',
-    FieldKind.enumeration => s.enumValues.isEmpty ? '' : s.enumValues.first,
-    FieldKind.vec2 || FieldKind.vec3 || FieldKind.vec4 => List<Object>.filled(s.components, 0),
-    FieldKind.quaternion => [0, 0, 0, 1],
-    FieldKind.color => List<Object>.filled(s.components, 1),
-    FieldKind.assetRef || FieldKind.objectRef || FieldKind.scriptRef => null,
-    FieldKind.array => <Object?>[],
-    FieldKind.object => {
-      for (final c in s.children)
-        if (c.hasDefault) c.name: c.defaultValue,
-    },
-    FieldKind.any => null,
-  };
+  String get key => slot.key;
+  @override
+  bool get canEdit => model.canEdit;
+  @override
+  Object? shown(String path) => slot.shown(path);
+  @override
+  bool isMixed(String path) => slot.isMixed(path);
+  @override
+  String? errorFor(String field) => model.errorFor(slot, field);
+  @override
+  ValueListenable<Object?>? live(String path) => model.liveField(slot, path);
+  @override
+  bool set(String path, Object? value, {FieldSpec? spec}) => model.setField(slot, path, value, spec: spec);
+  @override
+  List<String> get instances => _byKey.keys.toList();
+  @override
+  bool get single => slot.single;
+  @override
+  Object? shownFor(String instance, String path) => slot.shownFor(_byKey[instance]!, path);
+  @override
+  bool setEach(String path, Object? Function(String instance) valueFor) =>
+      model.setFieldEach(slot, path, (i) => valueFor(_keyOf(i)));
+  @override
+  void previewEach(String path, Object? Function(String instance) valueFor) =>
+      model.previewEach(slot, path, (i) => valueFor(_keyOf(i)));
+  @override
+  void endPreview() => model.endPreview(slot);
+  @override
+  bool isOverridden(String path) => slot.isOverridden(path);
+  @override
+  bool canRevert(String path) => model.canRevertField(slot, path);
+  @override
+  void revert(String path) => model.revertField(slot, path);
+  @override
+  String? cannotApply(String path) => model.cannotApplyField(slot, path);
+  @override
+  void apply(String path, {int depth = 0}) => model.applyField(slot, path, depth: depth);
+  @override
+  List<AssetEntry> assetsFor(FieldSpec spec) => assetsForSpec(model.project.assets(), spec);
+  @override
+  String describeAsset(Map<String, Object?>? ref) => model.describeAsset(ref);
+  @override
+  AssetPreview Function(AssetEntry entry)? get assetPreview => model.assetPreview;
+  @override
+  void Function(String assetId)? get pingAsset => model.pingAsset;
+  @override
+  List<String> entityNames() => model.entityNames();
+  @override
+  List<String> layerNames() => model.project.layerNames();
+  @override
+  List<({String id, String name, String path})> objectsFor(FieldSpec spec) => model.objectsFor(spec);
+  @override
+  Map<String, Object?>? objectRef(FieldSpec spec, String entity) => model.objectRef(spec, entity);
+  @override
+  String? describeObject(Map<String, Object?> ref) => model.describeObject(ref);
 }
-
-/// The list to write for [values] where the document held [previous]: each
-/// slot keeps its int-ness (`[0, 0, 0, 1]` stays ints where it can).
-List<Object> _numbersLike(List<double> values, List<num>? previous) => [
-  for (var i = 0; i < values.length; i++)
-    jsonNumber(values[i], previous: previous != null && i < previous.length ? previous[i] : null),
-];
 
 // ── Prefab overrides ───────────────────────────────────────────────────────
 
@@ -1745,25 +1314,3 @@ Future<void> showAddComponent(BuildContext context, InspectorModel model, {Rect?
   }
 }
 
-/// A followed field's value as a number (see [InspectorModel.liveField]).
-final class _Number implements ValueListenable<num?> {
-  const _Number(this.source);
-
-  final ValueListenable<Object?> source;
-
-  @override
-  num? get value => switch (source.value) {
-    final num n => n,
-    _ => null,
-  };
-
-  @override
-  void addListener(VoidCallback listener) => source.addListener(listener);
-  @override
-  void removeListener(VoidCallback listener) => source.removeListener(listener);
-
-  @override
-  bool operator ==(Object other) => other is _Number && identical(other.source, source);
-  @override
-  int get hashCode => identityHashCode(source);
-}

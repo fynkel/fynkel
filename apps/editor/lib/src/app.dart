@@ -1873,6 +1873,11 @@ class EditorShellState extends State<EditorShell> {
             switch (kind) {
               'volume' => scene?.previewVolume(id, fields),
               'material' => scene?.previewMaterial(id, fields),
+              // During Play the running game's instance takes the saved data.
+              'data' when fields?['data'] is Map => _livePlay?.dataEdited(
+                id,
+                Map<String, Object?>.from(fields!['data'] as Map),
+              ),
               // A physics material draws nothing; Play reads it from the cook.
               _ => null,
             };

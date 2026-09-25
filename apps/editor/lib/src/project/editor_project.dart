@@ -70,6 +70,29 @@ final class TypeSchema {
   final String? dart;
 }
 
+/// A data type the project knows (ADR-0027): a `@FynkelDataAsset` class's
+/// committed schema, `schemas/data/<id>.schema.json`.
+final class DataTypeInfo {
+  const DataTypeInfo({required this.id, required this.version, this.menu, this.icon, this.schema});
+
+  /// `game.Weapon`.
+  final String id;
+  final int version;
+
+  /// The Create menu path (`Game/Weapon`), or null: the id's last part.
+  final String? menu;
+
+  /// A Material icon name.
+  final String? icon;
+  final Map<String, Object?>? schema;
+
+  /// The Create menu path's parts: `['Game', 'Weapon']`.
+  List<String> get menuPath => (menu ?? id.split('.').last).split('/').where((s) => s.isNotEmpty).toList();
+
+  /// What a new one is named: `New Weapon`.
+  String get title => menuPath.isEmpty ? id : menuPath.last;
+}
+
 /// One entry of the asset database (`fynkel asset list --json`).
 final class AssetEntry {
   const AssetEntry({
@@ -80,6 +103,7 @@ final class AssetEntry {
     this.document,
     this.importer,
     this.subAssets = const {},
+    this.dataType,
   });
 
   final String id;
@@ -99,6 +123,9 @@ final class AssetEntry {
 
   /// A source's sub-assets: `mesh/0`, `anim/1`, `skin/0`, `prefab`, `image/0` → uuid.
   final Map<String, String> subAssets;
+
+  /// A data asset's type id (`game.Weapon`, ADR-0027); null for the rest.
+  final String? dataType;
 
   bool get isSource => kind == 'source';
 
@@ -185,6 +212,10 @@ abstract class EditorProject extends ChangeNotifier {
   /// query), components first, each in schema order.
   List<TypeSchema> typeSchemas();
 
+  /// The data types (ADR-0027) the project's `schemas/data/` declares, by
+  /// id; a type declared in the registry without a schema has no fields.
+  List<DataTypeInfo> dataTypes() => const [];
+
   /// The committed behaviour metadata (`lib/generated/behaviours.g.json`)
   /// as the session last read it (at open, and at `registerBehaviour`), or
   /// null when the project has none.
@@ -263,6 +294,7 @@ abstract class EditorProject extends ChangeNotifier {
   /// A new document; a prefab with [variantOf] (`{asset}`) is a variant of
   /// that base (ADR-0022 amendment 2026-09-25): its root an instance of it,
   /// with [overrides] (the base's ids) and the [instance] id they derive from.
+  /// A `data` document names its [type] and may start with [data].
   OperationResult newDocument(
     String kind,
     String path, {
@@ -271,6 +303,8 @@ abstract class EditorProject extends ChangeNotifier {
     Map<String, Object?>? variantOf,
     List<Map<String, Object?>>? overrides,
     String? instance,
+    String? type,
+    Map<String, Object?>? data,
   }) => operate('newDocument', {
     'kind': kind,
     'path': path,
@@ -279,6 +313,8 @@ abstract class EditorProject extends ChangeNotifier {
     'variantOf': ?variantOf,
     'overrides': ?overrides,
     'instance': ?instance,
+    'type': ?type,
+    'data': ?data,
   });
   OperationResult renameAsset(String id, String path) => operate('renameAsset', {'asset': id, 'path': path});
 
@@ -479,7 +515,7 @@ final class SessionProject extends EditorProject {
 
   @override
   List<DocumentAsset> documentAssets() {
-    const order = ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'physics_material'];
+    const order = ['scene', 'prefab', 'material', 'rig', 'blend', 'volume', 'physics_material', 'data'];
     final out = [
       for (final a in session.assets(kind: 'document'))
         DocumentAsset(
@@ -556,6 +592,29 @@ final class SessionProject extends EditorProject {
   }
 
   @override
+  List<DataTypeInfo> dataTypes() {
+    final out = <DataTypeInfo>[];
+    for (final d in session.schemas()['data'] as List? ?? const []) {
+      if (d is! Map) continue;
+      final schema = d['hasSchema'] == false || d['schema'] is! Map
+          ? null
+          : {for (final e in (d['schema'] as Map).entries) e.key as String: e.value};
+      final hints = schema?['x-fynkel'];
+      out.add(
+        DataTypeInfo(
+          id: d['type'] as String? ?? '',
+          version: (d['version'] as num?)?.toInt() ?? 1,
+          menu: hints is Map ? hints['menu'] as String? : null,
+          icon: hints is Map ? hints['icon'] as String? : null,
+          schema: schema,
+        ),
+      );
+    }
+    out.sort((a, b) => a.menuPath.join('/').toLowerCase().compareTo(b.menuPath.join('/').toLowerCase()));
+    return out;
+  }
+
+  @override
   Map<String, Object?>? behaviourMetadata() {
     try {
       return session.metadata();
@@ -574,6 +633,7 @@ final class SessionProject extends EditorProject {
         kind: a['kind'] as String? ?? '',
         document: a['document'] as String?,
         importer: a['importer'] as String?,
+        dataType: a['dataType'] as String?,
         subAssets: {
           if (a['subAssets'] is Map)
             for (final e in (a['subAssets'] as Map).entries) e.key as String: e.value.toString(),

@@ -135,6 +135,10 @@ abstract final class FIcons {
   static const IconData touchAppOutlined = LucideIcons.pointer;
   static const IconData tune = LucideIcons.sliders;
   static const IconData physicsMaterial = LucideIcons.volleyball;
+
+  /// A data asset (ADR-0027) whose type names no icon.
+  static const IconData dataAsset = LucideIcons.fileJson;
+  static const IconData swords = LucideIcons.swords;
   static const IconData unarchiveOutlined = LucideIcons.packageOpen;
   static const IconData undo = LucideIcons.undo2;
   static const IconData upgrade = LucideIcons.circleFadingArrowUp;

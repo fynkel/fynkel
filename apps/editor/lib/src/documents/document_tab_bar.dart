@@ -26,6 +26,7 @@ IconData documentKindIcon(String kind) => switch (kind) {
   'blend' => FIcons.callSplit,
   'volume' => FIcons.tune,
   'physics_material' => FIcons.physicsMaterial,
+  'data' => FIcons.dataAsset,
   _ => FIcons.descriptionOutlined,
 };
 

@@ -17,6 +17,7 @@ import '../project/editor_project.dart';
 import '../shell/file_drops.dart';
 import '../shell/notices.dart';
 import '../inspector/inspector_chrome.dart' show InspectorCaption;
+import '../inspector/inspector_panel.dart' show materialIconNamed;
 import '../theme/icons.dart';
 import '../theme/lock_button.dart';
 import '../theme/panel_focus.dart';
@@ -568,6 +569,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           enabled: model.canEdit,
           child: const Text('New Physics Material Here'),
         ),
+        ..._dataItems(here: true),
         PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
       ],
     );
@@ -611,7 +613,36 @@ class _ProjectPanelState extends State<ProjectPanel> {
         break;
       default:
         if (choice.startsWith('new:')) model.newDocument(choice.substring(4), inFolder: here);
+        if (choice.startsWith('data:')) _newData(choice.substring(5), inFolder: here);
     }
+  }
+
+  /// Create ▸ one entry per data type (ADR-0027 §7), its `menu` path as
+  /// the title (`Game › Weapon`); `data:<type id>`.
+  List<PopupMenuEntry<String>> _dataItems({bool here = false}) {
+    final types = model.project.dataTypes();
+    if (types.isEmpty) return const [];
+    return [
+      const PopupMenuDivider(),
+      for (final t in types)
+        PopupMenuItem(
+          key: Key('project.new.data.${t.id}'),
+          value: 'data:${t.id}',
+          enabled: model.canEdit,
+          child: here
+              ? Text('New ${t.menuPath.join(' › ')} Here')
+              : ListTile(
+                  dense: true,
+                  leading: Icon(materialIconNamed(t.icon) ?? assetKindIcon('data')),
+                  title: Text('New ${t.menuPath.join(' › ')}'),
+                ),
+        ),
+    ];
+  }
+
+  void _newData(String typeId, {String? inFolder}) {
+    final type = model.project.dataTypes().where((t) => t.id == typeId).firstOrNull;
+    if (type != null) model.newData(type, inFolder: inFolder);
   }
 
   Future<void> _folderMenu(BuildContext context, String rel, Offset at) async {
@@ -634,6 +665,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           enabled: model.canEdit,
           child: const Text('New Physics Material Here'),
         ),
+        ..._dataItems(here: true),
         PopupMenuItem(value: 'new:folder', enabled: model.canEdit, child: const Text('New Folder Here')),
         if (!isRoot) ...[
           const PopupMenuDivider(),
@@ -658,6 +690,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
         break;
       default:
         if (choice.startsWith('new:')) model.newDocument(choice.substring(4), inFolder: rel);
+        if (choice.startsWith('data:')) _newData(choice.substring(5), inFolder: rel);
     }
   }
 
@@ -1261,7 +1294,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
           PopupMenuButton<String>(
             popUpAnimationStyle: AnimationStyle.noAnimation,
             key: const Key('project.new'),
-            tooltip: 'New scene, prefab, material, volume profile, physics material, folder or behaviour',
+            tooltip: 'New scene, prefab, material, volume profile, physics material, data asset, folder or behaviour',
             icon: const Icon(FIcons.add),
             enabled: model.canEdit,
             itemBuilder: (context) => [
@@ -1302,6 +1335,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
                   title: const Text('New Physics Material'),
                 ),
               ),
+              ..._dataItems(),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 key: Key('project.new.folder'),
@@ -1326,6 +1360,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
             onSelected: (v) => switch (v) {
               'folder' => model.newFolder(),
               'behaviour' => _newBehaviour(),
+              _ when v.startsWith('data:') => _newData(v.substring(5)),
               _ => model.newDocument(v),
             },
           ),

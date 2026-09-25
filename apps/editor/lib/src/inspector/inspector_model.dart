@@ -808,18 +808,7 @@ final class InspectorModel extends ChangeNotifier {
   }
 
   /// `name (path)` of an asset reference, for the field's face.
-  String describeAsset(Map<String, Object?>? ref) {
-    if (ref == null) return 'None';
-    final id = ref['asset'] as String? ?? '';
-    final sub = ref['sub'] as String?;
-    for (final a in project.assets()) {
-      if (a.id == id) return sub == null || sub.isEmpty ? a.name : '${a.name} › $sub';
-      for (final e in a.subAssets.entries) {
-        if (e.value == id) return '${a.name} › ${e.key}';
-      }
-    }
-    return sub == null || sub.isEmpty ? id : '$id#$sub';
-  }
+  String describeAsset(Map<String, Object?>? ref) => describeAssetRef(project.assets(), ref);
 
   // ── Edits (each one transaction) ────────────────────────────────────────
 
@@ -831,47 +820,10 @@ final class InspectorModel extends ChangeNotifier {
     return a;
   }
 
-  /// Validates [value] against [spec] before a command is sent: the hints'
-  /// bounds, an asset that must exist, an enum value that must be listed.
-  /// Returns the problem or null.
-  String? precheck(FieldSpec spec, Object? value) {
-    if (value == null) return spec.nullable ? null : '${spec.label} cannot be empty';
-    switch (spec.kind) {
-      case FieldKind.number:
-      case FieldKind.integer:
-        if (value is! num) return 'not a number';
-        if (spec.kind == FieldKind.integer && value is! int && value != value.roundToDouble()) {
-          return 'not a whole number';
-        }
-        final min = spec.min, max = spec.max;
-        if (min != null && value < min) return 'below the minimum ${_fmt(min, spec)}';
-        if (max != null && value > max) return 'above the maximum ${_fmt(max, spec)}';
-      case FieldKind.enumeration:
-        if (spec.enumValues.isNotEmpty && !spec.enumValues.contains(value)) {
-          return "'$value' is not one of ${spec.enumValues.join(', ')}";
-        }
-      case FieldKind.assetRef:
-        if (value is! Map) return 'not an asset reference';
-        final id = value['asset'] as String? ?? '';
-        final sub = value['sub'] as String?;
-        if (!project.assetExists(id, sub: sub)) {
-          return 'FYN-A0004: unknown asset ${sub == null || sub.isEmpty ? id : '$id#$sub'}';
-        }
-      case FieldKind.vec2:
-      case FieldKind.vec3:
-      case FieldKind.vec4:
-      case FieldKind.quaternion:
-      case FieldKind.color:
-        if (value is! List || value.length != spec.components || value.any((v) => v is! num)) {
-          return 'needs ${spec.components} numbers';
-        }
-      default:
-        break;
-    }
-    return null;
-  }
+  /// Validates [value] against [spec] before a command is sent
+  /// ([precheckField]). Returns the problem or null.
+  String? precheck(FieldSpec spec, Object? value) => precheckField(project, spec, value);
 
-  String _fmt(num v, FieldSpec spec) => spec.angle ? '${(v * 180 / 3.141592653589793).toStringAsFixed(1)}°' : '$v';
 
   /// Sets [field] (a name or a `/pointer`) to [value] on every instance of
   /// [slot] in one transaction. [spec] is the field's spec when the
@@ -1819,3 +1771,59 @@ Object? _copyJson(Object? v) => switch (v) {
 /// where the document had one — the byte-exact round trip).
 Object numberFor(FieldSpec spec, double v, {Object? previous}) =>
     jsonNumber(v, previous: previous, integer: spec.kind == FieldKind.integer || spec.kind == FieldKind.layerMask);
+
+/// Validates [value] against [spec] before a field is written: the hints'
+/// bounds, an asset that must exist, an enum value that must be listed.
+/// Returns the problem or null.
+String? precheckField(EditorProject project, FieldSpec spec, Object? value) {
+  if (value == null) return spec.nullable ? null : '${spec.label} cannot be empty';
+  switch (spec.kind) {
+    case FieldKind.number:
+    case FieldKind.integer:
+      if (value is! num) return 'not a number';
+      if (spec.kind == FieldKind.integer && value is! int && value != value.roundToDouble()) {
+        return 'not a whole number';
+      }
+      final min = spec.min, max = spec.max;
+      if (min != null && value < min) return 'below the minimum ${_fmtBound(min, spec)}';
+      if (max != null && value > max) return 'above the maximum ${_fmtBound(max, spec)}';
+    case FieldKind.enumeration:
+      if (spec.enumValues.isNotEmpty && !spec.enumValues.contains(value)) {
+        return "'$value' is not one of ${spec.enumValues.join(', ')}";
+      }
+    case FieldKind.assetRef:
+      if (value is! Map) return 'not an asset reference';
+      final id = value['asset'] as String? ?? '';
+      final sub = value['sub'] as String?;
+      if (!project.assetExists(id, sub: sub)) {
+        return 'FYN-A0004: unknown asset ${sub == null || sub.isEmpty ? id : '$id#$sub'}';
+      }
+    case FieldKind.vec2:
+    case FieldKind.vec3:
+    case FieldKind.vec4:
+    case FieldKind.quaternion:
+    case FieldKind.color:
+      if (value is! List || value.length != spec.components || value.any((v) => v is! num)) {
+        return 'needs ${spec.components} numbers';
+      }
+    default:
+      break;
+  }
+  return null;
+}
+
+String _fmtBound(num v, FieldSpec spec) => spec.angle ? '${(v * 180 / 3.141592653589793).toStringAsFixed(1)}°' : '$v';
+
+/// `name (path)` of an asset reference, for the field's face.
+String describeAssetRef(List<AssetEntry> assets, Map<String, Object?>? ref) {
+  if (ref == null) return 'None';
+  final id = ref['asset'] as String? ?? '';
+  final sub = ref['sub'] as String?;
+  for (final a in assets) {
+    if (a.id == id) return sub == null || sub.isEmpty ? a.name : '${a.name} › $sub';
+    for (final e in a.subAssets.entries) {
+      if (e.value == id) return '${a.name} › ${e.key}';
+    }
+  }
+  return sub == null || sub.isEmpty ? id : '$id#$sub';
+}
