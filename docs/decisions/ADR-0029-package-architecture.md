@@ -340,3 +340,25 @@ What Fynkel has (mapped 2026-09-25):
    - the module measurement recorded;
    - a project outside the checkout builds against the local store;
    - the user's check in the editor.
+
+   Done 2026-09-25, except the user's check. `tools/package_acceptance.py`
+   copies code_only and pickups under `/tmp/fynkel-acceptance/<mode>/`
+   (the originals untouched) and runs both ways: **path** (pickups beside
+   the game) and **git** (pickups committed to a local repository,
+   depended on by `file://` URL with its Fynkel dependencies as hosted
+   constraints, as a published package has them, which the game
+   overrides with the checkout's). In each: `flutter pub get` (and where
+   pickups resolved: the copy, or pub's git cache), `fynkel validate`,
+   `fynkel cook` (the package's prefab cooked), code_only's tests, then
+   the project editor host (`fynkel editor --write-host`) running
+   `tools/acceptance/packages_editor_test.dart` with pickups' real editor
+   part compiled in: the pickup placed through the package's menu item and
+   saved as a prefab instance, the gem kind's Inspector page showing the
+   package's preview, the gem material edited in place (path) or refused,
+   copied into the project with a fresh id and edited there with the
+   package file untouched (git). Both passed. It found two faults, fixed:
+   a package asset's Inspector page could not read it (`assetDetail`
+   looked only among the project's own assets), and the editor host left
+   out the game's `dependency_overrides` (so a game overriding a git
+   package's constraints did not resolve in its editor). The module
+   measurement is step 5's, the store build step 6's.

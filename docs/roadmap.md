@@ -115,7 +115,10 @@ Three ADRs, then their implementation:
    animation off and stripped) done 2026-09-25; step 6 (one lock shape,
    `fynkel create --hosted`/`--store`, `tools/release_store.py`: a game
    made outside the checkout built and ran against the local store with no
-   cargo) done 2026-09-25.
+   cargo) done 2026-09-25; step 7 (acceptance: `tools/package_acceptance.py`,
+   code_only with pickups as a path and as a git dependency, in the game
+   and in its project editor) done 2026-09-25 — only the user's check in
+   the editor remains. With it, Phase 3 is complete.
 
 ## Phase 4 — Rendering resumes
 

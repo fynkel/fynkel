@@ -1799,8 +1799,12 @@ the game inside the editor, and a save in `lib/` hot reloads it.
   of `*`): a Flutter app whose `main` is
   `runFynkelEditor(args, game: EditorGame(build: buildGame))` from
   `package:fynkel_editor`, depending on `apps/editor` and on the project
-  by path, with `apps/editor/macos` copied in. It rewrites only files
-  whose bytes changed, so the second start reuses the first build.
+  by path, with `apps/editor/macos` copied in. The project's
+  `dependency_overrides:` are copied too, relative paths made absolute
+  (pub reads only the root package's, and the host is the root). It
+  rewrites only files whose bytes changed, so the second start reuses
+  the first build. `--write-host` generates the host, prints its
+  directory and stops (tools and tests build it themselves).
 - A project opens this way when it has a `pubspec.yaml` and
   `lib/fynkel_game.dart` (`Widget buildGame(FynkelLaunch)`, which
   `fynkel create` writes). Without them, or with `--plain`, the command
