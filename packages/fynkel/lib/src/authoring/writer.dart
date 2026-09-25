@@ -11,7 +11,7 @@ import 'package:crypto/crypto.dart';
 
 import '../../fynkel.dart';
 import '../../generated/schema.g.dart' as gen;
-import '../wire/support.dart' show docAssetRef;
+import '../wire/support.dart' show docAssetRef, docQuat, docVec3, docVec4;
 import '../world.dart' show bindWrittenData;
 
 /// A scene written from code: its objects, in order.
@@ -119,15 +119,8 @@ class ProjectWriter {
   /// other, write one, then the other, then the first again).
   WrittenDocument writeData(String path, DataAsset data, {String? name}) {
     path = _withExtension(path, '.data.json');
-    final type = data.dataType ?? registry.dataTypeOf(data);
-    if (type == null) {
-      throw ArgumentError('${data.runtimeType} is not a registered data type: pass the generated registerBehaviours '
-          'to ProjectWriter (and annotate the class with @FynkelDataAsset)');
-    }
-    final fields = <String, Object?>{
-      for (final f in type.fields)
-        f.name: f.holdsData ? _dataValue(f.target!(data), f.get(data), '${type.id}.${f.name}') : f.get(data),
-    };
+    final type = _dataType(data);
+    final fields = dataOf(data).data;
     final file = File('$assetsDir/$path');
     final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
     final id = existing?['id'] as String? ?? _uuid5(_namespace, 'document/$path');
@@ -143,6 +136,72 @@ class ProjectWriter {
     final written = _writeText(file, path, id, out, const []);
     bindWrittenData(data, written.ref, type);
     return written;
+  }
+
+  // ---- in memory, for the editor (ADR-0028)
+
+  /// [roots] and everything under them as a document's `entities` map —
+  /// what [writeScene] would write, without a file: the editor's paste
+  /// inserts it (`EditorEdit.add`). [roots] are the ids of the top
+  /// objects, in order. The ids derive from [key], as a document's from
+  /// its id; the editor gives the objects fresh ones.
+  ({Map<String, Object?> entities, List<String> roots}) entitiesOf(List<ObjectSpec> roots, {String key = 'editor'}) {
+    final doc = _Document(this, _uuid5(_namespace, 'memory/$key'));
+    for (final r in roots) {
+      doc.add(r, null);
+    }
+    return (entities: doc.entities, roots: List.unmodifiable(doc.roots));
+  }
+
+  /// [data]'s registered type and its fields as a data document holds
+  /// them (`data`), every field through the type's `get` — what
+  /// [writeData] writes, without a file.
+  ({String type, int version, Map<String, Object?> data}) dataOf(DataAsset data) {
+    final type = _dataType(data);
+    return (
+      type: type.id,
+      version: type.version,
+      data: <String, Object?>{
+        for (final f in type.fields)
+          f.name: f.holdsData ? _dataValue(f.target!(data), f.get(data), '${type.id}.${f.name}') : f.get(data),
+      },
+    );
+  }
+
+  /// [data] is now the asset [ref] (written by the editor): a scene,
+  /// prefab or data asset written afterwards names [ref] for every field
+  /// that holds it, as after [writeData].
+  void bindData(DataAsset data, AssetRef ref) => bindWrittenData(data, ref, _dataType(data));
+
+  /// [value] as a document field holds it: a vector or quaternion as a
+  /// list, an [AssetRef] as `{asset, sub?}`, a written [DataAsset] as its
+  /// asset, an enum by name, a component record through its `toJson`;
+  /// lists and maps value by value; numbers, strings, bools and null as
+  /// they are.
+  static Object? jsonOf(Object? value) => switch (value) {
+        null || num() || String() || bool() => value,
+        Vec2(:final x, :final y) => [x, y],
+        Vec3 v => docVec3(v),
+        Vec4 v => docVec4(v),
+        Quat q => docQuat(q),
+        AssetRef r => docAssetRef(r),
+        DataAsset d => d.asset == null
+            ? throw ArgumentError('a ${d.runtimeType} that was never written has no asset to name')
+            : docAssetRef(d.asset!),
+        Enum e => e.name,
+        List l => [for (final v in l) jsonOf(v)],
+        Map m => {for (final e in m.entries) '${e.key}': jsonOf(e.value)},
+        WireRecord r => (r as dynamic).toJson() as Map<String, Object?>,
+        _ => throw ArgumentError.value(value, 'value', 'not a value a document field holds'),
+      };
+
+  DataType _dataType(DataAsset data) {
+    final type = data.dataType ?? registry.dataTypeOf(data);
+    if (type == null) {
+      throw ArgumentError('${data.runtimeType} is not a registered data type: pass the generated registerBehaviours '
+          'to ProjectWriter (and annotate the class with @FynkelDataAsset)');
+    }
+    return type;
   }
 
   static String _withExtension(String path, String ext) => path.endsWith(ext) ? path : '$path$ext';
