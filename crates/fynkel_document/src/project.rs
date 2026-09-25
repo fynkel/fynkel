@@ -1156,6 +1156,21 @@ pub trait SourcePrefabs {
         entry: &crate::asset::AssetEntry,
         sub: &str,
     ) -> Result<Option<Document>, Vec<Diagnostic>>;
+
+    /// `db` with the built-in assets the cook ships to a project that has
+    /// not installed its own copy (`Fynkel/Primitives.glb`, ADR-0026 §4),
+    /// so references to them resolve as they do in the cook; `None` when
+    /// there are none to add. The project at `dir` gives the cache the
+    /// files are written under.
+    fn builtins(
+        &self,
+        _dir: &Path,
+        _db: &AssetDatabase,
+        _schemas: &SchemaSet,
+        _diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<AssetDatabase> {
+        None
+    }
 }
 
 /// No importer: every imported-prefab instance is `D0401`.
@@ -1233,6 +1248,9 @@ pub fn validate_project_with(
     }
     let (db, scan) = AssetDatabase::scan(&assets, schemas);
     report.diagnostics.extend(scan);
+    let db = sources
+        .builtins(dir, &db, schemas, &mut report.diagnostics)
+        .unwrap_or(db);
     report
         .diagnostics
         .extend(project.validate_against(&db, schemas));
@@ -1250,7 +1268,10 @@ pub fn validate_project_with(
                 }
             }
             AssetKind::Source { .. } => {
-                report.sources += 1;
+                // The project's own; a built-in lives outside the root.
+                if entry.origin.is_none() {
+                    report.sources += 1;
+                }
                 // The scan validated the sidecar; its material remaps
                 // are references it did not check.
                 let sidecar = entry.sidecar(db.root()).expect("a source has a sidecar");

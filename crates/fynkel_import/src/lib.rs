@@ -214,6 +214,16 @@ pub struct ImportedPrefabs {
 }
 
 impl fynkel_document::SourcePrefabs for ImportedPrefabs {
+    fn builtins(
+        &self,
+        dir: &Path,
+        db: &fynkel_document::AssetDatabase,
+        schemas: &fynkel_document::SchemaSet,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<fynkel_document::AssetDatabase> {
+        builtin::with_builtins(db, &cook::project_cache_dir(dir), schemas, diagnostics)
+    }
+
     fn prefab(
         &self,
         root: &Path,

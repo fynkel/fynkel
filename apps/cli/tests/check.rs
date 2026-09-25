@@ -1713,6 +1713,37 @@ fn scene_apply_dry_runs_conflicts_and_writes() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A scene that uses the built-in shapes (`Fynkel/Primitives.glb`, what
+/// `createPrimitive` and `package:fynkel/authoring.dart` write) validates
+/// in a project that never installed them, as it cooks (ADR-0026 §4); the
+/// shapes are not counted among the project's sources.
+#[test]
+fn validate_resolves_the_built_in_shapes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = std::env::temp_dir().join(format!("fynkel-cli-builtins-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_dir(&root.join("crates/fynkel_document/fixtures/project"), &dir);
+    let _ = std::fs::remove_dir_all(dir.join(".fynkel"));
+    let scene = dir.join("assets/scenes/results.scene.json");
+    let text = std::fs::read_to_string(&scene).unwrap().replacen(
+        "\"asset\": \"c0000000-0000-4000-8000-000000000001\",\n              \"sub\": \"mesh/Cube\"",
+        "\"asset\": \"f7a1e5d0-0000-4000-8000-000000000023\",\n              \"sub\": \"mesh/Cube\"",
+        1,
+    );
+    assert!(text.contains("f7a1e5d0"));
+    std::fs::write(&scene, text).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_fynkel"))
+        .args(["validate", "--project", dir.to_str().unwrap(), "--json", "--root"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["sources"], 6);
+    assert!(!dir.join("assets/Fynkel").exists(), "nothing installed");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap() {
