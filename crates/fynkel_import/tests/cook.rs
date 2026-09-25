@@ -1533,3 +1533,67 @@ fn a_physics_material_cooks_as_its_document_and_a_scene_depends_on_it() {
     );
     assert_ne!(status(&r, MAIN), Status::Cooked);
 }
+
+/// A data asset (ADR-0027) cooks as its document, like any JSON kind; its
+/// data is checked against its type's schema first, and data that does
+/// not fit fails it. An unknown type only warns.
+#[test]
+fn a_data_asset_cooks_as_its_document_checked_against_its_type() {
+    const SWORD: &str = "c0000000-0000-4000-8000-000000000a01";
+    let p = Project::new("data-asset");
+    let sword = |data: &str| {
+        format!(
+            r#"{{"$schema":"https://fynkel.dev/schemas/data.schema.json","formatVersion":1,"id":"{SWORD}","name":"Sword","type":"game.Weapon","version":1,"data":{data}}}"#
+        )
+    };
+    let types = p.dir.join("schemas");
+    std::fs::create_dir_all(types.join("data")).unwrap();
+    std::fs::write(
+        types.join("data/game.Weapon.schema.json"),
+        serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://fynkel.dev/schemas/data/game.Weapon.schema.json",
+            "title": "game.Weapon",
+            "type": "object",
+            "properties": { "damage": { "type": "integer", "minimum": 0 } },
+            "additionalProperties": false,
+            "x-fynkel": { "kind": "data", "id": "game.Weapon", "version": 1 }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let schemas = schemas().extended_with(&types).unwrap();
+    let cook_it = || {
+        let (db, _) = AssetDatabase::scan(&p.assets(), &schemas);
+        cook(&db, &schemas, &p.cache(), &CookOptions::default())
+    };
+
+    p.write("sword.data.json", &sword(r#"{"damage":3}"#));
+    let r = cook_it();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    let cooked = r.get(id(SWORD)).unwrap();
+    assert_eq!(cooked.kind, "document/data");
+    let mut f = ChunkFile::open_path(cooked.file.as_ref().unwrap()).unwrap();
+    f.verify().unwrap();
+    let kinds: Vec<String> = f.chunks().iter().map(|c| c.kind_str()).collect();
+    assert_eq!(kinds, ["META", "JSON"]);
+
+    p.write("sword.data.json", &sword(r#"{"damage":-1}"#));
+    let r = cook_it();
+    assert_eq!(status(&r, SWORD), Status::Failed);
+    assert!(
+        r.diagnostics
+            .iter()
+            .any(|d| d.code == Code::DATA_INVALID && d.pointer.as_deref() == Some("/data/damage")),
+        "{:?}",
+        r.diagnostics
+    );
+
+    // Without the type: a warning, and it cooks.
+    let r = p.cook();
+    assert!(!r.has_errors(), "{:?}", r.diagnostics);
+    assert!(r
+        .diagnostics
+        .iter()
+        .any(|d| d.code == Code::DATA_UNKNOWN_TYPE));
+}

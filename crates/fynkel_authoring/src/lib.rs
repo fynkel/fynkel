@@ -915,6 +915,18 @@ impl AuthoringSession {
                     "fields": document.root.to_serde(),
                 })
             }
+            DocumentKind::Data => {
+                let data = fynkel_document::DataDocument::from_document(document.clone());
+                json!({
+                    "kind": "data",
+                    "id": document.envelope.id.to_string(),
+                    "formatVersion": document.envelope.format_version,
+                    "revision": doc.editor.revision().as_str(),
+                    "type": data.type_id,
+                    "version": data.version,
+                    "fields": document.root.to_serde(),
+                })
+            }
             DocumentKind::Volume | DocumentKind::PhysicsMaterial => json!({
                 "kind": document.kind.name(),
                 "id": document.envelope.id.to_string(),

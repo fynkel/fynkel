@@ -295,6 +295,9 @@ impl Project {
             if entry.kind == "behaviour" {
                 schemas.declare_behaviour(&entry.type_id, entry.version);
             }
+            if entry.kind == "data" {
+                schemas.declare_data(&entry.type_id, entry.version);
+            }
         }
         Ok(schemas)
     }
@@ -1402,6 +1405,10 @@ pub fn validate_project_with(
             DocumentKind::PhysicsMaterial => {
                 let material = crate::physics_material::PhysicsMaterialDocument::from_document(doc);
                 report.diagnostics.extend(material.validate(schemas));
+            }
+            DocumentKind::Data => {
+                let data = crate::data::DataDocument::from_document(doc);
+                report.diagnostics.extend(data.validate(schemas));
             }
             DocumentKind::Project | DocumentKind::Meta => {
                 report.diagnostics.extend(doc.validate(schemas));

@@ -115,85 +115,97 @@ pub fn offered_kinds(r: &Resolved<'_>) -> Vec<String> {
     }
 }
 
-/// `A0007` for every component field of a scene or prefab whose reference
-/// names an asset of another kind. Prefab overrides are not typed here.
+/// `A0007` for every field of a scene's or prefab's components, or of a
+/// data asset, whose reference names an asset of another kind. Prefab
+/// overrides are not typed here.
 pub fn check_reference_kinds(
     doc: &Document,
     schemas: &SchemaSet,
     db: &AssetDatabase,
 ) -> Vec<Diagnostic> {
-    let mut out = Vec::new();
-    if !matches!(doc.kind, DocumentKind::Scene | DocumentKind::Prefab) {
-        return out;
-    }
-    let Some(entities) = doc.root.get("entities").and_then(Node::as_object) else {
-        return out;
-    };
-    let at = Locator::new(&doc.root);
-    for entity in entities {
-        let Some(components) = entity.value.get("components").and_then(Node::as_object) else {
-            continue;
-        };
-        for c in components {
-            let Some(type_id) = c.value.get("type").and_then(Node::as_str) else {
-                continue;
-            };
-            let Some(data) = c.value.get("data") else {
-                continue;
-            };
-            let fields = schemas.asset_fields(type_id);
-            if fields.is_empty() {
-                continue;
+    // (type, its data, the data's pointer) for each typed value.
+    let mut typed: Vec<(&str, &Node, String)> = Vec::new();
+    match doc.kind {
+        DocumentKind::Scene | DocumentKind::Prefab => {
+            for entity in doc
+                .root
+                .get("entities")
+                .and_then(Node::as_object)
+                .unwrap_or_default()
+            {
+                let components = entity.value.get("components").and_then(Node::as_object);
+                for c in components.unwrap_or_default() {
+                    let (Some(type_id), Some(data)) = (
+                        c.value.get("type").and_then(Node::as_str),
+                        c.value.get("data"),
+                    ) else {
+                        continue;
+                    };
+                    let base = format!(
+                        "/entities/{}/components/{}/data",
+                        escape(&entity.key),
+                        escape(&c.key)
+                    );
+                    typed.push((type_id, data, base));
+                }
             }
-            let base = format!(
-                "/entities/{}/components/{}/data",
-                escape(&entity.key),
-                escape(&c.key)
-            );
-            for field in fields {
-                let mut found = Vec::new();
-                select(data, &field.path, base.clone(), &mut found);
-                for (pointer, node) in found {
-                    for (_, r) in asset_refs(node) {
-                        if r.is_nil() {
-                            continue;
-                        }
-                        let Ok(resolved) = db.resolve(&r) else {
-                            continue;
-                        };
-                        let offered = offered_kinds(&resolved);
-                        if offered.iter().any(|k| field.kinds.contains(k)) {
-                            continue;
-                        }
-                        let what = match &resolved.sub {
-                            Some((sub, _)) => format!("{}#{sub}", resolved.entry.path),
-                            None => resolved.entry.path.clone(),
-                        };
-                        let is = offered.first().map_or_else(
-                            || format!("a {} asset", resolved.entry.kind.name()),
-                            |k| format!("a {}", k.replace('_', " ")),
-                        );
-                        let wants = field
-                            .kinds
-                            .iter()
-                            .map(|k| k.replace('_', " "))
-                            .collect::<Vec<_>>()
-                            .join(" or ");
-                        let d = Diagnostic::error(
-                            Code::ASSET_WRONG_KIND,
-                            format!(
-                                "{type_id}.{} takes a {wants}, but {what} is {is}",
-                                field.path.join(".").replace(".*", "[]")
-                            ),
-                        )
-                        .with_id(r.to_string())
-                        .with_suggestion(format!("pick a {wants} for this field"));
-                        let d = at.anchor(d, &pointer);
-                        out.push(match &doc.path {
-                            Some(p) => d.with_document(p.clone()),
-                            None => d,
-                        });
+        }
+        DocumentKind::Data => {
+            if let (Some(type_id), Some(data)) = (
+                doc.root.get("type").and_then(Node::as_str),
+                doc.root.get("data"),
+            ) {
+                typed.push((type_id, data, "/data".into()));
+            }
+        }
+        _ => {}
+    }
+    let at = Locator::new(&doc.root);
+    let mut out = Vec::new();
+    for (type_id, data, base) in typed {
+        for field in schemas.asset_fields(type_id) {
+            let mut found = Vec::new();
+            select(data, &field.path, base.clone(), &mut found);
+            for (pointer, node) in found {
+                for (_, r) in asset_refs(node) {
+                    if r.is_nil() {
+                        continue;
                     }
+                    let Ok(resolved) = db.resolve(&r) else {
+                        continue;
+                    };
+                    let offered = offered_kinds(&resolved);
+                    if offered.iter().any(|k| field.kinds.contains(k)) {
+                        continue;
+                    }
+                    let what = match &resolved.sub {
+                        Some((sub, _)) => format!("{}#{sub}", resolved.entry.path),
+                        None => resolved.entry.path.clone(),
+                    };
+                    let is = offered.first().map_or_else(
+                        || format!("a {} asset", resolved.entry.kind.name()),
+                        |k| format!("a {}", k.replace('_', " ")),
+                    );
+                    let wants = field
+                        .kinds
+                        .iter()
+                        .map(|k| k.replace('_', " "))
+                        .collect::<Vec<_>>()
+                        .join(" or ");
+                    let d = Diagnostic::error(
+                        Code::ASSET_WRONG_KIND,
+                        format!(
+                            "{type_id}.{} takes a {wants}, but {what} is {is}",
+                            field.path.join(".").replace(".*", "[]")
+                        ),
+                    )
+                    .with_id(r.to_string())
+                    .with_suggestion(format!("pick a {wants} for this field"));
+                    let d = at.anchor(d, &pointer);
+                    out.push(match &doc.path {
+                        Some(p) => d.with_document(p.clone()),
+                        None => d,
+                    });
                 }
             }
         }

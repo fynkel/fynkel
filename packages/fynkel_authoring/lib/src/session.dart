@@ -277,11 +277,14 @@ final class AuthoringSession implements Finalizable {
     return r;
   }
 
-  /// A new scene, prefab, material, volume or physics material document
-  /// ([kind] `scene`, `prefab`, `material`, `volume` or `physics_material`)
+  /// A new scene, prefab, material, volume, physics material or data asset
+  /// ([kind] `scene`, `prefab`, `material`, `volume`, `physics_material` or
+  /// `data`)
   /// written as the kind's `Document::new`. [path] is relative to the asset root (or absolute
   /// inside it); the kind's suffix is added when missing. [name] defaults
   /// to the file's stem; a material may name a [shader] the project has.
+  /// A data asset (ADR-0027) names its [type] (`game.Weapon`) and may give
+  /// its [data] (every field at the class default otherwise).
   ///
   /// A prefab with [variantOf] is a **variant** of that base (an
   /// [assetRef]: a prefab's id, or an imported `#prefab` hierarchy;
@@ -298,6 +301,8 @@ final class AuthoringSession implements Finalizable {
     Map<String, Object?>? variantOf,
     List<Map<String, Object?>>? overrides,
     String? instance,
+    String? type,
+    Map<String, Object?>? data,
   }) =>
       operate('newDocument', {
         'kind': kind,
@@ -307,6 +312,8 @@ final class AuthoringSession implements Finalizable {
         'variantOf': ?variantOf,
         'overrides': ?overrides,
         'instance': ?instance,
+        'type': ?type,
+        'data': ?data,
       });
 
   /// Renames or moves the asset [id] to [path] (relative to the asset

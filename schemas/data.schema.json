@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fynkel.dev/schemas/data.schema.json",
+  "title": "Fynkel data asset",
+  "description": "`<name>.data.json` (ADR-0027, `docs/documents.md` § Data assets): one instance of a game-declared data type — a Dart class annotated `@FynkelDataAsset`, Unity's ScriptableObject. The engine owns the kind; the type is named by a namespaced type id and its `data` is checked against `schemas/data/<type>.schema.json`, which `fynkel codegen` writes from the class. A field absent from `data` takes the class's default.",
+  "type": "object",
+  "allOf": [{ "$ref": "https://fynkel.dev/schemas/envelope.schema.json" }],
+  "properties": {
+    "type": {
+      "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/typeId",
+      "description": "The data type's id, such as game.Weapon."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "The version of the type the data was written for (`@FynkelDataAsset(version:)`)."
+    },
+    "data": {
+      "type": "object",
+      "description": "The exposed fields' values, in the type's JSON form."
+    }
+  },
+  "required": ["type", "version", "data"]
+}

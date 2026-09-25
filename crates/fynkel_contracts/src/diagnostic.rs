@@ -113,6 +113,17 @@ impl Code {
     pub const PHYSICS_MATERIAL_MALFORMED_ENTRY: Code = Code("FYN-D0800");
     // Documents (FYN-D): I/O.
     pub const IO: Code = Code("FYN-D0900");
+    // Documents (FYN-D): data assets (ADR-0027; `fynkel_document::data`).
+    /// An envelope field of a data asset that does not read (`type` not a
+    /// namespaced type id, `version` not an integer >= 1, `data` not an
+    /// object).
+    pub const DATA_MALFORMED_ENTRY: Code = Code("FYN-D1000");
+    /// A data asset of a type no loaded schema or registry entry declares
+    /// (a warning: `fynkel codegen` has not run, or the class is gone).
+    pub const DATA_UNKNOWN_TYPE: Code = Code("FYN-D1001");
+    /// A data asset whose `data` does not fit its type's schema, or that
+    /// was written for another version of the type.
+    pub const DATA_INVALID: Code = Code("FYN-D1002");
 
     // Assets (`FYN-A####`, blueprint §19.2c item 8): the asset database.
     /// A source file under `assets/` has no `.meta.json` sidecar.

@@ -359,13 +359,15 @@ impl AuthoringSession {
 
     // ------------------------------------------------------------ new
 
-    /// `newDocument { kind: scene|prefab|material|volume|physics_material, path, name?, shader? }`:
+    /// `newDocument { kind: scene|prefab|material|volume|physics_material|data, path, name?, shader?, type?, data? }`:
     /// `path` is relative to the asset root (the kind's suffix is added
     /// when missing); `name` defaults to the file's stem; a material may
     /// name a `shader` (the built-in PBR by default); a prefab may be a
     /// variant (`variantOf`, `overrides?`, `instance?`: see
-    /// [`Self::new_variant`]). Refused when the file or a file of another
-    /// kind's name exists.
+    /// [`Self::new_variant`]). A data asset (ADR-0027) names its `type`
+    /// (a namespaced id; the version is the loaded type's, else 1) and may
+    /// give its `data` (every field at the class default otherwise).
+    /// Refused when the file or a file of another kind's name exists.
     fn new_document(&mut self, args: &Value) -> Result<Value, Diagnostic> {
         const OP: &str = "newDocument";
         let kind_name = string_arg(args, "kind", OP)?;
@@ -375,13 +377,25 @@ impl AuthoringSession {
                 | DocumentKind::Prefab
                 | DocumentKind::Material
                 | DocumentKind::Volume
-                | DocumentKind::PhysicsMaterial),
+                | DocumentKind::PhysicsMaterial
+                | DocumentKind::Data),
             ) => k,
             _ => {
                 return Err(invalid(format!(
-                    "{OP}: kind must be \"scene\", \"prefab\", \"material\", \"volume\" or \"physics_material\", not {kind_name:?}"
+                    "{OP}: kind must be \"scene\", \"prefab\", \"material\", \"volume\", \"physics_material\" or \"data\", not {kind_name:?}"
                 )))
             }
+        };
+        let data_type = if kind == DocumentKind::Data {
+            let t = string_arg(args, "type", OP)?;
+            if !fynkel_document::data::is_type_id(t) {
+                return Err(invalid(format!(
+                    "{OP}: type must be a namespaced type id such as game.Weapon, not {t:?}"
+                )));
+            }
+            Some(t.to_string())
+        } else {
+            None
         };
         let given = string_arg(args, "path", OP)?;
         let project = self.project().unwrap();
@@ -416,6 +430,15 @@ impl AuthoringSession {
             .map(str::to_string)
             .unwrap_or_else(|| stem(&path, kind));
         let mut doc = Document::new(kind, &name);
+        if let Some(t) = &data_type {
+            let version = project.schemas.data_type(t).map_or(1, |info| info.version);
+            let data = match args.get("data").filter(|v| !v.is_null()) {
+                Some(v) if v.is_object() => Some(Node::from_serde(v)),
+                Some(_) => return Err(invalid(format!("{OP}: data must be an object"))),
+                None => None,
+            };
+            doc = Document::new_data(&name, t, version, data);
+        }
         if let Some(base) = args.get("variantOf").filter(|v| !v.is_null()) {
             doc = self.new_variant(&name, base, args)?;
         }

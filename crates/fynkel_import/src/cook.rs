@@ -1072,6 +1072,17 @@ fn cook_one(
                     return None;
                 }
             }
+            // A data asset (ADR-0027) likewise: its data against its
+            // type's schema, then written as it is for the SDK to read.
+            if doc.kind == DocumentKind::Data {
+                let data = fynkel_document::DataDocument::from_document(doc.clone());
+                let checked = data.validate(schemas);
+                let bad = has_errors(&checked);
+                diagnostics.extend(checked);
+                if bad {
+                    return None;
+                }
+            }
             // A physics material (ADR-0025) likewise, for the physics
             // world to read at load.
             if doc.kind == DocumentKind::PhysicsMaterial {

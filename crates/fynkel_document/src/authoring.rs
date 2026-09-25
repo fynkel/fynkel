@@ -1166,9 +1166,10 @@ impl Editor {
                 | DocumentKind::Material
                 | DocumentKind::Volume
                 | DocumentKind::PhysicsMaterial
+                | DocumentKind::Data
         ) {
             return Err(not_editable(format!(
-                "{} documents are not edited by commands (scenes, prefabs, materials, volume profiles and physics materials are)",
+                "{} documents are not edited by commands (scenes, prefabs, materials, volume profiles, physics materials and data assets are)",
                 document.kind.name()
             )));
         }
@@ -1481,6 +1482,9 @@ fn validate(document: &Document, schemas: &SchemaSet, shaders: &ShaderLibrary) -
         DocumentKind::PhysicsMaterial => {
             crate::physics_material::PhysicsMaterialDocument::from_document(document.clone())
                 .validate(schemas)
+        }
+        DocumentKind::Data => {
+            crate::data::DataDocument::from_document(document.clone()).validate(schemas)
         }
         _ => Scene::from_document(document.clone()).validate(schemas),
     }

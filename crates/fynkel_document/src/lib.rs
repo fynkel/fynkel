@@ -19,6 +19,7 @@
 pub mod asset;
 pub mod authoring;
 pub mod codec;
+pub mod data;
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub mod generated;
@@ -47,6 +48,7 @@ pub use authoring::{
 };
 pub use blend::Blend;
 pub use codec::{DocumentCodec, FieldError};
+pub use data::DataDocument;
 pub use fynkel_contracts::{has_errors, Code, Diagnostic, Severity};
 pub use json::{Node, Value};
 pub use material::{Material, ResolvedMaterial, ShaderLibrary, ShaderManifest};
@@ -82,10 +84,13 @@ pub enum DocumentKind {
     /// `.physicsmaterial.json`: friction and bounciness colliders share
     /// (ADR-0025).
     PhysicsMaterial,
+    /// `.data.json`: a data asset, an instance of a game-declared type
+    /// (ADR-0027).
+    Data,
 }
 
 impl DocumentKind {
-    pub const ALL: [DocumentKind; 10] = [
+    pub const ALL: [DocumentKind; 11] = [
         DocumentKind::Scene,
         DocumentKind::Prefab,
         DocumentKind::Material,
@@ -96,6 +101,7 @@ impl DocumentKind {
         DocumentKind::Blend,
         DocumentKind::Volume,
         DocumentKind::PhysicsMaterial,
+        DocumentKind::Data,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -110,6 +116,7 @@ impl DocumentKind {
             DocumentKind::Blend => "blend",
             DocumentKind::Volume => "volume",
             DocumentKind::PhysicsMaterial => "physics_material",
+            DocumentKind::Data => "data",
         }
     }
 
@@ -126,6 +133,7 @@ impl DocumentKind {
             DocumentKind::Blend => ".blend.json",
             DocumentKind::Volume => ".volume.json",
             DocumentKind::PhysicsMaterial => ".physicsmaterial.json",
+            DocumentKind::Data => ".data.json",
         }
     }
 
@@ -317,6 +325,12 @@ impl Document {
                     "bounce_combine".into(),
                     Node::string(m.bounce_combine.name()),
                 ));
+            }
+            DocumentKind::Data => {
+                // A placeholder type; `Document::new_data` names the real one.
+                members.push(("type".into(), Node::string(data::PLACEHOLDER_TYPE)));
+                members.push(("version".into(), Node::integer(1)));
+                members.push(("data".into(), Node::object(Vec::new())));
             }
             _ => {}
         }

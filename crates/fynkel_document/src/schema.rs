@@ -32,6 +32,10 @@ pub struct SchemaSet {
     ///
     /// [`declare_behaviour`]: SchemaSet::declare_behaviour
     behaviours: HashMap<String, BehaviourInfo>,
+    /// Data asset types by type id (ADR-0027): schemas with
+    /// `x-fynkel.kind == "data"` (`schemas/data/<id>.schema.json`) plus the
+    /// types a project registry declares (kind `data`).
+    data_types: HashMap<String, BehaviourInfo>,
     /// Every other loaded schema by `$id` (`lock.schema.json`, …).
     others: HashMap<String, Validator>,
     /// What this set was built from, so [`extended_with`] can rebuild it
@@ -41,6 +45,7 @@ pub struct SchemaSet {
     sources: Vec<(PathBuf, serde_json::Value)>,
     /// Declarations replayed by [`extended_with`](SchemaSet::extended_with).
     declared: Vec<(String, u32)>,
+    declared_data: Vec<(String, u32)>,
     /// The fields of each component and behaviour type that name assets
     /// of a kind (`FYN-A0007`, [`crate::reference_kinds`]).
     asset_fields: HashMap<String, Vec<crate::reference_kinds::AssetField>>,
@@ -109,6 +114,9 @@ impl SchemaSet {
         let mut set = SchemaSet::build(loaded)?;
         for (type_id, version) in &self.declared {
             set.declare_behaviour(type_id, *version);
+        }
+        for (type_id, version) in &self.declared_data {
+            set.declare_data(type_id, *version);
         }
         Ok(set)
     }
@@ -199,11 +207,14 @@ impl SchemaSet {
             );
         }
         let mut behaviours = HashMap::new();
+        let mut data_types = HashMap::new();
         for (id, value) in &by_id {
             let meta = value.get("x-fynkel");
-            if meta.and_then(|m| m.get("kind")).and_then(|k| k.as_str()) != Some("behaviour") {
-                continue;
-            }
+            let map = match meta.and_then(|m| m.get("kind")).and_then(|k| k.as_str()) {
+                Some("behaviour") => &mut behaviours,
+                Some("data") => &mut data_types,
+                _ => continue,
+            };
             let meta = meta.unwrap();
             let Some(type_id) = value
                 .get("title")
@@ -212,7 +223,7 @@ impl SchemaSet {
             else {
                 continue;
             };
-            behaviours.insert(
+            map.insert(
                 type_id.to_string(),
                 BehaviourInfo {
                     type_id: type_id.to_string(),
@@ -231,7 +242,7 @@ impl SchemaSet {
         for (_, value) in &by_id {
             let meta = value.get("x-fynkel");
             let kind = meta.and_then(|m| m.get("kind")).and_then(|k| k.as_str());
-            if !matches!(kind, Some("component") | Some("behaviour")) {
+            if !matches!(kind, Some("component") | Some("behaviour") | Some("data")) {
                 continue;
             }
             let Some(type_id) = value
@@ -274,7 +285,7 @@ impl SchemaSet {
                 .get("x-fynkel")
                 .and_then(|m| m.get("kind"))
                 .and_then(|k| k.as_str());
-            let is_typed = matches!(kind, Some("component") | Some("behaviour"));
+            let is_typed = matches!(kind, Some("component") | Some("behaviour") | Some("data"));
             if !is_document && !is_typed {
                 others.insert(id.clone(), compile(value, id)?);
             }
@@ -285,9 +296,11 @@ impl SchemaSet {
             missing,
             components,
             behaviours,
+            data_types,
             others,
             sources,
             declared: Vec::new(),
+            declared_data: Vec::new(),
             asset_fields,
         })
     }
@@ -332,6 +345,55 @@ impl SchemaSet {
                 validator,
             },
         );
+    }
+
+    /// Declares a data type without a schema (a registry entry of kind
+    /// `data`): known, its data accepted as any object. A loaded schema wins.
+    pub fn declare_data(&mut self, type_id: &str, version: u32) {
+        if self.data_types.contains_key(type_id) {
+            return;
+        }
+        self.declared_data.push((type_id.to_string(), version));
+        let validator = jsonschema::draft202012::options()
+            .build(&serde_json::json!({"type": "object"}))
+            .expect("constant schema compiles");
+        self.data_types.insert(
+            type_id.to_string(),
+            BehaviourInfo {
+                type_id: type_id.to_string(),
+                version,
+                dart: None,
+                has_schema: false,
+                validator,
+            },
+        );
+    }
+
+    /// Known data asset type (ADR-0027): the same facts a behaviour has.
+    pub fn data_type(&self, type_id: &str) -> Option<&BehaviourInfo> {
+        self.data_types.get(type_id)
+    }
+
+    /// Data asset types, sorted.
+    pub fn data_types(&self) -> Vec<&BehaviourInfo> {
+        let mut v: Vec<&BehaviourInfo> = self.data_types.values().collect();
+        v.sort_by(|a, b| a.type_id.cmp(&b.type_id));
+        v
+    }
+
+    /// Validates a data asset's `data` against its type's schema (nothing
+    /// for an unknown type).
+    pub fn validate_data(&self, type_id: &str, data: &Node) -> Vec<Diagnostic> {
+        let Some(info) = self.data_types.get(type_id) else {
+            return Vec::new();
+        };
+        let instance = data.to_serde();
+        let mut out = Vec::new();
+        for err in info.validator.iter_errors(&instance) {
+            out.extend(to_diagnostics(&err, &Locator::new(data)));
+        }
+        sort_by_position(&mut out);
+        out
     }
 
     /// Known component type (from the loaded component schemas).

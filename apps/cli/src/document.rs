@@ -12,7 +12,7 @@ use fynkel_document::{diagnostics_json, has_errors, Diagnostic, Document, Docume
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel document validate <path>... [--json] [--schemas <dir>] [--kind <kind>]\n  fynkel document format <path>... [--check] [--json]     rewrite in canonical form (or report drift)\n  fynkel document new <kind> <name> [--out <path>]        print (or write) a fresh document\n\nkinds: scene, prefab, material, shader, rig, project, meta"
+        "usage:\n  fynkel document validate <path>... [--json] [--schemas <dir>] [--kind <kind>]\n  fynkel document format <path>... [--check] [--json]     rewrite in canonical form (or report drift)\n  fynkel document new <kind> <name> [--out <path>]        print (or write) a fresh document\n  fynkel document new data <name> --type <type id> [--out <path>]   a data asset of a type (ADR-0027)\n\nkinds: scene, prefab, material, shader, rig, blend, volume, physics_material, data, project, meta"
     );
     ExitCode::from(2)
 }
@@ -24,6 +24,8 @@ struct Opts {
     schemas: Option<PathBuf>,
     kind: Option<DocumentKind>,
     out: Option<PathBuf>,
+    /// `new data`: the data type (ADR-0027).
+    type_id: Option<String>,
 }
 
 fn parse_opts(args: &[String]) -> Result<Opts, ExitCode> {
@@ -34,6 +36,7 @@ fn parse_opts(args: &[String]) -> Result<Opts, ExitCode> {
         schemas: None,
         kind: None,
         out: None,
+        type_id: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -47,6 +50,10 @@ fn parse_opts(args: &[String]) -> Result<Opts, ExitCode> {
             "--out" => {
                 i += 1;
                 o.out = args.get(i).map(PathBuf::from);
+            }
+            "--type" => {
+                i += 1;
+                o.type_id = args.get(i).cloned();
             }
             "--kind" => {
                 i += 1;
@@ -199,7 +206,18 @@ fn new(opts: Opts) -> ExitCode {
     ) else {
         return usage();
     };
-    let doc = Document::new(kind, &name.to_string_lossy());
+    let doc = match (kind, &opts.type_id) {
+        (DocumentKind::Data, Some(t)) if fynkel_document::data::is_type_id(t) => {
+            Document::new_data(&name.to_string_lossy(), t, 1, None)
+        }
+        (DocumentKind::Data, _) => {
+            eprintln!(
+                "fynkel document new data: --type <type id> is required (such as game.Weapon)"
+            );
+            return usage();
+        }
+        _ => Document::new(kind, &name.to_string_lossy()),
+    };
     let text = doc.write().expect("fresh documents are writable");
     match opts.out {
         Some(path) => match std::fs::write(&path, text) {

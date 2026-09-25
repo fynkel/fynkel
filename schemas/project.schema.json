@@ -52,7 +52,7 @@
     },
     "components": {
       "type": "object",
-      "description": "The component registry: every component type the project's documents may use. Absent means \"every built-in type\". Native entries must exist in the loaded component schemas; behaviour entries are Dart Behaviours (M2-15) and are only recorded here for now.",
+      "description": "The component registry: every component type the project's documents may use. Absent means \"every built-in type\". Native entries must exist in the loaded component schemas; behaviour entries are Dart Behaviours (M2-15) and data entries Dart data asset types (ADR-0027); both declare a type even without its generated schema.",
       "propertyNames": { "$ref": "https://fynkel.dev/schemas/envelope.schema.json#/$defs/typeId" },
       "additionalProperties": { "$ref": "#/$defs/componentEntry" }
     },
@@ -145,7 +145,7 @@
     "componentEntry": {
       "type": "object",
       "properties": {
-        "kind": { "enum": ["native", "behaviour"] },
+        "kind": { "enum": ["native", "behaviour", "data"] },
         "version": { "type": "integer", "minimum": 1, "default": 1 },
         "description": { "type": "string" }
       },

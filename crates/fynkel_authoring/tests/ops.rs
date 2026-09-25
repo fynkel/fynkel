@@ -282,6 +282,41 @@ fn new_documents_are_valid_named_after_their_file_and_undo_removes_them() {
         "FYN-T0003",
     );
     assert!(d.message.contains("material document"), "{}", d.message);
+    // A data asset (ADR-0027) names its type; its data is optional.
+    let v = ok(s.operate(
+        "newDocument",
+        &json!({ "kind": "data", "path": "data/sword", "type": "game.Weapon", "data": { "damage": 3 } }),
+    ));
+    assert_eq!(v["entry"]["document"], "data");
+    let sword = fynkel_document::DataDocument::from_document(
+        Document::read(
+            &copy.path("assets/data/sword.data.json"),
+            Some(DocumentKind::Data),
+        )
+        .unwrap(),
+    );
+    assert_eq!(
+        (sword.type_id.as_str(), sword.version, sword.name()),
+        ("game.Weapon", 1, "sword")
+    );
+    assert_eq!(
+        sword.data().unwrap().get("damage").and_then(|n| n.as_i64()),
+        Some(3)
+    );
+    refused(
+        s.operate(
+            "newDocument",
+            &json!({ "kind": "data", "path": "data/shield" }),
+        ),
+        "FYN-T0003",
+    );
+    refused(
+        s.operate(
+            "newDocument",
+            &json!({ "kind": "data", "path": "data/shield", "type": "Shield" }),
+        ),
+        "FYN-T0003",
+    );
     assert_clean(&s);
 }
 
