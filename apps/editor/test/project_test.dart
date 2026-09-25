@@ -91,7 +91,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('assets/scenes/main.scene.json:83:13'), findsOneWidget);
     expect(find.text('FYN-D0206'), findsOneWidget);
-    expect(find.textContaining('1 errors, 1 warnings'), findsOneWidget);
+    expect(
+      [
+        for (final s in ['error', 'warning'])
+          tester
+              .widget<Text>(find.descendant(of: find.byKey(Key('console.filter.$s')), matching: find.byType(Text)).last)
+              .data,
+      ],
+      ['1', '1'],
+    );
     await tester.tap(find.text('FYN-D0206'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('console.open')));

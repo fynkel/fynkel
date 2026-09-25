@@ -6,6 +6,11 @@ import 'package:fynkel_editor/src/console/console_panel.dart';
 
 import 'support/fakes.dart';
 
+/// The count on a severity's toggle (the Console has no footer to read).
+String _count(WidgetTester tester, String severity) => tester
+    .widget<Text>(find.descendant(of: find.byKey(Key('console.filter.$severity')), matching: find.byType(Text)).last)
+    .data!;
+
 void main() {
   late FakeProject project;
   late ConsoleModel model;
@@ -104,7 +109,8 @@ void main() {
     expect(find.text('unknown field "speeed"'), findsNWidgets(2));
     expect(find.text('assets/scenes/main.scene.json:75:13'), findsNWidgets(2));
     expect(find.text('×2'), findsOneWidget);
-    expect(find.textContaining('3 errors, 1 warnings'), findsOneWidget);
+    expect((_count(tester, 'error'), _count(tester, 'warning')), ('3', '1'));
+    expect(find.byKey(const Key('console.status')), findsNothing, reason: 'no footer once validated');
     expect(find.byKey(const Key('console.detail')), findsNothing);
 
     final first = find.text('remove it or check the spelling');
@@ -149,7 +155,10 @@ void main() {
     await tester.tap(find.byKey(const Key('console.revalidate')));
     await tester.pumpAndSettle();
     expect(project.revalidations, 1);
-    expect(find.textContaining('validated 12:30:15'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('validated 12:30:15')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('an IDE failure shows in the detail pane', (tester) async {
@@ -176,7 +185,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('No diagnostics. The project validates clean.'), findsOneWidget);
-    expect(find.textContaining('0 errors, 0 warnings'), findsOneWidget);
+    expect((_count(tester, 'error'), _count(tester, 'warning')), ('0', '0'));
   });
 
   group('a project from an older build', () {

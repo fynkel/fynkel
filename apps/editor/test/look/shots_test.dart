@@ -78,10 +78,13 @@ void main() {
       ('inspector', InspectorPanel),
       ('hierarchy', HierarchyPanel),
       ('project', ProjectPanel),
-      ('console', ConsolePanel),
     ]) {
       final f = find.byType(type);
       if (f.evaluate().isNotEmpty) await save(name, f.first);
     }
+    // The Console shares the Project's dock: bring its tab forward.
+    await tester.tap(find.text('Console').first);
+    await tester.pumpAndSettle();
+    await save('console', find.byType(ConsolePanel).first);
   }, skip: _out == null);
 }

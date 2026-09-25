@@ -162,6 +162,15 @@ class _GameConsoleViewState extends State<GameConsoleView> {
             icon: Icon(active ? FIcons.stop : FIcons.playArrow, size: t.icon + 2, color: active ? t.error : t.accent),
             onPressed: active ? widget.onStop : widget.onPlay,
           ),
+          FilterChip(
+            key: const Key('console.game.collapse'),
+            label: const Text('Collapse'),
+            tooltip: 'Collapse identical rows into one with a count',
+            selected: model.collapse,
+            onSelected: model.setCollapse,
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: 4),
           Expanded(
             child: TextField(
               key: const Key('console.game.search'),
@@ -215,15 +224,6 @@ class _GameConsoleViewState extends State<GameConsoleView> {
             tooltip: 'One row per stats window (the Profiler charts them)',
             selected: model.showStats,
             onSelected: model.setShowStats,
-            visualDensity: VisualDensity.compact,
-          ),
-          const SizedBox(width: 4),
-          FilterChip(
-            key: const Key('console.game.collapse'),
-            label: const Text('Collapse'),
-            tooltip: 'Collapse identical rows into one with a count',
-            selected: model.collapse,
-            onSelected: model.setCollapse,
             visualDensity: VisualDensity.compact,
           ),
           const SizedBox(width: 4),

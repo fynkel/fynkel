@@ -501,12 +501,12 @@ void main() {
       expect(find.byKey(const Key('project.folder.row.scenes')), findsOneWidget, reason: 'sub-folders are rows too');
       expect(find.byKey(const Key('project.asset.$loose')), findsOneWidget);
       expect(find.byKey(const Key('project.asset.$mainScene')), findsNothing);
-      expect(find.text('1 of 7 assets in assets'), findsOneWidget);
+      expect(find.byTooltip('1 of 7 assets in assets'), findsOneWidget);
       await tester.tap(find.byKey(const Key('project.folder.tree.scenes')));
       await tester.pumpAndSettle();
       expect(model.folder, 'scenes');
       expect(find.byKey(const Key('project.asset.$mainScene')), findsOneWidget);
-      expect(find.text('1 of 7 assets in assets/scenes'), findsOneWidget);
+      expect(find.byTooltip('1 of 7 assets in assets/scenes'), findsOneWidget);
       await tester.tap(find.byKey(const Key('project.up')));
       await tester.pumpAndSettle();
       expect(model.folder, '');
@@ -529,7 +529,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('project.asset.$coinPrefab')), findsOneWidget);
       expect(find.byKey(const Key('project.asset.$tone')), findsNothing);
-      expect(find.textContaining('1 of 7 assets in every folder'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('1 of 7 assets in every folder')),
+        findsOneWidget,
+      );
       // Kind filter: textures only.
       await tester.enterText(find.byKey(const Key('project.search')), '');
       await tester.tap(find.byKey(const Key('project.filter')));
@@ -703,7 +706,7 @@ void main() {
     testWidgets('the list has Name | Kind | Contents | Size columns; Name and Kind sort', (tester) async {
       final (_, model, _, _) = await pumpPanel(tester);
       expect(find.byKey(const Key('project.columns')), findsOneWidget);
-      expect(find.text('CONTENTS'), findsOneWidget);
+      expect(find.text('Contents'), findsOneWidget);
       expect(tester.widget<Text>(find.byKey(const Key('project.contents.folder.models'))).data, '1 asset');
       await tester.tap(find.byIcon(FIcons.viewListOutlined));
       await tester.pumpAndSettle();
@@ -727,8 +730,8 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpAndSettle();
-      expect(find.text('CONTENTS'), findsNothing);
-      expect(find.text('KIND'), findsOneWidget);
+      expect(find.text('Contents'), findsNothing);
+      expect(find.text('Kind'), findsOneWidget);
     });
 
     testWidgets('dragging a row onto a folder in the tree moves it (the selection when the row is selected)', (

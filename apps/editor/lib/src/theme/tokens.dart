@@ -51,6 +51,7 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
     required this.line,
     required this.lineStrong,
     required this.fieldEdge,
+    required this.prefab,
     required this.text,
     required this.textSecondary,
     required this.textDisabled,
@@ -96,6 +97,10 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
   /// A field's edge at rest: in the dark set barely darker than its fill,
   /// the way Unity's fields are flat and only the focus ring outlines one.
   final Color fieldEdge;
+
+  /// A prefab instance's name and icon in the Hierarchy — Unity's blue
+  /// text, lighter than the selection so a selected instance still reads.
+  final Color prefab;
 
   final Color text;
   final Color textSecondary;
@@ -200,6 +205,7 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
     line: Color(0xFF262626),
     lineStrong: Color(0xFF212121),
     fieldEdge: Color(0xFF242424),
+    prefab: Color(0xFF8AB4F8),
     text: Color(0xFFD2D2D2),
     textSecondary: Color(0xFFA2A2A2),
     textDisabled: Color(0xFF787878),
@@ -234,6 +240,7 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
     line: Color(0xFFD2D5DA),
     lineStrong: Color(0xFFC2C6CC),
     fieldEdge: Color(0xFFC2C6CC),
+    prefab: Color(0xFF2C5FD8),
     text: Color(0xFF1B1D21),
     textSecondary: Color(0xFF5A6067),
     textDisabled: Color(0xFF878D95),
@@ -281,6 +288,7 @@ final class FynkelTokens extends ThemeExtension<FynkelTokens> {
       line: p.line,
       lineStrong: p.lineStrong,
       fieldEdge: p.fieldEdge,
+      prefab: p.prefab,
       text: p.text,
       textSecondary: p.textSecondary,
       textDisabled: p.textDisabled,
@@ -330,6 +338,7 @@ final class _Palette {
     required this.line,
     required this.lineStrong,
     required this.fieldEdge,
+    required this.prefab,
     required this.text,
     required this.textSecondary,
     required this.textDisabled,
@@ -352,7 +361,7 @@ final class _Palette {
     required this.axisZ,
   });
 
-  final Color window, panel, header, field, popup, line, lineStrong, fieldEdge;
+  final Color window, panel, header, field, popup, line, lineStrong, fieldEdge, prefab;
   final Color text, textSecondary, textDisabled;
   final Color accent, onAccent, selection, onSelection, selectionQuiet, accentSoft, hover;
   final Color error, warning, ok, info, shadow, overlay, overlayEdge, axisX, axisY, axisZ;

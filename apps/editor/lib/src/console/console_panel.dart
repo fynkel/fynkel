@@ -460,8 +460,12 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
                 const Divider(height: 1),
                 _detail(theme, model.selected!, box.maxHeight * 0.4),
               ],
-              const Divider(height: 1),
-              _status(theme, project),
+              // Unity has no footer: this one only says validation is
+              // running or failed (docs/ui-refresh).
+              if (project.validating || project.validationError != null) ...[
+                const Divider(height: 1),
+                _status(theme, project),
+              ],
             ],
           ),
         );
@@ -522,6 +526,15 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
       padding: const EdgeInsets.fromLTRB(4, 3, 4, 3),
       child: Row(
         children: [
+          FilterChip(
+            key: const Key('console.collapse'),
+            label: const Text('Collapse'),
+            tooltip: 'Collapse identical diagnostics into one row with a count',
+            selected: model.collapse,
+            onSelected: model.setCollapse,
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: 4),
           Expanded(
             child: TextField(
               key: const Key('console.search'),
@@ -560,15 +573,6 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
             ),
             const SizedBox(width: 4),
           ],
-          FilterChip(
-            key: const Key('console.collapse'),
-            label: const Text('Collapse'),
-            tooltip: 'Collapse identical diagnostics into one row with a count',
-            selected: model.collapse,
-            onSelected: model.setCollapse,
-            visualDensity: VisualDensity.compact,
-          ),
-          const SizedBox(width: 4),
           IconButton(
             key: const Key('console.copy'),
             tooltip: 'Copy the selected row, or every visible row',
@@ -589,7 +593,12 @@ class _ConsolePanelState extends State<ConsolePanel> with SingleTickerProviderSt
           ),
           IconButton(
             key: const Key('console.revalidate'),
-            tooltip: 'Validate the project again',
+            // The footer's facts, now the footer is gone (docs/ui-refresh).
+            tooltip: [
+              'Validate the project again',
+              '${project.documents} documents, ${project.sources} sources, ${project.references} references',
+              if (project.validatedAt case final at?) 'validated ${_time(at)}',
+            ].join('\n'),
             icon: project.validating
                 ? SizedBox(width: t.icon, height: t.icon, child: const CircularProgressIndicator(strokeWidth: 2))
                 : const Icon(FIcons.refresh),

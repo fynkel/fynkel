@@ -358,7 +358,9 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
                 ),
         ),
         if (tab.lastError != null) _errorBar(context, theme, tab.lastError!),
-        _status(context, theme, tree, tab.selection.length),
+        // Unity has no footer: this one shows only what a search or a
+        // setting hides (docs/ui-refresh).
+        if (!tree.filter.isEmpty || !model.keepWorldTransform) _status(context, theme, tree, tab.selection.length),
       ],
     );
   }
@@ -402,9 +404,31 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
         color: t.header,
         border: Border(bottom: t.hairline),
       ),
-      padding: EdgeInsets.fromLTRB(t.gap, 3, 3, 3),
+      padding: const EdgeInsets.fromLTRB(3, 3, 3, 3),
       child: Row(
         children: [
+          // Unity's + first, then the search.
+          Builder(
+            builder: (context) => IconButton(
+              key: const Key('hierarchy.create'),
+              tooltip: 'Create an entity (under the selection when one is selected)',
+              icon: const Icon(FIcons.add),
+              onPressed: model.canEdit
+                  ? () {
+                      final box = context.findRenderObject()! as RenderBox;
+                      showCascadingMenu(context, box.localToGlobal(box.size.bottomLeft(Offset.zero)), [
+                        MenuAction(
+                          'Create Empty',
+                          key: const Key('hierarchy.create.empty'),
+                          onSelected: () => model.createEmpty(),
+                        ),
+                        const MenuSeparator(),
+                        ..._createLines('hierarchy.create', enabled: true, underSelection: true),
+                      ]);
+                    }
+                  : null,
+            ),
+          ),
           Expanded(
             child: TextField(
               key: const Key('hierarchy.search'),
@@ -500,27 +524,6 @@ class _HierarchyPanelState extends State<HierarchyPanel> {
             lockTip: 'Lock: keep showing this document when another tab is focused',
             unlockTip: 'Unlock: follow the focused tab again',
             onChanged: model.hasDocument ? model.setLocked : null,
-          ),
-          Builder(
-            builder: (context) => IconButton(
-              key: const Key('hierarchy.create'),
-              tooltip: 'Create an entity (under the selection when one is selected)',
-              icon: const Icon(FIcons.add),
-              onPressed: model.canEdit
-                  ? () {
-                      final box = context.findRenderObject()! as RenderBox;
-                      showCascadingMenu(context, box.localToGlobal(box.size.bottomLeft(Offset.zero)), [
-                        MenuAction(
-                          'Create Empty',
-                          key: const Key('hierarchy.create.empty'),
-                          onSelected: () => model.createEmpty(),
-                        ),
-                        const MenuSeparator(),
-                        ..._createLines('hierarchy.create', enabled: true, underSelection: true),
-                      ]);
-                    }
-                  : null,
-            ),
           ),
           PopupMenuButton<String>(
             popUpAnimationStyle: AnimationStyle.noAnimation,
@@ -1168,6 +1171,7 @@ class _HierarchyRowWidget extends StatefulWidget {
 
 class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
   _Zone? _zone;
+  bool _hover = false;
   final _renameFocus = FocusNode(debugLabel: 'hierarchy.rename');
   bool _submitted = false;
 
@@ -1279,14 +1283,17 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                   )
                 : null,
           ),
-          Icon(
-            _iconOf(n),
-            size: 13,
-            color: widget.selected
-                ? onRowDim
-                : row.matches && !widget.inactive
-                ? t.textSecondary
-                : t.textDisabled,
+          _prefabTip(
+            n,
+            Icon(
+              _iconOf(n),
+              size: 13,
+              color: widget.selected
+                  ? onRowDim
+                  : row.matches && !widget.inactive
+                  ? (n.isPrefabInstance ? t.prefab : t.textSecondary)
+                  : t.textDisabled,
+            ),
           ),
           const SizedBox(width: 6),
           Expanded(
@@ -1321,7 +1328,11 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                       color: widget.selected
                           ? (widget.inactive ? onRowDim : onRow)
                           : row.matches && !widget.inactive
-                          ? (n.isDerived && !n.added ? t.textSecondary : t.text)
+                          ? (n.isPrefabInstance
+                                ? t.prefab
+                                : n.isDerived && !n.added
+                                ? t.textSecondary
+                                : t.text)
                           : t.textDisabled,
                       fontStyle: n.name.isEmpty || n.isDerived ? FontStyle.italic : null,
                       fontWeight: n.overriddenFields > 0 ? FontWeight.bold : null,
@@ -1344,38 +1355,20 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
                 ),
               ),
             ),
-          if (n.isPrefabInstance)
-            Tooltip(
-              message:
-                  'Prefab instance of ${n.prefabAsset ?? '?'}'
-                  '${n.overrideCount > 0 ? ' · ${n.overrideCount} override${n.overrideCount == 1 ? '' : 's'}' : ''}',
-              child: Container(
-                key: Key('hierarchy.prefab.${n.id}'),
-                margin: const EdgeInsets.only(left: 4),
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                decoration: BoxDecoration(color: t.surfaceOf(t.accent, .28), borderRadius: t.cornerControl),
-                child: Row(
-                  children: [
-                    Icon(FIcons.widgetsOutlined, size: 10, color: theme.colorScheme.onTertiaryContainer),
-                    if (n.overrideCount > 0)
-                      Text(
-                        ' ${n.overrideCount}',
-                        style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onTertiaryContainer),
-                      ),
-                  ],
-                ),
-              ),
-            ),
           if (widget.onOpenPrefab != null)
             Tooltip(
               message: 'Open the prefab in context',
               waitDuration: const Duration(milliseconds: 600),
-              child: InkWell(
-                key: Key('hierarchy.openPrefab.${n.id}'),
-                onTap: widget.onOpenPrefab,
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 4),
-                  child: Icon(FIcons.chevronRight, size: 14, color: t.textSecondary),
+              // Unity's: the › shows under the pointer (and on the selection).
+              child: Opacity(
+                opacity: _hover || widget.selected ? 1 : 0,
+                child: InkWell(
+                  key: Key('hierarchy.openPrefab.${n.id}'),
+                  onTap: widget.onOpenPrefab,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Icon(FIcons.chevronRight, size: 14, color: widget.selected ? onRowDim : t.textSecondary),
+                  ),
                 ),
               ),
             ),
@@ -1397,11 +1390,15 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
     final interactive = Semantics(
       selected: widget.selected,
       expanded: row.hasChildren ? row.expanded : null,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: widget.onTap,
-        onSecondaryTapUp: (d) => widget.onSecondaryTap(d.globalPosition),
-        child: content,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          onSecondaryTapUp: (d) => widget.onSecondaryTap(d.globalPosition),
+          child: content,
+        ),
       ),
     );
 
@@ -1505,6 +1502,19 @@ class _HierarchyRowWidgetState extends State<_HierarchyRowWidget> {
               )
             : interactive,
       ),
+    );
+  }
+
+  /// A prefab instance says so in its icon's tooltip (Unity draws no
+  /// badge: the blue name is the mark).
+  Widget _prefabTip(HierarchyNode n, Widget icon) {
+    if (!n.isPrefabInstance) return icon;
+    return Tooltip(
+      key: Key('hierarchy.prefab.${n.id}'),
+      message:
+          'Prefab instance of ${n.prefabAsset ?? '?'}'
+          '${n.overrideCount > 0 ? ' · ${n.overrideCount} override${n.overrideCount == 1 ? '' : 's'}' : ''}',
+      child: icon,
     );
   }
 

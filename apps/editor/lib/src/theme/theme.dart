@@ -230,13 +230,13 @@ ThemeData fynkelTheme({required Brightness brightness, EditorDensity density = E
         minimumSize: WidgetStatePropertyAll(Size(0, t.row + 4)),
         padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 10)),
         textStyle: WidgetStatePropertyAll(text.labelLarge),
-        // An on segment is tinted, not solid (item 9b): solid blue is for
-        // the selection in the focused panel and nothing else.
+        // An on segment is a lighter grey, Unity's pressed toggle: blue is
+        // for the selection and focus only (docs/ui-refresh).
         backgroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? t.accentSoft : Colors.transparent,
+          (s) => s.contains(WidgetState.selected) ? t.selectionQuiet : Colors.transparent,
         ),
         foregroundColor: WidgetStateProperty.resolveWith(
-          (s) => s.contains(WidgetState.selected) ? t.accent : t.textSecondary,
+          (s) => s.contains(WidgetState.selected) ? t.text : t.textSecondary,
         ),
         side: WidgetStatePropertyAll(BorderSide(color: t.lineStrong)),
         shape: WidgetStatePropertyAll(RoundedRectangleBorder(borderRadius: t.cornerControl)),
@@ -376,17 +376,22 @@ ThemeData fynkelTheme({required Brightness brightness, EditorDensity density = E
       unselectedLabelColor: t.textSecondary,
       labelStyle: text.labelLarge,
       unselectedLabelStyle: text.labelLarge,
-      indicatorColor: t.accent,
+      // The on tab is marked in the text's colour: blue is for the
+      // selection and focus only (docs/ui-refresh).
+      indicatorColor: t.textSecondary,
       indicatorSize: TabBarIndicatorSize.tab,
       dividerColor: t.line,
       overlayColor: WidgetStatePropertyAll(t.hover),
     ),
+    // Flat toggles (the Console's counts, Collapse): an on chip is a
+    // lighter grey, Unity's pressed toggle — no outline, no blue.
     chipTheme: ChipThemeData(
-      backgroundColor: t.field,
-      selectedColor: t.accentSoft,
-      side: BorderSide(color: t.lineStrong),
+      backgroundColor: Colors.transparent,
+      selectedColor: t.selectionQuiet,
+      side: BorderSide.none,
       labelStyle: text.bodySmall!.copyWith(color: t.text),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 0),
+      labelPadding: const EdgeInsets.only(left: 2, right: 4),
       shape: RoundedRectangleBorder(borderRadius: t.cornerControl),
       showCheckmark: false,
     ),

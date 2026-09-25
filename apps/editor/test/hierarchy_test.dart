@@ -391,7 +391,7 @@ void main() {
       );
       expect(built.evaluate().length, lessThan(60));
       expect(built.evaluate().length, greaterThan(15));
-      expect(find.textContaining('10000 entities'), findsOneWidget);
+      expect(find.byKey(const Key('hierarchy.status')), findsNothing, reason: 'no footer without a search');
       await tester.drag(find.byKey(const Key('hierarchy.list')), const Offset(0, -20000));
       await tester.pumpAndSettle();
       expect(built.evaluate().length, lessThan(60));
@@ -424,7 +424,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('hierarchy.name.arm')), findsOneWidget);
       expect(find.byKey(const Key('hierarchy.prefab.crate')), findsOneWidget);
-      expect(find.textContaining('6 entities'), findsOneWidget);
+      expect(find.byKey(const Key('hierarchy.status')), findsNothing, reason: 'no footer without a search');
       await tester.enterText(find.byKey(const Key('hierarchy.search')), 'arm');
       await tester.pumpAndSettle();
       expect(model.filter.query, 'arm');

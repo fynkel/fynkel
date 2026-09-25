@@ -177,7 +177,7 @@ void main() {
       );
       await tester.tap(find.byKey(const Key('project.folder.tree.Packages/pickups/materials')));
       await tester.pumpAndSettle();
-      expect(find.text('1 of 4 assets in Packages/pickups/materials'), findsOneWidget);
+      expect(find.byTooltip('1 of 4 assets in Packages/pickups/materials'), findsOneWidget);
       // The asset's menu: Copy into Project, Rename off.
       await tester.tap(find.byKey(const Key('project.asset.$glow')), buttons: 2);
       await tester.pumpAndSettle();

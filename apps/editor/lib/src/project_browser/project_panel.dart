@@ -1175,7 +1175,8 @@ class _ProjectPanelState extends State<ProjectPanel> {
   /// Name | Kind | Contents | Size. Name and Kind sort (again to flip).
   Widget _columnHeader(BuildContext context, ThemeData theme, {required bool columns}) {
     final t = context.tokens;
-    final style = InspectorCaption.style(context);
+    // Column titles as written, quiet (docs/ui-refresh).
+    final style = InspectorCaption.style(context).copyWith(fontWeight: FontWeight.w500, color: t.textDisabled);
     Widget sortable(AssetSort s, String label, {double? width}) {
       final on = model.sort == s;
       final cell = InkWell(
@@ -1184,7 +1185,7 @@ class _ProjectPanelState extends State<ProjectPanel> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label.toUpperCase(), style: on ? style.copyWith(color: t.textSecondary) : style),
+            Text(label, style: on ? style.copyWith(color: t.textSecondary) : style),
             if (on) ...[
               const SizedBox(width: 3),
               Icon(model.descending ? FIcons.arrowDownward : FIcons.arrowUpward, size: 10, color: t.textSecondary),
@@ -1215,11 +1216,11 @@ class _ProjectPanelState extends State<ProjectPanel> {
           if (columns) ...[
             SizedBox(
               width: _AssetRow.contentsWidth,
-              child: Text('CONTENTS', style: style),
+              child: Text('Contents', style: style),
             ),
             SizedBox(
               width: _AssetRow.sizeWidth,
-              child: Text('SIZE', style: style, textAlign: TextAlign.right),
+              child: Text('Size', style: style, textAlign: TextAlign.right),
             ),
           ],
           const SizedBox(width: _AssetRow.endGap),
@@ -1241,6 +1242,80 @@ class _ProjectPanelState extends State<ProjectPanel> {
       padding: const EdgeInsets.fromLTRB(3, 3, 3, 3),
       child: Row(
         children: [
+          // Unity's + first.
+          PopupMenuButton<String>(
+            popUpAnimationStyle: AnimationStyle.noAnimation,
+            key: const Key('project.new'),
+            tooltip: 'New scene, prefab, material, volume profile, physics material, data asset, folder or behaviour',
+            icon: const Icon(FIcons.add),
+            enabled: model.canEdit,
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                key: const Key('project.new.scene'),
+                value: 'scene',
+                child: ListTile(dense: true, leading: Icon(assetKindIcon('scene')), title: const Text('New Scene')),
+              ),
+              PopupMenuItem(
+                key: const Key('project.new.prefab'),
+                value: 'prefab',
+                child: ListTile(dense: true, leading: Icon(assetKindIcon('prefab')), title: const Text('New Prefab')),
+              ),
+              PopupMenuItem(
+                key: const Key('project.new.material'),
+                value: 'material',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(assetKindIcon('material')),
+                  title: const Text('New Material'),
+                ),
+              ),
+              PopupMenuItem(
+                key: const Key('project.new.volume'),
+                value: 'volume',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(assetKindIcon('volume')),
+                  title: const Text('New Volume Profile'),
+                ),
+              ),
+              PopupMenuItem(
+                key: const Key('project.new.physics_material'),
+                value: 'physics_material',
+                child: ListTile(
+                  dense: true,
+                  leading: Icon(assetKindIcon('physics_material')),
+                  title: const Text('New Physics Material'),
+                ),
+              ),
+              ..._dataItems(),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                key: Key('project.new.folder'),
+                value: 'folder',
+                child: ListTile(dense: true, leading: Icon(FIcons.createNewFolderOutlined), title: Text('New Folder')),
+              ),
+              if (widget.generateBehaviours != null && model.hasScripts) ...[
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  key: const Key('project.new.behaviour'),
+                  value: 'behaviour',
+                  enabled: _canNewBehaviour,
+                  child: ListTile(
+                    dense: true,
+                    leading: const Icon(FIcons.code),
+                    title: const Text('New Behaviour…'),
+                    subtitle: Text('in lib/${model.newBehaviourFolder}', overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+            ],
+            onSelected: (v) => switch (v) {
+              'folder' => model.newFolder(),
+              'behaviour' => _newBehaviour(),
+              _ when v.startsWith('data:') => _newData(v.substring(5)),
+              _ => model.newDocument(v),
+            },
+          ),
           SegmentedButton<BrowserView>(
             key: const Key('project.view'),
             showSelectedIcon: false,
@@ -1348,79 +1423,6 @@ class _ProjectPanelState extends State<ProjectPanel> {
             lockTip: 'Lock: stay in this folder when an asset is shown elsewhere',
             unlockTip: 'Unlock: follow "Show in Project" again',
             onChanged: model.setLocked,
-          ),
-          PopupMenuButton<String>(
-            popUpAnimationStyle: AnimationStyle.noAnimation,
-            key: const Key('project.new'),
-            tooltip: 'New scene, prefab, material, volume profile, physics material, data asset, folder or behaviour',
-            icon: const Icon(FIcons.add),
-            enabled: model.canEdit,
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                key: const Key('project.new.scene'),
-                value: 'scene',
-                child: ListTile(dense: true, leading: Icon(assetKindIcon('scene')), title: const Text('New Scene')),
-              ),
-              PopupMenuItem(
-                key: const Key('project.new.prefab'),
-                value: 'prefab',
-                child: ListTile(dense: true, leading: Icon(assetKindIcon('prefab')), title: const Text('New Prefab')),
-              ),
-              PopupMenuItem(
-                key: const Key('project.new.material'),
-                value: 'material',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(assetKindIcon('material')),
-                  title: const Text('New Material'),
-                ),
-              ),
-              PopupMenuItem(
-                key: const Key('project.new.volume'),
-                value: 'volume',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(assetKindIcon('volume')),
-                  title: const Text('New Volume Profile'),
-                ),
-              ),
-              PopupMenuItem(
-                key: const Key('project.new.physics_material'),
-                value: 'physics_material',
-                child: ListTile(
-                  dense: true,
-                  leading: Icon(assetKindIcon('physics_material')),
-                  title: const Text('New Physics Material'),
-                ),
-              ),
-              ..._dataItems(),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                key: Key('project.new.folder'),
-                value: 'folder',
-                child: ListTile(dense: true, leading: Icon(FIcons.createNewFolderOutlined), title: Text('New Folder')),
-              ),
-              if (widget.generateBehaviours != null && model.hasScripts) ...[
-                const PopupMenuDivider(),
-                PopupMenuItem(
-                  key: const Key('project.new.behaviour'),
-                  value: 'behaviour',
-                  enabled: _canNewBehaviour,
-                  child: ListTile(
-                    dense: true,
-                    leading: const Icon(FIcons.code),
-                    title: const Text('New Behaviour…'),
-                    subtitle: Text('in lib/${model.newBehaviourFolder}', overflow: TextOverflow.ellipsis),
-                  ),
-                ),
-              ],
-            ],
-            onSelected: (v) => switch (v) {
-              'folder' => model.newFolder(),
-              'behaviour' => _newBehaviour(),
-              _ when v.startsWith('data:') => _newData(v.substring(5)),
-              _ => model.newDocument(v),
-            },
           ),
           IconButton(
             key: const Key('project.undo'),
@@ -1585,12 +1587,17 @@ class _ProjectPanelState extends State<ProjectPanel> {
               onTap: model.goUp,
               child: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(FIcons.arrowUpward, size: 13)),
             ),
+          // Where the list is, as Unity's breadcrumb; the counts are its tooltip.
           Expanded(
-            child: Text(
-              text,
-              key: const Key('project.status'),
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-              overflow: TextOverflow.ellipsis,
+            child: Tooltip(
+              message: text,
+              waitDuration: const Duration(milliseconds: 500),
+              child: Text(
+                where.replaceAll('/', '  ›  '),
+                key: const Key('project.status'),
+                style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ),
           _zoomSlider(context),
