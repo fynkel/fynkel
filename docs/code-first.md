@@ -54,8 +54,8 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 
 | | Unity (C#) | Fynkel (Dart) |
 |---|---|---|
-| Build a level in code at start-up | `new GameObject` in a loop | 🟡 possible with `spawn` + `set`, but every look needs a UUID and every component every field |
-| A reusable object built in code | a method that builds it | ❌ no description to build from: `ObjectSpec` + `world.build` (ADR-0026 §2) |
+| Build a level in code at start-up | `new GameObject` in a loop | 🔧 `world.build(ObjectSpec('Level', children: [...]))` with default components and `Assets.…` looks (`3795afb`) |
+| A reusable object built in code | a method that builds it | 🔧 a function returning an `ObjectSpec`, built with `world.build(spec, parent:, transform:)`; `ObjectSpec.prefab(ref, …)` places a prefab asset with overrides (`3795afb`, ADR-0026 §2) |
 | Save a scene or prefab from code | editor scripts (`PrefabUtility.SaveAsPrefabAsset`) | ❌ the reference game uses Python (`tools/playground.py`, 881 lines) |
 | Move / rotate / scale over time | DOTween, or a coroutine by hand | 🟡 by hand in a coroutine; no tweens (ADR-0026 §7) |
 | Play, crossfade, blend animations | Animator | ✅ `animation.play`, `crossfade`, `setParameter`, markers |
@@ -74,3 +74,4 @@ code as well as, or better than, Unity's.
 - 2026-09-25 — checklist written from the scan (ADR-0026 proposed).
 - 2026-09-25 — Tier 1 object graph (231945a, b1c375b).
 - 2026-09-25 — assets by name: `assets.g.dart`, the editor regenerating it, the reference game using it (abf2787), `world.assets`.
+- 2026-09-25 — `ObjectSpec` + `world.build`, code prefabs (3795afb).

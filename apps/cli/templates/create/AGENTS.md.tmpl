@@ -393,6 +393,12 @@ turret.findChild('Barrel');                          // the prefab's entities ar
   `scenes.transition(Assets.scenes.main)`, `Assets.models.cube.meshes.cube`.
   They hold ids, never paths; they are getters, so `final`, not `const`.
   A path known only at runtime: `world.assets.find('prefabs/coin')`.
+- Build objects from code with `world.build(ObjectSpec('Crate',
+  components: const [RigidBody(), Collider()], behaviours: [Spinner()],
+  children: [...]))`; a function returning an `ObjectSpec` is a code
+  prefab (call it per copy — behaviour instances attach once).
+  `ObjectSpec.prefab(Assets.prefabs.coin, tags: ['pickup'])` places a
+  prefab asset with overrides on its root.
 
 ## Scenes at runtime, zones, settings
 
