@@ -304,3 +304,29 @@ project editor. Windows and context menus (step 5) move up to follow
 `EditorContext` (step 2), ahead of Custom Inspectors and Property
 drawers: a window is the first real tool an extension makes, and no step
 depends on the order of 3–5. The order is now 1 → 2 → 5 → 3 → 4 → 6 → 7.
+
+**Amended 2026-09-25 (acceptance, step 7).**
+- **The record drawer moves to `examples/code_only`.** `spinner_game` is
+  a pure-Dart generator example without Flutter, so it cannot hold an
+  editor part. `code_only` gained a record for it: a coin kind's
+  `Sparks` (count, size, seconds; the big coin bursts into 12). Its
+  drawer, `editor.drawer<Sparks>`, draws the burst above the record's
+  standard fields, on the coin kind's page inside the custom Inspector's
+  `defaultInspector()`. The editor's drawer test still runs over
+  `spinner_game`'s real `Wave` schema.
+- **The plain editor edits every field.**
+  `apps/editor/test/plain_editor_code_only_test.dart` opens a copy of
+  `code_only` with no game compiled in and no extensions. It selects
+  every script's object and every data asset, and every field the
+  schemas expose, a record's included, has its own editor: never the
+  JSON-text fallback, and editable.
+- **A release build has no editor code.** `flutter build macos
+  --release` of `code_only` (`fynkel` has no `build` command; a release
+  is Flutter's) was searched for 17 strings only `lib/editor/` holds
+  (menu labels, window text, class names, `fynkel_editor_api`): none is
+  in `App.framework`. The game's own strings are there (the control).
+  Nothing in the game imports `lib/editor/` (`FYN-P0015`), so the
+  compiler never reaches it.
+- **Open:** the user's check that a save in `lib/editor/` appears in the
+  running editor.
+

@@ -87,7 +87,10 @@ Three ADRs, then their implementation:
    `@Expose(drawer:)`, `code_only`'s jump height) done 2026-09-25; step 6 (Play access:
    `context.play` with the running `World`, Pause, Step and Stop;
    `code_only`'s Level Tools collect the coins and respawn the player)
-   done 2026-09-25.
+   done 2026-09-25; step 7 (acceptance: `code_only`'s `Sparks` record
+   drawer, the plain editor editing every field of `code_only`, a
+   release build with no editor code) done 2026-09-25 — only the user's
+   hot-reload check remains.
 2. **`@DataAsset`** (Unity's ScriptableObject): a Dart class becomes an
    asset type with a schema, an Inspector page, references by id, a
    cooked form. **ADR-0027 accepted 2026-09-25; built first**, ahead of
