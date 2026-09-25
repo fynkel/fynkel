@@ -69,13 +69,18 @@ void main() {
   test('lock file parses and resolves published artifacts only', () {
     final lock = RuntimeLock.parse('''
 {
-  "runtime_version": "1.2.3",
-  "abi_version": 1,
-  "release_base_url": "https://example.test/dl/v{version}",
-  "artifacts": {
-    "macos-arm64": {"file": "lib-macos-arm64.dylib", "sha256": "${'A' * 64}"},
-    "ios-arm64": {"file": "lib-ios-arm64.dylib", "sha256": null}
-  }
+  "\$schema": "https://fynkel.dev/schemas/lock.schema.json",
+  "formatVersion": 1,
+  "runtime": {
+    "version": "1.2.3",
+    "abiVersion": 1,
+    "store": "https://example.test/dl/v{version}",
+    "artifacts": {
+      "macos-arm64": {"file": "lib-macos-arm64.dylib", "sha256": "${'A' * 64}"},
+      "ios-arm64": {"file": "lib-ios-arm64.dylib", "sha256": null}
+    }
+  },
+  "tools": {"version": "1.2.3"}
 }''');
     expect(lock.runtimeVersion, '1.2.3');
     expect(lock.artifacts['macos-arm64']!.sha256, 'a' * 64);
@@ -85,24 +90,53 @@ void main() {
     expect(lock.artifactUrl('windows-x64'), isNull);
   });
 
+  test("a project's lock pins the package's runtime and may name another store", () {
+    const package = RuntimeLock(
+      runtimeVersion: '1.2.3',
+      abiVersion: 1,
+      store: 'https://example.test/v{version}/',
+      artifacts: {'macos-arm64': LockArtifact(file: 'lib.dylib', sha256: 'ab')},
+    );
+    // A project's lock as `fynkel project lock` writes it: no store.
+    final plain = RuntimeLock.parse('{"runtime": {"version": "1.2.3", "abiVersion": 1}}');
+    expect(plain.store, isNull);
+    expect(plain.artifacts, isEmpty);
+    expect(package.under(plain).artifactUrl('macos-arm64'), Uri.parse('https://example.test/v1.2.3/lib.dylib'));
+    expect(package.under(null), same(package));
+    // A mirror: the project's store, the package's libraries.
+    const mirror = RuntimeLock(runtimeVersion: '1.2.3', abiVersion: 1, store: 'file:///store/runtime/{version}/');
+    expect(package.under(mirror).artifactUrl('macos-arm64'), Uri.parse('file:///store/runtime/1.2.3/lib.dylib'));
+    // Another runtime or ABI: refused, naming both versions.
+    expect(
+      () => package.under(const RuntimeLock(runtimeVersion: '1.2.2', abiVersion: 1)),
+      throwsA(isA<FormatException>().having((e) => e.message, 'message', allOf(contains('1.2.2'), contains('1.2.3')))),
+    );
+    expect(() => package.under(const RuntimeLock(runtimeVersion: '1.2.3', abiVersion: 2)), throwsFormatException);
+    // Without a store nothing downloads.
+    expect(const RuntimeLock(runtimeVersion: '1', abiVersion: 1, artifacts: {'k': LockArtifact(file: 'f', sha256: 'ab')})
+        .artifactUrl('k'), isNull);
+  });
+
   test('lock file rejects malformed entries', () {
     expect(() => RuntimeLock.parse('[]'), throwsFormatException);
-    expect(
-      () => RuntimeLock.parse('{"runtime_version": "", "abi_version": 1, "release_base_url": "", "artifacts": {}}'),
-      throwsFormatException,
-    );
+    expect(() => RuntimeLock.parse('{"runtime": {"version": "", "abiVersion": 1}}'), throwsFormatException);
+    expect(() => RuntimeLock.parse('{"runtime": {"version": "1", "abiVersion": 1, "store": ""}}'), throwsFormatException);
     expect(
       () => RuntimeLock.parse(
-        '{"runtime_version": "1", "abi_version": 1, "release_base_url": "", '
-        '"artifacts": {"macos-arm64": {"file": "x", "sha256": "nothex"}}}',
+        '{"runtime": {"version": "1", "abiVersion": 1, "store": "x", '
+        '"artifacts": {"macos-arm64": {"file": "x", "sha256": "nothex"}}}}',
       ),
       throwsFormatException,
     );
     expect(
       () => RuntimeLock.parse(
-        '{"runtime_version": "1", "abi_version": 1, "release_base_url": "", '
-        '"artifacts": {"macos-arm64": {"sha256": null}}}',
+        '{"runtime": {"version": "1", "abiVersion": 1, "store": "x", "artifacts": {"macos-arm64": {"sha256": null}}}}',
       ),
+      throwsFormatException,
+    );
+    // The old snake_case hook lock is gone (ADR-0029 §4, one lock shape).
+    expect(
+      () => RuntimeLock.parse('{"runtime_version": "1", "abi_version": 1, "release_base_url": "", "artifacts": {}}'),
       throwsFormatException,
     );
   });
@@ -110,6 +144,7 @@ void main() {
   test('the shipped lock file is valid and pins ABI v1', () {
     final lock = RuntimeLock.parse(File('fynkel.lock.json').readAsStringSync());
     expect(lock.abiVersion, 1);
+    expect(lock.store, contains('{version}'));
     expect(lock.artifacts.keys, containsAll(['macos-arm64', 'macos-x64', 'ios-arm64', 'ios-simulator-arm64']));
   });
 }

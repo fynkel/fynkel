@@ -93,58 +93,90 @@ class LockArtifact {
   bool get isPublished => sha256 != null && sha256!.isNotEmpty;
 }
 
-/// `fynkel.lock.json` (blueprint §13.5), the parts the build hook needs.
+/// `fynkel.lock.json` (blueprint §13.5; ADR-0029 §4, one lock shape), the
+/// parts the build hook needs: `runtime.version`, `runtime.abiVersion` and,
+/// in `package:fynkel`'s own lock, `runtime.store` with a prebuilt library
+/// per target. A project's lock has the same shape and usually no store.
 class RuntimeLock {
   const RuntimeLock({
     required this.runtimeVersion,
     required this.abiVersion,
-    required this.releaseBaseUrl,
-    required this.artifacts,
+    this.store,
+    this.artifacts = const {},
   });
 
   final String runtimeVersion;
   final int abiVersion;
 
-  /// May contain `{version}`, substituted with [runtimeVersion].
-  final String releaseBaseUrl;
+  /// The release store's base URL; `{version}` is replaced with
+  /// [runtimeVersion]. Null: nothing to download.
+  final String? store;
   final Map<String, LockArtifact> artifacts;
 
   static RuntimeLock parse(String json) {
     final root = jsonDecode(json);
     if (root is! Map<String, dynamic>) throw const FormatException('fynkel.lock.json: expected an object');
-    final version = root['runtime_version'];
-    if (version is! String || version.isEmpty) {
-      throw const FormatException('fynkel.lock.json: "runtime_version" must be a non-empty string');
+    final runtime = root['runtime'];
+    if (runtime is! Map<String, dynamic>) {
+      throw const FormatException('fynkel.lock.json: "runtime" must be an object');
     }
-    final abi = root['abi_version'];
-    if (abi is! int) throw const FormatException('fynkel.lock.json: "abi_version" must be an integer');
-    final base = root['release_base_url'];
-    if (base is! String) throw const FormatException('fynkel.lock.json: "release_base_url" must be a string');
-    final rawArtifacts = root['artifacts'];
+    final version = runtime['version'];
+    if (version is! String || version.isEmpty) {
+      throw const FormatException('fynkel.lock.json: "runtime.version" must be a non-empty string');
+    }
+    final abi = runtime['abiVersion'];
+    if (abi is! int) throw const FormatException('fynkel.lock.json: "runtime.abiVersion" must be an integer');
+    final store = runtime['store'];
+    if (store != null && (store is! String || store.isEmpty)) {
+      throw const FormatException('fynkel.lock.json: "runtime.store" must be a non-empty string');
+    }
+    final rawArtifacts = runtime['artifacts'] ?? const <String, dynamic>{};
     if (rawArtifacts is! Map<String, dynamic>) {
-      throw const FormatException('fynkel.lock.json: "artifacts" must be an object keyed by target');
+      throw const FormatException('fynkel.lock.json: "runtime.artifacts" must be an object keyed by target');
     }
     final artifacts = <String, LockArtifact>{};
     for (final entry in rawArtifacts.entries) {
       final v = entry.value;
       if (v is! Map<String, dynamic> || v['file'] is! String) {
-        throw FormatException('fynkel.lock.json: artifacts.${entry.key} needs a "file" string');
+        throw FormatException('fynkel.lock.json: runtime.artifacts.${entry.key} needs a "file" string');
       }
       final sha = v['sha256'];
       if (sha != null && (sha is! String || !_isSha256(sha))) {
-        throw FormatException('fynkel.lock.json: artifacts.${entry.key}.sha256 must be 64 hex chars or null');
+        throw FormatException('fynkel.lock.json: runtime.artifacts.${entry.key}.sha256 must be 64 hex chars or null');
       }
       artifacts[entry.key] = LockArtifact(file: v['file'] as String, sha256: (sha as String?)?.toLowerCase());
     }
-    return RuntimeLock(runtimeVersion: version, abiVersion: abi, releaseBaseUrl: base, artifacts: artifacts);
+    return RuntimeLock(runtimeVersion: version, abiVersion: abi, store: store as String?, artifacts: artifacts);
+  }
+
+  /// The lock the hook downloads with: `package:fynkel`'s ([this]) under
+  /// the game's [project] lock. The project pins the runtime, so its
+  /// version and ABI must be the package's; a store it names replaces the
+  /// package's (a mirror), and so do its libraries when it lists any.
+  RuntimeLock under(RuntimeLock? project) {
+    if (project == null) return this;
+    if (project.runtimeVersion != runtimeVersion || project.abiVersion != abiVersion) {
+      throw FormatException(
+          "the project's fynkel.lock.json pins runtime ${project.runtimeVersion} (ABI ${project.abiVersion}), "
+          'but package:fynkel $runtimeVersion (ABI $abiVersion) is the one resolved. '
+          'Depend on fynkel ${project.runtimeVersion} in pubspec.yaml, or run `fynkel project lock` '
+          'once you mean to move the project to $runtimeVersion.');
+    }
+    return RuntimeLock(
+      runtimeVersion: runtimeVersion,
+      abiVersion: abiVersion,
+      store: project.store ?? store,
+      artifacts: project.artifacts.isEmpty ? artifacts : project.artifacts,
+    );
   }
 
   /// Download URL for [key], or null when the lock has no published artifact.
   Uri? artifactUrl(String key) {
     final a = artifacts[key];
-    if (a == null || !a.isPublished) return null;
-    final base = releaseBaseUrl.replaceAll('{version}', runtimeVersion);
-    return Uri.parse(base.endsWith('/') ? base : '$base/').resolve(a.file);
+    final base = store;
+    if (a == null || !a.isPublished || base == null) return null;
+    final dir = base.replaceAll('{version}', runtimeVersion);
+    return Uri.parse(dir.endsWith('/') ? dir : '$dir/').resolve(a.file);
   }
 
   static bool _isSha256(String s) => s.length == 64 && RegExp(r'^[0-9a-fA-F]+$').hasMatch(s);

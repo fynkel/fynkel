@@ -6,8 +6,10 @@
 //   1. `hooks.user_defines.fynkel.native_lib` — an explicit library path.
 //   2. Fynkel source checkout (this package lives inside the Cargo workspace)
 //      — always `cargo build` so the runtime matches the working tree.
-//   3. Prebuilt artifact from the release store named by fynkel.lock.json,
-//      SHA-256 verified, cached in the shared output directory.
+//   3. Prebuilt artifact from the release store named by fynkel.lock.json
+//      (this package's; the game's own lock pins the same runtime and may
+//      name another store), SHA-256 verified, cached in the shared output
+//      directory. `http(s)://` or `file://`.
 //   4. `cargo build` from the vendored source when a Rust toolchain exists and
 //      the artifact is unpublished, or `build_from_source: true` is set.
 //
@@ -18,11 +20,11 @@
 //   hooks:
 //     user_defines:
 //       fynkel:
-//         lock_file: fynkel.lock.json   # project runtime pin (default: the package's)
 //         build_from_source: true       # skip the download
 //         native_lib: path/to/lib.dylib # use this library as-is
 //         features: [authoring]         # cargo features (the editor; never a game)
-//         project: .                    # the game's fynkel.project.json directory:
+//         project: .                    # the game's directory (fynkel.project.json,
+//                                       # fynkel.lock.json): its lock pins the runtime,
 //                                       # `modules.strip` leaves its off modules out
 //
 // Hooks run with a stripped environment (only PATH/HOME and a few tool
@@ -49,11 +51,12 @@ void main(List<String> args) async {
     final log = _Log(input.packageName);
 
     final lock = _loadLock(input, output);
+    final project = _project(input, output);
     final workspace = _sourceWorkspace(input.packageRoot);
     final userLib = input.userDefines.path('native_lib');
     final forceSource = _flag(input, 'build_from_source');
     final userFeatures = _features(input);
-    final modules = _modules(input, output, log);
+    final modules = _modules(project, log);
     final features = [...userFeatures, ...modules];
     final stripped = moduleFeatures.where((m) => !modules.contains(m)).toList();
 
@@ -70,13 +73,19 @@ void main(List<String> args) async {
       built = await _cargoBuild(workspace, crate, os, arch, iosSdk, features, output, log);
       source = RuntimeSource.workspace;
     } else {
-      final url = lock.artifactUrl(key);
+      final RuntimeLock pinned;
+      try {
+        pinned = lock.under(project?.lock);
+      } on FormatException catch (e) {
+        throw _fail('${project!.dir.toFilePath()}fynkel.lock.json: ${e.message}');
+      }
+      final url = pinned.artifactUrl(key);
       final cargo = _findCargo();
       // The published artifacts are game runtimes with every module and no
       // optional feature: an app that asks for one, or strips a module,
       // builds from source.
       if (url != null && !forceSource && userFeatures.isEmpty && stripped.isEmpty) {
-        built = await _download(input, lock, key, url, log);
+        built = await _download(input, pinned, key, url, log);
         source = RuntimeSource.prebuilt;
       } else if (cargo != null) {
         final vendored = _vendoredWorkspace(input.packageRoot);
@@ -88,7 +97,7 @@ void main(List<String> args) async {
         source = RuntimeSource.cargoFallback;
       } else {
         final why = url == null
-            ? 'fynkel.lock.json has no published artifact for target "$key" (runtime ${lock.runtimeVersion})'
+            ? 'fynkel.lock.json has no published artifact for target "$key" (runtime ${pinned.runtimeVersion})'
             : userFeatures.isNotEmpty
                 ? 'hooks.user_defines.fynkel.features (${userFeatures.join(', ')}) are not in the prebuilt runtime'
                 : stripped.isNotEmpty
@@ -119,19 +128,55 @@ void main(List<String> args) async {
 
 // ---- lock file -------------------------------------------------------------
 
+/// This package's lock: the runtime it was released with and its store.
 RuntimeLock _loadLock(BuildInput input, BuildOutputBuilder output) {
-  final override = input.userDefines.path('lock_file');
-  final uri = override ?? input.packageRoot.resolve('fynkel.lock.json');
+  final uri = input.packageRoot.resolve('fynkel.lock.json');
   final file = File.fromUri(uri);
-  if (!file.existsSync()) {
-    throw _fail('${uri.toFilePath()} not found (hooks.user_defines.fynkel.lock_file${override == null ? ' is unset' : ''}).');
-  }
+  if (!file.existsSync()) throw _fail('${uri.toFilePath()} not found.');
   output.dependencies.add(uri);
   try {
     return RuntimeLock.parse(file.readAsStringSync());
   } on FormatException catch (e) {
     throw _fail('${uri.toFilePath()}: ${e.message}');
   }
+}
+
+/// The game named by `hooks.user_defines.fynkel.project`: its project file
+/// (for the modules) and its lock (the runtime it pins), when it has one.
+class _Project {
+  _Project(this.dir, this.json, this.lock);
+  final Uri dir;
+  final Map<String, Object?>? json;
+  final RuntimeLock? lock;
+}
+
+_Project? _project(BuildInput input, BuildOutputBuilder output) {
+  final path = input.userDefines.path('project');
+  if (path == null) return null;
+  // `Directory.uri` ends in a slash, so the files resolve inside it.
+  final dir = Directory.fromUri(path).uri;
+  final file = File.fromUri(dir.resolve('fynkel.project.json'));
+  if (!file.existsSync()) {
+    throw _fail('hooks.user_defines.fynkel.project: ${file.path} not found.');
+  }
+  output.dependencies.add(file.uri);
+  final Object? json;
+  try {
+    json = jsonDecode(file.readAsStringSync());
+  } on FormatException catch (e) {
+    throw _fail('${file.path}: ${e.message}');
+  }
+  RuntimeLock? lock;
+  final lockFile = File.fromUri(dir.resolve('fynkel.lock.json'));
+  if (lockFile.existsSync()) {
+    output.dependencies.add(lockFile.uri);
+    try {
+      lock = RuntimeLock.parse(lockFile.readAsStringSync());
+    } on FormatException catch (e) {
+      throw _fail('${lockFile.path}: ${e.message}');
+    }
+  }
+  return _Project(dir, json is Map ? json.cast<String, Object?>() : null, lock);
 }
 
 bool _flag(BuildInput input, String key) {
@@ -144,25 +189,12 @@ bool _flag(BuildInput input, String key) {
 /// unless `hooks.user_defines.fynkel.project` names a project whose
 /// `modules.strip` is true — then its off modules are left out, and the
 /// hook says so before building.
-List<String> _modules(BuildInput input, BuildOutputBuilder output, _Log log) {
-  final dir = input.userDefines.path('project');
-  if (dir == null) return moduleFeatures;
-  // `Directory.uri` ends in a slash, so the file resolves inside it.
-  final file = File.fromUri(Directory.fromUri(dir).uri.resolve('fynkel.project.json'));
-  if (!file.existsSync()) {
-    throw _fail('hooks.user_defines.fynkel.project: ${file.path} not found.');
-  }
-  output.dependencies.add(file.uri);
-  final Object? json;
-  try {
-    json = jsonDecode(file.readAsStringSync());
-  } on FormatException catch (e) {
-    throw _fail('${file.path}: ${e.message}');
-  }
-  final modules = moduleFeaturesFor(json is Map ? json.cast<String, Object?>() : null);
+List<String> _modules(_Project? project, _Log log) {
+  final modules = moduleFeaturesFor(project?.json);
   final stripped = moduleFeatures.where((m) => !modules.contains(m)).toList();
   if (stripped.isNotEmpty) {
-    log.info('modules.strip: the runtime leaves out ${stripped.join(', ')} (${file.path} turns them off)');
+    log.info('modules.strip: the runtime leaves out ${stripped.join(', ')} '
+        '(${project!.dir.toFilePath()}fynkel.project.json turns them off)');
   }
   return modules;
 }
@@ -292,6 +324,17 @@ Future<Uri> _download(BuildInput input, RuntimeLock lock, String key, Uri url, _
   final cached = File.fromUri(cacheDir.resolve(artifact.file));
   if (cached.existsSync() && await _sha256(cached) == artifact.sha256) {
     log.info('using cached ${cached.path}');
+    return cached.uri;
+  }
+  if (url.scheme == 'file') {
+    // A release store on disk (the local rehearsal, an offline mirror).
+    final source = File.fromUri(url);
+    if (!source.existsSync()) throw _fail('the release store has no ${url.toFilePath()}.');
+    if (await _sha256(source) != artifact.sha256) {
+      throw _fail('checksum mismatch for $url: expected ${artifact.sha256}. Refusing to use it.');
+    }
+    log.info('copying $url');
+    await source.copy(cached.path);
     return cached.uri;
   }
   log.info('downloading $url');

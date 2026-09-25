@@ -15,9 +15,11 @@ The hook resolves the library in this order:
    `cargo build --release -p fynkel_platform_apple` (macOS) or
    `-p fynkel_native` (other targets), cross-compiling with `--target` when
    the requested architecture is not the host's.
-3. Prebuilt artifact for the target named in `fynkel.lock.json`, downloaded
-   from the release store, SHA-256 verified, cached under the shared hook
-   output directory.
+3. Prebuilt artifact for the target named in this package's
+   `fynkel.lock.json`, downloaded from its release store (`http(s)://` or
+   `file://`), SHA-256 verified, cached under the shared hook output
+   directory. The game's own lock (through `project`) pins the same runtime
+   version and may name another store.
 4. `cargo build` from source vendored next to the package when a Rust
    toolchain exists and the artifact is unpublished or
    `build_from_source: true`.
@@ -31,11 +33,18 @@ Configure in the app's `pubspec.yaml`:
 hooks:
   user_defines:
     fynkel:
-      lock_file: fynkel.lock.json   # project runtime pin; default: the package's
+      project: .                    # the game: its lock pins the runtime, its modules.strip strips
       build_from_source: true       # skip the download
       native_lib: path/to/libfynkel_platform_apple.dylib
       features: [authoring]         # cargo features of the runtime — the editor only, never a game
 ```
+
+`project` names the game's directory (`fynkel create` writes `.`). The
+hook reads its `fynkel.lock.json`: a runtime version or ABI other than this
+package's stops a prebuilt download with the fix named (depend on the
+pinned version, or `fynkel project lock`). It also reads
+`fynkel.project.json`: with `modules.strip: true` the modules the project
+turns off are left out of a runtime built from source (ADR-0029).
 
 `features` opts into cargo features of the native crates; the hook always
 builds with `--no-default-features` and adds exactly what is listed, so a
@@ -48,7 +57,12 @@ Hooks run with a stripped environment (only `PATH`, `HOME` and a few tool
 variables survive), which is why these are user-defines rather than
 environment variables.
 
-`fynkel.lock.json` pins `runtime_version`, `abi_version`, the release URL
-template and per-target artifacts (`<os>[-simulator]-<arch>` → file +
-sha256). Until release CI publishes artifacts every entry is unpublished
-(`sha256: null`), so the hook builds from source.
+`fynkel.lock.json` has a project lock's shape (ADR-0029 §4, one lock
+shape; `schemas/lock.schema.json`, kept matching the build by
+`fynkel_document`'s `package_fynkel_ships_its_lock_in_the_project_shape`)
+and its `runtime` also names the release store (`store`, `{version}`
+replaced) and the per-target artifacts (`<os>[-simulator]-<arch>` → file +
+sha256). Nothing is published, so every entry here is `sha256: null` and the
+hook builds from source; the local release store
+(`tools/release_store.py`) writes the checksums into its copy of the
+package.

@@ -1,14 +1,59 @@
 {
-  "$comment": "Native runtime pin for package:fynkel (ADR-0015, blueprint §13.5). A game project overrides this with its own fynkel.lock.json via `hooks.user_defines.fynkel.lock_file`. No release store publishes artifacts yet: every entry is unpublished (no sha256), so the hook builds from source (dev checkout or Rust toolchain) until release CI fills these in.",
-  "runtime_version": "0.0.1",
-  "abi_version": 1,
-  "schema_fingerprint": "0xc9dc361258a0c148",
-  "release_base_url": "https://github.com/mooumari/fynkelengine/releases/download/runtime-v{version}/",
-  "artifacts": {
-    "macos-arm64": { "file": "libfynkel_platform_apple-macos-arm64.dylib", "sha256": null },
-    "macos-x64": { "file": "libfynkel_platform_apple-macos-x64.dylib", "sha256": null },
-    "ios-arm64": { "file": "libfynkel_platform_apple-ios-arm64.dylib", "sha256": null },
-    "ios-simulator-arm64": { "file": "libfynkel_platform_apple-ios-simulator-arm64.dylib", "sha256": null },
-    "ios-simulator-x64": { "file": "libfynkel_platform_apple-ios-simulator-x64.dylib", "sha256": null }
+  "$schema": "https://fynkel.dev/schemas/lock.schema.json",
+  "formatVersion": 1,
+  "runtime": {
+    "version": "0.0.1",
+    "abiVersion": 1,
+    "store": "https://github.com/mooumari/fynkel/releases/download/runtime-v{version}/",
+    "artifacts": {
+      "ios-arm64": {
+        "file": "libfynkel_platform_apple-ios-arm64.dylib",
+        "sha256": null
+      },
+      "ios-simulator-arm64": {
+        "file": "libfynkel_platform_apple-ios-simulator-arm64.dylib",
+        "sha256": null
+      },
+      "ios-simulator-x64": {
+        "file": "libfynkel_platform_apple-ios-simulator-x64.dylib",
+        "sha256": null
+      },
+      "macos-arm64": {
+        "file": "libfynkel_platform_apple-macos-arm64.dylib",
+        "sha256": null
+      },
+      "macos-x64": {
+        "file": "libfynkel_platform_apple-macos-x64.dylib",
+        "sha256": null
+      }
+    }
+  },
+  "tools": {
+    "version": "0.0.1"
+  },
+  "schemaFingerprint": "0xc9dc361258a0c148",
+  "documents": {
+    "blend": 1,
+    "data": 1,
+    "material": 2,
+    "meta": 2,
+    "physics_material": 1,
+    "prefab": 5,
+    "project": 2,
+    "rig": 1,
+    "scene": 5,
+    "shader": 1,
+    "volume": 1
+  },
+  "importers": {
+    "fynkel.audio": 2,
+    "fynkel.fbx": 4,
+    "fynkel.file": 1,
+    "fynkel.gltf": 8,
+    "fynkel.image": 1
+  },
+  "cache": {
+    "version": 8,
+    "container": 1
   }
 }
