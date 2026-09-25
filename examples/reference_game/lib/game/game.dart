@@ -16,24 +16,25 @@
 
 import 'package:fynkel/fynkel.dart';
 
+import '../generated/assets.g.dart';
 import '../generated/behaviours.g.dart';
 import 'game_state.dart';
 
 /// The Menu scene (assets/scenes/menu.scene.json): the project's startup
 /// scene, the title's backdrop.
-const menuScene = '65905281-dc97-58ac-8d21-f5fbbac251a9';
+final menuScene = Assets.scenes.menu;
 
 /// The Playground scene (assets/scenes/playground.scene.json): the level.
-const playgroundScene = 'bca5eecb-c8d8-58fe-825c-5fce41819bf1';
+final playgroundScene = Assets.scenes.playground;
 
 /// The Results scene (assets/scenes/results.scene.json): it plays the win
 /// jingle from its load.
-const resultsScene = '8ac37ea4-2149-55a2-b535-802e54715bea';
+final resultsScene = Assets.scenes.results;
 
 /// The menus' button click (assets/audio/click.ogg, Kenney), played by
 /// the app on the presentation lane (`world.audio.play(clickSound,
 /// presentation: true)`), outside the ticks.
-const clickSound = AssetRef('a716d781-e657-4de4-a9b7-aeda36a941fa');
+final clickSound = Assets.audio.click;
 
 /// Seconds the win banner stays before the Results scene takes over
 /// (`Player` counts them in ticks).
@@ -41,7 +42,7 @@ const winDelay = 1.5;
 
 /// The burst of sparks a coin leaves (assets/prefabs/burst.prefab.json),
 /// spawned at runtime by `Collectible`.
-const burstPrefab = '88641ff3-d525-5d0b-b21f-226ee8e246a8';
+final burstPrefab = Assets.prefabs.burst;
 
 /// The project's tags (fynkel.project.json `tags`, ADR-0020): the Player
 /// carries [playerTag], every coin [pickupTag].
@@ -97,11 +98,12 @@ class Game {
   /// the frame that performs the transition), read by the overlay.
   void _onScene(SceneState s) {
     if (s != SceneState.ready) return;
-    state.screen.value = switch (scenes.current) {
-      playgroundScene => Screen.playing,
-      resultsScene => Screen.results,
-      _ => Screen.menu,
-    };
+    final current = scenes.current;
+    state.screen.value = current == playgroundScene.asset
+        ? Screen.playing
+        : current == resultsScene.asset
+        ? Screen.results
+        : Screen.menu;
   }
 
   /// The user's settings service (`world.context.settings`).

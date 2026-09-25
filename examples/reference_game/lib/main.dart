@@ -227,7 +227,7 @@ class _GamePageState extends State<GamePage> {
       // The editor's Play (or FYNKEL_SCENE): the open scene instead of the
       // Menu — the Playground as a fresh run, anything else as it is.
       final start = launch.startScene;
-      if (start == playgroundScene) {
+      if (start == playgroundScene.asset) {
         _game!.play();
       } else if (start != null && start != _game!.scenes.current) {
         _game!.scenes.transition(start);
