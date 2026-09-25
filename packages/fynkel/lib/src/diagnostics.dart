@@ -5,6 +5,7 @@ import '../generated/schema.g.dart' as gen;
 import 'animation.dart';
 import 'audio.dart';
 import 'layers.dart';
+import 'modules.dart';
 import 'physics.dart';
 
 /// True in debug mode (asserts enabled), false in profile/release.
@@ -36,7 +37,8 @@ enum DiagnosticCode {
   skinUnavailable(17),
   soundUnavailable(18),
   audioDevice(19),
-  snapshotBudget(20);
+  snapshotBudget(20),
+  moduleOff(21);
 
   const DiagnosticCode(this.value);
   final int value;
@@ -417,6 +419,7 @@ class LoadReport {
     this.mode,
     this.scenes = const [],
     this.loadMs = 0,
+    this.modules,
   });
 
   factory LoadReport.fromJson(Map<String, Object?> j) {
@@ -460,6 +463,7 @@ class LoadReport {
         for (final s in (j['scenes'] as List?) ?? const []) LoadedScene.fromJson((s as Map).cast<String, Object?>()),
       ],
       loadMs: ((j['timing'] as Map?)?['ms'] as num?)?.toDouble() ?? 0,
+      modules: j['modules'] is Map ? Modules.fromJson((j['modules'] as Map).cast<String, Object?>()) : null,
     );
   }
 
@@ -467,6 +471,11 @@ class LoadReport {
   final List<LoadDiagnostic> diagnostics;
   final String? sceneId;
   final String? sceneName;
+
+  /// The optional modules the world runs after this load (the project's
+  /// `modules`, ADR-0029); null for a report that does not say
+  /// (`bindActions`).
+  final Modules? modules;
 
   /// `replace` or `additive` for a scene load (M3-12); null for a report
   /// that loaded no scene (`bindActions`).
@@ -567,6 +576,7 @@ class LoadReport {
         mode: mode,
         scenes: scenes,
         loadMs: loadMs,
+        modules: modules,
       );
 
   /// This report after the SDK attached [attached] behaviours and found

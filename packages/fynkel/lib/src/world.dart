@@ -22,6 +22,7 @@ import 'gizmos.dart';
 import 'input.dart';
 import 'layers.dart';
 import 'mesh_data.dart';
+import 'modules.dart';
 import 'native/bridge.dart';
 import 'physics.dart';
 import 'settings.dart';
@@ -135,6 +136,12 @@ class World {
   /// The project's layers and tags from the last `loadProject` (ADR-0020);
   /// `default` and no tags before a load. [layerMask] reads the names.
   LayersAndTags layersAndTags = const LayersAndTags();
+
+  /// The optional modules the loaded project runs (ADR-0029): every one
+  /// before a load. A module the project turns off (`modules` in
+  /// `fynkel.project.json`) does not run, and the calls into it throw a
+  /// [StateError] — `world.modules.has(Module.audio)` answers first.
+  Modules modules = Modules.all;
 
   /// The audio engine (M3-11): `audio.open()` for the device, `audio.play`
   /// for a fire-and-forget sound, `audio.setBus` / `applySettings` for the
@@ -1060,6 +1067,7 @@ class World {
   /// Every collider along a ray, nearest first, at most [maxHits].
   List<PhysicsHit> raycastAll(Vec3 origin, Vec3 direction,
       {double maxDistance = 1000, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false, int maxHits = 16}) {
+    modules.require(Module.physics, 'raycast');
     _physicsQueries.clear();
     _physicsQueries.add(gen.PhysicsQueryRecord(
       id: _nextQueryId++,
@@ -1087,6 +1095,7 @@ class World {
       int mask = 0xffffffff,
       GameObject? exclude,
       bool hitSensors = false}) {
+    modules.require(Module.physics, 'shapeCast');
     _physicsQueries.clear();
     _physicsQueries.add(gen.PhysicsQueryRecord(
       id: _nextQueryId++,
@@ -1109,6 +1118,7 @@ class World {
   /// [origin] (distance 0, normal zero).
   List<PhysicsHit> overlap(gen.ColliderShape shape, Vec3 size, Vec3 origin,
       {Quat rotation = Quat.identity, int mask = 0xffffffff, GameObject? exclude, bool hitSensors = false, int maxHits = 16}) {
+    modules.require(Module.physics, 'overlap');
     _physicsQueries.clear();
     _physicsQueries.add(gen.PhysicsQueryRecord(
       id: _nextQueryId++,
@@ -1130,6 +1140,7 @@ class World {
   /// Several queries in one FFI call: the hits of every record, in query
   /// order (`PhysicsHitRecord.query` echoes each record's `id`).
   List<gen.PhysicsHitRecord> physicsQuery(List<gen.PhysicsQueryRecord> queries) {
+    modules.require(Module.physics, 'physicsQuery');
     _physicsQueries.clear();
     queries.forEach(_physicsQueries.add);
     final length = _physicsQueries.finalize();
@@ -1256,6 +1267,7 @@ class World {
           layersAndTags = report.layersAndTags;
         }
         if (op != 'bindActions') _loadedScenes = report.scenes;
+        if (report.modules case final m?) modules = m;
         report = _attachAuthoredBehaviours(report);
         if (EditorChannel.enabled) _loadedForEditor(report, op);
         if (report.warnings.isNotEmpty) onLoadDiagnostics(report.warnings.toList(growable: false));
@@ -1665,6 +1677,7 @@ class AudioSystem {
       double pitch = 1,
       int priority = 0,
       bool presentation = false}) {
+    _world.modules.require(Module.audio, 'audio.play');
     if (presentation) {
       _world._presentation.playSound(clip, bus: bus, volume: volume, pitch: pitch, priority: priority);
       _world._presentationTargets.add(null);
@@ -1680,6 +1693,7 @@ class AudioSystem {
   /// scales every other one; [muted] silences everything and is the same
   /// switch for every bus.
   void setBus(gen.AudioBus bus, double volume, {bool muted = false}) {
+    _world.modules.require(Module.audio, 'audio.setBus');
     _stageBus(bus, volume, muted);
     _world.flushPresentation();
   }
@@ -1691,7 +1705,11 @@ class AudioSystem {
 
   /// Applies a settings document's gains and mute switch to the buses,
   /// at once (`SettingsStore.attach` does it on every change).
+  ///
+  /// A no-op when the project turns the audio module off: the settings
+  /// keep their volumes, nothing hears them.
   void applySettings(SettingsDocument settings) {
+    if (!_world.modules.audio) return;
     _stageBus(gen.AudioBus.master, settings.masterVolume, settings.muted);
     _stageBus(gen.AudioBus.music, settings.musicVolume, settings.muted);
     _stageBus(gen.AudioBus.sfx, settings.sfxVolume, settings.muted);
@@ -2404,6 +2422,7 @@ class GameObject {
   /// whose body was `add`ed in the same batch: the tick creates the body,
   /// then applies the command.
   void _body(gen.BodyOp op, Vec3 v, [Quat q = Quat.identity]) {
+    world.modules.require(Module.physics, 'body command ${op.name}');
     final e = _simulationEntity('body command');
     world._simulation.body(e, op, v.x, v.y, v.z, q.x, q.y, q.z, q.w);
     world._simulationTargets.add(this);
@@ -2475,6 +2494,7 @@ class GameObject {
       bool looping = true,
       double value = 0,
       String name = ''}) {
+    world.modules.require(Module.animation, 'animation command ${op.name}');
     final e = _simulationEntity('animation command');
     world._simulation
         .animate(e, op, clip: clip, seconds: seconds, speed: speed, looping: looping, value: value, name: name);
@@ -2492,6 +2512,7 @@ class GameObject {
   AudioControl? _audioControl;
 
   void _audio(gen.AudioOp op, {double value = 0}) {
+    world.modules.require(Module.audio, 'audio command ${op.name}');
     final e = _simulationEntity('audio command');
     world._simulation.audio(e, op, value: value);
     world._simulationTargets.add(this);

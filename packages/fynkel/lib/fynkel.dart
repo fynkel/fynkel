@@ -82,6 +82,7 @@ export 'src/input.dart';
 export 'src/layers.dart';
 export 'src/mesh_data.dart';
 export 'src/model.dart';
+export 'src/modules.dart';
 export 'src/physics.dart' show BodyState, CharacterState, PhysicsHit, PhysicsSettings;
 export 'src/systems.dart';
 export 'src/recording.dart';
