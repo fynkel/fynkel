@@ -2,6 +2,7 @@
 
 **Status:** Accepted (2026-09-21, with M4 item 4 — the Inspector; proposed the same day at the start of M4)  
 **Date:** 2026-09-21  
+**Superseded in part:** §2 and §3 by ADR-0028 (editor extensions, accepted 2026-09-25); §1 and the amendments stand.  
 **Related:** ADR-0012 (committed codegen metadata), ADR-0016 (the editor never executes game code), `docs/blueprint.md` §11.2, §19.2e; `docs/design/editor-ux.md` §22.6; `docs/ideas.md` §23.6
 
 ## Context

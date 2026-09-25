@@ -74,7 +74,10 @@ Three ADRs, then their implementation:
 1. **Editor extensions in Dart** (reopens ADR-0018 now that ADR-0021
    compiles the game into the editor): custom Inspectors, property
    drawers, editor windows, menu items; `editor/` code never ships in a
-   game build.
+   game build. **ADR-0028 accepted 2026-09-25**: a package's
+   editor part (`lib/editor/editor.dart`'s `registerEditor`, through
+   `package:fynkel_editor_api`), so the package work (item 3) builds on
+   it.
 2. **`@DataAsset`** (Unity's ScriptableObject): a Dart class becomes an
    asset type with a schema, an Inspector page, references by id, a
    cooked form. **ADR-0027 accepted 2026-09-25; built first**, ahead of

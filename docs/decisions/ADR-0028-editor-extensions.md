@@ -1,6 +1,6 @@
 # ADR-0028: Editor extensions — a package's editor part, in Dart
 
-**Status:** Proposed — by the assistant 2026-09-25, for the user's review  
+**Status:** Accepted — proposed by the assistant 2026-09-25, confirmed by the user 2026-09-25 ("Amazing. I accept it. Let's go.")  
 **Date:** 2026-09-25  
 **Supersedes:** ADR-0018 §2 ("no custom Inspector widgets, no custom windows, no editor scripts in 1.0") and §3 (a plugin SDK after 1.0, the reserved `capabilities: ["editor"]` manifest). ADR-0018 §1 (declarative hints) and its amendments stand.  
 **Related:** ADR-0016 (the authoring service; documents change only through it), ADR-0017 (automation: stable command ids), ADR-0019 (declarative gizmos), ADR-0021 (the game compiled into its project editor, hot reload), ADR-0026 (code-first building: `ObjectSpec`), ADR-0027 (data assets, records), `docs/roadmap.md` Phase 3 items 1 and 3, `docs/ideas.md` §23.6
