@@ -250,6 +250,77 @@ void main() {
     expect(gizmoProblem(const GizmoSpec(shape: 'cone', angle: 'length'), cone, fields), contains('another'));
   });
 
+  test('List<T> (ADR-0027 §5): each item converted both ways, the item hints on the items schema', () {
+    const wave = BehaviourClass(
+      id: 'game.Wave',
+      version: 1,
+      className: 'Wave',
+      libraryUri: 'package:demo/wave.dart',
+      fields: [
+        ExposedField(
+          name: 'delays',
+          kind: FieldKind.list,
+          item: FieldKind.number,
+          defaultValue: [0.5, 1.0],
+          hasDefault: true,
+          min: 0,
+          unit: 's',
+          label: 'Delays',
+        ),
+        ExposedField(name: 'counts', kind: FieldKind.list, item: FieldKind.integer, nullable: true),
+        ExposedField(name: 'names', kind: FieldKind.list, item: FieldKind.string),
+        ExposedField(name: 'turns', kind: FieldKind.list, item: FieldKind.quat),
+        ExposedField(name: 'sounds', kind: FieldKind.list, item: FieldKind.assetRef, displayKind: 'asset(audio)'),
+        ExposedField(
+          name: 'modes',
+          kind: FieldKind.list,
+          item: FieldKind.enumeration,
+          typeLibrary: 'package:demo/modes.dart',
+          typeName: 'Mode',
+          enumValues: ['idle', 'aim'],
+        ),
+      ],
+    );
+    final src = emitDart('demo', [wave]);
+    const w = '(b as _lib1.Wave)';
+    expect(src, contains('get: (b) => $w.delays.cast<Object?>().toList()'), reason: 'a copy, never the live list');
+    expect(src, contains('$w.delays = [for (final x in v as List) _double(x)]'));
+    expect(src, contains('get: (b) => $w.counts?.cast<Object?>().toList()'));
+    expect(src, contains('$w.counts = v == null ? null : [for (final x in v as List) _int(x)]'));
+    expect(src, contains('$w.names = [for (final x in v as List) x as String]'));
+    expect(src, contains('get: (b) => [for (final x in $w.turns) _quatJson(x)]'));
+    expect(src, contains('$w.turns = [for (final x in v as List) _quat(x)]'));
+    expect(src, contains('get: (b) => [for (final x in $w.sounds) _assetRefJson(x)]'));
+    expect(src, contains('$w.sounds = [for (final x in v as List) _assetRef(x)]'));
+    expect(src, contains('get: (b) => [for (final x in $w.modes) x.name]'));
+    expect(src, contains('for (final x in v as List) _lib0.Mode.values.byName(x as String)'));
+    expect(src, isNot(contains('_orNull')), reason: 'a nullable list converts inline');
+
+    final p = schemaFor(wave)['properties'] as Map<String, Object?>;
+    expect(p['delays'], {
+      'type': 'array',
+      'items': {
+        'type': 'number',
+        'minimum': 0,
+        'x-fynkel': {'type': 'number', 'min': 0, 'unit': 's'},
+      },
+      'default': [0.5, 1.0],
+      'x-fynkel': {'type': 'list', 'label': 'Delays', 'items': 'number'},
+    });
+    expect((p['counts'] as Map)['type'], ['array', 'null']);
+    expect((p['turns'] as Map)['items'], containsPair('minItems', 4));
+    expect((p['sounds'] as Map)['items'], {
+      r'$ref': r'https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef',
+      'x-fynkel': {'type': 'assetRef', 'kind': 'asset(audio)'},
+    });
+    expect((p['sounds'] as Map)['x-fynkel'], {'type': 'list', 'items': 'assetRef'},
+        reason: "the kind hint is the item's, or the Inspector would take the list for one asset");
+    expect((p['modes'] as Map)['items'], containsPair('enum', ['idle', 'aim']));
+
+    expect(exposeKindProblem('asset(audio)', FieldKind.assetRef), isNull);
+    expect(exposeKindProblem('asset(physics_material)', FieldKind.assetRef), isNull);
+  });
+
   test('emitJson: metadata plus schema per type, sorted, JSON-parseable', () {
     final text = emitJson('demo', [spinner, blinker]);
     final doc = jsonDecode(text) as Map<String, Object?>;

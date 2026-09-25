@@ -10,6 +10,40 @@ import 'package:spinner_game/spinner.dart' as _lib0;
 BehaviourType get gameBlinkerType =>
     BehaviourType(id: 'game.Blinker', version: 2, create: _lib0.Blinker.new, fields: const []);
 
+/// `game.Chime` v1 → [_lib0.Chime].
+BehaviourType get gameChimeType => BehaviourType(
+  id: 'game.Chime',
+  version: 1,
+  create: _lib0.Chime.new,
+  fields: [
+    BehaviourField(
+      name: 'delays',
+      type: 'list',
+      defaultValue: const [0.5, 1.0],
+      min: 0,
+      step: 0.1,
+      get: (b) => (b as _lib0.Chime).delays.cast<Object?>().toList(),
+      set: (b, v) => (b as _lib0.Chime).delays = [for (final x in v as List) _double(x)],
+    ),
+    BehaviourField(
+      name: 'moods',
+      type: 'list',
+      defaultValue: const ['soft'],
+      get: (b) => [for (final x in (b as _lib0.Chime).moods) x.name],
+      set: (b, v) => (b as _lib0.Chime).moods = [
+        for (final x in v as List) _lib0.ChimeMood.values.byName(x as String),
+      ],
+    ),
+    BehaviourField(
+      name: 'sounds',
+      type: 'list',
+      defaultValue: const [],
+      get: (b) => [for (final x in (b as _lib0.Chime).sounds) _assetRefJson(x)],
+      set: (b, v) => (b as _lib0.Chime).sounds = [for (final x in v as List) _assetRef(x)],
+    ),
+  ],
+);
+
 /// `game.Patrol` v1 → [_lib0.Patrol].
 BehaviourType get gamePatrolType => BehaviourType(
   id: 'game.Patrol',
@@ -90,7 +124,7 @@ BehaviourType get gameSpinnerType => BehaviourType(
 
 /// Every `@FynkelBehaviour` type of package `spinner_game`, by id.
 List<BehaviourType> get behaviourTypes =>
-    List.unmodifiable([gameBlinkerType, gamePatrolType, gameSpinnerType]);
+    List.unmodifiable([gameBlinkerType, gameChimeType, gamePatrolType, gameSpinnerType]);
 
 /// Registers every type of this package in [registry].
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {

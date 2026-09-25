@@ -40,7 +40,14 @@ enum FieldKind {
 
   /// A `@FynkelBehaviour` class, nullable ↔ `{ "entity": id, "component":
   /// id }` (`behaviour`): that script on an object of the scene.
-  behaviour('behaviour');
+  behaviour('behaviour'),
+
+  /// `List<T>` ↔ a JSON array of T's JSON (`list`), for T one of
+  /// [listItems] (ADR-0027 §5); `List<Vec3>` stays [vec3List].
+  list('list');
+
+  /// The kinds a [list] may hold.
+  static const listItems = [number, integer, boolean, string, quat, assetRef, enumeration];
 
   const FieldKind(this.typeName);
 
@@ -60,6 +67,7 @@ enum FieldKind {
         FieldKind.enumeration => 'an enum',
         FieldKind.gameObject => 'GameObject?',
         FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
+        FieldKind.list => 'List<T> (T one of double, int, bool, String, Quat, AssetRef, an enum)',
       };
 
   /// A reference to an object of the scene, resolved at load.
@@ -100,6 +108,7 @@ class ExposedField {
     this.typeName,
     this.enumValues = const [],
     this.behaviourId,
+    this.item,
   });
 
   /// The Dart field name; also the JSON/scene field name.
@@ -149,9 +158,33 @@ class ExposedField {
   /// The type id of the script a [FieldKind.behaviour] field references.
   final String? behaviourId;
 
+  /// A [FieldKind.list]'s item kind (one of [FieldKind.listItems]); an
+  /// enum item's class is [typeName], its values [enumValues]. The
+  /// display hints (`kind`, `min`, `max`, `step`, `unit`) describe each
+  /// item.
+  final FieldKind? item;
+
   /// The `x-fynkel` hints beyond the type, in a fixed key order (what the
   /// schema and the metadata both carry).
-  Map<String, Object?> get hints => {
+  Map<String, Object?> get hints => item != null ? _listHints : _hints;
+
+  /// A list's own hints: the item's go on its `items`.
+  Map<String, Object?> get _listHints => {
+        for (final e in _hints.entries)
+          if (!const {'min', 'max', 'step', 'unit', 'kind'}.contains(e.key)) e.key: e.value,
+        'items': item!.typeName,
+      };
+
+  /// An item's hints, for a list's `items` schema.
+  Map<String, Object?> get itemHints => {
+        if (min != null) 'min': min,
+        if (max != null) 'max': max,
+        if (step != null) 'step': step,
+        if (unit != null) 'unit': unit,
+        if (displayKind != null) 'kind': displayKind,
+      };
+
+  Map<String, Object?> get _hints => {
         if (label != null) 'label': label,
         if (tooltip != null) 'tooltip': tooltip,
         if (min != null) 'min': min,
@@ -232,12 +265,24 @@ String? gizmoProblem(GizmoSpec g, ExposedField field, List<ExposedField> sibling
 }
 
 /// The asset kinds `@Expose(kind: 'asset(<kind>)')` accepts.
-const exposeAssetKinds = ['texture', 'material', 'mesh', 'prefab', 'scene', 'audio', 'clip', 'skin', 'rig'];
+const exposeAssetKinds = [
+  'texture',
+  'material',
+  'mesh',
+  'prefab',
+  'scene',
+  'audio',
+  'clip',
+  'skin',
+  'rig',
+  'volume',
+  'physics_material',
+];
 
 /// Checks an `@Expose(kind:)` value against the field's type; returns the
 /// problem, or null when it fits. Pure, so the builder and its tests share it.
 String? exposeKindProblem(String kind, FieldKind type) {
-  final asset = RegExp(r'^asset\(([a-z]+)\)$').firstMatch(kind);
+  final asset = RegExp(r'^asset\(([a-z_]+)\)$').firstMatch(kind);
   if (asset != null) {
     if (type != FieldKind.assetRef) return "kind '$kind' needs an AssetRef field";
     if (!exposeAssetKinds.contains(asset.group(1))) {

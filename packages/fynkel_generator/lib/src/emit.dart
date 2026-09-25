@@ -61,7 +61,8 @@ String emitDart(String package, List<BehaviourClass> classes) {
   for (final c in sorted) {
     for (final f in c.fields) {
       kinds.add(f.kind);
-      anyNullable |= f.nullable && !f.kind.isReference;
+      if (f.item != null) kinds.add(f.item!);
+      anyNullable |= f.nullable && !f.kind.isReference && f.kind != FieldKind.list;
     }
   }
 
@@ -199,14 +200,38 @@ String _getter(ExposedField f, String cls) {
     FieldKind.vec3List => '_vec3ListJson($read)',
     FieldKind.enumeration => f.nullable ? '$read?.name' : '$read.name',
     FieldKind.gameObject || FieldKind.behaviour => 'referenceJson($read)',
+    FieldKind.list => switch (f.item!) {
+        FieldKind.quat => _listJson(f, read, '_quatJson(x)'),
+        FieldKind.assetRef => _listJson(f, read, '_assetRefJson(x)'),
+        FieldKind.enumeration => _listJson(f, read, 'x.name'),
+        _ => f.nullable ? '$read?.cast<Object?>().toList()' : '$read.cast<Object?>().toList()',
+      },
     _ => read,
   };
 }
+
+/// A list field's JSON: a fresh array of each item's JSON.
+String _listJson(ExposedField f, String read, String item) =>
+    f.nullable ? '$read?.map((x) => $item).toList()' : '[for (final x in $read) $item]';
 
 /// [type]: the enum's or the referenced script's class, prefixed.
 String _setter(ExposedField f, String? type) {
   // References arrive resolved (BehaviourField.isReference).
   if (f.kind.isReference) return 'v as ${type ?? 'GameObject'}?';
+  if (f.kind == FieldKind.list) {
+    final item = switch (f.item!) {
+      FieldKind.number => '_double(x)',
+      FieldKind.integer => '_int(x)',
+      FieldKind.boolean => 'x as bool',
+      FieldKind.string => 'x as String',
+      FieldKind.quat => '_quat(x)',
+      FieldKind.assetRef => '_assetRef(x)',
+      FieldKind.enumeration => '$type.values.byName(x as String)',
+      final k => throw StateError('not a list item: $k'),
+    };
+    final list = '[for (final x in v as List) $item]';
+    return f.nullable ? 'v == null ? null : $list' : list;
+  }
   final convert = switch (f.kind) {
     FieldKind.number => '_double',
     FieldKind.integer => '_int',
@@ -217,7 +242,7 @@ String _setter(ExposedField f, String? type) {
     FieldKind.assetRef => '_assetRef',
     FieldKind.vec3List => '_vec3List',
     FieldKind.enumeration => '(v) => $type.values.byName(v as String)',
-    FieldKind.gameObject || FieldKind.behaviour => throw StateError('unreachable'),
+    FieldKind.gameObject || FieldKind.behaviour || FieldKind.list => throw StateError('unreachable'),
   };
   if (f.nullable) return '_orNull(v, $convert)';
   return switch (f.kind) {
@@ -305,6 +330,19 @@ Map<String, Object?> _propertySchema(ExposedField f) {
         'minItems': 3,
         'maxItems': 3,
       };
+    case FieldKind.list:
+      s['type'] = f.nullable ? ['array', 'null'] : 'array';
+      final item = ExposedField(
+        name: f.name,
+        kind: f.item!,
+        min: f.min,
+        max: f.max,
+        step: f.step,
+        unit: f.unit,
+        displayKind: f.displayKind,
+        enumValues: f.enumValues,
+      );
+      s['items'] = _propertySchema(item)..['x-fynkel'] = {'type': item.kind.typeName, ...f.itemHints};
     case FieldKind.enumeration:
       s['type'] = f.nullable ? ['string', 'null'] : 'string';
       s['enum'] = [...f.enumValues, if (f.nullable) null];

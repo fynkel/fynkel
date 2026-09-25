@@ -93,3 +93,39 @@ class Patrol extends Behaviour {
     transform.position += to.normalized * math.min(speed * context.dt, to.length);
   }
 }
+
+/// How a [Chime] sounds.
+enum ChimeMood { soft, bright }
+
+/// Counts through [delays], one chime each, then starts over; shows the
+/// `List<T>` fields (ADR-0027 §5): the Inspector adds, removes and
+/// reorders their items.
+@FynkelBehaviour(id: 'game.Chime', icon: 'notifications', category: 'Audio')
+class Chime extends Behaviour {
+  /// Seconds before each chime, in order.
+  @Expose(min: 0, step: 0.1, unit: 's')
+  List<double> delays = [0.5, 1];
+
+  /// The sound of each chime (for the Inspector; unused).
+  @Expose(kind: 'asset(audio)')
+  List<AssetRef> sounds = [];
+
+  /// The mood of each chime (for the Inspector; unused).
+  @Expose()
+  List<ChimeMood> moods = [ChimeMood.soft];
+
+  /// Chimes so far (not authored).
+  int chimes = 0;
+  double _wait = 0;
+
+  @override
+  void fixedUpdate(FixedUpdateContext context) {
+    if (delays.isEmpty) return;
+    _wait += context.dt;
+    final delay = delays[chimes % delays.length];
+    if (_wait >= delay) {
+      _wait -= delay;
+      chimes++;
+    }
+  }
+}

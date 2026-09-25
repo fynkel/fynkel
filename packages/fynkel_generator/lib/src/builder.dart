@@ -207,11 +207,16 @@ Future<ExposedField> _readField(
     );
   }
   final nullable = type.nullabilitySuffix == NullabilitySuffix.question;
+  // A list's item: what it holds decides the rest (an enum's values).
+  final itemType = kind == FieldKind.list ? (type as InterfaceType).typeArguments.single : null;
+  final item = itemType == null ? null : _kindOf(itemType);
+  final described = itemType ?? type;
+  final describedKind = item ?? kind;
   // An enum's values, a referenced script's class and type id.
   String? typeLibrary, typeName, behaviourId;
   var enumValues = const <String>[];
-  if (kind == FieldKind.enumeration || kind == FieldKind.behaviour) {
-    final element = (type as InterfaceType).element;
+  if (describedKind == FieldKind.enumeration || describedKind == FieldKind.behaviour) {
+    final element = (described as InterfaceType).element;
     typeLibrary = element.library.uri.toString();
     typeName = element.name;
     if (element.isPrivate) {
@@ -250,7 +255,7 @@ Future<ExposedField> _readField(
   if (node is VariableDeclaration) {
     final init = node.initializer;
     if (init != null) {
-      final v = _literal(init, kind);
+      final v = _literal(init, kind, item: item);
       if (v != null) {
         defaultValue = v.value;
         hasDefault = true;
@@ -260,7 +265,7 @@ Future<ExposedField> _readField(
   if (hasDefault && defaultValue == null && !nullable) hasDefault = false;
   final hintKind = expose.peek('kind')?.stringValue;
   if (hintKind != null) {
-    final problem = exposeKindProblem(hintKind, kind);
+    final problem = exposeKindProblem(hintKind, describedKind);
     if (problem != null) throw BehaviourGenerationError('@Expose: $problem', library: libraryUri, member: member);
   }
   final order = expose.peek('order');
@@ -308,6 +313,7 @@ Future<ExposedField> _readField(
     typeName: typeName,
     enumValues: enumValues,
     behaviourId: behaviourId,
+    item: item,
   );
 }
 
@@ -339,8 +345,10 @@ FieldKind? _kindOf(DartType type) {
   }
   if (lib.isScheme('dart') && lib.path == 'core' && name == 'List') {
     final item = type.typeArguments.single;
-    if (item.nullabilitySuffix == NullabilitySuffix.none && _kindOf(item) == FieldKind.vec3) return FieldKind.vec3List;
-    return null;
+    if (item.nullabilitySuffix != NullabilitySuffix.none) return null;
+    final kind = _kindOf(item);
+    if (kind == FieldKind.vec3) return FieldKind.vec3List;
+    return FieldKind.listItems.contains(kind) ? FieldKind.list : null;
   }
   if (lib.isScheme('package') && lib.pathSegments.first == 'fynkel') {
     return switch (name) {
@@ -362,7 +370,7 @@ class _Literal {
   final Object? value;
 }
 
-_Literal? _literal(Expression e, FieldKind kind) {
+_Literal? _literal(Expression e, FieldKind kind, {FieldKind? item}) {
   if (e is NullLiteral) return const _Literal(null);
   if (e is ParenthesizedExpression) return _literal(e.expression, kind);
   switch (kind) {
@@ -400,6 +408,16 @@ _Literal? _literal(Expression e, FieldKind kind) {
     case FieldKind.gameObject:
     case FieldKind.behaviour:
       return null;
+    case FieldKind.list:
+      if (e is! ListLiteral || item == null) return null;
+      final items = <Object?>[];
+      for (final element in e.elements) {
+        if (element is! Expression) return null;
+        final v = _literal(element, item);
+        if (v == null || v.value == null) return null;
+        items.add(v.value);
+      }
+      return _Literal(items);
     case FieldKind.vec3List:
       if (e is! ListLiteral) return null;
       final points = <Object?>[];

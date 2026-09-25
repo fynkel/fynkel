@@ -27,7 +27,7 @@ void main() {
   });
 
   test('generated registration covers every @FynkelBehaviour class', () {
-    expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Patrol', 'game.Spinner']);
+    expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Chime', 'game.Patrol', 'game.Spinner']);
     expect(gameSpinnerType.version, 1);
     expect(gameBlinkerType.version, 2);
     expect(gameSpinnerType.fields.map((f) => f.name), ['axis', 'showcase', 'speed', 'spinning']);
@@ -71,6 +71,35 @@ void main() {
     expect(() => registry.instantiate('game.Spinner', fields: {'axis': [1, 2]}), throwsA(isA<BehaviourDataError>()));
     expect(() => registry.instantiate('game.Spinner', fields: {'nope': 1}), throwsA(isA<BehaviourDataError>()));
     expect(() => registry.instantiate('game.Spinner', version: 2), throwsA(isA<BehaviourDataError>()));
+  });
+
+  test('List<T> fields round-trip, each item converted, the JSON a copy', () {
+    final registry = BehaviourRegistry()..registerAll(behaviourTypes);
+    final delays = gameChimeType.field('delays')!;
+    expect(delays.type, 'list');
+    expect(delays.defaultValue, [0.5, 1.0]);
+    expect(gameChimeType.field('moods')!.defaultValue, ['soft']);
+    final c = registry.instantiate('game.Chime', fields: {
+      'delays': [1, 2.5],
+      'moods': ['bright', 'soft'],
+      'sounds': [
+        {'asset': 'c0000000-0000-4000-8000-000000000002'},
+      ],
+    }) as Chime;
+    expect(c.delays, [1.0, 2.5]);
+    expect(c.moods, [ChimeMood.bright, ChimeMood.soft]);
+    expect(c.sounds, [const AssetRef('c0000000-0000-4000-8000-000000000002')]);
+    final json = delays.get(c) as List;
+    expect(json, [1.0, 2.5]);
+    json.add(9);
+    expect(c.delays, hasLength(2), reason: 'the JSON is a copy');
+    expect(gameChimeType.field('moods')!.get(c), ['bright', 'soft']);
+    expect(gameChimeType.field('sounds')!.get(c), [
+      {'asset': 'c0000000-0000-4000-8000-000000000002'},
+    ]);
+    c.delays.add(3); // a set list is growable
+    expect(() => registry.instantiate('game.Chime', fields: {'moods': ['loud']}), throwsA(isA<BehaviourDataError>()));
+    expect(() => registry.instantiate('game.Chime', fields: {'delays': 1}), throwsA(isA<BehaviourDataError>()));
   });
 
   test('a List<Vec3> field (a @Gizmo.path) round-trips', () {
@@ -148,7 +177,7 @@ void main() {
     final r = w.loadProject(fixture, cacheDir: cache);
     expect(r.ok, isTrue);
     expect(r.behavioursAttached, 0);
-    expect(r.entityCount, 7);
+    expect(r.entityCount, 6, reason: 'a prefab instance is its root (ADR-0022)');
     expect(warnings.map((d) => d.code), ['FYN-B0001']);
     expect(warnings.single.pointer, endsWith('/components/c0000000-0000-4000-8000-0000000000c2'));
     expect(w.behaviours, isEmpty);
