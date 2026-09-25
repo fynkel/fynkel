@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 
+import 'assets.dart';
 import 'context.dart';
+import 'scene.dart';
 
 /// What `registerEditor` is given: one package's way into the editor. The
 /// editor calls every package's `registerEditor` at start and after every
@@ -35,5 +37,58 @@ abstract interface class EditorExtensions {
     bool Function(EditorContext context)? enabled,
     SingleActivator? shortcut,
     String? description,
+  });
+
+  /// A window (Unity's `EditorWindow`): a panel the user docks anywhere,
+  /// whose place the layout keeps across restarts and hot reloads.
+  ///
+  /// [id] is its stable id, dotted like a menu item's (`game.levelTools`).
+  /// [menu] is the menu path that shows it (`Tools/Level Tools`); by
+  /// default `Window/<title>`. [build] draws it with the editor's theme and
+  /// runs again whenever the scene, the selection or the assets change, so
+  /// what it reads from [EditorContext] is current. A throw in [build] is
+  /// shown in the window's frame and logged in the Console.
+  void window(
+    String id, {
+    required String title,
+    String? menu,
+    IconData? icon,
+    required Widget Function(BuildContext context, EditorContext editor) build,
+  });
+
+  /// An entry in the Hierarchy's context menu (Unity's `GameObject/` menu
+  /// items on a right click): [run] gets the selected objects. With
+  /// [withComponent] (`game.Collectible`) it is offered only when every
+  /// selected object has one; [enabled] greys it out.
+  void hierarchyMenuItem(
+    String label, {
+    required String id,
+    String? withComponent,
+    required void Function(EditorContext context, List<EditorObject> objects) run,
+    bool Function(EditorContext context, List<EditorObject> objects)? enabled,
+  });
+
+  /// An entry in the Project panel's context menu (Unity's `Assets/` menu
+  /// items): [run] gets the selected assets. With [kind] (`prefab`) or
+  /// [dataType] (`game.CoinKind`) it is offered only when every selected
+  /// asset is one; [enabled] greys it out.
+  void projectMenuItem(
+    String label, {
+    required String id,
+    String? kind,
+    String? dataType,
+    required void Function(EditorContext context, List<EditorAsset> assets) run,
+    bool Function(EditorContext context, List<EditorAsset> assets)? enabled,
+  });
+
+  /// An entry in the ⋮ menu of the Inspector's [type] cards (Unity's
+  /// `CONTEXT/<Type>/` items and `[ContextMenu]`): [run] gets the objects
+  /// the Inspector shows, each with a [type] component.
+  void componentMenuItem(
+    String type,
+    String label, {
+    required String id,
+    required void Function(EditorContext context, List<EditorObject> objects) run,
+    bool Function(EditorContext context, List<EditorObject> objects)? enabled,
   });
 }

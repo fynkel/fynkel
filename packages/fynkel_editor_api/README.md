@@ -41,6 +41,12 @@ editor.menuItem(
 );
 ```
 
+`editor.window(...)` adds a dockable window whose `build` gets the
+context and runs again when the scene, the selection or the assets
+change. `hierarchyMenuItem`, `projectMenuItem` and `componentMenuItem`
+add entries to the Hierarchy's, the Project panel's and a component
+card's context menus.
+
 The rules:
 
 - Only files under `lib/editor/` import this package or `lib/editor/`
