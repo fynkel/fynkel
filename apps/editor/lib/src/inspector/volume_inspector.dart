@@ -1,6 +1,7 @@
 // A volume profile's overrides on its Inspector page, edited in place as
 // in Unity's Volume Profile Inspector: one card per override the profile
-// holds (Ambient Occlusion, Bloom), Add Override for the others, and a
+// holds (Ambient Occlusion, Bloom, Color Grading), Add Override for the
+// others, and a
 // checkbox in front of every field — ticked, the profile sets it; not
 // ticked, it is inherited (the engine default shows greyed). Every change
 // is one undo step, saved at once ([AssetEdits]); a label being dragged
@@ -14,8 +15,17 @@ import 'asset_edits.dart';
 import 'field_widgets.dart';
 import 'inspector_chrome.dart';
 
+/// How a field is edited: a number, a colour, three numbers (R, G, B) or
+/// one of [_choices].
+enum _Kind { number, color, rgb, choice }
+
 /// One field of an override: its key, label, engine default and range.
-typedef _Field = ({String key, String label, Object fallback, num? min, num? max, String tooltip});
+typedef _Field = ({String key, String label, _Kind kind, Object fallback, num? min, num? max, String tooltip});
+
+/// The values of a [_Kind.choice] field, and what each reads as.
+const Map<String, Map<String, String>> _choices = {
+  'tonemapper': {'aces': 'ACES', 'neutral': 'Neutral', 'none': 'None'},
+};
 
 /// The overrides a profile can hold, in the order Add Override lists
 /// them, with their fields (`schemas/volume.schema.json`).
@@ -27,6 +37,7 @@ const List<({String key, String title, List<_Field> fields})> volumeOverrides = 
       (
         key: 'intensity',
         label: 'Intensity',
+        kind: _Kind.number,
         fallback: 0,
         min: 0,
         max: 8,
@@ -35,6 +46,7 @@ const List<({String key, String title, List<_Field> fields})> volumeOverrides = 
       (
         key: 'radius',
         label: 'Radius',
+        kind: _Kind.number,
         fallback: 0.6,
         min: 0.01,
         max: 10,
@@ -49,6 +61,7 @@ const List<({String key, String title, List<_Field> fields})> volumeOverrides = 
       (
         key: 'intensity',
         label: 'Intensity',
+        kind: _Kind.number,
         fallback: 0,
         min: 0,
         max: 10,
@@ -57,6 +70,7 @@ const List<({String key, String title, List<_Field> fields})> volumeOverrides = 
       (
         key: 'threshold',
         label: 'Threshold',
+        kind: _Kind.number,
         fallback: 0.9,
         min: 0,
         max: 20,
@@ -65,6 +79,7 @@ const List<({String key, String title, List<_Field> fields})> volumeOverrides = 
       (
         key: 'scatter',
         label: 'Scatter',
+        kind: _Kind.number,
         fallback: 0.7,
         min: 0,
         max: 1,
@@ -73,10 +88,117 @@ const List<({String key, String title, List<_Field> fields})> volumeOverrides = 
       (
         key: 'tint',
         label: 'Tint',
+        kind: _Kind.color,
         fallback: [1, 1, 1],
         min: null,
         max: null,
         tooltip: 'A colour multiplied into the glow.',
+      ),
+    ],
+  ),
+  (
+    key: 'colorGrading',
+    title: 'Color Grading',
+    fields: [
+      (
+        key: 'tonemapper',
+        label: 'Tonemapper',
+        kind: _Kind.choice,
+        fallback: 'aces',
+        min: null,
+        max: null,
+        tooltip:
+            'How the scene\'s light fits the screen: ACES is filmic, Neutral keeps the colours, None clamps at white.',
+      ),
+      (
+        key: 'postExposure',
+        label: 'Post Exposure',
+        kind: _Kind.number,
+        fallback: 0,
+        min: -10,
+        max: 10,
+        tooltip: 'Stops added to the camera\'s exposure.',
+      ),
+      (
+        key: 'temperature',
+        label: 'Temperature',
+        kind: _Kind.number,
+        fallback: 0,
+        min: -100,
+        max: 100,
+        tooltip: 'White balance: negative is cooler (bluer), positive warmer (yellower).',
+      ),
+      (
+        key: 'tint',
+        label: 'Tint',
+        kind: _Kind.number,
+        fallback: 0,
+        min: -100,
+        max: 100,
+        tooltip: 'White balance: negative toward green, positive toward magenta.',
+      ),
+      (
+        key: 'contrast',
+        label: 'Contrast',
+        kind: _Kind.number,
+        fallback: 0,
+        min: -100,
+        max: 100,
+        tooltip: 'Spreads (positive) or gathers (negative) the tones around middle grey.',
+      ),
+      (
+        key: 'saturation',
+        label: 'Saturation',
+        kind: _Kind.number,
+        fallback: 0,
+        min: -100,
+        max: 100,
+        tooltip: '-100 is grey, 100 twice as vivid.',
+      ),
+      (
+        key: 'hueShift',
+        label: 'Hue Shift',
+        kind: _Kind.number,
+        fallback: 0,
+        min: -180,
+        max: 180,
+        tooltip: 'Degrees every hue is turned round the colour wheel.',
+      ),
+      (
+        key: 'colorFilter',
+        label: 'Color Filter',
+        kind: _Kind.color,
+        fallback: [1, 1, 1],
+        min: null,
+        max: null,
+        tooltip: 'A colour multiplied into the whole picture.',
+      ),
+      (
+        key: 'lift',
+        label: 'Lift',
+        kind: _Kind.rgb,
+        fallback: [0, 0, 0],
+        min: -1,
+        max: 1,
+        tooltip: 'Per channel: raises (or lowers) the darks; white stays.',
+      ),
+      (
+        key: 'gamma',
+        label: 'Gamma',
+        kind: _Kind.rgb,
+        fallback: [1, 1, 1],
+        min: 0.01,
+        max: 10,
+        tooltip: 'Per channel: above 1 brightens the midtones, below 1 darkens them.',
+      ),
+      (
+        key: 'gain',
+        label: 'Gain',
+        kind: _Kind.rgb,
+        fallback: [1, 1, 1],
+        min: 0,
+        max: 4,
+        tooltip: 'Per channel: scales the brights.',
       ),
     ],
   ),
@@ -270,8 +392,42 @@ class _VolumeInspectorState extends State<VolumeInspector> {
     final enabled = edits.canEditAsset(id) && ticked;
     final value = current[x.key] ?? x.fallback;
     final Widget field;
-    if (value is List || x.fallback is List) {
-      final rgb = value is List ? [for (final v in value) (v as num?) ?? 0] : (x.fallback as List).cast<num>();
+    final rgb = value is List && value.length == 3
+        ? [for (final v in value) v is num ? v : 0]
+        : (x.fallback is List ? (x.fallback as List).cast<num>() : const <num>[]);
+    if (x.kind == _Kind.choice) {
+      final names = _choices[x.key]!;
+      field = FieldRow(
+        label: x.label,
+        tooltip: x.tooltip,
+        child: EnumField(
+          value: value is String ? value : x.fallback as String,
+          values: names.keys.toList(),
+          display: (v) => names[v] ?? v,
+          enabled: enabled,
+          onCommit: (v) => _set(block, {x.key: v}),
+        ),
+      );
+    } else if (x.kind == _Kind.rgb) {
+      field = FieldRow(
+        label: x.label,
+        tooltip: x.tooltip,
+        child: VecField(
+          value: rgb,
+          components: 3,
+          names: const ['R', 'G', 'B'],
+          step: 0.01,
+          min: x.min,
+          max: x.max,
+          enabled: enabled,
+          onCommitComponent: (i, v) => _set(block, {
+            x.key: [for (var c = 0; c < 3; c++) c == i ? v : rgb[c]],
+          }),
+          onPreviewComponent: (i, v) =>
+              _show(block, current, x.key, v == null ? null : [for (var c = 0; c < 3; c++) c == i ? v : rgb[c]]),
+        ),
+      );
+    } else if (x.kind == _Kind.color) {
       field = FieldRow(
         label: x.label,
         tooltip: x.tooltip,
@@ -289,7 +445,8 @@ class _VolumeInspectorState extends State<VolumeInspector> {
         value: value is num ? value : x.fallback as num,
         min: x.min,
         max: x.max,
-        step: 0.01,
+        // A −100..100 control moves in whole steps.
+        step: (x.max ?? 1) - (x.min ?? 0) > 20 ? 1 : 0.01,
         slider: true,
         enabled: enabled,
         onCommit: (v) => _set(block, {x.key: v}),

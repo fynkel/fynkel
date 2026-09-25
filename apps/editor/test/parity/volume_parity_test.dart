@@ -109,6 +109,50 @@ void main() {
     expect((saved(e)['bloom'] as Map).containsKey('threshold'), isFalse, reason: '⇧⌘Z redoes');
   });
 
+  testWidgets('Color Grading: added as an override, a tone mapper picked, numbers and a channel typed', (tester) async {
+    final (e, look) = await onLook(tester);
+    final drawn = e.shell.scene!.current!.preview!;
+    expect(find.byKey(const Key('volume.colorGrading')), findsNothing, reason: 'a new profile has no grade');
+
+    await reveal(tester, find.byKey(const Key('volume.addOverride')));
+    await e.click(find.byKey(const Key('volume.addOverride')));
+    await e.click(find.byKey(const Key('volume.add.colorGrading')));
+    expect(saved(e)['colorGrading'], <String, Object?>{});
+    expect(ticked(tester, 'colorGrading.tonemapper'), isFalse);
+
+    // The tone mapper: ticked (ACES, the default, written), then Neutral.
+    await reveal(tester, tick('colorGrading.tonemapper'));
+    await e.click(tick('colorGrading.tonemapper'));
+    expect(saved(e)['colorGrading'], {'tonemapper': 'aces'});
+    await e.click(inRow('colorGrading.tonemapper', find.byType(EnumField)));
+    await e.click(find.text('Neutral').last);
+    expect((saved(e)['colorGrading'] as Map)['tonemapper'], 'neutral');
+
+    // Saturation, and Lift's blue channel alone.
+    await reveal(tester, tick('colorGrading.saturation'));
+    await e.click(tick('colorGrading.saturation'));
+    await typeInto(e, 'colorGrading.saturation', '-40');
+    await reveal(tester, tick('colorGrading.lift'));
+    await e.click(tick('colorGrading.lift'));
+    final blue = inRow(
+      'colorGrading.lift',
+      find.descendant(of: find.byKey(const ValueKey('vec.2')), matching: find.byKey(const ValueKey('number.text'))),
+    );
+    await reveal(tester, blue);
+    await e.click(blue);
+    await e.type('0.2');
+    await e.submit();
+    expect(saved(e)['colorGrading'], {
+      'tonemapper': 'neutral',
+      'saturation': -40,
+      'lift': [0, 0, 0.2],
+    });
+    final grade = drawn.volume(look)['colorGrading'] as Map;
+    expect(grade['tonemapper'], 'neutral', reason: 'the Scene view draws the grade');
+    expect(grade['saturation'], -40.0);
+    expect((grade['lift'] as List).map((v) => (v as num).toDouble()), [0.0, 0.0, closeTo(0.2, 1e-6)]);
+  });
+
   testWidgets('a global volume with the profile: the bloom set in the Inspector is in the rendered picture', (
     tester,
   ) async {
