@@ -109,7 +109,10 @@ Three ADRs, then their implementation:
    the primitives stay built in) done 2026-09-25; step 4 (the example
    package `examples/packages/pickups`: `Pickup`, `PickupKind`, the pickup
    prefab and material, an editor part; code_only's gem is its prefab)
-   done 2026-09-25.
+   done 2026-09-25; step 5 (modules: `fynkel_animation`, the cargo
+   features and `modules.strip`, `FYN-P0018`/`R0014`, `world.modules`,
+   Project ▸ Modules…, the sizes in the ADR; code_only plays with
+   animation off and stripped) done 2026-09-25.
 
 ## Phase 4 — Rendering resumes
 

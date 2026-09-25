@@ -631,6 +631,20 @@ in the dialog) while one of those documents has unsaved edits. The open
 documents it rewrote are re-read, and ⌥⌘Z (the asset undo) puts
 everything back.
 
+**Project ▸ Tags and Layers… and Project ▸ Modules…** (ADR-0029 step 5).
+The first opens the same dialog from the menu bar. The second
+(`project/modules_dialog.dart`) shows physics, audio and animation as
+check boxes, each with what it runs and its components, and **Leave
+modules that are off out of the build** (`modules.strip`). Apply is enabled
+only when something differs and sends one `setModules`
+(`EditorProject.setModules`), which writes only what differs from the
+defaults into `fynkel.project.json` and is undone with ⌥⌘Z. Turning a
+module off warns that its components stay in the scenes and prefabs:
+Validate reports each (`FYN-P0018`) until it is removed or the module is
+back on, and Add Component stops offering them (the session's
+`allowsComponent`). Both commands need an open project whose assets can be
+edited; neither has a shortcut.
+
 **The codegen banner.** Two signals, cheapest first: *committed drift* —
 the metadata's inline schemas compared with the `schemas/behaviours/`
 files the session loaded (instant, no process; `committedDrift`) — and the

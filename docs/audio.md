@@ -55,6 +55,15 @@ tick *n* — deterministic, so `fynkel test --headless` reports the same
 tick decided. The two drift by at most a callback buffer; nothing depends
 on the device's clock.
 
+**An optional module** (ADR-0029). A project can turn audio off
+(`modules.audio: false` in `fynkel.project.json`, Project ▸ Modules… in the
+editor). Then the system is skipped, its commands are rejected with
+`MODULE_OFF` (`FYN-R0014`), `AudioSource` and `AudioListener` in a scene or prefab are
+`FYN-P0018`, and from Dart `world.audio.play`, `setBus` and `GameObject.audio` (`applySettings` keeps the volumes quietly) throw a `StateError` naming the module
+(`world.modules.has(Module.audio)` answers first). With `modules.strip: true`
+a runtime built from source also leaves out the mixer, rtrb, symphonia and cpal; the types stay, so the
+contract is the same in every build.
+
 ## Components
 
 Both are ordinary native components (`fynkel_core::schema::ALL`, the

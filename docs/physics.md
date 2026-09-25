@@ -9,6 +9,15 @@ entity, shapes are metres, masses kilograms, layers are names from the
 project file (an object's layer is its own, ADR-0020 — not the collider's), and everything a game does goes through the same
 commands, queries and events every other native system uses.
 
+**An optional module** (ADR-0029). A project can turn physics off
+(`modules.physics: false` in `fynkel.project.json`, Project ▸ Modules… in the
+editor). Then the system is skipped, its commands are rejected with
+`MODULE_OFF` (`FYN-R0014`), `RigidBody`, `Collider` and `CharacterController` in a scene or prefab are
+`FYN-P0018`, and from Dart the body and character commands, `raycast`, `raycastAll`, `shapeCast`, `overlap` and `physicsQuery` throw a `StateError` naming the module
+(`world.modules.has(Module.physics)` answers first). With `modules.strip: true`
+a runtime built from source also leaves out Rapier; the types stay, so the
+contract is the same in every build.
+
 ## Components
 
 All are ordinary native components: schema-generated, scene-validated,

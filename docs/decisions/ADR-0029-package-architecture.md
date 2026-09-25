@@ -142,6 +142,22 @@ What Fynkel has (mapped 2026-09-25):
      release, macOS arm64) is built with each module left out, and the
      sizes are recorded in this ADR. The numbers inform the docs; they
      decide nothing.
+
+     Measured 2026-09-25 (step 5; `cargo build --release -p
+     fynkel_platform_apple --no-default-features --features=…`, Rust
+     1.93, the dylib as built and with `strip -x` as an app ships it;
+     bytes):
+
+     | Modules in the build | Built | `strip -x` | Saved (stripped) |
+     |---|---|---|---|
+     | physics, audio, animation | 18,266,976 | 13,285,512 | — |
+     | without physics (Rapier) | 16,392,944 | 11,878,080 | 1.41 MB (10.6 %) |
+     | without audio (mixer, rtrb, symphonia, cpal) | 17,108,896 | 12,487,552 | 0.80 MB (6.0 %) |
+     | without animation (the sampler) | 18,156,224 | 13,202,736 | 0.08 MB (0.6 %) |
+     | none of the three | 15,108,704 | 10,980,832 | 2.30 MB (17.3 %) |
+
+     The renderer, the ECS, the contract and the loader are the rest;
+     every module's types stay in each build.
    - **Where the switch is.**
      - `fynkel.project.json` gets `modules: { physics, audio, animation }`,
        all `true` by default. Unity's built-in packages have the same
@@ -266,6 +282,17 @@ What Fynkel has (mapped 2026-09-25):
    - the sizes recorded;
    - `examples/code_only`, which uses no animation, plays with animation
      off.
+
+   Done 2026-09-25. Beyond the list: a world never runs a module its
+   build lacks (`Modules::COMPILED` masks the project's list, so the load
+   report shows what runs), and the hook finds the project through the
+   app's `hooks.user_defines.fynkel.project` (a directory), since a hook
+   sees only its own package. Without `rapier`, `fynkel_physics` keeps its
+   types and a stand-in `Physics` (no bodies, no queries); without
+   `engine`, `fynkel_audio` keeps its types and a stand-in `Audio` (clips
+   remembered, `play` refused, silence). code_only sets `animation: false,
+   strip: true` and its tests run on a runtime built with `--features
+   audio,physics`.
 6. **Artifacts:**
    - one lock shape;
    - `fynkel create` with hosted dependencies;

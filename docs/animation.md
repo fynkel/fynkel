@@ -52,6 +52,15 @@ clip, a static Prop under a one-shot "bob"; the document fixture
 project's `Rig` scene (`c0000000-…-000034`) plays both, its
 `rigs/column.blend.json` mixes them by `energy`.
 
+**An optional module** (ADR-0029). A project can turn animation off
+(`modules.animation: false` in `fynkel.project.json`, Project ▸ Modules… in the
+editor). Then the system is skipped, its commands are rejected with
+`MODULE_OFF` (`FYN-R0014`), `Animator` and `Skin` in a scene or prefab are
+`FYN-P0018`, and from Dart `GameObject.animation` throw a `StateError` naming the module
+(`world.modules.has(Module.animation)` answers first). With `modules.strip: true`
+a runtime built from source also leaves out the sampler; the types stay, so the
+contract is the same in every build.
+
 ## The clip core
 
 A **clip** is a set of channels. Each channel keys one property —
