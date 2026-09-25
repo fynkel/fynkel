@@ -36,6 +36,14 @@ dev_dependencies:
     path: ../../packages/fynkel_generator
   build_runner: ^2.16.0
 
+# The build hook reads the project's `modules` (ADR-0029): this game uses
+# no animation, turns the module off and strips it, so the runtime built
+# for it carries no animation system.
+hooks:
+  user_defines:
+    fynkel:
+      project: .
+
 flutter:
   uses-material-design: true
   # The cooked cache `fynkel cook` stages into fynkel_cache/, bundled so the

@@ -175,6 +175,10 @@
       "description": "Rises when opened (lib/game/gate.dart)."
     }
   },
+  "modules": {
+    "animation": false,
+    "strip": true
+  },
   "targets": {
     "macos": {
       "enabled": true,

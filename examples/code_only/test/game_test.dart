@@ -115,6 +115,11 @@ void main() {
         expect(game.report.sceneId, isNull, reason: 'the project names no startup scene');
         expect(game.world.find('Big coin')!.get<Rotator>()!.speed, closeTo(0.8, 1e-6));
         expect(game.world.find('Player'), isNull);
+        // The game uses no animation: the project turns the module off
+        // and strips it (ADR-0029); physics and audio run.
+        expect(game.report.modules, const Modules(animation: false));
+        expect(game.world.modules.has(Module.animation), isFalse);
+        expect(game.world.modules.has(Module.physics), isTrue);
 
         game.play();
         game.frame(dt);
