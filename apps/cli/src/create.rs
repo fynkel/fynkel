@@ -13,6 +13,11 @@
 //! first (macOS + iOS, the app sandbox switched off so a dev build can read
 //! the project directory); `--no-flutter` skips that. Fresh output passes
 //! `fynkel validate`, `fynkel test --headless` and `flutter test`.
+//!
+//! The Fynkel packages are path dependencies into the checkout when there
+//! is one, and hosted ones (`^` this CLI's version) otherwise, or with
+//! `--hosted`; `--store <url>` names the pub server they come from (the
+//! local release-store rehearsal, ADR-0029 §4).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -23,7 +28,7 @@ use uuid::Uuid;
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel create <dir> [--name <package>] [--title <text>] [--org <reverse.domain>] [--no-flutter] [--force] [--json]\n                                               create a new game project (Flutter app + fynkel.project.json + assets + AGENTS.md)\n                                               package name: the directory's name, lower_snake_case; --root <repo> when not run from the Fynkel checkout"
+        "usage:\n  fynkel create <dir> [--name <package>] [--title <text>] [--org <reverse.domain>] [--no-flutter] [--hosted] [--store <url>] [--force] [--json]\n                                               create a new game project (Flutter app + fynkel.project.json + assets + AGENTS.md)\n                                               package name: the directory's name, lower_snake_case\n                                               the Fynkel packages: by path into the checkout (found, or --root <repo>);\n                                               without one, or with --hosted, `^<version>` from pub.dev or the --store pub server"
     );
     ExitCode::from(2)
 }
@@ -127,6 +132,8 @@ struct Opts {
     flutter: bool,
     force: bool,
     json: bool,
+    hosted: bool,
+    store: Option<String>,
 }
 
 fn parse(args: &[String]) -> Option<Opts> {
@@ -138,6 +145,8 @@ fn parse(args: &[String]) -> Option<Opts> {
         flutter: true,
         force: false,
         json: false,
+        hosted: false,
+        store: None,
     };
     let mut dir = None;
     let mut i = 0;
@@ -146,6 +155,11 @@ fn parse(args: &[String]) -> Option<Opts> {
             "--json" => o.json = true,
             "--force" => o.force = true,
             "--no-flutter" => o.flutter = false,
+            "--hosted" => o.hosted = true,
+            "--store" => {
+                i += 1;
+                o.store = Some(args.get(i)?.clone());
+            }
             "--name" => {
                 i += 1;
                 o.name = Some(args.get(i)?.clone());
@@ -182,18 +196,15 @@ pub struct Created {
     pub title: String,
     pub files: Vec<String>,
     pub flutter: bool,
+    /// The checkout the packages are path dependencies into; `None`: hosted.
+    pub packages: Option<PathBuf>,
 }
 
 pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let Some(opts) = parse(args) else {
         return usage();
     };
-    let Some(root) = root else {
-        eprintln!(
-            "fynkel create: the Fynkel checkout was not found (needed for the package:fynkel path dependency); pass --root <repo>"
-        );
-        return ExitCode::from(2);
-    };
+    let root = root.filter(|_| !opts.hosted && opts.store.is_none());
     match create(root, &opts) {
         Ok(c) => {
             if opts.json {
@@ -205,6 +216,10 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
                         "package": c.package,
                         "title": c.title,
                         "flutter": c.flutter,
+                        "packages": match &c.packages {
+                            Some(p) => serde_json::json!({ "path": p.display().to_string() }),
+                            None => serde_json::json!({ "hosted": opts.store.as_deref().unwrap_or("https://pub.dev"), "version": hosted_version() }),
+                        },
                         "files": c.files,
                     }))
                     .unwrap()
@@ -243,7 +258,26 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     }
 }
 
-fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
+/// The constraint on a hosted Fynkel package: this CLI's version, which is
+/// the runtime's and every package's (one workspace version).
+fn hosted_version() -> String {
+    format!("^{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// A `dependencies:` entry for a Fynkel package: by path into the checkout,
+/// or hosted (pub.dev, or the `--store` pub server).
+fn dependency(name: &str, path: Option<String>, store: Option<&str>) -> String {
+    match (path, store) {
+        (Some(p), _) => format!("  {name}:\n    path: {p}"),
+        (None, Some(url)) => format!(
+            "  {name}:\n    hosted: {url}\n    version: \"{}\"",
+            hosted_version()
+        ),
+        (None, None) => format!("  {name}: \"{}\"", hosted_version()),
+    }
+}
+
+fn create(root: Option<&Path>, opts: &Opts) -> Result<Created, String> {
     let dir = &opts.dir;
     let package = match &opts.name {
         Some(n) => n.clone(),
@@ -271,18 +305,26 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
             ));
         }
     }
-    let fynkel_pkg = root.join("packages/fynkel");
-    let flutter_pkg = root.join("packages/fynkel_flutter");
-    let generator_pkg = root.join("packages/fynkel_generator");
-    for p in [&fynkel_pkg, &flutter_pkg, &generator_pkg] {
-        if !p.join("pubspec.yaml").is_file() {
-            return Err(format!(
-                "{} is not a Fynkel checkout ({} missing); pass --root <repo>",
-                root.display(),
-                p.display()
-            ));
+    let packages = ["fynkel", "fynkel_flutter", "fynkel_generator"];
+    if let Some(root) = root {
+        for p in packages {
+            let p = root.join("packages").join(p);
+            if !p.join("pubspec.yaml").is_file() {
+                return Err(format!(
+                    "{} is not a Fynkel checkout ({} missing); pass --root <repo>, or --hosted",
+                    root.display(),
+                    p.display()
+                ));
+            }
         }
     }
+    let [fynkel_dep, flutter_dep, generator_dep] = packages.map(|name| {
+        dependency(
+            name,
+            root.map(|r| dependency_path(dir, &r.join("packages").join(name), r)),
+            opts.store.as_deref(),
+        )
+    });
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
 
     // Platform runners first: `flutter create` writes a whole app, then the
@@ -300,15 +342,9 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
     let mut vars: Vec<(String, String)> = vec![
         ("package".into(), package.clone()),
         ("title".into(), title.clone()),
-        ("fynkel".into(), dependency_path(dir, &fynkel_pkg, root)),
-        (
-            "fynkel_flutter".into(),
-            dependency_path(dir, &flutter_pkg, root),
-        ),
-        (
-            "generator".into(),
-            dependency_path(dir, &generator_pkg, root),
-        ),
+        ("fynkel".into(), fynkel_dep),
+        ("fynkel_flutter".into(), flutter_dep),
+        ("generator".into(), generator_dep),
     ];
     for key in [
         "project_id",
@@ -428,6 +464,7 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
         title,
         files,
         flutter: used_flutter,
+        packages: root.map(Path::to_path_buf),
     })
 }
 

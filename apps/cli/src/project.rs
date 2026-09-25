@@ -150,10 +150,13 @@ fn lock(root: Option<&Path>, opts: &Opts) -> ExitCode {
     if let Err(diags) = Project::read(&opts.project) {
         return cannot_open(&diags, opts.json);
     }
-    let expected = fynkel_import::expected_lock();
     let path = opts.project.join(LOCK_FILE);
     let shown = path.display().to_string();
     let current = Lock::read(&opts.project, &schemas);
+    let expected = match &current {
+        Ok(l) => fynkel_import::expected_lock().keeping_store(l),
+        Err(_) => fynkel_import::expected_lock(),
+    };
     let mut diags = Vec::new();
     let mut written = false;
     if opts.check {

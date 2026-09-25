@@ -41,7 +41,13 @@ pub fn repo_root(explicit: Option<PathBuf>) -> Option<PathBuf> {
             .map(|exe| exe.canonicalize().unwrap_or(exe))
             .and_then(|exe| exe.parent().map(Path::to_path_buf))
             .and_then(|d| find_workspace(&d))
-            .or_else(|| find_workspace(Path::new(env!("CARGO_MANIFEST_DIR"))))
+            // The checkout this CLI was built from, unless it was built for
+            // the release store (`FYNKEL_RELEASE` at build time): a released
+            // CLI knows no checkout (ADR-0029 §4).
+            .or_else(|| match option_env!("FYNKEL_RELEASE") {
+                Some(_) => None,
+                None => find_workspace(Path::new(env!("CARGO_MANIFEST_DIR"))),
+            })
     })
 }
 

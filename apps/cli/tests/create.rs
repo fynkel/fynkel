@@ -339,6 +339,68 @@ fn create_refuses_bad_names_and_non_empty_directories() {
     let _ = std::fs::remove_dir_all(&parent);
 }
 
+/// ADR-0029 §4: the Fynkel packages by path into the checkout, or hosted
+/// (`--hosted`: pub.dev; `--store <url>`: that pub server) at this CLI's
+/// version; either way the hook reads the project.
+#[test]
+fn create_writes_path_or_hosted_dependencies() {
+    let parent = fresh("hosted");
+    std::fs::create_dir_all(&parent).unwrap();
+    let version = format!("\"^{}\"", env!("CARGO_PKG_VERSION"));
+    let pubspec =
+        |name: &str| std::fs::read_to_string(parent.join(name).join("pubspec.yaml")).unwrap();
+
+    let (ok, stdout, stderr) = fynkel(&parent, &["create", "by_path", "--no-flutter", "--json"]);
+    assert!(ok, "{stdout}{stderr}");
+    let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert!(report["packages"]["path"].is_string(), "{report}");
+    let text = pubspec("by_path");
+    assert!(text.contains("  fynkel:\n    path: /"), "{text}");
+    assert!(text.contains("  fynkel_generator:\n    path: /"), "{text}");
+
+    let (ok, stdout, stderr) = fynkel(
+        &parent,
+        &["create", "from_pub", "--no-flutter", "--hosted", "--json"],
+    );
+    assert!(ok, "{stdout}{stderr}");
+    let text = pubspec("from_pub");
+    assert!(!text.contains("path:"), "{text}");
+    for name in ["fynkel", "fynkel_flutter", "fynkel_generator"] {
+        assert!(text.contains(&format!("\n  {name}: {version}\n")), "{text}");
+    }
+
+    let store = "http://127.0.0.1:8799";
+    let (ok, stdout, stderr) = fynkel(
+        &parent,
+        &[
+            "create",
+            "from_store",
+            "--no-flutter",
+            "--store",
+            store,
+            "--json",
+        ],
+    );
+    assert!(ok, "{stdout}{stderr}");
+    let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(report["packages"]["hosted"], store);
+    let text = pubspec("from_store");
+    assert!(
+        text.contains(&format!(
+            "  fynkel_flutter:\n    hosted: {store}\n    version: {version}\n"
+        )),
+        "{text}"
+    );
+    assert!(
+        text.contains("hooks:\n  user_defines:\n    fynkel:\n      project: .\n"),
+        "{text}"
+    );
+    // The hosted project is the same project otherwise.
+    let (ok, _, stderr) = fynkel(&parent.join("from_store"), &["validate"]);
+    assert!(ok, "{stderr}");
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
 /// build_runner deletes its outputs before it builds; a run that fails
 /// (its error, a lock another build holds) must leave the committed
 /// generated files in place — a failed editor check once left the game
