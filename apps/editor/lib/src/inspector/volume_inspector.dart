@@ -1,6 +1,7 @@
 // A volume profile's overrides on its Inspector page, edited in place as
 // in Unity's Volume Profile Inspector: one card per override the profile
-// holds (Ambient Occlusion, Bloom, Color Grading), Add Override for the
+// holds (Ambient Occlusion, Bloom, Color Grading, Contact Shadows), Add
+// Override for the
 // others, and a
 // checkbox in front of every field — ticked, the profile sets it; not
 // ticked, it is inherited (the engine default shows greyed). Every change
@@ -199,6 +200,48 @@ const List<({String key, String title, List<_Field> fields})> volumeOverrides = 
         min: 0,
         max: 4,
         tooltip: 'Per channel: scales the brights.',
+      ),
+    ],
+  ),
+  (
+    key: 'contactShadows',
+    title: 'Contact Shadows',
+    fields: [
+      (
+        key: 'intensity',
+        label: 'Intensity',
+        kind: _Kind.number,
+        fallback: 0,
+        min: 0,
+        max: 1,
+        tooltip: 'How dark the shadow is: 0 is off, 1 blocks the sun fully.',
+      ),
+      (
+        key: 'length',
+        label: 'Length',
+        kind: _Kind.number,
+        fallback: 0.15,
+        min: 0.01,
+        max: 5,
+        tooltip: 'How far toward the sun a pixel looks for something in the way, in metres.',
+      ),
+      (
+        key: 'thickness',
+        label: 'Thickness',
+        kind: _Kind.number,
+        fallback: 0.05,
+        min: 0.01,
+        max: 5,
+        tooltip: 'How thick a surface is taken to be behind what the camera sees, in metres.',
+      ),
+      (
+        key: 'distance',
+        label: 'Max Distance',
+        kind: _Kind.number,
+        fallback: 50,
+        min: 0.01,
+        max: 1000,
+        tooltip: 'The camera distance past which there are none, in metres; they fade out over the last tenth.',
       ),
     ],
   ),

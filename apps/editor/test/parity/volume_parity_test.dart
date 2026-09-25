@@ -153,6 +153,28 @@ void main() {
     expect((grade['lift'] as List).map((v) => (v as num).toDouble()), [0.0, 0.0, closeTo(0.2, 1e-6)]);
   });
 
+  testWidgets('Contact Shadows: added as an override, Intensity and Length typed', (tester) async {
+    final (e, look) = await onLook(tester);
+    final drawn = e.shell.scene!.current!.preview!;
+    expect(find.byKey(const Key('volume.contactShadows')), findsNothing, reason: 'a new profile has none');
+
+    await reveal(tester, find.byKey(const Key('volume.addOverride')));
+    await e.click(find.byKey(const Key('volume.addOverride')));
+    await e.click(find.byKey(const Key('volume.add.contactShadows')));
+    expect(saved(e)['contactShadows'], <String, Object?>{});
+    expect(ticked(tester, 'contactShadows.intensity'), isFalse);
+
+    for (final (field, text) in [('intensity', '0.8'), ('length', '0.3')]) {
+      await reveal(tester, tick('contactShadows.$field'));
+      await e.click(tick('contactShadows.$field'));
+      await typeInto(e, 'contactShadows.$field', text);
+    }
+    expect(saved(e)['contactShadows'], {'intensity': 0.8, 'length': 0.3});
+    final contact = drawn.volume(look)['contactShadows'] as Map;
+    expect((contact['intensity'] as num).toDouble(), closeTo(0.8, 1e-6), reason: 'the Scene view blends the edit');
+    expect(contact.containsKey('thickness'), isFalse, reason: 'and inherits the thickness');
+  });
+
   testWidgets('a global volume with the profile: the bloom set in the Inspector is in the rendered picture', (
     tester,
   ) async {
