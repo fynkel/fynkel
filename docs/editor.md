@@ -2207,6 +2207,10 @@ Play a saved edit reaches the running game's shared instance at once
 (`LivePlay.dataEdited` → `World.applyDataEdit`), and a script's
 data-typed field set in the Inspector takes the shared instance
 (`World.resolveData`); runtime changes to an instance are never saved.
+A record (`x-fynkel { type: record }`, an object schema with
+`properties`), on a data asset or a script card, alone or as a list's
+items, is a foldout of its fields — open until folded (`_Foldout`, per
+field) — and + on a list of records adds one with the record's defaults.
 
 **Open** is offered for scenes, prefabs and an imported model's `prefab`
 part. Blend spaces have no editor in M4, so opening one
