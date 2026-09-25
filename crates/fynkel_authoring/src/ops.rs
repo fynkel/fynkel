@@ -1220,7 +1220,7 @@ impl AuthoringSession {
         let project = self.project().unwrap();
         let mut diags = checked.validate(&project.schemas);
         diags.extend(checked.validate_remaps(&project.assets));
-        diags.extend(project.assets.check_references(&doc));
+        diags.extend(project.resolving_assets().check_references(&doc));
         if fynkel_contracts::has_errors(&diags) {
             let mut d = invalid(format!("{OP}: the sidecar would not validate"))
                 .with_document(sidecar.display().to_string());

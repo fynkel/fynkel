@@ -690,11 +690,12 @@ impl AuthoringSession {
         let project = self.require_project()?;
         let doc = self.document(handle)?;
         let mut out = doc.editor.validate(&project.schemas);
-        out.extend(project.assets.check_references(doc.editor.document()));
+        let assets = project.resolving_assets();
+        out.extend(assets.check_references(doc.editor.document()));
         out.extend(fynkel_document::reference_kinds::check_reference_kinds(
             doc.editor.document(),
             &project.schemas,
-            &project.assets,
+            assets,
         ));
         Ok(out)
     }

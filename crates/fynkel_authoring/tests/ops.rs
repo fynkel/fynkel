@@ -1147,6 +1147,42 @@ fn install_primitives_writes_the_built_in_shapes_once_under_their_fixed_id() {
     assert_clean(&s);
 }
 
+/// A code-built scene names the built-in shapes without installing them
+/// (ADR-0026 §4): the editor's check resolves them as the cook and `fynkel
+/// validate` do, and the asset query names them.
+#[test]
+fn documents_resolve_the_built_in_shapes_without_installing_them() {
+    let copy = Copy::new("builtin_refs");
+    let scene = copy.path("assets/scenes/main.scene.json");
+    let text = copy.read("assets/scenes/main.scene.json").replacen(
+        "\"asset\": \"c0000000-0000-4000-8000-000000000001\",\n              \"sub\": \"mesh/Cube\"",
+        &format!("\"asset\": \"{PRIMITIVES_ID}\",\n              \"sub\": \"mesh/Cube\""),
+        1,
+    );
+    assert!(text.contains(&PRIMITIVES_ID.to_string()));
+    std::fs::write(&scene, text).unwrap();
+    let mut s = open(&copy);
+    assert!(s.project().unwrap().assets.get(PRIMITIVES_ID).is_none());
+
+    let doc = s.open_document(MAIN).map_err(|d| format!("{d:?}")).unwrap();
+    let errors: Vec<_> = s
+        .validate(doc)
+        .unwrap()
+        .into_iter()
+        .filter(|d| d.is_error())
+        .collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    let v = s
+        .query(
+            "asset",
+            &json!({ "asset": PRIMITIVES_ID.to_string(), "sub": "mesh/Cube" }),
+        )
+        .map_err(|d| format!("{d:?}"))
+        .unwrap();
+    assert!(v.to_string().contains("Primitives"), "{v}");
+    assert_clean(&s);
+}
+
 /// Unity's drag in from Finder: files from outside copied into a folder,
 /// a source's own sidecar kept when its id is free (else a fresh one from
 /// the scan), a document's taken id replaced, a taken name counting on;

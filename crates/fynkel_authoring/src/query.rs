@@ -119,7 +119,7 @@ impl AuthoringSession {
                 if let Some(sub) = args.get("sub").and_then(Value::as_str) {
                     r.sub = sub.to_string();
                 }
-                let resolved = p.assets.resolve(&r).map_err(one)?;
+                let resolved = p.resolving_assets().resolve(&r).map_err(one)?;
                 Ok(resolved_json(&resolved))
             }
             "dependents" => {

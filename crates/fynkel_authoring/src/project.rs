@@ -61,6 +61,11 @@ pub struct OpenProject {
     /// The embedded schemas plus the project's own.
     pub schemas: SchemaSet,
     pub assets: AssetDatabase,
+    /// [`OpenProject::assets`] with the built-in assets the cook ships to a
+    /// project that has not installed its own copy (the primitives,
+    /// ADR-0026 §4); `None` when it has them all. What a document's
+    /// references resolve against ([`OpenProject::resolving_assets`]).
+    with_builtins: Option<AssetDatabase>,
     /// Every shader manifest document under the asset root (a material
     /// may name them; rebuilt into a library per open document).
     shader_docs: Vec<Document>,
@@ -135,6 +140,7 @@ impl OpenProject {
             read_only,
             schemas,
             assets: AssetDatabase::default(),
+            with_builtins: None,
             shader_docs: Vec::new(),
             references: Vec::new(),
             metadata: None,
@@ -148,6 +154,14 @@ impl OpenProject {
         this.read_schema_sources();
         this.rescan(&[]);
         Ok(this)
+    }
+
+    /// The database a document's references resolve against: the
+    /// project's assets and the built-in ones the cook ships (a code-built
+    /// scene's primitives resolve as they do in the cook and `fynkel
+    /// validate`).
+    pub fn resolving_assets(&self) -> &AssetDatabase {
+        self.with_builtins.as_ref().unwrap_or(&self.assets)
     }
 
     /// The asset root.
@@ -339,6 +353,13 @@ impl OpenProject {
             self.scan_diagnostics.extend(fresh.iter().cloned());
             fresh
         };
+        // Diagnostics of writing the built-ins show when the cook runs.
+        self.with_builtins = fynkel_import::builtin::with_builtins(
+            &self.assets,
+            &self.cache_dir(),
+            &self.schemas,
+            &mut Vec::new(),
+        );
         let mut all = self.base_diagnostics.clone();
         all.extend(self.scan_diagnostics.iter().cloned());
         all.extend(self.project.validate_against(&self.assets, &self.schemas));
