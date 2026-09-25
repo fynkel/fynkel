@@ -2000,12 +2000,39 @@ and a Hierarchy entry, Make Big Coin.
   - `componentMenuItem(type, label, id:, run: (context, objects))` in the
     ⋮ menu of the Inspector's `type` cards (Unity's `CONTEXT/<Type>/`).
   - `enabled` greys an entry out; a throw in `run` is a Console error.
+- **Custom Inspectors** (Unity's `CustomEditor`):
+  `editor.inspector<Collectible>((context, inspector) => …)` draws the
+  body of the script's card (the header and its ⋮ stay the editor's), and
+  `editor.inspector<CoinKind>(…)` the fields of the data type's asset
+  page (`lib/src/inspector/custom_inspector.dart`).
+  - The class is resolved to its type id through the game's
+    `registerBehaviours` at every registration (each script and data type
+    is constructed once, never run). A class the game does not register
+    is left out with a Console error, as is a second Inspector for a type.
+  - Its `InspectorContext` works on the document's values (Unity's
+    `SerializedObject`): `value(field)` as the document holds it (a list
+    for a vector or colour, `{"asset": id}` for a reference),
+    `isMixed(field)`, `targets` (the objects shown), `fields`, `canEdit`,
+    and `editor` (the `EditorContext`).
+  - `set(field, value)` takes a document value or a Fynkel one (`Vec3`,
+    `AssetRef`, a written `DataAsset`, an enum). It goes the default
+    Inspector's way, through its `FieldTarget`: prechecked (a refusal
+    returns false and the field's row says why), one undo step on every
+    target, a prefab override on an instance, the running game's during
+    Play, saved at once on a data asset.
+  - `field(name)` is the field's standard editor; `defaultInspector(except:)`
+    all of them but some (Unity's `DrawDefaultInspector`,
+    `DrawPropertiesExcluding`).
+  - A throw in the builder shows the default fields under a line saying
+    why, and a Console error once per distinct error. A card without a
+    schema keeps the JSON rows.
 - **A failing extension fails alone.** Every call into a package is
   wrapped. A throwing `registerEditor` skips that package's extensions,
   and a throwing command or `enabled` check is a Console error (with the
   first frame of its stack) while the editor carries on.
 - **Preferences › Extensions** lists each package with an editor part
-  and what it registered (menu items, windows, context entries), or why
+  and what it registered (menu items, windows, context entries,
+  Inspectors), or why
   it registered nothing.
 - **Editor code never ships in a game.** Only files under `lib/editor/`
   may import `package:fynkel_editor_api` or `lib/editor/`. `fynkel

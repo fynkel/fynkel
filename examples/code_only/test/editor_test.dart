@@ -1,12 +1,15 @@
 // The game's editor part (ADR-0028), without an editor: what it registers,
 // and what its command says.
 import 'package:code_only/editor/editor.dart';
+import 'package:code_only/game/coin_kind.dart';
 import 'package:code_only/generated/assets.g.dart';
 import 'package:code_only/generated/behaviours.g.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/authoring.dart' show ProjectWriter;
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
+
+typedef InspectorBuilder = Widget Function(BuildContext context, InspectorContext inspector);
 
 class _Items implements EditorExtensions {
   final items = <String, void Function(EditorContext)>{};
@@ -23,6 +26,15 @@ class _Items implements EditorExtensions {
     SingleActivator? shortcut,
     String? description,
   }) => items['$path|$id'] = run;
+
+  final inspectors = <Type>[];
+  InspectorBuilder? coinKind;
+
+  @override
+  void inspector<T>(InspectorBuilder build) {
+    inspectors.add(T);
+    coinKind = build;
+  }
 
   final windows = <String>[];
   final entries = <String>[];
@@ -85,6 +97,22 @@ class _Log implements EditorContext {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+/// A data asset's fields as the editor's Inspector would give them.
+class _CoinKindFields implements InspectorContext {
+  _CoinKindFields(this.data);
+
+  final Map<String, Object?> data;
+
+  @override
+  Object? value(String field) => data[field];
+
+  @override
+  Widget defaultInspector({Iterable<String> except = const []}) => const Text('default fields');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   test('the editor part lists the coin kinds from the Tools menu', () {
     final editor = _Items();
@@ -99,6 +127,24 @@ void main() {
     expect(log.lines, ['A coin is worth 1, the big coin 5 (1.6× the size).']);
     expect(editor.windows, ['Tools/Code Only/Level Tools|codeOnly.levelTools']);
     expect(editor.entries, ['Hierarchy|Make Big Coin|game.Collectible']);
+    expect(editor.inspectors, [CoinKind]);
+  });
+
+  testWidgets("the coin kind's Inspector: the coin in its colour at its size, then the default fields", (tester) async {
+    final editor = _Items();
+    registerEditor(editor);
+    final big = _CoinKindFields({
+      'value': 5,
+      'color': [1.0, 0.42, 0.12],
+      'size': 1.6,
+    });
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(builder: (c) => editor.coinKind!(c, big)))));
+    expect(find.text('Worth 5'), findsOneWidget);
+    expect(find.text('default fields'), findsOneWidget);
+    final preview = tester.widget<CoinPreview>(find.byType(CoinPreview));
+    expect(preview.diameter, closeTo(CoinPreview.base * 1.6, 1e-9));
+    expect(preview.swatch.r, closeTo(1, 1e-6));
+    expect(tester.getSize(find.byKey(const Key('coinPreview.coin'))).width, closeTo(CoinPreview.base * 1.6, 1e-6));
   });
 
   test('the Level Tools ring: coin prefabs evenly around the centre', () {

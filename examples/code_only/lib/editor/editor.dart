@@ -3,7 +3,7 @@
 // package:fynkel_editor_api or this folder (FYN-P0015), so none of it
 // ships in the game.
 
-import 'dart:math' show cos, pi, sin;
+import 'dart:math' show cos, pi, pow, sin;
 
 import 'package:flutter/material.dart' hide Transform;
 import 'package:fynkel/fynkel.dart';
@@ -67,6 +67,18 @@ void registerEditor(EditorExtensions editor) {
     build: (context, editor) => LevelTools(editor: editor),
   );
 
+  // Unity's CustomEditor: a coin kind's page shows the coin, in its colour
+  // and at its size, above the default fields.
+  editor.inspector<CoinKind>(
+    (context, inspector) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        CoinPreview(color: inspector.value('color'), size: inspector.value('size'), value: inspector.value('value')),
+        inspector.defaultInspector(),
+      ],
+    ),
+  );
+
   // A right click on coins in the Hierarchy: they become big coins (the
   // big coin data asset in their Collectible), one undo step.
   editor.hierarchyMenuItem(
@@ -79,6 +91,61 @@ void registerEditor(EditorExtensions editor) {
       }
     }),
   );
+}
+
+/// A coin kind as it looks: a disc of its colour (the document's linear
+/// RGB, shown in sRGB), [size] times a coin's, with what it is worth.
+class CoinPreview extends StatelessWidget {
+  const CoinPreview({super.key, required this.color, required this.size, required this.value});
+
+  /// As the document holds them: `[r, g, b]`, a number, an integer.
+  final Object? color;
+  final Object? size;
+  final Object? value;
+
+  /// A coin of size 1, in logical pixels.
+  static const base = 28.0;
+
+  static double _srgb(num linear) {
+    final c = linear.clamp(0, 1).toDouble();
+    return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1 / 2.4) - 0.055;
+  }
+
+  Color get swatch {
+    final c = color;
+    final rgb = c is List && c.length >= 3 ? [for (final x in c.take(3)) x is num ? x : 0] : const [1, 1, 1];
+    return Color.from(alpha: 1, red: _srgb(rgb[0]), green: _srgb(rgb[1]), blue: _srgb(rgb[2]));
+  }
+
+  double get diameter => base * (size is num ? (size as num).toDouble() : 1).clamp(0.1, 3);
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: base * 3 + 16,
+      child: Row(
+        children: [
+          SizedBox(
+            width: base * 3,
+            child: Center(
+              child: Container(
+                key: const Key('coinPreview.coin'),
+                width: diameter,
+                height: diameter,
+                decoration: BoxDecoration(
+                  color: swatch,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.black26),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text('Worth ${value ?? 1}', style: Theme.of(context).textTheme.titleSmall)),
+        ],
+      ),
+    );
+  }
 }
 
 /// The Level Tools window: how many coins, how far out, and a button that

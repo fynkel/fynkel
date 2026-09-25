@@ -81,7 +81,8 @@ Three ADRs, then their implementation:
    Preferences › Extensions) done 2026-09-25; step 2 (`EditorContext`:
    scene, selection, edits as one undo step, assets) done 2026-09-25;
    step 5 (windows and Hierarchy/Project/component context entries)
-   done 2026-09-25.
+   done 2026-09-25; step 3 (custom Inspectors: `inspector<T>`,
+   `InspectorContext`, `code_only`'s coin kind page) done 2026-09-25.
 2. **`@DataAsset`** (Unity's ScriptableObject): a Dart class becomes an
    asset type with a schema, an Inspector page, references by id, a
    cooked form. **ADR-0027 accepted 2026-09-25; built first**, ahead of
