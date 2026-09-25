@@ -75,6 +75,15 @@ pub fn run(project: &Path, check: bool) -> Result<Outcome, String> {
             project.display()
         ));
     }
+    // `--check` also holds the editor part to its folder (ADR-0028 §2,
+    // `FYN-P0015`): editor code reached from the game would ship in it.
+    if check {
+        let breaches = fynkel_document::editor_part::check_editor_imports(project);
+        if !breaches.is_empty() {
+            let lines: Vec<String> = breaches.iter().map(|d| d.to_string()).collect();
+            return Err(lines.join("\n"));
+        }
+    }
     let dart = find_dart().ok_or_else(|| {
         "no Dart SDK found: set FYNKEL_DART to a `dart` executable, or put `flutter` or `dart` on PATH".to_string()
     })?;

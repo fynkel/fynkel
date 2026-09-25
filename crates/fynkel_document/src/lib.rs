@@ -20,6 +20,7 @@ pub mod asset;
 pub mod authoring;
 pub mod codec;
 pub mod data;
+pub mod editor_part;
 #[rustfmt::skip]
 #[allow(clippy::all)]
 pub mod generated;

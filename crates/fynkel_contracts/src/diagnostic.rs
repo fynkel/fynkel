@@ -189,6 +189,10 @@ impl Code {
     /// `layers` has more than 32 names or does not start with `default`,
     /// `tags` more than 32; a name is empty or listed twice (ADR-0020).
     pub const PROJECT_LAYERS_TAGS: Code = Code("FYN-P0014");
+    /// A file of the game package outside `lib/editor/` imports editor
+    /// code: `package:fynkel_editor_api` or the package's own
+    /// `lib/editor/` (ADR-0028 §2), which would ship it in the game.
+    pub const PROJECT_EDITOR_IMPORT: Code = Code("FYN-P0015");
 
     // Physics (`FYN-H`, blueprint §9, §19.2d item 8): scene rules the
     // component schemas cannot express.

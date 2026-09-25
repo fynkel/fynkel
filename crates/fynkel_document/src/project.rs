@@ -1214,6 +1214,10 @@ pub fn validate_project_with(
         }
     };
     report.diagnostics.extend(project.validate(schemas));
+    // The game package's editor part stays out of the game (ADR-0028 §2).
+    report
+        .diagnostics
+        .extend(crate::editor_part::check_editor_imports(dir));
     // From here on the project's behaviour types are known.
     let schemas = match project.schemas(schemas, dir) {
         Ok(s) => s,
