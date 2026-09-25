@@ -57,7 +57,7 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 | Build a level in code at start-up | `new GameObject` in a loop | 🔧 `world.build(ObjectSpec('Level', children: [...]))` with default components and `Assets.…` looks (`3795afb`) |
 | A reusable object built in code | a method that builds it | 🔧 a function returning an `ObjectSpec`, built with `world.build(spec, parent:, transform:)`; `ObjectSpec.prefab(ref, …)` places a prefab asset with overrides (`3795afb`, ADR-0026 §2) |
 | Save a scene or prefab from code | editor scripts (`PrefabUtility.SaveAsPrefabAsset`) | ❌ the reference game uses Python (`tools/playground.py`, 881 lines) |
-| Move / rotate / scale over time | DOTween, or a coroutine by hand | 🟡 by hand in a coroutine; no tweens (ADR-0026 §7) |
+| Move / rotate / scale over time | DOTween, or a coroutine by hand | 🔧 `transform.moveTo(p, 0.5, ease: Ease.outCubic)`, `moveLocalTo`, `rotateTo`, `scaleTo`; `tween(from, to, seconds, onValue)` on a script or the world; each a `Coroutine` to yield, `await tween.done` or `stop()` (`f8e090d`, ADR-0026 §7) |
 | Play, crossfade, blend animations | Animator | ✅ `animation.play`, `crossfade`, `setParameter`, markers |
 | An animation clip made in code | `AnimationClip.SetCurve` | ❌ after the Phase 5 Animator |
 
@@ -76,3 +76,4 @@ code as well as, or better than, Unity's.
 - 2026-09-25 — assets by name: `assets.g.dart`, the editor regenerating it, the reference game using it (abf2787), `world.assets`.
 - 2026-09-25 — `ObjectSpec` + `world.build`, code prefabs (3795afb).
 - 2026-09-25 — `createPrimitive`, `createMaterial` (c76c0bb) and `GameObject.clone` (97d0c5b): step 4 done.
+- 2026-09-25 — tweens (f8e090d): step 5 done.

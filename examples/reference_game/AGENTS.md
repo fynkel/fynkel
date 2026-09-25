@@ -393,6 +393,9 @@ turret.findChild('Barrel');                          // the prefab's entities ar
   baseColor: …))` returns an `AssetRef` for a `MeshRenderer`;
   `obj.clone()` copies a spawned object and its subtree, scripts and all
   (Unity's `Instantiate(obj)`).
+- Animate a value with a tween, not a hand-written coroutine:
+  `yield transform.moveTo(target, 0.5, ease: Ease.outCubic)` in a
+  coroutine, `rotateTo`, `scaleTo`, or `tween(0.0, 8.0, 0.3, (v) => …)`.
 
 ## Audio (cooked clips, a streamed track, three buses, a voice limit; docs/audio.md)
 
