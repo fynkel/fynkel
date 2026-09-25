@@ -225,6 +225,10 @@ fn describe_json_lists_everything() {
     assert_eq!(v["tags"], serde_json::json!([]));
     assert_eq!(v["targets"].as_array().unwrap().len(), 3);
     assert_eq!(v["lock"]["schemaFingerprint"], lock.schema_fingerprint);
+    assert_eq!(
+        v["modules"],
+        serde_json::json!({"physics": true, "audio": true, "animation": true, "strip": false})
+    );
 }
 
 #[test]
@@ -383,6 +387,70 @@ fn the_component_registry_is_checked_both_ways() {
         v.as_object_mut().unwrap().remove("components");
     });
     assert!(t.codes().is_empty());
+}
+
+#[test]
+fn a_module_turned_off_fails_every_component_of_it() {
+    let t = Temp::new("modules");
+    t.edit_project(|v| v["modules"] = serde_json::json!({ "physics": false }));
+    let project = Project::read(&t.dir).unwrap();
+    assert!(!project.modules.modules.physics);
+    assert!(project.modules.modules.audio && project.modules.modules.animation);
+    assert!(!project.allows_component("fynkel.Collider"));
+    assert!(!project.allows_component("fynkel.CharacterController"));
+    assert!(project.allows_component("fynkel.AudioSource"));
+    let report = validate_project(&t.dir, &schemas(), Some(&expected_lock()));
+    assert!(report.has_errors());
+    let off: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code.as_str() == "FYN-P0018")
+        .collect();
+    // Every physics component in the fixture's scenes and prefabs: one
+    // error each, anchored at its type.
+    assert_eq!(off.len(), 10, "{off:#?}");
+    assert!(off.iter().all(|d| d.message.contains("physics module")));
+    assert!(off
+        .iter()
+        .all(|d| d.pointer.as_deref().unwrap().ends_with("/type")));
+    assert!(off
+        .iter()
+        .any(|d| d.document.as_deref().unwrap().ends_with("coin.prefab.json")));
+    assert!(off[0]
+        .suggestion
+        .as_deref()
+        .unwrap()
+        .contains("modules.physics"));
+    assert_eq!(
+        report.diagnostics.len(),
+        off.len(),
+        "nothing else: {:#?}",
+        report.diagnostics
+    );
+
+    // Animation off: the animators and the skin.
+    t.edit_project(|v| v["modules"] = serde_json::json!({ "animation": false, "strip": true }));
+    let project = Project::read(&t.dir).unwrap();
+    assert!(project.modules.strip);
+    let codes = t.codes();
+    assert!(codes.len() >= 3, "{codes:?}");
+    assert!(codes.iter().all(|c| c.0 == "FYN-P0018"), "{codes:?}");
+
+    // Everything on again: clean.
+    t.edit_project(|v| {
+        v["modules"] = serde_json::json!({ "physics": true, "audio": true, "animation": true })
+    });
+    assert!(t.codes().is_empty());
+
+    // Not a boolean.
+    t.edit_project(|v| v["modules"] = serde_json::json!({ "audio": "no" }));
+    let codes = t.codes();
+    assert!(
+        codes
+            .iter()
+            .any(|c| c.1.as_deref() == Some("/modules/audio")),
+        "{codes:?}"
+    );
 }
 
 #[test]

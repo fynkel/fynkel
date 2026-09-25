@@ -197,6 +197,40 @@ impl PhysicsSettings {
     }
 }
 
+/// The `modules` block (ADR-0029 §3): which optional engine modules the
+/// game uses — physics, audio, animation, all on by default — and
+/// whether a runtime built from source leaves the ones that are off out
+/// (`strip`, cargo features; the prebuilt runtime keeps their code).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct ModuleSettings {
+    pub modules: fynkel_core::Modules,
+    pub strip: bool,
+}
+
+impl ModuleSettings {
+    /// `{ "physics": true, "audio": true, "animation": true, "strip": false }`.
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut v = serde_json::Map::new();
+        for m in fynkel_core::Module::ALL {
+            v.insert(m.key().into(), self.modules.has(m).into());
+        }
+        v.insert("strip".into(), self.strip.into());
+        v.into()
+    }
+
+    /// Reads the block (absent keys keep their defaults).
+    pub fn from_json(v: &serde_json::Value) -> Self {
+        let mut out = Self::default();
+        for m in fynkel_core::Module::ALL {
+            if let Some(on) = v[m.key()].as_bool() {
+                out.modules.set(m, on);
+            }
+        }
+        out.strip = v["strip"].as_bool().unwrap_or(false);
+        out
+    }
+}
+
 /// The project's layers and tags (ADR-0020): `layers[i]` is layer `i`
 /// (bit `i` of a mask, at most 32, `layers[0]` is `default`), `tags[i]`
 /// bit `i` of a `fynkel.Tags` (at most 32).
@@ -277,6 +311,8 @@ pub struct Project {
     pub physics: PhysicsSettings,
     /// `layers` and `tags`, or the defaults (ADR-0020).
     pub layers_and_tags: LayersAndTags,
+    /// `modules`, or every module on (ADR-0029 §3).
+    pub modules: ModuleSettings,
     /// `None` = every built-in component type.
     pub components: Option<Vec<ComponentEntry>>,
     pub targets: Vec<Target>,
@@ -414,6 +450,29 @@ impl Project {
             }
         }
 
+        let mut modules = ModuleSettings::default();
+        if let Some(block) = root.get("modules") {
+            match block.as_object() {
+                Some(members) => {
+                    for m in members {
+                        let pointer = format!("/modules/{}", m.key);
+                        match (m.value.as_bool(), fynkel_core::Module::from_key(&m.key)) {
+                            (Some(on), Some(module)) => modules.modules.set(module, on),
+                            (Some(on), None) if m.key == "strip" => modules.strip = on,
+                            (None, _) => malformed(
+                                &pointer,
+                                &format!("modules.{} must be true or false", m.key),
+                                &mut diags,
+                            ),
+                            // An unknown key is the schema's to report.
+                            _ => {}
+                        }
+                    }
+                }
+                None => malformed("/modules", "modules must be an object", &mut diags),
+            }
+        }
+
         let mut layers_and_tags = LayersAndTags::default();
         for (key, list) in [
             ("layers", &mut layers_and_tags.layers),
@@ -541,6 +600,7 @@ impl Project {
             quality,
             physics,
             layers_and_tags,
+            modules,
             components,
             targets,
             packages: Default::default(),
@@ -842,6 +902,11 @@ impl Project {
         // feature a project opts into (ADR-0020).
         if matches!(type_id, "fynkel.Layer" | "fynkel.Tags") {
             return true;
+        }
+        // A module the project turned off takes its components with it
+        // (ADR-0029 §3): Add Component does not offer them.
+        if self.modules.modules.off_for(type_id).is_some() {
+            return false;
         }
         // A package's types come with the dependency (ADR-0029 §2).
         if self.packages.types.contains(type_id) {
@@ -1522,12 +1587,31 @@ fn registry_check(
     seen: &mut HashSet<String>,
     out: &mut Vec<Diagnostic>,
 ) {
-    if project.components.is_none() {
-        return;
-    }
     for e in entities {
         for c in &e.components {
-            if project.allows_component(&c.type_id) {
+            if let Some(module) = project.modules.modules.off_for(&c.type_id) {
+                let mut d = anchor(
+                    root,
+                    Diagnostic::error(
+                        Code::MODULE_OFF,
+                        format!(
+                            "{} needs the {} module, which the project turns off",
+                            c.type_id,
+                            module.key()
+                        ),
+                    )
+                    .with_id(c.id.to_string())
+                    .with_suggestion(format!(
+                        "set `modules.{}` to true in {PROJECT_FILE} (Project Settings › Modules), or remove the component",
+                        module.key()
+                    )),
+                    &format!("{}/type", c.pointer),
+                );
+                d.document = path.clone();
+                out.push(d);
+                continue;
+            }
+            if project.components.is_none() || project.allows_component(&c.type_id) {
                 continue;
             }
             let key = format!("{}#{}", path.as_deref().unwrap_or(""), c.type_id);
@@ -1583,6 +1667,7 @@ pub fn describe_json(
         })).collect::<Vec<_>>(),
         "quality": project.quality.as_ref().map(Quality::to_json),
         "physics": project.physics.to_json(),
+        "modules": project.modules.to_json(),
         "layers": project.layers_and_tags.layers,
         "tags": project.layers_and_tags.tags,
         "components": project.components.as_ref().map(|list| list.iter().map(|c| serde_json::json!({

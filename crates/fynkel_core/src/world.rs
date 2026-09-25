@@ -298,6 +298,9 @@ pub struct World {
     input: Input,
     /// The Rapier adapter (M3-08), stepped at the §5.1 physics slot.
     physics: Physics,
+    /// The optional modules the project uses (ADR-0029 §3): one that is
+    /// off runs no systems and its commands are rejected.
+    modules: crate::Modules,
     /// Named-target component (`ThirdPersonCamera`, `Follow`) → the entity
     /// its `target` name resolved to (M3-09); re-resolved when that entity
     /// dies or is renamed.
@@ -378,6 +381,7 @@ impl World {
             poisoned: false,
             input,
             physics: Physics::new(),
+            modules: crate::Modules::ALL,
             named_targets: HashMap::new(),
             prefabs: HashMap::new(),
             clips: HashMap::new(),
@@ -422,6 +426,45 @@ impl World {
 
     pub fn physics(&self) -> &Physics {
         &self.physics
+    }
+
+    /// The optional modules on (ADR-0029 §3); all until the project says.
+    pub fn modules(&self) -> crate::Modules {
+        self.modules
+    }
+
+    /// The project's module set: from the next tick a module that is off
+    /// runs no systems and its commands are rejected (`MODULE_OFF`).
+    pub fn set_modules(&mut self, modules: crate::Modules) {
+        self.modules = modules;
+    }
+
+    /// Rejects `cmd` when the module it needs is off; true when it may go on.
+    fn module_allows(&mut self, index: u32, lane: Lane, cmd: &Command) -> bool {
+        use crate::Module;
+        let module = match cmd {
+            Command::Body { .. } => Module::Physics,
+            Command::Animate { .. } => Module::Animation,
+            Command::Audio { .. } | Command::PlaySound { .. } | Command::AudioBus { .. } => {
+                Module::Audio
+            }
+            _ => return true,
+        };
+        if self.modules.has(module) {
+            return true;
+        }
+        self.reject(
+            index,
+            lane,
+            DiagnosticCode::MODULE_OFF,
+            cmd.target().unwrap_or(Entity::NULL),
+            ComponentId::NONE,
+            format!(
+                "FYN-R0014: the {} module is off (modules.{} in fynkel.project.json)",
+                module.key(),
+                module.key()
+            ),
+        )
     }
     pub fn physics_mut(&mut self) -> &mut Physics {
         &mut self.physics
@@ -735,6 +778,9 @@ impl World {
 
     fn apply_presentation(&mut self, index: u32, cmd: Command) -> bool {
         let lane = Lane::Presentation;
+        if !self.module_allows(index, lane, &cmd) {
+            return false;
+        }
         if !cmd.allowed_on_presentation() {
             return self.reject(
                 index,
@@ -881,6 +927,9 @@ impl World {
 
     pub(crate) fn apply_simulation(&mut self, index: u32, cmd: Command, tick: Tick) -> bool {
         let lane = Lane::Simulation;
+        if !self.module_allows(index, lane, &cmd) {
+            return false;
+        }
         match cmd {
             Command::Spawn {
                 temp_id,
@@ -1285,7 +1334,12 @@ impl World {
         // same tick wins.
         let edit = self.config.edit_mode;
         let t0 = Instant::now();
-        let characters = if edit { 0 } else { self.drive_characters() };
+        let modules = self.modules;
+        let characters = if edit || !modules.physics {
+            0
+        } else {
+            self.drive_characters()
+        };
         self.set_time(SystemKind::Characters, characters, micros(t0));
 
         // S[n] becomes the interpolation source.
@@ -1337,7 +1391,7 @@ impl World {
         // In edit mode (M4-06) every system below is skipped: commands,
         // propagation and the snapshot are the whole tick.
         let t0 = Instant::now();
-        let n = if edit {
+        let n = if edit || !modules.animation {
             0
         } else {
             self.run_animation(next_tick)
@@ -1372,7 +1426,7 @@ impl World {
         // propagate.
         let t0 = Instant::now();
         let mut physics_entities = 0;
-        if !edit && self.physics.has_work(&self.ecs) {
+        if !edit && modules.physics && self.physics.has_work(&self.ecs) {
             propagated += scene::propagate(&mut self.ecs) as u32;
             self.physics
                 .step(&mut self.ecs, self.config.fixed_dt, &self.subscriptions);
@@ -1431,7 +1485,9 @@ impl World {
         if moved_followers || moved_billboards {
             propagated += scene::propagate(&mut self.ecs) as u32;
         }
-        self.physics.record(&self.ecs);
+        if modules.physics {
+            self.physics.record(&self.ecs);
+        }
         self.seed_prev_world();
         self.apply_teleports();
         if edit {
@@ -1446,7 +1502,11 @@ impl World {
         // clock advanced (M3-11); after the destroys of the tick, so a
         // dead source's voice stops this tick.
         let t0 = Instant::now();
-        let n = if edit { 0 } else { self.run_audio(next_tick) };
+        let n = if edit || !modules.audio {
+            0
+        } else {
+            self.run_audio(next_tick)
+        };
         self.set_time(SystemKind::Audio, n, micros(t0));
 
         // Every native system of the tick has read the same view the game
@@ -1693,7 +1753,8 @@ impl World {
                 let (sp, cp) = pitch.sin_cos();
                 let dir = Vec3::new(cp * sy, sp, cp * cy);
                 let mut distance = rig.distance;
-                if rig.collision_radius > 0.0 {
+                // Without physics the rig does not pull in on walls.
+                if rig.collision_radius > 0.0 && self.modules.physics {
                     self.hits_scratch.clear();
                     self.physics.query(
                         &QuerySpec {

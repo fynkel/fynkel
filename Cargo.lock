@@ -834,6 +834,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_animation"
+version = "0.0.1"
+dependencies = [
+ "fynkel_contracts",
+ "fynkel_scene",
+ "glam 0.33.7",
+]
+
+[[package]]
 name = "fynkel_assets"
 version = "0.0.1"
 dependencies = [
@@ -912,6 +921,7 @@ dependencies = [
 name = "fynkel_core"
 version = "0.0.1"
 dependencies = [
+ "fynkel_animation",
  "fynkel_audio",
  "fynkel_contracts",
  "fynkel_ecs",

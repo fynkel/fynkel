@@ -103,6 +103,10 @@ impl DiagnosticCode {
     /// per crossing, informational — the snapshot is still published whole
     /// (M3-16).
     pub const SNAPSHOT_BUDGET: DiagnosticCode = DiagnosticCode(20);
+    /// A command of a module the project turned off (ADR-0029 §3): a body
+    /// command with physics off, `Animate` with animation off, an audio
+    /// command with audio off. Rejected; the module's systems do not run.
+    pub const MODULE_OFF: DiagnosticCode = DiagnosticCode(21);
 
     pub const fn name(self) -> &'static str {
         match self.0 {
@@ -126,6 +130,7 @@ impl DiagnosticCode {
             18 => "sound_unavailable",
             19 => "audio_device",
             20 => "snapshot_budget",
+            21 => "module_off",
             _ => "unknown",
         }
     }

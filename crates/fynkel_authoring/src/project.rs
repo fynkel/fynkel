@@ -235,6 +235,7 @@ impl OpenProject {
                 input_actions: self.project.input_actions.clone(),
                 physics: self.project.physics.clone(),
                 layers_and_tags: self.project.layers_and_tags.clone(),
+                modules: self.project.modules,
             }),
             live,
             ..fynkel_import::CookOptions::default()

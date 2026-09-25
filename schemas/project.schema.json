@@ -32,6 +32,10 @@
       "$ref": "#/$defs/physics",
       "description": "World gravity (blueprint §9, M3-08). Absent means [0, -9.81, 0]."
     },
+    "modules": {
+      "$ref": "#/$defs/modules",
+      "description": "The optional engine modules the game uses (ADR-0029 §3), as Unity's built-in packages: all on when absent. A module that is off runs no systems, its components are an error in the game's documents (FYN-P0018) and its Dart calls throw."
+    },
     "layers": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 },
@@ -67,6 +71,16 @@
   "patternProperties": { "^x-": true },
   "unevaluatedProperties": false,
   "$defs": {
+    "modules": {
+      "type": "object",
+      "properties": {
+        "physics": { "type": "boolean", "default": true, "description": "RigidBody, Collider, CharacterController; raycasts and overlaps (Rapier)." },
+        "audio": { "type": "boolean", "default": true, "description": "AudioSource, AudioListener; world.audio (Symphonia, the output device)." },
+        "animation": { "type": "boolean", "default": true, "description": "Animator, Skin; clips, blend spaces and skinning (fynkel_animation)." },
+        "strip": { "type": "boolean", "default": false, "description": "A runtime built from source leaves the modules that are off out (cargo features). The prebuilt runtime keeps their code; they are off in behaviour either way." }
+      },
+      "additionalProperties": false
+    },
     "physics": {
       "type": "object",
       "properties": {

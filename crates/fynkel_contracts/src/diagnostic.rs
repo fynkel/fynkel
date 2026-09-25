@@ -199,6 +199,10 @@ impl Code {
     /// A package's behaviour or data type whose id does not start with the
     /// package's namespace (`pickups.Pickup`, ADR-0029 §2).
     pub const PACKAGE_TYPE_NAMESPACE: Code = Code("FYN-P0017");
+    /// A document uses a component of a module the project turned off
+    /// (`modules` in `fynkel.project.json`, ADR-0029 §3): `fynkel.Collider`
+    /// with physics off.
+    pub const MODULE_OFF: Code = Code("FYN-P0018");
     /// A dependency's `fynkel.package.json` that could not be read: not
     /// JSON, an unknown field, a newer `formatVersion`, an asset folder
     /// outside the package or a namespace that is not an identifier
@@ -337,6 +341,9 @@ impl Code {
     /// The world reports it as `DiagnosticCode::SNAPSHOT_BUDGET`, once per
     /// crossing; the snapshot is still delivered whole.
     pub const RUNTIME_SNAPSHOT_BUDGET: Code = Code("FYN-R0013");
+    /// A command of a module the project turned off (ADR-0029 §3); the
+    /// world reports it as `DiagnosticCode::MODULE_OFF`.
+    pub const RUNTIME_MODULE_OFF: Code = Code("FYN-R0014");
 
     // User settings (`FYN-U`, blueprint §19.2d item 12): `settings.json`.
     /// The settings file is not a settings document (wrong `fynkel` kind

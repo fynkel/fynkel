@@ -155,6 +155,8 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
         if let Some(p) = assets.project() {
             core.physics_mut()
                 .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
+            // The modules the project turned off (ADR-0029 §3).
+            core.set_modules(p.modules.modules);
         }
         let (meshes, mut diags) =
             assets.register_mesh_colliders(&scene.description, core.physics_mut());
@@ -218,6 +220,7 @@ fn instantiate(w: &mut FynkelWorld, assets: Assets, scene: CookedScene, mode: Lo
                     "diagnostics": scene.diagnostics.iter().map(diagnostic_json).collect::<Vec<_>>(),
                     "input": input,
                     "physics": physics,
+                    "modules": modules_json(w.core().modules()),
                     "layers": layers_and_tags.layers,
                     "tags": layers_and_tags.tags,
                     "animation": animation,
@@ -247,6 +250,8 @@ fn open_project(w: &mut FynkelWorld, assets: Assets, cache: Value) -> Outcome {
         if let Some(p) = assets.project() {
             core.physics_mut()
                 .set_gravity(fynkel_core::physics::Vec3::from(p.physics.gravity));
+            // The modules the project turned off (ADR-0029 §3).
+            core.set_modules(p.modules.modules);
         }
         core.physics().gravity()
     };
@@ -272,10 +277,16 @@ fn open_project(w: &mut FynkelWorld, assets: Assets, cache: Value) -> Outcome {
                 "prefabs": 0,
                 "diagnostics": [],
             },
+            "modules": modules_json(w.core().modules()),
             "layers": layers_and_tags.layers,
             "tags": layers_and_tags.tags,
         }),
     }
+}
+
+/// The load report's `modules` (ADR-0029 §3): which optional modules run.
+fn modules_json(m: fynkel_core::Modules) -> Value {
+    json!({ "physics": m.physics, "audio": m.audio, "animation": m.animation })
 }
 
 /// Unloads a loaded scene (M3-12): its entities go, its residency token

@@ -1,0 +1,12 @@
+[package]
+name = "fynkel_animation"
+description = "Fynkel animation: the clip core — clips, channels, markers, blend spaces, poses and skins, sampled and blended (blueprint §19.2d item 19, docs/animation.md). The optional animation module (ADR-0029); fynkel_core drives it from the Animator and Skin components."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+fynkel_contracts.workspace = true
+fynkel_scene.workspace = true
+glam.workspace = true

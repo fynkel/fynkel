@@ -20,7 +20,6 @@
 //! Everything Dart-facing is typed Rust here; the wire encoding lives in
 //! `fynkel_native` (M1-06) and is generated from these types (ADR-0012).
 
-pub mod animation;
 pub mod clock;
 pub mod command;
 pub mod components;
@@ -29,17 +28,12 @@ pub mod input;
 pub mod load;
 pub mod material;
 pub mod memory;
+pub mod modules;
 pub mod schema;
 pub mod settings;
 pub mod volume;
 pub mod world;
 
-/// The clip core; `animation::Skin` (the data) is reached through the
-/// module, `Skin` at the root is the component.
-pub use animation::{
-    BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Pose, PoseEntry,
-    Property,
-};
 pub use clock::{FrameClock, FramePlan};
 pub use command::{AnimateOp, AudioOp, Command, Lane};
 pub use components::{
@@ -48,6 +42,14 @@ pub use components::{
     Rotator, Skin, SpotLight, ThirdPersonCamera, TriggerZone, Volume, VolumeShape,
 };
 pub use event::{Event, EventPayload};
+/// The clip core (`fynkel_animation`, the animation module of ADR-0029);
+/// `animation::Skin` (the data) is reached through the module, `Skin` at
+/// the root is the component.
+pub use fynkel_animation as animation;
+pub use fynkel_animation::{
+    BlendPoint, BlendSpace, BlendSync, Channel, Clip, Interpolation, Joint, Pose, PoseEntry,
+    Property,
+};
 pub use fynkel_audio::{
     self as audio, Audio, AudioBus, AudioClip, AudioListener, AudioSource, AudioStats, PlayError,
     PlayParams, VoiceId, VoiceState,
@@ -64,6 +66,7 @@ pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, 
 pub use load::{
     Cloned, EntityDescription, LoadError, LoadMode, LoadedScene, SceneDescription, UnloadedScene,
 };
+pub use modules::{Module, Modules};
 pub use settings::Settings;
 pub use world::{
     projection_matrix, view_matrix, Diagnostic, Extract, ExtractCamera, ExtractDirectionalLight,

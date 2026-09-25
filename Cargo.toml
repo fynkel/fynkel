@@ -7,6 +7,7 @@ members = [
     "crates/fynkel_scene",
     "crates/fynkel_physics",
     "crates/fynkel_audio",
+    "crates/fynkel_animation",
     "crates/fynkel_core",
     "crates/fynkel_wire",
     "crates/fynkel_render",
@@ -62,6 +63,7 @@ fynkel_ecs = { path = "crates/fynkel_ecs" }
 fynkel_scene = { path = "crates/fynkel_scene" }
 fynkel_physics = { path = "crates/fynkel_physics" }
 fynkel_audio = { path = "crates/fynkel_audio" }
+fynkel_animation = { path = "crates/fynkel_animation" }
 fynkel_core = { path = "crates/fynkel_core" }
 fynkel_wire = { path = "crates/fynkel_wire" }
 fynkel_render = { path = "crates/fynkel_render" }
