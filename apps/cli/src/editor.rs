@@ -19,6 +19,10 @@
 //! Dart package with `lib/fynkel_game.dart`, it runs the plain editor
 //! (`apps/editor`, no game compiled in).
 //!
+//! `--write-host` writes the host (step 1) and prints its directory,
+//! nothing run: a test, or CI, drives the project editor's own code
+//! there with `flutter test` (the ADR-0029 acceptance does).
+//!
 //! `--handover` (P3c): an editor that opens a game project starts this and
 //! hands over to it. The editor follows the project's `status.json`
 //! (`building` with Flutter's progress, then `running`, when it quits, or
@@ -39,7 +43,7 @@ use crate::editor_launch;
 
 pub fn usage() -> ExitCode {
     eprintln!(
-        "usage:\n  fynkel editor [<project dir>] [--plain] [--handover] [--window-frame x,y,w,h] [--flutter <path>]\n                                               the editor with the project's game compiled in (Play runs inside it; hot reload on save);\n                                               --plain (or no project) runs the editor without a game;\n                                               --handover: started by an editor that hands the project over (it follows status.json)"
+        "usage:\n  fynkel editor [<project dir>] [--plain] [--handover] [--window-frame x,y,w,h] [--flutter <path>] [--write-host]\n                                               the editor with the project's game compiled in (Play runs inside it; hot reload on save);\n                                               --plain (or no project) runs the editor without a game;\n                                               --handover: started by an editor that hands the project over (it follows status.json)\n                                               --write-host: write <project>/.fynkel/editor_host and print it, run nothing"
     );
     ExitCode::from(2)
 }
@@ -59,6 +63,7 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
     let mut project: Option<PathBuf> = None;
     let mut plain = false;
     let mut handover = false;
+    let mut write_host = false;
     let mut flutter: Option<PathBuf> = None;
     let mut window_frame: Option<String> = None;
     let mut i = 0;
@@ -66,6 +71,7 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         match args[i].as_str() {
             "--plain" => plain = true,
             "--handover" => handover = true,
+            "--write-host" => write_host = true,
             "--flutter" => {
                 i += 1;
                 match args.get(i) {
@@ -149,6 +155,18 @@ pub fn run(root: Option<&Path>, args: &[String]) -> ExitCode {
         },
         _ => None,
     };
+    if write_host {
+        return match &host {
+            Some(h) => {
+                println!("{}", h.display());
+                ExitCode::SUCCESS
+            }
+            None => fail(
+                seq,
+                "--write-host needs a game project (a Dart package with lib/fynkel_game.dart)",
+            ),
+        };
+    }
     let started = Instant::now();
     let cwd = host.clone().unwrap_or_else(|| editor.clone());
     let exe = std::env::current_exe().ok();
@@ -887,9 +905,11 @@ pub fn generate_host(project: &Path, package: &str, editor: &Path) -> Result<Pat
              environment:\n  sdk: ^3.13.0\n\
              dependencies:\n  flutter:\n    sdk: flutter\n  fynkel_editor:\n    path: '{editor}'\n  {package}:\n    path: '{project}'\n\
              flutter:\n  uses-material-design: true\n\
-             hooks:\n  user_defines:\n    fynkel:\n      features: [authoring]\n",
+             hooks:\n  user_defines:\n    fynkel:\n      features: [authoring]\n\
+             {overrides}",
             editor = q(editor),
             project = q(project),
+            overrides = game_overrides(project),
         ),
     )?;
     write_host_main(project, package)?;
@@ -899,6 +919,56 @@ pub fn generate_host(project: &Path, package: &str, editor: &Path) -> Result<Pat
     )?;
     copy_tree(&editor.join("macos"), &host.join("macos"))?;
     Ok(host)
+}
+
+/// The game's `dependency_overrides:` block for the host, its relative
+/// paths made absolute: pub reads only the root package's overrides, and
+/// the host is the root (a game that overrides what a package asks for —
+/// a git package's hosted Fynkel constraints, say — resolves the same in
+/// its editor). Empty when the game has none.
+fn game_overrides(project: &Path) -> String {
+    use std::fmt::Write as _;
+    let Ok(text) = std::fs::read_to_string(project.join("pubspec.yaml")) else {
+        return String::new();
+    };
+    let mut lines = text
+        .lines()
+        .skip_while(|l| l.trim_end() != "dependency_overrides:");
+    let Some(head) = lines.next() else {
+        return String::new();
+    };
+    let mut out = format!("{head}\n");
+    for line in lines.take_while(|l| l.trim().is_empty() || l.starts_with([' ', '#'])) {
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        let indent = &line[..line.len() - line.trim_start().len()];
+        match line.trim_start().strip_prefix("path:") {
+            Some(path) => {
+                let path = Path::new(
+                    path.split(" #")
+                        .next()
+                        .unwrap_or_default()
+                        .trim()
+                        .trim_matches(['"', '\'']),
+                );
+                let path = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    project.join(path)
+                };
+                let _ = writeln!(
+                    out,
+                    "{indent}path: '{}'",
+                    path.display().to_string().replace('\'', "''")
+                );
+            }
+            None => {
+                let _ = writeln!(out, "{line}");
+            }
+        }
+    }
+    out
 }
 
 /// Writes the host's `lib/main.dart`: the game, and every editor part
@@ -1127,6 +1197,7 @@ mod tests {
         assert!(pubspec.contains(&format!("path: '{}'", editor.display())));
         assert!(pubspec.contains("  my_game:\n"));
         assert!(pubspec.contains("features: [authoring]"));
+        assert!(!pubspec.contains("dependency_overrides"));
         let main = std::fs::read_to_string(host.join("lib/main.dart")).unwrap();
         assert!(main.contains("import 'package:my_game/fynkel_game.dart' as game;"));
         assert!(main.contains("build: game.buildGame"));
@@ -1149,6 +1220,24 @@ mod tests {
                 .modified()
                 .unwrap(),
             stamp
+        );
+
+        // The game's overrides are the host's (pub reads only the root's),
+        // relative paths made absolute.
+        std::fs::write(
+            project.join("pubspec.yaml"),
+            "name: my_game\ndependency_overrides:\n  fynkel:\n    path: ../fynkel # the checkout\n\n  other: '1.0.0'\n\
+             dev_dependencies:\n  lints: any\n",
+        )
+        .unwrap();
+        generate_host(&project, "my_game", &editor).unwrap();
+        let pubspec = std::fs::read_to_string(host.join("pubspec.yaml")).unwrap();
+        assert!(
+            pubspec.ends_with(&format!(
+                "dependency_overrides:\n  fynkel:\n    path: '{}'\n  other: '1.0.0'\n",
+                project.join("../fynkel").display()
+            )),
+            "{pubspec}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
