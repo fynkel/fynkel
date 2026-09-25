@@ -198,6 +198,99 @@ fn instantiate_places_the_prefab_root() {
     assert_eq!(w.live_entities(), live);
 }
 
+/// `World::clone_subtree` (ADR-0026 §4, Unity's `Instantiate(gameObject)`):
+/// a live subtree copied with its names, own active flags, child order and
+/// components, placed as `instantiate` places a prefab; the source is
+/// untouched.
+#[test]
+fn clone_subtree_copies_a_live_hierarchy() {
+    let mut w = World::new(WorldConfig::default());
+    let mut s = prefab();
+    s.entities
+        .iter_mut()
+        .find(|e| e.id == id(3))
+        .unwrap()
+        .active = false;
+    let base = w.load_scene(&s).unwrap();
+    let e1 = base.handle_of(id(1)).unwrap();
+    let (e2, e3) = (
+        base.handle_of(id(2)).unwrap(),
+        base.handle_of(id(3)).unwrap(),
+    );
+    let (desc, sources) = w.describe_subtree(e2).unwrap();
+    assert_eq!(
+        (desc.entities.len(), sources),
+        (1, vec![e2]),
+        "a leaf alone"
+    );
+
+    let live = w.live_entities();
+    let placed = Transform::from_position(Vec3::new(0.0, 2.0, 0.0));
+    let Cloned {
+        root,
+        pairs,
+        rejected_components: rejected,
+    } = w.clone_subtree(e1, None, placed, None).unwrap();
+    assert_eq!(rejected, 0, "{:?}", w.diagnostics());
+    assert_eq!(w.live_entities(), live + 3);
+    assert_eq!(pairs[0], (e1, root));
+    assert_eq!(
+        pairs.iter().map(|p| p.0).collect::<Vec<_>>(),
+        vec![e1, e3, e2]
+    );
+    assert_eq!(
+        w.ecs().copy::<Name>(root).unwrap().value,
+        "e1",
+        "the source's name"
+    );
+    assert_eq!(w.ecs().copy::<Transform>(root).unwrap(), placed);
+    let (c3, c2) = (pairs[1].1, pairs[2].1);
+    assert_eq!(
+        scene::children_of(w.ecs(), root),
+        vec![c3, c2],
+        "child order kept"
+    );
+    assert_eq!(w.ecs().copy::<Name>(c2).unwrap().value, "e2");
+    assert!(w.ecs().has::<Camera>(c2));
+    assert_eq!(
+        w.ecs().copy::<Transform>(c2).unwrap(),
+        Transform::from_position(Vec3::new(1.0, 0.0, 0.0)),
+        "descendants keep their local transforms"
+    );
+    assert!(
+        !scene::is_active_self(w.ecs(), c3),
+        "the own active flag copied"
+    );
+    assert!(w.ecs().has::<PointLight>(c3));
+    assert_eq!(
+        scene::children_of(w.ecs(), e1),
+        vec![e3, e2],
+        "the source is untouched"
+    );
+
+    // A name and a parent; a copy of a copy.
+    let named = w
+        .clone_subtree(c2, Some("Cam"), Transform::IDENTITY, Some(root))
+        .unwrap()
+        .root;
+    assert_eq!(w.ecs().copy::<Name>(named).unwrap().value, "Cam");
+    assert_eq!(scene::parent_of(w.ecs(), named), Some(root));
+
+    let stale = Entity::new(w.id(), 7, 60_000);
+    let live = w.live_entities();
+    assert_eq!(
+        w.clone_subtree(stale, None, Transform::IDENTITY, None)
+            .unwrap_err(),
+        LoadError::UnknownSource(stale)
+    );
+    assert_eq!(
+        w.clone_subtree(e1, None, Transform::IDENTITY, Some(stale))
+            .unwrap_err(),
+        LoadError::UnknownAnchorParent(stale)
+    );
+    assert_eq!(w.live_entities(), live);
+}
+
 #[test]
 fn structural_errors_load_nothing() {
     let mut w = World::new(WorldConfig::default());

@@ -83,6 +83,8 @@ pub enum LoadError {
     AlreadyLoaded(Uuid),
     /// `unload_scene` named a scene the world does not hold (M3-12).
     NotLoaded(Uuid),
+    /// `clone_subtree`: the source is not a live entity of this world.
+    UnknownSource(Entity),
 }
 
 impl core::fmt::Display for LoadError {
@@ -122,11 +124,24 @@ impl core::fmt::Display for LoadError {
             }
             LoadError::AlreadyLoaded(id) => write!(f, "scene {id} is already loaded"),
             LoadError::NotLoaded(id) => write!(f, "scene {id} is not loaded"),
+            LoadError::UnknownSource(e) => {
+                write!(f, "clone: source {e} is not a live entity of this world")
+            }
         }
     }
 }
 
 impl std::error::Error for LoadError {}
+
+/// What `World::clone_subtree` made.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Cloned {
+    pub root: Entity,
+    /// Every (source, copy) pair, breadth first, the root first.
+    pub pairs: Vec<(Entity, Entity)>,
+    /// Component values the command path rejected.
+    pub rejected_components: u32,
+}
 
 /// Where and as what an instantiated prefab's root spawns.
 struct Placed<'a> {
@@ -392,6 +407,78 @@ impl World {
         self.instantiate_inner(prefab, name, transform, parent, tick, true)
     }
 
+    /// The live subtree under `root` as a one-root description (ADR-0026
+    /// §4, Unity's `Instantiate(gameObject)`): every entity's name, own
+    /// active flag, children in order and built-in components, with
+    /// synthetic ids — entity `i` of the returned list is
+    /// `i + 1` as a big-endian UUID. None when `root` is not live.
+    pub fn describe_subtree(&self, root: Entity) -> Option<(SceneDescription, Vec<Entity>)> {
+        if root.world() != self.id() || !self.ecs().contains(root) {
+            return None;
+        }
+        let ecs = self.ecs();
+        // Breadth first; `(entity, parent's id)`.
+        let mut entities = vec![(root, None)];
+        let mut described: Vec<EntityDescription> = Vec::new();
+        let mut i = 0;
+        while i < entities.len() {
+            let (e, parent) = entities[i];
+            let id = synthetic_id(i + 1);
+            let mut children = Vec::new();
+            for c in scene::children_of(ecs, e) {
+                if ecs.contains(c) {
+                    entities.push((c, Some(id)));
+                    children.push(synthetic_id(entities.len()));
+                }
+            }
+            described.push(EntityDescription {
+                id,
+                name: ecs
+                    .get::<Name>(e)
+                    .map(|n| n.value.clone())
+                    .unwrap_or_default(),
+                active: scene::is_active_self(ecs, e),
+                parent,
+                children,
+                components: ComponentValue::all_of(self, e),
+            });
+            i += 1;
+        }
+        let description = SceneDescription {
+            id: synthetic_id(0),
+            name: String::new(),
+            entities: described,
+        };
+        Some((description, entities.into_iter().map(|(e, _)| e).collect()))
+    }
+
+    /// A copy of the live subtree under `source` (see [`describe_subtree`](Self::describe_subtree)),
+    /// its root named `name` (the source's when None) at `transform` under
+    /// `parent`, as `instantiate` places a prefab.
+    pub fn clone_subtree(
+        &mut self,
+        source: Entity,
+        name: Option<&str>,
+        transform: Transform,
+        parent: Option<Entity>,
+    ) -> Result<Cloned, LoadError> {
+        let Some((description, sources)) = self.describe_subtree(source) else {
+            return Err(LoadError::UnknownSource(source));
+        };
+        let name = name.unwrap_or(&description.entities[0].name).to_owned();
+        let (root, loaded) = self.instantiate(&description, &name, transform, parent)?;
+        let pairs = sources
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| (s, loaded.by_id[&synthetic_id(i + 1)]))
+            .collect();
+        Ok(Cloned {
+            root,
+            pairs,
+            rejected_components: loaded.rejected_components,
+        })
+    }
+
     /// `instantiate` with the tick its component writes belong to and
     /// whether to propagate afterwards (an `Emitter` inside `step` leaves
     /// that to the tick's own propagate).
@@ -513,6 +600,11 @@ impl World {
     fn apply_loaded(&mut self, entity: Entity, value: ComponentValue, tick: u64) -> bool {
         self.apply_simulation(u32::MAX, Command::SetComponent { entity, value }, tick)
     }
+}
+
+/// `n` as a big-endian UUID: the ids of a described subtree.
+fn synthetic_id(n: usize) -> Uuid {
+    Uuid::from_bytes((n as u128).to_be_bytes())
 }
 
 /// Validates the structure and returns indexes in spawn order.

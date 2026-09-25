@@ -149,6 +149,17 @@ pub struct FynkelInstantiateDesc {
 }
 
 #[repr(C)]
+pub struct FynkelCloneDesc {
+    pub source: u64,
+    pub name_utf8: *const u8,
+    pub name_len: u32,
+    pub parent: u64,
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+}
+
+#[repr(C)]
 pub struct FynkelQueryDesc {
     pub kind: u32,
     pub request_id: u32,

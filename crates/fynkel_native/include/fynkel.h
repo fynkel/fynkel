@@ -552,6 +552,29 @@ typedef struct FynkelInstantiateDesc {
 } FynkelInstantiateDesc;
 FynkelStatus fynkel_world_instantiate(FynkelWorld* world,
                                       const FynkelInstantiateDesc* desc);
+/* A copy of a live object (ADR-0026 §4, Unity's `Instantiate(gameObject)`,
+ * `GameObject.clone` in Dart). Spawns, now, a copy of the subtree under
+ * `source`: every entity's name, own active flag, child order and
+ * built-in components, as the world holds them (commands not yet stepped
+ * are not in it). The copy's root is named `name_utf8` (empty: the
+ * source's name) with the given local transform under `parent` (0 = a
+ * root); the others keep their local transforms. Components go through
+ * the command path, as an instantiated prefab's. No project needed. The
+ * report: {"ok", "clone": {"source": u64, "root": u64, "entities":
+ * [[source, copy], ...] (breadth first, the root first),
+ * "rejectedComponents"}, "diagnostics": [...]}. FYNKEL_STATUS_LOAD_FAILED
+ * when `source` or `parent` is not live or the transform is not finite
+ * (the world is unchanged). */
+typedef struct FynkelCloneDesc {
+  FynkelEntity source;
+  const uint8_t* name_utf8;           /* NULL with name_len 0 for none */
+  uint32_t name_len;
+  FynkelEntity parent;                /* 0: a root */
+  float position[3];
+  float rotation[4];                  /* x, y, z, w */
+  float scale[3];
+} FynkelCloneDesc;
+FynkelStatus fynkel_world_clone(FynkelWorld* world, const FynkelCloneDesc* desc);
 /* A material made at runtime (ADR-0026 §4, `world.createMaterial`):
  * `payload` is a MATL chunk payload — u32 version (1), u32 record size,
  * u32 tail length, u32 reserved, the `fynkel.PbrMaterial` wire record, its

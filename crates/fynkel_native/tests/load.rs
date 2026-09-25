@@ -1058,3 +1058,69 @@ fn runtime_materials_through_the_abi() {
     assert!(store().material(&made).is_err());
     assert_eq!(unsafe { fynkel_world_is_poisoned(host.w) }, 0);
 }
+
+/// `fynkel_world_clone` (ADR-0026 §4): a live subtree copied, placed and
+/// reported as source → copy pairs, without any project; a stale source
+/// fails with a report and spawns nothing.
+#[test]
+fn clone_through_the_abi() {
+    let host = Host::new();
+    let (root, child) = {
+        let w = unsafe { &mut *host.w }.core_mut();
+        let root = scene::spawn(w.ecs_mut(), Transform::IDENTITY, None).unwrap();
+        let child = scene::spawn(
+            w.ecs_mut(),
+            Transform::from_position(glam::Vec3::X),
+            Some(root),
+        )
+        .unwrap();
+        w.ecs_mut().insert(root, Name::new("Ship")).unwrap();
+        (root, child)
+    };
+    let desc = |source: Entity, name: &str, parent: u64| FynkelCloneDesc {
+        source: source.to_bits(),
+        name_utf8: name.as_ptr(),
+        name_len: name.len() as u32,
+        parent,
+        position: [0.0, 3.0, 0.0],
+        rotation: [0.0, 0.0, 0.0, 1.0],
+        scale: [1.0; 3],
+    };
+    assert_eq!(
+        unsafe { fynkel_world_clone(host.w, &desc(root, "", 0)) },
+        Status::Ok
+    );
+    let r = host.report();
+    assert_eq!(r["ok"], true, "{r:#}");
+    let c = &r["clone"];
+    let copy = Entity::from_bits(c["root"].as_u64().unwrap());
+    assert_eq!(c["entities"][0][0], root.to_bits());
+    assert_eq!(c["entities"][0][1], copy.to_bits());
+    assert_eq!(c["entities"][1][0], child.to_bits());
+    assert_eq!(host.live(), 4);
+    {
+        let ecs = unsafe { &*host.w }.core().ecs();
+        assert_eq!(ecs.copy::<Name>(copy).unwrap().value, "Ship");
+        assert_eq!(ecs.copy::<Transform>(copy).unwrap().position.y, 3.0);
+        let copied_child = Entity::from_bits(c["entities"][1][1].as_u64().unwrap());
+        assert_eq!(scene::children_of(ecs, copy), vec![copied_child]);
+    }
+
+    assert_eq!(
+        unsafe { fynkel_world_clone(host.w, &desc(child, "Wing", copy.to_bits())) },
+        Status::Ok
+    );
+    assert_eq!(host.live(), 5);
+
+    let stale = Entity::new(copy.world(), 7, 60_000);
+    assert_eq!(
+        unsafe { fynkel_world_clone(host.w, &desc(stale, "", 0)) },
+        Status::LoadFailed
+    );
+    assert_eq!(host.report()["ok"], false);
+    assert_eq!(host.live(), 5);
+    assert_eq!(
+        unsafe { fynkel_world_clone(host.w, ptr::null()) },
+        Status::InvalidArgument
+    );
+}

@@ -62,7 +62,7 @@ pub use fynkel_physics::{
 pub use fynkel_scene::{Layer, Tags, Transform};
 pub use input::{ActionKind, ActionSpec, ActionState, Device, Input, InputEvent, Phase};
 pub use load::{
-    EntityDescription, LoadError, LoadMode, LoadedScene, SceneDescription, UnloadedScene,
+    Cloned, EntityDescription, LoadError, LoadMode, LoadedScene, SceneDescription, UnloadedScene,
 };
 pub use settings::Settings;
 pub use world::{

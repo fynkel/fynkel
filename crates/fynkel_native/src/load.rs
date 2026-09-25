@@ -16,7 +16,7 @@ use fynkel_document::diagnostic_json;
 use glam::{Quat, Vec3};
 use serde_json::{json, Value};
 
-use crate::{guarded, FynkelBufferView, FynkelInstantiateDesc, FynkelWorld};
+use crate::{guarded, FynkelBufferView, FynkelCloneDesc, FynkelInstantiateDesc, FynkelWorld};
 
 /// What one load call produced.
 struct Outcome {
@@ -56,7 +56,9 @@ fn load_error_diagnostic(e: &LoadError) -> Diagnostic {
         LoadError::ChildParentMismatch { .. } => Code::SCENE_CHILD_PARENT_MISMATCH,
         LoadError::Unreachable(_) => Code::SCENE_HIERARCHY_CYCLE,
         LoadError::DuplicateComponent { .. } => Code::SCENE_DUPLICATE_COMPONENT,
-        LoadError::UnknownAnchorParent(_) | LoadError::AnchorTransform => Code::IO,
+        LoadError::UnknownAnchorParent(_)
+        | LoadError::AnchorTransform
+        | LoadError::UnknownSource(_) => Code::IO,
         LoadError::NotOneRoot(_) => Code::RUNTIME_SCENE_INVALID,
         LoadError::AlreadyLoaded(_) => Code::RUNTIME_SCENE_ALREADY_LOADED,
         LoadError::NotLoaded(_) => Code::RUNTIME_SCENE_NOT_LOADED,
@@ -520,6 +522,64 @@ pub unsafe extern "C" fn fynkel_world_instantiate(
     guarded(world, move |w| {
         let started = std::time::Instant::now();
         let out = instantiate_prefab(w, id, name.as_deref(), transform, parent);
+        finish(w, out, started)
+    })
+}
+
+/// Copies the live subtree under `desc.source` (ADR-0026 §4; see the
+/// header).
+///
+/// # Safety
+/// `world` live or NULL; `desc` NULL or valid, its name readable for its
+/// length.
+#[no_mangle]
+pub unsafe extern "C" fn fynkel_world_clone(
+    world: *mut FynkelWorld,
+    desc: *const FynkelCloneDesc,
+) -> Status {
+    let Some(d) = desc.as_ref() else {
+        return Status::InvalidArgument;
+    };
+    let name = if d.name_len == 0 {
+        None
+    } else {
+        match utf8(d.name_utf8, d.name_len) {
+            Some(n) => Some(n.to_string()),
+            None => return Status::InvalidArgument,
+        }
+    };
+    let transform = Transform {
+        position: Vec3::from_array(d.position),
+        rotation: Quat::from_array(d.rotation),
+        scale: Vec3::from_array(d.scale),
+    };
+    let source = Entity::from_bits(d.source);
+    let parent = (d.parent != 0).then(|| Entity::from_bits(d.parent));
+    guarded(world, move |w| {
+        let started = std::time::Instant::now();
+        let out = match w
+            .core_mut()
+            .clone_subtree(source, name.as_deref(), transform, parent)
+        {
+            Ok(c) => Outcome {
+                status: Status::Ok,
+                report: json!({
+                    "ok": true,
+                    "scene": Value::Null,
+                    "clone": {
+                        "source": source.to_bits(),
+                        "root": c.root.to_bits(),
+                        "entities": c.pairs
+                            .iter()
+                            .map(|(s, c)| [s.to_bits(), c.to_bits()])
+                            .collect::<Vec<_>>(),
+                        "rejectedComponents": c.rejected_components,
+                    },
+                    "diagnostics": [],
+                }),
+            },
+            Err(e) => failed(&[load_error_diagnostic(&e)], Value::Null),
+        };
         finish(w, out, started)
     })
 }
