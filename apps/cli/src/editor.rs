@@ -922,18 +922,24 @@ pub fn write_host_main(project: &Path, package: &str) -> Result<bool, String> {
             "    EditorPart('{part}', editor{i}.registerEditor),\n"
         ));
     }
-    // The game's behaviours and data types, for what the extensions write
-    // (ADR-0028 step 2).
-    let (behaviours_import, behaviours_arg) = if project.join(crate::behaviours::DART_OUT).is_file()
-    {
-        let under_lib = crate::behaviours::DART_OUT.trim_start_matches("lib/");
-        (
-            format!("import 'package:{package}/{under_lib}' as behaviours;\n"),
-            ", registerBehaviours: behaviours.registerBehaviours",
-        )
-    } else {
-        (String::new(), "")
-    };
+    // The game's behaviours and data types, and its packages' (ADR-0029
+    // §2), for what the extensions write (ADR-0028 step 2).
+    let (behaviours_import, behaviours_arg) =
+        if project.join(crate::packages_gen::DART_OUT).is_file() {
+            let under_lib = crate::packages_gen::DART_OUT.trim_start_matches("lib/");
+            (
+                format!("import 'package:{package}/{under_lib}' as behaviours;\n"),
+                ", registerBehaviours: behaviours.registerPackages",
+            )
+        } else if project.join(crate::behaviours::DART_OUT).is_file() {
+            let under_lib = crate::behaviours::DART_OUT.trim_start_matches("lib/");
+            (
+                format!("import 'package:{package}/{under_lib}' as behaviours;\n"),
+                ", registerBehaviours: behaviours.registerBehaviours",
+            )
+        } else {
+            (String::new(), "")
+        };
     let extensions = if parts.is_empty() {
         String::new()
     } else {
@@ -1237,6 +1243,14 @@ mod tests {
         assert!(main.contains(
             "build: game.buildGame, registerBehaviours: behaviours.registerBehaviours),"
         ));
+        // With packages.g.dart (ADR-0029 §2): every package's types too.
+        std::fs::write(game.join("lib/generated/packages.g.dart"), "").unwrap();
+        assert!(write_host_main(&game, "my_game").unwrap());
+        let main = std::fs::read_to_string(host.join("lib/main.dart")).unwrap();
+        assert!(
+            main.contains("import 'package:my_game/generated/packages.g.dart' as behaviours;\n")
+        );
+        assert!(main.contains("registerBehaviours: behaviours.registerPackages),"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

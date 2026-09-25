@@ -13,7 +13,7 @@ import 'dart:io';
 
 import 'package:code_only/game/coin_kind.dart';
 import 'package:code_only/game/level.dart';
-import 'package:code_only/generated/behaviours.g.dart';
+import 'package:code_only/generated/packages.g.dart';
 import 'package:fynkel/authoring.dart';
 import 'package:fynkel/fynkel.dart';
 
@@ -26,7 +26,7 @@ void main(List<String> args) {
 /// Writes every document into the project at [projectDir]; what was
 /// written, in order.
 List<WrittenDocument> writeScenes(String projectDir) {
-  final writer = ProjectWriter(projectDir, registerBehaviours: registerBehaviours);
+  final writer = ProjectWriter(projectDir, registerBehaviours: registerPackages);
   final written = <WrittenDocument>[];
   WrittenDocument add(WrittenDocument d) {
     written.add(d);

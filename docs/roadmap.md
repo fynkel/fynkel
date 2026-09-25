@@ -102,7 +102,8 @@ Three ADRs, then their implementation:
    through the package graph; modules switch off in Project Settings;
    publishing is rehearsed from a local store and waits for ADR-0005. Step 1 (the package
    graph in `fynkel_document`, `fynkel.package.json`, `FYN-P0019`) done
-   2026-09-25.
+   2026-09-25; step 2 (`registerPackages`, schemas from every package,
+   `FYN-P0016`/`P0017`) done 2026-09-25.
 
 ## Phase 4 — Rendering resumes
 

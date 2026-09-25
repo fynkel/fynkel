@@ -28,6 +28,7 @@ mod editor_launch;
 mod import;
 mod material;
 mod migrate;
+mod packages_gen;
 mod project;
 mod render;
 mod rig;

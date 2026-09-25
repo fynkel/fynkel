@@ -4,14 +4,15 @@
 // into it from the cooked cache (`.fynkel/cache`, written by `fynkel cook`;
 // `fynkel run` and `fynkel test` cook first, a test calls `cookProject`,
 // and on a device lib/main.dart unpacks the copy the app bundles),
-// and every `@FynkelBehaviour` class of this package registered so the
-// scene's behaviour components become live Dart objects. The host
+// and every `@FynkelBehaviour` class of this package and of the Fynkel
+// packages it depends on registered (`registerPackages`) so the scene's
+// behaviour components become live Dart objects. The host
 // (lib/main.dart, or a test) owns the loop and calls [frame] once per frame
 // (ADR-0007/0008).
 
 import 'package:fynkel/fynkel.dart';
 
-import '../generated/behaviours.g.dart';
+import '../generated/packages.g.dart';
 import 'hud_model.dart';
 
 class Game {
@@ -33,7 +34,7 @@ class Game {
   /// load; warnings stay in [report].diagnostics.
   static Game load(String projectDir, {String? cacheDir, String? settingsPath, NativeLibrary? library}) {
     final world = World.create(library: library);
-    registerBehaviours(world.registry);
+    registerPackages(world.registry);
     // The HUD's observable model: behaviours write it, widgets bind to it.
     world.context.install(HudModel());
     final warnings = <LoadDiagnostic>[];

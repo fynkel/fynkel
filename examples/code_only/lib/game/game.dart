@@ -16,7 +16,7 @@
 import 'package:fynkel/fynkel.dart';
 
 import '../generated/assets.g.dart';
-import '../generated/behaviours.g.dart';
+import '../generated/packages.g.dart';
 import 'coin_kind.dart';
 import 'flow.dart';
 import 'game_state.dart';
@@ -113,7 +113,7 @@ class Game {
     NativeLibrary? library,
   }) {
     final world = World.create(library: library);
-    registerBehaviours(world.registry);
+    registerPackages(world.registry);
     world.context.install(GameState());
     final report = world.loadProject(projectDir, cacheDir: cacheDir);
     if (settingsPath != null) world.useSettings(SettingsStore.open(settingsPath, world: world));

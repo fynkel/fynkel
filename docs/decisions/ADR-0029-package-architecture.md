@@ -91,8 +91,13 @@ What Fynkel has (mapped 2026-09-25):
        namespace, is a project error: `FYN-P0016` and `FYN-P0017`, from
        `fynkel validate` and codegen.
    - **Schemas** are read from every package's `schemas/`, then the
-     game's, into one registry. `fynkel.project.json`'s `components`
-     registry lists a package's types as it lists the game's.
+     game's, into one registry. A package's types need no entry in
+     `fynkel.project.json`'s `components` registry: the dependency is
+     the registration, as installing a Unity package is. (Changed from
+     "listed like the game's" while building step 2, 2026-09-25:
+     installing a package should not mean editing the project file.)
+   - The namespaces `fynkel` and `game` are the engine's and the game's;
+     a package claiming one is `FYN-P0019`.
    - **Assets.**
      - A package's asset folder is an asset root of its own, mounted at
        `Packages/<name>/`. This is Unity's Packages folder. Ids come from

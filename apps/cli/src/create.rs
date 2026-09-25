@@ -413,6 +413,10 @@ fn create(root: &Path, opts: &Opts) -> Result<Created, String> {
     // `Assets.…` for every file above, with the ids just made (ADR-0026 §3).
     crate::behaviours::write_assets(dir, false, &mut Vec::new())?;
     files.push(crate::assets_gen::DART_OUT.to_string());
+    // `registerPackages`: the game's own types until it depends on a
+    // Fynkel package (ADR-0029 §2).
+    crate::behaviours::write_packages(dir, false, &mut Vec::new())?;
+    files.push(crate::packages_gen::DART_OUT.to_string());
 
     if used_flutter {
         relax_sandbox(dir)?;

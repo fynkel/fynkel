@@ -1864,7 +1864,10 @@ non-finite gravity), `P0014` the project's `layers` or `tags` (ADR-0020),
 `P0015` a file of the game package outside `lib/editor/` that imports
 `package:fynkel_editor_api` or `lib/editor/` (ADR-0028: editor code never
 ships in a game; also reported by `fynkel codegen --check`), `P0019` a
-dependency's `fynkel.package.json` that cannot be read (below).
+dependency's `fynkel.package.json` that cannot be read (below), `P0016` a
+behaviour or data type id declared by two packages or by a package and the
+game, `P0017` a package's type whose id does not start with its namespace
+(also reported by `fynkel codegen`, which fails on either).
 
 ### Packages: `fynkel.package.json` (ADR-0029)
 
@@ -1898,6 +1901,24 @@ files are editable. The game and `path:` packages are the user's. Hosted,
 git and SDK packages live in pub's shared cache and are read-only. Without
 a lock entry, a package inside pub's cache (`PUB_CACHE`, `.pub-cache`)
 counts as hosted.
+
+A Fynkel package's types are the game's too:
+- **Schemas.** Every package's `schemas/` is loaded before the game's, in
+  graph order (`Project::schemas`). The component registry allows a
+  package's types without an entry.
+- **Registration.** `fynkel codegen --project .` writes
+  `lib/generated/packages.g.dart`: `registerPackages(registry, {replace})`
+  calls each package's `registerBehaviours` in graph order, then the
+  game's. `lib/game/game.dart` and the editor host call it.
+- **The editor.** The editor session merges each package's
+  `lib/generated/behaviours.g.json` ahead of the game's, so the Inspector
+  has their metadata.
+- **Names.** A package's type ids start with its namespace
+  (`pickups.Pickup`). `fynkel` and `game` are reserved.
+
+A package runs `fynkel codegen --project .` in its own folder and commits
+`lib/generated/` and `schemas/`, as a game does. There it writes no
+`packages.g.dart`, and fails on its own types outside its namespace.
 
 ## New projects: `fynkel create`
 

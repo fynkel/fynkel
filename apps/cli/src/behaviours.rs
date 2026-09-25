@@ -96,7 +96,25 @@ pub fn run(project: &Path, check: bool) -> Result<Outcome, String> {
         restore(&dart_out, before.0.as_deref())?;
         restore(&json_out, before.1.as_deref())?;
     }
-    result
+    let outcome = result?;
+    // One registry holds every package's types (ADR-0029 §2): a clash, or a
+    // package type outside its namespace, fails the run (the files stay
+    // written, as a validation error leaves them).
+    let errors = type_errors(project);
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
+    }
+    Ok(outcome)
+}
+
+/// `FYN-P0016`/`FYN-P0017` for the game's packages, or for the package
+/// codegen runs in.
+fn type_errors(project: &Path) -> Vec<String> {
+    use fynkel_document::Code;
+    let mut found = fynkel_document::packages::package_types(project).diagnostics;
+    found.retain(|d| d.code == Code::PACKAGE_TYPE_CLASH || d.code == Code::PACKAGE_TYPE_NAMESPACE);
+    found.extend(fynkel_document::packages::check_own_namespace(project));
+    found.iter().map(|d| d.to_string()).collect()
 }
 
 fn generate(
@@ -134,6 +152,7 @@ fn generate(
     }
     written += sync_schemas(project, &schemas, check, &mut drift)?;
     written += write_assets(project, check, &mut drift)?;
+    written += write_packages(project, check, &mut drift)?;
 
     if check {
         // `run` puts the committed generated files back: a check never mutates.
@@ -170,6 +189,31 @@ pub fn write_assets(
         return Ok(0);
     }
     drift.push(PathBuf::from(crate::assets_gen::DART_OUT));
+    if check {
+        return Ok(0);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(1)
+}
+
+/// `lib/generated/packages.g.dart` (ADR-0029 §2) for a package that is a
+/// project's, as [`write_assets`].
+pub fn write_packages(
+    project: &Path,
+    check: bool,
+    drift: &mut Vec<PathBuf>,
+) -> Result<usize, String> {
+    let Some(text) = crate::packages_gen::generate(project) else {
+        return Ok(0);
+    };
+    let path = project.join(crate::packages_gen::DART_OUT);
+    if read_opt(&path).as_deref() == Some(text.as_str()) {
+        return Ok(0);
+    }
+    drift.push(PathBuf::from(crate::packages_gen::DART_OUT));
     if check {
         return Ok(0);
     }
@@ -337,7 +381,8 @@ fn finish(
     let metadata: Value =
         serde_json::from_str(json_text).map_err(|e| format!("{JSON_OUT}: not JSON: {e}"))?;
     let schemas = split_schemas(&metadata)?;
-    let written = sync_schemas(project, &schemas, false, &mut Vec::new())?;
+    let mut written = sync_schemas(project, &schemas, false, &mut Vec::new())?;
+    written += write_packages(project, false, &mut Vec::new())?;
     Ok((written, counts(&schemas).0))
 }
 

@@ -17,7 +17,7 @@
 import 'package:fynkel/fynkel.dart';
 
 import '../generated/assets.g.dart';
-import '../generated/behaviours.g.dart';
+import '../generated/packages.g.dart';
 import 'game_state.dart';
 
 /// The Menu scene (assets/scenes/menu.scene.json): the project's startup
@@ -77,7 +77,7 @@ class Game {
   /// [report].diagnostics.
   static Game load(String projectDir, {String? cacheDir, String? settingsPath, NativeLibrary? library}) {
     final world = World.create(library: library);
-    registerBehaviours(world.registry);
+    registerPackages(world.registry);
     // The observable game state: behaviours write it, widgets bind to it.
     world.context.install(GameState());
     final warnings = <LoadDiagnostic>[];
