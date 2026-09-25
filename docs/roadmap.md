@@ -77,7 +77,8 @@ Three ADRs, then their implementation:
    game build.
 2. **`@DataAsset`** (Unity's ScriptableObject): a Dart class becomes an
    asset type with a schema, an Inspector page, references by id, a
-   cooked form.
+   cooked form. **ADR-0027 accepted 2026-09-25; built first**, ahead of
+   item 1 (its order is the ADR's § Order).
 3. **Package architecture:** physics, audio and animation as optional
    engine modules; game packages that ship behaviours, data assets,
    prefabs and editor extensions; published artifacts (E2).
