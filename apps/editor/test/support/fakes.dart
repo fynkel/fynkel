@@ -719,6 +719,7 @@ Widget shellApp({
   List<EditorPart> extensions = const [],
   StartEditorProcess? startEditor,
   bool Function(String dir)? isGame,
+  bool nativeMenuBar = false,
 }) {
   return FynkelEditorApp(
     key: key,
@@ -742,7 +743,7 @@ Widget shellApp({
     run: runner?.call ?? RecordingRunner().call,
     startPlayProcess: startPlayProcess ?? _noPlayProcess,
     startCodegen: startCodegen ?? _noCodegenWatch,
-    nativeMenuBar: false,
+    nativeMenuBar: nativeMenuBar,
     quit: quit ?? () {},
     initialProject: initialProject,
     extensions: extensions,

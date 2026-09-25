@@ -32,7 +32,7 @@ class EditorMenuBar extends StatelessWidget {
       listenable: registry,
       builder: (context, _) {
         if (native ?? useNativeMenuBar()) {
-          return PlatformMenuBar(menus: platformMenus(), child: child);
+          return _NativeMenuBar(menus: platformMenus(), child: child);
         }
         return Column(
           children: [
@@ -166,4 +166,63 @@ class EditorMenuBar extends StatelessWidget {
     onPressed: c.isEnabled ? () => registry.execute(c.id) : null,
     child: Text(c.label),
   );
+}
+
+/// The native menu bar, sent to the system only when what it shows changes.
+/// `PlatformMenuBar` sends the menus whenever it is given new item objects,
+/// and the system then rebuilds its menu bar, closing an open menu: during
+/// Play the shell rebuilds many times a second, so a menu would open and
+/// close at once. [menus] are compared by what they show (labels,
+/// shortcuts, enabled); the same, the menus last sent stay.
+class _NativeMenuBar extends StatefulWidget {
+  const _NativeMenuBar({required this.menus, required this.child});
+
+  final List<PlatformMenuItem> menus;
+  final Widget child;
+
+  @override
+  State<_NativeMenuBar> createState() => _NativeMenuBarState();
+}
+
+class _NativeMenuBarState extends State<_NativeMenuBar> {
+  late List<PlatformMenuItem> _menus = widget.menus;
+  late String _shown = _describe(widget.menus);
+
+  /// The latest items by what they show; their callbacks run through the
+  /// registry, so the kept ones still run the latest command.
+  @override
+  void didUpdateWidget(_NativeMenuBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final shown = _describe(widget.menus);
+    if (shown != _shown) {
+      _shown = shown;
+      _menus = widget.menus;
+    }
+  }
+
+  static String _describe(List<PlatformMenuItem> items) {
+    final out = StringBuffer();
+    void walk(PlatformMenuItem item) {
+      switch (item) {
+        case PlatformMenu(:final label, :final menus):
+          out.write('[$label');
+          menus.forEach(walk);
+          out.write(']');
+        case PlatformMenuItemGroup(:final members):
+          out.write('{');
+          members.forEach(walk);
+          out.write('}');
+        case PlatformProvidedMenuItem(:final type):
+          out.write('<${type.name}>');
+        default:
+          out.write('(${item.label}|${item.shortcut}|${item.onSelected != null})');
+      }
+    }
+
+    items.forEach(walk);
+    return out.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) => PlatformMenuBar(menus: _menus, child: widget.child);
 }
