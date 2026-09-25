@@ -287,6 +287,35 @@ impl PackageTypes {
     }
 }
 
+/// Every Fynkel package's assets as one database of entries mounted at
+/// `Packages/<name>/` (ADR-0029 §2), in graph order, with their scans'
+/// diagnostics. A package without its asset folder adds nothing.
+pub fn package_assets(
+    types: &PackageTypes,
+    schemas: &crate::schema::SchemaSet,
+) -> (crate::asset::AssetDatabase, Vec<Diagnostic>) {
+    let mut db = crate::asset::AssetDatabase::default();
+    let mut diags = Vec::new();
+    for package in &types.packages {
+        let Some(dir) = package.asset_root().filter(|d| d.is_dir()) else {
+            continue;
+        };
+        let (scanned, scan) = crate::asset::AssetDatabase::scan(&dir, schemas);
+        diags.extend(scan);
+        diags.extend(db.mount(&package.name, &scanned));
+    }
+    (db, diags)
+}
+
+/// The package a mounted asset path (`Packages/<name>/…`) belongs to, or
+/// `None` for the project's own.
+pub fn package_of(path: &str) -> Option<&str> {
+    let rest = path
+        .strip_prefix(crate::asset::PACKAGES_MOUNT)?
+        .strip_prefix('/')?;
+    rest.split('/').next().filter(|n| !n.is_empty())
+}
+
 /// [`PackageTypes`] of the game at `project` (its pubspec names the
 /// package; without one there are none).
 pub fn package_types(project: &Path) -> PackageTypes {
@@ -331,6 +360,14 @@ pub fn package_types(project: &Path) -> PackageTypes {
         clash(&mut owner, &id, &game, file, &mut out.diagnostics);
     }
     out
+}
+
+/// The [`PACKAGE_FILE`] of the package at `dir` itself (for `fynkel
+/// codegen` run in a package); `None` when it has none or it cannot be
+/// read.
+pub fn own_manifest(dir: &Path) -> Option<PackageManifest> {
+    let name = crate::editor_part::package_name(dir)?;
+    read_manifest(&name, dir, &mut Vec::new())
 }
 
 /// A Fynkel package's own types outside its namespace (`FYN-P0017`), for

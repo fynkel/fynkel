@@ -61,10 +61,15 @@ pub struct OpenProject {
     /// The embedded schemas plus the project's own.
     pub schemas: SchemaSet,
     pub assets: AssetDatabase,
-    /// [`OpenProject::assets`] with the built-in assets the cook ships to a
-    /// project that has not installed its own copy (the primitives,
-    /// ADR-0026 §4); `None` when it has them all. What a document's
-    /// references resolve against ([`OpenProject::resolving_assets`]).
+    /// The game's package assets, mounted at `Packages/<name>/`
+    /// (ADR-0029 §2): scanned when the project opens (and again on every
+    /// reopen), not on every rescan of the project's own.
+    pub package_assets: AssetDatabase,
+    /// [`OpenProject::assets`] with the package assets and the built-in
+    /// assets the cook ships to a project that has not installed its own
+    /// copy (the primitives, ADR-0026 §4); `None` when there are none to
+    /// add. What a document's references resolve against
+    /// ([`OpenProject::resolving_assets`]).
     with_builtins: Option<AssetDatabase>,
     /// Every shader manifest document under the asset root (a material
     /// may name them; rebuilt into a library per open document).
@@ -140,6 +145,7 @@ impl OpenProject {
             read_only,
             schemas,
             assets: AssetDatabase::default(),
+            package_assets: AssetDatabase::default(),
             with_builtins: None,
             shader_docs: Vec::new(),
             references: Vec::new(),
@@ -150,6 +156,10 @@ impl OpenProject {
             base_diagnostics: diagnostics,
             scan_diagnostics: Vec::new(),
         };
+        let (packaged, scan) =
+            fynkel_document::packages::package_assets(&this.project.packages, &this.schemas);
+        this.package_assets = packaged;
+        this.base_diagnostics.extend(scan);
         this.read_metadata();
         this.read_schema_sources();
         this.rescan(&[]);
@@ -157,11 +167,28 @@ impl OpenProject {
     }
 
     /// The database a document's references resolve against: the
-    /// project's assets and the built-in ones the cook ships (a code-built
+    /// project's assets, its packages' and the built-in ones the cook ships (a code-built
     /// scene's primitives resolve as they do in the cook and `fynkel
     /// validate`).
     pub fn resolving_assets(&self) -> &AssetDatabase {
         self.with_builtins.as_ref().unwrap_or(&self.assets)
+    }
+
+    /// Why the file at `path` cannot be changed when it belongs to a
+    /// package pub keeps — hosted or git, in pub's shared cache (ADR-0029
+    /// §2); `None` for the project's own files and a `path` package's.
+    pub fn package_read_only(&self, path: &Path) -> Option<String> {
+        let package = self.project.packages.packages.iter().find(|p| {
+            let root = p.root.canonicalize().unwrap_or_else(|_| p.root.clone());
+            path.starts_with(&root)
+        })?;
+        (!package.editable()).then(|| {
+            format!(
+                "{} is part of the package '{}', which pub keeps and updates: Copy into Project to change a copy",
+                path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                package.name
+            )
+        })
     }
 
     /// The asset root.
@@ -354,12 +381,16 @@ impl OpenProject {
             fresh
         };
         // Diagnostics of writing the built-ins show when the cook runs.
+        let packaged = (!self.package_assets.is_empty())
+            .then(|| self.assets.merged_with(&self.package_assets));
+        let base = packaged.as_ref().unwrap_or(&self.assets);
         self.with_builtins = fynkel_import::builtin::with_builtins(
-            &self.assets,
+            base,
             &self.cache_dir(),
             &self.schemas,
             &mut Vec::new(),
-        );
+        )
+        .or(packaged);
         let mut all = self.base_diagnostics.clone();
         all.extend(self.scan_diagnostics.iter().cloned());
         all.extend(self.project.validate_against(&self.assets, &self.schemas));
@@ -439,9 +470,17 @@ impl OpenProject {
     /// optionally only one kind (`"document"` / `"source"`) or one document
     /// kind (`"scene"`, `"prefab"`, ...).
     pub fn assets_json(&self, kind: Option<&str>, document: Option<&str>) -> Vec<Value> {
+        // The project's own, then its packages' (`Packages/<name>/…`,
+        // ADR-0029 §2) that no project asset shadows.
+        let packaged = self
+            .package_assets
+            .entries()
+            .iter()
+            .filter(|e| self.assets.get(e.id).is_none());
         self.assets
             .entries()
             .iter()
+            .chain(packaged)
             .filter(|e| {
                 matches!(
                     (kind, &e.kind),
@@ -455,7 +494,22 @@ impl OpenProject {
                 (Some(name), AssetKind::Document(k)) => k.name() == name,
                 _ => false,
             })
-            .map(entry_json)
+            .map(|e| {
+                let mut v = entry_json(e);
+                if let Some(why) = e
+                    .origin
+                    .as_deref()
+                    .filter(|_| v.get("package").is_some())
+                    .and_then(|f| {
+                        self.package_read_only(
+                            &f.canonicalize().unwrap_or_else(|_| f.to_path_buf()),
+                        )
+                    })
+                {
+                    v["readOnly"] = why.into();
+                }
+                v
+            })
             .collect()
     }
 

@@ -240,7 +240,7 @@ impl AuthoringSession {
         let project = self.require_project().map_err(|d| vec![d])?;
         let path = match path_or_id.parse::<Uuid>() {
             Ok(id) => {
-                let entry = project.assets.get(id).ok_or_else(|| {
+                let entry = project.resolving_assets().get(id).ok_or_else(|| {
                     vec![Diagnostic::error(
                         Code::SESSION_IO,
                         format!("no asset with id {id} in the project"),
@@ -272,10 +272,13 @@ impl AuthoringSession {
             return Ok(*h);
         }
         let editor = self.read_editor(&canonical)?;
+        // A document of a package pub keeps (hosted, git) is not the
+        // user's to change (ADR-0029 §2); a `path` package's is.
+        let read_only = self.project().unwrap().package_read_only(&canonical);
         Ok(self.insert(OpenDocument {
             path: canonical,
             sub: None,
-            read_only: None,
+            read_only,
             editor,
         }))
     }
@@ -325,7 +328,7 @@ impl AuthoringSession {
                     })?
             }
         };
-        let entry = project.assets.get(id).ok_or_else(|| {
+        let entry = project.resolving_assets().get(id).ok_or_else(|| {
             vec![Diagnostic::error(
                 Code::SESSION_IO,
                 format!("no asset with id {id} in the project"),
@@ -355,7 +358,7 @@ impl AuthoringSession {
     fn read_imported(&self, id: Uuid, sub: &str) -> Result<(Editor, String), Vec<Diagnostic>> {
         use fynkel_document::{AssetKind, PrefabLibrary};
         let project = self.require_project().map_err(|d| vec![d])?;
-        let entry = project.assets.get(id).ok_or_else(|| {
+        let entry = project.resolving_assets().get(id).ok_or_else(|| {
             vec![Diagnostic::error(
                 Code::SESSION_IO,
                 format!("no asset with id {id} in the project"),
@@ -793,7 +796,7 @@ impl AuthoringSession {
                 open.push(d.path.clone());
             }
         }
-        for entry in project.assets.entries() {
+        for entry in project.resolving_assets().entries() {
             if entry.kind != AssetKind::Document(DocumentKind::Prefab) {
                 continue;
             }

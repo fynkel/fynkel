@@ -1273,6 +1273,14 @@ pub fn validate_project_with(
     }
     let (db, scan) = AssetDatabase::scan(&assets, schemas);
     report.diagnostics.extend(scan);
+    // The packages' assets (ADR-0029 §2), then the built-in shapes.
+    let (packaged, scan) = crate::packages::package_assets(&project.packages, schemas);
+    report.diagnostics.extend(scan);
+    let db = if packaged.is_empty() {
+        db
+    } else {
+        db.merged_with(&packaged)
+    };
     let db = sources
         .builtins(dir, &db, schemas, &mut report.diagnostics)
         .unwrap_or(db);

@@ -244,7 +244,7 @@ impl AuthoringSession {
     /// The `prefab` block: the resolved prefab and how to open it.
     fn prefab_json(&self, project: &OpenProject, prefab: &Prefab, asset: Uuid, sub: &str) -> Value {
         let imported = !sub.is_empty();
-        let entry = project.assets.get(asset);
+        let entry = project.resolving_assets().get(asset);
         let kind = match entry.map(|e| &e.kind) {
             Some(AssetKind::Source { .. }) => "source",
             Some(AssetKind::Document(DocumentKind::Rig)) => "rig",
@@ -271,7 +271,9 @@ impl AuthoringSession {
                 kind,
             ))
         } else {
-            project.read_only.clone()
+            file.as_deref()
+                .and_then(|f| project.package_read_only(f))
+                .or_else(|| project.read_only.clone())
         };
         json!({
             "id": prefab.id().to_string(),

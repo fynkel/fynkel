@@ -622,6 +622,14 @@ pub fn cook_project(
     let assets = project.assets_dir(project_dir);
     let (db, scan) = AssetDatabase::scan(&assets, &schemas);
     diagnostics.extend(scan);
+    // The packages' assets are cooked with the project's (ADR-0029 §2).
+    let (packaged, scan) = fynkel_document::packages::package_assets(&project.packages, &schemas);
+    diagnostics.extend(scan);
+    let db = if packaged.is_empty() {
+        db
+    } else {
+        db.merged_with(&packaged)
+    };
     let cache_dir = cache
         .map(Path::to_path_buf)
         .unwrap_or_else(|| project_cache_dir(project_dir));

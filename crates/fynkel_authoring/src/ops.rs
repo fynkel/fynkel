@@ -31,6 +31,8 @@ pub const OPERATIONS: &[&str] = &[
     "newDocument",
     "renameAsset",
     "duplicateAsset",
+    "copyIntoProject",
+    "importPackageAssets",
     "installPrimitives",
     "importFiles",
     "deleteAsset",
@@ -228,6 +230,20 @@ impl OpenProject {
         self.assets
             .resolve(&AssetRef::new(to_contract(id)))
             .map(|r| r.entry)
+            .map_err(|d| match self.package_assets.get(id) {
+                // A package's asset is changed in its package, or copied.
+                Some(e) => Diagnostic::error(
+                    Code::EDIT_NOT_EDITABLE,
+                    format!(
+                        "{} belongs to the package '{}', not the project",
+                        e.path,
+                        fynkel_document::packages::package_of(&e.path).unwrap_or_default()
+                    ),
+                )
+                .with_id(id.to_string())
+                .with_suggestion("Copy into Project to change a copy of it"),
+                None => d,
+            })
     }
 
     /// The dependents of `id` as `related` diagnostics, one per reference.
@@ -298,6 +314,8 @@ impl AuthoringSession {
             "newDocument" => self.new_document(args).map_err(one),
             "renameAsset" => self.rename_asset(args).map_err(one),
             "duplicateAsset" => self.duplicate_asset(args).map_err(one),
+            "copyIntoProject" => self.copy_into_project(args).map_err(one),
+            "importPackageAssets" => self.import_package_assets(args).map_err(one),
             "installPrimitives" => self.install_primitives().map_err(one),
             "importFiles" => self.import_files(args).map_err(one),
             "deleteAsset" => self.delete_asset(args),
@@ -725,19 +743,6 @@ impl AuthoringSession {
         let root = project.assets.root().to_path_buf();
         let from = entry.file(&root);
         let from = from.canonicalize().unwrap_or(from);
-        let is_source = matches!(entry.kind, AssetKind::Source { .. });
-        let suffix = match &entry.kind {
-            AssetKind::Document(kind) => kind.suffix().to_string(),
-            AssetKind::Source { .. } => from
-                .extension()
-                .map(|e| format!(".{}", e.to_string_lossy()))
-                .unwrap_or_default(),
-        };
-        let name = file_name(&from);
-        let old_stem = name
-            .strip_suffix(suffix.as_str())
-            .unwrap_or(&name)
-            .to_string();
         let to = match args
             .get("path")
             .and_then(Value::as_str)
@@ -746,37 +751,163 @@ impl AuthoringSession {
             Some(given) => project.inside_assets(given, OP)?,
             None => {
                 let dir = from.parent().unwrap_or(&root).to_path_buf();
-                // `coin 1` → `coin 2`: a trailing number counts on.
-                let (base, first) = match old_stem.rsplit_once(' ') {
-                    Some((b, n)) if !b.is_empty() && n.parse::<u32>().is_ok() => {
-                        (b.to_string(), n.parse::<u32>().unwrap() + 1)
-                    }
-                    _ => (old_stem.clone(), 1),
-                };
-                (first..)
-                    .map(|n| dir.join(format!("{base} {n}{suffix}")))
-                    .find(|p| !(p.exists() || is_source && sidecar_path(p).exists()))
-                    .expect("an unused name")
+                unused_copy_name(&dir, &entry, &from, true)
             }
         };
-        let to_name = file_name(&to);
-        if !to_name.ends_with(suffix.as_str()) || to_name.len() == suffix.len() {
+        let (op, new_id) = self.write_copy(OP, &entry, &from, &to, true)?;
+        self.commit_copies(
+            OP,
+            format!("Duplicate {}", file_name(&from)),
+            vec![op],
+            new_id,
+            &to,
+        )
+    }
+
+    /// `copyIntoProject { asset, path? }` (ADR-0029 §2): a package asset
+    /// copied into the project with fresh ids, the project's own to edit
+    /// (Unity's copy out of an immutable package). Without `path` it goes
+    /// to `<assets>/<package>/<its path in the package>`, numbered on when
+    /// that is taken. References inside the copy keep pointing where they
+    /// did (the package's other assets).
+    fn copy_into_project(&mut self, args: &Value) -> Result<Value, Diagnostic> {
+        const OP: &str = "copyIntoProject";
+        let id = uuid_arg(args, "asset", OP)?;
+        let project = self.project().unwrap();
+        let entry = project.package_assets.get(id).cloned().ok_or_else(|| {
+            invalid(format!(
+                "{OP}: {id} is not an asset of one of the game's packages"
+            ))
+            .with_id(id.to_string())
+        })?;
+        let from = entry.file(Path::new(""));
+        let to = match args
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            Some(given) => project.inside_assets(given, OP)?,
+            None => {
+                let rel = unmounted(&entry.path);
+                let wanted = project.assets_dir().join(rel);
+                let dir = wanted.parent().map(Path::to_path_buf).unwrap_or_default();
+                if wanted.exists() {
+                    unused_copy_name(&dir, &entry, &wanted, false)
+                } else {
+                    wanted
+                }
+            }
+        };
+        let (op, new_id) = self.write_copy(OP, &entry, &from, &to, true)?;
+        self.commit_copies(
+            OP,
+            format!("Copy {} into Project", file_name(&from)),
+            vec![op],
+            new_id,
+            &to,
+        )
+    }
+
+    /// `importPackageAssets { package }` (ADR-0029 §2, Unity's `.unitypackage`
+    /// import): every asset of the package copied into `<assets>/<package>/`
+    /// as it is, ids included, so the copies take over every reference to
+    /// the package's (the project's own copy of an id wins) and are the
+    /// game's to edit. One undoable step; refused when the folder exists.
+    fn import_package_assets(&mut self, args: &Value) -> Result<Value, Diagnostic> {
+        const OP: &str = "importPackageAssets";
+        let package = args
+            .get("package")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid(format!("{OP}: `package` (a package name) is required")))?
+            .to_string();
+        let project = self.project().unwrap();
+        let entries: Vec<AssetEntry> = project
+            .package_assets
+            .entries()
+            .iter()
+            .filter(|e| fynkel_document::packages::package_of(&e.path) == Some(package.as_str()))
+            .cloned()
+            .collect();
+        if entries.is_empty() {
             return Err(invalid(format!(
-                "{OP}: the copy keeps the {suffix} suffix; {to_name} does not end with it"
+                "{OP}: the game has no package '{package}' with assets"
             )));
         }
-        if to.exists() || (is_source && sidecar_path(&to).exists()) {
+        let folder = project.assets_dir().join(&package);
+        // An empty folder (a Copy into Project undone) is no obstacle.
+        if has_files(&folder) {
             return Err(invalid(format!(
-                "{OP}: {} already exists",
-                project.relative_to_assets(&to).unwrap_or_default()
+                "{OP}: {package}/ already exists in the project's assets"
+            ))
+            .with_document(folder.display().to_string())
+            .with_suggestion("rename or delete that folder first"));
+        }
+        let mut ops = Vec::new();
+        for entry in &entries {
+            let from = entry.file(Path::new(""));
+            let to = folder.join(&unmounted(&entry.path)[package.len() + 1..]);
+            match self.write_copy(OP, entry, &from, &to, false) {
+                Ok((op, _)) => ops.push(op),
+                Err(e) => {
+                    for op in &ops {
+                        if let AssetOp::Copied { path, sidecar, .. } = op {
+                            let _ = std::fs::remove_file(path);
+                            if let Some((p, _)) = sidecar {
+                                let _ = std::fs::remove_file(p);
+                            }
+                        }
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        let first = entries[0].id;
+        let label = format!("Import {} Assets", package);
+        self.commit_copies(OP, label, ops, first, &folder)
+    }
+
+    /// Writes a copy of `entry` (its file at `from`) to `to`: with fresh
+    /// ids (`fresh`: Duplicate, Copy into Project) or byte for byte, ids and
+    /// sidecar included (Import Package Assets). Nothing is rescanned.
+    fn write_copy(
+        &self,
+        op: &str,
+        entry: &AssetEntry,
+        from: &Path,
+        to: &Path,
+        fresh: bool,
+    ) -> Result<(AssetOp, Uuid), Diagnostic> {
+        let project = self.project().unwrap();
+        let is_source = matches!(entry.kind, AssetKind::Source { .. });
+        let suffix = copy_suffix(entry, from);
+        let old_stem = {
+            let name = file_name(from);
+            name.strip_suffix(suffix.as_str())
+                .unwrap_or(&name)
+                .to_string()
+        };
+        let to_name = file_name(to);
+        if !to_name.ends_with(suffix.as_str()) || to_name.len() == suffix.len() {
+            return Err(invalid(format!(
+                "{op}: the copy keeps the {suffix} suffix; {to_name} does not end with it"
+            )));
+        }
+        if to.exists() || (is_source && sidecar_path(to).exists()) {
+            return Err(invalid(format!(
+                "{op}: {} already exists",
+                project.relative_to_assets(to).unwrap_or_default()
             ))
             .with_document(to.display().to_string()));
         }
         let new_stem = to_name[..to_name.len() - suffix.len()].to_string();
-        let new_id = Uuid::new_v4();
+        let new_id = if fresh { Uuid::new_v4() } else { entry.id };
         let (bytes, sidecar) = match &entry.kind {
+            AssetKind::Document(_) if !fresh => (
+                std::fs::read(from).map_err(|e| io(from, format!("{op}: cannot read: {e}")))?,
+                None,
+            ),
             AssetKind::Document(kind) => {
-                let mut doc = Document::read(&from, Some(*kind)).map_err(|mut v| v.remove(0))?;
+                let mut doc = Document::read(from, Some(*kind)).map_err(|mut v| v.remove(0))?;
                 doc.root.set("id", Node::string(new_id.to_string()));
                 if doc.envelope.name.eq_ignore_ascii_case(&old_stem) {
                     doc.root.set("name", Node::string(&new_stem));
@@ -785,53 +916,85 @@ impl AuthoringSession {
                 (doc.write()?.into_bytes(), None)
             }
             AssetKind::Source { .. } => {
-                let bytes = std::fs::read(&from)
-                    .map_err(|e| io(&from, format!("{OP}: cannot read: {e}")))?;
-                let (_, mut meta) = self.sidecar_of(id, OP).map_err(|mut v| v.remove(0))?;
-                meta.document
-                    .root
-                    .set("id", Node::string(new_id.to_string()));
-                meta.document.root.set("name", Node::string(&to_name));
-                for (_, sub) in &mut meta.sub_assets {
-                    *sub = Uuid::new_v4();
-                }
-                (
-                    bytes,
-                    Some((sidecar_path(&to), meta.to_document().write()?)),
-                )
+                let bytes =
+                    std::fs::read(from).map_err(|e| io(from, format!("{op}: cannot read: {e}")))?;
+                let own = sidecar_path(from);
+                let text = if fresh {
+                    let doc = Document::read(&own, Some(DocumentKind::Meta))
+                        .map_err(|mut v| v.remove(0))?;
+                    let mut meta = Meta::from_document(doc);
+                    meta.document
+                        .root
+                        .set("id", Node::string(new_id.to_string()));
+                    meta.document.root.set("name", Node::string(&to_name));
+                    for (_, sub) in &mut meta.sub_assets {
+                        *sub = Uuid::new_v4();
+                    }
+                    meta.to_document().write()?
+                } else {
+                    std::fs::read_to_string(&own)
+                        .map_err(|e| io(&own, format!("{op}: cannot read the sidecar: {e}")))?
+                };
+                (bytes, Some((sidecar_path(to), text)))
             }
         };
         if let Some(parent) = to.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| io(parent, format!("{OP}: cannot create the folder: {e}")))?;
+                .map_err(|e| io(parent, format!("{op}: cannot create the folder: {e}")))?;
         }
-        std::fs::write(&to, &bytes).map_err(|e| io(&to, format!("{OP}: cannot write: {e}")))?;
+        std::fs::write(to, &bytes).map_err(|e| io(to, format!("{op}: cannot write: {e}")))?;
         if let Some((path, text)) = &sidecar {
             if let Err(e) = std::fs::write(path, text) {
-                let _ = std::fs::remove_file(&to);
-                return Err(io(path, format!("{OP}: cannot write the sidecar: {e}")));
+                let _ = std::fs::remove_file(to);
+                return Err(io(path, format!("{op}: cannot write the sidecar: {e}")));
             }
         }
-        let to = to.canonicalize().unwrap_or(to);
+        let path = to.canonicalize().unwrap_or_else(|_| to.to_path_buf());
         let sidecar = sidecar.map(|(p, t)| (p.canonicalize().unwrap_or(p), t));
-        let mut touched = vec![to.clone()];
-        touched.extend(sidecar.iter().map(|(p, _)| p.clone()));
-        self.project_mut().unwrap().rescan(&touched);
-        let label = format!("Duplicate {}", file_name(&from));
-        self.assets_history.push(Done {
-            op: AssetOp::Copied {
-                path: to.clone(),
+        Ok((
+            AssetOp::Copied {
+                path,
                 id: new_id,
                 bytes,
                 sidecar,
             },
+            new_id,
+        ))
+    }
+
+    /// Rescans what `ops` (all [`AssetOp::Copied`]) wrote and records them as
+    /// one history step.
+    fn commit_copies(
+        &mut self,
+        op: &str,
+        label: String,
+        mut ops: Vec<AssetOp>,
+        id: Uuid,
+        to: &Path,
+    ) -> Result<Value, Diagnostic> {
+        let mut touched = Vec::new();
+        for o in &ops {
+            if let AssetOp::Copied { path, sidecar, .. } = o {
+                touched.push(path.clone());
+                touched.extend(sidecar.iter().map(|(p, _)| p.clone()));
+            }
+        }
+        self.project_mut().unwrap().rescan(&touched);
+        let done = if ops.len() == 1 {
+            ops.remove(0)
+        } else {
+            AssetOp::Group { ops, id }
+        };
+        self.assets_history.push(Done {
+            op: done,
             label: label.clone(),
         });
+        let to = to.canonicalize().unwrap_or_else(|_| to.to_path_buf());
         Ok(self.finish(
-            OP,
+            op,
             &label,
-            Some(new_id),
-            json!({ "path": to.display().to_string(), "id": new_id.to_string() }),
+            Some(id),
+            json!({ "path": to.display().to_string(), "id": id.to_string() }),
         ))
     }
 
@@ -1807,4 +1970,63 @@ fn file_json(path: &Path) -> Value {
         }),
         Err(_) => Value::Null,
     }
+}
+
+/// The suffix a copy of `entry` keeps: a document kind's (`.prefab.json`),
+/// a source's extension.
+fn copy_suffix(entry: &AssetEntry, from: &Path) -> String {
+    match &entry.kind {
+        AssetKind::Document(kind) => kind.suffix().to_string(),
+        AssetKind::Source { .. } => from
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default(),
+    }
+}
+
+/// A free name for a copy of `entry` in `dir`: `coin 1` → `coin 2` (a
+/// trailing number counts on), `coin` → `coin 1`. `start_after` counts on
+/// from the original's own number; otherwise the plain name is tried
+/// first by the caller.
+fn unused_copy_name(dir: &Path, entry: &AssetEntry, from: &Path, start_after: bool) -> PathBuf {
+    let is_source = matches!(entry.kind, AssetKind::Source { .. });
+    let suffix = copy_suffix(entry, from);
+    let name = file_name(from);
+    let stem = name
+        .strip_suffix(suffix.as_str())
+        .unwrap_or(&name)
+        .to_string();
+    let (base, first) = match stem.rsplit_once(' ') {
+        Some((b, n)) if !b.is_empty() && n.parse::<u32>().is_ok() => (
+            b.to_string(),
+            n.parse::<u32>().unwrap() + u32::from(start_after),
+        ),
+        _ => (stem.clone(), 1),
+    };
+    (first..)
+        .map(|n| dir.join(format!("{base} {n}{suffix}")))
+        .find(|p| !(p.exists() || is_source && sidecar_path(p).exists()))
+        .expect("an unused name")
+}
+
+/// Whether `dir` holds any file, however deep.
+fn has_files(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.flatten().any(|e| {
+            let p = e.path();
+            if p.is_dir() {
+                has_files(&p)
+            } else {
+                true
+            }
+        })
+    })
+}
+
+/// `Packages/<package>/<rel>` → `<package>/<rel>`.
+fn unmounted(path: &str) -> String {
+    path.strip_prefix(fynkel_document::asset::PACKAGES_MOUNT)
+        .and_then(|p| p.strip_prefix('/'))
+        .unwrap_or(path)
+        .to_string()
 }

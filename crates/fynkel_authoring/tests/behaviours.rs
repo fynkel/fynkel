@@ -411,3 +411,140 @@ fn a_type_clash_is_p0016_and_a_type_outside_the_namespace_is_p0017() {
     let s = open(&copy);
     assert_eq!(codes(&s.project().unwrap().diagnostics), expected);
 }
+
+const PICKUP_MATERIAL: &str = "c0000000-0000-4000-8000-00000000abcd";
+
+/// `pickups` with an asset of its own: `materials/pickup.material.json`.
+fn add_pickups_with_assets(copy: &Copy) -> PathBuf {
+    let root = add_pickups(copy);
+    std::fs::create_dir_all(root.join("assets/materials")).unwrap();
+    let rusted = copy.read("assets/materials/rusted.material.json");
+    std::fs::write(
+        root.join("assets/materials/pickup.material.json"),
+        rusted
+            .replace("c0000000-0000-4000-8000-000000000020", PICKUP_MATERIAL)
+            .replace("\"Rusted\"", "\"Pickup\""),
+    )
+    .unwrap();
+    root
+}
+
+fn listed(s: &AssetSession) -> Vec<Value> {
+    s.query("assets", &json!({}))
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone()
+}
+
+type AssetSession = AuthoringSession;
+
+/// ADR-0029 step 3: a package's assets are the game's to use — listed at
+/// `Packages/<name>/`, resolved, validated, cooked — and not the
+/// project's to rename; Copy into Project makes a copy with a fresh id,
+/// Import Package Assets copies them all with theirs, each one undoable
+/// step.
+#[test]
+fn a_packages_assets_are_mounted_copied_and_imported() {
+    let copy = Copy::new("package-assets");
+    add_pickups_with_assets(&copy);
+    let found = validate(&copy);
+    assert!(found.iter().all(|d| !d.is_error()), "{found:#?}");
+    let cooked = fynkel_import::cook::cook_project(
+        &copy.dir,
+        Some(&copy.dir.join(".fynkel/cache")),
+        &fynkel_import::cook::CookOptions::default(),
+    )
+    .unwrap_or_else(|d| panic!("{d:#?}"));
+    assert!(cooked
+        .assets
+        .iter()
+        .any(|a| a.path == "Packages/pickups/materials/pickup.material.json"));
+
+    let mut s = open(&copy);
+    let pickup = listed(&s)
+        .into_iter()
+        .find(|e| e["id"] == PICKUP_MATERIAL)
+        .expect("listed");
+    assert_eq!(
+        pickup["path"],
+        "Packages/pickups/materials/pickup.material.json"
+    );
+    assert_eq!(pickup["package"], "pickups");
+    assert!(
+        pickup.get("readOnly").is_none(),
+        "a path package is the user's"
+    );
+    let h = s.open_document(PICKUP_MATERIAL).unwrap();
+    assert!(s.state_json(h).unwrap()["readOnly"].is_null());
+
+    // Not the project's to rename.
+    let refused = s
+        .operate(
+            "renameAsset",
+            &json!({ "asset": PICKUP_MATERIAL, "path": "x.material.json" }),
+        )
+        .unwrap_err();
+    assert_eq!(refused[0].code.as_str(), "FYN-E0007", "{refused:?}");
+    assert!(
+        refused[0].message.contains("package 'pickups'"),
+        "{refused:?}"
+    );
+
+    // Copy into Project: a fresh id under assets/pickups/.
+    let v = ok(s.operate("copyIntoProject", &json!({ "asset": PICKUP_MATERIAL })));
+    let copied = copy.json("assets/pickups/materials/pickup.material.json");
+    assert_ne!(copied["id"], PICKUP_MATERIAL);
+    assert_eq!(v["id"], copied["id"]);
+    assert_eq!(v["label"], "Copy pickup.material.json into Project");
+    ok(s.operate("undoAsset", &json!({})));
+    assert!(!copy
+        .dir
+        .join("assets/pickups")
+        .join("materials/pickup.material.json")
+        .exists());
+
+    // Import Package Assets: the same ids, which then shadow the package's.
+    ok(s.operate("importPackageAssets", &json!({ "package": "pickups" })));
+    assert_eq!(
+        copy.json("assets/pickups/materials/pickup.material.json")["id"],
+        PICKUP_MATERIAL
+    );
+    let now: Vec<Value> = listed(&s)
+        .into_iter()
+        .filter(|e| e["id"] == PICKUP_MATERIAL)
+        .collect();
+    assert_eq!(now.len(), 1);
+    assert_eq!(now[0]["path"], "pickups/materials/pickup.material.json");
+    let again = s
+        .operate("importPackageAssets", &json!({ "package": "pickups" }))
+        .unwrap_err();
+    assert!(again[0].message.contains("already exists"), "{again:?}");
+    ok(s.operate("undoAsset", &json!({})));
+    assert!(!copy
+        .dir
+        .join("assets/pickups/materials/pickup.material.json")
+        .exists());
+}
+
+/// A package pub keeps (hosted, git) is read-only: its assets say why and
+/// its documents open read-only.
+#[test]
+fn a_hosted_packages_assets_are_read_only() {
+    let copy = Copy::new("package-hosted");
+    add_pickups_with_assets(&copy);
+    std::fs::write(
+        copy.dir.join("pubspec.lock"),
+        "packages:\n  pickups:\n    dependency: \"direct main\"\n    source: hosted\n    version: \"1.0.0\"\n",
+    )
+    .unwrap();
+    let mut s = open(&copy);
+    let pickup = listed(&s)
+        .into_iter()
+        .find(|e| e["id"] == PICKUP_MATERIAL)
+        .unwrap();
+    let why = pickup["readOnly"].as_str().expect("read-only");
+    assert!(why.contains("Copy into Project"), "{why}");
+    let h = s.open_document(PICKUP_MATERIAL).unwrap();
+    assert!(s.state_json(h).unwrap()["readOnly"].is_string());
+}

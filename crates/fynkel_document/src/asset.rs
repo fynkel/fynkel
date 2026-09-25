@@ -408,6 +408,10 @@ impl AssetEntry {
     }
 }
 
+/// Where a game's package assets appear among its own (ADR-0029 §2, Unity's
+/// Packages folder): `Packages/<package>/<path in its asset folder>`.
+pub const PACKAGES_MOUNT: &str = "Packages";
+
 /// A resolved `assetRef`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resolved<'a> {
@@ -592,6 +596,60 @@ impl AssetDatabase {
         self.entries.sort_by(|a, b| a.path.cmp(&b.path));
         self.reindex();
         diags
+    }
+
+    /// Mounts `scanned` — a database of one package's asset folder
+    /// (ADR-0029 §2) — at `Packages/<name>/`: each entry keeps its id and
+    /// sub-assets, its path gains the mount and its `origin` is the file
+    /// itself, as a built-in's is. An id already here (another package's)
+    /// is `FYN-A0003` and keeps the first.
+    pub fn mount(&mut self, name: &str, scanned: &AssetDatabase) -> Vec<Diagnostic> {
+        let mut diags = Vec::new();
+        for entry in scanned.entries() {
+            let file = entry.file(scanned.root());
+            if let Some(owner) = self.owner_path(entry.id) {
+                diags.push(
+                    Diagnostic::error(
+                        Code::ASSET_DUPLICATE_ID,
+                        format!("id {} is already used by {owner}", entry.id),
+                    )
+                    .with_document(file.display().to_string()),
+                );
+                continue;
+            }
+            let mut mounted = entry.clone();
+            mounted.path = format!("{}/{name}/{}", PACKAGES_MOUNT, entry.path);
+            mounted.origin = Some(file);
+            let index = self.entries.len();
+            for (sub, id) in &mounted.sub_assets {
+                self.subs.insert(*id, (index, sub.clone()));
+            }
+            self.by_id.insert(mounted.id, index);
+            self.by_path.insert(mounted.path.clone(), index);
+            self.entries.push(mounted);
+        }
+        self.entries.sort_by(|a, b| a.path.cmp(&b.path));
+        self.reindex();
+        diags
+    }
+
+    /// This database with `other`'s entries (a game's package assets)
+    /// whose id and path are free: the project's own copy of an asset wins
+    /// (Import Package Assets keeps the ids, so the copy takes over every
+    /// reference).
+    pub fn merged_with(&self, other: &AssetDatabase) -> AssetDatabase {
+        let mut out = self.clone();
+        for entry in other.entries() {
+            if out.owner_path(entry.id).is_some() || out.by_path.contains_key(&entry.path) {
+                continue;
+            }
+            let mut entry = entry.clone();
+            entry.origin = Some(entry.file(other.root()));
+            out.entries.push(entry);
+        }
+        out.entries.sort_by(|a, b| a.path.cmp(&b.path));
+        out.reindex();
+        out
     }
 
     fn reindex(&mut self) {
@@ -989,6 +1047,11 @@ pub fn entry_json(e: &AssetEntry) -> serde_json::Value {
             AssetKind::Source { .. } => "source",
         },
     });
+    // A package's asset (ADR-0029 §2): which package, and where it is.
+    if let (Some(package), Some(file)) = (crate::packages::package_of(&e.path), &e.origin) {
+        v["package"] = package.into();
+        v["file"] = file.display().to_string().into();
+    }
     match &e.kind {
         AssetKind::Document(k) => {
             v["document"] = k.name().into();
