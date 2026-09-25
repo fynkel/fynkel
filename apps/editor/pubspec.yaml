@@ -18,6 +18,10 @@ dependencies:
   # game host uses, here over the edit-preview world (viewport ABI v4).
   fynkel_flutter:
     path: ../../packages/fynkel_flutter
+  # What the packages' editor parts register (ADR-0028); this app
+  # implements it.
+  fynkel_editor_api:
+    path: ../../packages/fynkel_editor_api
   # The in-editor Play (ADR-0021): the game's editor-channel records come
   # in-process (`EditorChannel.debugUse`) into the Console's Game tab.
   fynkel:

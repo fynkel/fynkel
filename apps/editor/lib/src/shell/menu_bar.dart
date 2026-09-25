@@ -136,24 +136,26 @@ class EditorMenuBar extends StatelessWidget {
   List<Widget> _widgetMenus(BuildContext context) {
     return [
       for (final menu in EditorMenu.values)
-        SubmenuButton(
-          key: Key('menu.${menu.name}'),
-          menuChildren: [
-            for (final (i, group) in _groups(menu).indexed) ...[
-              if (i > 0) const Divider(height: 1),
-              for (final (submenu, items) in _entries(group))
-                if (submenu == null)
-                  _widgetItem(items.single)
-                else
-                  SubmenuButton(
-                    key: Key('submenu.${menu.name}.$submenu'),
-                    menuChildren: [for (final c in items) _widgetItem(c)],
-                    child: Text(submenu),
-                  ),
+        // An empty menu is left out (Tools without extensions).
+        if (registry.inMenu(menu).isNotEmpty)
+          SubmenuButton(
+            key: Key('menu.${menu.name}'),
+            menuChildren: [
+              for (final (i, group) in _groups(menu).indexed) ...[
+                if (i > 0) const Divider(height: 1),
+                for (final (submenu, items) in _entries(group))
+                  if (submenu == null)
+                    _widgetItem(items.single)
+                  else
+                    SubmenuButton(
+                      key: Key('submenu.${menu.name}.$submenu'),
+                      menuChildren: [for (final c in items) _widgetItem(c)],
+                      child: Text(submenu),
+                    ),
+              ],
             ],
-          ],
-          child: Text(menu.title),
-        ),
+            child: Text(menu.title),
+          ),
     ];
   }
 

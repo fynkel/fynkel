@@ -1,7 +1,8 @@
 // Preferences (⌘,): theme, density, the IDE command, the tool paths, the
-// layout reset.
+// layout reset, the packages' editor extensions.
 import 'package:flutter/material.dart';
 
+import '../extensions/editor_extensions.dart';
 import '../theme/tokens.dart';
 import 'preferences.dart';
 
@@ -10,22 +11,37 @@ Future<void> showPreferencesDialog(
   required Preferences prefs,
   required VoidCallback onResetLayout,
   required VoidCallback onToolsChanged,
+  EditorExtensionHost? extensions,
 }) {
   return showDialog<void>(
     animationStyle: AnimationStyle.noAnimation,
     context: context,
-    builder: (_) => PreferencesDialog(prefs: prefs, onResetLayout: onResetLayout, onToolsChanged: onToolsChanged),
+    builder: (_) => PreferencesDialog(
+      prefs: prefs,
+      onResetLayout: onResetLayout,
+      onToolsChanged: onToolsChanged,
+      extensions: extensions,
+    ),
   );
 }
 
 class PreferencesDialog extends StatefulWidget {
-  const PreferencesDialog({super.key, required this.prefs, required this.onResetLayout, required this.onToolsChanged});
+  const PreferencesDialog({
+    super.key,
+    required this.prefs,
+    required this.onResetLayout,
+    required this.onToolsChanged,
+    this.extensions,
+  });
 
   final Preferences prefs;
   final VoidCallback onResetLayout;
 
   /// A tool path changed: the launcher's checks run again.
   final VoidCallback onToolsChanged;
+
+  /// What the packages' editor parts registered (ADR-0028).
+  final EditorExtensionHost? extensions;
 
   @override
   State<PreferencesDialog> createState() => _PreferencesDialogState();
@@ -192,6 +208,9 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                Text('Extensions', style: theme.textTheme.titleSmall),
+                ExtensionsList(host: widget.extensions),
+                const SizedBox(height: 16),
                 Text('Workspace', style: theme.textTheme.titleSmall),
                 const SizedBox(height: 4),
                 Wrap(
@@ -233,6 +252,54 @@ class _PreferencesDialogState extends State<PreferencesDialog> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Preferences › Extensions: each package with an editor part and what it
+/// registered, or why nothing (ADR-0028 §1).
+class ExtensionsList extends StatelessWidget {
+  const ExtensionsList({super.key, required this.host});
+
+  final EditorExtensionHost? host;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final small = theme.textTheme.bodySmall;
+    final packages = host?.packages ?? const <PackageExtensions>[];
+    if (packages.isEmpty) {
+      return Text(
+        host == null || host!.parts.isEmpty
+            ? 'No package has an editor part. A package adds one in lib/editor/editor.dart, '
+                  'with void registerEditor(EditorExtensions editor).'
+            : 'The editor parts have not registered yet.',
+        key: const Key('prefs.extensions.none'),
+        style: small,
+      );
+    }
+    return Column(
+      key: const Key('prefs.extensions'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final p in packages)
+          Padding(
+            key: Key('prefs.extensions.${p.package}'),
+            padding: const EdgeInsets.only(top: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(p.package, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                if (p.error != null)
+                  Text('registerEditor failed: ${p.error}', style: small?.copyWith(color: theme.colorScheme.error))
+                else if (p.isEmpty)
+                  Text('Registers nothing.', style: small)
+                else
+                  for (final item in p.menuItems) Text('Menu item: ${item.path}  (${item.id})', style: small),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

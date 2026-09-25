@@ -11,6 +11,7 @@ import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/documents/editor_document.dart';
 import 'package:fynkel_editor/src/inspector/codegen_check.dart';
 import 'package:fynkel_editor/src/env/tools.dart';
+import 'package:fynkel_editor/src/extensions/editor_extensions.dart';
 import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/play/play_session.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
@@ -710,6 +711,7 @@ Widget shellApp({
   Future<Toolchain> Function(Preferences prefs)? detectToolchain,
   String? codeReloadStatus,
   EditorGame? game,
+  List<EditorPart> extensions = const [],
   StartEditorProcess? startEditor,
   bool Function(String dir)? isGame,
 }) {
@@ -738,6 +740,7 @@ Widget shellApp({
     nativeMenuBar: false,
     quit: quit ?? () {},
     initialProject: initialProject,
+    extensions: extensions,
     codeReloadStatus: codeReloadStatus,
     game: game,
     // No handover unless a test asks for one: nothing starts an editor.

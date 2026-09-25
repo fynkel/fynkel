@@ -266,6 +266,7 @@ abstract final class EditorStrings {
   static const menuLight = 'Light';
   static const menuView = 'View';
   static const menuPlay = 'Play';
+  static const menuTools = 'Tools';
   static const menuWindow = 'Window';
   static const menuHelp = 'Help';
 

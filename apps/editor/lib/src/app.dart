@@ -34,6 +34,7 @@ import 'launcher/opening_screen.dart';
 import 'picker/picker.dart';
 import 'play/code_reload.dart';
 import 'play/dart_stack.dart';
+import 'extensions/editor_extensions.dart';
 import 'play/editor_game.dart';
 import 'play/game_console.dart';
 import 'play/game_panel.dart';
@@ -102,6 +103,7 @@ class FynkelEditorApp extends StatelessWidget {
     this.initialProject,
     this.sceneViewport = true,
     this.game,
+    this.extensions = const [],
     this.codeReloadStatus,
     this.startEditor = startDetachedEditor,
     this.isGame = isGameProject,
@@ -116,6 +118,10 @@ class FynkelEditorApp extends StatelessWidget {
   /// The project's game when this is its project editor (ADR-0021, built
   /// by `fynkel editor <dir>`); null in the plain editor.
   final EditorGame? game;
+
+  /// The editor parts of the game and its packages (ADR-0028), in the
+  /// order they register; none in the plain editor.
+  final List<EditorPart> extensions;
 
   /// Starts a game project's own editor when one is opened (P3c); null
   /// opens every project here.
@@ -178,6 +184,7 @@ class FynkelEditorApp extends StatelessWidget {
             quit: quit ?? () => exit(0),
             initialProject: initialProject,
             game: game,
+            extensions: extensions,
             codeReloadStatus: codeReloadStatus ?? CodeReloadStatus.environmentPath,
             startEditor: startEditor,
             isGame: isGame,
@@ -205,6 +212,7 @@ class EditorShell extends StatefulWidget {
     this.initialProject,
     this.sceneViewport = true,
     this.game,
+    this.extensions = const [],
     this.codeReloadStatus,
     this.startEditor,
     this.isGame = isGameProject,
@@ -216,6 +224,7 @@ class EditorShell extends StatefulWidget {
   final ChooseDirectory chooseDirectory;
   final ChooseSavePath chooseSavePath;
   final EditorGame? game;
+  final List<EditorPart> extensions;
   final StartEditorProcess? startEditor;
   final bool Function(String dir) isGame;
   final String? codeReloadStatus;
@@ -455,6 +464,8 @@ class EditorShellState extends State<EditorShell> {
     }
     _panels = PanelRegistry(_panelSpecs());
     _registerCommands();
+    extensions = EditorExtensionHost(widget.extensions)..addListener(_onExtensionLog);
+    _registerExtensions();
     widget.prefs.addListener(_onPrefsChanged);
     final detected = _detect();
     // A project named at launch opens once the tools are known: its open runs
@@ -470,9 +481,63 @@ class EditorShellState extends State<EditorShell> {
     }
   }
 
+  /// A hot reload (ADR-0028 §7): the packages register again, so a
+  /// change in `lib/editor/` shows without a restart.
+  @override
+  void reassemble() {
+    super.reassemble();
+    _registerExtensions();
+  }
+
+  /// The packages' editor parts, called into [extensions].
+  late final EditorExtensionHost extensions;
+  final _extensionIds = <String>{};
+
+  /// Calls every editor part's `registerEditor` again and puts its menu
+  /// items in the registry, in place of the last registration's.
+  void _registerExtensions() {
+    registry.unregisterAll(_extensionIds);
+    _extensionIds.clear();
+    final taken = {
+      for (final c in registry.all)
+        for (final s in [c.shortcut, c.key].nonNulls) CommandRegistry.shortcutLabel(s),
+    };
+    extensions.rebuild(
+      idTaken: (id) => registry.byId(id) != null,
+      shortcutTaken: (s) => taken.contains(CommandRegistry.shortcutLabel(s)),
+    );
+    // A submenu's items side by side, where its first item was registered.
+    final items = extensions.menuItems.toList();
+    String place(ExtensionMenuItem item) => '${item.menu.name}/${item.submenu ?? '#${item.id}'}';
+    final first = <String, int>{};
+    for (final (i, item) in items.indexed) {
+      first.putIfAbsent(place(item), () => i);
+    }
+    registry.registerAll([
+      for (final (i, item) in items.indexed)
+        EditorCommand(
+          id: item.id,
+          baseLabel: item.label,
+          description: item.description ?? '${item.path} (${item.package})',
+          menu: item.menu,
+          submenu: item.submenu,
+          // After the editor's own items in the menu it joins.
+          group: 100,
+          order: first[place(item)]! * 1000 + i,
+          shortcut: item.shortcut,
+          enabled: () => extensions.isEnabled(item),
+          run: () => extensions.run(item),
+        ),
+    ]);
+    _extensionIds.addAll(items.map((i) => i.id));
+  }
+
+  void _onExtensionLog() => console?.refresh();
+
   @override
   void dispose() {
     widget.prefs.removeListener(_onPrefsChanged);
+    extensions.dispose();
     codeReload?.dispose();
     _livePlay?.dispose();
     gameRun?.dispose();
@@ -1887,7 +1952,7 @@ class EditorShellState extends State<EditorShell> {
         project: opened,
         openInIde: ide.open,
         openInEditor: openDiagnosticInEditor,
-        extra: () => _compileDiagnostics(opened),
+        extra: () => [..._compileDiagnostics(opened), ...extensions.log],
       );
       final ps = PlaySession(projectDir: opened.dir, cli: () => toolchain?.fynkelCli, start: widget.startPlayProcess);
       final gc = GameConsoleModel(
@@ -2956,6 +3021,7 @@ class EditorShellState extends State<EditorShell> {
       if (workspace == null) widget.layoutStore.clear();
     },
     onToolsChanged: _detect,
+    extensions: extensions,
   );
 
   void showAbout() {

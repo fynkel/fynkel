@@ -151,6 +151,10 @@ void main() {
   testWidgets('menus show every command of their menu, in groups, with the shortcut label', (tester) async {
     final shell = await openShell(tester);
     for (final menu in EditorMenu.values) {
+      if (shell.registry.inMenu(menu).isEmpty) {
+        expect(find.byKey(Key('menu.${menu.name}')), findsNothing, reason: 'an empty menu is left out');
+        continue;
+      }
       await tester.tap(find.byKey(Key('menu.${menu.name}')));
       await tester.pumpAndSettle();
       for (final c in shell.registry.inMenu(menu).where((c) => c.submenu == null)) {

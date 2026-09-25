@@ -13,6 +13,9 @@ enum EditorMenu {
   gameObject(EditorStrings.menuGameObject),
   view(EditorStrings.menuView),
   play(EditorStrings.menuPlay),
+
+  /// The packages' editor parts' commands (ADR-0028); hidden while empty.
+  tools(EditorStrings.menuTools),
   window(EditorStrings.menuWindow),
   help(EditorStrings.menuHelp);
 
@@ -161,6 +164,15 @@ final class CommandRegistry extends ChangeNotifier {
   void registerAll(Iterable<EditorCommand> commands) {
     for (final c in commands) {
       _commands[c.id] = c;
+    }
+    notifyListeners();
+  }
+
+  /// Removes the commands with these [ids] (an extension's, before its
+  /// package registers again).
+  void unregisterAll(Iterable<String> ids) {
+    for (final id in ids) {
+      _commands.remove(id);
     }
     notifyListeners();
   }
