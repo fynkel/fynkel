@@ -9,15 +9,62 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel_authoring/fynkel_authoring.dart' show Severity;
+import 'package:fynkel/fynkel.dart' show BehaviourRegistry, DataAsset, DataType;
 import 'package:fynkel_editor/src/app.dart';
 import 'package:fynkel_editor/src/extensions/editor_extensions.dart';
+import 'package:fynkel_editor/src/play/editor_game.dart';
 import 'package:fynkel_editor/src/prefs/preferences.dart';
 import 'package:fynkel_editor/src/project/editor_project.dart';
 import 'package:fynkel_editor_api/fynkel_editor_api.dart';
 
+import 'parity/harness.dart';
 import 'support/fakes.dart';
 
 class Wave {}
+
+class CoinKind extends DataAsset {}
+
+class Sparks {}
+
+/// code_only's coin kind: a custom Inspector over the default fields, and
+/// a drawer for its Sparks record — the drawer inside the Inspector's
+/// defaultInspector, on a data asset's page.
+void _coins(EditorExtensions editor) {
+  editor.inspector<CoinKind>(
+    (context, inspector) => Column(children: [const Text('coin kind page'), inspector.defaultInspector()]),
+  );
+  editor.drawer<Sparks>(
+    (context, field) => field.row(
+      TextButton(
+        key: const Key('sparks.fewer'),
+        onPressed: () => field.setField('count', 3),
+        child: Text('${field.valueOf('count')} sparks', key: const Key('sparks.text')),
+      ),
+    ),
+  );
+}
+
+const _bigCoin = '6d1f0a52-0000-4000-8000-00000000c014';
+
+/// code_only's real CoinKind schema and its big coin.
+void _coinKinds(Directory dir) {
+  File('../../examples/code_only/schemas/data/game.CoinKind.schema.json')
+      .copySync('${dir.path}/schemas/data/game.CoinKind.schema.json');
+  File('${dir.path}/assets/data/big_coin.data.json').writeAsStringSync(
+    const JsonEncoder.withIndent('  ').convert({
+      r'$schema': 'https://fynkel.dev/schemas/data.schema.json',
+      'formatVersion': 1,
+      'id': _bigCoin,
+      'name': 'Big Coin',
+      'type': 'game.CoinKind',
+      'version': 1,
+      'data': {
+        'value': 5,
+        'sparks': {'count': 12, 'seconds': 1.6, 'size': 0.24},
+      },
+    }),
+  );
+}
 
 var _throws = false;
 
@@ -64,13 +111,10 @@ void _drawers(EditorExtensions editor) {
 /// The generator's own `game.Spawner` (`boss`, a `Wave`; `waves`, a list of
 /// them), with a `range` that names the `minMax` drawer.
 Map<String, Object?> spawnerSchema() {
-  final s =
-      jsonDecode(
-            File(
-              '../../packages/fynkel_generator/example/spinner_game/schemas/behaviours/game.Spawner.schema.json',
-            ).readAsStringSync(),
-          )
-          as Map<String, Object?>;
+  final s = jsonDecode(
+    File('../../packages/fynkel_generator/example/spinner_game/schemas/behaviours/game.Spawner.schema.json')
+        .readAsStringSync(),
+  ) as Map<String, Object?>;
   (s['properties'] as Map)['range'] = {
     'type': 'array',
     'items': {'type': 'number'},
@@ -186,5 +230,37 @@ void main() {
     final failed = errors(shell).where((e) => e.contains('drawer<Wave> failed')).toList();
     expect(failed, hasLength(1));
     expect(failed.single, contains('so the field is drawn the default way: Bad state: no wave'));
+  });
+
+  testWidgets('a record\'s drawer on a data asset\'s page, inside a custom Inspector\'s default fields', (
+    tester,
+  ) async {
+    final e = await Editor.open(
+      tester,
+      tag: 'sparks',
+      prepare: (dir) {
+        Directory('${dir.path}/schemas/data').createSync(recursive: true);
+        Directory('${dir.path}/assets/data').createSync(recursive: true);
+        _coinKinds(dir);
+      },
+      game: EditorGame(
+        name: 'game',
+        projectDir: '/elsewhere',
+        build: (_) => const SizedBox(),
+        registerBehaviours: (BehaviourRegistry r) =>
+            r.registerData(DataType(id: 'game.CoinKind', create: CoinKind.new)),
+      ),
+      extensions: const [EditorPart('game', _coins)],
+    );
+    e.shell.browser!.select(_bigCoin);
+    await tester.pumpAndSettle();
+    expect(find.text('coin kind page'), findsOneWidget);
+    expect(find.text('12 sparks'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('sparks.fewer')));
+    await tester.pumpAndSettle();
+    final data = (jsonDecode(File('${e.dir.path}/assets/data/big_coin.data.json').readAsStringSync()) as Map)['data'];
+    expect(data['sparks'], {'count': 3, 'seconds': 1.6, 'size': 0.24});
+    expect(find.text('3 sparks'), findsOneWidget);
   });
 }
