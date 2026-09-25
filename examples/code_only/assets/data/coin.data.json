@@ -1,0 +1,21 @@
+{
+  "$schema": "https://fynkel.dev/schemas/data.schema.json",
+  "formatVersion": 1,
+  "id": "3d9bb115-a763-5ce4-8bd6-d1ab9fc0ad58",
+  "name": "Coin",
+  "type": "game.CoinKind",
+  "version": 1,
+  "data": {
+    "color": [
+      1.0,
+      0.78,
+      0.3
+    ],
+    "pitch": 1.0,
+    "size": 1.0,
+    "sound": {
+      "asset": "46690333-e5ce-46aa-84a2-58216253ccc1"
+    },
+    "value": 1
+  }
+}

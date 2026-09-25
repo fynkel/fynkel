@@ -93,7 +93,9 @@
           "type": "game.Collectible",
           "version": 1,
           "data": {
-            "value": 1
+            "kind": {
+              "asset": "3d9bb115-a763-5ce4-8bd6-d1ab9fc0ad58"
+            }
           }
         }
       }

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://fynkel.dev/schemas/data.schema.json",
+  "formatVersion": 1,
+  "id": "95c53737-ee47-5661-a9d7-7be6fe64c555",
+  "name": "Big Coin",
+  "type": "game.CoinKind",
+  "version": 1,
+  "data": {
+    "color": [
+      1.0,
+      0.42,
+      0.12
+    ],
+    "pitch": 0.7,
+    "size": 1.6,
+    "sound": {
+      "asset": "46690333-e5ce-46aa-84a2-58216253ccc1"
+    },
+    "value": 5
+  }
+}

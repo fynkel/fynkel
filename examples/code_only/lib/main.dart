@@ -187,6 +187,7 @@ class _GamePageState extends State<GamePage> {
                       lines: [
                         if (run != null) ...[
                           '${run.collected} of ${run.total} coins in ${run.clock}',
+                          '${run.score} ${run.score == 1 ? 'point' : 'points'}',
                           '${run.deaths} ${run.deaths == 1 ? 'death' : 'deaths'}',
                         ],
                       ],
@@ -238,6 +239,10 @@ class Hud extends StatelessWidget {
                       value: state.total,
                       builder: (_, total, _) => Text('$n / $total', style: text.titleLarge),
                     ),
+                  ),
+                  ModelBuilder<int>(
+                    value: state.score,
+                    builder: (_, points, _) => Text('   $points pts', style: text.titleLarge),
                   ),
                   const SizedBox(width: 20),
                   ModelBuilder<int>(

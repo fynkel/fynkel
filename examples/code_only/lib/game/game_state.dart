@@ -6,10 +6,19 @@ enum Screen { menu, playing, results }
 
 /// A finished run, as the Results screen shows it.
 class RunResult {
-  const RunResult({required this.collected, required this.total, required this.elapsedTenths, required this.deaths});
+  const RunResult({
+    required this.collected,
+    required this.total,
+    required this.score,
+    required this.elapsedTenths,
+    required this.deaths,
+  });
 
   final int collected;
   final int total;
+
+  /// The coins' values added up.
+  final int score;
   final int elapsedTenths;
   final int deaths;
 
@@ -36,6 +45,9 @@ class GameState extends GameModel {
   /// Coins the level started with (each `Collectible` counts itself).
   late final total = field(ModelValue(0));
 
+  /// The collected coins' values (a big coin is worth five).
+  late final score = field(ModelValue(0));
+
   /// Every coin collected.
   late final won = field(ModelValue(false));
 
@@ -58,15 +70,17 @@ class GameState extends GameModel {
   void reset() {
     collected.value = 0;
     total.value = 0;
+    score.value = 0;
     won.value = false;
     elapsedTenths.value = 0;
     deaths.value = 0;
     hint.value = '';
   }
 
-  /// One coin counted; the last one wins.
-  void collect() {
+  /// One coin worth [value] counted; the last one wins.
+  void collect(int value) {
     collected.value += 1;
+    score.value += value;
     if (collected.value >= total.value) won.value = true;
   }
 
@@ -75,6 +89,7 @@ class GameState extends GameModel {
     lastRun.value = RunResult(
       collected: collected.value,
       total: total.value,
+      score: score.value,
       elapsedTenths: elapsedTenths.value,
       deaths: deaths.value,
     );

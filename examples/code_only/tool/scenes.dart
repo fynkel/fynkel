@@ -1,4 +1,5 @@
-// Writes the game's scenes, its coin prefab and its materials from the
+// Writes the game's scenes, its coin prefabs, its materials and its kinds of
+// coin (data assets, ADR-0027) from the
 // specs in lib/game/level.dart (`package:fynkel/authoring.dart`, ADR-0026
 // §2): `dart run tool/scenes.dart` from the project. The documents are
 // what BuildMode.scenes loads; nothing in assets/ is written by hand.
@@ -10,6 +11,7 @@
 
 import 'dart:io';
 
+import 'package:code_only/game/coin_kind.dart';
 import 'package:code_only/game/level.dart';
 import 'package:code_only/generated/behaviours.g.dart';
 import 'package:fynkel/authoring.dart';
@@ -32,14 +34,27 @@ List<WrittenDocument> writeScenes(String projectDir) {
   }
 
   final look = Look((name, material) => add(writer.writeMaterial('materials/$name', material)).ref);
-  final coinPrefab = add(writer.writePrefab('prefabs/coin', coin(look))).ref;
+  // Written first: the instances then know their assets, so the prefab
+  // and the level name them.
+  final kinds = CoinKinds();
+  add(writer.writeData('data/coin', kinds.coin, name: 'Coin'));
+  add(writer.writeData('data/big_coin', kinds.big, name: 'Big Coin'));
+  // A prefab per kind: the coin and the big coin.
+  final prefabs = {
+    kinds.coin: add(writer.writePrefab('prefabs/coin', coin(look, kinds.coin, name: 'Coin'))).ref,
+    kinds.big: add(writer.writePrefab('prefabs/big_coin', coin(look, kinds.big, name: 'Big Coin'))).ref,
+  };
   add(writer.writeScene('scenes/menu', SceneSpec('Menu', menu(look))));
   add(
     writer.writeScene(
       'scenes/level',
       SceneSpec(
         'Level',
-        level(look, coinAt: (name, at) => ObjectSpec.prefab(coinPrefab, name: name, transform: Transform(position: at))),
+        level(
+          look,
+          kinds,
+          coinAt: (name, at, kind) => ObjectSpec.prefab(prefabs[kind]!, name: name, transform: Transform(position: at)),
+        ),
       ),
     ),
   );

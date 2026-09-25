@@ -4,33 +4,81 @@
 // ignore_for_file: type=lint, unused_element
 
 import 'package:fynkel/fynkel.dart';
-import 'package:code_only/game/collectible.dart' as _lib0;
-import 'package:code_only/game/gate.dart' as _lib1;
-import 'package:code_only/game/player.dart' as _lib2;
-import 'package:code_only/game/switch.dart' as _lib3;
+import 'package:code_only/game/coin_kind.dart' as _lib0;
+import 'package:code_only/game/collectible.dart' as _lib1;
+import 'package:code_only/game/gate.dart' as _lib2;
+import 'package:code_only/game/player.dart' as _lib3;
+import 'package:code_only/game/switch.dart' as _lib4;
 
-/// `game.Collectible` v1 → [_lib0.Collectible].
-BehaviourType get gameCollectibleType => BehaviourType(
-  id: 'game.Collectible',
+/// `game.CoinKind` v1 → [_lib0.CoinKind].
+DataType get gameCoinKindType => DataType(
+  id: 'game.CoinKind',
   version: 1,
-  create: _lib0.Collectible.new,
+  create: _lib0.CoinKind.new,
   fields: [
-    BehaviourField(
+    DataField(
+      name: 'color',
+      type: 'vec3',
+      defaultValue: const [1.0, 0.78, 0.3],
+      get: (b) => _vec3Json((b as _lib0.CoinKind).color),
+      set: (b, v) => (b as _lib0.CoinKind).color = _vec3(v),
+    ),
+    DataField(
+      name: 'pitch',
+      type: 'number',
+      defaultValue: 1.0,
+      min: 0.05,
+      max: 8,
+      get: (b) => (b as _lib0.CoinKind).pitch,
+      set: (b, v) => (b as _lib0.CoinKind).pitch = _double(v),
+    ),
+    DataField(
+      name: 'size',
+      type: 'number',
+      defaultValue: 1.0,
+      min: 0.1,
+      get: (b) => (b as _lib0.CoinKind).size,
+      set: (b, v) => (b as _lib0.CoinKind).size = _double(v),
+    ),
+    DataField(
+      name: 'sound',
+      type: 'assetRef',
+      get: (b) => _assetRefJson((b as _lib0.CoinKind).sound),
+      set: (b, v) => (b as _lib0.CoinKind).sound = _orNull(v, _assetRef),
+    ),
+    DataField(
       name: 'value',
       type: 'integer',
       defaultValue: 1,
       min: 1,
-      get: (b) => (b as _lib0.Collectible).value,
-      set: (b, v) => (b as _lib0.Collectible).value = _int(v),
+      get: (b) => (b as _lib0.CoinKind).value,
+      set: (b, v) => (b as _lib0.CoinKind).value = _int(v),
     ),
   ],
 );
 
-/// `game.Gate` v1 → [_lib1.Gate].
+/// `game.Collectible` v1 → [_lib1.Collectible].
+BehaviourType get gameCollectibleType => BehaviourType(
+  id: 'game.Collectible',
+  version: 1,
+  create: _lib1.Collectible.new,
+  fields: [
+    BehaviourField(
+      name: 'kind',
+      type: 'data',
+      dataType: 'game.CoinKind',
+      get: (b) => dataJson((b as _lib1.Collectible).kind),
+      target: (b) => (b as _lib1.Collectible).kind,
+      set: (b, v) => (b as _lib1.Collectible).kind = v as _lib0.CoinKind?,
+    ),
+  ],
+);
+
+/// `game.Gate` v1 → [_lib2.Gate].
 BehaviourType get gameGateType => BehaviourType(
   id: 'game.Gate',
   version: 1,
-  create: _lib1.Gate.new,
+  create: _lib2.Gate.new,
   fields: [
     BehaviourField(
       name: 'rise',
@@ -38,8 +86,8 @@ BehaviourType get gameGateType => BehaviourType(
       defaultValue: 2.6,
       min: 0,
       step: 0.1,
-      get: (b) => (b as _lib1.Gate).rise,
-      set: (b, v) => (b as _lib1.Gate).rise = _double(v),
+      get: (b) => (b as _lib2.Gate).rise,
+      set: (b, v) => (b as _lib2.Gate).rise = _double(v),
     ),
     BehaviourField(
       name: 'seconds',
@@ -47,32 +95,32 @@ BehaviourType get gameGateType => BehaviourType(
       defaultValue: 1.2,
       min: 0.01,
       step: 0.1,
-      get: (b) => (b as _lib1.Gate).seconds,
-      set: (b, v) => (b as _lib1.Gate).seconds = _double(v),
+      get: (b) => (b as _lib2.Gate).seconds,
+      set: (b, v) => (b as _lib2.Gate).seconds = _double(v),
     ),
   ],
 );
 
-/// `game.Player` v1 → [_lib2.Player].
+/// `game.Player` v1 → [_lib3.Player].
 BehaviourType get gamePlayerType => BehaviourType(
   id: 'game.Player',
   version: 1,
-  create: _lib2.Player.new,
+  create: _lib3.Player.new,
   fields: [
     BehaviourField(
       name: 'cameraName',
       type: 'string',
       defaultValue: 'Camera',
-      get: (b) => (b as _lib2.Player).cameraName,
-      set: (b, v) => (b as _lib2.Player).cameraName = v as String,
+      get: (b) => (b as _lib3.Player).cameraName,
+      set: (b, v) => (b as _lib3.Player).cameraName = v as String,
     ),
     BehaviourField(
       name: 'fallY',
       type: 'number',
       defaultValue: -6.0,
       step: 0.5,
-      get: (b) => (b as _lib2.Player).fallY,
-      set: (b, v) => (b as _lib2.Player).fallY = _double(v),
+      get: (b) => (b as _lib3.Player).fallY,
+      set: (b, v) => (b as _lib3.Player).fallY = _double(v),
     ),
     BehaviourField(
       name: 'jumpSpeed',
@@ -80,8 +128,8 @@ BehaviourType get gamePlayerType => BehaviourType(
       defaultValue: 5.5,
       min: 0,
       step: 0.1,
-      get: (b) => (b as _lib2.Player).jumpSpeed,
-      set: (b, v) => (b as _lib2.Player).jumpSpeed = _double(v),
+      get: (b) => (b as _lib3.Player).jumpSpeed,
+      set: (b, v) => (b as _lib3.Player).jumpSpeed = _double(v),
     ),
     BehaviourField(
       name: 'walkSpeed',
@@ -89,31 +137,31 @@ BehaviourType get gamePlayerType => BehaviourType(
       defaultValue: 4.0,
       min: 0,
       step: 0.1,
-      get: (b) => (b as _lib2.Player).walkSpeed,
-      set: (b, v) => (b as _lib2.Player).walkSpeed = _double(v),
+      get: (b) => (b as _lib3.Player).walkSpeed,
+      set: (b, v) => (b as _lib3.Player).walkSpeed = _double(v),
     ),
   ],
 );
 
-/// `game.Switch` v1 → [_lib3.Switch].
+/// `game.Switch` v1 → [_lib4.Switch].
 BehaviourType get gameSwitchType => BehaviourType(
   id: 'game.Switch',
   version: 1,
-  create: _lib3.Switch.new,
+  create: _lib4.Switch.new,
   fields: [
     BehaviourField(
       name: 'prompt',
       type: 'string',
       defaultValue: 'E — open the gate',
-      get: (b) => (b as _lib3.Switch).prompt,
-      set: (b, v) => (b as _lib3.Switch).prompt = v as String,
+      get: (b) => (b as _lib4.Switch).prompt,
+      set: (b, v) => (b as _lib4.Switch).prompt = v as String,
     ),
     BehaviourField(
       name: 'target',
       type: 'string',
       defaultValue: 'Gate',
-      get: (b) => (b as _lib3.Switch).target,
-      set: (b, v) => (b as _lib3.Switch).target = v as String,
+      get: (b) => (b as _lib4.Switch).target,
+      set: (b, v) => (b as _lib4.Switch).target = v as String,
     ),
   ],
 );
@@ -122,10 +170,16 @@ BehaviourType get gameSwitchType => BehaviourType(
 List<BehaviourType> get behaviourTypes =>
     List.unmodifiable([gameCollectibleType, gameGateType, gamePlayerType, gameSwitchType]);
 
-/// Registers every type of this package in [registry].
+/// Every `@FynkelDataAsset` type of package `code_only`, by id.
+List<DataType> get dataTypes => List.unmodifiable([gameCoinKindType]);
+
+/// Registers every type of this package in [registry] (the data types too).
 void registerBehaviours(BehaviourRegistry registry, {bool replace = false}) {
   for (final t in behaviourTypes) {
     registry.register(t, replace: replace);
+  }
+  for (final t in dataTypes) {
+    registry.registerData(t, replace: replace);
   }
 }
 
@@ -138,3 +192,21 @@ int _int(Object? v) {
   if (d != d.truncateToDouble()) throw FormatException('expected an integer, got $d');
   return d.toInt();
 }
+
+Vec3 _vec3(Object? v) {
+  final l = (v as List).cast<num>();
+  if (l.length != 3) throw FormatException('expected [x, y, z], got ${l.length} items');
+  return Vec3(l[0].toDouble(), l[1].toDouble(), l[2].toDouble());
+}
+
+List<double>? _vec3Json(Vec3? v) => v == null ? null : [v.x, v.y, v.z];
+
+AssetRef _assetRef(Object? v) {
+  final m = v as Map;
+  return AssetRef(m['asset'] as String, sub: m['sub'] as String?);
+}
+
+Map<String, Object?>? _assetRefJson(AssetRef? r) =>
+    r == null ? null : {'asset': r.asset, if (r.sub != null) 'sub': r.sub};
+
+T? _orNull<T>(Object? v, T Function(Object?) convert) => v == null ? null : convert(v);

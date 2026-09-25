@@ -17,6 +17,7 @@ import 'package:fynkel/fynkel.dart';
 
 import '../generated/assets.g.dart';
 import '../generated/behaviours.g.dart';
+import 'coin_kind.dart';
 import 'flow.dart';
 import 'game_state.dart';
 import 'level.dart';
@@ -38,6 +39,10 @@ class LiveFlow extends Flow {
 
   /// The materials, made once for the world's life.
   final Look look;
+
+  /// The kinds of coin, made in code: the same values tool/scenes.dart
+  /// writes as data assets.
+  final kinds = CoinKinds();
   final List<GameObject> _built = [];
 
   @override
@@ -50,7 +55,11 @@ class LiveFlow extends Flow {
       ..addAll(
         switch (screen) {
           Screen.menu => menu(look),
-          Screen.playing => level(look, coinAt: (name, at) => coin(look, name: name, transform: Transform(position: at))),
+          Screen.playing => level(
+              look,
+              kinds,
+              coinAt: (name, at, kind) => coin(look, kind, name: name, transform: Transform(position: at)),
+            ),
           Screen.results => results(look),
         }.map(world.build),
       );

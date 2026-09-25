@@ -8,6 +8,7 @@
 
 import 'dart:io';
 
+import 'package:code_only/game/coin_kind.dart';
 import 'package:code_only/game/collectible.dart';
 import 'package:code_only/game/game.dart';
 import 'package:code_only/game/game_state.dart';
@@ -15,6 +16,7 @@ import 'package:code_only/game/gate.dart';
 import 'package:code_only/game/level.dart';
 import 'package:code_only/game/player.dart';
 import 'package:code_only/game/switch.dart';
+import 'package:code_only/generated/assets.g.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
@@ -74,7 +76,10 @@ void main() {
 
   test('the documents in assets/ are what tool/scenes.dart writes from the specs', () {
     final written = writeScenes(projectDir);
-    expect(written.map((d) => d.path), containsAll(['scenes/menu.scene.json', 'scenes/level.scene.json', 'prefabs/coin.prefab.json']));
+    expect(
+      written.map((d) => d.path),
+      containsAll(['scenes/menu.scene.json', 'scenes/level.scene.json', 'prefabs/coin.prefab.json', 'data/big_coin.data.json']),
+    );
     expect(
       [for (final d in written) if (d.changed) d.path],
       isEmpty,
@@ -123,6 +128,33 @@ void main() {
         expect(game.world.find('Gate')!.behaviour<Gate>(), isNotNull);
         expect(game.world.find('Sweeper')!.get<Oscillate>()!.amplitude, 1.5);
         expect(game.world.find('Coin 3')!.localTransform.position, coinSpots[2]);
+
+        // The kinds of coin (ADR-0027): four plain coins share one kind, the
+        // last is the big one — its colour and size taken at start.
+        final coins = [for (var i = 1; i <= 5; i++) game.world.find('Coin $i')!.behaviour<Collectible>()!];
+        final (plain, big) = (coins.first.kind!, coins.last.kind!);
+        for (final c in coins.take(4)) {
+          expect(c.kind, same(plain));
+        }
+        expect((plain.value, big.value, big.size, big.pitch), (1, 5, 1.6, 0.7));
+        expect(game.world.find('Coin 5')!.localTransform.scale.x, closeTo(1.6, 1e-6));
+        Vec4? colour(String coin) {
+          final disc = game.world.find(coin)!.children.single.get<MeshRenderer>()!.material;
+          return game.world.runtimeMaterial(disc)?.baseColor;
+        }
+
+        expect(colour('Coin 5'), Vec4(big.color.x, big.color.y, big.color.z, 1));
+        expect(colour('Coin 1'), Vec4(plain.color.x, plain.color.y, plain.color.z, 1));
+        // Loaded from the scenes, the coins hold the written data assets;
+        // built live, the same values made in code, with no asset.
+        final written = game.world.data<CoinKind>(Assets.data.bigCoin);
+        expect(written.value, 5);
+        if (mode == BuildMode.scenes) {
+          expect(big, same(written), reason: 'one shared instance per asset');
+          expect(plain.asset, Assets.data.coin);
+        } else {
+          expect(big.asset, isNull);
+        }
       });
 
       test('the route collects every coin through the gate, then the Results', () {
@@ -133,6 +165,7 @@ void main() {
 
         collectAll().replay(game.world);
         expect(game.state.collected.value, 5);
+        expect(game.state.score.value, 9, reason: 'four coins and a big one worth five');
         expect(game.state.won.value, isTrue);
         expect(game.state.deaths.value, 0);
         expect(hinted, isTrue, reason: 'the switch prompted');
@@ -145,7 +178,7 @@ void main() {
         }
         expect(game.state.screen.value, Screen.results);
         final run = game.state.lastRun.value!;
-        expect((run.collected, run.total, run.deaths), (5, 5, 0));
+        expect((run.collected, run.total, run.score, run.deaths), (5, 5, 9, 0));
         expect(run.won, isTrue);
         expect(game.world.find('Jingle')!.get<AudioSource>()!.playing, isTrue);
 
@@ -175,6 +208,7 @@ void main() {
             .recording
             .replay(game.world);
         expect(game.state.collected.value, 0);
+        expect(game.state.score.value, 0);
         expect(game.state.total.value, 5);
         expect(game.world.findObjectsOfType<Collectible>(), hasLength(5));
       });

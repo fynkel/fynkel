@@ -1480,14 +1480,14 @@
       "components": {},
       "prefab": {
         "asset": {
-          "asset": "becedaed-a5e2-54b0-b85f-00eda8cb729c"
+          "asset": "d2749035-0813-5383-abbc-8649390c8b8c"
         },
         "instance": "c658af98-0e2e-55da-b321-b09b7acef797",
         "overrides": [
           {
             "op": "setField",
-            "entity": "e9af29fb-145f-5e73-88d3-3effc361ce29",
-            "component": "96c0490f-1bae-5392-989a-0df2449c92df",
+            "entity": "455191a3-9673-532d-8b52-82626804962b",
+            "component": "3d5304a3-ca96-52df-b4be-206f53c582b6",
             "field": "position",
             "value": [
               -15.0,

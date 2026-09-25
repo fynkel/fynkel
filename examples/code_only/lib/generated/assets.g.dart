@@ -12,6 +12,8 @@ import 'package:fynkel/fynkel.dart' show AssetRef;
 abstract final class Assets {
   /// `audio/`
   static const audio = _AssetsAudio();
+  /// `data/`
+  static const data = _AssetsData();
   /// `materials/`
   static const materials = _AssetsMaterials();
   /// `prefabs/`
@@ -35,6 +37,15 @@ final class _AssetsAudio {
   AssetRef get jump => const AssetRef('8015150b-767d-48f9-8f8f-f0856b9ec79f');
   /// `audio/win.ogg` (fynkel.audio)
   AssetRef get win => const AssetRef('4ffad449-e658-44d1-810d-433921385bf7');
+}
+
+final class _AssetsData {
+  const _AssetsData();
+
+  /// `data/big_coin.data.json` (data)
+  AssetRef get bigCoin => const AssetRef('95c53737-ee47-5661-a9d7-7be6fe64c555');
+  /// `data/coin.data.json` (data)
+  AssetRef get coin => const AssetRef('3d9bb115-a763-5ce4-8bd6-d1ab9fc0ad58');
 }
 
 final class _AssetsMaterials {
@@ -63,6 +74,8 @@ final class _AssetsMaterials {
 final class _AssetsPrefabs {
   const _AssetsPrefabs();
 
+  /// `prefabs/big_coin.prefab.json` (prefab)
+  AssetRef get bigCoin => const AssetRef('d2749035-0813-5383-abbc-8649390c8b8c');
   /// `prefabs/coin.prefab.json` (prefab)
   AssetRef get coin => const AssetRef('becedaed-a5e2-54b0-b85f-00eda8cb729c');
 }

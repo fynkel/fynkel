@@ -34,10 +34,20 @@ the game puts its places in the world one of two ways, from the same specs:
 The first test checks that the committed documents are what the tool writes
 now; the rest run each way and compare the two levels object by object.
 
+The coins come in two kinds (ADR-0027, data assets — Unity's
+ScriptableObject): `CoinKind` (`lib/game/coin_kind.dart`) holds what a coin is
+worth, its colour, size and sound. `tool/scenes.dart` writes the coin and the
+big coin worth five as `assets/data/coin.data.json` and `big_coin.data.json`
+(`ProjectWriter.writeData`) and a prefab per kind whose `Collectible` names
+it; every coin of a kind shares its one instance, so an edit to the asset in
+the editor's Inspector changes them all. Built live, the coins hold the same
+kinds made in code. The last coin, behind the gate, is the big one: the route
+scores 9.
+
 Gameplay is four behaviours in `lib/game/`: `Player` (camera-relative walking
 through a `CharacterController`, the jump, the clock, dying on the sweeper,
-restart), `Collectible` (a trigger zone that scores, plays a sound and builds
-a burst of sparks), `Switch` (the prompt and the `interact` press) and `Gate`
+restart), `Collectible` (a trigger zone that scores its kind's value, plays its sound and builds
+a burst of sparks in its colour), `Switch` (the prompt and the `interact` press) and `Gate`
 (a `moveTo` tween). `GameState` is the HUD's model; `lib/main.dart` is the
 Flutter overlay switching on `GameState.screen`.
 

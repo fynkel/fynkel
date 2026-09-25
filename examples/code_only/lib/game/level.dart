@@ -12,6 +12,7 @@ import 'dart:math' as math;
 import 'package:fynkel/fynkel.dart';
 
 import '../generated/assets.g.dart';
+import 'coin_kind.dart';
 import 'collectible.dart';
 import 'gate.dart';
 import 'player.dart';
@@ -88,10 +89,11 @@ List<ObjectSpec> lighting() => [
 
 // ---- code prefabs
 
-/// A coin: a gold disc spinning in place, a `collect` zone that listens to
-/// the player, and the [Collectible] that scores it. [transform] places it.
-/// tool/scenes.dart writes it as assets/prefabs/coin.prefab.json.
-ObjectSpec coin(Look look, {String name = 'Coin', Transform transform = const Transform()}) => ObjectSpec(
+/// A coin of [kind]: a gold disc spinning in place, a `collect` zone that
+/// listens to the player, and the [Collectible] that scores it (it takes
+/// the kind's colour and size). [transform] places it. tool/scenes.dart
+/// writes it as assets/prefabs/coin.prefab.json.
+ObjectSpec coin(Look look, CoinKind kind, {String name = 'Coin', Transform transform = const Transform()}) => ObjectSpec(
       name,
       transform: transform,
       layer: 'trigger',
@@ -101,7 +103,7 @@ ObjectSpec coin(Look look, {String name = 'Coin', Transform transform = const Tr
         Collider(shape: ColliderShape.sphere, size: const Vec3(0.8, 0.8, 0.8), isSensor: true, mask: playerMask),
         const TriggerZone(event: 'collect', once: true),
       ],
-      behaviours: [Collectible()],
+      behaviours: [Collectible()..kind = kind],
       children: [
         ObjectSpec(
           'Disc',
@@ -150,11 +152,16 @@ const coinSpots = [
   Vec3(-15, 0, -9),
 ];
 
-/// The level: a walled floor, five coins, a sweeper to dodge, a gate that
-/// shuts the last two coins in and the switch that opens it. [coinAt]
-/// makes a coin named `Coin n` at a spot: the [coin] spec when building live, an
-/// instance of the written coin prefab for the scenes.
-List<ObjectSpec> level(Look look, {required ObjectSpec Function(String name, Vec3 at) coinAt}) => [
+/// The level: a walled floor, five coins — the last a big one — a sweeper
+/// to dodge, a gate that shuts the last two coins in and the switch that
+/// opens it. [coinAt] makes a coin of a kind named `Coin n` at a spot: the
+/// [coin] spec when building live, an instance of the written coin prefab
+/// for the scenes.
+List<ObjectSpec> level(
+  Look look,
+  CoinKinds kinds, {
+  required ObjectSpec Function(String name, Vec3 at, CoinKind kind) coinAt,
+}) => [
       ...lighting(),
       ObjectSpec(
         'Camera',
@@ -233,7 +240,8 @@ List<ObjectSpec> level(Look look, {required ObjectSpec Function(String name, Vec
           ),
         ],
       ),
-      for (final (i, spot) in coinSpots.indexed) coinAt('Coin ${i + 1}', spot),
+      for (final (i, spot) in coinSpots.indexed)
+        coinAt('Coin ${i + 1}', spot, i == coinSpots.length - 1 ? kinds.big : kinds.coin),
     ];
 
 /// A podium with a big spinning coin, seen by a camera orbiting it: the
