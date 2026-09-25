@@ -4,6 +4,10 @@
 // §7), so neither widget nor spec needs an entity.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:fynkel/authoring.dart' show ProjectWriter;
+import 'package:fynkel_editor_api/fynkel_editor_api.dart' show EditorContext, FieldContext;
+
+import '../extensions/editor_extensions.dart' show EditorExtensionHost, EditorExtensionScope, ExtensionDrawer;
 
 import '../picker/picker.dart';
 import '../project/editor_project.dart';
@@ -87,12 +91,23 @@ List<AssetEntry> assetsForSpec(List<AssetEntry> all, FieldSpec spec) {
 /// Picks the widget for a spec and wires it to its [target]. [path] is the
 /// `data` path (`speed`, `inner/offset`, `/points/2`).
 class FieldEditor extends StatelessWidget {
-  const FieldEditor({super.key, required this.target, required this.spec, required this.path, this.indent = 0});
+  const FieldEditor({
+    super.key,
+    required this.target,
+    required this.spec,
+    required this.path,
+    this.indent = 0,
+    this.plain = false,
+  });
 
   final FieldTarget target;
   final FieldSpec spec;
   final String path;
   final double indent;
+
+  /// Drawn the default way, whatever drawer the extensions have for it (a
+  /// drawer's own `defaultEditor`).
+  final bool plain;
 
   bool get _enabled => target.canEdit && !spec.readOnly;
   String get _pointer => path.startsWith('/') ? path : '/$path';
@@ -127,6 +142,12 @@ class FieldEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!plain) {
+      // A package's property drawer for it (ADR-0028): by name, else by record class.
+      final host = EditorExtensionScope.maybeOf(context);
+      final drawer = host?.drawerFor(named: spec.drawer, record: spec.record);
+      if (host != null && drawer != null) return _drawn(context, host, drawer);
+    }
     final value = target.shown(path);
     final mixed = target.isMixed(path);
     final error = target.errorFor(path.startsWith('/') ? path.substring(1).split('/').first : path.split('/').first);
@@ -438,6 +459,8 @@ class FieldEditor extends StatelessWidget {
                       item: item.item,
                       fixedLength: item.fixedLength,
                       children: item.children,
+                      record: item.record,
+                      drawer: item.drawer,
                     ),
                     path: '$_pointer/$i',
                     indent: indent + 10,
@@ -543,6 +566,31 @@ class FieldEditor extends StatelessWidget {
     );
   }
 
+  /// [drawer]'s widget for this field, or the default one with the error
+  /// when it throws (logged once, after the frame).
+  Widget _drawn(BuildContext context, EditorExtensionHost host, ExtensionDrawer drawer) {
+    final field = _DrawerContext(this, host.contextFor(drawer.package));
+    try {
+      return KeyedSubtree(key: ValueKey('drawer.${target.key}.$path'), child: drawer.build(context, field));
+    } catch (e, stack) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => host.drawerFailed(drawer, e, stack));
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: EdgeInsets.only(left: indent, bottom: 2),
+            child: Text(
+              "${drawer.package}'s ${drawer.title} failed, so this is the default: $e",
+              key: const Key('drawer.error'),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: context.tokens.error),
+            ),
+          ),
+          field.defaultEditor(),
+        ],
+      );
+    }
+  }
+
   /// A fresh value of a spec (an added array item, a nullable object set).
   static Object? _blank(FieldSpec s) => switch (s.kind) {
     FieldKind.number => 0,
@@ -637,4 +685,71 @@ final class _Number implements ValueListenable<num?> {
   bool operator ==(Object other) => other is _Number && identical(other.source, source);
   @override
   int get hashCode => identityHashCode(source);
+}
+
+/// A [FieldContext] over a [FieldEditor]: its target, path and rows.
+final class _DrawerContext implements FieldContext {
+  _DrawerContext(this._e, this.editor);
+
+  final FieldEditor _e;
+
+  @override
+  final EditorContext editor;
+
+  FieldTarget get _target => _e.target;
+  FieldSpec get _spec => _e.spec;
+
+  @override
+  String get name => _spec.name;
+  @override
+  String get label => _spec.label;
+  @override
+  String? get record => _spec.record;
+  @override
+  Object? get value => _target.shown(_e.path);
+  @override
+  bool get isMixed => _target.isMixed(_e.path);
+  @override
+  bool get canEdit => _e._enabled;
+
+  @override
+  bool set(Object? value) => canEdit && _target.set(_e._writePath, ProjectWriter.jsonOf(value), spec: _spec);
+
+  @override
+  List<String> get fields => [for (final c in _spec.children) c.name];
+
+  FieldSpec _child(String field) =>
+      _spec.children.where((c) => c.name == field).firstOrNull ??
+      (throw ArgumentError.value(field, 'field', '${_spec.record ?? _spec.name} has no such field'));
+
+  @override
+  Object? valueOf(String field) => _target.shown('${_e._pointer}/${_child(field).name}');
+
+  @override
+  bool setField(String field, Object? value) {
+    final c = _child(field);
+    return canEdit && !c.readOnly && _target.set('${_e._pointer}/${c.name}', ProjectWriter.jsonOf(value), spec: c);
+  }
+
+  @override
+  Widget field(String field) {
+    final c = _child(field);
+    return FieldEditor(
+      key: ValueKey('field.${_target.key}.${_e.path}.${c.name}'),
+      target: _target,
+      spec: c,
+      path: '${_e._pointer}/${c.name}',
+      indent: _e.indent,
+    );
+  }
+
+  @override
+  Widget row(Widget child) {
+    final p = _e.path;
+    final error = _target.errorFor(p.startsWith('/') ? p.substring(1).split('/').first : p.split('/').first);
+    return _e._row(_spec.label, error, child);
+  }
+
+  @override
+  Widget defaultEditor() => FieldEditor(target: _target, spec: _spec, path: _e.path, indent: _e.indent, plain: true);
 }

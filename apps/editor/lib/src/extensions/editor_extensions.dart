@@ -103,6 +103,25 @@ class ExtensionInspector {
   String? typeId;
 }
 
+/// A property drawer a package registered: for a record class, or by
+/// the name `@Expose(drawer:)` gives.
+@immutable
+class ExtensionDrawer {
+  const ExtensionDrawer({required this.package, required this.build, this.record, this.name});
+
+  final String package;
+
+  /// The record class's name (`drawer<Wave>`), or null.
+  final String? record;
+
+  /// The drawer's name (`namedDrawer('minMax', …)`), or null.
+  final String? name;
+  final Widget Function(BuildContext context, FieldContext field) build;
+
+  /// How the Console names it.
+  String get title => record != null ? 'drawer<$record>' : 'drawer "$name"';
+}
+
 /// Where a context entry is offered.
 enum ContextMenuPlace { hierarchy, project, component }
 
@@ -174,17 +193,20 @@ class PackageExtensions {
   final windows = <ExtensionWindow>[];
   final contextItems = <ExtensionContextItem>[];
   final inspectors = <ExtensionInspector>[];
+  final drawers = <ExtensionDrawer>[];
 
   /// `registerEditor` threw: nothing of the package's is used.
   String? error;
 
-  bool get isEmpty => menuItems.isEmpty && windows.isEmpty && contextItems.isEmpty && inspectors.isEmpty;
+  bool get isEmpty =>
+      menuItems.isEmpty && windows.isEmpty && contextItems.isEmpty && inspectors.isEmpty && drawers.isEmpty;
 
   void clear() {
     menuItems.clear();
     windows.clear();
     contextItems.clear();
     inspectors.clear();
+    drawers.clear();
   }
 }
 
@@ -223,6 +245,12 @@ class EditorExtensionHost extends ChangeNotifier {
   ExtensionInspector? inspectorFor(String typeId) => _inspectors[typeId];
   var _inspectors = <String, ExtensionInspector>{};
 
+  /// The drawer for a field naming [named] (`@Expose(drawer:)`), else for
+  /// the record class [record]; null: the default editor draws it.
+  ExtensionDrawer? drawerFor({String? named, String? record}) =>
+      (named == null ? null : _drawers['name:$named']) ?? (record == null ? null : _drawers['record:$record']);
+  var _drawers = <String, ExtensionDrawer>{};
+
   Iterable<ExtensionContextItem> _contextItems(ContextMenuPlace place) =>
       _packages.expand((p) => p.contextItems).where((i) => i.place == place);
 
@@ -244,6 +272,7 @@ class EditorExtensionHost extends ChangeNotifier {
     final windowIds = <String>{};
     final contextIds = <String>{};
     final inspectors = <String, ExtensionInspector>{};
+    final drawers = <String, ExtensionDrawer>{};
     Map<Type, String>? typeIds;
     for (final part in parts) {
       final registered = PackageExtensions(part.package);
@@ -306,11 +335,22 @@ class EditorExtensionHost extends ChangeNotifier {
         inspectors[id!] = i..typeId = id;
         return false;
       });
+      registered.drawers.removeWhere((d) {
+        final key = d.record != null ? 'record:${d.record}' : 'name:${d.name}';
+        if (drawers.containsKey(key)) {
+          _error(part.package, '${d.title} left out: another extension already registered it.');
+          return true;
+        }
+        drawers[key] = d;
+        return false;
+      });
       out.add(registered);
     }
     _packages = out;
     _inspectors = inspectors;
+    _drawers = drawers;
     _inspectorErrors.clear();
+    _drawerErrors.clear();
     notifyListeners();
   }
 
@@ -424,6 +464,17 @@ class EditorExtensionHost extends ChangeNotifier {
   }
 
   final _inspectorErrors = <String, String>{};
+
+  /// A property drawer's build failed: the Console says so once per
+  /// distinct error.
+  void drawerFailed(ExtensionDrawer d, Object error, StackTrace stack) {
+    final line = '${d.title} failed, so the field is drawn the default way: $error';
+    if (_drawerErrors[d.title] == line) return;
+    _drawerErrors[d.title] = line;
+    _error(d.package, line, stack);
+  }
+
+  final _drawerErrors = <String, String>{};
 
   /// A window's build failed: the Console says so once per distinct error.
   void windowFailed(ExtensionWindow w, Object error, StackTrace stack) {
@@ -572,6 +623,24 @@ class _Registrar implements EditorExtensions {
       return;
     }
     registered.inspectors.add(ExtensionInspector(package: package, dartType: T, build: build));
+  }
+
+  @override
+  void drawer<T>(Widget Function(BuildContext context, FieldContext field) build) {
+    if (T == dynamic || T == Object) {
+      host._error(package, 'a drawer left out: name its record class, drawer<Wave>(…).');
+      return;
+    }
+    registered.drawers.add(ExtensionDrawer(package: package, record: '$T', build: build));
+  }
+
+  @override
+  void namedDrawer(String name, Widget Function(BuildContext context, FieldContext field) build) {
+    if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_.]*$').hasMatch(name)) {
+      host._error(package, 'drawer "$name" left out: its name must be one word, as @Expose(drawer:) gives it.');
+      return;
+    }
+    registered.drawers.add(ExtensionDrawer(package: package, name: name, build: build));
   }
 
   bool _contextOk(String label, String id) {

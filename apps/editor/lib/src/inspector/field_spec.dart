@@ -90,6 +90,8 @@ final class FieldSpec {
     this.gizmo,
     this.behaviourType,
     this.dataType,
+    this.record,
+    this.drawer,
   });
 
   /// The key in the component's `data` (a nested field's key in its parent).
@@ -155,6 +157,13 @@ final class FieldSpec {
   /// [FieldKind.assetRef] of [assetKind] `data` that takes only data
   /// assets of this type (`game.Weapon`).
   final String? dataType;
+
+  /// The `@FynkelRecord` class an [FieldKind.object] holds
+  /// (`x-fynkel.record`, `Wave`): a `drawer<Wave>` draws it (ADR-0028).
+  final String? record;
+
+  /// The property drawer it names (`x-fynkel.drawer`, ADR-0028).
+  final String? drawer;
 
   /// The sibling [showIf] names, without the `!`.
   String? get showIfField {
@@ -616,6 +625,8 @@ FieldSpec _parseField(
     gizmo: GizmoHint.parse(hints['gizmo']),
     behaviourType: kind == FieldKind.scriptRef ? hints['behaviour'] as String? : null,
     dataType: dataType,
+    record: kind == FieldKind.object ? hints['record'] as String? : null,
+    drawer: hints['drawer'] as String?,
   );
 }
 
