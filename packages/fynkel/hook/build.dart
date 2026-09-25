@@ -22,10 +22,13 @@
 //         build_from_source: true       # skip the download
 //         native_lib: path/to/lib.dylib # use this library as-is
 //         features: [authoring]         # cargo features (the editor; never a game)
+//         project: .                    # the game's fynkel.project.json directory:
+//                                       # `modules.strip` leaves its off modules out
 //
 // Hooks run with a stripped environment (only PATH/HOME and a few tool
 // variables survive), so `FYNKEL_BUILD_FROM_SOURCE` is a user-define here.
 
+import 'dart:convert' show jsonDecode;
 import 'dart:ffi' show Abi;
 import 'dart:io';
 
@@ -49,7 +52,10 @@ void main(List<String> args) async {
     final workspace = _sourceWorkspace(input.packageRoot);
     final userLib = input.userDefines.path('native_lib');
     final forceSource = _flag(input, 'build_from_source');
-    final features = _features(input);
+    final userFeatures = _features(input);
+    final modules = _modules(input, output, log);
+    final features = [...userFeatures, ...modules];
+    final stripped = moduleFeatures.where((m) => !modules.contains(m)).toList();
 
     final Uri built;
     final RuntimeSource source;
@@ -66,9 +72,10 @@ void main(List<String> args) async {
     } else {
       final url = lock.artifactUrl(key);
       final cargo = _findCargo();
-      // The published artifacts are game runtimes: no optional feature is in
-      // them, so an app that asks for one builds from source.
-      if (url != null && !forceSource && features.isEmpty) {
+      // The published artifacts are game runtimes with every module and no
+      // optional feature: an app that asks for one, or strips a module,
+      // builds from source.
+      if (url != null && !forceSource && userFeatures.isEmpty && stripped.isEmpty) {
         built = await _download(input, lock, key, url, log);
         source = RuntimeSource.prebuilt;
       } else if (cargo != null) {
@@ -82,9 +89,11 @@ void main(List<String> args) async {
       } else {
         final why = url == null
             ? 'fynkel.lock.json has no published artifact for target "$key" (runtime ${lock.runtimeVersion})'
-            : features.isNotEmpty
-                ? 'hooks.user_defines.fynkel.features (${features.join(', ')}) are not in the prebuilt runtime'
-                : 'build_from_source is set';
+            : userFeatures.isNotEmpty
+                ? 'hooks.user_defines.fynkel.features (${userFeatures.join(', ')}) are not in the prebuilt runtime'
+                : stripped.isNotEmpty
+                    ? 'modules.strip leaves out ${stripped.join(', ')}, and the prebuilt runtime carries every module'
+                    : 'build_from_source is set';
         throw _fail('$why and no Rust toolchain was found (looked for `cargo` on PATH and in ~/.cargo/bin).\n'
             'Fix one of:\n'
             '  - install Rust (https://rustup.rs) so the runtime can be built from source;\n'
@@ -129,6 +138,33 @@ bool _flag(BuildInput input, String key) {
   final v = input.userDefines[key];
   if (v is! bool?) throw _fail('hooks.user_defines.fynkel.$key must be a boolean');
   return v ?? false;
+}
+
+/// The module features for the game's project (ADR-0029): every one,
+/// unless `hooks.user_defines.fynkel.project` names a project whose
+/// `modules.strip` is true — then its off modules are left out, and the
+/// hook says so before building.
+List<String> _modules(BuildInput input, BuildOutputBuilder output, _Log log) {
+  final dir = input.userDefines.path('project');
+  if (dir == null) return moduleFeatures;
+  // `Directory.uri` ends in a slash, so the file resolves inside it.
+  final file = File.fromUri(Directory.fromUri(dir).uri.resolve('fynkel.project.json'));
+  if (!file.existsSync()) {
+    throw _fail('hooks.user_defines.fynkel.project: ${file.path} not found.');
+  }
+  output.dependencies.add(file.uri);
+  final Object? json;
+  try {
+    json = jsonDecode(file.readAsStringSync());
+  } on FormatException catch (e) {
+    throw _fail('${file.path}: ${e.message}');
+  }
+  final modules = moduleFeaturesFor(json is Map ? json.cast<String, Object?>() : null);
+  final stripped = moduleFeatures.where((m) => !modules.contains(m)).toList();
+  if (stripped.isNotEmpty) {
+    log.info('modules.strip: the runtime leaves out ${stripped.join(', ')} (${file.path} turns them off)');
+  }
+  return modules;
 }
 
 /// `hooks.user_defines.fynkel.features`: a list of [knownFeatures] names.

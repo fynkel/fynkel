@@ -46,6 +46,23 @@ String? rustTriple(OS os, Architecture arch, {IOSSdk? iosSdk}) {
 /// carries no editor code (blueprint §19.2e item 1).
 const knownFeatures = {'authoring'};
 
+/// The optional engine modules (ADR-0029), each a cargo feature of the
+/// runtime crates, on in every build unless the project strips it.
+const moduleFeatures = ['physics', 'audio', 'animation'];
+
+/// The module features to build for a project file's JSON ([project]
+/// null: no project named, every module). Only `modules.strip: true`
+/// leaves anything out — the modules the project turns off; without it
+/// an off module is off in behaviour only (the runtime keeps its code).
+List<String> moduleFeaturesFor(Map<String, Object?>? project) {
+  final modules = project?['modules'];
+  if (modules is! Map || modules['strip'] != true) return moduleFeatures;
+  return [
+    for (final m in moduleFeatures)
+      if (modules[m] != false) m,
+  ];
+}
+
 /// The `cargo build` arguments for one target: always `--no-default-features`
 /// so the built runtime carries exactly the features the app asked for — the
 /// crates' defaults are for the workspace, not for a game.

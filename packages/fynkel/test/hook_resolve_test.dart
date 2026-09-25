@@ -46,6 +46,26 @@ void main() {
     expect(knownFeatures, {'authoring'});
   });
 
+  test('every module is built unless the project strips the ones it turns off (ADR-0029)', () {
+    expect(moduleFeatures, ['physics', 'audio', 'animation']);
+    expect(moduleFeaturesFor(null), moduleFeatures);
+    expect(moduleFeaturesFor({'name': 'x'}), moduleFeatures);
+    // Off without strip: off in behaviour only, the code stays.
+    expect(moduleFeaturesFor({'modules': {'animation': false}}), moduleFeatures);
+    expect(moduleFeaturesFor({'modules': {'animation': false, 'audio': false, 'strip': true}}), ['physics']);
+    expect(moduleFeaturesFor({'modules': {'strip': true}}), moduleFeatures);
+    // A game's runtime: the modules as features, no editor code.
+    expect(cargoBuildArgs('fynkel_platform_apple', features: moduleFeaturesFor(null)), [
+      'build',
+      '--release',
+      '-p',
+      'fynkel_platform_apple',
+      '--no-default-features',
+      '--features',
+      'animation,audio,physics',
+    ]);
+  });
+
   test('lock file parses and resolves published artifacts only', () {
     final lock = RuntimeLock.parse('''
 {
