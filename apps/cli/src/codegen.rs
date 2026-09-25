@@ -746,7 +746,14 @@ fn dart(fp: u64) -> String {
                 SchemaKind::Component => {
                     fynkel_authoring::component_default(s.name).map(|n| n.to_serde())
                 }
-                _ => None,
+                // A document record (`PbrMaterial`): every field optional in
+                // the file, so every constructor argument too (ADR-0026 §4).
+                _ => s.document.and_then(|kind| {
+                    fynkel_document::generated::document_defaults()
+                        .into_iter()
+                        .find(|(k, _)| *k == kind)
+                        .map(|(_, n)| n.to_serde())
+                }),
             };
             for f in s.fields {
                 let v = camel(f.name);
@@ -894,9 +901,10 @@ fn dart(fp: u64) -> String {
             let _ = writeln!(o, "    );");
         }
         let _ = writeln!(o, "  }}");
-        // copyWith (components: `set(get<MeshRenderer>()!.copyWith(visible: false))`);
+        // copyWith (components: `set(get<MeshRenderer>()!.copyWith(visible: false))`;
+        // document records: `setMaterial(ref, m.copyWith(roughness: 1))`);
         // an optional field passed as null keeps its value.
-        if s.kind == SchemaKind::Component && !s.fields.is_empty() {
+        if (s.kind == SchemaKind::Component || s.document.is_some()) && !s.fields.is_empty() {
             let _ = writeln!(o);
             let _ = writeln!(o, "  /// This value with the given fields replaced.");
             let _ = writeln!(o, "  {name} copyWith({{");

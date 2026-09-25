@@ -1231,16 +1231,16 @@ class PointLight implements WireRecord {
 /// `fynkel.PbrMaterial` (record, id 0, 184 bytes).
 class PbrMaterial implements WireRecord {
   const PbrMaterial({
-    required this.baseColor,
-    required this.metallic,
-    required this.roughness,
-    required this.emissive,
-    required this.emissiveStrength,
-    required this.normalScale,
-    required this.occlusionStrength,
-    required this.alphaMode,
-    required this.alphaCutoff,
-    required this.doubleSided,
+    this.baseColor = const Vec4(1.0, 1.0, 1.0, 1.0),
+    this.metallic = 0.0,
+    this.roughness = 0.5,
+    this.emissive = const Vec3(0.0, 0.0, 0.0),
+    this.emissiveStrength = 1.0,
+    this.normalScale = 1.0,
+    this.occlusionStrength = 1.0,
+    this.alphaMode = AlphaMode.opaque,
+    this.alphaCutoff = 0.5,
+    this.doubleSided = false,
     this.baseColorTexture,
     this.normalTexture,
     this.metallicRoughnessTexture,
@@ -1321,6 +1321,42 @@ class PbrMaterial implements WireRecord {
       emissiveTexture: readOptionalAssetRef(d, offset + 160, tail),
     );
   }
+
+  /// This value with the given fields replaced.
+  PbrMaterial copyWith({
+    Vec4? baseColor,
+    double? metallic,
+    double? roughness,
+    Vec3? emissive,
+    double? emissiveStrength,
+    double? normalScale,
+    double? occlusionStrength,
+    AlphaMode? alphaMode,
+    double? alphaCutoff,
+    bool? doubleSided,
+    AssetRef? baseColorTexture,
+    AssetRef? normalTexture,
+    AssetRef? metallicRoughnessTexture,
+    AssetRef? occlusionTexture,
+    AssetRef? emissiveTexture,
+  }) =>
+      PbrMaterial(
+        baseColor: baseColor ?? this.baseColor,
+        metallic: metallic ?? this.metallic,
+        roughness: roughness ?? this.roughness,
+        emissive: emissive ?? this.emissive,
+        emissiveStrength: emissiveStrength ?? this.emissiveStrength,
+        normalScale: normalScale ?? this.normalScale,
+        occlusionStrength: occlusionStrength ?? this.occlusionStrength,
+        alphaMode: alphaMode ?? this.alphaMode,
+        alphaCutoff: alphaCutoff ?? this.alphaCutoff,
+        doubleSided: doubleSided ?? this.doubleSided,
+        baseColorTexture: baseColorTexture ?? this.baseColorTexture,
+        normalTexture: normalTexture ?? this.normalTexture,
+        metallicRoughnessTexture: metallicRoughnessTexture ?? this.metallicRoughnessTexture,
+        occlusionTexture: occlusionTexture ?? this.occlusionTexture,
+        emissiveTexture: emissiveTexture ?? this.emissiveTexture,
+      );
 
   @override
   bool operator ==(Object other) =>
@@ -3122,11 +3158,11 @@ class ZoneEvent implements WireRecord {
 /// `fynkel.Settings` (record, id 0, 24 bytes).
 class Settings implements WireRecord {
   const Settings({
-    required this.masterVolume,
-    required this.musicVolume,
-    required this.sfxVolume,
-    required this.muted,
-    required this.quality,
+    this.masterVolume = 1.0,
+    this.musicVolume = 1.0,
+    this.sfxVolume = 1.0,
+    this.muted = false,
+    this.quality = '',
   });
 
   /// Gain of the `master` bus, `0..=1`.
@@ -3163,6 +3199,22 @@ class Settings implements WireRecord {
       quality: readWireString(d, offset + 16, tail),
     );
   }
+
+  /// This value with the given fields replaced.
+  Settings copyWith({
+    double? masterVolume,
+    double? musicVolume,
+    double? sfxVolume,
+    bool? muted,
+    String? quality,
+  }) =>
+      Settings(
+        masterVolume: masterVolume ?? this.masterVolume,
+        musicVolume: musicVolume ?? this.musicVolume,
+        sfxVolume: sfxVolume ?? this.sfxVolume,
+        muted: muted ?? this.muted,
+        quality: quality ?? this.quality,
+      );
 
   @override
   bool operator ==(Object other) =>

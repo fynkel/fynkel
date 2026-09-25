@@ -1201,14 +1201,14 @@ fn cook_fills_the_cache_and_cooked_inspect_reads_it() {
     };
     let first = cook(&[]);
     assert_eq!(first["profile"], "dev");
-    assert_eq!(first["cooked"], 6);
+    assert_eq!(first["cooked"], 7, "six and the built-in primitives");
     assert_eq!(first["cached"], 0);
     assert_eq!(first["failed"], 0);
     assert!(cache.join("index.json").is_file());
     let second = cook(&[]);
-    assert_eq!(second["cached"], 6);
+    assert_eq!(second["cached"], 7);
     let ios = cook(&["--profile", "ios"]);
-    assert_eq!(ios["cooked"], 6);
+    assert_eq!(ios["cooked"], 7);
 
     // Inspect the scene's container.
     let scene = first["assets"]
@@ -1239,8 +1239,8 @@ fn cook_fills_the_cache_and_cooked_inspect_reads_it() {
 
     // Pruning after an ios cook drops the dev objects.
     let pruned = cook(&["--profile", "ios", "--prune"]);
-    assert_eq!(pruned["pruned"], 6);
-    assert_eq!(cook(&[])["cooked"], 6);
+    assert_eq!(pruned["pruned"], 7);
+    assert_eq!(cook(&[])["cooked"], 7);
     let _ = std::fs::remove_dir_all(&cache);
 }
 
