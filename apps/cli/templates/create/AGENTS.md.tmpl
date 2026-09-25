@@ -387,6 +387,12 @@ turret.findChild('Barrel');                          // the prefab's entities ar
   text) from the cooked cache and returns the anchor object immediately;
   `world.lastInstantiate` is the report, a bad id throws
   `FynkelInstantiateError`. Prefabs may nest; a cycle is `FYN-D0402`.
+- Name assets through the generated `Assets` class
+  (`lib/generated/assets.g.dart`, written by `fynkel codegen` and by the
+  editor when assets change): `world.instantiate(Assets.prefabs.coin)`,
+  `scenes.transition(Assets.scenes.main)`, `Assets.models.cube.meshes.cube`.
+  They hold ids, never paths; they are getters, so `final`, not `const`.
+  A path known only at runtime: `world.assets.find('prefabs/coin')`.
 
 ## Scenes at runtime, zones, settings
 

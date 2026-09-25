@@ -41,13 +41,13 @@ Status: ✅ works as in Unity · 🟡 works but differs · ❌ missing or broken
 
 | | Unity (C#) | Fynkel (Dart) |
 |---|---|---|
-| Name an asset in code | a serialized field, or `Resources.Load("prefabs/Burst")` | ❌ a UUID string: `const burstPrefab = '88641ff3-…'` (ADR-0026 §3) |
+| Name an asset in code | a serialized field, or `Resources.Load("prefabs/Burst")` | 🔧 `Assets.prefabs.burst` (generated `lib/generated/assets.g.dart`, kept current by the editor; `f4902e3`, `10914af`) or `world.assets.find('prefabs/burst')` for a path known only while running (`c9cf929`) (ADR-0026 §3) |
 | Spawn a prefab | `Instantiate(prefab)` | ✅ `world.instantiate(ref)` |
 | Copy a live object | `Instantiate(obj)` | ❌ (ADR-0026 §4) |
 | A cube / sphere / plane | `GameObject.CreatePrimitive` | ❌ only through the editor's GameObject menu (ADR-0023) |
 | A material made in code | `new Material(shader)`, `material.color = …` | ❌ materials are files only |
 | A mesh made in code | `new Mesh { vertices = … }` | ❌ |
-| Load a scene | `SceneManager.LoadScene("Level1")` | 🟡 `scenes.transition(id)` works, but by UUID |
+| Load a scene | `SceneManager.LoadScene("Level1")` | 🔧 `scenes.transition(Assets.scenes.level1)`, or `world.assets.find('scenes/level1')` |
 | Additive scenes | | ✅ `LoadMode.additive` |
 
 ## Tier 3 — building scenes and prefabs from code
@@ -72,3 +72,5 @@ code as well as, or better than, Unity's.
 ## Log
 
 - 2026-09-25 — checklist written from the scan (ADR-0026 proposed).
+- 2026-09-25 — Tier 1 object graph (231945a, b1c375b).
+- 2026-09-25 — assets by name: `assets.g.dart`, the editor regenerating it, the reference game using it (abf2787), `world.assets`.
