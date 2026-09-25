@@ -10,6 +10,7 @@ import 'package:ffi/ffi.dart';
 
 import '../../generated/schema.g.dart' as gen;
 import '../wire/buffers.dart';
+import '../wire/support.dart' show WireStrings;
 import 'fynkel_bindings.g.dart';
 
 export 'fynkel_bindings.g.dart' show FynkelStatus;
@@ -457,6 +458,45 @@ class NativeWorld {
               calloc.free(d);
             }
           }));
+
+  /// `fynkel_world_set_material` (ADR-0026 §4): [material] drawn as the
+  /// runtime material [id] (16 UUID bytes); null removes it.
+  FynkelStatus setMaterial(Uint8List id, gen.PbrMaterial? material) {
+    ffiCalls++;
+    final idp = calloc<Uint8>(16);
+    try {
+      idp.asTypedList(16).setAll(0, id);
+      if (material == null) return fynkel_world_set_material(_w, idp, nullptr, 0);
+      final payload = materialPayload(material);
+      final p = calloc<Uint8>(payload.length);
+      try {
+        p.asTypedList(payload.length).setAll(0, payload);
+        return fynkel_world_set_material(_w, idp, p, payload.length);
+      } finally {
+        calloc.free(p);
+      }
+    } finally {
+      calloc.free(idp);
+    }
+  }
+
+  /// A `MATL` chunk payload (`fynkel_wire::material`): u32 version 1,
+  /// record size, tail length, reserved; the record; its string tail.
+  static Uint8List materialPayload(gen.PbrMaterial m) {
+    const header = 16;
+    final strings = WireStrings();
+    final record = ByteData(gen.PbrMaterial.wireSize);
+    m.encode(record, 0, strings);
+    final tail = strings.takeBytes();
+    final out = Uint8List(header + record.lengthInBytes + tail.length);
+    ByteData.sublistView(out)
+      ..setUint32(0, 1, Endian.little)
+      ..setUint32(4, record.lengthInBytes, Endian.little)
+      ..setUint32(8, tail.length, Endian.little);
+    out.setAll(header, record.buffer.asUint8List());
+    out.setAll(header + record.lengthInBytes, tail);
+    return out;
+  }
 
   T _withUtf8<T>(String text, T Function(Pointer<Uint8>, int) body) {
     final bytes = utf8.encode(text);

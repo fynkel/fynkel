@@ -46,6 +46,32 @@ final class ObjectSpec {
     this.children = const [],
   });
 
+  /// A built-in shape (Unity's `GameObject.CreatePrimitive`): [shape]'s
+  /// mesh with the default material and Unity's collider for it, named
+  /// after the shape unless [name] says otherwise. [components] come after
+  /// those two, so a `MeshRenderer` or `Collider` among them replaces the
+  /// shape's (`MeshRenderer(mesh: Primitive.cube.mesh, material: mine)`).
+  factory ObjectSpec.primitive(
+    Primitive shape, {
+    String? name,
+    Transform transform = identityTransform,
+    bool active = true,
+    Iterable<String> tags = const [],
+    String? layer,
+    List<WireRecord> components = const [],
+    List<Behaviour> behaviours = const [],
+    List<ObjectSpec> children = const [],
+  }) => ObjectSpec(
+    name ?? shape.label,
+    transform: transform,
+    active: active,
+    tags: tags,
+    layer: layer,
+    components: [gen.MeshRenderer(mesh: shape.mesh, material: Primitive.defaultMaterial), shape.collider, ...components],
+    behaviours: behaviours,
+    children: children,
+  );
+
   /// The object's name; null only for a prefab instance keeping the
   /// prefab's.
   final String? name;
@@ -75,6 +101,37 @@ final class ObjectSpec {
 
   @override
   String toString() => prefab == null ? 'ObjectSpec($name)' : 'ObjectSpec.prefab(${name ?? prefab!.asset})';
+}
+
+/// The built-in shapes (ADR-0023), the editor's GameObject → 3D Object
+/// menu. Every cook ships them (`Fynkel/Primitives.glb`, fixed ids),
+/// whether or not the project installed its own copy.
+enum Primitive {
+  cube('Cube', gen.Collider(shape: gen.ColliderShape.box, size: Vec3(0.5, 0.5, 0.5))),
+  sphere('Sphere', gen.Collider(shape: gen.ColliderShape.sphere, size: Vec3(0.5, 0.5, 0.5))),
+  // A capsule collider for both, as Unity: radius 0.5, 2 m tall.
+  capsule('Capsule', gen.Collider(shape: gen.ColliderShape.capsule, size: Vec3(0.5, 0.5, 0.5))),
+  cylinder('Cylinder', gen.Collider(shape: gen.ColliderShape.capsule, size: Vec3(0.5, 0.5, 0.5))),
+  plane('Plane', gen.Collider(shape: gen.ColliderShape.mesh, mesh: AssetRef(Primitive.id, sub: 'mesh/Plane'))),
+  quad('Quad', gen.Collider(shape: gen.ColliderShape.mesh, mesh: AssetRef(Primitive.id, sub: 'mesh/Quad')));
+
+  const Primitive(this.label, this.collider);
+
+  /// The shapes' asset (`Fynkel/Primitives.glb`).
+  static const id = 'f7a1e5d0-0000-4000-8000-000000000023';
+
+  /// The material every shape starts with.
+  static const defaultMaterial = AssetRef(id, sub: 'material/Default');
+
+  /// Unity's name for it, the new object's name.
+  final String label;
+
+  /// Unity's collider for the shape: a 1 m box, a 0.5 m sphere, a 2 m
+  /// capsule for the capsule and the cylinder, the mesh for the plane
+  /// (10 m) and the quad (1 m).
+  final gen.Collider collider;
+
+  AssetRef get mesh => AssetRef(id, sub: 'mesh/$label');
 }
 
 extension on World {

@@ -277,6 +277,71 @@ class World {
     return _buildSpec(spec, parent, transform ?? spec.transform);
   }
 
+  /// A built-in shape (Unity's `GameObject.CreatePrimitive`, ADR-0026
+  /// §4): [ObjectSpec.primitive] built under [parent] at [transform] —
+  /// the shape's mesh, the default material and Unity's collider for it.
+  GameObject createPrimitive(Primitive shape, {String? name, Transform transform = identityTransform, GameObject? parent}) =>
+      build(ObjectSpec.primitive(shape, name: name, transform: transform), parent: parent);
+
+  // ------------------------------------------ runtime materials (ADR-0026 §4)
+
+  static final math.Random _ids = math.Random.secure();
+
+  /// A material made in code (Unity's `new Material(shader)`): a new
+  /// asset id that a `MeshRenderer`'s `material` takes like a cooked one,
+  /// drawn with [material]'s values from the next frame and kept across
+  /// scene loads until [destroyMaterial]. Change it with [setMaterial].
+  /// Throws [StateError] before a project or scene is loaded (the
+  /// material lives in that asset store).
+  AssetRef createMaterial([gen.PbrMaterial material = const gen.PbrMaterial()]) {
+    final id = Uint8List(16);
+    for (var i = 0; i < 16; i++) {
+      id[i] = _ids.nextInt(256);
+    }
+    id[6] = (id[6] & 0x0f) | 0x40; // UUID v4
+    id[8] = (id[8] & 0x3f) | 0x80;
+    final ref = AssetRef.fromBytes(id, '');
+    setMaterial(ref, material);
+    return ref;
+  }
+
+  /// Gives the material [ref] new values (Unity's `material.color = …`):
+  /// one [createMaterial] made, or a cooked material, replaced for this
+  /// run until [destroyMaterial]. Every renderer using it changes.
+  void setMaterial(AssetRef ref, gen.PbrMaterial material) {
+    _setMaterial(ref, material);
+    _runtimeMaterials[ref.asset] = material;
+  }
+
+  /// Removes the runtime material [ref]: a created one draws as missing
+  /// again, a replaced cooked one goes back to its cooked values.
+  void destroyMaterial(AssetRef ref) {
+    _setMaterial(ref, null);
+    _runtimeMaterials.remove(ref.asset);
+  }
+
+  /// The values [setMaterial] or [createMaterial] last gave [ref] (null
+  /// for a material this world did not make or replace): the start of a
+  /// change, `setMaterial(ref, runtimeMaterial(ref)!.copyWith(…))`.
+  gen.PbrMaterial? runtimeMaterial(AssetRef ref) => _runtimeMaterials[ref.asset];
+  final Map<String, gen.PbrMaterial> _runtimeMaterials = {};
+
+  void _setMaterial(AssetRef ref, gen.PbrMaterial? material) {
+    final id = ref.bytes;
+    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
+    final status = _native.setMaterial(id, material);
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        return;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        throw StateError('materials need a loaded project or scene (their asset store) — loadProject or loadScene first');
+      case FynkelStatus.FYNKEL_STATUS_INVALID_ARGUMENT:
+        throw FynkelBridgeError('setMaterial: the native library has another PbrMaterial layout (rebuild it)');
+      default:
+        throw FynkelBridgeError('setMaterial: $status');
+    }
+  }
+
   /// Looks a resolved object up by handle.
   GameObject? byEntity(int entity) => _byEntity[entity];
 

@@ -563,6 +563,39 @@ FynkelStatus fynkel_world_instantiate(
   ffi.Pointer<FynkelInstantiateDesc> desc,
 ) => FynkelStatus.fromValue(_fynkel_world_instantiate(world, desc));
 
+/// A material made at runtime (ADR-0026 §4, `world.createMaterial`):
+/// `payload` is a MATL chunk payload — u32 version (1), u32 record size,
+/// u32 tail length, u32 reserved, the `fynkel.PbrMaterial` wire record, its
+/// string tail — drawn as the material `id` (16 bytes, big-endian UUID; one
+/// the cache does not have, or a cooked material's to replace it) by every
+/// renderer on the world's asset store until `payload_len` 0 removes it.
+/// Kept across scene loads. FYNKEL_STATUS_LOAD_FAILED before any project is
+/// loaded; FYNKEL_STATUS_INVALID_ARGUMENT for a payload that does not
+/// decode (another build's record layout).
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<FynkelWorld>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Uint32,
+  )
+>(symbol: 'fynkel_world_set_material')
+external int _fynkel_world_set_material(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> id,
+  ffi.Pointer<ffi.Uint8> payload,
+  int payload_len,
+);
+
+FynkelStatus fynkel_world_set_material(
+  ffi.Pointer<FynkelWorld> world,
+  ffi.Pointer<ffi.Uint8> id,
+  ffi.Pointer<ffi.Uint8> payload,
+  int payload_len,
+) => FynkelStatus.fromValue(
+  _fynkel_world_set_material(world, id, payload, payload_len),
+);
+
 /// UTF-8 JSON describing the last load, unload, instantiate or bind call
 /// on this world (empty before any): {"ok": bool, "mode": "replace" |
 /// "additive"?, "scene": {"id", "name", "path", "key", "entities",
