@@ -226,12 +226,13 @@ final class _DataTarget extends FieldTarget {
 
   static String _escape(String s) => s.replaceAll('~', '~0').replaceAll('/', '~1');
 
-  /// [into] with [value] at [path] (an index one past a list's end appends).
+  /// [into] with [value] at [path] (an index one past a list's end appends;
+  /// an index into nothing yet starts a list — a field the file leaves out).
   static Object? _setIn(Object? into, List<String> path, Object? value) {
     if (path.isEmpty) return value;
     final head = path.first, rest = path.sublist(1);
-    if (into is List) {
-      final list = [...into];
+    if (into is List || (into == null && int.tryParse(head) != null)) {
+      final list = [...?into as List?];
       final i = int.tryParse(head) ?? list.length;
       if (i >= list.length) {
         list.add(_setIn(null, rest, value));

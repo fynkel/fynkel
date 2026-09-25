@@ -10,6 +10,7 @@ import '../project/editor_project.dart';
 import '../project_browser/asset_preview.dart';
 import '../project_browser/project_browser_model.dart' show AssetPreview;
 import '../theme/icons.dart';
+import '../theme/tokens.dart';
 import 'field_spec.dart';
 import 'field_widgets.dart';
 import 'inspector_math.dart';
@@ -512,15 +513,14 @@ class FieldEditor extends StatelessWidget {
     _ => v,
   };
 
+  /// A nested object — a script's `@FynkelRecord` — as a foldout (Unity's
+  /// serialized class), open until folded.
   Widget _object(BuildContext context, String label, Object? value) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return _Foldout(
+      key: ValueKey('foldout.${target.key}.$path'),
+      label: label,
+      indent: indent,
       children: [
-        Padding(
-          padding: EdgeInsets.only(left: indent, top: 4, bottom: 1),
-          child: Text(label, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
-        ),
         if (value == null && spec.nullable)
           Padding(
             padding: EdgeInsets.only(left: indent + 10),
@@ -561,6 +561,52 @@ class FieldEditor extends StatelessWidget {
     },
     FieldKind.any => null,
   };
+}
+
+/// A caption with a chevron that folds [children] away.
+class _Foldout extends StatefulWidget {
+  const _Foldout({super.key, required this.label, required this.indent, required this.children});
+
+  final String label;
+  final double indent;
+  final List<Widget> children;
+
+  @override
+  State<_Foldout> createState() => _FoldoutState();
+}
+
+class _FoldoutState extends State<_Foldout> {
+  bool _open = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final t = context.tokens;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: EdgeInsets.only(left: widget.indent, top: 4, bottom: 1),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              key: const ValueKey('foldout.toggle'),
+              onTap: () => setState(() => _open = !_open),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(_open ? FIcons.expandMore : FIcons.chevronRight, size: 14, color: t.textSecondary),
+                  const SizedBox(width: 2),
+                  Text(widget.label, style: theme.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (_open) ...widget.children,
+      ],
+    );
+  }
 }
 
 /// The list to write for [values] where the document held [previous]: each

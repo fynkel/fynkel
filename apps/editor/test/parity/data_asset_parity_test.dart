@@ -3,7 +3,8 @@
 // `.data.json` of that type; its Inspector page draws the type's fields
 // from the committed schema with the script Inspector's editors, each
 // change saved at once and undone by ⌘Z; a data-typed field's picker
-// offers only data assets of its type.
+// offers only data assets of its type; a record (`@FynkelRecord`) is a
+// foldout, alone or as a list's items.
 import 'dart:convert';
 import 'dart:io';
 
@@ -16,6 +17,7 @@ import 'harness.dart';
 const sword = 'c0000000-0000-4000-8000-000000000d01';
 const axe = 'c0000000-0000-4000-8000-000000000d02';
 const shield = 'c0000000-0000-4000-8000-000000000d03';
+const loot = 'c0000000-0000-4000-8000-000000000d04';
 const assetRef = r'https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef';
 
 void writeJson(File f, Object json) {
@@ -67,6 +69,45 @@ void weapons(Directory dir) {
   writeJson(File('${dir.path}/assets/data/sword.data.json'), doc(sword, 'Sword', 'game.Weapon'));
   writeJson(File('${dir.path}/assets/data/axe.data.json'), doc(axe, 'Axe', 'game.Weapon'));
   writeJson(File('${dir.path}/assets/data/shield.data.json'), doc(shield, 'Shield', 'game.Shield'));
+  // `game.Loot`: a `Drop` record alone (`best`) and in a list (`drops`), as
+  // the generator writes them.
+  Map<String, Object?> drop() => {
+    'type': 'object',
+    'properties': {
+      'weight': {
+        'type': 'integer',
+        'minimum': 0,
+        'default': 1,
+        'x-fynkel': {'type': 'integer', 'min': 0},
+      },
+      'rare': {
+        'type': 'boolean',
+        'default': false,
+        'x-fynkel': {'type': 'boolean'},
+      },
+    },
+    'additionalProperties': false,
+  };
+  writeJson(
+    File('${dir.path}/schemas/data/game.Loot.schema.json'),
+    typeSchema('game.Loot', {
+      'best': {
+        ...drop(),
+        'default': <String, Object?>{},
+        'x-fynkel': {'type': 'record', 'record': 'Drop'},
+      },
+      'drops': {
+        'type': 'array',
+        'items': {
+          ...drop(),
+          'x-fynkel': {'type': 'record', 'record': 'Drop'},
+        },
+        'default': <Object?>[],
+        'x-fynkel': {'type': 'list', 'items': 'record'},
+      },
+    }),
+  );
+  writeJson(File('${dir.path}/assets/data/loot.data.json'), doc(loot, 'Loot', 'game.Loot'));
 }
 
 void main() {
@@ -133,5 +174,45 @@ void main() {
       'upgrade': {'asset': axe},
     });
     expect(find.descendant(of: upgrade, matching: find.text('Axe')), findsOneWidget);
+  });
+
+  testWidgets('a record is a foldout, alone and as the items of a list; its fields edit in place', (tester) async {
+    final e = await Editor.open(tester, prepare: weapons);
+    e.shell.browser!.select(loot);
+    await tester.pumpAndSettle();
+    final file = File('${e.dir.path}/assets/data/loot.data.json');
+    Map<String, Object?> data() => (jsonDecode(file.readAsStringSync()) as Map)['data'] as Map<String, Object?>;
+
+    final best = find.byKey(const ValueKey('field.data.$loot.best'));
+    final weight = find.byKey(const ValueKey('field.data.$loot.best.weight'));
+    expect(weight, findsOneWidget);
+    final box = find.descendant(of: weight, matching: find.byKey(const ValueKey('number.text')));
+    await reveal(tester, box);
+    await e.click(box);
+    await e.type('4');
+    await e.submit();
+    expect(data()['best'], {'weight': 4});
+
+    // Folded: its fields are gone until it opens again.
+    await e.click(find.descendant(of: best, matching: find.byKey(const ValueKey('foldout.toggle'))).first);
+    expect(weight, findsNothing);
+    await e.click(find.descendant(of: best, matching: find.byKey(const ValueKey('foldout.toggle'))).first);
+    expect(weight, findsOneWidget);
+
+    // A list of records: + adds one with the record's defaults.
+    final add = find.byKey(const ValueKey('array.add.drops'));
+    await reveal(tester, add);
+    await e.click(add);
+    expect(data()['drops'], [
+      {'weight': 1, 'rare': false},
+    ]);
+    final item = find.byKey(const ValueKey('field.data.$loot.drops.0'));
+    expect(find.descendant(of: item, matching: find.byKey(const ValueKey('foldout.toggle'))), findsOneWidget);
+    final rare = find.descendant(of: item, matching: find.byType(Checkbox));
+    await reveal(tester, rare);
+    await e.click(rare);
+    expect(data()['drops'], [
+      {'weight': 1, 'rare': true},
+    ]);
   });
 }

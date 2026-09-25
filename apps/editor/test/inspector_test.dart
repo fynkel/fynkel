@@ -1197,6 +1197,55 @@ void main() {
       expect(find.textContaining('Choose a sound'), findsNothing);
     });
 
+    testWidgets('@FynkelRecord (ADR-0027 §5): a record is a foldout, alone and in a list; + adds its defaults', (
+      tester,
+    ) async {
+      final r = rig();
+      // The generator's own output: `game.Spawner` with `Wave` records.
+      final spawner = jsonDecode(
+        File('../../packages/fynkel_generator/example/spinner_game/schemas/behaviours/game.Spawner.schema.json')
+            .readAsStringSync(),
+      ) as Map<String, Object?>;
+      r.project.schemas = [
+        ...r.project.schemas,
+        TypeSchema(type: 'game.Spawner', isBehaviour: true, authored: true, allowed: true, schema: spawner, version: 1),
+      ];
+      final spec = parseComponentSpec('game.Spawner', spawner);
+      final boss = spec.field('boss')!;
+      expect(boss.kind, FieldKind.object);
+      expect(boss.children.map((c) => c.name), ['count', 'delay', 'enemy', 'spread']);
+      expect(boss.children.firstWhere((c) => c.name == 'enemy').assetKind, 'prefab');
+      expect(boss.children.firstWhere((c) => c.name == 'spread').kind, FieldKind.object, reason: 'a record in a record');
+      expect(spec.field('waves')!.item!.kind, FieldKind.object);
+
+      final tab = r.tabs.openDocument('main')!;
+      tab.select('a');
+      expect(r.model.addComponent('game.Spawner'), isTrue);
+      await pumpPanel(tester, r.model);
+      Object? value(String field) => r.model.slots.singleWhere((s) => s.type == 'game.Spawner').value(field);
+
+      // The record's fields sit under its foldout, which folds them away.
+      expect(inField('game.Spawner#0', 'boss.count', find.byType(TextField)), findsOneWidget);
+      final toggle = find.byKey(const ValueKey('foldout.toggle'));
+      await tester.tap(toggle.first);
+      await tester.pumpAndSettle();
+      expect(inField('game.Spawner#0', 'boss.count', find.byType(TextField)), findsNothing);
+      await tester.tap(toggle.first);
+      await tester.pumpAndSettle();
+
+      // + into the empty list: a wave with the record's defaults.
+      await tester.tap(find.byKey(const ValueKey('array.add.waves')));
+      await tester.pumpAndSettle();
+      expect(value('waves'), [
+        {'count': 3, 'delay': 1.0, 'spread': <String, Object?>{}},
+      ]);
+      final count = inField('game.Spawner#0', 'waves.0', find.byType(TextField)).first;
+      await tester.enterText(count, '7');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect((value('waves') as List).single, containsPair('count', 7));
+    });
+
     testWidgets('the asset picker lists the kind only, an unknown drop is refused, Clear on a nullable field', (
       tester,
     ) async {
