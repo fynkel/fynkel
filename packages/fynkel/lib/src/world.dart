@@ -32,6 +32,7 @@ import 'wire/support.dart' show WireRecord, WireStrings, writeVec3;
 export 'native/bridge.dart' show BridgeStats, CommandLane, FramePlan, StepResult;
 
 part 'behaviour.dart';
+part 'object_spec.dart';
 part 'projection.dart';
 part 'scenes.dart';
 
@@ -262,6 +263,18 @@ class World {
     );
     _simulationTargets.add(go);
     return go;
+  }
+
+  /// Builds [spec] and everything under it (ADR-0026 §2) and returns its
+  /// root: under [parent], at [transform] (default: the spec's own).
+  /// New objects spawn as [spawn] does (pending until the next tick, usable
+  /// now); a prefab instance is made now as [instantiate] does. The whole
+  /// spec is checked first — a behaviour already attached or listed twice,
+  /// an unknown tag or layer, a sub-asset that is not a prefab — so a
+  /// mistake throws before anything exists.
+  GameObject build(ObjectSpec spec, {GameObject? parent, Transform? transform}) {
+    _checkSpec(spec);
+    return _buildSpec(spec, parent, transform ?? spec.transform);
   }
 
   /// Looks a resolved object up by handle.
