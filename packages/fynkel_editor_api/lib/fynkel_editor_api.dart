@@ -21,4 +21,5 @@ export 'src/edit.dart';
 export 'src/extensions.dart';
 export 'src/field.dart';
 export 'src/inspector.dart';
+export 'src/play.dart';
 export 'src/scene.dart';

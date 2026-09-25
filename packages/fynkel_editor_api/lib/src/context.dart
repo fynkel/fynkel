@@ -1,5 +1,6 @@
 import 'assets.dart';
 import 'edit.dart';
+import 'play.dart';
 import 'scene.dart';
 
 /// The editor, as an extension's callbacks see it (ADR-0028 §4). Every
@@ -45,4 +46,9 @@ abstract interface class EditorContext {
 
   /// The project's assets.
   EditorAssets get assets;
+
+  /// The running game during Play; null while the editor is stopped (or
+  /// has no game compiled in). A window's build runs again when Play
+  /// starts and stops.
+  EditorPlay? get play;
 }
