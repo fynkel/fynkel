@@ -39,6 +39,19 @@ class FynkelBehaviour {
   final String? description;
 }
 
+/// Marks a plain class as a record (ADR-0027 §5), Unity's `[Serializable]`
+/// class: a nested value with `@Expose` fields — a wave's `{enemy, count,
+/// delay}` — that a behaviour, a data asset or another record exposes
+/// alone or in a `List`. It is stored as a JSON object, has no identity of
+/// its own (an assignment copies nothing; a load or a clone makes new
+/// instances), and the Inspector draws it as a foldout. It needs an
+/// unnamed constructor without required parameters; a key the JSON leaves
+/// out keeps the class's default. Its fields hold values only — no
+/// `GameObject`, script or data-asset references. Metadata only.
+class FynkelRecord {
+  const FynkelRecord();
+}
+
 /// Marks a field as authored data: serialized, shown in the Inspector, set
 /// from scene components. Metadata only; the generator reads it and writes
 /// every hint into `behaviours.g.json` and the field's schema `x-fynkel`

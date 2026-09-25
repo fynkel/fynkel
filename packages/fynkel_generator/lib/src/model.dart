@@ -48,10 +48,14 @@ enum FieldKind {
 
   /// A `@FynkelDataAsset` class, nullable ↔ `{ "asset": id }` (`data`):
   /// the shared instance of a data asset (ADR-0027 §4), resolved at load.
-  data('data');
+  data('data'),
+
+  /// A `@FynkelRecord` class ↔ a JSON object of its fields (`record`): a
+  /// nested value (ADR-0027 §5), [ExposedField.record] its class.
+  record('record');
 
   /// The kinds a [list] may hold.
-  static const listItems = [number, integer, boolean, string, quat, assetRef, enumeration, data];
+  static const listItems = [number, integer, boolean, string, quat, assetRef, enumeration, data, record];
 
   const FieldKind(this.typeName);
 
@@ -71,8 +75,10 @@ enum FieldKind {
         FieldKind.enumeration => 'an enum',
         FieldKind.gameObject => 'GameObject?',
         FieldKind.behaviour => 'a @FynkelBehaviour class (nullable)',
-        FieldKind.list => 'List<T> (T one of double, int, bool, String, Quat, AssetRef, an enum, a data class)',
+        FieldKind.list =>
+          'List<T> (T one of double, int, bool, String, Quat, AssetRef, an enum, a data class, a record class)',
         FieldKind.data => 'a @FynkelDataAsset class (nullable)',
+        FieldKind.record => 'a @FynkelRecord class',
       };
 
   /// A reference to an object of the scene, resolved at load.
@@ -115,6 +121,7 @@ class ExposedField {
     this.behaviourId,
     this.item,
     this.dataId,
+    this.record,
   });
 
   /// The Dart field name; also the JSON/scene field name.
@@ -174,6 +181,9 @@ class ExposedField {
   /// them) holds.
   final String? dataId;
 
+  /// The class a [FieldKind.record] field (or a list of them) holds.
+  final RecordClass? record;
+
   /// The `x-fynkel` hints beyond the type, in a fixed key order (what the
   /// schema and the metadata both carry).
   Map<String, Object?> get hints => item != null ? _listHints : _hints;
@@ -193,6 +203,7 @@ class ExposedField {
         if (unit != null) 'unit': unit,
         if (displayKind != null) 'kind': displayKind,
         if (dataId != null) 'data': dataId,
+        if (record != null) 'record': record!.className,
       };
 
   Map<String, Object?> get _hints => {
@@ -212,7 +223,31 @@ class ExposedField {
         if (gizmo != null) 'gizmo': gizmo!.json,
         if (behaviourId != null) 'behaviour': behaviourId,
         if (dataId != null) 'data': dataId,
+        if (record != null && item == null) 'record': record!.className,
       };
+}
+
+/// A `@FynkelRecord` class (ADR-0027 §5): a nested value with `@Expose`
+/// fields and no identity, stored as a JSON object of them.
+class RecordClass {
+  const RecordClass({required this.className, required this.libraryUri, required this.fields, this.doc});
+
+  final String className;
+
+  /// `package:<pkg>/<path>.dart` of the library declaring the class.
+  final String libraryUri;
+
+  /// Sorted by name, as a type's are.
+  final List<ExposedField> fields;
+  final String? doc;
+
+  /// The class and every record class its fields hold, depth first.
+  Iterable<RecordClass> get closure sync* {
+    yield this;
+    for (final f in fields) {
+      if (f.record != null) yield* f.record!.closure;
+    }
+  }
 }
 
 /// A field's `@Gizmo`: the shape, and the options that differ from the

@@ -9,6 +9,7 @@ import 'dart:math' as math;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:spinner_game/generated/behaviours.g.dart';
+import 'package:spinner_game/spawner.dart';
 import 'package:spinner_game/spinner.dart';
 import 'package:spinner_game/weapon.dart';
 import 'package:test/test.dart';
@@ -28,7 +29,8 @@ void main() {
   });
 
   test('generated registration covers every @FynkelBehaviour class', () {
-    expect(behaviourTypes.map((t) => t.id), ['game.Blinker', 'game.Chime', 'game.Patrol', 'game.Spinner', 'game.Wielder']);
+    expect(behaviourTypes.map((t) => t.id),
+        ['game.Blinker', 'game.Chime', 'game.Patrol', 'game.Spawner', 'game.Spinner', 'game.Wielder']);
     expect(dataTypes.map((t) => t.id), ['game.Weapon']);
     expect(gameSpinnerType.version, 1);
     expect(gameBlinkerType.version, 2);
@@ -148,6 +150,43 @@ void main() {
     expect(field.get(w), isNull);
     expect(gameWielderType.field('spares')!.get(w), [null, null]);
     expect(dataJson(null), isNull);
+  });
+
+  test('@FynkelRecord (ADR-0027 §5): records alone and in lists, built from JSON objects, copied as values', () {
+    final registry = BehaviourRegistry()..registerAll(behaviourTypes);
+    const prefab = {'asset': 'c0000000-0000-4000-8000-000000000001'};
+    final s = registry.instantiate('game.Spawner', fields: {
+      'waves': [
+        {'enemy': prefab, 'count': 5, 'spread': {'radius': 4, 'ring': true}},
+        {'delay': 2.5},
+      ],
+      'boss': {'enemy': null},
+    }) as Spawner;
+    expect(s.waves, hasLength(2));
+    final (a, b) = (s.waves[0], s.waves[1]);
+    expect((a.enemy, a.count, a.delay, a.spread.radius, a.spread.ring),
+        (const AssetRef('c0000000-0000-4000-8000-000000000001'), 5, 1.0, 4.0, true));
+    expect((b.enemy, b.count, b.delay, b.spread.radius), (null, 3, 2.5, 2.0), reason: 'keys left out: the class defaults');
+    expect(s.boss.count, 3, reason: "the record class's own default, not the field initializer's");
+    expect(s.total, 11);
+
+    final waves = gameSpawnerType.field('waves')!;
+    expect(waves.type, 'list');
+    expect(waves.defaultValue, const []);
+    expect(gameSpawnerType.field('boss')!.type, 'record');
+    expect(waves.get(s), [
+      {'count': 5, 'delay': 1.0, 'enemy': prefab, 'spread': {'radius': 4.0, 'ring': true}},
+      {'count': 3, 'delay': 2.5, 'enemy': null, 'spread': {'radius': 2.0, 'ring': false}},
+    ]);
+    // What a load or a clone does: the JSON back into new instances.
+    final copy = Spawner();
+    waves.set(copy, waves.get(s));
+    expect(copy.waves[0], isNot(same(a)));
+    expect(copy.waves[0].spread.radius, 4.0);
+    copy.waves[0].spread.radius = 9;
+    expect(a.spread.radius, 4.0, reason: 'no identity: a copy shares nothing');
+    expect(() => registry.instantiate('game.Spawner', fields: {'boss': {'count': 'many'}}),
+        throwsA(isA<BehaviourDataError>()));
   });
 
   test('a List<Vec3> field (a @Gizmo.path) round-trips', () {

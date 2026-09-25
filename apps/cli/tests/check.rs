@@ -51,7 +51,7 @@ fn behaviour_generator_output_is_up_to_date() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("up to date (5 behaviour types, 1 data type)"),
+        stdout.contains("up to date (6 behaviour types, 1 data type)"),
         "{stdout}"
     );
     // A check never leaves the tree modified.

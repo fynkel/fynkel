@@ -4,18 +4,19 @@
 // ignore_for_file: type=lint, unused_element
 
 import 'package:fynkel/fynkel.dart';
-import 'package:spinner_game/spinner.dart' as _lib0;
-import 'package:spinner_game/weapon.dart' as _lib1;
+import 'package:spinner_game/spawner.dart' as _lib0;
+import 'package:spinner_game/spinner.dart' as _lib1;
+import 'package:spinner_game/weapon.dart' as _lib2;
 
-/// `game.Blinker` v2 → [_lib0.Blinker].
+/// `game.Blinker` v2 → [_lib1.Blinker].
 BehaviourType get gameBlinkerType =>
-    BehaviourType(id: 'game.Blinker', version: 2, create: _lib0.Blinker.new, fields: const []);
+    BehaviourType(id: 'game.Blinker', version: 2, create: _lib1.Blinker.new, fields: const []);
 
-/// `game.Chime` v1 → [_lib0.Chime].
+/// `game.Chime` v1 → [_lib1.Chime].
 BehaviourType get gameChimeType => BehaviourType(
   id: 'game.Chime',
   version: 1,
-  create: _lib0.Chime.new,
+  create: _lib1.Chime.new,
   fields: [
     BehaviourField(
       name: 'delays',
@@ -23,33 +24,33 @@ BehaviourType get gameChimeType => BehaviourType(
       defaultValue: const [0.5, 1.0],
       min: 0,
       step: 0.1,
-      get: (b) => (b as _lib0.Chime).delays.cast<Object?>().toList(),
-      set: (b, v) => (b as _lib0.Chime).delays = [for (final x in v as List) _double(x)],
+      get: (b) => (b as _lib1.Chime).delays.cast<Object?>().toList(),
+      set: (b, v) => (b as _lib1.Chime).delays = [for (final x in v as List) _double(x)],
     ),
     BehaviourField(
       name: 'moods',
       type: 'list',
       defaultValue: const ['soft'],
-      get: (b) => [for (final x in (b as _lib0.Chime).moods) x.name],
-      set: (b, v) => (b as _lib0.Chime).moods = [
-        for (final x in v as List) _lib0.ChimeMood.values.byName(x as String),
+      get: (b) => [for (final x in (b as _lib1.Chime).moods) x.name],
+      set: (b, v) => (b as _lib1.Chime).moods = [
+        for (final x in v as List) _lib1.ChimeMood.values.byName(x as String),
       ],
     ),
     BehaviourField(
       name: 'sounds',
       type: 'list',
       defaultValue: const [],
-      get: (b) => [for (final x in (b as _lib0.Chime).sounds) _assetRefJson(x)],
-      set: (b, v) => (b as _lib0.Chime).sounds = [for (final x in v as List) _assetRef(x)],
+      get: (b) => [for (final x in (b as _lib1.Chime).sounds) _assetRefJson(x)],
+      set: (b, v) => (b as _lib1.Chime).sounds = [for (final x in v as List) _assetRef(x)],
     ),
   ],
 );
 
-/// `game.Patrol` v1 → [_lib0.Patrol].
+/// `game.Patrol` v1 → [_lib1.Patrol].
 BehaviourType get gamePatrolType => BehaviourType(
   id: 'game.Patrol',
   version: 1,
-  create: _lib0.Patrol.new,
+  create: _lib1.Patrol.new,
   fields: [
     BehaviourField(
       name: 'reach',
@@ -57,8 +58,8 @@ BehaviourType get gamePatrolType => BehaviourType(
       defaultValue: 0.5,
       min: 0.01,
       step: 0.1,
-      get: (b) => (b as _lib0.Patrol).reach,
-      set: (b, v) => (b as _lib0.Patrol).reach = _double(v),
+      get: (b) => (b as _lib1.Patrol).reach,
+      set: (b, v) => (b as _lib1.Patrol).reach = _double(v),
     ),
     BehaviourField(
       name: 'speed',
@@ -66,8 +67,8 @@ BehaviourType get gamePatrolType => BehaviourType(
       defaultValue: 2.0,
       min: 0,
       step: 0.1,
-      get: (b) => (b as _lib0.Patrol).speed,
-      set: (b, v) => (b as _lib0.Patrol).speed = _double(v),
+      get: (b) => (b as _lib1.Patrol).speed,
+      set: (b, v) => (b as _lib1.Patrol).speed = _double(v),
     ),
     BehaviourField(
       name: 'waypoints',
@@ -77,30 +78,52 @@ BehaviourType get gamePatrolType => BehaviourType(
         const [4.0, 0.0, 0.0],
         const [4.0, 0.0, -4.0],
       ],
-      get: (b) => _vec3ListJson((b as _lib0.Patrol).waypoints),
-      set: (b, v) => (b as _lib0.Patrol).waypoints = _vec3List(v),
+      get: (b) => _vec3ListJson((b as _lib1.Patrol).waypoints),
+      set: (b, v) => (b as _lib1.Patrol).waypoints = _vec3List(v),
     ),
   ],
 );
 
-/// `game.Spinner` v1 → [_lib0.Spinner].
+/// `game.Spawner` v1 → [_lib0.Spawner].
+BehaviourType get gameSpawnerType => BehaviourType(
+  id: 'game.Spawner',
+  version: 1,
+  create: _lib0.Spawner.new,
+  fields: [
+    BehaviourField(
+      name: 'boss',
+      type: 'record',
+      get: (b) => _waveJson((b as _lib0.Spawner).boss),
+      set: (b, v) => (b as _lib0.Spawner).boss = _wave(v),
+    ),
+    BehaviourField(
+      name: 'waves',
+      type: 'list',
+      defaultValue: const [],
+      get: (b) => [for (final x in (b as _lib0.Spawner).waves) _waveJson(x)],
+      set: (b, v) => (b as _lib0.Spawner).waves = [for (final x in v as List) _wave(x)],
+    ),
+  ],
+);
+
+/// `game.Spinner` v1 → [_lib1.Spinner].
 BehaviourType get gameSpinnerType => BehaviourType(
   id: 'game.Spinner',
   version: 1,
-  create: _lib0.Spinner.new,
+  create: _lib1.Spinner.new,
   fields: [
     BehaviourField(
       name: 'axis',
       type: 'vec3',
       defaultValue: const [0.0, 1.0, 0.0],
-      get: (b) => _vec3Json((b as _lib0.Spinner).axis),
-      set: (b, v) => (b as _lib0.Spinner).axis = _vec3(v),
+      get: (b) => _vec3Json((b as _lib1.Spinner).axis),
+      set: (b, v) => (b as _lib1.Spinner).axis = _vec3(v),
     ),
     BehaviourField(
       name: 'showcase',
       type: 'assetRef',
-      get: (b) => _assetRefJson((b as _lib0.Spinner).showcase),
-      set: (b, v) => (b as _lib0.Spinner).showcase = _orNull(v, _assetRef),
+      get: (b) => _assetRefJson((b as _lib1.Spinner).showcase),
+      set: (b, v) => (b as _lib1.Spinner).showcase = _orNull(v, _assetRef),
     ),
     BehaviourField(
       name: 'speed',
@@ -109,88 +132,88 @@ BehaviourType get gameSpinnerType => BehaviourType(
       tooltip: 'Angular speed in radians per second',
       min: 0,
       step: 0.1,
-      get: (b) => (b as _lib0.Spinner).speed,
-      set: (b, v) => (b as _lib0.Spinner).speed = _double(v),
+      get: (b) => (b as _lib1.Spinner).speed,
+      set: (b, v) => (b as _lib1.Spinner).speed = _double(v),
     ),
     BehaviourField(
       name: 'spinning',
       type: 'boolean',
       defaultValue: true,
       label: 'Spinning',
-      get: (b) => (b as _lib0.Spinner).spinning,
-      set: (b, v) => (b as _lib0.Spinner).spinning = v as bool,
+      get: (b) => (b as _lib1.Spinner).spinning,
+      set: (b, v) => (b as _lib1.Spinner).spinning = v as bool,
     ),
   ],
 );
 
-/// `game.Weapon` v1 → [_lib1.Weapon].
+/// `game.Weapon` v1 → [_lib2.Weapon].
 DataType get gameWeaponType => DataType(
   id: 'game.Weapon',
   version: 1,
-  create: _lib1.Weapon.new,
+  create: _lib2.Weapon.new,
   fields: [
     DataField(
       name: 'cooldown',
       type: 'number',
       defaultValue: 0.5,
       min: 0,
-      get: (b) => (b as _lib1.Weapon).cooldown,
-      set: (b, v) => (b as _lib1.Weapon).cooldown = _double(v),
+      get: (b) => (b as _lib2.Weapon).cooldown,
+      set: (b, v) => (b as _lib2.Weapon).cooldown = _double(v),
     ),
     DataField(
       name: 'damage',
       type: 'integer',
       defaultValue: 1,
       min: 0,
-      get: (b) => (b as _lib1.Weapon).damage,
-      set: (b, v) => (b as _lib1.Weapon).damage = _int(v),
+      get: (b) => (b as _lib2.Weapon).damage,
+      set: (b, v) => (b as _lib2.Weapon).damage = _int(v),
     ),
     DataField(
       name: 'projectile',
       type: 'assetRef',
-      get: (b) => _assetRefJson((b as _lib1.Weapon).projectile),
-      set: (b, v) => (b as _lib1.Weapon).projectile = _orNull(v, _assetRef),
+      get: (b) => _assetRefJson((b as _lib2.Weapon).projectile),
+      set: (b, v) => (b as _lib2.Weapon).projectile = _orNull(v, _assetRef),
     ),
     DataField(
       name: 'sounds',
       type: 'list',
       defaultValue: const [],
-      get: (b) => [for (final x in (b as _lib1.Weapon).sounds) _assetRefJson(x)],
-      set: (b, v) => (b as _lib1.Weapon).sounds = [for (final x in v as List) _assetRef(x)],
+      get: (b) => [for (final x in (b as _lib2.Weapon).sounds) _assetRefJson(x)],
+      set: (b, v) => (b as _lib2.Weapon).sounds = [for (final x in v as List) _assetRef(x)],
     ),
     DataField(
       name: 'upgrade',
       type: 'data',
       dataType: 'game.Weapon',
-      get: (b) => dataJson((b as _lib1.Weapon).upgrade),
-      target: (b) => (b as _lib1.Weapon).upgrade,
-      set: (b, v) => (b as _lib1.Weapon).upgrade = v as _lib1.Weapon?,
+      get: (b) => dataJson((b as _lib2.Weapon).upgrade),
+      target: (b) => (b as _lib2.Weapon).upgrade,
+      set: (b, v) => (b as _lib2.Weapon).upgrade = v as _lib2.Weapon?,
     ),
   ],
 );
 
-/// `game.Wielder` v1 → [_lib1.Wielder].
+/// `game.Wielder` v1 → [_lib2.Wielder].
 BehaviourType get gameWielderType => BehaviourType(
   id: 'game.Wielder',
   version: 1,
-  create: _lib1.Wielder.new,
+  create: _lib2.Wielder.new,
   fields: [
     BehaviourField(
       name: 'spares',
       type: 'list',
       defaultValue: const [],
       dataType: 'game.Weapon',
-      get: (b) => [for (final x in (b as _lib1.Wielder).spares) dataJson(x)],
-      target: (b) => (b as _lib1.Wielder).spares,
-      set: (b, v) => (b as _lib1.Wielder).spares = [for (final x in v as List) x as _lib1.Weapon],
+      get: (b) => [for (final x in (b as _lib2.Wielder).spares) dataJson(x)],
+      target: (b) => (b as _lib2.Wielder).spares,
+      set: (b, v) => (b as _lib2.Wielder).spares = [for (final x in v as List) x as _lib2.Weapon],
     ),
     BehaviourField(
       name: 'weapon',
       type: 'data',
       dataType: 'game.Weapon',
-      get: (b) => dataJson((b as _lib1.Wielder).weapon),
-      target: (b) => (b as _lib1.Wielder).weapon,
-      set: (b, v) => (b as _lib1.Wielder).weapon = v as _lib1.Weapon?,
+      get: (b) => dataJson((b as _lib2.Wielder).weapon),
+      target: (b) => (b as _lib2.Wielder).weapon,
+      set: (b, v) => (b as _lib2.Wielder).weapon = v as _lib2.Weapon?,
     ),
   ],
 );
@@ -200,6 +223,7 @@ List<BehaviourType> get behaviourTypes => List.unmodifiable([
   gameBlinkerType,
   gameChimeType,
   gamePatrolType,
+  gameSpawnerType,
   gameSpinnerType,
   gameWielderType,
 ]);
@@ -252,3 +276,33 @@ Map<String, Object?>? _assetRefJson(AssetRef? r) =>
     r == null ? null : {'asset': r.asset, if (r.sub != null) 'sub': r.sub};
 
 T? _orNull<T>(Object? v, T Function(Object?) convert) => v == null ? null : convert(v);
+
+_lib0.Spread _spread(Object? json) {
+  final m = json as Map;
+  final r = _lib0.Spread();
+  if (m['radius'] case final v?) r.radius = _double(v);
+  if (m['ring'] case final v?) r.ring = v as bool;
+  return r;
+}
+
+Map<String, Object?> _spreadJson(_lib0.Spread r) => {'radius': r.radius, 'ring': r.ring};
+
+_lib0.Wave _wave(Object? json) {
+  final m = json as Map;
+  final r = _lib0.Wave();
+  if (m['count'] case final v?) r.count = _int(v);
+  if (m['delay'] case final v?) r.delay = _double(v);
+  if (m.containsKey('enemy')) {
+    final v = m['enemy'];
+    r.enemy = _orNull(v, _assetRef);
+  }
+  if (m['spread'] case final v?) r.spread = _spread(v);
+  return r;
+}
+
+Map<String, Object?> _waveJson(_lib0.Wave r) => {
+  'count': r.count,
+  'delay': r.delay,
+  'enemy': _assetRefJson(r.enemy),
+  'spread': _spreadJson(r.spread),
+};

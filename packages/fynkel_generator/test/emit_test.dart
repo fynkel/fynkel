@@ -405,6 +405,101 @@ void main() {
     expect(jsonDecode(emitJson('demo', [spinner])), isNot(contains('dataTypes')));
   });
 
+  test('@FynkelRecord (ADR-0027 §5): a nested object alone or in a list, converted by one helper pair per class', () {
+    const offset = RecordClass(
+      className: 'Offset',
+      libraryUri: 'package:demo/wave.dart',
+      fields: [ExposedField(name: 'at', kind: FieldKind.vec3, defaultValue: [0.0, 0.0, 0.0], hasDefault: true)],
+    );
+    const wave = RecordClass(
+      className: 'Wave',
+      libraryUri: 'package:demo/wave.dart',
+      fields: [
+        ExposedField(name: 'count', kind: FieldKind.integer, defaultValue: 3, hasDefault: true, min: 1),
+        ExposedField(name: 'enemy', kind: FieldKind.assetRef, nullable: true, displayKind: 'asset(prefab)'),
+        ExposedField(
+          name: 'mode',
+          kind: FieldKind.enumeration,
+          nullable: true,
+          typeLibrary: 'package:demo/modes.dart',
+          typeName: 'Mode',
+          enumValues: ['idle', 'aim'],
+        ),
+        ExposedField(
+          name: 'offset',
+          kind: FieldKind.record,
+          record: offset,
+          typeLibrary: 'package:demo/wave.dart',
+          typeName: 'Offset',
+          defaultValue: <String, Object?>{},
+          hasDefault: true,
+        ),
+      ],
+    );
+    const spawner = BehaviourClass(
+      id: 'game.Spawner',
+      version: 1,
+      className: 'Spawner',
+      libraryUri: 'package:demo/spawner.dart',
+      fields: [
+        ExposedField(
+          name: 'first',
+          kind: FieldKind.record,
+          record: wave,
+          typeLibrary: 'package:demo/wave.dart',
+          typeName: 'Wave',
+          label: 'First Wave',
+        ),
+        ExposedField(
+          name: 'waves',
+          kind: FieldKind.list,
+          item: FieldKind.record,
+          record: wave,
+          typeLibrary: 'package:demo/wave.dart',
+          typeName: 'Wave',
+          defaultValue: [],
+          hasDefault: true,
+        ),
+      ],
+    );
+    final src = emitDart('demo', [spawner]);
+    const s = '(b as _lib1.Spawner)';
+    expect(src, contains('get: (b) => _waveJson($s.first)'));
+    expect(src, contains('set: (b, v) => $s.first = _wave(v)'));
+    expect(src, contains('get: (b) => [for (final x in $s.waves) _waveJson(x)]'));
+    expect(src, contains('$s.waves = [for (final x in v as List) _wave(x)]'));
+    expect(src, contains('_lib2.Wave _wave(Object? json) {'));
+    expect(src, contains('final r = _lib2.Wave();'));
+    expect(src, contains("if (m['count'] case final v?) r.count = _int(v);"), reason: 'left out: the class default');
+    expect(src, contains("if (m.containsKey('mode')) {"), reason: 'a nullable field may be set back to null');
+    expect(src, contains('r.mode = _orNull(v, (v) => _lib0.Mode.values.byName(v as String));'));
+    expect(src, contains("if (m['offset'] case final v?) r.offset = _offset(v);"), reason: 'a record in a record');
+    expect(src, contains("'at': _vec3Json(r.at)"));
+    expect(src, contains("'enemy': _assetRefJson(r.enemy)"));
+    expect(src, contains("'mode': r.mode?.name"));
+    expect(src, contains("'offset': _offsetJson(r.offset)"));
+    expect('_lib2.Offset _offset('.allMatches(src), hasLength(1), reason: 'one helper pair per class');
+    expect(src, contains('Vec3 _vec3(Object? v)'), reason: "a record's field kinds bring their converters");
+
+    final p = schemaFor(spawner)['properties'] as Map<String, Object?>;
+    final first = p['first'] as Map;
+    expect(first['type'], 'object');
+    expect(first['additionalProperties'], false);
+    expect(first['x-fynkel'], {'type': 'record', 'label': 'First Wave', 'record': 'Wave'});
+    expect(first.containsKey('required'), isFalse, reason: 'every key optional, as a type is');
+    final props = first['properties'] as Map;
+    expect(props.keys, ['count', 'enemy', 'mode', 'offset']);
+    expect(props['count'], {'type': 'integer', 'minimum': 1, 'default': 3, 'x-fynkel': {'type': 'integer', 'min': 1}});
+    expect((props['enemy'] as Map)['x-fynkel'], {'type': 'assetRef', 'nullable': true, 'kind': 'asset(prefab)'});
+    expect(props['offset'], containsPair('default', <String, Object?>{}));
+    expect(((props['offset'] as Map)['properties'] as Map).keys, ['at']);
+    final waves = p['waves'] as Map;
+    expect(waves['x-fynkel'], {'type': 'list', 'items': 'record'});
+    expect((waves['items'] as Map)['type'], 'object');
+    expect((waves['items'] as Map)['x-fynkel'], {'type': 'record', 'record': 'Wave'});
+    expect(((waves['items'] as Map)['properties'] as Map).keys, ['count', 'enemy', 'mode', 'offset']);
+  });
+
   test('emitJson: metadata plus schema per type, sorted, JSON-parseable', () {
     final text = emitJson('demo', [spinner, blinker]);
     final doc = jsonDecode(text) as Map<String, Object?>;

@@ -41,8 +41,21 @@ List<BehaviourClass> _sorted(List<BehaviourClass> classes) {
 /// `lib/generated/behaviours.g.dart` for [package].
 String emitDart(String package, List<BehaviourClass> classes) {
   final sorted = _sorted(classes);
+  // The record classes any field holds (nested ones too), each once.
+  final records = <String, RecordClass>{
+    for (final c in sorted)
+      for (final f in c.fields)
+        if (f.record != null)
+          for (final r in f.record!.closure) '${r.libraryUri}#${r.className}': r,
+  };
+  final recordKeys = records.keys.toList()..sort();
+  final allFields = [
+    for (final c in sorted) ...c.fields,
+    for (final r in records.values) ...r.fields,
+  ];
   final libraries = {
-    for (final c in sorted) ...[c.libraryUri, for (final f in c.fields) ?f.typeLibrary],
+    for (final c in sorted) c.libraryUri,
+    for (final f in allFields) ?f.typeLibrary,
   }.toList()
     ..sort();
   final prefix = {for (var i = 0; i < libraries.length; i++) libraries[i]: '_lib$i'};
@@ -59,12 +72,22 @@ String emitDart(String package, List<BehaviourClass> classes) {
   }
   final kinds = <FieldKind>{};
   var anyNullable = false;
-  for (final c in sorted) {
-    for (final f in c.fields) {
-      kinds.add(f.kind);
-      if (f.item != null) kinds.add(f.item!);
-      anyNullable |= f.nullable && !f.kind.isReference && f.kind != FieldKind.list && f.kind != FieldKind.data;
+  for (final f in allFields) {
+    kinds.add(f.kind);
+    if (f.item != null) kinds.add(f.item!);
+    anyNullable |= f.nullable && !f.kind.isReference && f.kind != FieldKind.list && f.kind != FieldKind.data;
+  }
+  // `_wave` / `_waveJson` per record class (`_wave2` for a second `Wave`).
+  final recordNames = <String, String>{};
+  for (final key in recordKeys) {
+    final c = records[key]!.className;
+    final base = '_${c[0].toLowerCase()}${c.substring(1)}';
+    var name = base;
+    var n = 2;
+    while (recordNames.containsValue(name)) {
+      name = '$base${n++}';
     }
+    recordNames[key] = name;
   }
   final behaviours = [for (final c in sorted) if (!c.isData) c];
   final data = [for (final c in sorted) if (c.isData) c];
@@ -106,10 +129,10 @@ String emitDart(String package, List<BehaviourClass> classes) {
         if (f.max != null) o.writeln('      max: ${_dartLiteral(f.max)},');
         if (f.step != null) o.writeln('      step: ${_dartLiteral(f.step)},');
         if (f.dataId != null) o.writeln("      dataType: '${_dartString(f.dataId!)}',");
-        o.writeln('      get: (b) => ${_getter(f, cls)},');
+        o.writeln('      get: (b) => ${_getter(f, '(b as $cls).${f.name}', recordNames)},');
         if (f.kind.isReference || f.dataId != null) o.writeln('      target: (b) => (b as $cls).${f.name},');
         final type = f.typeName == null ? null : '${prefix[f.typeLibrary]}.${f.typeName}';
-        o.writeln('      set: (b, v) => (b as $cls).${f.name} = ${_setter(f, type)},');
+        o.writeln('      set: (b, v) => (b as $cls).${f.name} = ${_setter(f, type, recordNames)},');
         o.writeln('    ),');
       }
       o.writeln('  ],');
@@ -199,6 +222,39 @@ Map<String, Object?>? _assetRefJson(AssetRef? r) =>
   if (anyNullable) {
     helpers.add('T? _orNull<T>(Object? v, T Function(Object?) convert) => v == null ? null : convert(v);');
   }
+  // A record from its JSON object (a key left out, or null for a field
+  // that cannot be, keeps the class default) and back.
+  for (final key in recordKeys) {
+    final r = records[key]!;
+    final cls = '${prefix[r.libraryUri]}.${r.className}';
+    final name = recordNames[key]!;
+    final h = StringBuffer();
+    h.writeln('$cls $name(Object? json) {');
+    h.writeln('  final m = json as Map;');
+    h.writeln('  final r = $cls();');
+    for (final f in r.fields) {
+      final type = f.typeName == null ? null : '${prefix[f.typeLibrary]}.${f.typeName}';
+      final set = _setter(f, type, recordNames);
+      final k = _dartString(f.name);
+      if (f.nullable) {
+        h.writeln("  if (m.containsKey('$k')) {");
+        h.writeln("    final v = m['$k'];");
+        h.writeln('    r.${f.name} = $set;');
+        h.writeln('  }');
+      } else {
+        h.writeln("  if (m['$k'] case final v?) r.${f.name} = $set;");
+      }
+    }
+    h.writeln('  return r;');
+    h.writeln('}');
+    h.writeln();
+    h.write('Map<String, Object?> ${name}Json($cls r) => {');
+    for (final f in r.fields) {
+      h.write("'${_dartString(f.name)}': ${_getter(f, 'r.${f.name}', recordNames)}, ");
+    }
+    h.write('};');
+    helpers.add(h.toString());
+  }
   if (helpers.isNotEmpty) {
     o.writeln();
     o.writeln('// JSON ↔ field value converters.');
@@ -210,8 +266,9 @@ Map<String, Object?>? _assetRefJson(AssetRef? r) =>
   return DartFormatter(languageVersion: DartFormatter.latestLanguageVersion, pageWidth: 100).format(o.toString());
 }
 
-String _getter(ExposedField f, String cls) {
-  final read = '(b as $cls).${f.name}';
+/// [read] the field's value; [records] the helpers' names per record class.
+String _getter(ExposedField f, String read, Map<String, String> records) {
+  final record = f.record == null ? null : records['${f.record!.libraryUri}#${f.record!.className}'];
   return switch (f.kind) {
     FieldKind.vec3 => '_vec3Json($read)',
     FieldKind.quat => '_quatJson($read)',
@@ -220,8 +277,10 @@ String _getter(ExposedField f, String cls) {
     FieldKind.enumeration => f.nullable ? '$read?.name' : '$read.name',
     FieldKind.gameObject || FieldKind.behaviour => 'referenceJson($read)',
     FieldKind.data => 'dataJson($read)',
+    FieldKind.record => '${record}Json($read)',
     FieldKind.list => switch (f.item!) {
         FieldKind.data => _listJson(f, read, 'dataJson(x)'),
+        FieldKind.record => _listJson(f, read, '${record}Json(x)'),
         FieldKind.quat => _listJson(f, read, '_quatJson(x)'),
         FieldKind.assetRef => _listJson(f, read, '_assetRefJson(x)'),
         FieldKind.enumeration => _listJson(f, read, 'x.name'),
@@ -236,11 +295,13 @@ String _listJson(ExposedField f, String read, String item) =>
     f.nullable ? '$read?.map((x) => $item).toList()' : '[for (final x in $read) $item]';
 
 /// [type]: the enum's or the referenced script's class, prefixed.
-String _setter(ExposedField f, String? type) {
+String _setter(ExposedField f, String? type, Map<String, String> records) {
   // References arrive resolved (BehaviourField.isReference).
   if (f.kind.isReference) return 'v as ${type ?? 'GameObject'}?';
   // Data assets arrive resolved too (the shared instance).
   if (f.kind == FieldKind.data) return 'v as $type?';
+  final record = f.record == null ? null : records['${f.record!.libraryUri}#${f.record!.className}'];
+  if (f.kind == FieldKind.record) return '$record(v)';
   if (f.kind == FieldKind.list) {
     final item = switch (f.item!) {
       FieldKind.number => '_double(x)',
@@ -251,6 +312,7 @@ String _setter(ExposedField f, String? type) {
       FieldKind.assetRef => '_assetRef(x)',
       FieldKind.enumeration => '$type.values.byName(x as String)',
       FieldKind.data => 'x as $type',
+      FieldKind.record => '$record(x)',
       final k => throw StateError('not a list item: $k'),
     };
     final list = '[for (final x in v as List) $item]';
@@ -266,7 +328,12 @@ String _setter(ExposedField f, String? type) {
     FieldKind.assetRef => '_assetRef',
     FieldKind.vec3List => '_vec3List',
     FieldKind.enumeration => '(v) => $type.values.byName(v as String)',
-    FieldKind.gameObject || FieldKind.behaviour || FieldKind.list || FieldKind.data => throw StateError('unreachable'),
+    FieldKind.gameObject ||
+    FieldKind.behaviour ||
+    FieldKind.list ||
+    FieldKind.data ||
+    FieldKind.record =>
+      throw StateError('unreachable'),
   };
   if (f.nullable) return '_orNull(v, $convert)';
   return switch (f.kind) {
@@ -367,6 +434,7 @@ Map<String, Object?> _propertySchema(ExposedField f) {
         displayKind: f.displayKind,
         enumValues: f.enumValues,
         dataId: f.dataId,
+        record: f.record,
       );
       s['items'] = _propertySchema(item)..['x-fynkel'] = {'type': item.kind.typeName, ...f.itemHints};
     case FieldKind.enumeration:
@@ -380,6 +448,11 @@ Map<String, Object?> _propertySchema(ExposedField f) {
         for (final k in keys) k: {'type': 'string'},
       };
       s['required'] = keys;
+      s['additionalProperties'] = false;
+    case FieldKind.record:
+      // Inline, keys optional as a type's are: the class's defaults.
+      s['type'] = 'object';
+      s['properties'] = {for (final c in f.record!.fields) c.name: _propertySchema(c)};
       s['additionalProperties'] = false;
     case FieldKind.assetRef:
     case FieldKind.data:
