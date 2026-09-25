@@ -21,6 +21,7 @@ import 'events.dart';
 import 'gizmos.dart';
 import 'input.dart';
 import 'layers.dart';
+import 'mesh_data.dart';
 import 'native/bridge.dart';
 import 'physics.dart';
 import 'settings.dart';
@@ -295,15 +296,20 @@ class World {
   /// Throws [StateError] before a project or scene is loaded (the
   /// material lives in that asset store).
   AssetRef createMaterial([gen.PbrMaterial material = const gen.PbrMaterial()]) {
+    final ref = _newAssetId();
+    setMaterial(ref, material);
+    return ref;
+  }
+
+  /// A new random (v4) asset id: what a made material or mesh is named.
+  static AssetRef _newAssetId() {
     final id = Uint8List(16);
     for (var i = 0; i < 16; i++) {
       id[i] = _ids.nextInt(256);
     }
     id[6] = (id[6] & 0x0f) | 0x40; // UUID v4
     id[8] = (id[8] & 0x3f) | 0x80;
-    final ref = AssetRef.fromBytes(id, '');
-    setMaterial(ref, material);
-    return ref;
+    return AssetRef.fromBytes(id, '');
   }
 
   /// Gives the material [ref] new values (Unity's `material.color = …`):
@@ -340,6 +346,56 @@ class World {
         throw FynkelBridgeError('setMaterial: the native library has another PbrMaterial layout (rebuild it)');
       default:
         throw FynkelBridgeError('setMaterial: $status');
+    }
+  }
+
+  // --------------------------------------------- runtime meshes (ADR-0026 §4)
+
+  /// A mesh made in code (Unity's `new Mesh()`): a new asset id that a
+  /// `MeshRenderer`'s `mesh` takes like a cooked one — and a `shape: mesh`
+  /// `Collider`'s, for a static collider — drawn from the next frame and
+  /// kept across scene loads until [destroyMesh]. Change it with
+  /// [setMesh]. Throws [StateError] before a project or scene is loaded
+  /// (the mesh lives in that asset store).
+  AssetRef createMesh(MeshData mesh) {
+    final ref = _newAssetId();
+    setMesh(ref, mesh);
+    return ref;
+  }
+
+  /// Gives the mesh [ref] (one [createMesh] made) new geometry: every
+  /// renderer and mesh collider using it follows from the next frame.
+  void setMesh(AssetRef ref, MeshData mesh) {
+    _setMesh(ref, mesh);
+    _runtimeMeshes[ref.asset] = mesh;
+  }
+
+  /// Removes the mesh [ref]: its renderers draw it as missing, and a
+  /// collider still naming it reports `meshUnavailable` at the next step
+  /// (remove the collider first).
+  void destroyMesh(AssetRef ref) {
+    _setMesh(ref, null);
+    _runtimeMeshes.remove(ref.asset);
+  }
+
+  /// What [createMesh] or [setMesh] last gave [ref] (null for a mesh this
+  /// world did not make): the start of a change,
+  /// `setMesh(ref, runtimeMesh(ref)!.copyWith(positions: …))`.
+  MeshData? runtimeMesh(AssetRef ref) => _runtimeMeshes[ref.asset];
+  final Map<String, MeshData> _runtimeMeshes = {};
+
+  void _setMesh(AssetRef ref, MeshData? mesh) {
+    final id = ref.bytes;
+    if (id == null) throw ArgumentError.value(ref, 'ref', 'not a UUID');
+    if (ref.sub?.isNotEmpty ?? false) throw ArgumentError.value(ref, 'ref', 'a made mesh is a whole asset, not a sub-asset of a model');
+    final status = _native.setMesh(id, mesh?.toPayload());
+    switch (status) {
+      case FynkelStatus.FYNKEL_STATUS_OK:
+        return;
+      case FynkelStatus.FYNKEL_STATUS_LOAD_FAILED:
+        throw StateError('meshes need a loaded project or scene (their asset store) — loadProject or loadScene first');
+      default:
+        throw FynkelBridgeError('setMesh: $status');
     }
   }
 
