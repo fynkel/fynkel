@@ -41,7 +41,10 @@ final class WrittenDocument {
 }
 
 /// Writes scene and prefab documents into the project at [projectDir]
-/// (the folder with `fynkel.project.json`) from [ObjectSpec]s.
+/// (the folder with `fynkel.project.json`) from [ObjectSpec]s — or into a
+/// Fynkel package (the folder with `fynkel.package.json`, ADR-0029): its
+/// `assets` folder, its ids derived apart from any game's, and no layers
+/// or tags but `default` (the game's are not the package's to know).
 ///
 /// Every id is derived — the document's from its path (or kept from the
 /// file already there), an object's from the path of names down to it, a
@@ -62,10 +65,53 @@ class ProjectWriter {
     registerBehaviours?.call(registry);
     _cacheDir = cacheDir ?? '${this.projectDir}/.fynkel/cache';
     final project = File('${this.projectDir}/fynkel.project.json');
-    if (!project.existsSync()) throw ArgumentError.value(projectDir, 'projectDir', 'no fynkel.project.json');
-    final json = jsonDecode(project.readAsStringSync()) as Map<String, Object?>;
-    layersAndTags = LayersAndTags.fromJson(json);
-    assetsDir = '${this.projectDir}/${json['assets'] as String? ?? 'assets'}';
+    final package = File('${this.projectDir}/fynkel.package.json');
+    if (project.existsSync()) {
+      final json = jsonDecode(project.readAsStringSync()) as Map<String, Object?>;
+      layersAndTags = LayersAndTags.fromJson(json);
+      assetsDir = '${this.projectDir}/${json['assets'] as String? ?? 'assets'}';
+      _ids = _namespace;
+    } else if (package.existsSync()) {
+      final json = jsonDecode(package.readAsStringSync()) as Map<String, Object?>;
+      layersAndTags = LayersAndTags.fromJson(const {});
+      assetsDir = '${this.projectDir}/${json['assets'] as String? ?? 'assets'}';
+      final name = json['namespace'] as String? ?? _pubspecName(this.projectDir);
+      _ids = _uuid5(_namespace, 'package/$name');
+    } else {
+      throw ArgumentError.value(projectDir, 'projectDir', 'no fynkel.project.json or fynkel.package.json');
+    }
+  }
+
+  /// The namespace of the ids this writer derives: the project's, or one
+  /// per package so a package's `materials/x` is not the game's.
+  late final String _ids;
+
+  static String _pubspecName(String dir) {
+    final pubspec = File('$dir/pubspec.yaml');
+    final m = pubspec.existsSync() ? RegExp(r'^name:\s*(\w+)', multiLine: true).firstMatch(pubspec.readAsStringSync()) : null;
+    if (m == null) throw ArgumentError.value(dir, 'projectDir', 'a package without a namespace needs a pubspec.yaml name');
+    return m.group(1)!;
+  }
+
+  /// The asset folders of the Fynkel packages the project resolves
+  /// (`.dart_tool/package_config.json`, ADR-0029): where a prefab instance
+  /// of a package's prefab finds its root.
+  List<String> _packageAssetDirs() {
+    final config = File('$projectDir/.dart_tool/package_config.json');
+    if (!config.existsSync()) return const [];
+    final out = <String>[];
+    final packages = (jsonDecode(config.readAsStringSync()) as Map<String, Object?>)['packages'] as List? ?? const [];
+    for (final p in packages.cast<Map<String, Object?>>()) {
+      final root = config.uri.resolve(p['rootUri'] as String? ?? '');
+      final dir = Directory.fromUri(root).path.replaceFirst(RegExp(r'/$'), '');
+      if (dir == projectDir) continue;
+      final manifest = File('$dir/fynkel.package.json');
+      if (!manifest.existsSync()) continue;
+      final json = jsonDecode(manifest.readAsStringSync()) as Map<String, Object?>;
+      final assets = Directory('$dir/${json['assets'] as String? ?? 'assets'}');
+      if (assets.existsSync()) out.add(assets.path);
+    }
+    return out;
   }
 
   final String projectDir;
@@ -97,7 +143,7 @@ class ProjectWriter {
     path = _withExtension(path, '.material.json');
     final file = File('$assetsDir/$path');
     final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
-    final id = existing?['id'] as String? ?? _uuid5(_namespace, 'document/$path');
+    final id = existing?['id'] as String? ?? _uuid5(_ids, 'document/$path');
     final out = <String, Object?>{
       r'$schema': 'https://fynkel.dev/schemas/material.schema.json',
       'formatVersion': 2,
@@ -123,7 +169,7 @@ class ProjectWriter {
     final fields = dataOf(data).data;
     final file = File('$assetsDir/$path');
     final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
-    final id = existing?['id'] as String? ?? _uuid5(_namespace, 'document/$path');
+    final id = existing?['id'] as String? ?? _uuid5(_ids, 'document/$path');
     final out = <String, Object?>{
       r'$schema': 'https://fynkel.dev/schemas/data.schema.json',
       'formatVersion': 1,
@@ -146,7 +192,7 @@ class ProjectWriter {
   /// objects, in order. The ids derive from [key], as a document's from
   /// its id; the editor gives the objects fresh ones.
   ({Map<String, Object?> entities, List<String> roots}) entitiesOf(List<ObjectSpec> roots, {String key = 'editor'}) {
-    final doc = _Document(this, _uuid5(_namespace, 'memory/$key'));
+    final doc = _Document(this, _uuid5(_ids, 'memory/$key'));
     for (final r in roots) {
       doc.add(r, null);
     }
@@ -209,7 +255,7 @@ class ProjectWriter {
   WrittenDocument _write(String path, String kind, String name, List<ObjectSpec> roots, {required bool prefab}) {
     final file = File('$assetsDir/$path');
     final existing = file.existsSync() ? jsonDecode(file.readAsStringSync()) as Map<String, Object?> : null;
-    final id = existing?['id'] as String? ?? _uuid5(_namespace, 'document/$path');
+    final id = existing?['id'] as String? ?? _uuid5(_ids, 'document/$path');
     final doc = _Document(this, id);
     for (final r in roots) {
       doc.add(r, null);
@@ -251,13 +297,16 @@ class ProjectWriter {
   }
 
   _PrefabRoot _documentRoot(AssetRef ref) {
+    // The project's prefabs, then its packages' (the project's own win).
     final paths = _prefabPaths ??= {
-      for (final f in Directory(assetsDir).listSync(recursive: true))
-        if (f is File && f.path.endsWith('.prefab.json'))
-          if ((jsonDecode(f.readAsStringSync()) as Map<String, Object?>)['id'] case final String id) id: f.path,
+      for (final dir in [..._packageAssetDirs().reversed, assetsDir])
+        if (Directory(dir).existsSync())
+          for (final f in Directory(dir).listSync(recursive: true))
+            if (f is File && f.path.endsWith('.prefab.json'))
+              if ((jsonDecode(f.readAsStringSync()) as Map<String, Object?>)['id'] case final String id) id: f.path,
     };
     final path = paths[ref.asset];
-    if (path == null) throw ArgumentError.value(ref, 'prefab', 'no prefab document in $assetsDir has this id');
+    if (path == null) throw ArgumentError.value(ref, 'prefab', 'no prefab document in $assetsDir or its packages has this id');
     return _PrefabRoot.of(jsonDecode(File(path).readAsStringSync()) as Map<String, Object?>, path);
   }
 
