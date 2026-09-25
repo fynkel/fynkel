@@ -10,6 +10,10 @@
 //! `image/0` → `texture`); a whole audio source is a `sound`, a whole
 //! image a `texture`. A reference the database cannot resolve is left to
 //! [`AssetDatabase::check_references`] (`A0004`/`A0005`).
+//!
+//! A data-typed field (`x-fynkel.type: "data"`, `x-fynkel.data` naming the
+//! type) takes a `data` document of that type: a data asset of another
+//! type is `A0007` too.
 
 use fynkel_contracts::diagnostic::{Code, Diagnostic};
 
@@ -26,6 +30,8 @@ pub struct AssetField {
     pub path: Vec<String>,
     /// The kinds it accepts (normally one).
     pub kinds: Vec<String>,
+    /// For a data-typed field, the data type it takes (ADR-0027 §4).
+    pub data: Option<String>,
 }
 
 /// The built-in components' asset fields: their schemas are generated
@@ -66,10 +72,8 @@ pub fn asset_fields_of(schema: &serde_json::Value) -> Vec<AssetField> {
 }
 
 fn walk(p: &serde_json::Value, path: Vec<String>, out: &mut Vec<AssetField>) {
-    let hint = p
-        .get("x-fynkel")
-        .and_then(|x| x.get("kind"))
-        .and_then(|k| k.as_str());
+    let x = p.get("x-fynkel");
+    let hint = x.and_then(|x| x.get("kind")).and_then(|k| k.as_str());
     if let Some(kind) = hint
         .and_then(|k| k.strip_prefix("asset("))
         .and_then(|k| k.strip_suffix(')'))
@@ -77,6 +81,18 @@ fn walk(p: &serde_json::Value, path: Vec<String>, out: &mut Vec<AssetField>) {
         out.push(AssetField {
             path,
             kinds: vec![normal(kind)],
+            data: None,
+        });
+        return;
+    }
+    if x.and_then(|x| x.get("type")).and_then(|t| t.as_str()) == Some("data") {
+        out.push(AssetField {
+            path,
+            kinds: vec!["data".into()],
+            data: x
+                .and_then(|x| x.get("data"))
+                .and_then(|d| d.as_str())
+                .map(str::to_string),
         });
         return;
     }
@@ -175,23 +191,37 @@ pub fn check_reference_kinds(
                         continue;
                     };
                     let offered = offered_kinds(&resolved);
-                    if offered.iter().any(|k| field.kinds.contains(k)) {
-                        continue;
-                    }
                     let what = match &resolved.sub {
                         Some((sub, _)) => format!("{}#{sub}", resolved.entry.path),
                         None => resolved.entry.path.clone(),
                     };
-                    let is = offered.first().map_or_else(
-                        || format!("a {} asset", resolved.entry.kind.name()),
-                        |k| format!("a {}", k.replace('_', " ")),
-                    );
-                    let wants = field
-                        .kinds
-                        .iter()
-                        .map(|k| k.replace('_', " "))
-                        .collect::<Vec<_>>()
-                        .join(" or ");
+                    let (wants, is) = if offered.iter().any(|k| field.kinds.contains(k)) {
+                        // The right kind; a data asset must be of the type too.
+                        let (Some(want), true) = (&field.data, resolved.sub.is_none()) else {
+                            continue;
+                        };
+                        match data_type_of(&resolved.entry.file(db.root())) {
+                            Some(t) if t != *want => {
+                                (format!("{want} data asset"), format!("a {t} data asset"))
+                            }
+                            _ => continue,
+                        }
+                    } else {
+                        let is = offered.first().map_or_else(
+                            || format!("a {} asset", resolved.entry.kind.name()),
+                            |k| format!("a {}", k.replace('_', " ")),
+                        );
+                        let wants = match &field.data {
+                            Some(t) => format!("{t} data asset"),
+                            None => field
+                                .kinds
+                                .iter()
+                                .map(|k| k.replace('_', " "))
+                                .collect::<Vec<_>>()
+                                .join(" or "),
+                        };
+                        (wants, is)
+                    };
                     let d = Diagnostic::error(
                         Code::ASSET_WRONG_KIND,
                         format!(
@@ -211,6 +241,14 @@ pub fn check_reference_kinds(
         }
     }
     out
+}
+
+/// A data document's `type`, read from its file (`None` when it does not
+/// read: the document's own validation reports that).
+fn data_type_of(file: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v.get("type")?.as_str().map(str::to_string)
 }
 
 /// The nodes at `path` under `node` (`*` fans out over an array).
@@ -253,15 +291,18 @@ mod tests {
             vec![
                 AssetField {
                     path: vec!["showcase".into()],
-                    kinds: vec!["mesh".into()]
+                    kinds: vec!["mesh".into()],
+                    data: None
                 },
                 AssetField {
                     path: vec!["sounds".into(), "*".into()],
-                    kinds: vec!["sound".into()]
+                    kinds: vec!["sound".into()],
+                    data: None
                 },
                 AssetField {
                     path: vec!["wave".into(), "enemy".into()],
-                    kinds: vec!["prefab".into()]
+                    kinds: vec!["prefab".into()],
+                    data: None
                 },
             ]
         );

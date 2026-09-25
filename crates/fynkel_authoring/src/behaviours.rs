@@ -5,7 +5,8 @@
 //!
 //! - The project's component registry (`fynkel.project.json`
 //!   `components`) gains `id → { kind: behaviour, version: 1,
-//!   description? }` when the project has a registry and the entry is
+//!   description? }` (`kind: data` with `{ kind: "data" }` in the
+//!   arguments: a `@FynkelDataAsset` type, ADR-0027) when the project has a registry and the entry is
 //!   missing (a scene using a type the registry leaves out is a warning).
 //!   That write is one asset-history step, so ⌥⌘Z takes it back.
 //! - The project is read again either way: the behaviour metadata
@@ -53,6 +54,15 @@ impl AuthoringSession {
             )));
         }
         let description = args["description"].as_str().filter(|d| !d.is_empty());
+        let kind = match args["kind"].as_str() {
+            None | Some("behaviour") => "behaviour",
+            Some("data") => "data",
+            Some(other) => {
+                return Err(invalid(format!(
+                    "`kind` is behaviour or data, not {other:?}"
+                )))
+            }
+        };
         let project = self.project().expect("operate checked the project");
         let dir = project.dir.clone();
         let project_file = dir.join(fynkel_document::project::PROJECT_FILE);
@@ -60,7 +70,7 @@ impl AuthoringSession {
         let registered = match doc.root.get_mut("components") {
             Some(registry) if registry.get(id).is_none() => {
                 let mut entry = vec![
-                    ("kind".to_string(), Node::string("behaviour")),
+                    ("kind".to_string(), Node::string(kind)),
                     ("version".to_string(), Node::from_serde(&json!(1))),
                 ];
                 if let Some(d) = description {
@@ -71,7 +81,10 @@ impl AuthoringSession {
             }
             _ => false,
         };
-        let label = format!("Register Behaviour {id}");
+        let label = match kind {
+            "data" => format!("Register Data Type {id}"),
+            _ => format!("Register Behaviour {id}"),
+        };
         if registered {
             let before = std::fs::read_to_string(&project_file)
                 .map_err(|e| io(&project_file, format!("{OP}: cannot read: {e}")))?;
@@ -95,7 +108,14 @@ impl AuthoringSession {
             .unwrap()
             .metadata
             .as_ref()
-            .and_then(|m| m["behaviours"].as_array())
+            .and_then(|m| {
+                m[if kind == "data" {
+                    "dataTypes"
+                } else {
+                    "behaviours"
+                }]
+                .as_array()
+            })
             .is_some_and(|list| list.iter().any(|b| b["id"] == id));
         Ok(self.finish(
             OP,

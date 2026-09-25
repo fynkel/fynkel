@@ -116,14 +116,16 @@ fn codegen_json_project(
             let dir_text = dir.display().to_string();
             let command = format!("fynkel codegen --project {dir_text}");
             match behaviours::run(dir, check) {
-                Ok(behaviours::Outcome::Written { files, types }) => (
+                Ok(behaviours::Outcome::Written { files, types, data }) => (
                     Some(
-                        json!({ "dir": dir_text, "status": "written", "files": files, "types": types }),
+                        json!({ "dir": dir_text, "status": "written", "files": files, "types": types, "dataTypes": data }),
                     ),
                     ExitCode::SUCCESS,
                 ),
-                Ok(behaviours::Outcome::UpToDate { types }) => (
-                    Some(json!({ "dir": dir_text, "status": "upToDate", "types": types })),
+                Ok(behaviours::Outcome::UpToDate { types, data }) => (
+                    Some(
+                        json!({ "dir": dir_text, "status": "upToDate", "types": types, "dataTypes": data }),
+                    ),
                     ExitCode::SUCCESS,
                 ),
                 Ok(behaviours::Outcome::Drift(paths)) => (
@@ -366,17 +368,19 @@ fn main() -> ExitCode {
                 return native;
             };
             let behaviours = match behaviours::run(&project, check) {
-                Ok(behaviours::Outcome::Written { files, types }) => {
+                Ok(behaviours::Outcome::Written { files, types, data }) => {
                     println!(
-                        "fynkel codegen --project {}: wrote {files} files for {types} behaviour types",
-                        project.display()
+                        "fynkel codegen --project {}: wrote {files} files for {}",
+                        project.display(),
+                        behaviours::describe_counts(types, data)
                     );
                     ExitCode::SUCCESS
                 }
-                Ok(behaviours::Outcome::UpToDate { types }) => {
+                Ok(behaviours::Outcome::UpToDate { types, data }) => {
                     println!(
-                        "fynkel codegen --project {}: up to date ({types} behaviour types)",
-                        project.display()
+                        "fynkel codegen --project {}: up to date ({})",
+                        project.display(),
+                        behaviours::describe_counts(types, data)
                     );
                     ExitCode::SUCCESS
                 }

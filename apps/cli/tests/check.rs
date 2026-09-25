@@ -51,11 +51,14 @@ fn behaviour_generator_output_is_up_to_date() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout.contains("up to date (4 behaviour types)"),
+        stdout.contains("up to date (5 behaviour types, 1 data type)"),
         "{stdout}"
     );
     // A check never leaves the tree modified.
     assert!(example.join("lib/generated/behaviours.g.dart").is_file());
+    assert!(example
+        .join("schemas/data/game.Weapon.schema.json")
+        .is_file());
     assert!(example
         .join("schemas/behaviours/game.Spinner.schema.json")
         .is_file());

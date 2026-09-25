@@ -31,7 +31,7 @@ fn root() -> PathBuf {
 
 /// The generator's shape for `game.Weapon { int damage (min 0); double
 /// cooldown; AssetRef? projectile (asset(prefab)); List<AssetRef> sounds
-/// (asset(audio)) }`.
+/// (asset(audio)); Weapon? upgrade }`.
 fn weapon_schema(version: u32) -> serde_json::Value {
     let asset_ref = "https://fynkel.dev/schemas/envelope.schema.json#/$defs/assetRef";
     serde_json::json!({
@@ -52,6 +52,10 @@ fn weapon_schema(version: u32) -> serde_json::Value {
                 "items": { "$ref": asset_ref,
                            "x-fynkel": { "type": "assetRef", "kind": "asset(audio)" } },
                 "x-fynkel": { "type": "list", "items": "assetRef" }
+            },
+            "upgrade": {
+                "anyOf": [{ "$ref": asset_ref }, { "type": "null" }],
+                "x-fynkel": { "type": "data", "nullable": true, "data": "game.Weapon" }
             }
         },
         "additionalProperties": false,
@@ -105,7 +109,7 @@ fn a_data_asset_is_checked_against_its_type() {
         schemas.behaviour("game.Weapon").is_none(),
         "a data type is not a behaviour"
     );
-    assert_eq!(schemas.asset_fields("game.Weapon").len(), 2);
+    assert_eq!(schemas.asset_fields("game.Weapon").len(), 3);
 
     let sword = doc(r#","type":"game.Weapon","version":1,"data":{"damage":3,"cooldown":0.25}"#);
     assert_eq!((sword.type_id.as_str(), sword.version), ("game.Weapon", 1));
@@ -223,6 +227,34 @@ fn data_assets_validate_in_a_project() {
     assert_eq!(codes(), [("FYN-A0007".into(), "/data/sounds/1".into())]);
     write(r#"{"damage":-2}"#);
     assert_eq!(codes(), [("FYN-D1002".into(), "/data/damage".into())]);
+
+    // A data-typed field takes a data asset of its type: itself is one; a
+    // material is not a data asset, and a shield is another type (its
+    // own unknown-type warning aside).
+    let sword = "c0000000-0000-4000-8000-000000000a01";
+    write(&format!(r#"{{"upgrade":{{"asset":"{sword}"}}}}"#));
+    assert_eq!(codes(), Vec::<(String, String)>::new());
+    write(r#"{"upgrade":{"asset":"c0000000-0000-4000-8000-000000000020"}}"#);
+    assert_eq!(codes(), [("FYN-A0007".into(), "/data/upgrade".into())]);
+    std::fs::write(
+        dir.join("assets/data/shield.data.json"),
+        r#"{"$schema":"https://fynkel.dev/schemas/data.schema.json","formatVersion":1,"id":"c0000000-0000-4000-8000-000000000a02","name":"Shield","type":"game.Shield","version":1,"data":{}}"#,
+    )
+    .unwrap();
+    write(r#"{"upgrade":{"asset":"c0000000-0000-4000-8000-000000000a02"}}"#);
+    let report = validate_project(&dir, &schemas, None);
+    let wrong: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == Code::ASSET_WRONG_KIND)
+        .collect();
+    assert_eq!(wrong.len(), 1, "{:?}", report.diagnostics);
+    assert!(
+        wrong[0].message.contains("takes a game.Weapon data asset")
+            && wrong[0].message.contains("is a game.Shield data asset"),
+        "{}",
+        wrong[0].message
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

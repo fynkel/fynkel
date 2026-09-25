@@ -137,6 +137,68 @@ fn a_new_behaviour_is_registered_once_and_its_metadata_read_at_once() {
     assert!(refused[0].message.contains("namespace.Name"), "{refused:?}");
 }
 
+/// A data type (ADR-0027): `kind: "data"` registers it as one, and its
+/// schema (`schemas/data/`) is a source like a behaviour's, listed under
+/// `data` for the Inspector.
+#[test]
+fn a_new_data_type_is_registered_as_data() {
+    let copy = Copy::new("register-data");
+    let mut s = open(&copy);
+    std::fs::create_dir_all(copy.dir.join("schemas/data")).unwrap();
+    std::fs::write(
+        copy.dir.join("schemas/data/game.Weapon.schema.json"),
+        json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://fynkel.dev/schemas/data/game.Weapon.schema.json",
+            "title": "game.Weapon", "type": "object",
+            "properties": { "damage": { "type": "integer", "default": 1,
+                                        "x-fynkel": { "type": "integer" } } },
+            "additionalProperties": false,
+            "x-fynkel": { "kind": "data", "id": "game.Weapon", "version": 1, "menu": "Game/Weapon" }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::create_dir_all(copy.dir.join("lib/generated")).unwrap();
+    std::fs::write(
+        copy.dir.join("lib/generated/behaviours.g.json"),
+        json!({ "behaviours": [], "dataTypes": [{ "id": "game.Weapon", "version": 1, "class": "Weapon" }] })
+            .to_string(),
+    )
+    .unwrap();
+    let v = ok(s.operate(
+        "registerBehaviour",
+        &json!({ "id": "game.Weapon", "kind": "data" }),
+    ));
+    assert_eq!(
+        (&v["registered"], &v["inMetadata"], &v["label"]),
+        (
+            &json!(true),
+            &json!(true),
+            &json!("Register Data Type game.Weapon")
+        ),
+        "{v}"
+    );
+    assert_eq!(
+        copy.json("fynkel.project.json")["components"]["game.Weapon"],
+        json!({ "kind": "data", "version": 1 })
+    );
+    let schemas = s.project().unwrap().schemas_json();
+    let weapon = &schemas["data"][0];
+    assert_eq!(weapon["type"], "game.Weapon", "{schemas}");
+    assert_eq!(weapon["schema"]["x-fynkel"]["menu"], "Game/Weapon");
+    let refused = s
+        .operate(
+            "registerBehaviour",
+            &json!({ "id": "game.Weapon", "kind": "asset" }),
+        )
+        .unwrap_err();
+    assert!(
+        refused[0].message.contains("behaviour or data"),
+        "{refused:?}"
+    );
+}
+
 #[test]
 fn reload_behaviours_reads_regenerated_metadata_and_writes_nothing() {
     let copy = Copy::new("reload");

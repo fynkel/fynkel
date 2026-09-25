@@ -522,7 +522,9 @@ impl OpenProject {
         v
     }
 
-    /// Component and behaviour types with their schemas, for the Inspector.
+    /// Component, behaviour and data types with their schemas, for the
+    /// Inspector (a data type's `menu` and `icon` are in its schema's
+    /// `x-fynkel`).
     pub fn schemas_json(&self) -> Value {
         json!({
             "components": self.schemas.component_types().iter().map(|c| json!({
@@ -540,6 +542,13 @@ impl OpenProject {
                 "hasSchema": b.has_schema,
                 "allowed": self.project.allows_component(&b.type_id),
                 "schema": self.schema_sources.get(&b.type_id),
+            })).collect::<Vec<_>>(),
+            "data": self.schemas.data_types().iter().map(|d| json!({
+                "type": d.type_id,
+                "version": d.version,
+                "dart": d.dart,
+                "hasSchema": d.has_schema,
+                "schema": self.schema_sources.get(&d.type_id),
             })).collect::<Vec<_>>(),
         })
     }
@@ -696,7 +705,7 @@ impl OpenProject {
             .get("x-fynkel")
             .and_then(|m| m.get("kind"))
             .and_then(Value::as_str);
-        if !matches!(kind, Some("component") | Some("behaviour")) {
+        if !matches!(kind, Some("component") | Some("behaviour") | Some("data")) {
             return;
         }
         let type_id = v

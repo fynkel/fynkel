@@ -263,6 +263,7 @@ impl SchemaSet {
                     crate::reference_kinds::AssetField {
                         path: vec![field.to_string()],
                         kinds: kinds.iter().map(|k| k.to_string()).collect(),
+                        data: None,
                     },
                 );
             }

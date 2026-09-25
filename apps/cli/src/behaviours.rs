@@ -2,9 +2,10 @@
 //! --project <dir>` runs `dart run build_runner build` in the project's Dart
 //! package (the `fynkel_generator` builder writes
 //! `lib/generated/behaviours.g.dart` and `.g.json`), then splits the JSON
-//! metadata into `schemas/behaviours/<id>.schema.json` — the files
+//! metadata into `schemas/behaviours/<id>.schema.json` and, for the data
+//! types (ADR-0027), `schemas/data/<id>.schema.json` — the files
 //! `fynkel_document` loads for a project (`SchemaSet::embedded_with`) so
-//! scene validation knows every behaviour type and its fields.
+//! validation knows every behaviour and data type and its fields.
 //!
 //! The two pipelines have separate caches: (a) is a pure function of the
 //! Rust registry (no cache), (b) is build_runner's `.dart_tool/build`.
@@ -23,15 +24,19 @@ use serde_json::Value;
 pub const DART_OUT: &str = "lib/generated/behaviours.g.dart";
 pub const JSON_OUT: &str = "lib/generated/behaviours.g.json";
 pub const SCHEMAS_DIR: &str = "schemas/behaviours";
+pub const DATA_SCHEMAS_DIR: &str = "schemas/data";
 
 pub enum Outcome {
-    /// Files written or refreshed (count) for `types` behaviour types.
+    /// Files written or refreshed (count) for `types` behaviour types and
+    /// `data` data types (ADR-0027).
     Written {
         files: usize,
         types: usize,
+        data: usize,
     },
     UpToDate {
         types: usize,
+        data: usize,
     },
     Drift(Vec<PathBuf>),
 }
@@ -106,9 +111,8 @@ fn generate(
     let metadata: Value = serde_json::from_str(&json_text)
         .map_err(|e| format!("{}: not JSON: {e}", json_out.display()))?;
     let schemas = split_schemas(&metadata)?;
-    let types = schemas.len();
+    let (types, data) = counts(&schemas);
 
-    let schemas_dir = project.join(SCHEMAS_DIR);
     let mut drift = Vec::new();
     let mut written = 0usize;
     if before.0 != after.0 {
@@ -119,52 +123,24 @@ fn generate(
         drift.push(PathBuf::from(JSON_OUT));
         written += 1;
     }
-    // Stale schema files: anything in the directory the metadata no longer
-    // names.
-    let mut stale = Vec::new();
-    if schemas_dir.is_dir() {
-        for entry in std::fs::read_dir(&schemas_dir).map_err(|e| e.to_string())? {
-            let path = entry.map_err(|e| e.to_string())?.path();
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
-            if name.ends_with(".schema.json") && !schemas.contains_key(&name) {
-                stale.push(path);
-            }
-        }
-    }
-    for (name, text) in &schemas {
-        let path = schemas_dir.join(name);
-        if read_opt(&path).as_deref() != Some(text.as_str()) {
-            drift.push(PathBuf::from(SCHEMAS_DIR).join(name));
-            if !check {
-                std::fs::create_dir_all(&schemas_dir).map_err(|e| e.to_string())?;
-                std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-                written += 1;
-            }
-        }
-    }
-    for path in &stale {
-        drift.push(PathBuf::from(SCHEMAS_DIR).join(path.file_name().unwrap()));
-        if !check {
-            std::fs::remove_file(path).map_err(|e| format!("{}: {e}", path.display()))?;
-            written += 1;
-        }
-    }
+    written += sync_schemas(project, &schemas, check, &mut drift)?;
     written += write_assets(project, check, &mut drift)?;
 
     if check {
         // `run` puts the committed generated files back: a check never mutates.
         return Ok(if drift.is_empty() {
-            Outcome::UpToDate { types }
+            Outcome::UpToDate { types, data }
         } else {
             Outcome::Drift(drift)
         });
     }
     Ok(if written == 0 {
-        Outcome::UpToDate { types }
+        Outcome::UpToDate { types, data }
     } else {
         Outcome::Written {
             files: written,
             types,
+            data,
         }
     })
 }
@@ -340,7 +316,7 @@ pub fn watch(project: &Path) -> Result<(), String> {
     result
 }
 
-/// The schema split after a watch build: (files written, types).
+/// The schema split after a watch build: (files written, behaviour types).
 fn finish(
     project: &Path,
     after: &(Option<String>, Option<String>),
@@ -352,27 +328,8 @@ fn finish(
     let metadata: Value =
         serde_json::from_str(json_text).map_err(|e| format!("{JSON_OUT}: not JSON: {e}"))?;
     let schemas = split_schemas(&metadata)?;
-    let schemas_dir = project.join(SCHEMAS_DIR);
-    let mut written = 0;
-    if schemas_dir.is_dir() {
-        for entry in std::fs::read_dir(&schemas_dir).map_err(|e| e.to_string())? {
-            let path = entry.map_err(|e| e.to_string())?.path();
-            let name = path.file_name().unwrap().to_string_lossy().to_string();
-            if name.ends_with(".schema.json") && !schemas.contains_key(&name) {
-                std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-                written += 1;
-            }
-        }
-    }
-    for (name, text) in &schemas {
-        let path = schemas_dir.join(name);
-        if read_opt(&path).as_deref() != Some(text.as_str()) {
-            std::fs::create_dir_all(&schemas_dir).map_err(|e| e.to_string())?;
-            std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-            written += 1;
-        }
-    }
-    Ok((written, schemas.len()))
+    let written = sync_schemas(project, &schemas, false, &mut Vec::new())?;
+    Ok((written, counts(&schemas).0))
 }
 
 /// The error lines of a failed build: build_runner's `E` blocks, else all.
@@ -422,24 +379,90 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
-/// `<id>.schema.json` → pretty text, from the metadata's `behaviours[].schema`.
-pub fn split_schemas(metadata: &Value) -> Result<BTreeMap<String, String>, String> {
+/// (behaviour types, data types) among the split schemas.
+fn counts(schemas: &BTreeMap<PathBuf, String>) -> (usize, usize) {
+    let data = schemas
+        .keys()
+        .filter(|k| k.starts_with(DATA_SCHEMAS_DIR))
+        .count();
+    (schemas.len() - data, data)
+}
+
+/// `N behaviour types`, and `, M data type(s)` when there are any.
+pub fn describe_counts(types: usize, data: usize) -> String {
+    match data {
+        0 => format!("{types} behaviour types"),
+        1 => format!("{types} behaviour types, 1 data type"),
+        n => format!("{types} behaviour types, {n} data types"),
+    }
+}
+
+/// Writes (unless `check`) the split schemas into `schemas/behaviours/`
+/// and `schemas/data/`, and removes the ones there the metadata no longer
+/// names; every difference goes into `drift`. Returns the files changed.
+fn sync_schemas(
+    project: &Path,
+    schemas: &BTreeMap<PathBuf, String>,
+    check: bool,
+    drift: &mut Vec<PathBuf>,
+) -> Result<usize, String> {
+    let mut written = 0;
+    for dir in [SCHEMAS_DIR, DATA_SCHEMAS_DIR] {
+        let abs = project.join(dir);
+        if !abs.is_dir() {
+            continue;
+        }
+        for entry in std::fs::read_dir(&abs).map_err(|e| e.to_string())? {
+            let path = entry.map_err(|e| e.to_string())?.path();
+            let rel = Path::new(dir).join(path.file_name().unwrap());
+            if rel.to_string_lossy().ends_with(".schema.json") && !schemas.contains_key(&rel) {
+                drift.push(rel);
+                if !check {
+                    std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                    written += 1;
+                }
+            }
+        }
+    }
+    for (rel, text) in schemas {
+        let path = project.join(rel);
+        if read_opt(&path).as_deref() != Some(text.as_str()) {
+            drift.push(rel.clone());
+            if !check {
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+                }
+                std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+                written += 1;
+            }
+        }
+    }
+    Ok(written)
+}
+
+/// `schemas/behaviours/<id>.schema.json` (and `schemas/data/<id>…` for
+/// the data types) → pretty text, from the metadata's `behaviours[].schema`
+/// and `dataTypes[].schema`.
+pub fn split_schemas(metadata: &Value) -> Result<BTreeMap<PathBuf, String>, String> {
     let list = metadata
         .get("behaviours")
         .and_then(|b| b.as_array())
         .ok_or("behaviours.g.json has no `behaviours` array")?;
+    let data = metadata.get("dataTypes").and_then(|d| d.as_array());
     let mut out = BTreeMap::new();
-    for b in list {
-        let id = b
-            .get("id")
-            .and_then(|i| i.as_str())
-            .ok_or("behaviour entry without `id`")?;
-        let schema = b
-            .get("schema")
-            .ok_or_else(|| format!("behaviour {id} without `schema`"))?;
-        let mut text = serde_json::to_string_pretty(schema).map_err(|e| e.to_string())?;
-        text.push('\n');
-        out.insert(format!("{id}.schema.json"), text);
+    for (dir, list) in [(SCHEMAS_DIR, Some(list)), (DATA_SCHEMAS_DIR, data)] {
+        for b in list.into_iter().flatten() {
+            let id = b
+                .get("id")
+                .and_then(|i| i.as_str())
+                .ok_or("type entry without `id`")?;
+            let schema = b
+                .get("schema")
+                .ok_or_else(|| format!("type {id} without `schema`"))?;
+            let mut text = serde_json::to_string_pretty(schema).map_err(|e| e.to_string())?;
+            text.push('\n');
+            out.insert(Path::new(dir).join(format!("{id}.schema.json")), text);
+        }
     }
     Ok(out)
 }
