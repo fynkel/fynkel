@@ -1,6 +1,6 @@
 # ADR-0026: Building a game from code
 
-**Status:** Proposed — by the assistant 2026-09-25, awaiting the user  
+**Status:** Accepted — proposed by the assistant 2026-09-25, confirmed by the user 2026-09-25 ("ok let's start")  
 **Date:** 2026-09-25  
 **Related:** ADR-0006 (asset identity: references by id, never by path), ADR-0007 (engine as a library), ADR-0011 (Dart behaviours for the few, native components for the many), ADR-0012 (schema codegen), ADR-0022 (one-root prefabs), ADR-0023 (built-in primitives), `docs/code-first.md` (the checklist this ADR serves)
 
@@ -104,9 +104,9 @@ code and editor build the same things.
    field the default of its Rust `Default` implementation, the same value
    the Inspector's Add Component uses (`fynkel_authoring::component_default`).
    So `const RigidBody()` is a dynamic 1 kg body, and `RigidBody(mass: 5)`
-   changes one field. The defaults travel through the schema's `default`
-   keyword, which codegen now writes. A component without a `Default`
-   keeps `required` fields. `copyWith` is unchanged.
+   changes one field. `fynkel codegen` reads the defaults through that
+   function and writes them into the Dart constructors. A component
+   without a `Default` keeps `required` fields. `copyWith` is unchanged.
 
 7. **Motion and animation from code.** Tweens on top of coroutines:
    `transform.moveTo(target, seconds, ease: Ease.outCubic)`, `rotateTo`,
@@ -136,11 +136,9 @@ code and editor build the same things.
   with no native dependency. It must stay in step with the document
   schemas, and its output is checked by `fynkel validate` in its tests,
   so drift fails a test rather than a user's project.
-- Component defaults change every generated constructor and add
-  `default` to the component schemas. Whether the schema fingerprint moves
-  depends on whether it hashes annotations. It is measured in step 1, and
-  the locks are refreshed if it does. Every `const X(...)` in the
-  repository can get shorter.
+- Component defaults change every generated Dart constructor, and nothing
+  on the wire: the schema fingerprint does not move. Every `const X(...)`
+  in the repository can get shorter.
 - `children` / `parent` changing type breaks existing game code once,
   before 1.0, while the only games are in this repository.
 - `playground.py` and its siblings stay until `examples/code_only/`

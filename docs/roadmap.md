@@ -57,6 +57,14 @@ Apply to Scene (`docs/design/live-play-mode.md`).
 - a11y/l10n basics, docs, the **M4 gate report**. **Done 2026-09-25:
   M4 GO** (`docs/m4-gate-report.md`), after the Unity parity pass.
 
+## Phase 2b — Code first (ADR-0026)
+
+Added 2026-09-25 at the user's request: building a game from Dart as
+fully as from the editor, ahead of the extensibility work, because the
+user ranks the code path above the editor. The checklist is
+`docs/code-first.md`; the order is ADR-0026 § Order; the acceptance test
+is `examples/code_only/`.
+
 ## Phase 3 — Extensibility and the data model
 
 Three ADRs, then their implementation:
